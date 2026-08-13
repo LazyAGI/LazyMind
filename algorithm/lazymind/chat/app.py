@@ -35,7 +35,7 @@ def register_chat_routers(app: FastAPI) -> FastAPI:
     app.include_router(health_routes.router)
     # Agent control callbacks must remain available in both direct and router modes.
     app.include_router(agent_control_routes.router)
-    # Writer sync and LazyMind task cancellation callbacks.
+    # Workflow actions, Writer sync, and LazyMind task cancellation callbacks.
     app.include_router(workflow_routes.router)
 
     if not config['enable_router']:

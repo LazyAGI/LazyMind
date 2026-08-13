@@ -707,7 +707,12 @@ class SQLiteGatewayStore(GatewayStore):
                     )
                 )
                 AND account.status = 'connected'
-                AND NOT EXISTS (
+                AND (
+                  json_extract(
+                      inbox.provider_context,
+                      '$._parallel_inbound'
+                  ) = 1
+                  OR NOT EXISTS (
                     SELECT 1
                     FROM channel_inbox AS earlier
                     WHERE earlier.account_id = inbox.account_id
@@ -716,6 +721,7 @@ class SQLiteGatewayStore(GatewayStore):
                           'completed', 'ignored', 'dead'
                       )
                       AND earlier.ingest_sequence < inbox.ingest_sequence
+                  )
                 )
                 ORDER BY inbox.ingest_sequence
                 LIMIT 1
@@ -796,6 +802,180 @@ class SQLiteGatewayStore(GatewayStore):
             ).fetchone()
         return self._claimed_outbound(row)
 
+    def save_feishu_workspace_state_if_revision(
+        self,
+        account_id: str,
+        external_address_hash: str,
+        state: dict[str, Any],
+        expected_revision: int,
+        *,
+        preserve_current_message: bool = True,
+    ) -> bool:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT snapshot_json FROM channel_navigation_states
+                WHERE account_id = %s AND external_address_hash = %s
+                """,
+                (account_id, external_address_hash),
+            ).fetchone()
+            if not row:
+                if expected_revision != 0:
+                    return False
+                inserted = connection.execute(
+                    """
+                    INSERT INTO channel_navigation_states(
+                        account_id, external_address_hash, mode, snapshot_json
+                    )
+                    VALUES(%s, %s, 'active', %s)
+                    ON CONFLICT(account_id, external_address_hash) DO NOTHING
+                    """,
+                    (
+                        account_id,
+                        external_address_hash,
+                        self._json({'feishu_workspace': dict(state)}),
+                    ),
+                )
+                return inserted.rowcount == 1
+            value = _snapshot(row.get('snapshot_json')) if row else {}
+            workspace = value.get('feishu_workspace')
+            if not isinstance(workspace, dict):
+                workspace = {}
+            if int(workspace.get('revision') or 0) != expected_revision:
+                return False
+            next_state = dict(state)
+            if preserve_current_message:
+                next_state['message_id'] = str(
+                    workspace.get('message_id')
+                    or next_state.get('message_id')
+                    or ''
+                )
+            value = {'feishu_workspace': next_state}
+            result = connection.execute(
+                """
+                UPDATE channel_navigation_states
+                SET snapshot_json = %s,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE account_id = %s AND external_address_hash = %s
+                """,
+                (
+                    self._json(value),
+                    account_id,
+                    external_address_hash,
+                ),
+            )
+            return result.rowcount == 1
+
+    def patch_feishu_workspace_state(
+        self,
+        account_id: str,
+        external_address_hash: str,
+        patch: dict[str, Any],
+        operation_id: str = '',
+    ) -> dict[str, Any]:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT snapshot_json FROM channel_navigation_states
+                WHERE account_id = %s AND external_address_hash = %s
+                """,
+                (account_id, external_address_hash),
+            ).fetchone()
+            value = _snapshot(row.get('snapshot_json')) if row else {}
+            workspace = value.get('feishu_workspace')
+            if not isinstance(workspace, dict):
+                workspace = {}
+            if (
+                operation_id
+                and str(workspace.get('active_operation_id') or '')
+                != operation_id
+            ):
+                return dict(workspace)
+            current_revision = max(
+                0,
+                int(workspace.get('revision') or 0),
+            )
+            workspace.update(patch)
+            workspace['revision'] = current_revision + 1
+            value = {'feishu_workspace': workspace}
+            connection.execute(
+                """
+                INSERT INTO channel_navigation_states(
+                    account_id, external_address_hash, mode, snapshot_json
+                )
+                VALUES(%s, %s, 'active', %s)
+                ON CONFLICT(account_id, external_address_hash) DO UPDATE SET
+                    snapshot_json = EXCLUDED.snapshot_json,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    account_id,
+                    external_address_hash,
+                    self._json(value),
+                ),
+            )
+            return dict(workspace)
+
+    def save_feishu_workspace_message(
+        self,
+        account_id: str,
+        external_address_hash: str,
+        message_id: str,
+        operation_id: str,
+        expected_message_id: str,
+        expected_revision: int | None = None,
+        *,
+        advance_revision: bool = True,
+    ) -> dict[str, Any]:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT snapshot_json FROM channel_navigation_states
+                WHERE account_id = %s AND external_address_hash = %s
+                """,
+                (account_id, external_address_hash),
+            ).fetchone()
+            value = _snapshot(row.get('snapshot_json')) if row else {}
+            workspace = value.get('feishu_workspace')
+            if not isinstance(workspace, dict):
+                workspace = {}
+            if operation_id and str(
+                workspace.get('active_operation_id') or ''
+            ) != operation_id:
+                return dict(workspace)
+            if str(workspace.get('message_id') or '') != expected_message_id:
+                return dict(workspace)
+            if (
+                expected_revision is not None
+                and int(workspace.get('revision') or 0) != expected_revision
+            ):
+                return dict(workspace)
+            workspace = dict(workspace)
+            workspace['message_id'] = message_id
+            if advance_revision:
+                workspace['revision'] = max(
+                    0,
+                    int(workspace.get('revision') or 0),
+                ) + 1
+            value = {'feishu_workspace': workspace}
+            connection.execute(
+                """
+                INSERT INTO channel_navigation_states(
+                    account_id, external_address_hash, mode, snapshot_json
+                )
+                VALUES(%s, %s, 'active', %s)
+                ON CONFLICT(account_id, external_address_hash) DO UPDATE SET
+                    snapshot_json = EXCLUDED.snapshot_json,
+                    updated_at = CURRENT_TIMESTAMP
+                """,
+                (
+                    account_id,
+                    external_address_hash,
+                    self._json(value),
+                ),
+            )
+        return workspace
+
     def begin_new_conversation(
         self,
         account_id: str,
@@ -811,9 +991,9 @@ class SQLiteGatewayStore(GatewayStore):
                 (account_id, external_address_hash),
             ).fetchone()
             current = _snapshot(row.get('snapshot_json')) if row else {}
-            value = {'new_conversation': draft or {}}
-            if isinstance(current.get('pending_turn'), dict):
-                value['pending_turn'] = current['pending_turn']
+            value = dict(current)
+            value.pop('selection', None)
+            value['new_conversation'] = draft or {}
             connection.execute(
                 """
                 DELETE FROM channel_routes
@@ -848,6 +1028,7 @@ class SQLiteGatewayStore(GatewayStore):
         history_next_page_token: str | None = None,
         *,
         consume_pending_turn: bool = False,
+        preserve_selection: bool = False,
     ) -> None:
         history_conversation_id = (
             conversation_id
@@ -863,7 +1044,8 @@ class SQLiteGatewayStore(GatewayStore):
                 (account_id, external_address_hash),
             ).fetchone()
             value = _snapshot(row.get('snapshot_json')) if row else {}
-            value.pop('selection', None)
+            if not preserve_selection:
+                value.pop('selection', None)
             value.pop('new_conversation', None)
             if consume_pending_turn:
                 value.pop('pending_turn', None)
@@ -889,7 +1071,10 @@ class SQLiteGatewayStore(GatewayStore):
                 ON CONFLICT(account_id, external_address_hash) DO UPDATE SET
                     mode = 'active',
                     snapshot_json = EXCLUDED.snapshot_json,
-                    snapshot_expires_at = NULL,
+                    snapshot_expires_at = CASE WHEN %s
+                        THEN channel_navigation_states.snapshot_expires_at
+                        ELSE NULL
+                    END,
                     history_conversation_id =
                         EXCLUDED.history_conversation_id,
                     history_next_page_token =
@@ -902,6 +1087,7 @@ class SQLiteGatewayStore(GatewayStore):
                     self._json(value),
                     history_conversation_id,
                     history_next_page_token or None,
+                    preserve_selection,
                 ),
             )
 

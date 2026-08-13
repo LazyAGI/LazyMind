@@ -14,6 +14,7 @@ from channel_gateway.common.application.intents import (
 )
 from channel_gateway.common.domain.chat import (
     BASIC_CHAT_FEATURES,
+    ChannelExecutionContext,
     ChannelFeatureProfile,
 )
 from channel_gateway.common.domain.commands import (
@@ -73,9 +74,12 @@ class ChannelCommandRouter:
         provider_context: dict[str, Any],
     ) -> RoutedCommand | str:
         continuation_catalog: dict[str, Any] = {}
+        execution = ChannelExecutionContext.from_provider_context(
+            provider_context
+        )
         command_action = provider_context.get('command_action')
         selection_action = provider_context.get('selection_action')
-        structured_ask = provider_context.get('ask_answers_structured')
+        structured_ask = execution.ask_answers_structured
         if isinstance(command_action, dict):
             command = COMMAND_ADAPTER.validate_python(command_action)
             grounding_messages = (text,)
@@ -141,6 +145,7 @@ class ChannelCommandRouter:
             command,
             account_id,
             external_address_hash,
+            execution,
         )
         if required_kinds:
             continuation_catalog.update(
@@ -260,6 +265,7 @@ class ChannelCommandRouter:
         command: CommandEnvelope,
         account_id: str,
         external_address_hash: str,
+        execution: ChannelExecutionContext,
     ) -> set[str]:
         parameters = command.parameters
         kinds = {

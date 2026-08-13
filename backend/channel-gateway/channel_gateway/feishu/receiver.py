@@ -9,6 +9,7 @@ from dataclasses import asdict
 from channel_gateway.feishu.domain import (
     FeishuAppCredentials,
     FeishuInboundAction,
+    FeishuInboundMenu,
     FeishuInboundMessage,
     FeishuRuntimeError,
 )
@@ -24,7 +25,7 @@ def _await_persistence_ack(
     stop_event,
     acknowledgement_id: str,
     timeout_seconds: float = _ACK_TIMEOUT_SECONDS,
-) -> None:
+):
     deadline = time.monotonic() + timeout_seconds
     while not stop_event.is_set():
         remaining = deadline - time.monotonic()
@@ -33,7 +34,7 @@ def _await_persistence_ack(
                 'Gateway persistence acknowledgement timed out'
             )
         try:
-            ack_id, succeeded, error = acknowledgements.get(
+            ack_id, succeeded, error, response = acknowledgements.get(
                 timeout=min(0.5, remaining)
             )
         except queue.Empty:
@@ -45,7 +46,7 @@ def _await_persistence_ack(
             raise FeishuRuntimeError(
                 str(error or 'Gateway persistence failed')
             )
-        return
+        return response
     raise FeishuRuntimeError(
         'Feishu receiver stopped before message persistence'
     )
@@ -81,7 +82,7 @@ def _receiver_process_main(
                 acknowledgement_id,
             )
 
-    def on_action(action: FeishuInboundAction) -> None:
+    def on_action(action: FeishuInboundAction):
         acknowledgement_id = uuid.uuid4().hex
         with delivery_lock:
             events.put(
@@ -93,17 +94,36 @@ def _receiver_process_main(
                     },
                 )
             )
-            _await_persistence_ack(
+            return _await_persistence_ack(
                 acknowledgements,
                 stop_event,
                 acknowledgement_id,
                 timeout_seconds=_ACTION_ACK_TIMEOUT_SECONDS,
             )
 
+    def on_menu(menu: FeishuInboundMenu) -> None:
+        acknowledgement_id = uuid.uuid4().hex
+        with delivery_lock:
+            events.put(
+                (
+                    'menu',
+                    {
+                        'acknowledgement_id': acknowledgement_id,
+                        'menu': asdict(menu),
+                    },
+                )
+            )
+            _await_persistence_ack(
+                acknowledgements,
+                stop_event,
+                acknowledgement_id,
+            )
+
     client = LarkChannelClient(
         credentials,
         on_message,
         on_action=on_action,
+        on_menu=on_menu,
     )
 
     def watch() -> None:
@@ -144,7 +164,11 @@ class ProcessLarkReceiverClient:
         self,
         credentials: FeishuAppCredentials,
         on_message: Callable[[FeishuInboundMessage], None],
-        on_action: Callable[[FeishuInboundAction], None],
+        on_action: Callable[
+            [FeishuInboundAction],
+            dict | None,
+        ],
+        on_menu: Callable[[FeishuInboundMenu], None],
     ):
         context = multiprocessing.get_context('spawn')
         self._events = context.Queue()
@@ -152,6 +176,7 @@ class ProcessLarkReceiverClient:
         self._stop_event = context.Event()
         self._on_message = on_message
         self._on_action = on_action
+        self._on_menu = on_menu
         self._process = context.Process(
             target=_receiver_process_main,
             args=(
@@ -193,20 +218,21 @@ class ProcessLarkReceiverClient:
                             acknowledgement_id,
                             False,
                             exc.__class__.__name__,
+                            None,
                         )
                     )
                     terminal_error = str(exc)
                     break
                 else:
                     self._acknowledgements.put(
-                        (acknowledgement_id, True, '')
+                        (acknowledgement_id, True, '', None)
                     )
             elif kind == 'action':
                 acknowledgement_id = str(
                     payload['acknowledgement_id']
                 )
                 try:
-                    self._on_action(
+                    response = self._on_action(
                         FeishuInboundAction(
                             **payload['action']
                         )
@@ -217,13 +243,35 @@ class ProcessLarkReceiverClient:
                             acknowledgement_id,
                             False,
                             exc.__class__.__name__,
+                            None,
                         )
                     )
                     terminal_error = str(exc)
                     break
                 else:
                     self._acknowledgements.put(
-                        (acknowledgement_id, True, '')
+                        (acknowledgement_id, True, '', response)
+                    )
+            elif kind == 'menu':
+                acknowledgement_id = str(
+                    payload['acknowledgement_id']
+                )
+                try:
+                    self._on_menu(FeishuInboundMenu(**payload['menu']))
+                except Exception as exc:
+                    self._acknowledgements.put(
+                        (
+                            acknowledgement_id,
+                            False,
+                            exc.__class__.__name__,
+                            None,
+                        )
+                    )
+                    terminal_error = str(exc)
+                    break
+                else:
+                    self._acknowledgements.put(
+                        (acknowledgement_id, True, '', None)
                     )
             elif kind == 'ready':
                 with self._lock:
@@ -277,12 +325,14 @@ class LarkChannelFactory:
         self,
         credentials: FeishuAppCredentials,
         on_message: Callable[[FeishuInboundMessage], None],
-        on_action: Callable[[FeishuInboundAction], None],
+        on_action: Callable[[FeishuInboundAction], dict | None],
+        on_menu: Callable[[FeishuInboundMenu], None],
     ) -> ProcessLarkReceiverClient:
         return ProcessLarkReceiverClient(
             credentials,
             on_message,
             on_action,
+            on_menu,
         )
 
     def create_sender(

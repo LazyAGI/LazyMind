@@ -35,6 +35,24 @@ func TestBuildChatRequestBodyUsesConversationIDDerivedSessionID(t *testing.T) {
 	}
 }
 
+func TestPromoteAgentRuntimeFlagsPrefersExplicitRequest(t *testing.T) {
+	body := map[string]any{
+		"agentic_config": map[string]any{
+			"enable_workflow": true,
+			"enable_subagent": false,
+		},
+	}
+	promoteAgentRuntimeFlags(map[string]any{
+		"enable_workflow": false,
+	}, body)
+	if enabled, _ := body["enable_workflow"].(bool); enabled {
+		t.Fatalf("explicit enable_workflow=false was overwritten: %#v", body)
+	}
+	if enabled, _ := body["enable_subagent"].(bool); enabled {
+		t.Fatalf("expected persisted enable_subagent=false: %#v", body)
+	}
+}
+
 func TestBuildChatRequestBodyPropagatesSensitiveFilterBypass(t *testing.T) {
 	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "hello", nil, map[string]any{"skip_sensitive_filter": true}, nil, "", 1)
 	if skip, _ := body["skip_sensitive_filter"].(bool); !skip {

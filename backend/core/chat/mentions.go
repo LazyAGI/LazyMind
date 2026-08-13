@@ -192,7 +192,7 @@ func applyChatMentions(ctx context.Context, db *gorm.DB, raw map[string]any, use
 			var count int64
 			if err := db.WithContext(ctx).Model(&orm.WorkflowResource{}).
 				Where("plugin_ref = ? AND status = 'active' AND (owner_user_id = ? OR owner_user_id = '')", mention.ResourceID, userID).Count(&count).Error; err != nil || count == 0 { // workflow-naming: persistence
-				return query, resolved, fmt.Errorf("plugin mention is not accessible: %s", mention.ResourceID)
+				return query, resolved, fmt.Errorf("workflow mention is not accessible: %s", mention.ResourceID)
 			}
 			if denied {
 				resolved.ExcludedWorkflowRefs = append(resolved.ExcludedWorkflowRefs, mention.ResourceID)
@@ -577,7 +577,7 @@ func mergeMentionedWorkflows(ctx context.Context, db *gorm.DB, userID string, re
 		if err := db.WithContext(ctx).Table("plugins p").Select("p.*, pr.tree_hash").
 			Joins("JOIN plugin_revisions pr ON pr.id=p.head_revision_id").
 			Where("p.plugin_ref=? AND p.status='active' AND (p.owner_user_id=? OR p.owner_user_id='')", ref, userID).Take(&row).Error; err != nil { // workflow-naming: persistence
-			return nil, nil, fmt.Errorf("plugin mention is not accessible: %s", ref)
+			return nil, nil, fmt.Errorf("workflow mention is not accessible: %s", ref)
 		}
 		selected = append(selected, map[string]any{"workflow_ref": row.WorkflowRef, "workflow_id": row.WorkflowID, "name": row.Name, "description": row.Description, "when_to_use": row.WhenToUse, "source_type": row.SourceType, "remote_root": "remote://" + row.RelativeRoot, "revision_id": row.HeadRevisionID, "revision_no": row.Version, "tree_hash": row.TreeHash})
 	}
@@ -595,7 +595,7 @@ func applyWorkflowSelection(
 	excludedRefs []string,
 ) error {
 	if len(mentionedRefs) > 1 {
-		return fmt.Errorf("at most one plugin mention is allowed per turn")
+		return fmt.Errorf("at most one workflow mention is allowed per turn")
 	}
 	if len(mentionedRefs) > 0 {
 		reqBody["enable_workflow"] = true
@@ -609,7 +609,7 @@ func applyWorkflowSelection(
 	}
 	catalog, err := workflow.EnabledCatalog(db, userID)
 	if err != nil {
-		return fmt.Errorf("load plugin catalog: %w", err)
+		return fmt.Errorf("load workflow catalog: %w", err)
 	}
 	excluded := map[string]bool{}
 	for _, ref := range excludedRefs {
@@ -649,7 +649,7 @@ func applyWorkflowSelection(
 	}
 	disabledBuiltins, err := workflow.DisabledBuiltinWorkflowIDs(db, userID)
 	if err != nil {
-		return fmt.Errorf("load builtin plugin settings: %w", err)
+		return fmt.Errorf("load builtin workflow settings: %w", err)
 	}
 	for _, ref := range excludedRefs {
 		if strings.HasPrefix(ref, "builtin:") {

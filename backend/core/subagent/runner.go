@@ -73,6 +73,11 @@ type TaskEvent struct {
 	// Text / think streaming content.
 	Text  string `json:"text,omitempty"`
 	Think string `json:"think,omitempty"`
+	// Attempt-scoped Markdown Draft preview fields. These events are stored only
+	// in the short-lived Task stream and never persisted as artifacts or steps.
+	StreamID   string `json:"stream_id,omitempty"`
+	ChunkIndex int64  `json:"chunk_index,omitempty"`
+	Delta      string `json:"delta,omitempty"`
 }
 
 // algoServiceURL resolves the algorithm chat-service base URL (same host as /api/chat/stream).
@@ -220,6 +225,14 @@ func routeEventWithWorkflowHooks(ctx context.Context, db *gorm.DB, stateStore st
 		if terminalHook {
 			routeWorkflowStepStatus(ctx, db, stateStore, ev.TaskID, status, ev.Message)
 		}
+	case "artifact_stream_start", "artifact_stream", "artifact_stream_end", "artifact_stream_abort":
+		// Draft preview events are intentionally ephemeral: append to the Task
+		// stream below, without creating DB steps, artifacts, or workflow revisions.
+	}
+	if isArtifactStreamEvent(ev.Type) {
+		// Deliver Draft preview events immediately to SSE clients connected to
+		// this process, without waiting for the Redis replay copy.
+		taskLiveEvents.publish(ev.TaskID, ev)
 	}
 	_ = AppendStreamEvent(ctx, stateStore, ev.TaskID, ev)
 	return nil

@@ -269,13 +269,13 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if len(mentionedResources.WorkflowRefs) > 1 {
-		common.ReplyErr(w, "at most one plugin mention is allowed per turn", http.StatusBadRequest)
+		common.ReplyErr(w, "at most one workflow mention is allowed per turn", http.StatusBadRequest)
 		return
 	}
 	if len(mentionedResources.WorkflowRefs) == 1 {
 		if active, activeErr := workflow.GetLatestSession(r.Context(), db, convID); activeErr == nil &&
 			!workflowSessionTerminal(active) && active.WorkflowRef != mentionedResources.WorkflowRefs[0] {
-			common.ReplyErr(w, "another plugin session is active; finish or close it before mentioning a different plugin", http.StatusConflict)
+			common.ReplyErr(w, "another workflow session is active; finish or close it before mentioning a different workflow", http.StatusConflict)
 			return
 		}
 	}
@@ -349,23 +349,16 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 			reqBody["workflow_context"] = existing
 		}
 
-		// Promote enable_workflow and enable_subagent from agentic_config to top-level
-		// so Python chat_routes can receive them as explicit parameters.
-		if ac, ok := reqBody["agentic_config"].(map[string]any); ok {
-			if v, ok := ac["enable_workflow"]; ok {
-				reqBody["enable_workflow"] = v
-			}
-			if v, ok := ac["enable_subagent"]; ok {
-				reqBody["enable_subagent"] = v
-			}
-		}
+		// Explicit per-request flags (for example a Feishu workspace selection)
+		// take precedence over persisted conversation defaults.
+		promoteAgentRuntimeFlags(raw, reqBody)
 		workflowEnabled, _ := reqBody["enable_workflow"].(bool)
 		effectiveWorkflowRefs, bindingErr := resolveConversationWorkflowBinding(
 			r.Context(), db, convID, mentionedResources.WorkflowRefs,
 			mentionedResources.ExcludedWorkflowRefs, workflowEnabled, true,
 		)
 		if bindingErr != nil {
-			common.ReplyErr(w, "resolve conversation plugin binding failed", http.StatusInternalServerError)
+			common.ReplyErr(w, "resolve conversation workflow binding failed", http.StatusInternalServerError)
 			return
 		}
 		if err := applyWorkflowSelection(
@@ -1380,19 +1373,7 @@ func DeleteConversation(w http.ResponseWriter, r *http.Request) {
 		userID = "0"
 	}
 	db := store.DB()
-	now := time.Now().UTC()
-	if err := db.Transaction(func(tx *gorm.DB) error {
-		res := tx.Model(&orm.Conversation{}).
-			Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", convID, userID).
-			Updates(map[string]any{"deleted_at": now, "updated_at": now})
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected == 0 {
-			return gorm.ErrRecordNotFound
-		}
-		return taskcenter.ArchiveTasksForConversations(r.Context(), tx, userID, []string{convID}, now)
-	}); errors.Is(err, gorm.ErrRecordNotFound) {
+	if err := archiveConversation(r.Context(), db, convID, userID, false); errors.Is(err, gorm.ErrRecordNotFound) {
 		common.ReplyErr(w, "conversation not found", http.StatusNotFound)
 		return
 	} else if err != nil {
@@ -1400,6 +1381,44 @@ func DeleteConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeConversationJSON(w, http.StatusOK, map[string]any{})
+}
+
+func archiveConversation(
+	ctx context.Context,
+	db *gorm.DB,
+	conversationID string,
+	userID string,
+	deleteExternalBinding bool,
+) error {
+	now := time.Now().UTC()
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&orm.Conversation{}).
+			Where(
+				"id = ? AND create_user_id = ? AND deleted_at IS NULL",
+				conversationID,
+				userID,
+			).
+			Updates(map[string]any{"deleted_at": now, "updated_at": now})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		if err := taskcenter.ArchiveTasksForConversations(
+			ctx, tx, userID, []string{conversationID}, now,
+		); err != nil {
+			return err
+		}
+		if deleteExternalBinding {
+			return tx.Where(
+				"conversation_id = ? AND created_by_user_id = ?",
+				conversationID,
+				userID,
+			).Delete(&orm.ExternalAgentBinding{}).Error
+		}
+		return nil
+	})
 }
 
 // BatchDeleteConversations text POST /api/v1/conversations:batchDelete
@@ -1492,6 +1511,10 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 
 	db := store.DB()
 	q := db.Model(&orm.Conversation{}).Where("create_user_id = ? AND deleted_at IS NULL", userID)
+	q = q.Where(
+		"NOT EXISTS (SELECT 1 FROM external_agent_bindings " +
+			"WHERE external_agent_bindings.conversation_id = conversations.id)",
+	)
 	if keyword != "" {
 		q = q.Where("display_name LIKE ?", "%"+keyword+"%")
 	}

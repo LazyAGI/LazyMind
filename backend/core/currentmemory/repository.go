@@ -73,7 +73,29 @@ func (r *Repository) ensureInitializedOnce(
 	}
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		entries := DefaultEntries(userID, now.UTC())
-		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&entries).Error
+		directories := make([]orm.MemoryCurrentEntry, 0, len(entries))
+		files := make([]orm.MemoryCurrentEntry, 0, len(entries))
+		for _, entry := range entries {
+			if entry.EntryType == EntryDir {
+				directories = append(directories, entry)
+			} else {
+				files = append(files, entry)
+			}
+		}
+		// SQLite's GORM batch encoder turns a nil []byte into an empty BLOB when
+		// directory and file rows share one INSERT. The schema deliberately
+		// requires directory content to be SQL NULL, so omit the content column
+		// for directory rows and insert files separately in the same transaction.
+		if len(directories) > 0 {
+			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).
+				Omit("content").Create(&directories).Error; err != nil {
+				return err
+			}
+		}
+		if len(files) > 0 {
+			return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&files).Error
+		}
+		return nil
 	})
 }
 

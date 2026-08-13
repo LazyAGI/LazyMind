@@ -44,7 +44,7 @@ func (m *ChannelGatewayManager) Run(ctx context.Context, cfg RuntimeConfig, path
 		strconv.Itoa(cfg.ChannelGateway.Port),
 	)
 	cmd.Dir = filepath.Join(paths.RepoRoot, channelGatewaySourceDirName)
-	cmd.Env = append(os.Environ(), channelGatewayEnv(cfg, paths)...)
+	cmd.Env = channelGatewayProcessEnv(cfg, paths)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	configureChildProcess(cmd, false)
@@ -172,4 +172,17 @@ func channelGatewayEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_CHANNEL_GATEWAY_CREDENTIAL_KEY_PATH=" + paths.ChannelGatewayKeyPath,
 		"LAZYMIND_CHANNEL_GATEWAY_CORE_BASE_URL=http://127.0.0.1:" + strconv.Itoa(cfg.LocalProxy.CoreHostPort),
 	}
+}
+
+func channelGatewayProcessEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
+	env := make([]string, 0, len(os.Environ())+3)
+	for _, item := range os.Environ() {
+		key, _, _ := strings.Cut(item, "=")
+		switch strings.ToUpper(key) {
+		case "PYTHONHOME", "PYTHONPATH", "VIRTUAL_ENV":
+			continue
+		}
+		env = append(env, item)
+	}
+	return append(env, channelGatewayEnv(cfg, paths)...)
 }

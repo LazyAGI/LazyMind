@@ -76,6 +76,22 @@ class MessageWorkerRepository(
     pass
 
 
+class InboundActionHandler(Protocol):
+    def handle_inbound_action(
+        self,
+        message: ClaimedInbound,
+    ) -> OutboundMessage | None:
+        ...
+
+
+class InboundActionHandlerRegistry(Protocol):
+    def action_handler(
+        self,
+        provider: str,
+    ) -> InboundActionHandler | None:
+        ...
+
+
 class OutboxWorkRepository(Protocol):
     def claim_next_outbound(
         self,

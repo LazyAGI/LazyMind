@@ -24,6 +24,10 @@ from channel_gateway.feishu.ports import (
     FeishuConnectionRepository,
     FeishuOutboundFactory,
 )
+from channel_gateway.feishu.workspace import (
+    FeishuWorkspaceState,
+)
+from channel_gateway.feishu.presentation import FeishuReplyRenderer
 from channel_gateway.feishu.domain import FeishuAppCredentials
 from channel_gateway.feishu.accounts import FeishuAccountService
 
@@ -47,6 +51,21 @@ def _iso(value: dt.datetime | None) -> str | None:
 
 def _registration_lease_key(session_id: str) -> str:
     return f'feishu-registration:{session_id}'
+
+
+def _tls_certificate_error(error: BaseException) -> bool:
+    seen: set[int] = set()
+    current: BaseException | None = error
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        message = str(current).lower()
+        if (
+            'certificate_verify_failed' in message
+            or 'unable to get local issuer certificate' in message
+        ):
+            return True
+        current = current.__cause__ or current.__context__
+    return False
 
 
 @dataclass(slots=True)
@@ -467,33 +486,21 @@ class FeishuConnectionService:
                 session_id,
                 exc,
             )
-            self._store.mark_failed(
+            self._fail_registration(
                 session_id,
                 qr_version,
-                code='FEISHU_REGISTRATION_FAILED',
-                message='飞书连接失败，请刷新二维码后重试',
-                retryable=True,
-            )
-            self._cleanup_interrupted_session(
-                session_id,
-                qr_version,
+                exc,
                 runtime_lease=lease,
             )
-        except Exception:
+        except Exception as exc:
             _logger.exception(
                 'feishu_registration_failed session_id=%s',
                 session_id,
             )
-            self._store.mark_failed(
+            self._fail_registration(
                 session_id,
                 qr_version,
-                code='FEISHU_REGISTRATION_FAILED',
-                message='飞书连接失败，请刷新二维码后重试',
-                retryable=True,
-            )
-            self._cleanup_interrupted_session(
-                session_id,
-                qr_version,
+                exc,
                 runtime_lease=lease,
             )
         finally:
@@ -508,6 +515,38 @@ class FeishuConnectionService:
                         (session_id, qr_version),
                         None,
                     )
+
+    def _fail_registration(
+        self,
+        session_id: str,
+        qr_version: int,
+        error: BaseException,
+        *,
+        runtime_lease: RuntimeLease | None,
+    ) -> None:
+        if _tls_certificate_error(error):
+            code = 'TLS_CERTIFICATE_VERIFY_FAILED'
+            message = (
+                '无法验证飞书服务的 HTTPS 证书，'
+                '请检查系统证书或企业网络设置'
+            )
+            retryable = False
+        else:
+            code = 'FEISHU_REGISTRATION_FAILED'
+            message = '飞书连接失败，请刷新二维码后重试'
+            retryable = True
+        self._store.mark_failed(
+            session_id,
+            qr_version,
+            code=code,
+            message=message,
+            retryable=retryable,
+        )
+        self._cleanup_interrupted_session(
+            session_id,
+            qr_version,
+            runtime_lease=runtime_lease,
+        )
 
     def _on_qr_code(
         self,
@@ -651,9 +690,17 @@ class FeishuConnectionService:
     ) -> None:
         sender = self._channels.create_sender(credentials)
         try:
-            sender.send_markdown_to_user(
+            workspace = FeishuWorkspaceState()
+            sender.send_card_to_user(
                 open_id=credentials.provider_account_id,
-                text=f'**👋 欢迎使用 LazyMind**\n\n{WELCOME_MESSAGE}',
+                card=FeishuReplyRenderer.render(
+                    provider_context={
+                        'chat_id': '',
+                        'workspace_state': workspace.to_dict(),
+                    },
+                    text=f'**👋 欢迎使用 LazyMind**\n\n{WELCOME_MESSAGE}',
+                    status='✅ **连接完成**',
+                ),
                 idempotency_key=(
                     f'feishu-welcome:{account_id}'
                 ),

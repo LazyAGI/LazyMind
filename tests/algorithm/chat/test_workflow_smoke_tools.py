@@ -1,7 +1,10 @@
+import base64
 import importlib.util
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
 import yaml
 
 
@@ -158,3 +161,63 @@ def test_complete_smoke_workflow_with_fixed_model_io():
     assert artifacts.latest('test_status')['value'] == 'Workflow smoke test passed'
     report = artifacts.latest('verification_report')['value']['content']
     assert all(json.loads(report).values())
+
+
+def test_workflow_action_route_uses_pinned_definition_and_server_owned_arguments(monkeypatch):
+    from fastapi import HTTPException
+    from lazymind.chat.api import workflow_routes
+
+    definition = yaml.safe_dump({'artifact_actions': {'rewrite_selection': {
+        'slots': ['draft_document'], 'preview_tool': 'preview_rewrite',
+    }}}).encode()
+    package = {
+        'revision_id': 'revision-1', 'tree_hash': 'tree-1',
+        'files': {'workflow.yaml': base64.b64encode(definition).decode()},
+    }
+    fetches = []
+
+    class FakeWorkflowClient:
+        def __init__(self, *_args, **_kwargs):
+            pass
+
+        def get_workflow(self, workflow_id, revision_id):
+            fetches.append((workflow_id, revision_id))
+            return SimpleNamespace(result=package)
+
+    def preview_rewrite(*, artifact, artifact_store, slot, instruction):
+        return artifact, artifact_store, slot, instruction
+
+    monkeypatch.setattr(workflow_routes, 'WorkflowClient', FakeWorkflowClient)
+    monkeypatch.setattr(
+        workflow_routes, 'load_workflow_package_tools',
+        lambda loaded, names, *_identity: (
+            {'preview_rewrite': preview_rewrite} if loaded is package and names else {}
+        ),
+    )
+    monkeypatch.setattr(workflow_routes, 'inject_model_config', lambda _config: None)
+    monkeypatch.setattr(workflow_routes, 'inject_tool_config', lambda _config: None)
+
+    payload = {
+        'workflow_id': 'writer-workflow',
+        'revision_id': 'revision-1',
+        'tree_hash': 'tree-1',
+        'action': 'rewrite_selection',
+        'phase': 'preview',
+        'slot': 'draft_document',
+        'artifact': {'path': '/tmp/draft.md'},
+        'artifact_store': '/tmp/action',
+        'arguments': {'instruction': '润色'},
+    }
+
+    request = workflow_routes.WorkflowActionInvokeRequest.model_validate(payload)
+    assert workflow_routes.invoke_workflow_action(request)['result'] == (
+        {'path': '/tmp/draft.md'}, '/tmp/action', 'draft_document', '润色',
+    )
+    assert fetches == [('writer-workflow', 'revision-1')]
+
+    payload['arguments'] = {'instruction': '润色', 'slot': 'outline_document'}
+    with pytest.raises(HTTPException, match='reserved arguments') as error:
+        workflow_routes.invoke_workflow_action(
+            workflow_routes.WorkflowActionInvokeRequest.model_validate(payload),
+        )
+    assert error.value.status_code == 400

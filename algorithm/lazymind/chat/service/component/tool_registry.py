@@ -139,7 +139,9 @@ ASK_USER_QUERY_APPENDIX = (
     'their opinion, or invite any reply, you MUST make an actual `ask_user` function-tool call; NEVER '
     'write that request as assistant prose. This rule applies to every kind of user-facing question or '
     'reply request, including clarification, confirmation, opinion, open-ended questions, and optional '
-    'follow-ups.'
+    'follow-ups. Exception: after you have already given the substantive answer to the user request, '
+    'do NOT call `ask_user` merely to offer optional next steps or say what the user can ask for next; '
+    'write that brief follow-up in assistant prose instead.'
 )
 KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (

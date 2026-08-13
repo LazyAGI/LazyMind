@@ -14,6 +14,7 @@ import (
 type HTTPError struct {
 	StatusCode int
 	Message    string
+	Body       json.RawMessage
 }
 
 func (e *HTTPError) Error() string {
@@ -74,6 +75,7 @@ func do(ctx context.Context, url, method string, body any, header map[string]str
 		return &HTTPError{
 			StatusCode: resp.StatusCode,
 			Message:    summarizeExternalErrorMessage(respBytes),
+			Body:       append(json.RawMessage(nil), respBytes...),
 		}
 	}
 	if response == nil {

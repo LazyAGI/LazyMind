@@ -2,6 +2,7 @@ package subagent
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -80,6 +81,28 @@ func TestSignArtifactValueRejectsAbsolutePathOutsideWorkspace(t *testing.T) {
 	_, pathExposed := got["path"]
 	if got["url"] != nil || pathExposed {
 		t.Fatalf("absolute path outside workspace must be cleared: %#v", got)
+	}
+}
+
+func TestSignArtifactValueAllowsSharedWorkflowArtifact(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)
+	path := filepath.Join(root, "workflow-artifacts", "session-1", "attempt-1", "result.png")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("png"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(map[string]any{"path": path})
+	signed := SignArtifactValue("image", raw, filepath.Join(t.TempDir(), "task-workspace"))
+	var got map[string]any
+	if err := json.Unmarshal(signed, &got); err != nil {
+		t.Fatal(err)
+	}
+	url, _ := got["url"].(string)
+	if !strings.HasPrefix(url, "/static-files/workflow-artifacts/session-1/attempt-1/result.png?") {
+		t.Fatalf("expected shared workflow artifact URL, got %q", url)
 	}
 }
 

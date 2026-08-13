@@ -236,6 +236,12 @@ export default function MainLayout() {
         return;
       }
 
+      // The Markdown document editor owns wheel input, including when it has
+      // reached the top or bottom of its own scroll area.
+      if (target.closest(".writer-markdown-editor")) {
+        return;
+      }
+
       let ancestor: HTMLElement | null = target;
       while (ancestor && ancestor !== event.currentTarget) {
         if (canScrollVertically(ancestor, event.deltaY)) {
