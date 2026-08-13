@@ -225,7 +225,7 @@ export async function setUserWorkflowEnabled(workflowRef: string, enabled: boole
 // Returns immediately with generate_status == 'generating'; the job runs asynchronously.
 export async function aiGenerateWorkflowDraft(
   id: string,
-  payload: { description?: string; skill_id?: string },
+  payload: { description?: string; skill_id?: string; start_phase?: WorkflowGenerateStartPhase },
 ): Promise<WorkflowDraftRecord> {
   const resp = await axiosInstance.post<CoreResponse<WorkflowDraftRecord>>(
     `${coreBasePath}/workflow-drafts/${id}:ai-generate`,
@@ -233,6 +233,8 @@ export async function aiGenerateWorkflowDraft(
   );
   return resp.data.data;
 }
+
+export type WorkflowGenerateStartPhase = 'design_brief' | 'skeleton' | 'state_machine' | 'scenario_scripts';
 
 export type PolishableField = 'description' | 'when_to_use' | 'overview' | 'notes';
 
@@ -253,8 +255,7 @@ export async function polishWorkflowInfo(payload: PolishWorkflowInfoPayload): Pr
 
 export interface RepairWorkflowDraftPayload {
   repair_hint?: string;
-  // Which part to repair: 'statemachine' | 'ui' | 'scenario'
-  // 'statemachine' and 'ui' maps to state.yml repair; 'scenario' maps to scenario.md repair.
+  // Which part to repair: 'statemachine' | 'ui' | 'scenario' | 'scripts' | 'full'.
   target?: string;
   mode?: 'workflow_local' | 'source_aware';
   draft_version: number;
@@ -301,17 +302,28 @@ export async function previewWorkflowRepair(id:string,payload:{target:string;mod
       severity: String(item.severity ?? item.Severity ?? 'error'),
     };
   }) : [];
-  const appliesToTarget = (code: string) => {
-    if (payload.target === 'full' || code === 'workflow_yaml_invalid') return true;
-    if (payload.target === 'statemachine') return code.startsWith('state_');
-    if (payload.target === 'ui') return code.startsWith('ui_');
-    if (payload.target === 'scenario') return code.startsWith('scenario_');
-    if (payload.target === 'scripts') return code.startsWith('scripts_') || code.startsWith('tool_script_');
+  const appliesToTarget = (code: string, path: string) => {
+    const normalizedCode = code.toUpperCase();
+    if (payload.target === 'full' || normalizedCode === 'E_WORKFLOW_YAML_INVALID') return true;
+    if (payload.target === 'statemachine') {
+      return path.startsWith('scenario/state.yml') ||
+        normalizedCode.startsWith('E_GRAPH_') ||
+        normalizedCode.startsWith('E_EDGE_') ||
+        normalizedCode.startsWith('E_STEP_') ||
+        normalizedCode.startsWith('E_ROUTE_') ||
+        normalizedCode.startsWith('E_SKIP_') ||
+        normalizedCode.startsWith('E_MATERIAL_') ||
+        normalizedCode.startsWith('E_EXPRESSION_') ||
+        normalizedCode.startsWith('E_BIND_');
+    }
+    if (payload.target === 'ui') return normalizedCode.includes('_UI_');
+    if (payload.target === 'scenario') return normalizedCode.includes('SCENARIO_');
+    if (payload.target === 'scripts') return normalizedCode.includes('SCRIPTS_') || normalizedCode.includes('TOOL_SCRIPT_');
     return true;
   };
   const seen = new Set<string>();
   const diagnostics = normalized.filter((item) => {
-    if (!appliesToTarget(item.code)) return false;
+    if (!appliesToTarget(item.code, item.path)) return false;
     const key = `${item.code}\u0000${item.path}\u0000${item.message}\u0000${item.severity}`;
     if (seen.has(key)) return false;
     seen.add(key);

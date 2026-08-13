@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"time"
@@ -200,6 +201,14 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_CHAT_SERVICE_URL=" + endpoints.Host.ChatBaseURL,
 		"LAZYMIND_EVO_SERVICE_URL=" + endpoints.Host.EvoBaseURL,
 		"LAZYMIND_CORE_SELF_URL=" + endpoints.Host.CoreBaseURL,
+		"LAZYMIND_CODEX_APP_SERVER_URL=" + envText("LAZYMIND_CODEX_APP_SERVER_URL", ""),
+		"LAZYMIND_CODEX_APP_SERVER_SOCKET=" + localCodexAppServerSocket(),
+		"LAZYMIND_CODEX_APP_SERVER_TOKEN=" + envText("LAZYMIND_CODEX_APP_SERVER_TOKEN", ""),
+		"LAZYMIND_CODEX_APP_SERVER_TOKEN_FILE=" + envText("LAZYMIND_CODEX_APP_SERVER_TOKEN_FILE", ""),
+		"LAZYMIND_CODEX_BIN=" + localCodexBinary(),
+		"LAZYMIND_CODEX_DEFAULT_CWD=" + envText("LAZYMIND_CODEX_DEFAULT_CWD", paths.RepoRoot),
+		"SHELL=" + localCodexShell(),
+		"CODEX_SHELL=" + localCodexShell(),
 		"LAZYMIND_SCAN_CONTROL_PLANE_URL=http://127.0.0.1:" + strconv.Itoa(cfg.LocalProxy.ScanHostPort),
 		"LAZYMIND_OFFICE_CONVERT_URL=" + endpoints.Host.OfficeConvertURL,
 		"LAZYMIND_OFFICE_CONVERT_WORKERS=" + envText("LAZYMIND_OFFICE_CONVERT_WORKERS", "4"),
@@ -216,6 +225,92 @@ func coreServiceEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_MODEL_PROVIDER_SECRET_KEY=" + envText("LAZYMIND_MODEL_PROVIDER_SECRET_KEY", "lazymind-core-model-provider-default-secret"),
 		"LAZYMIND_MCP_SECRET_KEY=" + envText("LAZYMIND_MCP_SECRET_KEY", "lazymind-core-mcp-default-secret"),
 	}
+}
+
+func localCodexAppServerSocket() string {
+	if configured := strings.TrimSpace(os.Getenv("LAZYMIND_CODEX_APP_SERVER_SOCKET")); configured != "" {
+		return configured
+	}
+	if runtime.GOOS != "darwin" {
+		return ""
+	}
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	path := filepath.Join(home, ".codex", "app-server-control", "app-server-control.sock")
+	info, err := os.Stat(path)
+	if err != nil || info.Mode()&os.ModeSocket == 0 {
+		return ""
+	}
+	return path
+}
+
+func localCodexBinary() string {
+	if configured := strings.TrimSpace(os.Getenv("LAZYMIND_CODEX_BIN")); configured != "" {
+		return configured
+	}
+	name := "codex"
+	if runtime.GOOS == "windows" {
+		name = "codex.exe"
+	}
+	if resolved, err := exec.LookPath(name); err == nil {
+		return resolved
+	}
+	home, _ := os.UserHomeDir()
+	candidates := []string{}
+	if home != "" {
+		candidates = append(candidates, filepath.Join(
+			home, ".codex", "packages", "standalone", "current", name,
+		))
+	}
+	switch runtime.GOOS {
+	case "darwin":
+		candidates = append(candidates,
+			"/Applications/ChatGPT.app/Contents/Resources/codex",
+			filepath.Join(home, "Applications", "ChatGPT.app", "Contents", "Resources", "codex"),
+		)
+	case "windows":
+		if root := strings.TrimSpace(os.Getenv("LOCALAPPDATA")); root != "" {
+			candidates = append(candidates,
+				filepath.Join(root, "Programs", "ChatGPT", "resources", name),
+				filepath.Join(root, "Programs", "Codex", "resources", name),
+			)
+			matches, _ := filepath.Glob(filepath.Join(
+				root, "Programs", "ChatGPT", "app-*", "resources", name,
+			))
+			candidates = append(candidates, matches...)
+		}
+		if root := strings.TrimSpace(os.Getenv("ProgramFiles")); root != "" {
+			candidates = append(candidates, filepath.Join(
+				root, "ChatGPT", "resources", name,
+			))
+		}
+	}
+	for _, candidate := range candidates {
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			return candidate
+		}
+	}
+	return name
+}
+
+func localCodexShell() string {
+	if configured := strings.TrimSpace(os.Getenv("CODEX_SHELL")); configured != "" {
+		return configured
+	}
+	if runtime.GOOS == "windows" {
+		for _, name := range []string{"pwsh.exe", "powershell.exe"} {
+			if resolved, err := exec.LookPath(name); err == nil {
+				return resolved
+			}
+		}
+		return "powershell.exe"
+	}
+	if configured := strings.TrimSpace(os.Getenv("SHELL")); configured != "" {
+		return configured
+	}
+	return "/bin/sh"
 }
 
 func (m *CoreServiceManager) waitForCoreDatabase(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) error {

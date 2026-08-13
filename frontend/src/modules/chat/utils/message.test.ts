@@ -6,12 +6,28 @@ import {
   getCitationFromText,
   getCitationsFromText,
   getRegenerationInputs,
+  isAskPendingReadOnly,
   mergeChatMessageLists,
   mergeConversationTrailIntoMessageList,
   normalizeMessageInputs,
   stripAskUserReceipt,
   stripCitationFromText,
 } from "./message";
+
+describe("isAskPendingReadOnly", () => {
+  it("keeps the latest unanswered Ask interactive after history reload", () => {
+    expect(isAskPendingReadOnly(false, true)).toBe(false);
+  });
+
+  it("disables answered or superseded Ask cards", () => {
+    expect(isAskPendingReadOnly(true, true)).toBe(true);
+    expect(isAskPendingReadOnly(false, false, true)).toBe(true);
+  });
+
+  it("keeps an unanswered Ask interactive when only assistant placeholders follow it", () => {
+    expect(isAskPendingReadOnly(false, false, false)).toBe(false);
+  });
+});
 
 describe("stripAskUserReceipt", () => {
   it("returns an empty string when the receipt pattern matches and an ask is pending", () => {

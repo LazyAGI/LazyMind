@@ -2,6 +2,7 @@ cryptography==44.0.2
 fastapi==0.115.0
 httpx==0.28.1
 lark-channel-sdk==1.2.0
-lark-oapi==1.7.1
+lark-oapi==1.7.2
 psycopg[binary]==3.2.6
+truststore==0.10.4
 uvicorn==0.30.6

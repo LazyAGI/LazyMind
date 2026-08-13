@@ -41,62 +41,27 @@ class SelectionPresentation:
 class CapabilityPresentation:
     kind: Literal['capability']
     groups: tuple[dict[str, Any], ...]
-    enabled_features: tuple[str, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         return {
             'kind': self.kind,
             'groups': [dict(group) for group in self.groups],
-            'enabled_features': list(self.enabled_features),
         }
 
 
 @dataclass(frozen=True, slots=True)
 class ConversationSettingsPresentation:
     kind: Literal['conversation_settings']
-    conversation_id: str
-    section: Literal[
-        'overview',
-        'knowledge_base',
-        'plugin',
-        'subagent',
-        'skill',
-        'tool',
-        'personalization',
-        'workflow',
-    ]
-    knowledge_bases: tuple[dict[str, Any], ...]
-    workflow_enabled: bool
+    dataset_ids: tuple[str, ...]
     workflow_mode: Literal['auto', 'dynamic']
     subagent_enabled: bool
-    skills: tuple[dict[str, Any], ...] = ()
-    tools: tuple[dict[str, Any], ...] = ()
-    personalization_enabled: bool = True
-    workflows: tuple[dict[str, Any], ...] = ()
-    channel_features: tuple[str, ...] = ()
-    updated: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return {
             'kind': self.kind,
-            'conversation_id': self.conversation_id,
-            'section': self.section,
-            'knowledge_bases': [
-                dict(item) for item in self.knowledge_bases
-            ],
-            'workflow_enabled': self.workflow_enabled,
+            'dataset_ids': list(self.dataset_ids),
             'workflow_mode': self.workflow_mode,
             'subagent_enabled': self.subagent_enabled,
-            'skills': [dict(item) for item in self.skills],
-            'tools': [dict(item) for item in self.tools],
-            'personalization_enabled': (
-                self.personalization_enabled
-            ),
-            'workflows': [
-                dict(item) for item in self.workflows
-            ],
-            'channel_features': list(self.channel_features),
-            'updated': self.updated,
         }
 
 
@@ -121,6 +86,7 @@ class AskPresentation:
     title: str
     description: str
     questions: tuple[AskQuestionPresentation, ...]
+    submittable: bool = True
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -132,6 +98,7 @@ class AskPresentation:
                 question.to_dict()
                 for question in self.questions
             ],
+            'submittable': self.submittable,
         }
 
 
@@ -179,12 +146,7 @@ class ConversationPresentation:
     kind: Literal['conversation']
     state: Literal['new', 'current', 'switched', 'history']
     title: str
-    previous_title: str = ''
-    updated_at: str = ''
-    feature_labels: tuple[str, ...] = ()
-    history_label: str = ''
     turns: tuple[ConversationTurnPresentation, ...] = ()
-    footer: str = ''
     reached_start: bool = False
 
     def to_dict(self) -> dict[str, Any]:
@@ -192,12 +154,7 @@ class ConversationPresentation:
             'kind': self.kind,
             'state': self.state,
             'title': self.title,
-            'previous_title': self.previous_title,
-            'updated_at': self.updated_at,
-            'feature_labels': list(self.feature_labels),
-            'history_label': self.history_label,
             'turns': [turn.to_dict() for turn in self.turns],
-            'footer': self.footer,
             'reached_start': self.reached_start,
         }
 

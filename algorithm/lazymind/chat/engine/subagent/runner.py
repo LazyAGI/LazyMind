@@ -1,18 +1,17 @@
 from __future__ import annotations
 
+import asyncio
 import json
 import os
 import re
 import time
-import base64
-import types
+from collections.abc import AsyncIterator
 from typing import Any, Dict, List, Optional
 
 import lazyllm
 from lazyllm import LOG, AutoModel
+from lazyllm.tools.tool_config_inject import inject_tool_config
 
-from lazymind.config import config as _cfg
-from lazymind.model_config import inject_model_config
 from lazymind.chat.engine.agent_runtime import (
     AgentExecutionOptions,
     AgentExecutor,
@@ -25,7 +24,6 @@ from lazymind.chat.engine.agent_runtime import (
 )
 from lazymind.chat.engine.prompts import add_standard_system_sections
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
-
 from lazymind.chat.service.component.tool_registry import (
     ATTACHMENT_EDIT_TOOL_CONFIG,
     DEFAULT_TOOLS,
@@ -34,12 +32,68 @@ from lazymind.chat.service.component.tool_registry import (
     filter_tools,
     tool_is_active,
 )
-from lazyllm.tools.tool_config_inject import inject_tool_config
+from lazymind.config import config as _cfg
+from lazymind.model_config import inject_model_config
+from lazymind.workflow_toolkit import load_workflow_package_tools
 
-from .context import SubAgentContext, set_context, LARGE_TOOL_RESULT_THRESHOLD
-from .db import MemorySubAgentStore, SubAgentDB
-from . import tools as subagent_tools
 from . import SUBAGENT_ATTACHMENT_CONTEXT_KEY, SUBAGENT_CORE_TOOL_NAMES
+from . import tools as subagent_tools
+from .context import LARGE_TOOL_RESULT_THRESHOLD, SubAgentContext, set_context
+from .db import MemorySubAgentStore, SubAgentDB
+
+DRAFT_STREAM_EVENT_TYPES = frozenset({
+    'artifact_stream_start',
+    'artifact_stream',
+    'artifact_stream_end',
+    'artifact_stream_abort',
+})
+
+
+async def merge_agent_and_stream_events(
+    agent_events: AsyncIterator[Any],
+    stream_events: asyncio.Queue[dict[str, Any]],
+) -> AsyncIterator[tuple[str, Any]]:
+    """Yield tool-thread stream events while the Agent iterator is still running."""
+    iterator = agent_events.__aiter__()
+    agent_task: asyncio.Task[Any] | None = asyncio.create_task(iterator.__anext__())
+    stream_task: asyncio.Task[Any] | None = asyncio.create_task(stream_events.get())
+    agent_error: BaseException | None = None
+    try:
+        while agent_task is not None:
+            wait_for = {agent_task}
+            if stream_task is not None:
+                wait_for.add(stream_task)
+            done, _ = await asyncio.wait(wait_for, return_when=asyncio.FIRST_COMPLETED)
+
+            if stream_task is not None and stream_task in done:
+                yield 'stream', stream_task.result()
+                stream_task = asyncio.create_task(stream_events.get())
+
+            if agent_task in done:
+                try:
+                    item = agent_task.result()
+                except StopAsyncIteration:
+                    agent_task = None
+                except (asyncio.CancelledError, Exception) as exc:
+                    agent_error = exc
+                    agent_task = None
+                else:
+                    yield 'agent', item
+                    agent_task = asyncio.create_task(iterator.__anext__())
+
+        # Deliver callbacks queued immediately before the tool/agent future completed.
+        await asyncio.sleep(0)
+        if stream_task is not None and stream_task.done():
+            yield 'stream', stream_task.result()
+            stream_task = None
+        while not stream_events.empty():
+            yield 'stream', stream_events.get_nowait()
+        if agent_error is not None:
+            raise agent_error
+    finally:
+        for pending in (agent_task, stream_task):
+            if pending is not None and not pending.done():
+                pending.cancel()
 
 
 def _build_artifact_context_section(
@@ -89,7 +143,7 @@ def _resolve_workflow_step_tools(params: Dict[str, Any]) -> Optional[List[str]]:
     return list(dict.fromkeys([*SUBAGENT_CORE_TOOL_NAMES, *map(str, declared)]))
 
 
-def _workflow_package_tools(params: Dict[str, Any], names: List[str]) -> Dict[str, Any]:
+def load_workflow_tools(params: Dict[str, Any], names: List[str]) -> Dict[str, Any]:
     """Load declared callables from the exact published Workflow revision.
 
     Core is authoritative for both the pinned revision and the compiled
@@ -114,38 +168,7 @@ def _workflow_package_tools(params: Dict[str, Any], names: List[str]) -> Dict[st
         expected_hash = str(params.get('tree_hash') or '').strip()
         if expected_hash and str(package.get('tree_hash') or '') != expected_hash:
             raise RuntimeError('Core returned a Workflow package with a different tree hash')
-        files = package.get('files') if isinstance(package.get('files'), dict) else {}
-        remaining = set(names)
-        resolved: Dict[str, Any] = {}
-        for path in sorted(files):
-            if not path.startswith('scripts/') or not path.endswith('.py'):
-                continue
-            encoded = files[path]
-            raw_source = base64.b64decode(encoded) if isinstance(encoded, str) else bytes(encoded)
-            source = raw_source.decode('utf-8')
-            module = types.ModuleType(
-                f'_lazymind_workflow_{revision_id.replace("-", "_")}_{len(resolved)}'
-            )
-            module.__file__ = f'{workflow_id}@{revision_id}/{path}'
-            exec(compile(source, module.__file__, 'exec'), module.__dict__)
-            for name in tuple(remaining):
-                candidate = module.__dict__.get(name)
-                if callable(candidate):
-                    # Published Workflow scripts can predate the tool runtime's
-                    # docstring requirement. Their callable name, signature and
-                    # annotations are already pinned by the immutable revision;
-                    # provide a stable description so legacy revisions remain
-                    # executable instead of failing before the first tool call.
-                    if not str(getattr(candidate, '__doc__', '') or '').strip():
-                        candidate.__doc__ = f'Execute the published Workflow tool {name}.'
-                    resolved[name] = candidate
-                    remaining.remove(name)
-        if remaining:
-            LOG.warning(
-                '[SubAgent] Workflow revision %s does not provide declared tools %s',
-                revision_id, sorted(remaining),
-            )
-        return resolved
+        return load_workflow_package_tools(package, names, workflow_id, revision_id)
     except Exception as exc:
         LOG.warning('[SubAgent] failed to load pinned Workflow script tools: %s', exc)
         return {}
@@ -174,7 +197,7 @@ def _resolve_runtime_tools(
         ]
         # Published Workflow script functions are resolved from the exact
         # revision before falling back to framework/global tools.
-        package_by_name = _workflow_package_tools(params or {}, name_list)
+        package_by_name = load_workflow_tools(params or {}, name_list)
         # Build lookup from DEFAULT_TOOLS.
         default_by_name = {cfg.name: cfg for cfg in DEFAULT_TOOLS if tool_is_active(cfg)}
         result = []
@@ -610,8 +633,16 @@ async def run_subagent_stream(
     start_time = time.time()
     db: Optional[SubAgentDB] = None
     emitted: List[Dict[str, Any]] = []
+    stream_events: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
+    loop = asyncio.get_running_loop()
 
     def _emit(ev: Dict[str, Any]) -> None:
+        if ev.get('type') in DRAFT_STREAM_EVENT_TYPES:
+            try:
+                loop.call_soon_threadsafe(stream_events.put_nowait, dict(ev))
+            except RuntimeError as exc:
+                LOG.warning('[SubAgent] failed to enqueue Draft stream event: %s', exc)
+            return
         emitted.append(ev)
 
     def _sse(ev: Dict[str, Any]) -> str:
@@ -754,7 +785,17 @@ async def run_subagent_stream(
         _pending_think: str = ''
 
         executor = AgentExecutor()
-        async for kind, payload in executor.stream(llm, plan):
+        merged_events = merge_agent_and_stream_events(
+            executor.stream(llm, plan), stream_events,
+        )
+        async for source, merged_payload in merged_events:
+            if source == 'stream':
+                stream_event = dict(merged_payload)
+                stream_event['task_id'] = task_id
+                yield _sse(stream_event)
+                continue
+
+            kind, payload = merged_payload
             if kind == 'event':
                 item = payload
                 tag = item.get('tag')

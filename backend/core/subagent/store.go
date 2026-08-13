@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
@@ -23,6 +24,8 @@ const (
 	StatusInterrupted = "interrupted"
 	StatusCanceled    = "canceled"
 )
+
+var ErrTaskTerminal = errors.New("task is terminal")
 
 // CreateTaskInput carries the fields needed to create a task record.
 // seq_in_conversation is allocated inside the transaction, not provided by the caller.
@@ -248,16 +251,27 @@ func AcceptFinalStatus(
 // SaveArtifact appends one artifact row for a task.
 func SaveArtifact(ctx context.Context, db *gorm.DB, taskID, key, contentType string, value json.RawMessage, seq int) error {
 	now := time.Now().UTC()
-	row := &orm.SubAgentArtifact{
-		ID:          "saa_" + common.GenerateID(),
-		TaskID:      taskID,
-		Slot:        key,
-		ContentType: contentType,
-		Value:       normalizeJSON(value, "{}"),
-		Seq:         seq,
-		CreatedAt:   now,
-	}
-	return db.WithContext(ctx).Create(row).Error
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var task orm.SubAgentTask
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Select("id", "status").
+			Where("id = ?", taskID).
+			First(&task).Error; err != nil {
+			return err
+		}
+		if isTerminal(task.Status) {
+			return ErrTaskTerminal
+		}
+		return tx.Create(&orm.SubAgentArtifact{
+			ID:          "saa_" + common.GenerateID(),
+			TaskID:      taskID,
+			Slot:        key,
+			ContentType: contentType,
+			Value:       normalizeJSON(value, "{}"),
+			Seq:         seq,
+			CreatedAt:   now,
+		}).Error
+	})
 }
 
 // LoadArtifacts returns artifacts for a task ordered by (slot, seq).
@@ -337,7 +351,7 @@ func LoadSteps(ctx context.Context, db *gorm.DB, taskID string) ([]orm.SubAgentS
 // AppendRemoteStep persists streamed Host events so reconnects and lease
 // reclaims have the same durable execution history as an in-process SubAgent.
 func AppendRemoteStep(ctx context.Context, db *gorm.DB, taskID, role string, content json.RawMessage) error {
-	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	return common.TransactionWithSQLiteBusyRetry(ctx, db, func(tx *gorm.DB) error {
 		var maxSeq int
 		if err := tx.Model(&orm.SubAgentStep{}).Where("task_id = ?", taskID).
 			Select("COALESCE(MAX(seq), -1)").Scan(&maxSeq).Error; err != nil {

@@ -3,9 +3,50 @@ package algo
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"time"
 
 	"lazymind/core/common"
 )
+
+type WorkflowActionInvokeRequest struct {
+	WorkflowID    string          `json:"workflow_id"`
+	RevisionID    string          `json:"revision_id"`
+	TreeHash      string          `json:"tree_hash,omitempty"`
+	UserID        string          `json:"user_id,omitempty"`
+	Action        string          `json:"action"`
+	Phase         string          `json:"phase"`
+	Slot          string          `json:"slot"`
+	Artifact      json.RawMessage `json:"artifact,omitempty"`
+	Arguments     map[string]any  `json:"arguments"`
+	ArtifactStore string          `json:"artifact_store,omitempty"`
+	LLMConfig     map[string]any  `json:"llm_config,omitempty"`
+	ToolConfig    map[string]any  `json:"tool_config,omitempty"`
+}
+
+type WorkflowActionInvokeResponse struct {
+	Result json.RawMessage `json:"result"`
+}
+
+func InvokeWorkflowAction(
+	ctx context.Context, req WorkflowActionInvokeRequest,
+) (*WorkflowActionInvokeResponse, int, error) {
+	var response WorkflowActionInvokeResponse
+	err := common.ApiPost(
+		ctx,
+		common.JoinURL(common.ChatServiceEndpoint(), "/api/workflow/actions:invoke"),
+		req, nil, &response, 2*time.Minute,
+	)
+	return &response, workflowActionHTTPStatus(err), err
+}
+
+func workflowActionHTTPStatus(err error) int {
+	var httpErr *common.HTTPError
+	if errors.As(err, &httpErr) {
+		return httpErr.StatusCode
+	}
+	return 0
+}
 
 // Staged plugin generation — four sequential phases, each writes to DB independently.
 
@@ -15,7 +56,32 @@ const (
 	generateSkeletonPath     = "/api/chat/generate_workflow/skeleton"
 	generateStateMachinePath = "/api/chat/generate_workflow/state_machine"
 	generateScenarioPath     = "/api/chat/generate_workflow/scenario_scripts"
+	llmTaskRunPath           = "/api/chat/llm-task:run"
 )
+
+type llmTaskFile struct {
+	Path        string `json:"path"`
+	Content     string `json:"content"`
+	ContentType string `json:"content_type,omitempty"`
+}
+
+type llmTaskInput struct {
+	Text  string         `json:"text,omitempty"`
+	Data  map[string]any `json:"data,omitempty"`
+	Files []llmTaskFile  `json:"files,omitempty"`
+}
+
+type llmTaskRequest struct {
+	Mode           string           `json:"mode"`
+	TaskType       string           `json:"task_type"`
+	Instruction    string           `json:"instruction,omitempty"`
+	Input          llmTaskInput     `json:"input"`
+	Skills         []map[string]any `json:"skills,omitempty"`
+	Tools          []map[string]any `json:"tools,omitempty"`
+	ResponseFormat map[string]any   `json:"response_format,omitempty"`
+	LLMConfig      map[string]any   `json:"llm_config,omitempty"`
+	Options        map[string]any   `json:"options,omitempty"`
+}
 
 type AnalyzeSkillRequest struct {
 	Name         string         `json:"name"`
@@ -35,12 +101,12 @@ type AnalyzeSkillResponse struct {
 
 func AnalyzeSkill(ctx context.Context, req AnalyzeSkillRequest) (*AnalyzeSkillResponse, error) {
 	req.LLMConfig = ensureLLMConfig(req.LLMConfig)
-	var raw map[string]any
-	if err := common.ApiPost(ctx, generateURL(generateAnalyzeSkillPath), req, nil, &raw, generateTimeout); err != nil {
+	raw, err := callWorkflowLLMTask(ctx, "workflow.analyze_skill", "Analyze whether this Skill can be converted into an executable Workflow.", map[string]any{
+		"name":          req.Name,
+		"skill_package": req.SkillPackage,
+	}, nil, req.LLMConfig)
+	if err != nil {
 		return nil, err
-	}
-	if data, ok := raw["data"].(map[string]any); ok {
-		raw = data
 	}
 	b, _ := json.Marshal(raw)
 	var resp AnalyzeSkillResponse
@@ -72,13 +138,15 @@ type DesignBriefResponse struct {
 // DesignBrief calls Phase 0: generate the design brief Markdown.
 func DesignBrief(ctx context.Context, req DesignBriefRequest) (*DesignBriefResponse, error) {
 	req.LLMConfig = ensureLLMConfig(req.LLMConfig)
-	url := generateURL(generateDesignBriefPath)
-	var raw map[string]any
-	if err := common.ApiPost(ctx, url, req, nil, &raw, generateTimeout); err != nil {
+	raw, err := callWorkflowLLMTask(ctx, "workflow.design_brief", "Create an implementation brief for the Workflow generation phases.", map[string]any{
+		"name":              req.Name,
+		"description":       req.Description,
+		"skill_content":     req.SkillContent,
+		"skill_package":     req.SkillPackage,
+		"workflow_analysis": req.WorkflowAnalysis,
+	}, nil, req.LLMConfig)
+	if err != nil {
 		return nil, err
-	}
-	if data, ok := raw["data"].(map[string]any); ok {
-		raw = data
 	}
 	return &DesignBriefResponse{
 		DesignBrief: extractStringField(raw, "design_brief"),
@@ -141,6 +209,42 @@ func ensureLLMConfig(c map[string]any) map[string]any {
 	return c
 }
 
+func workflowTaskSkills() []map[string]any {
+	return []map[string]any{{"name": "create-workflow", "source": "builtin", "required": true}}
+}
+
+func workflowTaskTools(taskType string) []map[string]any {
+	if taskType == "workflow.repair" {
+		return []map[string]any{{"name": "str_replace", "source": "builtin", "mode": "expanded"}}
+	}
+	return nil
+}
+
+func callWorkflowLLMTask(ctx context.Context, taskType, instruction string, data map[string]any, files []llmTaskFile, llmConfig map[string]any) (map[string]any, error) {
+	payload := llmTaskRequest{
+		Mode:           "agent",
+		TaskType:       taskType,
+		Instruction:    instruction,
+		Input:          llmTaskInput{Data: data, Files: files},
+		Skills:         workflowTaskSkills(),
+		Tools:          workflowTaskTools(taskType),
+		ResponseFormat: map[string]any{"type": "json_object"},
+		LLMConfig:      ensureLLMConfig(llmConfig),
+		Options:        map[string]any{"max_retries": 2},
+	}
+	var raw map[string]any
+	if err := common.ApiPost(ctx, generateURL(llmTaskRunPath), payload, nil, &raw, generateTimeout); err != nil {
+		return nil, err
+	}
+	if data, ok := raw["data"].(map[string]any); ok {
+		raw = data
+	}
+	if output, ok := raw["output"].(map[string]any); ok {
+		return output, nil
+	}
+	return raw, nil
+}
+
 func extractStringField(raw map[string]any, key string) string {
 	if v, ok := raw[key].(string); ok {
 		return v
@@ -178,12 +282,33 @@ func extractScripts(raw map[string]any) map[string]string {
 	return nil
 }
 
+func extractStringSlice(raw map[string]any, key string) []string {
+	var result []string
+	if data, ok := raw["data"].(map[string]any); ok {
+		raw = data
+	}
+	if values, ok := raw[key].([]any); ok {
+		for _, value := range values {
+			if item, ok := value.(string); ok {
+				result = append(result, item)
+			}
+		}
+	}
+	return result
+}
+
 // GenerateSkeleton calls Phase 1: generate workflow.yaml skeleton.
 func GenerateSkeleton(ctx context.Context, req GenerateSkeletonRequest) (*GenerateSkeletonResponse, error) {
 	req.LLMConfig = ensureLLMConfig(req.LLMConfig)
-	url := generateURL(generateSkeletonPath)
-	var raw map[string]any
-	if err := common.ApiPost(ctx, url, req, nil, &raw, generateTimeout); err != nil {
+	raw, err := callWorkflowLLMTask(ctx, "workflow.generate_skeleton", "Generate workflow.yaml skeleton. It must be compatible with the LazyMind Workflow compiler.", map[string]any{
+		"name":              req.Name,
+		"description":       req.Description,
+		"skill_content":     req.SkillContent,
+		"skill_package":     req.SkillPackage,
+		"workflow_analysis": req.WorkflowAnalysis,
+		"design_brief":      req.DesignBrief,
+	}, nil, req.LLMConfig)
+	if err != nil {
 		return nil, err
 	}
 	return &GenerateSkeletonResponse{
@@ -194,9 +319,13 @@ func GenerateSkeleton(ctx context.Context, req GenerateSkeletonRequest) (*Genera
 // GenerateStateMachine calls Phase 2: generate state.yml from the skeleton.
 func GenerateStateMachine(ctx context.Context, req GenerateStateMachineRequest) (*GenerateStateMachineResponse, error) {
 	req.LLMConfig = ensureLLMConfig(req.LLMConfig)
-	url := generateURL(generateStateMachinePath)
-	var raw map[string]any
-	if err := common.ApiPost(ctx, url, req, nil, &raw, generateTimeout); err != nil {
+	raw, err := callWorkflowLLMTask(ctx, "workflow.generate_state_machine", "Generate scenario/state.yml for this workflow.yaml. Return publish-valid graph YAML.", map[string]any{
+		"name":              req.Name,
+		"workflow_yaml":     req.WorkflowYAML,
+		"design_brief":      req.DesignBrief,
+		"workflow_analysis": req.WorkflowAnalysis,
+	}, []llmTaskFile{{Path: "workflow.yaml", Content: req.WorkflowYAML, ContentType: "text/yaml"}}, req.LLMConfig)
+	if err != nil {
 		return nil, err
 	}
 	resp := &GenerateStateMachineResponse{
@@ -205,41 +334,32 @@ func GenerateStateMachine(ctx context.Context, req GenerateStateMachineRequest) 
 	// Phase 2 may return an updated workflow_yaml when slot repair was applied.
 	resp.WorkflowYAML = extractStringField(raw, "workflow_yaml")
 	// Extract warnings list from response (may be absent for older Python versions).
-	if data, ok := raw["data"].(map[string]any); ok {
-		raw = data
-	}
-	if warnRaw, ok := raw["warnings"].([]any); ok {
-		for _, w := range warnRaw {
-			if s, ok := w.(string); ok {
-				resp.Warnings = append(resp.Warnings, s)
-			}
-		}
-	}
+	resp.Warnings = extractStringSlice(raw, "warnings")
 	return resp, nil
 }
 
 // GenerateScenarioScripts calls Phase 3: generate scenario.md and optional scripts.
 func GenerateScenarioScripts(ctx context.Context, req GenerateScenarioScriptsRequest) (*GenerateScenarioScriptsResponse, error) {
 	req.LLMConfig = ensureLLMConfig(req.LLMConfig)
-	url := generateURL(generateScenarioPath)
-	var raw map[string]any
-	if err := common.ApiPost(ctx, url, req, nil, &raw, generateTimeout); err != nil {
+	files := []llmTaskFile{
+		{Path: "workflow.yaml", Content: req.WorkflowYAML, ContentType: "text/yaml"},
+		{Path: "scenario/state.yml", Content: req.StateYAML, ContentType: "text/yaml"},
+	}
+	raw, err := callWorkflowLLMTask(ctx, "workflow.generate_scenario_scripts", "Generate complete scenario documentation and safe optional scripts for the Workflow. The scenario markdown must include one substantive section for every state step, explaining purpose, inputs, outputs, and runtime behavior. Do not return placeholder text.", map[string]any{
+		"name":           req.Name,
+		"workflow_yaml":  req.WorkflowYAML,
+		"state_yaml":     req.StateYAML,
+		"design_brief":   req.DesignBrief,
+		"source_scripts": req.SourceScripts,
+	}, files, req.LLMConfig)
+	if err != nil {
 		return nil, err
 	}
 	resp := &GenerateScenarioScriptsResponse{
 		ScenarioMD: extractStringField(raw, "scenario_md"),
 		Scripts:    extractScripts(raw),
 	}
-	if data, ok := raw["data"].(map[string]any); ok {
-		raw = data
-	}
-	if values, ok := raw["warnings"].([]any); ok {
-		for _, value := range values {
-			if warning, ok := value.(string); ok {
-				resp.Warnings = append(resp.Warnings, warning)
-			}
-		}
-	}
+	resp.Warnings = extractStringSlice(raw, "warnings")
 	return resp, nil
 }
 
@@ -274,13 +394,28 @@ type RepairStateMachineResponse struct {
 // RepairStateMachine calls the repair endpoint to fix an incomplete state.yml.
 func RepairStateMachine(ctx context.Context, req RepairStateMachineRequest) (*RepairStateMachineResponse, error) {
 	req.LLMConfig = ensureLLMConfig(req.LLMConfig)
-	url := generateURL(repairStateMachinePath)
-	var raw map[string]any
-	if err := common.ApiPost(ctx, url, req, nil, &raw, generateTimeout); err != nil {
-		return nil, err
+	files := []llmTaskFile{
+		{Path: "workflow.yaml", Content: req.WorkflowYAML, ContentType: "text/yaml"},
+		{Path: "scenario/state.yml", Content: req.StateYAML, ContentType: "text/yaml"},
 	}
-	if data, ok := raw["data"].(map[string]any); ok {
-		raw = data
+	if req.ScenarioMD != "" {
+		files = append(files, llmTaskFile{Path: "scenario/scenario.md", Content: req.ScenarioMD, ContentType: "text/markdown"})
+	}
+	for path, content := range req.Scripts {
+		files = append(files, llmTaskFile{Path: path, Content: content, ContentType: "text/x-python"})
+	}
+	raw, err := callWorkflowLLMTask(ctx, "workflow.repair", "Repair only the requested Workflow target. Prefer precise edits for local changes and return final full content for changed files.", map[string]any{
+		"workflow_yaml": req.WorkflowYAML,
+		"state_yaml":    req.StateYAML,
+		"repair_hint":   req.RepairHint,
+		"warnings":      req.Warnings,
+		"diagnostics":   req.Diagnostics,
+		"target":        req.Target,
+		"scenario_md":   req.ScenarioMD,
+		"scripts":       req.Scripts,
+	}, files, req.LLMConfig)
+	if err != nil {
+		return nil, err
 	}
 	resp := &RepairStateMachineResponse{
 		StateYAML:    extractStringField(raw, "state_yaml"),
@@ -288,13 +423,10 @@ func RepairStateMachine(ctx context.Context, req RepairStateMachineRequest) (*Re
 		ScenarioMD:   extractStringField(raw, "scenario_md"),
 		Scripts:      extractScripts(raw),
 	}
-	if warnRaw, ok := raw["remaining_warnings"].([]any); ok {
-		for _, w := range warnRaw {
-			if s, ok := w.(string); ok {
-				resp.RemainingWarnings = append(resp.RemainingWarnings, s)
-			}
-		}
+	if req.Target == "scenario" && resp.StateYAML == "" {
+		resp.StateYAML = resp.ScenarioMD
 	}
+	resp.RemainingWarnings = extractStringSlice(raw, "remaining_warnings")
 	return resp, nil
 }
 
@@ -322,14 +454,12 @@ type PolishWorkflowInfoResponse struct {
 // PolishWorkflowInfo proxies to the Python polish_info endpoint.
 func PolishWorkflowInfo(ctx context.Context, req PolishWorkflowInfoRequest) (*PolishWorkflowInfoResponse, error) {
 	req.LLMConfig = ensureLLMConfig(req.LLMConfig)
-	url := generateURL(polishWorkflowInfoPath)
-	var raw map[string]any
-	if err := common.ApiPost(ctx, url, req, nil, &raw, generateTimeout); err != nil {
+	raw, err := callWorkflowLLMTask(ctx, "workflow.polish_info", "Polish only the requested Workflow metadata fields.", map[string]any{
+		"fields":        req.Fields,
+		"target_fields": req.TargetFields,
+	}, nil, req.LLMConfig)
+	if err != nil {
 		return nil, err
-	}
-	// Unwrap data envelope if present
-	if data, ok := raw["data"].(map[string]any); ok {
-		raw = data
 	}
 	resp := &PolishWorkflowInfoResponse{}
 	if v, ok := raw["description"].(string); ok {

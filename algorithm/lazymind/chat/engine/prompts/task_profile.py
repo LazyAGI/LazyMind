@@ -171,17 +171,20 @@ _SIGNALS: tuple[tuple[Outcome, re.Pattern[str]], ...] = (
     ('execute', re.compile(
         r'替我|帮我(?:发送|发布|修改|运行|删除|安装|部署)|直接(?:发送|发布|修改|运行|部署)|'
         r'^(?:发送|发布|修改|运行|删除|安装|部署)|(?:然后|再|并且|并)(?:发送|发布|修改|运行|删除|安装|部署)|'
-        r'帮我(?:修复|更新|升级|替换|重构|新增|添加|移除|重命名|移动|复制|'
+        r'帮我(?:修复|更新|升级|替换|重构|新增|添加|插入|移除|重命名|移动|复制|'
         r'上传|下载|导入|导出|提交|推送|合并|回滚|配置|连接|同步|迁移|'
         r'启动|停止|重启|回复|转发|预约|取消|邀请|批准|填写)|'
-        r'^(?:修复|更新|升级|新增|添加|移除|重命名|上传|提交|推送|合并|回滚|'
+        r'^(?:修复|更新|升级|新增|添加|插入|移除|重命名|上传|提交|推送|合并|回滚|'
         r'配置|迁移|启动|停止|重启)|execute|deploy\s+it|fix\s+(?:this|the)|'
-        r'(?:把|将).{0,30}(?:修复|更新|升级|替换|重构|新增|添加|移除|重命名|移动|'
+        r'(?:插入|嵌入).{0,16}(?:图片|配图|插图|图像|表格|内容|段落|章节|文本|链接|引用|'
+        r'(?:这个|当前|该)?(?:成稿|文档|文章|报告|大纲))|'
+        r'(?:把|将).{0,30}(?:修复|更新|升级|替换|重构|新增|添加|插入|移除|重命名|移动|'
         r'提交|推送|合并|回滚|配置|迁移)|update\s+(?:this|the)|'
+        r'insert\s+(?:this|the|an?|one)|'
         r'\bcommit\b|\bpush\b|\bmerge\b|\brevert\b|\brename\b|\bupload\b', re.I,
     )),
     ('create', re.compile(
-        r'创建|生成|编写|撰写|写一份|写个|帮我写|制作一份|做一个|设计一个|画一个|'
+        r'创建|生成|编写|撰写|写一份|写一篇|写篇|写个|帮我写|制作一份|做一个|设计一个|画一个|'
         r'起草|拟一份|想几个|给.{0,4}个点子|搭一个原型|实现一个|补一个测试|'
         r'产出|create|generate|draft|design|compose|implement|brainstorm|mock\s+up|\bwrite\b', re.I,
     )),
@@ -268,6 +271,16 @@ def _ordered_outcomes(text: str, *, current: bool) -> list[Outcome]:
         found.append((research_match.start(), priority['research'], 'research'))
     found.sort(key=lambda item: (item[0], item[1]))
     outcomes = list(dict.fromkeys(outcome for _, _, outcome in found))
+    # A document insertion is the enclosing outcome even when creating its content
+    # is an earlier prerequisite. Keep create as a secondary outcome without
+    # changing the normal ordering of unrelated multi-outcome requests.
+    document_insertion = re.search(
+        r'(?:插入|嵌入).{0,32}(?:成稿|文档|文章|报告|大纲|图片|配图|插图|图像)|'
+        r'\binsert\b.{0,48}\b(?:document|article|report|draft|image)\b',
+        routing_text, re.I,
+    )
+    if document_insertion and 'execute' in outcomes and outcomes[0] != 'execute':
+        outcomes = ['execute', *(item for item in outcomes if item != 'execute')]
     if 'create' in outcomes and 'plan' in outcomes and re.search(
         r'(?:create|build)\s+(?:an?\s+)?(?:launch\s+|implementation\s+)?'
         r'(?:plan|roadmap)|(?:创建|生成|写)(?:一个|一份)?\s*(?:计划|路线图|方案)',

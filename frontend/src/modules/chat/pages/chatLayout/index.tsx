@@ -2,6 +2,7 @@ import { FC, type ReactNode, useRef, useState, useEffect, useCallback } from "re
 import { useTranslation } from "react-i18next";
 import { localizeErrorCode } from "@/components/request";
 import { message } from "antd";
+import { MessageOutlined, UnorderedListOutlined } from "@ant-design/icons";
 import { AgentAppsAuth } from "@/components/auth";
 import {
   ChatConversationsRequestActionEnum,
@@ -752,8 +753,27 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       )}
       {workflowPanelExpanded && (
         <div className="expanded-rail-tabs" role="tablist">
-          <button type="button" role="tab" aria-selected={expandedRailTab === "chat"} className={expandedRailTab === "chat" ? "active" : ""} onClick={() => setExpandedRailTab("chat")}>{t("chat.workflowRailConversation")}</button>
-          <button type="button" role="tab" aria-selected={expandedRailTab === "tasks"} className={expandedRailTab === "tasks" ? "active" : ""} onClick={() => setExpandedRailTab("tasks")}>{t("taskCenter.panelTitle")} {tasks.length > 0 && <span>{tasks.length}</span>}</button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={expandedRailTab === "chat"}
+            className={expandedRailTab === "chat" ? "active" : ""}
+            onClick={() => setExpandedRailTab("chat")}
+          >
+            <MessageOutlined aria-hidden />
+            <span>{t("chat.workflowRailConversation")}</span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={expandedRailTab === "tasks"}
+            className={expandedRailTab === "tasks" ? "active" : ""}
+            onClick={() => setExpandedRailTab("tasks")}
+          >
+            <UnorderedListOutlined aria-hidden />
+            <span>{t("taskCenter.panelTitle")}</span>
+            {tasks.length > 0 && <span className="expanded-rail-tabs__count">{tasks.length}</span>}
+          </button>
         </div>
       )}
       <div className={`chat-conversation-pane${workflowPanelExpanded && expandedRailTab !== "chat" ? " chat-conversation-pane--hidden" : ""}${isTaskPanelRestoreVisible ? " chat-conversation-pane--task-restore-visible" : ""}`}>
