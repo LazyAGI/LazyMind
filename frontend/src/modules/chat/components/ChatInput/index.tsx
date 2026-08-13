@@ -68,6 +68,11 @@ import {
 import { useChatNewMessageStore } from "@/modules/chat/store/chatNewMessage";
 import { useTranslation } from "react-i18next";
 import { PromptServiceApi } from "@/modules/chat/utils/request";
+import {
+  listToolAssetsPage,
+  TOOL_AVAILABILITY_CHANGED_EVENT,
+  type ToolAvailabilityChange,
+} from "@/modules/memory/toolApi";
 import { Popover, Tag } from "antd";
 
 /**
@@ -542,6 +547,10 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const [contextRuntimeSettings, setContextRuntimeSettings] = useState(initialWorkflowSettings);
     const [contextUsageReset, setContextUsageReset] = useState(0);
     const [addMenuOpen, setAddMenuOpen] = useState(false);
+    const [knowledgeToolsEnabled, setKnowledgeToolsEnabled] = useState<{
+      kb: boolean | null;
+      temp_kb: boolean | null;
+    }>({ kb: null, temp_kb: null });
     const disabledNoticeId = useId();
     const previousSessionIdRef = useRef<string | undefined>(undefined);
     const hasSentMessageRef = useRef(false);
@@ -554,6 +563,52 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const { setPendingMessage, clearPendingMessage } = useChatMessageStore();
     const { saveInputContent, getInputContent, clearInputContent } =
       useChatInputStore();
+
+    const refreshKnowledgeToolAvailability = useCallback(async () => {
+      try {
+        const response = await listToolAssetsPage({ silentError: true });
+        const toolsByID = new Map(
+          response.records.map((tool) => [tool.id, tool.isEnabled]),
+        );
+        setKnowledgeToolsEnabled({
+          kb: toolsByID.get("kb") ?? null,
+          temp_kb: toolsByID.get("temp_kb") ?? null,
+        });
+      } catch {
+        // Keep entries usable until the authoritative state can be read.
+      }
+    }, []);
+
+    const handleToolAvailabilityChanged = useCallback((event: Event) => {
+      const change = (event as CustomEvent<ToolAvailabilityChange>).detail;
+      if (change?.id === "kb" || change?.id === "temp_kb") {
+        setKnowledgeToolsEnabled((current) => ({
+          ...current,
+          [change.id]: change.enabled,
+        }));
+      }
+      void refreshKnowledgeToolAvailability();
+    }, [refreshKnowledgeToolAvailability]);
+
+    useEffect(() => {
+      void refreshKnowledgeToolAvailability();
+      window.addEventListener(
+        TOOL_AVAILABILITY_CHANGED_EVENT,
+        handleToolAvailabilityChanged,
+      );
+      return () => window.removeEventListener(
+        TOOL_AVAILABILITY_CHANGED_EVENT,
+        handleToolAvailabilityChanged,
+      );
+    }, [handleToolAvailabilityChanged, refreshKnowledgeToolAvailability]);
+
+    const knowledgeBaseEnabled = knowledgeToolsEnabled.kb !== false;
+    const temporaryFileSearchEnabled = knowledgeToolsEnabled.temp_kb !== false;
+    const knowledgeBaseDisabledReason = "知识库检索已在设置中停用";
+    const temporaryFileSearchDisabledReason = "临时文件检索已在设置中停用";
+    const uploadTypes = temporaryFileSearchEnabled
+      ? allowedUploadTypes
+      : allowedImageTypes;
 
     const debouncedSaveInput = useMemo(
       () =>
@@ -598,10 +653,28 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
             }
             return;
           }
-          fileListRef.current?.uploadFiles(files);
+          const uploadableFiles = temporaryFileSearchEnabled
+            ? files
+            : files.filter((file) => {
+              const suffix = file.name.substring(file.name.lastIndexOf(".")).toLowerCase();
+              return allowedImageTypes.includes(suffix);
+            });
+          if (uploadableFiles.length !== files.length) {
+            message.warning(`${temporaryFileSearchDisabledReason}，仅支持上传图片`);
+          }
+          if (uploadableFiles.length > 0) {
+            fileListRef.current?.uploadFiles(uploadableFiles);
+          }
         },
       }),
-      [clearPendingMessage, clearMultiData, disabled, disabledReason],
+      [
+        clearPendingMessage,
+        clearMultiData,
+        disabled,
+        disabledReason,
+        temporaryFileSearchDisabledReason,
+        temporaryFileSearchEnabled,
+      ],
     );
 
     useEffect(() => {
@@ -974,7 +1047,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
               const finalSuffix = finalFile.name
                 .substring(finalFile.name.lastIndexOf("."))
                 .toLowerCase();
-              if (allowedUploadTypes.includes(finalSuffix)) {
+              if (uploadTypes.includes(finalSuffix)) {
                 if (fileList.length + files.length < MAX_UPLOAD_FILES) {
                   files.push(finalFile);
                 } else {
@@ -992,11 +1065,11 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
           e.stopPropagation();
 
           if (invalidFiles.length > 0) {
-            message.warning(
-              t("chat.unsupportedFileType", {
+            message.warning(temporaryFileSearchEnabled
+              ? t("chat.unsupportedFileType", {
                 types: t("chat.supportedUploadTypeSummary"),
-              }),
-            );
+              })
+              : `${temporaryFileSearchDisabledReason}，仅支持上传图片`);
           }
 
           if (files.length > 0) {
@@ -1029,7 +1102,15 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
           document.execCommand("insertText", false, plainText);
         }
       },
-      [disabled, disabledReason, fileList.length, t],
+      [
+        disabled,
+        disabledReason,
+        fileList.length,
+        t,
+        temporaryFileSearchDisabledReason,
+        temporaryFileSearchEnabled,
+        uploadTypes,
+      ],
     );
 
     return (
@@ -1121,6 +1202,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                 value={value}
                 onChange={handleInputChange}
                 onMentionsChange={setMentions}
+                disabledMentionReasons={knowledgeBaseEnabled ? undefined : {
+                  knowledge_base: knowledgeBaseDisabledReason,
+                }}
                 onPaste={handlePaste}
                 onCompositionChange={(composing) => {
                   isComposingRef.current = composing;
@@ -1158,33 +1242,46 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       classNames={{ root: "chat-add-resource-popover" }}
                       content={
                         <div className="chat-add-resource-menu">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (fileList.length >= MAX_UPLOAD_FILES) {
-                                message.warning(t("chat.maxFilesWarning"));
+                          <Tooltip
+                            title={temporaryFileSearchEnabled
+                              ? undefined
+                              : `${temporaryFileSearchDisabledReason}，仅支持上传图片`}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (fileList.length >= MAX_UPLOAD_FILES) {
+                                  message.warning(t("chat.maxFilesWarning"));
+                                  setAddMenuOpen(false);
+                                  return;
+                                }
+                                // Open the file picker while still inside the
+                                // user gesture, then close the popover.
+                                fileListRef.current?.openFileDialog();
                                 setAddMenuOpen(false);
-                                return;
-                              }
-                              // Open the file picker while still inside the
-                              // user gesture, then close the popover.
-                              fileListRef.current?.openFileDialog();
-                              setAddMenuOpen(false);
-                            }}
-                          >
-                            <PaperClipOutlined />
-                            {t("chat.addAttachment")}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setAddMenuOpen(false);
-                              knowledgeSelectorRef.current?.open(document.body);
-                            }}
-                          >
-                            <BookOutlined />
-                            {t("chat.knowledgeBase")}
-                          </button>
+                              }}
+                            >
+                              <PaperClipOutlined />
+                              {temporaryFileSearchEnabled
+                                ? t("chat.addAttachment")
+                                : "添加图片"}
+                            </button>
+                          </Tooltip>
+                          <Tooltip title={knowledgeBaseEnabled ? undefined : knowledgeBaseDisabledReason}>
+                            <span className="chat-add-resource-menu-tooltip-anchor">
+                              <button
+                                type="button"
+                                disabled={!knowledgeBaseEnabled}
+                                onClick={() => {
+                                  setAddMenuOpen(false);
+                                  knowledgeSelectorRef.current?.open(document.body);
+                                }}
+                              >
+                                <BookOutlined />
+                                {t("chat.knowledgeBase")}
+                              </button>
+                            </span>
+                          </Tooltip>
                           <button
                             type="button"
                             onClick={() => {
@@ -1218,6 +1315,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         embeddingReady={embeddingReady}
                         multimodalEmbeddingReady={multimodalEmbeddingReady}
                         rerankReady={rerankReady}
+                        disabled={!knowledgeBaseEnabled}
+                        disabledReason={knowledgeBaseDisabledReason}
                         onChange={onKnowledgeBaseChange}
                       />
                     </div>
@@ -1226,7 +1325,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         updateFiles={updateImageList}
                         listNum={fileList.length}
                         ref={fileListRef}
-                        types={allowedUploadTypes}
+                        types={uploadTypes}
                         max={MAX_UPLOAD_FILES}
                         onBeforeAddFiles={onBeforeAddFiles}
                         disabled={disabled || isPromptPolishing}

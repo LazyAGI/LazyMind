@@ -12,12 +12,42 @@ import (
 
 	"lazymind/core/common/orm"
 	appLog "lazymind/core/log"
+	"lazymind/core/settings"
 )
 
 func newTestDB(t *testing.T) *orm.DB {
 	t.Helper()
-	db := orm.MigrateTestDB(t, &orm.MCPServer{}, &orm.MCPServerTool{})
+	db := orm.MigrateTestDB(t, &orm.MCPServer{}, &orm.MCPServerTool{}, &orm.UserUIPreferences{})
 	return db
+}
+
+func TestLoadRuntimeConfigHonorsMCPMasterSwitch(t *testing.T) {
+	db := newTestDB(t)
+	now := time.Now().UTC()
+	if err := db.Create(&orm.MCPServer{
+		ID: "msp-master-switch", Name: "Verified", Transport: "http", URL: "https://mcp.example.com",
+		HeadersJSON: []byte("{}"), AllowedToolsJSON: []byte(`["search"]`), Enabled: true, IsVerified: true,
+		BaseModel: orm.BaseModel{CreateUserID: "u1", CreatedAt: now, UpdatedAt: now},
+	}).Error; err != nil {
+		t.Fatalf("seed mcp server: %v", err)
+	}
+	if err := db.Model(&orm.UserUIPreferences{}).Create(map[string]any{"user_id": "u1", "task_center_enabled": true, "skills_enabled": true, "mcp_enabled": false, "created_at": now, "updated_at": now}).Error; err != nil {
+		t.Fatalf("seed preferences: %v", err)
+	}
+	runtime, err := LoadRuntimeConfig(context.Background(), db.DB, "u1")
+	if err != nil {
+		t.Fatalf("load paused runtime: %v", err)
+	}
+	if len(runtime) != 0 {
+		t.Fatalf("expected no MCP runtime when master switch is off, got %#v", runtime)
+	}
+	if err := db.Model(&orm.UserUIPreferences{}).Where("user_id = ?", "u1").Update("mcp_enabled", true).Error; err != nil {
+		t.Fatalf("enable MCP master: %v", err)
+	}
+	runtime, err = LoadRuntimeConfig(context.Background(), db.DB, "u1")
+	if err != nil || len(runtime) != 1 {
+		t.Fatalf("expected enabled runtime after restoring master switch, got %#v err=%v", runtime, err)
+	}
 }
 
 func TestDoRPCNon2xxHidesResponseBodyFromError(t *testing.T) {
@@ -300,6 +330,81 @@ func TestUpdateServerRequiresVerificationBeforeEnabling(t *testing.T) {
 	}
 	if !updated.Enabled {
 		t.Fatalf("verified server should be enabled")
+	}
+}
+
+func TestSetOwnedServersEnabledUpdatesOnlyOwnedVerifiedServers(t *testing.T) {
+	db := newTestDB(t)
+	now := time.Now().UTC()
+	rows := []orm.MCPServer{
+		{
+			ID: "owned-verified", Name: "Owned verified", Transport: "http", URL: "https://owned.example.com/mcp",
+			HeadersJSON: []byte("{}"), AllowedToolsJSON: []byte("[]"), Enabled: false, IsVerified: true,
+			BaseModel: orm.BaseModel{CreateUserID: "u1", CreatedAt: now, UpdatedAt: now},
+		},
+		{
+			ID: "owned-unverified", Name: "Owned unverified", Transport: "http", URL: "https://unverified.example.com/mcp",
+			HeadersJSON: []byte("{}"), AllowedToolsJSON: []byte("[]"), Enabled: false, IsVerified: false,
+			BaseModel: orm.BaseModel{CreateUserID: "u1", CreatedAt: now, UpdatedAt: now},
+		},
+		{
+			ID: "shared-other-user", Name: "Shared", Transport: "http", URL: "https://shared.example.com/mcp",
+			HeadersJSON: []byte("{}"), AllowedToolsJSON: []byte("[]"), Enabled: false, IsVerified: true, Share: true,
+			BaseModel: orm.BaseModel{CreateUserID: "u2", CreatedAt: now, UpdatedAt: now},
+		},
+	}
+	if err := db.Create(&rows).Error; err != nil {
+		t.Fatalf("seed mcp servers: %v", err)
+	}
+	if err := db.Model(&orm.UserUIPreferences{}).Create(map[string]any{
+		"user_id": "u1", "task_center_enabled": true, "skills_enabled": true,
+		"workflows_enabled": true, "mcp_enabled": false, "created_at": now, "updated_at": now,
+	}).Error; err != nil {
+		t.Fatalf("seed preferences: %v", err)
+	}
+
+	result, err := SetOwnedServersEnabled(context.Background(), db.DB, "u1", true)
+	if err != nil {
+		t.Fatalf("enable owned MCP servers: %v", err)
+	}
+	if result.TotalCount != 2 || result.UpdatedCount != 1 || result.SkippedUnverifiedCount != 1 || !result.Enabled {
+		t.Fatalf("unexpected enable result: %#v", result)
+	}
+
+	var stored []orm.MCPServer
+	if err := db.Order("id ASC").Find(&stored).Error; err != nil {
+		t.Fatalf("load mcp servers: %v", err)
+	}
+	states := map[string]bool{}
+	for _, row := range stored {
+		states[row.ID] = row.Enabled
+	}
+	if !states["owned-verified"] || states["owned-unverified"] || states["shared-other-user"] {
+		t.Fatalf("unexpected enabled states: %#v", states)
+	}
+
+	controls, err := settings.LoadFeatureControls(context.Background(), db.DB, "u1")
+	if err != nil || !controls.MCPEnabled {
+		t.Fatalf("expected MCP feature control enabled, controls=%#v err=%v", controls, err)
+	}
+
+	result, err = SetOwnedServersEnabled(context.Background(), db.DB, "u1", false)
+	if err != nil {
+		t.Fatalf("disable owned MCP servers: %v", err)
+	}
+	if result.TotalCount != 2 || result.UpdatedCount != 2 || result.SkippedUnverifiedCount != 0 || result.Enabled {
+		t.Fatalf("unexpected disable result: %#v", result)
+	}
+	var disabled orm.MCPServer
+	if err := db.First(&disabled, "id = ?", "owned-verified").Error; err != nil {
+		t.Fatalf("load disabled server: %v", err)
+	}
+	if disabled.Enabled {
+		t.Fatal("owned verified server should be disabled")
+	}
+	controls, err = settings.LoadFeatureControls(context.Background(), db.DB, "u1")
+	if err != nil || controls.MCPEnabled {
+		t.Fatalf("expected MCP feature control disabled, controls=%#v err=%v", controls, err)
 	}
 }
 

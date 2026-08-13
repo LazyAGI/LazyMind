@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ReactNode, WheelEvent as ReactWheelEvent } from "react";
-import { Button, Form, Input, Layout, Modal, Popover, Spin, Tooltip, message } from "antd";
+import { Button, Form, Input, Layout, Modal, Popover, Spin, message } from "antd";
 import {
   CodeOutlined,
   SettingOutlined,
@@ -9,7 +9,6 @@ import {
   DatabaseOutlined,
   ApiOutlined,
   UserOutlined,
-  TeamOutlined,
   GlobalOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
@@ -37,6 +36,7 @@ import logoImage from "@/public/Lazy.png";
 import { useTranslation } from "react-i18next";
 import LanguageSwitcher from "@/components/LanguageSwitcher";
 import {
+	DEVELOPER_ACTIVE_EVENT,
   isDeveloperModeActive,
   persistDeveloperModeActive,
   syncDeveloperModeFromServer,
@@ -54,6 +54,7 @@ import { useLocalSessionGate } from "@/runtime/useLocalSessionGate";
 import UserAgreementConsentModal, {
   useUserAgreementConsentGate,
 } from "@/components/UserAgreementConsentModal";
+import TerminalConnectionQuickPanel from "@/modules/channelGateway/components/TerminalConnectionQuickPanel";
 import "./index.scss";
 
 const { Content, Sider } = Layout;
@@ -126,6 +127,10 @@ export default function MainLayout() {
   const userName = userInfo?.username || "";
   const isAdminUser = isAdminRole(userInfo?.role);
   const hideLocalUserControls = shouldHideLocalUserControls();
+  const accountDisplayName = userInfo?.displayName || userName || "LazyMind";
+  const accountRoleLabel = isAdminUser
+    ? t("layout.systemAdministrator")
+    : t("layout.normalUser");
 
   const [currentSidebarConversationId, setCurrentSidebarConversationId] =
     useState(() => {
@@ -139,6 +144,7 @@ export default function MainLayout() {
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileSubmitting, setProfileSubmitting] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [terminalConnectionOpen, setTerminalConnectionOpen] = useState(false);
   const [sidebarSearchText, setSidebarSearchText] = useState("");
   const [isMenuCollapsed, setIsMenuCollapsed] = useState(readStoredMainMenuCollapsed);
   const [shouldRenderMenuContent, setShouldRenderMenuContent] = useState(
@@ -151,23 +157,19 @@ export default function MainLayout() {
 
   const settingsMenuItems = [
     {
-      key: "/model-providers/default-services",
+      key: "/settings?section=overview",
+      label: t("layout.settings"),
+      icon: <SettingOutlined className="settings-popover-icon" />,
+    },
+    {
+      key: "/settings?section=models",
       label: t("layout.modelProviderManagement"),
       icon: <ApiOutlined className="settings-popover-icon" />,
     },
-    ...(!runtimeFeatures.hideCloudAdmin
-      ? [
-          {
-            key: "/admin",
-            label: t("layout.systemManagement"),
-            icon: <TeamOutlined className="settings-popover-icon" />,
-          },
-        ]
-      : []),
     ...(isAdminUser && !runtimeFeatures.hideEvo
       ? [
           {
-            key: "developer-toggle",
+            key: "/settings?section=developer",
             label: t("layout.developer"),
             icon: <CodeOutlined className="settings-popover-icon" />,
           },
@@ -207,6 +209,7 @@ export default function MainLayout() {
     pathname.startsWith("/model-providers") ||
     pathname.startsWith("/cloud-documents") ||
     pathname.startsWith("/channels") ||
+    pathname.startsWith("/settings") ||
     pathname.startsWith("/lib/knowledge/detail") ||
     pathname.startsWith("/memory-management") ||
     pathname.startsWith("/self-evolution");
@@ -307,17 +310,24 @@ export default function MainLayout() {
     const handleUserChange = () => {
       setUserInfo(AgentAppsAuth.getUserInfo());
     };
+    const handleDeveloperModeChange = (event: Event) => {
+      setDeveloperActive(
+        Boolean((event as CustomEvent<{ active?: boolean }>).detail?.active),
+      );
+    };
 
     document.addEventListener("visibilitychange", handleVisibilityChange);
     window.addEventListener("focus", handleFocus);
     window.addEventListener("storage", handleStorage);
     window.addEventListener(AUTH_USER_CHANGE_EVENT, handleUserChange);
+    window.addEventListener(DEVELOPER_ACTIVE_EVENT, handleDeveloperModeChange);
 
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("focus", handleFocus);
       window.removeEventListener("storage", handleStorage);
       window.removeEventListener(AUTH_USER_CHANGE_EVENT, handleUserChange);
+      window.removeEventListener(DEVELOPER_ACTIVE_EVENT, handleDeveloperModeChange);
     };
   }, [localSessionGate.enabled, refreshLayoutUser]);
 
@@ -509,23 +519,6 @@ export default function MainLayout() {
   );
 
   const handleSettingsNavigate = (targetPath: string) => {
-    if (targetPath === "developer-toggle") {
-      if (developerActive) {
-        setDeveloperActive(false);
-        void persistDeveloperModeActive(false);
-        message.success(t("admin.developerDeactivated"));
-        if (pathname.startsWith("/self-evolution")) {
-          navigate("/agent/chat");
-        }
-        return;
-      }
-
-      setDeveloperActive(true);
-      void persistDeveloperModeActive(true);
-      message.success(t("admin.developerActivated"));
-      return;
-    }
-
     setSettingsOpen(false);
     navigate(targetPath);
   };
@@ -901,45 +894,51 @@ export default function MainLayout() {
             {showSettingsTrigger && (
               <Popover
                 content={
-                  <div className="settings-popover">
+                  <div className="settings-popover" role="menu">
+                    {userName && !hideLocalUserControls && (
+                      <button
+                        type="button"
+                        className="settings-popover-account"
+                        role="menuitem"
+                        onClick={() => {
+                          setSettingsOpen(false);
+                          void handleOpenProfile();
+                        }}
+                      >
+                        <span className="settings-popover-avatar" aria-hidden="true">
+                          <UserOutlined />
+                        </span>
+                        <span className="settings-popover-account-copy">
+                          <strong>{accountDisplayName}</strong>
+                          <small>{accountRoleLabel}</small>
+                        </span>
+                      </button>
+                    )}
                     {settingsMenuItems.map((item) => {
                       const btn = (
                         <Button
                           key={item.key}
                           type="text"
+                          role="menuitem"
                           className={`settings-popover-button${
-                            item.key === "developer-toggle" && developerActive ? " is-active" : ""
+                            item.key === "/settings?section=developer" && developerActive ? " is-active" : ""
                           }`}
                           onClick={() => handleSettingsNavigate(item.key)}
                         >
                           {item.icon}
                           <span className="settings-popover-label">{item.label}</span>
-                          {item.key === "developer-toggle" && developerActive && (
+                          {item.key === "/settings?section=developer" && developerActive && (
                             <span className="settings-active-badge">{t("admin.developerActiveTag")}</span>
                           )}
                           {[
-                            "/model-providers/default-services",
-                            "/admin",
+                            "/settings?section=overview",
+                            "/settings?section=models",
+                            "/settings?section=developer",
                           ].includes(item.key) && (
                             <RightOutlined className="settings-popover-accessory" />
                           )}
                         </Button>
                       );
-                      if (item.key === "developer-toggle") {
-                        return (
-                          <Tooltip
-                            key={item.key}
-                            placement="right"
-                            title={
-                              <div style={{ whiteSpace: "pre-line", lineHeight: 1.7 }}>
-                                {t("admin.developerModeTooltip")}
-                              </div>
-                            }
-                          >
-                            {btn}
-                          </Tooltip>
-                        );
-                      }
                       return btn;
                     })}
                     <div className="settings-popover-language">
@@ -950,6 +949,7 @@ export default function MainLayout() {
                       isLoggedIn ? (
                         <Button
                           type="text"
+                          role="menuitem"
                           className="settings-popover-button"
                           onClick={handleLogout}
                         >
@@ -958,6 +958,7 @@ export default function MainLayout() {
                       ) : (
                         <Button
                           type="text"
+                          role="menuitem"
                           className="settings-popover-button"
                           onClick={handleGoLogin}
                         >
@@ -969,63 +970,72 @@ export default function MainLayout() {
                 }
                 arrow={false}
                 overlayClassName="settings-popover-overlay"
-                placement="top"
+                placement="topLeft"
                 trigger="click"
                 open={settingsOpen}
-                onOpenChange={setSettingsOpen}
-              >
-                <div
-                  className="bottom-item settings-trigger"
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter" || event.key === " ") {
-                      event.preventDefault();
-                      setSettingsOpen((open) => !open);
-                    }
-                  }}
-                >
-                  <SettingOutlined className="bottom-icon" />
-                  {shouldRenderMenuContent && <span className="bottom-text">{t("layout.settings")}</span>}
-                </div>
-              </Popover>
-            )}
-            <div
-              className={`bottom-item terminal-entry${
-                pathname.startsWith("/channels") ? " is-active" : ""
-              }`}
-              role="button"
-              tabIndex={0}
-              onClick={() => handleModuleNavigate("/channels")}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  handleModuleNavigate("/channels");
-                }
-              }}
-            >
-              <LinkOutlined className="bottom-icon" />
-              {shouldRenderMenuContent && (
-                <span className="bottom-text">{t("layout.terminalConnection")}</span>
-              )}
-            </div>
-            {userName && !hideLocalUserControls && (
-              <div
-                className="bottom-item user-item"
-                onClick={handleOpenProfile}
-                role="button"
-                tabIndex={0}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    handleOpenProfile();
-                  }
+                onOpenChange={(open) => {
+                  setSettingsOpen(open);
+                  if (open) setTerminalConnectionOpen(false);
                 }}
               >
-                <UserOutlined className="bottom-icon" />
-                {shouldRenderMenuContent && <span className="bottom-text">{userName}</span>}
-              </div>
+                <button
+                  type="button"
+                  className={`sider-account-trigger${
+                    pathname.startsWith("/settings") ? " is-active" : ""
+                  }`}
+                  aria-label={t("layout.settings")}
+                  aria-haspopup="menu"
+                  aria-expanded={settingsOpen}
+                >
+                  <span className="sider-account-avatar" aria-hidden="true">
+                    <UserOutlined />
+                  </span>
+                  {shouldRenderMenuContent && (
+                    <span className="sider-account-copy">
+                      <strong>{accountDisplayName}</strong>
+                      <small>{accountRoleLabel}</small>
+                    </span>
+                  )}
+                </button>
+              </Popover>
             )}
+            <div className="sider-account-actions">
+              <Popover
+                content={(
+                  <TerminalConnectionQuickPanel
+                    onManage={() => {
+                      setTerminalConnectionOpen(false);
+                      handleModuleNavigate("/settings?section=channels");
+                    }}
+                  />
+                )}
+                arrow={false}
+                overlayClassName="terminal-quick-popover-overlay"
+                placement="topLeft"
+                trigger="click"
+                destroyOnHidden
+                open={terminalConnectionOpen}
+                onOpenChange={(open) => {
+                  setTerminalConnectionOpen(open);
+                  if (open) setSettingsOpen(false);
+                }}
+              >
+                <button
+                  type="button"
+                  className={`sider-account-action${
+                    terminalConnectionOpen || pathname.startsWith("/channels")
+                      ? " is-active"
+                      : ""
+                  }`}
+                  aria-label={t("layout.terminalConnection")}
+                  title={t("layout.terminalConnection")}
+                  aria-haspopup="dialog"
+                  aria-expanded={terminalConnectionOpen}
+                >
+                  <LinkOutlined />
+                </button>
+              </Popover>
+            </div>
           </div>
         </div>
       </Sider>

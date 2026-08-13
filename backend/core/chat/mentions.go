@@ -12,6 +12,7 @@ import (
 	"lazymind/core/acl"
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
+	"lazymind/core/settings"
 	"lazymind/core/workflow"
 )
 
@@ -125,6 +126,10 @@ func applyChatMentions(ctx context.Context, db *gorm.DB, raw map[string]any, use
 	if err != nil || len(mentions) == 0 {
 		return query, resolvedChatMentions{}, err
 	}
+	controls, err := settings.LoadFeatureControls(ctx, db, userID)
+	if err != nil {
+		return query, resolvedChatMentions{}, err
+	}
 	resolved := resolvedChatMentions{}
 	var datasetIDs, skillIDs, conversationIDs []string
 	for _, mention := range mentions {
@@ -145,6 +150,9 @@ func applyChatMentions(ctx context.Context, db *gorm.DB, raw map[string]any, use
 				"display_name": mention.DisplayName,
 			})
 		case "skill":
+			if !controls.SkillsEnabled {
+				return query, resolved, errors.New("skills and plugins are paused in settings")
+			}
 			var skill orm.SkillV2Skill
 			if err := db.WithContext(ctx).Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", mention.ResourceID, userID).Take(&skill).Error; err != nil || skill.HeadRevisionID == nil {
 				return query, resolved, fmt.Errorf("skill mention is not accessible or unpublished: %s", mention.ResourceID)
@@ -173,6 +181,9 @@ func applyChatMentions(ctx context.Context, db *gorm.DB, raw map[string]any, use
 				resolved.ToolNames = append(resolved.ToolNames, mention.ResourceID)
 			}
 		case "workflow":
+			if !controls.WorkflowsEnabled && !denied {
+				return query, resolved, errors.New("workflows are paused in settings")
+			}
 			if strings.HasPrefix(mention.ResourceID, "builtin:") {
 				var count int64
 				if err := db.WithContext(ctx).Model(&orm.WorkflowResource{}).Where("plugin_ref = ? AND source_type = 'builtin' AND owner_user_id = '' AND status = 'active'", mention.ResourceID).Count(&count).Error; err != nil || count == 0 { // workflow-naming: persistence
@@ -594,6 +605,21 @@ func applyWorkflowSelection(
 	mentionedRefs []string,
 	excludedRefs []string,
 ) error {
+	controls, err := settings.LoadFeatureControls(ctx, db, userID)
+	if err != nil {
+		return err
+	}
+	if !controls.WorkflowsEnabled {
+		// A master pause must also block workflow bindings restored from an
+		// existing conversation. Keep the binding itself untouched so enabling
+		// the feature later restores the user's prior choice.
+		reqBody["enable_workflow"] = false
+		reqBody["workflow_catalog"] = []map[string]any{}
+		reqBody["disabled_builtin_workflows"] = []string{}
+		delete(reqBody, "allowed_workflow_refs")
+		delete(reqBody, "workflow_activations")
+		return nil
+	}
 	if len(mentionedRefs) > 1 {
 		return fmt.Errorf("at most one workflow mention is allowed per turn")
 	}

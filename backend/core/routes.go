@@ -219,6 +219,7 @@ func registerAllRoutes(r *mux.Router) {
 	// ----- MCP servers -----
 	handleAPI(r, "GET", "/mcp_servers", []string{"qa.read"}, mcp.List)
 	handleAPI(r, "POST", "/mcp_servers", []string{"qa.write"}, mcp.Create)
+	handleAPI(r, "PATCH", "/mcp_servers:enabled", []string{"qa.write"}, mcp.BulkUpdateEnabled)
 	handleAPI(r, "GET", "/mcp_servers/{id}", []string{"qa.read"}, mcp.Get)
 	handleAPI(r, "PATCH", "/mcp_servers/{id}", []string{"qa.write"}, mcp.Update)
 	handleAPI(r, "DELETE", "/mcp_servers/{id}", []string{"qa.write"}, mcp.Delete)
@@ -349,6 +350,8 @@ func registerAllRoutes(r *mux.Router) {
 	// The handlers still require the gateway-injected X-User-Id identity.
 	handleAPI(r, "GET", "/user/ui-preferences", []string{}, userprefs.GetUIPreferences)
 	handleAPI(r, "PATCH", "/user/ui-preferences", []string{}, userprefs.PatchUIPreferences)
+	handleAPI(r, "GET", "/settings/overview", []string{}, userprefs.GetSettingsOverview)
+	handleAPI(r, "POST", "/settings/checks", []string{}, userprefs.RunSettingsChecks)
 	handleAPI(r, "PATCH", "/conversations/{conversation_id}/workflow-settings", []string{"qa.write"}, chat.PatchConversationWorkflowSettings)
 
 	// ----- Workflow Sessions -----

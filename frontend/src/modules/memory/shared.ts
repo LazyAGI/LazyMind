@@ -37,6 +37,7 @@ export interface StructuredAsset extends BaseAsset {
   headRevisionId?: string;
   draft?: SkillDraftSummary;
   isEnabled?: boolean;
+  isAvailable?: boolean;
   readonly?: boolean;
   protect?: boolean;
   hasPendingReviewSuggestions?: boolean;

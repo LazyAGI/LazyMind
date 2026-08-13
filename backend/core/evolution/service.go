@@ -16,6 +16,7 @@ import (
 
 	"lazymind/core/common/orm"
 	appLog "lazymind/core/log"
+	"lazymind/core/settings"
 )
 
 type SkillState struct {
@@ -78,13 +79,19 @@ func BuildChatResourceContext(ctx context.Context, db *gorm.DB, userID, userName
 	if err != nil {
 		return nil, err
 	}
+	controls, err := settings.LoadFeatureControls(ctx, db, userID)
+	if err != nil {
+		return nil, err
+	}
 
 	var v2Skills []orm.SkillV2Skill
-	if err := db.WithContext(ctx).
-		Where("owner_user_id = ? AND is_enabled = ? AND deleted_at IS NULL", userID, true).
-		Order("category ASC, skill_name ASC").
-		Find(&v2Skills).Error; err != nil {
-		return nil, err
+	if controls.SkillsEnabled {
+		if err := db.WithContext(ctx).
+			Where("owner_user_id = ? AND is_enabled = ? AND deleted_at IS NULL", userID, true).
+			Order("category ASC, skill_name ASC").
+			Find(&v2Skills).Error; err != nil {
+			return nil, err
+		}
 	}
 	now := time.Now()
 	availableSkills := make([]string, 0, len(v2Skills))
