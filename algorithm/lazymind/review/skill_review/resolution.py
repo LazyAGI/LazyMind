@@ -25,9 +25,24 @@ _RESOLUTION_DECISION_SCHEMA = {
     'properties': {
         'type': {'type': 'string', 'enum': ['new', 'patch']},
         'patch_skill_key': {'type': 'string'},
+        'applicable_scenario_same': {'type': 'boolean'},
+        'task_goal_same': {'type': 'boolean'},
+        'procedure_enhancements': {
+            'type': 'array',
+            'items': {'type': 'string', 'minLength': 1},
+            'uniqueItems': True,
+        },
         'reason': {'type': ['string', 'null']},
     },
-    'required': ['type'],
+    'required': [
+        'type',
+        'patch_skill_key',
+        'applicable_scenario_same',
+        'task_goal_same',
+        'procedure_enhancements',
+        'reason',
+    ],
+    'additionalProperties': False,
 }
 
 _PATCH_MERGE_SCHEMA = {
@@ -61,14 +76,17 @@ def resolve_skill_action(
     )
     resolution_type = _normalize_resolution_type(payload.get('type') or payload.get('action'), 'new')
     reason = str(payload.get('reason') or payload.get('summary') or payload.get('suggestion') or '').strip()
+    resolution_type, patch_skill_key = _enforce_workflow_resolution(
+        candidate,
+        payload,
+        resolution_type=resolution_type,
+        available_skill_keys=available_skill_keys,
+    )
     if resolution_type != 'patch':
         return _new_resolution(candidate)
 
-    patch_skill_key = str(payload.get('patch_skill_key') or '').strip()
     if not patch_skill_key:
         raise ValueError('patch resolution requires patch_skill_key')
-    if patch_skill_key not in available_skill_keys:
-        raise ValueError(f'patch_skill_key {patch_skill_key!r} is not in global skill summaries')
     category, name = parse_skill_storage_key(patch_skill_key)
     patch_skill_key = f'{category}/{name}'
 
@@ -161,6 +179,51 @@ def _normalize_resolution_type(value, fallback: str) -> str:
     if normalized in {'patch', 'modify', 'replace', 'merge'}:
         return 'patch'
     return fallback
+
+
+def _enforce_workflow_resolution(
+    candidate: CandidateSkill,
+    payload: dict,
+    *,
+    resolution_type: str,
+    available_skill_keys: set[str],
+) -> tuple[str, str]:
+    patch_skill_key = str(payload.get('patch_skill_key') or '').strip()
+    if patch_skill_key and patch_skill_key not in available_skill_keys:
+        raise ValueError(f'patch_skill_key {patch_skill_key!r} is not in global skill summaries')
+
+    if resolution_type == 'patch':
+        return resolution_type, patch_skill_key
+
+    applicable_scenario_same = payload.get('applicable_scenario_same') is True
+    task_goal_same = payload.get('task_goal_same') is True
+    distinct_skill_boundary = not applicable_scenario_same and not task_goal_same
+
+    # Procedure changes are always merged into an existing skill. A new skill is
+    # allowed only when both its applicable scenario and task goal are different.
+    if not distinct_skill_boundary:
+        if not patch_skill_key:
+            source_skill_keys = _available_source_skill_keys(candidate, available_skill_keys)
+            if len(source_skill_keys) == 1:
+                patch_skill_key = source_skill_keys[0]
+        if not patch_skill_key:
+            raise ValueError(
+                'workflow-compatible resolution requires an existing patch_skill_key'
+            )
+        return 'patch', patch_skill_key
+
+    return 'new', ''
+
+
+def _available_source_skill_keys(
+    candidate: CandidateSkill,
+    available_skill_keys: set[str],
+) -> list[str]:
+    return [
+        key
+        for key in candidate.source_skills
+        if key in available_skill_keys
+    ]
 
 
 def _list_skill_summaries(skill_manager) -> str:

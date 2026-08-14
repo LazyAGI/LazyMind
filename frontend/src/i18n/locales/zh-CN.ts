@@ -3705,6 +3705,20 @@ const zhCN = {
     memorySkillHunkActionsUnavailable:
       "当前 diff 未返回 hunk_id，暂无法逐块接受/拒绝。请等待后端 skill-diff 接口补齐后重试，或使用顶部「确认草稿」。",
     memorySkillReviewDecisionStats: "已接受 {{accepted}} · 已拒绝 {{rejected}} · 待处理 {{pending}}",
+    memorySkillReviewStatsLoading: "正在统计待处理变更…",
+    memorySkillReviewSnapshotUnavailable: "暂时无法加载完整的变更审阅状态，请重试。",
+    memorySkillBatchAccept: "全部接受",
+    memorySkillBatchAcceptConfirmTitle: "确认全部接受？",
+    memorySkillBatchAcceptConfirmContent:
+      "将一次性接受全部 {{count}} 个待处理变更块，之后可以直接确认草稿。",
+    memorySkillBatchAcceptConfirmOk: "确认接受",
+    memorySkillBatchAcceptSuccess: "已接受全部待处理变更",
+    memorySkillBatchReject: "全部拒绝",
+    memorySkillBatchRejectConfirmTitle: "确认全部拒绝并丢弃草稿？",
+    memorySkillBatchRejectConfirmContent:
+      "将拒绝全部 {{count}} 个待处理变更并丢弃整个草稿，此操作无法恢复。",
+    memorySkillBatchRejectConfirmOk: "确认拒绝并丢弃",
+    memorySkillBatchActionFailed: "批量处理变更失败，请重试。",
     memorySkillDiffStatus_added: "新增",
     memorySkillDiffStatus_modified: "修改",
     memorySkillDiffStatus_deleted: "删除",

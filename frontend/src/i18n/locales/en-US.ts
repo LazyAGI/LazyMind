@@ -3853,6 +3853,20 @@ const enUS = {
     memorySkillHunkActionsUnavailable:
       "This diff has no hunk_id yet, so per-block accept/reject is unavailable. Retry after the skill-diff API is updated, or use Confirm draft above.",
     memorySkillReviewDecisionStats: "Accepted {{accepted}} · Rejected {{rejected}} · Pending {{pending}}",
+    memorySkillReviewStatsLoading: "Loading pending changes…",
+    memorySkillReviewSnapshotUnavailable: "The complete review state could not be loaded. Please retry.",
+    memorySkillBatchAccept: "Accept all",
+    memorySkillBatchAcceptConfirmTitle: "Accept all changes?",
+    memorySkillBatchAcceptConfirmContent:
+      "This will accept all {{count}} pending diff blocks. You can then confirm the draft.",
+    memorySkillBatchAcceptConfirmOk: "Accept all",
+    memorySkillBatchAcceptSuccess: "All pending changes accepted",
+    memorySkillBatchReject: "Reject all",
+    memorySkillBatchRejectConfirmTitle: "Reject all and discard the draft?",
+    memorySkillBatchRejectConfirmContent:
+      "This will reject all {{count}} pending changes and discard the entire draft. This cannot be undone.",
+    memorySkillBatchRejectConfirmOk: "Reject and discard",
+    memorySkillBatchActionFailed: "Batch change processing failed. Please retry.",
     memorySkillDiffStatus_added: "Added",
     memorySkillDiffStatus_modified: "Modified",
     memorySkillDiffStatus_deleted: "Deleted",
