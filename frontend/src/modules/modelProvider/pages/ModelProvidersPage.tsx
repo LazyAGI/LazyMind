@@ -190,8 +190,7 @@ function isSensenovaProvider(provider?: Pick<ProviderOption, "source" | "name"> 
 }
 
 function isSensenovaNewBaseUrl(url?: string): boolean {
-  const normalized = normalizeFormText(url).replace(/\/+$/, "");
-  return normalized === normalizeFormText(SENSENOVA_NEW_BASE_URL).replace(/\/+$/, "");
+  return normalizeBaseUrlForCompare(url) === normalizeBaseUrlForCompare(SENSENOVA_NEW_BASE_URL);
 }
 
 function createConnectionGroup(provider: ProviderOption, overrides: Partial<ProviderConnectionGroup> = {}): ProviderConnectionGroup {
@@ -475,8 +474,12 @@ function renderDescriptionWithLinks(description: string) {
   });
 }
 
+function normalizeBaseUrlForCompare(value?: string) {
+  return normalizeFormText(value).replace(/\/+$/, "");
+}
+
 function isDefaultProviderBaseUrl(provider: Pick<ProviderOption, "baseUrl">, baseUrl?: string) {
-  return normalizeFormText(baseUrl) === normalizeFormText(provider.baseUrl);
+  return normalizeBaseUrlForCompare(baseUrl) === normalizeBaseUrlForCompare(provider.baseUrl);
 }
 
 export default function ModelProviderPage() {
@@ -513,6 +516,9 @@ export default function ModelProviderPage() {
     ? `${verifyGroupModal.provider.id}:${verifyGroupModal.group.id}`
     : "";
   const verifyGroupBusy = activeVerifyKey ? Boolean(verifyingGroupIds[activeVerifyKey]) : false;
+  const verifyApiKeyRequired = verifyGroupModal
+    ? isDefaultProviderBaseUrl(verifyGroupModal.provider, verifyGroupModal.group.baseUrl)
+    : false;
   const baseUrlChanged = configProvider
     ? !isDefaultProviderBaseUrl(
         configProvider,
@@ -748,8 +754,14 @@ export default function ModelProviderPage() {
   };
 
   const verifyProviderGroup = async (providerId: string, groupId: string, apiKey: string) => {
+    const provider = addedProviderList.find((item) => item.id === providerId);
+    const group = provider?.groups.find((item) => item.id === groupId);
+    if (!provider || !group) {
+      return;
+    }
+
     const requestApiKey = normalizeFormText(apiKey) || normalizeFormText(verifyApiKeyInputRef.current?.input?.value);
-    if (!requestApiKey) {
+    if (!requestApiKey && isDefaultProviderBaseUrl(provider, group.baseUrl)) {
       message.warning(t("modelProvider.message.fillApiKeyBeforeVerify"));
       return;
     }
@@ -761,16 +773,11 @@ export default function ModelProviderPage() {
 
     setVerifyingGroupIds((current) => ({ ...current, [verifyKey]: true }));
     try {
-      const provider = addedProviderList.find((item) => item.id === providerId);
-      const group = provider?.groups.find((item) => item.id === groupId);
-      if (!provider || !group) {
-        return;
-      }
       const payload: Record<string, unknown> = {
         provider_name: provider.name,
         base_url: group.baseUrl,
-        api_key: requestApiKey,
         dry_run: false,
+        ...(requestApiKey ? { api_key: requestApiKey } : {}),
       };
       // The new SenseNova platform URL requires a model name for connectivity check.
       if (isSensenovaProvider(provider) && isSensenovaNewBaseUrl(group.baseUrl)) {
@@ -1447,13 +1454,14 @@ export default function ModelProviderPage() {
             </div>
           ) : null}
           <Form.Item
-            extra={t("modelProvider.verifyApiKeyExtra")}
+            extra={t(verifyApiKeyRequired ? "modelProvider.verifyApiKeyExtra" : "modelProvider.verifyApiKeyCustomExtra")}
             label="API Key"
             name="apiKey"
             normalize={(value: string | undefined) => value?.trim()}
+            required={verifyApiKeyRequired}
             rules={[
               {
-                required: true,
+                required: verifyApiKeyRequired,
                 message: t("modelProvider.validation.apiKeyRequired"),
               },
               { max: 512, message: t("modelProvider.validation.apiKeyMax") },
@@ -1468,7 +1476,7 @@ export default function ModelProviderPage() {
             <Input.Password
               autoComplete="off"
               maxLength={512}
-              placeholder={t("modelProvider.verifyApiKeyPlaceholder")}
+              placeholder={t(verifyApiKeyRequired ? "modelProvider.verifyApiKeyPlaceholder" : "modelProvider.apiKeyOptionalPlaceholder")}
               ref={verifyApiKeyInputRef}
               visibilityToggle={false}
             />

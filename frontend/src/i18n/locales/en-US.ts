@@ -345,6 +345,7 @@ const enUS = {
     apiKeyOptionalPlaceholder: "Optional",
     verifyGroupTitle: "Verify {{name}}",
     verifyApiKeyExtra: "Used only for this connection check. The frontend will not save or display the full key again.",
+    verifyApiKeyCustomExtra: "Optional for custom Base URLs. Enter a Key only if the service requires authentication.",
     verifyConfiguredApiKeyExtra: "Leave blank to use the saved key for this connection check. A newly entered key is used only for this verification.",
     verifyApiKeyPlaceholder: "Enter the API Key for this verification",
     keyConfiguredStatus: "Configured key: {{preview}}",

@@ -330,6 +330,7 @@ const zhCN = {
     apiKeyOptionalPlaceholder: "可不填写",
     verifyGroupTitle: "验证 {{name}}",
     verifyApiKeyExtra: "仅用于本次连接验证，前端不会保存或再次展示完整 Key。",
+    verifyApiKeyCustomExtra: "自定义 Base URL 可不填写；若服务本身要求鉴权，请填写本次验证使用的 Key。",
     verifyConfiguredApiKeyExtra: "留空将使用已保存的 Key 进行本次连接验证；填写新 Key 时仅用于本次验证。",
     verifyApiKeyPlaceholder: "请输入本次验证使用的 API Key",
     keyConfiguredStatus: "已配置 Key：{{preview}}",
