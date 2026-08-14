@@ -182,6 +182,7 @@ export default function SettingsPage() {
     ? knowledgeToolCandidate
     : null;
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const modelProviderTabRef = useRef<HTMLButtonElement>(null);
   const latestRequest = useRef(0);
   const [overview, setOverview] = useState<SettingsOverview | null>(null);
   const [developerActive, setDeveloperActive] = useState(false);
@@ -638,11 +639,23 @@ export default function SettingsPage() {
     } else if (section === "models") {
       content = <>
         {integratedHeader(t("settingsPage.models.title"), selectedSection.detail)}
-        <nav className="settings-model-tabs" aria-label={t("settingsPage.models.tabsAria")}>
-          <button className={modelView === "defaults" ? "is-active" : ""} type="button" onClick={() => setModelView("defaults")}>{t("settingsPage.models.defaultSettings")}</button>
-          <button className={modelView === "providers" ? "is-active" : ""} type="button" onClick={() => setModelView("providers")}>{t("settingsPage.models.providers")}</button>
+        <nav className="settings-model-tabs" aria-label={t("settingsPage.models.tabsAria")} role="tablist">
+          <button className={modelView === "defaults" ? "is-active" : ""} type="button" role="tab" aria-selected={modelView === "defaults"} onClick={() => setModelView("defaults")}>{t("settingsPage.models.defaultSettings")}</button>
+          <button ref={modelProviderTabRef} className={modelView === "providers" ? "is-active" : ""} type="button" role="tab" aria-selected={modelView === "providers"} onClick={() => setModelView("providers")}>{t("settingsPage.models.providers")}</button>
         </nav>
-        {integratedSurface(modelView === "defaults" ? <DefaultServicesPage /> : <ModelProvidersPage />, "is-models")}
+        {integratedSurface(modelView === "defaults" ? (
+          <DefaultServicesPage
+            onConfigureCloudService={(service) => navigate(
+              service === "cloudParsing"
+                ? "/settings?section=knowledge&tool=document-parsing"
+                : "/settings?section=knowledge&tool=web-search",
+            )}
+            onConfigureProviders={() => {
+              setModelView("providers");
+              requestAnimationFrame(() => modelProviderTabRef.current?.focus());
+            }}
+          />
+        ) : <ModelProvidersPage />, "is-models")}
       </>;
     } else if (section === "tasks") {
       const taskCenterEnabled = Boolean(overview?.controls.task_center_enabled);
