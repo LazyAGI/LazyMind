@@ -996,6 +996,17 @@ async def _handle_chat_impl(
         'agent.workspace',
         priority=70,
     )
+    if agent.available_skills:
+        prompt_builder.system(
+            'skill_execution_errors',
+            'Skill execution error handling',
+            (
+                'If a skill script fails because a required credential is missing, stop retrying. '
+                'Ask the user to configure the exact `missing_env` names from the tool result.'
+            ),
+            'agent.skills.error_handling',
+            priority=72,
+        )
     prompt_builder.runtime(
         'chat_workflow_runtime', 'Workflow State', workflow_contribution.runtime_context,
         'workflow.runtime', priority=10, authoritative=True, content_kind='state',

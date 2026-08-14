@@ -469,7 +469,7 @@ _TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
     'external_db_query': 'Read-only external database query for {value} could not be completed.',
     'get_skill': 'Skill details for {value} could not be loaded.',
     'read_reference': 'Skill reference material from {value} could not be read.',
-    'run_script': 'Skill helper script at {value} did not finish.',
+    'run_script': 'Skill helper script did not finish: {value}',
     'read_file': 'File content from {value} could not be read.',
     'list_dir': 'Folder contents from {value} could not be listed.',
     'search_in_files': 'Project file search for {value} could not finish.',
@@ -538,7 +538,7 @@ _ZH_TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
     'external_db_query': '未能完成只读外部数据库查询：{value}。',
     'get_skill': '未能加载 {value} 的技能详情。',
     'read_reference': '未能读取 {value} 技能参考资料。',
-    'run_script': '技能 {value} 的预定义脚本未能运行完成。',
+    'run_script': '技能脚本未能运行完成：{value}',
     'read_file': '未能读取文件 {value} 的内容。',
     'list_dir': '未能列出文件夹 {value} 的内容。',
     'search_in_files': '未能完成项目文件中与 {value} 相关的搜索。',
@@ -816,6 +816,7 @@ _LOW_SIGNAL_ARGUMENT_KEYS = {
 
 _MAX_REPRESENTATIVE_RESULT_LENGTH = 200
 _MAX_TOOL_RESULT_PREVIEW_LENGTH = 50
+_MAX_TOOL_RESULT_FAILURE_DETAIL_LENGTH = 300
 
 _ZH_PREVIEW_RE = re.compile('[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]')
 _TOOL_NOT_AVAILABLE_RE = re.compile(
@@ -1071,11 +1072,11 @@ def _tool_call_preview_value(tool_name: str, arguments: Any, language: str = 'en
     return preview
 
 
-def _truncate_tool_result_preview(value: Any) -> str:
+def _truncate_tool_result_preview(value: Any, max_length: int = _MAX_TOOL_RESULT_PREVIEW_LENGTH) -> str:
     text = _tool_preview_value(value)
-    if len(text) <= _MAX_TOOL_RESULT_PREVIEW_LENGTH:
+    if len(text) <= max_length:
         return text
-    return f'{text[:_MAX_TOOL_RESULT_PREVIEW_LENGTH]}...'
+    return f'{text[:max_length]}...'
 
 
 def _tool_result_status(result: Any) -> str:
@@ -1104,12 +1105,38 @@ def _tool_result_failure_detail(result: Any) -> str:
             for key in ('reason', 'detail', 'type'):
                 value = error.get(key)
                 if value:
-                    return _truncate_tool_result_preview(value)
-        for key in ('reason', 'error', 'message', 'path', 'status'):
+                    return _truncate_tool_result_preview(value, _MAX_TOOL_RESULT_FAILURE_DETAIL_LENGTH)
+        missing_env = result.get('missing_env')
+        if isinstance(missing_env, list):
+            missing_env_text = ', '.join(str(item).strip() for item in missing_env if str(item).strip())
+        else:
+            missing_env_text = str(missing_env or '').strip()
+        setup_commands = result.get('setup_commands')
+        if isinstance(setup_commands, list):
+            setup_commands_text = '; '.join(str(item).strip() for item in setup_commands if str(item).strip())
+        else:
+            setup_commands_text = str(setup_commands or '').strip()
+        credential_parts = []
+        if missing_env_text:
+            credential_parts.append(f'missing_env: {missing_env_text}')
+        api_key_url = str(result.get('api_key_url') or '').strip()
+        if api_key_url:
+            credential_parts.append(api_key_url)
+        if setup_commands_text:
+            credential_parts.append(f'setup_commands: {setup_commands_text}')
+        if not credential_parts:
+            credential_parts = [
+                str(result.get(key) or '').strip()
+                for key in ('hint', 'api_key_url')
+                if str(result.get(key) or '').strip()
+            ]
+        if credential_parts:
+            return _truncate_tool_result_preview(' '.join(credential_parts), _MAX_TOOL_RESULT_FAILURE_DETAIL_LENGTH)
+        for key in ('reason', 'hint', 'stderr', 'error', 'message', 'stdout', 'path', 'status'):
             value = result.get(key)
             if value:
-                return _truncate_tool_result_preview(value)
-    return _truncate_tool_result_preview(result)
+                return _truncate_tool_result_preview(value, _MAX_TOOL_RESULT_FAILURE_DETAIL_LENGTH)
+    return _truncate_tool_result_preview(result, _MAX_TOOL_RESULT_FAILURE_DETAIL_LENGTH)
 
 
 def _ensure_trailing_newline(text: str) -> str:
@@ -1201,6 +1228,8 @@ def _tool_call_preview(tool_name: str, preview_value: str, language: str = 'en')
 
 def _tool_result_preview_display_value(tool_name: str, result: Any, value: str = '') -> str:
     status = _tool_result_status(result)
+    if status == 'failed':
+        return _tool_result_failure_detail(result) or value
     if _tool_name_is(tool_name, 'SkillManagementToolkit_install_skill') and status == 'ok':
         return _truncate_tool_result_preview(_representative_tool_result(tool_name, result))
     if (

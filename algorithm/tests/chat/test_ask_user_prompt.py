@@ -61,6 +61,52 @@ def test_ask_user_tool_result_has_no_visible_preview():
     assert '<trp' not in rendered
 
 
+def test_run_script_failure_preview_surfaces_credential_guidance():
+    rendered = _tool_result_frame_text({
+        'id': 'call-2',
+        'name': 'run_script',
+        'result': {
+            'status': 'failed',
+            'error': (
+                'Missing environment variable EXAMPLE_API_KEY required by skill api-skill. '
+                'Get it from: https://example.test/api-keys'
+            ),
+            'hint': 'Configure KEY before retrying this skill.',
+            'missing_env': ['EXAMPLE_API_KEY'],
+            'setup_commands': ['export EXAMPLE_API_KEY="<your EXAMPLE_API_KEY>"'],
+            'api_key_url': 'https://example.test/api-keys',
+            'exit_code': 1,
+        },
+    }, language='zh', preview_value='scripts/fetch.py')
+
+    preview = rendered.split('<tool_result>', 1)[0]
+    assert '<trp' in preview
+    assert '技能脚本未能运行完成' in preview
+    assert 'EXAMPLE_API_KEY' in preview
+    assert 'export EXAMPLE_API_KEY' in preview
+    assert 'https://example.test/api-keys' in preview
+    assert 'Configure KEY' not in preview
+    assert 'export KEY' not in preview
+    assert 'scripts/fetch.py' not in preview
+
+
+def test_run_script_failure_preview_surfaces_stderr():
+    rendered = _tool_result_frame_text({
+        'id': 'call-3',
+        'name': 'run_script',
+        'result': {
+            'status': 'failed',
+            'stderr': 'Traceback: skill script crashed while writing output.json',
+            'exit_code': 1,
+        },
+    }, language='zh', preview_value='scripts/fetch.py')
+
+    assert '<trp' in rendered
+    assert '技能脚本未能运行完成' in rendered
+    assert 'skill script crashed' in rendered
+    assert 'scripts/fetch.py' not in rendered
+
+
 def test_ask_pending_event_suppresses_stop_tool_receipt():
     translator = AgentEventFrameTranslator(query='Ask me one question.')
 
