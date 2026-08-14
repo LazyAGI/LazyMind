@@ -38,6 +38,13 @@ function externalHostname(source: ChatSource) {
   }
 }
 
+export function getSourceFaviconUrl(source: ChatSource) {
+  const hostname = isExternalSource(source) ? externalHostname(source) : "";
+  return hostname
+    ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(hostname)}&sz=64`
+    : "";
+}
+
 function externalSourceTarget(source: ChatSource) {
   const target = source.url?.trim() || "";
   if (target && !/^(?:javascript|data|vbscript):/i.test(target)) {

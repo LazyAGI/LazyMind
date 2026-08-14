@@ -1,4 +1,4 @@
-import { Button, Divider, Drawer, Flex, message, Spin, Tooltip } from "antd";
+import { Button, Divider, Flex, message, Spin, Tooltip } from "antd";
 import { trim, debounce } from "lodash";
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { MouseEvent } from "react";
@@ -7,13 +7,15 @@ import { useTranslation } from "react-i18next";
 import "./index.scss";
 import {
   CopyOutlined,
+  CloseOutlined,
   DislikeFilled,
   DislikeOutlined,
   ExclamationCircleOutlined,
+  FileTextOutlined,
   LikeFilled,
   LikeOutlined,
-  LinkOutlined,
   ReloadOutlined,
+  RightOutlined,
 } from "@ant-design/icons";
 import {
   ChatConversationsResponseFinishReasonEnum,
@@ -35,11 +37,117 @@ import {
   getSearchSources,
   getSourceDedupKey,
   getSourceEvidenceText,
+  getSourceFaviconUrl,
   getSourceLabel,
   getSourceSubtitle,
+  isExternalSource,
   openSource,
 } from "@/modules/chat/utils/sourceAdapter";
 import { IdentityAvatar } from "@/modules/identityAvatar";
+
+const SOURCE_ICON_TONES = 6;
+
+function getSourceIconTone(source: ChatSource) {
+  const value = getSourceSubtitle(source) || getSourceLabel(source);
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash) % SOURCE_ICON_TONES;
+}
+
+function getSourceIconInitial(source: ChatSource) {
+  const value = (getSourceSubtitle(source) || getSourceLabel(source)).trim();
+  return value ? value[0].toLocaleUpperCase() : "S";
+}
+
+function SourceFavicon({
+  source,
+  compact = false,
+}: {
+  source: ChatSource;
+  compact?: boolean;
+}) {
+  const [hasFaviconError, setHasFaviconError] = useState(false);
+  const faviconUrl = getSourceFaviconUrl(source);
+  const showFavicon = Boolean(faviconUrl && !hasFaviconError);
+
+  return (
+    <span
+      className={`chat-source-brand-icon tone-${getSourceIconTone(source)}${compact ? " is-compact" : ""}`}
+      aria-hidden="true"
+    >
+      {showFavicon ? (
+        <img
+          src={faviconUrl}
+          alt=""
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          onError={() => setHasFaviconError(true)}
+        />
+      ) : isExternalSource(source) ? (
+        <span className="chat-source-brand-initial">{getSourceIconInitial(source)}</span>
+      ) : (
+        <FileTextOutlined />
+      )}
+    </span>
+  );
+}
+
+export function ChatSourcePanel({
+  sources,
+  onClose,
+}: {
+  sources: ChatSource[];
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <aside className="chat-source-panel" aria-label={t("chat.references")}>
+      <div className="chat-source-panel-header">
+        <h2 className="chat-source-panel-title">
+          <span>{t("chat.references")}</span>
+          <span className="chat-source-panel-count">{sources.length}</span>
+        </h2>
+        <Button
+          type="text"
+          className="chat-source-panel-close"
+          icon={<CloseOutlined />}
+          onClick={onClose}
+          aria-label={t("common.close")}
+        />
+      </div>
+      <div className="chat-source-panel-body">
+        <div className="chat-source-list">
+          {sources.map((source, sourceIndex) => (
+            <button
+              type="button"
+              className="chat-source-item"
+              key={getSourceDedupKey(source, sourceIndex)}
+              onClick={() => openSource(source)}
+              title={getSourceLabel(source)}
+            >
+              <SourceFavicon source={source} />
+              <span className="chat-source-item-copy">
+                <span className="chat-source-item-heading">
+                  {getSourceSubtitle(source) || t("chat.references")}
+                </span>
+                <strong className="chat-source-item-title">{getSourceLabel(source)}</strong>
+                {getSourceEvidenceText(source) && (
+                  <span className="chat-source-item-content">
+                    {getSourceEvidenceText(source)}
+                  </span>
+                )}
+              </span>
+              <RightOutlined className="chat-source-item-arrow" aria-hidden="true" />
+            </button>
+          ))}
+        </div>
+      </div>
+    </aside>
+  );
+}
 
 async function copyTextToClipboard(text: string) {
   const normalizedText = text.trim();
@@ -212,10 +320,10 @@ const AssistantMessage = (props: any) => {
     isLatestDualAnswer,
     onCiteMessage,
     hasLaterUserMessage,
+    onOpenSources,
   } = props;
   const citeButtonRef = useRef<HTMLButtonElement | null>(null);
   const citeSelectionTextRef = useRef("");
-  const [drawerSources, setDrawerSources] = useState<ChatSource[]>([]);
   const onCiteMessageRef = useRef(onCiteMessage);
   onCiteMessageRef.current = onCiteMessage;
   // Debounced backend persistence for ask-card answers. Created once per component
@@ -417,60 +525,29 @@ const AssistantMessage = (props: any) => {
     );
   }
 
-  function handleOpenSource(source: ChatSource) {
-    openSource(source);
-  }
-
   function renderSourceButton(sources?: ChatSourceCollection) {
     const displaySources = getSearchSources(sources);
     if (!displaySources.length) return null;
     return (
-      <Tooltip title={t("chat.references")}>
+      <Tooltip title={`${t("chat.references")} (${displaySources.length})`}>
         <Button
           className="tool-btn source-btn"
-          icon={<LinkOutlined />}
-          onClick={() => setDrawerSources(displaySources)}
+          onClick={() => onOpenSources?.(displaySources)}
+          aria-label={`${t("chat.references")} (${displaySources.length})`}
         >
-          {t("chat.references")} · {displaySources.length}
+          <span className="chat-source-button-icons" aria-hidden="true">
+            {displaySources.slice(0, 3).map((source, sourceIndex) => (
+              <SourceFavicon
+                source={source}
+                compact
+                key={getSourceDedupKey(source, sourceIndex)}
+              />
+            ))}
+          </span>
+          <span className="chat-source-button-label">{t("chat.references")}</span>
+          <span className="chat-source-button-count">{displaySources.length}</span>
         </Button>
       </Tooltip>
-    );
-  }
-
-  function renderSourceDrawer() {
-    return (
-      <Drawer
-        className="chat-source-drawer"
-        title={`${t("chat.references")} · ${drawerSources.length}`}
-        placement="right"
-        width={400}
-        open={drawerSources.length > 0}
-        onClose={() => setDrawerSources([])}
-      >
-        <div className="chat-source-list">
-          {drawerSources.map((source, sourceIndex) => {
-            return (
-              <button
-                type="button"
-                className="chat-source-item"
-                key={getSourceDedupKey(source, sourceIndex)}
-                onClick={() => handleOpenSource(source)}
-              >
-                <span className="chat-source-item-heading">
-                  <LinkOutlined />
-                  {getSourceSubtitle(source) || t("chat.references")}
-                </span>
-                <strong>{getSourceLabel(source)}</strong>
-                {getSourceEvidenceText(source) && (
-                  <span className="chat-source-item-content">
-                    {getSourceEvidenceText(source)}
-                  </span>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      </Drawer>
     );
   }
 
@@ -1058,7 +1135,6 @@ const AssistantMessage = (props: any) => {
           initialReason={modalFeedbackRecord?.reason}
           initialComment={modalFeedbackRecord?.expected_answer}
         />
-        {renderSourceDrawer()}
       </div>
     );
   }
@@ -1108,7 +1184,6 @@ const AssistantMessage = (props: any) => {
         initialReason={modalFeedbackRecord?.reason}
         initialComment={modalFeedbackRecord?.expected_answer}
       />
-      {renderSourceDrawer()}
     </div>
   );
 };
