@@ -544,3 +544,52 @@
     background: #4096ff;
   }
 }
+
+.provider-state-wrap {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.provider-retry-status {
+  width: fit-content;
+  padding: 6px 10px;
+  border-radius: 8px;
+  color: #6d7788;
+  background: #f5f7fa;
+  font-size: 12px;
+}
+
+.provider-diagnostic-card {
+  padding: 10px 12px;
+  border: 1px solid #f2c9c5;
+  border-radius: 10px;
+  color: #643b37;
+  background: #fff8f7;
+  font-size: 12px;
+
+  .provider-diagnostic-title {
+    font-weight: 600;
+  }
+
+  details {
+    margin-top: 8px;
+  }
+
+  summary {
+    cursor: pointer;
+  }
+
+  pre {
+    max-height: 240px;
+    margin: 8px 0 0;
+    padding: 10px;
+    overflow: auto;
+    border-radius: 6px;
+    background: #2b2f36;
+    color: #f4f6f8;
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+}

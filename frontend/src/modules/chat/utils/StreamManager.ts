@@ -2,6 +2,12 @@
 
 import { SSE } from "./sse";
 import i18n from "@/i18n";
+import type {
+  ModelRetry,
+  ModelTransportError,
+  ProviderStatus,
+} from "@/modules/chat/utils/providerStatus";
+import { nextProviderEventState } from "@/modules/chat/utils/providerStatus";
 
 export interface StreamCallbacks {
   message?: (e: CustomEvent) => void;
@@ -15,6 +21,9 @@ export interface StreamState {
   reasoning_content: string;
   sources?: any[];
   finish_reason?: string;
+  provider_status?: ProviderStatus;
+  model_retry?: ModelRetry;
+  model_transport_error?: ModelTransportError;
   messageId?: string;
   history_id?: string;
   messageList?: any[];
@@ -82,6 +91,9 @@ class StreamManager {
         existingState.delta = "";
         existingState.reasoning_content = "";
         existingState.finish_reason = undefined;
+        existingState.provider_status = undefined;
+        existingState.model_retry = undefined;
+        existingState.model_transport_error = undefined;
       }
     }
 
@@ -167,6 +179,7 @@ class StreamManager {
         const parsed = JSON.parse(data);
         const result = parsed?.result;
         if (result) {
+          Object.assign(state, nextProviderEventState(state, result));
           if (result.sources && result.sources.length > 0) {
             state.sources = result.sources;
           }

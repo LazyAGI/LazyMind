@@ -429,10 +429,16 @@ components:
                     type: string
                 message:
                     type: string
+                model_retry:
+                    $ref: '#/components/schemas/ModelRetryEvent'
+                model_transport_error:
+                    $ref: '#/components/schemas/ModelTransportErrorEvent'
                 prompt_questions:
                     items:
                         type: string
                     type: array
+                provider_status:
+                    $ref: '#/components/schemas/ProviderStatusEvent'
                 reasoning_content:
                     type: string
                 seq:
@@ -631,6 +637,8 @@ components:
                         properties: {}
                         type: object
                     type: array
+                provider_status:
+                    $ref: '#/components/schemas/ProviderStatusEvent'
                 query:
                     type: string
                 reason:
@@ -2530,6 +2538,32 @@ components:
                 - image_embed_enabled
                 - image_embed_required
             type: object
+        ModelRetryEvent:
+            properties:
+                delay_ms:
+                    type: integer
+                max_retries:
+                    type: integer
+                model_call_id:
+                    type: string
+                retry_index:
+                    type: integer
+            type: object
+        ModelTransportErrorEvent:
+            properties:
+                error_message:
+                    type: string
+                error_type:
+                    type: string
+                finish_reason:
+                    nullable: true
+                    type: string
+                http_status:
+                    nullable: true
+                    type: integer
+                model_call_id:
+                    type: string
+            type: object
         ParserConfig:
             properties:
                 name:
@@ -2700,6 +2734,19 @@ components:
                 usage_count:
                     format: int64
                     type: integer
+            type: object
+        ProviderStatusEvent:
+            properties:
+                error_body:
+                    type: string
+                finish_reason:
+                    nullable: true
+                    type: string
+                http_status:
+                    nullable: true
+                    type: integer
+                model_call_id:
+                    type: string
             type: object
         QuestionTypeOption:
             properties:

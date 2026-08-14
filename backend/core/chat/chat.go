@@ -141,8 +141,33 @@ type LazyChatData struct {
 	ToolLimitPending         *ToolLimitPendingEvent         `json:"tool_limit_pending,omitempty"`
 	IntentUpdated            *IntentUpdatedEvent            `json:"intent_updated,omitempty"`
 	WorkflowPreflightUpdated *WorkflowPreflightUpdatedEvent `json:"workflow_preflight_updated,omitempty"`
+	ProviderStatus           *ProviderStatusEvent           `json:"provider_status,omitempty"`
+	ModelRetry               *ModelRetryEvent               `json:"model_retry,omitempty"`
+	ModelTransportError      *ModelTransportErrorEvent      `json:"model_transport_error,omitempty"`
 	Heartbeat                bool                           `json:"heartbeat,omitempty"`
 	ToolCallTurns            int64                          `json:"tool_call_turns"`
+}
+
+type ProviderStatusEvent struct {
+	ModelCallID  string  `json:"model_call_id"`
+	HTTPStatus   *int    `json:"http_status"`
+	FinishReason *string `json:"finish_reason"`
+	ErrorBody    string  `json:"error_body,omitempty"`
+}
+
+type ModelRetryEvent struct {
+	ModelCallID string `json:"model_call_id"`
+	RetryIndex  int    `json:"retry_index"`
+	MaxRetries  int    `json:"max_retries"`
+	DelayMS     int    `json:"delay_ms"`
+}
+
+type ModelTransportErrorEvent struct {
+	ModelCallID  string  `json:"model_call_id"`
+	HTTPStatus   *int    `json:"http_status"`
+	FinishReason *string `json:"finish_reason"`
+	ErrorType    string  `json:"error_type"`
+	ErrorMessage string  `json:"error_message,omitempty"`
 }
 
 // TaskCreatedEvent is emitted by create_subagent (via translator) on the main SSE.
@@ -382,6 +407,9 @@ type UpstreamStreamChunk struct {
 	ToolLimitPending         *ToolLimitPendingEvent         `json:"tool_limit_pending,omitempty"`
 	IntentUpdated            *IntentUpdatedEvent            `json:"intent_updated,omitempty"`
 	WorkflowPreflightUpdated *WorkflowPreflightUpdatedEvent `json:"workflow_preflight_updated,omitempty"`
+	ProviderStatus           *ProviderStatusEvent           `json:"provider_status,omitempty"`
+	ModelRetry               *ModelRetryEvent               `json:"model_retry,omitempty"`
+	ModelTransportError      *ModelTransportErrorEvent      `json:"model_transport_error,omitempty"`
 	Heartbeat                bool                           `json:"heartbeat,omitempty"`
 	ToolCallTurns            int64                          `json:"tool_call_turns"`
 }
@@ -841,6 +869,9 @@ func upstreamStreamChunkFromData(data LazyChatData) UpstreamStreamChunk {
 		ToolLimitPending:         data.ToolLimitPending,
 		IntentUpdated:            data.IntentUpdated,
 		WorkflowPreflightUpdated: data.WorkflowPreflightUpdated,
+		ProviderStatus:           data.ProviderStatus,
+		ModelRetry:               data.ModelRetry,
+		ModelTransportError:      data.ModelTransportError,
 		Heartbeat:                data.Heartbeat,
 		ToolCallTurns:            data.ToolCallTurns,
 	}

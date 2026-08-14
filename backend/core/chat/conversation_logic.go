@@ -1380,6 +1380,97 @@ func elapsedThinkingSeconds(elapsed time.Duration) int64 {
 	return int64((elapsed + time.Second - 1) / time.Second)
 }
 
+func forwardProviderEvent(
+	ctx context.Context,
+	w http.ResponseWriter,
+	flusher http.Flusher,
+	stateStore state.Store,
+	conversationID, historyID string,
+	seq int,
+	upstream UpstreamStreamChunk,
+	emitLive bool,
+) (*ProviderStatusEvent, bool) {
+	if upstream.ProviderStatus == nil && upstream.ModelRetry == nil && upstream.ModelTransportError == nil {
+		return nil, false
+	}
+	chunk := &ChatChunkResponse{
+		ConversationID:      conversationID,
+		Seq:                 int32(seq),
+		HistoryID:           historyID,
+		FinishReason:        "FINISH_REASON_UNSPECIFIED",
+		ProviderStatus:      upstream.ProviderStatus,
+		ModelRetry:          upstream.ModelRetry,
+		ModelTransportError: upstream.ModelTransportError,
+	}
+	if emitLive {
+		writeSSEChunk(w, flusher, chunk)
+	}
+	if upstream.ProviderStatus != nil {
+		_ = setLatestProviderStatus(ctx, stateStore, conversationID, historyID, upstream.ProviderStatus)
+	}
+	return upstream.ProviderStatus, true
+}
+
+func mergeProviderStatusIntoExt(ext json.RawMessage, status *ProviderStatusEvent) json.RawMessage {
+	if status == nil {
+		return ext
+	}
+	m := make(map[string]any)
+	if len(ext) > 0 {
+		_ = json.Unmarshal(ext, &m)
+	}
+	snapshot := *status
+	snapshot.ErrorBody = ""
+	m["provider_status"] = &snapshot
+	b, err := json.Marshal(m)
+	if err != nil {
+		return ext
+	}
+	return b
+}
+
+func providerStatusFromExt(ext json.RawMessage) *ProviderStatusEvent {
+	if len(ext) == 0 {
+		return nil
+	}
+	var payload struct {
+		ProviderStatus *ProviderStatusEvent `json:"provider_status"`
+	}
+	if json.Unmarshal(ext, &payload) != nil || payload.ProviderStatus == nil {
+		return nil
+	}
+	payload.ProviderStatus.ErrorBody = ""
+	return payload.ProviderStatus
+}
+
+func consumeUpstreamLifecycleStatus(upstream UpstreamStreamChunk, failed *bool, toolCallTurns *int) bool {
+	status := strings.TrimSpace(upstream.Status)
+	if status == "" {
+		return false
+	}
+	if next := nonNegativeToolCallTurns(upstream.ToolCallTurns); next > *toolCallTurns {
+		*toolCallTurns = next
+	}
+	if strings.EqualFold(status, "FAILED") {
+		*failed = true
+	}
+	return true
+}
+
+func lifecycleFinishReason(failed bool) string {
+	if failed {
+		return "FINISH_REASON_UNKNOWN"
+	}
+	return "FINISH_REASON_STOP"
+}
+
+func lifecycleCacheStatus(failed bool) string {
+	if failed {
+		return "failed"
+	}
+	return "completed"
+}
+
 func streamSingleAnswer(
 	chatCtx, reqCtx context.Context,
 	w http.ResponseWriter,
@@ -1420,6 +1511,8 @@ func streamSingleAnswer(
 	var sources []any
 	var pendingAskPending any
 	var pendingConversationIntent *IntentUpdatedEvent
+	var latestProviderStatus *ProviderStatusEvent
+	upstreamFailed := false
 	thinkStart := time.Now()
 	var thinkingDurationS int64
 	var thinkingActive bool
@@ -1471,6 +1564,17 @@ func streamSingleAnswer(
 		ThinkingDurationS: 0,
 	})
 	for d := range ch {
+		if status, handled := forwardProviderEvent(
+			chatCtx, w, flusher, stateStore, convID, historyID, seq, d, reqCtx.Err() == nil,
+		); handled {
+			if status != nil {
+				latestProviderStatus = status
+			}
+			continue
+		}
+		if consumeUpstreamLifecycleStatus(d, &upstreamFailed, &toolCallTurns) {
+			continue
+		}
 		if d.ArtifactCreated != nil {
 			persistAndPublishConversationArtifact(
 				chatCtx, reqCtx, w, flusher, db, stateStore, reqBody,
@@ -1676,6 +1780,7 @@ func streamSingleAnswer(
 	if pendingConversationIntent != nil {
 		historyExt = mergeIntentUpdatedIntoExt(historyExt, pendingConversationIntent)
 	}
+	historyExt = mergeProviderStatusIntoExt(historyExt, latestProviderStatus)
 	persisted := false
 	if target.IsRegeneration && target.Existing != nil {
 		if err := db.Model(&orm.ChatHistory{}).Where("id = ?", historyID).Updates(map[string]any{
@@ -1729,16 +1834,23 @@ func streamSingleAnswer(
 		}
 	}
 	if stateStore != nil {
-		_ = setChatStatus(context.Background(), stateStore, convID, historyID, "completed", stripToolTags(fullText))
+		_ = setChatStatus(
+			context.Background(), stateStore, convID, historyID,
+			lifecycleCacheStatus(upstreamFailed), stripToolTags(fullText),
+		)
 	}
 	if persisted {
 		db.Model(&orm.Conversation{}).Where("id = ?", convID).Update("updated_at", now)
 		// Reaching this point means the upstream SSE channel has closed and the
 		// final history payload was persisted. Intermediate thinking persistence
 		// never reaches this update.
+		taskStatus := "succeeded"
+		if upstreamFailed {
+			taskStatus = "failed"
+		}
 		if err := db.Model(&orm.TaskCenterTask{}).
 			Where("conversation_id = ? AND task_type = ? AND archived_at IS NULL AND status NOT IN ('succeeded','failed','canceled')", convID, "background_chat").
-			Updates(map[string]any{"status": "succeeded", "finished_at": now, "updated_at": now}).Error; err != nil {
+			Updates(map[string]any{"status": taskStatus, "finished_at": now, "updated_at": now}).Error; err != nil {
 			log.Logger.Warn().Err(err).Str("conversation_id", convID).Msg("failed to finish background task after SSE close")
 		}
 	}
@@ -1755,7 +1867,7 @@ func streamSingleAnswer(
 			Seq:             int32(seq),
 			Message:         stripToolTags(fullText),
 			Delta:           "",
-			FinishReason:    "FINISH_REASON_STOP",
+			FinishReason:    lifecycleFinishReason(upstreamFailed),
 			HistoryID:       historyID,
 			Sources:         sources,
 			PromptQuestions: []string{},
@@ -1857,6 +1969,8 @@ func streamDualAnswer(
 	var primarySources, secondarySources []any
 	var primaryPendingThink, secondaryPendingThink string
 	var primaryToolCallTurns, secondaryToolCallTurns int
+	var primaryProviderStatus, secondaryProviderStatus *ProviderStatusEvent
+	primaryFailed, secondaryFailed := err1 != nil, err2 != nil
 	thinkStart := time.Now()
 	var primaryThinkingDurationS, secondaryThinkingDurationS int64
 	primaryProgressCreated, secondaryProgressCreated := false, false
@@ -1961,6 +2075,17 @@ func streamDualAnswer(
 				primaryDone = true
 				continue
 			}
+			if status, handled := forwardProviderEvent(
+				chatCtx, w, flusher, stateStore, convID, historyID, seq, d, reqCtx.Err() == nil,
+			); handled {
+				if status != nil {
+					primaryProviderStatus = status
+				}
+				continue
+			}
+			if consumeUpstreamLifecycleStatus(d, &primaryFailed, &primaryToolCallTurns) {
+				continue
+			}
 			if d.ArtifactCreated != nil {
 				persistAndPublishConversationArtifact(
 					chatCtx, reqCtx, w, flusher, db, stateStore, reqBody,
@@ -1975,6 +2100,17 @@ func streamDualAnswer(
 		case d, ok := <-secondaryCh:
 			if !ok {
 				secondaryDone = true
+				continue
+			}
+			if status, handled := forwardProviderEvent(
+				chatCtx, w, flusher, stateStore, convID, secondaryHistoryID, seq, d, reqCtx.Err() == nil,
+			); handled {
+				if status != nil {
+					secondaryProviderStatus = status
+				}
+				continue
+			}
+			if consumeUpstreamLifecycleStatus(d, &secondaryFailed, &secondaryToolCallTurns) {
 				continue
 			}
 			if d.ArtifactCreated != nil {
@@ -1997,6 +2133,17 @@ func streamDualAnswer(
 						primaryDone = true
 						primaryCh = nil
 					} else {
+						if status, handled := forwardProviderEvent(
+							bg, w, flusher, stateStore, convID, historyID, seq, d, false,
+						); handled {
+							if status != nil {
+								primaryProviderStatus = status
+							}
+							continue
+						}
+						if consumeUpstreamLifecycleStatus(d, &primaryFailed, &primaryToolCallTurns) {
+							continue
+						}
 						if len(d.Sources) > 0 {
 							primarySources = d.Sources
 						}
@@ -2038,6 +2185,17 @@ func streamDualAnswer(
 						secondaryDone = true
 						secondaryCh = nil
 					} else {
+						if status, handled := forwardProviderEvent(
+							bg, w, flusher, stateStore, convID, secondaryHistoryID, seq, d, false,
+						); handled {
+							if status != nil {
+								secondaryProviderStatus = status
+							}
+							continue
+						}
+						if consumeUpstreamLifecycleStatus(d, &secondaryFailed, &secondaryToolCallTurns) {
+							continue
+						}
 						if len(d.Sources) > 0 {
 							secondarySources = d.Sources
 						}
@@ -2081,6 +2239,8 @@ func streamDualAnswer(
 	}
 dualPersist:
 	now := time.Now()
+	primaryHistoryExt := mergeProviderStatusIntoExt(historyExt, primaryProviderStatus)
+	secondaryHistoryExt := mergeProviderStatusIntoExt(historyExt, secondaryProviderStatus)
 	if primaryPendingThink != "" {
 		primaryResult += "<think>" + primaryPendingThink + "</think>"
 	}
@@ -2090,7 +2250,7 @@ dualPersist:
 	primaryHistory := &orm.MultiAnswersChatHistory{
 		ID: historyID, Seq: seq, ConversationID: convID, RawContent: query, Content: query, Result: primaryResult,
 		ToolCallTurns: primaryToolCallTurns, ThinkingDurationS: primaryThinkingDurationS,
-		RetrievalResult: marshalRetrievalResult(primarySources), Ext: historyExt,
+		RetrievalResult: marshalRetrievalResult(primarySources), Ext: primaryHistoryExt,
 		TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
 	}
 	if primaryProgressCreated {
@@ -2101,7 +2261,7 @@ dualPersist:
 	secondaryHistory := &orm.MultiAnswersChatHistory{
 		ID: secondaryHistoryID, Seq: seq, ConversationID: convID, RawContent: query, Content: query, Result: secondaryResult,
 		ToolCallTurns: secondaryToolCallTurns, ThinkingDurationS: secondaryThinkingDurationS,
-		RetrievalResult: marshalRetrievalResult(secondarySources), Ext: historyExt,
+		RetrievalResult: marshalRetrievalResult(secondarySources), Ext: secondaryHistoryExt,
 		TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
 	}
 	if secondaryProgressCreated {
@@ -2110,8 +2270,14 @@ dualPersist:
 		_ = db.Create(secondaryHistory).Error
 	}
 	if stateStore != nil {
-		_ = setChatStatus(context.Background(), stateStore, convID, historyID, "completed", stripToolTags(primaryText))
-		_ = setChatStatus(context.Background(), stateStore, convID, secondaryHistoryID, "completed", stripToolTags(secondaryText))
+		_ = setChatStatus(
+			context.Background(), stateStore, convID, historyID,
+			lifecycleCacheStatus(primaryFailed), stripToolTags(primaryText),
+		)
+		_ = setChatStatus(
+			context.Background(), stateStore, convID, secondaryHistoryID,
+			lifecycleCacheStatus(secondaryFailed), stripToolTags(secondaryText),
+		)
 	}
 	db.Model(&orm.Conversation{}).Where("id = ?", convID).Update("updated_at", now)
 	if !target.IsRegeneration {
@@ -2120,13 +2286,13 @@ dualPersist:
 	recordConversationIdleActivity(context.Background(), db, stateStore, convID, userIDFromChatRequestBody(reqBody), historyID, query, stripToolTags(primaryText), now)
 	if reqCtx.Err() == nil {
 		writeSSEChunk(w, flusher, map[string]any{
-			"finish_reason":       "FINISH_REASON_STOP",
+			"finish_reason":       lifecycleFinishReason(primaryFailed),
 			"history_id":          historyID,
 			"tool_call_turns":     primaryToolCallTurns,
 			"thinking_duration_s": primaryThinkingDurationS,
 		})
 		writeSSEChunk(w, flusher, map[string]any{
-			"finish_reason":       "FINISH_REASON_STOP",
+			"finish_reason":       lifecycleFinishReason(secondaryFailed),
 			"history_id":          secondaryHistoryID,
 			"tool_call_turns":     secondaryToolCallTurns,
 			"thinking_duration_s": secondaryThinkingDurationS,

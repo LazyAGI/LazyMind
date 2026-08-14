@@ -584,7 +584,7 @@ func resumeFromDBOnly(db *gorm.DB, convID string, flusher http.Flusher, w http.R
 		writeSSEChunk(w, flusher, map[string]any{"finish_reason": "FINISH_REASON_UNKNOWN"})
 		return
 	}
-	writeSSEChunk(w, flusher, map[string]any{
+	result := map[string]any{
 		"conversation_id":     convID,
 		"seq":                 last.Seq,
 		"message":             stripThinkTags(stripToolTags(last.Result)),
@@ -594,13 +594,17 @@ func resumeFromDBOnly(db *gorm.DB, convID string, flusher http.Flusher, w http.R
 		"sources":             retrievalSources(last.RetrievalResult),
 		"tool_call_turns":     last.ToolCallTurns,
 		"thinking_duration_s": last.ThinkingDurationS,
-	})
+	}
+	if status := providerStatusFromExt(last.Ext); status != nil {
+		result["provider_status"] = status
+	}
+	writeSSEChunk(w, flusher, result)
 }
 
 func resumeCompletedFromDB(db *gorm.DB, convID string, flusher http.Flusher, w http.ResponseWriter) {
 	var last orm.ChatHistory
 	if err := db.Where("conversation_id = ?", convID).Order("seq DESC").First(&last).Error; err == nil && last.ID != "" {
-		writeSSEChunk(w, flusher, map[string]any{
+		result := map[string]any{
 			"conversation_id":     convID,
 			"seq":                 last.Seq,
 			"message":             stripThinkTags(stripToolTags(last.Result)),
@@ -610,7 +614,11 @@ func resumeCompletedFromDB(db *gorm.DB, convID string, flusher http.Flusher, w h
 			"sources":             retrievalSources(last.RetrievalResult),
 			"tool_call_turns":     last.ToolCallTurns,
 			"thinking_duration_s": last.ThinkingDurationS,
-		})
+		}
+		if status := providerStatusFromExt(last.Ext); status != nil {
+			result["provider_status"] = status
+		}
+		writeSSEChunk(w, flusher, result)
 		return
 	}
 
@@ -624,7 +632,7 @@ func resumeCompletedFromDB(db *gorm.DB, convID string, flusher http.Flusher, w h
 		if i == len(mh)-1 {
 			finish = "FINISH_REASON_STOP"
 		}
-		writeSSEChunk(w, flusher, map[string]any{
+		result := map[string]any{
 			"conversation_id":     convID,
 			"seq":                 h.Seq,
 			"message":             stripThinkTags(stripToolTags(h.Result)),
@@ -634,7 +642,11 @@ func resumeCompletedFromDB(db *gorm.DB, convID string, flusher http.Flusher, w h
 			"sources":             retrievalSources(h.RetrievalResult),
 			"tool_call_turns":     h.ToolCallTurns,
 			"thinking_duration_s": h.ThinkingDurationS,
-		})
+		}
+		if status := providerStatusFromExt(h.Ext); status != nil {
+			result["provider_status"] = status
+		}
+		writeSSEChunk(w, flusher, result)
 	}
 }
 
@@ -688,10 +700,18 @@ func sendChunk(w http.ResponseWriter, flusher http.Flusher, ch *ChatChunkRespons
 func resumeSingleAnswerChat(ctx context.Context, stateStore state.Store, convID, historyID string, w http.ResponseWriter, flusher http.Flusher) {
 	status, _ := getChatStatus(ctx, stateStore, convID, historyID)
 	chunks, _ := getChatChunks(ctx, stateStore, convID, historyID)
+	providerStatus, _ := getLatestProviderStatus(ctx, stateStore, convID, historyID)
 
 	first := mergeChunksToFirstChunk(chunks)
 	if first != nil {
 		sendChunk(w, flusher, first)
+	}
+	if providerStatus != nil {
+		sendChunk(w, flusher, &ChatChunkResponse{
+			ConversationID: convID,
+			HistoryID:      historyID,
+			ProviderStatus: providerStatus,
+		})
 	}
 
 	if status != nil && (status.Status == "completed" || status.Status == "stopped" || status.Status == "failed") {
@@ -717,11 +737,12 @@ func resumeSingleAnswerChat(ctx context.Context, stateStore state.Store, convID,
 				})
 			}
 		}
+		finishReason := lifecycleFinishReason(status.Status == "failed")
 		sendChunk(w, flusher, &ChatChunkResponse{
 			ConversationID: convID,
 			Seq:            seq,
 			HistoryID:      historyID,
-			FinishReason:   "FINISH_REASON_STOP",
+			FinishReason:   finishReason,
 		})
 		_ = clearChatData(context.Background(), stateStore, convID, historyID)
 		return
@@ -743,11 +764,11 @@ func resumeSingleAnswerChat(ctx context.Context, stateStore state.Store, convID,
 	}
 
 	finalStatus, _ := getChatStatus(context.Background(), stateStore, convID, historyID)
-	if finalStatus != nil && (finalStatus.Status == "completed" || finalStatus.Status == "stopped") {
+	if finalStatus != nil && (finalStatus.Status == "completed" || finalStatus.Status == "stopped" || finalStatus.Status == "failed") {
 		sendChunk(w, flusher, &ChatChunkResponse{
 			ConversationID: convID,
 			HistoryID:      historyID,
-			FinishReason:   "FINISH_REASON_STOP",
+			FinishReason:   lifecycleFinishReason(finalStatus.Status == "failed"),
 		})
 		_ = clearChatData(context.Background(), stateStore, convID, historyID)
 	}
@@ -768,6 +789,16 @@ func resumeMultiAnswerChat(ctx context.Context, stateStore state.Store, convID s
 			ch.FinishReason = ""
 			sendChunk(w, flusher, ch)
 		}
+	}
+	if providerStatus, _ := getLatestProviderStatus(ctx, stateStore, convID, info.PrimaryHistoryID); providerStatus != nil {
+		sendChunk(w, flusher, &ChatChunkResponse{
+			ConversationID: convID, HistoryID: info.PrimaryHistoryID, ProviderStatus: providerStatus,
+		})
+	}
+	if providerStatus, _ := getLatestProviderStatus(ctx, stateStore, convID, info.SecondaryHistoryID); providerStatus != nil {
+		sendChunk(w, flusher, &ChatChunkResponse{
+			ConversationID: convID, HistoryID: info.SecondaryHistoryID, ProviderStatus: providerStatus,
+		})
 	}
 
 	primaryStatus, _ := getChatStatus(ctx, stateStore, convID, info.PrimaryHistoryID)
@@ -827,18 +858,22 @@ func resumeMultiAnswerChat(ctx context.Context, stateStore state.Store, convID s
 	}
 	patchTail(info.PrimaryHistoryID)
 	patchTail(info.SecondaryHistoryID)
+	finishReasonForHistory := func(historyID string) string {
+		status, _ := getChatStatus(context.Background(), stateStore, convID, historyID)
+		return lifecycleFinishReason(status != nil && status.Status == "failed")
+	}
 
 	sendChunk(w, flusher, &ChatChunkResponse{
 		ConversationID: convID,
 		Seq:            int32(info.Seq),
 		HistoryID:      info.PrimaryHistoryID,
-		FinishReason:   "FINISH_REASON_STOP",
+		FinishReason:   finishReasonForHistory(info.PrimaryHistoryID),
 	})
 	sendChunk(w, flusher, &ChatChunkResponse{
 		ConversationID: convID,
 		Seq:            int32(info.Seq),
 		HistoryID:      info.SecondaryHistoryID,
-		FinishReason:   "FINISH_REASON_STOP",
+		FinishReason:   finishReasonForHistory(info.SecondaryHistoryID),
 	})
 
 	if ctx.Err() == nil {
@@ -1093,6 +1128,7 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 	var askAnswered bool
 	var askSavedAnswers any
 	var intentUpdated any
+	providerStatus := providerStatusFromExt(h.Ext)
 	if len(h.Ext) > 0 {
 		var ext struct {
 			Input           any  `json:"input"`
@@ -1138,6 +1174,9 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 	}
 	if intentUpdated != nil {
 		item["intent_updated"] = intentUpdated
+	}
+	if providerStatus != nil {
+		item["provider_status"] = providerStatus
 	}
 	return item
 }

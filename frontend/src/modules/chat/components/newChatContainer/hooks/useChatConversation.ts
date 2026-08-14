@@ -26,6 +26,7 @@ import {
   stripAskUserReceipt,
 } from "@/modules/chat/utils/message";
 import { splitThinkingContent } from "@/modules/chat/utils/thinking";
+import { nextProviderEventState } from "@/modules/chat/utils/providerStatus";
 import {
   buildCitedMessageText,
   MAX_CITE_MESSAGE_COUNT,
@@ -552,9 +553,11 @@ export function useChatConversation({
         assistantMessage.reasoning_content || "",
       );
 
+      const providerEventState = nextProviderEventState(assistantMessage, result);
       assistantMessage = {
         ...assistantMessage,
         ...result,
+        ...providerEventState,
         id: result.messageId,
         raw_delta: mergedRawDelta,
         delta: stripAskUserReceipt(
