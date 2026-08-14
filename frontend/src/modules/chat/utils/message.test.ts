@@ -225,6 +225,29 @@ describe("buildChatMessageListFromHistory", () => {
     expect(assistantMessage.ask_answered).toBe(true);
   });
 
+  it("restores only the persisted provider status snapshot", () => {
+    const history = [{
+      id: "h1",
+      query: "q1",
+      result: "partial answer",
+      provider_status: {
+        model_call_id: "call-1",
+        http_status: 200,
+        finish_reason: "length",
+      },
+    }];
+
+    const list = buildChatMessageListFromHistory(history);
+
+    expect(list[1].delta).toBe("partial answer");
+    expect(list[1].provider_status).toEqual({
+      model_call_id: "call-1",
+      http_status: 200,
+      finish_reason: "length",
+    });
+    expect(list[1].provider_status.error_body).toBeUndefined();
+  });
+
   it("separates image and file inputs into their respective arrays", () => {
     const history = [
       {

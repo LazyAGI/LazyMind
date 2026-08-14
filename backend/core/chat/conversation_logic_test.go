@@ -117,6 +117,57 @@ func TestMergeIntentUpdatedIntoExtPreservesExistingFields(t *testing.T) {
 	}
 }
 
+func TestMergeProviderStatusIntoExtDropsRawBodyAndPreservesExistingFields(t *testing.T) {
+	ext := json.RawMessage(`{"mentions":[{"id":"m1"}]}`)
+	status := &ProviderStatusEvent{
+		ModelCallID: "call-1", HTTPStatus: intPtr(500), FinishReason: stringPtr("VendorLimit"),
+		ErrorBody: "raw provider body",
+	}
+
+	merged := mergeProviderStatusIntoExt(ext, status)
+	var got map[string]any
+	if err := json.Unmarshal(merged, &got); err != nil {
+		t.Fatalf("unmarshal merged ext: %v", err)
+	}
+	if got["mentions"] == nil {
+		t.Fatalf("existing ext field was lost: %#v", got)
+	}
+	encoded := string(merged)
+	if strings.Contains(encoded, "raw provider body") || strings.Contains(encoded, "error_body") {
+		t.Fatalf("raw provider body leaked into history ext: %s", encoded)
+	}
+	restored := providerStatusFromExt(merged)
+	if restored == nil || restored.ModelCallID != "call-1" || *restored.FinishReason != "VendorLimit" {
+		t.Fatalf("unexpected restored provider status: %#v", restored)
+	}
+}
+
+func TestConsumeUpstreamLifecycleStatusKeepsProviderReasonSeparate(t *testing.T) {
+	failed := false
+	toolCallTurns := 1
+	providerReason := "length"
+	upstream := UpstreamStreamChunk{
+		Status:        "FAILED",
+		ToolCallTurns: 3,
+		ProviderStatus: &ProviderStatusEvent{
+			ModelCallID: "call-1", HTTPStatus: intPtr(200), FinishReason: &providerReason,
+		},
+	}
+
+	if !consumeUpstreamLifecycleStatus(upstream, &failed, &toolCallTurns) {
+		t.Fatal("expected lifecycle status to be consumed")
+	}
+	if !failed || toolCallTurns != 3 {
+		t.Fatalf("unexpected lifecycle state: failed=%v tool_call_turns=%d", failed, toolCallTurns)
+	}
+	if lifecycleFinishReason(failed) != "FINISH_REASON_UNKNOWN" || lifecycleCacheStatus(failed) != "failed" {
+		t.Fatalf("failed lifecycle was not mapped to Agent failure")
+	}
+	if *upstream.ProviderStatus.FinishReason != "length" {
+		t.Fatalf("provider finish reason was overwritten: %#v", upstream.ProviderStatus)
+	}
+}
+
 func TestMergeChunksRetainsConversationIntentUpdate(t *testing.T) {
 	intent := &IntentUpdatedEvent{Scope: "conversation", IntentContext: map[string]any{"goal": "新目标"}}
 	merged := mergeChunksToFirstChunk([]*ChatChunkResponse{
@@ -566,6 +617,19 @@ func TestChatHistoryResponseIncludesMentions(t *testing.T) {
 	mentions, ok := item["mentions"].([]any)
 	if !ok || len(mentions) != 1 {
 		t.Fatalf("mentions missing from history response: %#v", item["mentions"])
+	}
+}
+
+func TestChatHistoryResponseStripsProviderErrorBody(t *testing.T) {
+	item := chatHistoryToResponseItem(orm.ChatHistory{
+		Ext: json.RawMessage(`{"provider_status":{"model_call_id":"call-1","http_status":429,"finish_reason":null,"error_body":"must not persist"}}`),
+	})
+	status, ok := item["provider_status"].(*ProviderStatusEvent)
+	if !ok || status.ModelCallID != "call-1" || status.HTTPStatus == nil || *status.HTTPStatus != 429 {
+		t.Fatalf("provider status missing from history response: %#v", item["provider_status"])
+	}
+	if status.ErrorBody != "" {
+		t.Fatalf("provider error body leaked from history response: %#v", status)
 	}
 }
 

@@ -144,6 +144,9 @@ func TestChatChunkResponseRoundTrip(t *testing.T) {
 		FinishReason:     "stop",
 		HistoryID:        "hist-1",
 		ReasoningContent: "thinking...",
+		ProviderStatus: &ProviderStatusEvent{
+			ModelCallID: "call-1", HTTPStatus: intPtr(200), FinishReason: stringPtr("length"),
+		},
 	}
 	bs, err := json.Marshal(orig)
 	if err != nil {
@@ -153,7 +156,8 @@ func TestChatChunkResponseRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(bs, &restored); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if restored.ConversationID != orig.ConversationID || restored.Delta != orig.Delta {
+	if restored.ConversationID != orig.ConversationID || restored.Delta != orig.Delta ||
+		restored.ProviderStatus == nil || *restored.ProviderStatus.FinishReason != "length" {
 		t.Fatalf("roundtrip mismatch")
 	}
 }

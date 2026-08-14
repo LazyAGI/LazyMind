@@ -6,11 +6,17 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/state"
 )
+
+func intPtr(value int) *int          { return &value }
+func stringPtr(value string) *string { return &value }
 
 func TestUpstreamStreamChunkPreservesToolLimitPending(t *testing.T) {
 	pending := &ToolLimitPendingEvent{
@@ -25,6 +31,61 @@ func TestUpstreamStreamChunkPreservesToolLimitPending(t *testing.T) {
 
 	if chunk.ToolLimitPending != pending {
 		t.Fatalf("tool-limit event was dropped during upstream conversion: %#v", chunk)
+	}
+}
+
+func TestUpstreamStreamChunkPreservesProviderEvents(t *testing.T) {
+	status := &ProviderStatusEvent{
+		ModelCallID: "call-1", HTTPStatus: intPtr(429), FinishReason: nil, ErrorBody: `{"error":"limited"}`,
+	}
+	retry := &ModelRetryEvent{ModelCallID: "call-1", RetryIndex: 1, MaxRetries: 5, DelayMS: 1100}
+	transport := &ModelTransportErrorEvent{ModelCallID: "call-2", ErrorType: "ReadTimeout", ErrorMessage: "timed out"}
+
+	chunk := upstreamStreamChunkFromData(LazyChatData{
+		ProviderStatus: status, ModelRetry: retry, ModelTransportError: transport,
+	})
+
+	if chunk.ProviderStatus != status || chunk.ModelRetry != retry || chunk.ModelTransportError != transport {
+		t.Fatalf("provider events were dropped during upstream conversion: %#v", chunk)
+	}
+}
+
+func TestForwardProviderEventKeepsLiveBodyAndStoresOnlyLatestRedactedStatus(t *testing.T) {
+	ctx := context.Background()
+	stateStore, err := state.NewSQLiteStore(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("create state store: %v", err)
+	}
+	defer stateStore.Close()
+	recorder := httptest.NewRecorder()
+	status := &ProviderStatusEvent{
+		ModelCallID: "call-1", HTTPStatus: intPtr(429), FinishReason: nil, ErrorBody: "raw provider body",
+	}
+
+	got, handled := forwardProviderEvent(
+		ctx, recorder, recorder, stateStore, "conv-1", "history-1", 2,
+		UpstreamStreamChunk{ProviderStatus: status}, true,
+	)
+
+	if !handled || got != status {
+		t.Fatalf("provider status was not handled: handled=%v status=%#v", handled, got)
+	}
+	if !strings.Contains(recorder.Body.String(), "raw provider body") {
+		t.Fatalf("live SSE lost provider body: %s", recorder.Body.String())
+	}
+	snapshot, err := getLatestProviderStatus(ctx, stateStore, "conv-1", "history-1")
+	if err != nil {
+		t.Fatalf("read provider snapshot: %v", err)
+	}
+	if snapshot == nil || snapshot.ModelCallID != "call-1" || snapshot.ErrorBody != "" {
+		t.Fatalf("unexpected stored provider snapshot: %#v", snapshot)
+	}
+	chunks, err := getChatChunks(ctx, stateStore, "conv-1", "history-1")
+	if err != nil {
+		t.Fatalf("read replay chunks: %v", err)
+	}
+	if len(chunks) != 0 {
+		t.Fatalf("raw provider event leaked into replay list: %#v", chunks)
 	}
 }
 
@@ -143,5 +204,31 @@ func TestStreamChatUpstreamForwardsToolLimitPending(t *testing.T) {
 	}
 	if chunk.ToolLimitPending.DecisionID != "decision-2" {
 		t.Fatalf("unexpected decision id: %#v", chunk.ToolLimitPending)
+	}
+}
+
+func TestStreamChatUpstreamForwardsProviderStatusBody(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = fmt.Fprintln(w, `{"code":200,"msg":"success","data":{"provider_status":{"model_call_id":"call-1","http_status":429,"finish_reason":null,"error_body":"raw upstream body"}}}`)
+		_, _ = fmt.Fprintln(w, `{"code":500,"msg":"chat service failed","data":{"status":"FAILED","tool_call_turns":3}}`)
+	}))
+	defer server.Close()
+
+	stream, _, err := StreamChatUpstream(context.Background(), server.URL, map[string]any{"query": "test"})
+	if err != nil {
+		t.Fatalf("start upstream stream: %v", err)
+	}
+	chunk, ok := <-stream
+	if !ok || chunk.ProviderStatus == nil {
+		t.Fatalf("provider status was not forwarded: %#v", chunk)
+	}
+	if chunk.ProviderStatus.HTTPStatus == nil || *chunk.ProviderStatus.HTTPStatus != 429 ||
+		chunk.ProviderStatus.ErrorBody != "raw upstream body" {
+		t.Fatalf("unexpected provider status: %#v", chunk.ProviderStatus)
+	}
+	lifecycle, ok := <-stream
+	if !ok || lifecycle.Status != "FAILED" || lifecycle.ToolCallTurns != 3 {
+		t.Fatalf("failed lifecycle status was not forwarded after provider status: %#v", lifecycle)
 	}
 }

@@ -525,7 +525,10 @@ export interface ChatChunkResponse {
     'finish_reason'?: string;
     'history_id'?: string;
     'message'?: string;
+    'model_retry'?: ModelRetryEvent;
+    'model_transport_error'?: ModelTransportErrorEvent;
     'prompt_questions'?: Array<string>;
+    'provider_status'?: ProviderStatusEvent;
     'reasoning_content'?: string;
     'seq'?: number;
     'sources'?: Array<object>;
@@ -617,6 +620,7 @@ export interface ConversationHistoryItem {
     'feed_back'?: number;
     'id'?: string;
     'input'?: Array<object>;
+    'provider_status'?: ProviderStatusEvent;
     'query'?: string;
     'reason'?: string;
     'reasoning_content'?: string;
@@ -1558,6 +1562,19 @@ export interface ModelFeaturesResponse {
     'image_embed_enabled': boolean;
     'image_embed_required': boolean;
 }
+export interface ModelRetryEvent {
+    'delay_ms'?: number;
+    'max_retries'?: number;
+    'model_call_id'?: string;
+    'retry_index'?: number;
+}
+export interface ModelTransportErrorEvent {
+    'error_message'?: string;
+    'error_type'?: string;
+    'finish_reason'?: string | null;
+    'http_status'?: number | null;
+    'model_call_id'?: string;
+}
 export interface OkOpenAPIResponse {
     'ok': boolean;
 }
@@ -1698,6 +1715,12 @@ export interface PromptStateResponse {
     'is_favorite'?: boolean;
     'last_used_at'?: string;
     'usage_count'?: number;
+}
+export interface ProviderStatusEvent {
+    'error_body'?: string;
+    'finish_reason'?: string | null;
+    'http_status'?: number | null;
+    'model_call_id'?: string;
 }
 export interface QuestionTypeOption {
     'label': string;

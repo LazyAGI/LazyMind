@@ -7,6 +7,11 @@ import type { ChatSourceCollection } from "@/modules/chat/utils/sourceAdapter";
 import type { SendMessageParams } from "../ChatInput";
 import type { ChatMention } from "../ChatInput/MentionEditor";
 import type { ChatConfig } from "../ChatConfigs";
+import type {
+  ModelRetry,
+  ModelTransportError,
+  ProviderStatus,
+} from "@/modules/chat/utils/providerStatus";
 
 export interface ChatImperativeProps {
   replaceMessageList: (id: string, data: any[]) => void;
@@ -72,6 +77,9 @@ export interface ChatMessage {
     uid?: string;
   }[];
   finish_reason?: string;
+  provider_status?: ProviderStatus;
+  model_retry?: ModelRetry;
+  model_transport_error?: ModelTransportError;
   inputs?: Query[];
   reasoning_content?: string;
   thinking_duration_s?: number | string;
@@ -87,6 +95,9 @@ export interface ChatMessage {
     reasoning_content?: string;
     sources?: ChatSourceCollection;
     thinking_duration_s?: string;
+    provider_status?: ProviderStatus;
+    model_retry?: ModelRetry;
+    model_transport_error?: ModelTransportError;
   }>;
   answer_index?: number;
   create_time?: string;

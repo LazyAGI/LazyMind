@@ -10,11 +10,12 @@ import (
 )
 
 const (
-	chatStreamKeyPrefix = "rag/chat/stream:%s:%s"
-	chatStatusKeyPrefix = "rag/chat/status:%s"
-	chatStopKeyPrefix   = "rag/chat/stop:%s:%s"
-	chatMultiKeyPrefix  = "rag/chat/multi:%s:%s"
-	chatInputKeyPrefix  = "rag/chat/input:%s:%s"
+	chatStreamKeyPrefix         = "rag/chat/stream:%s:%s"
+	chatStatusKeyPrefix         = "rag/chat/status:%s"
+	chatStopKeyPrefix           = "rag/chat/stop:%s:%s"
+	chatMultiKeyPrefix          = "rag/chat/multi:%s:%s"
+	chatInputKeyPrefix          = "rag/chat/input:%s:%s"
+	chatProviderStatusKeyPrefix = "rag/chat/provider-status:%s:%s"
 
 	// convEventsKeyPrefix is a conversation-level event LIST, keyed only by conversation_id.
 	// It carries task_created and plugin lifecycle events across all chat turns so that
@@ -49,22 +50,25 @@ type MultiAnswerInfo struct {
 }
 
 type ChatChunkResponse struct {
-	ConversationID    string                   `json:"conversation_id"`
-	Seq               int32                    `json:"seq"`
-	Message           string                   `json:"message"`
-	Delta             string                   `json:"delta"`
-	FinishReason      string                   `json:"finish_reason"`
-	HistoryID         string                   `json:"history_id"`
-	Sources           []any                    `json:"sources,omitempty"`
-	PromptQuestions   []string                 `json:"prompt_questions,omitempty"`
-	ReasoningContent  string                   `json:"reasoning_content,omitempty"`
-	ThinkingDurationS int64                    `json:"thinking_duration_s,omitempty"`
-	ToolCallTurns     int                      `json:"tool_call_turns,omitempty"`
-	TaskCreated       *TaskCreatedNotice       `json:"task_created,omitempty"`
-	ArtifactCreated   *ConversationArtifactDTO `json:"artifact_created,omitempty"`
-	AskPending        *AskPendingEvent         `json:"ask_pending,omitempty"`
-	ToolLimitPending  *ToolLimitPendingEvent   `json:"tool_limit_pending,omitempty"`
-	IntentUpdated     *IntentUpdatedEvent      `json:"intent_updated,omitempty"`
+	ConversationID      string                    `json:"conversation_id"`
+	Seq                 int32                     `json:"seq"`
+	Message             string                    `json:"message"`
+	Delta               string                    `json:"delta"`
+	FinishReason        string                    `json:"finish_reason"`
+	HistoryID           string                    `json:"history_id"`
+	Sources             []any                     `json:"sources,omitempty"`
+	PromptQuestions     []string                  `json:"prompt_questions,omitempty"`
+	ReasoningContent    string                    `json:"reasoning_content,omitempty"`
+	ThinkingDurationS   int64                     `json:"thinking_duration_s,omitempty"`
+	ToolCallTurns       int                       `json:"tool_call_turns,omitempty"`
+	TaskCreated         *TaskCreatedNotice        `json:"task_created,omitempty"`
+	ArtifactCreated     *ConversationArtifactDTO  `json:"artifact_created,omitempty"`
+	AskPending          *AskPendingEvent          `json:"ask_pending,omitempty"`
+	ToolLimitPending    *ToolLimitPendingEvent    `json:"tool_limit_pending,omitempty"`
+	IntentUpdated       *IntentUpdatedEvent       `json:"intent_updated,omitempty"`
+	ProviderStatus      *ProviderStatusEvent      `json:"provider_status,omitempty"`
+	ModelRetry          *ModelRetryEvent          `json:"model_retry,omitempty"`
+	ModelTransportError *ModelTransportErrorEvent `json:"model_transport_error,omitempty"`
 }
 
 // TaskCreatedNotice notifies the frontend (main SSE) that a SubAgent task was created,
@@ -90,7 +94,10 @@ func chatMultiKey(cid, primaryHID string) string {
 	return fmt.Sprintf(chatMultiKeyPrefix, cid, primaryHID)
 }
 func chatInputKey(cid, hid string) string { return fmt.Sprintf(chatInputKeyPrefix, cid, hid) }
-func convEventsKey(cid string) string     { return fmt.Sprintf(convEventsKeyPrefix, cid) }
+func chatProviderStatusKey(cid, hid string) string {
+	return fmt.Sprintf(chatProviderStatusKeyPrefix, cid, hid)
+}
+func convEventsKey(cid string) string { return fmt.Sprintf(convEventsKeyPrefix, cid) }
 
 func setChatStatus(ctx context.Context, stateStore state.Store, conversationID, historyID, status, currentResult string) error {
 	key := chatStatusKey(conversationID)
@@ -142,7 +149,37 @@ func clearChatData(ctx context.Context, stateStore state.Store, conversationID, 
 	_ = stateStore.HDel(ctx, key, historyID)
 	_ = stateStore.Del(ctx, chatStreamKey(conversationID, historyID))
 	_ = stateStore.Del(ctx, chatInputKey(conversationID, historyID))
+	_ = stateStore.Del(ctx, chatProviderStatusKey(conversationID, historyID))
 	return nil
+}
+
+func setLatestProviderStatus(ctx context.Context, stateStore state.Store, conversationID, historyID string, status *ProviderStatusEvent) error {
+	if stateStore == nil || status == nil {
+		return nil
+	}
+	snapshot := *status
+	snapshot.ErrorBody = ""
+	bs, err := json.Marshal(&snapshot)
+	if err != nil {
+		return err
+	}
+	return stateStore.Set(ctx, chatProviderStatusKey(conversationID, historyID), bs, chatCacheExpireTime)
+}
+
+func getLatestProviderStatus(ctx context.Context, stateStore state.Store, conversationID, historyID string) (*ProviderStatusEvent, error) {
+	if stateStore == nil {
+		return nil, nil
+	}
+	bs, err := stateStore.Get(ctx, chatProviderStatusKey(conversationID, historyID))
+	if err != nil {
+		return nil, err
+	}
+	var status ProviderStatusEvent
+	if err := json.Unmarshal(bs, &status); err != nil {
+		return nil, err
+	}
+	status.ErrorBody = ""
+	return &status, nil
 }
 
 func setChatInput(ctx context.Context, stateStore state.Store, conversationID, historyID, rawContent string, seq int, ext json.RawMessage) error {

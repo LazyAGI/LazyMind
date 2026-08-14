@@ -31,6 +31,7 @@ import FeedbackModal from "../FeedbackModal";
 import AskCard from "@/modules/chat/components/AskCard";
 import ToolLimitCard from "@/modules/chat/components/ToolLimitCard";
 import ArtifactDownloadButton from "@/modules/chat/components/ArtifactCollectorCard/ArtifactDownloadButton";
+import ProviderStatusCard from "./ProviderStatusCard";
 import {
   type ChatSource,
   type ChatSourceCollection,
@@ -1073,6 +1074,11 @@ const AssistantMessage = (props: any) => {
             {item.finish_reason ===
               ChatConversationsResponseFinishReasonEnum.FinishReasonUnknown &&
               renderError()}
+            <ProviderStatusCard
+              status={item.provider_status}
+              retry={item.model_retry}
+              transportError={item.model_transport_error}
+            />
 
             {}
             <MultiAnswerDisplay
@@ -1159,6 +1165,11 @@ const AssistantMessage = (props: any) => {
           {item.finish_reason ===
             ChatConversationsResponseFinishReasonEnum.FinishReasonUnknown &&
             renderError()}
+          <ProviderStatusCard
+            status={item.provider_status}
+            retry={item.model_retry}
+            transportError={item.model_transport_error}
+          />
 
           {}
           {item.finish_reason ===

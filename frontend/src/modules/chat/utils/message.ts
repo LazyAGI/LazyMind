@@ -213,6 +213,7 @@ export function buildChatMessageListFromHistory(
       thinking_time_s: record.thinking_time_s,
       tool_call_turns: record.tool_call_turns,
       intent_updated: (record as any).intent_updated,
+      provider_status: (record as any).provider_status,
     };
 
     // Restore ask_pending from persisted ext so the AskCard is visible after page reload.

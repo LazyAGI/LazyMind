@@ -79,6 +79,10 @@ class AgentEventFrameTranslator:
     def feed(self, event: Any) -> list[dict[str, Any]]:
         frames: list[dict[str, Any]] = []
         event_type = str(event.get('tag', '') or '')
+        if event_type in {'provider_status', 'model_retry', 'model_transport_error'}:
+            payload = {k: v for k, v in event.items() if k != 'tag'}
+            frames.append(_stream_frame(extra={event_type: payload}))
+            return frames
         if event_type == 'task_created':
             task_created = {k: v for k, v in event.items() if k != 'tag'}
             frames.append(_stream_frame(extra={'task_created': task_created}))
