@@ -265,16 +265,26 @@ func HandleUpdateJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Re
 		_ = reporter.SetProgress(ctx, 2, 3)
 	}
 
-	importFiles := make([]doc.MarketImportFile, 0, len(files))
-	for _, f := range files {
-		importFiles = append(importFiles, doc.MarketImportFile{
-			LocalPath:    filepath.Join(tmpRoot, filepath.FromSlash(f.Path)),
-			DisplayName:  filepath.Base(f.Path),
-			RelativePath: filepath.Dir(f.Path),
-		})
+	// Apply the same source-specific conversion as the install path so updates
+	// re-import only the documents the catalog source actually provides.
+	importFiles, err := materializeMarketFiles(ctx, item, files, tmpRoot)
+	if err != nil {
+		return failUpdate(ctx, db, payload, fmt.Errorf("materialize source files failed: %w", err))
+	}
+	if len(importFiles) == 0 {
+		return failUpdate(ctx, db, payload, errors.New("source adapter produced no documents"))
 	}
 	importResult, err := doc.ImportMarketFiles(ctx, &ds, payload.UserID, payload.UserName, importFiles)
 	if err != nil {
+		// Remove partially imported documents so a failed update leaves the
+		// knowledge base empty instead of containing only a subset of files.
+		if _, cleanupErr := doc.ClearMarketDatasetDocuments(ctx, &ds); cleanupErr != nil {
+			log.Logger.Error().
+				Err(cleanupErr).
+				Str("market_item_id", payload.MarketItemID).
+				Str("dataset_id", ds.ID).
+				Msg("clear partial market import failed")
+		}
 		return failUpdate(ctx, db, payload, fmt.Errorf("import files failed: %w", err))
 	}
 

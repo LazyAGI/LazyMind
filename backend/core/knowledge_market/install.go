@@ -181,14 +181,14 @@ func HandleInstallJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.R
 		return failInstall(ctx, db, payload, err)
 	}
 
-	// Register and submit every downloaded file to the parsing pipeline.
-	importFiles := make([]doc.MarketImportFile, 0, len(files))
-	for _, f := range files {
-		importFiles = append(importFiles, doc.MarketImportFile{
-			LocalPath:    filepath.Join(tmpRoot, filepath.FromSlash(f.Path)),
-			DisplayName:  filepath.Base(f.Path),
-			RelativePath: filepath.Dir(f.Path),
-		})
+	// Convert the downloaded package into parser-ready documents. Adapter-based
+	// sources only keep knowledge files; legacy sources keep every file.
+	importFiles, err := materializeMarketFiles(ctx, item, files, tmpRoot)
+	if err != nil {
+		return failInstall(ctx, db, payload, fmt.Errorf("materialize source files failed: %w", err))
+	}
+	if len(importFiles) == 0 {
+		return failInstall(ctx, db, payload, errors.New("source adapter produced no documents"))
 	}
 	importResult, err := doc.ImportMarketFiles(ctx, ds, payload.UserID, payload.UserName, importFiles)
 	if err != nil {
@@ -245,7 +245,7 @@ func failInstall(ctx context.Context, db *gorm.DB, payload installJobPayload, er
 	// clear the install link so a retry starts from a clean state. Cleanup
 	// errors are logged only: the install is still marked failed.
 	if datasetID := installDatasetID(ctx, db, payload); datasetID != "" {
-		if delErr := doc.DeleteMarketDataset(ctx, payload.UserID, datasetID); delErr != nil {
+		if delErr := doc.CleanupMarketDataset(ctx, payload.UserID, datasetID); delErr != nil {
 			log.Logger.Error().
 				Err(delErr).
 				Str("market_item_id", payload.MarketItemID).

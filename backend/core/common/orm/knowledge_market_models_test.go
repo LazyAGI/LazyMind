@@ -30,6 +30,7 @@ func TestKnowledgeMarketModelsAutoMigrate(t *testing.T) {
 		"id", "category", "name", "description", "icon", "domain", "tags",
 		"version", "version_date", "version_note",
 		"package_url", "package_revision", "online_access_url", "data_source",
+		"source_adapter", "source_options",
 		"sample_questions", "status", "sort_order", "created_at", "updated_at",
 	}
 	for _, col := range itemColumns {

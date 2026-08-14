@@ -17,11 +17,17 @@ import (
 	"lazymind/core/store"
 )
 
+const (
+	marketImportBatchSize  = 50
+	marketImportBatchDelay = 200 * time.Millisecond
+)
+
 // MarketImportFile is one downloaded file to import into a dataset.
 type MarketImportFile struct {
-	LocalPath    string // absolute path of the downloaded file
-	DisplayName  string // user-facing file name
-	RelativePath string // path inside the package ("" when at the root)
+	LocalPath    string   // absolute path of the downloaded file
+	DisplayName  string   // user-facing file name
+	RelativePath string   // path inside the package ("" when at the root)
+	Tags         []string // document tags assigned by the source adapter
 }
 
 // MarketImportResult summarizes a submitted market import.
@@ -42,6 +48,38 @@ func ImportMarketFiles(ctx context.Context, ds *orm.Dataset, userID, userName st
 	if db == nil {
 		return nil, fmt.Errorf("store not initialized")
 	}
+
+	// startTasksInternal needs a request for user context and the parsing
+	// service call; a synthetic request carries the same ctx and user headers.
+	r := (&http.Request{Header: make(http.Header)}).WithContext(ctx)
+	r.Header.Set("X-User-Id", userID)
+	r.Header.Set("X-User-Name", userName)
+
+	result := &MarketImportResult{DatasetID: ds.ID, TaskIDs: make([]string, 0, len(files))}
+	for start := 0; start < len(files); start += marketImportBatchSize {
+		if err := ctx.Err(); err != nil {
+			return nil, fmt.Errorf("market import canceled before batch %d: %w", start/marketImportBatchSize+1, err)
+		}
+		end := start + marketImportBatchSize
+		if end > len(files) {
+			end = len(files)
+		}
+		batchTaskIDs, submitted, err := importMarketFileBatch(ctx, db, ds, userID, userName, r, files[start:end])
+		if err != nil {
+			return nil, fmt.Errorf("import market files batch %d failed: %w", start/marketImportBatchSize+1, err)
+		}
+		result.TaskIDs = append(result.TaskIDs, batchTaskIDs...)
+		result.Submitted += submitted
+		if end < len(files) {
+			time.Sleep(marketImportBatchDelay)
+		}
+	}
+	return result, nil
+}
+
+// importMarketFileBatch registers one batch of documents and submits its tasks
+// to the parsing pipeline before the next batch is created.
+func importMarketFileBatch(ctx context.Context, db *gorm.DB, ds *orm.Dataset, userID, userName string, r *http.Request, files []MarketImportFile) ([]string, int, error) {
 	now := time.Now().UTC()
 	taskIDs := make([]string, 0, len(files))
 	for _, file := range files {
@@ -49,21 +87,22 @@ func ImportMarketFiles(ctx context.Context, ds *orm.Dataset, userID, userName st
 		if displayName == "" {
 			displayName = filepath.Base(file.LocalPath)
 		}
+		documentTags := normalizeBatchDocumentTags(file.Tags)
 		documentID := newDocID()
 		taskID := newTaskID()
 		storedName := storedFileName(displayName, documentID)
 		finalDir := buildDatasetDocFileDir(ds.TenantID, ds.ID, file.RelativePath, documentID)
 		if err := os.MkdirAll(finalDir, 0o755); err != nil {
-			return nil, fmt.Errorf("create dataset dir failed: %w", err)
+			return nil, 0, fmt.Errorf("create dataset dir failed: %w", err)
 		}
 		finalPath := filepath.Join(finalDir, storedName)
 		size, err := copyMarketFile(file.LocalPath, finalPath)
 		if err != nil {
-			return nil, fmt.Errorf("copy %s failed: %w", displayName, err)
+			return nil, 0, fmt.Errorf("copy %s failed: %w", displayName, err)
 		}
 		size, err = normalizeUploadedTextFileInPlace(finalPath, displayName, size)
 		if err != nil {
-			return nil, fmt.Errorf("normalize %s failed: %w", displayName, err)
+			return nil, 0, fmt.Errorf("normalize %s failed: %w", displayName, err)
 		}
 
 		contentType := mime.TypeByExtension(strings.ToLower(filepath.Ext(displayName)))
@@ -74,13 +113,13 @@ func ImportMarketFiles(ctx context.Context, ds *orm.Dataset, userID, userName st
 		docRow := orm.Document{
 			ID: documentID, DatasetID: ds.ID, DisplayName: displayName,
 			DocumentType: fileDocumentTypeFromName(displayName),
-			Tags:         mustJSON([]string{}), FileID: documentID,
+			Tags:         mustJSON(documentTags), FileID: documentID,
 			PDFConvertResult: docExt.ConvertStatus, Ext: mustJSON(docExt),
 			BaseModel: orm.BaseModel{CreateUserID: userID, CreateUserName: userName, CreatedAt: now, UpdatedAt: now},
 		}
 		tExt := taskExt{
 			TaskType: string(TaskTypeParseUploaded), DisplayName: displayName,
-			DataSourceType: "MARKET", DocumentTags: []string{},
+			DataSourceType: "MARKET", DocumentTags: documentTags,
 			Files: []TaskFile{{DisplayName: displayName, StoredName: storedName, StoredPath: finalPath, FileSize: size, RelativePath: file.RelativePath, ContentType: contentType}},
 		}
 		taskRow := orm.Task{
@@ -95,22 +134,17 @@ func ImportMarketFiles(ctx context.Context, ds *orm.Dataset, userID, userName st
 			}
 			return tx.Create(&taskRow).Error
 		}); err != nil {
-			return nil, fmt.Errorf("create document/task rows failed: %w", err)
+			return nil, 0, fmt.Errorf("create document/task rows failed: %w", err)
 		}
 		recalcAffectedFolderStats(ctx, ds.ID, "")
 		taskIDs = append(taskIDs, taskID)
 	}
 
-	// startTasksInternal needs a request for user context and the parsing
-	// service call; a synthetic request carries the same ctx and user headers.
-	r := (&http.Request{Header: make(http.Header)}).WithContext(ctx)
-	r.Header.Set("X-User-Id", userID)
-	r.Header.Set("X-User-Name", userName)
 	results, err := startTasksInternal(r, ds.ID, taskIDs)
 	if err != nil {
-		return nil, fmt.Errorf("submit parse tasks failed: %w", err)
+		return nil, 0, fmt.Errorf("submit parse tasks failed: %w", err)
 	}
-	return &MarketImportResult{DatasetID: ds.ID, Submitted: len(results), TaskIDs: taskIDs}, nil
+	return taskIDs, len(results), nil
 }
 
 // copyMarketFile copies a downloaded file into the dataset doc dir.

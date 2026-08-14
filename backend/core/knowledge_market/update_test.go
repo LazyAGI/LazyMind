@@ -60,6 +60,7 @@ func seedPublishedItem(t *testing.T, db *gorm.DB, id, packageURL string) {
 		Name:            "知识库 " + id,
 		Description:     "desc",
 		Tags:            json.RawMessage(`[]`),
+		SourceOptions:   json.RawMessage(`{}`),
 		SampleQuestions: json.RawMessage(`[]`),
 		PackageURL:      packageURL,
 		PackageRevision: "master",

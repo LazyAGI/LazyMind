@@ -1,63 +1,86 @@
 # Knowledge market catalog — source of truth for knowledge_market_items.
 # Loaded at startup by knowledge_market.SeedCatalog(); mirrors datasource_catalog.yaml.
 #
-# M2 测试用例（真实可下载的 ModelScope 公开数据集）：
-#   - weather-qa  : 普通 git 仓库（无 LFS），clone 即真实内容，全部文件约 180KB，解析快
-#   - ccvg-law    : LFS 仓库，clone 得到指针，安装时自动走 host 表 resolve 兜底
-#   - nlpcc2018   : 普通 git 仓库，单 CSV 小文件，最轻量
-# 用法：给任意条目填 package_url + package_revision 后重启 core，调用
-#   POST /api/core/knowledge-market/items/{id}:install 即可测试后台安装链路。
+# 本期正式接入 4 个典型领域知识库：
+#   1. lawtext/laws                     — 中国法律法规 Markdown 仓库（全部状态）
+#   2. ImCa0/just-laws                  — 现行法律 Markdown 仓库
+#   3. salpt/chinatax-policy-corpus     — 税务政策 Parquet 数据集（逐行成文）
+#   4. microsoft/generative-ai-for-beginners — 生成式 AI 课程（zh-CN + 英文原版）
+#
+# source_adapter 选择对应的 source 包适配器；source_options 为该适配器的自由配置。
+# 未配置 source_adapter 的条目仍使用旧行为：下载后所有文件直接入库。
 # 字段说明：package_url 为唯一下载入口（.git 结尾 → git 仓库；否则直链 + zip 解压）；
 # package_revision 可选，固定 git 分支/tag；文件清单与 sha256 安装时实时生成，不在目录维护。
-# 注意：catalog 不再维护 version / version_date / version_note。前端不展示版本号，
-# "更新时间"以用户实际安装/更新成功时间（knowledge_market_installs.installed_at）为准；
-# 是否真正有更新由安装快照（git commit / 文件 sha256）与远端内容比对决定。
 # online_access_url 为「在线查询」使用的公开网页地址（产品维护）：必须可被模型直接抓取
 # 正文（url_fetch），不能是 git 仓库/zip 直链/需登录页面；为空时前端不展示「在线查询」。
 
 knowledge_market_items:
-  - id: weather-qa
-    category: industry       # industry | evaluation
-    name: 中文天气预报生成知识集（Weather）
-    description: DAMO_NLP 天气信息生成测试集，覆盖晴雨、气温、空气质量、预警等级等结构化天气属性与对应天气播报文本，可用于对话知识库与问答检索测试。
-    icon: 🌤️
-    domain: 生活服务
-    tags: [天气, 中文, 测试]
-    package_url: https://www.modelscope.cn/datasets/DAMO_NLP/weather_infomation_generation.git
-    package_revision: master
-    online_access_url: https://www.modelscope.cn/datasets/DAMO_NLP/weather_infomation_generation/summary
-    data_source: ModelScope 公开数据集 DAMO_NLP/weather_infomation_generation
-    sample_questions:
-      - 今日天气类型为晴、最低气温26℃、最高气温31℃时，天气播报应如何组织？
-      - 空气质量为严重污染时，天气预报一般会给出什么建议？
-      - 出现道路结冰黄色预警时，天气播报应如何提醒出行？
-
-  - id: ccvg-law
-    category: industry       # industry | evaluation
-    name: 刑事裁判文书知识集（CCVG）
-    description: 中文刑事案件裁判文书语料，包含事实描述与法院观点，可用于法律人工智能与法院观点生成研究。
+  - id: lawtext-laws
+    category: industry
+    name: 中国法律法规在线文库
+    description: 来自国家法律法规数据库的中国法律法规 Markdown 语料，覆盖宪法、法律、行政法规、司法解释、监察法规及附录，包含有效、修改、废止等全部状态文件，适合法条检索与 RAG 知识库。
     icon: ⚖
     domain: 法律
-    tags: [法律, 裁判文书, LFS]
-    package_url: https://www.modelscope.cn/datasets/ZhitianHou/CCVG.git
-    package_revision: master
-    online_access_url: https://www.modelscope.cn/datasets/ZhitianHou/CCVG/summary
-    data_source: ModelScope 公开数据集 ZhitianHou/CCVG
+    tags: [法律, 法律法规, Markdown]
+    package_url: https://github.com/lawtext/laws.git
+    package_revision: main
+    online_access_url: https://github.com/lawtext/laws
+    data_source: GitHub lawtext/laws
+    source_adapter: lawtext_laws
+    source_options:
+      include_status: all
     sample_questions:
-      - 根据裁判文书事实部分生成法院推理部分。
-      - 该案被告人涉嫌什么罪名？
+      - 根据现行宪法，全国人民代表大会的职权有哪些？
+      - 合同解除的法律效果是什么？
 
-  - id: nlpcc2018
-    category: industry       # industry | evaluation
-    name: 中文语法纠错知识集（NLPCC2018）
-    description: NLPCC 2018 中文语法纠错测试集，2,000 条带编辑标注的句子对，适用于语言校验与文本纠错知识库测试。
-    icon: ✏️
-    domain: 语言
-    tags: [语法纠错, 中文, 测试]
-    package_url: https://www.modelscope.cn/datasets/DAMO_NLP/NLPCC2018-test.git
+  - id: just-laws
+    category: industry
+    name: 国家现行法律知识库
+    description: 收录 311 部现行有效法律的 Markdown 语料，按宪法、民商法、刑法、行政法、经济法、社会法、程序法等部门组织，并保留编章节条结构，适合法律问答与精细切片。
+    icon: ⚖
+    domain: 法律
+    tags: [法律, 现行法律, Markdown]
+    package_url: https://github.com/ImCa0/just-laws.git
     package_revision: master
-    online_access_url: https://www.modelscope.cn/datasets/DAMO_NLP/NLPCC2018-test/summary
-    data_source: ModelScope 公开数据集 DAMO_NLP/NLPCC2018-test
+    online_access_url: https://github.com/ImCa0/just-laws
+    data_source: GitHub ImCa0/just-laws
+    source_adapter: just_laws
+    source_options: {}
     sample_questions:
-      - 展示一条中文语法纠错样例。
-      - 语法纠错数据的字段含义是什么？
+      - 民法典中合同编的主要章节有哪些？
+      - 刑法关于正当防卫是如何规定的？
+
+  - id: chinatax-policy
+    category: industry
+    name: 中国税务政策法规知识库
+    description: 从国家税务总局政策法规库采集的税务政策语料，共 5,593 条，覆盖税务规范性文件、财税文件、政策解读、法律和行政法规；入库时逐条生成 Markdown 文档。
+    icon: 🏛
+    domain: 政务
+    tags: [税务, 政策法规, 政务]
+    package_url: https://huggingface.co/datasets/salpt/chinatax-policy-corpus/resolve/main/data/train-00000-of-00001.parquet
+    package_revision: main
+    online_access_url: https://huggingface.co/datasets/salpt/chinatax-policy-corpus
+    data_source: HuggingFace salpt/chinatax-policy-corpus
+    source_adapter: chinatax_policy
+    source_options: {}
+    sample_questions:
+      - 小型微利企业享受哪些企业所得税优惠？
+      - 增值税留抵退税政策适用哪些行业？
+
+  - id: generative-ai-for-beginners
+    category: industry
+    name: 生成式人工智能知识库
+    description: 微软生成式 AI 入门课程，覆盖 LLM、模型选择、提示工程、向量检索、RAG、Agent、微调、AI 安全与 LLMOps 等主题；同时入库 zh-CN 翻译与英文原版课程文档。
+    icon: 🤖
+    domain: 互联网
+    tags: [生成式AI, RAG, Agent, 课程]
+    package_url: https://github.com/microsoft/generative-ai-for-beginners.git
+    package_revision: main
+    online_access_url: https://microsoft.github.io/generative-ai-for-beginners/
+    data_source: GitHub microsoft/generative-ai-for-beginners
+    source_adapter: genai_beginners
+    source_options:
+      include_original_en: true
+    sample_questions:
+      - 什么是检索增强生成（RAG），它适合解决什么问题？
+      - 提示工程中常见的技巧有哪些？

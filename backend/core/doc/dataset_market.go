@@ -189,6 +189,36 @@ func resetMarketInstallInTx(ctx context.Context, tx *gorm.DB, userID, marketItem
 	return nil
 }
 
+// CleanupMarketDataset removes documents left by a partially completed market
+// import and then deletes the residual dataset. It is a no-op when the dataset
+// is missing or already deleted.
+func CleanupMarketDataset(ctx context.Context, userID, datasetID string) error {
+	datasetID = strings.TrimSpace(datasetID)
+	if datasetID == "" {
+		return nil
+	}
+	db := corestore.DB()
+	if db == nil {
+		return fmt.Errorf("store not initialized")
+	}
+	var ds orm.Dataset
+	if err := db.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", datasetID).Take(&ds).Error; err != nil {
+		if isRecordNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("query dataset failed: %w", err)
+	}
+	// Deleting the residual dataset must continue even when clearing documents
+	// fails, so the install row is never left pointing at an orphan dataset.
+	if _, err := ClearMarketDatasetDocuments(ctx, &ds); err != nil {
+		log.Logger.Error().
+			Err(err).
+			Str("dataset_id", datasetID).
+			Msg("clear market dataset documents failed; deleting residual dataset anyway")
+	}
+	return DeleteMarketDataset(ctx, userID, datasetID)
+}
+
 // DeleteMarketDataset removes a personal dataset created by a failed official
 // knowledge base install: it deletes the KB on the algo service and
 // soft-deletes the dataset row so the residual dataset no longer appears in

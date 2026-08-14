@@ -2,6 +2,7 @@ package knowledge_market
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -121,6 +122,32 @@ knowledge_market_items:
 	}
 	if n := countItems(t, db); n != 0 {
 		t.Fatalf("expected no rows after failed seed, got %d", n)
+	}
+}
+
+func TestSeedCatalogParsesSourceAdapterOptions(t *testing.T) {
+	db := newTestDB(t)
+	path := writeCatalog(t, `
+knowledge_market_items:
+  - id: adapted
+    category: industry
+    name: 适配源
+    package_url: https://example.com/data.parquet
+    source_adapter: chinatax_policy
+    source_options:
+      include_original_en: true
+      languages: [zh-CN, en]
+`)
+	if err := SeedCatalog(context.Background(), db, path); err != nil {
+		t.Fatalf("seed catalog: %v", err)
+	}
+
+	row := getItem(t, db, "adapted")
+	if row.SourceAdapter != "chinatax_policy" {
+		t.Fatalf("unexpected source_adapter %q", row.SourceAdapter)
+	}
+	if !jsonEqual(row.SourceOptions, json.RawMessage(`{"include_original_en":true,"languages":["zh-CN","en"]}`)) {
+		t.Fatalf("unexpected source_options %s", row.SourceOptions)
 	}
 }
 

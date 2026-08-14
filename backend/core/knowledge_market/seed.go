@@ -24,18 +24,20 @@ import (
 
 // catalogItem mirrors one entry of config/knowledge_market_catalog.yaml.
 type catalogItem struct {
-	ID              string   `yaml:"id"`
-	Category        string   `yaml:"category"`
-	Name            string   `yaml:"name"`
-	Description     string   `yaml:"description"`
-	Icon            string   `yaml:"icon"`
-	Domain          string   `yaml:"domain"`
-	Tags            []string `yaml:"tags"`
-	PackageURL      string   `yaml:"package_url"`
-	PackageRevision string   `yaml:"package_revision"`
-	OnlineAccessURL string   `yaml:"online_access_url"`
-	DataSource      string   `yaml:"data_source"`
-	SampleQuestions []string `yaml:"sample_questions"`
+	ID              string         `yaml:"id"`
+	Category        string         `yaml:"category"`
+	Name            string         `yaml:"name"`
+	Description     string         `yaml:"description"`
+	Icon            string         `yaml:"icon"`
+	Domain          string         `yaml:"domain"`
+	Tags            []string       `yaml:"tags"`
+	PackageURL      string         `yaml:"package_url"`
+	PackageRevision string         `yaml:"package_revision"`
+	OnlineAccessURL string         `yaml:"online_access_url"`
+	DataSource      string         `yaml:"data_source"`
+	SourceAdapter   string         `yaml:"source_adapter"`
+	SourceOptions   map[string]any `yaml:"source_options"`
+	SampleQuestions []string       `yaml:"sample_questions"`
 }
 
 type catalogFileYAML struct {
@@ -122,6 +124,13 @@ func upsertItem(tx *gorm.DB, now time.Time, sortOrder int, item catalogItem) err
 	if string(questionsJSON) == "null" {
 		questionsJSON = []byte("[]")
 	}
+	optionsJSON, err := json.Marshal(item.SourceOptions)
+	if err != nil {
+		return err
+	}
+	if string(optionsJSON) == "null" {
+		optionsJSON = []byte("{}")
+	}
 
 	desired := orm.KnowledgeMarketItem{
 		ID:              item.ID,
@@ -135,6 +144,8 @@ func upsertItem(tx *gorm.DB, now time.Time, sortOrder int, item catalogItem) err
 		PackageRevision: item.PackageRevision,
 		OnlineAccessURL: item.OnlineAccessURL,
 		DataSource:      item.DataSource,
+		SourceAdapter:   strings.TrimSpace(item.SourceAdapter),
+		SourceOptions:   json.RawMessage(optionsJSON),
 		SampleQuestions: json.RawMessage(questionsJSON),
 		Status:          "published",
 		SortOrder:       sortOrder,
@@ -167,6 +178,8 @@ func upsertItem(tx *gorm.DB, now time.Time, sortOrder int, item catalogItem) err
 			"package_revision":  desired.PackageRevision,
 			"online_access_url": desired.OnlineAccessURL,
 			"data_source":       desired.DataSource,
+			"source_adapter":    desired.SourceAdapter,
+			"source_options":    desired.SourceOptions,
 			"sample_questions":  desired.SampleQuestions,
 			"status":            "published",
 			"sort_order":        sortOrder,
@@ -187,6 +200,8 @@ func rowContentEqual(row, desired *orm.KnowledgeMarketItem) bool {
 		row.PackageRevision == desired.PackageRevision &&
 		row.OnlineAccessURL == desired.OnlineAccessURL &&
 		row.DataSource == desired.DataSource &&
+		row.SourceAdapter == desired.SourceAdapter &&
+		jsonEqual(row.SourceOptions, desired.SourceOptions) &&
 		jsonEqual(row.SampleQuestions, desired.SampleQuestions)
 }
 

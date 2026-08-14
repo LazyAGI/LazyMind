@@ -32,6 +32,11 @@ type KnowledgeMarketItem struct {
 	OnlineAccessURL string `gorm:"column:online_access_url;type:varchar(1024);not null;default:''"`
 	DataSource      string `gorm:"column:data_source;type:text;not null;default:''"`
 
+	// SourceAdapter selects the source-specific ingestion rules. Empty means the
+	// legacy behavior of importing every downloaded file.
+	SourceAdapter string          `gorm:"column:source_adapter;type:varchar(64);not null;default:''"`
+	SourceOptions json.RawMessage `gorm:"column:source_options;type:json;not null;default:'{}'"`
+
 	SampleQuestions json.RawMessage `gorm:"column:sample_questions;type:json;not null;default:'[]'"`
 	Status          string          `gorm:"column:status;type:varchar(32);not null;default:'published';index:idx_knowledge_market_items_category_status,priority:1"` // published | offline
 	SortOrder       int             `gorm:"column:sort_order;not null;default:0"`
