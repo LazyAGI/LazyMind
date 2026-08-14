@@ -223,10 +223,6 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
             />
           </div>
           <div className="model-provider-cloud-doc-resource-controls">
-            <div className="model-provider-cloud-doc-directory-count">
-              <strong>{vm.localSourceCount}</strong>
-              <span>{t("modelProvider.cloudDocuments.directoryCountUnit")}</span>
-            </div>
             <button
               type="button"
               className="model-provider-cloud-doc-resource-action"

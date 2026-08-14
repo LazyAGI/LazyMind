@@ -1232,10 +1232,11 @@
 }
 
 .model-provider-service-logo-cyan {
-  background: #ecfeff;
+  border-color: rgba(8, 145, 178, 0.32);
+  background: #0891b2;
 
   .model-provider-service-logo-icon {
-    color: #0891b2;
+    color: #fff;
   }
 }
 
@@ -2224,24 +2225,6 @@
   }
 }
 
-.model-provider-cloud-doc-directory-count {
-  display: inline-flex;
-  align-items: baseline;
-  justify-content: flex-end;
-  gap: 4px;
-  color: #667085;
-
-  strong {
-    color: #344054;
-    font-size: 16px;
-    font-weight: 600;
-  }
-
-  span {
-    font-size: 12px;
-  }
-}
-
 .model-provider-cloud-doc-resource-status.ant-tag {
   min-width: 72px;
   margin: 0;
@@ -2330,10 +2313,6 @@
     grid-column: 2;
     align-items: flex-start;
     justify-self: flex-start;
-  }
-
-  .model-provider-cloud-doc-directory-count {
-    justify-content: flex-start;
   }
 
   .model-provider-cloud-doc-quick-actions {

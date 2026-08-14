@@ -257,7 +257,7 @@ function getProviderLogoUrl(name: string) {
     [/claude|anthropic/, "anthropic.com"],
     [/deepseek/, "deepseek.com"],
     [/doubao|volc|ark/, "volcengine.com"],
-    [/glm|bigmodel|zhipu/, "bigmodel.cn"],
+    [/glm|bigmodel|zhipu/, "zhipuai.cn"],
     [/kimi|moonshot/, "moonshot.cn"],
     [/minimax/, "minimaxi.com"],
     [/openai/, "openai.com"],
