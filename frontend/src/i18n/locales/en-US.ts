@@ -860,6 +860,12 @@ const enUS = {
         "Connect LazyMind to your messaging apps and continue conversations and tasks from the same account.",
       quickSubtitle: "Continue conversations and tasks in your messaging apps",
       connectedCount: "{{count}} connected",
+      connectedDetailsTitle: "Connected channel accounts",
+      connectedDetailsHint: "Select an account to show its channel QR code again below.",
+      loadingAccounts: "Loading connected accounts…",
+      retryAccounts: "Reload",
+      showAccountQr: "Show the {{provider}} QR code for {{account}} below",
+      showQr: "Show QR code",
       manageSettings: "Channel connection settings",
       expiresAt: "Expires at {{time}}",
       wechatQuickDescription:
