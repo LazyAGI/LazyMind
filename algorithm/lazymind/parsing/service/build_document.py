@@ -39,6 +39,10 @@ _CODE_FILE_PATTERNS = (
 def _quiet_trace(kbs):
     def call(kb_group, *args, **kwargs):
         set_trace_context({'enabled': False})
+        llm_config = kwargs.pop('llm_config', None)
+        if llm_config:
+            from lazymind.model_config import inject_model_config
+            inject_model_config(llm_config)
         return kbs[kb_group](*args, **kwargs)
     return call
 

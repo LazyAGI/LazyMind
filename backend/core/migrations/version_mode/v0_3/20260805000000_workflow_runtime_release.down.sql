@@ -1,6 +1,9 @@
 -- +migrate Dialect postgres
+ALTER TABLE conversations DROP COLUMN IF EXISTS chat_executor;
 ALTER TABLE plugin_transition_commands DROP COLUMN IF EXISTS retry_origin;
 DROP TABLE IF EXISTS external_agent_operations;
+DROP TABLE IF EXISTS external_chat_hosts;
+DROP TABLE IF EXISTS external_chat_run_events;
 DROP TABLE IF EXISTS external_agent_runs;
 DROP TABLE IF EXISTS external_agent_bindings;
 DROP TABLE IF EXISTS public.episode_memories;
@@ -63,8 +66,11 @@ BEGIN
 END $$;
 
 -- +migrate Dialect sqlite
+ALTER TABLE conversations DROP COLUMN chat_executor;
 ALTER TABLE plugin_transition_commands DROP COLUMN retry_origin;
 DROP TABLE IF EXISTS external_agent_operations;
+DROP TABLE IF EXISTS external_chat_hosts;
+DROP TABLE IF EXISTS external_chat_run_events;
 DROP TABLE IF EXISTS external_agent_runs;
 DROP TABLE IF EXISTS external_agent_bindings;
 DROP TABLE IF EXISTS episode_memories;

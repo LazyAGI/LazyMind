@@ -121,12 +121,13 @@ type DiscardDraftResponse struct {
 }
 
 type ListSkillsRequest struct {
-	UserID   string
-	Keyword  string
-	Category string
-	Tags     []string
-	Offset   int
-	Limit    int
+	UserID      string
+	Keyword     string
+	Category    string
+	Tags        []string
+	Offset      int
+	Limit       int
+	EnabledOnly bool
 }
 
 type ListSkillsResponse struct {

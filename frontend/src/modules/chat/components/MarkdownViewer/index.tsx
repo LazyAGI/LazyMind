@@ -21,6 +21,7 @@ import {
 import { customSchema } from "./config";
 import rehypeRaw from "rehype-raw";
 import {
+	basenameFromPath,
   resolveCoreAssetUrl,
   resolveMarkdownImageUrlAsync,
 } from "@/modules/knowledge/utils/imageUrl";
@@ -201,7 +202,25 @@ const PreComponent = (props: any) => {
 
 const LinkComponent = (props: any) => {
   const { isStreaming, markSources } = useContext(MarkdownRenderContext);
-  const href = props.href;
+  const href = typeof props.href === "string" ? props.href : "";
+  const managedFile = href.includes("/static-files/");
+  const [resolvedHref, setResolvedHref] = useState(() =>
+    managedFile ? "" : href,
+  );
+  useEffect(() => {
+    let cancelled = false;
+    if (!managedFile) {
+      setResolvedHref(href);
+      return () => { cancelled = true; };
+    }
+    setResolvedHref("");
+    resolveMarkdownImageUrlAsync(href).then((url) => {
+      if (!cancelled) setResolvedHref(url);
+    }).catch(() => {
+      if (!cancelled) setResolvedHref("");
+    });
+    return () => { cancelled = true; };
+  }, [href, managedFile]);
   const sourceIndex = getSourceIndex(href);
 
   if (sourceIndex) {
@@ -239,7 +258,15 @@ const LinkComponent = (props: any) => {
   }
 
   return (
-    <a href={props.href} target="_blank">
+    <a
+      href={managedFile && resolvedHref
+        ? `${resolvedHref}${resolvedHref.includes("?") ? "&" : "?"}download=1`
+        : resolvedHref || undefined}
+      target="_blank"
+      rel="noreferrer"
+      download={managedFile ? basenameFromPath(href) : undefined}
+      aria-disabled={managedFile && !resolvedHref}
+    >
       {props.children}
     </a>
   );

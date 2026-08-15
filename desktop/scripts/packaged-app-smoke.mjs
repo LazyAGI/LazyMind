@@ -72,6 +72,7 @@ export function packagedRuntimePaths(appPath, platform = process.platform) {
     resourcesRoot,
     repoRoot: platformPath.join(resourcesRoot, "app"),
     manager: platformPath.join(resourcesRoot, "bin", platform === "win32" ? "local-runtime-manager.exe" : "local-runtime-manager"),
+    agentConnector: platformPath.join(resourcesRoot, "bin", platform === "win32" ? "lazymind.exe" : "lazymind"),
   };
 }
 

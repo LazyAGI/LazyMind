@@ -45,7 +45,7 @@ import ChatSelector, { type ChatSelectorImperativeProps } from "../ChatSelector"
 import PromptModal, { PromptImperativeProps } from "../PromptModal";
 import { appendPromptToDraft } from "../PromptModal/promptLibrary";
 import ChatConfigModal from "./ChatConfigModal";
-import type { ConversationWorkflowSettings } from "../../utils/request";
+import type { ConversationRuntimeSettings } from "../../utils/request";
 import { WorkflowSessionApi } from "../../utils/request";
 import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
 import BatchChatComponent, { BatchChatImperativeProps } from "../BatchChat";
@@ -69,6 +69,13 @@ import { useChatNewMessageStore } from "@/modules/chat/store/chatNewMessage";
 import { useTranslation } from "react-i18next";
 import { PromptServiceApi } from "@/modules/chat/utils/request";
 import { Popover, Tag } from "antd";
+import type {
+  ChatFileList,
+  ChatInputImperativeProps,
+  SendMessageParams,
+} from "./types";
+
+export type { ChatFileList, ChatInputImperativeProps, SendMessageParams } from "./types";
 
 /**
  * Shows a button in the toolbar when there are dismissed workflow sessions.
@@ -334,24 +341,6 @@ function preprocessUpload(
   return { filesToAdd, clearFirst, toasts };
 }
 
-export interface SendMessageParams {
-  text: string;
-  mentions?: ChatMention[];
-  citeMessage?: string;
-  citeMessages?: string[];
-  citeHistoryIds?: (string | undefined)[];
-  clearInput?: boolean;
-  fileList?: ChatFileList[];
-  fileListRef?: React.RefObject<ImageUploadImperativeProps | null>;
-  files?: (RcFile & { uri: string })[];
-  create_time?: string;
-  thinking_depth?: ThinkingDepth;
-  /** When true, the payload will include run_in_background=true and the task center badge will increment. */
-  run_in_background?: boolean;
-  /** Structured answers from an AskCard submission; forwarded to the backend as ask_answers_structured. */
-  ask_answers_structured?: import("@/modules/chat/components/AskCard").AskAnswersStructured;
-}
-
 interface ChatInputProps {
   value: string;
   onChange: (value: string) => void;
@@ -376,9 +365,9 @@ interface ChatInputProps {
   onStopGeneration?: () => void;
   embeddingReady?: boolean | null;
   /** Called when workflow settings change (e.g. from the chat config popover). */
-  onWorkflowSettingsChange?: (settings: ConversationWorkflowSettings) => void;
+  onConversationSettingsChange?: (settings: ConversationRuntimeSettings) => void;
   /** Initial workflow settings to pre-populate the config popover. */
-  initialWorkflowSettings?: ConversationWorkflowSettings;
+  initialConversationSettings?: ConversationRuntimeSettings;
   /** When true, the allow-workflow toggle in config is locked (workflow session is active). */
   hasWorkflowSession?: boolean;
   /** Optional case-driven category selectors shown in the welcome composer. */
@@ -418,26 +407,9 @@ export interface ShowcaseSelection {
   onSecondaryChange?: (value: string) => void;
 }
 
-export interface ChatFileList {
-  uid: string;
-  name: string;
-  base64: string;
-  /** Local object URL or data URL for preview / open. */
-  previewUrl?: string;
-  suffix: string;
-  size: string;
-}
-
 export interface SkillDepositStats {
   userTurns: number;
   toolCallTurns: number;
-}
-
-export interface ChatInputImperativeProps {
-  clearFiles: () => void;
-  element: HTMLDivElement | null;
-  focus: () => void;
-  uploadFiles: (files: File[]) => void;
 }
 
 interface SendButtonProps {
@@ -517,8 +489,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       skillDepositStats,
       skillDepositDisabledReason,
       onSkillDeposit,
-      onWorkflowSettingsChange,
-      initialWorkflowSettings,
+      onConversationSettingsChange,
+      initialConversationSettings,
       hasWorkflowSession,
       showcaseSelection,
       runInBackground = false,
@@ -539,7 +511,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const { t } = useTranslation();
     const [text, setText] = useState("");
     const [mentions, setMentions] = useState<ChatMention[]>([]);
-    const [contextRuntimeSettings, setContextRuntimeSettings] = useState(initialWorkflowSettings);
+    const [contextRuntimeSettings, setContextRuntimeSettings] = useState(initialConversationSettings);
     const [contextUsageReset, setContextUsageReset] = useState(0);
     const [addMenuOpen, setAddMenuOpen] = useState(false);
     const disabledNoticeId = useId();
@@ -547,8 +519,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const hasSentMessageRef = useRef(false);
 
     useEffect(() => {
-      setContextRuntimeSettings(initialWorkflowSettings);
-    }, [initialWorkflowSettings]);
+      setContextRuntimeSettings(initialConversationSettings);
+    }, [initialConversationSettings]);
 
     const [fileList, setFileList] = useState<ChatFileList[]>([]);
     const { setPendingMessage, clearPendingMessage } = useChatMessageStore();
@@ -1342,11 +1314,11 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         ? sessionId
                         : undefined
                     }
-                    initialSettings={initialWorkflowSettings}
+                    initialSettings={initialConversationSettings}
                     hasWorkflowSession={hasWorkflowSession}
                     onSave={(settings) => {
                       setContextRuntimeSettings(settings);
-                      onWorkflowSettingsChange?.(settings);
+                      onConversationSettingsChange?.(settings);
                     }}
                   />
                   {sessionId && !sessionId.startsWith("temp_") && (

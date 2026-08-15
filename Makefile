@@ -1,5 +1,5 @@
 # Code style: Python (flake8) + Go (gofmt). Mirrors algorithm/lazyllm Makefile pattern.
-.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary lint-workflow-naming lint-migration-immutability test test-hermetic test-hermetic-setup test-hermetic-check build up up-build local-runtime-manager-build local-up local-up-lan local-down local-clean local-reset local-win-doctor local-win-build local-win-up local-win-up-lan local-win-down local-win-status local-win-clean local-win-reset down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-darwin-arm64 desktop-darwin-arm64-dmg desktop-darwin-arm64-clean desktop-windows-x64 desktop-windows-x64-installer desktop-windows-x64-clean desktop-cache-clean desktop-clean
+.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary lint-workflow-naming lint-migration-immutability test test-hermetic test-hermetic-setup test-hermetic-check build up up-build local-runtime-manager-build lazymind-cli-build local-up local-up-lan local-down local-clean local-reset local-win-doctor local-win-build local-win-up local-win-up-lan local-win-down local-win-status local-win-clean local-win-reset down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-darwin-arm64 desktop-darwin-arm64-dmg desktop-darwin-arm64-clean desktop-windows-x64 desktop-windows-x64-installer desktop-windows-x64-clean desktop-cache-clean desktop-clean
 .DEFAULT_GOAL := help
 
 LOCAL_CONFIG_ENV ?= local/config.env
@@ -24,6 +24,7 @@ LOCAL_BUILD_DIR := $(CURDIR)/local/build
 override export LAZYMIND_LOCAL_BUILD_ROOT := $(LOCAL_BUILD_DIR)
 override LOCAL_RUNTIME_MANAGER_BIN := $(LOCAL_BUILD_DIR)/bin/local-runtime-manager
 override LOCAL_RUNTIME_MANAGER_WIN_BIN := $(LOCAL_BUILD_DIR)/bin/local-runtime-manager.exe
+override LAZYMIND_CLI_BIN := $(LOCAL_BUILD_DIR)/bin/lazymind
 LOCAL_WIN_SCRIPT := $(CURDIR)/local/scripts/local-win.ps1
 DESKTOP_WIN_SCRIPT := $(CURDIR)/desktop/scripts/build-windows-x64.ps1
 LAZYMIND_LOCAL_DOWN_TIMEOUT ?= 150s
@@ -177,8 +178,8 @@ export LAZYMIND_FRONTEND_PORT ?= 8090
 PYTHON_DIRS := algorithm backend evo
 
 # Go dirs to lint
-GO_DIRS := backend/core local/local-proxy local/local-runtime-manager
-GO_MODULE_DIRS := backend/core backend/scan-control-plane backend/file-watcher local/local-proxy local/local-runtime-manager tests/backend/core
+GO_DIRS := backend/core local/local-proxy local/local-runtime-manager local/lazymind-cli
+GO_MODULE_DIRS := backend/core backend/scan-control-plane backend/file-watcher local/local-proxy local/local-runtime-manager local/lazymind-cli tests/backend/core
 GOLANGCI_LINT_VERSION ?= v2.12.2
 GOLANGCI_LINT ?= $(shell command -v golangci-lint 2>/dev/null || printf '%s/bin/golangci-lint' "$$($(GO) env GOPATH)")
 
@@ -445,6 +446,10 @@ local-runtime-manager-build:
 	@mkdir -p "$(dir $(LOCAL_RUNTIME_MANAGER_BIN))"
 	@cd local/local-runtime-manager && $(GO) build -buildvcs=false -o "$(LOCAL_RUNTIME_MANAGER_BIN)" .
 
+lazymind-cli-build:
+	@mkdir -p "$(dir $(LAZYMIND_CLI_BIN))"
+	@cd local/lazymind-cli && $(GO) build -buildvcs=false -o "$(LAZYMIND_CLI_BIN)" ./cmd/lazymind
+
 desktop-darwin-arm64:
 	@bash desktop/scripts/build-darwin-arm64.sh
 
@@ -506,10 +511,10 @@ desktop-clean:
 	done
 endif
 
-local-up: local-runtime-manager-build
+local-up: local-runtime-manager-build lazymind-cli-build
 	@"$(LOCAL_RUNTIME_MANAGER_BIN)" up
 
-local-up-lan: local-runtime-manager-build
+local-up-lan: local-runtime-manager-build lazymind-cli-build
 	@LAZYMIND_LOCAL_NETWORK_PROFILE=lan LAZYMIND_LOCAL_AUTO_LOGIN_ALLOW_LAN=true "$(LOCAL_RUNTIME_MANAGER_BIN)" up
 
 local-down:

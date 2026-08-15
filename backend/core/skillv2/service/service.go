@@ -656,6 +656,9 @@ func (s *SkillService) listSkillsQuery(ctx context.Context, req ListSkillsReques
 }
 
 func (s *SkillService) applyListSkillFilters(query *gorm.DB, req ListSkillsRequest) *gorm.DB {
+	if req.EnabledOnly {
+		query = query.Where("is_enabled = ? AND head_revision_id IS NOT NULL", true)
+	}
 	if req.Category != "" {
 		query = query.Where("category = ?", req.Category)
 	}

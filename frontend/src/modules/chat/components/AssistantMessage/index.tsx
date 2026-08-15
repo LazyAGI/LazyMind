@@ -21,6 +21,7 @@ import {
 } from "@/api/generated/chatbot-client";
 import { AgentAppsAuth } from "@/components/auth";
 import { isAskPendingReadOnly } from "@/modules/chat/utils/message";
+import type { ExternalExecutionProjection } from "@/modules/chat/utils/message";
 import { ChatServiceApi, decideToolLimit } from "@/modules/chat/utils/request";
 import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
 import { WorkflowPanel } from "@/modules/chat/components/WorkflowPanel";
@@ -77,6 +78,76 @@ interface FeedbackState {
   localFeedbackType: FeedBackChatHistoryRequestTypeEnum | undefined;
   localFeedbackHistoryId: string | undefined;
   targetHistoryId: string | undefined;
+}
+
+function ExternalExecutionSummary({
+  execution,
+}: {
+  execution?: ExternalExecutionProjection;
+}) {
+  const { t } = useTranslation();
+  if (!execution) {
+    return null;
+  }
+  const provider =
+    execution.provider.charAt(0).toUpperCase() + execution.provider.slice(1);
+  const status = t(`chat.executionStatus.${execution.status}`);
+  const workflows = execution.workflows
+    .map((workflow) => `${workflow.workflow_id} · ${workflow.status}`)
+    .join(", ");
+  return (
+    <details
+      className={`external-execution external-execution-${execution.status}`}
+    >
+      <summary>
+        <span className="external-execution-dot" />
+        <span>{provider}</span>
+        <span className="external-execution-status">{status}</span>
+      </summary>
+      <div className="external-execution-details">
+        <span>
+          {t("chat.executionCalls", { count: execution.invocation.total })}
+          {execution.invocation.tools.length > 0
+            ? ` · ${execution.invocation.tools.join(", ")}`
+            : ""}
+        </span>
+        {execution.recovery_count > 0 && (
+          <span>
+            {t("chat.executionRecovery", { count: execution.recovery_count })}
+          </span>
+        )}
+        {workflows && (
+          <span>
+            {t("chat.executionWorkflow")} · {workflows}
+          </span>
+        )}
+        {execution.artifact_revision_count > 0 && (
+          <span>
+            {t("chat.executionArtifacts", { count: execution.artifact_count })}
+            {" · "}
+            {t("chat.executionVersions", {
+              count: execution.artifact_revision_count,
+            })}
+          </span>
+        )}
+        {execution.host_id && (
+          <span>
+            {t("chat.executionHost")} · {execution.host_id} ·{" "}
+            {t(
+              execution.host_online
+                ? "chat.executionHostOnline"
+                : "chat.executionHostOffline",
+            )}
+          </span>
+        )}
+        {execution.error_message && (
+          <span className="external-execution-error">
+            {execution.error_message}
+          </span>
+        )}
+      </div>
+    </details>
+  );
 }
 
 type FeedbackAction =
@@ -220,15 +291,6 @@ const AssistantMessage = (props: any) => {
     localFeedbackHistoryId: item?.history_id,
     targetHistoryId: undefined,
   });
-
-  const loadActiveSession = useWorkflowStore((s) => s.loadActiveSession);
-  // Eagerly load the workflow session so the panel appears without waiting for component mount.
-  const isLast = index === length - 1;
-  useEffect(() => {
-    if (isLast && sessionId) {
-      loadActiveSession(sessionId);
-    }
-  }, [isLast, sessionId, loadActiveSession]);
 
   const workflowSession = useWorkflowStore((s) =>
     sessionId ? s.sessionByConversation[sessionId] ?? null : null,
@@ -1028,6 +1090,7 @@ const AssistantMessage = (props: any) => {
         />
         <div className="chat-bot-box-multi">
           <div className="chat-bot">
+            <ExternalExecutionSummary execution={item.execution} />
             {shouldShowLoading
               ? renderLoading()
               : renderText({ ...item, delta: "" })}
@@ -1118,6 +1181,7 @@ const AssistantMessage = (props: any) => {
       />
       <div className="chat-bot-box-single">
         <div className="chat-bot">
+          <ExternalExecutionSummary execution={item.execution} />
           {shouldShowLoading
             ? renderLoading()
             : item.onboardingInfo

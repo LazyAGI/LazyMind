@@ -24,7 +24,6 @@ from channel_gateway.common.domain.commands import (
     ResourceIndexSelector,
     SelectionContinuation,
     SelectionChooseCommand,
-    WorkflowInvokeCommand,
     command_registry,
 )
 from channel_gateway.common.errors import LazyMindError
@@ -307,9 +306,6 @@ class ChannelIntentClassifier:
             or not latest_selection.get('has_continuation')
         ):
             allowed.discard(ActionKind.SELECTION_CHOOSE)
-        workflows = state.get('available_workflows')
-        if not isinstance(workflows, list) or not workflows:
-            allowed.discard(ActionKind.WORKFLOW_INVOKE)
         return allowed
 
     def catalog(
@@ -332,11 +328,6 @@ def canonicalize_command(
 ) -> CommandEnvelope:
     """Apply parameter identities declared by the command contract."""
 
-    if isinstance(command, WorkflowInvokeCommand):
-        parameters = command.parameters.model_copy(
-            update={'message': current_message}
-        )
-        return command.model_copy(update={'parameters': parameters})
     if isinstance(command, ChatCommand) and not command.parameters.resource_changes:
         parameters = command.parameters.model_copy(
             update={'message': current_message}
@@ -375,11 +366,6 @@ def validate_command(
         and task != grounding_messages[-1]
     ):
         raise LazyMindError('Plain chat must preserve the complete user message')
-    if (
-        isinstance(command, WorkflowInvokeCommand)
-        and task != grounding_messages[-1]
-    ):
-        raise LazyMindError('Workflow task must preserve the complete user message')
     if isinstance(command, ConversationSwitchCommand):
         target = parameters.target
         if target.kind == 'index':
@@ -396,25 +382,6 @@ def validate_command(
         capabilities = list(parameters.capabilities)
         if len(set(capabilities)) != len(capabilities):
             raise LazyMindError('Capability categories contain duplicates')
-    return command
-
-
-def validate_workflow_catalog(
-    command: CommandEnvelope,
-    catalog: dict[str, Any],
-) -> CommandEnvelope:
-    if not isinstance(command, WorkflowInvokeCommand):
-        return command
-    workflows = catalog.get('workflow')
-    if not isinstance(workflows, list):
-        raise LazyMindError('No workflow catalog is available for this channel')
-    available_refs = {
-        str(item.get('id') or '')
-        for item in workflows
-        if isinstance(item, dict) and bool(item.get('enabled', False))
-    }
-    if command.parameters.workflow_ref not in available_refs:
-        raise LazyMindError('The selected workflow is not available to this user')
     return command
 
 

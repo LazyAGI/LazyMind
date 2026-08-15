@@ -4,7 +4,7 @@ import {
   Query,
   Source,
 } from "@/api/generated/chatbot-client";
-import type { SendMessageParams } from "../ChatInput";
+import type { SendMessageParams } from "../ChatInput/types";
 import type { ChatMention } from "../ChatInput/MentionEditor";
 import type { ChatConfig } from "../ChatConfigs";
 
@@ -35,6 +35,7 @@ export interface ChatContainerProps {
   onOpenResumeSSE?: (
     conversationId: string,
     callbacks: Record<string, (e: CustomEvent) => void>,
+    cursor?: { historyId?: string; afterSequence?: number },
   ) => any;
   onConversationIdChange?: (conversationId: string) => void;
   parseErrorData: (data: string) => string;
@@ -52,10 +53,10 @@ export interface ChatContainerProps {
   disabledReason?: string;
   disabledDescription?: ReactNode;
   disabledAction?: ReactNode;
-  onWorkflowSettingsChange?: (
-    settings: import("@/modules/chat/utils/request").ConversationWorkflowSettings,
+  onConversationSettingsChange?: (
+    settings: import("@/modules/chat/utils/request").ConversationRuntimeSettings,
   ) => void;
-  initialWorkflowSettings?: import("@/modules/chat/utils/request").ConversationWorkflowSettings;
+  initialConversationSettings?: import("@/modules/chat/utils/request").ConversationRuntimeSettings;
   hasWorkflowSession?: boolean;
 }
 
@@ -77,6 +78,7 @@ export interface ChatMessage {
   thinking_duration_s?: number | string;
   thinking_time_s?: number | string;
   history_id?: string;
+  external_event_sequence?: number;
   sources?: Source[];
   feed_back?: string;
   answers?: Array<{

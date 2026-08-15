@@ -13,6 +13,14 @@ func ChatServiceEndpoint() string {
 	return "http://chat:8046"
 }
 
+// KnowledgeSearchServiceEndpoint returns the dedicated retrieval-only service URL.
+func KnowledgeSearchServiceEndpoint() string {
+	if u := strings.TrimSpace(os.Getenv("LAZYMIND_KNOWLEDGE_SEARCH_SERVICE_URL")); u != "" {
+		return strings.TrimRight(u, "/")
+	}
+	return "http://knowledge-search:8049"
+}
+
 // AuthServiceBaseURL returns the base URL for auth-service APIs.
 func AuthServiceBaseURL() string {
 	if u := strings.TrimSpace(os.Getenv("LAZYMIND_AUTH_SERVICE_URL")); u != "" {

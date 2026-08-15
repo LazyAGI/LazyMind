@@ -21,6 +21,7 @@ import {
   BookOutlined,
   CloudOutlined,
   LinkOutlined,
+  DesktopOutlined,
 } from "@ant-design/icons";
 import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import type { UserDetailResponse } from "@/api/generated/auth-client";
@@ -54,6 +55,7 @@ import { useLocalSessionGate } from "@/runtime/useLocalSessionGate";
 import UserAgreementConsentModal, {
   useUserAgreementConsentGate,
 } from "@/components/UserAgreementConsentModal";
+import { isDesktopRuntime } from "@/runtime/mode";
 import "./index.scss";
 
 const { Content, Sider } = Layout;
@@ -150,6 +152,15 @@ export default function MainLayout() {
   const pathname = location.pathname || "/agent/chat";
 
   const settingsMenuItems = [
+    ...(isDesktopRuntime()
+      ? [
+          {
+            key: "/settings/agent-integrations",
+            label: t("layout.agentIntegrations"),
+            icon: <DesktopOutlined className="settings-popover-icon" />,
+          },
+        ]
+      : []),
     {
       key: "/model-providers/default-services",
       label: t("layout.modelProviderManagement"),
@@ -209,7 +220,8 @@ export default function MainLayout() {
     pathname.startsWith("/channels") ||
     pathname.startsWith("/lib/knowledge/detail") ||
     pathname.startsWith("/memory-management") ||
-    pathname.startsWith("/self-evolution");
+    pathname.startsWith("/self-evolution") ||
+    pathname.startsWith("/settings/agent-integrations");
   const isSelfEvolutionObservationPage =
     pathname.startsWith("/self-evolution/detail/") && pathname.includes("/observation/");
   const isChatPage = pathname.startsWith("/agent/chat");
@@ -912,6 +924,7 @@ export default function MainLayout() {
                             <span className="settings-active-badge">{t("admin.developerActiveTag")}</span>
                           )}
                           {[
+                            "/settings/agent-integrations",
                             "/model-providers/default-services",
                             "/admin",
                           ].includes(item.key) && (

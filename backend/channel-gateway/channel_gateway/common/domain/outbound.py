@@ -50,18 +50,46 @@ class CapabilityPresentation:
 
 
 @dataclass(frozen=True, slots=True)
+class ConversationExecutorPresentation:
+    id: str
+    display_name: str
+    kind: Literal['internal', 'external']
+    installed: bool
+    host_online: bool
+    available: bool
+    unavailable_reason: str = ''
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'id': self.id,
+            'display_name': self.display_name,
+            'kind': self.kind,
+            'installed': self.installed,
+            'host_online': self.host_online,
+            'available': self.available,
+            'unavailable_reason': self.unavailable_reason,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class ConversationSettingsPresentation:
     kind: Literal['conversation_settings']
     dataset_ids: tuple[str, ...]
+    workflow_enabled: bool
     workflow_mode: Literal['auto', 'dynamic']
     subagent_enabled: bool
+    chat_executor: str
+    executors: tuple[ConversationExecutorPresentation, ...]
 
     def to_dict(self) -> dict[str, Any]:
         return {
             'kind': self.kind,
             'dataset_ids': list(self.dataset_ids),
+            'workflow_enabled': self.workflow_enabled,
             'workflow_mode': self.workflow_mode,
             'subagent_enabled': self.subagent_enabled,
+            'chat_executor': self.chat_executor,
+            'executors': [executor.to_dict() for executor in self.executors],
         }
 
 
@@ -133,6 +161,38 @@ class TaskPresentation:
 
 
 @dataclass(frozen=True, slots=True)
+class ExecutionPresentation:
+    kind: Literal['execution']
+    provider: str
+    status: str
+    host_id: str = ''
+    host_online: bool = False
+    recovery_count: int = 0
+    invocation_count: int = 0
+    tools: tuple[str, ...] = ()
+    workflows: tuple[str, ...] = ()
+    artifact_count: int = 0
+    artifact_revision_count: int = 0
+    error_message: str = ''
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'kind': self.kind,
+            'provider': self.provider,
+            'status': self.status,
+            'host_id': self.host_id,
+            'host_online': self.host_online,
+            'recovery_count': self.recovery_count,
+            'invocation_count': self.invocation_count,
+            'tools': list(self.tools),
+            'workflows': list(self.workflows),
+            'artifact_count': self.artifact_count,
+            'artifact_revision_count': self.artifact_revision_count,
+            'error_message': self.error_message,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class ConversationTurnPresentation:
     query: str
     answer: str
@@ -165,6 +225,7 @@ ReplyPresentation: TypeAlias = (
     | ConversationSettingsPresentation
     | AskPresentation
     | TaskPresentation
+    | ExecutionPresentation
     | ConversationPresentation
 )
 

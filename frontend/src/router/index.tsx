@@ -57,6 +57,8 @@ import { getAntdLocale } from "@/i18n/antdLocale";
 import { runtimeFeatures } from "@/runtime/features";
 import { isLocalSessionEnabled } from "@/runtime/localSession";
 import UserAgreementPage from "@/pages/UserAgreementPage";
+import AgentIntegrationPage from "@/modules/agentIntegration/AgentIntegrationPage";
+import { isDesktopRuntime } from "@/runtime/mode";
 
 const WorkflowDetailPage = lazy(() => import("@/modules/workflow/pages/detail"));
 const BuiltinWorkflowDetailPage = lazy(() => import("@/modules/workflow/pages/builtin-detail"));
@@ -290,6 +292,10 @@ export default function AppRouter() {
             </>
           )}
           <Route path="task-center" element={<TaskCenterPage />} />
+          <Route
+            path="settings/agent-integrations"
+            element={isDesktopRuntime() ? <AgentIntegrationPage /> : <Navigate to="/agent/chat" replace />}
+          />
         </Route>
         {runtimeFeatures.hideCloudAdmin ? (
           <Route

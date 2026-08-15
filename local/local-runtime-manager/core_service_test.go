@@ -54,6 +54,10 @@ func TestCoreServiceEnvUsesLocalEndpoints(t *testing.T) {
 	assertEnvContains(t, env, "LAZYMIND_OFFICE_CONVERT_URL=http://127.0.0.1:18082/v1/office/to-pdf")
 	assertEnvContains(t, env, "LAZYMIND_READONLY_DB_DRIVER=sqlite")
 	assertEnvContains(t, env, "LAZYMIND_READONLY_DB_DSN="+paths.LazyLLMDBPath)
+	assertEnvContains(t, env, "LAZYMIND_CAPABILITY_MCP_ENABLED=true")
+
+	t.Setenv("LAZYMIND_CAPABILITY_MCP_ENABLED", "false")
+	assertEnvContains(t, coreServiceEnv(cfg, paths), "LAZYMIND_CAPABILITY_MCP_ENABLED=false")
 }
 
 func TestCoreServiceEnvUsesRuntimeUploadPaths(t *testing.T) {
