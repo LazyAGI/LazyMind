@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { ChatExecutorDescriptor } from '../../utils/request';
-import { buildExecutorCatalog } from './ChatConfigModal';
+import { buildExecutorCatalog, resolveWorkflowExecutionMode } from './ChatConfigModal';
 
 describe('buildExecutorCatalog', () => {
   it('always keeps LazyMind selectable when the external catalog is unavailable', () => {
@@ -37,5 +37,20 @@ describe('buildExecutorCatalog', () => {
       expect.objectContaining({ id: 'codex', available: true }),
       expect.objectContaining({ id: 'cursor', available: true }),
     ]);
+  });
+});
+
+describe('resolveWorkflowExecutionMode', () => {
+  it('derives an active workflow mode without persisting settings during hydration', () => {
+    const settings = {
+      enable_workflow: false,
+    };
+
+    expect(resolveWorkflowExecutionMode(settings, true)).toBe('dynamic');
+    expect(settings).toEqual({ enable_workflow: false });
+  });
+
+  it('keeps the persisted disabled mode when no workflow session is active', () => {
+    expect(resolveWorkflowExecutionMode({ enable_workflow: false }, false)).toBe('disabled');
   });
 });

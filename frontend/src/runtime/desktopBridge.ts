@@ -15,10 +15,10 @@ export interface DesktopRuntimeStatus {
   services?: Record<string, DesktopRuntimeServiceStatus>;
 }
 
-export type DesktopAgent = "codex" | "cursor" | "workbuddy";
+export type DesktopAgent = "codex" | "cursor" | "workbuddy" | "traework" | "deepseek-harness";
 
 export interface DesktopAgentSetupGuide {
-  method: "config_file" | "cursor_install_url";
+  method: "config_file" | "cursor_install_url" | "trae_config_file" | "dsh_profile_patch";
   url?: string;
   config_path?: string;
   configuration?: string;

@@ -241,13 +241,25 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Extract initial_workflow_settings from request body (only used on first message of a new conversation).
-	var initialWorkflowSettings map[string]any
-	if rawPS, ok := raw["initial_workflow_settings"].(map[string]any); ok {
-		initialWorkflowSettings = rawPS
+	// Initial settings are only applied while creating a conversation. Keep the
+	// old key as a read-only compatibility alias for installed frontends.
+	var initialConversationSettings map[string]any
+	if value, ok := raw["initial_conversation_settings"].(map[string]any); ok {
+		initialConversationSettings = value
+	} else if value, ok := raw["initial_workflow_settings"].(map[string]any); ok {
+		initialConversationSettings = value
+	}
+	if rawExecutor, present := initialConversationSettings["chat_executor"]; present {
+		executor, ok := rawExecutor.(string)
+		normalized, valid := normalizeChatExecutor(executor)
+		if !ok || !valid {
+			common.ReplyErr(w, chatExecutorValidationMessage(), http.StatusBadRequest)
+			return
+		}
+		initialConversationSettings["chat_executor"] = normalized
 	}
 
-	_, seq, err := ensureConversation(r.Context(), db, convID, displayName, searchConfigJSON, modelsJSON, userID, userName, initialWorkflowSettings)
+	conversationRecord, seq, err := ensureConversation(r.Context(), db, convID, displayName, searchConfigJSON, modelsJSON, userID, userName, initialConversationSettings)
 	if err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "failed to ensure conversation", err), http.StatusInternalServerError)
 		return
@@ -292,6 +304,58 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	)
 	resourceContext.DisabledTools = applyMentionedTools(resourceContext.DisabledTools, mentionedResources.ToolNames)
 	reqBody := buildChatRequestBody(r.Context(), db, convID, sessionID, query, upstreamHistories, raw, resourceContext, userID, target.Seq)
+	executor, validExecutor := normalizeChatExecutor(conversationRecord.ChatExecutor)
+	if !validExecutor {
+		common.ReplyErr(w, "conversation has an unsupported chat executor", http.StatusConflict)
+		return
+	}
+	if executor != ChatExecutorLazyMind {
+		if !stream {
+			common.ReplyErr(w, "external chat executors require streaming", http.StatusConflict)
+			return
+		}
+		if dualReply {
+			dualReply = false
+		}
+	}
+	if isExternalChatProvider(executor) {
+		clientRequestID := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+		if clientRequestID == "" {
+			clientRequestID = strings.TrimSpace(r.Header.Get("X-Request-Id"))
+		}
+		if len(clientRequestID) > 512 {
+			common.ReplyErr(w, "external chat idempotency key is too long", http.StatusBadRequest)
+			return
+		}
+		if requestKey := externalChatRequestKey(userID, clientRequestID); requestKey != "" {
+			reqBody["_external_request_key"] = requestKey
+			app := newExternalChatApplication(db)
+			existing, findErr := app.findRunByRequest(r.Context(), userID, executor, requestKey)
+			if findErr == nil {
+				if existing.ConversationID != convID || existing.Query != displayQuery {
+					common.ReplyErr(w, "external chat idempotency key conflicts with another request", http.StatusConflict)
+					return
+				}
+				target.HistoryID = existing.HistoryID
+				target.Seq = existing.Sequence
+				reqBody["_external_run_id"] = existing.ID
+			} else if !errors.Is(findErr, gorm.ErrRecordNotFound) {
+				common.ReplyErr(w, "query external chat idempotency record failed", http.StatusServiceUnavailable)
+				return
+			} else {
+				_, target.HistoryID = externalChatIdentity(requestKey)
+			}
+		}
+	}
+	if isExternalChatProvider(executor) {
+		if _, existing := reqBody["_external_run_id"]; !existing {
+			if err := externalChatUnavailableError(r.Context(), userID, executor); err != nil {
+				common.ReplyErr(w, err.Error(), http.StatusServiceUnavailable)
+				return
+			}
+		}
+	}
+	reqBody["_chat_executor"] = executor
 	applyExplicitResourceBindings(reqBody, mentionedResources)
 	if mentionedResources.ConversationContext != "" {
 		history, _ := reqBody["history"].([]map[string]string)
@@ -506,6 +570,7 @@ func resumeChatStream(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		ConversationID string `json:"conversation_id"`
 		HistoryID      string `json:"history_id"`
+		AfterSequence  int64  `json:"after_sequence,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid body", err), http.StatusBadRequest)
@@ -544,6 +609,9 @@ func resumeChatStream(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 
 	ctx := r.Context()
+	if resumeExternalChatStream(r, db, userID, convID, historyID, externalResumeCursor(r, body.AfterSequence), w, flusher) {
+		return
+	}
 	stateStore := store.State()
 	if stateStore == nil {
 		resumeFromDBOnly(db, convID, flusher, w)
@@ -884,17 +952,23 @@ func StopChatGeneration(w http.ResponseWriter, r *http.Request) {
 
 	// Interrupt any active plugin session steps.
 	if db := store.DB(); db != nil {
+		if err := newExternalChatApplication(db).requestStop(r.Context(), userID, convID, historyID); err != nil {
+			common.ReplyErr(w, fmt.Sprintf("stop external chat failed: %v", err), http.StatusServiceUnavailable)
+			return
+		}
 		workflow.StopActiveWorkflowSession(r.Context(), db, stateStore, convID)
 		taskIDs, err := subagent.InterruptConversation(r.Context(), db, convID, "stopped by user")
 		if err == nil {
 			for _, taskID := range taskIDs {
+				event := subagent.TaskEvent{
+					Type: "error", TaskID: taskID, Status: subagent.StatusInterrupted,
+					Message: "stopped by user",
+				}
 				_ = subagent.WriteStatus(r.Context(), stateStore, taskID, map[string]any{
 					"status": subagent.StatusInterrupted, "summary": "stopped by user",
 				})
-				_ = subagent.AppendStreamEvent(r.Context(), stateStore, taskID, subagent.TaskEvent{
-					Type: "error", TaskID: taskID, Status: subagent.StatusInterrupted,
-					Message: "stopped by user",
-				})
+				_ = subagent.AppendStreamEvent(r.Context(), stateStore, taskID, event)
+				subagent.PublishConversationTaskEvent(r.Context(), db, stateStore, event)
 			}
 			subagent.CancelRuns(taskIDs)
 		}
@@ -956,10 +1030,15 @@ func GetChatStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	isGenerating := false
+	var externalCount int64
+	_ = store.DB().Model(&orm.ExternalChatRun{}).
+		Where("actor_user_id = ? AND conversation_id = ? AND status IN ?", userID, convID, []string{"pending", "running"}).
+		Count(&externalCount).Error
+	isGenerating = externalCount > 0
 	stateStore := store.State()
 	if stateStore != nil {
-		ids, _ := getGeneratingHistoryIDs(r.Context(), stateStore, convID)
-		isGenerating = len(ids) > 0
+		ids, _ := reconcileGeneratingExternalChatStatuses(r.Context(), store.DB(), stateStore, userID, convID)
+		isGenerating = isGenerating || len(ids) > 0
 	}
 	writeConversationJSON(w, http.StatusOK, map[string]any{"is_generating": isGenerating})
 }
@@ -1040,23 +1119,14 @@ func parseConversationHistoryPage(r *http.Request) (pageSize, offset int) {
 	return pageSize, offset
 }
 
-func loadConversationHistories(ctx context.Context, convID string) []orm.ChatHistory {
-	var histories []orm.ChatHistory
-	store.DB().Where("conversation_id = ?", convID).Order("seq DESC").Find(&histories)
-
+func loadGeneratingConversationHistories(ctx context.Context, convID string) []orm.ChatHistory {
 	stateStore := store.State()
 	if stateStore == nil {
-		return histories
+		return nil
 	}
 	ids, _ := getGeneratingHistoryIDs(ctx, stateStore, convID)
-	exists := make(map[string]struct{}, len(histories))
-	for _, h := range histories {
-		exists[h.ID] = struct{}{}
-	}
+	histories := make([]orm.ChatHistory, 0, len(ids))
 	for _, hid := range ids {
-		if _, ok := exists[hid]; ok {
-			continue
-		}
 		in, err := getChatInput(ctx, stateStore, convID, hid)
 		if err != nil || in == nil || strings.TrimSpace(in.RawContent) == "" {
 			continue
@@ -1073,8 +1143,81 @@ func loadConversationHistories(ctx context.Context, convID string) []orm.ChatHis
 			TimeMixin:      orm.TimeMixin{CreateTime: ct, UpdateTime: ct},
 		})
 	}
-	sort.Slice(histories, func(i, j int) bool { return histories[i].Seq > histories[j].Seq })
 	return histories
+}
+
+func loadConversationHistoryPage(ctx context.Context, convID string, pageSize, offset int) ([]orm.ChatHistory, int, error) {
+	db := store.DB().WithContext(ctx)
+	var persistedCount int64
+	if err := db.Model(&orm.ChatHistory{}).Where("conversation_id = ?", convID).Count(&persistedCount).Error; err != nil {
+		return nil, 0, err
+	}
+
+	transient := loadGeneratingConversationHistories(ctx, convID)
+	if len(transient) > 0 {
+		ids := make([]string, 0, len(transient))
+		for _, history := range transient {
+			ids = append(ids, history.ID)
+		}
+		var persistedIDs []string
+		if err := db.Model(&orm.ChatHistory{}).
+			Where("conversation_id = ? AND id IN ?", convID, ids).
+			Pluck("id", &persistedIDs).Error; err != nil {
+			return nil, 0, err
+		}
+		if len(persistedIDs) > 0 {
+			exists := make(map[string]struct{}, len(persistedIDs))
+			for _, id := range persistedIDs {
+				exists[id] = struct{}{}
+			}
+			filtered := transient[:0]
+			for _, history := range transient {
+				if _, ok := exists[history.ID]; !ok {
+					filtered = append(filtered, history)
+				}
+			}
+			transient = filtered
+		}
+	}
+
+	total := int(persistedCount) + len(transient)
+	if offset > total {
+		offset = total
+	}
+	dbOffset := offset - len(transient)
+	if dbOffset < 0 {
+		dbOffset = 0
+	}
+	var persisted []orm.ChatHistory
+	if dbOffset < int(persistedCount) {
+		if err := db.Where("conversation_id = ?", convID).
+			Order("seq DESC, create_time DESC, id DESC").
+			Offset(dbOffset).
+			Limit(pageSize + len(transient)).
+			Find(&persisted).Error; err != nil {
+			return nil, 0, err
+		}
+	}
+
+	histories := append(persisted, transient...)
+	sort.Slice(histories, func(i, j int) bool {
+		if histories[i].Seq != histories[j].Seq {
+			return histories[i].Seq > histories[j].Seq
+		}
+		if !histories[i].CreateTime.Equal(histories[j].CreateTime) {
+			return histories[i].CreateTime.After(histories[j].CreateTime)
+		}
+		return histories[i].ID > histories[j].ID
+	})
+	start := offset - dbOffset
+	if start > len(histories) {
+		start = len(histories)
+	}
+	end := start + pageSize
+	if end > len(histories) {
+		end = len(histories)
+	}
+	return histories[start:end], total, nil
 }
 
 func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
@@ -1311,6 +1454,7 @@ func GetConversationDetail(w http.ResponseWriter, r *http.Request) {
 			"enable_workflow":       c.EnableWorkflow,
 			"workflow_mode":         c.WorkflowMode,
 			"enable_subagent":       c.EnableSubagent,
+			"chat_executor":         c.ChatExecutor,
 		},
 	})
 }
@@ -1333,22 +1477,31 @@ func GetConversationHistory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pageSize, offset := parseConversationHistoryPage(r)
-	histories := loadConversationHistories(r.Context(), convID)
-	total := len(histories)
-	if offset > total {
-		offset = total
+	page, total, err := loadConversationHistoryPage(r.Context(), convID, pageSize, offset)
+	if err != nil {
+		common.ReplyErr(w, fmt.Sprintf("load conversation history: %v", err), http.StatusInternalServerError)
+		return
 	}
-	end := offset + pageSize
-	if end > total {
-		end = total
-	}
-	page := histories[offset:end]
 
 	nextToken := ""
-	if end < total {
-		nextToken = encodeListPageToken(end, pageSize, total)
+	nextOffset := offset + len(page)
+	if nextOffset < total {
+		nextToken = encodeListPageToken(nextOffset, pageSize, total)
 	}
 	historyItems := conversationHistoryResponseItems(page)
+	historyIDs := make([]string, 0, len(page))
+	for _, history := range page {
+		historyIDs = append(historyIDs, history.ID)
+	}
+	if projections, err := newExternalChatApplication(store.DB()).executionProjections(
+		r.Context(), userID, historyIDs,
+	); err == nil {
+		for index, history := range page {
+			if projection, ok := projections[history.ID]; ok {
+				historyItems[index]["execution"] = projection
+			}
+		}
+	}
 	if collectedInputs := collectedInputsForConversation(r.Context(), store.DB(), convID); len(collectedInputs) > 0 && len(historyItems) > 0 {
 		historyItems[0]["collected_inputs"] = collectedInputs
 	}
@@ -1486,10 +1639,6 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 
 	db := store.DB()
 	q := db.Model(&orm.Conversation{}).Where("create_user_id = ? AND deleted_at IS NULL", userID)
-	q = q.Where(
-		"NOT EXISTS (SELECT 1 FROM external_agent_bindings " +
-			"WHERE external_agent_bindings.conversation_id = conversations.id)",
-	)
 	if keyword != "" {
 		q = q.Where("display_name LIKE ?", "%"+keyword+"%")
 	}

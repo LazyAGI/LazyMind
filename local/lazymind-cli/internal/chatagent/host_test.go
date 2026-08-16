@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 )
 
 type retryingCoreClient struct {
@@ -15,9 +16,16 @@ type retryingCoreClient struct {
 
 type countingRunner struct{ calls int }
 
+type blockingCoreClient struct{}
+
 func (r *countingRunner) Run(context.Context, Run, func(Event) error) error {
 	r.calls++
 	return nil
+}
+
+func (blockingCoreClient) DoJSON(ctx context.Context, _, _ string, _, _ any) error {
+	<-ctx.Done()
+	return ctx.Err()
 }
 
 func (c *retryingCoreClient) DoJSON(_ context.Context, _, _ string, input, _ any) error {
@@ -84,5 +92,27 @@ func TestHostFinalizesDurableProviderCheckpointWithoutRunningAgentAgain(t *testi
 	if len(client.inputs) != 1 || client.inputs[0]["type"] != "completed" ||
 		client.inputs[0]["host_id"] != "host-2" || client.inputs[0]["lease_token"] != "lease-2" {
 		t.Fatalf("unexpected finalization event: %#v", client.inputs)
+	}
+}
+
+func TestHostBoundsBlockedCoreRequestByOperationTimeout(t *testing.T) {
+	host := &Host{api: blockingCoreClient{}}
+	started := time.Now()
+	err := host.doJSON(context.Background(), 20*time.Millisecond, "POST", "/blocked", nil, nil)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("blocked request error=%v, want deadline exceeded", err)
+	}
+	if elapsed := time.Since(started); elapsed > time.Second {
+		t.Fatalf("blocked request exceeded its operation timeout: %s", elapsed)
+	}
+}
+
+func TestHeartbeatFailureWindowStaysBelowCoreLease(t *testing.T) {
+	const coreLeaseDuration = 30 * time.Second
+	if heartbeatRequestTimeout >= leaseLossGrace {
+		t.Fatalf("heartbeat request timeout %s must be shorter than loss grace %s", heartbeatRequestTimeout, leaseLossGrace)
+	}
+	if leaseLossGrace+heartbeatRequestTimeout >= coreLeaseDuration {
+		t.Fatalf("heartbeat failure window %s must be shorter than Core lease %s", leaseLossGrace+heartbeatRequestTimeout, coreLeaseDuration)
 	}
 }

@@ -429,6 +429,8 @@ function runAgentConnector(agent, action) {
     codex: new Set(["connect", "status", "disconnect"]),
     cursor: new Set(["status"]),
     workbuddy: new Set(["status"]),
+    traework: new Set(["status"]),
+    "deepseek-harness": new Set(["status"]),
   };
   if (!allowedActions[agent]?.has(action)) {
     return Promise.reject(new Error(`Unsupported external Agent action: ${agent}/${action}`));

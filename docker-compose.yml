@@ -35,8 +35,8 @@ x-proxy-env: &proxy-env
   https_proxy: ${https_proxy:-}
   HTTP_PROXY: ${HTTP_PROXY:-}
   HTTPS_PROXY: ${HTTPS_PROXY:-}
-  no_proxy: 127.0.0.1,localhost,::1,core,chat,knowledge-search,evo-api,doc-server,lazyllm-algo,parsing,milvus,opensearch,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
-  NO_PROXY: 127.0.0.1,localhost,::1,core,chat,knowledge-search,evo-api,doc-server,lazyllm-algo,parsing,milvus,opensearch,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+  no_proxy: 127.0.0.1,localhost,::1,core,chat,evo-api,doc-server,lazyllm-algo,parsing,milvus,opensearch,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+  NO_PROXY: 127.0.0.1,localhost,::1,core,chat,evo-api,doc-server,lazyllm-algo,parsing,milvus,opensearch,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
 
 x-core-env: &core-env
   ACL_DB_DRIVER: postgres
@@ -365,9 +365,6 @@ services:
     environment:
       <<: *core-env
       MIGRATIONS_DIR: /migrations
-      LAZYMIND_CODEX_APP_SERVER_URL: ${LAZYMIND_CODEX_APP_SERVER_URL:-ws://host.docker.internal:14501}
-      LAZYMIND_CODEX_APP_SERVER_TOKEN: ${LAZYMIND_CODEX_APP_SERVER_TOKEN:-}
-      LAZYMIND_CODEX_DEFAULT_CWD: ${LAZYMIND_CODEX_DEFAULT_CWD:-${PWD}}
       LAZYMIND_ALGO_SERVICE_URL: http://lazyllm-doc-server:8000
       LAZYMIND_SUBAGENT_WORKSPACE: /data/subagent
       LAZYMIND_SUBAGENT_DB_DSN: ${ACL_DB_DSN}
@@ -379,10 +376,8 @@ services:
       LAZYMIND_DOCUMENT_SERVICE_URL: http://lazyllm-doc-server:8000
       LAZYMIND_PARSING_SERVICE_URL: http://lazyllm-parse-server:8000
       LAZYMIND_CHAT_SERVICE_URL: http://chat:8046
-      LAZYMIND_KNOWLEDGE_SEARCH_SERVICE_URL: http://knowledge-search:8049
       LAZYMIND_EVO_SERVICE_URL: http://evo-api:8047
       LAZYMIND_RESOURCE_UPDATE_ENABLED: "true"
-      LAZYMIND_CAPABILITY_MCP_ENABLED: ${LAZYMIND_CAPABILITY_MCP_ENABLED:-true}
       LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN: ${LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN:-dev-internal-service-token}
       LAZYMIND_OFFICE_CONVERT_WORKERS: "4"
       LAZYMIND_WORKFLOW_EXECUTOR_TOKEN: ${LAZYMIND_WORKFLOW_EXECUTOR_TOKEN:-dev-workflow-executor-token}
@@ -712,45 +707,6 @@ services:
       default:
         aliases:
           - parsing
-
-  knowledge-search:
-    image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-algorithm:${LAZYMIND_IMAGE_TAG:-latest}
-    restart: unless-stopped
-    build:
-      network: host
-      context: .
-      dockerfile: algorithm/Dockerfile
-      target: algorithm
-      args:
-        <<: *mirror-args
-    expose:
-      - "8049"
-    volumes:
-      - ./data/core/uploads:/var/lib/lazymind/uploads
-      - ./data/traces:/var/lib/lazymind/traces
-      - *algorithm-src-mount
-      - *lazyllm-src-mount
-    environment:
-      LAZYMIND_AGENTIC_KB_URL: http://lazyllm-algo:8000
-      LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN: ${LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN:-dev-internal-service-token}
-      LAZYMIND_MODEL_CONFIG_PATH: ${LAZYMIND_MODEL_CONFIG_PATH:-dynamic}
-      LAZYMIND_BACKGROUND_JOBS_ENABLED: "false"
-      LAZYMIND_ENABLE_ROUTER: "false"
-      <<: [*runtime-home, *trace-config, *proxy-env, *db-conn, *core-db-conn, *llm-api-keys, *upload-paths]
-    command: ["python", "-m", "uvicorn", "lazymind.chat.api.knowledge_search_routes:create_app", "--factory", "--host", "0.0.0.0", "--port", "8049"]
-    healthcheck:
-      test: ['CMD-SHELL', 'curl -sf http://localhost:8049/health || exit 1']
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 180s
-    depends_on:
-      db:
-        condition: service_healthy
-      db-bootstrap:
-        condition: service_completed_successfully
-      lazyllm-algo:
-        condition: service_healthy
 
   chat:
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-algorithm:${LAZYMIND_IMAGE_TAG:-latest}

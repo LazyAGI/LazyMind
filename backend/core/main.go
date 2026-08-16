@@ -58,18 +58,13 @@ func openAPIArtifactExportEnabled() bool {
 	return raw != "0" && raw != "false" && raw != "no" && raw != "off"
 }
 
-func capabilityMCPEnabled() bool {
-	raw := strings.TrimSpace(strings.ToLower(os.Getenv("LAZYMIND_CAPABILITY_MCP_ENABLED")))
-	return raw == "1" || raw == "true" || raw == "yes" || raw == "on"
-}
-
 func buildCapabilityMCPHandler() (http.Handler, error) {
 	return capabilitybootstrap.NewHandler(capabilitybootstrap.Config{
 		DB:                        store.DB(),
 		LazyDB:                    store.LazyLLMDB(),
 		AuthServiceBaseURL:        common.AuthServiceBaseURL(),
 		AuthHTTPClient:            &http.Client{Timeout: 10 * time.Second},
-		KnowledgeSearchBaseURL:    common.KnowledgeSearchServiceEndpoint(),
+		KnowledgeSearchBaseURL:    common.ChatServiceEndpoint(),
 		InternalServiceToken:      os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN"),
 		KnowledgeSearchHTTPClient: &http.Client{Timeout: 60 * time.Second},
 	})
@@ -406,14 +401,12 @@ func main() {
 		w.Write(swaggerUIHTML)
 	}).Methods(http.MethodGet)
 
-	if capabilityMCPEnabled() {
-		handler, err := buildCapabilityMCPHandler()
-		if err != nil {
-			log.Logger.Fatal().Err(err).Msg("initialize capability MCP failed")
-		}
-		registerCapabilityMCPRoute(r, handler)
-		log.Logger.Info().Str("path", "/mcp/capabilities/v1").Msg("capability MCP enabled")
+	handler, err := buildCapabilityMCPHandler()
+	if err != nil {
+		log.Logger.Fatal().Err(err).Msg("initialize capability MCP failed")
 	}
+	registerCapabilityMCPRoute(r, handler)
+	log.Logger.Info().Str("path", "/mcp/capabilities/v1").Msg("capability MCP enabled")
 
 	listenAddr := coreListenAddr()
 	log.Logger.Info().Str("addr", listenAddr).Msg("Core listening")

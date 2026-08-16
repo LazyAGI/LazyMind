@@ -222,6 +222,7 @@ func routeEventWithWorkflowHooks(ctx context.Context, db *gorm.DB, stateStore st
 		}
 	}
 	_ = AppendStreamEvent(ctx, stateStore, ev.TaskID, ev)
+	PublishConversationTaskEvent(ctx, db, stateStore, ev)
 	return nil
 }
 
@@ -235,7 +236,42 @@ func routeError(ctx context.Context, db *gorm.DB, stateStore state.Store, taskID
 	}
 	_ = WriteStatus(ctx, stateStore, taskID, map[string]any{"status": StatusFailed, "summary": message})
 	_ = AppendStreamEvent(ctx, stateStore, taskID, ev)
+	PublishConversationTaskEvent(ctx, db, stateStore, ev)
 	routeWorkflowStepStatus(ctx, db, stateStore, taskID, StatusFailed, message)
+}
+
+// PublishConversationTaskEvent multiplexes task changes onto the one active
+// conversation stream. Workflow steps invalidate the Workflow view; independent
+// tasks carry their live event. Artifact bodies are reloaded from the signed
+// conversation-artifact endpoint instead of being copied into the event log.
+func PublishConversationTaskEvent(
+	ctx context.Context,
+	db *gorm.DB,
+	stateStore state.Store,
+	ev TaskEvent,
+) {
+	if db == nil || EventHooks == nil || ev.TaskID == "" {
+		return
+	}
+	task, err := GetTask(ctx, db, ev.TaskID)
+	if err != nil || task.ConversationID == "" {
+		return
+	}
+	if task.AgentType == "workflow_step" {
+		switch ev.Type {
+		case "task_start", "progress", "artifact", "done", "error":
+		default:
+			return
+		}
+		EventHooks.CallConversationEvent(ctx, stateStore, task.ConversationID, "",
+			"workflow_runtime_updated", map[string]any{"task_id": ev.TaskID, "change": ev.Type})
+		return
+	}
+	if ev.Type == "artifact" {
+		ev.Value = nil
+	}
+	EventHooks.CallConversationEvent(ctx, stateStore, task.ConversationID, "", "task_updated",
+		map[string]any{"task_id": ev.TaskID, "event": ev})
 }
 
 // EventHooks allows external packages (e.g. plugin) to register callbacks for SubAgent events.

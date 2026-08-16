@@ -25,6 +25,16 @@ interface ChatConfigPopoverProps {
 
 type WorkflowExecutionMode = 'auto' | 'dynamic' | 'disabled';
 
+export function resolveWorkflowExecutionMode(
+  settings: ConversationRuntimeSettings | null,
+  hasWorkflowSession: boolean,
+): WorkflowExecutionMode {
+  if (!hasWorkflowSession && settings?.enable_workflow === false) {
+    return 'disabled';
+  }
+  return settings?.workflow_mode === 'auto' ? 'auto' : 'dynamic';
+}
+
 const lazyMindExecutor: ChatExecutorDescriptor = {
   id: 'lazymind',
   display_name: 'LazyMind',
@@ -71,7 +81,6 @@ export default function ChatConfigPopover({
   const [executors, setExecutors] = useState<ChatExecutorDescriptor[]>([]);
   // Track whether we've already fetched defaults to avoid repeated requests.
   const fetchedRef = useRef(false);
-  const enforcedWorkflowConversationRef = useRef<string | null>(null);
 
   // Sync external initialSettings into local state; reset fetch cache on conversation change.
   useEffect(() => {
@@ -85,31 +94,6 @@ export default function ChatConfigPopover({
       fetchedRef.current = false;
     }
   }, [conversationId, initialSettings]);
-
-  // Starting/attaching a workflow makes approval mode authoritative for this
-  // conversation. Enforce it once per attached session; users may still switch
-  // between auto and approval afterwards, but cannot disable until it is removed.
-  useEffect(() => {
-    if (!hasWorkflowSession) {
-      enforcedWorkflowConversationRef.current = null;
-      return;
-    }
-    const key = conversationId || 'pending-conversation';
-    if (enforcedWorkflowConversationRef.current === key) return;
-    enforcedWorkflowConversationRef.current = key;
-    const next: ConversationRuntimeSettings = {
-      ...settings,
-      enable_workflow: true,
-      workflow_mode: 'dynamic',
-    };
-    setSettings(next);
-    onSave?.(next);
-    if (conversationId && !conversationId.startsWith('temp_')) {
-      void ConversationSettingsApi().patchConversationSettings(conversationId, next).catch(() => {
-        enforcedWorkflowConversationRef.current = null;
-      });
-    }
-  }, [conversationId, hasWorkflowSession, onSave, settings]);
 
   // Fetch settings from server the first time the popover opens.
   async function ensureSettings() {
@@ -197,7 +181,6 @@ export default function ChatConfigPopover({
     }
   }
 
-  const workflowEnabled = settings?.enable_workflow ?? true;
   const chatExecutor = settings?.chat_executor ?? 'lazymind';
   const executorCatalog = buildExecutorCatalog(
     executors,
@@ -218,9 +201,7 @@ export default function ChatConfigPopover({
           name: displayedExecutor.display_name,
         })
       : t('chat.conversationConfigExecutorLazyMindDesc');
-  const executionMode: WorkflowExecutionMode = workflowEnabled
-    ? (settings?.workflow_mode ?? 'dynamic')
-    : 'disabled';
+  const executionMode = resolveWorkflowExecutionMode(settings, hasWorkflowSession);
 
   function handleExecutionModeChange(mode: string | number) {
     const nextMode = mode as WorkflowExecutionMode;

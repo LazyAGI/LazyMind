@@ -78,16 +78,7 @@ func TestBackgroundJobsEnabledAcceptsFalseValues(t *testing.T) {
 	}
 }
 
-func TestCapabilityMCPIsOptInAndMountedWhenConfigured(t *testing.T) {
-	t.Setenv("LAZYMIND_CAPABILITY_MCP_ENABLED", "")
-	if capabilityMCPEnabled() {
-		t.Fatal("capability MCP should be disabled by default")
-	}
-	t.Setenv("LAZYMIND_CAPABILITY_MCP_ENABLED", " true ")
-	if !capabilityMCPEnabled() {
-		t.Fatal("capability MCP should accept an explicit true value")
-	}
-
+func TestCapabilityMCPRouteIsMounted(t *testing.T) {
 	router := mux.NewRouter()
 	registerCoreRoutes(router)
 	registerCapabilityMCPRoute(router, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {

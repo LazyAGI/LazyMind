@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import os
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -20,6 +20,7 @@ class KnowledgeSearchRequest(BaseModel):
     query: str = Field(...)
     kb_ids: List[str] = Field(...)
     top_k: int = Field(default=10)
+    llm_config: Dict[str, Any] = Field(default_factory=dict)
 
 
 class KnowledgeSearchHitResponse(BaseModel):
@@ -71,6 +72,7 @@ async def search_knowledge(
             query=request.query,
             kb_ids=request.kb_ids,
             top_k=request.top_k,
+            llm_config=request.llm_config,
         )
     except knowledge_search_service.KnowledgeSearchError as exc:
         status = 400 if exc.code == 'INVALID_ARGUMENT' else 503

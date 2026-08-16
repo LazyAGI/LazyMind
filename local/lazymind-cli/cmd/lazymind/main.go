@@ -14,7 +14,7 @@ import (
 
 	"lazymind/agentconnector/internal/adapters/codex"
 	"lazymind/agentconnector/internal/adapters/cursor"
-	"lazymind/agentconnector/internal/adapters/editor"
+	"lazymind/agentconnector/internal/adapters/mcpclient"
 	"lazymind/agentconnector/internal/adapters/workbuddy"
 	"lazymind/agentconnector/internal/chatagent"
 	"lazymind/agentconnector/internal/coreapi"
@@ -77,11 +77,11 @@ func runInternal(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	switch agent {
 	case "codex":
 		return runInternalCodex(ctx, action, *agentBinary, bridge, stdout)
-	case string(editor.Cursor), string(editor.WorkBuddy):
+	case string(mcpclient.Cursor), string(mcpclient.WorkBuddy), string(mcpclient.TRAEWork), string(mcpclient.DeepSeekHarness):
 		if action != "status" {
 			return fmt.Errorf("%s uses manual setup; only status is supported", agent)
 		}
-		adapter, err := editor.New(editor.Kind(agent), *agentBinary, "", bridge)
+		adapter, err := mcpclient.New(mcpclient.Kind(agent), *agentBinary, "", bridge)
 		if err != nil {
 			return err
 		}
@@ -121,7 +121,7 @@ func runAgent(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 		}
 		flags := flag.NewFlagSet("agent host "+action, flag.ContinueOnError)
 		flags.SetOutput(stderr)
-		provider := flags.String("provider", "codex", "Agent provider: codex, cursor, workbuddy, or all")
+		provider := flags.String("provider", "codex", "Chat Agent provider: codex, cursor, workbuddy, or all")
 		agentBinary := flags.String("agent-bin", "", "selected external Agent CLI executable")
 		if err := flags.Parse(args[2:]); err != nil {
 			return err
@@ -161,9 +161,9 @@ func runAgent(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 		return runAgentHosts(ctx, api, providers, *agentBinary, stderr)
 	}
 	if len(args) < 2 || args[0] != "guide" {
-		return errors.New("usage: lazymind agent host run | lazymind agent guide <cursor|workbuddy>")
+		return errors.New("usage: lazymind agent host run | lazymind agent guide <cursor|workbuddy|traework|deepseek-harness>")
 	}
-	kind := editor.Kind(strings.ToLower(args[1]))
+	kind := mcpclient.Kind(strings.ToLower(args[1]))
 	flags := flag.NewFlagSet("agent guide "+string(kind), flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	agentBinary := flags.String("agent-bin", "", "external Agent CLI executable")
@@ -181,7 +181,7 @@ func runAgent(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 	if err != nil {
 		return err
 	}
-	adapter, err := editor.New(kind, *agentBinary, "", bridge)
+	adapter, err := mcpclient.New(kind, *agentBinary, "", bridge)
 	if err != nil {
 		return err
 	}
@@ -191,11 +191,16 @@ func runAgent(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 	}
 	_, _ = fmt.Fprintf(stdout, "%s %s detected.\n\n", status.DisplayName, status.Version)
 	switch status.Setup.Method {
-	case editor.SetupCursorInstall:
+	case mcpclient.SetupCursorInstall:
 		_, _ = fmt.Fprintf(stdout, "Open this official Cursor MCP install link and approve the installation:\n\n%s\n\n", status.Setup.URL)
 		_, _ = fmt.Fprintf(stdout, "If the install page cannot open Cursor, merge this entry into %s without removing existing mcpServers:\n\n%s\n\n", status.Setup.ConfigPath, status.Setup.Configuration)
-	case editor.SetupConfigFile:
+	case mcpclient.SetupConfigFile:
 		_, _ = fmt.Fprintf(stdout, "In WorkBuddy, open MCP -> Configure MCP and merge this entry into %s without removing existing mcpServers:\n\n%s\n\n", status.Setup.ConfigPath, status.Setup.Configuration)
+	case mcpclient.SetupTRAEConfigFile:
+		_, _ = fmt.Fprintf(stdout, "Merge this entry into %s under mcpServers, then restart TRAE Work; do not use --add-mcp because it writes the unrelated servers schema:\n\n%s\n\n", status.Setup.ConfigPath, status.Setup.Configuration)
+	case mcpclient.SetupDSHProfilePatch:
+		_, _ = fmt.Fprintf(stdout, "Append this insert entry to the top-level YAML list in %s; do not replace existing entries:\n\n%s\n", status.Setup.ConfigPath, status.Setup.Configuration)
+		_, _ = fmt.Fprintln(stdout, "DeepSeek Harness Web watches this profile patch and reloads it automatically.")
 	default:
 		return fmt.Errorf("unsupported %s setup method %q", status.DisplayName, status.Setup.Method)
 	}
@@ -295,16 +300,18 @@ func printJSON(out io.Writer, value any) error {
 }
 
 func usage(out io.Writer) {
-	_, _ = fmt.Fprintln(out, `LazyMind external Agent connector
+	_, _ = fmt.Fprint(out, `LazyMind external Agent connector
 
 Usage:
   lazymind mcp proxy
   lazymind agent host <run|status> [--provider codex|cursor|workbuddy|all]
-  lazymind agent guide <cursor|workbuddy>
+  lazymind agent guide <cursor|workbuddy|traework|deepseek-harness>
 
 Codex can connect with its native 'codex mcp add' command or from
 LazyMind Desktop settings. LazyMind Desktop hosts all installed Agent CLIs;
-the public command defaults to Codex for backward compatibility. Cursor and
-WorkBuddy guides only print native MCP setup and never modify Agent config.
-Internal Adapter commands are not a public CLI.`)
+the public command defaults to Codex for backward compatibility. Cursor,
+WorkBuddy, TRAE Work, and DeepSeek Harness guides only print native MCP setup
+and never modify Agent config. TRAE Work and DeepSeek Harness are MCP clients,
+not LazyMind Chat executors. The internal Adapter commands are not a public CLI.
+`)
 }

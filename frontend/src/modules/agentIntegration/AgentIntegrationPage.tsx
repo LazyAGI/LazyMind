@@ -44,7 +44,23 @@ const AGENTS: Array<{ id: DesktopAgent; name: string; manual: boolean }> = [
   { id: "codex", name: "Codex CLI", manual: false },
   { id: "cursor", name: "Cursor", manual: true },
   { id: "workbuddy", name: "WorkBuddy", manual: true },
+  { id: "traework", name: "TRAE Work", manual: true },
+  { id: "deepseek-harness", name: "DeepSeek Harness", manual: true },
 ];
+
+const SETUP_DESCRIPTION: Record<Exclude<DesktopAgent, "codex">, string> = {
+  cursor: "agentIntegration.cursorSetupDescription",
+  workbuddy: "agentIntegration.workBuddySetupDescription",
+  traework: "agentIntegration.traeWorkSetupDescription",
+  "deepseek-harness": "agentIntegration.deepSeekHarnessSetupDescription",
+};
+
+const CONFIG_INSTRUCTION: Record<NonNullable<DesktopAgentIntegrationStatus["setup"]>["method"], string> = {
+  cursor_install_url: "agentIntegration.cursorConfigFallback",
+  config_file: "agentIntegration.workBuddyConfig",
+  trae_config_file: "agentIntegration.traeConfigFile",
+  dsh_profile_patch: "agentIntegration.appendProfilePatch",
+};
 
 type StatusMap = Partial<Record<DesktopAgent, DesktopAgentIntegrationStatus>>;
 
@@ -187,9 +203,7 @@ export default function AgentIntegrationPage() {
                       type="info"
                       showIcon
                       message={t("agentIntegration.manualSetupTitle")}
-                      description={t(id === "cursor"
-                        ? "agentIntegration.cursorSetupDescription"
-                        : "agentIntegration.workBuddySetupDescription")}
+                      description={t(SETUP_DESCRIPTION[id as Exclude<DesktopAgent, "codex">])}
                     />
                     {status?.setup?.method === "cursor_install_url" && status.setup.url && (
                       <Button
@@ -201,10 +215,10 @@ export default function AgentIntegrationPage() {
                         {t("agentIntegration.openCursorInstall")}
                       </Button>
                     )}
-                    {status?.setup?.config_path && status.setup.configuration && (
+                    {status?.setup?.configuration && (
                       <div className="agent-integration-fallback">
                         <Typography.Text type="secondary">
-                          {t("agentIntegration.configFallback", { path: status.setup.config_path })}
+                          {t(CONFIG_INSTRUCTION[status.setup.method], { path: status.setup.config_path })}
                         </Typography.Text>
                         <Typography.Paragraph className="agent-integration-command" code>
                           {status.setup.configuration}
@@ -216,7 +230,9 @@ export default function AgentIntegrationPage() {
                             t("agentIntegration.configCopied", { agent: name }),
                           )}
                         >
-                          {t("agentIntegration.copyConfig")}
+                          {t(status.setup.method === "dsh_profile_patch"
+                            ? "agentIntegration.copyProfilePatch"
+                            : "agentIntegration.copyConfig")}
                         </Button>
                       </div>
                     )}

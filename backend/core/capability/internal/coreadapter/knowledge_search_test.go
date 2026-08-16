@@ -77,7 +77,7 @@ func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) 
 
 func TestHTTPKnowledgeSearchClientUsesPureRouteAndForwardsModels(t *testing.T) {
 	httpClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
-		if request.URL.String() != "http://knowledge-search.test/internal/knowledge:search" {
+		if request.URL.String() != "http://chat.test/internal/knowledge:search" {
 			t.Fatalf("URL = %s", request.URL)
 		}
 		if got := request.Header.Get(internalServiceTokenHeader); got != "internal-token" {
@@ -101,7 +101,7 @@ func TestHTTPKnowledgeSearchClientUsesPureRouteAndForwardsModels(t *testing.T) {
 			Request: request,
 		}, nil
 	})}
-	client, err := NewHTTPKnowledgeSearchBackendClient("http://knowledge-search.test", "internal-token", httpClient)
+	client, err := NewHTTPKnowledgeSearchBackendClient("http://chat.test", "internal-token", httpClient)
 	if err != nil {
 		t.Fatal(err)
 	}

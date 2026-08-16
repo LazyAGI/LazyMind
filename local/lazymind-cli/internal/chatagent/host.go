@@ -13,10 +13,13 @@ import (
 )
 
 const (
-	heartbeatInterval = 2 * time.Second
-	leaseLossGrace    = 20 * time.Second
-	eventRetryDelay   = 200 * time.Millisecond
-	terminalTimeout   = 10 * time.Second
+	heartbeatInterval       = 2 * time.Second
+	claimRequestTimeout     = 15 * time.Second
+	heartbeatRequestTimeout = 5 * time.Second
+	eventRequestTimeout     = 5 * time.Second
+	leaseLossGrace          = 20 * time.Second
+	eventRetryDelay         = 200 * time.Millisecond
+	terminalTimeout         = 10 * time.Second
 )
 
 type Run struct {
@@ -103,7 +106,7 @@ func (h *Host) Run(ctx context.Context) error {
 			Run *Run `json:"run"`
 		}
 		path := "/external-chat/hosts/" + url.PathEscape(h.provider) + ":claim"
-		if err := h.api.DoJSON(ctx, http.MethodPost, path, map[string]any{
+		if err := h.doJSON(ctx, claimRequestTimeout, http.MethodPost, path, map[string]any{
 			"host_id": h.id, "installed": h.installed, "ready": h.ready,
 			"unavailable_reason": h.unavailableReason,
 		}, &response); err != nil {
@@ -150,7 +153,7 @@ func (h *Host) execute(parent context.Context, run Run) {
 					StopRequested bool `json:"stop_requested"`
 				}
 				path := "/external-chat/runs/" + url.PathEscape(run.RunID) + ":heartbeat"
-				if err := h.api.DoJSON(ctx, http.MethodPost, path, map[string]any{
+				if err := h.doJSON(ctx, heartbeatRequestTimeout, http.MethodPost, path, map[string]any{
 					"host_id": h.id, "lease_token": run.LeaseToken,
 				}, &response); err != nil {
 					// Core may be restarting. Continue only inside a window that is
@@ -195,6 +198,12 @@ func (h *Host) sendEvent(ctx context.Context, run Run, event Event) error {
 	return h.sendEventWithRetry(ctx, run, event, 0)
 }
 
+func (h *Host) doJSON(ctx context.Context, timeout time.Duration, method, path string, input, output any) error {
+	requestCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	return h.api.DoJSON(requestCtx, method, path, input, output)
+}
+
 func (h *Host) sendEventWithRetry(ctx context.Context, run Run, event Event, maxAttempts int) error {
 	eventID, err := newEventID()
 	if err != nil {
@@ -215,7 +224,7 @@ func (h *Host) sendEventWithRetry(ctx context.Context, run Run, event Event, max
 		input["error"] = event.Error
 	}
 	for attempt := 0; maxAttempts <= 0 || attempt < maxAttempts; attempt++ {
-		if err = h.api.DoJSON(ctx, http.MethodPost, path, input, nil); err == nil {
+		if err = h.doJSON(ctx, eventRequestTimeout, http.MethodPost, path, input, nil); err == nil {
 			return nil
 		}
 		if maxAttempts > 0 && attempt+1 >= maxAttempts {

@@ -70,7 +70,7 @@ func (c *ChatService) ContextUsage(ctx context.Context, req *LazyChatRequest) (*
 	if err != nil {
 		return nil, err
 	}
-	endpoint := strings.TrimSuffix(c.chatURL, chatPath) + contextUsagePath
+	endpoint := c.baseURL + contextUsagePath
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, err
@@ -96,7 +96,7 @@ func (c *ChatService) ContextPrompt(ctx context.Context, req *LazyChatRequest) (
 	if err != nil {
 		return nil, err
 	}
-	endpoint := strings.TrimSuffix(c.chatURL, chatPath) + contextPromptPath
+	endpoint := c.baseURL + contextPromptPath
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, err
