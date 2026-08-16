@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Empty, Form, Input, Modal, Popconfirm, Select, Tag, Tooltip, message } from "antd";
+import type { InputRef } from "antd";
 import { useTranslation } from "react-i18next";
 import { localizeErrorCode } from "@/components/request";
 import {
@@ -15,6 +16,8 @@ import {
 } from "@ant-design/icons";
 import { modelProvidersApi, unwrapModelProviderData } from "../api";
 import "../index.scss";
+
+const SENSENOVA_LOGO_URL = "https://www.sensenova.ai/images/logo.png";
 
 type ModelCapability =
   | "LLM_CHAT"
@@ -249,6 +252,7 @@ function getProviderBrand(name: string) {
 
 function getProviderLogoUrl(name: string) {
   const normalized = name.trim().toLowerCase();
+  if (/sensenova|sensecore|商汤|日日新/.test(normalized)) return SENSENOVA_LOGO_URL;
   const domainMap: Array<[RegExp, string]> = [
     [/claude|anthropic/, "anthropic.com"],
     [/deepseek/, "deepseek.com"],
@@ -258,7 +262,6 @@ function getProviderLogoUrl(name: string) {
     [/minimax/, "minimaxi.com"],
     [/openai/, "openai.com"],
     [/qwen|tongyi|通义/, "qwen.ai"],
-    [/sensenova|sensecore|商汤|日日新/, "platform.sensenova.cn"],
     [/siliconflow/, "siliconflow.cn"],
   ];
   const match = domainMap.find(([pattern]) => pattern.test(normalized));
@@ -324,6 +327,10 @@ interface ApiGroup {
   api_key_preview?: string;
   is_verified?: boolean;
   user_model_provider_id: string;
+}
+
+interface SavedProviderGroup extends ApiGroup {
+  check?: CheckModelProviderResult;
 }
 
 interface CheckModelProviderResult {
@@ -494,6 +501,9 @@ export default function ModelProviderPage() {
   const [loadingGroupModelIds, setLoadingGroupModelIds] = useState<Record<string, boolean>>({});
   const [sensenovaBaseUrlPreset, setSensenovaBaseUrlPreset] = useState<string>("");
   const watchedProviderBaseUrl = Form.useWatch("baseUrl", providerConfigForm);
+  const watchedProviderApiKey = Form.useWatch("apiKey", providerConfigForm);
+  const providerApiKeyInputRef = useRef<InputRef>(null);
+  const verifyApiKeyInputRef = useRef<InputRef>(null);
   const providerSearchRequestIdRef = useRef(0);
   const initialProvidersLoadedRef = useRef(false);
   const localizedFallbacks = useMemo(() => createModelProviderFallbacks(t), [i18n.language, t]);
@@ -650,7 +660,7 @@ export default function ModelProviderPage() {
 
     const groupName = normalizeFormText(values.name);
     const baseUrl = normalizeFormText(values.baseUrl);
-    const apiKey = normalizeFormText(values.apiKey);
+    const apiKey = normalizeFormText(values.apiKey) || normalizeFormText(providerApiKeyInputRef.current?.input?.value);
     const isCustomBaseUrl = !isDefaultProviderBaseUrl(configProvider, baseUrl);
     const existingProvider = addedProviderList.find((provider) => provider.id === configProvider.id);
     const existingGroup = activeConfigModal.group
@@ -663,29 +673,34 @@ export default function ModelProviderPage() {
     }
 
     setProviderConfigSaving(true);
+    const closeVerificationNotice = apiKey
+      ? message.loading(t("modelProvider.message.verifyingApiKey"), 0)
+      : undefined;
     try {
       const payload = {
         name: groupName || configProvider.name,
         base_url: baseUrl,
-        verify: false,
+        verify: Boolean(apiKey),
         ...(apiKey ? { api_key: apiKey } : {}),
       };
+      const requestOptions = apiKey ? { timeout: 3 * 60 * 1000 } : undefined;
       const savedGroup = activeConfigModal.group
-        ? unwrapModelProviderData<ApiGroup>((await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdPatch({
+        ? unwrapModelProviderData<SavedProviderGroup>((await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdPatch({
             modelProviderId: configProvider.id,
             groupId: activeConfigModal.group.id,
             updateModelProviderGroupOpenAPIRequest: payload,
-          })).data)
-        : unwrapModelProviderData<ApiGroup>((await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsPost({
+          }, requestOptions)).data)
+        : unwrapModelProviderData<SavedProviderGroup>((await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsPost({
             modelProviderId: configProvider.id,
             createModelProviderGroupOpenAPIRequest: payload,
-          })).data);
+          }, requestOptions)).data);
       const nextGroup = mapApiGroup(
         configProvider,
         {
           ...savedGroup,
           api_key_configured: Boolean(apiKey || existingGroup?.apiKeyConfigured || savedGroup.api_key_configured || savedGroup.api_key),
           api_key_preview: apiKey ? maskApiKey(apiKey) : existingGroup?.apiKeyPreview || savedGroup.api_key_preview,
+          is_verified: apiKey ? savedGroup.check?.success === true : savedGroup.is_verified,
         },
         existingGroup?.models || []
       );
@@ -711,13 +726,19 @@ export default function ModelProviderPage() {
             ]
       );
       setExpandedProviderIds((current) => ({ ...current, [configProvider.id]: true }));
-      message.success(t("modelProvider.message.groupSaved", { name: nextGroup.name }));
+      message.success(apiKey
+        ? t("modelProvider.message.groupVerifiedAndSaved", { name: nextGroup.name })
+        : t("modelProvider.message.groupSaved", { name: nextGroup.name }));
 
       setConfigModal(null);
       providerConfigForm.resetFields();
       setSensenovaBaseUrlPreset("");
-    } catch (error) {
+    } catch {
+      if (apiKey) {
+        message.error(t("modelProvider.message.groupVerifyFailed"));
+      }
     } finally {
+      closeVerificationNotice?.();
       setProviderConfigSaving(false);
     }
   };
@@ -727,7 +748,7 @@ export default function ModelProviderPage() {
   };
 
   const verifyProviderGroup = async (providerId: string, groupId: string, apiKey: string) => {
-    const requestApiKey = normalizeFormText(apiKey);
+    const requestApiKey = normalizeFormText(apiKey) || normalizeFormText(verifyApiKeyInputRef.current?.input?.value);
     if (!requestApiKey) {
       message.warning(t("modelProvider.message.fillApiKeyBeforeVerify"));
       return;
@@ -1288,7 +1309,7 @@ export default function ModelProviderPage() {
         confirmLoading={providerConfigSaving}
         destroyOnHidden
         maskClosable={!providerConfigSaving}
-        okText={t("modelProvider.saveConfig")}
+        okText={normalizeFormText(watchedProviderApiKey) ? t("modelProvider.verifyAndSaveConfig") : t("modelProvider.saveConfig")}
         open={!!configModal}
         title={t("modelProvider.groupConfigTitle", { name: configProvider?.name || "" })}
         width={520}
@@ -1387,6 +1408,7 @@ export default function ModelProviderPage() {
               autoComplete="off"
               maxLength={512}
               placeholder={apiKeyRequired ? t("modelProvider.apiKeyPlaceholder") : t("modelProvider.apiKeyOptionalPlaceholder")}
+              ref={providerApiKeyInputRef}
               visibilityToggle={false}
             />
           </Form.Item>
@@ -1447,6 +1469,7 @@ export default function ModelProviderPage() {
               autoComplete="off"
               maxLength={512}
               placeholder={t("modelProvider.verifyApiKeyPlaceholder")}
+              ref={verifyApiKeyInputRef}
               visibilityToggle={false}
             />
           </Form.Item>

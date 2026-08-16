@@ -1,23 +1,25 @@
 import { Button, Divider, Flex, message, Spin, Tooltip } from "antd";
 import { trim, debounce } from "lodash";
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import "./index.scss";
 import {
   CopyOutlined,
+  CloseOutlined,
   DislikeFilled,
   DislikeOutlined,
   ExclamationCircleOutlined,
+  FileTextOutlined,
   LikeFilled,
   LikeOutlined,
   ReloadOutlined,
+  RightOutlined,
 } from "@ant-design/icons";
 import {
   ChatConversationsResponseFinishReasonEnum,
   FeedBackChatHistoryRequestTypeEnum,
-  Source,
 } from "@/api/generated/chatbot-client";
 import { AgentAppsAuth } from "@/components/auth";
 import { isAskPendingReadOnly } from "@/modules/chat/utils/message";
@@ -30,7 +32,123 @@ import FeedbackModal from "../FeedbackModal";
 import AskCard from "@/modules/chat/components/AskCard";
 import ToolLimitCard from "@/modules/chat/components/ToolLimitCard";
 import ArtifactDownloadButton from "@/modules/chat/components/ArtifactCollectorCard/ArtifactDownloadButton";
+import {
+  type ChatSource,
+  type ChatSourceCollection,
+  getSearchSources,
+  getSourceDedupKey,
+  getSourceEvidenceText,
+  getSourceFaviconUrl,
+  getSourceLabel,
+  getSourceSubtitle,
+  isExternalSource,
+  openSource,
+} from "@/modules/chat/utils/sourceAdapter";
 import { IdentityAvatar } from "@/modules/identityAvatar";
+
+const SOURCE_ICON_TONES = 6;
+
+function getSourceIconTone(source: ChatSource) {
+  const value = getSourceSubtitle(source) || getSourceLabel(source);
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash) % SOURCE_ICON_TONES;
+}
+
+function getSourceIconInitial(source: ChatSource) {
+  const value = (getSourceSubtitle(source) || getSourceLabel(source)).trim();
+  return value ? value[0].toLocaleUpperCase() : "S";
+}
+
+function SourceFavicon({
+  source,
+  compact = false,
+}: {
+  source: ChatSource;
+  compact?: boolean;
+}) {
+  const [hasFaviconError, setHasFaviconError] = useState(false);
+  const faviconUrl = getSourceFaviconUrl(source);
+  const showFavicon = Boolean(faviconUrl && !hasFaviconError);
+
+  return (
+    <span
+      className={`chat-source-brand-icon tone-${getSourceIconTone(source)}${compact ? " is-compact" : ""}`}
+      aria-hidden="true"
+    >
+      {showFavicon ? (
+        <img
+          src={faviconUrl}
+          alt=""
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          onError={() => setHasFaviconError(true)}
+        />
+      ) : isExternalSource(source) ? (
+        <span className="chat-source-brand-initial">{getSourceIconInitial(source)}</span>
+      ) : (
+        <FileTextOutlined />
+      )}
+    </span>
+  );
+}
+
+export function ChatSourcePanel({
+  sources,
+  onClose,
+}: {
+  sources: ChatSource[];
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <aside className="chat-source-panel" aria-label={t("chat.references")}>
+      <div className="chat-source-panel-header">
+        <h2 className="chat-source-panel-title">
+          <span>{t("chat.references")}</span>
+          <span className="chat-source-panel-count">{sources.length}</span>
+        </h2>
+        <Button
+          type="text"
+          className="chat-source-panel-close"
+          icon={<CloseOutlined />}
+          onClick={onClose}
+          aria-label={t("common.close")}
+        />
+      </div>
+      <div className="chat-source-panel-body">
+        <div className="chat-source-list">
+          {sources.map((source, sourceIndex) => (
+            <button
+              type="button"
+              className="chat-source-item"
+              key={getSourceDedupKey(source, sourceIndex)}
+              onClick={() => openSource(source)}
+              title={getSourceLabel(source)}
+            >
+              <SourceFavicon source={source} />
+              <span className="chat-source-item-copy">
+                <span className="chat-source-item-heading">
+                  {getSourceSubtitle(source) || t("chat.references")}
+                </span>
+                <strong className="chat-source-item-title">{getSourceLabel(source)}</strong>
+                {getSourceEvidenceText(source) && (
+                  <span className="chat-source-item-content">
+                    {getSourceEvidenceText(source)}
+                  </span>
+                )}
+              </span>
+              <RightOutlined className="chat-source-item-arrow" aria-hidden="true" />
+            </button>
+          ))}
+        </div>
+      </div>
+    </aside>
+  );
+}
 
 async function copyTextToClipboard(text: string) {
   const normalizedText = text.trim();
@@ -272,6 +390,8 @@ const AssistantMessage = (props: any) => {
     onPreferenceSelect,
     isLatestDualAnswer,
     onCiteMessage,
+    hasLaterUserMessage,
+    onOpenSources,
   } = props;
   const citeButtonRef = useRef<HTMLButtonElement | null>(null);
   const citeSelectionTextRef = useRef("");
@@ -467,78 +587,29 @@ const AssistantMessage = (props: any) => {
     );
   }
 
-  function getSourceDisplayIndex(source: any) {
-    const index = source?.index;
-    if (source?.display_index !== undefined && source?.display_index !== null) {
-      return source.display_index;
-    }
-    if (source?.document_index !== undefined && source?.document_index !== null) {
-      return source.document_index;
-    }
-    if (typeof index === "string" && index.includes(".")) {
-      return index.split(".")[0];
-    }
-    return index;
-  }
-
-  function getSourceDocumentKey(source: any, sourceIndex: number) {
-    const displayIndex = getSourceDisplayIndex(source);
-    if (displayIndex !== undefined && displayIndex !== null) {
-      return `${source?.dataset_id || ""}:${source?.file_name || source?.document_id || ""}:${displayIndex}`;
-    }
-    if (source?.document_id) {
-      return `${source?.dataset_id || ""}:${source.document_id}`;
-    }
-    return `source-${sourceIndex}`;
-  }
-
-  function getDocumentSources(sources: Source[]) {
-    const seen = new Set<string>();
-    return Object.values(sources).filter((source: any, sourceIndex: number) => {
-      const key = getSourceDocumentKey(source, sourceIndex);
-      if (seen.has(key)) {
-        return false;
-      }
-      seen.add(key);
-      return true;
-    });
-  }
-
-  function openSource(source: any) {
-    if (source?.dataset_id === "default") {
-      message.error(t("chat.tempFileNotSupportJump"));
-      return;
-    }
-    const url = `/lib/knowledge/knowledge/${source.dataset_id}/${source.document_id}?group_name=${source.group_name}&segement_id=${source.segement_id}&number=${source.segment_number}&from=chat`;
-    window.open(url, "_blank");
-  }
-
-  function renderKnowledgeBase() {
-    const sources = item.sources as Source[];
-    if (!sources || sources.length < 1) {
-      return <></>;
-    }
+  function renderSourceButton(sources?: ChatSourceCollection) {
+    const displaySources = getSearchSources(sources);
+    if (!displaySources.length) return null;
     return (
-      <div className="chat-assistant-msg-knowledge-info">
-        {getDocumentSources(sources).map((source: Source, sourceIndex: number) => {
-          return (
-            <div
-              className="chat-assistant-msg-knowledge"
-              key={getSourceDocumentKey(source, sourceIndex)}
-            >
-              <span style={{ marginRight: "8px" }}>
-                {getSourceDisplayIndex(source)}
-              </span>
-              <span
-                className="knowledgeName"
-                onClick={() => openSource(source)}
-              >
-                {source.file_name}
-              </span>
-            </div>
-          );
-        })}
-      </div>
+      <Tooltip title={`${t("chat.references")} (${displaySources.length})`}>
+        <Button
+          className="tool-btn source-btn"
+          onClick={() => onOpenSources?.(displaySources)}
+          aria-label={`${t("chat.references")} (${displaySources.length})`}
+        >
+          <span className="chat-source-button-icons" aria-hidden="true">
+            {displaySources.slice(0, 3).map((source, sourceIndex) => (
+              <SourceFavicon
+                source={source}
+                compact
+                key={getSourceDedupKey(source, sourceIndex)}
+              />
+            ))}
+          </span>
+          <span className="chat-source-button-label">{t("chat.references")}</span>
+          <span className="chat-source-button-count">{displaySources.length}</span>
+        </Button>
+      </Tooltip>
     );
   }
 
@@ -776,41 +847,6 @@ const AssistantMessage = (props: any) => {
       .catch(() => {});
   }
 
-  function renderAnswerKnowledgeBase(answerIndex: number) {
-    const answer = item.answers?.[answerIndex];
-    if (!answer) {
-      return null;
-    }
-
-    const sources = answer.sources as Source[];
-    if (!sources || sources.length < 1) {
-      return null;
-    }
-
-    return (
-      <div className="chat-assistant-msg-knowledge-info">
-        {getDocumentSources(sources).map((source: Source, sourceIndex: number) => {
-          return (
-            <div
-              className="chat-assistant-msg-knowledge"
-              key={getSourceDocumentKey(source, sourceIndex)}
-            >
-              <span style={{ marginRight: "8px" }}>
-                {getSourceDisplayIndex(source)}
-              </span>
-              <span
-                className="knowledgeName"
-                onClick={() => openSource(source)}
-              >
-                {source.file_name}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-    );
-  }
-
   function renderAnswerFooter(answerIndex: number, showFullToolbar = false) {
     const answer = item.answers?.[answerIndex];
     if (!answer) {
@@ -827,7 +863,7 @@ const AssistantMessage = (props: any) => {
           style={{ margin: "12px 0" }}
         />
         <div className="chat-assistant-msg-tool-chat-toolbar">
-          <div>
+          <div className="chat-assistant-msg-tool-actions">
             <Tooltip title={t("chat.copy")}>
               <Button
                 className="tool-btn"
@@ -848,6 +884,7 @@ const AssistantMessage = (props: any) => {
                 />
               </Tooltip>
             )}
+            {renderSourceButton(answer.sources)}
           </div>
           {showFullToolbar && (
             <Flex>
@@ -899,7 +936,7 @@ const AssistantMessage = (props: any) => {
       <>
         <Divider className="chat-assistant-msg-tool-divider" />
         <div className="chat-assistant-msg-tool-chat-toolbar">
-          <div>
+          <div className="chat-assistant-msg-tool-actions">
             <Tooltip title={t("chat.copy")}>
               <Button
                 className="tool-btn"
@@ -920,6 +957,7 @@ const AssistantMessage = (props: any) => {
                 />
               </Tooltip>
             )}
+            {renderSourceButton(item.sources)}
           </div>
           <Flex>
             {currentFeedback ===
@@ -995,6 +1033,7 @@ const AssistantMessage = (props: any) => {
       const isReadOnly = isAskPendingReadOnly(
         item.ask_answered,
         index === length - 1,
+        !!hasLaterUserMessage,
       );
       return (
         <AskCard
@@ -1133,12 +1172,6 @@ const AssistantMessage = (props: any) => {
                   ? renderAnswerFooter
                   : undefined
               }
-              renderKnowledgeBase={
-                item.finish_reason ===
-                ChatConversationsResponseFinishReasonEnum.FinishReasonStop
-                  ? renderAnswerKnowledgeBase
-                  : undefined
-              }
               initialSelectedIndex={item.selected_answer_index}
               initialPreference={item.answer_preference}
               isStreaming={
@@ -1190,12 +1223,6 @@ const AssistantMessage = (props: any) => {
           {item.finish_reason ===
             ChatConversationsResponseFinishReasonEnum.FinishReasonUnknown &&
             renderError()}
-
-          {}
-          {item.finish_reason ===
-            ChatConversationsResponseFinishReasonEnum.FinishReasonStop &&
-            !item.onboardingInfo &&
-            renderKnowledgeBase()}
 
           {}
           {item.finish_reason ===

@@ -103,7 +103,8 @@ type WorkflowSlotRevision struct {
 	// ContentSnapshot is kept for legacy fallback (pre-migration AI rows where
 	// artifact_seq was not yet populated, and pre-human_artifact_id human rows).
 	ContentSnapshot json.RawMessage `gorm:"column:content_snapshot;type:jsonb"`
-	// ChangeSource distinguishes AI-generated ('ai') from human-edited ('human') revisions.
+	// ChangeSource distinguishes AI-generated ('ai'), human-edited ('human'), and
+	// provider-confirmed ('provider_sync') revisions.
 	ChangeSource      string    `gorm:"column:change_source;type:varchar(16);not null;default:'ai'"`
 	Slot              string    `gorm:"column:slot;type:varchar(255);not null"`
 	StepID            string    `gorm:"column:step_id;type:varchar(64);not null"`

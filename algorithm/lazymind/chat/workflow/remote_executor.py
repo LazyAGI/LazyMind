@@ -10,11 +10,8 @@ import asyncio
 import base64
 import json
 import logging
-import mimetypes
 import os
 import pathlib
-import shutil
-import tempfile
 import threading
 from typing import Any, Dict, Optional
 
@@ -36,6 +33,7 @@ class RemoteWorkflowExecutor:
         self.executor_id = os.getenv('LAZYMIND_WORKFLOW_EXECUTOR_ID', 'lazymind-remote-1')
         self.token = os.getenv('LAZYMIND_WORKFLOW_EXECUTOR_TOKEN', '').strip()
         self.poll_seconds = float(os.getenv('LAZYMIND_WORKFLOW_EXECUTOR_POLL_SECONDS', '0.5'))
+        self.heartbeat_seconds = float(os.getenv('LAZYMIND_WORKFLOW_EXECUTOR_HEARTBEAT_SECONDS', '10'))
         self.concurrency = max(1, int(os.getenv('LAZYMIND_WORKFLOW_EXECUTOR_CONCURRENCY', '4')))
         self.runtime = RemoteExecutorClient(self.base_url, self.executor_id, 'lazymind', self.token)
 
@@ -78,13 +76,14 @@ class RemoteWorkflowExecutor:
     async def _run_claim(self, client: httpx.AsyncClient, claim: Dict[str, Any]) -> None:
         attempt_id = str(claim['attempt_id'])
         lease = str(claim['lease_token'])
-        workspace = ''
         try:
             context = await self.runtime.context(client, attempt_id, lease)
             metadata = context.get('metadata') or {}
             task_id = str(metadata.get('task_id') or attempt_id)
             spec = await self.runtime.execution_spec(client, task_id, lease)
-            workspace = tempfile.mkdtemp(prefix=f'lazymind-workflow-{attempt_id}-')
+            task = dict(spec.get('task') or {})
+            workspace = str(spec['workspace_path'])
+            pathlib.Path(workspace).mkdir(parents=True, exist_ok=True)
             inputs = await self._materialize_inputs(client, attempt_id, lease, context, workspace)
         except Exception as exc:
             # A claimed Attempt must never remain stuck merely because Host setup
@@ -92,28 +91,32 @@ class RemoteWorkflowExecutor:
             await self.runtime.fail(client, attempt_id, lease, f'executor setup failed: {exc}')
             return
 
-        stopped = asyncio.Event()
-        lease_lost = asyncio.Event()
+        stopped = threading.Event()
+        lease_lost = threading.Event()
 
-        async def heartbeat() -> None:
-            while not stopped.is_set():
-                await asyncio.sleep(10)
-                try:
-                    await self.runtime.heartbeat(client, attempt_id, lease)
-                except Exception:
-                    lease_lost.set()
-                    self._cancel_subagent(task_id)
-                    return
+        def heartbeat() -> None:
+            with httpx.Client(timeout=5.0) as heartbeat_client:
+                while not stopped.wait(self.heartbeat_seconds):
+                    try:
+                        self.runtime.heartbeat_sync(heartbeat_client, attempt_id, lease)
+                    except Exception:
+                        lease_lost.set()
+                        self._cancel_subagent(task_id)
+                        return
 
-        heartbeat_task = asyncio.create_task(heartbeat())
+        heartbeat_thread = threading.Thread(
+            target=heartbeat, name=f'workflow-heartbeat-{attempt_id}', daemon=True)
+        heartbeat_thread.start()
         artifacts: list[Dict[str, Any]] = []
         summary = ''
         failure: Optional[str] = None
         terminal_event: Optional[Dict[str, Any]] = None
         try:
             from lazymind.chat.engine.subagent.runner import run_subagent_stream
-            task = dict(spec.get('task') or {})
             params = dict(spec.get('params') or {})
+            output_types = dict(context.get('declared_output_types') or {})
+            if output_types:
+                params['output_slot_types'] = output_types
             attachment_context = dict(params.get('_attachment_context') or {})
             attachment_context['files'] = list(inputs.values())
             params['_attachment_context'] = attachment_context
@@ -139,19 +142,28 @@ class RemoteWorkflowExecutor:
                 if event is None:
                     continue
                 kind = event.get('type')
-                if kind not in {'done', 'error'}:
+                if kind == 'artifact':
+                    artifact = {'slot': event.get('slot'), 'content_type': event.get('content_type'),
+                                'seq': event.get('seq', 1), 'value': event.get('value')}
+                    artifact['value'] = await self._persist_files(
+                        client, attempt_id, lease, artifact['value'],
+                        str(artifact.get('content_type') or ''), workspace)
+                    # The ordinary Task Center projection must receive the same
+                    # host-neutral value as the Workflow artifact sink.  A raw
+                    # path here points into this executor's temporary workspace
+                    # and is inaccessible to Core after the attempt finishes.
+                    await self.runtime.task_event(client, task_id, lease, {
+                        **event, 'value': artifact['value'],
+                    })
+                    await self.runtime.artifact(client, attempt_id, lease, artifact)
+                    artifacts.append(artifact)
+                elif kind not in {'done', 'error'}:
                     await self.runtime.task_event(client, task_id, lease, event)
+
                 if kind in {'task_start', 'progress'}:
                     await self.runtime.progress(client, attempt_id, lease, {
                         'progress': event.get('progress', 0),
                         'phase': event.get('current_phase', kind)})
-                elif kind == 'artifact':
-                    artifact = {'slot': event.get('slot'), 'content_type': event.get('content_type'),
-                                'seq': event.get('seq', 1), 'value': event.get('value')}
-                    artifact['value'] = self._embed_files(
-                        artifact['value'], str(artifact.get('content_type') or ''), workspace)
-                    await self.runtime.artifact(client, attempt_id, lease, artifact)
-                    artifacts.append(artifact)
                 elif kind == 'done':
                     terminal_event = event
                     summary = str(event.get('summary') or '')
@@ -164,32 +176,28 @@ class RemoteWorkflowExecutor:
             failure = str(exc)
         finally:
             stopped.set()
-            heartbeat_task.cancel()
-            await asyncio.gather(heartbeat_task, return_exceptions=True)
+            heartbeat_thread.join(timeout=1)
 
+        if lease_lost.is_set():
+            return
         try:
-            if lease_lost.is_set():
-                return
-            try:
-                if failure:
-                    await self.runtime.fail(client, attempt_id, lease, failure)
-                else:
-                    await self.runtime.complete(client, attempt_id, lease, {
-                        'summary': summary, 'executor_ref': task_id, 'artifacts': artifacts})
-            except httpx.HTTPStatusError as exc:
-                # A Runtime completion validation error is a terminal execution
-                # failure, not a reason to leave the Attempt running until expiry.
-                if exc.response.status_code in {401, 409}:
-                    return
-                failure = str(exc)
+            if failure:
                 await self.runtime.fail(client, attempt_id, lease, failure)
-                terminal_event = {'type': 'error', 'status': 'failed', 'message': failure}
-            if terminal_event is not None:
-                # Runtime terminal state wins first; the ordinary LazyMind event is
-                # then persisted and invokes existing Chat handoff/synthetic hooks.
-                await self.runtime.task_event(client, task_id, lease, terminal_event)
-        finally:
-            shutil.rmtree(workspace, ignore_errors=True)
+            else:
+                await self.runtime.complete(client, attempt_id, lease, {
+                    'summary': summary, 'executor_ref': task_id, 'artifacts': artifacts})
+        except httpx.HTTPStatusError as exc:
+            # A Runtime completion validation error is a terminal execution
+            # failure, not a reason to leave the Attempt running until expiry.
+            if exc.response.status_code in {401, 409}:
+                return
+            failure = str(exc)
+            await self.runtime.fail(client, attempt_id, lease, failure)
+            terminal_event = {'type': 'error', 'status': 'failed', 'message': failure}
+        if terminal_event is not None:
+            # Runtime terminal state wins first; the ordinary LazyMind event is
+            # then persisted and invokes existing Chat handoff/synthetic hooks.
+            await self.runtime.task_event(client, task_id, lease, terminal_event)
 
     async def _materialize_inputs(self, client: httpx.AsyncClient, attempt: str, lease: str,
                                   context: Dict[str, Any], workspace: str) -> Dict[str, str]:
@@ -204,8 +212,8 @@ class RemoteWorkflowExecutor:
             result[str(material)] = str(target)
         return result
 
-    @staticmethod
-    def _embed_files(value: Any, content_type: str, workspace: str) -> Any:
+    async def _persist_files(self, client: httpx.AsyncClient, attempt: str, lease: str,
+                             value: Any, content_type: str, workspace: str) -> Any:
         if not isinstance(value, dict) or content_type not in {'file', 'file_list', 'image'}:
             return value
         result = dict(value)
@@ -214,13 +222,13 @@ class RemoteWorkflowExecutor:
             paths = result.get(key)
             scalar = isinstance(paths, str)
             values = [paths] if scalar else paths if isinstance(paths, list) else []
-            embedded = []
+            persisted = []
             for raw in values:
                 raw_text = str(raw)
                 if raw_text.startswith((
-                    'http://', 'https://', 'data:', '/static-files/', '/api/core/static-files/',
+                    'http://', 'https://', '/static-files/', '/api/core/static-files/',
                 )):
-                    embedded.append(raw_text)
+                    persisted.append(raw_text)
                     continue
                 path = pathlib.Path(raw_text)
                 if not path.is_absolute():
@@ -228,12 +236,12 @@ class RemoteWorkflowExecutor:
                 try:
                     resolved = path.resolve(strict=True)
                     resolved.relative_to(pathlib.Path(workspace).resolve())
-                    mime = mimetypes.guess_type(resolved.name)[0] or 'application/octet-stream'
-                    data = base64.b64encode(resolved.read_bytes()).decode('ascii')
-                    embedded.append(f'data:{mime};base64,{data}')
+                    stable_path = await self.runtime.upload_artifact_file(
+                        client, attempt, lease, resolved.name, resolved.read_bytes())
+                    persisted.append(stable_path)
                 except (OSError, ValueError):
-                    embedded.append('')
-            result[key] = embedded[0] if scalar and embedded else embedded
+                    persisted.append('')
+            result[key] = persisted[0] if scalar and persisted else persisted
         return result
 
     @staticmethod

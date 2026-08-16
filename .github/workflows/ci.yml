@@ -69,6 +69,10 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Verify generated OpenAPI clients
+        working-directory: frontend
+        run: node scripts/openapi/check-stale.mjs
+
       - name: Install and test with coverage
         run: |
           cd tests/frontend

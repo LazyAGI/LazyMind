@@ -6,6 +6,7 @@ from lazymind.chat.service.component.tool_rendering import (
 from lazymind.chat.service.utils.citations import (
     CITATION_REFS_KEY,
     annotate_citations,
+    register_external_search_result,
 )
 
 
@@ -76,6 +77,57 @@ def test_final_answer_citation_display_starts_from_first_cited_document():
     assert '[3](#source-3.1 "doc-3.md")' not in text
     assert sources[0]['index'] == '3.1'
     assert sources[0]['display_index'] == 1
+
+
+def test_translator_merges_searched_and_cited_sources_with_roles():
+    translator = AgentEventFrameTranslator(query='q')
+    first = register_external_search_result({
+        'title': 'First',
+        'url': 'https://example.test/first',
+    }, translator.citation_state)
+    register_external_search_result({
+        'title': 'Second',
+        'url': 'https://example.test/second',
+    }, translator.citation_state)
+
+    frames = translator.finish({
+        'text': f'Use {first["ref"]}.',
+        'sources': [{
+            'index': '9.1',
+            'source_type': 'external',
+            'title': 'Unused existing source',
+            'url': 'https://example.test/unused',
+        }],
+    })
+    assert [(source['title'], source['source_roles']) for source in frames[-1]['sources']] == [
+        ('First', ['cited', 'searched']),
+        ('Second', ['searched']),
+    ]
+    assert 'searched_sources' not in frames[-1]
+
+
+def test_final_sources_preserve_distinct_citation_indices_for_same_url():
+    translator = AgentEventFrameTranslator(query='q')
+    register_external_search_result({
+        'title': 'Search result',
+        'url': 'https://example.test/shared#search',
+    }, translator.citation_state)
+
+    frames = translator.finish({
+        'text': 'Use [[9.1]].',
+        'sources': [{
+            'index': '9.1',
+            'source_type': 'external',
+            'title': 'Existing source',
+            'url': 'https://example.test/shared',
+            'content': 'Existing evidence',
+        }],
+    })
+
+    assert [(source['index'], source['source_roles']) for source in frames[-1]['sources']] == [
+        ('9.1', ['cited']),
+        ('1.1', ['searched']),
+    ]
 
 
 def test_translator_counts_tool_call_turns_not_individual_calls():

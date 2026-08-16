@@ -50,6 +50,7 @@ export default function MemoryManagementListPage() {
     setGlossaryListPage,
     setGlossaryListPageSize,
     setSelectedGlossaryAssetIds,
+    embedded,
   } = useMemoryManagementOutletContext();
 
   return (
@@ -95,7 +96,7 @@ export default function MemoryManagementListPage() {
         </Space>
       </div>
 
-      <div className="memory-tab-grid">
+      {!embedded ? <div className="memory-tab-grid">
         {memoryTabOrder.map((tabKey: string) => {
           const tabItem = tabMeta[tabKey];
 
@@ -121,7 +122,7 @@ export default function MemoryManagementListPage() {
             </button>
           );
         })}
-      </div>
+      </div> : null}
 
       {activeTab !== "experience" && activeTab !== "skills" ? (
         <div className="memory-filter-bar">

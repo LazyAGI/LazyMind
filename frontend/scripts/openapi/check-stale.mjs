@@ -2,7 +2,7 @@ import fs from "fs";
 import {
   getOpenApiApis,
   getOpenApiCacheFilePath,
-  hashFile,
+  getOpenApiStatus,
 } from "./openapi-manifest.mjs";
 
 const cwdPath = process.cwd();
@@ -22,34 +22,19 @@ if (fs.existsSync(cacheFilePath)) {
   }
 }
 
-const statuses = apis.map((api) => {
-  const exists = fs.existsSync(api.input);
-  const currentHash = exists ? hashFile(api.input) : "";
-  const cachedHash = cache[api.name] || "";
-
-  return {
-    name: api.name,
-    input: api.input,
-    exists,
-    currentHash,
-    cachedHash,
-    stale: exists && currentHash !== cachedHash,
-  };
-});
+const statuses = apis.map((api) => getOpenApiStatus(api, cache[api.name]));
 
 if (jsonOutput) {
   process.stdout.write(`${JSON.stringify(statuses, null, 2)}\n`);
 } else if (!quiet) {
   statuses.forEach((status) => {
-    const state = !status.exists
-      ? "missing"
-      : status.stale
-        ? "stale"
-        : "fresh";
+    const state = status.stale
+      ? `stale (${status.reasons.join(", ")})`
+      : "fresh";
     process.stdout.write(`${status.name}: ${state}\n`);
   });
 }
 
-if (statuses.some((status) => status.stale || !status.exists)) {
+if (statuses.some((status) => status.stale)) {
   process.exit(1);
 }

@@ -1,0 +1,87 @@
+.writer-markdown-editor {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 620px;
+  border: 1px solid var(--color-border, #d9dce3);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--color-bg-base, #fff);
+}
+
+.writer-markdown-editor__surface {
+  position: relative;
+  min-height: 0;
+  max-height: 480px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  color: var(--color-text, #1f2329);
+}
+
+.writer-markdown-editor__surface .mdxeditor-toolbar {
+  position: fixed;
+  top: var(--writer-markdown-selection-toolbar-top, -9999px);
+  left: var(--writer-markdown-selection-toolbar-left, -9999px);
+  z-index: 1200;
+  width: max-content;
+  max-width: var(--writer-markdown-selection-toolbar-max-width, calc(100vw - 16px));
+  padding: 5px;
+  overflow: visible;
+  border: 1px solid var(--color-border, #d9dce3);
+  border-radius: 8px;
+  background: var(--color-bg-base, #fff);
+  box-shadow: 0 8px 24px rgba(31, 35, 41, 0.16);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.writer-markdown-editor--selection-toolbar-visible .writer-markdown-editor__surface .mdxeditor-toolbar {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.writer-markdown-editor__surface .mdxeditor-root-contenteditable {
+  min-height: 300px;
+  padding: 20px 24px;
+}
+
+.writer-markdown-editor__rewrite-layer {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  pointer-events: none;
+}
+
+.writer-markdown-editor__surface p.artifact-rewrite-inline-diff,
+.writer-markdown-editor__surface p.artifact-rewrite-inline-diff [data-lexical-text='true'] {
+  color: transparent;
+  caret-color: transparent;
+  text-decoration-color: transparent;
+  user-select: none;
+}
+
+.writer-markdown-editor__notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.writer-markdown-editor__notice--warning {
+  color: #8a5b00;
+  background: #fff7e6;
+}
+
+.writer-markdown-editor__notice--error {
+  color: #b42318;
+  background: #fff1f0;
+}
+
+.mdxeditor-popup-container {
+  z-index: 1300;
+}

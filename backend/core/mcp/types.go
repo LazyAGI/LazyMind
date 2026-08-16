@@ -72,6 +72,17 @@ type UpdateToolsRequest struct {
 	AllowedTools []string `json:"allowed_tools"`
 }
 
+type BulkUpdateServerEnabledRequest struct {
+	Enabled *bool `json:"enabled"`
+}
+
+type BulkUpdateServerEnabledResponse struct {
+	Enabled                bool  `json:"enabled"`
+	TotalCount             int64 `json:"total_count"`
+	UpdatedCount           int64 `json:"updated_count"`
+	SkippedUnverifiedCount int64 `json:"skipped_unverified_count"`
+}
+
 type CheckResponse struct {
 	Success   bool   `json:"success"`
 	Message   string `json:"message"`

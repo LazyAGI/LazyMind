@@ -1,10 +1,11 @@
 import { create } from "zustand";
 import { AgentAppsAuth } from "@/components/auth";
+import { axiosInstance, localizeErrorCode } from "@/components/request";
 import { Method, SSE } from "@/modules/chat/utils/sse";
 import { TaskServiceApi, convEventsUrl } from "@/modules/chat/utils/request";
+import { resolveCoreAssetUrl } from "@/modules/knowledge/utils/imageUrl";
 import UIUtils from "@/modules/chat/utils/ui";
 import { WORKFLOW_GRAPH_REFRESH_EVENT } from "@/components/StateGraphModal";
-import { localizeErrorCode } from "@/components/request";
 import {
   CHAT_AUTO_ADVANCE_EVENT,
   CHAT_FFMPEG_DEPENDENCY_MISSING_EVENT,
@@ -26,6 +27,21 @@ export interface TaskArtifact {
   content_type: string;
   seq: number;
   value: any;
+}
+
+/** Ephemeral Markdown preview emitted before the task persists its file artifact. */
+export interface TaskArtifactStream {
+  task_id: string;
+  slot: string;
+  content_type: string;
+  stream_id: string;
+  chunk_index: number;
+  content: string;
+  state: "streaming" | "ended" | "aborted" | "ready";
+  message?: string;
+  artifact?: TaskArtifact;
+  final_content?: string;
+  final_content_error?: string;
 }
 
 export interface ConversationArtifact extends TaskArtifact {
@@ -75,11 +91,25 @@ export interface SubAgentTask {
   summary?: string;
   output_slots?: string[];
   artifacts: TaskArtifact[];
+  artifact_streams: TaskArtifactStream[];
   execution_log: TaskLogEntry[];
 }
 
+const WRITER_MARKDOWN_STREAM_SLOT_IDS = new Set(['outline_document', 'draft_document']);
 function artifactKey(a: TaskArtifact): string {
   return `${a.slot}#${a.seq}`;
+}
+
+function isWriterIRArtifact(artifact: TaskArtifact): boolean {
+  const value = artifact.value;
+  if (!value || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  const format = String(record.document_format ?? "").toLowerCase();
+  if (format === "writer_ir" || format === "lmd") return true;
+  return [record.filename, record.name, record.path, record.url].some((source) => {
+    const path = String(source ?? "").split(/[?#]/, 1)[0].toLowerCase();
+    return path.endsWith(".lmd") || path.endsWith("_ir.json");
+  });
 }
 
 interface TaskCenterStore {
@@ -96,6 +126,7 @@ interface TaskCenterStore {
   getTasks: (conversationId: string) => SubAgentTask[];
   upsertTask: (conversationId: string, task: Partial<SubAgentTask> & { task_id: string }) => void;
   applyTaskEvent: (conversationId: string, taskId: string, event: any) => void;
+  loadArtifactStreamContent: (conversationId: string, taskId: string, artifact: TaskArtifact) => Promise<void>;
   loadConversationTasks: (conversationId: string) => Promise<void>;
   loadConversationArtifacts: (conversationId: string) => Promise<void>;
   refreshConversationExecution: (conversationId: string) => Promise<void>;
@@ -205,6 +236,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             summary: task.summary,
             output_slots: task.output_slots,
             artifacts: task.artifacts ?? [],
+            artifact_streams: task.artifact_streams ?? [],
             execution_log: task.execution_log ?? [],
             conversation_id: conversationId,
             trigger_history_id: task.trigger_history_id,
@@ -250,6 +282,82 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           if (!existing.some((a) => artifactKey(a) === artifactKey(newArtifact))) {
             task.artifacts = [...existing, newArtifact];
           }
+          const streams = task.artifact_streams ?? [];
+          const streamIndex = streams.reduce(
+            (latestIndex, stream, index) => (
+              stream.slot === newArtifact.slot && stream.content_type === "text/markdown"
+                ? index
+                : latestIndex
+            ),
+            -1,
+          );
+          if (streamIndex >= 0) {
+            const nextStreams = streams.slice();
+            nextStreams[streamIndex] = {
+              ...nextStreams[streamIndex],
+              artifact: newArtifact,
+              // A .lmd file is the final Writer IR, not Markdown text. Keep the
+              // streamed Markdown preview until the plugin session exposes the
+              // IR revision, then let the slot renderer switch to its editor.
+              state: isWriterIRArtifact(newArtifact) ? "ready" : nextStreams[streamIndex].state,
+            };
+            task.artifact_streams = nextStreams;
+          }
+          break;
+        }
+        case "artifact_stream_start": {
+          if (!event.stream_id || !event.slot || !event.content_type) break;
+          const current = task.artifact_streams ?? [];
+          const next = current.filter((stream) => stream.stream_id !== event.stream_id);
+          next.push({
+            task_id: taskId,
+            slot: event.slot,
+            content_type: event.content_type,
+            stream_id: event.stream_id,
+            chunk_index: event.chunk_index ?? 1,
+            content: "",
+            state: "streaming",
+          });
+          task.artifact_streams = next;
+          break;
+        }
+        case "artifact_stream": {
+          if (!event.stream_id) break;
+          const streams = task.artifact_streams ?? [];
+          const streamIndex = streams.findIndex((stream) => stream.stream_id === event.stream_id);
+          if (streamIndex < 0) break;
+          const stream = streams[streamIndex];
+          const chunkIndex = event.chunk_index ?? 0;
+          // The server guarantees monotonically increasing chunk indexes. Ignore replayed
+          // or out-of-order chunks so reconnects never duplicate preview text.
+          if (chunkIndex <= stream.chunk_index) break;
+          const nextStreams = streams.slice();
+          nextStreams[streamIndex] = {
+            ...stream,
+            chunk_index: chunkIndex,
+            content: stream.content + (typeof event.delta === "string" ? event.delta : ""),
+            state: "streaming",
+          };
+          task.artifact_streams = nextStreams;
+          break;
+        }
+        case "artifact_stream_end":
+        case "artifact_stream_abort": {
+          if (!event.stream_id) break;
+          const streams = task.artifact_streams ?? [];
+          const streamIndex = streams.findIndex((stream) => stream.stream_id === event.stream_id);
+          if (streamIndex < 0) break;
+          const stream = streams[streamIndex];
+          const chunkIndex = event.chunk_index ?? stream.chunk_index;
+          if (chunkIndex < stream.chunk_index) break;
+          const nextStreams = streams.slice();
+          nextStreams[streamIndex] = {
+            ...stream,
+            chunk_index: chunkIndex,
+            state: event.type === "artifact_stream_abort" ? "aborted" : "ended",
+            message: event.message || stream.message,
+          };
+          task.artifact_streams = nextStreams;
           break;
         }
         case "done":
@@ -335,6 +443,78 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
     });
   },
 
+  loadArtifactStreamContent: async (conversationId, taskId, artifact) => {
+    if (!WRITER_MARKDOWN_STREAM_SLOT_IDS.has(artifact.slot) || artifact.content_type !== "file") return;
+    if (isWriterIRArtifact(artifact)) return;
+    const rawUrl = typeof artifact.value?.url === "string" ? artifact.value.url : "";
+    const url = resolveCoreAssetUrl(rawUrl);
+    if (!url) return;
+
+    try {
+      const response = await axiosInstance.get<string>(url, { responseType: "text" });
+      const content = typeof response.data === "string" ? response.data : "";
+      if (!content) throw new Error("empty artifact content");
+      set((state) => {
+        const tasks = state.tasksByConversation[conversationId] ?? [];
+        const taskIndex = tasks.findIndex((task) => task.task_id === taskId);
+        if (taskIndex < 0) return state;
+        const task = tasks[taskIndex];
+        const streamIndex = (task.artifact_streams ?? []).reduce(
+          (latestIndex, stream, index) => (
+            stream.slot === artifact.slot && stream.artifact?.value?.url === rawUrl
+              ? index
+              : latestIndex
+          ),
+          -1,
+        );
+        if (streamIndex < 0) return state;
+        const nextStreams = task.artifact_streams.slice();
+        nextStreams[streamIndex] = {
+          ...nextStreams[streamIndex],
+          state: "ready",
+          final_content: content,
+          final_content_error: undefined,
+        };
+        const nextTasks = tasks.slice();
+        nextTasks[taskIndex] = { ...task, artifact_streams: nextStreams };
+        return {
+          tasksByConversation: {
+            ...state.tasksByConversation,
+            [conversationId]: nextTasks,
+          },
+        };
+      });
+    } catch {
+      set((state) => {
+        const tasks = state.tasksByConversation[conversationId] ?? [];
+        const taskIndex = tasks.findIndex((task) => task.task_id === taskId);
+        if (taskIndex < 0) return state;
+        const task = tasks[taskIndex];
+        const streamIndex = (task.artifact_streams ?? []).reduce(
+          (latestIndex, stream, index) => (
+            stream.slot === artifact.slot && stream.artifact?.value?.url === rawUrl
+              ? index
+              : latestIndex
+          ),
+          -1,
+        );
+        if (streamIndex < 0) return state;
+        const nextStreams = task.artifact_streams.slice();
+        nextStreams[streamIndex] = {
+          ...nextStreams[streamIndex],
+          final_content_error: localizeErrorCode("2000509"),
+        };
+        const nextTasks = tasks.slice();
+        nextTasks[taskIndex] = { ...task, artifact_streams: nextStreams };
+        return {
+          tasksByConversation: {
+            ...state.tasksByConversation,
+            [conversationId]: nextTasks,
+          },
+        };
+      });
+    }
+  },
   loadConversationTasks: async (conversationId) => {
     if (!conversationId) {
       return;
@@ -360,6 +540,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           summary: t.summary,
           output_slots: t.output_slots,
           artifacts: t.artifacts ?? [],
+          artifact_streams: t.artifact_streams ?? [],
           execution_log: stepsToExecutionLog(t.steps ?? []),
       }));
       set((state) => ({
@@ -462,10 +643,19 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           } else if (type === 'task_updated' && payload?.task_id && payload?.event) {
             if (replayed) return;
             const taskEvent = payload.event;
-            if (taskEvent.type !== 'artifact') {
-              get().applyTaskEvent(conversationId, payload.task_id, taskEvent);
+            get().applyTaskEvent(conversationId, payload.task_id, taskEvent);
+            if (taskEvent.type === 'artifact') {
+              void get().loadArtifactStreamContent(conversationId, payload.task_id, {
+                slot: taskEvent.slot,
+                content_type: taskEvent.content_type,
+                seq: taskEvent.seq ?? 1,
+                value: taskEvent.value,
+              });
             }
-            if (taskEvent.type === 'artifact' || taskEvent.type === 'done' || taskEvent.type === 'error') {
+            if (taskEvent.type === 'artifact') {
+              void get().loadConversationArtifacts(conversationId);
+            }
+            if (taskEvent.type === 'done' || taskEvent.type === 'error') {
               void get().loadConversationTasks(conversationId);
               void get().loadConversationArtifacts(conversationId);
             }
@@ -493,9 +683,18 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             window.dispatchEvent(
               new CustomEvent(WORKFLOW_GRAPH_REFRESH_EVENT, { detail: { conversationId } }),
             );
-            const workflowState = useWorkflowStore.getState();
-            workflowState.setAutoRunning(conversationId, false);
-            void workflowState.loadActiveSession(conversationId);
+            const refreshActiveWorkflowSession = () => {
+              const workflowState = useWorkflowStore.getState();
+              void workflowState.loadActiveSession(conversationId);
+              workflowState.setAutoRunning(conversationId, false);
+            };
+            refreshActiveWorkflowSession();
+            // Artifact files and their slot projection can commit just after the
+            // completion event. Reconcile once more so the completed Writer panel
+            // gets its generated image without requiring a route change.
+            if (type === 'workflow_completed') {
+              window.setTimeout(refreshActiveWorkflowSession, 800);
+            }
           } else if (type === 'step_partial_done') {
             if (replayed) return;
             window.dispatchEvent(

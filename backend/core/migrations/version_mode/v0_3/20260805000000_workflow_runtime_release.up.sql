@@ -1,4 +1,25 @@
 -- +migrate Dialect postgres
+ALTER TABLE user_ui_preferences
+    ADD COLUMN IF NOT EXISTS task_center_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE user_ui_preferences
+    ADD COLUMN IF NOT EXISTS skills_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE user_ui_preferences
+    ADD COLUMN IF NOT EXISTS mcp_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE user_ui_preferences
+    ADD COLUMN IF NOT EXISTS workflows_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+UPDATE user_ui_preferences SET workflows_enabled = skills_enabled;
+ALTER TABLE user_ui_preferences
+    ADD COLUMN IF NOT EXISTS document_parsing_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+
+-- +migrate Dialect sqlite
+ALTER TABLE user_ui_preferences ADD COLUMN task_center_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE user_ui_preferences ADD COLUMN skills_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE user_ui_preferences ADD COLUMN mcp_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE user_ui_preferences ADD COLUMN workflows_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+UPDATE user_ui_preferences SET workflows_enabled = skills_enabled;
+ALTER TABLE user_ui_preferences ADD COLUMN document_parsing_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+
+-- +migrate Dialect postgres
 ALTER TABLE user_plugin_settings
     ADD COLUMN IF NOT EXISTS call_mode VARCHAR(16) NOT NULL DEFAULT 'disabled';
 UPDATE user_plugin_settings

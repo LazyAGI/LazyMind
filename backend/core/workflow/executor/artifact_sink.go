@@ -95,7 +95,7 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 			return err
 		}
 		payload, _ := json.Marshal(map[string]any{"artifact_id": row.ID, "attempt_id": attempt.AttemptID,
-			"slot": artifact.Slot, "revision": revision, "state_version": stateVersion})
+			"slot": artifact.Slot, "revision": revision, "list_index": listIndex, "state_version": stateVersion})
 		if err := tx.Create(&orm.WorkflowEvent{SessionID: attempt.SessionID, OwnerUserID: session.CreateUserID,
 			ContractVersion: "workflow.v1", EventType: "artifact.upsert", EntityID: row.ID,
 			StateVersion: stateVersion, PayloadJSON: payload, CreatedAt: now}).Error; err != nil {
@@ -121,6 +121,12 @@ func artifactListIndex(tx *gorm.DB, attempt AttemptContext, artifact Artifact, c
 		}
 		index := selected[position]
 		return &index, false, nil
+	}
+	var metadata map[string]any
+	if json.Unmarshal(artifact.Value, &metadata) == nil {
+		if index := metadataListIndex(metadata); index != nil {
+			return index, false, nil
+		}
 	}
 	var maxIndex int
 	if err := tx.Model(&orm.WorkflowSlotRevision{}).Select("COALESCE(MAX(list_index), -1)").
@@ -170,6 +176,32 @@ func appendArtifactListOrder(tx *gorm.DB, sessionID, slot string, listIndex int,
 	encoded, _ := json.Marshal(append(current, listIndex))
 	return tx.Model(&orm.WorkflowSlotOrder{}).Where("session_id = ? AND slot_id = ?", sessionID, slot).
 		Updates(map[string]any{"order_list": encoded, "order_version": order.OrderVersion + 1, "updated_at": now}).Error
+}
+
+func metadataListIndex(metadata map[string]any) *int {
+	if metadata == nil {
+		return nil
+	}
+	raw, ok := metadata["list_index"]
+	if !ok {
+		return nil
+	}
+	var value int
+	switch typed := raw.(type) {
+	case float64:
+		value = int(typed)
+		if float64(value) != typed {
+			return nil
+		}
+	case int:
+		value = typed
+	default:
+		return nil
+	}
+	if value < 0 {
+		return nil
+	}
+	return &value
 }
 
 func stringValue(value any) string {

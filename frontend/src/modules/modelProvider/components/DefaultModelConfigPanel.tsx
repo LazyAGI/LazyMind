@@ -23,6 +23,8 @@ import {
   withModelProviderJsonOptions,
 } from "../api";
 
+const SENSENOVA_LOGO_URL = "https://www.sensenova.ai/images/logo.png";
+
 type ModelCapability =
   | "llm"
   | "embed_main"
@@ -298,6 +300,7 @@ function getProviderBrand(name: string) {
 
 function getProviderLogoUrl(name: string) {
   const normalized = name.trim().toLowerCase();
+  if (/sensenova|sensecore|商汤|日日新/.test(normalized)) return SENSENOVA_LOGO_URL;
   const domainMap: Array<[RegExp, string]> = [
     [/claude|anthropic/, "anthropic.com"],
     [/deepseek/, "deepseek.com"],
@@ -307,7 +310,6 @@ function getProviderLogoUrl(name: string) {
     [/minimax/, "minimaxi.com"],
     [/openai/, "openai.com"],
     [/qwen|tongyi|通义/, "qwen.ai"],
-    [/sensenova|sensecore|商汤|日日新/, "platform.sensenova.cn"],
     [/siliconflow/, "siliconflow.cn"],
   ];
   const match = domainMap.find(([pattern]) => pattern.test(normalized));

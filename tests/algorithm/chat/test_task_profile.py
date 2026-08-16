@@ -781,6 +781,7 @@ def test_platform_capability_questions_stay_on_fast_rule_path(query: str) -> Non
 
 
 @pytest.mark.parametrize(('query', 'expected'), [
+    ('写一篇克苏鲁小说', 'create'),
     ('帮我写一封邮件', 'create'),
     ('做一个登录页', 'create'),
     ('想几个产品名字', 'create'),
@@ -813,6 +814,14 @@ def test_explicit_final_goal_wins_over_preparatory_step() -> None:
     )
     assert profile.primary_outcome == 'decide'
     assert profile.secondary_outcomes == ('analyze',)
+
+
+def test_document_insertion_wins_over_generated_media_prerequisite() -> None:
+    profile = resolve_task_profile(
+        '生成一张配图，然后插入到这篇文章中', enable_llm_fallback=False,
+    )
+    assert profile.primary_outcome == 'execute'
+    assert 'create' in profile.secondary_outcomes
 
 
 def test_ordinary_skill_concept_does_not_select_runtime_skill() -> None:

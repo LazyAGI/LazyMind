@@ -14,6 +14,7 @@ import { runtimeFeatures } from "@/runtime/features";
 import { isLocalSessionEnabled } from "@/runtime/localSession";
 import UserAgreementPage from "@/pages/UserAgreementPage";
 import { isDesktopRuntime } from "@/runtime/mode";
+import SettingsPage from "@/modules/settings";
 
 const ShowcaseGalleryPage = lazy(() => import("@/modules/showcase/GalleryPage"));
 const ShowcaseDetailPage = lazy(() => import("@/modules/showcase/DetailPage"));
@@ -307,6 +308,7 @@ export default function AppRouter() {
             path="settings/agent-integrations"
             element={isDesktopRuntime() ? <AgentIntegrationPage /> : <Navigate to="/agent/chat" replace />}
           />
+          <Route path="settings" element={<SettingsPage />} />
         </Route>
         {runtimeFeatures.hideCloudAdmin ? (
           <Route

@@ -19,6 +19,7 @@ package workflow
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 
@@ -93,7 +94,7 @@ func DeleteSlotItemByIndex(w http.ResponseWriter, r *http.Request) {
 }
 
 // PatchSlotItemByIndex handles PATCH /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}.
-// Body: {"value": <json>, "content_type": "text"|"json"|"image"|"file", "mode": "draft"|"checkpoint"}
+// Body: {"value": <json>, "content_type": "text"|"json"|"image"|"file", "mode": "draft"|"checkpoint", "base_revision": N}
 //
 // mode=draft updates the selected human artifact in place when possible (no new revision).
 // mode=checkpoint (default) always creates a new human revision.
@@ -106,10 +107,11 @@ func PatchSlotItemByIndex(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Value       json.RawMessage `json:"value"`
-		ContentType string          `json:"content_type"`
-		Caption     *string         `json:"caption"`
-		Mode        string          `json:"mode"`
+		Value        json.RawMessage `json:"value"`
+		ContentType  string          `json:"content_type"`
+		Caption      *string         `json:"caption"`
+		Mode         string          `json:"mode"`
+		BaseRevision *int            `json:"base_revision"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.Value) == 0 {
 		common.ReplyErr(w, "invalid body: value required", http.StatusBadRequest)
@@ -141,9 +143,13 @@ func PatchSlotItemByIndex(w http.ResponseWriter, r *http.Request) {
 
 	if mode == "draft" {
 		updated, updatedInPlace, err := UpdateSelectedHumanArtifactValue(
-			ctx, db, sessionID, slotID, liPtr, body.ContentType, cleaned, body.Caption,
+			ctx, db, sessionID, slotID, liPtr, body.ContentType, cleaned, body.Caption, body.BaseRevision,
 		)
 		if err != nil {
+			if errors.Is(err, ErrConflict) {
+				common.ReplyErr(w, "revision conflict; refresh and retry", http.StatusConflict)
+				return
+			}
 			common.ReplyErr(w, "patch item failed", http.StatusInternalServerError)
 			return
 		}
@@ -182,9 +188,13 @@ func PatchSlotItemByIndex(w http.ResponseWriter, r *http.Request) {
 		sessionID, slotID, existing.Slot, existing.StepID, existing.Attempt,
 		slotType,
 		liPtr,
-		body.ContentType, cleaned, body.Caption,
+		body.ContentType, cleaned, body.Caption, body.BaseRevision,
 	)
 	if err != nil {
+		if errors.Is(err, ErrConflict) {
+			common.ReplyErr(w, "revision conflict; refresh and retry", http.StatusConflict)
+			return
+		}
 		common.ReplyErr(w, "patch item failed", http.StatusInternalServerError)
 		return
 	}
@@ -303,12 +313,14 @@ func GetSlotItemVersionsByIndex(w http.ResponseWriter, r *http.Request) {
 			"created_at":    rev.CreatedAt,
 			"selected":      rev.Selected,
 		}
+		var artifactValue json.RawMessage
 		if rev.HumanArtifactID != nil {
 			var ha orm.WorkflowHumanArtifact
 			if db.WithContext(ctx).Where("id = ?", *rev.HumanArtifactID).First(&ha).Error == nil {
 				ct := resolveContentType(ha.ContentType, ha.Value)
 				item["content_snapshot"] = enrichArtifactValue(ha.Value, ct)
 				item["content_type"] = ct
+				artifactValue = ha.Value
 			}
 		} else if rev.ArtifactSeq != nil {
 			tid := taskIDByStep[stepKey{rev.StepID, rev.Attempt}]
@@ -320,10 +332,15 @@ func GetSlotItemVersionsByIndex(w http.ResponseWriter, r *http.Request) {
 					ct := resolveContentType(art.ContentType, art.Value)
 					item["content_snapshot"] = enrichArtifactValue(art.Value, ct)
 					item["content_type"] = ct
+					artifactValue = art.Value
 				}
 			}
 		} else if len(rev.ContentSnapshot) > 0 {
 			item["content_snapshot"] = enrichArtifactValue(rev.ContentSnapshot, "")
+			artifactValue = rev.ContentSnapshot
+		}
+		if slotID == "draft_document" && writerSlotRevisionSynced(rev.ChangeSource, artifactValue) {
+			item["provider_synced"] = true
 		}
 		out = append(out, item)
 	}

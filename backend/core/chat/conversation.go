@@ -296,13 +296,14 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "query disabled tools failed", http.StatusInternalServerError)
 		return
 	}
-	if len(dbDisabledTools) > 0 {
-		resourceContext.DisabledTools = mergeDisabledToolNames(resourceContext.DisabledTools, dbDisabledTools)
-	}
 	resourceContext.DisabledTools = mergeDisabledToolNames(
 		resourceContext.DisabledTools, mentionedResources.ExcludedToolNames,
 	)
 	resourceContext.DisabledTools = applyMentionedTools(resourceContext.DisabledTools, mentionedResources.ToolNames)
+	if len(dbDisabledTools) > 0 {
+		// A setting-level pause must not be bypassed by an explicit @tool mention.
+		resourceContext.DisabledTools = mergeDisabledToolNames(resourceContext.DisabledTools, dbDisabledTools)
+	}
 	reqBody := buildChatRequestBody(r.Context(), db, convID, sessionID, query, upstreamHistories, raw, resourceContext, userID, target.Seq)
 	executor, validExecutor := normalizeChatExecutor(conversationRecord.ChatExecutor)
 	if !validExecutor {
@@ -658,6 +659,7 @@ func resumeFromDBOnly(db *gorm.DB, convID string, flusher http.Flusher, w http.R
 		"delta":               stripThinkTags(stripToolTags(last.Result)),
 		"finish_reason":       "FINISH_REASON_STOP",
 		"history_id":          last.ID,
+		"sources":             retrievalSources(last.RetrievalResult),
 		"tool_call_turns":     last.ToolCallTurns,
 		"thinking_duration_s": last.ThinkingDurationS,
 	})
@@ -673,6 +675,7 @@ func resumeCompletedFromDB(db *gorm.DB, convID string, flusher http.Flusher, w h
 			"delta":               stripThinkTags(stripToolTags(last.Result)),
 			"finish_reason":       "FINISH_REASON_STOP",
 			"history_id":          last.ID,
+			"sources":             retrievalSources(last.RetrievalResult),
 			"tool_call_turns":     last.ToolCallTurns,
 			"thinking_duration_s": last.ThinkingDurationS,
 		})
@@ -696,6 +699,7 @@ func resumeCompletedFromDB(db *gorm.DB, convID string, flusher http.Flusher, w h
 			"delta":               stripThinkTags(stripToolTags(h.Result)),
 			"finish_reason":       finish,
 			"history_id":          h.ID,
+			"sources":             retrievalSources(h.RetrievalResult),
 			"tool_call_turns":     h.ToolCallTurns,
 			"thinking_duration_s": h.ThinkingDurationS,
 		})
@@ -708,6 +712,7 @@ func mergeChunksToFirstChunk(chunks []*ChatChunkResponse) *ChatChunkResponse {
 	}
 	var fullDelta, fullReasoning string
 	var intentUpdated *IntentUpdatedEvent
+	var sources []any
 	last := chunks[len(chunks)-1]
 	for _, ch := range chunks {
 		if ch == nil {
@@ -717,6 +722,9 @@ func mergeChunksToFirstChunk(chunks []*ChatChunkResponse) *ChatChunkResponse {
 		fullReasoning += ch.ReasoningContent
 		if ch.IntentUpdated != nil {
 			intentUpdated = ch.IntentUpdated
+		}
+		if len(ch.Sources) > 0 {
+			sources = ch.Sources
 		}
 	}
 	if last == nil {
@@ -728,7 +736,7 @@ func mergeChunksToFirstChunk(chunks []*ChatChunkResponse) *ChatChunkResponse {
 		HistoryID:        last.HistoryID,
 		Delta:            fullDelta,
 		ReasoningContent: fullReasoning,
-		Sources:          last.Sources,
+		Sources:          sources,
 		FinishReason:     last.FinishReason,
 		IntentUpdated:    intentUpdated,
 	}
@@ -1221,15 +1229,7 @@ func loadConversationHistoryPage(ctx context.Context, convID string, pageSize, o
 }
 
 func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
-	var sources any
-	if len(h.RetrievalResult) > 0 {
-		var rr struct {
-			Sources any `json:"sources"`
-		}
-		if err := json.Unmarshal(h.RetrievalResult, &rr); err == nil {
-			sources = rr.Sources
-		}
-	}
+	sources := retrievalSources(h.RetrievalResult)
 	var input any
 	var mentions any
 	var askPending any
@@ -1527,19 +1527,7 @@ func DeleteConversation(w http.ResponseWriter, r *http.Request) {
 		userID = "0"
 	}
 	db := store.DB()
-	now := time.Now().UTC()
-	if err := db.Transaction(func(tx *gorm.DB) error {
-		res := tx.Model(&orm.Conversation{}).
-			Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", convID, userID).
-			Updates(map[string]any{"deleted_at": now, "updated_at": now})
-		if res.Error != nil {
-			return res.Error
-		}
-		if res.RowsAffected == 0 {
-			return gorm.ErrRecordNotFound
-		}
-		return taskcenter.ArchiveTasksForConversations(r.Context(), tx, userID, []string{convID}, now)
-	}); errors.Is(err, gorm.ErrRecordNotFound) {
+	if err := archiveConversation(r.Context(), db, convID, userID); errors.Is(err, gorm.ErrRecordNotFound) {
 		common.ReplyErr(w, "conversation not found", http.StatusNotFound)
 		return
 	} else if err != nil {
@@ -1547,6 +1535,36 @@ func DeleteConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeConversationJSON(w, http.StatusOK, map[string]any{})
+}
+
+func archiveConversation(
+	ctx context.Context,
+	db *gorm.DB,
+	conversationID string,
+	userID string,
+) error {
+	now := time.Now().UTC()
+	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		res := tx.Model(&orm.Conversation{}).
+			Where(
+				"id = ? AND create_user_id = ? AND deleted_at IS NULL",
+				conversationID,
+				userID,
+			).
+			Updates(map[string]any{"deleted_at": now, "updated_at": now})
+		if res.Error != nil {
+			return res.Error
+		}
+		if res.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		if err := taskcenter.ArchiveTasksForConversations(
+			ctx, tx, userID, []string{conversationID}, now,
+		); err != nil {
+			return err
+		}
+		return nil
+	})
 }
 
 // BatchDeleteConversations text POST /api/v1/conversations:batchDelete

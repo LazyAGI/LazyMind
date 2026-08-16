@@ -12,6 +12,7 @@ export const WRITER_ARTIFACT_SLOT_IDS = new Set([
   'resource_profiles',
   'writing_context',
   'outline',
+  'outline_document',
   'section_instructions',
   'draft_sections',
   'draft_document',

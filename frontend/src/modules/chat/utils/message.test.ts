@@ -21,7 +21,11 @@ describe("isAskPendingReadOnly", () => {
 
   it("disables answered or superseded Ask cards", () => {
     expect(isAskPendingReadOnly(true, true)).toBe(true);
-    expect(isAskPendingReadOnly(false, false)).toBe(true);
+    expect(isAskPendingReadOnly(false, false, true)).toBe(true);
+  });
+
+  it("keeps an unanswered Ask interactive when only assistant placeholders follow it", () => {
+    expect(isAskPendingReadOnly(false, false, false)).toBe(false);
   });
 });
 

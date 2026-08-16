@@ -38,6 +38,22 @@ import { waitForRuntimeCapability } from "@/runtime/readiness";
 type UserEditApi = ReturnType<typeof useUserMessageEdit>;
 type RuntimeWaitingOperation = "chat" | "workflow";
 
+function appendStreamDelta(previous: string, incoming: string) {
+  if (!previous || !incoming) {
+    return previous + incoming;
+  }
+  if (incoming.startsWith(previous)) {
+    return incoming;
+  }
+  const maxOverlap = Math.min(previous.length, incoming.length);
+  for (let size = maxOverlap; size > 0; size -= 1) {
+    if (previous.endsWith(incoming.slice(0, size))) {
+      return previous + incoming.slice(size);
+    }
+  }
+  return previous + incoming;
+}
+
 interface UseChatConversationOptions {
   canChat: boolean;
   disabledReason?: string;
@@ -456,6 +472,18 @@ export function useChatConversation({
       }
       let assistantMessage =
         newList.length > 0 ? newList[newList.length - 1] : null;
+      let assistantMessageIndex = newList.length - 1;
+      if (result.history_id) {
+        const existingAssistantIndex = newList.findIndex(
+          (item) =>
+            item?.role === RoleTypes.ASSISTANT &&
+            item?.history_id === result.history_id,
+        );
+        if (existingAssistantIndex >= 0) {
+          assistantMessageIndex = existingAssistantIndex;
+          assistantMessage = newList[existingAssistantIndex];
+        }
+      }
 
 
       const incomingExternalSequence = Number(
@@ -497,11 +525,12 @@ export function useChatConversation({
           answers: [],
         };
         newList.push(assistantMessage);
+        assistantMessageIndex = newList.length - 1;
       }
 
       const previousRawDelta =
         assistantMessage.raw_delta || assistantMessage.delta || "";
-      const mergedRawDelta = previousRawDelta + (result.delta || "");
+      const mergedRawDelta = appendStreamDelta(previousRawDelta, result.delta || "");
       const splitResult = splitThinkingContent(
         mergedRawDelta,
         assistantMessage.reasoning_content || "",
@@ -523,7 +552,7 @@ export function useChatConversation({
             : assistantMessage.sources,
       };
 
-      newList[newList.length - 1] = assistantMessage;
+      newList[assistantMessageIndex] = assistantMessage;
       return newList;
     };
 

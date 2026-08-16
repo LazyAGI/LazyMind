@@ -32,6 +32,18 @@ import {
   getRawLanguageFromClassName,
   highlightCode,
 } from "./syntaxHighlight";
+import {
+  type ChatSource,
+  findSourceByCitationId,
+  getSourceEvidenceText,
+  getSourceFaviconUrl,
+  getSourceHref,
+  getSourceLabel,
+  getSourceSubtitle,
+  isExternalSource,
+  normalizeSourceMarkers,
+  stripRedundantSourceUrls,
+} from "@/modules/chat/utils/sourceAdapter";
 
 const SOURCE_PREFIXES = ["#source-", "#user-content-source-"];
 const BOLD_BARE_URL_PATTERN = /\*\*((?:https?:\/\/|www\.)[^\s*<>()]+)\*\*/g;
@@ -50,11 +62,67 @@ const markdownRehypeWorkflows = [
 
 const MarkdownRenderContext = createContext<{
   isStreaming: boolean;
-  markSources: any[];
+  markSources: ChatSource[];
 }>({
   isStreaming: false,
   markSources: [],
 });
+
+const SOURCE_PREVIEW_TEXT_LIMIT = 280;
+
+function getSourceBrandName(source: ChatSource) {
+  const subtitle = getSourceSubtitle(source).replace(/^www\./i, "");
+  return subtitle || getSourceLabel(source);
+}
+
+function getSourcePreviewText(source: ChatSource) {
+  const text = getSourceEvidenceText(source).replace(/\s+/g, " ").trim();
+  return text.length > SOURCE_PREVIEW_TEXT_LIMIT
+    ? `${text.slice(0, SOURCE_PREVIEW_TEXT_LIMIT).trimEnd()}…`
+    : text;
+}
+
+function SourceBrandIcon({ source }: { source: ChatSource }) {
+  const [hasFaviconError, setHasFaviconError] = useState(false);
+  const faviconUrl = getSourceFaviconUrl(source);
+  const label = getSourceBrandName(source);
+
+  return (
+    <span className="md-source-chip-icon" aria-hidden="true">
+      {faviconUrl && !hasFaviconError ? (
+        <img
+          src={faviconUrl}
+          alt=""
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          onError={() => setHasFaviconError(true)}
+        />
+      ) : (
+        <span>{label.slice(0, 1).toLocaleUpperCase() || "S"}</span>
+      )}
+    </span>
+  );
+}
+
+function SourcePreviewCard({ source }: { source: ChatSource }) {
+  const sourceHref = getSourceHref(source);
+  const sourceUrl = isExternalSource(source) && /^https?:\/\//i.test(sourceHref)
+    ? sourceHref
+    : "";
+  const previewText = getSourcePreviewText(source);
+
+  return (
+    <div className="md-source-preview">
+      <div className="md-source-preview-brand">
+        <SourceBrandIcon source={source} />
+        <span>{getSourceBrandName(source)}</span>
+      </div>
+      <strong className="md-source-preview-title">{getSourceLabel(source)}</strong>
+      {previewText && <p className="md-source-preview-summary">{previewText}</p>}
+      {sourceUrl && <span className="md-source-preview-url">{sourceUrl}</span>}
+    </div>
+  );
+}
 
 function getSourceIndex(href: any) {
   if (typeof href !== "string") {
@@ -224,35 +292,53 @@ const LinkComponent = (props: any) => {
   const sourceIndex = getSourceIndex(href);
 
   if (sourceIndex) {
-    if (isStreaming) {
-      return (
-        <span
-          className="md-segment-index"
-          style={{ backgroundColor: "var(--color-text-description)" }}
-        >
-          {props.children}
-        </span>
-      );
+    const source = findSourceByCitationId(markSources, sourceIndex);
+    const sourceHref = source ? getSourceHref(source) : "";
+    const label = source
+      ? getSourceLabel(source)
+      : typeof props.title === "string" && props.title
+        ? props.title
+        : "Source";
+    const chipContent = source ? (
+      <>
+        <SourceBrandIcon source={source} />
+        <span className="md-source-chip-label">{getSourceBrandName(source)}</span>
+      </>
+    ) : (
+      <span className="md-source-chip-label">{label}</span>
+    );
+    const chip = source ? (
+      <a
+        className={classnames("md-source-chip", {
+          "md-source-chip--pending": isStreaming,
+          "md-source-chip--clickable": true,
+        })}
+        href={sourceHref}
+        target="_blank"
+        rel="noopener noreferrer"
+        aria-label={label}
+        title={label}
+      >
+        {chipContent}
+      </a>
+    ) : (
+      <span className="md-source-chip md-source-chip--pending">
+        {chipContent}
+      </span>
+    );
+
+    if (isStreaming || !source) {
+      return chip;
     }
 
     return (
       <Popover
-        title={props.title || ""}
-        content={
-          <div className="md-content-card">
-            <div className="md-content-card-content">
-              <MarkdownViewer>
-                {
-                  markSources.find(
-                    (source) => String(source.index) === sourceIndex,
-                  )?.content
-                }
-              </MarkdownViewer>
-            </div>
-          </div>
-        }
+        mouseEnterDelay={0.2}
+        placement="top"
+        classNames={{ root: "md-source-popover" }}
+        content={<SourcePreviewCard source={source} />}
       >
-        <span className="md-segment-index">{props.children}</span>
+        {chip}
       </Popover>
     );
   }
@@ -325,10 +411,14 @@ const MarkdownViewer = memo((props: any) => {
   } = props;
   const normalizedChildren =
     typeof children === "string"
-      ? normalizeBoldBareUrls(normalizeBareUrls(children))
+      ? normalizeBoldBareUrls(
+          normalizeBareUrls(
+            stripRedundantSourceUrls(normalizeSourceMarkers(children)),
+          ),
+        )
       : children;
 
-  const [markSources, setMarkSources] = useState<any[]>([]);
+  const [markSources, setMarkSources] = useState<ChatSource[]>([]);
 
   useEffect(() => {
     if (sources && sources.length > 0) {

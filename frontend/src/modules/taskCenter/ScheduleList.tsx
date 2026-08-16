@@ -175,7 +175,7 @@ function capitalize(s: string) {
 
 type TFunc = (key: string) => string;
 
-function describeCron(cron: string, t: TFunc): string {
+export function describeCron(cron: string, t: TFunc): string {
   const cadence = parseCadence(cron);
   const fields = cadence.cron.trim().split(/\s+/);
   if (fields.length === 5 && fields[2] !== '*') {

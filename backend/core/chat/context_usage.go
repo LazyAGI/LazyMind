@@ -231,11 +231,12 @@ func estimateContext(w http.ResponseWriter, r *http.Request, exportPrompt bool) 
 		common.ReplyErr(w, "query disabled tools failed", http.StatusInternalServerError)
 		return
 	}
-	resourceContext.DisabledTools = mergeDisabledToolNames(resourceContext.DisabledTools, disabled)
 	resourceContext.DisabledTools = mergeDisabledToolNames(
 		resourceContext.DisabledTools, mentioned.ExcludedToolNames,
 	)
 	resourceContext.DisabledTools = applyMentionedTools(resourceContext.DisabledTools, mentioned.ToolNames)
+	// A setting-level pause must not be bypassed by an explicit @tool mention.
+	resourceContext.DisabledTools = mergeDisabledToolNames(resourceContext.DisabledTools, disabled)
 
 	reqBody := buildChatRequestBody(
 		r.Context(), db, convID, sessionID, query, histories, raw,
