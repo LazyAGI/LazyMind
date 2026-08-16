@@ -47,7 +47,6 @@ _CAPABILITY_LABELS = {
 }
 
 
-
 def _capability_command() -> dict[str, Any]:
     return {
         'schema_version': '1',

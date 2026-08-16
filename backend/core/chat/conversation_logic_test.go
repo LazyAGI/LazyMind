@@ -815,14 +815,7 @@ func TestLoadConversationHistoryPageUsesDatabasePaging(t *testing.T) {
 		t.Fatalf("unexpected page bounds: first=%d last=%d", page[0].Seq, page[9].Seq)
 	}
 
-	var indexCount int64
-	if err := db.Raw(
-		"SELECT count(*) FROM sqlite_master WHERE type = 'index' AND name = ?",
-		"idx_chat_histories_conversation_seq",
-	).Scan(&indexCount).Error; err != nil {
-		t.Fatalf("inspect pagination index: %v", err)
-	}
-	if indexCount != 1 {
+	if !db.Migrator().HasIndex(&orm.ChatHistory{}, "idx_chat_histories_conversation_seq") {
 		t.Fatal("chat history pagination index was not created")
 	}
 }

@@ -13,6 +13,22 @@ import {
 import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
 
 let convReconnectTimer: ReturnType<typeof setTimeout> | null = null;
+let workflowRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleWorkflowSessionRefresh(conversationId: string, delayMs = 100): void {
+  if (workflowRefreshTimer) clearTimeout(workflowRefreshTimer);
+  workflowRefreshTimer = setTimeout(() => {
+    workflowRefreshTimer = null;
+    void useWorkflowStore.getState().loadActiveSession(conversationId, {
+      silentError: true,
+    });
+  }, delayMs);
+}
+
+function cancelWorkflowSessionRefresh(): void {
+  if (workflowRefreshTimer) clearTimeout(workflowRefreshTimer);
+  workflowRefreshTimer = null;
+}
 
 export type TaskStatus =
   | "pending"
@@ -628,7 +644,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           if (type === 'task_created' && payload?.task_id) {
             if (replayed) return;
             if (payload.agent_type === 'workflow_step') {
-              void useWorkflowStore.getState().loadActiveSession(conversationId);
+              scheduleWorkflowSessionRefresh(conversationId);
               return;
             }
             get().upsertTask(conversationId, {
@@ -674,7 +690,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             }));
             useWorkflowStore.getState().setAutoRunning(conversationId, true);
           } else if (
-			type === 'workflow_runtime_updated' ||
+            type === 'workflow_runtime_updated' ||
             type === 'step_waiting' ||
             type === 'workflow_completed' ||
             type === 'workflow_error'
@@ -683,18 +699,14 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             window.dispatchEvent(
               new CustomEvent(WORKFLOW_GRAPH_REFRESH_EVENT, { detail: { conversationId } }),
             );
-            const refreshActiveWorkflowSession = () => {
-              const workflowState = useWorkflowStore.getState();
-              void workflowState.loadActiveSession(conversationId);
-              workflowState.setAutoRunning(conversationId, false);
-            };
-            refreshActiveWorkflowSession();
-            // Artifact files and their slot projection can commit just after the
-            // completion event. Reconcile once more so the completed Writer panel
-            // gets its generated image without requiring a route change.
-            if (type === 'workflow_completed') {
-              window.setTimeout(refreshActiveWorkflowSession, 800);
-            }
+            useWorkflowStore.getState().setAutoRunning(conversationId, false);
+            // Completion can be emitted just before its artifact transaction is
+            // visible. Delay that one refresh instead of issuing an immediate
+            // request followed by a second reconciliation request.
+            scheduleWorkflowSessionRefresh(
+              conversationId,
+              type === 'workflow_completed' ? 800 : 100,
+            );
           } else if (type === 'step_partial_done') {
             if (replayed) return;
             window.dispatchEvent(
@@ -702,13 +714,13 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             );
           } else if (type === 'intent_updated') {
             if (replayed) return;
-            void useWorkflowStore.getState().loadActiveSession(conversationId);
+            scheduleWorkflowSessionRefresh(conversationId);
           } else if (type === 'workflow_artifact_updated') {
             if (replayed) return;
             window.dispatchEvent(
               new CustomEvent(WORKFLOW_GRAPH_REFRESH_EVENT, { detail: { conversationId } }),
             );
-            void useWorkflowStore.getState().loadActiveSession(conversationId);
+            scheduleWorkflowSessionRefresh(conversationId);
           } else if (type === 'ask_pending') {
             if (replayed) return;
             // ask_pending is persisted in chat history. Resuming the chat turn
@@ -719,7 +731,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           } else if (type === 'max_retries_exceeded' || type === 'driver_fallback') {
             const workflowState = useWorkflowStore.getState();
             workflowState.setAutoRunning(conversationId, false);
-            void workflowState.loadActiveSession(conversationId);
+            scheduleWorkflowSessionRefresh(conversationId);
           } else if (type === 'auto_chat_started') {
             if (replayed) return;
             useWorkflowStore.getState().setAutoRunning(conversationId, true);
@@ -736,6 +748,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           if (get().activeConversationId !== conversationId) return;
           try { get()._convStream?.close(); } catch { /* ignore */ }
           set({ _convStream: null });
+          cancelWorkflowSessionRefresh();
           void get().refreshConversationExecution(conversationId);
           if (!convReconnectTimer) {
             convReconnectTimer = setTimeout(() => {
@@ -755,6 +768,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
     if (get().activeConversationId !== conversationId) return;
     if (convReconnectTimer) clearTimeout(convReconnectTimer);
     convReconnectTimer = null;
+    cancelWorkflowSessionRefresh();
     try { get()._convStream?.close(); } catch { /* ignore */ }
     set({ activeConversationId: '', _convStream: null });
   },

@@ -1,4 +1,6 @@
 -- +migrate Dialect postgres
+DROP INDEX IF EXISTS idx_chat_histories_conversation_seq;
+DROP TABLE IF EXISTS agent_invocations;
 ALTER TABLE conversations DROP COLUMN IF EXISTS chat_executor;
 ALTER TABLE user_ui_preferences
     DROP COLUMN IF EXISTS document_parsing_enabled,
@@ -72,6 +74,8 @@ BEGIN
 END $$;
 
 -- +migrate Dialect sqlite
+DROP INDEX IF EXISTS idx_chat_histories_conversation_seq;
+DROP TABLE IF EXISTS agent_invocations;
 ALTER TABLE conversations DROP COLUMN chat_executor;
 ALTER TABLE user_ui_preferences DROP COLUMN document_parsing_enabled;
 ALTER TABLE user_ui_preferences DROP COLUMN workflows_enabled;

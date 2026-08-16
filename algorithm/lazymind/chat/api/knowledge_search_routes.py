@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import hmac
 import os
-from typing import Any, Dict, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
 from fastapi import APIRouter, Header, HTTPException
 from pydantic import BaseModel, Field
@@ -62,7 +62,9 @@ def require_internal_token(provided: Optional[str]) -> str:
 @router.post('/internal/knowledge:search', response_model=KnowledgeSearchResponse)
 async def search_knowledge(
     request: KnowledgeSearchRequest,
-    x_lazymind_internal_token: Optional[str] = Header(default=None, alias=INTERNAL_TOKEN_HEADER),
+    x_lazymind_internal_token: Annotated[
+        Optional[str], Header(alias=INTERNAL_TOKEN_HEADER)
+    ] = None,
 ):
     require_internal_token(x_lazymind_internal_token)
     try:

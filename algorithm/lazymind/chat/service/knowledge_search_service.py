@@ -18,9 +18,13 @@ _DEFAULT_IMAGE_TOPK = 0
 
 class KnowledgeSearchError(Exception):
     def __init__(self, code: str, message: str, cause: Optional[BaseException] = None):
-        super().__init__(message)
+        super().__init__(code, message, cause)
         self.code = code
+        self.message = message
         self.cause = cause
+
+    def __str__(self) -> str:
+        return self.message
 
 
 @dataclass(frozen=True)

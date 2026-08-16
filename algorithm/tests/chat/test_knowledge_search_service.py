@@ -211,11 +211,12 @@ def test_internal_route_requires_service_token(monkeypatch):
     client = TestClient(app)
 
     monkeypatch.setattr(routes, 'expected_internal_token', lambda: '')
-    resp = client.post('/internal/knowledge:search', json={'user_id': 'user-1', 'query': 'q', 'kb_ids': ['kb'], 'top_k': 2})
+    payload = {'user_id': 'user-1', 'query': 'q', 'kb_ids': ['kb'], 'top_k': 2}
+    resp = client.post('/internal/knowledge:search', json=payload)
     assert resp.status_code == 503
 
     monkeypatch.setattr(routes, 'expected_internal_token', lambda: 'secret-token')
-    resp = client.post('/internal/knowledge:search', json={'user_id': 'user-1', 'query': 'q', 'kb_ids': ['kb'], 'top_k': 2})
+    resp = client.post('/internal/knowledge:search', json=payload)
     assert resp.status_code == 401
 
     resp = client.post(

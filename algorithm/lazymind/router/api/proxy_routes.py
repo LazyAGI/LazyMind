@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Optional
+from typing import Annotated, Optional
 
 import httpx
 from fastapi import APIRouter, Header, HTTPException, Request, Response
@@ -64,7 +64,9 @@ async def proxy_chat_context_prompt(request: Request):
 @router.post('/internal/knowledge:search', summary='Proxy: pure knowledge search (router mode)')
 async def proxy_knowledge_search(
     request: Request,
-    x_lazymind_internal_token: Optional[str] = Header(default=None, alias=INTERNAL_TOKEN_HEADER),
+    x_lazymind_internal_token: Annotated[
+        Optional[str], Header(alias=INTERNAL_TOKEN_HEADER)
+    ] = None,
 ):
     require_internal_token(x_lazymind_internal_token)
     caller_algo_id = await _parse_algo_id(request)
