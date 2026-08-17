@@ -7,10 +7,15 @@ import { resolveScanSourceIdByDatasetId } from "@/modules/dataSource/utils/resol
 
 interface Props {
   datasetId: string;
+  documentParsingEnabled: boolean | null;
   onSyncComplete?: () => void;
 }
 
-const KnowledgeBaseSyncNow: FC<Props> = ({ datasetId, onSyncComplete }) => {
+const KnowledgeBaseSyncNow: FC<Props> = ({
+  datasetId,
+  documentParsingEnabled,
+  onSyncComplete,
+}) => {
   const { t } = useTranslation();
   const [sourceId, setSourceId] = useState<string>();
   const [sourceResolving, setSourceResolving] = useState(true);
@@ -43,6 +48,7 @@ const KnowledgeBaseSyncNow: FC<Props> = ({ datasetId, onSyncComplete }) => {
     enabled: Boolean(sourceId),
     onSyncComplete,
   });
+  const isDocumentParsingUnavailable = documentParsingEnabled !== true;
 
   if (!sourceResolving && !sourceId) {
     return null;
@@ -56,7 +62,17 @@ const KnowledgeBaseSyncNow: FC<Props> = ({ datasetId, onSyncComplete }) => {
         loading={
           sourceResolving || syncFlow.detailLoading || syncFlow.syncSubmitting
         }
-        disabled={sourceResolving || !sourceId || syncFlow.detailLoading}
+        disabled={
+          isDocumentParsingUnavailable ||
+          sourceResolving ||
+          !sourceId ||
+          syncFlow.detailLoading
+        }
+        title={isDocumentParsingUnavailable
+          ? documentParsingEnabled === false
+            ? "文档解析已暂停，请在设置中重新启用"
+            : "正在读取文档解析状态"
+          : undefined}
         onClick={() => {
           void syncFlow.openSyncPicker();
         }}

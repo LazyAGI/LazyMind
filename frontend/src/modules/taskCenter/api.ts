@@ -96,7 +96,7 @@ export interface CreateScheduleRequest {
   cron_expr: string;
   prompt_template: string;
   timezone: string;
-  name?: string;
+  name: string;
   remark?: string;
   kb_ids?: string[];
   file_ids?: string[];

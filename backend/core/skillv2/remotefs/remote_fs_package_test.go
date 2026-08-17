@@ -256,6 +256,7 @@ func TestRemoteFSMove_PackageRootRenameAndCrossPackageFile(t *testing.T) {
 
 func TestRemoteFSTrashAndPurge_PreservesSharedBlob(t *testing.T) {
 	db := testutil.NewTestDB(t)
+	testutil.RelaxSQLiteFixtureSkillUniqueIndexes(t, db.DB)
 	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
 	handler := NewHandler(HandlerDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
 	createPackage(t, handler, "skills/research/target-skill")

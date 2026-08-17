@@ -1,6 +1,17 @@
 -- +migrate Dialect postgres
+DROP INDEX IF EXISTS idx_chat_histories_conversation_seq;
+DROP TABLE IF EXISTS agent_invocations;
+ALTER TABLE conversations DROP COLUMN IF EXISTS chat_executor;
+ALTER TABLE user_ui_preferences
+    DROP COLUMN IF EXISTS document_parsing_enabled,
+    DROP COLUMN IF EXISTS workflows_enabled,
+    DROP COLUMN IF EXISTS mcp_enabled,
+    DROP COLUMN IF EXISTS skills_enabled,
+    DROP COLUMN IF EXISTS task_center_enabled;
 ALTER TABLE plugin_transition_commands DROP COLUMN IF EXISTS retry_origin;
 DROP TABLE IF EXISTS external_agent_operations;
+DROP TABLE IF EXISTS external_chat_hosts;
+DROP TABLE IF EXISTS external_chat_run_events;
 DROP TABLE IF EXISTS external_agent_runs;
 DROP TABLE IF EXISTS external_agent_bindings;
 DROP TABLE IF EXISTS public.episode_memories;
@@ -63,8 +74,18 @@ BEGIN
 END $$;
 
 -- +migrate Dialect sqlite
+DROP INDEX IF EXISTS idx_chat_histories_conversation_seq;
+DROP TABLE IF EXISTS agent_invocations;
+ALTER TABLE conversations DROP COLUMN chat_executor;
+ALTER TABLE user_ui_preferences DROP COLUMN document_parsing_enabled;
+ALTER TABLE user_ui_preferences DROP COLUMN workflows_enabled;
+ALTER TABLE user_ui_preferences DROP COLUMN mcp_enabled;
+ALTER TABLE user_ui_preferences DROP COLUMN skills_enabled;
+ALTER TABLE user_ui_preferences DROP COLUMN task_center_enabled;
 ALTER TABLE plugin_transition_commands DROP COLUMN retry_origin;
 DROP TABLE IF EXISTS external_agent_operations;
+DROP TABLE IF EXISTS external_chat_hosts;
+DROP TABLE IF EXISTS external_chat_run_events;
 DROP TABLE IF EXISTS external_agent_runs;
 DROP TABLE IF EXISTS external_agent_bindings;
 DROP TABLE IF EXISTS episode_memories;

@@ -10,7 +10,6 @@ from channel_gateway.common.application.intents import (
     canonicalize_command,
     resolve_pending_selection,
     validate_command,
-    validate_workflow_catalog,
 )
 from channel_gateway.common.domain.chat import (
     BASIC_CHAT_FEATURES,
@@ -137,10 +136,6 @@ class ChannelCommandRouter:
             grounding_messages = resumed.grounding_messages
             continuation_catalog = dict(resumed.prepared_catalog)
         command = validate_command(command, grounding_messages)
-        command = validate_workflow_catalog(
-            command,
-            continuation_catalog,
-        )
         required_kinds = self._required_catalog_kinds(
             command,
             account_id,
@@ -229,25 +224,6 @@ class ChannelCommandRouter:
             external_address_hash,
             surface,
         )
-        if self._feature_resolver(provider).enable_workflow:
-            workflow_catalog = self._classifier.catalog(
-                owner_user_id=owner_user_id,
-                request_id=request_id,
-                kinds={'workflow'},
-            )
-            continuation_catalog.update(workflow_catalog)
-            classifier_state['available_workflows'] = [
-                {
-                    'ref': str(item.get('id') or ''),
-                    'name': str(item.get('name') or ''),
-                    'description': str(
-                        item.get('description') or ''
-                    )[:2000],
-                }
-                for item in workflow_catalog.get('workflow', [])
-                if isinstance(item, dict)
-                and bool(item.get('enabled', False))
-            ][:20]
         return (
             self._classifier.classify(
                 provider=provider,

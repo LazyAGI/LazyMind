@@ -1,6 +1,8 @@
 """Token persistence: save / load / clear credentials."""
 
 import json
+import os
+import tempfile
 import time
 from typing import Any, Dict, Optional
 
@@ -22,21 +24,27 @@ def save(data: Dict[str, Any]) -> None:
     _ensure_dir()
     # Copy so we don't mutate the caller's dict with our bookkeeping field.
     to_write = {**data, 'saved_at': time.time()}
-    # Create with 0600 *before* writing to avoid the TOCTOU window between
-    # write_text and chmod where another process could read the token.
-    if not CREDENTIALS_FILE.exists():
-        import os
-        fd = os.open(
-            str(CREDENTIALS_FILE),
-            os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
-            0o600,
-        )
-        os.close(fd)
-    CREDENTIALS_FILE.chmod(0o600)
-    CREDENTIALS_FILE.write_text(
-        json.dumps(to_write, indent=2, ensure_ascii=False),
-        encoding='utf-8',
+    payload = json.dumps(to_write, indent=2, ensure_ascii=False) + '\n'
+    fd, temporary = tempfile.mkstemp(
+        prefix=f'{CREDENTIALS_FILE.name}.', suffix='.tmp',
+        dir=str(CREDENTIALS_DIR),
     )
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, 'w', encoding='utf-8') as handle:
+            fd = -1
+            handle.write(payload)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, CREDENTIALS_FILE)
+        CREDENTIALS_FILE.chmod(0o600)
+    finally:
+        if fd >= 0:
+            os.close(fd)
+        try:
+            os.unlink(temporary)
+        except FileNotFoundError:
+            pass
 
 
 def load() -> Optional[Dict[str, Any]]:

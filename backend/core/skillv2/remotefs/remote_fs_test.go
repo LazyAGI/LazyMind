@@ -3,6 +3,7 @@ package remotefs
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"net/http"
@@ -68,6 +69,14 @@ func TestRemoteFSWriteBinary_SupportsRawAndBase64Read(t *testing.T) {
 	if blob.StorageBackend == "postgres" || len(blob.Content) != 0 || blob.StorageKey == nil {
 		t.Fatalf("binary blob stored in PG or without storage key: %#v", blob)
 	}
+	assertBlobStorageState(t, db, blob.Hash, wantBlobStorage{
+		Binary:         true,
+		StorageBackend: "local_file",
+		ContentIsNull:  true,
+		StorageKeySet:  true,
+		FileType:       "image",
+		Mime:           "image/png",
+	})
 
 	rawRec := httptest.NewRecorder()
 	handler.Content(rawRec, httptest.NewRequest(http.MethodGet, remoteContentURL("skills/research/论文精读/assets/logo.png", "user_001", "task1", "raw"), nil))
@@ -78,6 +87,88 @@ func TestRemoteFSWriteBinary_SupportsRawAndBase64Read(t *testing.T) {
 	handler.Content(base64Rec, httptest.NewRequest(http.MethodGet, remoteContentURL("skills/research/论文精读/assets/logo.png", "user_001", "task1", "base64"), nil))
 	if base64Rec.Code != http.StatusOK || !strings.Contains(base64Rec.Body.String(), base64.StdEncoding.EncodeToString(data)) {
 		t.Fatalf("base64 read status=%d body=%s", base64Rec.Code, base64Rec.Body.String())
+	}
+}
+
+func TestRemoteFSWriteTextThenBinaryStoresCurrentBlobExternally(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	handler := NewHandler(HandlerDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
+	path := "skills/research/论文精读/references/switch.bin"
+	text := []byte("plain text first\n")
+	binary := testutil.MinimalPNGBytes()
+
+	writeRemoteContent(t, handler, path, "user_001", "task1", text)
+	textHash := currentDraftBlobHash(t, db, "skill1", "references/switch.bin")
+	assertBlobStorageState(t, db, textHash, wantBlobStorage{
+		Binary:         false,
+		StorageBackend: "postgres",
+		ContentIsNull:  false,
+		ContentLen:     int64(len(text)),
+		StorageKeySet:  false,
+		FileType:       "text",
+		Mime:           "text/plain",
+	})
+
+	writeRemoteContent(t, handler, path, "user_001", "task1", binary)
+	binaryHash := currentDraftBlobHash(t, db, "skill1", "references/switch.bin")
+	if binaryHash == textHash {
+		t.Fatalf("binary rewrite kept blob hash %q, want new content hash", binaryHash)
+	}
+	assertBlobStorageState(t, db, binaryHash, wantBlobStorage{
+		Binary:         true,
+		StorageBackend: "local_file",
+		ContentIsNull:  true,
+		StorageKeySet:  true,
+		FileType:       "binary",
+		Mime:           "application/octet-stream",
+	})
+
+	rawRec := httptest.NewRecorder()
+	handler.Content(rawRec, httptest.NewRequest(http.MethodGet, remoteContentURL(path, "user_001", "task1", "raw"), nil))
+	if rawRec.Code != http.StatusOK || !bytes.Equal(rawRec.Body.Bytes(), binary) {
+		t.Fatalf("raw binary read status=%d len=%d", rawRec.Code, rawRec.Body.Len())
+	}
+}
+
+func TestRemoteFSWriteBinaryThenTextStoresCurrentBlobInPostgres(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	handler := NewHandler(HandlerDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
+	path := "skills/research/论文精读/references/switch.bin"
+	binary := testutil.MinimalPNGBytes()
+	text := []byte("plain text second\n")
+
+	writeRemoteContent(t, handler, path, "user_001", "task1", binary)
+	binaryHash := currentDraftBlobHash(t, db, "skill1", "references/switch.bin")
+	assertBlobStorageState(t, db, binaryHash, wantBlobStorage{
+		Binary:         true,
+		StorageBackend: "local_file",
+		ContentIsNull:  true,
+		StorageKeySet:  true,
+		FileType:       "binary",
+		Mime:           "application/octet-stream",
+	})
+
+	writeRemoteContent(t, handler, path, "user_001", "task1", text)
+	textHash := currentDraftBlobHash(t, db, "skill1", "references/switch.bin")
+	if textHash == binaryHash {
+		t.Fatalf("text rewrite kept blob hash %q, want new content hash", textHash)
+	}
+	assertBlobStorageState(t, db, textHash, wantBlobStorage{
+		Binary:         false,
+		StorageBackend: "postgres",
+		ContentIsNull:  false,
+		ContentLen:     int64(len(text)),
+		StorageKeySet:  false,
+		FileType:       "text",
+		Mime:           "text/plain",
+	})
+
+	rawRec := httptest.NewRecorder()
+	handler.Content(rawRec, httptest.NewRequest(http.MethodGet, remoteContentURL(path, "user_001", "task1", "raw"), nil))
+	if rawRec.Code != http.StatusOK || !bytes.Equal(rawRec.Body.Bytes(), text) {
+		t.Fatalf("raw text read status=%d body=%q", rawRec.Code, rawRec.Body.String())
 	}
 }
 
@@ -117,6 +208,90 @@ func TestRemoteFSWrite_RejectsDifferentTaskWhenDraftExists(t *testing.T) {
 	}
 	if got := testutil.CountRows(t, db, "skill_draft_entries", "skill_id = ?", "skill1"); got != 1 {
 		t.Fatalf("draft entry count = %d, want 1", got)
+	}
+}
+
+func writeRemoteContent(t *testing.T, handler *Handler, remotePath, userID, taskID string, data []byte) {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	handler.Content(rec, httptest.NewRequest(http.MethodPut, remoteContentURL(remotePath, userID, taskID, ""), bytes.NewReader(data)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("write %s status=%d body=%s", remotePath, rec.Code, rec.Body.String())
+	}
+}
+
+func currentDraftBlobHash(t *testing.T, db *testutil.TestDB, skillID, relPath string) string {
+	t.Helper()
+	var row struct {
+		BlobHash string `gorm:"column:blob_hash"`
+	}
+	if err := db.Table("skill_draft_entries").
+		Select("blob_hash").
+		Where("skill_id = ? AND path = ? AND op = ?", skillID, relPath, "upsert").
+		Take(&row).Error; err != nil {
+		t.Fatalf("query current draft blob hash: %v", err)
+	}
+	return row.BlobHash
+}
+
+type wantBlobStorage struct {
+	Binary         bool
+	StorageBackend string
+	ContentIsNull  bool
+	ContentLen     int64
+	StorageKeySet  bool
+	FileType       string
+	Mime           string
+}
+
+func assertBlobStorageState(t *testing.T, db *testutil.TestDB, hash string, want wantBlobStorage) {
+	t.Helper()
+	var got struct {
+		Hash           string         `gorm:"column:hash"`
+		Binary         bool           `gorm:"column:binary"`
+		StorageBackend string         `gorm:"column:storage_backend"`
+		StorageKey     sql.NullString `gorm:"column:storage_key"`
+		ContentIsNull  bool           `gorm:"column:content_is_null"`
+		ContentLen     sql.NullInt64  `gorm:"column:content_len"`
+		FileType       string         `gorm:"column:file_type"`
+		Mime           string         `gorm:"column:mime"`
+	}
+	if err := db.Raw(`
+		SELECT
+			hash,
+			binary,
+			storage_backend,
+			storage_key,
+			content IS NULL AS content_is_null,
+			length(content) AS content_len,
+			file_type,
+			mime
+		FROM skill_blobs
+		WHERE hash = ?
+	`, hash).Scan(&got).Error; err != nil {
+		t.Fatalf("query blob storage state: %v", err)
+	}
+	if got.Hash == "" {
+		t.Fatalf("blob %q not found", hash)
+	}
+	if got.Binary != want.Binary ||
+		got.StorageBackend != want.StorageBackend ||
+		got.ContentIsNull != want.ContentIsNull ||
+		got.StorageKey.Valid != want.StorageKeySet ||
+		got.FileType != want.FileType ||
+		got.Mime != want.Mime {
+		t.Fatalf("blob state = %#v, want %#v", got, want)
+	}
+	if want.StorageKeySet && got.StorageKey.String == "" {
+		t.Fatalf("storage_key is empty, want non-empty")
+	}
+	if !want.ContentIsNull {
+		if !got.ContentLen.Valid || got.ContentLen.Int64 != want.ContentLen {
+			t.Fatalf("content length = %#v, want %d", got.ContentLen, want.ContentLen)
+		}
+	}
+	if want.ContentIsNull && got.ContentLen.Valid {
+		t.Fatalf("content length valid for SQL NULL content: %#v", got.ContentLen)
 	}
 }
 

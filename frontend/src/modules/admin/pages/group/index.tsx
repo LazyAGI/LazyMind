@@ -18,7 +18,11 @@ import { getLocalizedTablePagination } from "@/components/ui/pagination";
 const { Paragraph } = Typography;
 const NAME_COLUMN_WIDTH = 220;
 
-const GroupManagement = () => {
+interface GroupManagementProps {
+  embedded?: boolean;
+}
+
+const GroupManagement = ({ embedded = false }: GroupManagementProps) => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [isModalVisible, setIsModalVisible] = useState(false);
@@ -127,7 +131,7 @@ const GroupManagement = () => {
       width: NAME_COLUMN_WIDTH,
       ellipsis: true,
       render: (text: string, record: GroupItem) => (
-        isUserAdmin ? (
+        isUserAdmin && !embedded ? (
           <Tooltip title={text}>
             <Button
               type="link"

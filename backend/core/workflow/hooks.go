@@ -97,6 +97,28 @@ func emitWorkflowArtifactUpdated(stateStore state.Store, conversationID string, 
 	)
 }
 
+// NotifyWorkflowRuntimeUpdated invalidates the conversation's Workflow view
+// after a hosted attempt changes. WorkflowSessionStep remains authoritative.
+func NotifyWorkflowRuntimeUpdated(
+	ctx context.Context,
+	db *gorm.DB,
+	sessionID, attemptID, change string,
+) {
+	if db == nil || subagent.EventHooks == nil {
+		return
+	}
+	session, err := GetSession(ctx, db, sessionID)
+	if err != nil || session.ConversationID == "" {
+		return
+	}
+	subagent.EventHooks.CallConversationEvent(ctx, store.State(), session.ConversationID, "",
+		"workflow_runtime_updated", map[string]any{
+			"session_id": sessionID,
+			"attempt_id": attemptID,
+			"change":     change,
+		})
+}
+
 // onTerminalStatus is called by the subagent runner when a task reaches terminal status.
 func onTerminalStatus(ctx context.Context, db *gorm.DB, stateStore state.Store, taskID, status, message string) {
 	if status == subagent.StatusRunning {

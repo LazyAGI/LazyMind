@@ -1,6 +1,7 @@
 package doc
 
 import (
+	"context"
 	"net/http"
 	"os"
 	"strings"
@@ -30,11 +31,15 @@ type scanSourceAccessByDatasetItem struct {
 }
 
 func datasetAllowedByScanSource(r *http.Request, datasetID string, action string) bool {
+	return datasetAllowedByScanSourceForCaller(r.Context(), datasetCatalogCallerFromRequest(r), datasetID, action)
+}
+
+func datasetAllowedByScanSourceForCaller(ctx context.Context, caller DatasetCatalogCaller, datasetID string, action string) bool {
 	datasetID = strings.TrimSpace(datasetID)
 	if datasetID == "" {
 		return false
 	}
-	items, ok := scanSourceAccessByDataset(r, []string{datasetID}, action)
+	items, ok := scanSourceAccessByDatasetForCaller(ctx, caller, []string{datasetID}, action)
 	if !ok {
 		return true
 	}
@@ -43,6 +48,10 @@ func datasetAllowedByScanSource(r *http.Request, datasetID string, action string
 }
 
 func filterDatasetsByScanSourceAccess(r *http.Request, datasets []orm.Dataset, action string) []orm.Dataset {
+	return filterDatasetsByScanSourceAccessForCaller(r.Context(), datasetCatalogCallerFromRequest(r), datasets, action)
+}
+
+func filterDatasetsByScanSourceAccessForCaller(ctx context.Context, caller DatasetCatalogCaller, datasets []orm.Dataset, action string) []orm.Dataset {
 	if len(datasets) == 0 {
 		return datasets
 	}
@@ -52,7 +61,7 @@ func filterDatasetsByScanSourceAccess(r *http.Request, datasets []orm.Dataset, a
 			datasetIDs = append(datasetIDs, id)
 		}
 	}
-	items, ok := scanSourceAccessByDataset(r, datasetIDs, action)
+	items, ok := scanSourceAccessByDatasetForCaller(ctx, caller, datasetIDs, action)
 	if !ok {
 		return datasets
 	}
@@ -67,6 +76,10 @@ func filterDatasetsByScanSourceAccess(r *http.Request, datasets []orm.Dataset, a
 }
 
 func scanSourceAccessByDataset(r *http.Request, datasetIDs []string, action string) (map[string]scanSourceAccessByDatasetItem, bool) {
+	return scanSourceAccessByDatasetForCaller(r.Context(), datasetCatalogCallerFromRequest(r), datasetIDs, action)
+}
+
+func scanSourceAccessByDatasetForCaller(ctx context.Context, caller DatasetCatalogCaller, datasetIDs []string, action string) (map[string]scanSourceAccessByDatasetItem, bool) {
 	datasetIDs = uniqueNonEmptyStrings(datasetIDs)
 	if len(datasetIDs) == 0 {
 		return map[string]scanSourceAccessByDatasetItem{}, true
@@ -77,7 +90,7 @@ func scanSourceAccessByDataset(r *http.Request, datasetIDs []string, action stri
 		Action:     scanSourceAccessAction(action),
 	}
 	var resp scanSourceAccessByDatasetBatchResponse
-	if err := common.ApiPost(r.Context(), scanURL, req, scanSourceAccessHeaders(r), &resp, 5*time.Second); err != nil {
+	if err := common.ApiPost(ctx, scanURL, req, scanSourceAccessHeadersForCaller(caller), &resp, 5*time.Second); err != nil {
 		log.Logger.Warn().
 			Err(err).
 			Str("scan_url", scanURL).
@@ -109,25 +122,41 @@ func scanSourceAccessAction(action string) string {
 }
 
 func scanSourceAccessHeaders(r *http.Request) map[string]string {
+	return scanSourceAccessHeadersForCaller(datasetCatalogCallerFromRequest(r))
+}
+
+func scanSourceAccessHeadersForCaller(caller DatasetCatalogCaller) map[string]string {
 	headers := map[string]string{}
-	copyHeader := func(name string) {
-		if v := strings.TrimSpace(r.Header.Get(name)); v != "" {
+	add := func(name, value string) {
+		if v := strings.TrimSpace(value); v != "" {
 			headers[name] = v
 		}
 	}
-	copyHeader("Authorization")
-	copyHeader("X-User-ID")
-	copyHeader("X-Tenant-ID")
-	copyHeader("X-User-Role")
-	if _, ok := headers["X-User-ID"]; !ok {
-		if userID := strings.TrimSpace(store.UserID(r)); userID != "" {
-			headers["X-User-ID"] = userID
-		}
-	}
+	add("Authorization", caller.Authorization)
+	add("X-User-ID", caller.UserID)
+	add("X-Tenant-ID", caller.TenantID)
+	add("X-User-Role", caller.UserRole)
 	if token := strings.TrimSpace(os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN")); token != "" {
 		headers["X-LazyMind-Internal-Token"] = token
 	}
 	return headers
+}
+
+func datasetCatalogCallerFromRequest(r *http.Request) DatasetCatalogCaller {
+	caller := DatasetCatalogCaller{}
+	if r == nil {
+		return caller
+	}
+	caller.Authorization = strings.TrimSpace(r.Header.Get("Authorization"))
+	caller.UserID = strings.TrimSpace(r.Header.Get("X-User-ID"))
+	if caller.UserID == "" {
+		if userID := strings.TrimSpace(store.UserID(r)); userID != "" {
+			caller.UserID = userID
+		}
+	}
+	caller.TenantID = strings.TrimSpace(r.Header.Get("X-Tenant-ID"))
+	caller.UserRole = strings.TrimSpace(r.Header.Get("X-User-Role"))
+	return caller
 }
 
 func uniqueNonEmptyStrings(values []string) []string {

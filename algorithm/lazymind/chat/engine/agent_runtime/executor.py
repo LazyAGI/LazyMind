@@ -7,6 +7,7 @@ import lazyllm
 import lazyllm.module.stream_helper as _sh
 import lazyllm.tools.agent as _agent_mod
 from lazymind.config import config as _cfg
+from lazymind.chat.engine.tools.infra import CitationResultMiddleware
 
 from .models import AgentRole, AgentRunPlan
 from .tool_limit_control import tool_limit_decision_coordinator
@@ -238,7 +239,7 @@ class AgentExecutor:
             **kwargs,
         )
         agent._tools_manager = ToolCallGuard(
-            agent._tools_manager,
+            CitationResultMiddleware(agent._tools_manager),
             options.tool_failure_limits,
             max(2, int(_cfg['agentic_expanded_max_rounds'])),
             cancel_check=options.extra_stop_condition,

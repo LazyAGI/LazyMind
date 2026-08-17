@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"time"
 
+	"gorm.io/gorm"
+
+	"lazymind/core/common/orm"
 	"lazymind/core/state"
 )
 
@@ -17,8 +20,8 @@ const (
 	chatInputKeyPrefix  = "rag/chat/input:%s:%s"
 
 	// convEventsKeyPrefix is a conversation-level event LIST, keyed only by conversation_id.
-	// It carries task_created and plugin lifecycle events across all chat turns so that
-	// the frontend can subscribe at conversation granularity rather than per history_id.
+	// It multiplexes independent-task changes and Workflow lifecycle events across
+	// chat turns so the frontend needs one background stream per conversation.
 	convEventsKeyPrefix = "rag/conv/events:%s"
 
 	chatCacheExpireTime  = time.Hour * 2
@@ -49,26 +52,28 @@ type MultiAnswerInfo struct {
 }
 
 type ChatChunkResponse struct {
-	ConversationID    string                   `json:"conversation_id"`
-	Seq               int32                    `json:"seq"`
-	Message           string                   `json:"message"`
-	Delta             string                   `json:"delta"`
-	FinishReason      string                   `json:"finish_reason"`
-	HistoryID         string                   `json:"history_id"`
-	Sources           []any                    `json:"sources,omitempty"`
-	PromptQuestions   []string                 `json:"prompt_questions,omitempty"`
-	ReasoningContent  string                   `json:"reasoning_content,omitempty"`
-	ThinkingDurationS int64                    `json:"thinking_duration_s,omitempty"`
-	ToolCallTurns     int                      `json:"tool_call_turns,omitempty"`
-	TaskCreated       *TaskCreatedNotice       `json:"task_created,omitempty"`
-	ArtifactCreated   *ConversationArtifactDTO `json:"artifact_created,omitempty"`
-	AskPending        *AskPendingEvent         `json:"ask_pending,omitempty"`
-	ToolLimitPending  *ToolLimitPendingEvent   `json:"tool_limit_pending,omitempty"`
-	IntentUpdated     *IntentUpdatedEvent      `json:"intent_updated,omitempty"`
+	ConversationID        string                       `json:"conversation_id"`
+	Seq                   int32                        `json:"seq"`
+	Message               string                       `json:"message"`
+	Delta                 string                       `json:"delta"`
+	FinishReason          string                       `json:"finish_reason"`
+	HistoryID             string                       `json:"history_id"`
+	Sources               []any                        `json:"sources,omitempty"`
+	PromptQuestions       []string                     `json:"prompt_questions,omitempty"`
+	ReasoningContent      string                       `json:"reasoning_content,omitempty"`
+	ThinkingDurationS     int64                        `json:"thinking_duration_s,omitempty"`
+	ToolCallTurns         int                          `json:"tool_call_turns,omitempty"`
+	ExternalEventSequence int64                        `json:"external_event_sequence,omitempty"`
+	Execution             *externalExecutionProjection `json:"execution,omitempty"`
+	TaskCreated           *TaskCreatedNotice           `json:"task_created,omitempty"`
+	ArtifactCreated       *ConversationArtifactDTO     `json:"artifact_created,omitempty"`
+	AskPending            *AskPendingEvent             `json:"ask_pending,omitempty"`
+	ToolLimitPending      *ToolLimitPendingEvent       `json:"tool_limit_pending,omitempty"`
+	IntentUpdated         *IntentUpdatedEvent          `json:"intent_updated,omitempty"`
 }
 
-// TaskCreatedNotice notifies the frontend (main SSE) that a SubAgent task was created,
-// so it can subscribe to the corresponding Task SSE stream.
+// TaskCreatedNotice notifies the frontend that an independent SubAgent task exists.
+// Subsequent changes arrive through the conversation event stream.
 type TaskCreatedNotice struct {
 	TaskID            string `json:"task_id"`
 	TriggerHistoryID  string `json:"trigger_history_id"`
@@ -123,6 +128,75 @@ func getGeneratingHistoryIDs(ctx context.Context, stateStore state.Store, conver
 		}
 	}
 	return ids, nil
+}
+
+// reconcileGeneratingExternalChatStatuses heals the derived chat cache from
+// durable External Chat runs. Internal Chat histories are deliberately left
+// untouched because their lifecycle is not owned by the External Chat store.
+func reconcileGeneratingExternalChatStatuses(
+	ctx context.Context,
+	db *gorm.DB,
+	stateStore state.Store,
+	owner, conversationID string,
+) ([]string, error) {
+	ids, err := getGeneratingHistoryIDs(ctx, stateStore, conversationID)
+	if err != nil || len(ids) == 0 || db == nil {
+		return ids, err
+	}
+	var runs []orm.ExternalChatRun
+	if err := db.WithContext(ctx).
+		Where("actor_user_id = ? AND conversation_id = ? AND history_id IN ?", owner, conversationID, ids).
+		Order("created_at DESC").Find(&runs).Error; err != nil {
+		return ids, err
+	}
+	latest := make(map[string]orm.ExternalChatRun, len(runs))
+	for _, run := range runs {
+		if _, exists := latest[run.HistoryID]; !exists {
+			latest[run.HistoryID] = run
+		}
+	}
+	remaining := make([]string, 0, len(ids))
+	for _, historyID := range ids {
+		run, exists := latest[historyID]
+		if !exists || !externalRunTerminal(run.Status) {
+			remaining = append(remaining, historyID)
+			continue
+		}
+		result := ""
+		var history orm.ChatHistory
+		if err := db.WithContext(ctx).Select("result").Where("id = ?", historyID).Take(&history).Error; err == nil {
+			result = history.Result
+		}
+		if err := setChatStatus(ctx, stateStore, conversationID, historyID, run.Status, result); err != nil {
+			return ids, err
+		}
+	}
+	return remaining, nil
+}
+
+func projectExternalChatRunStatus(
+	ctx context.Context,
+	db *gorm.DB,
+	stateStore state.Store,
+	owner, runID string,
+) error {
+	if db == nil || stateStore == nil {
+		return nil
+	}
+	var run orm.ExternalChatRun
+	if err := db.WithContext(ctx).
+		Where("id = ? AND actor_user_id = ?", runID, owner).Take(&run).Error; err != nil {
+		return err
+	}
+	if !externalRunTerminal(run.Status) {
+		return nil
+	}
+	result := ""
+	var history orm.ChatHistory
+	if err := db.WithContext(ctx).Select("result").Where("id = ?", run.HistoryID).Take(&history).Error; err == nil {
+		result = history.Result
+	}
+	return setChatStatus(ctx, stateStore, run.ConversationID, run.HistoryID, run.Status, result)
 }
 
 func getChatStatus(ctx context.Context, stateStore state.Store, conversationID, historyID string) (*ChatStatus, error) {

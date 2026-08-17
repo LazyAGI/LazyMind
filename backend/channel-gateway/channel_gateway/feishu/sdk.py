@@ -722,7 +722,7 @@ class _LarkCardReplyStream(ReplyStream):
                         thinking=snapshot.thinking,
                         answer=final_text,
                         thinking_seconds=snapshot.thinking_seconds,
-                        workflow_progress=snapshot.workflow_progress,
+                        task_progress=snapshot.task_progress,
                     )
                     sequence = await self._render_snapshot(
                         card_id,
@@ -887,7 +887,7 @@ class _LarkCardReplyStream(ReplyStream):
                     thinking=snapshot.thinking,
                     answer=str(value or snapshot.answer),
                     thinking_seconds=snapshot.thinking_seconds,
-                    workflow_progress=snapshot.workflow_progress,
+                    task_progress=snapshot.task_progress,
                 )
                 if self._should_render():
                     card = self._message_snapshot_card(
@@ -1037,7 +1037,7 @@ class _LarkCardReplyStream(ReplyStream):
         if snapshot.thinking_seconds is not None:
             status += f' · {snapshot.thinking_seconds} 秒'
         answer = streamable_feishu_text(snapshot.answer)
-        progress = streamable_feishu_text(snapshot.workflow_progress)
+        progress = streamable_feishu_text(snapshot.task_progress)
         if progress:
             answer = f'{answer}\n\n---\n{progress}'.strip()
         return status, answer
