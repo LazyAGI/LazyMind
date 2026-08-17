@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -50,5 +51,16 @@ func TestReplyError(t *testing.T) {
 				t.Fatalf("status = %d, want %d", rec.Code, tt.wantStatus)
 			}
 		})
+	}
+}
+
+func TestBulkUpdateEnabledRequiresEnabledField(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPatch, "/api/core/mcp_servers:enabled", strings.NewReader(`{}`))
+	rec := httptest.NewRecorder()
+
+	BulkUpdateEnabled(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
 	}
 }

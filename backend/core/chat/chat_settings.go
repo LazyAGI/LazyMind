@@ -50,9 +50,9 @@ func GetChatSettings(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// PatchConversationWorkflowSettings updates conversation-level plugin/subagent overrides.
-// Supports enable_workflow, workflow_mode, enable_subagent; null clears back to global default.
-func PatchConversationWorkflowSettings(w http.ResponseWriter, r *http.Request) {
+// PatchConversationSettings updates the Agent executor and the conversation's
+// Workflow/subagent overrides through one settings boundary.
+func PatchConversationSettings(w http.ResponseWriter, r *http.Request) {
 	userID := store.UserID(r)
 	if userID == "" {
 		common.ReplyErr(w, "unauthorized", http.StatusUnauthorized)
@@ -101,6 +101,21 @@ func PatchConversationWorkflowSettings(w http.ResponseWriter, r *http.Request) {
 			}
 			updates["plugin_mode"] = v // workflow-naming: persistence
 		}
+	}
+	if raw, present := body["chat_executor"]; present {
+		value, ok := raw.(string)
+		normalized, valid := normalizeChatExecutor(value)
+		if !ok || !valid {
+			common.ReplyErr(w, chatExecutorValidationMessage(), http.StatusBadRequest)
+			return
+		}
+		if isExternalChatProvider(normalized) {
+			if err := externalChatUnavailableError(r.Context(), userID, normalized); err != nil {
+				common.ReplyErr(w, err.Error(), http.StatusConflict)
+				return
+			}
+		}
+		updates["chat_executor"] = normalized
 	}
 	if len(updates) == 0 {
 		common.ReplyErr(w, "no valid fields to update", http.StatusBadRequest)

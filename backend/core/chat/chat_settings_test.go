@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -19,8 +20,8 @@ import (
 func setupChatSettingsTest(t *testing.T) {
 	t.Helper()
 	db := newPromptTestDB(t)
-	// Also migrate Conversation table for PatchConversationWorkflowSettings.
-	if err := db.AutoMigrate(&orm.Conversation{}); err != nil {
+	// Also migrate Conversation table for PatchConversationSettings.
+	if err := db.AutoMigrate(&orm.Conversation{}, &orm.ExternalChatHost{}); err != nil {
 		t.Fatalf("migrate conversation: %v", err)
 	}
 	corestore.Init(db.DB, nil, nil)
@@ -146,60 +147,76 @@ func TestPatchChatSettings_DisabledWorkflowModeWithWorkflow(t *testing.T) {
 	}
 }
 
-// --- PatchConversationWorkflowSettings ---
+// --- PatchConversationSettings ---
 
-// TestPatchConversationWorkflowSettings_NoConversation returns 400.
-func TestPatchConversationWorkflowSettings_NoConversation(t *testing.T) {
+// TestPatchConversationSettings_NoConversation returns 400.
+func TestPatchConversationSettings_NoConversation(t *testing.T) {
 	setupChatSettingsTest(t)
 	req := newSettingsRequest("PATCH", "/chat/conversations//workflow_settings", `{}`, "user-1", nil)
 	w := httptest.NewRecorder()
-	PatchConversationWorkflowSettings(w, req)
+	PatchConversationSettings(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status: got %d, want %d", w.Code, http.StatusBadRequest)
 	}
 }
 
-// TestPatchConversationWorkflowSettings_MissingUserID returns 401.
-func TestPatchConversationWorkflowSettings_MissingUserID(t *testing.T) {
+// TestPatchConversationSettings_MissingUserID returns 401.
+func TestPatchConversationSettings_MissingUserID(t *testing.T) {
 	setupChatSettingsTest(t)
 	vars := map[string]string{"conversation_id": "conv-1"}
 	req := newSettingsRequest("PATCH", "/chat/conversations/conv-1/workflow_settings", `{}`, "", vars)
 	w := httptest.NewRecorder()
-	PatchConversationWorkflowSettings(w, req)
+	PatchConversationSettings(w, req)
 
 	if w.Code != http.StatusUnauthorized {
 		t.Fatalf("status: got %d, want %d", w.Code, http.StatusUnauthorized)
 	}
 }
 
-// TestPatchConversationWorkflowSettings_InvalidWorkflowMode returns 400.
-func TestPatchConversationWorkflowSettings_InvalidWorkflowMode(t *testing.T) {
+// TestPatchConversationSettings_InvalidWorkflowMode returns 400.
+func TestPatchConversationSettings_InvalidWorkflowMode(t *testing.T) {
 	setupChatSettingsTest(t)
 	vars := map[string]string{"conversation_id": "conv-1"}
 	req := newSettingsRequest("PATCH", "/chat/conversations/conv-1/workflow_settings",
 		`{"workflow_mode":"bogus"}`, "user-1", vars)
 	w := httptest.NewRecorder()
-	PatchConversationWorkflowSettings(w, req)
+	PatchConversationSettings(w, req)
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("status: got %d, want %d", w.Code, http.StatusBadRequest)
 	}
 }
 
-func TestPatchConversationWorkflowSettings_PersistsPhysicalPluginModeColumn(t *testing.T) {
+func TestPatchConversationSettings_RejectsInvalidExecutor(t *testing.T) {
+	setupChatSettingsTest(t)
+	req := newSettingsRequest(http.MethodPatch, "/chat/conversations/conv/settings",
+		`{"chat_executor":"unknown"}`, "user-1", map[string]string{"conversation_id": "conv"})
+	w := httptest.NewRecorder()
+	PatchConversationSettings(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("status: got %d, want %d", w.Code, http.StatusBadRequest)
+	}
+}
+
+func TestPatchConversationSettings_PersistsRuntimeSettings(t *testing.T) {
 	setupChatSettingsTest(t)
 	db := corestore.DB()
+	if err := newExternalChatApplication(db).reportHost(
+		context.Background(), "user-1", ChatExecutorCodex, "test-host", true, true, "",
+	); err != nil {
+		t.Fatalf("report external Host: %v", err)
+	}
 	now := time.Now().UTC()
 	if err := db.Create(&orm.Conversation{ID: "conv-mode", BaseModel: orm.BaseModel{
 		CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now,
 	}}).Error; err != nil {
 		t.Fatalf("create conversation: %v", err)
 	}
-	req := newSettingsRequest(http.MethodPatch, "/chat/conversations/conv-mode/workflow-settings",
-		`{"workflow_mode":"auto"}`, "user-1", map[string]string{"conversation_id": "conv-mode"})
+	req := newSettingsRequest(http.MethodPatch, "/chat/conversations/conv-mode/settings",
+		`{"workflow_mode":"auto","chat_executor":"codex"}`, "user-1", map[string]string{"conversation_id": "conv-mode"})
 	w := httptest.NewRecorder()
-	PatchConversationWorkflowSettings(w, req)
+	PatchConversationSettings(w, req)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status: got %d, want %d, body=%s", w.Code, http.StatusOK, w.Body.String())
 	}
@@ -209,5 +226,8 @@ func TestPatchConversationWorkflowSettings_PersistsPhysicalPluginModeColumn(t *t
 	}
 	if stored.WorkflowMode == nil || *stored.WorkflowMode != "auto" {
 		t.Fatalf("workflow mode was not persisted: %#v", stored.WorkflowMode)
+	}
+	if stored.ChatExecutor != ChatExecutorCodex {
+		t.Fatalf("chat executor=%q, want %q", stored.ChatExecutor, ChatExecutorCodex)
 	}
 }

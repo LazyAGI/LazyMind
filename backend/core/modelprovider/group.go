@@ -200,6 +200,25 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		}
 		checkData = &CheckModelProviderData{Success: true, Message: checkResult.Message}
 	}
+	if req.Verify && checkData == nil && apiKey != "" {
+		checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, baseURL, apiKey, "")
+		if checkErr != nil || checkResult == nil || !checkResult.Success {
+			msg := "verification failed"
+			checkMsg := msg
+			if checkResult != nil && strings.TrimSpace(checkResult.Message) != "" {
+				checkMsg = strings.TrimSpace(checkResult.Message)
+				msg = msg + ": " + checkMsg
+			}
+			common.ReplyErrWithData(
+				w,
+				msg,
+				CheckModelProviderData{Success: false, Message: checkMsg},
+				http.StatusBadGateway,
+			)
+			return
+		}
+		checkData = &CheckModelProviderData{Success: true, Message: checkResult.Message}
+	}
 
 	now := time.Now()
 	row := orm.UserModelProviderGroup{
@@ -379,14 +398,24 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 			updates["is_verified"] = true
 		} else {
 			checkResult, checkErr := doProviderGroupCheck(r.Context(), parent.Category, parent.Name, baseURL, effectiveAPIKey, "")
-			if checkErr != nil || !checkResult.Success {
+			if checkErr != nil || checkResult == nil || !checkResult.Success {
 				msg := "verification failed"
+				checkMsg := msg
 				if checkResult != nil {
-					msg = "verification failed: " + checkResult.Message
+					checkMsg = strings.TrimSpace(checkResult.Message)
+					if checkMsg != "" {
+						msg = "verification failed: " + checkMsg
+					}
 				}
-				common.ReplyErr(w, msg, http.StatusBadGateway)
+				common.ReplyErrWithData(
+					w,
+					msg,
+					CheckModelProviderData{Success: false, Message: checkMsg},
+					http.StatusBadGateway,
+				)
 				return
 			}
+			checkData = &CheckModelProviderData{Success: true, Message: checkResult.Message}
 			updates["is_verified"] = true
 		}
 	}

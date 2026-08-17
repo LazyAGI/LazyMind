@@ -10,7 +10,38 @@ import (
 
 func newTestSchedulerDB(t *testing.T) *orm.DB {
 	t.Helper()
-	return orm.MigrateTestDB(t, &orm.UserSchedule{}, &orm.TaskCenterTask{})
+	return orm.MigrateTestDB(t, &orm.UserSchedule{}, &orm.TaskCenterTask{}, &orm.UserUIPreferences{})
+}
+
+func TestFireSchedulesSkipsPausedTaskCenterAndMovesNextRunForward(t *testing.T) {
+	db := newTestSchedulerDB(t)
+	now := time.Now().UTC()
+	schedule := orm.UserSchedule{
+		ID: "sched-paused", UserID: "user-1", CronExpr: "*/10 * * * *", Timezone: "UTC", PromptTemplate: "daily",
+		Enabled: true, NextRunAt: now.Add(-time.Hour), CreatedAt: now.Add(-time.Hour),
+	}
+	if err := db.Create(&schedule).Error; err != nil {
+		t.Fatalf("seed schedule: %v", err)
+	}
+	if err := db.Model(&orm.UserUIPreferences{}).Create(map[string]any{
+		"user_id": "user-1", "task_center_enabled": false, "skills_enabled": true, "mcp_enabled": true,
+		"created_at": now, "updated_at": now,
+	}).Error; err != nil {
+		t.Fatalf("seed controls: %v", err)
+	}
+
+	fireSchedules(context.Background(), db.DB, "")
+
+	var saved orm.UserSchedule
+	if err := db.Where("id = ?", schedule.ID).Take(&saved).Error; err != nil {
+		t.Fatalf("load schedule: %v", err)
+	}
+	if !saved.NextRunAt.After(now) {
+		t.Fatalf("paused schedule must move forward, got %s", saved.NextRunAt)
+	}
+	if saved.RunCount != 0 || saved.LastRunAt != nil {
+		t.Fatalf("paused schedule must not produce a new run: %#v", saved)
+	}
 }
 
 // ──────────────────────────────────────────────
@@ -23,6 +54,7 @@ func TestCreateAndCancelSchedule(t *testing.T) {
 
 	s := &orm.UserSchedule{
 		UserID:         "user-1",
+		Name:           "weekly report",
 		CronExpr:       "0 9 * * 1",
 		Timezone:       "Asia/Shanghai",
 		PromptTemplate: "weekly report",
@@ -48,6 +80,32 @@ func TestCreateAndCancelSchedule(t *testing.T) {
 	}
 	if got.Enabled {
 		t.Fatal("expected schedule to be disabled after cancel")
+	}
+}
+
+func TestCreateScheduleRejectsBlankName(t *testing.T) {
+	db := newTestSchedulerDB(t)
+
+	for _, name := range []string{"", "   "} {
+		s := &orm.UserSchedule{
+			UserID:         "user-1",
+			Name:           name,
+			CronExpr:       "0 9 * * 1",
+			Timezone:       "Asia/Shanghai",
+			PromptTemplate: "weekly report",
+			Enabled:        true,
+		}
+		if err := CreateSchedule(context.Background(), db.DB, s); err == nil || err.Error() != "name required" {
+			t.Fatalf("CreateSchedule(%q) error = %v, want name required", name, err)
+		}
+	}
+
+	var count int64
+	if err := db.Model(&orm.UserSchedule{}).Count(&count).Error; err != nil {
+		t.Fatalf("count schedules: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("blank schedule names must not be persisted, got %d rows", count)
 	}
 }
 

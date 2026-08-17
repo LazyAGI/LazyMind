@@ -23,7 +23,7 @@ func SignArtifactValue(contentType string, raw json.RawMessage, workspacePath st
 	}
 	raw = resolveArtifactPaths(raw, workspacePath)
 	ct := strings.TrimSpace(contentType)
-	if ct == "" || ct == "image" {
+	if ct == "" || ct == "image" || strings.HasPrefix(ct, "image/") {
 		return signImageArtifactValue(raw)
 	}
 	if ct == "file_list" {

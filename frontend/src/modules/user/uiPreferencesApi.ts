@@ -14,6 +14,8 @@ const coreConfig = new Configuration({ basePath: BASE_URL });
 
 const userApi = UserApiFactory(coreConfig, BASE_URL, axiosInstance);
 
+export const USER_UI_PREFERENCES_CHANGED_EVENT = "lazymind:user-ui-preferences-changed";
+
 function unwrapUiPreferencesData<T>(payload: unknown): T {
   if (payload && typeof payload === "object" && "data" in payload) {
     return (payload as ApiEnvelope<T>).data as T;
@@ -34,5 +36,11 @@ export async function patchUserUiPreferences(
   const response = await userApi.apiCoreUserUiPreferencesPatch({
     userUIPreferencesPatchOpenAPIRequest: patch,
   });
-  return unwrapUiPreferencesData<UserUIPreferencesOpenAPIResponse>(response.data);
+  const preferences = unwrapUiPreferencesData<UserUIPreferencesOpenAPIResponse>(response.data);
+  if (typeof window !== "undefined") {
+    window.dispatchEvent(new CustomEvent(USER_UI_PREFERENCES_CHANGED_EVENT, {
+      detail: preferences,
+    }));
+  }
+  return preferences;
 }

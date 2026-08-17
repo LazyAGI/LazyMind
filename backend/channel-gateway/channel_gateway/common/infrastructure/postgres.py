@@ -2664,8 +2664,6 @@ class GatewayStore:
         operation_id: str,
         expected_message_id: str,
         expected_revision: int | None = None,
-        *,
-        advance_revision: bool = True,
     ) -> dict[str, Any]:
         with self._connect() as connection:
             row = connection.execute(
@@ -2698,11 +2696,6 @@ class GatewayStore:
                 return dict(workspace)
             workspace = dict(workspace)
             workspace['message_id'] = message_id
-            if advance_revision:
-                workspace['revision'] = max(
-                    0,
-                    int(workspace.get('revision') or 0),
-                ) + 1
             value = json.dumps(
                 workspace,
                 ensure_ascii=False,

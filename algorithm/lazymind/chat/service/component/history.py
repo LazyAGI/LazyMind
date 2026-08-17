@@ -244,7 +244,10 @@ def normalize_history_for_agent(
                         'type': 'function',
                         'function': {
                             'name': seg['name'],
-                            'arguments': json.dumps(seg['arguments'], ensure_ascii=False),
+                            'arguments': json.dumps(
+                                seg['arguments'],
+                                ensure_ascii=False,
+                            ),
                         },
                     })
                 elif seg_type == 'tool_result':

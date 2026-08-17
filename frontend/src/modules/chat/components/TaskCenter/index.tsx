@@ -22,7 +22,6 @@ import {
   TaskStatus,
   useTaskCenterStore,
 } from "@/modules/chat/store/taskCenter";
-import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
 import {
   basenameFromPath,
   resolveCoreAssetUrl,
@@ -520,16 +519,6 @@ const TaskCenter = (props: Props) => {
   const { sessionId, onClose, showHeader = true } = props;
   const { t } = useTranslation();
   const [filter, setFilter] = useState<FilterKey>("all");
-
-  const loadActiveSession = useWorkflowStore((s) => s.loadActiveSession);
-
-  // Ensure workflow session is loaded whenever the conversation changes,
-  // independently of whether WorkflowPanel has mounted yet.
-  useEffect(() => {
-    if (sessionId) {
-      loadActiveSession(sessionId);
-    }
-  }, [sessionId, loadActiveSession]);
 
   const tasks = useTaskCenterStore((s) =>
     sessionId ? s.tasksByConversation[sessionId] ?? EMPTY_TASKS : EMPTY_TASKS,

@@ -101,7 +101,15 @@ const { Text } = Typography;
 type SourceCategory = "local" | "cloudArchive" | "official";
 type KnowledgePageView = "mine" | "square";
 
-const KnowledgePage: FC = () => {
+interface KnowledgePageProps {
+  modelSettingsPath?: string;
+  taskCenterPath?: string;
+}
+
+const KnowledgePage: FC<KnowledgePageProps> = ({
+  modelSettingsPath = "/model-providers",
+  taskCenterPath = "/task-center",
+}) => {
   const [form] = Form.useForm();
   const navigate = useNavigate();
   const { t } = useTranslation();
@@ -119,7 +127,7 @@ const KnowledgePage: FC = () => {
   // Keep a local default option to avoid label flicker while tags are loading.
   const [tags, setTags] = useState<string[]>([ALL_TAGS]);
   const [sourceCategory, setSourceCategory] = useState<SourceCategory>("local");
-  const [activeView, setActiveView] = useState<KnowledgePageView>("square");
+  const [activeView, setActiveView] = useState<KnowledgePageView>("mine");
   const [officialStatus, setOfficialStatus] = useState<KnowledgeSquareStatusMap>(
     createInitialKnowledgeSquareStatus,
   );
@@ -152,7 +160,7 @@ const KnowledgePage: FC = () => {
         style={{ marginLeft: 8, color: "#fff", textDecoration: "underline" }}
         onClick={(e: MouseEvent<HTMLAnchorElement>) => {
           e.preventDefault();
-          navigate("/model-providers");
+          navigate(modelSettingsPath);
         }}
       >
         {t("knowledge.goToConfig")}
@@ -985,7 +993,7 @@ const KnowledgePage: FC = () => {
               </span>
             </Tooltip>
           ) : null}
-          <Button icon={<HistoryOutlined />} onClick={() => navigate("/task-center")}>
+          <Button icon={<HistoryOutlined />} onClick={() => navigate(taskCenterPath)}>
             {t("knowledge.backgroundTasks")}
           </Button>
         </div>
@@ -1000,11 +1008,11 @@ const KnowledgePage: FC = () => {
               <span>
                 {t("knowledge.embeddingNotReadyBannerAdmin")}
                 <a
-                  href="/model-providers"
+                  href={modelSettingsPath}
                   style={{ marginLeft: 8, fontWeight: 500 }}
                   onClick={(e: MouseEvent<HTMLAnchorElement>) => {
                     e.preventDefault();
-                    navigate("/model-providers");
+                    navigate(modelSettingsPath);
                   }}
                 >
                   {t("knowledge.goToConfig")}
@@ -1027,11 +1035,11 @@ const KnowledgePage: FC = () => {
               <span>
                 {t("knowledge.multimodalEmbeddingNotReadyBannerAdmin")}
                 <a
-                  href="/model-providers"
+                  href={modelSettingsPath}
                   style={{ marginLeft: 8, fontWeight: 500 }}
                   onClick={(e: MouseEvent<HTMLAnchorElement>) => {
                     e.preventDefault();
-                    navigate("/model-providers");
+                    navigate(modelSettingsPath);
                   }}
                 >
                   {t("knowledge.goToConfig")}

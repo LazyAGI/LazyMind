@@ -1,5 +1,5 @@
 # Code style: Python (flake8) + Go (gofmt). Mirrors algorithm/lazyllm Makefile pattern.
-.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary lint-workflow-naming lint-migration-immutability test test-hermetic test-hermetic-setup test-hermetic-check build up up-build local-runtime-manager-build local-up local-up-lan local-down local-clean local-reset local-win-doctor local-win-build local-win-up local-win-up-lan local-win-down local-win-status local-win-clean local-win-reset down clear reset-kb reset-all fresh-start compose-host-permissions codex-daemon-bridge-start codex-daemon-bridge-stop file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-darwin-arm64 desktop-darwin-arm64-dmg desktop-darwin-arm64-clean desktop-windows-x64 desktop-windows-x64-installer desktop-windows-x64-clean desktop-cache-clean desktop-clean
+.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary lint-workflow-naming lint-migration-immutability test test-hermetic test-hermetic-setup test-hermetic-check build up up-build local-runtime-manager-build lazymind-cli-build local-up local-up-lan local-down local-clean local-reset local-win-doctor local-win-build local-win-up local-win-up-lan local-win-down local-win-status local-win-clean local-win-reset down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-darwin-arm64 desktop-darwin-arm64-dmg desktop-darwin-arm64-clean desktop-windows-x64 desktop-windows-x64-installer desktop-windows-x64-clean desktop-cache-clean desktop-clean
 .DEFAULT_GOAL := help
 
 LOCAL_CONFIG_ENV ?= local/config.env
@@ -24,6 +24,7 @@ LOCAL_BUILD_DIR := $(CURDIR)/local/build
 override export LAZYMIND_LOCAL_BUILD_ROOT := $(LOCAL_BUILD_DIR)
 override LOCAL_RUNTIME_MANAGER_BIN := $(LOCAL_BUILD_DIR)/bin/local-runtime-manager
 override LOCAL_RUNTIME_MANAGER_WIN_BIN := $(LOCAL_BUILD_DIR)/bin/local-runtime-manager.exe
+override LAZYMIND_CLI_BIN := $(LOCAL_BUILD_DIR)/bin/lazymind
 LOCAL_WIN_SCRIPT := $(CURDIR)/local/scripts/local-win.ps1
 DESKTOP_WIN_SCRIPT := $(CURDIR)/desktop/scripts/build-windows-x64.ps1
 LAZYMIND_LOCAL_DOWN_TIMEOUT ?= 150s
@@ -106,14 +107,6 @@ LAZYMIND_FILE_WATCHER_BIN := $(LAZYMIND_FILE_WATCHER_DIR)/file_watcher
 LAZYMIND_FILE_WATCHER_CONFIG := $(LAZYMIND_FILE_WATCHER_DIR)/configs/agent.yaml
 LAZYMIND_FILE_WATCHER_PID := $(LAZYMIND_FILE_WATCHER_BASE_ROOT_ABS)/run/file_watcher.pid
 LAZYMIND_FILE_WATCHER_CONSOLE_LOG := $(LAZYMIND_FILE_WATCHER_BASE_ROOT_ABS)/logs/file_watcher.console.log
-CODEX_DAEMON_BRIDGE_DIR := $(CURDIR)/data/codex-daemon-bridge
-CODEX_DAEMON_BRIDGE_PID := $(CODEX_DAEMON_BRIDGE_DIR)/bridge.pid
-CODEX_DAEMON_BRIDGE_LOG := $(CODEX_DAEMON_BRIDGE_DIR)/bridge.log
-CODEX_DAEMON_BRIDGE_TOKEN := $(CODEX_DAEMON_BRIDGE_DIR)/token
-CODEX_DAEMON_BRIDGE_LABEL := com.lazymind.codex-daemon-bridge
-CODEX_DAEMON_SOCKET ?= $(HOME)/.codex/app-server-control/app-server-control.sock
-CODEX_DAEMON_BRIDGE_HOST ?= 0.0.0.0
-CODEX_DAEMON_BRIDGE_PORT ?= 14501
 
 # ---------------------------------------------------------------------------
 # Environment variables (override via: make up VAR=value, or set in .env)
@@ -185,8 +178,8 @@ export LAZYMIND_FRONTEND_PORT ?= 8090
 PYTHON_DIRS := algorithm backend evo
 
 # Go dirs to lint
-GO_DIRS := backend/core local/local-proxy local/local-runtime-manager
-GO_MODULE_DIRS := backend/core backend/scan-control-plane backend/file-watcher local/local-proxy local/local-runtime-manager tests/backend/core
+GO_DIRS := backend/core local/local-proxy local/local-runtime-manager local/lazymind-cli
+GO_MODULE_DIRS := backend/core backend/scan-control-plane backend/file-watcher local/local-proxy local/local-runtime-manager local/lazymind-cli tests/backend/core
 GOLANGCI_LINT_VERSION ?= v2.12.2
 GOLANGCI_LINT ?= $(shell command -v golangci-lint 2>/dev/null || printf '%s/bin/golangci-lint' "$$($(GO) env GOPATH)")
 
@@ -410,62 +403,7 @@ file-watcher-run: file-watcher-stop file-watcher-dirs
 file-watcher-start: file-watcher-build
 	@$(MAKE) --no-print-directory file-watcher-run
 
-codex-daemon-bridge-start:
-	@mkdir -p "$(CODEX_DAEMON_BRIDGE_DIR)"
-	@codex_bin="$${LAZYMIND_CODEX_BIN:-}"; \
-	if [ -z "$$codex_bin" ]; then codex_bin="$$(command -v codex 2>/dev/null || true)"; fi; \
-	if [ -z "$$codex_bin" ] && [ -x "$(HOME)/.codex/packages/standalone/current/codex" ]; then \
-		codex_bin="$(HOME)/.codex/packages/standalone/current/codex"; \
-	fi; \
-	if [ ! -S "$(CODEX_DAEMON_SOCKET)" ]; then \
-		echo "ℹ️  Codex daemon is unavailable; continuing without Codex Desktop sharing"; \
-	elif [ -z "$$codex_bin" ]; then \
-		echo "ℹ️  Codex executable is unavailable; continuing without Codex Desktop sharing"; \
-	elif [ -f "$(CODEX_DAEMON_BRIDGE_PID)" ] && kill -0 "$$(cat "$(CODEX_DAEMON_BRIDGE_PID)")" 2>/dev/null; then \
-		echo "✅ Codex daemon bridge already running"; \
-	else \
-		if [ "$$(uname -s)" = "Darwin" ]; then \
-			launchctl remove "$(CODEX_DAEMON_BRIDGE_LABEL)" >/dev/null 2>&1 || true; \
-			launchctl submit -l "$(CODEX_DAEMON_BRIDGE_LABEL)" \
-				-o "$(CODEX_DAEMON_BRIDGE_LOG)" -e "$(CODEX_DAEMON_BRIDGE_LOG)" -- \
-				"$$(command -v "$(PYTHON)")" "$(CURDIR)/local/codex_daemon_bridge.py" \
-				--host "$(CODEX_DAEMON_BRIDGE_HOST)" \
-				--codex-bin "$$codex_bin" \
-				--socket "$(CODEX_DAEMON_SOCKET)" \
-				--port "$(CODEX_DAEMON_BRIDGE_PORT)" \
-				--token-file "$(CODEX_DAEMON_BRIDGE_TOKEN)" \
-				--pid-file "$(CODEX_DAEMON_BRIDGE_PID)"; \
-		else \
-			nohup "$(PYTHON)" "$(CURDIR)/local/codex_daemon_bridge.py" \
-				--host "$(CODEX_DAEMON_BRIDGE_HOST)" \
-				--codex-bin "$$codex_bin" \
-				--socket "$(CODEX_DAEMON_SOCKET)" \
-				--port "$(CODEX_DAEMON_BRIDGE_PORT)" \
-				--token-file "$(CODEX_DAEMON_BRIDGE_TOKEN)" \
-				--pid-file "$(CODEX_DAEMON_BRIDGE_PID)" \
-				>> "$(CODEX_DAEMON_BRIDGE_LOG)" 2>&1 & \
-		fi; \
-		sleep 1; bridge_pid=$$(cat "$(CODEX_DAEMON_BRIDGE_PID)" 2>/dev/null || true); \
-		if kill -0 "$$bridge_pid" 2>/dev/null; then \
-			echo "✅ Codex daemon bridge started ($$bridge_pid)"; \
-		else \
-			echo "⚠️  Codex daemon bridge failed; continuing without it"; \
-			tail -n 20 "$(CODEX_DAEMON_BRIDGE_LOG)" 2>/dev/null || true; \
-		fi; \
-	fi
-
-codex-daemon-bridge-stop:
-	@if [ "$$(uname -s)" = "Darwin" ]; then \
-		launchctl remove "$(CODEX_DAEMON_BRIDGE_LABEL)" >/dev/null 2>&1 || true; \
-	fi; \
-	if [ -f "$(CODEX_DAEMON_BRIDGE_PID)" ]; then \
-		bridge_pid=$$(cat "$(CODEX_DAEMON_BRIDGE_PID)"); \
-		if kill -0 "$$bridge_pid" 2>/dev/null; then kill "$$bridge_pid"; fi; \
-		rm -f "$(CODEX_DAEMON_BRIDGE_PID)"; \
-	fi
-
 up:
-	@$(MAKE) --no-print-directory codex-daemon-bridge-start
 	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" = "container" ]; then \
 		$(MAKE) --no-print-directory file-watcher-stop; \
 		$(MAKE) --no-print-directory file-watcher-dirs; \
@@ -486,10 +424,8 @@ down:
 	@echo "🛑 Stopping default Cloud/Kong compose stack, if present..."
 	@COMPOSE_PROFILES="$(_CLEANUP_COMPOSE_PROFILE_NAMES)" $(_COMPOSE_DEFAULT) $(_COMPOSE_DOWN_ACTION) \
 		$(_COMPOSE_DOWN_SERVICES) || true
-	@$(MAKE) --no-print-directory codex-daemon-bridge-stop
 
 up-build:
-	@$(MAKE) --no-print-directory codex-daemon-bridge-start
 	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" = "container" ]; then \
 		$(MAKE) --no-print-directory file-watcher-stop; \
 		$(MAKE) --no-print-directory file-watcher-dirs; \
@@ -509,6 +445,10 @@ up-build:
 local-runtime-manager-build:
 	@mkdir -p "$(dir $(LOCAL_RUNTIME_MANAGER_BIN))"
 	@cd local/local-runtime-manager && $(GO) build -buildvcs=false -o "$(LOCAL_RUNTIME_MANAGER_BIN)" .
+
+lazymind-cli-build:
+	@mkdir -p "$(dir $(LAZYMIND_CLI_BIN))"
+	@cd local/lazymind-cli && $(GO) build -buildvcs=false -o "$(LAZYMIND_CLI_BIN)" ./cmd/lazymind
 
 desktop-darwin-arm64:
 	@bash desktop/scripts/build-darwin-arm64.sh
@@ -571,10 +511,10 @@ desktop-clean:
 	done
 endif
 
-local-up: local-runtime-manager-build
+local-up: local-runtime-manager-build lazymind-cli-build
 	@"$(LOCAL_RUNTIME_MANAGER_BIN)" up
 
-local-up-lan: local-runtime-manager-build
+local-up-lan: local-runtime-manager-build lazymind-cli-build
 	@LAZYMIND_LOCAL_NETWORK_PROFILE=lan LAZYMIND_LOCAL_AUTO_LOGIN_ALLOW_LAN=true "$(LOCAL_RUNTIME_MANAGER_BIN)" up
 
 local-down:

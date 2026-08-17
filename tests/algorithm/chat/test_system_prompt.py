@@ -86,7 +86,7 @@ def test_system_prompt_appends_partitioned_active_tool_contracts() -> None:
 def test_tool_output_contract_keeps_detailed_image_and_citation_guards() -> None:
     from lazymind.chat.service.component.tool_registry import (
         IMAGE_MARKDOWN_OUTPUT_APPENDIX,
-        KNOWLEDGE_CITATION_OUTPUT_APPENDIX,
+        RETRIEVAL_CITATION_OUTPUT_APPENDIX,
         collect_system_prompt_appendices,
     )
 
@@ -96,17 +96,16 @@ def test_tool_output_contract_keeps_detailed_image_and_citation_guards() -> None
             [],
             extra_appendices=(
                 IMAGE_MARKDOWN_OUTPUT_APPENDIX,
-                KNOWLEDGE_CITATION_OUTPUT_APPENDIX,
+                RETRIEVAL_CITATION_OUTPUT_APPENDIX,
             ),
         ),
     )
 
     assert 'NEVER invent hosts or prefixes' in prompt
     assert 'Do not paste bare filesystem paths' in prompt
-    assert 'you MUST cite that evidence in the user-visible final answer' in prompt
-    assert 'MUST contain at least one such marker' in prompt
-    assert 'builds the references panel automatically' in prompt
-    assert 'do not invent' in prompt
+    assert 'For any used retrieval result containing `ref`' in prompt
+    assert 'cite at least one result from each category' in prompt
+    assert 'Never invent or rewrite refs' in prompt
 
 
 def test_system_prompt_ignores_tool_appendices_when_no_tools_are_registered() -> None:

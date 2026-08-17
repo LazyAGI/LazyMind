@@ -3,6 +3,8 @@ function createDesktopBridge(ipcRenderer) {
     openLogsDir: () => ipcRenderer.invoke("lazymind:openLogsDir"),
     openDataDir: () => ipcRenderer.invoke("lazymind:openDataDir"),
     runtimeStatus: () => ipcRenderer.invoke("lazymind:runtimeStatus"),
+    agentIntegrationStatus: (agent) => ipcRenderer.invoke("lazymind:agentIntegrationStatus", agent),
+    codexIntegrationAction: (action) => ipcRenderer.invoke("lazymind:codexIntegrationAction", action),
     restartRuntime: () => ipcRenderer.invoke("lazymind:restartRuntime"),
     resetRuntime: (scope) => ipcRenderer.invoke("lazymind:resetRuntime", scope),
     selectFolder: () => ipcRenderer.invoke("lazymind:selectFolder"),

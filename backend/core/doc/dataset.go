@@ -561,207 +561,33 @@ func ListDatasets(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	db := corestore.DB()
-	base := db.Model(&orm.Dataset{}).
-		Where("deleted_at IS NULL")
-
-	orderClause := "updated_at desc"
-	if orderBy != "" {
-		if ob, err := normalizeDatasetOrderBy(orderBy); err == nil {
-			orderClause = ob
-		}
+	service, err := NewDatasetCatalogService(DatasetCatalogServiceDeps{DB: corestore.DB()})
+	if err != nil {
+		common.ReplyErr(w, "query datasets failed", http.StatusInternalServerError)
+		return
 	}
-
-	groupIDs := acl.ResolveUserGroupIDs(userID)
-
-	const fetchFactor = 5
-	fetchSize := pageSize * fetchFactor
-	if fetchSize < pageSize {
-		fetchSize = pageSize
-	}
-	if fetchSize > 500 {
-		fetchSize = 500
-	}
-
-	total := 0
-	page := make([]orm.Dataset, 0, pageSize)
-	scanOffset := 0
-	hasMoreRows := true
-	candidates := make([]orm.Dataset, 0, pageSize)
-	pageSourceMap := make(map[string]bool, pageSize)
-
-	// ------------------------------------------------------------------
-	// Phase 1: collect the current page while counting candidates.
-	// Stops when the page is full OR all DB rows are exhausted.
-	// The total count at this point may be incomplete — Phase 2 fixes it.
-	// ------------------------------------------------------------------
-	for hasMoreRows && len(page) < pageSize {
-		var rows []orm.Dataset
-		query := base.
-			Select(`id, kb_id, create_user_id, create_user_name, display_name, "desc", cover_image, created_at, updated_at, ext, type, share_type, dataset_state`).
-			Order(orderClause).
-			Offset(scanOffset).
-			Limit(fetchSize)
-		if err := query.Find(&rows).Error; err != nil {
-			common.ReplyErr(w, "query datasets failed", http.StatusInternalServerError)
-			return
-		}
-		if len(rows) < fetchSize {
-			hasMoreRows = false
-		}
-		scanOffset += len(rows)
-		if len(rows) == 0 {
-			break
-		}
-		// ACL + keyword + tags filtering (same as before).
-		for _, ds := range rows {
-			perms := datasetACLForUserWithGroups(&ds, userID, groupIDs)
-			if len(perms) == 0 {
-				continue
-			}
-			if !datasetMatchesKeyword(&ds, keyword) {
-				continue
-			}
-			if len(wantTags) > 0 && !containsAll(parseDatasetTags(ds.Ext), wantTags) {
-				continue
-			}
-			candidates = append(candidates, ds)
-		}
-		candidates = filterDatasetsByScanSourceAccess(r, candidates, acl.PermissionDatasetRead)
-
-		if len(candidates) > 0 {
-			candidateIDs := make([]string, len(candidates))
-			for i, c := range candidates {
-				candidateIDs[i] = c.ID
-			}
-			sourceMap := batchCheckDatasetsHaveSource(r.Context(), candidateIDs)
-
-			// Delegate source filtering + page collection + counting.
-			total, page = filterAndCountCandidates(
-				candidates, sourceFilter, sourceMap,
-				offset, pageSize, total, page, pageSourceMap,
-				true, // collectPage: collect page items
-			)
-
-			candidates = candidates[:0]
-		}
-	}
-
-	// ------------------------------------------------------------------
-	// Phase 2: if the page is filled but more DB rows remain, continue
-	// scanning to finish counting the accurate total. No page collection
-	// is done in this phase — the page is already complete.
-	// ------------------------------------------------------------------
-	if len(page) >= pageSize && hasMoreRows {
-		for hasMoreRows {
-			var rows []orm.Dataset
-			// Use a lighter SELECT — only fields needed for filtering.
-			query := base.
-				Select("id, kb_id, create_user_id, display_name, ext").
-				Order(orderClause).
-				Offset(scanOffset).
-				Limit(fetchSize)
-			if err := query.Find(&rows).Error; err != nil {
-				common.ReplyErr(w, "query datasets failed", http.StatusInternalServerError)
-				return
-			}
-			if len(rows) < fetchSize {
-				hasMoreRows = false
-			}
-			scanOffset += len(rows)
-			if len(rows) == 0 {
-				break
-			}
-			// ACL + keyword + tags filtering (same as Phase 1).
-			for _, ds := range rows {
-				perms := datasetACLForUserWithGroups(&ds, userID, groupIDs)
-				if len(perms) == 0 {
-					continue
-				}
-				if !datasetMatchesKeyword(&ds, keyword) {
-					continue
-				}
-				if len(wantTags) > 0 && !containsAll(parseDatasetTags(ds.Ext), wantTags) {
-					continue
-				}
-				candidates = append(candidates, ds)
-			}
-
-			if len(candidates) > 0 {
-				candidateIDs := make([]string, len(candidates))
-				for i, c := range candidates {
-					candidateIDs[i] = c.ID
-				}
-				sourceMap := batchCheckDatasetsHaveSource(r.Context(), candidateIDs)
-
-				// Count only — do not collect page items.
-				total, page = filterAndCountCandidates(
-					candidates, sourceFilter, sourceMap,
-					offset, pageSize, total, page, pageSourceMap,
-					false, // collectPage: count only, skip page collection
-				)
-
-				candidates = candidates[:0]
-			}
-		}
-	}
-
-	end := offset + len(page)
-
-	out := make([]Dataset, 0, len(page))
-	dsIDs := make([]string, 0, len(page))
-	for _, ds := range page {
-		dsIDs = append(dsIDs, ds.ID)
-	}
-	statsMap := calcDatasetStatsBatch(r.Context(), dsIDs)
-	parserCache := map[string][]ParserConfig{}
-
-	for _, ds := range page {
-		datasetACL := datasetACLForUserWithGroups(&ds, userID, groupIDs)
-		algo := parseDatasetAlgo(ds.Ext)
-		liveParsers, ok := parserCache[algo.AlgoID]
-		if !ok {
-			liveParsers = fetchParsersByAlgoID(r.Context(), algo.AlgoID)
-			parserCache[algo.AlgoID] = liveParsers
-		}
-		parsers := mergeParserConfigs(parseDatasetParsers(ds.Ext), liveParsers)
-		stats := statsMap[ds.ID]
-		createdByDataSource := pageSourceMap[ds.ID]
-
-		out = append(out, Dataset{
-			Name:                "datasets/" + ds.ID,
-			DatasetID:           ds.ID,
-			DisplayName:         ds.DisplayName,
-			Desc:                ds.Desc,
-			CoverImage:          ds.CoverImage,
-			State:               stateToPB(ds.DatasetState),
-			IsEmpty:             stats.DocumentCount == 0,
-			DocumentCount:       stats.DocumentCount,
-			DocumentSize:        stats.DocumentSize,
-			SegmentCount:        0,
-			TokenCount:          0,
-			Parsers:             parsers,
-			Algo:                algo,
-			Creator:             ds.CreateUserName,
-			IsOwner:             ds.CreateUserID == userID,
-			CreateTime:          ds.CreatedAt,
-			UpdateTime:          ds.UpdatedAt,
-			Acl:                 datasetACL,
-			ShareType:           shareTypeToPB(ds.ShareType),
-			Type:                datasetTypeToPB(ds.Type),
-			Tags:                parseDatasetTags(ds.Ext),
-			DefaultDataset:      isDefaultDatasetForUser(r.Context(), userID, ds.ID),
-			CreatedByDataSource: &createdByDataSource,
-		})
+	result, err := service.ListDatasets(r.Context(), DatasetListRequest{
+		UserID:       userID,
+		Keyword:      keyword,
+		Tags:         wantTags,
+		Offset:       offset,
+		Limit:        pageSize,
+		OrderBy:      orderBy,
+		SourceFilter: sourceFilter,
+		Caller:       datasetCatalogCallerFromRequest(r),
+	})
+	if err != nil {
+		replyDatasetCatalogServiceError(w, err, "query datasets failed")
+		return
 	}
 
 	nextToken := ""
-	if end < total {
-		nextToken = encodeDatasetPageToken(end, pageSize, total)
+	if result.HasMore {
+		nextToken = encodeDatasetPageToken(result.NextOffset, pageSize, int(result.TotalSize))
 	}
 	common.ReplyJSON(w, ListDatasetsResponse{
-		Datasets:      out,
-		TotalSize:     int32(total),
+		Datasets:      result.Datasets,
+		TotalSize:     int32(result.TotalSize),
 		NextPageToken: nextToken,
 	})
 }
@@ -903,11 +729,18 @@ func newDatasetID() string {
 }
 
 func isDefaultDatasetForUser(ctx context.Context, userID, datasetID string) bool {
+	return isDefaultDatasetForUserWithDB(ctx, corestore.DB(), userID, datasetID)
+}
+
+func isDefaultDatasetForUserWithDB(ctx context.Context, db *gorm.DB, userID, datasetID string) bool {
 	if strings.TrimSpace(userID) == "" || strings.TrimSpace(datasetID) == "" {
 		return false
 	}
+	if db == nil {
+		return false
+	}
 	var n int64
-	_ = corestore.DB().WithContext(ctx).
+	_ = db.WithContext(ctx).
 		Model(&orm.DefaultDataset{}).
 		Where("create_user_id = ? AND dataset_id = ? AND deleted_at IS NULL", userID, datasetID).
 		Count(&n).Error
@@ -1178,59 +1011,60 @@ func GetDataset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var ds orm.Dataset
-	if err := corestore.DB().
-		Where("id = ? AND deleted_at IS NULL", datasetID).
-		First(&ds).Error; err != nil {
+	service, err := NewDatasetCatalogService(DatasetCatalogServiceDeps{DB: corestore.DB()})
+	if err != nil {
 		common.ReplyErr(w, "dataset not found", http.StatusNotFound)
 		return
 	}
-	datasetACL := datasetACLForUser(&ds, userID)
-	if len(datasetACL) == 0 {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		_, _ = w.Write([]byte(common.ForbiddenBody))
-		return
-	}
-	if !datasetAllowedByScanSource(r, ds.ID, acl.PermissionDatasetRead) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusForbidden)
-		_, _ = w.Write([]byte(common.ForbiddenBody))
-		return
-	}
-
-	algo := parseDatasetAlgo(ds.Ext)
-	parsers := mergeParserConfigs(parseDatasetParsers(ds.Ext), fetchParsersByAlgoID(r.Context(), algo.AlgoID))
-	stats := calcDatasetStats(r.Context(), ds.ID)
-	createdByDataSource := isDatasetCreatedByDataSource(r.Context(), ds.ID)
-
-	common.ReplyJSON(w, Dataset{
-
-		Name:                "datasets/" + ds.ID,
-		DatasetID:           ds.ID,
-		DisplayName:         ds.DisplayName,
-		Desc:                ds.Desc,
-		CoverImage:          ds.CoverImage,
-		State:               stateToPB(ds.DatasetState),
-		IsEmpty:             stats.DocumentCount == 0,
-		DocumentCount:       stats.DocumentCount,
-		DocumentSize:        stats.DocumentSize,
-		SegmentCount:        0,
-		TokenCount:          0,
-		Parsers:             parsers,
-		Algo:                algo,
-		Creator:             ds.CreateUserName,
-		IsOwner:             ds.CreateUserID == userID,
-		CreateTime:          ds.CreatedAt,
-		UpdateTime:          ds.UpdatedAt,
-		Acl:                 datasetACL,
-		ShareType:           shareTypeToPB(ds.ShareType),
-		Type:                datasetTypeToPB(ds.Type),
-		Tags:                parseDatasetTags(ds.Ext),
-		DefaultDataset:      isDefaultDatasetForUser(r.Context(), userID, ds.ID),
-		CreatedByDataSource: &createdByDataSource,
+	result, err := service.GetDataset(r.Context(), DatasetGetRequest{
+		UserID:    userID,
+		DatasetID: datasetID,
+		Caller:    datasetCatalogCallerFromRequest(r),
 	})
+	if err != nil {
+		replyDatasetCatalogGetServiceError(w, err)
+		return
+	}
+
+	common.ReplyJSON(w, result)
 }
+
+func replyDatasetCatalogServiceError(w http.ResponseWriter, err error, fallback string) {
+	var svcErr *DatasetServiceError
+	if errors.As(err, &svcErr) {
+		switch svcErr.Code {
+		case DatasetServiceInvalidArgument:
+			common.ReplyErr(w, svcErr.Message, http.StatusBadRequest)
+		case DatasetServiceNotFound:
+			common.ReplyErr(w, "dataset not found", http.StatusNotFound)
+		case DatasetServiceForbidden:
+			replyDatasetForbidden(w)
+		default:
+			common.ReplyErr(w, fallback, http.StatusInternalServerError)
+		}
+		return
+	}
+	common.ReplyErr(w, fallback, http.StatusInternalServerError)
+}
+
+func replyDatasetCatalogGetServiceError(w http.ResponseWriter, err error) {
+	var svcErr *DatasetServiceError
+	if errors.As(err, &svcErr) {
+		switch svcErr.Code {
+		case DatasetServiceInvalidArgument:
+			common.ReplyErr(w, svcErr.Message, http.StatusBadRequest)
+		case DatasetServiceForbidden:
+			replyDatasetForbidden(w)
+		case DatasetServiceNotFound, DatasetServiceUnavailable, DatasetServiceInternal:
+			common.ReplyErr(w, "dataset not found", http.StatusNotFound)
+		default:
+			common.ReplyErr(w, "dataset not found", http.StatusNotFound)
+		}
+		return
+	}
+	common.ReplyErr(w, "dataset not found", http.StatusNotFound)
+}
+
 func DeleteDataset(w http.ResponseWriter, r *http.Request) {
 	userID := corestore.UserID(r)
 	if userID == "" {
@@ -1675,9 +1509,16 @@ type datasetStats struct {
 // (excluding folder-like documents).
 // file_size is stored in document.ext (JSON); we aggregate it in memory in Go.
 func calcDatasetStats(ctx context.Context, datasetID string) datasetStats {
+	return calcDatasetStatsWithDB(ctx, corestore.DB(), datasetID)
+}
+
+func calcDatasetStatsWithDB(ctx context.Context, db *gorm.DB, datasetID string) datasetStats {
+	if db == nil {
+		return datasetStats{}
+	}
 	var docs []orm.Document
-	if err := corestore.DB().WithContext(ctx).
-		Select("ext").
+	if err := db.WithContext(ctx).
+		Select("display_name, ext").
 		Where("dataset_id = ? AND deleted_at IS NULL", datasetID).
 		Find(&docs).Error; err != nil {
 		return datasetStats{}
@@ -1697,12 +1538,19 @@ func calcDatasetStats(ctx context.Context, datasetID string) datasetStats {
 
 // calcDatasetStatsBatch calculates stats for multiple datasets in one query to avoid N+1.
 func calcDatasetStatsBatch(ctx context.Context, datasetIDs []string) map[string]datasetStats {
+	return calcDatasetStatsBatchWithDB(ctx, corestore.DB(), datasetIDs)
+}
+
+func calcDatasetStatsBatchWithDB(ctx context.Context, db *gorm.DB, datasetIDs []string) map[string]datasetStats {
 	if len(datasetIDs) == 0 {
 		return map[string]datasetStats{}
 	}
+	if db == nil {
+		return map[string]datasetStats{}
+	}
 	var docs []orm.Document
-	if err := corestore.DB().WithContext(ctx).
-		Select("dataset_id, ext").
+	if err := db.WithContext(ctx).
+		Select("dataset_id, display_name, ext").
 		Where("dataset_id IN ? AND deleted_at IS NULL", datasetIDs).
 		Find(&docs).Error; err != nil {
 		return map[string]datasetStats{}

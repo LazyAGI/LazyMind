@@ -5,9 +5,9 @@ import (
 	"encoding/json"
 )
 
-// AttemptContext is the immutable Host-neutral execution snapshot returned by
-// the remote Executor protocol. It never contains a model configuration, API
-// credential, Host-local path or private conversation state.
+// AttemptContext is the immutable Host-neutral execution snapshot used by
+// trusted Executor boundaries. It never contains a model configuration, API
+// credential or Host-local path. Public adapters must redact Metadata.
 type AttemptContext struct {
 	ContractVersion     string            `json:"contract_version"`
 	SessionID           string            `json:"session_id"`
@@ -25,6 +25,7 @@ type AttemptContext struct {
 	DeclaredOutputs     []string          `json:"declared_outputs,omitempty"`
 	DeclaredOutputTypes map[string]string `json:"declared_output_types,omitempty"`
 	RequiredOutputs     []string          `json:"required_outputs,omitempty"`
+	OutputCardinality   map[string]string `json:"output_cardinality,omitempty"`
 	Capabilities        []string          `json:"capabilities,omitempty"`
 	LegacyTools         []string          `json:"legacy_tools,omitempty"`
 	Metadata            map[string]string `json:"metadata,omitempty"`

@@ -1001,7 +1001,7 @@ func TestOpenAPISpecMarksUIPreferencesPatchFieldsOptional(t *testing.T) {
 	if !ok {
 		t.Fatalf("userUIPreferencesPatchOpenAPIRequest properties missing")
 	}
-	for _, name := range []string{"chat_preference_notice_dismissed", "developer_mode_active"} {
+	for _, name := range []string{"chat_preference_notice_dismissed", "developer_mode_active", "skills_enabled", "workflows_enabled"} {
 		if _, ok := properties[name]; !ok {
 			t.Fatalf("userUIPreferencesPatchOpenAPIRequest expected property %q", name)
 		}
@@ -1480,6 +1480,7 @@ func TestOpenAPISpecIncludesMCPOperations(t *testing.T) {
 	}{
 		{"get", "/api/core/mcp_servers", "", "#/components/schemas/ListServersResponse", false, []string{"keyword", "page", "page_size"}},
 		{"post", "/api/core/mcp_servers", "#/components/schemas/CreateServerRequest", "#/components/schemas/ServerResponse", false, nil},
+		{"patch", "/api/core/mcp_servers:enabled", "#/components/schemas/BulkUpdateServerEnabledRequest", "#/components/schemas/BulkUpdateServerEnabledResponse", false, nil},
 		{"get", "/api/core/mcp_servers/{id}", "", "#/components/schemas/ServerResponse", true, nil},
 		{"patch", "/api/core/mcp_servers/{id}", "#/components/schemas/UpdateServerRequest", "#/components/schemas/ServerResponse", true, nil},
 		{"delete", "/api/core/mcp_servers/{id}", "", "#/components/schemas/mcpDeleteServerOpenAPIResponse", true, nil},

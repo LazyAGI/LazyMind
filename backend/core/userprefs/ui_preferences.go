@@ -9,10 +9,13 @@ import (
 	"time"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/currentmemory"
+	"lazymind/core/scheduler"
+	"lazymind/core/settings"
 	"lazymind/core/store"
 )
 
@@ -20,6 +23,11 @@ type uiPreferencesResponse struct {
 	ChatPreferenceNoticeDismissed bool   `json:"chat_preference_notice_dismissed"`
 	DeveloperModeActive           bool   `json:"developer_mode_active"`
 	AcceptedUserAgreementVersion  string `json:"accepted_user_agreement_version"`
+	TaskCenterEnabled             bool   `json:"task_center_enabled"`
+	SkillsEnabled                 bool   `json:"skills_enabled"`
+	WorkflowsEnabled              bool   `json:"workflows_enabled"`
+	MCPEnabled                    bool   `json:"mcp_enabled"`
+	DocumentParsingEnabled        bool   `json:"document_parsing_enabled"`
 	UserPreferenceConfigured      bool   `json:"user_preference_configured"`
 	UpdatedAt                     string `json:"updated_at"`
 }
@@ -28,6 +36,11 @@ type uiPreferencesPatchRequest struct {
 	ChatPreferenceNoticeDismissed *bool   `json:"chat_preference_notice_dismissed"`
 	DeveloperModeActive           *bool   `json:"developer_mode_active"`
 	AcceptedUserAgreementVersion  *string `json:"accepted_user_agreement_version"`
+	TaskCenterEnabled             *bool   `json:"task_center_enabled"`
+	SkillsEnabled                 *bool   `json:"skills_enabled"`
+	WorkflowsEnabled              *bool   `json:"workflows_enabled"`
+	MCPEnabled                    *bool   `json:"mcp_enabled"`
+	DocumentParsingEnabled        *bool   `json:"document_parsing_enabled"`
 }
 
 func GetUIPreferences(w http.ResponseWriter, r *http.Request) {
@@ -74,12 +87,43 @@ func PatchUIPreferences(w http.ResponseWriter, r *http.Request) {
 	}
 	if req.ChatPreferenceNoticeDismissed == nil &&
 		req.DeveloperModeActive == nil &&
-		req.AcceptedUserAgreementVersion == nil {
+		req.AcceptedUserAgreementVersion == nil &&
+		req.TaskCenterEnabled == nil &&
+		req.SkillsEnabled == nil &&
+		req.WorkflowsEnabled == nil &&
+		req.MCPEnabled == nil &&
+		req.DocumentParsingEnabled == nil {
 		common.ReplyErr(w, "no valid fields to update", http.StatusBadRequest)
 		return
 	}
 
-	row, err := UpsertUserUIPreferences(r.Context(), db, userID, req)
+	currentControls, err := settings.LoadFeatureControls(r.Context(), db, userID)
+	if err != nil {
+		common.ReplyErr(w, "query settings controls failed", http.StatusInternalServerError)
+		return
+	}
+	var row orm.UserUIPreferences
+	err = db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		var upsertErr error
+		row, upsertErr = UpsertUserUIPreferences(r.Context(), tx, userID, req)
+		if upsertErr != nil {
+			return upsertErr
+		}
+		if req.SkillsEnabled != nil {
+			if err := setAllSkillsEnabled(r.Context(), tx, userID, *req.SkillsEnabled); err != nil {
+				return err
+			}
+		}
+		if req.WorkflowsEnabled != nil {
+			if err := setAllWorkflowsEnabled(r.Context(), tx, userID, *req.WorkflowsEnabled); err != nil {
+				return err
+			}
+		}
+		if req.TaskCenterEnabled != nil && *req.TaskCenterEnabled && !currentControls.TaskCenterEnabled {
+			return scheduler.RecomputeEnabledSchedules(r.Context(), tx, userID, time.Now().UTC())
+		}
+		return nil
+	})
 	if err != nil {
 		common.ReplyErr(w, "update user ui preferences failed", http.StatusInternalServerError)
 		return
@@ -92,13 +136,60 @@ func PatchUIPreferences(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, buildUIPreferencesResponse(row, configured))
 }
 
+func setAllSkillsEnabled(ctx context.Context, db *gorm.DB, userID string, enabled bool) error {
+	userID = strings.TrimSpace(userID)
+	now := time.Now().UTC()
+	return db.WithContext(ctx).
+		Model(&orm.SkillV2Skill{}).
+		Where("owner_user_id = ? AND deleted_at IS NULL", userID).
+		Updates(map[string]any{"is_enabled": enabled, "updated_at": now}).Error
+}
+
+func setAllWorkflowsEnabled(ctx context.Context, db *gorm.DB, userID string, enabled bool) error {
+	userID = strings.TrimSpace(userID)
+	now := time.Now().UTC()
+	var workflowRefs []string
+	if err := db.WithContext(ctx).
+		Model(&orm.WorkflowResource{}).
+		Where("status = ? AND (owner_user_id = ? OR owner_user_id = '')", "active", userID).
+		Pluck("plugin_ref", &workflowRefs).Error; err != nil { // workflow-naming: persistence
+		return err
+	}
+	if len(workflowRefs) == 0 {
+		return nil
+	}
+
+	settings := make([]orm.UserWorkflowSetting, 0, len(workflowRefs))
+	for _, workflowRef := range workflowRefs {
+		settings = append(settings, orm.UserWorkflowSetting{
+			UserID:      userID,
+			WorkflowRef: workflowRef,
+			Enabled:     enabled,
+			UpdatedAt:   now,
+		})
+	}
+	return db.WithContext(ctx).
+		Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "user_id"}, {Name: "plugin_ref"}},
+			DoUpdates: clause.AssignmentColumns([]string{"enabled", "updated_at"}),
+		}).
+		Create(&settings).Error
+}
+
 func LoadUserUIPreferences(ctx context.Context, db *gorm.DB, userID string) (orm.UserUIPreferences, error) {
 	var row orm.UserUIPreferences
 	err := db.WithContext(ctx).
 		Where("user_id = ?", strings.TrimSpace(userID)).
 		Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return orm.UserUIPreferences{UserID: strings.TrimSpace(userID)}, nil
+		return orm.UserUIPreferences{
+			UserID:                 strings.TrimSpace(userID),
+			TaskCenterEnabled:      true,
+			SkillsEnabled:          true,
+			WorkflowsEnabled:       true,
+			MCPEnabled:             true,
+			DocumentParsingEnabled: true,
+		}, nil
 	}
 	return row, err
 }
@@ -111,9 +202,14 @@ func UpsertUserUIPreferences(ctx context.Context, db *gorm.DB, userID string, re
 	err := db.WithContext(ctx).Where("user_id = ?", userID).Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		row = orm.UserUIPreferences{
-			UserID:    userID,
-			CreatedAt: now,
-			UpdatedAt: now,
+			UserID:                 userID,
+			TaskCenterEnabled:      true,
+			SkillsEnabled:          true,
+			WorkflowsEnabled:       true,
+			MCPEnabled:             true,
+			DocumentParsingEnabled: true,
+			CreatedAt:              now,
+			UpdatedAt:              now,
 		}
 		if req.ChatPreferenceNoticeDismissed != nil {
 			row.ChatPreferenceNoticeDismissed = *req.ChatPreferenceNoticeDismissed
@@ -124,7 +220,36 @@ func UpsertUserUIPreferences(ctx context.Context, db *gorm.DB, userID string, re
 		if req.AcceptedUserAgreementVersion != nil {
 			row.AcceptedUserAgreementVersion = strings.TrimSpace(*req.AcceptedUserAgreementVersion)
 		}
-		if err := db.WithContext(ctx).Create(&row).Error; err != nil {
+		if req.TaskCenterEnabled != nil {
+			row.TaskCenterEnabled = *req.TaskCenterEnabled
+		}
+		if req.SkillsEnabled != nil {
+			row.SkillsEnabled = *req.SkillsEnabled
+		}
+		if req.WorkflowsEnabled != nil {
+			row.WorkflowsEnabled = *req.WorkflowsEnabled
+		}
+		if req.MCPEnabled != nil {
+			row.MCPEnabled = *req.MCPEnabled
+		}
+		if req.DocumentParsingEnabled != nil {
+			row.DocumentParsingEnabled = *req.DocumentParsingEnabled
+		}
+		// Feature controls default to true. Map-based create preserves an explicit
+		// false from a first-time user instead of applying GORM's model default.
+		if err := db.WithContext(ctx).Model(&orm.UserUIPreferences{}).Create(map[string]any{
+			"user_id":                          row.UserID,
+			"chat_preference_notice_dismissed": row.ChatPreferenceNoticeDismissed,
+			"developer_mode_active":            row.DeveloperModeActive,
+			"accepted_user_agreement_version":  row.AcceptedUserAgreementVersion,
+			"task_center_enabled":              row.TaskCenterEnabled,
+			"skills_enabled":                   row.SkillsEnabled,
+			"workflows_enabled":                row.WorkflowsEnabled,
+			"mcp_enabled":                      row.MCPEnabled,
+			"document_parsing_enabled":         row.DocumentParsingEnabled,
+			"created_at":                       row.CreatedAt,
+			"updated_at":                       row.UpdatedAt,
+		}).Error; err != nil {
 			return orm.UserUIPreferences{}, err
 		}
 		return row, nil
@@ -146,6 +271,26 @@ func UpsertUserUIPreferences(ctx context.Context, db *gorm.DB, userID string, re
 		version := strings.TrimSpace(*req.AcceptedUserAgreementVersion)
 		updates["accepted_user_agreement_version"] = version
 		row.AcceptedUserAgreementVersion = version
+	}
+	if req.TaskCenterEnabled != nil {
+		updates["task_center_enabled"] = *req.TaskCenterEnabled
+		row.TaskCenterEnabled = *req.TaskCenterEnabled
+	}
+	if req.SkillsEnabled != nil {
+		updates["skills_enabled"] = *req.SkillsEnabled
+		row.SkillsEnabled = *req.SkillsEnabled
+	}
+	if req.WorkflowsEnabled != nil {
+		updates["workflows_enabled"] = *req.WorkflowsEnabled
+		row.WorkflowsEnabled = *req.WorkflowsEnabled
+	}
+	if req.MCPEnabled != nil {
+		updates["mcp_enabled"] = *req.MCPEnabled
+		row.MCPEnabled = *req.MCPEnabled
+	}
+	if req.DocumentParsingEnabled != nil {
+		updates["document_parsing_enabled"] = *req.DocumentParsingEnabled
+		row.DocumentParsingEnabled = *req.DocumentParsingEnabled
 	}
 	if err := db.WithContext(ctx).Model(&orm.UserUIPreferences{}).
 		Where("user_id = ?", userID).
@@ -184,6 +329,11 @@ func buildUIPreferencesResponse(row orm.UserUIPreferences, userPreferenceConfigu
 		ChatPreferenceNoticeDismissed: row.ChatPreferenceNoticeDismissed,
 		DeveloperModeActive:           row.DeveloperModeActive,
 		AcceptedUserAgreementVersion:  row.AcceptedUserAgreementVersion,
+		TaskCenterEnabled:             row.TaskCenterEnabled,
+		SkillsEnabled:                 row.SkillsEnabled,
+		WorkflowsEnabled:              row.WorkflowsEnabled,
+		MCPEnabled:                    row.MCPEnabled,
+		DocumentParsingEnabled:        row.DocumentParsingEnabled,
 		UserPreferenceConfigured:      userPreferenceConfigured,
 		UpdatedAt:                     updatedAt,
 	}

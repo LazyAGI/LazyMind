@@ -21,6 +21,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/settings"
 	"lazymind/core/store"
 	"lazymind/core/taskcenter"
 )
@@ -29,6 +30,10 @@ import (
 
 // CreateSchedule inserts a new UserSchedule and computes the first next_run_at.
 func CreateSchedule(ctx context.Context, db *gorm.DB, s *orm.UserSchedule) error {
+	s.Name = strings.TrimSpace(s.Name)
+	if s.Name == "" {
+		return errors.New("name required")
+	}
 	if s.ID == "" {
 		s.ID = common.GeneratePrefixedID("sched_", 36)
 	}
@@ -305,6 +310,31 @@ func repairFutureScheduleNextRunsAt(ctx context.Context, db *gorm.DB, now time.T
 	}
 }
 
+// RecomputeEnabledSchedules moves an enabled user's schedules forward from now.
+// It deliberately does not create work or alter run history, which means a
+// task-center resume never backfills triggers missed while the master switch was
+// paused.
+func RecomputeEnabledSchedules(ctx context.Context, db *gorm.DB, userID string, now time.Time) error {
+	var schedules []orm.UserSchedule
+	if err := db.WithContext(ctx).
+		Where("user_id = ? AND enabled = ?", userID, true).
+		Find(&schedules).Error; err != nil {
+		return err
+	}
+	for _, schedule := range schedules {
+		next, err := nextCronTimeAfter(schedule.CronExpr, schedule.Timezone, now)
+		if err != nil {
+			return err
+		}
+		if err := db.WithContext(ctx).Model(&orm.UserSchedule{}).
+			Where("id = ? AND user_id = ?", schedule.ID, userID).
+			Update("next_run_at", next.UTC()).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // maxConcurrentFires is the maximum number of schedules fired concurrently in one tick.
 const maxConcurrentFires = 50
 
@@ -322,6 +352,14 @@ func fireSchedules(ctx context.Context, db *gorm.DB, _ string) {
 	var wg sync.WaitGroup
 	for _, s := range due {
 		s := s
+		controls, err := settings.LoadFeatureControls(ctx, db, s.UserID)
+		if err != nil {
+			continue
+		}
+		if !controls.TaskCenterEnabled {
+			_ = RecomputeEnabledSchedules(ctx, db, s.UserID, now)
+			continue
+		}
 		sem <- struct{}{}
 		wg.Add(1)
 		go func() {
@@ -714,6 +752,15 @@ func EnableScheduleHandler(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/schedules/")
 	id := strings.TrimSuffix(path, ":enable")
 	db := store.DB()
+	controls, err := settings.LoadFeatureControls(r.Context(), db, userID)
+	if err != nil {
+		common.ReplyErr(w, "query task center settings failed", http.StatusInternalServerError)
+		return
+	}
+	if !controls.TaskCenterEnabled {
+		common.ReplyErr(w, "task center is paused in settings", http.StatusConflict)
+		return
+	}
 	// Recompute next_run_at from now so the schedule fires at the correct future time.
 	var s orm.UserSchedule
 	if err := db.WithContext(r.Context()).
@@ -840,6 +887,15 @@ func RunNowHandler(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/schedules/")
 	id := strings.TrimSuffix(path, ":run-now")
 	db := store.DB()
+	controls, err := settings.LoadFeatureControls(r.Context(), db, userID)
+	if err != nil {
+		common.ReplyErr(w, "query task center settings failed", http.StatusInternalServerError)
+		return
+	}
+	if !controls.TaskCenterEnabled {
+		common.ReplyErr(w, "task center is paused in settings", http.StatusConflict)
+		return
+	}
 	var s orm.UserSchedule
 	if err := db.WithContext(r.Context()).
 		Where("id = ? AND user_id = ?", id, userID).First(&s).Error; err != nil {
