@@ -4,6 +4,7 @@ import re
 from typing import Any, Optional
 
 from lazymind.config import config as _cfg
+from lazymind.chat.runtime_events import RunAccumulator
 from lazymind.chat.service.utils import (
     build_stream_citation_scanner,
     materialize_source_views,
@@ -65,8 +66,9 @@ def _iter_scanned_text_frames(
 
 
 class AgentEventFrameTranslator:
-    def __init__(self, *, query: str) -> None:
+    def __init__(self, *, query: str, run_id: str = '') -> None:
         self.query = query
+        self.run = RunAccumulator(run_id=run_id or 'unbound-run')
         self.citation_state: dict[str, Any] = {}
         reset_citation_state(self.citation_state)
         self.language = _preview_language(query)
@@ -79,6 +81,21 @@ class AgentEventFrameTranslator:
     def feed(self, event: Any) -> list[dict[str, Any]]:
         frames: list[dict[str, Any]] = []
         event_type = str(event.get('tag', '') or '')
+        if event_type == 'runtime_event':
+            value = event.get('runtime_event')
+            if not isinstance(value, dict):
+                raise ValueError('runtime_event payload must be an object')
+            value = dict(value)
+            value['run_id'] = self.run.run_id
+            if value.get('schema_version') != 1:
+                raise ValueError('unsupported runtime_event schema_version')
+            if value.get('type') not in {'model_retry_scheduled', 'model_call_finished'}:
+                raise ValueError('unexpected upstream runtime_event type')
+            if not isinstance(value.get('data'), dict):
+                raise ValueError('runtime_event data must be an object')
+            self.run.observe_model_event(value)
+            frames.append(_stream_frame(extra={'runtime_event': value}))
+            return frames
         if event_type == 'task_created':
             task_created = {k: v for k, v in event.items() if k != 'tag'}
             frames.append(_stream_frame(extra={'task_created': task_created}))
@@ -90,6 +107,7 @@ class AgentEventFrameTranslator:
         if event_type == 'ask_pending':
             ask_data = {k: v for k, v in event.items() if k != 'tag'}
             self.ask_pending_emitted = True
+            self.run.ask_pending = True
             frames.append(_stream_frame(extra={'ask_pending': ask_data}))
             return frames
         if event_type == 'tool_limit_pending':
@@ -111,6 +129,7 @@ class AgentEventFrameTranslator:
         if event_type == 'think':
             delta = str(event.get('delta', '') or '')
             if delta:
+                self.run.semantic_output = True
                 frames.append(_stream_frame(think=delta))
             return frames
 
@@ -118,6 +137,7 @@ class AgentEventFrameTranslator:
             delta = str(event.get('delta', '') or '')
             if not delta:
                 return frames
+            self.run.semantic_output = True
             for has_text, frame in _iter_scanned_text_frames(
                 self.text_scanner.feed(delta), self.citation_state,
             ):
@@ -128,6 +148,7 @@ class AgentEventFrameTranslator:
         if event_type == 'tool_calls':
             tool_calls = [tc for tc in (event.get('tool_calls', []) or []) if isinstance(tc, dict)]
             if tool_calls:
+                self.run.semantic_output = True
                 self.tool_call_turns += 1
                 parts: list[str] = []
                 for tc in tool_calls:
@@ -157,6 +178,9 @@ class AgentEventFrameTranslator:
                 frames.append(_stream_frame(think=think))
 
         return frames
+
+    def finish_run(self, *, succeeded: bool) -> dict[str, Any]:
+        return _stream_frame(extra={'runtime_event': self.run.finish(succeeded=succeeded)})
 
     def flush(self) -> list[dict[str, Any]]:
         frames: list[dict[str, Any]] = []
