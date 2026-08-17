@@ -342,6 +342,40 @@ func TestLocalFSRecommendationsUseConfiguredDirectoryName(t *testing.T) {
 	}
 }
 
+func TestRecommendedLocalPathRulesContainConfiguredPatternsWithoutDuplicates(t *testing.T) {
+	t.Parallel()
+
+	expected := []string{
+		".cursor/rules",
+		".cursor/skills",
+		".agents/skills",
+		".codex/skills",
+		"Downloads/飞书",
+		"Downloads/Feishu",
+		"Downloads/Lark",
+		"Documents/飞书",
+		"Documents/Feishu",
+		"Documents/Lark",
+		"Downloads/BaiduNetdiskDownload",
+		"BaiduNetdiskDownload",
+		"BaiduYunDownload",
+		"BaiduDownload",
+	}
+	if len(RecommendedLocalPathRules) != len(expected) {
+		t.Fatalf("expected %d recommendation rules, got %d", len(expected), len(RecommendedLocalPathRules))
+	}
+	seen := make(map[string]struct{}, len(expected))
+	for index, rule := range RecommendedLocalPathRules {
+		if rule.Pattern != expected[index] {
+			t.Fatalf("recommendation rule %d: expected %q, got %q", index, expected[index], rule.Pattern)
+		}
+		if _, ok := seen[rule.Pattern]; ok {
+			t.Fatalf("duplicate recommendation path pattern %q", rule.Pattern)
+		}
+		seen[rule.Pattern] = struct{}{}
+	}
+}
+
 func TestFlattenRecommendedTreeNodesReturnsAllMatchesWithoutAncestors(t *testing.T) {
 	t.Parallel()
 

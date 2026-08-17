@@ -31,6 +31,8 @@ const enUS = {
     open: "Open",
     install: "Install",
     refresh: "Refresh",
+    selectAll: "Select all",
+    cancelSelectAll: "Deselect all",
     previous: "Previous",
     next: "Next",
     totalItems: "Total {{total}} items",
@@ -3245,6 +3247,15 @@ const enUS = {
       "No local directories are connected yet. Create a local directory knowledge source first.",
     dataSourceUseCurrentInput: "Use current input: {{value}}",
     dataSourceNoLocalDirectories: "No selectable directories found",
+    dataSourceRecommendedPaths: "Smart folder suggestions",
+    dataSourceRecommendedPathsDescription:
+      "Finds common application folders automatically. Selected folders are added to the access path below.",
+    dataSourceRecommendedPathsFound: "{{total}} found",
+    dataSourceRecommendedPathsSelected: "{{selected}} selected",
+    dataSourceRecommendedPathsRefresh: "Find recommended folders again",
+    dataSourceRecommendedPathsLoading: "Scanning accessible folders...",
+    dataSourceRecommendedPathsEmpty:
+      "No recommended folders found. You can continue by selecting a path manually.",
     dataSourceLocalDirectoryListFailedManual:
       "Failed to load directory list. You can enter the path manually first.",
     dataSourceNoScanAgentManual:

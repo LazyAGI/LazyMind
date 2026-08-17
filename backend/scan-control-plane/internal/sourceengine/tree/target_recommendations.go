@@ -17,6 +17,71 @@ type RecommendedLocalPathRule struct {
 // Add a rule here to expose another product directory through the recommendations API.
 var RecommendedLocalPathRules = []RecommendedLocalPathRule{
 	{
+		ProductID:   "cursor_rules",
+		ProductName: "Cursor Rules",
+		Pattern:     ".cursor/rules",
+	},
+	{
+		ProductID:   "cursor_skills",
+		ProductName: "Cursor Skills",
+		Pattern:     ".cursor/skills",
+	},
+	{
+		ProductID:   "agent_skills",
+		ProductName: "Cursor / Codex Skills",
+		Pattern:     ".agents/skills",
+	},
+	{
+		ProductID:   "codex_skills",
+		ProductName: "Codex Skills",
+		Pattern:     ".codex/skills",
+	},
+	{
+		ProductID:   "feishu_download",
+		ProductName: "飞书下载目录",
+		Pattern:     "Downloads/飞书",
+	},
+	{
+		ProductID:   "feishu_download",
+		ProductName: "飞书下载目录",
+		Pattern:     "Downloads/Feishu",
+	},
+	{
+		ProductID:   "feishu_download",
+		ProductName: "Lark 下载目录",
+		Pattern:     "Downloads/Lark",
+	},
+	{
+		ProductID:   "feishu_documents",
+		ProductName: "飞书文档目录",
+		Pattern:     "Documents/飞书",
+	},
+	{
+		ProductID:   "feishu_documents",
+		ProductName: "飞书文档目录",
+		Pattern:     "Documents/Feishu",
+	},
+	{
+		ProductID:   "feishu_documents",
+		ProductName: "Lark 文档目录",
+		Pattern:     "Documents/Lark",
+	},
+	{
+		ProductID:   "baidu_download",
+		ProductName: "百度网盘下载目录",
+		Pattern:     "Downloads/BaiduNetdiskDownload",
+	},
+	{
+		ProductID:   "baidu_download",
+		ProductName: "百度网盘下载目录",
+		Pattern:     "BaiduNetdiskDownload",
+	},
+	{
+		ProductID:   "baidu_download",
+		ProductName: "百度网盘下载目录",
+		Pattern:     "BaiduYunDownload",
+	},
+	{
 		ProductID:   "baidu_download",
 		ProductName: "百度网盘下载目录",
 		Pattern:     "BaiduDownload",

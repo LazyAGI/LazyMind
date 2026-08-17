@@ -6,6 +6,7 @@ import type {
   SourceType,
   SyncMode,
 } from "../constants/types";
+import type { LocalPathRecommendation } from "../utils/feishuTarget";
 import WizardTypeStep from "./wizard/WizardTypeStep";
 import WizardConnectionStep from "./wizard/WizardConnectionStep";
 import type { LocalPathSelectOption } from "./wizard/treeSelectUtils";
@@ -26,6 +27,9 @@ interface DataSourceWizardModalProps {
   savingMode?: "create" | "createAndSync";
   localPathOptions?: LocalPathSelectOption[];
   localPathLoading?: boolean;
+  localPathRecommendations?: LocalPathRecommendation[];
+  localPathRecommendationsLoading?: boolean;
+  localPathRecommendationsError?: string;
   feishuTargetLoading?: boolean;
   feishuTargetTreeData?: DataNode[];
   allowTypeSelection?: boolean;
@@ -40,6 +44,7 @@ interface DataSourceWizardModalProps {
   onSearchLocalPathOptions?: (keyword: string) => void;
   onLoadLocalPathChildren?: TreeSelectProps["loadData"];
   onResetLocalPathBrowseOptions?: () => void;
+  onLoadLocalPathRecommendations?: () => void;
   onLoadFeishuTargetOptions?: () => void;
   onSearchFeishuTargetOptions?: (keyword: string) => void;
   onLoadFeishuTargetChildren?: TreeSelectProps["loadData"];
@@ -59,6 +64,9 @@ export default function DataSourceWizardModal({
   savingMode,
   localPathOptions = [],
   localPathLoading = false,
+  localPathRecommendations = [],
+  localPathRecommendationsLoading = false,
+  localPathRecommendationsError = "",
   feishuTargetLoading = false,
   feishuTargetTreeData = [],
   allowTypeSelection = true,
@@ -73,6 +81,7 @@ export default function DataSourceWizardModal({
   onSearchLocalPathOptions,
   onLoadLocalPathChildren,
   onResetLocalPathBrowseOptions,
+  onLoadLocalPathRecommendations,
   onLoadFeishuTargetOptions,
   onSearchFeishuTargetOptions,
   onLoadFeishuTargetChildren,
@@ -171,12 +180,16 @@ export default function DataSourceWizardModal({
               syncMode={syncMode}
               localPathOptions={localPathOptions}
               localPathLoading={localPathLoading}
+              localPathRecommendations={localPathRecommendations}
+              localPathRecommendationsLoading={localPathRecommendationsLoading}
+              localPathRecommendationsError={localPathRecommendationsError}
               feishuTargetLoading={feishuTargetLoading}
               feishuTargetTreeData={feishuTargetTreeData}
               onLoadLocalPathOptions={onLoadLocalPathOptions}
               onSearchLocalPathOptions={onSearchLocalPathOptions}
               onLoadLocalPathChildren={onLoadLocalPathChildren}
               onResetLocalPathBrowseOptions={onResetLocalPathBrowseOptions}
+              onLoadLocalPathRecommendations={onLoadLocalPathRecommendations}
               onLoadFeishuTargetOptions={onLoadFeishuTargetOptions}
               onSearchFeishuTargetOptions={onSearchFeishuTargetOptions}
               onLoadFeishuTargetChildren={onLoadFeishuTargetChildren}
