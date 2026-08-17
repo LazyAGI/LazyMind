@@ -58,7 +58,7 @@ def get_config_path() -> str:
     Controlled entirely by LAZYMIND_MODEL_CONFIG_PATH.  Three shorthand aliases
     are accepted in addition to an explicit file path:
 
-        inner    → runtime_models.inner.yaml   (intranet / on-prem deployment)
+        inner    → /home/mnt/share/runtime_models.inner.yaml (intranet / on-prem deployment)
         online   → runtime_models.online.yaml  (public cloud API deployment)
         dynamic  → runtime_models.yaml         (fully dynamic, key injected per request)
 

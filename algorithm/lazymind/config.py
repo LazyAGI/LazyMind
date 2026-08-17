@@ -5,6 +5,7 @@ import lazyllm
 from lazyllm.configs import Config
 
 _COMMON_DIR = Path(__file__).resolve().parent / 'common'
+_INNER_MODEL_CONFIG_PATH = '/home/mnt/share/runtime_models.inner.yaml'
 EMBED_MAIN = 'embed_main'
 EMBED_IMAGE = 'embed_image'
 EMBED_KEYS = [EMBED_MAIN, EMBED_IMAGE]
@@ -138,7 +139,7 @@ config.add(
 config.add('model_config_path', str, 'dynamic', 'MODEL_CONFIG_PATH',
            description='Runtime model config YAML path. Shorthand aliases are auto-resolved to absolute paths.',
            alias={
-               'inner': str(_COMMON_DIR / 'runtime_models.inner.yaml'),
+               'inner': _INNER_MODEL_CONFIG_PATH,
                'online': str(_COMMON_DIR / 'runtime_models.online.yaml'),
                'dynamic': str(_COMMON_DIR / 'runtime_models.yaml'),
            },

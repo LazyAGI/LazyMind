@@ -131,7 +131,7 @@ def test_get_config_path_alias_inner(monkeypatch):
     from lazymind.config import config as _cfg
     _cfg.refresh('model_config_path')
     path = get_config_path()
-    assert 'inner' in path
+    assert path == '/home/mnt/share/runtime_models.inner.yaml'
 
 
 def test_get_config_path_custom_override(monkeypatch, tmp_path):
