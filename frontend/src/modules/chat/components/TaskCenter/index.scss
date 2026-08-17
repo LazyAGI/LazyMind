@@ -114,7 +114,7 @@
   }
 }
 
-// ── Collapsible section (执行过程 / 产出) ────────────────────────────────────
+// ── Collapsible section (执行过程 / 产出 / 参考来源) ────────────────────────
 .task-section {
   margin-top: 8px;
 
@@ -147,6 +147,98 @@
   .task-section-body {
     margin-top: 4px;
   }
+}
+
+.task-source-list {
+  max-height: 260px;
+  overflow-y: auto;
+  border: 1px solid #e5ecf5;
+  border-radius: 10px;
+  background: #fff;
+}
+
+.task-source-item {
+  display: grid;
+  width: 100%;
+  border: 0;
+  padding: 10px;
+  grid-template-columns: 30px minmax(0, 1fr) 14px;
+  align-items: start;
+  gap: 8px;
+  color: #1f2733;
+  background: #fff;
+  text-align: left;
+  cursor: pointer;
+
+  & + & {
+    border-top: 1px solid #edf1f6;
+  }
+
+  &:hover {
+    background: #f6faff;
+  }
+
+  &:focus-visible {
+    outline: 2px solid #69a9f8;
+    outline-offset: -2px;
+  }
+}
+
+.task-source-icon {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  color: #4774ae;
+  background: #edf4fd;
+
+  img {
+    width: 18px;
+    height: 18px;
+    object-fit: contain;
+  }
+}
+
+.task-source-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+}
+
+.task-source-heading,
+.task-source-title,
+.task-source-content {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-source-heading {
+  color: #8d9ab2;
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.task-source-title {
+  color: #263244;
+  font-size: 12px;
+  line-height: 18px;
+}
+
+.task-source-content {
+  margin-top: 2px;
+  color: #6b7787;
+  font-size: 11px;
+  line-height: 16px;
+}
+
+.task-source-arrow {
+  margin-top: 8px;
+  color: #9aa8ba;
+  font-size: 10px;
 }
 
 // ── Execution log ─────────────────────────────────────────────────────────────

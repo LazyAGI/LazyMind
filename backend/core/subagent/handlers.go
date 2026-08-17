@@ -181,6 +181,7 @@ type taskDTO struct {
 	Summary          string          `json:"summary"`
 	InputSlots       json.RawMessage `json:"input_slots"`
 	OutputSlots      json.RawMessage `json:"output_slots"`
+	Sources          json.RawMessage `json:"sources"`
 	CreatedAt        time.Time       `json:"created_at"`
 	UpdatedAt        time.Time       `json:"updated_at"`
 	Artifacts        []artifactDTO   `json:"artifacts,omitempty"`
@@ -229,6 +230,7 @@ func toTaskDTO(t *orm.SubAgentTask) taskDTO {
 		Summary:          t.Summary,
 		InputSlots:       normalizeJSON(t.InputSlots, "[]"),
 		OutputSlots:      normalizeJSON(t.OutputSlots, "[]"),
+		Sources:          normalizeJSON(json.RawMessage(t.Sources), "[]"),
 		CreatedAt:        t.CreatedAt,
 		UpdatedAt:        t.UpdatedAt,
 	}

@@ -5,6 +5,7 @@ ALTER TABLE user_ui_preferences
     DROP COLUMN IF EXISTS mcp_enabled,
     DROP COLUMN IF EXISTS skills_enabled,
     DROP COLUMN IF EXISTS task_center_enabled;
+ALTER TABLE sub_agent_tasks DROP COLUMN IF EXISTS sources;
 ALTER TABLE plugin_transition_commands DROP COLUMN IF EXISTS retry_origin;
 DROP TABLE IF EXISTS external_agent_operations;
 DROP TABLE IF EXISTS external_agent_runs;
@@ -74,6 +75,7 @@ ALTER TABLE user_ui_preferences DROP COLUMN workflows_enabled;
 ALTER TABLE user_ui_preferences DROP COLUMN mcp_enabled;
 ALTER TABLE user_ui_preferences DROP COLUMN skills_enabled;
 ALTER TABLE user_ui_preferences DROP COLUMN task_center_enabled;
+ALTER TABLE sub_agent_tasks DROP COLUMN sources;
 ALTER TABLE plugin_transition_commands DROP COLUMN retry_origin;
 DROP TABLE IF EXISTS external_agent_operations;
 DROP TABLE IF EXISTS external_agent_runs;

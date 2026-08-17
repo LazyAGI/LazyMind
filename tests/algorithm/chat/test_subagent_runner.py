@@ -398,6 +398,48 @@ def test_run_subagent_stream_text_think_events(monkeypatch):
     assert 'text' in types_out
 
 
+def test_run_subagent_stream_emits_task_scoped_source_snapshot(monkeypatch):
+    _install_fake_db(monkeypatch)
+    _install_fake_lazyllm(monkeypatch)
+    _install_fake_build(monkeypatch)
+    _install_fake_translator(monkeypatch)
+    _install_fake_drive(monkeypatch, [{
+        'tag': 'tool_results',
+        'tool_results': [{'id': 'search-1', 'name': 'web_search', 'result': 'ok'}],
+    }])
+    monkeypatch.setattr(
+        runner_mod,
+        'materialize_source_views',
+        MagicMock(side_effect=[[], [{
+            'index': '1.1',
+            'source_type': 'external',
+            'title': 'Example',
+            'url': 'https://example.test',
+            'source_roles': ['searched'],
+        }], [{
+            'index': '1.1',
+            'source_type': 'external',
+            'title': 'Example',
+            'url': 'https://example.test',
+            'source_roles': ['searched'],
+        }]]),
+    )
+
+    def pre_save_ctx(ctx):
+        ctx._artifact_counts['result'] = 1
+
+    monkeypatch.setattr(runner_mod, 'set_context', pre_save_ctx)
+
+    async def run():
+        return await _collect(runner_mod.run_subagent_stream(_DEFAULT_TASK_ID, 'dsn://'))
+
+    events_out = _sse_to_events(asyncio.run(run()))
+    source_events = [event for event in events_out if event.get('type') == 'sources']
+    assert len(source_events) == 1
+    assert source_events[0]['task_id'] == _DEFAULT_TASK_ID
+    assert source_events[0]['sources'][0]['source_roles'] == ['searched']
+
+
 # ---------------------------------------------------------------------------
 # Test: _rebuild_history_from_steps pairing validation
 # ---------------------------------------------------------------------------

@@ -2038,6 +2038,7 @@ const zhCN = {
     running: "执行中",
     history: "历史任务",
     artifacts: "产出",
+    references: "参考来源",
     download: "下载",
     executionProcess: "执行过程",
     estimatedSeconds: "约 {{seconds}} 秒",

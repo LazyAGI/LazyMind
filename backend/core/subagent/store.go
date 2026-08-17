@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
@@ -94,6 +95,7 @@ func CreateTask(ctx context.Context, db *gorm.DB, in CreateTaskInput) (*orm.SubA
 			WorkspacePath:     in.WorkspacePath,
 			InputSlots:        normalizeJSON(in.InputSlots, "[]"),
 			OutputSlots:       normalizeJSON(in.OutputSlots, "[]"),
+			Sources:           orm.RawJSON(`[]`),
 			CreateUserID:      in.CreateUserID,
 			CreatedAt:         now,
 			UpdatedAt:         now,
@@ -108,6 +110,20 @@ func CreateTask(ctx context.Context, db *gorm.DB, in CreateTaskInput) (*orm.SubA
 		return nil, err
 	}
 	return task, nil
+}
+
+// UpdateSources replaces the task-scoped searched-source snapshot.
+func UpdateSources(ctx context.Context, db *gorm.DB, taskID string, sources json.RawMessage) error {
+	sources = normalizeJSON(sources, "[]")
+	var items []json.RawMessage
+	if err := json.Unmarshal(sources, &items); err != nil {
+		return fmt.Errorf("invalid sources snapshot: %w", err)
+	}
+	return db.WithContext(ctx).Model(&orm.SubAgentTask{}).Where("id = ?", taskID).
+		Updates(map[string]any{
+			"sources":    orm.RawJSON(sources),
+			"updated_at": time.Now().UTC(),
+		}).Error
 }
 
 // GetTask loads a single task by id.

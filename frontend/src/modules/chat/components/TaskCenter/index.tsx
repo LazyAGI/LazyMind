@@ -28,6 +28,16 @@ import {
   resolveCoreAssetUrl,
 } from "@/modules/knowledge/utils/imageUrl";
 import { downloadStream } from "@/modules/chat/utils/download";
+import {
+  type ChatSource,
+  getSearchSources,
+  getSourceDedupKey,
+  getSourceEvidenceText,
+  getSourceFaviconUrl,
+  getSourceLabel,
+  getSourceSubtitle,
+  openSource,
+} from "@/modules/chat/utils/sourceAdapter";
 import "./index.scss";
 
 interface Props {
@@ -395,6 +405,63 @@ function ArtifactGrid({ artifacts }: { artifacts: TaskArtifact[] }) {
   );
 }
 
+function TaskSourceIcon({ source }: { source: ChatSource }) {
+  const [failed, setFailed] = useState(false);
+  const favicon = getSourceFaviconUrl(source);
+  return (
+    <span className="task-source-icon" aria-hidden="true">
+      {favicon && !failed ? (
+        <img
+          src={favicon}
+          alt=""
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          onError={() => setFailed(true)}
+        />
+      ) : (
+        <FileTextOutlined />
+      )}
+    </span>
+  );
+}
+
+function ReferenceSources({ sources }: { sources: ChatSource[] }) {
+  const { t } = useTranslation();
+  const displaySources = getSearchSources(sources);
+  if (displaySources.length === 0) return null;
+
+  return (
+    <CollapsibleSection
+      title={`${t("taskCenter.references")} (${displaySources.length})`}
+      defaultOpen={false}
+    >
+      <div className="task-source-list">
+        {displaySources.map((source, index) => (
+          <button
+            type="button"
+            className="task-source-item"
+            key={getSourceDedupKey(source, index)}
+            onClick={() => openSource(source)}
+            title={getSourceLabel(source)}
+          >
+            <TaskSourceIcon source={source} />
+            <span className="task-source-copy">
+              <span className="task-source-heading">
+                {getSourceSubtitle(source) || t("taskCenter.references")}
+              </span>
+              <strong className="task-source-title">{getSourceLabel(source)}</strong>
+              {getSourceEvidenceText(source) && (
+                <span className="task-source-content">{getSourceEvidenceText(source)}</span>
+              )}
+            </span>
+            <RightOutlined className="task-source-arrow" aria-hidden="true" />
+          </button>
+        ))}
+      </div>
+    </CollapsibleSection>
+  );
+}
+
 function StatusBadge({ status }: { status: TaskStatus }) {
   const { t } = useTranslation();
   if (status === "succeeded") {
@@ -505,6 +572,7 @@ function TaskCard({ task }: { task: SubAgentTask }) {
           )}
           <ExecutionLog log={task.execution_log} isRunning={isRunning} />
           <ArtifactGrid artifacts={task.artifacts} />
+          <ReferenceSources sources={task.sources} />
         </>
       )}
       {!collapsed && (

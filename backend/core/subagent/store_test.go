@@ -103,6 +103,32 @@ func TestStatusAndArtifactLifecycle(t *testing.T) {
 	}
 }
 
+func TestUpdateSourcesReplacesTaskSnapshot(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	if _, err := CreateTask(ctx, db.DB, CreateTaskInput{
+		TaskID: "task-sources", ConversationID: "conv-sources", AgentType: "research",
+		Title: "research", Mode: "auto",
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	sources := json.RawMessage(`[{"index":"1.1","title":"Example","source_roles":["searched"]}]`)
+	if err := UpdateSources(ctx, db.DB, "task-sources", sources); err != nil {
+		t.Fatalf("update sources: %v", err)
+	}
+	task, err := GetTask(ctx, db.DB, "task-sources")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if string(task.Sources) != string(sources) {
+		t.Fatalf("sources: got %s, want %s", task.Sources, sources)
+	}
+	if err := UpdateSources(ctx, db.DB, "task-sources", json.RawMessage(`{"bad":true}`)); err == nil {
+		t.Fatal("expected object snapshot to be rejected")
+	}
+}
+
 func TestListTasksByConversationForUserEnforcesOwnership(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()

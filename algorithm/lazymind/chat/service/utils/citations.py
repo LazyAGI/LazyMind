@@ -303,6 +303,17 @@ def register_existing_sources(
                     current[key] = value
         else:
             refs[index] = candidate
+        roles = source.get('source_roles') or ()
+        mark_source_roles(config, index, roles)
+        document_index, _ = split_citation_index(index)
+        if document_index is not None:
+            config[CITATION_NEXT_DOC_KEY] = max(
+                int(config.get(CITATION_NEXT_DOC_KEY) or 1), document_index + 1,
+            )
+        if source.get('source_type') == 'external' or source.get('url'):
+            key_map = config.setdefault(EXTERNAL_SOURCE_KEY_MAP_KEY, {})
+            for key in _external_source_keys(source):
+                key_map[key] = index
 
 
 def materialize_source_views(

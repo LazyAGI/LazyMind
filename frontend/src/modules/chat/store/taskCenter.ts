@@ -7,6 +7,7 @@ import { resolveCoreAssetUrl } from "@/modules/knowledge/utils/imageUrl";
 import UIUtils from "@/modules/chat/utils/ui";
 import { WORKFLOW_GRAPH_REFRESH_EVENT } from "@/components/StateGraphModal";
 import { CHAT_FFMPEG_DEPENDENCY_MISSING_EVENT } from "@/modules/chat/constants/chat";
+import type { ChatSource } from "@/modules/chat/utils/sourceAdapter";
 
 const taskReconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const convReconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
@@ -88,6 +89,7 @@ export interface SubAgentTask {
   summary?: string;
   output_slots?: string[];
   artifacts: TaskArtifact[];
+  sources: ChatSource[];
   artifact_streams: TaskArtifactStream[];
   execution_log: TaskLogEntry[];
 }
@@ -250,6 +252,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             summary: task.summary,
             output_slots: task.output_slots,
             artifacts: task.artifacts ?? [],
+            sources: task.sources ?? [],
             artifact_streams: task.artifact_streams ?? [],
             execution_log: task.execution_log ?? [],
             conversation_id: conversationId,
@@ -319,6 +322,9 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           }
           break;
         }
+        case "sources":
+          task.sources = Array.isArray(event.sources) ? event.sources : [];
+          break;
         case "artifact_stream_start": {
           if (!event.stream_id || !event.slot || !event.content_type) break;
           const current = task.artifact_streams ?? [];
@@ -655,6 +661,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           summary: t.summary,
           output_slots: t.output_slots,
           artifacts: t.artifacts ?? [],
+          sources: t.sources ?? [],
           execution_log: stepsToExecutionLog(t.steps ?? []),
         });
         if (!TERMINAL.includes(t.status)) {
