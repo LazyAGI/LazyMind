@@ -4,6 +4,7 @@ function createDesktopBridge(ipcRenderer) {
     openDataDir: () => ipcRenderer.invoke("lazymind:openDataDir"),
     runtimeStatus: () => ipcRenderer.invoke("lazymind:runtimeStatus"),
     agentIntegrationStatus: (agent) => ipcRenderer.invoke("lazymind:agentIntegrationStatus", agent),
+    agentIntegrationAction: (agent, action) => ipcRenderer.invoke("lazymind:agentIntegrationAction", agent, action),
     codexIntegrationAction: (action) => ipcRenderer.invoke("lazymind:codexIntegrationAction", action),
     restartRuntime: () => ipcRenderer.invoke("lazymind:restartRuntime"),
     resetRuntime: (scope) => ipcRenderer.invoke("lazymind:resetRuntime", scope),

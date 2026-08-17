@@ -108,6 +108,91 @@ func TestDiscoverDeepSeekHarnessFromNpxWebProfile(t *testing.T) {
 	}
 }
 
+func TestManagedJSONConfigPreservesOtherServersAndRemovesOnlyLazyMind(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "mcp.json")
+	self := filepath.Join(root, "bin", "lazymind")
+	home := filepath.Join(root, "home")
+	writeTestFile(t, self, "test connector")
+	writeTestFile(t, path, `{"theme":"dark","mcpServers":{"existing":{"command":"other","args":["serve"]}}}`)
+
+	if err := writeManagedConfig(Cursor, path, self, home); err != nil {
+		t.Fatal(err)
+	}
+	state, err := readManagedConfig(Cursor, path, self, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.configured || !state.owned {
+		t.Fatalf("managed state = %#v", state)
+	}
+	var configured struct {
+		Theme      string                        `json:"theme"`
+		MCPServers map[string]stdioMCPDefinition `json:"mcpServers"`
+	}
+	body, _ := os.ReadFile(path)
+	if err := json.Unmarshal(body, &configured); err != nil {
+		t.Fatal(err)
+	}
+	if configured.Theme != "dark" || configured.MCPServers["existing"].Command != "other" {
+		t.Fatalf("unrelated configuration changed: %#v", configured)
+	}
+	if _, err := os.Stat(path + ".lazymind-backup"); err != nil {
+		t.Fatalf("configuration backup missing: %v", err)
+	}
+
+	if err := removeManagedConfig(Cursor, path); err != nil {
+		t.Fatal(err)
+	}
+	body, _ = os.ReadFile(path)
+	configured.MCPServers = nil
+	if err := json.Unmarshal(body, &configured); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := configured.MCPServers[serverName]; exists || configured.MCPServers["existing"].Command != "other" {
+		t.Fatalf("disconnect changed unrelated configuration: %#v", configured.MCPServers)
+	}
+}
+
+func TestManagedJSONConfigRejectsForeignLazyMindEntry(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "mcp.json")
+	writeTestFile(t, path, `{"mcpServers":{"lazymind":{"command":"foreign","args":["run"]}}}`)
+	state, err := readManagedConfig(WorkBuddy, path, "/owned/lazymind", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.configured || state.owned {
+		t.Fatalf("foreign state = %#v", state)
+	}
+}
+
+func TestManagedDSHConfigPreservesOtherPatchEntries(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(root, "cordis.patch.yml")
+	self := filepath.Join(root, "bin", "lazymind")
+	home := filepath.Join(root, "home")
+	writeTestFile(t, self, "test connector")
+	writeTestFile(t, path, "- insert:\n    - id: existing\n      name: existing-plugin\n      config:\n        value: keep\n")
+
+	if err := writeManagedConfig(DeepSeekHarness, path, self, home); err != nil {
+		t.Fatal(err)
+	}
+	state, err := readManagedConfig(DeepSeekHarness, path, self, home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.configured || !state.owned {
+		t.Fatalf("managed DSH state = %#v", state)
+	}
+	if err := removeManagedConfig(DeepSeekHarness, path); err != nil {
+		t.Fatal(err)
+	}
+	body, _ := os.ReadFile(path)
+	if !strings.Contains(string(body), "id: existing") || strings.Contains(string(body), "mcp-lazymind") {
+		t.Fatalf("unexpected DSH patch after disconnect:\n%s", body)
+	}
+}
+
 func testAdapter(kind Kind) *Adapter {
 	return &Adapter{
 		kind: kind, definition: definition{agent: string(kind)},

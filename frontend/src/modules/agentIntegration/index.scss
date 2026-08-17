@@ -1,20 +1,19 @@
 .agent-integration-page {
   min-height: 100%;
-  padding: 32px;
-  background: #f5f7fa;
+  padding: 28px;
+  background: linear-gradient(180deg, #f7f9ff 0%, #f3f6fb 100%);
 
   .agent-integration-header,
-  .agent-integration-card-title,
-  .agent-integration-summary {
+  .agent-integration-card-title {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 20px;
+    gap: 16px;
   }
 
   .agent-integration-header {
-    max-width: 1280px;
-    margin: 0 auto 24px;
+    max-width: 1180px;
+    margin: 0 auto 20px;
 
     .ant-typography {
       margin-bottom: 4px;
@@ -24,7 +23,7 @@
   > .ant-alert,
   > .ant-spin-nested-loading {
     display: block;
-    max-width: 1280px;
+    max-width: 1180px;
     margin: 0 auto 16px;
   }
 
@@ -34,60 +33,98 @@
 
   .agent-integration-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
-    gap: 20px;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
+    gap: 16px;
   }
 
   .agent-integration-card {
-    border-radius: 16px;
-  }
+    overflow: hidden;
+    border: 1px solid #e4e9f3;
+    border-radius: 18px;
+    box-shadow: 0 8px 28px rgb(31 55 95 / 6%);
 
-  .agent-integration-card-title .ant-typography {
-    margin: 0;
-  }
-
-  .agent-integration-summary {
-    justify-content: flex-start;
-    margin: 28px 0;
-
-    > div {
-      min-width: 150px;
+    .ant-card-body {
       display: flex;
+      min-height: 166px;
+      padding: 22px;
       flex-direction: column;
+    }
+  }
+
+  .agent-integration-card-title {
+    align-items: flex-start;
+
+    .ant-tag {
+      display: inline-flex;
+      margin: 2px 0 0;
+      padding: 3px 10px;
+      align-items: center;
       gap: 6px;
+      border-radius: 999px;
+      font-size: 13px;
+      line-height: 20px;
     }
   }
 
-  .agent-integration-tools {
+  .agent-integration-identity {
     display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin: 20px 0;
-  }
+    min-width: 0;
+    align-items: center;
+    gap: 14px;
 
-  .agent-integration-security {
-    max-width: 720px;
-  }
-
-  .agent-integration-command {
-    max-height: 132px;
-    margin: 16px 0;
-    overflow: auto;
-    overflow-wrap: anywhere;
-
-    code {
-      display: block;
-      padding: 12px;
-      white-space: pre-wrap;
+    .ant-typography {
+      margin: 0;
+      overflow: hidden;
+      font-size: 18px;
+      line-height: 26px;
+      text-overflow: ellipsis;
+      white-space: normal;
     }
   }
 
-  .agent-integration-fallback {
-    margin-top: 16px;
+  .agent-integration-logo {
+    display: grid;
+    width: 48px;
+    height: 48px;
+    overflow: hidden;
+    flex: 0 0 48px;
+    place-items: center;
+    border: 1px solid #e5e9f2;
+    border-radius: 14px;
+    background: #fff;
+    color: #fff;
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -0.4px;
+
+    img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
   }
 
-  .agent-integration-next-step {
-    margin: 12px 0 0;
+  .agent-integration-state-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: currentColor;
+  }
+
+  .agent-integration-actions {
+    width: 100%;
+    margin-top: auto;
+    padding-top: 30px;
+
+    .ant-space-item {
+      flex: 1;
+    }
+
+    .ant-btn {
+      width: 100%;
+      height: 40px;
+      border-radius: 10px;
+    }
   }
 }
 
@@ -96,10 +133,13 @@
     padding: 20px;
 
     .agent-integration-header,
-    .agent-integration-card-title,
-    .agent-integration-summary {
+    .agent-integration-card-title {
       align-items: flex-start;
       flex-direction: column;
+    }
+
+    .agent-integration-card-title .ant-tag {
+      margin-left: 62px;
     }
   }
 }

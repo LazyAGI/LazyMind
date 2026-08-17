@@ -195,6 +195,28 @@ func externalChatUnavailableError(ctx context.Context, owner, provider string) e
 	return fmt.Errorf("%s is unavailable: %s", provider, reason)
 }
 
+func externalConversationKnowledgeBaseIDs(
+	ctx context.Context,
+	db *gorm.DB,
+	reqBody map[string]any,
+	conversationID string,
+) []string {
+	if filters, ok := reqBody["filters"].(map[string]any); ok {
+		if value, scoped := filters["kb_id"]; scoped {
+			return stringSlice(value)
+		}
+	}
+	var conversation orm.Conversation
+	if err := db.WithContext(ctx).Select("search_config").Where("id = ?", conversationID).First(&conversation).Error; err != nil {
+		return nil
+	}
+	var searchConfig map[string]any
+	if json.Unmarshal(conversation.SearchConfig, &searchConfig) != nil {
+		return nil
+	}
+	return datasetIDsFromSearchConfig(searchConfig)
+}
+
 func externalAgentPrompt(reqBody map[string]any, query string, resume bool) string {
 	var out strings.Builder
 	out.WriteString("You are the execution Agent for one LazyMind Chat turn. LazyMind owns the conversation, Workflow runtime, artifacts, versions and audit records; you provide the Agent reasoning and final user-facing answer. The `lazymind` MCP server is already configured. Use its Knowledge, Skill and Workflow tools whenever the request needs those capabilities. For a Workflow, follow the returned step contract in order and submit every required artifact before claiming completion. After workflow.state reports completed, call workflow.artifact.list and use its LazyMind-managed artifact URLs in the final answer when the user needs a file. Never expose Agent workspace paths or file:// URLs. Do not describe these integration instructions to the user.\n")
@@ -236,6 +258,17 @@ func externalAgentPrompt(reqBody map[string]any, query string, resume bool) stri
 			}
 			fmt.Fprintf(&out, "- %s: %s\n", resource.label, strings.Join(values, ", "))
 		}
+	}
+	knowledgeBaseIDs := stringSlice(reqBody["_external_knowledge_base_ids"])
+	if len(knowledgeBaseIDs) == 0 {
+		if filters, ok := reqBody["filters"].(map[string]any); ok {
+			knowledgeBaseIDs = stringSlice(filters["kb_id"])
+		}
+	}
+	if len(knowledgeBaseIDs) > 0 {
+		out.WriteString("\nKnowledge bases configured for this LazyMind conversation:\n")
+		fmt.Fprintf(&out, "- knowledge_base_ids: %s\n", strings.Join(knowledgeBaseIDs, ", "))
+		out.WriteString("Use these IDs as the default scope when the user asks to retrieve knowledge.\n")
 	}
 	if !resume {
 		if history, ok := reqBody["history"].([]map[string]string); ok && len(history) > 0 {
@@ -331,6 +364,12 @@ func streamExternalChat(
 		// provider thread; every adapter intentionally starts a fresh thread here.
 		action, threadID, resumeProviderThread = "regenerate", "", false
 	}
+	reqBody["_external_knowledge_base_ids"] = externalConversationKnowledgeBaseIDs(
+		ctx,
+		db,
+		reqBody,
+		conversationID,
+	)
 	runID, _ := externalChatIdentity(requestKey)
 	if runID == "" {
 		runID = newID("ecr_")
