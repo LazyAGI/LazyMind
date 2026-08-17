@@ -141,9 +141,9 @@ func TestChatChunkResponseRoundTrip(t *testing.T) {
 		ConversationID:   "conv-1",
 		Seq:              1,
 		Delta:            "hello",
-		FinishReason:     "stop",
 		HistoryID:        "hist-1",
 		ReasoningContent: "thinking...",
+		RuntimeEvent:     completedRunEvent("run-1", true),
 	}
 	bs, err := json.Marshal(orig)
 	if err != nil {

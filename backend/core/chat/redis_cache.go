@@ -31,10 +31,12 @@ const (
 )
 
 type ChatStatus struct {
-	Status        string `json:"status"`
-	CurrentResult string `json:"current_result"`
-	LastUpdate    int64  `json:"last_update"`
-	TotalChunks   int32  `json:"total_chunks"`
+	Status        string       `json:"status"`
+	RunID         string       `json:"run_id"`
+	RunTerminal   *RunTerminal `json:"run_terminal,omitempty"`
+	CurrentResult string       `json:"current_result"`
+	LastUpdate    int64        `json:"last_update"`
+	TotalChunks   int32        `json:"total_chunks"`
 }
 
 type ChatInput struct {
@@ -56,7 +58,6 @@ type ChatChunkResponse struct {
 	Seq                   int32                        `json:"seq"`
 	Message               string                       `json:"message"`
 	Delta                 string                       `json:"delta"`
-	FinishReason          string                       `json:"finish_reason"`
 	HistoryID             string                       `json:"history_id"`
 	Sources               []any                        `json:"sources,omitempty"`
 	PromptQuestions       []string                     `json:"prompt_questions,omitempty"`
@@ -70,6 +71,7 @@ type ChatChunkResponse struct {
 	AskPending            *AskPendingEvent             `json:"ask_pending,omitempty"`
 	ToolLimitPending      *ToolLimitPendingEvent       `json:"tool_limit_pending,omitempty"`
 	IntentUpdated         *IntentUpdatedEvent          `json:"intent_updated,omitempty"`
+	RuntimeEvent          *ChatRuntimeEvent            `json:"runtime_event,omitempty"`
 }
 
 // TaskCreatedNotice notifies the frontend that an independent SubAgent task exists.
@@ -98,13 +100,17 @@ func chatInputKey(cid, hid string) string { return fmt.Sprintf(chatInputKeyPrefi
 func convEventsKey(cid string) string     { return fmt.Sprintf(convEventsKeyPrefix, cid) }
 
 func setChatStatus(ctx context.Context, stateStore state.Store, conversationID, historyID, status, currentResult string) error {
+	return setChatRuntimeStatus(ctx, stateStore, conversationID, historyID, status, currentResult, "", nil)
+}
+
+func setChatRuntimeStatus(ctx context.Context, stateStore state.Store, conversationID, historyID, status, currentResult, runID string, terminal *RunTerminal) error {
 	key := chatStatusKey(conversationID)
 	totalChunks := int32(0)
 	chunks, _ := getChatChunks(ctx, stateStore, conversationID, historyID)
 	if len(chunks) > 0 {
 		totalChunks = int32(len(chunks))
 	}
-	data := ChatStatus{Status: status, CurrentResult: currentResult, LastUpdate: time.Now().Unix(), TotalChunks: totalChunks}
+	data := ChatStatus{Status: status, RunID: runID, RunTerminal: terminal, CurrentResult: currentResult, LastUpdate: time.Now().Unix(), TotalChunks: totalChunks}
 	bs, _ := json.Marshal(data)
 	if err := stateStore.HSet(ctx, key, map[string]any{historyID: string(bs)}, chatCacheExpireTime); err != nil {
 		return err
@@ -167,7 +173,9 @@ func reconcileGeneratingExternalChatStatuses(
 		if err := db.WithContext(ctx).Select("result").Where("id = ?", historyID).Take(&history).Error; err == nil {
 			result = history.Result
 		}
-		if err := setChatStatus(ctx, stateStore, conversationID, historyID, run.Status, result); err != nil {
+		terminalEvent := externalRunTerminalEvent(run.ID, run.Status, result != "")
+		terminal, _ := terminalEvent.Terminal()
+		if err := setChatRuntimeStatus(ctx, stateStore, conversationID, historyID, terminal.Status, result, run.ID, terminal); err != nil {
 			return ids, err
 		}
 	}
@@ -196,7 +204,9 @@ func projectExternalChatRunStatus(
 	if err := db.WithContext(ctx).Select("result").Where("id = ?", run.HistoryID).Take(&history).Error; err == nil {
 		result = history.Result
 	}
-	return setChatStatus(ctx, stateStore, run.ConversationID, run.HistoryID, run.Status, result)
+	terminalEvent := externalRunTerminalEvent(run.ID, run.Status, result != "")
+	terminal, _ := terminalEvent.Terminal()
+	return setChatRuntimeStatus(ctx, stateStore, run.ConversationID, run.HistoryID, terminal.Status, result, run.ID, terminal)
 }
 
 func getChatStatus(ctx context.Context, stateStore state.Store, conversationID, historyID string) (*ChatStatus, error) {
@@ -302,7 +312,7 @@ func watchChatChunks(ctx context.Context, stateStore state.Store, conversationID
 			st, _ := getChatStatus(ctx, stateStore, conversationID, historyID)
 			if st != nil {
 				switch st.Status {
-				case "completed", "stopped", "failed":
+				case "completed", "interrupted", "failed", "cancelled":
 					return nil
 				}
 			}

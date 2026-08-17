@@ -649,7 +649,7 @@ func resumeChatStream(w http.ResponseWriter, r *http.Request) {
 func resumeFromDBOnly(db *gorm.DB, convID string, flusher http.Flusher, w http.ResponseWriter) {
 	var last orm.ChatHistory
 	if err := db.Where("conversation_id = ?", convID).Order("seq DESC").First(&last).Error; err != nil || last.ID == "" {
-		writeSSEChunk(w, flusher, map[string]any{"finish_reason": "FINISH_REASON_UNKNOWN"})
+		writeSSEChunk(w, flusher, map[string]any{"runtime_event": failedRunEvent(newID("run_"), "history_not_found", false)})
 		return
 	}
 	writeSSEChunk(w, flusher, map[string]any{
@@ -657,12 +657,12 @@ func resumeFromDBOnly(db *gorm.DB, convID string, flusher http.Flusher, w http.R
 		"seq":                 last.Seq,
 		"message":             stripThinkTags(stripToolTags(last.Result)),
 		"delta":               stripThinkTags(stripToolTags(last.Result)),
-		"finish_reason":       "FINISH_REASON_STOP",
 		"history_id":          last.ID,
 		"sources":             retrievalSources(last.RetrievalResult),
 		"tool_call_turns":     last.ToolCallTurns,
 		"thinking_duration_s": last.ThinkingDurationS,
 	})
+	writeSSEChunk(w, flusher, map[string]any{"history_id": last.ID, "runtime_event": storedRunEvent(last.RunID, last.RunTerminal)})
 }
 
 func resumeCompletedFromDB(db *gorm.DB, convID string, flusher http.Flusher, w http.ResponseWriter) {
@@ -673,36 +673,32 @@ func resumeCompletedFromDB(db *gorm.DB, convID string, flusher http.Flusher, w h
 			"seq":                 last.Seq,
 			"message":             stripThinkTags(stripToolTags(last.Result)),
 			"delta":               stripThinkTags(stripToolTags(last.Result)),
-			"finish_reason":       "FINISH_REASON_STOP",
 			"history_id":          last.ID,
 			"sources":             retrievalSources(last.RetrievalResult),
 			"tool_call_turns":     last.ToolCallTurns,
 			"thinking_duration_s": last.ThinkingDurationS,
 		})
+		writeSSEChunk(w, flusher, map[string]any{"history_id": last.ID, "runtime_event": storedRunEvent(last.RunID, last.RunTerminal)})
 		return
 	}
 
 	var mh []orm.MultiAnswersChatHistory
 	if err := db.Where("conversation_id = ?", convID).Order("seq DESC, create_time DESC").Limit(2).Find(&mh).Error; err != nil || len(mh) == 0 {
-		writeSSEChunk(w, flusher, map[string]any{"finish_reason": "FINISH_REASON_UNKNOWN"})
+		writeSSEChunk(w, flusher, map[string]any{"runtime_event": failedRunEvent(newID("run_"), "history_not_found", false)})
 		return
 	}
-	for i, h := range mh {
-		finish := ""
-		if i == len(mh)-1 {
-			finish = "FINISH_REASON_STOP"
-		}
+	for _, h := range mh {
 		writeSSEChunk(w, flusher, map[string]any{
 			"conversation_id":     convID,
 			"seq":                 h.Seq,
 			"message":             stripThinkTags(stripToolTags(h.Result)),
 			"delta":               stripThinkTags(stripToolTags(h.Result)),
-			"finish_reason":       finish,
 			"history_id":          h.ID,
 			"sources":             retrievalSources(h.RetrievalResult),
 			"tool_call_turns":     h.ToolCallTurns,
 			"thinking_duration_s": h.ThinkingDurationS,
 		})
+		writeSSEChunk(w, flusher, map[string]any{"history_id": h.ID, "runtime_event": storedRunEvent(h.RunID, h.RunTerminal)})
 	}
 }
 
@@ -726,6 +722,9 @@ func mergeChunksToFirstChunk(chunks []*ChatChunkResponse) *ChatChunkResponse {
 		if len(ch.Sources) > 0 {
 			sources = ch.Sources
 		}
+		if ch.RuntimeEvent != nil {
+			continue
+		}
 	}
 	if last == nil {
 		return nil
@@ -737,7 +736,6 @@ func mergeChunksToFirstChunk(chunks []*ChatChunkResponse) *ChatChunkResponse {
 		Delta:            fullDelta,
 		ReasoningContent: fullReasoning,
 		Sources:          sources,
-		FinishReason:     last.FinishReason,
 		IntentUpdated:    intentUpdated,
 	}
 }
@@ -745,10 +743,6 @@ func mergeChunksToFirstChunk(chunks []*ChatChunkResponse) *ChatChunkResponse {
 func sendChunk(w http.ResponseWriter, flusher http.Flusher, ch *ChatChunkResponse) {
 	if ch == nil {
 		return
-	}
-	// Defaulttext finish_reason，text
-	if ch.FinishReason == "" {
-		ch.FinishReason = "FINISH_REASON_UNSPECIFIED"
 	}
 	writeSSEChunk(w, flusher, ch)
 }
@@ -762,7 +756,7 @@ func resumeSingleAnswerChat(ctx context.Context, stateStore state.Store, convID,
 		sendChunk(w, flusher, first)
 	}
 
-	if status != nil && (status.Status == "completed" || status.Status == "stopped" || status.Status == "failed") {
+	if status != nil && status.RunTerminal != nil {
 		full := strings.TrimSpace(status.CurrentResult)
 		seq := int32(0)
 		var sources []any
@@ -785,12 +779,10 @@ func resumeSingleAnswerChat(ctx context.Context, stateStore state.Store, convID,
 				})
 			}
 		}
-		sendChunk(w, flusher, &ChatChunkResponse{
-			ConversationID: convID,
-			Seq:            seq,
-			HistoryID:      historyID,
-			FinishReason:   "FINISH_REASON_STOP",
-		})
+		eventData, _ := json.Marshal(status.RunTerminal)
+		sendChunk(w, flusher, &ChatChunkResponse{ConversationID: convID, Seq: seq, HistoryID: historyID, RuntimeEvent: &ChatRuntimeEvent{
+			SchemaVersion: 1, EventID: newID("evt_"), RunID: status.RunID, Type: RuntimeEventRunFinished, Data: eventData,
+		}})
 		_ = clearChatData(context.Background(), stateStore, convID, historyID)
 		return
 	}
@@ -811,12 +803,7 @@ func resumeSingleAnswerChat(ctx context.Context, stateStore state.Store, convID,
 	}
 
 	finalStatus, _ := getChatStatus(context.Background(), stateStore, convID, historyID)
-	if finalStatus != nil && (finalStatus.Status == "completed" || finalStatus.Status == "stopped") {
-		sendChunk(w, flusher, &ChatChunkResponse{
-			ConversationID: convID,
-			HistoryID:      historyID,
-			FinishReason:   "FINISH_REASON_STOP",
-		})
+	if finalStatus != nil && finalStatus.RunTerminal != nil {
 		_ = clearChatData(context.Background(), stateStore, convID, historyID)
 	}
 }
@@ -824,16 +811,19 @@ func resumeSingleAnswerChat(ctx context.Context, stateStore state.Store, convID,
 func resumeMultiAnswerChat(ctx context.Context, stateStore state.Store, convID string, info *MultiAnswerInfo, w http.ResponseWriter, flusher http.Flusher) {
 	primaryChunks, _ := getChatChunks(ctx, stateStore, convID, info.PrimaryHistoryID)
 	secondaryChunks, _ := getChatChunks(ctx, stateStore, convID, info.SecondaryHistoryID)
+	// Announce both branches before replaying either terminal. Otherwise a
+	// terminal-only primary branch could make the browser close before it has
+	// observed the secondary branch.
+	sendChunk(w, flusher, &ChatChunkResponse{ConversationID: convID, Seq: int32(info.Seq), HistoryID: info.PrimaryHistoryID})
+	sendChunk(w, flusher, &ChatChunkResponse{ConversationID: convID, Seq: int32(info.Seq), HistoryID: info.SecondaryHistoryID})
 
 	for _, ch := range primaryChunks {
 		if ch != nil {
-			ch.FinishReason = ""
 			sendChunk(w, flusher, ch)
 		}
 	}
 	for _, ch := range secondaryChunks {
 		if ch != nil {
-			ch.FinishReason = ""
 			sendChunk(w, flusher, ch)
 		}
 	}
@@ -849,7 +839,6 @@ func resumeMultiAnswerChat(ctx context.Context, stateStore state.Store, convID s
 			if ch == nil {
 				return nil
 			}
-			ch.FinishReason = ""
 			writeMu.Lock()
 			sendChunk(w, flusher, ch)
 			writeMu.Unlock()
@@ -895,19 +884,6 @@ func resumeMultiAnswerChat(ctx context.Context, stateStore state.Store, convID s
 	}
 	patchTail(info.PrimaryHistoryID)
 	patchTail(info.SecondaryHistoryID)
-
-	sendChunk(w, flusher, &ChatChunkResponse{
-		ConversationID: convID,
-		Seq:            int32(info.Seq),
-		HistoryID:      info.PrimaryHistoryID,
-		FinishReason:   "FINISH_REASON_STOP",
-	})
-	sendChunk(w, flusher, &ChatChunkResponse{
-		ConversationID: convID,
-		Seq:            int32(info.Seq),
-		HistoryID:      info.SecondaryHistoryID,
-		FinishReason:   "FINISH_REASON_STOP",
-	})
 
 	if ctx.Err() == nil {
 		_ = clearChatData(context.Background(), stateStore, convID, info.PrimaryHistoryID)
@@ -1269,6 +1245,14 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 		"tool_call_turns":   h.ToolCallTurns,
 		"reasoning_content": extractThinkContent(h.Result),
 		"thinking_time_s":   h.ThinkingDurationS,
+		"run_id":            h.RunID,
+		"run_status":        h.RunStatus,
+	}
+	if len(h.RunTerminal) > 0 {
+		var terminal RunTerminal
+		if json.Unmarshal(h.RunTerminal, &terminal) == nil {
+			item["run_terminal"] = terminal
+		}
 	}
 	if askPending != nil {
 		item["ask_pending"] = askPending
@@ -1782,6 +1766,9 @@ func SetChatHistory(w http.ResponseWriter, r *http.Request) {
 			Result:            selected.Result,
 			ToolCallTurns:     nonNegativeToolCallTurns(int64(selected.ToolCallTurns)),
 			ThinkingDurationS: selected.ThinkingDurationS,
+			RunID:             selected.RunID,
+			RunStatus:         selected.RunStatus,
+			RunTerminal:       selected.RunTerminal,
 			FeedBack:          selected.FeedBack,
 			Reason:            selected.Reason,
 			Ext:               selected.Ext,
