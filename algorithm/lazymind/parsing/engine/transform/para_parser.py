@@ -1,7 +1,7 @@
 import copy
+import re
 from dataclasses import dataclass
 from typing import Callable, List, Optional, Sequence, Tuple
-from pathlib import Path
 from pydantic import Field, PrivateAttr
 
 from lazyllm.tools.rag import NodeTransform, DocNode
@@ -57,10 +57,94 @@ def split_by_char() -> Callable[[str], List[str]]:
 
 
 SENTENCE_CHUNK_OVERLAP = 200
+# Used by ParagraphSplitter secondary chunking. NormalLineSplitter uses
+# _split_by_sentence_punct so English decimals / versions (2.5, Qwen2.5) stay intact.
 CHUNKING_REGEX = r'[^。？?！!.\n]+[。？?！!.\n]*|[。？?！!.\n]+'
 DEFAULT_PARAGRAPH_SEP = '\n\n\n'
 
 DEFAULT_CHUNK_SIZE = 1024
+
+# Soft hyphenation at EOL: "understand-\\ning". Captures the right-hand fragment
+# so we can tell real compounds ("state-of-\\nthe-art") from break hyphens.
+_HYPHEN_EOL_RE = re.compile(r'-\n([^\n]*)')
+
+
+def _is_pdf_reader_node(node: DocNode) -> bool:
+    '''PDFReader tags each page with page_label and has no OCR layout fields.'''
+    return 'page_label' in (node.metadata or {})
+
+
+def _unwrap_soft_newlines(text: str) -> str:
+    '''Join PDF/visual soft wraps before sentence splitting.
+
+    Only for PDFReader output (pypdf extract_text keeps layout \\n and EOL
+    hyphenation). Preserve blank-line paragraph breaks (\\n\\n).
+    '''
+    if not text:
+        return text
+
+    def _dehyphenate(match: re.Match) -> str:
+        right = match.group(1)
+        before = match.string[:match.start()]
+        left_token = before.rsplit(None, 1)[-1] if before.strip() else ''
+        # Real compounds already contain '-' on either side of the break; keep it.
+        # Soft hyphenation (understand-\\ning) has no '-' in either fragment.
+        if '-' in left_token or '-' in right.split(None, 1)[0]:
+            return '-' + right
+        return right
+
+    text = _HYPHEN_EOL_RE.sub(_dehyphenate, text)
+    # single newlines -> space; preserve paragraph breaks
+    text = re.sub(r'(?<!\n)\n(?!\n)', ' ', text)
+    text = re.sub(r'[ \t]+', ' ', text)
+    return text
+
+
+def _split_by_sentence_punct(text: str) -> List[str]:
+    '''Split on sentence-ending punctuation without breaking decimals/versions.
+
+    '.' only ends a sentence when it is at EOF or followed by whitespace
+    (same rule as GeneralParser._rfind_sentence_end). Soft newlines are not
+    sentence boundaries — unwrap them first via _unwrap_soft_newlines when
+    the source is PDFReader.
+    '''
+    if not text:
+        return []
+    parts: List[str] = []
+    start = 0
+    n = len(text)
+    for i, ch in enumerate(text):
+        if ch in '。？?！!':
+            parts.append(text[start:i + 1])
+            start = i + 1
+            continue
+        if ch != '.':
+            continue
+        nxt = text[i + 1] if i + 1 < n else ''
+        if nxt == '' or nxt.isspace():
+            parts.append(text[start:i + 1])
+            start = i + 1
+    if start < n:
+        parts.append(text[start:])
+    return parts
+
+
+def _lines_for_sentence(lines, sentence: str) -> list | None:
+    '''Keep layout lines whose content is fully contained in this sentence.
+
+    Block-wide fake lines (content == whole block) will not match any sentence
+    and are dropped so children do not inherit parent-level layout metadata.
+    '''
+    if not isinstance(lines, list) or not lines or not sentence:
+        return None
+    matched = []
+    for line in lines:
+        if not isinstance(line, dict):
+            continue
+        content = line.get('content') or ''
+        if content and content in sentence:
+            matched.append(copy.deepcopy(line))
+    return matched or None
 
 
 @dataclass
@@ -88,30 +172,32 @@ class NormalLineSplitter(NodeTransform):
 
         return out_para
 
-    def _split_text(self, text: str) -> List[str]:
-        def _split_fun(text: str):
-            fun = split_by_regex(CHUNKING_REGEX)
-            return fun(text)
-
-        text_list = _split_fun(text=text)
-        return self._split_para(text_list)
+    def _split_text(self, text: str, *, unwrap_soft_newlines: bool = False) -> List[str]:
+        if unwrap_soft_newlines:
+            text = _unwrap_soft_newlines(text)
+        return self._split_para(_split_by_sentence_punct(text))
 
     def forward(self, document: DocNode, **kwargs) -> List[DocNode]:
         result = []
         nodes = document if isinstance(document, list) else [document]
         for node in nodes:
-            metadata = node.metadata
             global_metadata = node.global_metadata
-            split_text = self._split_text(node.text)
-            result.extend([
-                spawn_child_doc_node(
+            unwrap = _is_pdf_reader_node(node)
+            split_text = self._split_text(node.text, unwrap_soft_newlines=unwrap)
+            parent_lines = node.metadata.get('lines')
+            for text in split_text:
+                child_metadata = copy.deepcopy(node.metadata)
+                chunk_lines = _lines_for_sentence(parent_lines, text)
+                if chunk_lines is not None:
+                    child_metadata['lines'] = chunk_lines
+                else:
+                    child_metadata.pop('lines', None)
+                result.append(spawn_child_doc_node(
                     node,
                     text=text,
-                    metadata=copy.deepcopy(metadata),
+                    metadata=child_metadata,
                     global_metadata=copy.deepcopy(global_metadata),
-                )
-                for text in split_text
-            ])
+                ))
         return result
 
 
@@ -437,18 +523,15 @@ class LineSplitter(NodeTransform):
     def __init__(self, **kwargs):
         super().__init__()
         self._normal_spliter = NormalLineSplitter()
-        self._mineru_spliter = MineruLineSplitter()
 
     def sig_fields(self) -> dict:
         return {}
 
     def forward(self, document: DocNode, **kwargs) -> List[DocNode]:
+        # line group is "sentence slice": always split by sentence punctuation.
+        # Mineru layout lines vary in visual length and are not sentence boundaries.
         result = []
         nodes = document if isinstance(document, list) else [document]
         for node in nodes:
-            file_type = Path(node.global_metadata.get('file_name', '')).suffix
-            if file_type.lower() == '.pdf' and node.metadata.get('lines'):
-                result.extend(self._mineru_spliter(node))
-            else:
-                result.extend(self._normal_spliter(node))
+            result.extend(self._normal_spliter(node))
         return result

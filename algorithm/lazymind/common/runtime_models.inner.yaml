@@ -1,32 +1,29 @@
-# Runtime model config for ECS/internal services (static, all endpoints pre-configured).
-# yaml key = AutoModel(model=...) lookup name; name field = actual model name sent to the API.
-
 llm:
   - source: openai
     type: llm
     name: minimax-m27
-    url: http://106.75.235.251:9000/v1/
+    url: http://172.24.176.1:49090/v1/
     api_key: ${LAZYLLM_MINIMAX_API_KEY}
 
 evo_llm:
   - source: openai
     type: llm
     name: lazyllm
-    url: http://10.119.21.177:8000/v1/
+    url: http://172.24.176.1:48000/v1/
     skip_auth: true
 
 reranker:
   - source: openai
     type: rerank
     name: Qwen3-Reranker-8B
-    url: http://10.119.17.248:8331/v1
+    url: http://172.24.176.1:48331/v1
     skip_auth: true
 
 embed_main:
   - source: openai
     type: embed
     name: lazyllm
-    url: http://10.119.29.245:9800/v1/embeddings
+    url: http://172.24.176.1:22341/v1/embeddings
     skip_auth: true
 
 # Cross-modal (image) embed shared by image nodes and image-only retrieval branch.
@@ -34,7 +31,7 @@ embed_image:
   - source: openai
     type: cross_modal_embed
     name: siglip
-    url: http://10.119.21.178:34335/embeddings
+    url: http://172.24.176.1:43435/embeddings
     skip_auth: true
 
 # Vision-language model for image-aware query rewriting and vision_extractor tool.
@@ -42,7 +39,7 @@ vlm:
   - source: openai
     type: vlm
     name: lazyllm
-    url: http://10.119.16.10:36324/v1/
+    url: http://172.24.176.1:46517/v1/
     skip_auth: true
 
 speech_to_text:

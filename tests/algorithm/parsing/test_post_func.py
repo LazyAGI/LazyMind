@@ -95,7 +95,13 @@ def test_merge_node_parser_merges_text_bbox_lines_and_table_image_map():
     group = [
         DocNode(
             text='first',
-            metadata={'file_name': 'a.pdf', 'page': 1, 'bbox': [10, 20, 30, 40], 'type': 'text'},
+            metadata={
+                'file_name': 'a.pdf',
+                'page': 1,
+                'bbox': [10, 20, 30, 40],
+                'type': 'text',
+                'lines': [{'content': 'first', 'bbox': [10, 20, 30, 40], 'type': 'text', 'page': 1}],
+            },
         ),
         DocNode(
             text='table markdown',
@@ -105,11 +111,18 @@ def test_merge_node_parser_merges_text_bbox_lines_and_table_image_map():
                 'bbox': [5, 25, 35, 45],
                 'type': 'table',
                 'table_image_map': table_map,
+                'lines': [{'content': 'table markdown', 'bbox': [5, 25, 35, 45], 'type': 'table', 'page': 1}],
             },
         ),
         DocNode(
             text='second page',
-            metadata={'file_name': 'a.pdf', 'page': 2, 'bbox': [1, 2, 3, 4], 'type': 'text'},
+            metadata={
+                'file_name': 'a.pdf',
+                'page': 2,
+                'bbox': [1, 2, 3, 4],
+                'type': 'text',
+                'lines': [{'content': 'second page', 'bbox': [1, 2, 3, 4], 'type': 'text', 'page': 2}],
+            },
         ),
     ]
 
@@ -126,6 +139,47 @@ def test_merge_node_parser_merges_text_bbox_lines_and_table_image_map():
     ]
     assert normalize_table_image_map(result[0].metadata['table_image_map']) == [
         {'content': 'table markdown', 'image': '![表](images/table.png)'}
+    ]
+
+
+def test_merge_node_parser_does_not_invent_lines_from_content():
+    group = [
+        DocNode(
+            text='only paragraph',
+            metadata={'file_name': 'a.pdf', 'page': 1, 'bbox': [10, 20, 30, 40], 'type': 'text'},
+        ),
+    ]
+
+    result = MergeNodeParser().forward([group])
+
+    assert result[0].text == 'only paragraph'
+    assert result[0].metadata['bbox'] == [10, 20, 30, 40]
+    assert 'lines' not in result[0].metadata
+
+
+def test_merge_node_parser_preserves_fine_grained_mineru_lines():
+    group = [
+        DocNode(
+            text='paragraph one',
+            metadata={
+                'file_name': 'a.pdf',
+                'page': 1,
+                'bbox': [10, 20, 30, 40],
+                'type': 'text',
+                'lines': [
+                    {'content': 'line a', 'bbox': [10, 20, 30, 25], 'type': 'text', 'page': 1},
+                    {'content': 'line b', 'bbox': [10, 26, 30, 40], 'type': 'text', 'page': 1},
+                ],
+            },
+        ),
+    ]
+
+    result = MergeNodeParser().forward([group])
+
+    assert result[0].text == 'paragraph one'
+    assert result[0].metadata['lines'] == [
+        {'content': 'line a', 'bbox': [10, 20, 30, 25], 'type': 'text', 'page': 1},
+        {'content': 'line b', 'bbox': [10, 26, 30, 40], 'type': 'text', 'page': 1},
     ]
 
 
@@ -158,8 +212,56 @@ def test_group_node_parser_splits_large_table_and_refreshes_table_image_map():
     split_node = result[0][0]
     assert split_node.text.startswith('表1\n')
     assert split_node.text.endswith('注：说明')
-    assert split_node.metadata['lines'][0]['type'] == 'table'
+    assert split_node.metadata.get('type') == 'table'
+    # Split chunks must not invent a single fake line equal to the whole node text.
+    assert (split_node.metadata.get('lines') or []) != [{
+        'content': split_node.text,
+        'bbox': split_node.metadata.get('bbox', []),
+        'type': 'table',
+        'page': split_node.metadata.get('page', 0),
+    }]
     assert normalize_table_image_map(split_node.metadata['table_image_map'])[0]['image'] == '![表](images/table.png)'
+
+
+def test_create_split_node_keeps_newline_pieces_as_lines():
+    node = DocNode(
+        text='alpha\nbeta\ngamma',
+        metadata={'type': 'text', 'page': 1, 'bbox': [1, 2, 3, 4]},
+    )
+
+    split_nodes = GroupNodeParser()._split_large_node(node, max_length=12)
+
+    assert len(split_nodes) >= 1
+    first = split_nodes[0]
+    assert first.text == 'alpha\nbeta'
+    assert first.metadata.get('lines') == [
+        {'content': 'alpha', 'bbox': [1, 2, 3, 4], 'type': 'text', 'page': 1},
+        {'content': 'beta', 'bbox': [1, 2, 3, 4], 'type': 'text', 'page': 1},
+    ]
+
+
+def test_create_split_node_filters_original_mineru_lines_into_chunk():
+    node = DocNode(
+        text='line-a-content\nline-b-content\nline-c-extra',
+        metadata={
+            'type': 'text',
+            'page': 1,
+            'bbox': [1, 2, 3, 4],
+            'lines': [
+                {'content': 'line-a-content', 'bbox': [1, 2, 3, 2], 'type': 'text', 'page': 1},
+                {'content': 'line-b-content', 'bbox': [1, 3, 3, 4], 'type': 'text', 'page': 1},
+                {'content': 'line-c-extra', 'bbox': [1, 5, 3, 6], 'type': 'text', 'page': 1},
+            ],
+        },
+    )
+
+    split_nodes = GroupNodeParser()._split_large_node(node, max_length=20)
+
+    assert split_nodes
+    first = split_nodes[0]
+    assert first.metadata['lines']
+    assert all(ln['content'] in first.text for ln in first.metadata['lines'])
+    assert 'line-c-extra' not in {ln['content'] for ln in first.metadata['lines']} or 'line-c-extra' in first.text
 
 
 def test_group_node_parser_title_relationships_and_toc_detection():

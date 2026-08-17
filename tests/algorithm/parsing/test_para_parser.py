@@ -34,10 +34,11 @@ def test_sentence_tokenizer_splitter_returns_strings():
 def test_normal_line_splitter_splits_sentences_and_merges_short_prefixes():
     splitter = NormalLineSplitter()
 
+    # Non-PDF: keep semantic newlines; short prefix is merged into the next sentence.
     assert splitter._split_text('短。\n这是一个较长的句子。') == ['短。\n这是一个较长的句子。']
     assert splitter._split_text('这是一个足够长的第一句。\n第二句也足够长？') == [
-        '这是一个足够长的第一句。\n',
-        '第二句也足够长？',
+        '这是一个足够长的第一句。',
+        '\n第二句也足够长？',
     ]
 
 
@@ -52,7 +53,7 @@ def test_line_splitter_uses_normal_sentence_splitter_for_non_pdf():
 
     assert isinstance(result, list)
     assert all(isinstance(item, DocNode) for item in result)
-    assert [item.text for item in result] == ['这是一个足够长的第一句。\n', '第二句也足够长？']
+    assert [item.text for item in result] == ['这是一个足够长的第一句。', '\n第二句也足够长？']
     assert result[0].metadata == {'file_name': 'note.md', 'page': 1}
     assert result[0].metadata is not node.metadata
 
@@ -86,21 +87,157 @@ def test_mineru_line_splitter_expands_line_metadata():
     assert result[1].metadata['type'] == 'table'
 
 
-def test_line_splitter_uses_mineru_lines_for_pdf():
+def test_line_splitter_sentence_splits_pdf_even_with_layout_lines():
+    text = (
+        '这是一个足够长的第一句，用来触发句级切分。'
+        '这是一个足够长的第二句，确认不会走版面行。'
+    )
     node = DocNode(
-        text='merged text',
+        text=text,
         metadata={
             'file_name': 'paper.pdf',
             'docid': 'doc-1',
-            'lines': [{'content': 'line one', 'type': 'text', 'page': 2, 'bbox': [1, 2, 3, 4]}],
+            # Layout lines are intentionally one blob; sentence slice must ignore them.
+            'lines': [{'content': text, 'type': 'text', 'page': 2, 'bbox': [1, 2, 3, 4]}],
         },
         global_metadata={'file_name': 'paper.pdf'},
     )
 
     result = LineSplitter().forward(node)
 
-    assert [item.text for item in result] == ['line one']
-    assert result[0].metadata['page'] == 2
+    assert len(result) == 2
+    assert result[0].text.endswith('。')
+    assert result[1].text.endswith('。')
+    # Block-wide lines must not be copied onto every sentence child.
+    assert all('lines' not in item.metadata for item in result)
+
+
+def test_line_splitter_filters_layout_lines_to_matching_sentences():
+    text = (
+        '这是一个足够长的第一句，用来触发句级切分。'
+        '这是一个足够长的第二句，确认行级元数据过滤。'
+    )
+    line_a = {
+        'content': '这是一个足够长的第一句，用来触发句级切分。',
+        'type': 'text',
+        'page': 1,
+        'bbox': [1, 2, 3, 4],
+    }
+    line_b = {
+        'content': '这是一个足够长的第二句，确认行级元数据过滤。',
+        'type': 'text',
+        'page': 1,
+        'bbox': [5, 6, 7, 8],
+    }
+    node = DocNode(
+        text=text,
+        metadata={'file_name': 'paper.pdf', 'lines': [line_a, line_b]},
+        global_metadata={'file_name': 'paper.pdf'},
+    )
+
+    result = LineSplitter().forward(node)
+
+    assert len(result) == 2
+    assert result[0].metadata['lines'] == [line_a]
+    assert result[1].metadata['lines'] == [line_b]
+
+
+def test_line_splitter_uses_normal_splitter_when_pdf_has_no_lines():
+    text = (
+        '这是一个足够长的第一句，用来触发句级切分。\n'
+        '这是一个足够长的第二句，确认不会原样保留整段。'
+    )
+    node = DocNode(
+        text=text,
+        metadata={
+            'file_name': 'paper.pdf',
+            'type': 'paragraph',
+            'page': 0,
+            'bbox': [1, 2, 3, 4],
+        },
+        global_metadata={'file_name': 'paper.pdf'},
+    )
+
+    result = LineSplitter().forward(node)
+
+    assert len(result) > 1
+    assert all(item.text != text for item in result)
+
+
+def test_line_splitter_sentence_splits_english_pdf_with_layout_lines():
+    text = (
+        '(2) For the Qwen3 MoE base models, our experimental results indicate that: '
+        '(a) Using the same pre-training data, Qwen3 MoE base models can achieve similar '
+        'performance to Qwen3 dense base models with only 1/5 activated parameters. '
+        '(b) Due to the improvements of the Qwen3 MoE architecture, the scale-up of the '
+        'training tokens, and more advanced training strategies, the Qwen3 MoE base models '
+        'can outperform the Qwen2.5 MoE base models with less than 1/2 activated parameters '
+        'and fewer total parameters. (c) Even with 1/10 of the activated parameters of the '
+        'Qwen2.5 dense base model, the Qwen3 MoE base model can achieve comparable '
+        'performance, which brings us significant advantages in inference and training costs.'
+    )
+    node = DocNode(
+        text=text,
+        metadata={
+            'file_name': 'paper.pdf',
+            'lines': [{'content': text, 'type': 'text', 'page': 1, 'bbox': [1, 2, 3, 4]}],
+        },
+        global_metadata={'file_name': 'paper.pdf'},
+    )
+
+    result = LineSplitter().forward(node)
+    texts = [item.text for item in result]
+
+    assert len(texts) == 3
+    assert 'Qwen2.5 MoE' in texts[1]
+    assert 'Qwen2.5 dense' in texts[2]
+    assert not any(t.rstrip().endswith('Qwen2.') for t in texts)
+
+
+def test_normal_line_splitter_keeps_decimals_and_versions():
+    text = 'Qwen2.5 MoE is strong enough here. Next sentence follows with enough length.'
+    assert NormalLineSplitter()._split_text(text) == [
+        'Qwen2.5 MoE is strong enough here.',
+        ' Next sentence follows with enough length.',
+    ]
+
+
+def test_normal_line_splitter_preserves_markdown_newlines_without_unwrap():
+    text = '# Title\n这是一个足够长的第一句。\n- 列表项也足够长。'
+    parts = NormalLineSplitter()._split_text(text)
+    assert parts == ['# Title\n这是一个足够长的第一句。', '\n- 列表项也足够长。']
+
+
+def test_normal_line_splitter_joins_pdfreader_soft_wraps_before_sentence_split():
+    text = (
+        'benchmarks, including tasks in code generation, mathematical reasoning, agent tasks,\n'
+        'etc., competitive against larger MoE models and proprietary models. Compared to its\n'
+        'predecessor Qwen2.5, Qwen3 expands multilingual support from 29 to 119 languages\n'
+        'and dialects, enhancing global accessibility through improved cross-lingual understand-\n'
+        'ing and generation capabilities.'
+    )
+    node = DocNode(
+        text=text,
+        metadata={'page_label': '1', 'file_name': 'paper.pdf'},
+        global_metadata={'file_name': 'paper.pdf'},
+    )
+    parts = [item.text for item in NormalLineSplitter().forward(node)]
+    assert len(parts) == 2
+    assert 'agent tasks, etc., competitive' in parts[0]
+    assert parts[0].endswith('models.')
+    assert 'Compared to its predecessor Qwen2.5' in parts[1]
+    assert 'understanding and generation capabilities.' in parts[1]
+    assert 'understand-' not in parts[1]
+
+
+def test_unwrap_soft_newlines_keeps_compound_hyphens_across_wraps():
+    from lazymind.parsing.engine.transform.para_parser import _unwrap_soft_newlines
+
+    assert _unwrap_soft_newlines('state-of-\nthe-art models') == 'state-of-the-art models'
+    assert _unwrap_soft_newlines('state-\nof-the-art models') == 'state-of-the-art models'
+    assert _unwrap_soft_newlines('cross-lingual understand-\ning capabilities') == (
+        'cross-lingual understanding capabilities'
+    )
 
 
 def test_normal_line_splitter_inherits_parent_metadata_exclusions():

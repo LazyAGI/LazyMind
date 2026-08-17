@@ -666,12 +666,16 @@ class GroupNodeParser(ModuleBase):
 
         # create new node, inheriting metadata from original node
         new_node = DocNode(text=content, metadata=copy.deepcopy(metadata))
-        new_node.metadata['lines'] = [{
-            'content': new_node._content,
-            'bbox': new_node.metadata.get('bbox', []),
-            'type': new_node.metadata.get('type', 'text'),
-            'page': new_node.metadata.get('page', 0),
-        }]
+        new_node.metadata['lines'] = _layout_lines_for_text(
+            metadata.get('lines'),
+            content,
+            fallback_chunks=current_chunks,
+            default_bbox=new_node.metadata.get('bbox', []),
+            default_type=new_node.metadata.get('type', 'text'),
+            default_page=new_node.metadata.get('page', 0),
+        )
+        if not new_node.metadata['lines']:
+            new_node.metadata.pop('lines', None)
 
         return new_node
 
@@ -711,6 +715,61 @@ class GroupNodeParser(ModuleBase):
                 return True
 
         return False
+
+
+def _line_content(line) -> str:
+    if isinstance(line, dict):
+        return line.get('content') or ''
+    return str(line) if line is not None else ''
+
+
+def _filter_lines_in_text(lines, text: str) -> list:
+    '''Keep layout lines whose content is contained in text.'''
+    if not isinstance(lines, list) or not lines or not text:
+        return []
+    matched = []
+    for line in lines:
+        content = _line_content(line)
+        if content and content in text:
+            matched.append(copy.deepcopy(line) if isinstance(line, dict) else {
+                'content': content, 'bbox': [], 'type': 'text', 'page': 0,
+            })
+    return matched
+
+
+def _layout_lines_for_text(
+    lines,
+    text: str,
+    *,
+    fallback_chunks=None,
+    default_bbox=None,
+    default_type='text',
+    default_page=0,
+) -> list:
+    '''Build layout lines for a text span without inventing a paragraph-sized fake line.
+
+    Prefer original mineru/layout lines that belong to this text. Otherwise, when
+    fallback_chunks has multiple real pieces, use those. Never emit a single entry
+    that merely duplicates the whole text blob.
+    '''
+    matched = _filter_lines_in_text(lines, text)
+    if matched:
+        return matched
+
+    chunks = [str(c) for c in (fallback_chunks or []) if str(c).strip()]
+    if len(chunks) <= 1:
+        return []
+
+    bbox = copy.deepcopy(default_bbox) if isinstance(default_bbox, list) else (default_bbox or [])
+    return [
+        {
+            'content': chunk,
+            'bbox': copy.deepcopy(bbox) if isinstance(bbox, list) else bbox,
+            'type': default_type,
+            'page': default_page,
+        }
+        for chunk in chunks
+    ]
 
 
 class MergeNodeParser(ModuleBase):
@@ -757,15 +816,17 @@ class MergeNodeParser(ModuleBase):
                 table_image_map = merge_table_image_maps(table_image_map, node.metadata['table_image_map'])
             if node.metadata.get('page', None) is not None and node.metadata.get('bbox', None):
                 bboxs.append([node.metadata.get('page')] + node.metadata.get('bbox'))
-                lines.append({
-                    'content': node._content,
-                    'bbox': node.metadata.get('bbox', []),
-                    'type': node.metadata.get('type', 'text'),
-                    'page': node.metadata.get('page', 0),
-                })
+            # Only keep real layout lines from mineru / upstream. Never invent a
+            # paragraph-sized fake line from node._content (that makes line==block).
+            orig_lines = node.metadata.get('lines')
+            if isinstance(orig_lines, list) and orig_lines:
+                lines.extend(copy.deepcopy(orig_lines))
         if not context:
             return None
-        metadata['lines'] = lines
+        if lines:
+            metadata['lines'] = lines
+        else:
+            metadata.pop('lines', None)
         if table_image_map:
             metadata['table_image_map'] = serialize_table_image_map(table_image_map)
 

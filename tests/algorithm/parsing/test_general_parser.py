@@ -160,3 +160,51 @@ def test_forward_inherits_parent_metadata_exclusions(monkeypatch):
         assert set(chunk.excluded_embed_metadata_keys) == {'page', 'bbox', 'lines'}
         assert set(chunk.excluded_llm_metadata_keys) == {'page', 'bbox', 'lines'}
         assert chunk.get_text(MetadataMode.EMBED) == 'file_name: doc.pdf\n\n' + chunk.text
+
+
+def test_forward_redistributes_layout_lines_per_chunk(monkeypatch):
+    monkeypatch.setattr(general_parser_module, 'IMAGE_PREFIX', '/assets/images/')
+    parser = GeneralParser(max_length=20, split_by='\n')
+    node = DocNode(
+        text='alpha line here\nbeta line here\ngamma trailing',
+        metadata={
+            'file_name': 'doc.pdf',
+            'page': 1,
+            'bbox': [0, 0, 10, 10],
+            'lines': [
+                {'content': 'alpha line here', 'bbox': [0, 0, 10, 3], 'type': 'text', 'page': 1},
+                {'content': 'beta line here', 'bbox': [0, 4, 10, 7], 'type': 'text', 'page': 1},
+                {'content': 'gamma trailing', 'bbox': [0, 8, 10, 10], 'type': 'text', 'page': 1},
+            ],
+        },
+    )
+
+    chunks = parser.forward(node)
+
+    assert len(chunks) >= 2
+    for chunk in chunks:
+        lines = chunk.metadata.get('lines') or []
+        assert all(ln['content'] in chunk.text for ln in lines)
+
+
+def test_forward_drops_parent_wide_fake_line_on_split(monkeypatch):
+    monkeypatch.setattr(general_parser_module, 'IMAGE_PREFIX', '/assets/images/')
+    parser = GeneralParser(max_length=20, split_by='\n')
+    full = 'alpha line here\nbeta line here\ngamma trailing'
+    node = DocNode(
+        text=full,
+        metadata={
+            'file_name': 'doc.pdf',
+            'page': 1,
+            'bbox': [0, 0, 10, 10],
+            # Coarse fake line equal to the whole parent text.
+            'lines': [{'content': full, 'bbox': [0, 0, 10, 10], 'type': 'text', 'page': 1}],
+        },
+    )
+
+    chunks = parser.forward(node)
+
+    assert len(chunks) >= 2
+    for chunk in chunks:
+        # Parent-wide fake line is not contained in any partial chunk.
+        assert 'lines' not in chunk.metadata

@@ -51,6 +51,25 @@ def _runtime_embed_max_input_tokens() -> int | None:
     return _parse_token_limit(embed_config.get('max_input_tokens'))
 
 
+def _lines_for_chunk(lines, chunk: str) -> list | None:
+    '''Redistribute parent layout lines onto a text chunk.
+
+    Keep only lines whose content is contained in the chunk. Drop the key when
+    nothing matches so LineSplitter does not treat a stale parent-wide line list
+    as this chunk's layout lines.
+    '''
+    if not isinstance(lines, list) or not lines or not chunk:
+        return None
+    matched = []
+    for line in lines:
+        if not isinstance(line, dict):
+            continue
+        content = line.get('content') or ''
+        if content and content in chunk:
+            matched.append(copy.deepcopy(line))
+    return matched or None
+
+
 def is_url(s):
     try:
         res = urlparse(s)
@@ -180,10 +199,18 @@ class GeneralParser(NodeTransform):
         ppl = pipeline(self._image_path_transform, lambda text: self._split(text, max_length=max_length))
         content = ppl(document.text or '')
 
-        return [
-            spawn_child_doc_node(
+        children = []
+        for chunk in content:
+            child_metadata = copy.deepcopy(metadata)
+            chunk_lines = _lines_for_chunk(child_metadata.get('lines'), chunk)
+            if chunk_lines is not None:
+                child_metadata['lines'] = chunk_lines
+            else:
+                child_metadata.pop('lines', None)
+            children.append(spawn_child_doc_node(
                 document,
                 text=chunk,
-                metadata=copy.deepcopy(metadata),
+                metadata=child_metadata,
                 global_metadata=copy.deepcopy(global_metadata),
-            ) for chunk in content]
+            ))
+        return children
