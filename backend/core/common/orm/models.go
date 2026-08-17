@@ -132,6 +132,9 @@ type Conversation struct {
 	EnableWorkflow *bool   `gorm:"column:enable_plugin"`
 	WorkflowMode   *string `gorm:"column:plugin_mode;type:varchar(16)"`
 	EnableSubagent *bool   `gorm:"column:enable_subagent"`
+	// ChatExecutor selects the upstream Agent while the existing Chat application
+	// remains responsible for persistence, Workflow, artifacts and SSE delivery.
+	ChatExecutor string `gorm:"column:chat_executor;type:varchar(32);not null;default:'lazymind'"`
 	// IsTaskConv marks conversations created by the scheduler or task center (not user-initiated).
 	IsTaskConv bool `gorm:"column:is_task_conv;not null;default:false"`
 
@@ -142,8 +145,8 @@ func (Conversation) TableName() string { return "conversations" }
 
 type ChatHistory struct {
 	ID                string          `gorm:"column:id;type:varchar(36);primaryKey"`
-	Seq               int             `gorm:"column:seq;not null"`
-	ConversationID    string          `gorm:"column:conversation_id;type:varchar(36);index;not null"`
+	Seq               int             `gorm:"column:seq;not null;index:idx_chat_histories_conversation_seq,priority:2,sort:desc"`
+	ConversationID    string          `gorm:"column:conversation_id;type:varchar(36);index;index:idx_chat_histories_conversation_seq,priority:1;not null"`
 	RawContent        string          `gorm:"column:raw_content;type:text"`
 	RetrievalResult   json.RawMessage `gorm:"column:retrieval_result;type:json"`
 	Content           string          `gorm:"column:content;type:text"`

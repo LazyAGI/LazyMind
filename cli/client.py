@@ -153,14 +153,25 @@ def resolve_server_url(cli_url: Optional[str] = None) -> str:
 
 def _try_refresh(server: str) -> bool:
     """Attempt to refresh the access token.  Returns True on success."""
-    rt = credentials.refresh_token()
+    before = credentials.load() or {}
+    rt = before.get('refresh_token')
     if not rt:
         return False
     url = f'{server}{AUTH_API_PREFIX}/refresh'
     try:
         data = raw_request('POST', url, payload={'refresh_token': rt})
     except (ApiError, RuntimeError):
-        return False
+        # The Go MCP bridge and Python CLI share one rotating refresh token.
+        # If the other process won the race, reuse its atomically-written pair.
+        latest = credentials.load() or {}
+        return bool(
+            latest.get('access_token')
+            and latest.get('refresh_token')
+            and (
+                latest.get('access_token') != before.get('access_token')
+                or latest.get('refresh_token') != rt
+            )
+        )
     new_access = data.get('access_token')
     new_refresh = data.get('refresh_token')
     if not new_access or not new_refresh:

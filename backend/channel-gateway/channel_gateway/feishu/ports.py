@@ -93,8 +93,6 @@ class FeishuWorkspaceRepository(Protocol):
         operation_id: str,
         expected_message_id: str,
         expected_revision: int | None = None,
-        *,
-        advance_revision: bool = True,
     ) -> dict[str, Any]:
         ...
 

@@ -21,7 +21,7 @@ import { useChatModelProviderGuard } from "@/modules/chat/hooks/useChatModelProv
 import { AgentAppsAuth } from "@/components/auth";
 import { localizeErrorCode } from "@/components/request";
 import PreferenceConfigNotice from "@/modules/chat/components/PreferenceConfigNotice";
-import type { ConversationWorkflowSettings } from "@/modules/chat/utils/request";
+import type { ConversationRuntimeSettings } from "@/modules/chat/utils/request";
 import { RightOutlined, ScheduleOutlined } from "@ant-design/icons";
 import { useChatThinkStore } from "@/modules/chat/store/chatThink";
 import FeaturedCases from "@/modules/showcase/FeaturedCases";
@@ -43,9 +43,9 @@ function persistRunInBackgroundMode(enabled: boolean) {
   }
 }
 
-function getInitialWorkflowSettings(
+function getInitialConversationSettings(
   runInBackground: boolean,
-): ConversationWorkflowSettings | null {
+): ConversationRuntimeSettings | null {
   return runInBackground ? null : { enable_workflow: false };
 }
 
@@ -82,9 +82,9 @@ const NewChatPage = () => {
     useState(0);
   const newChatInputRef = useRef<ChatInputImperativeProps>(null);
   // Stash workflow settings changed in the welcome-screen ChatInput before a conversation is created.
-  const [pendingWorkflowSettings, setPendingWorkflowSettings] =
-    useState<ConversationWorkflowSettings | null>(() =>
-      getInitialWorkflowSettings(readRunInBackgroundMode()),
+  const [pendingConversationSettings, setPendingConversationSettings] =
+    useState<ConversationRuntimeSettings | null>(() =>
+      getInitialConversationSettings(readRunInBackgroundMode()),
     );
 
   const [isDragging, setIsDragging] = useState(false);
@@ -214,7 +214,7 @@ const NewChatPage = () => {
       setRunInBackground(nextRunInBackground);
       setWelcomeKnowledgeRefreshKey((key) => key + 1);
       // Reset pending settings and KB config so a fresh new conversation starts clean.
-      setPendingWorkflowSettings(getInitialWorkflowSettings(nextRunInBackground));
+      setPendingConversationSettings(getInitialConversationSettings(nextRunInBackground));
       setChatConfig({});
       setSearchParams({}, { replace: true });
     }
@@ -248,8 +248,8 @@ const NewChatPage = () => {
         setWelcomeKnowledgeRefreshKey((key) => key + 1);
         setIsChatContent(false);
         setChatConfig({});
-        setPendingWorkflowSettings(
-          getInitialWorkflowSettings(nextRunInBackground),
+        setPendingConversationSettings(
+          getInitialConversationSettings(nextRunInBackground),
         );
         return;
       }
@@ -367,7 +367,7 @@ const NewChatPage = () => {
             chatDisabledReason={inputDisabledReason}
             chatDisabledDescription={inputDisabledDescription}
             chatDisabledAction={inputDisabledAction}
-            initPendingWorkflowSettings={pendingWorkflowSettings}
+            initPendingConversationSettings={pendingConversationSettings}
           />
         </div>
       )}
@@ -507,10 +507,10 @@ const NewChatPage = () => {
                         ? t("chat.taskInputPlaceholder")
                         : undefined
                     }
-                    onWorkflowSettingsChange={(settings) => {
-                      setPendingWorkflowSettings(settings);
+                    onConversationSettingsChange={(settings) => {
+                      setPendingConversationSettings(settings);
                     }}
-                    initialWorkflowSettings={pendingWorkflowSettings ?? undefined}
+                    initialConversationSettings={pendingConversationSettings ?? undefined}
                     runInBackground={runInBackground}
                     showcaseSelection={showcaseSelection}
                   />

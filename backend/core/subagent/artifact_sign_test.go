@@ -8,6 +8,28 @@ import (
 	"testing"
 )
 
+func TestSignArtifactImageValueAcceptsMIMEContentType(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)
+	path := filepath.Join(root, "workflow-artifacts", "scope", "image.png")
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("image"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := json.Marshal(map[string]any{"path": path, "name": "image.png"})
+	signed := SignArtifactImageValue("image/png", raw)
+	var got map[string]any
+	if err := json.Unmarshal(signed, &got); err != nil {
+		t.Fatal(err)
+	}
+	url, _ := got["url"].(string)
+	if _, exposed := got["path"]; exposed || !strings.HasPrefix(url, "/static-files/workflow-artifacts/") {
+		t.Fatalf("MIME image was not safely signed: %#v", got)
+	}
+}
+
 func TestSignArtifactFileValueAddsSignedURL(t *testing.T) {
 	subRoot := t.TempDir()
 	t.Setenv("LAZYMIND_SUBAGENT_WORKSPACE", subRoot)

@@ -121,11 +121,18 @@ type DiscardDraftResponse struct {
 }
 
 type ListSkillsRequest struct {
-	UserID string
+	UserID      string
+	Keyword     string
+	Category    string
+	Tags        []string
+	Offset      int
+	Limit       int
+	EnabledOnly bool
 }
 
 type ListSkillsResponse struct {
 	Items []SkillSummary
+	Total int64
 }
 
 type GetSkillRequest struct {
@@ -336,7 +343,11 @@ type skillMarketInstallRow struct {
 func (skillMarketInstallRow) TableName() string { return "skill_market_installs" }
 
 type skillSearchIndexRow struct {
-	SkillID string `gorm:"column:skill_id;type:varchar(36);primaryKey"`
+	SkillID        string    `gorm:"column:skill_id;type:varchar(36);primaryKey"`
+	OwnerUserID    string    `gorm:"column:owner_user_id;type:text;not null"`
+	HeadRevisionID string    `gorm:"column:head_revision_id;type:varchar(36);not null"`
+	Content        string    `gorm:"column:content;type:text;not null"`
+	UpdatedAt      time.Time `gorm:"column:updated_at;not null"`
 }
 
 func (skillSearchIndexRow) TableName() string { return "skill_search_indexes" }

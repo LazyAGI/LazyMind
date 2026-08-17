@@ -18,6 +18,7 @@ from channel_gateway.common.domain.commands import (
 )
 from channel_gateway.common.domain.outbound import (
     CapabilityPresentation,
+    ConversationExecutorPresentation,
     ConversationSettingsPresentation,
 )
 from channel_gateway.common.ports.core import CapabilityClient
@@ -92,6 +93,29 @@ class CapabilityActions:
             conversation_id=conversation_id,
             request_id=f'{request_id}_conversation_settings',
         )
+        executors = tuple(
+            ConversationExecutorPresentation(
+                id=str(item.get('id') or '')[:64],
+                display_name=str(item.get('display_name') or '')[:100],
+                kind=(
+                    'external'
+                    if str(item.get('kind') or '') == 'external'
+                    else 'internal'
+                ),
+                installed=bool(item.get('installed')),
+                host_online=bool(item.get('host_online')),
+                available=bool(item.get('available')),
+                unavailable_reason=str(
+                    item.get('unavailable_reason') or ''
+                )[:512],
+            )
+            for item in self._client.list_chat_executors(
+                owner_user_id=owner_user_id,
+                request_id=f'{request_id}_executor_catalog',
+            )
+            if str(item.get('id') or '')
+            and str(item.get('display_name') or '')
+        )
         workflow_enabled = bool(
             detail.get('enable_workflow')
             if detail.get('enable_workflow') is not None
@@ -108,6 +132,16 @@ class CapabilityActions:
             if detail.get('enable_subagent') is not None
             else True
         )
+        chat_executor = str(detail.get('chat_executor') or '')[:64]
+        if not chat_executor:
+            chat_executor = next(
+                (
+                    executor.id
+                    for executor in executors
+                    if executor.kind == 'internal'
+                ),
+                '',
+            )
         title = str(detail.get('display_name') or '未命名会话')
         search_config = detail.get('search_config')
         dataset_list = (
@@ -135,6 +169,8 @@ class CapabilityActions:
                 workflow_enabled=workflow_enabled,
                 workflow_mode=workflow_mode,
                 subagent_enabled=subagent_enabled,
+                chat_executor=chat_executor,
+                executors=executors,
             ),
         )
 
@@ -203,7 +239,12 @@ class CapabilityActions:
                 request_id=f'{request_id}_save_kb',
                 dataset_ids=dataset_ids,
             )
-        elif change.setting in ('workflow_enabled', 'workflow_mode', 'subagent'):
+        elif change.setting in (
+            'workflow_enabled',
+            'workflow_mode',
+            'subagent',
+            'executor',
+        ):
             if change.setting == 'workflow_enabled':
                 settings = {'enable_workflow': change.enabled}
             elif change.setting == 'workflow_mode':
@@ -211,8 +252,33 @@ class CapabilityActions:
                     'enable_workflow': True,
                     'workflow_mode': change.mode,
                 }
-            else:
+            elif change.setting == 'subagent':
                 settings = {'enable_subagent': change.enabled}
+            else:
+                executors = self._client.list_chat_executors(
+                    owner_user_id=owner_user_id,
+                    request_id=f'{request_id}_executor_catalog',
+                )
+                executor = next(
+                    (
+                        item
+                        for item in executors
+                        if str(item.get('id') or '') == change.executor_id
+                    ),
+                    None,
+                )
+                if executor is None:
+                    raise ActionMessage(
+                        '这个会话执行器已不可用，请刷新后重试。'
+                    )
+                if executor.get('available') is not True:
+                    reason = str(
+                        executor.get('unavailable_reason') or ''
+                    ).strip()
+                    raise ActionMessage(
+                        reason or '这个会话执行器当前不可用。'
+                    )
+                settings = {'chat_executor': change.executor_id}
             self._client.update_conversation_agent_settings(
                 owner_user_id=owner_user_id,
                 conversation_id=conversation_id,
