@@ -50,6 +50,13 @@ type groupModelListResponse struct {
 	Models []groupModelListItem `json:"models"`
 }
 
+func compatibleDBModelTypes(modelType string) []string {
+	if modelType == "cross_modal_embed" {
+		return []string{"cross_modal_embed", "multimodal_embedding", "embed_image"}
+	}
+	return []string{modelType}
+}
+
 // AddGroupModel inserts a user-defined model row under a connection group (custom model name and model_type).
 func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 	db := store.DB()
@@ -271,11 +278,12 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 	// Translate runtime_models.yaml role key (e.g. "evo_llm") to the lazyllm
 	// technical type (e.g. "llm") stored in user_model_provider_group_models.
 	dbModelType := resolveModelType(r.Context(), modelType)
+	dbModelTypes := compatibleDBModelTypes(dbModelType)
 
 	q := db.WithContext(r.Context()).
 		Joins("JOIN user_model_providers ON user_model_providers.id = user_model_provider_group_models.user_model_provider_id AND user_model_providers.deleted_at IS NULL AND user_model_providers.capabilities LIKE '%has_models%'").
 		Joins("JOIN user_model_provider_groups ON user_model_provider_groups.id = user_model_provider_group_models.user_model_provider_group_id AND user_model_provider_groups.create_user_id = user_model_provider_group_models.create_user_id AND user_model_provider_groups.deleted_at IS NULL AND user_model_provider_groups.is_verified = ?", true).
-		Where("user_model_provider_group_models.create_user_id = ? AND user_model_provider_group_models.deleted_at IS NULL AND user_model_provider_group_models.model_type = ?", userID, dbModelType)
+		Where("user_model_provider_group_models.create_user_id = ? AND user_model_provider_group_models.deleted_at IS NULL AND user_model_provider_group_models.model_type IN ?", userID, dbModelTypes)
 	if keyword != "" {
 		like := "%" + keyword + "%"
 		q = q.Where(
