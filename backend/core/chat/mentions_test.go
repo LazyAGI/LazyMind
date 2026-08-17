@@ -135,6 +135,12 @@ func TestExplicitWorkflowMentionOverridesDisabledConversationToggle(t *testing.T
 	if err != nil || bound != "builtin:test-workflow" {
 		t.Fatalf("persisted binding=%q err=%v", bound, err)
 	}
+
+	refs, err = resolveConversationWorkflowBinding(context.Background(), db.DB, "conversation-1",
+		nil, nil, false, true)
+	if err != nil || len(refs) != 1 || refs[0] != "builtin:test-workflow" {
+		t.Fatalf("disabled follow-up must preserve explicit binding refs=%v err=%v", refs, err)
+	}
 }
 
 func TestConversationWorkflowBindingExplicitCancellationClearsSelection(t *testing.T) {

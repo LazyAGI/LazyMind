@@ -1,7 +1,10 @@
+import lazyllm
+
 from lazymind.chat.engine.subagent.context import SubAgentContext, set_context
 from lazymind.chat.engine.subagent.tools import (
     _build_artifact_value,
     _validate_declared_artifact_type,
+    get_artifact,
 )
 
 
@@ -77,3 +80,17 @@ def test_workflow_file_slot_rejects_text(tmp_path):
 
     assert _validate_declared_artifact_type(ctx, 'enhanced_image_output', 'text')
     assert _validate_declared_artifact_type(ctx, 'enhanced_image_output', 'file') is None
+
+
+def test_get_artifact_preserves_remote_list_input_order(tmp_path):
+    paths = [str(tmp_path / 'one.png'), str(tmp_path / 'two.png')]
+    ctx = _context(str(tmp_path))
+    ctx.params['remote_inputs'] = {'effect_images': paths}
+    set_context(ctx)
+    lazyllm.globals['agentic_config'] = {'workflow_session_id': 'session-1'}
+
+    all_items = get_artifact('effect_images')['result']['artifacts']
+    second = get_artifact('effect_images', sort_order=2)['result']['artifacts']
+
+    assert [item['value']['path'] for item in all_items] == paths
+    assert [item['value']['path'] for item in second] == paths[1:]

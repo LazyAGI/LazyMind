@@ -603,7 +603,10 @@ function InnerTabsCell({
                 onRefresh={onRefresh}
                 onReference={onReference}
                 hideImageMutationActions={hideImageMutationActions}
-                readOnly={readOnly}
+                readOnly={Boolean(readOnly || def?.readOnly === true)}
+                uiEditable={def?.readOnly === false}
+                widgetType={def?.widgetType}
+                maxHeight={def?.maxHeight}
               />
             ) : (
               <div className='composite-cell__empty'>—</div>
@@ -710,7 +713,10 @@ function CompositeSlotGrid({
                     onRefresh={onRefresh}
                     onReference={onReference}
                     hideImageMutationActions={hideImageMutationActions}
-                    readOnly={readOnly}
+                    readOnly={Boolean(readOnly || def?.readOnly === true)}
+                    uiEditable={def?.readOnly === false}
+                    widgetType={def?.widgetType}
+                    maxHeight={def?.maxHeight}
                   />
                 ) : (
                   <div className='composite-grid__cell-empty'>—</div>
@@ -978,7 +984,8 @@ function NamedTabSlot({
   const { t } = useTranslation();
   const slotLabel = slotDef.label ?? slotDef.id;
   const isImageList = slotDef.type === 'image' && slotDef.cardinality === 'list';
-  const isDraggable = Boolean(slotDef.ordered) && !readOnly;
+  const effectiveReadOnly = Boolean(readOnly || slotDef.readOnly === true);
+  const isDraggable = Boolean(slotDef.ordered) && !effectiveReadOnly;
   const showStream = Boolean(artifactStream && (
     revisions.length === 0 || artifactStream.state !== 'ready'
   ));
@@ -1008,8 +1015,8 @@ function NamedTabSlot({
           onRefresh={onRefresh}
           onReference={onReference}
           onFocusSortOrder={onFocusSortOrder}
-          onAddItem={readOnly ? undefined : onAddItem}
-          readOnly={readOnly}
+          onAddItem={effectiveReadOnly ? undefined : onAddItem}
+          readOnly={effectiveReadOnly}
         />
       ) : (
         revisions.map((rev) => (
@@ -1033,7 +1040,10 @@ function NamedTabSlot({
               revisionCount={rev.revision_count}
               onRefresh={onRefresh}
               onReference={onReference}
-              readOnly={readOnly}
+              readOnly={effectiveReadOnly}
+              uiEditable={slotDef.readOnly === false}
+              widgetType={slotDef.widgetType}
+              maxHeight={slotDef.maxHeight}
             />
           </div>
         ))

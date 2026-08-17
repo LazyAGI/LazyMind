@@ -420,8 +420,8 @@ steps:
 	}
 }
 
-func TestBundledWorkflowsCompileForRuntime(t *testing.T) {
-	for _, workflowID := range []string{"writer-workflow", "image-workflow", "test-workflow"} {
+func TestBundledWorkflowsCompile(t *testing.T) {
+	for _, workflowID := range []string{"writer-workflow", "image-workflow", "test-workflow", "bid_tech_proposal_writer"} {
 		root := filepath.Join("..", "..", "..", "..", "workflows", workflowID)
 		workflowYAML, err := os.ReadFile(filepath.Join(root, "workflow.yaml"))
 		if err != nil {
@@ -432,9 +432,11 @@ func TestBundledWorkflowsCompileForRuntime(t *testing.T) {
 			t.Fatalf("read %s state: %v", workflowID, err)
 		}
 		scenario, _ := os.ReadFile(filepath.Join(root, "scenario", "scenario.md"))
-		result := Compile(string(workflowYAML), string(stateYAML), string(scenario), ProfileRuntimeLoad)
-		if !result.Valid {
-			t.Fatalf("bundled plugin %s must compile: %#v", workflowID, result.Diagnostics)
+		for _, profile := range []Profile{ProfileRuntimeLoad, ProfilePublish} {
+			result := Compile(string(workflowYAML), string(stateYAML), string(scenario), profile)
+			if !result.Valid {
+				t.Fatalf("bundled plugin %s must compile for %s: %#v", workflowID, profile, result.Diagnostics)
+			}
 		}
 	}
 }

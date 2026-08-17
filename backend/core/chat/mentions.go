@@ -301,15 +301,19 @@ func resolveConversationWorkflowBinding(
 		}
 		return currentRefs, nil
 	}
-	if !enabled {
-		if persist {
-			return nil, writeConversationWorkflowBinding(ctx, db, conversationID, "")
-		}
-		return nil, nil
-	}
 	boundRef, err := readConversationWorkflowBinding(ctx, db, conversationID)
 	if err != nil {
 		return nil, err
+	}
+	// New user conversations intentionally start with general Workflow discovery
+	// disabled. An explicit @workflow mention is nevertheless an affirmative
+	// selection, and its exact binding must survive clarification turns before a
+	// Session exists. Otherwise an ask_user answer arrives without a mention, the
+	// bound trigger disappears, and ChatAgent falls back to unrelated tools/skills.
+	// Keep only the explicitly bound Workflow enabled here; applyWorkflowSelection
+	// will continue to restrict the request to this single ref.
+	if !enabled && boundRef == "" {
+		return nil, nil
 	}
 	for _, ref := range excludedRefs {
 		if ref == boundRef {

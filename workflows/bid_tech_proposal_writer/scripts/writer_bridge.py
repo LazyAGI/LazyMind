@@ -74,11 +74,38 @@ def _write_markdown(root: Path, name: str, value: str) -> str:
     return str(path)
 
 
+def _preserve_bid_knowledge_context(writing_context_json: str, knowledge_text: str) -> str:
+    """Keep selected-KB evidence intact after the shared Writer's compact profiling."""
+    writing_context = _json_value(writing_context_json, {})
+    knowledge = str(knowledge_text or '').strip()
+    if not knowledge:
+        return json.dumps(writing_context, ensure_ascii=False)
+
+    facts = list(writing_context.get('facts') or [])
+    facts = [
+        fact for fact in facts
+        if not isinstance(fact, dict)
+        or fact.get('fact_id') != 'bid-selected-knowledge-evidence'
+    ]
+    facts.append({
+        'fact_id': 'bid-selected-knowledge-evidence',
+        'key': 'selected_knowledge_base_evidence',
+        'value': knowledge,
+        'source': ['knowledge_base_evidence'],
+        'applies_to': [],
+        'locked': True,
+    })
+    writing_context['facts'] = facts
+    writing_context.setdefault('meta', {})['bid_knowledge_evidence_preserved'] = True
+    return json.dumps(writing_context, ensure_ascii=False)
+
+
 def bid_writer_prepare_context(
     user_request: str,
     requirements_markdown: str,
     disqualification_markdown: str,
     word_target: str,
+    knowledge_text: str = '',
 ) -> dict[str, str]:
     """Create Writer task, resource profile, and context for one bid proposal."""
     context = require_context()
@@ -88,7 +115,9 @@ def bid_writer_prepare_context(
 
 编写中文投标技术方案，目标约 {target} 个中文字符。大纲不超过四级，标题使用简短中文名词短语。
 正文采用解决方案专家口吻，逐项覆盖资料中的技术要求与废标项 ID；所有数字、标准和承诺必须可追溯，
-不得虚构。每个章节末尾保留“追溯：ID...”行。""".strip()
+不得虚构。每个章节末尾保留“追溯：ID...”行。如果上下文包含指定知识库检索资料，
+必须在相关章节实际吸收其中与本项目相关的产品能力和方案做法，不得只写成泛化摘要；
+标记为模拟数据、参考指标或非官方承诺的内容不得转化为本项目承诺。""".strip()
     task = _json_value(toolkit.build_writing_task(
         query=query,
         task_id=str(context.params.get('session_id') or uuid.uuid4().hex),
@@ -99,6 +128,8 @@ def bid_writer_prepare_context(
         '# 招标技术要求\n\n' + str(requirements_markdown or '').strip()
         + '\n\n# 废标与高风险条款\n\n' + str(disqualification_markdown or '').strip()
     )
+    if str(knowledge_text or '').strip():
+        evidence += '\n\n# 指定知识库检索资料\n\n' + str(knowledge_text).strip()
     resources_json = toolkit.build_resources(knowledge_text=evidence)
     profiles_json = toolkit.profile_resources(
         writing_task_json=task_json,
@@ -108,6 +139,13 @@ def bid_writer_prepare_context(
     writing_context_json = toolkit.create_writing_context(
         writing_task_json=task_json,
         resource_profiles_json=profiles_json,
+    )
+    # The shared Writer intentionally condenses resources into a compact set of facts.
+    # For bid writing that can erase the concrete, selected-KB product facts before the
+    # section planner sees them. Keep the original retrieved evidence as one locked,
+    # workflow-specific fact while retaining the rest of the shared Writer context.
+    writing_context_json = _preserve_bid_knowledge_context(
+        writing_context_json, knowledge_text,
     )
     root = _run_root('prepare')
     return {
@@ -157,16 +195,10 @@ def bid_writer_save_validated_outline(outline_json: str) -> str:
                 lines.append('')
                 render(children, level + 1)
             else:
-                metadata = {
-                    'number': node.get('number'),
-                    'target_words': node.get('target_words'),
-                    'bid_requirements_refs': node.get('bid_requirements_refs') or [],
-                    'disqualification_refs': node.get('disqualification_refs') or [],
-                }
-                lines.extend([
-                    f'<!-- bid-outline: {json.dumps(metadata, ensure_ascii=False)} -->',
-                    '',
-                ])
+                # Keep the user-facing Writer document as ordinary Markdown. MDX-based
+                # editors do not accept HTML comments reliably, and the authoritative
+                # trace/word metadata already remains in the structured outline slot.
+                lines.append('')
     render(outline['chapters'])
     return _write_markdown(_run_root('validated-outline'), 'outline_document', '\n'.join(lines))
 

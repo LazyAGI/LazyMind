@@ -1,31 +1,39 @@
 id: bid_tech_proposal_writer
 name: 投标技术方案编写
 description: >
-  面向中文招标文件技术部分的内置八步工作流。按原始 bid-tech-proposal
+  面向中文招标文件技术部分的内置九步工作流。按原始 bid-tech-proposal
   模式完成文件解析、技术要求与废标项提取、可追溯大纲、逐章正文、
-  代码渲染架构图和 5–10 张差异化效果图、DOCX 合成及最终校验。
-  大纲与正文复用 LazyMind Writer，并支持卡片内人工编辑、版本修订和选区改写。
+  指定知识库资料检索、代码渲染架构图和 5–10 张差异化效果图、Markdown/Word
+  导出及最终校验。大纲与正文复用 LazyMind Writer，并设人工审批点，支持卡片内
+  编辑、版本修订和选区改写。
 
 when_to_use: >
   当用户提供中文招标文件（优先支持 DOCX、PDF，也支持 TXT、Markdown、HTML、RTF），
-  希望生成完整投标技术方案、技术标正文或可下载 Word 技术方案时使用。
-  启动必须具备招标文件和目标总字数；缺少目标字数时先向用户询问。
+  希望生成完整投标技术方案、技术标正文或可下载 Markdown/Word 技术方案时使用。
+  启动前必须确认并绑定：招标文件、导出格式（md 或 docx）、目标总字数，以及是否
+  使用内置 DOCX 默认投标样式。用户已明确的参数直接使用；缺少任意参数时一次性
+  询问，例如“导出 Markdown 还是 Word？目标 5000/10000/20000/30000 字或其他字数？
+  Word 是否使用默认投标样式（否则采用基础样式）？”，不要先启动再猜默认值。
   不用于仅编写商务报价、资质证明或制作 PPT 的请求。
 
 tool_scripts:
   - path: scripts/pipeline_tools.py
     functions:
+      - normalize_bid_parameters
       - parse_bid_document
       - extract_technical_requirements
       - extract_disqualification_items
       - validate_and_allocate_outline
       - validate_proposal_package
+      - validate_proposal_from_inputs
   - path: scripts/visual_renderer.py
     functions:
       - render_proposal_image
   - path: scripts/document_builder.py
     functions:
+      - export_proposal_markdown
       - compose_proposal_docx
+      - compose_proposal_from_inputs
   - path: scripts/writer_bridge.py
     functions:
       - bid_writer_prepare_context
@@ -51,14 +59,16 @@ steps:
     label: 技术要求提取
   - id: extract_disqualification_items
     label: 废标项聚焦
+  - id: search_reference_materials
+    label: 知识库资料检索
   - id: build_chapter_outline
-    label: 章节大纲与字数
+    label: 章节大纲撰写与审批
   - id: write_chapter_contents
-    label: 逐章正文编写
+    label: 完整正文撰写与审批
   - id: generate_proposal_images
     label: 架构图与效果图
   - id: compose_proposal_docx
-    label: 技术方案合成
+    label: 技术方案导出
   - id: validate_proposal
     label: 文档结果校验
 
@@ -74,6 +84,24 @@ slots:
     type: text
     cardinality: single
     external: true
+    exposed: false
+  - id: output_format
+    label: 导出格式（md/docx）
+    type: text
+    cardinality: single
+    external: true
+    exposed: false
+  - id: use_default_docx_template
+    label: 使用默认 DOCX 样式
+    type: text
+    cardinality: single
+    external: true
+    exposed: false
+
+  - id: generation_parameters
+    label: 已确认生成参数
+    type: json
+    cardinality: single
     exposed: false
 
   - id: raw_bid_text
@@ -93,6 +121,11 @@ slots:
     exposed: true
   - id: disqualification_items
     label: 废标项清单
+    type: text
+    cardinality: single
+    exposed: true
+  - id: knowledge_evidence
+    label: 知识库检索资料
     type: text
     cardinality: single
     exposed: true
@@ -172,14 +205,14 @@ slots:
     cardinality: single
     exposed: false
   - id: chapter_contents
-    label: 分章正文
+    label: 分章生成稿（只读）
     type: file
     cardinality: list
     ordered: true
     allow_manual_add: false
     exposed: true
   - id: draft_document
-    label: 可编辑完整正文
+    label: 可编辑完整正文（修改后重跑交付）
     type: file
     cardinality: single
     exposed: true
@@ -231,12 +264,12 @@ slots:
     cardinality: single
     exposed: true
   - id: final_proposal_markdown
-    label: 技术方案 Markdown
-    type: text
+    label: 技术方案 Markdown（交付快照）
+    type: file
     cardinality: single
     exposed: true
   - id: final_proposal
-    label: 技术方案 Word
+    label: 最终交付文件（Markdown/Word）
     type: file
     cardinality: single
     exposed: true
@@ -257,12 +290,16 @@ ui:
     raw_bid_meta: {widgetType: json-block, readOnly: true, collapsed: false}
     technical_requirements: {widgetType: text-markdown, readOnly: true}
     disqualification_items: {widgetType: text-markdown, readOnly: true}
+    knowledge_evidence: {widgetType: text-markdown, readOnly: true}
+    outline_document: {widgetType: file-card, readOnly: false}
     outline_check_report: {widgetType: text-markdown, readOnly: true}
     effective_outline_check_report: {widgetType: text-markdown, readOnly: true}
+    chapter_contents: {widgetType: file-card, readOnly: true}
+    draft_document: {widgetType: file-card, readOnly: false}
     architecture_image: {widgetType: image-gallery, readOnly: true, itemWidth: 720, itemHeight: 405}
     effect_images: {widgetType: image-gallery, readOnly: true, itemLayout: grid, gridMaxCols: 2, itemWidth: 520, itemHeight: 292}
     image_manifest: {widgetType: json-block, readOnly: true, collapsed: true}
-    final_proposal_markdown: {widgetType: text-markdown, readOnly: true}
+    final_proposal_markdown: {widgetType: file-card, readOnly: true}
     final_proposal: {widgetType: file-card, readOnly: true}
     validation_report: {widgetType: text-markdown, readOnly: true}
     validation_summary: {widgetType: json-block, readOnly: true, collapsed: false}
@@ -287,9 +324,14 @@ ui:
       label: 废标项
       layout: list
       slots: [{id: disqualification_items}]
+    - id: knowledge
+      step_id: search_reference_materials
+      label: 资料检索
+      layout: list
+      slots: [{id: knowledge_evidence}]
     - id: outline
       step_id: build_chapter_outline
-      label: 章节大纲
+      label: 大纲撰写与审批
       layout: composite
       slots: [{id: outline_document}, {id: outline_check_report}]
       composite_layout:
@@ -299,9 +341,9 @@ ui:
           - {slot: outline_check_report, weight: 1}
     - id: chapters
       step_id: write_chapter_contents
-      label: 分章正文
+      label: 正文撰写与审批
       layout: list
-      slots: [{id: effective_outline_check_report}, {id: chapter_contents}, {id: draft_document}]
+      slots: [{id: draft_document}, {id: chapter_contents}, {id: effective_outline_check_report}]
     - id: images
       step_id: generate_proposal_images
       label: 方案配图

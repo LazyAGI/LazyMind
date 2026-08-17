@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import pathlib
+import re
 import threading
 from typing import Any, Dict, Optional
 
@@ -118,7 +119,10 @@ class RemoteWorkflowExecutor:
             if output_types:
                 params['output_slot_types'] = output_types
             attachment_context = dict(params.get('_attachment_context') or {})
-            attachment_context['files'] = list(inputs.values())
+            attachment_context['files'] = [
+                path for value in inputs.values()
+                for path in (value if isinstance(value, list) else [value])
+            ]
             params['_attachment_context'] = attachment_context
             params['remote_inputs'] = inputs
             task.update({
@@ -200,16 +204,28 @@ class RemoteWorkflowExecutor:
             await self.runtime.task_event(client, task_id, lease, terminal_event)
 
     async def _materialize_inputs(self, client: httpx.AsyncClient, attempt: str, lease: str,
-                                  context: Dict[str, Any], workspace: str) -> Dict[str, str]:
-        result: Dict[str, str] = {}
+                                  context: Dict[str, Any], workspace: str) -> Dict[str, Any]:
+        result: Dict[str, Any] = {}
         root = pathlib.Path(workspace) / 'inputs'
         root.mkdir(parents=True, exist_ok=True)
         for material in (context.get('inputs') or {}):
             value = await self.runtime.input(client, attempt, lease, str(material))
-            name = pathlib.Path(str(value.get('name') or material)).name or str(material)
-            target = root / name
-            target.write_bytes(base64.b64decode(str(value.get('content_base64') or '')))
-            result[str(material)] = str(target)
+            is_list = isinstance(value.get('items'), list)
+            items = value.get('items') if is_list else [value]
+            paths = []
+            list_root = root
+            if is_list:
+                safe_material = re.sub(r'[^0-9A-Za-z_.-]+', '_', str(material)).strip('._') or 'input'
+                list_root = root / safe_material
+                list_root.mkdir(parents=True, exist_ok=True)
+            for index, item in enumerate(items, start=1):
+                name = pathlib.Path(str(item.get('name') or material)).name or str(material)
+                if is_list:
+                    name = f'{index:04d}_{name}'
+                target = list_root / name
+                target.write_bytes(base64.b64decode(str(item.get('content_base64') or '')))
+                paths.append(str(target))
+            result[str(material)] = paths if is_list else paths[0]
         return result
 
     async def _persist_files(self, client: httpx.AsyncClient, attempt: str, lease: str,

@@ -159,20 +159,22 @@ func metadataListIndex(metadata map[string]any) *int {
 
 func prepareSlotRevision(tx *gorm.DB, sessionID, slot, cardinality string, metadata map[string]any) (int, *int, error) {
 	if cardinality != "list" {
-		var current orm.WorkflowSlotRevision
-		revision := 1
-		err := tx.Where("session_id = ? AND slot_id = ? AND selected = ?", sessionID, slot, true).
-			Order("revision DESC").First(&current).Error
-		if err == nil {
-			revision = current.Revision + 1
-			if err := tx.Model(&orm.WorkflowSlotRevision{}).Where("id = ?", current.ID).
-				Update("selected", false).Error; err != nil {
-				return 0, nil, err
-			}
-		} else if err != gorm.ErrRecordNotFound {
+		// Invalidating or interrupting an attempt deselects its output revisions but
+		// intentionally keeps them for audit history.  Revision numbers therefore
+		// must advance from every stored revision, not only the currently selected
+		// one, otherwise a retry attempts to insert revision 1 again.
+		var maxRevision int
+		if err := tx.Model(&orm.WorkflowSlotRevision{}).Select("COALESCE(MAX(revision), 0)").
+			Where("session_id = ? AND slot_id = ? AND list_index IS NULL", sessionID, slot).
+			Scan(&maxRevision).Error; err != nil {
 			return 0, nil, err
 		}
-		return revision, nil, nil
+		if err := tx.Model(&orm.WorkflowSlotRevision{}).
+			Where("session_id = ? AND slot_id = ? AND list_index IS NULL AND selected = ?", sessionID, slot, true).
+			Update("selected", false).Error; err != nil {
+			return 0, nil, err
+		}
+		return maxRevision + 1, nil, nil
 	}
 
 	listIndex := metadataListIndex(metadata)

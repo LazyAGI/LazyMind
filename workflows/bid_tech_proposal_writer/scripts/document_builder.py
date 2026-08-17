@@ -35,6 +35,14 @@ def _safe_output_name(value: str) -> str:
     return name if name.lower().endswith('.docx') else name + '.docx'
 
 
+def _safe_markdown_output_name(value: str) -> str:
+    name = Path(str(value or '')).name
+    name = re.sub(r'[\\/:*?"<>|\r\n\t]+', '_', name).strip(' ._') or '投标技术方案.md'
+    if name.lower().endswith('.markdown'):
+        return name[:-9] + '.md'
+    return name if name.lower().endswith('.md') else name + '.md'
+
+
 def _json_object(value: Any, name: str) -> dict[str, Any]:
     if isinstance(value, dict):
         return value
@@ -45,6 +53,50 @@ def _json_object(value: Any, name: str) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise ValueError(f'{name} must be a JSON object.')
     return parsed
+
+
+def _artifact_payload(path: str) -> Any:
+    source = Path(str(path or '')).expanduser().resolve()
+    if not source.is_file():
+        raise FileNotFoundError(f'Workflow input does not exist: {path}')
+    text = source.read_text(encoding='utf-8')
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        return text
+    if isinstance(value, dict):
+        if 'data' in value:
+            return value['data']
+        if 'text' in value:
+            return value['text']
+    return value
+
+
+def _remote_workflow_inputs() -> dict[str, Any]:
+    # Runtime integration stays inside this Workflow package. The generic
+    # project only transports immutable input paths; bid-specific composition
+    # remains here.
+    from lazymind.chat.engine.subagent.context import require_context
+    values = require_context().params.get('remote_inputs') or {}
+    if not isinstance(values, dict):
+        raise RuntimeError('Workflow input paths are unavailable in this Attempt.')
+    return values
+
+
+def _required_path(values: dict[str, Any], slot: str) -> str:
+    path = values.get(slot)
+    if not isinstance(path, str) or not path.strip():
+        raise ValueError(f'Required single input path is missing: {slot}')
+    return path
+
+
+def _canonical_output_format(value: Any) -> str:
+    raw = str(value or '').strip().lower()
+    if raw in {'md', 'markdown', '.md'}:
+        return 'md'
+    if raw in {'docx', 'word', '.docx'}:
+        return 'docx'
+    raise ValueError('generation_parameters.output_format must be md or docx.')
 
 
 def _image_paths(value: Any) -> list[dict[str, str]]:
@@ -329,9 +381,27 @@ def _render_markdown(document: Any, markdown_text: str, images: list[dict[str, s
     return paragraph_count, heading_count, embedded
 
 
+def export_proposal_markdown(markdown_text: str,
+                             output_name: str = '投标技术方案.md') -> dict[str, Any]:
+    """Write the approved proposal body as a downloadable Markdown file."""
+    text = str(markdown_text or '').strip()
+    if len(text) < 200:
+        raise ValueError('markdown_text must contain the complete proposal.')
+    root = Path(tempfile.gettempdir()) / 'bid_tech_proposal_writer' / 'documents' / uuid.uuid4().hex
+    root.mkdir(parents=True, exist_ok=True)
+    output = root / _safe_markdown_output_name(output_name)
+    output.write_text(text + '\n', encoding='utf-8')
+    return {
+        'path': str(output.resolve()), 'filename': output.name,
+        'content_type': 'text/markdown', 'size': output.stat().st_size,
+        'renderer': 'workflow_local_markdown_export',
+    }
+
+
 def compose_proposal_docx(markdown_text: str, outline_json: str,
                           image_paths_json: str = '[]', output_name: str = '投标技术方案.docx',
-                          add_toc: bool = True) -> dict[str, Any]:
+                          add_toc: bool = True,
+                          use_default_template: bool = True) -> dict[str, Any]:
     """Compose complete proposal Markdown and local images into a styled DOCX.
 
     Args:
@@ -340,6 +410,9 @@ def compose_proposal_docx(markdown_text: str, outline_json: str,
         image_paths_json: Ordered JSON list of local path/title/type objects.
         output_name: Safe project-specific DOCX filename without a directory.
         add_toc: Insert an updateable Heading 1-4 Word/WPS table of contents.
+        use_default_template: Apply the built-in bid typography and multilevel numbering.
+            False keeps python-docx's basic Word styles while retaining the cover, TOC,
+            complete content, tables, and images.
 
     Returns:
         Metadata including the absolute path of the generated DOCX.
@@ -361,7 +434,8 @@ def compose_proposal_docx(markdown_text: str, outline_json: str,
     root.mkdir(parents=True, exist_ok=True)
     output = root / _safe_output_name(output_name)
     document = Document()
-    _configure_document(document)
+    if use_default_template:
+        _configure_document(document)
     title = str(outline.get('project_full_name') or outline.get('project_name') or '').strip()
     if not title:
         first = next((line for line in markdown_text.splitlines() if line.strip()), '投标技术方案')
@@ -409,5 +483,78 @@ def compose_proposal_docx(markdown_text: str, outline_json: str,
         'content_type': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
         'paragraph_count': paragraph_count, 'heading_count': heading_count,
         'images_embedded': embedded, 'toc': bool(add_toc),
+        'style_mode': 'default_bid_template' if use_default_template else 'plain_word_styles',
         'renderer': 'workflow_local_python_docx',
+    }
+
+
+def compose_proposal_from_inputs(output_name: str = '') -> dict[str, Any]:
+    """Build final Markdown and delivery directly from current Attempt input paths.
+
+    Large approved drafts and requirement lists never pass through an LLM tool-call
+    JSON payload. The function preserves the approved body and embeds every ordered
+    image supplied by the generic list-input runtime.
+    """
+    inputs = _remote_workflow_inputs()
+    draft = str(_artifact_payload(_required_path(inputs, 'draft_document')) or '').strip()
+    if len(draft) < 200:
+        raise ValueError('draft_document must contain the complete approved proposal.')
+    outline = _artifact_payload(_required_path(inputs, 'effective_outline'))
+    if not isinstance(outline, dict):
+        raise ValueError('effective_outline must contain a JSON object.')
+    parameters = _artifact_payload(_required_path(inputs, 'generation_parameters'))
+    if not isinstance(parameters, dict):
+        raise ValueError('generation_parameters must contain a JSON object.')
+    manifest = _artifact_payload(_required_path(inputs, 'image_manifest'))
+    if not isinstance(manifest, dict):
+        raise ValueError('image_manifest must contain a JSON object.')
+
+    if IMAGE_MARKER not in draft:
+        draft = draft.rstrip() + '\n\n## 系统架构与功能效果\n\n' + IMAGE_MARKER
+
+    architecture_path = _required_path(inputs, 'architecture_image')
+    effect_paths = inputs.get('effect_images')
+    if isinstance(effect_paths, str):
+        effect_paths = [effect_paths]
+    if not isinstance(effect_paths, list) or not all(isinstance(path, str) and path for path in effect_paths):
+        raise ValueError('effect_images must contain one or more ordered local paths.')
+    effects = manifest.get('effects') if isinstance(manifest.get('effects'), list) else []
+    architecture = manifest.get('architecture') if isinstance(manifest.get('architecture'), dict) else {}
+    images: list[dict[str, str]] = [{
+        'path': architecture_path,
+        'title': str(architecture.get('title') or architecture.get('caption') or '系统总体架构图'),
+        'type': 'architecture',
+    }]
+    for index, path in enumerate(effect_paths):
+        metadata = effects[index] if index < len(effects) and isinstance(effects[index], dict) else {}
+        images.append({
+            'path': path,
+            'title': str(metadata.get('title') or metadata.get('caption') or f'功能效果图 {index + 1}'),
+            'type': str(metadata.get('type') or metadata.get('image_type') or 'effect'),
+        })
+
+    title = str(outline.get('project_full_name') or outline.get('project_name') or '投标技术方案').strip()
+    title = re.sub(r'[\s\\/:*?"<>|]+', '_', title).strip('._') or '投标技术方案'
+    markdown_name = title + ('_技术方案.md' if not title.endswith('技术方案') else '.md')
+    markdown_file = export_proposal_markdown(draft, markdown_name)
+    output_format = _canonical_output_format(parameters.get('output_format'))
+    if output_format == 'md':
+        delivery = dict(markdown_file)
+    else:
+        docx_name = Path(str(output_name or '')).name
+        if not docx_name:
+            docx_name = title + ('_技术方案.docx' if not title.endswith('技术方案') else '.docx')
+        delivery = compose_proposal_docx(
+            markdown_text=draft,
+            outline_json=outline,
+            image_paths_json=images,
+            output_name=docx_name,
+            add_toc=True,
+            use_default_template=bool(parameters.get('use_default_docx_template', True)),
+        )
+    return {
+        'final_markdown': markdown_file,
+        'final_proposal': delivery,
+        'output_format': output_format,
+        'images_embedded_requested': len(images),
     }

@@ -94,6 +94,12 @@ function normalizeMarkdownForMdxEditor(markdown: string): string {
       }
       return line;
     }
+    // Standalone HTML comments are invisible Markdown metadata, but MDX parses
+    // them as unsupported JSX and may render the entire document blank. Dropping
+    // an otherwise invisible comment keeps legacy Markdown artifacts readable.
+    if (!fenceCharacter && /^\s*<!--[\s\S]*-->\s*$/.test(line)) {
+      return '';
+    }
     return fenceCharacter ? line : escapeMdxLessThanInLine(line);
   }).join('\n');
 }
@@ -202,6 +208,19 @@ export function MarkdownArtifactEditor({
   dirtyRef.current = dirty;
   savingRef.current = saving;
   conflictRef.current = conflict;
+
+  const handleEditorChange = useCallback((nextMarkdown: string, initialMarkdownNormalize?: boolean) => {
+    // MDXEditor reports its own import/canonicalization pass through the second
+    // callback argument. Treating that pass as a user edit leaves a newly opened
+    // document permanently "dirty" and disables selection rewriting until it is
+    // needlessly saved. Adopt the canonical form as the clean baseline instead.
+    if (initialMarkdownNormalize && !dirtyRef.current) {
+      setBaseMarkdown(nextMarkdown);
+      setDraftMarkdown(nextMarkdown);
+      return;
+    }
+    setDraftMarkdown(nextMarkdown);
+  }, []);
 
   useEffect(() => {
     onContentChange?.(draftMarkdown);
@@ -494,7 +513,7 @@ export function MarkdownArtifactEditor({
         className='writer-markdown-editor__surface'
         markdown={baseMarkdown}
         readOnly={readOnly}
-        onChange={setDraftMarkdown}
+        onChange={handleEditorChange}
         plugins={[
           headingsPlugin(),
           listsPlugin(),

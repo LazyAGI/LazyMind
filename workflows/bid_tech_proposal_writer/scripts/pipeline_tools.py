@@ -483,11 +483,60 @@ def _target_number(value: Any) -> int:
     if isinstance(value, (int, float)):
         target = int(value)
     else:
-        match = re.search(r'\d[\d,，]*', str(value or ''))
-        target = int(re.sub(r'[,，]', '', match.group(0))) if match else 0
+        raw = str(value or '')
+        ten_thousand = re.search(r'(\d+(?:\.\d+)?)\s*万', raw)
+        if ten_thousand:
+            target = int(float(ten_thousand.group(1)) * 10000)
+        else:
+            match = re.search(r'\d[\d,，]*', raw)
+            target = int(re.sub(r'[,，]', '', match.group(0))) if match else 0
     if target < 1000 or target > 500000:
         raise ValueError('word_target must be between 1000 and 500000 Chinese characters.')
     return target
+
+
+def normalize_bid_parameters(output_format: str, word_target: str,
+                             use_default_docx_template: str) -> dict[str, Any]:
+    """Validate and normalize user-confirmed proposal generation parameters."""
+    raw_format = str(output_format or '').strip().lower()
+    if raw_format in {'md', 'markdown', '.md', 'markdown文件'} or 'markdown' in raw_format:
+        normalized_format = 'md'
+    elif raw_format in {'docx', 'word', '.docx', 'word文档', 'word文件'} \
+            or 'docx' in raw_format or 'word' in raw_format:
+        normalized_format = 'docx'
+    else:
+        raise ValueError('output_format must be md/Markdown or docx/Word.')
+
+    target = _target_number(word_target)
+    raw_style = str(use_default_docx_template or '').strip().lower()
+    negative = ('不使用', '不用', '否', 'false', 'no', 'plain', '基础样式', '简洁样式', '不适用')
+    positive = ('使用', '默认', '是', 'true', 'yes')
+    if any(token in raw_style for token in negative):
+        use_default = False
+    elif any(token in raw_style for token in positive):
+        use_default = True
+    else:
+        raise ValueError(
+            'use_default_docx_template must explicitly say whether to use the default template.'
+        )
+
+    return {
+        'output_format': normalized_format,
+        'word_target': target,
+        'use_default_docx_template': use_default if normalized_format == 'docx' else False,
+        'docx_style_mode': (
+            'default_bid_template' if normalized_format == 'docx' and use_default
+            else 'plain_word_styles' if normalized_format == 'docx'
+            else 'not_applicable'
+        ),
+        'display_summary': (
+            f'导出格式：{normalized_format.upper()}；目标字数：{target}；'
+            + (
+                f'DOCX 样式：{"默认投标模板" if use_default else "Word 基础样式"}'
+                if normalized_format == 'docx' else 'DOCX 样式：不适用'
+            )
+        ),
+    }
 
 
 def _walk_chapters(chapters: list[Any], parent_number: str = '', expected_level: int = 1,
@@ -663,17 +712,20 @@ def _section_character_counts(markdown_text: str, leaves: list[dict[str, Any]]) 
 
 def validate_proposal_package(markdown_text: str, docx_path: str, outline_json: str,
                               requirements_markdown: str, disqualification_markdown: str,
-                              word_target: str, image_manifest_json: str) -> dict[str, Any]:
-    """Validate final Markdown and the actual DOCX package produced by the workflow.
+                              word_target: str, image_manifest_json: str,
+                              output_format: str = 'docx') -> dict[str, Any]:
+    """Validate final Markdown and the selected delivery file produced by the workflow.
 
     Args:
         markdown_text: Complete final proposal Markdown.
-        docx_path: Resolved local path of the final DOCX artifact.
+        docx_path: Backward-compatible parameter name for the resolved final `.md` or
+            `.docx` delivery artifact path.
         outline_json: Validated outline object or JSON string.
         requirements_markdown: Requirement-ID Markdown.
         disqualification_markdown: D-NNN Markdown.
         word_target: User-supplied total Chinese-character target.
         image_manifest_json: Image manifest object or JSON string.
+        output_format: User-confirmed `md` or `docx` delivery format.
 
     Returns:
         Markdown report and structured summary with PASS/WARN/FAIL status.
@@ -681,18 +733,37 @@ def validate_proposal_package(markdown_text: str, docx_path: str, outline_json: 
     outline = _json_object(outline_json, 'outline_json')
     manifest = _json_object(image_manifest_json, 'image_manifest_json')
     target = _target_number(word_target)
+    raw_format = str(output_format or '').strip().lower()
+    if raw_format in {'md', 'markdown', '.md'}:
+        normalized_format = 'md'
+    elif raw_format in {'docx', 'word', '.docx'}:
+        normalized_format = 'docx'
+    else:
+        raise ValueError('output_format must be canonical md or docx.')
     path = Path(str(docx_path or '')).expanduser().resolve()
-    package_valid = path.is_file() and path.suffix.lower() == '.docx' and path.stat().st_size > 5000
+    package_valid = False
+    markdown_file_matches = False
     embedded_images = 0
-    docx_error = ''
-    if package_valid:
+    delivery_error = ''
+    if normalized_format == 'docx':
+        package_valid = path.is_file() and path.suffix.lower() == '.docx' and path.stat().st_size > 5000
+    else:
+        package_valid = path.is_file() and path.suffix.lower() in {'.md', '.markdown'} \
+            and path.stat().st_size > 200
+        if package_valid:
+            try:
+                markdown_file_matches = path.read_text(encoding='utf-8').strip() == str(markdown_text or '').strip()
+                package_valid = markdown_file_matches
+            except (OSError, UnicodeError) as exc:
+                package_valid, delivery_error = False, str(exc)
+    if normalized_format == 'docx' and package_valid:
         try:
             with zipfile.ZipFile(path) as archive:
                 names = set(archive.namelist())
                 package_valid = {'[Content_Types].xml', 'word/document.xml'}.issubset(names)
                 embedded_images = len([name for name in names if name.startswith('word/media/')])
         except (OSError, zipfile.BadZipFile) as exc:
-            package_valid, docx_error = False, str(exc)
+            package_valid, delivery_error = False, str(exc)
 
     actual_words = len(HAN.findall(str(markdown_text or '')))
     total_deviation = round(abs(actual_words - target) * 100 / target, 2)
@@ -711,7 +782,11 @@ def validate_proposal_package(markdown_text: str, docx_path: str, outline_json: 
     failures: list[str] = []
     warnings: list[str] = []
     if not package_valid:
-        failures.append('DOCX 文件不存在、为空或不是有效的 Office Open XML 包')
+        failures.append(
+            'DOCX 文件不存在、为空或不是有效的 Office Open XML 包'
+            if normalized_format == 'docx'
+            else 'Markdown 交付文件不存在、为空或与最终正文不一致'
+        )
     if missing_leaves:
         failures.append('缺少叶子章节：' + '、'.join(str(item['number']) for item in missing_leaves))
     if uncovered_disq:
@@ -724,7 +799,7 @@ def validate_proposal_package(markdown_text: str, docx_path: str, outline_json: 
         warnings.append('叶子章节字数偏差超过 10%：' + '、'.join(str(item['number']) for item in leaf_warnings))
     if manifest_images < 6:
         warnings.append(f'图像清单仅 {manifest_images} 张，低于 1+5 的最低要求')
-    if package_valid and embedded_images < manifest_images:
+    if normalized_format == 'docx' and package_valid and embedded_images < manifest_images:
         warnings.append(f'DOCX 嵌入图片 {embedded_images}/{manifest_images}，存在缺图')
     status = 'FAIL' if failures else 'WARN' if warnings else 'PASS'
     summary = {
@@ -735,16 +810,24 @@ def validate_proposal_package(markdown_text: str, docx_path: str, outline_json: 
         'requirements_total': len(req_ids), 'requirements_uncovered': uncovered_req,
         'disqualification_total': len(disq_ids), 'disqualification_uncovered': uncovered_disq,
         'manifest_image_count': manifest_images, 'docx_embedded_image_count': embedded_images,
-        'docx_valid': package_valid, 'docx_filename': path.name,
-        'docx_size': path.stat().st_size if path.is_file() else 0,
+        'output_format': normalized_format, 'delivery_valid': package_valid,
+        'delivery_filename': path.name,
+        'delivery_size': path.stat().st_size if path.is_file() else 0,
+        'markdown_file_matches': markdown_file_matches if normalized_format == 'md' else None,
+        'docx_valid': package_valid if normalized_format == 'docx' else None,
+        'docx_filename': path.name if normalized_format == 'docx' else '',
+        'docx_size': path.stat().st_size if normalized_format == 'docx' and path.is_file() else 0,
         'failures': failures, 'warnings': warnings,
     }
     lines = ['# 技术方案校验报告', '', f'## 总体结论：{status}', '',
-             '## 文档与字数', f'- DOCX：{path.name or "—"}',
-             f'- DOCX 包有效：{"是" if package_valid else "否"}',
-             f'- DOCX 文件大小：{summary["docx_size"]} bytes',
+             '## 文档与字数', f'- 导出格式：{normalized_format.upper()}',
+             f'- 交付文件：{path.name or "—"}',
+             f'- 交付文件有效：{"是" if package_valid else "否"}',
+             f'- 文件大小：{summary["delivery_size"]} bytes',
              f'- 中文字符：{actual_words} / {target}（偏差 {total_deviation}%）',
-             f'- 图片：清单 {manifest_images} 张，DOCX 嵌入 {embedded_images} 张', '',
+             (f'- 图片：清单 {manifest_images} 张，DOCX 嵌入 {embedded_images} 张'
+              if normalized_format == 'docx' else
+              f'- 图片：清单 {manifest_images} 张（Markdown 正文与图片附件分别交付）'), '',
              '## 覆盖结果', f'- 章节：{len(leaves) - len(missing_leaves)}/{len(leaves)}',
              f'- 技术要求：{len(req_ids) - len(uncovered_req)}/{len(req_ids)}',
              f'- 废标项：{len(disq_ids) - len(uncovered_disq)}/{len(disq_ids)}', '',
@@ -757,6 +840,54 @@ def validate_proposal_package(markdown_text: str, docx_path: str, outline_json: 
         lines.extend(['', '## 必须修复', *[f'- {item}' for item in failures]])
     if warnings:
         lines.extend(['', '## 建议调整', *[f'- {item}' for item in warnings]])
-    if docx_error:
-        lines.extend(['', f'- DOCX 检查异常：{docx_error}'])
+    if delivery_error:
+        lines.extend(['', f'- 交付文件检查异常：{delivery_error}'])
     return {'report': '\n'.join(lines), 'summary': summary}
+
+
+def _workflow_artifact_payload(path: str) -> Any:
+    source = Path(str(path or '')).expanduser().resolve()
+    if not source.is_file():
+        raise FileNotFoundError(f'Workflow input does not exist: {path}')
+    text = source.read_text(encoding='utf-8')
+    try:
+        value = json.loads(text)
+    except json.JSONDecodeError:
+        return text
+    if isinstance(value, dict):
+        if 'data' in value:
+            return value['data']
+        if 'text' in value:
+            return value['text']
+    return value
+
+
+def validate_proposal_from_inputs() -> dict[str, Any]:
+    """Validate the final package directly from current Attempt input paths.
+
+    Large Markdown, requirement, and outline bodies never cross the model/tool JSON
+    boundary; only the compact validation result is returned to the SubAgent.
+    """
+    from lazymind.chat.engine.subagent.context import require_context
+    inputs = require_context().params.get('remote_inputs') or {}
+    required = [
+        'final_proposal_markdown', 'final_proposal', 'effective_outline',
+        'technical_requirements', 'disqualification_items',
+        'generation_parameters', 'image_manifest',
+    ]
+    missing = [slot for slot in required if not isinstance(inputs.get(slot), str) or not inputs.get(slot)]
+    if missing:
+        raise ValueError('Required validation input paths are missing: ' + ', '.join(missing))
+    parameters = _workflow_artifact_payload(inputs['generation_parameters'])
+    if not isinstance(parameters, dict):
+        raise ValueError('generation_parameters must contain a JSON object.')
+    return validate_proposal_package(
+        markdown_text=str(_workflow_artifact_payload(inputs['final_proposal_markdown']) or ''),
+        docx_path=inputs['final_proposal'],
+        outline_json=_workflow_artifact_payload(inputs['effective_outline']),
+        requirements_markdown=str(_workflow_artifact_payload(inputs['technical_requirements']) or ''),
+        disqualification_markdown=str(_workflow_artifact_payload(inputs['disqualification_items']) or ''),
+        word_target=str(parameters.get('word_target') or ''),
+        image_manifest_json=_workflow_artifact_payload(inputs['image_manifest']),
+        output_format=str(parameters.get('output_format') or ''),
+    )

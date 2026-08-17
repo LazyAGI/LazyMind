@@ -100,6 +100,42 @@ async def test_remote_executor_materializes_fenced_inputs_in_host_workspace(tmp_
 
 
 @pytest.mark.asyncio
+async def test_remote_executor_materializes_every_list_input_in_order(tmp_path):
+    worker = RemoteWorkflowExecutor()
+
+    class Runtime:
+        async def input(self, _client, _attempt, _lease, _material):
+            return {'items': [
+                {'name': '../effect.png', 'content_base64': 'Zmlyc3Q='},
+                {'name': '../effect.png', 'content_base64': 'c2Vjb25k'},
+            ]}
+
+    worker.runtime = Runtime()
+    values = await worker._materialize_inputs(
+        object(), 'attempt-1', 'lease-1', {'inputs': {'effect_images': [{}, {}]}}, str(tmp_path))
+    expected = [
+        tmp_path / 'inputs' / 'effect_images' / '0001_effect.png',
+        tmp_path / 'inputs' / 'effect_images' / '0002_effect.png',
+    ]
+    assert values['effect_images'] == [str(path) for path in expected]
+    assert [path.read_text() for path in expected] == ['first', 'second']
+
+
+@pytest.mark.asyncio
+async def test_remote_executor_preserves_single_item_list_cardinality(tmp_path):
+    worker = RemoteWorkflowExecutor()
+
+    class Runtime:
+        async def input(self, _client, _attempt, _lease, _material):
+            return {'items': [{'name': 'only.png', 'content_base64': 'b25seQ=='}]}
+
+    worker.runtime = Runtime()
+    values = await worker._materialize_inputs(
+        object(), 'attempt-1', 'lease-1', {'inputs': {'images': [{}]}}, str(tmp_path))
+    assert values['images'] == [str(tmp_path / 'inputs' / 'images' / '0001_only.png')]
+
+
+@pytest.mark.asyncio
 async def test_execution_spec_failure_marks_claimed_attempt_failed():
     worker = RemoteWorkflowExecutor()
 

@@ -481,11 +481,19 @@ def get_artifact(key: str, sort_order: Optional[int] = None, task_ref: Optional[
                 'status': 'ok', 'key': key, 'artifacts': artifacts,
             })
         elif remote_path:
+            remote_paths = remote_path if isinstance(remote_path, list) else [remote_path]
+            if sort_order is not None:
+                remote_paths = remote_paths[sort_order - 1:sort_order] if sort_order > 0 else []
+            if not remote_paths:
+                return tool_success('get_artifact', {
+                    'status': 'empty',
+                    'message': f"No artifact found for key '{key}' at sort_order={sort_order}.",
+                })
             result = tool_success('get_artifact', {
                 'status': 'ok', 'key': key, 'artifacts': [{
                     'slot': key, 'content_type': 'file',
-                    'value': {'path': str(remote_path), 'filename': os.path.basename(str(remote_path))},
-                }],
+                    'value': {'path': str(path), 'filename': os.path.basename(str(path))},
+                } for path in remote_paths],
             })
         else:
             result = _get_public_workflow_artifacts(key, workflow_session_id, sort_order)

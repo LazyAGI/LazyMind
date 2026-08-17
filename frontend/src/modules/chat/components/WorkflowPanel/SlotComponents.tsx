@@ -1546,9 +1546,20 @@ interface SlotTextProps {
   revisionCount?: number;
   onRefresh?: () => void;
   readOnly?: boolean;
+  renderMarkdown?: boolean;
+  maxHeight?: number;
 }
 
-export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh, readOnly }: SlotTextProps) {
+export function SlotText({
+  slot,
+  sessionId,
+  slotId,
+  revisionCount,
+  onRefresh,
+  readOnly,
+  renderMarkdown,
+  maxHeight,
+}: SlotTextProps) {
   const raw = slot.artifact_value;
   const { patchSlotCaption } = useWorkflowStore();
   const { setEditing: notifyEditing } = useContext(SlotEditingContext);
@@ -1784,14 +1795,29 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh, re
         />
       ) : (
         <>
-          <p
-            className={`workflow-slot__text${canEdit ? ' workflow-slot__text--editable' : ''}`}
-            onClick={canEdit ? handleEdit : undefined}
-            title={canEdit ? tr('chat.slots.clickToEdit') : undefined}
-            role={canEdit ? 'button' : undefined}
-            tabIndex={canEdit ? 0 : undefined}
-            onKeyDown={canEdit ? (e) => e.key === 'Enter' && handleEdit() : undefined}
-          >{displayText}</p>
+          {renderMarkdown ? (
+            <div
+              className={`workflow-slot__markdown${canEdit ? ' workflow-slot__text--editable' : ''}`}
+              style={maxHeight ? { maxHeight, overflowY: 'auto' } : undefined}
+              onClick={canEdit ? handleEdit : undefined}
+              title={canEdit ? tr('chat.slots.clickToEdit') : undefined}
+              role={canEdit ? 'button' : undefined}
+              tabIndex={canEdit ? 0 : undefined}
+              onKeyDown={canEdit ? (e) => e.key === 'Enter' && handleEdit() : undefined}
+            >
+              <MarkdownViewer>{displayText}</MarkdownViewer>
+            </div>
+          ) : (
+            <p
+              className={`workflow-slot__text${canEdit ? ' workflow-slot__text--editable' : ''}`}
+              style={maxHeight ? { maxHeight, overflowY: 'auto' } : undefined}
+              onClick={canEdit ? handleEdit : undefined}
+              title={canEdit ? tr('chat.slots.clickToEdit') : undefined}
+              role={canEdit ? 'button' : undefined}
+              tabIndex={canEdit ? 0 : undefined}
+              onKeyDown={canEdit ? (e) => e.key === 'Enter' && handleEdit() : undefined}
+            >{displayText}</p>
+          )}
           <div className='workflow-slot__text-meta'>
             {revisionCount !== undefined && revisionCount > 0 && sessionId && slotId && (
               <SlotVersionPopover
@@ -3059,6 +3085,7 @@ interface SlotMarkdownFileProps {
   revisionCount?: number;
   onRefresh?: () => void;
   readOnly?: boolean;
+  uiEditable?: boolean;
 }
 
 /** Displays the temporary Markdown emitted by a Writer Task SSE stream. */
@@ -3125,6 +3152,7 @@ function SlotMarkdownFile({
   revisionCount,
   onRefresh,
   readOnly,
+  uiEditable,
 }: SlotMarkdownFileProps) {
   const allowDownload = useContext(SlotDownloadContext);
   const raw = slot.artifact_value;
@@ -3225,7 +3253,7 @@ function SlotMarkdownFile({
     && rewritePreview === null;
   const canEditMarkdown = Boolean(sessionId && slotId)
     && !readOnly
-    && WRITER_ARTIFACT_SLOT_IDS.has(resolvedSlotId);
+    && (WRITER_ARTIFACT_SLOT_IDS.has(resolvedSlotId) || uiEditable === true);
 
   const downloadMarkdown = useCallback(() => {
     const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
@@ -3664,6 +3692,9 @@ export function SlotRenderer({
   onReference,
   readOnly,
   hideImageMutationActions,
+  widgetType,
+  uiEditable,
+  maxHeight,
 }: {
   slot: SlotRevision;
   originalFileSlot?: SlotRevision;
@@ -3677,6 +3708,9 @@ export function SlotRenderer({
   onReference?: (slot: SlotRevision) => void;
   readOnly?: boolean;
   hideImageMutationActions?: boolean;
+  widgetType?: string;
+  uiEditable?: boolean;
+  maxHeight?: number;
 }) {
   useTranslation();
   if (slot.artifact_value === undefined || slot.artifact_value === null) {
@@ -3710,6 +3744,7 @@ export function SlotRenderer({
         revisionCount={revisionCount}
         onRefresh={onRefresh}
         readOnly={readOnly}
+        uiEditable={uiEditable}
       />
     );
   }
@@ -3746,6 +3781,8 @@ export function SlotRenderer({
       revisionCount={revisionCount}
       onRefresh={onRefresh}
       readOnly={readOnly}
+      renderMarkdown={widgetType === 'text-markdown'}
+      maxHeight={maxHeight}
     />
   );
 }

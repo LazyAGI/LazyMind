@@ -284,6 +284,12 @@ export interface SlotDef {
   gridMaxCols?: number;
   itemWidth?: number;
   itemHeight?: number;
+  /** Workflow-declared presentation widget inherited from ui.slots. */
+  widgetType?: string;
+  /** Workflow-declared editability. Active sessions remain read-only regardless. */
+  readOnly?: boolean;
+  /** Optional scroll bound for text/Markdown widgets. */
+  maxHeight?: number;
 }
 
 // composite_layout node types (recursive) — format C.

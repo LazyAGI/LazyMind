@@ -336,6 +336,12 @@ function preprocessUpload(
 
 export interface SendMessageParams {
   text: string;
+  /**
+   * Snapshot the resource selection used by this message.  The welcome composer
+   * unmounts before its pending first message is consumed by ChatLayout, so the
+   * receiver must not depend on a later render's chatConfig value.
+   */
+  chatConfigSnapshot?: ChatConfig;
   mentions?: ChatMention[];
   citeMessage?: string;
   citeMessages?: string[];
@@ -850,6 +856,12 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       setNewMessage(false);
       const sendParams: SendMessageParams = {
         text: normalizedText,
+        chatConfigSnapshot: {
+          knowledgeBaseId: [...(chatConfig?.knowledgeBaseId ?? [])],
+          creators: [...(chatConfig?.creators ?? [])],
+          tags: [...(chatConfig?.tags ?? [])],
+          databaseBaseId: chatConfig?.databaseBaseId,
+        },
         thinking_depth: thinkingDepth,
         mentions,
         citeMessage: normalizedCiteMessages.join("\n\n"),

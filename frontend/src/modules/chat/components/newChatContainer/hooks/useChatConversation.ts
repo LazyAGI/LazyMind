@@ -940,6 +940,9 @@ export function useChatConversation({
     scroll.isMouseScrollingRef.current = true;
     scroll.scrollToEnd();
     await openSSE(inputs, ChatConversationsRequestActionEnum.ChatActionNext, {
+      ...(params.chatConfigSnapshot
+        ? { chat_config_snapshot: params.chatConfigSnapshot }
+        : {}),
       ...(params.run_in_background ? { run_in_background: true } : {}),
       ...(params.thinking_depth
         ? { thinking_depth: params.thinking_depth }

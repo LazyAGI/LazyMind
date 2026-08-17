@@ -3,9 +3,12 @@ start_route: all
 
 transitions:
   __start__: [{to: parse_bid_document}]
-  parse_bid_document: [{to: extract_tech_requirements}]
-  extract_tech_requirements: [{to: extract_disqualification_items}]
-  extract_disqualification_items: [{to: build_chapter_outline}]
+  parse_bid_document:
+    - {to: extract_tech_requirements}
+    - {to: extract_disqualification_items}
+  extract_tech_requirements: [{to: search_reference_materials}]
+  extract_disqualification_items: [{to: search_reference_materials}]
+  search_reference_materials: [{to: build_chapter_outline}]
   build_chapter_outline: [{to: write_chapter_contents}]
   write_chapter_contents: [{to: generate_proposal_images}]
   generate_proposal_images: [{to: compose_proposal_docx}]
@@ -18,7 +21,14 @@ steps:
     prompt: |
       {{runtime_instruction}}
 
-      Execute step 1 of the bid-tech-proposal pipeline. The Runtime Parameters section
+      Execute step 1 of the bid-tech-proposal pipeline. All required external inputs were
+      collected by Workflow preflight before this Session was created. First call
+      normalize_bid_parameters(output_format=<output_format>, word_target=<word_target>,
+      use_default_docx_template=<use_default_docx_template>). Do not infer or silently
+      default a value. Save the returned canonical object as generation_parameters with
+      content_type="json" together with this step's parsing artifacts.
+
+      The Runtime Parameters section
       contains remote_inputs, a mapping from material id to the actual local input path.
       Take remote_inputs.bid_doc exactly as supplied; never guess, rewrite, or reuse a
       path from the source skill.
@@ -26,19 +36,29 @@ steps:
       Call parse_bid_document(input_path=<remote_inputs.bid_doc>). The tool performs the
       format-specific deterministic parsing. Save the returned raw_text as raw_bid_text
       with content_type="text" and returned metadata as raw_bid_meta with
-      content_type="json" in one save_artifacts call. Preserve full source clauses,
+      content_type="json" in one save_artifacts call together with generation_parameters.
+      Preserve full source clauses,
       headings, numbered paragraphs, table rows and page markers. Do not replace the
       parsed text with a summary and do not claim an unavailable parser was used.
-    tools: [parse_bid_document]
+    tools: [normalize_bid_parameters, parse_bid_document]
     inputs:
       - material: bid_doc
         required: true
+      - material: output_format
+        required: true
+      - material: word_target
+        required: true
+      - material: use_default_docx_template
+        required: true
     outputs:
+      - material: generation_parameters
       - material: raw_bid_text
       - material: raw_bid_meta
     acceptance_criteria: |
-      raw_bid_text contains substantive source text, and raw_bid_meta identifies the
-      source filename, detected format, parser, section count and any honest warnings.
+      generation_parameters contains canonical md/docx output format, a valid integer word
+      target and an explicit DOCX style mode. raw_bid_text contains substantive source text,
+      and raw_bid_meta identifies the source filename, detected format, parser, section count
+      and any honest warnings.
 
   extract_tech_requirements:
     label: 技术要求提取
@@ -87,48 +107,97 @@ steps:
       Merge duplicates without losing the strongest evidence. Save one Markdown artifact
       as disqualification_items with content_type="text".
 
-      After the reviewed disqualification Markdown is ready, call
-      bid_writer_prepare_context(user_request="{{user_input}}",
+    tools: [extract_disqualification_items]
+    inputs:
+      - material: raw_bid_text
+        required: true
+    outputs:
+      - material: disqualification_items
+    acceptance_criteria: |
+      Explicit rejection clauses and inferred risks are separated. Every D-NNN item has
+      a source reference, response strategy and risk rating without invented conditions.
+
+  search_reference_materials:
+    label: 知识库资料检索
+    prompt: |
+      {{runtime_instruction}}
+
+      Execute step 4 as the proposal evidence-enrichment stage. The kb framework receives
+      the knowledge bases selected in the parent chat through its runtime filters. Never
+      call list_knowledge_bases, never choose or enumerate a knowledge base yourself, never
+      pass guessed kb_ids, and never use web search. Search only the implicit selected scope.
+
+      Read raw_bid_text, technical_requirements, and disqualification_items. If one or more
+      knowledge bases were selected for this conversation, make exactly one kb_search call,
+      matching the single-call collection pattern used by the built-in image workflow. The
+      query must express one natural-language intent: retrieve reference solutions and
+      product capabilities that can support this project's technical-proposal writing. Base
+      it on the project name and core construction objective rather than a comma-separated
+      keyword/topic list. Keep it under 120 Chinese characters and use the tool's default
+      retrieval and reranking sizes; do not pass kb_ids, filters, retriever_topk, rerank_topk,
+      k_max, or image_topk, and do not issue follow-up searches. Consolidate only retrieved
+      evidence that can improve the proposal, retaining document/source labels and citation
+      markers from the tool result. Clearly separate retrieved facts from solution
+      recommendations and do not turn uncited knowledge into a mandatory tender requirement.
+
+      If kb_search is unavailable or reports that no knowledge base is selected, do not
+      discover a replacement knowledge base. Save exactly one short Markdown artifact
+      explaining that no knowledge base was specified and that this run will use the tender
+      document only. If that one search fails, record the retrieval failure honestly and
+      continue without retrying or formulating another query. In every branch save as
+      knowledge_evidence with content_type="text"; this output must always exist so the
+      pipeline remains deterministic.
+
+      Then call bid_writer_prepare_context(user_request="{{user_input}}",
       requirements_markdown=<technical requirements>,
       disqualification_markdown=<reviewed disqualification Markdown>,
-      word_target=<word_target>). This is the only preparation path for later outline and
-      drafting: it delegates task construction, resource profiling, and writing context to
-      LazyMind's shared Writer capability. Save the three returned paths as writing_task,
-      resource_profiles, and writing_context with content_type="file". Never recreate
-      Writer schemas in the model or save a returned path as text.
-    tools: [extract_disqualification_items, bid_writer_prepare_context]
+      word_target=<generation_parameters.word_target>,
+      knowledge_text=<knowledge_evidence>). This is the only
+      preparation path for later outline and drafting: it delegates task construction,
+      resource profiling, and writing context to LazyMind's shared Writer capability.
+      Save the three returned paths as writing_task, resource_profiles, and writing_context
+      with content_type="file". Never recreate Writer schemas in the model or save a
+      returned path as text.
+    tools: [kb, bid_writer_prepare_context]
     inputs:
       - material: raw_bid_text
         required: true
       - material: technical_requirements
         required: true
-      - material: word_target
+      - material: disqualification_items
+        required: true
+      - material: generation_parameters
         required: true
     outputs:
-      - material: disqualification_items
+      - material: knowledge_evidence
       - material: writing_task
       - material: resource_profiles
       - material: writing_context
     acceptance_criteria: |
-      Explicit rejection clauses and inferred risks are separated. Every D-NNN item has
-      a source reference, response strategy and risk rating without invented conditions.
+      knowledge_evidence truthfully states the selected-KB evidence with source
+      labels/citations, that no KB was selected, or that the single retrieval attempt failed.
       writing_task, resource_profiles, and writing_context are real files returned by the
-      shared Writer capability.
+      shared Writer capability and the Writer resources include the knowledge evidence.
 
   build_chapter_outline:
     label: 章节大纲与字数
+    mode: human
     rerun_when: >
       用户要求重新生成、调整或局部修改当前章节大纲。人工在卡片中保存的
       outline_document 修订也是后续步骤唯一应读取的最新大纲。
     prompt: |
       {{runtime_instruction}}
 
-      Execute step 4 with LazyMind's shared Writer outline capability while preserving the
+      Execute step 5 with LazyMind's shared Writer outline capability while preserving the
       bid-specific validation contract. Every Writer tool returns a real local path; save
       it with content_type="file" and never save the path string as text.
 
-      Retrieve writing_task, writing_context, technical_requirements,
-      disqualification_items, and the latest selected outline_document when it exists.
+      Retrieve writing_task, writing_context, knowledge_evidence, technical_requirements,
+      disqualification_items, generation_parameters, and the latest selected
+      outline_document when it exists. Use generation_parameters.word_target as the target.
+      `bid_writer_read_markdown` is only for Markdown/plain-text content. Never call it on
+      writing_task, resource_profiles, writing_context, or any other `.json` path; pass
+      those JSON file paths directly to the Writer tools that declare them as inputs.
       Select exactly one mode:
 
       A. First generation or complete regeneration: call bid_writer_generate_outline with
@@ -159,11 +228,13 @@ steps:
 
       Call validate_and_allocate_outline(outline_json=<candidate>,
       requirements_markdown=<requirements>, disqualification_markdown=<items>,
-      word_target=<target>). If valid is false, fix every reported error and call again.
+      word_target=<generation_parameters.word_target>). If valid is false, fix every
+      reported error and call again.
       After PASS, call bid_writer_save_validated_outline with normalized_outline. This
-      creates the canonical editable outline_document.md, including hidden trace and word
-      allocation metadata on leaf sections. Then call bid_writer_update_context using this
-      canonical outline and writing_context.
+      creates the canonical editable outline_document.md as clean user-facing Markdown;
+      keep trace and word-allocation metadata in the structured outline artifact rather
+      than HTML comments. Then call bid_writer_update_context using this canonical outline
+      and writing_context.
 
       Save the canonical path as outline_document with content_type="file", the normalized
       object as outline with content_type="json", the report as outline_check_report with
@@ -182,11 +253,13 @@ steps:
         required: true
       - material: writing_context
         required: true
+      - material: knowledge_evidence
+        required: true
       - material: technical_requirements
         required: true
       - material: disqualification_items
         required: true
-      - material: word_target
+      - material: generation_parameters
         required: true
     outputs:
       - material: outline_document
@@ -207,28 +280,39 @@ steps:
       outline_document is a real editable `.md` file produced through the shared Writer
       planner or revision path. outline_check_report begins with PASS; the normalized
       outline satisfies level, numbering, title, target allocation and complete ID coverage.
-      writing_context_after_outline exists. Revision internals are required only for an AI
-      modification run; direct frontend edits remain human revisions of outline_document.
+      writing_context_after_outline exists and preserves the selected knowledge-base
+      evidence as fact `bid-selected-knowledge-evidence`. Revision internals are required
+      only for an AI modification run; direct frontend edits remain human revisions of
+      outline_document. After saving the editable outline, stop at the human approval
+      checkpoint; do not start body drafting until the user saves any edits and clicks Continue.
 
   write_chapter_contents:
     label: 逐章正文编写
+    mode: human
     rerun_when: >
       用户要求修改、扩写、缩写或重写当前 draft_document，包括对文字、章节、
       表格、图片说明或插入位置的修改。
     prompt: |
       {{runtime_instruction}}
 
-      Execute step 5 through LazyMind's shared Writer planning, streaming drafting, and
+      Execute step 6 through LazyMind's shared Writer planning, streaming drafting, and
       revision capabilities. The latest selected outline_document is authoritative,
       including any human revision saved in the frontend. Retrieve it together with
-      writing_task, writing_context_after_outline, technical_requirements,
-      disqualification_items, and the latest selected draft_document when one exists.
+      writing_task, writing_context_after_outline, knowledge_evidence, technical_requirements,
+      disqualification_items, generation_parameters, and the latest selected draft_document
+      when one exists. Use generation_parameters.word_target for allocation and validation.
+      `bid_writer_read_markdown` is only for outline_document/draft_document and other
+      Markdown/plain-text artifacts. Never call it on writing_task, section_instructions,
+      writing_context_after_outline, or any other `.json` path; pass JSON paths directly
+      to the corresponding Writer tools.
 
       First read outline_document with bid_writer_read_markdown. Convert its current
-      headings and hidden bid-outline metadata into a fresh structured candidate. Ignore
+      headings into a fresh structured candidate, then rebuild trace and word metadata
+      from the authoritative technical_requirements and disqualification_items. Ignore
       the single H1 document title and map H2..H5 to chapter levels 1..4. Map every
       requirement and D-NNN ID exactly once or more, then call validate_and_allocate_outline.
-      Fix all errors until PASS. Save the resulting normalized object as effective_outline
+      Fix all errors until PASS using generation_parameters.word_target. Save the resulting
+      normalized object as effective_outline
       and its report as effective_outline_check_report. Never reuse the old structure when
       a human has changed the Markdown outline.
 
@@ -259,6 +343,10 @@ steps:
       each leaf explicitly covers its mapped IDs, retains a compact “追溯：ID...” line,
       respects target_words within ±10%, and uses solution-expert language with no invented
       number, first person, requirement-echo opening, vague promise, or defensive wording.
+      The section plan and draft must use relevant concrete facts from
+      `bid-selected-knowledge-evidence` in the architecture, platform, data-governance,
+      security, and operations sections. Do not merely mention that knowledge was retrieved,
+      and do not force irrelevant evidence into a section.
 
       Finally call bid_writer_update_context with the final draft_document and the refreshed
       outline context. Save its path as writing_context_after_draft. Every returned Writer
@@ -278,11 +366,13 @@ steps:
         required: true
       - material: writing_context_after_outline
         required: true
+      - material: knowledge_evidence
+        required: true
       - material: technical_requirements
         required: true
       - material: disqualification_items
         required: true
-      - material: word_target
+      - material: generation_parameters
         required: true
     outputs:
       - material: effective_outline
@@ -308,14 +398,16 @@ steps:
       Markdown file and writing_context_after_draft exists. Generation mode requires
       section_instructions and one ordered chapter_contents file per planned section;
       targeted revision mode requires all document_* revision internals. The final draft
-      explicitly covers mapped IDs and follows the validated latest human/AI outline.
+      explicitly covers mapped IDs and follows the validated latest human/AI outline. After
+      saving draft_document, stop at the human approval checkpoint; do not generate images
+      or delivery files until the user saves any edits and clicks Continue.
 
   generate_proposal_images:
     label: 架构图与效果图
     prompt: |
       {{runtime_instruction}}
 
-      Execute step 6 using local code only. Never call a text-to-image or image-generation
+      Execute step 7 using local code only. Never call a text-to-image or image-generation
       model. Retrieve the latest selected draft_document, resolve its local path, and read
       it with bid_writer_read_markdown. Derive truthful JSON specs from effective_outline,
       requirements, and that latest editable body.
@@ -351,31 +443,21 @@ steps:
       manifest order matches the effect_images order.
 
   compose_proposal_docx:
-    label: 技术方案合成
+    label: 技术方案导出
     prompt: |
       {{runtime_instruction}}
 
-      Execute step 7. Retrieve and resolve the latest selected draft_document, then read it
-      with bid_writer_read_markdown. Read effective_outline and image_manifest. Build the
-      final Markdown without rewriting or duplicating the approved editable body:
-      - one project title;
-      - the complete draft in outline order;
-      - place [[WORKFLOW_IMAGES]] alone immediately after the architecture-design portion;
-      - append compact requirement and disqualification traceability tables containing
-        IDs and mapped section numbers, not duplicate full source clauses.
+      Execute step 8 deterministically. Call compose_proposal_from_inputs exactly once with
+      no document content arguments. The Workflow-local tool reads the immutable paths bound
+      to this Attempt, preserves the latest user-approved draft, consumes every ordered
+      effect_images list item, inserts the image section when needed, and applies
+      generation_parameters.output_format and use_default_docx_template.
 
-      Resolve the actual local path of architecture_image with find_artifact. Resolve
-      every effect_images item using sort_order=1..N from image_manifest. Call
-      compose_proposal_docx(markdown_text=<complete Markdown>, outline_json=<effective outline>,
-      image_paths_json=<ordered path/title/type objects>, output_name=<project Chinese
-      name + "_技术方案.docx">, add_toc=true). The workflow-specific builder applies
-      Heading 1–4 numbering, 宋体 14pt body, 1.5 spacing, first-line indent, page breaks,
-      centered 15 cm images and an updateable TOC.
-
-      Save the exact Markdown as final_proposal_markdown with content_type="text" and the
-      returned path as final_proposal with content_type="file" in one save_artifacts
-      call. Never store a path string as text or a base64 placeholder in the Word slot.
-    tools: [bid_writer_read_markdown, compose_proposal_docx]
+      Save result.final_markdown as final_proposal_markdown with content_type="file" and
+      result.final_proposal as final_proposal with content_type="file" in one save_artifacts
+      call. Never read or copy the full draft, requirement lists, outline, image manifest or
+      binary data through the model. Never store a path string as text or a base64 placeholder.
+    tools: [compose_proposal_from_inputs]
     inputs:
       - material: effective_outline
         required: true
@@ -391,38 +473,36 @@ steps:
         required: true
       - material: disqualification_items
         required: true
+      - material: generation_parameters
+        required: true
     outputs:
       - material: final_proposal_markdown
       - material: final_proposal
     acceptance_criteria: |
-      final_proposal_markdown is complete and non-duplicated. final_proposal is an actual
-      non-empty `.docx` containing the complete body, updateable TOC and every selected
-      architecture/effect image.
+      final_proposal_markdown is complete and non-duplicated. final_proposal is one real,
+      non-empty file matching generation_parameters.output_format. A DOCX export contains
+      the complete body, updateable TOC and every selected architecture/effect image, and
+      its style mode matches use_default_docx_template.
 
   validate_proposal:
     label: 文档结果校验
     prompt: |
       {{runtime_instruction}}
 
-      Execute step 8 deterministically. Read final_proposal_markdown, effective_outline,
-      technical_requirements, disqualification_items, image_manifest and word_target.
-      Use find_artifact to resolve final_proposal to a short local file path; never read,
-      echo or pass base64 binary content through the model.
-
-      Call validate_proposal_package(markdown_text=<final Markdown>,
-      docx_path=<resolved path>, outline_json=<effective outline>,
-      requirements_markdown=<requirements>,
-      disqualification_markdown=<items>, word_target=<target>,
-      image_manifest_json=<manifest>). Save returned report as validation_report with
+      Execute step 9 deterministically. Call validate_proposal_from_inputs exactly once with
+      no arguments. The Workflow-local tool reads the immutable files bound to this Attempt;
+      never read, echo, reconstruct or pass full document content or binary data through the
+      model. Save returned report as validation_report with
       content_type="text" and returned summary as validation_summary with
       content_type="json" in one call.
 
       Report overall and per-leaf Chinese-character deviations, missing headings,
-      uncovered requirement IDs, uncovered D-NNN items, actual embedded-image count,
-      DOCX extension/ZIP/package validity and actionable remediation. A total word-count
-      deviation above 5%, any missing leaf, any uncovered explicit rejection item, fewer
-      than six images, or an invalid DOCX must not be reported as PASS.
-    tools: [validate_proposal_package]
+      uncovered requirement IDs, uncovered D-NNN items, selected delivery-file validity and
+      actionable remediation. For DOCX also validate the Office package and embedded-image
+      count; for Markdown validate that the file matches the final Markdown exactly. A total
+      word-count deviation above 5%, any missing leaf, any uncovered explicit rejection item,
+      fewer than six generated images, or an invalid selected delivery file must not be PASS.
+    tools: [validate_proposal_from_inputs]
     inputs:
       - material: final_proposal_markdown
         required: true
@@ -434,7 +514,7 @@ steps:
         required: true
       - material: disqualification_items
         required: true
-      - material: word_target
+      - material: generation_parameters
         required: true
       - material: image_manifest
         required: true
@@ -442,6 +522,6 @@ steps:
       - material: validation_report
       - material: validation_summary
     acceptance_criteria: |
-      validation_report and validation_summary are internally consistent, verify the
-      actual DOCX package, and provide evidence for word count, chapters, ID coverage,
-      disqualification responses and image count.
+      validation_report and validation_summary are internally consistent, verify the actual
+      selected Markdown or DOCX delivery file, and provide evidence for word count, chapters,
+      ID coverage, disqualification responses and image count.
