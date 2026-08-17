@@ -265,7 +265,7 @@ export default function KnowledgeDataSettings({
               aria-label={t("settingsPage.knowledge.openParsingAria")}
               className="settings-knowledge-detail-button"
               icon={<RightOutlined />}
-              onClick={() => navigate("/model-providers/tools")}
+              onClick={() => navigate("/settings?section=knowledge&tool=document-parsing")}
               type="text"
             />
           </div>

@@ -346,7 +346,7 @@
   "2001097": { "en-US": "update user_preference failed", "zh-CN": "更新用户偏好失败" },
   "2001098": { "en-US": "update word group failed", "zh-CN": "更新词组失败" },
   "2001101": { "en-US": "auto_evo apply conflict", "zh-CN": "自动进化应用冲突" },
-  "2001102": { "en-US": "A knowledge base with this name already exists. Use a unique name.", "zh-CN": "知识库名称已存在，请使用未被占用的名称" },
+  "2001102": { "en-US": "A dataset with this name already exists. Use a unique name.", "zh-CN": "数据集名称已存在，请使用未被占用的名称" },
   "2001103": { "en-US": "memory draft already pending_confirm", "zh-CN": "记忆草稿已处于待确认状态" },
   "2001104": { "en-US": "memory draft version conflict", "zh-CN": "记忆草稿版本冲突" },
   "2001105": { "en-US": "model name already exists in this group", "zh-CN": "该分组中已存在同名模型" },
