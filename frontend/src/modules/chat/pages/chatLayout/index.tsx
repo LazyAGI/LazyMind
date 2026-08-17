@@ -21,8 +21,8 @@ import {
   CHAT_RESUME_STREAM_URL,
   CHAT_STREAM_URL,
   ChatServiceApi,
-  parseConversationWorkflowSettings,
-  type ConversationWorkflowSettings,
+  parseConversationRuntimeSettings,
+  type ConversationRuntimeSettings,
 } from "@/modules/chat/utils/request";
 import { draftStore, buildWorkflowSearchConfig, useWorkflowStore } from "@/modules/chat/store/workflowPanel";
 import { useChatMessageStore } from "@/modules/chat/store/chatMessage";
@@ -78,7 +78,7 @@ interface IChatLayoutProps {
   chatDisabledDescription?: ReactNode;
   chatDisabledAction?: ReactNode;
   /** Workflow settings selected on the welcome screen before the first message is sent. */
-  initPendingWorkflowSettings?: ConversationWorkflowSettings | null;
+  initPendingConversationSettings?: ConversationRuntimeSettings | null;
 }
 
 const ChatLayout: FC<IChatLayoutProps> = (props) => {
@@ -94,19 +94,19 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     chatDisabledReason,
     chatDisabledDescription,
     chatDisabledAction,
-    initPendingWorkflowSettings,
+    initPendingConversationSettings,
   } = props;
   const [sessionId, setSessionId] = useState("");
   const [chatConfig, setChatConfig] = useState<ChatConfig>(
     initchatConfig || {},
   );
   // Pending workflow settings from the chat config popover before a conversation is created.
-  // Initialised from the welcome-screen selection (initPendingWorkflowSettings) when provided.
-  const pendingWorkflowSettingsRef = useRef<ConversationWorkflowSettings | null>(
-    initPendingWorkflowSettings ?? null,
+  // Initialised from the welcome-screen selection when provided.
+  const pendingConversationSettingsRef = useRef<ConversationRuntimeSettings | null>(
+    initPendingConversationSettings ?? null,
   );
   // Workflow settings loaded from conversation detail (for existing conversations).
-  const [conversationWorkflowSettings, setConversationWorkflowSettings] = useState<ConversationWorkflowSettings | undefined>(undefined);
+  const [conversationSettings, setConversationSettings] = useState<ConversationRuntimeSettings | undefined>(undefined);
   const [knowledgeRefreshKey, setKnowledgeRefreshKey] = useState(0);
   const [isTaskPanelCollapsed, setIsTaskPanelCollapsed] = useState(false);
   const [panelWidth, setPanelWidth] = useState<number>(0); // 0 = use CSS default
@@ -136,18 +136,18 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     return () => window.removeEventListener(WORKFLOW_PANEL_EXPANDED_EVENT, handleExpandedChange);
   }, [sessionId]);
 
-  // Keep pendingWorkflowSettingsRef in sync with the welcome screen while no conversation is active.
+  // Keep pending settings in sync with the welcome screen while no conversation is active.
   useEffect(() => {
     if (!sessionId) {
-      pendingWorkflowSettingsRef.current = initPendingWorkflowSettings ?? null;
+      pendingConversationSettingsRef.current = initPendingConversationSettings ?? null;
     }
-  }, [initPendingWorkflowSettings, sessionId]);
+  }, [initPendingConversationSettings, sessionId]);
 
   // Load persisted workflow settings once a real conversation id is available.
   useEffect(() => {
     if (!sessionId || sessionId.startsWith('temp_')) {
       if (!sessionId) {
-        setConversationWorkflowSettings(undefined);
+        setConversationSettings(undefined);
       }
       return;
     }
@@ -158,8 +158,8 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         if (cancelled) {
           return;
         }
-        setConversationWorkflowSettings(
-          parseConversationWorkflowSettings(detailRes.data.conversation),
+        setConversationSettings(
+          parseConversationRuntimeSettings(detailRes.data.conversation),
         );
       })
       .catch(() => {});
@@ -251,35 +251,20 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const tasks = useTaskCenterStore((s) =>
     sessionId ? s.tasksByConversation[sessionId] ?? EMPTY_TASKS : EMPTY_TASKS,
   );
-  const loadConversationTasks = useTaskCenterStore(
-    (s) => s.loadConversationTasks,
-  );
-  const loadConversationArtifacts = useTaskCenterStore(
-    (s) => s.loadConversationArtifacts,
+  const refreshConversationExecution = useTaskCenterStore(
+    (s) => s.refreshConversationExecution,
   );
   const subscribeConvEvents = useTaskCenterStore((s) => s.subscribeConvEvents);
   const unsubscribeConvEvents = useTaskCenterStore((s) => s.unsubscribeConvEvents);
 
   useEffect(() => {
     if (!sessionId) return;
-    // Load the persisted task list first, then subscribe to conv-level events.
-    // convEvents are replayed from the start on every new SSE connection, so we
-    // must have the authoritative task states in the store before the replay
-    // delivers task_created events — otherwise a replayed task_created for an
-    // already-finished task would look "new" and we would re-subscribe to its
-    // task stream, causing the full execution log to be appended again.
-    let cancelled = false;
-    void loadConversationArtifacts(sessionId);
-    loadConversationTasks(sessionId).then(() => {
-      if (!cancelled) {
-        subscribeConvEvents(sessionId);
-      }
-    });
+    subscribeConvEvents(sessionId);
+    void refreshConversationExecution(sessionId);
     return () => {
-      cancelled = true;
       unsubscribeConvEvents(sessionId);
     };
-  }, [sessionId, loadConversationTasks, loadConversationArtifacts, subscribeConvEvents, unsubscribeConvEvents]);
+  }, [sessionId, refreshConversationExecution, subscribeConvEvents, unsubscribeConvEvents]);
 
   // Auto-expand the task panel the first time a SubAgent task appears.
   // In developer mode: auto-expand; otherwise: keep collapsed (user expands manually).
@@ -504,14 +489,15 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         // carry them in the first request so Go can persist them on ensureConversation.
         // Only send the three known fields to avoid polluting the payload with API response leftovers.
         ...(() => {
-          const pending = pendingWorkflowSettingsRef.current;
+          const pending = pendingConversationSettingsRef.current;
           if (!sessionId && pending) {
-            pendingWorkflowSettingsRef.current = null;
+            pendingConversationSettingsRef.current = null;
             const clean: Record<string, unknown> = {};
             if (pending.enable_workflow != null) clean.enable_workflow = pending.enable_workflow;
             if (pending.enable_subagent != null) clean.enable_subagent = pending.enable_subagent;
             if (pending.workflow_mode != null) clean.workflow_mode = pending.workflow_mode;
-            return { initial_workflow_settings: clean };
+            if (pending.chat_executor != null) clean.chat_executor = pending.chat_executor;
+            return { initial_conversation_settings: clean };
           }
           return {};
         })(),
@@ -523,6 +509,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   function onOpenResumeSSE(
     conversationId: string,
     callbacks: Record<string, (e: CustomEvent) => void>,
+    cursor?: { historyId?: string; afterSequence?: number },
   ) {
     return new SSE(CHAT_RESUME_STREAM_URL, {
       method: Method.POST,
@@ -532,13 +519,18 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         ...AgentAppsAuth.getAuthHeaders(),
       },
       timeout: 1800000,
-      payload: JSON.stringify({ conversation_id: conversationId }),
+      payload: JSON.stringify({
+        conversation_id: conversationId,
+        history_id: cursor?.historyId,
+        after_sequence: cursor?.afterSequence || undefined,
+      }),
       callbacks,
     });
   }
 
   const sessionIdRef = useRef(sessionId);
   sessionIdRef.current = sessionId;
+  const loadConversationRequestRef = useRef(0);
 
   const setConversationId = useCallback((id: string) => {
     if (id === sessionIdRef.current) return;
@@ -550,66 +542,55 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     );
   }, []);
 
-  const loadConversation = useCallback((conversationId: string) => {
+  const loadConversation = useCallback(async (conversationId: string) => {
+    const requestId = ++loadConversationRequestRef.current;
     setIsRestoringConversation(true);
-    ChatServiceApi()
-      .conversationServiceGetChatStatus({ conversationId })
-      .then((res) => ({
-        resolvedId: conversationId,
-        isGenerating: !!res.data?.is_generating,
-      }))
-      .catch(() => ({ resolvedId: conversationId, isGenerating: false }))
-      .then(({ resolvedId, isGenerating }) =>
-        ChatServiceApi()
-          .conversationServiceGetConversationDetail({
-            conversation: resolvedId,
-          })
-          .then((detailRes) =>
-            loadConversationHistory(resolvedId).then((historyRes) => ({
-              detailRes,
-              historyRes,
-              resolvedId,
-              isGenerating,
-            })),
-          ),
-      )
-      .then(({ detailRes, historyRes, resolvedId, isGenerating }) => {
-        const conversation = detailRes.data.conversation;
-        const tempData = {
-          knowledgeBaseId: conversation?.search_config?.dataset_list
-            ?.map((dataset: any) => dataset.id)
-            .filter((id: string) => !!id),
-          creators: conversation?.search_config?.creators,
-          tags: conversation?.search_config?.tags,
-          databaseBaseId: conversation?.search_config?.database_ids?.[0],
-        };
-        setChatConfig(tempData);
-        setChatConfigFn(tempData);
-        setKnowledgeRefreshKey((key) => key + 1);
+    try {
+      let isGenerating = false;
+      try {
+        const status = await ChatServiceApi().conversationServiceGetChatStatus({ conversationId });
+        isGenerating = !!status.data?.is_generating;
+      } catch {
+        isGenerating = false;
+      }
+      const [detailRes, historyRes] = await Promise.all([
+        ChatServiceApi().conversationServiceGetConversationDetail({ conversation: conversationId }),
+        loadConversationHistory(conversationId),
+      ]);
+      if (requestId !== loadConversationRequestRef.current) return;
+      const conversation = detailRes.data.conversation;
+      const tempData = {
+        knowledgeBaseId: conversation?.search_config?.dataset_list
+          ?.map((dataset: any) => dataset.id)
+          .filter((id: string) => !!id),
+        creators: conversation?.search_config?.creators,
+        tags: conversation?.search_config?.tags,
+        databaseBaseId: conversation?.search_config?.database_ids?.[0],
+      };
+      setChatConfig(tempData);
+      setChatConfigFn(tempData);
+      setKnowledgeRefreshKey((key) => key + 1);
+      setConversationSettings(parseConversationRuntimeSettings(conversation));
+      setConversationId(conversationId);
 
-        setConversationWorkflowSettings(
-          parseConversationWorkflowSettings(conversation),
-        );
-
-        setConversationId(resolvedId);
-
-        const history = historyRes.data.history;
-        const list = buildChatMessageListFromHistory(history, {
-          fallbackCreateTime: "xxx-xxx-xxx",
-          isGenerating,
-        });
-        chatRef.current?.replaceMessageList(resolvedId, list);
-        if (isGenerating) {
-          chatRef.current?.openResumeSSE?.(resolvedId);
-        }
-      })
-      .catch(() => {
+      const list = buildChatMessageListFromHistory(historyRes.data.history, {
+        fallbackCreateTime: "xxx-xxx-xxx",
+        isGenerating,
+      });
+      chatRef.current?.replaceMessageList(conversationId, list);
+      if (isGenerating) {
+        chatRef.current?.openResumeSSE?.(conversationId);
+      }
+    } catch {
+      if (requestId === loadConversationRequestRef.current) {
         setIsChatContent(false);
         message.error(localizeErrorCode("2000509"));
-      })
-      .finally(() => {
+      }
+    } finally {
+      if (requestId === loadConversationRequestRef.current) {
         setIsRestoringConversation(false);
-      });
+      }
+    }
   }, [setConversationId, setChatConfigFn, setIsChatContent]);
 
   useEffect(() => {
@@ -622,13 +603,14 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       }
       const conversationId = detail.conversationId || "";
       if (!conversationId) {
+        loadConversationRequestRef.current += 1;
         if (sessionIdRef.current) {
           chatRef.current?.disconnectConversationStream?.(sessionIdRef.current, {
-            persistResumeKey: true,
+            persistResumeKey: false,
           });
         }
         setIsRestoringConversation(false);
-        setConversationWorkflowSettings(undefined);
+        setConversationSettings(undefined);
         setChatConfig({});
         setChatConfigFn({});
         chatRef.current?.createNewChat();
@@ -639,7 +621,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
       }
       if (sessionIdRef.current) {
         chatRef.current?.disconnectConversationStream?.(sessionIdRef.current, {
-          persistResumeKey: true,
+          persistResumeKey: false,
         });
       }
       setIsChatContent(true);
@@ -791,14 +773,14 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         chatConfig={chatConfig}
         setChatConfig={setChatConfig}
         setChatConfigFn={setChatConfigFn}
-        onWorkflowSettingsChange={(settings) => {
+        onConversationSettingsChange={(settings) => {
           if (!sessionId) {
-            pendingWorkflowSettingsRef.current = settings;
+            pendingConversationSettingsRef.current = settings;
           } else {
-            setConversationWorkflowSettings(settings);
+            setConversationSettings(settings);
           }
         }}
-        initialWorkflowSettings={conversationWorkflowSettings}
+        initialConversationSettings={conversationSettings}
         hasWorkflowSession={hasWorkflowSession}
         knowledgeRefreshKey={knowledgeRefreshKey}
         embeddingReady={embeddingReady}

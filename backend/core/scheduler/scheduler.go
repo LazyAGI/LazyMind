@@ -30,6 +30,10 @@ import (
 
 // CreateSchedule inserts a new UserSchedule and computes the first next_run_at.
 func CreateSchedule(ctx context.Context, db *gorm.DB, s *orm.UserSchedule) error {
+	s.Name = strings.TrimSpace(s.Name)
+	if s.Name == "" {
+		return errors.New("name required")
+	}
 	if s.ID == "" {
 		s.ID = common.GeneratePrefixedID("sched_", 36)
 	}

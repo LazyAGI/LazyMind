@@ -92,7 +92,6 @@ class ChannelExecutionContext:
     attachments: tuple[ChannelAttachment, ...] = ()
     ask_answers_structured: dict[str, Any] | None = None
     thinking_depth: Literal['low', 'medium', 'high', 'max'] | None = None
-    external_agent_conversation_id: str = ''
     include_capability_settings: bool = False
 
     @classmethod
@@ -126,9 +125,6 @@ class ChannelExecutionContext:
                 dict(raw_answers) if isinstance(raw_answers, dict) else None
             ),
             thinking_depth=thinking_depth or None,
-            external_agent_conversation_id=str(
-                value.get('external_agent_conversation_id') or ''
-            ).strip()[:512],
             include_capability_settings=(
                 value.get('include_capability_settings') is True
             ),
@@ -140,9 +136,6 @@ class ChannelExecutionContext:
             'attachments': [item.to_dict() for item in self.attachments],
             'ask_answers_structured': self.ask_answers_structured,
             'thinking_depth': self.thinking_depth or '',
-            'external_agent_conversation_id': (
-                self.external_agent_conversation_id
-            ),
             'include_capability_settings': (
                 self.include_capability_settings
             ),
@@ -161,7 +154,6 @@ class ChatOptions:
     ask_answers_structured: dict[str, Any] | None = None
     thinking_depth: Literal['low', 'medium', 'high', 'max'] | None = None
     enable_workflow: bool | None = None
-    external_agent: bool = False
     features: ChannelFeatureProfile = BASIC_CHAT_FEATURES
 
 
@@ -188,9 +180,8 @@ class CoreStreamUpdate:
     thinking_seconds: int | None = None
     conversation_id: str = ''
     history_id: str = ''
-    external_event: dict[str, Any] | None = None
     task_created: dict[str, Any] | None = None
-    workflow_progress: str = ''
+    task_progress: str = ''
 
 
 @dataclass(frozen=True, slots=True)

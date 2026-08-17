@@ -25,7 +25,6 @@ class ActionKind(str, Enum):
     CAPABILITY_CONFIGURE = 'capability.configure'
     CONVERSATION_SETTINGS = 'conversation.settings'
     CONVERSATION_SETTINGS_UPDATE = 'conversation.settings.update'
-    WORKFLOW_INVOKE = 'workflow.invoke'
     CLARIFY = 'clarify'
 
 
@@ -321,6 +320,7 @@ class CapabilityConfigureParameters(_StrictModel):
 class ConversationSettingsParameters(_StrictModel):
     section: Literal[
         'overview',
+        'executor',
         'knowledge_base',
         'subagent',
         'skill',
@@ -356,6 +356,11 @@ class ConversationSubagentSetting(_StrictModel):
     enabled: bool
 
 
+class ConversationExecutorSetting(_StrictModel):
+    setting: Literal['executor']
+    executor_id: str = Field(min_length=1, max_length=64)
+
+
 class AccountSkillSetting(_StrictModel):
     setting: Literal['skill']
     skill_id: str = Field(min_length=1, max_length=512)
@@ -384,6 +389,7 @@ ConversationSettingChange: TypeAlias = Annotated[
     | ConversationWorkflowEnabledSetting
     | ConversationWorkflowModeSetting
     | ConversationSubagentSetting
+    | ConversationExecutorSetting
     | AccountSkillSetting
     | AccountToolSetting
     | AccountPersonalizationSetting
@@ -403,32 +409,6 @@ class ConversationSettingsUpdateParameters(_StrictModel):
         min_length=1,
         max_length=8,
         description='Verbatim substrings requesting a persistent setting change.',
-    )
-
-
-class WorkflowInvokeParameters(_StrictModel):
-    workflow_ref: str = Field(
-        min_length=1,
-        max_length=512,
-        description=(
-            'Exact workflow ref from state.available_workflows. Never invent or '
-            'rewrite a workflow ref.'
-        ),
-    )
-    message: str = Field(
-        min_length=1,
-        max_length=4000,
-        description=(
-            'The complete verbatim user task to execute with the selected workflow.'
-        ),
-    )
-    evidence: list[Evidence] = Field(
-        min_length=1,
-        max_length=8,
-        description=(
-            'Verbatim substrings showing that the selected workflow directly '
-            'matches the user request.'
-        ),
     )
 
 
@@ -480,19 +460,12 @@ _CAPABILITY_CONFIGURE_DESCRIPTION = (
 )
 _CONVERSATION_SETTINGS_DESCRIPTION = (
     'Show persistent settings for the current conversation and account: knowledge bases, '
-    'Workflow execution mode, SubAgent, Skills, tools, personalization, and workflows. '
+    'Chat executor, Workflow execution mode, SubAgent, Skills, tools, personalization, and workflows. '
     'This never selects a resource for only the next turn.'
 )
 _CONVERSATION_SETTINGS_UPDATE_DESCRIPTION = (
     'Persistently update one setting for the current conversation or account. '
     'This never performs one-turn capability invocation.'
-)
-_WORKFLOW_INVOKE_DESCRIPTION = (
-    'Invoke one available workflow when it directly matches the primary requested '
-    'deliverable. Select workflow_ref exactly from state.available_workflows and '
-    'preserve the complete user task verbatim. Do not use for an incidental sub-step, '
-    'for a workflow absent from the supplied catalog, or when the user explicitly '
-    'rejects that workflow.'
 )
 _CLARIFY_DESCRIPTION = (
     'Ask one clarification question when no command and required parameters can be selected '
@@ -587,15 +560,6 @@ class ConversationSettingsUpdateCommand(_CommandBase):
     parameters: ConversationSettingsUpdateParameters
 
 
-class WorkflowInvokeCommand(_CommandBase):
-    name: ClassVar[ActionKind] = ActionKind.WORKFLOW_INVOKE
-    description: ClassVar[str] = _WORKFLOW_INVOKE_DESCRIPTION
-    command: Literal[ActionKind.WORKFLOW_INVOKE] = Field(
-        description=_WORKFLOW_INVOKE_DESCRIPTION
-    )
-    parameters: WorkflowInvokeParameters
-
-
 class ClarifyCommand(_CommandBase):
     name: ClassVar[ActionKind] = ActionKind.CLARIFY
     description: ClassVar[str] = _CLARIFY_DESCRIPTION
@@ -615,7 +579,6 @@ COMMAND_TYPES = (
     CapabilityConfigureCommand,
     ConversationSettingsCommand,
     ConversationSettingsUpdateCommand,
-    WorkflowInvokeCommand,
     ClarifyCommand,
 )
 _CommandUnion = reduce(or_, COMMAND_TYPES)
@@ -635,8 +598,6 @@ COMMAND_SELECTION_RULES = (
     'questions about information stored inside a resource are chat.',
     'Use selection.choose only for a pure numbered answer when '
     'state.latest_selection.has_continuation is true.',
-    'Use workflow.invoke only with an exact ref from state.available_workflows and '
-    'only when that workflow directly serves the primary requested deliverable.',
 )
 
 

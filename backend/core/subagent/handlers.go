@@ -115,12 +115,6 @@ func InternalIngestTaskEvent(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "persist task event failed", http.StatusServiceUnavailable)
 		return
 	}
-	if task, err := GetTask(r.Context(), store.DB(), taskID); err == nil && EventHooks != nil &&
-		(event.Type == "task_start" || event.Type == "progress" || event.Type == "artifact" ||
-			event.Type == "done" || event.Type == "error") {
-		EventHooks.CallConversationEvent(r.Context(), store.State(), task.ConversationID, "",
-			"workflow_runtime_updated", map[string]any{"task_id": taskID, "change": event.Type})
-	}
 	common.ReplyOK(w, map[string]any{"accepted": true})
 }
 

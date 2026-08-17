@@ -141,10 +141,10 @@ func TestBatchTransitionAcceptsAllReadyTargetsAtomically(t *testing.T) {
 	}
 }
 
-func TestHostTransitionCreatesRemoteExecutableSubAgentTask(t *testing.T) {
+func TestExternalControllerTransitionQueuesHostedAttemptForBoundConversation(t *testing.T) {
 	db, graphHash := setupBatchTransitionSession(t)
 	if err := db.Model(&orm.WorkflowSession{}).Where("id = ?", "batch-session").
-		Update("conversation_id", "").Error; err != nil {
+		Update("controller_host", "external-agent").Error; err != nil {
 		t.Fatal(err)
 	}
 	w, data := runBatchTransition(t, db, graphHash, "execute", []map[string]any{
@@ -153,19 +153,19 @@ func TestHostTransitionCreatesRemoteExecutableSubAgentTask(t *testing.T) {
 	if w.Code != http.StatusOK || data["accepted"] != true {
 		t.Fatalf("host transition rejected: status=%d body=%s", w.Code, w.Body.String())
 	}
-	var task orm.SubAgentTask
-	if err := db.Where("id = ?", "host-task-b").First(&task).Error; err != nil {
-		t.Fatalf("remote execution task missing: %v", err)
-	}
-	if task.AgentType != "workflow_step" || task.Objective != "run b" || task.CreateUserID != "batch-user" {
-		t.Fatalf("unexpected task: %#v", task)
-	}
-	var params map[string]any
-	if err := json.Unmarshal(task.Params, &params); err != nil {
+	var taskCount int64
+	if err := db.Model(&orm.SubAgentTask{}).Where("id = ?", "host-task-b").Count(&taskCount).Error; err != nil {
 		t.Fatal(err)
 	}
-	if params["session_id"] != "batch-session" || params["step_id"] != "branch_b" || params["user_input"] != "hello" {
-		t.Fatalf("unexpected task params: %#v", params)
+	if taskCount != 0 {
+		t.Fatalf("hosted Workflow attempt created %d redundant SubAgent tasks", taskCount)
+	}
+	var attempt orm.WorkflowSessionStep
+	if err := db.Where("id = ?", "host-task-b").First(&attempt).Error; err != nil {
+		t.Fatalf("hosted Workflow attempt missing: %v", err)
+	}
+	if attempt.SessionID != "batch-session" || attempt.StepID != "branch_b" || attempt.Status != "queued" {
+		t.Fatalf("unexpected hosted attempt: %#v", attempt)
 	}
 }
 

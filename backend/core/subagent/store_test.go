@@ -164,6 +164,26 @@ func TestListTasksByConversationForUserEnforcesOwnership(t *testing.T) {
 	}
 }
 
+func TestListTasksByConversationForUserExcludesWorkflowAttempts(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	for _, input := range []CreateTaskInput{
+		{TaskID: "independent", ConversationID: "conv", CreateUserID: "user-1", AgentType: "research"},
+		{TaskID: "workflow", ConversationID: "conv", CreateUserID: "user-1", AgentType: "workflow_step"},
+	} {
+		if _, err := CreateTask(ctx, db.DB, input); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tasks, err := ListTasksByConversationForUser(ctx, db.DB, "conv", "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 1 || tasks[0].ID != "independent" {
+		t.Fatalf("public tasks = %#v, want only independent task", tasks)
+	}
+}
+
 func TestMarkInterrupted(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()

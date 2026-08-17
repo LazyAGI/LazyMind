@@ -15,8 +15,39 @@ export interface DesktopRuntimeStatus {
   services?: Record<string, DesktopRuntimeServiceStatus>;
 }
 
+export type DesktopAgent = "codex" | "cursor" | "workbuddy" | "traework" | "deepseek-harness";
+
+export interface DesktopAgentSetupGuide {
+  method: "config_file" | "cursor_install_url" | "trae_config_file" | "dsh_profile_patch";
+  url?: string;
+  config_path?: string;
+  configuration?: string;
+}
+
+export interface DesktopAgentIntegrationStatus {
+  agent: DesktopAgent;
+  display_name?: string;
+  mode?: "managed" | "manual";
+  installed: boolean;
+  version?: string;
+  configured?: boolean;
+  owned?: boolean;
+  service_ready: boolean;
+  ready: boolean;
+  command?: string;
+  arguments?: string[];
+  endpoint?: string;
+  tools?: string[];
+  setup?: DesktopAgentSetupGuide;
+  readiness_error?: string;
+}
+
 export type DesktopRuntimeStatusResult =
   | { ok: true; data: DesktopRuntimeStatus }
+  | { ok: false; reason: DesktopBridgeUnavailableReason; error?: unknown };
+
+export type DesktopAgentIntegrationResult =
+  | { ok: true; data: DesktopAgentIntegrationStatus }
   | { ok: false; reason: DesktopBridgeUnavailableReason; error?: unknown };
 
 type DesktopBridgeCommand =
@@ -28,6 +59,8 @@ interface LazyMindDesktopBridge {
   openLogsDir?: () => Promise<void> | void;
   openDataDir?: () => Promise<void> | void;
   runtimeStatus?: () => Promise<unknown> | unknown;
+  agentIntegrationStatus?: (agent: DesktopAgent) => Promise<unknown> | unknown;
+  codexIntegrationAction?: (action: "connect" | "disconnect") => Promise<unknown> | unknown;
   restartRuntime?: () => Promise<unknown> | unknown;
   resetRuntime?: (scope?: "kb" | "all") => Promise<unknown> | unknown;
   selectFolder?: () => Promise<string | null> | string | null;
@@ -87,6 +120,35 @@ export function runtimeStatus(): Promise<DesktopRuntimeStatusResult> {
       reason: "failed" as const,
       error,
     }));
+}
+
+async function callAgentIntegration(
+  call: (bridge: LazyMindDesktopBridge) => Promise<unknown> | unknown,
+): Promise<DesktopAgentIntegrationResult> {
+  const bridge = getDesktopBridge();
+  if (!bridge) {
+    return { ok: false, reason: "unavailable" };
+  }
+  try {
+    const data = await call(bridge);
+    return { ok: true, data: data as DesktopAgentIntegrationStatus };
+  } catch (error) {
+    return { ok: false, reason: "failed", error };
+  }
+}
+
+export function agentIntegrationStatus(agent: DesktopAgent): Promise<DesktopAgentIntegrationResult> {
+  return callAgentIntegration((bridge) => {
+    if (!bridge.agentIntegrationStatus) throw new Error("Agent integration is unavailable");
+    return bridge.agentIntegrationStatus(agent);
+  });
+}
+
+export function codexIntegrationAction(action: "connect" | "disconnect"): Promise<DesktopAgentIntegrationResult> {
+  return callAgentIntegration((bridge) => {
+    if (!bridge.codexIntegrationAction) throw new Error("Codex integration is unavailable");
+    return bridge.codexIntegrationAction(action);
+  });
 }
 
 export function restartRuntime(): Promise<DesktopBridgeResult> {

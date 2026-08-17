@@ -618,6 +618,10 @@
     padding-left: 48px;
   }
 
+  .state-graph-editor > .sge-topbar {
+    padding-left: 56px;
+  }
+
   .self-evolution-chatlike-top {
     padding-left: 48px;
   }
@@ -828,17 +832,189 @@
 }
 
 .terminal-quick-count {
+  border: 0;
   display: inline-flex;
   min-height: 26px;
   align-items: center;
   justify-content: center;
+  gap: 6px;
   padding: 0 10px;
   border-radius: 7px;
   background: #eaf9f1;
   color: #159957;
+  cursor: pointer;
+  font-family: inherit;
   font-size: 12px;
   font-weight: 650;
   white-space: nowrap;
+
+  > .anticon {
+    font-size: 10px;
+    transition: transform 160ms ease;
+  }
+
+  &[aria-expanded='true'] > .anticon {
+    transform: rotate(180deg);
+  }
+
+  &:hover:not(:disabled) {
+    background: #dff6e9;
+  }
+
+  &:focus-visible {
+    outline: 2px solid #74c99d;
+    outline-offset: 2px;
+  }
+
+  &:disabled {
+    cursor: default;
+  }
+}
+
+.terminal-quick-accounts {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px solid var(--terminal-quick-line);
+  border-radius: 10px;
+  background: #f8fbff;
+
+  > header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+
+    > div {
+      min-width: 0;
+    }
+
+    strong,
+    small {
+      display: block;
+    }
+
+    strong {
+      color: var(--terminal-quick-ink);
+      font-size: 13px;
+    }
+
+    small {
+      margin-top: 2px;
+      color: var(--terminal-quick-muted);
+      font-size: 11px;
+      line-height: 1.4;
+    }
+
+    .ant-btn {
+      flex: 0 0 auto;
+      color: #245bdb;
+    }
+  }
+}
+
+.terminal-quick-account-list {
+  display: grid;
+  max-height: 160px;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+
+  li > button {
+    display: grid;
+    width: 100%;
+    grid-template-columns: 34px minmax(0, 1fr) auto;
+    gap: 9px;
+    align-items: center;
+    padding: 8px 9px;
+    border: 1px solid #dce6f1;
+    border-radius: 9px;
+    background: #fff;
+    color: inherit;
+    cursor: pointer;
+    font: inherit;
+    text-align: left;
+
+    &:hover {
+      border-color: #9bbcff;
+      background: #f7faff;
+    }
+
+    &:focus-visible {
+      outline: 2px solid #8fb7ff;
+      outline-offset: 1px;
+    }
+  }
+}
+
+.terminal-quick-account-icon {
+  display: inline-flex;
+  width: 34px;
+  height: 34px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  background: #eafaf1;
+  color: #07c160;
+  font-size: 18px;
+
+  &.is-feishu {
+    background: #eef3ff;
+    color: #3370ff;
+  }
+
+  .feishu-official-icon {
+    width: 20px;
+    height: 20px;
+  }
+}
+
+.terminal-quick-account-copy {
+  min-width: 0;
+
+  strong,
+  small {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  strong {
+    color: var(--terminal-quick-ink);
+    font-size: 13px;
+  }
+
+  small {
+    margin-top: 2px;
+    color: var(--terminal-quick-muted);
+    font-size: 11px;
+  }
+}
+
+.terminal-quick-account-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #245bdb;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.terminal-quick-accounts-state {
+  display: flex;
+  min-height: 54px;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px;
+  color: var(--terminal-quick-muted);
+  font-size: 12px;
+  text-align: center;
 }
 
 .terminal-quick-body {

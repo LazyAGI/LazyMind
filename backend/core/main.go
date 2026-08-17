@@ -15,6 +15,7 @@ import (
 
 	"lazymind/core/acl"
 	"lazymind/core/asyncjob"
+	capabilitybootstrap "lazymind/core/capability/bootstrap"
 	"lazymind/core/chat"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
@@ -22,6 +23,7 @@ import (
 	"lazymind/core/currentmemory"
 	"lazymind/core/episode"
 	"lazymind/core/evalset"
+	"lazymind/core/externallease"
 	"lazymind/core/log"
 	"lazymind/core/migrate"
 	"lazymind/core/modelprovider"
@@ -54,6 +56,18 @@ func openAPIArtifactExportEnabled() bool {
 		return true
 	}
 	return raw != "0" && raw != "false" && raw != "no" && raw != "off"
+}
+
+func buildCapabilityMCPHandler() (http.Handler, error) {
+	return capabilitybootstrap.NewHandler(capabilitybootstrap.Config{
+		DB:                        store.DB(),
+		LazyDB:                    store.LazyLLMDB(),
+		AuthServiceBaseURL:        common.AuthServiceBaseURL(),
+		AuthHTTPClient:            &http.Client{Timeout: 10 * time.Second},
+		KnowledgeSearchBaseURL:    common.ChatServiceEndpoint(),
+		InternalServiceToken:      os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN"),
+		KnowledgeSearchHTTPClient: &http.Client{Timeout: 60 * time.Second},
+	})
 }
 
 func exportOpenAPIArtifacts(openAPIJSON []byte) {
@@ -103,7 +117,53 @@ func exportOpenAPIArtifacts(openAPIJSON []byte) {
 // handleAPI textPermissiontext。perms text extract_api_permissions.py text api_permissions.json（Kong RBAC），
 // text core text（text Kong + auth-service Authorization）。text gorilla/mux，text path text，text ":action" text。
 func handleAPI(r *mux.Router, method, path string, perms []string, h http.HandlerFunc) *mux.Route {
-	return r.HandleFunc(path, withMutationRequestAudit(method, path, h)).Methods(method)
+	return r.HandleFunc(path, withMutationRequestAudit(method, path, withExternalAgentLease(h))).Methods(method)
+}
+
+func withExternalAgentLease(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if err := externallease.ValidateRequest(
+			r.Context(), store.DB(), externallease.Request{
+				Owner: strings.TrimSpace(r.Header.Get("X-User-Id")),
+				RunID: r.Header.Get("X-LazyMind-External-Ref"), LeaseToken: r.Header.Get("X-LazyMind-External-Lease"),
+				HostID: r.Header.Get("X-LazyMind-External-Host"), ConversationID: r.Header.Get("X-LazyMind-Conversation-Id"),
+				Operation: externalAgentOperation(r.Method, r.URL.Path),
+			}, time.Now().UTC(),
+		); err != nil {
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
+			return
+		}
+		next(w, r)
+	}
+}
+
+func externalAgentOperation(method, path string) externallease.Operation {
+	method = strings.ToUpper(strings.TrimSpace(method))
+	path = strings.TrimPrefix(strings.TrimSpace(path), "/api/core")
+	if method == http.MethodPost && path == "/mcp/capabilities/v1" {
+		return externallease.OperationCapabilityRead
+	}
+	if method == http.MethodPost && strings.HasPrefix(path, "/agent-invocations/") &&
+		(strings.HasSuffix(path, ":start") || strings.HasSuffix(path, ":finish")) {
+		return externallease.OperationInvocationWrite
+	}
+	if method == http.MethodGet && (path == "/workflow-runtime/v1/workflows" ||
+		strings.HasPrefix(path, "/workflow-runtime/v1/workflows/") || path == "/workflow-sessions" ||
+		strings.HasPrefix(path, "/workflow-input-resources/") || strings.HasPrefix(path, "/workflow-artifacts/") ||
+		(strings.HasPrefix(path, "/workflow-sessions/") &&
+			(strings.HasSuffix(path, "/projection") || strings.HasSuffix(path, "/artifacts")))) {
+		return externallease.OperationWorkflowRead
+	}
+	if method == http.MethodPost && (path == "/workflow-input-resources" || path == "/workflow-preparations" ||
+		(strings.HasPrefix(path, "/workflow-preparations/") && strings.HasSuffix(path, ":consume")) ||
+		(strings.HasPrefix(path, "/workflow-sessions/") &&
+			(strings.HasSuffix(path, ":stop") || strings.HasSuffix(path, ":resume") ||
+				strings.HasSuffix(path, ":advance-step-and-hand-off") ||
+				(strings.Contains(path, "/hosted-attempts/") &&
+					(strings.HasSuffix(path, ":begin") || strings.HasSuffix(path, ":resume") || strings.HasSuffix(path, ":submit")))))) {
+		return externallease.OperationWorkflowWrite
+	}
+	return ""
 }
 
 func registerCoreRoutes(r *mux.Router) {
@@ -118,6 +178,11 @@ func registerCoreRoutes(r *mux.Router) {
 		common.ReplyJSON(w, map[string]string{"message": "Admin only area"})
 	})
 	registerAllRoutes(r)
+}
+
+func registerCapabilityMCPRoute(r *mux.Router, handler http.Handler) {
+	handleAPI(r, "POST", "/mcp/capabilities/v1", []string{"qa.read"}, handler.ServeHTTP)
+	r.Handle("/mcp/capabilities/v1", handler).Methods(http.MethodGet, http.MethodDelete)
 }
 
 func coreListenAddr() string {
@@ -242,6 +307,10 @@ func main() {
 		AllowAllCapabilities: true,
 		AllowLegacyTools:     true,
 	})
+	workflowHosts.RegisterHost("external-agent", workflowexecutor.HostRegistration{
+		AllowAllCapabilities: true,
+		AllowLegacyTools:     true,
+	})
 	startBackgroundJobs := backgroundJobsEnabled()
 	if !startBackgroundJobs {
 		log.Logger.Info().Msg("core background jobs are disabled")
@@ -331,6 +400,13 @@ func main() {
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
 		w.Write(swaggerUIHTML)
 	}).Methods(http.MethodGet)
+
+	handler, err := buildCapabilityMCPHandler()
+	if err != nil {
+		log.Logger.Fatal().Err(err).Msg("initialize capability MCP failed")
+	}
+	registerCapabilityMCPRoute(r, handler)
+	log.Logger.Info().Str("path", "/mcp/capabilities/v1").Msg("capability MCP enabled")
 
 	listenAddr := coreListenAddr()
 	log.Logger.Info().Str("addr", listenAddr).Msg("Core listening")

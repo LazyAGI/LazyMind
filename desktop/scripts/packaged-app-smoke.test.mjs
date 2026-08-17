@@ -18,10 +18,15 @@ test("resolves packaged runtime paths on macOS and Windows", () => {
     resourcesRoot: "/Applications/LazyMind.app/Contents/Resources/runtime",
     repoRoot: "/Applications/LazyMind.app/Contents/Resources/runtime/app",
     manager: "/Applications/LazyMind.app/Contents/Resources/runtime/bin/local-runtime-manager",
+    agentConnector: "/Applications/LazyMind.app/Contents/Resources/runtime/bin/lazymind",
   });
   assert.match(
     packagedRuntimePaths("C:\\Apps\\LazyMind\\LazyMind.exe", "win32").manager,
     /resources[\\/]runtime[\\/]bin[\\/]local-runtime-manager\.exe$/,
+  );
+  assert.match(
+    packagedRuntimePaths("C:\\Apps\\LazyMind\\LazyMind.exe", "win32").agentConnector,
+    /resources[\\/]runtime[\\/]bin[\\/]lazymind\.exe$/,
   );
 });
 

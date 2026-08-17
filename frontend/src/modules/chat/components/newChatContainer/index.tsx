@@ -109,8 +109,8 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       disabledReason,
       disabledDescription,
       disabledAction,
-      onWorkflowSettingsChange,
-      initialWorkflowSettings,
+      onConversationSettingsChange,
+      initialConversationSettings,
       hasWorkflowSession,
     } = props;
 
@@ -408,8 +408,8 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
                   : undefined
               }
               onSkillDeposit={handleSkillDeposit}
-              onWorkflowSettingsChange={onWorkflowSettingsChange}
-              initialWorkflowSettings={initialWorkflowSettings}
+              onConversationSettingsChange={onConversationSettingsChange}
+              initialConversationSettings={initialConversationSettings}
               hasWorkflowSession={hasWorkflowSession}
             />
           </div>

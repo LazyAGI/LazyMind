@@ -741,6 +741,7 @@
 .settings-model-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: -2px 0 18px; }
 .settings-model-tabs button { min-height: 42px; padding: 0 16px; border: 1px solid #dbe3ef; border-radius: 12px; color: #334155; background: rgba(255, 255, 255, .86); font-size: 14px; font-weight: 750; cursor: pointer; }
 .settings-model-tabs button:hover { color: var(--settings-blue); border-color: #9fc5ff; }
+.settings-model-tabs button:focus-visible { outline: 2px solid #8dbaff; outline-offset: 3px; }
 .settings-model-tabs button.is-active { border-color: var(--settings-blue); color: #fff; background: var(--settings-blue); box-shadow: 0 12px 24px rgba(47, 109, 246, .2); }
 .settings-organization-tabs { display: flex; gap: 22px; margin: -4px 0 14px; border-bottom: 1px solid #dce5f1; }
 .settings-organization-tabs button { position: relative; min-height: 42px; padding: 0 3px; border: 0; color: #66758c; background: transparent; font-size: 14px; font-weight: 700; cursor: pointer; }

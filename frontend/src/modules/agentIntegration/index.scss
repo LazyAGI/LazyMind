@@ -1,0 +1,105 @@
+.agent-integration-page {
+  min-height: 100%;
+  padding: 32px;
+  background: #f5f7fa;
+
+  .agent-integration-header,
+  .agent-integration-card-title,
+  .agent-integration-summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+  }
+
+  .agent-integration-header {
+    max-width: 1280px;
+    margin: 0 auto 24px;
+
+    .ant-typography {
+      margin-bottom: 4px;
+    }
+  }
+
+  > .ant-alert,
+  > .ant-spin-nested-loading {
+    display: block;
+    max-width: 1280px;
+    margin: 0 auto 16px;
+  }
+
+  .agent-integration-error {
+    white-space: pre-line;
+  }
+
+  .agent-integration-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 360px), 1fr));
+    gap: 20px;
+  }
+
+  .agent-integration-card {
+    border-radius: 16px;
+  }
+
+  .agent-integration-card-title .ant-typography {
+    margin: 0;
+  }
+
+  .agent-integration-summary {
+    justify-content: flex-start;
+    margin: 28px 0;
+
+    > div {
+      min-width: 150px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+  }
+
+  .agent-integration-tools {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin: 20px 0;
+  }
+
+  .agent-integration-security {
+    max-width: 720px;
+  }
+
+  .agent-integration-command {
+    max-height: 132px;
+    margin: 16px 0;
+    overflow: auto;
+    overflow-wrap: anywhere;
+
+    code {
+      display: block;
+      padding: 12px;
+      white-space: pre-wrap;
+    }
+  }
+
+  .agent-integration-fallback {
+    margin-top: 16px;
+  }
+
+  .agent-integration-next-step {
+    margin: 12px 0 0;
+  }
+}
+
+@media (max-width: 720px) {
+  .agent-integration-page {
+    padding: 20px;
+
+    .agent-integration-header,
+    .agent-integration-card-title,
+    .agent-integration-summary {
+      align-items: flex-start;
+      flex-direction: column;
+    }
+  }
+}

@@ -59,12 +59,16 @@ const desktopCredentialIdentityPath = path.join(app.getPath("userData"), "creden
 const startupLogPath = path.join(desktopLogsDir, "desktop-startup.log");
 const sidecarPath = process.env.LAZYMIND_DESKTOP_SIDECAR ||
   path.join(runtimeResourcesRoot, "bin", `local-runtime-manager${isWindows ? ".exe" : ""}`);
+const agentConnectorPath = process.env.LAZYMIND_DESKTOP_AGENT_CONNECTOR ||
+  path.join(runtimeResourcesRoot, "bin", `lazymind${isWindows ? ".exe" : ""}`);
 const maxStartupLogEntries = 1200;
 const maxSidecarFailureBytes = 32 * 1024;
 const desktopShutdownTimeout = process.env.LAZYMIND_DESKTOP_SHUTDOWN_TIMEOUT || "20s";
 const forceExitDelayMs = 1500;
 const rendererReadyTimeoutMs = 30 * 1000;
 const runtimeOwnershipHandoffTimeoutMs = 30 * 1000;
+const agentHostRestartMaxDelayMs = 30 * 1000;
+const agentHostStableAfterMs = 60 * 1000;
 const macInstallationWarmupMarker = macWarmupMarkerPath(app.getPath("userData"));
 const startupMetricsHistoryPath = path.join(desktopLogsDir, "startup-metrics.jsonl");
 const startupMetricsRecorder = createStartupMetricsRecorder({
@@ -91,6 +95,10 @@ let frontendOpeningAllowed = false;
 let tray;
 let rendererReadyWait;
 let runtimeProcess;
+let agentHostProcess;
+let agentHostRestartTimer;
+let agentHostStableTimer;
+let agentHostRestartAttempts = 0;
 let runtimeProcessExit = null;
 let sidecarStderrTail = "";
 let sidecarStructuredFailure = "";
@@ -416,6 +424,85 @@ function runSidecar(command, extra = [], options = {}) {
   });
 }
 
+function runAgentConnector(agent, action) {
+  const allowedActions = {
+    codex: new Set(["connect", "status", "disconnect"]),
+    cursor: new Set(["status"]),
+    workbuddy: new Set(["status"]),
+    traework: new Set(["status"]),
+    "deepseek-harness": new Set(["status"]),
+  };
+  if (!allowedActions[agent]?.has(action)) {
+    return Promise.reject(new Error(`Unsupported external Agent action: ${agent}/${action}`));
+  }
+  const args = ["internal", "agent", agent, action];
+  return new Promise((resolve, reject) => {
+    execFile(agentConnectorPath, args, {
+      env: sidecarEnv(),
+      timeout: 60_000,
+      windowsHide: isWindows,
+    }, (error, stdout, stderr) => {
+      if (error) {
+        error.message = String(stderr || stdout || error.message).trim();
+        reject(error);
+        return;
+      }
+      try {
+        resolve(JSON.parse(stdout));
+      } catch (parseError) {
+        reject(new Error(`LazyMind connector returned invalid JSON: ${parseError.message}`));
+      }
+    });
+  });
+}
+
+function scheduleAgentHostRestart() {
+  if (isQuitting || isInstallerWarmup || agentHostRestartTimer) {
+    return;
+  }
+  const delay = Math.min(1000 * (2 ** Math.min(agentHostRestartAttempts, 5)), agentHostRestartMaxDelayMs);
+  agentHostRestartAttempts += 1;
+  appendStartupLog("agent-host", `restarting external Agent host in ${delay}ms`);
+  agentHostRestartTimer = setTimeout(() => {
+    agentHostRestartTimer = undefined;
+    startAgentHost();
+  }, delay);
+  agentHostRestartTimer.unref?.();
+}
+
+function startAgentHost() {
+  if (agentHostProcess || isQuitting || isInstallerWarmup || !fs.existsSync(agentConnectorPath)) {
+    return;
+  }
+  clearTimeout(agentHostRestartTimer);
+  agentHostRestartTimer = undefined;
+  const child = spawn(agentConnectorPath, ["agent", "host", "run", "--provider", "all"], {
+    env: sidecarEnv(),
+    stdio: ["ignore", "ignore", "pipe"],
+    detached: false,
+    windowsHide: isWindows,
+  });
+  agentHostProcess = child;
+  clearTimeout(agentHostStableTimer);
+  agentHostStableTimer = setTimeout(() => {
+    agentHostRestartAttempts = 0;
+  }, agentHostStableAfterMs);
+  agentHostStableTimer.unref?.();
+  child.stderr?.on("data", (chunk) => appendStartupLog("agent-host", chunk));
+  child.once("error", (error) => {
+    appendStartupLog("agent-host", `could not start external Agent host: ${serializeError(error)}`);
+  });
+  child.once("close", (code, signal) => {
+    appendStartupLog("agent-host", `external Agent host exited with code ${code ?? "null"} signal ${signal ?? "null"}`);
+    clearTimeout(agentHostStableTimer);
+    agentHostStableTimer = undefined;
+    if (agentHostProcess === child) {
+      agentHostProcess = undefined;
+    }
+    scheduleAgentHostRestart();
+  });
+}
+
 async function runInstallerWarmup() {
   const timeoutSeconds = installerWarmupTimeoutSeconds();
   const maintenanceArgs = ["--maintenance", "installer-warmup"];
@@ -724,6 +811,12 @@ function beginFastQuit(reason = "quit") {
   allowWindowClose = true;
   finishStartupMetrics("cancelled", "app-quit-during-startup");
   appendStartupLog("desktop", `quitting LazyMind Desktop (${reason}); runtime cleanup continues in background`);
+  clearTimeout(agentHostRestartTimer);
+  clearTimeout(agentHostStableTimer);
+  agentHostRestartTimer = undefined;
+  agentHostStableTimer = undefined;
+  agentHostProcess?.kill();
+  agentHostProcess = undefined;
   const guardWillCleanUp = Boolean(guardPID || (!isWindows && guardProcess));
   if (!guardWillCleanUp) {
     spawnDetachedShutdownHelper(reason);
@@ -1336,6 +1429,7 @@ async function createWindow() {
       return;
     }
     nextMainWindow = new BrowserWindow(browserWindowOptions(false));
+    startAgentHost();
     attachExternalNavigationHandler(nextMainWindow);
     mainWindow = nextMainWindow;
     nextMainWindow.once("closed", () => {
@@ -1405,6 +1499,8 @@ ipcMain.on("lazymind:renderer-ready", (event) => {
 });
 
 ipcMain.handle("lazymind:runtimeStatus", () => readStatus());
+ipcMain.handle("lazymind:agentIntegrationStatus", (_event, agent) => runAgentConnector(agent, "status"));
+ipcMain.handle("lazymind:codexIntegrationAction", (_event, action) => runAgentConnector("codex", action));
 ipcMain.handle("lazymind:restartRuntime", async () => {
   await runSidecar("down");
   startRuntime();

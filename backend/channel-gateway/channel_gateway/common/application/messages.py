@@ -15,7 +15,6 @@ from channel_gateway.common.domain.commands import (
     ChatCommand,
     ConversationNewCommand,
     ConversationSwitchCommand,
-    WorkflowInvokeCommand,
 )
 
 
@@ -90,7 +89,7 @@ class ChannelMessageService:
 
 
 def _starts_core_stream(command) -> bool:
-    if isinstance(command, (ChatCommand, WorkflowInvokeCommand)):
+    if isinstance(command, ChatCommand):
         return True
     if isinstance(
         command,

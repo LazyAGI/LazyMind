@@ -20,6 +20,7 @@ import {
   BookOutlined,
   CloudOutlined,
   LinkOutlined,
+  DesktopOutlined,
 } from "@ant-design/icons";
 import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import type { UserDetailResponse } from "@/api/generated/auth-client";
@@ -54,6 +55,7 @@ import { useLocalSessionGate } from "@/runtime/useLocalSessionGate";
 import UserAgreementConsentModal, {
   useUserAgreementConsentGate,
 } from "@/components/UserAgreementConsentModal";
+import { isDesktopRuntime } from "@/runtime/mode";
 import TerminalConnectionQuickPanel from "@/modules/channelGateway/components/TerminalConnectionQuickPanel";
 import "./index.scss";
 
@@ -156,6 +158,15 @@ export default function MainLayout() {
   const pathname = location.pathname || "/agent/chat";
 
   const settingsMenuItems = [
+    ...(isDesktopRuntime()
+      ? [
+          {
+            key: "/settings/agent-integrations",
+            label: t("layout.agentIntegrations"),
+            icon: <DesktopOutlined className="settings-popover-icon" />,
+          },
+        ]
+      : []),
     {
       key: "/settings?section=overview",
       label: t("layout.settings"),
@@ -212,7 +223,8 @@ export default function MainLayout() {
     pathname.startsWith("/settings") ||
     pathname.startsWith("/lib/knowledge/detail") ||
     pathname.startsWith("/memory-management") ||
-    pathname.startsWith("/self-evolution");
+    pathname.startsWith("/self-evolution") ||
+    pathname.startsWith("/settings/agent-integrations");
   const isSelfEvolutionObservationPage =
     pathname.startsWith("/self-evolution/detail/") && pathname.includes("/observation/");
   const isChatPage = pathname.startsWith("/agent/chat");
@@ -931,6 +943,7 @@ export default function MainLayout() {
                             <span className="settings-active-badge">{t("admin.developerActiveTag")}</span>
                           )}
                           {[
+                            "/settings/agent-integrations",
                             "/settings?section=overview",
                             "/settings?section=models",
                             "/settings?section=developer",

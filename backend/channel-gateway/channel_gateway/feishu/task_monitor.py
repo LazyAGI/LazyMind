@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import datetime as dt
 import hashlib
 import json
 import logging
 import threading
-import time
 import uuid
 from typing import Any
 from urllib.parse import urlsplit
@@ -25,11 +23,9 @@ from channel_gateway.feishu.presentation import (
 
 _logger = logging.getLogger(__name__)
 _POLL_SECONDS = 5
-_WORKFLOW_TERMINAL_GRACE_SECONDS = 180
 _TASK_OUTBOX_LIMIT = 100
-_MAX_WORKFLOW_TASKS = 20
 _MAX_TASK_IMAGES = 20
-_MONITOR_STATE_VERSION = 4
+_MONITOR_STATE_VERSION = 5
 _TERMINAL_STATUSES = {
     'completed',
     'succeeded',
@@ -39,11 +35,6 @@ _TERMINAL_STATUSES = {
     'canceled',
     'stopped',
     'interrupted',
-}
-_NON_RETRYABLE_TERMINAL_STATUSES = {
-    'cancelled',
-    'canceled',
-    'stopped',
 }
 
 
@@ -120,7 +111,7 @@ class FeishuTaskCardMonitor:
                 saved_state.get('task_monitor') or {}
             )
             if (
-                monitor_state.get('workflow_terminal') is True
+                monitor_state.get('task_terminal') is True
                 and monitor_state.get('delivery_settled') is True
                 and int(monitor_state.get('version') or 1)
                 >= _MONITOR_STATE_VERSION
@@ -136,30 +127,22 @@ class FeishuTaskCardMonitor:
                     f'{outbound.outbox_id[-16:]}_{part_index}'
                 ),
             )
-            workflow = workflow_tasks(tasks, anchor_task_id)
-            if not workflow:
+            task = find_task(tasks, anchor_task_id)
+            if task is None:
                 continue
-            visible_workflow = workflow[-_MAX_WORKFLOW_TASKS:]
-            now = time.time()
-            waiting, terminal, terminal_since = _workflow_state(
-                workflow,
-                monitor_state,
-                now,
-            )
+            terminal = _task_terminal(task)
             artifacts, omitted_artifacts = _task_artifact_manifest(
                 outbound,
                 part_index,
-                workflow,
+                task,
             )
             delivery = self._store.sync_task_artifact_outbounds(
                 parent=outbound,
                 part_index=part_index,
                 artifacts=artifacts,
             )
-            signature = _workflow_signature(
-                visible_workflow,
-                waiting_for_next_step=waiting,
-                terminal=terminal,
+            signature = _task_signature(
+                task,
                 image_delivery=delivery,
                 omitted_images=omitted_artifacts,
             )
@@ -173,9 +156,8 @@ class FeishuTaskCardMonitor:
                     outbound=outbound,
                     account=account,
                     message_id=message_id,
-                    card=FeishuPresentationRenderer.task_workflow_card(
-                        visible_workflow,
-                        waiting_for_next_step=waiting,
+                    card=FeishuPresentationRenderer.task_card(
+                        task,
                         inflight_image_count=delivery['inflight'],
                         failed_image_count=delivery['dead'],
                         omitted_image_count=omitted_artifacts,
@@ -197,17 +179,13 @@ class FeishuTaskCardMonitor:
                 'task_monitor': {
                     'version': _MONITOR_STATE_VERSION,
                     'signature': signature,
-                    'workflow_terminal': terminal,
+                    'task_terminal': terminal,
                     'delivery_settled': delivery_settled,
                     'artifacts_complete': artifacts_complete,
                     'failed_count': delivery['dead'],
                     'omitted_count': omitted_artifacts,
                     'manifest_hash': _artifact_manifest_hash(artifacts),
-                    'terminal_since': terminal_since,
-                    'latest_status': str(
-                        workflow[-1].get('status') or ''
-                    ).lower(),
-                    'task_lineage': _task_lineage(workflow),
+                    'latest_status': str(task.get('status') or '').lower(),
                 },
             }
             persisted = (
@@ -361,28 +339,25 @@ def _task_image_projection(
 def _task_artifact_manifest(
     outbound: ClaimedOutbound,
     part_index: int,
-    workflow: list[dict[str, Any]],
+    task: dict[str, Any],
 ) -> tuple[list[dict[str, str]], int]:
     artifacts: list[dict[str, str]] = []
-    omitted = 0
-    for task in workflow:
-        images, task_omitted = _task_image_projection(task)
-        omitted += task_omitted
-        for artifact_key, source, caption in images:
-            artifacts.append({
-                'artifact_key': artifact_key,
-                'source': source,
-                'caption': caption,
-                'delivery_id': str(
-                    uuid.uuid5(
-                        uuid.NAMESPACE_URL,
-                        (
-                            f'lazymind:{outbound.outbox_id}:'
-                            f'task-artifact:{part_index}:{artifact_key}'
-                        ),
-                    )
-                ),
-            })
+    images, omitted = _task_image_projection(task)
+    for artifact_key, source, caption in images:
+        artifacts.append({
+            'artifact_key': artifact_key,
+            'source': source,
+            'caption': caption,
+            'delivery_id': str(
+                uuid.uuid5(
+                    uuid.NAMESPACE_URL,
+                    (
+                        f'lazymind:{outbound.outbox_id}:'
+                        f'task-artifact:{part_index}:{artifact_key}'
+                    ),
+                )
+            ),
+        })
     return artifacts, omitted
 
 
@@ -399,171 +374,47 @@ def _is_lazymind_static_file(source: str) -> bool:
     return urlsplit(source).path.startswith('/static-files/')
 
 
-def workflow_tasks(
+def find_task(
     tasks: list[dict[str, Any]],
-    anchor_task_id: str,
-) -> list[dict[str, Any]]:
-    anchor = next(
+    task_id: str,
+) -> dict[str, Any] | None:
+    return next(
         (
             task
             for task in tasks
-            if str(task.get('task_id') or '') == anchor_task_id
+            if str(task.get('task_id') or '') == task_id
         ),
         None,
     )
-    if anchor is None:
-        return []
-    anchor_seq = int(anchor.get('seq_in_conversation') or 0)
-    anchor_type = str(anchor.get('agent_type') or '')
-    anchor_title = str(anchor.get('title') or '')
-    workflow_prefix = (
-        anchor_title.split(':', 1)[0]
-        if anchor_type == 'workflow_step' and ':' in anchor_title
-        else ''
-    )
-    candidates = sorted(
-        [
-            task
-            for task in tasks
-            if int(task.get('seq_in_conversation') or 0) >= anchor_seq
-            and (
-                (
-                    workflow_prefix
-                    and str(task.get('agent_type') or '') == 'workflow_step'
-                    and str(task.get('title') or '').startswith(
-                        f'{workflow_prefix}:'
-                    )
-                )
-                or (
-                    not workflow_prefix
-                    and str(task.get('task_id') or '') == anchor_task_id
-                )
-            )
-        ],
-        key=lambda task: int(
-            task.get('seq_in_conversation') or 0
-        ),
-    )
-    workflow: list[dict[str, Any]] = []
-    for task in candidates:
-        if workflow and (
-            str(workflow[-1].get('status') or '').lower()
-            in _TERMINAL_STATUSES
-            and _task_gap_seconds(workflow[-1], task)
-            > _WORKFLOW_TERMINAL_GRACE_SECONDS
-        ):
-            break
-        workflow.append(task)
-    return workflow
 
 
-def _task_gap_seconds(
-    previous: dict[str, Any],
-    current: dict[str, Any],
-) -> float:
-    previous_at = _parse_task_time(previous.get('updated_at'))
-    current_at = _parse_task_time(current.get('created_at'))
-    if previous_at is None or current_at is None:
-        return 0
-    return max(0, (current_at - previous_at).total_seconds())
+def _task_terminal(task: dict[str, Any]) -> bool:
+    return str(task.get('status') or '').lower() in _TERMINAL_STATUSES
 
 
-def _parse_task_time(value: Any) -> dt.datetime | None:
-    text = str(value or '').strip()
-    if not text:
-        return None
-    try:
-        parsed = dt.datetime.fromisoformat(
-            text.replace('Z', '+00:00')
-        )
-    except ValueError:
-        return None
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=dt.timezone.utc)
-    return parsed
-
-
-def _workflow_state(
-    tasks: list[dict[str, Any]],
-    previous: dict[str, Any],
-    now: float,
-) -> tuple[bool, bool, float]:
-    latest = tasks[-1]
-    status = str(latest.get('status') or '').lower()
-    if status not in _TERMINAL_STATUSES:
-        return False, False, 0
-    if status in _NON_RETRYABLE_TERMINAL_STATUSES:
-        return False, True, now
-    if str(latest.get('agent_type') or '') != 'workflow_step':
-        return False, True, now
-    if (
-        status in {'completed', 'succeeded', 'success'}
-        and str(latest.get('title') or '')
-        .split(':', 1)[-1]
-        .strip()
-        .lower() in {
-            'generate_image',
-            'enhance_image',
-        }
-    ):
-        return False, True, now
-    current_lineage = _task_lineage(tasks)
-    terminal_since = float(
-        previous.get('terminal_since') or 0
-    )
-    if (
-        str(previous.get('task_lineage') or '') != current_lineage
-        or str(previous.get('latest_status') or '') != status
-        or terminal_since <= 0
-    ):
-        terminal_since = now
-    waiting = (
-        now - terminal_since
-        < _WORKFLOW_TERMINAL_GRACE_SECONDS
-    )
-    return waiting, not waiting, terminal_since
-
-
-def _task_lineage(tasks: list[dict[str, Any]]) -> str:
-    return hashlib.sha256(
-        '\0'.join(
-            str(task.get('task_id') or '')
-            for task in tasks
-        ).encode()
-    ).hexdigest()
-
-
-def _workflow_signature(
-    tasks: list[dict[str, Any]],
+def _task_signature(
+    task: dict[str, Any],
     *,
-    waiting_for_next_step: bool,
-    terminal: bool,
     image_delivery: dict[str, int],
     omitted_images: int,
 ) -> str:
     payload = {
-        'waiting': waiting_for_next_step,
-        'terminal': terminal,
         'image_delivery': image_delivery,
         'omitted_images': omitted_images,
-        'tasks': [
-            {
-                key: task.get(key)
-                for key in (
-                    'task_id',
-                    'seq_in_conversation',
-                    'title',
-                    'agent_type',
-                    'status',
-                    'progress_pct',
-                    'current_phase',
-                    'estimated_sec',
-                    'summary',
-                    'updated_at',
-                )
-            }
-            for task in tasks
-        ],
+        'task': {
+            key: task.get(key)
+            for key in (
+                'task_id',
+                'title',
+                'agent_type',
+                'status',
+                'progress_pct',
+                'current_phase',
+                'estimated_sec',
+                'summary',
+                'updated_at',
+            )
+        },
     }
     encoded = json.dumps(
         payload,
