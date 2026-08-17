@@ -94,7 +94,6 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       onOpenSSE,
       onOpenResumeSSE,
       onConversationIdChange,
-      parseErrorData,
       setShowHistoryList,
       showHistoryList,
       showHistoryButton = true,
@@ -147,7 +146,6 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       onOpenSSE,
       onOpenResumeSSE,
       onConversationIdChange,
-      parseErrorData,
       setIsChatContent,
       clearStorePendingMessage,
       clearCiteMessages,
@@ -232,8 +230,9 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       );
       return Boolean(
         lastAssistantMessage &&
-          lastAssistantMessage.finish_reason !==
-            ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified,
+          (lastAssistantMessage.run_status ||
+            lastAssistantMessage.finish_reason !==
+              ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified),
       );
     }, [conversation.messageList]);
     const shouldRemindSkillDeposit =

@@ -1498,6 +1498,14 @@ const zhCN = {
     batchChatTemplateFileName: "批量对话模板.xlsx",
     embeddingNotReadyWarning: "向量模型未就绪，知识库检索暂不可用",
     streamCloseFailedLog: "关闭消息流失败",
+    runStatus: {
+      completed: "回答已完成",
+      interrupted: "回答未完整生成",
+      failed: "模型调用失败",
+      cancelled: "已取消生成",
+      partialOutput: "已生成的部分内容已保留。",
+      noOutput: "本次未生成可用内容。",
+    },
     writerIR: {
       documentRegion: "结构化文档",
       stage: "阶段：{{stage}}",

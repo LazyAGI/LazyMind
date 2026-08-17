@@ -18,8 +18,14 @@ export interface ChatImperativeProps {
   ) => void;
   uploadFiles?: (files: File[]) => void;
   openResumeSSE?: (conversationId: string) => void;
-  appendAutoAdvanceTurn?: (conversationId: string, driverMessage: string) => void;
-  ensureAutoAdvanceUserTurn?: (conversationId: string, driverMessage: string) => void;
+  appendAutoAdvanceTurn?: (
+    conversationId: string,
+    driverMessage: string,
+  ) => void;
+  ensureAutoAdvanceUserTurn?: (
+    conversationId: string,
+    driverMessage: string,
+  ) => void;
 }
 
 export interface ChatContainerProps {
@@ -73,6 +79,21 @@ export interface ChatMessage {
     uid?: string;
   }[];
   finish_reason?: string;
+  run_status?: "completed" | "interrupted" | "failed" | "cancelled";
+  run_terminal?: {
+    status: "completed" | "interrupted" | "failed" | "cancelled";
+    reason:
+      | "normal"
+      | "awaiting_user_input"
+      | "model_incomplete"
+      | "model_failure"
+      | "runtime_failure"
+      | "user_cancelled";
+    code?: string;
+    partial_output: boolean;
+    model_call_id?: string;
+    diagnostic_id?: string;
+  };
   inputs?: Query[];
   reasoning_content?: string;
   thinking_duration_s?: number | string;
@@ -113,14 +134,14 @@ export interface ChatMessage {
   };
   resolved_tool_limit_decision_id?: string;
   mentions?: ChatMention[];
-	collected_inputs?: Array<{
-		task_id: string;
-		conversation_id?: string;
-		source_name?: string;
-		executed_at?: string;
-		mode?: string;
-		summary?: string;
-	}>;
+  collected_inputs?: Array<{
+    task_id: string;
+    conversation_id?: string;
+    source_name?: string;
+    executed_at?: string;
+    mode?: string;
+    summary?: string;
+  }>;
   intent_updated?: {
     scope: "conversation";
     intent_context: Record<string, unknown>;

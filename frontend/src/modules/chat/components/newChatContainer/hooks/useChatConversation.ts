@@ -6,7 +6,11 @@ import {
   ChatConversationsResponseFinishReasonEnum,
 } from "@/api/generated/chatbot-client";
 import { allowedImageTypes } from "../../ImageUpload";
-import type { ChatFileList, ChatInputImperativeProps, SendMessageParams } from "../../ChatInput/types";
+import type {
+  ChatFileList,
+  ChatInputImperativeProps,
+  SendMessageParams,
+} from "../../ChatInput/types";
 import { RoleTypes } from "@/modules/chat/constants/common";
 import {
   CHAT_AUTO_ADVANCE_EVENT,
@@ -60,7 +64,6 @@ interface UseChatConversationOptions {
   onOpenSSE: ChatContainerProps["onOpenSSE"];
   onOpenResumeSSE?: ChatContainerProps["onOpenResumeSSE"];
   onConversationIdChange?: ChatContainerProps["onConversationIdChange"];
-  parseErrorData: ChatContainerProps["parseErrorData"];
   setIsChatContent: ChatContainerProps["setIsChatContent"];
   clearStorePendingMessage: () => void;
   clearCiteMessages: () => void;
@@ -76,7 +79,6 @@ export function useChatConversation({
   onOpenSSE,
   onOpenResumeSSE,
   onConversationIdChange,
-  parseErrorData,
   setIsChatContent,
   clearStorePendingMessage,
   clearCiteMessages,
@@ -97,6 +99,8 @@ export function useChatConversation({
   const ffmpegPromptOpenRef = useRef(false);
   const runtimeWaitAbortRef = useRef<AbortController | null>(null);
   const runtimeWaitInProgressRef = useRef(false);
+  const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const resumeAttemptRef = useRef(0);
 
   const [messageList, setMessageList] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -148,6 +152,10 @@ export function useChatConversation({
         if (currentId && streamManager.hasActiveStream(currentId)) {
           streamManager.saveMessageList(currentId, messageListRef.current);
         }
+      }
+      if (resumeTimerRef.current) {
+        clearTimeout(resumeTimerRef.current);
+        resumeTimerRef.current = null;
       }
 
       streamManager.cleanupFinishedStreams();
@@ -247,9 +255,7 @@ export function useChatConversation({
         index !== undefined
           ? index
           : id
-            ? newList.findIndex(
-              (msg) => msg.id === id || msg.history_id === id,
-            )
+            ? newList.findIndex((msg) => msg.id === id || msg.history_id === id)
             : newList.length - 1;
       if (targetIndex >= 0) {
         newList[targetIndex] = { ...newList[targetIndex], ...data };
@@ -284,23 +290,11 @@ export function useChatConversation({
       // ignore malformed error payload
     }
 
-    const errMessage = parseErrorData(e.data || "");
-
-    if (errorConversationId === currentConversationIdRef.current) {
-      updateAssistantMessage({
-        finish_reason:
-          ChatConversationsResponseFinishReasonEnum.FinishReasonUnknown,
-        errMessage,
-      });
-      setIsStreaming(false);
-      closeSSE();
-    }
-
     if (errorConversationId) {
-      streamManager.closeAndCleanup(errorConversationId);
-      conversationMessagesCache.current.delete(errorConversationId);
+      sessionStorage.setItem(CHAT_RESUME_CONVERSATION_KEY, errorConversationId);
+      streamManager.removeStreamEntry(errorConversationId);
+      scheduleResume(errorConversationId);
     }
-    sessionStorage.removeItem(CHAT_RESUME_CONVERSATION_KEY);
   }
 
   function onTimeout(e: any) {
@@ -310,10 +304,27 @@ export function useChatConversation({
     onError({ type: "error", data: e.data });
   }
 
+  function scheduleResume(conversationId: string) {
+    if (!onOpenResumeSSE || resumeTimerRef.current) {
+      return;
+    }
+    const delay = Math.min(1000 * 2 ** resumeAttemptRef.current, 10000);
+    resumeTimerRef.current = setTimeout(() => {
+      resumeTimerRef.current = null;
+      resumeAttemptRef.current += 1;
+      void openResumeSSE(conversationId);
+    }, delay);
+  }
+
   function onMessage(e: any) {
     const result = UIUtils.jsonParser(e.data)?.result;
     if (!result) {
       return;
+    }
+    resumeAttemptRef.current = 0;
+    if (resumeTimerRef.current) {
+      clearTimeout(resumeTimerRef.current);
+      resumeTimerRef.current = null;
     }
 
     ffmpegErrorBufferRef.current = (
@@ -387,11 +398,11 @@ export function useChatConversation({
           streamManager.removeStreamEntry(previousConversationId);
 
           const streamCallbacks: Record<string, (event: CustomEvent) => void> =
-          {
-            message: (event) => onMessage(event),
-            error: (event) => onError(event),
-            timeout: (event) => onTimeout(event),
-          };
+            {
+              message: (event) => onMessage(event),
+              error: (event) => onError(event),
+              timeout: (event) => onTimeout(event),
+            };
           streamManager.registerStream(
             result.conversation_id,
             sseRef.current,
@@ -427,18 +438,33 @@ export function useChatConversation({
       });
     }
 
-    if (
-      isActiveConversation &&
-      result.finish_reason ===
-      ChatConversationsResponseFinishReasonEnum.FinishReasonStop
-    ) {
+    const runTerminal =
+      result.runtime_event?.type === "run_finished"
+        ? result.runtime_event.data
+        : undefined;
+    const allRunsFinished = Boolean(
+      runTerminal &&
+        (messageConversationId || currentConversationIdAtStart) &&
+        streamManager.isStreamFinished(
+          messageConversationId || currentConversationIdAtStart,
+        ),
+    );
+    const finalRunTerminal = allRunsFinished
+      ? Object.values(
+          streamManager.getStreamState(
+            messageConversationId || currentConversationIdAtStart,
+          )?.runTerminals || {},
+        ).sort((left, right) => {
+          const rank = { failed: 0, interrupted: 1, cancelled: 2, completed: 3 };
+          return rank[left.status] - rank[right.status];
+        })[0]
+      : undefined;
+
+    if (isActiveConversation && finalRunTerminal?.status === "completed") {
       scroll.isMouseScrollingRef.current = true;
     }
 
-    if (
-      result.finish_reason !==
-      ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified
-    ) {
+    if (allRunsFinished) {
       if (isActiveConversation) {
         setIsStreaming(false);
         closeSSE();
@@ -485,7 +511,6 @@ export function useChatConversation({
         }
       }
 
-
       const incomingExternalSequence = Number(
         result.external_event_sequence || 0,
       );
@@ -509,7 +534,7 @@ export function useChatConversation({
       const isLastAssistantCompleted =
         assistantMessage?.role === RoleTypes.ASSISTANT &&
         assistantMessage?.finish_reason ===
-        ChatConversationsResponseFinishReasonEnum.FinishReasonStop;
+          ChatConversationsResponseFinishReasonEnum.FinishReasonStop;
 
       if (
         !assistantMessage ||
@@ -530,7 +555,10 @@ export function useChatConversation({
 
       const previousRawDelta =
         assistantMessage.raw_delta || assistantMessage.delta || "";
-      const mergedRawDelta = appendStreamDelta(previousRawDelta, result.delta || "");
+      const mergedRawDelta = appendStreamDelta(
+        previousRawDelta,
+        result.delta || "",
+      );
       const splitResult = splitThinkingContent(
         mergedRawDelta,
         assistantMessage.reasoning_content || "",
@@ -539,6 +567,8 @@ export function useChatConversation({
       assistantMessage = {
         ...assistantMessage,
         ...result,
+        run_terminal: finalRunTerminal || assistantMessage.run_terminal,
+        run_status: finalRunTerminal?.status || assistantMessage.run_status,
         id: result.messageId,
         raw_delta: mergedRawDelta,
         delta: stripAskUserReceipt(
@@ -590,8 +620,7 @@ export function useChatConversation({
     action: ChatConversationsRequestActionEnum,
     extras?: Record<string, unknown>,
   ) => {
-    const operation =
-      extras?.run_in_background === true ? "workflow" : "chat";
+    const operation = extras?.run_in_background === true ? "workflow" : "chat";
     if (!(await waitForChatRuntime(operation))) {
       return false;
     }
@@ -615,7 +644,8 @@ export function useChatConversation({
     };
 
     const sseOrPromise = onOpenSSE(input, action, {}, extras);
-    const sse = sseOrPromise instanceof Promise ? await sseOrPromise : sseOrPromise;
+    const sse =
+      sseOrPromise instanceof Promise ? await sseOrPromise : sseOrPromise;
     sseRef.current = sse;
 
     streamManager.registerStream(conversationId, sse, callbacks);
@@ -642,7 +672,7 @@ export function useChatConversation({
             sessionStorage.setItem(CHAT_RESUME_CONVERSATION_KEY, realId);
             onConversationIdChange?.(realId);
           })
-          .catch(() => { });
+          .catch(() => {});
       }, 400);
     }
     return true;
@@ -650,9 +680,11 @@ export function useChatConversation({
 
   async function syncGeneratingHistory(conversationId: string) {
     try {
-      const statusRes = await ChatServiceApi().conversationServiceGetChatStatus({
-        conversationId,
-      });
+      const statusRes = await ChatServiceApi().conversationServiceGetChatStatus(
+        {
+          conversationId,
+        },
+      );
       if (!statusRes.data?.is_generating) {
         return;
       }
@@ -666,7 +698,8 @@ export function useChatConversation({
       if (apiList.length === 0) {
         return;
       }
-      const cached = conversationMessagesCache.current.get(conversationId) ?? [];
+      const cached =
+        conversationMessagesCache.current.get(conversationId) ?? [];
       const baseList =
         currentConversationIdRef.current === conversationId
           ? messageListRef.current
@@ -708,10 +741,14 @@ export function useChatConversation({
     const latestAssistant = messageListRef.current.findLast(
       (item) => item?.role === RoleTypes.ASSISTANT,
     );
-    const sse = onOpenResumeSSE(conversationId, {}, {
-      historyId: latestAssistant?.history_id,
-      afterSequence: Number(latestAssistant?.external_event_sequence || 0),
-    });
+    const sse = onOpenResumeSSE(
+      conversationId,
+      {},
+      {
+        historyId: latestAssistant?.history_id,
+        afterSequence: Number(latestAssistant?.external_event_sequence || 0),
+      },
+    );
     sseRef.current = sse;
 
     streamManager.registerStream(conversationId, sse, callbacks);
@@ -750,8 +787,7 @@ export function useChatConversation({
       display_delta: text,
       role: RoleTypes.USER,
       inputs: [{ input_type: "text", text }],
-      finish_reason:
-        ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
+      finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
       create_time,
       model_mode: "value_engineering",
       auto_advance: true,
@@ -778,7 +814,10 @@ export function useChatConversation({
     }
   }
 
-  function appendAutoAdvanceTurn(conversationId: string, driverMessage: string) {
+  function appendAutoAdvanceTurn(
+    conversationId: string,
+    driverMessage: string,
+  ) {
     ensureAutoAdvanceUserTurn(conversationId, driverMessage);
     void openResumeSSE(conversationId);
   }
@@ -903,8 +942,7 @@ export function useChatConversation({
       files: tempGroup?.file,
       fileList,
       inputs,
-      finish_reason:
-        ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
+      finish_reason: ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
       create_time,
       model_mode: "value_engineering",
       mentions: params.mentions || [],
@@ -1068,27 +1106,8 @@ export function useChatConversation({
         );
     }
 
-    if (sseRef.current) {
-      try {
-        sseRef.current.close();
-      } catch (error) {
-        console.error("Error closing SSE:", error);
-      }
-    }
-
-    updateAssistantMessage({
-      finish_reason:
-        ChatConversationsResponseFinishReasonEnum.FinishReasonStop,
-    });
-
-    setIsStreaming(false);
-    closeSSE();
-
-    if (conversationId) {
-      streamManager.closeAndCleanup(conversationId);
-      conversationMessagesCache.current.delete(conversationId);
-    }
-    sessionStorage.removeItem(CHAT_RESUME_CONVERSATION_KEY);
+    // The stop request is only a control signal. Keep the business stream open
+    // until Core emits the authoritative cancelled run_finished event.
   }
 
   function regenerate() {

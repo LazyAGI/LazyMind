@@ -423,8 +423,8 @@ components:
                     type: string
                 delta:
                     type: string
-                finish_reason:
-                    type: string
+                execution:
+                    $ref: '#/components/schemas/ExternalExecutionProjection'
                 history_id:
                     type: string
                 message:
@@ -435,6 +435,8 @@ components:
                     type: array
                 reasoning_content:
                     type: string
+                runtime_event:
+                    $ref: '#/components/schemas/ChatRuntimeEvent'
                 seq:
                     type: integer
                 sources:
@@ -445,6 +447,20 @@ components:
                 thinking_duration_s:
                     format: int64
                     type: integer
+            type: object
+        ChatRuntimeEvent:
+            properties:
+                data:
+                    properties: {}
+                    type: object
+                event_id:
+                    type: string
+                run_id:
+                    type: string
+                schema_version:
+                    type: integer
+                type:
+                    type: string
             type: object
         CheckDatabaseConnectionResponse:
             properties:
@@ -620,6 +636,8 @@ components:
             properties:
                 create_time:
                     type: string
+                execution:
+                    $ref: '#/components/schemas/ExternalExecutionProjection'
                 expected_answer:
                     type: string
                 feed_back:
@@ -639,6 +657,12 @@ components:
                     type: string
                 result:
                     type: string
+                run_id:
+                    type: string
+                run_status:
+                    type: string
+                run_terminal:
+                    $ref: '#/components/schemas/RunTerminal'
                 seq:
                     type: integer
                 sources:
@@ -2104,6 +2128,100 @@ components:
                         type: string
                     type: array
             type: object
+        ExternalExecutionInvocation:
+            properties:
+                failed:
+                    type: integer
+                interrupted:
+                    type: integer
+                running:
+                    type: integer
+                succeeded:
+                    type: integer
+                tools:
+                    items:
+                        type: string
+                    type: array
+                total:
+                    type: integer
+            type: object
+        ExternalExecutionProjection:
+            properties:
+                artifact_count:
+                    format: int64
+                    type: integer
+                artifact_revision_count:
+                    format: int64
+                    type: integer
+                claim_count:
+                    type: integer
+                claimed_at:
+                    format: date-time
+                    type: string
+                completed_at:
+                    format: date-time
+                    type: string
+                created_at:
+                    format: date-time
+                    type: string
+                error_message:
+                    type: string
+                event_count:
+                    format: int64
+                    type: integer
+                history_id:
+                    type: string
+                host_id:
+                    type: string
+                host_online:
+                    type: boolean
+                invocation:
+                    $ref: '#/components/schemas/ExternalExecutionInvocation'
+                last_heartbeat_at:
+                    format: date-time
+                    type: string
+                provider:
+                    type: string
+                recovery_count:
+                    type: integer
+                run_id:
+                    type: string
+                status:
+                    enum:
+                        - pending
+                        - running
+                        - completed
+                        - failed
+                        - stopped
+                    type: string
+                updated_at:
+                    format: date-time
+                    type: string
+                workflows:
+                    items:
+                        $ref: '#/components/schemas/ExternalExecutionWorkflow'
+                    type: array
+            type: object
+        ExternalExecutionWorkflow:
+            properties:
+                artifact_count:
+                    format: int64
+                    type: integer
+                artifact_revision_count:
+                    format: int64
+                    type: integer
+                current_step_id:
+                    type: string
+                session_id:
+                    type: string
+                state_version:
+                    format: int64
+                    type: integer
+                status:
+                    type: string
+                workflow_id:
+                    type: string
+            type: object
         GetKBAuthorizationResponse:
             properties:
                 grants:
@@ -2854,6 +2972,21 @@ components:
                 - feedback_count
                 - feedback_rate
                 - user_count
+            type: object
+        RunTerminal:
+            properties:
+                code:
+                    type: string
+                diagnostic_id:
+                    type: string
+                model_call_id:
+                    type: string
+                partial_output:
+                    type: boolean
+                reason:
+                    type: string
+                status:
+                    type: string
             type: object
         SearchDatasetMemberRequest:
             properties:
@@ -4017,6 +4150,21 @@ components:
                 - status
                 - thread_id
                 - updated_at
+            type: object
+        artifactActionPreviewOpenAPIRequest:
+            properties:
+                action:
+                    type: string
+                base_revision:
+                    type: integer
+                input:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+            required:
+                - action
+                - base_revision
             type: object
         builtinSkillListOpenAPIResponse:
             properties:
@@ -6175,6 +6323,13 @@ components:
             required:
                 - base_revision
             type: object
+        writerDocumentWriteBackOpenAPIRequest:
+            properties:
+                base_revision:
+                    type: integer
+            required:
+                - base_revision
+            type: object
 info:
     description: LazyMind Go backend core API - proxies to algorithm services. text Kong text /api/core。
     title: Backend Core API
@@ -6270,6 +6425,36 @@ paths:
             summary: Unpublish market skill item
             tags:
                 - skill-market
+    /api/core/agent-invocations:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /agent-invocations
+    /api/core/agent-invocations/{invocation_id}:finish:
+        post:
+            parameters:
+                - in: path
+                  name: invocation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /agent-invocations/{invocation_id}:finish
+    /api/core/agent-invocations/{invocation_id}:start:
+        post:
+            parameters:
+                - in: path
+                  name: invocation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /agent-invocations/{invocation_id}:start
     /api/core/agent/candidates:
         get:
             description: Proxies Evo GET /candidates for a current-user thread. The thread_id query parameter is required by Core for ownership enforcement.
@@ -7210,6 +7395,12 @@ paths:
                 "200":
                     description: OK
             summary: POST /chat
+    /api/core/chat/executors:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /chat/executors
     /api/core/chat/settings/workflows:
         get:
             responses:
@@ -7352,6 +7543,18 @@ paths:
                 "200":
                     description: OK
             summary: GET /conversations/{conversation_id}/events
+    /api/core/conversations/{conversation_id}/settings:
+        patch:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /conversations/{conversation_id}/settings
     /api/core/conversations/{conversation_id}/tasks:
         get:
             parameters:
@@ -9504,55 +9707,7 @@ paths:
             summary: Create eval set by import
             tags:
                 - eval-set-imports
-    /api/core/external-agent-conversations/{conversation_id}:interrupt:
-        post:
-            parameters:
-                - in: path
-                  name: conversation_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /external-agent-conversations/{conversation_id}:interrupt
-    /api/core/external-agent-conversations/{conversation_id}:release:
-        post:
-            parameters:
-                - in: path
-                  name: conversation_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /external-agent-conversations/{conversation_id}:release
-    /api/core/external-agent-conversations/{conversation_id}:run:
-        post:
-            parameters:
-                - in: path
-                  name: conversation_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /external-agent-conversations/{conversation_id}:run
-    /api/core/external-agent-requests/{request_id}:respond:
-        post:
-            parameters:
-                - in: path
-                  name: request_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /external-agent-requests/{request_id}:respond
-    /api/core/external-agents/{provider}/bindings:
+    /api/core/external-chat/hosts/{provider}:claim:
         post:
             parameters:
                 - in: path
@@ -9563,8 +9718,8 @@ paths:
             responses:
                 "200":
                     description: OK
-            summary: POST /external-agents/{provider}/bindings
-    /api/core/external-agents/{provider}/projects:
+            summary: POST /external-chat/hosts/{provider}:claim
+    /api/core/external-chat/hosts/{provider}:status:
         get:
             parameters:
                 - in: path
@@ -9575,36 +9730,37 @@ paths:
             responses:
                 "200":
                     description: OK
-            summary: GET /external-agents/{provider}/projects
-    /api/core/external-agents/{provider}/threads:
+            summary: GET /external-chat/hosts/{provider}:status
+    /api/core/external-chat/runs:
         get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /external-chat/runs
+    /api/core/external-chat/runs/{run_id}:event:
+        post:
             parameters:
                 - in: path
-                  name: provider
+                  name: run_id
                   required: true
                   schema:
                     type: string
             responses:
                 "200":
                     description: OK
-            summary: GET /external-agents/{provider}/threads
-    /api/core/external-agents/{provider}/threads/{thread_id}:
-        get:
+            summary: POST /external-chat/runs/{run_id}:event
+    /api/core/external-chat/runs/{run_id}:heartbeat:
+        post:
             parameters:
                 - in: path
-                  name: provider
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: thread_id
+                  name: run_id
                   required: true
                   schema:
                     type: string
             responses:
                 "200":
                     description: OK
-            summary: GET /external-agents/{provider}/threads/{thread_id}
+            summary: POST /external-chat/runs/{run_id}:heartbeat
     /api/core/health:
         get:
             responses:
@@ -14009,6 +14165,12 @@ paths:
                 "200":
                     description: OK
             summary: GET /workflow-runtime/v1/workflows/{workflow_id}
+    /api/core/workflow-sessions:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-sessions
     /api/core/workflow-sessions/{session_id}:
         get:
             parameters:
@@ -14056,6 +14218,57 @@ paths:
                 "200":
                     description: OK
             summary: GET /workflow-sessions/{session_id}/events
+    /api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:begin:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: attempt_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:begin
+    /api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:resume:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: attempt_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:resume
+    /api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:submit:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: attempt_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:submit
     /api/core/workflow-sessions/{session_id}/input-bindings:
         get:
             parameters:
@@ -14246,6 +14459,41 @@ paths:
                 "200":
                     description: OK
             summary: GET /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions
+    /api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-preview:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: list_index
+                  required: true
+                  schema:
+                    type: integer
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/artifactActionPreviewOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Artifact action preview
+            summary: Preview a Workflow-owned artifact action
+            tags:
+                - workflow
     /api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:sync-writer-document:
         post:
             parameters:
@@ -14280,6 +14528,7 @@ paths:
                     description: WriterDocument sync result
             summary: Sync an edited WriterDocument to Feishu
             tags:
+                - workflow
                 - writer
     /api/core/workflow-sessions/{session_id}/slots/{slot_id}/order:
         get:
@@ -14338,6 +14587,32 @@ paths:
                 "200":
                     description: OK
             summary: GET /workflow-sessions/{session_id}/steps
+    /api/core/workflow-sessions/{session_id}/writer-document:write-back:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/writerDocumentWriteBackOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: WriterDocument write-back result
+            summary: Write the active WriterDocument back to Feishu
+            tags:
+                - workflow
+                - writer
     /api/core/workflow-sessions/{session_id}:advance-step:
         post:
             parameters:

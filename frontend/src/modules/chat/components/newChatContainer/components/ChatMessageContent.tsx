@@ -9,9 +9,7 @@ import { ChatConversationsResponseFinishReasonEnum } from "@/api/generated/chatb
 import MarkdownViewer from "@/modules/chat/components/MarkdownViewer";
 import { getCitationSources } from "@/modules/chat/utils/sourceAdapter";
 import { RoleTypes } from "@/modules/chat/constants/common";
-import {
-  formatThinkingForDisplay,
-} from "@/modules/chat/utils/thinking";
+import { formatThinkingForDisplay } from "@/modules/chat/utils/thinking";
 import { useTranslation } from "react-i18next";
 import ChatImages from "../../ChatImages";
 import ChatFiles from "../../ChatFiles";
@@ -48,8 +46,9 @@ export default function ChatMessageContent({
   const citeMessageList =
     item.role === RoleTypes.USER ? getCiteMessages(item) : [];
   const isStreaming =
+    !item.run_status &&
     item.finish_reason !==
-    ChatConversationsResponseFinishReasonEnum.FinishReasonStop;
+      ChatConversationsResponseFinishReasonEnum.FinishReasonStop;
   const isCollapsed = isThinkingCollapsed(thinkingKey, !isStreaming);
   const conversationIntent =
     item.intent_updated?.scope === "conversation"

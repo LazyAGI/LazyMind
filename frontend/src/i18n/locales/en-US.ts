@@ -1543,6 +1543,14 @@ const enUS = {
     batchChatTemplateFileName: "batch-chat-template.xlsx",
     embeddingNotReadyWarning: "The embedding model is not ready, so knowledge-base retrieval is unavailable",
     streamCloseFailedLog: "Failed to close message stream",
+    runStatus: {
+      completed: "Answer complete",
+      interrupted: "Answer generation was interrupted",
+      failed: "Model call failed",
+      cancelled: "Generation cancelled",
+      partialOutput: "The partial output has been preserved.",
+      noOutput: "No usable output was generated.",
+    },
     writerIR: {
       documentRegion: "Structured document",
       stage: "Stage: {{stage}}",
