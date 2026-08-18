@@ -34,6 +34,7 @@ type skillMDFrontmatter struct {
 
 var Manifests = []Manifest{
 	{UID: "bsk_01JZ7Q3YF6Q2Z4HM9V8K7D1R3P", Category: "research", DirName: "deep-research"},
+	{UID: "bsk_01K2B9M4RKT8A6C3F7H5N1P0Q2", Category: "research", DirName: "market-researcher"},
 	{UID: "bsk_01JZ7Q4AJ1X9N5B2C8M6T0W3EY", Category: "review", DirName: "single-document-review"},
 	{UID: "bsk_01JZ7Q4RPN6K3Y8V1D5H2A9S0B", Category: "review", DirName: "systematic-document-and-literature-review"},
 	{UID: "bsk_01JZ7Q58M4E7C2N9X6P1D3V0KA", Category: "search", DirName: "paper-search"},
