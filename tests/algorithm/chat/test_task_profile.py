@@ -634,13 +634,21 @@ def test_optional_issue_uses_assumption_without_forcing_clarification() -> None:
     assert 'clarification' not in selected_prompt_modules(profile)
 
 
-def test_skill_candidates_are_relevance_ranked_and_capped_at_five() -> None:
+def test_skill_candidates_delegate_semantic_selection_to_skill_manager() -> None:
     profile = resolve_task_profile('调研AI视频行业', enable_llm_fallback=False)
     available = [f'research/video-{index}' for index in range(8)] + ['writing/poetry']
     visible = select_skill_candidates(available, '调研AI视频行业', profile)
-    assert visible is not None
-    assert len(visible) == 5
-    assert all(item.startswith('research/video-') for item in visible)
+    assert visible == available
+
+
+def test_skill_candidates_do_not_drop_semantically_relevant_cross_language_skill() -> None:
+    query = '用投资视角看看热点'
+    profile = resolve_task_profile(query, enable_llm_fallback=False)
+
+    assert profile.skill_mode == 'candidates'
+    assert select_skill_candidates(
+        ['external/hot-news-summary'], query, profile,
+    ) == ['external/hot-news-summary']
 
 
 def test_explicit_skill_selection_overrides_learning_suppression() -> None:

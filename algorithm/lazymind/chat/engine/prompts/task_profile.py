@@ -1046,28 +1046,6 @@ def selected_prompt_modules(profile: TaskProfile) -> list[str]:
     return list(dict.fromkeys(modules))
 
 
-_SKILL_OUTCOME_TERMS: dict[Outcome, tuple[str, ...]] = {
-    'research': ('research', 'review', 'search', '调研', '研究'),
-    'analyze': ('analysis', 'review', 'critique', '分析', '审查'),
-    'transform': ('transform', 'rewrite', 'translate', 'summary', '转换', '改写'),
-    'decide': ('decision', 'comparison', 'compare', '决策', '对比'),
-    'plan': ('planning', 'plan', 'roadmap', '规划', '计划'),
-    'create': ('create', 'writing', 'generation', '创作', '生成'),
-    'execute': ('automation', 'operation', 'deploy', '执行', '自动化'),
-    'diagnose': ('diagnose', 'debug', 'review', '排障', '诊断'),
-    'answer': ('answer',),
-    'learn': ('learning', 'tutorial'),
-}
-
-
-def _selection_tokens(value: str) -> set[str]:
-    text = str(value or '').lower()
-    latin = re.findall(r'[a-z0-9][a-z0-9_-]{1,}', text)
-    cjk = re.findall(r'[\u3400-\u9fff]{2,}', text)
-    bigrams = [token[index:index + 2] for token in cjk for index in range(len(token) - 1)]
-    return set(latin + cjk + bigrams)
-
-
 def select_skill_candidates(
     available_skills: list[str] | None,
     query: str,
@@ -1083,12 +1061,9 @@ def select_skill_candidates(
             return available_skills
         available = set(available_skills or [])
         return [skill for skill in selected if skill in available]
-    available = [str(item) for item in (available_skills or []) if str(item).strip()]
-    query_tokens = _selection_tokens(query)
-    query_tokens.update(_SKILL_OUTCOME_TERMS[profile.primary_outcome])
-    ranked = []
-    for index, skill in enumerate(available):
-        score = len(query_tokens & _selection_tokens(skill))
-        ranked.append((score, index, skill))
-    ranked.sort(key=lambda item: (-item[0], item[1]))
-    return [skill for score, _, skill in ranked if score > 0][:max(1, min(limit, 5))]
+    # Skill references are identifiers, not semantic metadata. Filtering them by
+    # lexical overlap can discard a relevant skill before LazyLLM's SkillManager
+    # reads its SKILL.md description and lets the model decide whether to use it.
+    # Keep query/limit in the interface for existing callers, but delegate
+    # candidate relevance to the downstream skill mechanism.
+    return [str(item) for item in (available_skills or []) if str(item).strip()]
