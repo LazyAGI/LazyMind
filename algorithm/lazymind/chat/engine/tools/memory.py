@@ -665,16 +665,10 @@ class MemoryTools:
         for field, value in required_context:
             if not value:
                 return _record_tool_result(
-                    {
-                        'success': False,
-                        'tool': 'episode_create',
-                        'error': {
-                            'code': 'missing_context',
-                            'message': f'{field} is required in agentic_config.',
-                            'detail': {'field': field},
-                        },
-                        'retryable': False,
-                    },
+                    tool_error(
+                        'episode_create', f'{field} is required in agentic_config.',
+                        code='missing_context', details={'field': field},
+                    ),
                     mutation=False,
                 )
             values[field] = value
@@ -682,33 +676,19 @@ class MemoryTools:
         source_kind = str(config.get('episode_source_kind') or '').strip()
         if not source_kind:
             return _record_tool_result(
-                {
-                    'success': False,
-                    'tool': 'episode_create',
-                    'error': {
-                        'code': 'missing_context',
-                        'message': 'episode_source_kind is required in agentic_config.',
-                        'detail': {'field': 'episode_source_kind'},
-                    },
-                    'retryable': False,
-                },
+                tool_error(
+                    'episode_create', 'episode_source_kind is required in agentic_config.',
+                    code='missing_context', details={'field': 'episode_source_kind'},
+                ),
                 mutation=False,
             )
         if source_kind not in {'chat_explicit', 'memory_review'}:
             return _record_tool_result(
-                {
-                    'success': False,
-                    'tool': 'episode_create',
-                    'error': {
-                        'code': 'invalid_arguments',
-                        'message': (
-                            'episode_source_kind must be either '
-                            "'chat_explicit' or 'memory_review'."
-                        ),
-                        'detail': {'field': 'episode_source_kind'},
-                    },
-                    'retryable': False,
-                },
+                tool_error(
+                    'episode_create',
+                    "episode_source_kind must be either 'chat_explicit' or 'memory_review'.",
+                    code='invalid_arguments', details={'field': 'episode_source_kind'},
+                ),
                 mutation=False,
             )
 
@@ -722,16 +702,10 @@ class MemoryTools:
             occurred_at_ms = None
         if not occurred_at_ms or occurred_at_ms <= 0:
             return _record_tool_result(
-                {
-                    'success': False,
-                    'tool': 'episode_create',
-                    'error': {
-                        'code': 'missing_context',
-                        'message': f'{timestamp_field} is required in agentic_config.',
-                        'detail': {'field': timestamp_field},
-                    },
-                    'retryable': False,
-                },
+                tool_error(
+                    'episode_create', f'{timestamp_field} is required in agentic_config.',
+                    code='missing_context', details={'field': timestamp_field},
+                ),
                 mutation=False,
             )
 
@@ -747,16 +721,11 @@ class MemoryTools:
             )
         except (TypeError, ValueError, ValidationError) as exc:
             return _record_tool_result(
-                {
-                    'success': False,
-                    'tool': 'episode_create',
-                    'error': {
-                        'code': 'invalid_arguments',
-                        'message': f'Invalid Episode arguments: {_safe_exception_message(exc)}',
-                        'detail': {'episode_type': str(episode_type)},
-                    },
-                    'retryable': False,
-                },
+                tool_error(
+                    'episode_create', f'Invalid Episode arguments: {_safe_exception_message(exc)}',
+                    category='INVALID_ARGS', code='invalid_arguments', retryable=True,
+                    recovery_attempts_remaining=1, details={'episode_type': str(episode_type)},
+                ),
                 mutation=False,
             )
 
@@ -772,20 +741,15 @@ class MemoryTools:
             _log_tool_exception('episode_create', exc)
             transient = _is_transient(exc)
             return _record_tool_result(
-                {
-                    'success': False,
-                    'tool': 'episode_create',
-                    'error': {
-                        'code': 'storage_unavailable' if transient else 'storage_failed',
-                        'message': (
-                            'Episode storage is temporarily unavailable.'
-                            if transient
-                            else 'Failed to initialize Episode storage.'
-                        ),
-                        'detail': {'exception_type': type(exc).__name__},
-                    },
-                    'retryable': transient,
-                },
+                tool_error(
+                    'episode_create',
+                    'Episode storage is temporarily unavailable.'
+                    if transient else 'Failed to initialize Episode storage.',
+                    category='TRANSIENT_ERROR' if transient else 'DOMAIN_FAILURE',
+                    code='storage_unavailable' if transient else 'storage_failed',
+                    retryable=transient, recovery_attempts_remaining=1 if transient else 0,
+                    details={'exception_type': type(exc).__name__},
+                ),
                 mutation=False,
                 ledger_result={
                     'status': 'failed',
@@ -799,20 +763,15 @@ class MemoryTools:
             root_exc = exc.__cause__ if isinstance(exc.__cause__, Exception) else exc
             _log_tool_exception('episode_create', root_exc)
             return _record_tool_result(
-                {
-                    'success': False,
-                    'tool': 'episode_create',
-                    'error': {
-                        'code': exc.code,
-                        'message': (
-                            'Episode storage is temporarily unavailable.'
-                            if exc.retryable
-                            else 'Failed to read existing Episodes.'
-                        ),
-                        'detail': {'exception_type': type(root_exc).__name__},
-                    },
-                    'retryable': exc.retryable,
-                },
+                tool_error(
+                    'episode_create',
+                    'Episode storage is temporarily unavailable.'
+                    if exc.retryable else 'Failed to read existing Episodes.',
+                    category='TRANSIENT_ERROR' if exc.retryable else 'DOMAIN_FAILURE',
+                    code=exc.code, retryable=exc.retryable,
+                    recovery_attempts_remaining=1 if exc.retryable else 0,
+                    details={'exception_type': type(root_exc).__name__},
+                ),
                 mutation=False,
                 ledger_result={
                     'status': 'failed',
@@ -824,21 +783,14 @@ class MemoryTools:
             safe_message = _safe_exception_message(exc)
             timed_out = _is_timeout(exc)
             return _record_tool_result(
-                {
-                    'success': False,
-                    'tool': 'episode_create',
-                    'error': {
-                        'code': 'storage_timeout' if timed_out else 'storage_failed',
-                        'message': (
-                            'Episode storage timed out and write completion is unknown: '
-                            f'{safe_message}'
-                            if timed_out
-                            else f'Failed to create Episode: {safe_message}'
-                        ),
-                        'detail': {'exception_type': type(exc).__name__},
-                    },
-                    'retryable': False,
-                },
+                tool_error(
+                    'episode_create',
+                    'Episode storage timed out and write completion is unknown: '
+                    f'{safe_message}' if timed_out else f'Failed to create Episode: {safe_message}',
+                    category='TRANSIENT_ERROR' if timed_out else 'DOMAIN_FAILURE',
+                    code='storage_timeout' if timed_out else 'storage_failed',
+                    details={'exception_type': type(exc).__name__},
+                ),
                 mutation=None,
                 ledger_result={
                     'status': 'failed',
@@ -946,20 +898,15 @@ class MemoryReviewEpisodeTools:
             root_exc = exc.__cause__ if isinstance(exc.__cause__, Exception) else raw_exc
             _log_tool_exception('episode_search', root_exc)
             return _record_tool_result(
-                {
-                    'success': False,
-                    'tool': 'episode_search',
-                    'error': {
-                        'code': exc.code,
-                        'message': (
-                            'Episode storage is temporarily unavailable.'
-                            if exc.retryable
-                            else 'Failed to search Episodes.'
-                        ),
-                        'detail': {'exception_type': type(root_exc).__name__},
-                    },
-                    'retryable': exc.retryable,
-                },
+                tool_error(
+                    'episode_search',
+                    'Episode storage is temporarily unavailable.'
+                    if exc.retryable else 'Failed to search Episodes.',
+                    category='TRANSIENT_ERROR' if exc.retryable else 'DOMAIN_FAILURE',
+                    code=exc.code, retryable=exc.retryable,
+                    recovery_attempts_remaining=1 if exc.retryable else 0,
+                    details={'exception_type': type(root_exc).__name__},
+                ),
                 mutation=False,
             )
 
@@ -1026,24 +973,16 @@ class MemoryReviewEpisodeTools:
             root_exc = exc.__cause__ if isinstance(exc.__cause__, Exception) else raw_exc
             _log_tool_exception('episode_delete', root_exc)
             return _record_tool_result(
-                {
-                    'success': False,
-                    'tool': 'episode_delete',
-                    'error': {
-                        'code': (
-                            'storage_unavailable'
-                            if exc.retryable
-                            else 'storage_failed'
-                        ),
-                        'message': (
-                            'Episode storage is temporarily unavailable.'
-                            if exc.retryable
-                            else 'Failed to delete Episode.'
-                        ),
-                        'detail': {'exception_type': type(root_exc).__name__},
-                    },
-                    'retryable': exc.retryable,
-                },
+                tool_error(
+                    'episode_delete',
+                    'Episode storage is temporarily unavailable.'
+                    if exc.retryable else 'Failed to delete Episode.',
+                    category='TRANSIENT_ERROR' if exc.retryable else 'DOMAIN_FAILURE',
+                    code='storage_unavailable' if exc.retryable else 'storage_failed',
+                    retryable=exc.retryable,
+                    recovery_attempts_remaining=1 if exc.retryable else 0,
+                    details={'exception_type': type(root_exc).__name__},
+                ),
                 mutation=False,
                 ledger_result={
                     'status': 'failed',

@@ -297,7 +297,11 @@ class LocalFileToolkit:
         try:
             proc = self._run_rg(args, cwd=safe_dir)
         except subprocess.TimeoutExpired:
-            return tool_error('grep', f'Search timed out (>{_RG_TIMEOUT}s)', error_type='Timeout')
+            return tool_error(
+                'grep', f'Search timed out (>{_RG_TIMEOUT}s)',
+                category='TRANSIENT_ERROR', code='SEARCH_TIMEOUT', retryable=True,
+                recovery_attempts_remaining=1, error_type='Timeout',
+            )
 
         if proc.returncode > 1:
             return tool_error('grep', f'ripgrep search failed: {proc.stderr.strip() or "unknown error"}')
@@ -399,7 +403,10 @@ class LocalFileToolkit:
         """
         safe_path, scope = self._resolve_with_scope(filepath)
         if not os.path.isfile(safe_path):
-            return tool_error('read', f'File not found: {filepath}')
+            return tool_error(
+                'read', f'File not found: {filepath}', code='RESOURCE_NOT_FOUND',
+                details={'resource_type': 'file'},
+            )
         self._ensure_visible_file(scope, safe_path)
 
         try:

@@ -11,7 +11,7 @@ from lazymind.chat.engine.attachment_reader import (
     is_chat_text_file,
     parse_attachment_content,
 )
-from lazymind.chat.engine.tools.infra import handle_tool_errors, tool_error, tool_success
+from lazymind.chat.engine.tools.infra import handle_tool_errors, tool_error, tool_failure, tool_success
 from lazymind.chat.engine.tools.attachment_edit import (
     AttachmentEditDraft,
     effective_attachment_path,
@@ -717,7 +717,11 @@ def patch_artifact(
     if sort_order is not None:
         list_index, resolve_err = _resolve_list_index_from_sort_order(key, sort_order)
         if resolve_err:
-            return tool_success('patch_artifact', {'status': 'error', 'message': resolve_err})
+            return tool_error(
+                'patch_artifact', resolve_err, category='INVALID_ARGS', code='INVALID_SORT_ORDER',
+                retryable=True, recovery_attempts_remaining=1,
+                details={'violations': [{'path': 'sort_order', 'type': 'validation_error'}]},
+            )
 
     # Load draft or initialize from latest committed content.
     draft_result = ctx.read_draft(key, list_index)
@@ -726,13 +730,14 @@ def patch_artifact(
         # Workflow sessions: this path also checks workflow_human_artifacts (human edits).
         text, original_type = _resolve_artifact_text(ctx, key, sort_order)
         if text is None:
-            return tool_success('patch_artifact', {
-                'status': 'error',
-                'message': (
+            return tool_error(
+                'patch_artifact',
+                (
                     f"No committed content found for artifact '{key}'. "
                     'Call save_artifacts first to create the artifact before patching.'
                 ),
-            })
+                code='RESOURCE_NOT_FOUND', details={'resource_type': 'artifact'},
+            )
         ctx.write_draft(key, original_type, text, list_index, pending_commit=False)
         draft_result = (text, original_type)
 
@@ -745,13 +750,23 @@ def patch_artifact(
     elif patch_type == 'json_patch':
         new_content, err = _apply_json_patch(content, patch)
     else:
-        return tool_success('patch_artifact', {
-            'status': 'error',
-            'message': f"Unknown patch_type '{patch_type}'. Use str_replace, json_merge, or json_patch.",
-        })
+        return tool_error(
+            'patch_artifact',
+            f"Unknown patch_type '{patch_type}'. Use str_replace, json_merge, or json_patch.",
+            category='INVALID_ARGS', code='INVALID_PATCH_TYPE', retryable=True,
+            recovery_attempts_remaining=1,
+            details={'violations': [{
+                'path': 'patch_type', 'type': 'enum_error',
+                'expected': {'enum': ['str_replace', 'json_merge', 'json_patch']},
+                'actual': 'string',
+            }]},
+        )
 
     if err:
-        return tool_success('patch_artifact', {'status': 'error', 'message': err})
+        return tool_error(
+            'patch_artifact', err, category='INVALID_ARGS', code='PATCH_REJECTED',
+            retryable=True, recovery_attempts_remaining=1,
+        )
 
     ctx.write_draft(key, original_type, new_content, list_index)
     lines_changed = abs(new_content.count('\n') - content.count('\n'))
@@ -947,7 +962,11 @@ def discard_draft(key: str, sort_order: Optional[int] = None) -> Dict[str, Any]:
     if sort_order is not None:
         list_index, resolve_err = _resolve_list_index_from_sort_order(key, sort_order)
         if resolve_err:
-            return tool_success('discard_draft', {'status': 'error', 'message': resolve_err})
+            return tool_error(
+                'discard_draft', resolve_err, category='INVALID_ARGS', code='INVALID_SORT_ORDER',
+                retryable=True, recovery_attempts_remaining=1,
+                details={'violations': [{'path': 'sort_order', 'type': 'validation_error'}]},
+            )
     existed = ctx.read_draft(key, list_index) is not None
     ctx.delete_draft(key, list_index)
     msg = (
@@ -1004,11 +1023,16 @@ def list_knowledge_bases() -> Dict[str, Any]:
             headers['X-User-Id'] = user_id
         resp = httpx.get(f'{core_url}/kb/list', headers=headers, timeout=5.0)
         if resp.status_code != 200:
-            return tool_success('list_knowledge_bases', {
-                'status': 'error',
-                'message': f'Failed to list knowledge bases: HTTP {resp.status_code}',
-                'items': [],
-            })
+            category = 'PERMISSION_ERROR' if resp.status_code in {401, 403} else (
+                'TRANSIENT_ERROR' if resp.status_code in {408, 429, 502, 503, 504} else 'DOMAIN_FAILURE'
+            )
+            return tool_error(
+                'list_knowledge_bases', f'Failed to list knowledge bases: HTTP {resp.status_code}',
+                category=category, code='UPSTREAM_HTTP_ERROR',
+                retryable=category == 'TRANSIENT_ERROR',
+                recovery_attempts_remaining=1 if category == 'TRANSIENT_ERROR' else 0,
+                details={'status_code': resp.status_code, 'resource_type': 'knowledge_base'},
+            )
         # Go /kb/list returns {"code":0,"data":{"total":N,"list":[{id,name,visibility,...}]}}
         data = resp.json().get('data') or {}
         raw_items = data.get('list') or []
@@ -1026,12 +1050,8 @@ def list_knowledge_bases() -> Dict[str, Any]:
             'message': f'Found {len(simplified)} knowledge base(s).',
             'items': simplified,
         })
-    except Exception as e:
-        return tool_success('list_knowledge_bases', {
-            'status': 'error',
-            'message': f'list_knowledge_bases failed: {e}',
-            'items': [],
-        })
+    except Exception as exc:
+        return tool_failure('list_knowledge_bases', exc)
 
 
 def _resolve_attachment(
@@ -1158,23 +1178,28 @@ def read_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
     """
     matched, err = _resolve_attachment(filename, turn)
     if err:
-        return tool_success('read_user_attachment', {'status': 'error', 'message': err})
+        return tool_error(
+            'read_user_attachment', err, code='RESOURCE_NOT_FOUND',
+            details={'resource_type': 'attachment'},
+        )
     is_remote = str(matched or '').lower().startswith(('http://', 'https://'))
     if not is_remote:
         matched = _materialize_local_path(matched)
     if not is_remote and not os.path.exists(matched):
-        return tool_success('read_user_attachment', {
-            'status': 'error',
-            'message': f"File '{os.path.basename(matched)}' was found in the index but is no longer on disk.",
-        })
+        return tool_error(
+            'read_user_attachment',
+            f"File '{os.path.basename(matched)}' was found in the index but is no longer on disk.",
+            code='RESOURCE_NOT_FOUND', details={'resource_type': 'attachment'},
+        )
     if not is_chat_attachment_file(matched):
-        return tool_success('read_user_attachment', {
-            'status': 'error',
-            'message': (
+        return tool_error(
+            'read_user_attachment',
+            (
                 f"Unsupported file type '{os.path.splitext(matched)[1].lower() or '(no extension)'}'. "
                 'Supported: images, Office/PDF documents, and common plain-text files.'
             ),
-        })
+            code='UNSUPPORTED_CONTENT_TYPE', details={'resource_type': 'attachment'},
+        )
 
     try:
         import lazyllm
@@ -1182,11 +1207,12 @@ def read_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
         priority = int(cfg.get('priority') or 0)
         read_path = effective_attachment_path(matched) if is_chat_text_file(matched) else matched
         content = parse_attachment_content(read_path, priority=priority)
-    except Exception as e:
-        return tool_success('read_user_attachment', {
-            'status': 'error',
-            'message': f"Could not parse '{os.path.basename(matched)}': {e}",
-        })
+    except Exception as exc:
+        return tool_error(
+            'read_user_attachment', f"Could not parse '{os.path.basename(matched)}': {exc}",
+            code='ATTACHMENT_PARSE_FAILED', details={'resource_type': 'attachment'},
+            error_type=type(exc).__name__,
+        )
 
     kind = 'image' if is_chat_image_file(matched) else (
         'text' if is_chat_text_file(matched) else 'document'
@@ -1347,15 +1373,19 @@ def find_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
     """
     matched, err = _resolve_attachment(filename, turn)
     if err:
-        return tool_success('find_user_attachment', {'status': 'error', 'message': err})
+        return tool_error(
+            'find_user_attachment', err, code='RESOURCE_NOT_FOUND',
+            details={'resource_type': 'attachment'},
+        )
     is_remote = str(matched or '').lower().startswith(('http://', 'https://'))
     if not is_remote:
         matched = _materialize_local_path(matched)
     if not is_remote and not os.path.exists(matched):
-        return tool_success('find_user_attachment', {
-            'status': 'error',
-            'message': f"File '{os.path.basename(matched)}' was found in the index but is no longer on disk.",
-        })
+        return tool_error(
+            'find_user_attachment',
+            f"File '{os.path.basename(matched)}' was found in the index but is no longer on disk.",
+            code='RESOURCE_NOT_FOUND', details={'resource_type': 'attachment'},
+        )
 
     signed_url = None if is_remote else _sign_static_file_url(matched)
 
@@ -1397,17 +1427,17 @@ def find_artifact(slot: str, sort_order: Optional[int] = None) -> Dict[str, Any]
 
     session_id: str = cfg.get('workflow_session_id', '')
     if not session_id:
-        return tool_success('find_artifact', {
-            'status': 'error',
-            'message': 'No active workflow session found in agentic_config.',
-        })
+        return tool_error(
+            'find_artifact', 'No active workflow session found in agentic_config.',
+            code='PRECONDITION_FAILED', details={'required_capability': 'workflow_session'},
+        )
 
     ctx = get_context()
     if ctx is None:
-        return tool_success('find_artifact', {
-            'status': 'error',
-            'message': 'find_artifact requires an active SubAgent context.',
-        })
+        return tool_error(
+            'find_artifact', 'find_artifact requires an active SubAgent context.',
+            code='PRECONDITION_FAILED', details={'required_capability': 'subagent_context'},
+        )
     result_dict = get_artifact(slot, sort_order=sort_order)
 
     # Unwrap inner result to extract the path.
@@ -1417,10 +1447,10 @@ def find_artifact(slot: str, sort_order: Optional[int] = None) -> Dict[str, Any]
 
     artifacts = inner.get('artifacts') or []
     if not artifacts:
-        return tool_success('find_artifact', {
-            'status': 'error',
-            'message': f"No artifact found for slot '{slot}'.",
-        })
+        return tool_error(
+            'find_artifact', f"No artifact found for slot '{slot}'.",
+            code='RESOURCE_NOT_FOUND', details={'resource_type': 'artifact'},
+        )
 
     # Use the first (or only) artifact to resolve the path.
     artifact = artifacts[0]
@@ -1438,10 +1468,10 @@ def find_artifact(slot: str, sort_order: Optional[int] = None) -> Dict[str, Any]
 
     path: Optional[str] = value.get('path') or value.get('url') or value.get('text')
     if not path or not isinstance(path, str):
-        return tool_success('find_artifact', {
-            'status': 'error',
-            'message': f"Artifact '{slot}' has no resolvable path.",
-        })
+        return tool_error(
+            'find_artifact', f"Artifact '{slot}' has no resolvable path.",
+            code='RESOURCE_NOT_FOUND', details={'resource_type': 'artifact'},
+        )
 
     if not path.lower().startswith(('http://', 'https://', '/static-files/')):
         path = _materialize_local_path(path)

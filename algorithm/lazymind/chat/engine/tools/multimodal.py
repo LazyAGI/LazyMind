@@ -87,6 +87,8 @@ def vision_extractor(url: str, instruction: Optional[str] = None) -> Dict[str, A
         return tool_error(
             'vision_extractor',
             'vision_extractor only supports image files; use kb_tmp_search to read PDF content',
+            code='UNSUPPORTED_CONTENT_TYPE',
+            details={'resource_type': 'image'},
             error_type='UnsupportedFileType',
         )
 
@@ -267,6 +269,8 @@ def video_to_gif(
                 'FFMPEG_DEPENDENCY_MISSING: Animated GIF output requires FFmpeg. '
                 'The generated video remains available.'
             ),
+            code='DEPENDENCY_MISSING',
+            details={'required_capability': 'ffmpeg'},
             error_type='MissingDependency',
             meta={
                 'dependency': 'ffmpeg',

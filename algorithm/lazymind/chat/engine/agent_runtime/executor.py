@@ -7,7 +7,7 @@ import lazyllm
 import lazyllm.module.stream_helper as _sh
 import lazyllm.tools.agent as _agent_mod
 from lazymind.config import config as _cfg
-from lazymind.chat.engine.tools.infra import CitationResultMiddleware
+from lazymind.chat.engine.tools.infra import CitationResultMiddleware, runtime_tool_failure
 
 from .models import AgentRole, AgentRunPlan
 from .tool_limit_control import tool_limit_decision_coordinator
@@ -44,6 +44,7 @@ class ToolCallGuard:
         self._expanded_round_limit = expanded_round_limit
         self._repeated_call_limit = max(2, int(repeated_call_limit))
         self._signature_calls: dict[str, int] = {}
+        self._recovery_failures: dict[tuple[str, str], int] = {}
         self._cancel_check = cancel_check
 
     def __getattr__(self, name: str) -> Any:
@@ -85,20 +86,33 @@ class ToolCallGuard:
         return False
 
     @staticmethod
+    def _error(result: Any) -> dict[str, Any]:
+        if isinstance(result, dict) and isinstance(result.get('error'), dict):
+            return result['error']
+        return {}
+
+    def _update_recovery_budget(self, name: str, result: Any) -> Any:
+        error = self._error(result)
+        category = str(error.get('category') or '')
+        if category not in {'UNKNOWN_TOOL', 'INVALID_ARGS'}:
+            return result
+        key = (category, '' if category == 'UNKNOWN_TOOL' else name)
+        failures = self._recovery_failures.get(key, 0) + 1
+        self._recovery_failures[key] = failures
+        if failures == 1:
+            return result
+        updated_error = {**error, 'recovery_attempts_remaining': 0}
+        return {**result, 'error': updated_error, 'msg': updated_error.get('message', '')}
+
+    @staticmethod
     def _blocked(name: str, message: str) -> dict[str, Any]:
-        return {
-            'ok': False,
-            'value': None,
-            'msg': f'[Repeated Tool Failure] {name}: {message}',
-        }
+        message = f'[Repeated Tool Failure] {name}: {message}'
+        return runtime_tool_failure(name, message, code='REPEATED_TOOL_FAILURE')
 
     @staticmethod
     def _loop_blocked(name: str, message: str) -> dict[str, Any]:
-        return {
-            'ok': False,
-            'value': None,
-            'msg': f'[Repeated Tool Call] {name}: {message}',
-        }
+        message = f'[Repeated Tool Call] {name}: {message}'
+        return runtime_tool_failure(name, message, code='REPEATED_TOOL_CALL')
 
     def __call__(self, tools: Any, verbose: bool = False) -> Any:
         if self._cancel_check is not None:
@@ -164,14 +178,17 @@ class ToolCallGuard:
         if pending:
             pending_results = self._manager(pending, verbose=verbose)
             for index, tool_call, result in zip(pending_indices, pending, pending_results):
-                results[index] = result
                 name = str((tool_call.get('function') or {}).get('name') or '')
+                result = self._update_recovery_budget(name, result)
+                results[index] = result
                 if name in self._failure_limits:
                     if self._failed(result):
                         self._consecutive_failures[name] = (
                             self._consecutive_failures.get(name, 0) + 1
                         )
-                        self._failed_signatures.add(self._signature(tool_call))
+                        error = self._error(result)
+                        if error.get('category') != 'TRANSIENT_ERROR' or not error.get('retryable'):
+                            self._failed_signatures.add(self._signature(tool_call))
                     else:
                         self._consecutive_failures[name] = 0
                         prefix = f'{name}:'

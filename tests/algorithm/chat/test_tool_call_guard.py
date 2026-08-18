@@ -7,6 +7,22 @@ def _call(name, arguments):
     return {'function': {'name': name, 'arguments': arguments}}
 
 
+def _failure(category, tool='search'):
+    return {
+        'ok': False,
+        'value': None,
+        'error': {
+            'category': category,
+            'code': f'{category}_CODE',
+            'tool': tool,
+            'message': 'tool failed',
+            'retryable': True,
+            'recovery_attempts_remaining': 1,
+            'details': {},
+        },
+    }
+
+
 class _RecordingToolManager:
     def __init__(self, result_factory=None):
         self.calls = []
@@ -55,6 +71,8 @@ def test_repeated_exact_failure_is_blocked_without_reexecution():
     assert len(manager.calls) == 1
     assert blocked[0]['ok'] is False
     assert '[Repeated Tool Failure]' in blocked[0]['msg']
+    assert blocked[0]['error']['category'] == 'DOMAIN_FAILURE'
+    assert blocked[0]['error']['code'] == 'REPEATED_TOOL_FAILURE'
 
 
 def test_different_parameter_guesses_are_blocked_after_consecutive_failures():
@@ -82,6 +100,39 @@ def test_success_resets_consecutive_failure_count():
         guard([_call('url_fetch', {'url': f'https://example.com/{index}'})])
 
     assert len(manager.calls) == 4
+
+
+def test_transient_failure_can_be_retried_by_agent_but_is_not_auto_retried():
+    transient = _failure('TRANSIENT_ERROR', 'url_fetch')
+    manager = _RecordingToolManager(lambda _: transient)
+    guard = ToolCallGuard(manager, {'url_fetch': 2})
+    call = _call('url_fetch', {'url': 'https://example.com'})
+
+    first = guard([call])
+
+    assert first == [transient]
+    assert len(manager.calls) == 1
+
+    second = guard([call])
+
+    assert second == [transient]
+    assert len(manager.calls) == 2
+
+
+def test_invalid_args_and_unknown_tool_each_allow_one_recovery_attempt():
+    cases = (
+        ('INVALID_ARGS', _call('search', {'limit': 'many'}), _call('search', {'limit': []})),
+        ('UNKNOWN_TOOL', _call('seach', {}), _call('serch', {})),
+    )
+    for category, first_call, second_call in cases:
+        manager = _RecordingToolManager(lambda _, category=category: _failure(category))
+        guard = ToolCallGuard(manager)
+
+        first = guard([first_call])[0]
+        second = guard([second_call])[0]
+
+        assert first['error']['recovery_attempts_remaining'] == 1
+        assert second['error']['recovery_attempts_remaining'] == 0
 
 
 def test_unconfigured_stateful_tool_is_not_deduplicated():
