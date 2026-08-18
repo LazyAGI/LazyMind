@@ -1507,7 +1507,7 @@ const zhCN = {
       cancelled: "已取消生成",
       partialOutput: "已生成的部分内容已保留。",
       noOutput: "本次未生成可用内容。",
-      providerError: "模型服务返回了未识别的错误。",
+      providerError: "模型服务请求失败，具体原因未识别。",
       incompleteUnknown: "模型回答未正常结束。",
       runtimeError: "运行时处理失败。",
       codes: {
@@ -1531,7 +1531,7 @@ const zhCN = {
         provider_overloaded: "模型服务当前资源不足。",
         service_unavailable: "模型服务当前过载或暂时不可用。",
         provider_internal_error: "模型服务处理请求时发生内部错误。",
-        provider_rejected: "模型服务返回了未识别的错误。",
+        provider_rejected: "模型服务请求失败，具体原因未识别。",
         protocol_error: "模型服务返回了无法解析的响应。",
         transport_error: "无法稳定连接到模型服务。",
         length: "回答达到长度限制，未完整生成。",

@@ -1552,7 +1552,7 @@ const enUS = {
       cancelled: "Generation cancelled",
       partialOutput: "The partial output has been preserved.",
       noOutput: "No usable output was generated.",
-      providerError: "The model service returned an unrecognized error.",
+      providerError: "The model service request failed for an unrecognized reason.",
       incompleteUnknown: "The model response ended unexpectedly.",
       runtimeError: "Runtime processing failed.",
       codes: {
@@ -1576,7 +1576,7 @@ const enUS = {
         provider_overloaded: "The model service has insufficient capacity.",
         service_unavailable: "The model service is overloaded or temporarily unavailable.",
         provider_internal_error: "The model service encountered an internal processing error.",
-        provider_rejected: "The model service returned an unrecognized error.",
+        provider_rejected: "The model service request failed for an unrecognized reason.",
         protocol_error: "The model service returned an invalid response.",
         transport_error: "A stable connection to the model service could not be established.",
         length: "The response reached a length limit and is incomplete.",
