@@ -12,7 +12,6 @@ import (
 	"runtime"
 	"strconv"
 	"strings"
-	"time"
 
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/mcpbridge"
@@ -56,8 +55,12 @@ type Status struct {
 	Mode           string      `json:"mode"`
 	Installed      bool        `json:"installed"`
 	Version        string      `json:"version,omitempty"`
+	Configured     bool        `json:"configured"`
+	Owned          bool        `json:"owned"`
 	ServiceReady   bool        `json:"service_ready"`
 	Ready          bool        `json:"ready"`
+	Command        string      `json:"command,omitempty"`
+	Arguments      []string    `json:"arguments,omitempty"`
 	Endpoint       string      `json:"endpoint,omitempty"`
 	Tools          []string    `json:"tools,omitempty"`
 	Setup          *SetupGuide `json:"setup,omitempty"`
@@ -125,9 +128,14 @@ func New(kind Kind, binary, self string, bridge *mcpbridge.Bridge) (*Adapter, er
 }
 
 func (a *Adapter) Status(ctx context.Context) Status {
+	probe, probeErr := a.bridge.Probe(ctx)
+	return a.StatusWithProbe(probe, probeErr)
+}
+
+func (a *Adapter) StatusWithProbe(probe mcpbridge.ProbeResult, probeErr error) Status {
 	status := Status{
 		Agent: a.definition.agent, DisplayName: a.definition.displayName,
-		Mode: "manual", Installed: a.discoveryError == nil, Version: a.version,
+		Mode: "managed", Installed: a.discoveryError == nil, Version: a.version,
 	}
 	var problems []string
 	if a.discoveryError != nil {
@@ -138,19 +146,83 @@ func (a *Adapter) Status(ctx context.Context) Status {
 			problems = append(problems, fmt.Sprintf("build %s setup instructions: %v", a.definition.displayName, err))
 		} else {
 			status.Setup = &guide
+			state, stateErr := readManagedConfig(a.kind, guide.ConfigPath, a.self, a.home)
+			if stateErr != nil {
+				problems = append(problems, fmt.Sprintf("read %s MCP configuration: %v", a.definition.displayName, stateErr))
+			} else {
+				status.Configured = state.configured
+				status.Owned = state.owned
+				status.Command = state.command
+				status.Arguments = append([]string(nil), state.arguments...)
+				if state.configured && !state.owned {
+					problems = append(problems, "an MCP server named `lazymind` already exists and is not managed by this LazyMind installation")
+				}
+			}
 		}
 	}
-	probe, err := a.bridge.Probe(ctx)
-	if err != nil {
-		problems = append(problems, "LazyMind MCP preflight failed: "+err.Error())
+	if probeErr != nil {
+		problems = append(problems, "LazyMind MCP preflight failed: "+probeErr.Error())
 	} else {
 		status.ServiceReady = true
 		status.Endpoint = probe.Endpoint
 		status.Tools = probe.Tools
 	}
-	status.Ready = status.Installed && status.ServiceReady && status.Setup != nil
+	status.Ready = status.Installed && status.ServiceReady && status.Configured && status.Owned
 	status.ReadinessError = strings.Join(problems, "; ")
 	return status
+}
+
+func (a *Adapter) Connect(ctx context.Context) (Status, error) {
+	if a.discoveryError != nil {
+		return Status{}, a.discoveryError
+	}
+	guide, err := a.setupGuide()
+	if err != nil {
+		return Status{}, err
+	}
+	state, err := readManagedConfig(a.kind, guide.ConfigPath, a.self, a.home)
+	if err != nil {
+		return Status{}, fmt.Errorf("read %s MCP configuration: %w", a.definition.displayName, err)
+	}
+	if state.configured && !state.owned {
+		return Status{}, errors.New("an MCP server named `lazymind` already exists and is not managed by this LazyMind installation")
+	}
+	if _, err := a.bridge.Probe(ctx); err != nil {
+		return Status{}, fmt.Errorf("LazyMind MCP preflight failed: %w", err)
+	}
+	if !state.configured {
+		if err := writeManagedConfig(a.kind, guide.ConfigPath, a.self, a.home); err != nil {
+			return Status{}, fmt.Errorf("configure %s MCP: %w", a.definition.displayName, err)
+		}
+	}
+	status := a.Status(ctx)
+	if !status.Configured || !status.Owned {
+		return Status{}, fmt.Errorf("%s did not persist the expected LazyMind MCP configuration", a.definition.displayName)
+	}
+	return status, nil
+}
+
+func (a *Adapter) Disconnect(ctx context.Context) (Status, error) {
+	if a.discoveryError != nil {
+		return a.Status(ctx), nil
+	}
+	guide, err := a.setupGuide()
+	if err != nil {
+		return Status{}, err
+	}
+	state, err := readManagedConfig(a.kind, guide.ConfigPath, a.self, a.home)
+	if err != nil {
+		return Status{}, fmt.Errorf("read %s MCP configuration: %w", a.definition.displayName, err)
+	}
+	if state.configured && !state.owned {
+		return Status{}, errors.New("the MCP server named `lazymind` is not managed by this LazyMind installation and will not be removed")
+	}
+	if state.configured {
+		if err := removeManagedConfig(a.kind, guide.ConfigPath); err != nil {
+			return Status{}, fmt.Errorf("disconnect %s MCP: %w", a.definition.displayName, err)
+		}
+	}
+	return a.Status(ctx), nil
 }
 
 func (a *Adapter) setupGuide() (SetupGuide, error) {
@@ -257,30 +329,7 @@ func discover(kind Kind, configured string, def definition) (string, string, err
 	if err != nil {
 		return "", "", err
 	}
-	version, err := executableVersion(kind, binary)
-	return binary, version, err
-}
-
-func executableVersion(kind Kind, binary string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if kind == TRAEWork {
-		output, err := agentexec.Run(ctx, binary, "--help")
-		if err != nil {
-			return "", err
-		}
-		for _, line := range strings.Split(output, "\n") {
-			if line = strings.TrimSpace(line); strings.HasPrefix(line, "TRAE SOLO") {
-				return line, nil
-			}
-		}
-		return "", errors.New("TRAE Work version was not reported")
-	}
-	output, err := agentexec.Run(ctx, binary, "--version")
-	if err != nil {
-		return "", err
-	}
-	return firstLine(output), nil
+	return binary, "", nil
 }
 
 func discoverDSHProfile() (string, string, error) {
@@ -433,13 +482,4 @@ func appCandidates(home, application, binary string) []string {
 		result = append(result, filepath.Join(home, "Applications", application, "Contents", "Resources", "app", "bin", binary))
 	}
 	return result
-}
-
-func firstLine(value string) string {
-	for _, line := range strings.Split(value, "\n") {
-		if line = strings.TrimSpace(line); line != "" {
-			return line
-		}
-	}
-	return ""
 }

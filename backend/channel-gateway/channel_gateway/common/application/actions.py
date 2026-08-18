@@ -228,10 +228,12 @@ class ChannelActionExecutor:
                         features=features,
                     )
                 )
-                presentations = (
-                    capability_presentation,
-                    settings_presentation,
-                )
+                presentations = (capability_presentation,)
+                if settings_presentation is not None:
+                    presentations = (
+                        capability_presentation,
+                        settings_presentation,
+                    )
             elif isinstance(command, ClarifyCommand):
                 text = command.parameters.clarification_question
             elif isinstance(command, SelectionChooseCommand):

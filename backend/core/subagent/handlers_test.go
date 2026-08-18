@@ -23,6 +23,7 @@ func TestToTaskDTO(t *testing.T) {
 		CurrentPhase:      "analyzing",
 		EstimatedSec:      120,
 		Summary:           "Working on it",
+		Sources:           orm.RawJSON(`[{"index":"1.1"}]`),
 	}
 	dto := toTaskDTO(ot)
 	if dto.TaskID != "task-1" || dto.ConversationID != "conv-1" {
@@ -33,6 +34,9 @@ func TestToTaskDTO(t *testing.T) {
 	}
 	if dto.Progress != 50 || dto.EstimatedSec != 120 {
 		t.Fatalf("progress/estimated: %+v", dto)
+	}
+	if string(dto.Sources) != `[{"index":"1.1"}]` {
+		t.Fatalf("sources: %s", dto.Sources)
 	}
 }
 

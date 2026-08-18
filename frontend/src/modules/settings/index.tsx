@@ -24,6 +24,7 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { AgentAppsAuth } from "@/components/auth";
 import GroupManagement from "@/modules/admin/pages/group";
 import UserManagement from "@/modules/admin/pages/user";
+import AgentIntegrationPage from "@/modules/agentIntegration/AgentIntegrationPage";
 import { TerminalConnectionPage } from "@/modules/channelGateway";
 import { listChannelAccounts } from "@/modules/channelGateway/api";
 import { setAllMcpServersEnabled } from "@/modules/memory/toolApi";
@@ -62,6 +63,7 @@ type SectionID =
   | "skills"
   | "system_tools"
   | "mcp"
+  | "assistants"
   | "channels"
   | "diagnostics"
   | "organization"
@@ -127,6 +129,7 @@ function baseNavigation(isAdmin: boolean, t: Translate): NavigationGroup[] {
         { id: "skills", label: t("settingsPage.sections.skills"), keywords: t("settingsPage.sectionKeywords.skills"), icon: <RobotOutlined /> },
         { id: "system_tools", label: t("settingsPage.sections.systemTools"), keywords: t("settingsPage.sectionKeywords.systemTools"), icon: <ToolOutlined /> },
         { id: "mcp", label: t("settingsPage.sections.mcp"), keywords: t("settingsPage.sectionKeywords.mcp"), icon: <ToolOutlined /> },
+        { id: "assistants", label: t("settingsPage.sections.assistants"), keywords: t("settingsPage.sectionKeywords.assistants"), icon: <RobotOutlined /> },
         { id: "channels", label: t("settingsPage.sections.channels"), keywords: t("settingsPage.sectionKeywords.channels"), icon: <LinkOutlined />, status: t("settingsPage.sectionStatus.connect") },
       ],
     },
@@ -460,6 +463,10 @@ export default function SettingsPage() {
           dashboardRow(t("settingsPage.sections.mcp"), t("settingsPage.overview.mcpMaster"), t("settingsPage.overview.mcpMasterDesc"), switchControl("mcp_enabled")),
           dashboardRow(t("settingsPage.sections.mcp"), t("settingsPage.overview.verifiedServices"), t("settingsPage.overview.verifiedServicesDesc", { verified: mcp.counts.verified, runnable: mcp.counts.runnable }), <Tag className="settings-status-tag">{formatCount(mcp, t)}</Tag>),
         ])}
+        {dashboardCard("assistants", <RobotOutlined />, t("settingsPage.sections.assistants"), t("settingsPage.overview.assistantsDesc"), [
+          dashboardRow(t("settingsPage.sections.assistants"), t("settingsPage.overview.assistantMcp"), t("settingsPage.overview.assistantMcpDesc"), <Tag className="settings-status-tag">MCP</Tag>),
+          dashboardRow(t("settingsPage.sections.assistants"), t("settingsPage.overview.assistantExecutors"), t("settingsPage.overview.assistantExecutorsDesc"), <Button className="settings-dashboard-quick-action" size="small" onClick={() => selectSection("assistants")}>{t("settingsPage.manageAssistants")}</Button>),
+        ])}
         {dashboardCard("skills", <RobotOutlined />, t("settingsPage.sections.skills"), t("settingsPage.overview.skillsDesc"), [
           dashboardRow(t("settingsPage.sections.skills"), t("settingsPage.controls.skills.title"), t("settingsPage.overview.mySkillsDesc"), switchControl("skills_enabled")),
           dashboardRow(t("settingsPage.sections.skills"), t("settingsPage.controls.workflows.title"), t("settingsPage.overview.myWorkflowsDesc"), switchControl("workflows_enabled")),
@@ -722,6 +729,8 @@ export default function SettingsPage() {
           "is-mcp",
         )}
       </>;
+    } else if (section === "assistants") {
+      content = integratedSurface(<AgentIntegrationPage />, "is-assistants");
     } else if (section === "channels") {
       content = integratedSurface(<TerminalConnectionPage />, "is-channels");
     } else if (section === "diagnostics") {

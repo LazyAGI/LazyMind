@@ -427,10 +427,10 @@ function runSidecar(command, extra = [], options = {}) {
 function runAgentConnector(agent, action) {
   const allowedActions = {
     codex: new Set(["connect", "status", "disconnect"]),
-    cursor: new Set(["status"]),
-    workbuddy: new Set(["status"]),
-    traework: new Set(["status"]),
-    "deepseek-harness": new Set(["status"]),
+    cursor: new Set(["connect", "status", "disconnect"]),
+    workbuddy: new Set(["connect", "status", "disconnect"]),
+    traework: new Set(["connect", "status", "disconnect"]),
+    "deepseek-harness": new Set(["connect", "status", "disconnect"]),
   };
   if (!allowedActions[agent]?.has(action)) {
     return Promise.reject(new Error(`Unsupported external Agent action: ${agent}/${action}`));
@@ -1500,6 +1500,7 @@ ipcMain.on("lazymind:renderer-ready", (event) => {
 
 ipcMain.handle("lazymind:runtimeStatus", () => readStatus());
 ipcMain.handle("lazymind:agentIntegrationStatus", (_event, agent) => runAgentConnector(agent, "status"));
+ipcMain.handle("lazymind:agentIntegrationAction", (_event, agent, action) => runAgentConnector(agent, action));
 ipcMain.handle("lazymind:codexIntegrationAction", (_event, action) => runAgentConnector("codex", action));
 ipcMain.handle("lazymind:restartRuntime", async () => {
   await runSidecar("down");

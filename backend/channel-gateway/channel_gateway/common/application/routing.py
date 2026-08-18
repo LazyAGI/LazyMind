@@ -264,13 +264,15 @@ class ChannelCommandRouter:
                 kinds.add(parameters.section)
         if isinstance(command, ConversationSettingsUpdateCommand):
             setting = parameters.change.setting
-            if setting in {
+            capability_settings = {
                 'knowledge_base',
                 'skill',
                 'tool',
-                'personalization',
                 'workflow',
-            }:
+            }
+            if execution.include_capability_settings:
+                kinds.update(capability_settings)
+            elif setting in capability_settings | {'personalization'}:
                 kinds.add(setting)
         if isinstance(command, ConversationNewCommand) or (
             isinstance(command, ChatCommand)

@@ -189,6 +189,8 @@ Windows 使用 `make local-win-down`。完整配置见 [快速开始](docs/quick
 make up
 ```
 
+该命令会同时启动 Docker 服务和本机「助理桥接器」。打开“设置 → 助理”即可一键连接 Codex、Cursor、WorkBuddy、TRAE Work 或 DeepSeek Harness，无需再运行 MCP 配置命令；只安装 Docker、未安装 Go 时，桥接器会由 Docker 自动交叉编译为当前宿主机版本。
+
 ### 启动命令速查
 
 | 场景 | 命令 |

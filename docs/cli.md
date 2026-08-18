@@ -657,178 +657,42 @@ tests/test_cli.py
 
 ## 16. 让外部 Agent 使用 LazyMind
 
-外部 Agent 可以连接 LazyMind Desktop，也可以连接 Docker 或远端部署。三种部署都使用同一个 `lazymind[.exe] mcp proxy`：
+外部 Agent 统一通过宿主机 `lazymind mcp proxy` 使用 LazyMind。Desktop 和标准 Docker 启动命令都会自动托管这个 connector：
 
-- Desktop 正在运行且已经登录时，connector 可以从本机 Desktop 会话初始化凭证。
-- Docker 或远端部署需要先执行一次 `lazymind login --server <外部 Agent 所在机器可访问的 URL>`；凭证默认保存在 `~/.lazymind/credentials.json`。
-- 使用自定义 `LAZYMIND_HOME` 登录时，生成的 Agent 配置只携带该目录路径，不携带 access token 或 refresh token。
+- LazyMind Desktop 继续使用内置进程托管和 IPC。
+- `make up` / `make up-build` 会在 Docker 服务启动后自动构建并启动回环地址上的「助理桥接器」，`make down` 会停止它。
+- 用户打开“设置 → 助理”，点击对应卡片的“连接”即可；不需要执行 `mcp add`、复制 JSON 或单独启动 Agent Host。
+- Docker 用户没有安装 Go 时，`make up` 会用 Docker 中的 Go 工具链交叉编译当前宿主机的 connector，不新增宿主机开发依赖。
 
-以本机 Docker 默认映射到 `8090` 为例：
+桥接器只监听 `127.0.0.1`，只接受本机 LazyMind 页面来源。它使用现有本地会话引导凭证，并且写入 Agent 配置的内容只有 connector 绝对路径、`mcp proxy` 参数以及可选的 `LAZYMIND_HOME`；不会写入 access token 或 refresh token。
 
-```bash
-./lazymind login --server http://127.0.0.1:8090 --username <用户名>
-./lazymind agent guide cursor
-./lazymind agent guide workbuddy
-./lazymind agent guide traework
-./lazymind agent guide deepseek-harness
-```
-
-密码由终端交互读取，不建议写进 shell 历史。若 Docker 映射到其他端口，或服务部署在其他机器，应把 `--server` 换成宿主机上真实可达的 HTTP(S) 地址；不要使用只在容器内部有效的服务名。
-
-无论部署方式如何，外部 Agent 配置最终只保存 connector 命令和可选的 `LAZYMIND_HOME` 路径，不保存 access token 或 refresh token。
+直接执行裸 `docker compose up` 无法启动宿主机进程，因此标准用户入口是 `make up`。源码调试仍可使用 `lazymind agent guide <agent>` 查看备用配置，但它不再是正常安装流程。
 
 ### 16.1 Codex CLI
 
-macOS：
+“设置 → 助理 → Codex CLI → 连接”会复用现有 Codex Adapter：先验证 LazyMind 的 20 个工具，再调用 Codex 原生 `codex mcp add`。重新连接和断开分别更新或移除同一个受管条目，不直接编辑 Codex 私有配置。
 
-```bash
-codex mcp add lazymind -- "/Applications/LazyMind.app/Contents/Resources/runtime/bin/lazymind" mcp proxy
-```
+如果已经存在一个不属于当前 LazyMind 安装的同名 `lazymind` 服务，桥接器会拒绝覆盖或删除。连接成功后新建 Codex 任务即可加载工具。
 
-Windows：
+### 16.2 Desktop 与 Docker 使用同一入口
 
-```powershell
-$Connector = "$env:LOCALAPPDATA\Programs\LazyMind\resources\runtime\bin\lazymind.exe"
-codex mcp add lazymind -- $Connector mcp proxy
-```
+Desktop 通过 Electron IPC 调用 connector；Docker 网页通过本机回环 Assistant Bridge 调用相同 adapter。两种入口的探测、归属校验、工具预检和最终配置完全一致，没有 Plugin、Marketplace 或 Codex Skill 分支。
 
-源码仓库：
+### 16.3 Cursor
 
-```bash
-make lazymind-cli-build
-codex mcp add lazymind -- "$(pwd)/local/build/bin/lazymind" mcp proxy
-```
+桥接器直接在 `~/.cursor/mcp.json#mcpServers` 中原子合并受管的 `lazymind` 条目，并保留其他服务和顶层设置。第一次修改前会创建 `.lazymind-backup`；断开时只删除归属于当前 connector 的条目。Cursor 中已经存在的外来同名条目不会被覆盖。连接后新建 Cursor Agent 会话即可。
 
-使用自定义凭证目录时，在 `--` 前增加 `--env LAZYMIND_HOME=<绝对路径>`。检查或移除配置：
+### 16.4 WorkBuddy
 
-```bash
-codex mcp list
-codex mcp get lazymind --json
-codex mcp remove lazymind
-```
+桥接器检测 CodeBuddy CN / WorkBuddy，并原子合并 `~/.codebuddy/mcp.json#mcpServers`。备份、归属判断和精确移除规则与 Cursor 相同，不再要求用户进入 MCP 页面粘贴 JSON。连接后在 WorkBuddy 中新建会话即可。
 
-命令成功后新建一个 Codex 任务，使新的 MCP 配置生效。移除只影响 Codex 配置，不删除 LazyMind 登录态、Skill 或知识库。
+### 16.5 TRAE Work
 
-### 16.2 从 LazyMind Desktop 连接
+桥接器写入 TRAE Work Agent 实际读取的用户级 `mcp.json#mcpServers`，不会调用会写入错误 `servers` 字段的 `--add-mcp`。它保留其他配置并只管理当前 LazyMind 条目。连接后重启 TRAE Work 或新建会话。TRAE Work 本期仍只作为 MCP 客户端，不出现在 LazyMind 的对话执行器列表中。
 
-打开“设置 → 外部 Agents”，在 Codex CLI 卡片中点击“连接 Codex”。LazyMind 会先验证本机 Codex CLI、LazyMind 服务和全部 20 个 Tool，再通过同一个 Codex Adapter 执行原生 `codex mcp add`。状态、重新连接和断开也都在该卡片完成，不需要运行 LazyMind 命令行。
+### 16.6 DeepSeek Harness
 
-如果 Codex 已有一个名为 `lazymind`、但命令并非当前 LazyMind 安装的配置，Desktop 会拒绝覆盖或删除。请先在 Codex 侧确认并自行移除或改名，避免破坏其他安装。
-
-Codex 的两种入口使用同一 connector，没有 Plugin、Marketplace 或 Codex Skill。
-
-### 16.3 Cursor：官方一键安装 + JSON 备用配置
-
-Cursor 使用辅助式手动配置。LazyMind 检测 Cursor、验证全部 20 个 Tool，并生成 Cursor 官方 `https://cursor.com/en/install-mcp` 安装链接；用户在 Cursor 中确认后才会写入配置，LazyMind 不直接修改配置文件。
-
-最便捷的两种入口：
-
-1. LazyMind Desktop →“设置 → 外部 Agents”→ Cursor →“打开 Cursor 官方安装页”。
-2. 已安装 `lazymind` 命令时，在终端运行 `lazymind agent guide cursor`，打开输出的官方安装链接。
-
-如果安装页不能拉起 Cursor，guide 和 Desktop 同时提供标准 JSON。把其中的 `lazymind` 项合并到全局 `~/.cursor/mcp.json` 的 `mcpServers`，不要覆盖已有服务：
-
-```json
-{
-  "mcpServers": {
-    "lazymind": {
-      "type": "stdio",
-      "command": "/Applications/LazyMind.app/Contents/Resources/runtime/bin/lazymind",
-      "args": ["mcp", "proxy"]
-    }
-  }
-}
-```
-
-如果 LazyMind 使用自定义凭证目录，生成的 JSON 会额外包含：
-
-```json
-{"env":{"LAZYMIND_HOME":"/absolute/path/to/lazymind-home"}}
-```
-
-确认安装后新建 Cursor Agent 会话。Cursor IDE 已安装不等于独立 `cursor-agent` CLI 已安装；验收 IDE 时直接在 Cursor 新会话中查看 MCP Tools 并发起调用。
-
-不要使用 IDE shell 的 `cursor --add-mcp` 安装本连接。Cursor 3.x 的该参数写入 VS Code 兼容的 `User/settings.json#mcp.servers`，真实 Cursor Agent 读取的是 `~/.cursor/mcp.json#mcpServers`；CLI 返回成功不代表 Agent 注册成功。
-
-### 16.4 WorkBuddy：在官方 MCP 页面粘贴 JSON
-
-当前 macOS 产品中，WorkBuddy 由 `CodeBuddy CN.app` 承载。LazyMind 检测该应用和 LazyMind 20 个 Tool，并生成标准 JSON，不直接修改 WorkBuddy 配置。
-
-最便捷的两种入口：
-
-1. LazyMind Desktop →“设置 → 外部 Agents”→ WorkBuddy →“复制备用 JSON”。
-2. 或在终端运行 `lazymind agent guide workbuddy`，复制输出的 JSON。
-3. 在 CodeBuddy CN 中进入工作模式，打开“插件 → MCP → 配置 MCP”，把 `lazymind` 合并到 `~/.codebuddy/mcp.json` 的 `mcpServers`，不要删除已有服务。
-
-配置格式：
-
-```json
-{
-  "mcpServers": {
-    "lazymind": {
-      "type": "stdio",
-      "command": "/Applications/LazyMind.app/Contents/Resources/runtime/bin/lazymind",
-      "args": ["mcp", "proxy"]
-    }
-  }
-}
-```
-
-保存后回到“我的 MCP”确认 `lazymind` 及 20 个工具，再新建 WorkBuddy 会话。不要使用 App shell 的 `buddycn --add-mcp`：本机真实 UI 验证显示该参数写入 `User/mcp.json#servers`，WorkBuddy Agent 的 MCP 页面仍为空。
-
-### 16.5 TRAE Work：合并 Agent MCP 配置
-
-LazyMind 检测 TRAE Work 的本机 CLI，并生成其 Agent 实际读取的 `mcpServers` 配置。最便捷的入口：
-
-1. LazyMind Desktop →“设置 → 外部 Agents”→ TRAE Work →“复制接入配置”。
-2. 或运行 `lazymind agent guide traework` 取得同一份配置和当前平台的配置文件路径。
-3. 把 `lazymind` 项合并到该文件的 `mcpServers`，保留其他服务器，然后重启 TRAE Work。
-
-macOS 当前版本的用户配置位于：
-
-```text
-~/Library/Application Support/TRAE SOLO CN/User/mcp.json
-```
-
-配置格式如下，connector 必须使用 guide 输出的真实绝对路径；使用自定义 `LAZYMIND_HOME` 时还要保留 guide 生成的 `env`：
-
-```json
-{
-  "mcpServers": {
-    "lazymind": {
-      "type": "stdio",
-      "command": "/absolute/path/to/lazymind",
-      "args": ["mcp", "proxy"]
-    }
-  }
-}
-```
-
-不要使用 TRAE Work 0.1.50 的 `--add-mcp` 作为验收依据：本机真实验证表明它会写入另一个 `servers` 字段，命令虽然返回成功，TraeWork Agent 却报告 `NoServers`，不会加载该服务。正确的 `mcpServers` 配置加载后，再新建会话确认 `lazymind` 和 20 个工具。TRAE Work 本期只作为 LazyMind MCP 客户端，不出现在 LazyMind 的对话执行器列表中。
-
-### 16.6 DeepSeek Harness：追加 Web Profile Patch
-
-通过 `npx @deepseek-ai/dsh web` 安装或启动的 Harness 使用 `~/.dsh/profiles/web/cordis.patch.yml` 作为用户配置层。LazyMind 生成一个官方 `@deepseek-ai/dsh-mcp-client` 的 `insert` 条目，不修改 Harness 内部包，也不接管模型鉴权。
-
-1. LazyMind Desktop →“设置 → 外部 Agents”→ DeepSeek Harness →“复制 Profile Patch”，或运行 `lazymind agent guide deepseek-harness`。
-2. 把整个 `- insert:` 条目追加到 `cordis.patch.yml` 的顶层 YAML 列表；已有条目必须保留。文件原来是 `[]` 时，用该条目替换 `[]`。
-3. 已运行的 Web profile 会热加载；也可以重新运行 `npx @deepseek-ai/dsh web`。
-
-生成格式如下，路径以 guide 输出为准：
-
-```yaml
-- insert:
-    - id: mcp-lazymind
-      name: '@deepseek-ai/dsh-mcp-client'
-      config:
-        serverName: lazymind
-        transport: stdio
-        command: "/absolute/path/to/lazymind"
-        args: ['mcp', 'proxy']
-        failOnStartupError: true
-```
-
-可先用 `npx @deepseek-ai/dsh --profile web --dump-config` 检查组合后的配置包含 `mcp-lazymind`。Harness 会把 MCP 工具映射为带 `mcp__lazymind__` 前缀的模型工具；实际调用仍进入同一个 LazyMind Invocation Ledger。DeepSeek Harness 本期同样不是 LazyMind 对话执行器。
+桥接器在 `~/.dsh/profiles/web/cordis.patch.yml` 顶层列表中合并一个 ID 为 `mcp-lazymind` 的官方 `@deepseek-ai/dsh-mcp-client` 条目。YAML 中的其他 patch 和注释会保留，首次修改前同样创建备份；断开只移除该 insert。Harness 会热加载这个 profile，MCP 调用仍进入统一 Invocation Ledger。DeepSeek Harness 本期同样不是 LazyMind 对话执行器。
 
 ### 16.7 能力和安全边界
 
@@ -874,22 +738,7 @@ macOS 当前版本的用户配置位于：
 
 Cursor IDE 和 CodeBuddy CN 已登录，不代表这两个独立 CLI 已登录。LazyMind 不读取、复制或保存外部 Agent 的登录凭证。
 
-LazyMind Desktop 启动时会自动托管本机已经安装的三个 CLI。源码方式可手动启动全部执行服务：
-
-```bash
-./local/build/bin/lazymind agent host run --provider all
-```
-
-也可以只启动或检查一个 provider：
-
-```bash
-./local/build/bin/lazymind agent host run --provider cursor
-./local/build/bin/lazymind agent host status --provider cursor
-./local/build/bin/lazymind agent host run --provider workbuddy
-./local/build/bin/lazymind agent host status --provider workbuddy
-```
-
-缺失的 CLI 在 `--provider all` 模式下只会跳过自身，不影响已经可用的 provider。然后在 LazyMind 的对话配置中选择 Codex、Cursor 或 WorkBuddy；若对应 Host 尚未连接，界面会拒绝切换并给出提示。
+LazyMind Desktop 和 Docker Assistant Bridge 都会自动托管本机已经安装的三个 CLI；用户不需要另起 `agent host` 进程。缺失的 CLI 只会把自身注册为不可用，不影响其他 provider。然后可在 LazyMind 的对话配置中选择 Codex、Cursor 或 WorkBuddy；若对应 Host 尚未连接，界面会拒绝切换并给出提示。`lazymind agent host ...` 仅保留为开发诊断入口。
 
 TRAE Work 没有满足该边界的无头结果/事件/恢复接口；DeepSeek Harness 当前的外部执行协议也不能恢复既有会话，且与运行时 MCP 注入存在约束。因此二者不会注册 `ExternalChatRun` Host，不会出现在 `chat_executor` 中。这不影响它们在各自界面调用 LazyMind MCP。
 

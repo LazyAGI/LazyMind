@@ -64,6 +64,7 @@ type TaskEvent struct {
 	ContentType  string          `json:"content_type,omitempty"`
 	Seq          int             `json:"seq,omitempty"`
 	Value        json.RawMessage `json:"value,omitempty"`
+	Sources      json.RawMessage `json:"sources,omitempty"`
 	Status       string          `json:"status,omitempty"`
 	Summary      string          `json:"summary,omitempty"`
 	Message      string          `json:"message,omitempty"`
@@ -195,6 +196,10 @@ func routeEventWithWorkflowHooks(ctx context.Context, db *gorm.DB, stateStore st
 		// extracted by the plugin hook via extractListIndex — no need to pass it here.
 		if artifactHook {
 			routeWorkflowArtifact(ctx, db, stateStore, ev.TaskID, ev.ArtifactKey)
+		}
+	case "sources":
+		if err := UpdateSources(ctx, db, ev.TaskID, ev.Sources); err != nil {
+			return fmt.Errorf("save sources task=%s: %w", ev.TaskID, err)
 		}
 	case "done":
 		status := ev.Status
