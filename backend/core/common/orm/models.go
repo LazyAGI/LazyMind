@@ -136,12 +136,28 @@ type Conversation struct {
 	// remains responsible for persistence, Workflow, artifacts and SSE delivery.
 	ChatExecutor string `gorm:"column:chat_executor;type:varchar(32);not null;default:'lazymind'"`
 	// IsTaskConv marks conversations created by the scheduler or task center (not user-initiated).
-	IsTaskConv bool `gorm:"column:is_task_conv;not null;default:false"`
+	IsTaskConv      bool       `gorm:"column:is_task_conv;not null;default:false"`
+	ArchivedAt      *time.Time `gorm:"column:archived_at"`
+	ArchiveFolderID *string    `gorm:"column:archive_folder_id;type:varchar(36)"`
+	TrashExpiresAt  *time.Time `gorm:"column:trash_expires_at"`
 
 	BaseModel
 }
 
 func (Conversation) TableName() string { return "conversations" }
+
+// ConversationArchiveFolder groups archived conversations for a single user.
+// A nil Conversation.ArchiveFolderID represents the virtual "unfiled" group.
+type ConversationArchiveFolder struct {
+	ID             string    `gorm:"column:id;type:varchar(36);primaryKey"`
+	UserID         string    `gorm:"column:user_id;type:varchar(255);not null;uniqueIndex:uk_conversation_archive_folders_user_name,priority:1"`
+	Name           string    `gorm:"column:name;type:varchar(255);not null"`
+	NormalizedName string    `gorm:"column:normalized_name;type:varchar(255);not null;uniqueIndex:uk_conversation_archive_folders_user_name,priority:2"`
+	CreatedAt      time.Time `gorm:"column:created_at;not null"`
+	UpdatedAt      time.Time `gorm:"column:updated_at;not null"`
+}
+
+func (ConversationArchiveFolder) TableName() string { return "conversation_archive_folders" }
 
 type ChatHistory struct {
 	ID                string          `gorm:"column:id;type:varchar(36);primaryKey"`

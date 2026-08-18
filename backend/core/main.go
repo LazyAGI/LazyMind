@@ -27,6 +27,7 @@ import (
 	"lazymind/core/log"
 	"lazymind/core/migrate"
 	"lazymind/core/modelprovider"
+	"lazymind/core/recovery"
 	"lazymind/core/resourceupdate"
 	"lazymind/core/scheduler"
 	"lazymind/core/state"
@@ -328,6 +329,7 @@ func main() {
 		if resourceUpdateEnabled {
 			resourceupdate.Start(context.Background(), store.DB(), store.State(), resourceupdate.DefaultConfig())
 		}
+		recovery.Start(context.Background(), store.DB(), recovery.DefaultCleanupInterval)
 
 		// Mark stale running SubAgent tasks (no heartbeat for >5m) as interrupted on startup.
 		if n, err := subagent.MarkInterrupted(context.Background(), store.DB(), 5*time.Minute); err != nil {

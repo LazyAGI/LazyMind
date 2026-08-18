@@ -364,6 +364,17 @@ func ListTrash(w http.ResponseWriter, r *http.Request) {
 		replyServiceError(w, err)
 		return
 	}
+	categorySet := make(map[string]struct{})
+	for _, item := range resp.Items {
+		if category := strings.TrimSpace(item.Category); category != "" {
+			categorySet[category] = struct{}{}
+		}
+	}
+	categories := make([]string, 0, len(categorySet))
+	for category := range categorySet {
+		categories = append(categories, category)
+	}
+	sort.Strings(categories)
 	items := filterTrashedSkillSummaries(resp.Items, r)
 	total := len(items)
 	items = paginateSkillSummaries(items, r)
@@ -372,10 +383,11 @@ func ListTrash(w http.ResponseWriter, r *http.Request) {
 		out = append(out, skillSummaryDTO(item))
 	}
 	common.ReplyOK(w, map[string]any{
-		"items":     out,
-		"page":      positiveQueryInt(r, "page", 1),
-		"page_size": positiveQueryInt(r, "page_size", 20),
-		"total":     total,
+		"categories": categories,
+		"items":      out,
+		"page":       positiveQueryInt(r, "page", 1),
+		"page_size":  positiveQueryInt(r, "page_size", 20),
+		"total":      total,
 	})
 }
 
@@ -418,6 +430,26 @@ func EmptyTrash(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	common.ReplyOK(w, map[string]any{"purged": count})
+}
+
+// PurgeExpiredTrash runs the existing skill purge service per expired item so
+// local blob cleanup remains identical to a manual permanent deletion.
+func PurgeExpiredTrash(ctx context.Context, db *gorm.DB, now time.Time) (purged, failed int) {
+	var skills []orm.SkillV2Skill
+	if err := db.WithContext(ctx).
+		Where("deleted_at IS NOT NULL AND trash_expires_at IS NOT NULL AND trash_expires_at <= ?", now).
+		Find(&skills).Error; err != nil {
+		return 0, 1
+	}
+	service := newSkillService(db)
+	for _, skill := range skills {
+		if err := service.PurgeSkill(ctx, skillservice.PurgeSkillRequest{SkillID: skill.ID, UserID: skill.OwnerUserID}); err != nil {
+			failed++
+			continue
+		}
+		purged++
+	}
+	return purged, failed
 }
 
 func Tree(w http.ResponseWriter, r *http.Request) {
@@ -2158,6 +2190,9 @@ func skillSummaryDTO(item skillservice.SkillSummary) map[string]any {
 	}
 	if item.DeletedAt != nil {
 		out["deleted_at"] = item.DeletedAt
+	}
+	if item.TrashExpiresAt != nil {
+		out["trash_expires_at"] = item.TrashExpiresAt
 	}
 	if strings.TrimSpace(item.DeletedBy) != "" {
 		out["deleted_by"] = item.DeletedBy

@@ -369,6 +369,28 @@ func init() {
 	registerAdditionalError("write managed artifact", http.StatusInternalServerError, 2002096)
 	registerAdditionalError("commit managed artifact", http.StatusInternalServerError, 2002097)
 
+	// Personal recovery and archive lifecycle errors.
+	registerAdditionalError("query archive folders failed", http.StatusInternalServerError, 2002098)
+	registerAdditionalError("archive folder not found", http.StatusNotFound, 2002099)
+	registerAdditionalError("query archive folder failed", http.StatusInternalServerError, 2002100)
+	registerAdditionalError("archive conversation failed", http.StatusInternalServerError, 2002101)
+	registerAdditionalError("unarchive conversation failed", http.StatusInternalServerError, 2002102)
+	registerAdditionalError("archived conversation not found", http.StatusNotFound, 2002103)
+	registerAdditionalError("restore conversation failed", http.StatusInternalServerError, 2002104)
+	registerAdditionalError("trashed conversation not found", http.StatusNotFound, 2002105)
+	registerAdditionalError("purge conversation failed", http.StatusInternalServerError, 2002106)
+	registerAdditionalError("query conversation trash failed", http.StatusInternalServerError, 2002107)
+	registerAdditionalError("empty conversation trash failed", http.StatusInternalServerError, 2002108)
+	registerAdditionalError("query archive folder counts failed", http.StatusInternalServerError, 2002109)
+	registerAdditionalError("archive folder name already exists", http.StatusConflict, 2002110)
+	registerAdditionalError("create archive folder failed", http.StatusInternalServerError, 2002111)
+	registerAdditionalError("workflow id already exists", http.StatusConflict, 2002112)
+	registerAdditionalError("purge failed", http.StatusInternalServerError, 2002113)
+	registerAdditionalError("empty trash failed", http.StatusInternalServerError, 2002114)
+	registerAdditionalError("conversation is in trash", http.StatusConflict, 2002115)
+	registerAdditionalError("folder name is required", http.StatusBadRequest, 2002116)
+	registerAdditionalErrorPattern("folder name must be at most %d characters", "folder name is too long", http.StatusBadRequest, 2002117)
+
 }
 
 func registerAdditionalError(message string, status, code int) {
