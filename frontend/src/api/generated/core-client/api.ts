@@ -1848,7 +1848,9 @@ export interface RunTerminal {
     'diagnostic_id'?: string;
     'model_call_id'?: string;
     'partial_output'?: boolean;
+    'provider_http_status'?: number;
     'reason'?: string;
+    'retry_after_ms'?: number;
     'status'?: string;
 }
 export interface SearchDatasetMemberRequest {

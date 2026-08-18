@@ -124,3 +124,24 @@ func TestStreamChatUpstreamRejectsMalformedFrame(t *testing.T) {
 		t.Fatalf("unexpected chunks: %#v", chunks)
 	}
 }
+
+func TestRunTerminalPreservesProviderFailureMetadata(t *testing.T) {
+	event := runFinishedEvent("run_test", RunTerminal{
+		Status:             "failed",
+		Reason:             "model_failure",
+		Code:               "rate_limited",
+		PartialOutput:      false,
+		ModelCallID:        "call_test",
+		DiagnosticID:       "diag_test",
+		ProviderHTTPStatus: 429,
+		RetryAfterMS:       2000,
+	})
+
+	terminal, err := event.Terminal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if terminal.Code != "rate_limited" || terminal.ProviderHTTPStatus != 429 || terminal.RetryAfterMS != 2000 {
+		t.Fatalf("provider failure metadata was not preserved: %#v", terminal)
+	}
+}

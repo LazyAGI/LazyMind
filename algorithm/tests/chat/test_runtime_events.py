@@ -34,10 +34,14 @@ def test_translator_binds_model_event_to_run():
 
 
 @pytest.mark.parametrize(('terminal', 'status', 'reason'), [
-    ({'kind': 'finish', 'finish': 'length', 'has_semantic_output': True}, 'interrupted', 'model_incomplete'),
-    ({'kind': 'failure', 'failure': {'origin': 'transport'}, 'has_semantic_output': True},
+    ({'kind': 'finish', 'finish': 'length', 'has_semantic_output': True},
+     'interrupted', 'model_incomplete'),
+    ({'kind': 'failure',
+      'failure': {'origin': 'transport', 'code': 'transport_error'},
+      'has_semantic_output': True},
      'interrupted', 'model_failure'),
-    ({'kind': 'failure', 'failure': {'origin': 'http'}, 'has_semantic_output': False},
+    ({'kind': 'failure', 'failure': {'origin': 'http', 'code': 'rate_limited'},
+      'has_semantic_output': False},
      'failed', 'model_failure'),
 ])
 def test_run_accumulator_maps_model_terminal(terminal, status, reason):
@@ -47,6 +51,34 @@ def test_run_accumulator_maps_model_terminal(terminal, status, reason):
     assert event['type'] == 'run_finished'
     assert event['data']['status'] == status
     assert event['data']['reason'] == reason
+
+
+def test_run_accumulator_propagates_safe_provider_failure_fields():
+    accumulator = RunAccumulator(run_id='run-1', last_model_terminal={
+        'model_call_id': 'call-1',
+        'kind': 'failure',
+        'has_semantic_output': False,
+        'failure': {
+            'origin': 'http',
+            'code': 'quota_exhausted',
+            'provider_http_status': 429,
+            'retry_after_ms': 2000,
+            'diagnostic_id': 'diag-1',
+        },
+    })
+
+    data = accumulator.finish(succeeded=False)['data']
+
+    assert data == {
+        'status': 'failed',
+        'reason': 'model_failure',
+        'code': 'quota_exhausted',
+        'partial_output': False,
+        'model_call_id': 'call-1',
+        'diagnostic_id': 'diag-1',
+        'provider_http_status': 429,
+        'retry_after_ms': 2000,
+    }
 
 
 def test_run_accumulator_awaiting_user_input_is_completed():

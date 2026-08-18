@@ -93,6 +93,8 @@ export interface ChatMessage {
     partial_output: boolean;
     model_call_id?: string;
     diagnostic_id?: string;
+    provider_http_status?: number;
+    retry_after_ms?: number;
   };
   inputs?: Query[];
   reasoning_content?: string;

@@ -50,8 +50,13 @@ class RunAccumulator:
         if terminal.get('model_call_id'):
             data['model_call_id'] = terminal['model_call_id']
         failure = terminal.get('failure')
-        if isinstance(failure, dict) and failure.get('diagnostic_id'):
-            data['diagnostic_id'] = failure['diagnostic_id']
+        if isinstance(failure, dict):
+            if failure.get('diagnostic_id'):
+                data['diagnostic_id'] = failure['diagnostic_id']
+            if isinstance(failure.get('provider_http_status'), int):
+                data['provider_http_status'] = failure['provider_http_status']
+            if isinstance(failure.get('retry_after_ms'), int):
+                data['retry_after_ms'] = failure['retry_after_ms']
         return runtime_event('run_finished', self.run_id, data)
 
     def _terminal_fields(self, succeeded: bool) -> tuple[str, str, str]:
@@ -63,7 +68,11 @@ class RunAccumulator:
             return 'interrupted', 'model_incomplete', finish
         if terminal.get('kind') == 'failure':
             failure = terminal.get('failure') or {}
-            origin = str(failure.get('origin') or 'unknown')
+            code = str(
+                failure.get('code')
+                or failure.get('origin')
+                or 'provider_rejected'
+            )
             status = 'interrupted' if terminal.get('has_semantic_output') else 'failed'
-            return status, 'model_failure', origin
+            return status, 'model_failure', code
         return 'failed', 'runtime_failure', 'runtime_failure'
