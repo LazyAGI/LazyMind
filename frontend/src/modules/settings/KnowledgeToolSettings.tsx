@@ -5,7 +5,7 @@ import { useTranslation } from "react-i18next";
 import ToolManagementSection from "@/modules/modelProvider/components/ToolManagementSection";
 import ExternalServicesPage from "@/modules/modelProvider/pages/ExternalServicesPage";
 
-export const knowledgeToolViews = ["web-search", "academic-search", "wikipedia"] as const;
+export const knowledgeToolViews = ["web-search", "academic-search", "wikipedia", "document-parsing"] as const;
 export type KnowledgeToolView = typeof knowledgeToolViews[number];
 
 export function isKnowledgeToolView(value: string | null): value is KnowledgeToolView {
@@ -25,8 +25,12 @@ export default function KnowledgeToolSettings({ headingRef, onBack, view }: Know
     : view === "academic-search"
       ? "settingsPage.knowledge.groups.search.academicSearch"
       : "settingsPage.knowledge.groups.search.wikipedia";
-  const title = t(`${copyKey}.name`);
-  const description = t(`${copyKey}.description`);
+  const title = view === "document-parsing"
+    ? t("settingsPage.knowledge.documentParsing")
+    : t(`${copyKey}.name`);
+  const description = view === "document-parsing"
+    ? t("settingsPage.knowledge.documentParsingGroupDesc")
+    : t(`${copyKey}.description`);
 
   return (
     <section className="settings-knowledge-tool-settings">
@@ -51,7 +55,11 @@ export default function KnowledgeToolSettings({ headingRef, onBack, view }: Know
             includeBuiltinTools={false}
             includeDependencies={false}
             includeMcp={false}
-            visibleCategories={view === "web-search" ? ["search"] : ["academic"]}
+            visibleCategories={view === "web-search"
+              ? ["search"]
+              : view === "document-parsing"
+                ? ["parsing"]
+                : ["academic"]}
           />
         )}
       </div>

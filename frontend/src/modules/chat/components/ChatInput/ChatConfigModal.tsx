@@ -221,14 +221,25 @@ export default function ChatConfigPopover({
             <QuestionCircleOutlined className="chat-config-help-icon" />
           </Tooltip>
         </div>
-        <Segmented
-          block
-          value={chatExecutor}
-          onChange={(value: string | number) =>
-            void handleChange({ chat_executor: value as ChatExecutor })
-          }
-          options={executorOptions}
-        />
+        <div
+          className="chat-config-executor-grid"
+          role="radiogroup"
+          aria-label={t('chat.conversationConfigExecutor')}
+        >
+          {executorOptions.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={chatExecutor === option.value}
+              className={chatExecutor === option.value ? 'is-selected' : ''}
+              disabled={option.disabled}
+              onClick={() => void handleChange({ chat_executor: option.value as ChatExecutor })}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
         <p className="chat-config-workflow-description">
           {executorDescription}
         </p>

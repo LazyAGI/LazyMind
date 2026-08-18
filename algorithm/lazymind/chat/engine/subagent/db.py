@@ -50,10 +50,14 @@ class SubAgentDB:
         with self._conn() as conn:
             row = conn.execute(text(
                 'SELECT id, conversation_id, agent_type, title, objective, params, mode, '
-                'status, workspace_path, input_slots, output_slots, create_user_id '
+                'status, workspace_path, input_slots, output_slots, sources, create_user_id '
                 'FROM sub_agent_tasks WHERE id = :id'
             ), {'id': task_id}).mappings().first()
-        return dict(row) if row else None
+        if not row:
+            return None
+        task = dict(row)
+        task['sources'] = _decode(task.get('sources'), [])
+        return task
 
     def append_step(self, task_id: str, seq: int, role: str, content: Dict[str, Any]) -> None:
         with self._conn() as conn:

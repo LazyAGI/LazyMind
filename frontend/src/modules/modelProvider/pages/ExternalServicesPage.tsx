@@ -132,7 +132,7 @@ const externalServiceConfigs: ExternalServiceConfig[] = [
     category: "parsing",
     fields: ["baseUrl", "apiKey"],
     logo: <FilePdfOutlined />,
-    logoUrl: "https://www.google.com/s2/favicons?domain=mineru.net&sz=96",
+    logoUrl: "https://mineru.net/favicon-96x96.png",
     tone: "blue",
     status: "configured",
   },

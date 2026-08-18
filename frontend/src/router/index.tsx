@@ -13,7 +13,6 @@ import { getAntdLocale } from "@/i18n/antdLocale";
 import { runtimeFeatures } from "@/runtime/features";
 import { isLocalSessionEnabled } from "@/runtime/localSession";
 import UserAgreementPage from "@/pages/UserAgreementPage";
-import { isDesktopRuntime } from "@/runtime/mode";
 import SettingsPage from "@/modules/settings";
 
 const ShowcaseGalleryPage = lazy(() => import("@/modules/showcase/GalleryPage"));
@@ -70,7 +69,6 @@ const SelfEvolutionDetailPage = lazy(() => import("@/modules/selfEvolution").the
 const SelfEvolutionObservationPage = lazy(() => import("@/modules/selfEvolution").then((module) => ({
   default: module.SelfEvolutionObservationPage,
 })));
-const AgentIntegrationPage = lazy(() => import("@/modules/agentIntegration/AgentIntegrationPage"));
 const WorkflowDetailPage = lazy(() => import("@/modules/workflow/pages/detail"));
 const BuiltinWorkflowDetailPage = lazy(() => import("@/modules/workflow/pages/builtin-detail"));
 
@@ -306,7 +304,7 @@ export default function AppRouter() {
           <Route path="task-center" element={<TaskCenterPage />} />
           <Route
             path="settings/agent-integrations"
-            element={isDesktopRuntime() ? <AgentIntegrationPage /> : <Navigate to="/agent/chat" replace />}
+            element={<Navigate to="/settings?section=assistants" replace />}
           />
           <Route path="settings" element={<SettingsPage />} />
         </Route>

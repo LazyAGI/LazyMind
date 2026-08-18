@@ -43,6 +43,7 @@ test("maps bridge methods to their exact IPC channels and arguments", async () =
     ["openDataDir", [], "lazymind:openDataDir", []],
     ["runtimeStatus", [], "lazymind:runtimeStatus", []],
     ["agentIntegrationStatus", ["cursor"], "lazymind:agentIntegrationStatus", ["cursor"]],
+    ["agentIntegrationAction", ["cursor", "connect"], "lazymind:agentIntegrationAction", ["cursor", "connect"]],
     ["codexIntegrationAction", ["connect"], "lazymind:codexIntegrationAction", ["connect"]],
     ["restartRuntime", [], "lazymind:restartRuntime", []],
     ["resetRuntime", ["all"], "lazymind:resetRuntime", ["all"]],

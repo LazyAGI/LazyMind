@@ -376,7 +376,11 @@ class FeishuPresentationRenderer:
                 ),
                 extra_elements=extra_elements,
             ),
-            'workspace': False,
+            'workspace': (
+                message.provider_context.get(
+                    'workspace_reanchor_to_bottom'
+                ) is True
+            ),
             'replace_message_id': str(
                 message.provider_context.get(
                     'workspace_stream_message_id'

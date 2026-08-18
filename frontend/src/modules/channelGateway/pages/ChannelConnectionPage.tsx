@@ -387,7 +387,9 @@ export function TerminalConnectionPage() {
   }, [loadAccounts]);
 
   const selectProvider = (nextProvider: ChannelProvider) => {
-    setSearchParams({ provider: nextProvider }, { replace: true });
+    const nextSearchParams = new URLSearchParams(searchParams);
+    nextSearchParams.set('provider', nextProvider);
+    setSearchParams(nextSearchParams, { replace: true });
   };
 
   const openAccountsPanel = () => {

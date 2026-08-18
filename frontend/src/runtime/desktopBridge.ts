@@ -50,6 +50,10 @@ export type DesktopAgentIntegrationResult =
   | { ok: true; data: DesktopAgentIntegrationStatus }
   | { ok: false; reason: DesktopBridgeUnavailableReason; error?: unknown };
 
+export type DesktopAgentIntegrationStatusesResult =
+  | { ok: true; data: Partial<Record<DesktopAgent, DesktopAgentIntegrationStatus>> }
+  | { ok: false; reason: DesktopBridgeUnavailableReason; error?: unknown };
+
 type DesktopBridgeCommand =
   | "openLogsDir"
   | "openDataDir"
@@ -60,6 +64,7 @@ interface LazyMindDesktopBridge {
   openDataDir?: () => Promise<void> | void;
   runtimeStatus?: () => Promise<unknown> | unknown;
   agentIntegrationStatus?: (agent: DesktopAgent) => Promise<unknown> | unknown;
+  agentIntegrationAction?: (agent: DesktopAgent, action: "connect" | "disconnect") => Promise<unknown> | unknown;
   codexIntegrationAction?: (action: "connect" | "disconnect") => Promise<unknown> | unknown;
   restartRuntime?: () => Promise<unknown> | unknown;
   resetRuntime?: (scope?: "kb" | "all") => Promise<unknown> | unknown;
@@ -138,17 +143,63 @@ async function callAgentIntegration(
 }
 
 export function agentIntegrationStatus(agent: DesktopAgent): Promise<DesktopAgentIntegrationResult> {
-  return callAgentIntegration((bridge) => {
-    if (!bridge.agentIntegrationStatus) throw new Error("Agent integration is unavailable");
-    return bridge.agentIntegrationStatus(agent);
-  });
+	const bridge = getDesktopBridge();
+	if (bridge?.agentIntegrationStatus) {
+		return callAgentIntegration((value) => value.agentIntegrationStatus!(agent));
+	}
+	return callLocalAssistantBridge(`/agents/${encodeURIComponent(agent)}`);
+}
+
+export async function agentIntegrationStatuses(agents: DesktopAgent[]): Promise<DesktopAgentIntegrationStatusesResult> {
+  const bridge = getDesktopBridge();
+  if (bridge?.agentIntegrationStatus) {
+    const results = await Promise.all(agents.map(async (agent) => ({ agent, result: await agentIntegrationStatus(agent) })));
+    const statuses: Partial<Record<DesktopAgent, DesktopAgentIntegrationStatus>> = {};
+    for (const { agent, result } of results) {
+      if (!result.ok) return result;
+      statuses[agent] = result.data;
+    }
+    return { ok: true, data: statuses };
+  }
+  try {
+    const response = await fetch(`${LOCAL_ASSISTANT_BRIDGE}/agents`);
+    const payload = await response.json().catch(() => ({})) as {
+      agents?: Partial<Record<DesktopAgent, DesktopAgentIntegrationStatus>>;
+      error?: string;
+    };
+    if (!response.ok) throw new Error(payload.error || `Assistant Bridge returned HTTP ${response.status}`);
+    return { ok: true, data: payload.agents || {} };
+  } catch (error) {
+    return { ok: false, reason: "unavailable", error };
+  }
+}
+
+export function agentIntegrationAction(agent: DesktopAgent, action: "connect" | "disconnect"): Promise<DesktopAgentIntegrationResult> {
+	const bridge = getDesktopBridge();
+	if (bridge?.agentIntegrationAction) {
+		return callAgentIntegration((value) => value.agentIntegrationAction!(agent, action));
+	}
+	if (agent === "codex" && bridge?.codexIntegrationAction) {
+		return callAgentIntegration((value) => value.codexIntegrationAction!(action));
+	}
+	return callLocalAssistantBridge(`/agents/${encodeURIComponent(agent)}/${action}`, { method: "POST" });
 }
 
 export function codexIntegrationAction(action: "connect" | "disconnect"): Promise<DesktopAgentIntegrationResult> {
-  return callAgentIntegration((bridge) => {
-    if (!bridge.codexIntegrationAction) throw new Error("Codex integration is unavailable");
-    return bridge.codexIntegrationAction(action);
-  });
+	return agentIntegrationAction("codex", action);
+}
+
+const LOCAL_ASSISTANT_BRIDGE = "http://127.0.0.1:19091/v1";
+
+async function callLocalAssistantBridge(path: string, init?: RequestInit): Promise<DesktopAgentIntegrationResult> {
+	try {
+		const response = await fetch(`${LOCAL_ASSISTANT_BRIDGE}${path}`, init);
+		const payload = await response.json().catch(() => ({})) as DesktopAgentIntegrationStatus & { error?: string };
+		if (!response.ok) throw new Error(payload.error || `Assistant Bridge returned HTTP ${response.status}`);
+		return { ok: true, data: payload };
+	} catch (error) {
+		return { ok: false, reason: "unavailable", error };
+	}
 }
 
 export function restartRuntime(): Promise<DesktopBridgeResult> {

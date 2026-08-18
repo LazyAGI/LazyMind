@@ -600,7 +600,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
         .map((schedule) => schedule.id);
       const sourceScheduleIDs = Array.from(new Set<string>([...(values.source_schedule_ids ?? []), ...mentionedSourceIDs]));
       const payload = {
-        name: values.name?.trim() || '',
+        name: values.name.trim(),
         remark: values.remark ?? '',
         cron_expr: values.cron_expr || buildCronExpr([1, 2, 3, 4, 5], dayjs().hour(9).minute(0)),
         prompt_template: values.prompt_template,
@@ -878,7 +878,11 @@ export default function ScheduleList({ active }: ScheduleListProps) {
         </div> : null}
         {creationType === 'task' || editTarget ? <>
         <Form key={modalKey} form={form} layout='horizontal' labelCol={{ flex: '145px' }} wrapperCol={{ flex: 1 }} labelAlign='left' colon={false} size='small'>
-          <Form.Item name='name' label={<FieldLabel>{t('taskCenter.scheduleNameInputLabel')}</FieldLabel>}>
+          <Form.Item
+            name='name'
+            label={<FieldLabel>{t('taskCenter.scheduleNameInputLabel')}</FieldLabel>}
+            rules={[{ required: true, whitespace: true, message: t('taskCenter.scheduleNameRequired') }]}
+          >
             <Input placeholder='请输入任务名称' maxLength={100} />
           </Form.Item>
           <Form.Item name='prompt_template' label={<FieldLabel>{t('taskCenter.scheduleDescription')}</FieldLabel>} rules={[{ required: true, message: t('taskCenter.scheduleDescriptionRequired') }]}>
