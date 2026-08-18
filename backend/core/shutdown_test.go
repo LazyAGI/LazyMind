@@ -38,12 +38,18 @@ func TestCoordinateShutdownReturnsNilOnContextCancellation(t *testing.T) {
 	go func() { <-time.After(10 * time.Millisecond); close(bg2) }()
 
 	ctx, cancel := context.WithCancel(context.Background())
+	runtimeCtx, cancelRuntime := context.WithCancel(ctx)
+	defer cancel()
+
 	errCh := make(chan error, 1)
-	go func() { errCh <- coordinateShutdown(ctx, srv, ln, []<-chan struct{}{bg1, bg2}, time.Second, onClose) }()
+	go func() {
+		errCh <- coordinateShutdown(ctx, srv, ln, []<-chan struct{}{bg1, bg2}, time.Second, cancelRuntime, onClose)
+	}()
 
 	// Let the server start serving, then trigger shutdown.
 	time.Sleep(30 * time.Millisecond)
 	cancel()
+	_ = runtimeCtx
 
 	select {
 	case err := <-errCh:
@@ -77,10 +83,11 @@ func TestCoordinateShutdownDrainsInFlightRequest(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	_, cancelRuntime := context.WithCancel(ctx)
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- coordinateShutdown(ctx, srv, ln, nil, 2*time.Second, nil)
+		errCh <- coordinateShutdown(ctx, srv, ln, nil, 2*time.Second, cancelRuntime, nil)
 	}()
 
 	// Fire an in-flight request that blocks inside the handler.
@@ -150,9 +157,12 @@ func TestCoordinateShutdownWaitsForBackgroundLoops(t *testing.T) {
 	}()
 
 	ctx, cancel := context.WithCancel(context.Background())
+	_, cancelRuntime := context.WithCancel(ctx)
+	defer cancel()
+
 	coordinatorDone := make(chan error, 1)
 	go func() {
-		coordinatorDone <- coordinateShutdown(ctx, srv, ln, []<-chan struct{}{bgExited}, time.Second, nil)
+		coordinatorDone <- coordinateShutdown(ctx, srv, ln, []<-chan struct{}{bgExited}, time.Second, cancelRuntime, nil)
 	}()
 
 	time.Sleep(20 * time.Millisecond)
@@ -181,10 +191,10 @@ func TestCoordinateShutdownWaitsForBackgroundLoops(t *testing.T) {
 }
 
 // TestCoordinateShutdownClosesResourcesAfterBackgroundLoops locks down the
-// §3.5 ordering invariant: onClose (which releases Redis/DB) must run only
-// after every background loop has exited, so a loop's final tick can never
-// race with store/DB close. The background loop records when it observes
-// shutdown; onClose asserts the loop had already exited by then.
+// ordering invariant: onClose (which releases Redis/DB) must run only after
+// every background loop has exited, so a loop's final tick can never race with
+// store/DB close. The background loop records when it observes shutdown;
+// onClose asserts the loop had already exited by then.
 func TestCoordinateShutdownClosesResourcesAfterBackgroundLoops(t *testing.T) {
 	ln := newListener(t)
 	srv := &http.Server{
@@ -212,9 +222,12 @@ func TestCoordinateShutdownClosesResourcesAfterBackgroundLoops(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	_, cancelRuntime := context.WithCancel(ctx)
+	defer cancel()
+
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- coordinateShutdown(ctx, srv, ln, []<-chan struct{}{loopExited}, time.Second, onClose)
+		errCh <- coordinateShutdown(ctx, srv, ln, []<-chan struct{}{loopExited}, time.Second, cancelRuntime, onClose)
 	}()
 
 	time.Sleep(20 * time.Millisecond)
@@ -247,12 +260,104 @@ func TestCoordinateShutdownReturnsServeError(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
+	_, cancelRuntime := context.WithCancel(ctx)
 
-	err := coordinateShutdown(ctx, srv, ln, nil, time.Second, nil)
+	err := coordinateShutdown(ctx, srv, ln, nil, time.Second, cancelRuntime, nil)
 	if err == nil {
 		t.Fatal("coordinateShutdown returned nil for a closed listener, want error")
 	}
 	if errors.Is(err, http.ErrServerClosed) {
 		t.Fatalf("coordinateShutdown treated serve failure as ErrServerClosed: %v", err)
+	}
+}
+
+// TestCoordinateShutdownServeErrorCancelsBackground verifies that a fatal
+// server.Serve error unblocks the background waits: the watchdog cancels the
+// runtime context, the background loop observes cancellation and exits, and
+// coordinateShutdown returns the Serve error instead of blocking forever.
+// This covers the P1 scenario where the background loops were started with a
+// context that errgroup cancellation alone cannot reach.
+func TestCoordinateShutdownServeErrorCancelsBackground(t *testing.T) {
+	ln := newListener(t)
+	_ = ln.Close() // force an immediate Serve failure
+	srv := &http.Server{
+		Handler:           http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {}),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	runtimeCtx, cancelRuntime := context.WithCancel(ctx)
+
+	// Background loop that exits when runtimeCtx is cancelled — mirroring how
+	// real background loops react to the runtime context. If the watchdog never
+	// calls cancelRuntime, this channel never closes and the test hangs.
+	bgExited := make(chan struct{})
+	go func() {
+		<-runtimeCtx.Done()
+		close(bgExited)
+	}()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- coordinateShutdown(ctx, srv, ln, []<-chan struct{}{bgExited}, time.Second, cancelRuntime, nil)
+	}()
+
+	select {
+	case err := <-errCh:
+		if err == nil {
+			t.Fatal("coordinateShutdown returned nil for a serve failure, want error")
+		}
+		if errors.Is(err, http.ErrServerClosed) {
+			t.Fatalf("coordinateShutdown treated serve failure as ErrServerClosed: %v", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("coordinateShutdown blocked forever on background waits after a serve failure (cancelRuntime not invoked)")
+	}
+
+	// And confirm the background loop actually exited (proving cancelRuntime ran).
+	select {
+	case <-bgExited:
+	default:
+		t.Fatal("background loop did not exit after serve failure (runtime ctx was not cancelled)")
+	}
+}
+
+// TestCoordinateShutdownBackgroundWaitIsBounded verifies the overall shutdown
+// deadline: a background loop that ignores cancellation cannot keep the
+// process alive forever after a single SIGTERM. coordinateShutdown must
+// return once shutdownTimeout elapses even if backgroundDone never closes.
+func TestCoordinateShutdownBackgroundWaitIsBounded(t *testing.T) {
+	ln := newListener(t)
+	srv := &http.Server{
+		Handler:           http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+
+	// A background loop that never closes its done channel, simulating a
+	// handler that ignores cancellation.
+	neverExits := make(chan struct{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	_, cancelRuntime := context.WithCancel(ctx)
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- coordinateShutdown(ctx, srv, ln, []<-chan struct{}{neverExits}, 80*time.Millisecond, cancelRuntime, nil)
+	}()
+
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+
+	// With a 80ms shutdown timeout, the coordinator must return well before
+	// the 3s test deadline — proving the background wait is bounded.
+	select {
+	case err := <-errCh:
+		if err != nil {
+			t.Fatalf("coordinateShutdown returned %v, want nil (deadline exit should not surface an error)", err)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("coordinateShutdown hung forever waiting for a background loop that ignores cancellation")
 	}
 }

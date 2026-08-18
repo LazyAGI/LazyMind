@@ -267,25 +267,32 @@ func shutdownTimeout() time.Duration {
 }
 
 // coordinateShutdown serves HTTP on listener and waits for the background
-// loops until ctx is cancelled, then triggers an ordered shutdown matching
-// the plan in §3.5: stop accepting new HTTP connections and drain in-flight
-// requests (bounded by shutdownTimeout), wait for every backgroundDone
-// channel to close, and only then invoke onClose to release state/DB
-// connections — so a background loop's final tick can never race with the
-// store/DB being closed. It returns the first non-nil error from the group;
-// http.ErrServerClosed is expected and treated as success.
+// loops until the app ctx is cancelled (by SIGINT/SIGTERM) or server.Serve
+// fails, then triggers an ordered shutdown: stop accepting new HTTP
+// connections and drain in-flight requests (bounded by shutdownTimeout), wait
+// up to shutdownTimeout for every backgroundDone channel to close, and only
+// then invoke onClose to release state/DB connections — so a background loop's
+// final tick can never race with the store/DB being closed.
+//
+// cancelRuntime cancels the runtime context that the background loops were
+// started with. It is invoked as soon as the errgroup context is cancelled —
+// whether by a signal (propagated through ctx) or by a fatal server.Serve
+// error — so a Serve failure also unblocks the background waits instead of
+// leaving them open forever.
 func coordinateShutdown(
 	ctx context.Context,
 	server *http.Server,
 	listener net.Listener,
 	backgroundDone []<-chan struct{},
 	shutdownTimeout time.Duration,
+	cancelRuntime context.CancelFunc,
 	onClose func(),
 ) error {
 	g, gctx := errgroup.WithContext(ctx)
 
 	// Serve HTTP until Shutdown is called (returns http.ErrServerClosed) or a
-	// fatal serve error occurs.
+	// fatal serve error occurs. A fatal error cancels gctx, which the watchdog
+	// below turns into a runtime cancellation so background loops also exit.
 	g.Go(func() error {
 		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			return &startupError{msg: "http serve", err: err}
@@ -293,12 +300,15 @@ func coordinateShutdown(
 		return nil
 	})
 
-	// Watchdog: on ctx cancellation, stop accepting new HTTP connections and
-	// drain in-flight requests. Resource release (onClose) is deliberately NOT
-	// done here — it runs after g.Wait() below, once every background loop has
-	// exited, so a loop's final DB write cannot race with DB close.
+	// Watchdog: as soon as the errgroup context is done (signal or Serve
+	// failure), cancel the runtime context so background loops observe
+	// cancellation, then drain HTTP within shutdownTimeout. Resource release
+	// (onClose) is deliberately NOT done here — it runs after g.Wait() below,
+	// once every background loop has exited or the deadline elapsed, so a
+	// loop's final DB write cannot race with DB close.
 	g.Go(func() error {
 		<-gctx.Done()
+		cancelRuntime()
 		shutCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 		defer cancel()
 		if err := server.Shutdown(shutCtx); err != nil {
@@ -307,18 +317,25 @@ func coordinateShutdown(
 		return nil
 	})
 
-	// Wait for each background loop to fully exit.
+	// Wait for each background loop to fully exit, but bound the wait by the
+	// same shutdownTimeout so a handler that ignores cancellation cannot keep
+	// the process alive forever after a single SIGTERM.
+	deadline := time.After(shutdownTimeout)
 	for _, d := range backgroundDone {
 		d := d
 		g.Go(func() error {
-			<-d
+			select {
+			case <-d:
+			case <-deadline:
+				log.Logger.Warn().Msg("background loop did not exit within shutdown timeout; giving up")
+			}
 			return nil
 		})
 	}
 
 	err := g.Wait()
-	// All HTTP serving, drain, and background loops have now exited; it is safe
-	// to release shared state and DB connections.
+	// All HTTP serving, drain, and background loops have now exited (or the
+	// deadline elapsed); it is safe to release shared state and DB connections.
 	if onClose != nil {
 		onClose()
 	}
@@ -430,6 +447,13 @@ func run(ctx context.Context) error {
 		AllowLegacyTools:     true,
 	})
 
+	// runtimeCtx is the context the background loops are started with. It is
+	// derived from ctx (so a signal cancels it) but can also be cancelled by
+	// coordinateShutdown when server.Serve fails — ensuring a fatal Serve
+	// error unblocks the background waits instead of leaving them open forever.
+	runtimeCtx, cancelRuntime := context.WithCancel(ctx)
+	defer cancelRuntime()
+
 	// backgroundDone collects the completion signal of every background loop so
 	// coordinateShutdown can wait for them to fully exit before the process
 	// returns. asyncjob.Runner exposes Done() directly; the other Start funcs
@@ -441,7 +465,7 @@ func run(ctx context.Context) error {
 		log.Logger.Info().Msg("core background jobs are disabled")
 	} else {
 		asyncConfig := evalset.LoadAsyncJobRuntimeConfigFromEnv()
-		runner = asyncjob.Start(ctx, store.DB(), asyncjob.Options{
+		runner = asyncjob.Start(runtimeCtx, store.DB(), asyncjob.Options{
 			Concurrency:  asyncConfig.Concurrency,
 			PollInterval: asyncConfig.PollInterval,
 			LockTTL:      asyncConfig.LockTTL,
@@ -450,17 +474,17 @@ func run(ctx context.Context) error {
 
 		importConfig := evalset.LoadImportRuntimeConfigFromEnv()
 		backgroundDone = append(backgroundDone,
-			evalset.StartImportPreviewCleanup(ctx, store.DB(), importConfig.CleanupInterval))
+			evalset.StartImportPreviewCleanup(runtimeCtx, store.DB(), importConfig.CleanupInterval))
 
 		resourceUpdateEnabled := resourceupdate.EnabledFromEnv()
 		resourceupdate.LogStartup(resourceUpdateEnabled)
 		if resourceUpdateEnabled {
 			backgroundDone = append(backgroundDone,
-				resourceupdate.Start(ctx, store.DB(), store.State(), resourceupdate.DefaultConfig()))
+				resourceupdate.Start(runtimeCtx, store.DB(), store.State(), resourceupdate.DefaultConfig()))
 		}
 
 		// Mark stale running SubAgent tasks (no heartbeat for >5m) as interrupted on startup.
-		if n, err := subagent.MarkInterrupted(ctx, store.DB(), 5*time.Minute); err != nil {
+		if n, err := subagent.MarkInterrupted(runtimeCtx, store.DB(), 5*time.Minute); err != nil {
 			log.Logger.Warn().Err(err).Msg("mark interrupted subagent tasks failed")
 		} else if n > 0 {
 			log.Logger.Info().Int64("count", n).Msg("marked stale subagent tasks as interrupted")
@@ -481,7 +505,7 @@ func run(ctx context.Context) error {
 			if _, ok := enriched["conversation_id"]; !ok {
 				enriched["conversation_id"] = convID
 			}
-			_ = chat.AppendConvEvent(ctx, stateStore, convID, &chat.ConvEvent{
+			_ = chat.AppendConvEvent(runtimeCtx, stateStore, convID, &chat.ConvEvent{
 				Type:    eventType,
 				Payload: enriched,
 			})
@@ -491,7 +515,7 @@ func run(ctx context.Context) error {
 
 	// Start the schedule ticker.
 	if startBackgroundJobs {
-		backgroundDone = append(backgroundDone, scheduler.RunScheduler(ctx, store.DB(), ""))
+		backgroundDone = append(backgroundDone, scheduler.RunScheduler(runtimeCtx, store.DB(), ""))
 	}
 
 	r := mux.NewRouter()
@@ -545,27 +569,21 @@ func run(ctx context.Context) error {
 	}
 	log.Logger.Info().Str("addr", listener.Addr().String()).Msg("Core listening")
 
-	// onClose releases shared state and DB connections after the HTTP drain and
-	// all background loops have exited (coordinateShutdown calls it once
-	// g.Wait() returns), so a loop's final tick can never race with store/DB
-	// close.
-	onClose := func() {
-		if st := store.State(); st != nil {
-			if err := st.Close(); err != nil {
-				log.Logger.Warn().Err(err).Msg("state store close failed")
-			}
-		}
-		if sqlDB, err := store.DB().DB(); err == nil {
-			if err := sqlDB.Close(); err != nil {
-				log.Logger.Warn().Err(err).Msg("core db close failed")
-			}
-		}
-	}
-
+	// DB/Redis connections are intentionally NOT closed on shutdown. The
+	// scheduler launches detached task-execution goroutines (sendScheduledChatRequest)
+	// that outlive RunScheduler's Done() channel and may still be writing task
+	// results to the DB after the background loops have exited; closing the pool
+	// would race with those final writes (sql: database is closed). This matches
+	// the pre-PR behavior — the process relied on os.Exit/Fatal, which never
+	// closed pools either. The OS reclaims the TCP connections on process exit,
+	// and PostgreSQL/Redis clean up their side on disconnect identically to a
+	// graceful QUIT (abort tx, release locks), so there is no functional or data
+	// difference. The graceful-shutdown value lives in: HTTP drain, asyncjob
+	// lease release, and short-lived background loops exiting cleanly.
 	server := &http.Server{
 		Handler:           r,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	log.Logger.Info().Dur("timeout", shutdownTimeout()).Msg("core graceful shutdown armed")
-	return coordinateShutdown(ctx, server, listener, backgroundDone, shutdownTimeout(), onClose)
+	return coordinateShutdown(ctx, server, listener, backgroundDone, shutdownTimeout(), cancelRuntime, nil)
 }

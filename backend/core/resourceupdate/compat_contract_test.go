@@ -72,17 +72,17 @@ func TestCoreStartsResourceUpdateRuntime(t *testing.T) {
 	for _, token := range []string{
 		"resourceupdate.EnabledFromEnv()",
 		"resourceupdate.LogStartup(resourceUpdateEnabled)",
-		"resourceupdate.Start(ctx, store.DB(), store.State(), resourceupdate.DefaultConfig())",
+		"resourceupdate.Start(runtimeCtx, store.DB(), store.State(), resourceupdate.DefaultConfig())",
 	} {
 		if !strings.Contains(content, token) {
 			t.Fatalf("core main must wire resource update runtime: missing %q", token)
 		}
 	}
-	// The runtime must be driven by the app context (not context.Background)
-	// so it stops on SIGINT/SIGTERM. Reject any leftover background-context
-	// wiring of the resourceupdate runtime.
+	// The runtime must be driven by a context derived from the app context
+	// (not context.Background) so it stops on SIGINT/SIGTERM or a fatal serve
+	// error. Reject any leftover background-context wiring.
 	if strings.Contains(content, "resourceupdate.Start(context.Background()") {
-		t.Fatalf("core main must start resourceupdate runtime with the app ctx, not context.Background()")
+		t.Fatalf("core main must start resourceupdate runtime with a context derived from the app ctx, not context.Background()")
 	}
 }
 
