@@ -261,11 +261,14 @@ func truncateRunes(s string, maxRunes int, suffix string) string {
 // ── Scheduler loop ────────────────────────────────────────────────────────────
 
 // RunScheduler starts a goroutine that fires due schedules every 30 seconds.
-// Call once at application startup. The goroutine stops when ctx is cancelled.
-// Task status is now derived on read via resolveTaskStatus (chat_histories presence),
-// so no periodic reconciler is needed here.
-func RunScheduler(ctx context.Context, db *gorm.DB, chatBaseURL string) {
+// Call once at application startup. The goroutine stops when ctx is cancelled,
+// at which point the returned channel is closed so callers can wait for full
+// shutdown. Task status is now derived on read via resolveTaskStatus
+// (chat_histories presence), so no periodic reconciler is needed here.
+func RunScheduler(ctx context.Context, db *gorm.DB, chatBaseURL string) <-chan struct{} {
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		repairFutureScheduleNextRunsAt(ctx, db, time.Now().UTC())
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
@@ -279,6 +282,7 @@ func RunScheduler(ctx context.Context, db *gorm.DB, chatBaseURL string) {
 			}
 		}
 	}()
+	return done
 }
 
 // repairFutureScheduleNextRunsAt corrects future timestamps produced when a
