@@ -1140,6 +1140,7 @@ const AssistantMessage = (props: any) => {
     );
 
   const shouldShowLoading =
+    !item.model_retry &&
     !(item.delta && trim(item.delta)?.length > 0) &&
     !(item.reasoning_content && trim(item.reasoning_content)?.length > 0) &&
     !hasMultipleAnswersContent &&
