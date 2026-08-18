@@ -42,6 +42,7 @@ from lazymind.chat.engine.tools.memory import MemoryTools
 from lazymind.chat.engine.tools.lazy_kb import KBToolkit, kb_tmp_search
 from lazymind.model_config import is_model_role_available
 from lazymind.chat.engine.tools.ask_user import ask_user
+from lazymind.chat.engine.tools.session_env import build_session_env_tool
 from lazymind.chat.engine.subagent.tools import (
     find_user_attachment,
     read_user_attachment,
@@ -380,6 +381,21 @@ ASK_USER_TOOL_CONFIG = ToolConfig(
     appendix_system_prompt=ASK_USER_TOOL_POLICY_APPENDIX,
     appendix_query=ASK_USER_QUERY_APPENDIX,
 )
+
+
+def build_session_env_tool_config(
+    conversation_env_store: dict[str, dict[str, str]],
+    conversation_id: str,
+) -> ToolConfig:
+    return ToolConfig(
+        name='set_session_env',
+        label='会话环境变量',
+        description='为当前对话临时配置 skill 脚本所需环境变量，并立即对 run_script 生效',
+        tool=build_session_env_tool(conversation_env_store, conversation_id),
+        module='execution',
+        label_en='Session Environment',
+        description_en='Temporarily configure environment variables for skill scripts in this conversation.',
+    )
 
 USER_ATTACHMENT_TOOL_CONFIGS = (
     ToolConfig(

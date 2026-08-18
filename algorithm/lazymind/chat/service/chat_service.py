@@ -44,6 +44,7 @@ from lazymind.chat.service.component import (
     collect_system_prompt_appendices,
     filter_tools,
     normalize_history_for_agent,
+    build_session_env_tool_config,
 )
 from lazymind.chat.engine.agent_runtime import (
     AgentExecutionOptions,
@@ -76,7 +77,7 @@ from lazymind.chat.service.utils import (
 )
 from lazyllm.tools.fs.client import FS
 from lazymind.model_config import inject_model_config, summarize_model_config_for_log
-from lazyllm.tools.tool_config_inject import inject_tool_config
+from lazyllm.tools import inject_env_vars, inject_tool_config
 from lazyllm import AutoModel
 from lazyllm.tools.mcp.client import MCPClient
 from lazymind.config import config as _cfg
@@ -91,6 +92,7 @@ sensitive_filter = SensitiveFilter(
 # Maps conversation_id → session_id for active chat sessions.
 # Used by task-cancel endpoint to cancel ChatAgent by conversation_id.
 _active_sessions: dict[str, str] = {}
+_conversation_env_vars: dict[str, dict[str, str]] = {}
 
 
 def _unregister_active_session(conversation_id: str, session_id: str) -> None:
@@ -667,6 +669,8 @@ async def _handle_chat_impl(
         lazyllm.locals._init_sid(sid=lazyllm_session_id)
     inject_model_config(runtime.llm_config)
     inject_tool_config(runtime.tool_config)
+    env_scope_key = conversation_id or conversation.session_id
+    inject_env_vars(_conversation_env_vars.get(env_scope_key))
     _inject_reader_config(runtime.ocr_config)
     lazyllm.globals['agentic_config'] = agentic_config
 
@@ -822,11 +826,16 @@ async def _handle_chat_impl(
     allow_ask_user = _should_register_ask_user(agentic_config, disabled)
     ask_user_tools = _build_ask_user_tool() if allow_ask_user else []
     ask_user_configs = [ASK_USER_TOOL_CONFIG] if ask_user_tools else []
+    session_env_configs = (
+        [build_session_env_tool_config(_conversation_env_vars, env_scope_key)]
+        if 'set_session_env' not in disabled else []
+    )
+    session_env_tools = [cfg.tool for cfg in session_env_configs]
     artifact_tools = _build_chat_artifact_tools()
     workspace = chat_agent_workspace(user_id or '0', conversation_id)
     skill_listing_tools = [build_list_skills_tool(agent.available_skills)]
     all_tools = ([intentwriter] + agent_tools + artifact_tools + subagent_tools + attachment_tools
-                 + skill_listing_tools + ask_user_tools + workflow_tools + mcp_tools)
+                 + skill_listing_tools + session_env_tools + ask_user_tools + workflow_tools + mcp_tools)
     active_workflow_tool_isolation = bool(
         isinstance(effective_workflow_context, dict)
         and effective_workflow_context.get('session_id')
@@ -841,7 +850,7 @@ async def _handle_chat_impl(
         # The Workflow's declarative rerun_when metadata still decides the owning step.
         active_configs = []
         attachment_configs = []
-        all_tools = [intentwriter, *ask_user_tools, *workflow_tools]
+        all_tools = [intentwriter, *session_env_tools, *ask_user_tools, *workflow_tools]
         LOG.info(
             '[ChatServer] [ACTIVE_WORKFLOW_TOOL_ISOLATION] [sid=%s] '
             '[workflow_id=%s] [outcome=%s] [tools=%s]',
@@ -956,7 +965,7 @@ async def _handle_chat_impl(
         )
 
     prompt_builder = PromptBuilder.for_role(AgentRole.CHAT)
-    active_tool_configs = active_configs + attachment_configs + ask_user_configs
+    active_tool_configs = active_configs + attachment_configs + session_env_configs + ask_user_configs
     add_standard_system_sections(
         prompt_builder,
         bool(all_tools),

@@ -20,6 +20,7 @@ from .tool_registry import (
     filter_tools,
     get_all_tool_groups,
     normalize_tool_locale,
+    build_session_env_tool_config,
 )
 
 __all__ = [
@@ -42,4 +43,5 @@ __all__ = [
     'get_all_tool_groups',
     'normalize_tool_locale',
     'normalize_history_for_agent',
+    'build_session_env_tool_config',
 ]
