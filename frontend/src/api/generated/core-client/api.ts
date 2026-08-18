@@ -1847,10 +1847,30 @@ export interface RunTerminal {
     'code'?: string;
     'diagnostic_id'?: string;
     'model_call_id'?: string;
-    'partial_output'?: boolean;
-    'reason'?: string;
-    'status'?: string;
+    'partial_output': boolean;
+    'reason': RunTerminalReasonEnum;
+    'status': RunTerminalStatusEnum;
 }
+
+export const RunTerminalReasonEnum = {
+    Normal: 'normal',
+    AwaitingUserInput: 'awaiting_user_input',
+    ModelIncomplete: 'model_incomplete',
+    ModelFailure: 'model_failure',
+    RuntimeFailure: 'runtime_failure',
+    UserCancelled: 'user_cancelled'
+} as const;
+
+export type RunTerminalReasonEnum = typeof RunTerminalReasonEnum[keyof typeof RunTerminalReasonEnum];
+export const RunTerminalStatusEnum = {
+    Completed: 'completed',
+    Interrupted: 'interrupted',
+    Failed: 'failed',
+    Cancelled: 'cancelled'
+} as const;
+
+export type RunTerminalStatusEnum = typeof RunTerminalStatusEnum[keyof typeof RunTerminalStatusEnum];
+
 export interface SearchDatasetMemberRequest {
     'is_all'?: boolean;
     'name_prefix'?: string;

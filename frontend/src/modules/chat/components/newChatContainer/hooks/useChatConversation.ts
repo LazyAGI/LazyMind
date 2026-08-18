@@ -450,14 +450,9 @@ export function useChatConversation({
         ),
     );
     const finalRunTerminal = allRunsFinished
-      ? Object.values(
-          streamManager.getStreamState(
-            messageConversationId || currentConversationIdAtStart,
-          )?.runTerminals || {},
-        ).sort((left, right) => {
-          const rank = { failed: 0, interrupted: 1, cancelled: 2, completed: 3 };
-          return rank[left.status] - rank[right.status];
-        })[0]
+      ? streamManager.getAggregatedRunTerminal(
+          messageConversationId || currentConversationIdAtStart,
+        )
       : undefined;
 
     if (isActiveConversation && finalRunTerminal?.status === "completed") {

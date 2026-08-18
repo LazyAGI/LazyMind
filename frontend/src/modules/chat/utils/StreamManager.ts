@@ -13,6 +13,7 @@ export interface StreamState {
   reasoning_content: string;
   sources?: any[];
   runTerminals: Record<string, RunTerminal>;
+  historyRunIds: Record<string, string>;
   activeHistoryIds: string[];
   connectionState: "connected" | "disconnected" | "resuming";
   messageId?: string;
@@ -86,6 +87,7 @@ export class StreamManager {
         reasoning_content: "",
         sources: undefined,
         runTerminals: {},
+        historyRunIds: {},
         activeHistoryIds: [],
         connectionState: "connected",
         messageId: undefined,
@@ -97,6 +99,7 @@ export class StreamManager {
         existingState.delta = "";
         existingState.reasoning_content = "";
         existingState.runTerminals = {};
+        existingState.historyRunIds = {};
         existingState.activeHistoryIds = [];
         existingState.connectionState = "connected";
       }
@@ -173,6 +176,7 @@ export class StreamManager {
         reasoning_content: "",
         sources: undefined,
         runTerminals: {},
+        historyRunIds: {},
         activeHistoryIds: [],
         connectionState: "connected",
         messageId: undefined,
@@ -216,9 +220,12 @@ export class StreamManager {
           ) {
             state.activeHistoryIds.push(result.history_id);
           }
-          if (runtimeEvent?.type === "run_finished") {
-            const key = result.history_id || runtimeEvent.run_id;
-            state.runTerminals[key] = runtimeEvent.data as RunTerminal;
+          if (result.history_id && runtimeEvent?.run_id) {
+            state.historyRunIds[result.history_id] = runtimeEvent.run_id;
+          }
+          if (runtimeEvent?.type === "run_finished" && runtimeEvent.run_id) {
+            state.runTerminals[runtimeEvent.run_id] =
+              runtimeEvent.data as RunTerminal;
           }
           if (result.messageId) {
             state.messageId = result.messageId;
@@ -257,6 +264,7 @@ export class StreamManager {
         delta: "",
         reasoning_content: "",
         runTerminals: {},
+        historyRunIds: {},
         activeHistoryIds: [],
         connectionState: "connected",
         messageList,
@@ -321,12 +329,45 @@ export class StreamManager {
 
   isStreamFinished(conversationId: string): boolean {
     const state = this.streamStates.get(conversationId);
-    if (!state || state.activeHistoryIds.length === 0) {
+    if (!state) {
       return false;
     }
+    if (state.activeHistoryIds.length === 0) {
+      return Object.keys(state.runTerminals).length > 0;
+    }
     return state.activeHistoryIds.every((historyId) =>
-      Boolean(state.runTerminals[historyId]),
+      Boolean(
+        state.historyRunIds[historyId] &&
+          state.runTerminals[state.historyRunIds[historyId]],
+      ),
     );
+  }
+
+  getAggregatedRunTerminal(conversationId: string): RunTerminal | undefined {
+    const state = this.streamStates.get(conversationId);
+    if (!state || !this.isStreamFinished(conversationId)) {
+      return undefined;
+    }
+    const terminals =
+      state.activeHistoryIds.length > 0
+        ? state.activeHistoryIds
+            .map((historyId) => state.historyRunIds[historyId])
+            .map((runId) => state.runTerminals[runId])
+        : Object.values(state.runTerminals);
+    const rank: Record<RunTerminal["status"], number> = {
+      failed: 0,
+      interrupted: 1,
+      cancelled: 2,
+      completed: 3,
+    };
+    return terminals.reduce<RunTerminal | undefined>((worst, terminal) => {
+      if (!terminal) {
+        return worst;
+      }
+      return !worst || rank[terminal.status] < rank[worst.status]
+        ? terminal
+        : worst;
+    }, undefined);
   }
 
   closeAndCleanup(conversationId: string): void {
@@ -498,6 +539,7 @@ export class StreamManager {
         isActive: this.hasActiveStream(conversationId),
         isFinished: this.isStreamFinished(conversationId),
         runTerminals: state.runTerminals,
+        historyRunIds: state.historyRunIds,
         connectionState: state.connectionState,
         messageListLength: state.messageList?.length || 0,
       };
