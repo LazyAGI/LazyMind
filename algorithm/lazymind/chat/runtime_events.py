@@ -6,6 +6,12 @@ from uuid import uuid4
 
 
 RUNTIME_EVENT_TYPES = frozenset({'model_retry_scheduled', 'model_call_finished', 'run_finished'})
+INCOMPLETE_MODEL_FINISHES = frozenset({
+    'length',
+    'content_filter',
+    'insufficient_system_resource',
+    'unknown',
+})
 
 
 def runtime_event(event_type: str, run_id: str, data: Dict[str, Any], *, event_id: Optional[str] = None) -> dict:
@@ -61,7 +67,12 @@ class RunAccumulator:
         terminal = self.last_model_terminal or {}
         if terminal.get('kind') == 'finish':
             finish = str(terminal.get('finish') or 'unknown')
-            return 'interrupted', 'model_incomplete', finish
+            if finish in INCOMPLETE_MODEL_FINISHES:
+                return 'interrupted', 'model_incomplete', finish
+            # stop and tool_calls complete the model call successfully. If the
+            # enclosing run still failed, the cause is downstream runtime work
+            # rather than incomplete model generation.
+            return 'failed', 'runtime_failure', 'runtime_failure'
         if terminal.get('kind') == 'failure':
             failure = terminal.get('failure') or {}
             code = str(

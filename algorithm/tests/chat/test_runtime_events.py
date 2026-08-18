@@ -36,6 +36,16 @@ def test_translator_binds_model_event_to_run():
 @pytest.mark.parametrize(('terminal', 'status', 'reason'), [
     ({'kind': 'finish', 'finish': 'length', 'has_semantic_output': True},
      'interrupted', 'model_incomplete'),
+    ({'kind': 'finish', 'finish': 'content_filter', 'has_semantic_output': True},
+     'interrupted', 'model_incomplete'),
+    ({'kind': 'finish', 'finish': 'insufficient_system_resource', 'has_semantic_output': False},
+     'interrupted', 'model_incomplete'),
+    ({'kind': 'finish', 'finish': 'unknown', 'has_semantic_output': False},
+     'interrupted', 'model_incomplete'),
+    ({'kind': 'finish', 'finish': 'stop', 'has_semantic_output': True},
+     'failed', 'runtime_failure'),
+    ({'kind': 'finish', 'finish': 'tool_calls', 'has_semantic_output': True},
+     'failed', 'runtime_failure'),
     ({'kind': 'failure',
       'failure': {'origin': 'transport', 'code': 'transport_error'},
       'has_semantic_output': True},
@@ -57,6 +67,17 @@ def test_run_accumulator_maps_model_terminal(terminal, status, reason):
     assert event['type'] == 'run_finished'
     assert event['data']['status'] == status
     assert event['data']['reason'] == reason
+
+
+@pytest.mark.parametrize('finish', ['stop', 'tool_calls'])
+def test_successful_model_terminal_does_not_mask_downstream_runtime_failure(finish):
+    accumulator = RunAccumulator(run_id='run-1', last_model_terminal={
+        'kind': 'finish',
+        'finish': finish,
+        'has_semantic_output': True,
+    })
+
+    assert accumulator.finish(succeeded=False)['data']['code'] == 'runtime_failure'
 
 
 def test_run_accumulator_only_propagates_public_failure_fields():
