@@ -750,10 +750,49 @@ func sendChunk(w http.ResponseWriter, flusher http.Flusher, ch *ChatChunkRespons
 func resumeSingleAnswerChat(ctx context.Context, stateStore state.Store, convID, historyID string, w http.ResponseWriter, flusher http.Flusher) {
 	status, _ := getChatStatus(ctx, stateStore, convID, historyID)
 	chunks, _ := getChatChunks(ctx, stateStore, convID, historyID)
+	terminalSent := false
 
 	first := mergeChunksToFirstChunk(chunks)
 	if first != nil {
 		sendChunk(w, flusher, first)
+	}
+	for _, chunk := range chunks {
+		if chunk == nil || chunk.RuntimeEvent == nil || chunk.RuntimeEvent.Type != RuntimeEventRunFinished || terminalSent {
+			continue
+		}
+		if _, err := chunk.RuntimeEvent.Terminal(); err != nil {
+			copyOfChunk := *chunk
+			runID := strings.TrimSpace(chunk.RuntimeEvent.RunID)
+			if runID == "" && status != nil {
+				runID = strings.TrimSpace(status.RunID)
+			}
+			if runID == "" {
+				runID = newID("run_")
+			}
+			copyOfChunk.RuntimeEvent = failedRunEvent(runID, "missing_persisted_terminal", false)
+			sendChunk(w, flusher, &copyOfChunk)
+		} else {
+			sendChunk(w, flusher, chunk)
+		}
+		terminalSent = true
+	}
+
+	emitStatusTerminal := func(current *ChatStatus) {
+		if current == nil || current.RunTerminal == nil || terminalSent {
+			return
+		}
+		seq := int32(0)
+		if first != nil {
+			seq = first.Seq
+		}
+		event := runFinishedEvent(current.RunID, *current.RunTerminal)
+		if _, err := event.Terminal(); err != nil {
+			event = failedRunEvent(current.RunID, "missing_persisted_terminal", false)
+		}
+		sendChunk(w, flusher, &ChatChunkResponse{
+			ConversationID: convID, Seq: seq, HistoryID: historyID, RuntimeEvent: event,
+		})
+		terminalSent = true
 	}
 
 	if status != nil && status.RunTerminal != nil {
@@ -779,10 +818,7 @@ func resumeSingleAnswerChat(ctx context.Context, stateStore state.Store, convID,
 				})
 			}
 		}
-		eventData, _ := json.Marshal(status.RunTerminal)
-		sendChunk(w, flusher, &ChatChunkResponse{ConversationID: convID, Seq: seq, HistoryID: historyID, RuntimeEvent: &ChatRuntimeEvent{
-			SchemaVersion: 1, EventID: newID("evt_"), RunID: status.RunID, Type: RuntimeEventRunFinished, Data: eventData,
-		}})
+		emitStatusTerminal(status)
 		_ = clearChatData(context.Background(), stateStore, convID, historyID)
 		return
 	}
@@ -792,6 +828,12 @@ func resumeSingleAnswerChat(ctx context.Context, stateStore state.Store, convID,
 		lastIdx = -1
 	}
 	err := watchChatChunks(ctx, stateStore, convID, historyID, lastIdx, func(ch *ChatChunkResponse) error {
+		if ch != nil && ch.RuntimeEvent != nil && ch.RuntimeEvent.Type == RuntimeEventRunFinished {
+			if terminalSent {
+				return nil
+			}
+			terminalSent = true
+		}
 		sendChunk(w, flusher, ch)
 		return nil
 	})
@@ -804,6 +846,7 @@ func resumeSingleAnswerChat(ctx context.Context, stateStore state.Store, convID,
 
 	finalStatus, _ := getChatStatus(context.Background(), stateStore, convID, historyID)
 	if finalStatus != nil && finalStatus.RunTerminal != nil {
+		emitStatusTerminal(finalStatus)
 		_ = clearChatData(context.Background(), stateStore, convID, historyID)
 	}
 }
@@ -1249,8 +1292,7 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 		"run_status":        h.RunStatus,
 	}
 	if len(h.RunTerminal) > 0 {
-		var terminal RunTerminal
-		if json.Unmarshal(h.RunTerminal, &terminal) == nil {
+		if terminal, err := parseRunTerminal(h.RunTerminal); err == nil {
 			item["run_terminal"] = terminal
 		}
 	}

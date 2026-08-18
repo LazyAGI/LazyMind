@@ -567,6 +567,20 @@ func (a *externalChatApplication) eventsAfter(ctx context.Context, owner, runID 
 	return events, run, nil
 }
 
+func (a *externalChatApplication) hasSemanticOutput(ctx context.Context, runID string) (bool, error) {
+	var events []orm.ExternalChatRunEvent
+	if err := a.db.WithContext(ctx).Select("text").
+		Where("run_id = ? AND type = ?", runID, "message").Find(&events).Error; err != nil {
+		return false, err
+	}
+	for _, event := range events {
+		if event.Text != "" {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // executionProjections joins existing authorities into the user-facing read
 // model. It deliberately does not write back to any source table.
 func (a *externalChatApplication) executionProjections(

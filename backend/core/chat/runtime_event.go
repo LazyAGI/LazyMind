@@ -58,19 +58,39 @@ func (e *ChatRuntimeEvent) Terminal() (*RunTerminal, error) {
 	if e == nil || e.Type != RuntimeEventRunFinished {
 		return nil, errors.New("runtime event is not run_finished")
 	}
-	var terminal RunTerminal
-	if err := json.Unmarshal(e.Data, &terminal); err != nil {
+	return parseRunTerminal(e.Data)
+}
+
+func parseRunTerminal(raw json.RawMessage) (*RunTerminal, error) {
+	var fields map[string]json.RawMessage
+	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
 		return nil, errors.New("invalid run_finished data")
 	}
-	switch terminal.Status {
-	case "completed", "interrupted", "failed", "cancelled":
-	default:
-		return nil, errors.New("invalid run status")
+	partialOutput, exists := fields["partial_output"]
+	if !exists {
+		return nil, errors.New("run_finished partial_output is required")
 	}
-	switch terminal.Reason {
-	case "normal", "awaiting_user_input", "model_incomplete", "model_failure", "runtime_failure", "user_cancelled":
-	default:
-		return nil, errors.New("invalid run reason")
+	var explicitPartialOutput *bool
+	if err := json.Unmarshal(partialOutput, &explicitPartialOutput); err != nil || explicitPartialOutput == nil {
+		return nil, errors.New("run_finished partial_output must be boolean")
+	}
+	var terminal RunTerminal
+	if err := json.Unmarshal(raw, &terminal); err != nil {
+		return nil, errors.New("invalid run_finished data")
+	}
+	valid := false
+	switch terminal.Status {
+	case "completed":
+		valid = terminal.Reason == "normal" || terminal.Reason == "awaiting_user_input"
+	case "interrupted":
+		valid = terminal.Reason == "model_incomplete" || terminal.Reason == "model_failure"
+	case "failed":
+		valid = terminal.Reason == "model_failure" || terminal.Reason == "runtime_failure"
+	case "cancelled":
+		valid = terminal.Reason == "user_cancelled"
+	}
+	if !valid {
+		return nil, errors.New("invalid run status/reason combination")
 	}
 	return &terminal, nil
 }
@@ -120,8 +140,8 @@ func terminalJSON(terminal *RunTerminal) json.RawMessage {
 }
 
 func storedRunEvent(runID string, raw json.RawMessage) *ChatRuntimeEvent {
-	var terminal RunTerminal
-	if strings.TrimSpace(runID) == "" || json.Unmarshal(raw, &terminal) != nil {
+	terminal, err := parseRunTerminal(raw)
+	if strings.TrimSpace(runID) == "" || err != nil {
 		if strings.TrimSpace(runID) == "" {
 			runID = newID("run_")
 		}
@@ -132,7 +152,7 @@ func storedRunEvent(runID string, raw json.RawMessage) *ChatRuntimeEvent {
 		EventID:       newID("evt_"),
 		RunID:         runID,
 		Type:          RuntimeEventRunFinished,
-		Data:          terminalJSON(&terminal),
+		Data:          terminalJSON(terminal),
 	}
 }
 

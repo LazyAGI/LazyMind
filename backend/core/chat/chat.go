@@ -231,9 +231,17 @@ type LazyChatResponse struct {
 
 // LazyStreamData text /api/chat_stream text。
 type LazyStreamData struct {
-	Resp *LazyChatResponse
-	Err  error
+	Resp    *LazyChatResponse
+	Err     error
+	ErrKind lazyStreamErrorKind
 }
+
+type lazyStreamErrorKind uint8
+
+const (
+	lazyStreamErrorProtocol lazyStreamErrorKind = iota + 1
+	lazyStreamErrorTransport
+)
 
 // ChatService owns the algorithm chat-stream connection.
 type ChatService struct {
@@ -325,6 +333,7 @@ func lazyStreamHandler(ctx context.Context, resp *http.Response) <-chan *LazyStr
 			var streamResp LazyChatResponse
 			if err := json.Unmarshal([]byte(text), &streamResp); err != nil {
 				data.Err = fmt.Errorf("invalid algorithm stream frame: %w", err)
+				data.ErrKind = lazyStreamErrorProtocol
 			} else {
 				data.Resp = &streamResp
 			}
@@ -336,7 +345,7 @@ func lazyStreamHandler(ctx context.Context, resp *http.Response) <-chan *LazyStr
 		}
 		if err := scanner.Err(); err != nil && ctx.Err() == nil {
 			select {
-			case dataChan <- &LazyStreamData{Err: fmt.Errorf("read algorithm stream: %w", err)}:
+			case dataChan <- &LazyStreamData{Err: fmt.Errorf("read algorithm stream: %w", err), ErrKind: lazyStreamErrorTransport}:
 			case <-ctx.Done():
 			}
 		}
@@ -798,6 +807,13 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 				continue
 			}
 			if d.Err != nil {
+				if terminalSeen && d.ErrKind == lazyStreamErrorTransport && terminalChunk != nil {
+					select {
+					case out <- *terminalChunk:
+					case <-ctx.Done():
+					}
+					return
+				}
 				select {
 				case out <- UpstreamStreamChunk{Err: d.Err}:
 				case <-ctx.Done():

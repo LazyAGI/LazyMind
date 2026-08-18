@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/log"
 	"lazymind/core/state"
 )
 
@@ -290,7 +291,49 @@ func setChatCancelSignal(ctx context.Context, stateStore state.Store, conversati
 
 func watchChatCancelSignal(ctx context.Context, stateStore state.Store, conversationID, historyID string) error {
 	key := chatStopKey(conversationID, historyID)
-	return stateStore.BLPop(ctx, key, 0)
+	return retryChatCancelSignal(ctx, func(waitCtx context.Context) error {
+		return stateStore.BLPop(waitCtx, key, 0)
+	}, func(err error, delay time.Duration) {
+		log.Logger.Warn().Err(err).
+			Str("conversation_id", conversationID).
+			Str("history_id", historyID).
+			Dur("retry_in", delay).
+			Msg("chat cancel watcher state read failed; retrying")
+	}, 100*time.Millisecond, 2*time.Second)
+}
+
+func retryChatCancelSignal(
+	ctx context.Context,
+	wait func(context.Context) error,
+	onRetry func(error, time.Duration),
+	initialDelay, maxDelay time.Duration,
+) error {
+	delay := initialDelay
+	for {
+		err := wait(ctx)
+		if err == nil {
+			return nil
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if onRetry != nil {
+			onRetry(err, delay)
+		}
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+		if delay < maxDelay {
+			delay *= 2
+			if delay > maxDelay {
+				delay = maxDelay
+			}
+		}
+	}
 }
 
 func watchChatChunks(ctx context.Context, stateStore state.Store, conversationID, historyID string, lastIndex int64, callback func(*ChatChunkResponse) error) error {

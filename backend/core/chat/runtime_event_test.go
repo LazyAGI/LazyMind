@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -81,6 +82,20 @@ func TestStreamChatUpstreamBuffersTerminalUntilEOF(t *testing.T) {
 	}
 }
 
+func TestStreamChatUpstreamPreservesTerminalOnAbnormalEOF(t *testing.T) {
+	frame := runFinishedFrame(t, "run_test") + "\n"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Length", strconv.Itoa(len(frame)+16))
+		_, _ = w.Write([]byte(frame))
+	}))
+	defer server.Close()
+
+	chunks := collectUpstream(t, server.URL, "run_test")
+	if len(chunks) != 1 || chunks[0].RuntimeEvent == nil || chunks[0].Err != nil {
+		t.Fatalf("unexpected chunks: %#v", chunks)
+	}
+}
+
 func TestStreamChatUpstreamRejectsPayloadAfterTerminal(t *testing.T) {
 	server := streamServer(t, "run_test",
 		runFinishedFrame(t, "run_test"),
@@ -90,6 +105,16 @@ func TestStreamChatUpstreamRejectsPayloadAfterTerminal(t *testing.T) {
 
 	chunks := collectUpstream(t, server.URL, "run_test")
 	if len(chunks) != 1 || chunks[0].Err == nil || !strings.Contains(chunks[0].Err.Error(), "after run_finished") {
+		t.Fatalf("unexpected chunks: %#v", chunks)
+	}
+}
+
+func TestStreamChatUpstreamRejectsDuplicateTerminal(t *testing.T) {
+	server := streamServer(t, "run_test", runFinishedFrame(t, "run_test"), runFinishedFrame(t, "run_test"))
+	defer server.Close()
+
+	chunks := collectUpstream(t, server.URL, "run_test")
+	if len(chunks) != 1 || chunks[0].Err == nil || !strings.Contains(chunks[0].Err.Error(), "duplicate run_finished") {
 		t.Fatalf("unexpected chunks: %#v", chunks)
 	}
 }
@@ -122,6 +147,46 @@ func TestStreamChatUpstreamRejectsMalformedFrame(t *testing.T) {
 	chunks := collectUpstream(t, server.URL, "run_test")
 	if len(chunks) != 1 || chunks[0].Err == nil || !strings.Contains(chunks[0].Err.Error(), "invalid algorithm stream frame") {
 		t.Fatalf("unexpected chunks: %#v", chunks)
+	}
+}
+
+func TestStreamChatUpstreamRejectsMalformedFrameAfterTerminal(t *testing.T) {
+	server := streamServer(t, "run_test", runFinishedFrame(t, "run_test"), "not-json")
+	defer server.Close()
+
+	chunks := collectUpstream(t, server.URL, "run_test")
+	if len(chunks) != 1 || chunks[0].Err == nil || !strings.Contains(chunks[0].Err.Error(), "invalid algorithm stream frame") {
+		t.Fatalf("unexpected chunks: %#v", chunks)
+	}
+}
+
+func TestRunTerminalRejectsInvalidContract(t *testing.T) {
+	tests := []struct {
+		name string
+		data string
+	}{
+		{name: "invalid combination", data: `{"status":"completed","reason":"runtime_failure","partial_output":false}`},
+		{name: "missing partial output", data: `{"status":"failed","reason":"runtime_failure"}`},
+		{name: "invalid partial output", data: `{"status":"failed","reason":"runtime_failure","partial_output":null}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			event := &ChatRuntimeEvent{Type: RuntimeEventRunFinished, Data: json.RawMessage(test.data)}
+			if _, err := event.Terminal(); err == nil {
+				t.Fatal("invalid run terminal was accepted")
+			}
+		})
+	}
+}
+
+func TestStoredRunEventRejectsInvalidTerminal(t *testing.T) {
+	event := storedRunEvent("run_test", json.RawMessage(`{"status":"completed","reason":"runtime_failure","partial_output":false}`))
+	terminal, err := event.Terminal()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if terminal.Status != "failed" || terminal.Reason != "runtime_failure" || terminal.Code != "missing_persisted_terminal" {
+		t.Fatalf("unexpected fallback terminal: %#v", terminal)
 	}
 }
 

@@ -1,8 +1,11 @@
 package chat
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"testing"
+	"time"
 )
 
 // --- Key generation functions ---
@@ -31,6 +34,32 @@ func TestChatStopKey(t *testing.T) {
 	want := "rag/chat/stop:conv-1:hist-1"
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
+	}
+}
+
+func TestRetryChatCancelSignalRecoversFromTransientErrors(t *testing.T) {
+	attempts := 0
+	err := retryChatCancelSignal(context.Background(), func(context.Context) error {
+		attempts++
+		if attempts < 3 {
+			return errors.New("temporary state backend failure")
+		}
+		return nil
+	}, nil, time.Microsecond, 2*time.Microsecond)
+	if err != nil || attempts != 3 {
+		t.Fatalf("err=%v attempts=%d, want nil/3", err, attempts)
+	}
+}
+
+func TestRetryChatCancelSignalStopsBackoffOnContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	err := retryChatCancelSignal(ctx, func(context.Context) error {
+		return errors.New("temporary state backend failure")
+	}, func(error, time.Duration) {
+		cancel()
+	}, time.Hour, time.Hour)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("err=%v, want context canceled", err)
 	}
 }
 

@@ -277,6 +277,14 @@ func resumeExternalChatStream(
 		writeSSEChunk(w, flusher, map[string]any{"runtime_event": failedRunEvent(newID("run_"), "external_resume_failed", false)})
 		return true
 	}
+	hasSemanticOutput, err := app.hasSemanticOutput(r.Context(), run.ID)
+	if err != nil {
+		writeSSEChunk(w, flusher, map[string]any{
+			"conversation_id": conversationID, "history_id": run.HistoryID,
+			"runtime_event": failedRunEvent(run.ID, "external_resume_failed", false),
+		})
+		return true
+	}
 	cursor := after
 	heartbeatAt := time.Time{}
 	for {
@@ -284,7 +292,7 @@ func resumeExternalChatStream(
 		if readErr != nil {
 			writeSSEChunk(w, flusher, map[string]any{
 				"conversation_id": conversationID, "history_id": run.HistoryID,
-				"runtime_event": failedRunEvent(run.ID, "external_resume_failed", cursor > 0),
+				"runtime_event": failedRunEvent(run.ID, "external_resume_failed", hasSemanticOutput),
 			})
 			return true
 		}
@@ -293,6 +301,9 @@ func resumeExternalChatStream(
 			projection := basicExternalExecutionProjection(current, time.Now().UTC())
 			switch event.Type {
 			case "message":
+				if event.Text != "" {
+					hasSemanticOutput = true
+				}
 				writeSSEChunk(w, flusher, &ChatChunkResponse{
 					ConversationID: conversationID, Seq: int32(run.Sequence), HistoryID: run.HistoryID,
 					Delta: event.Text, ExternalEventSequence: event.Sequence,
@@ -303,7 +314,7 @@ func resumeExternalChatStream(
 					ConversationID: conversationID, Seq: int32(run.Sequence), HistoryID: run.HistoryID,
 					ExternalEventSequence: event.Sequence,
 					Execution:             &projection,
-					RuntimeEvent:          failedRunEvent(run.ID, "external_agent_failed", cursor > 1),
+					RuntimeEvent:          failedRunEvent(run.ID, "external_agent_failed", hasSemanticOutput),
 				})
 				return true
 			case "completed", "stopped":
@@ -316,7 +327,7 @@ func resumeExternalChatStream(
 					ConversationID: conversationID, Seq: int32(run.Sequence), HistoryID: run.HistoryID,
 					ExternalEventSequence: event.Sequence,
 					Execution:             &projection,
-					RuntimeEvent:          externalRunTerminalEvent(run.ID, event.Type, cursor > 1),
+					RuntimeEvent:          externalRunTerminalEvent(run.ID, event.Type, hasSemanticOutput),
 				})
 				return true
 			}
@@ -332,7 +343,7 @@ func resumeExternalChatStream(
 				ConversationID: conversationID, Seq: int32(run.Sequence), HistoryID: run.HistoryID,
 				ExternalEventSequence: current.NextEventSequence,
 				Execution:             &projection,
-				RuntimeEvent:          externalRunTerminalEvent(run.ID, current.Status, current.NextEventSequence > 1),
+				RuntimeEvent:          externalRunTerminalEvent(run.ID, current.Status, hasSemanticOutput),
 			})
 			return true
 		}
