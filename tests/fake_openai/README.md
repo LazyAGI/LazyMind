@@ -27,7 +27,7 @@ from the latest user query, using a marker such as `[fake:length]`.
 | `[fake:stop]` | 200, normal response, `finish_reason=stop` |
 | `[fake:length]` | 200, partial content, `finish_reason=length` |
 | `[fake:content_filter]` | 200, empty/filtered content, `finish_reason=content_filter` |
-| `[fake:sensitive_input]` | HTTP 400, request rejected by a content safety policy |
+| `[fake:sensitive_input]` | HTTP 400 with no recognized safety business code; OpenAI source treats it as `invalid_request` |
 | `[fake:sensitive_output]` | 200, filtered output, `finish_reason=content_filter` |
 | `[fake:tool_calls]` | 200, an OpenAI function tool call, `finish_reason=tool_calls` |
 | `[fake:insufficient_system_resource]` | 200, DeepSeek-style terminal reason |
@@ -36,9 +36,13 @@ from the latest user query, using a marker such as `[fake:length]`.
 | `[fake:401]` | HTTP 401 authentication failure |
 | `[fake:402]` | HTTP 402 with no recognized Provider business code |
 | `[fake:422]` | HTTP 422 invalid parameters |
-| `[fake:429]` | HTTP 429 rate limit, with `Retry-After: 2` |
-| `[fake:429_quota]` | HTTP 429 with OpenAI `credit_balance_exhausted` |
-| `[fake:429_unknown]` | HTTP 429 with no recognized rate/quota code |
+| `[fake:429]` | Bare HTTP 429 with `Retry-After: 2`; expected `too_many_requests` |
+| `[fake:429_quota]` / `[fake:429_balance]` | HTTP 429 with OpenAI `credit_balance_exhausted` |
+| `[fake:429_org_spend]` | HTTP 429 with OpenAI `organization_spend_limit_exceeded` |
+| `[fake:429_project_spend]` | HTTP 429 with OpenAI `project_spend_limit_exceeded` |
+| `[fake:429_org_usage]` | HTTP 429 with OpenAI `organization_usage_limit_exceeded` |
+| `[fake:429_quota_type]` | HTTP 429 with only `error.type=insufficient_quota` |
+| `[fake:429_unknown]` | Alias of the bare HTTP 429 scenario |
 | `[fake:500]` | HTTP 500 server error |
 | `[fake:503]` | HTTP 503 server overloaded, with `Retry-After: 2` |
 | `[fake:protocol_json]` | HTTP 200 with malformed JSON |
@@ -55,10 +59,10 @@ For example:
 请测试 [fake:429]
 ```
 
-`Retry-After: 2` is included to exercise the frontend/runtime retry hint; it
-does not authorize an automatic retry. The error body's
-shape follows the common OpenAI-compatible envelope. The `fake_*` codes are
-test labels, not claims about an official provider error-code vocabulary.
+`Retry-After: 2` is included to confirm that HTTP failures are not retried and
+that transport metadata is not exposed to the browser. The error body's shape
+follows the common OpenAI-compatible envelope. Only the billing codes listed
+above represent the OpenAI contract exercised by this fixture.
 
 The service also supports `/health`, `/v1/models`, streaming and non-streaming
 `/v1/chat/completions` requests.

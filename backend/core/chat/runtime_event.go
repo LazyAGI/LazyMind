@@ -21,14 +21,12 @@ type ChatRuntimeEvent struct {
 }
 
 type RunTerminal struct {
-	Status             string `json:"status"`
-	Reason             string `json:"reason"`
-	Code               string `json:"code,omitempty"`
-	PartialOutput      bool   `json:"partial_output"`
-	ModelCallID        string `json:"model_call_id,omitempty"`
-	DiagnosticID       string `json:"diagnostic_id,omitempty"`
-	ProviderHTTPStatus int    `json:"provider_http_status,omitempty"`
-	RetryAfterMS       int64  `json:"retry_after_ms,omitempty"`
+	Status        string `json:"status"`
+	Reason        string `json:"reason"`
+	Code          string `json:"code,omitempty"`
+	PartialOutput bool   `json:"partial_output"`
+	ModelCallID   string `json:"model_call_id,omitempty"`
+	DiagnosticID  string `json:"diagnostic_id,omitempty"`
 }
 
 func (e *ChatRuntimeEvent) Validate(expectedRunID string) error {
@@ -129,7 +127,13 @@ func storedRunEvent(runID string, raw json.RawMessage) *ChatRuntimeEvent {
 		}
 		return failedRunEvent(runID, "missing_persisted_terminal", false)
 	}
-	return &ChatRuntimeEvent{SchemaVersion: 1, EventID: newID("evt_"), RunID: runID, Type: RuntimeEventRunFinished, Data: raw}
+	return &ChatRuntimeEvent{
+		SchemaVersion: 1,
+		EventID:       newID("evt_"),
+		RunID:         runID,
+		Type:          RuntimeEventRunFinished,
+		Data:          terminalJSON(&terminal),
+	}
 }
 
 func hasBusinessStreamPayload(chunk UpstreamStreamChunk) bool {

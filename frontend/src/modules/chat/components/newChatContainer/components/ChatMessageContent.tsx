@@ -34,6 +34,26 @@ interface ChatMessageContentProps {
   onToggleThinkingCollapse: (key: string, currentCollapsed?: boolean) => void;
 }
 
+function ModelRetryStatus({
+  retry,
+}: {
+  retry: {
+    retry_index: number;
+    max_attempts: number;
+  };
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <div className="chat-model-retry-status" role="status" aria-live="polite">
+      {t("chat.modelRetrying", {
+        attempt: retry.retry_index + 1,
+        max: retry.max_attempts,
+      })}
+    </div>
+  );
+}
+
 export default function ChatMessageContent({
   item,
   uniqueKey,
@@ -72,6 +92,7 @@ export default function ChatMessageContent({
 
   return (
     <Flex vertical>
+      {item.model_retry ? <ModelRetryStatus retry={item.model_retry} /> : null}
       {conversationIntent ? (
         <Tooltip title={intentTooltip} placement="topLeft">
           <span className="chat-intent-updated">

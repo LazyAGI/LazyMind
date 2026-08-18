@@ -10,6 +10,10 @@ const KNOWN_CODES = new Set([
   "rate_limited",
   "too_many_requests",
   "quota_exhausted",
+  "balance_exhausted",
+  "organization_spend_limit_exceeded",
+  "project_spend_limit_exceeded",
+  "organization_usage_limit_exceeded",
   "input_filtered",
   "output_filtered",
   "token_limit",
@@ -18,6 +22,8 @@ const KNOWN_CODES = new Set([
   "service_unavailable",
   "provider_internal_error",
   "provider_rejected",
+  "conflict",
+  "unprocessable_entity",
   "protocol_error",
   "transport_error",
   "length",
@@ -31,8 +37,6 @@ export interface RunTerminalView {
   reason: string;
   code?: string;
   partial_output: boolean;
-  provider_http_status?: number;
-  retry_after_ms?: number;
 }
 
 export function runStatusDescription(
@@ -55,20 +59,6 @@ export function runStatusDescription(
       ? t("chat.runStatus.partialOutput")
       : t("chat.runStatus.noOutput"),
   );
-  if (
-    Number.isInteger(terminal.provider_http_status) &&
-    Number(terminal.provider_http_status) > 0
-  ) {
-    parts.push(t("chat.runStatus.httpStatus", { status: terminal.provider_http_status }));
-  }
-  if (
-    Number.isFinite(terminal.retry_after_ms) &&
-    Number(terminal.retry_after_ms) > 0
-  ) {
-    parts.push(t("chat.runStatus.retryAfterSeconds", {
-      seconds: Math.ceil(Number(terminal.retry_after_ms) / 1000),
-    }));
-  }
   return parts.join(" ");
 }
 

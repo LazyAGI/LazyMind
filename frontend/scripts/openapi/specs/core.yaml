@@ -2983,13 +2983,8 @@ components:
                     type: string
                 partial_output:
                     type: boolean
-                provider_http_status:
-                    type: integer
                 reason:
                     type: string
-                retry_after_ms:
-                    format: int64
-                    type: integer
                 status:
                     type: string
             type: object

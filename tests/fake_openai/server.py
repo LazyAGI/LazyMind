@@ -39,13 +39,18 @@ SCENARIO_ALIASES = {
     "auth": "http_401",
     "authentication": "http_401",
     "402": "http_402",
-    "insufficient_balance": "http_402",
-    "balance": "http_402",
+    "insufficient_balance": "http_429_balance",
+    "balance": "http_429_balance",
     "422": "http_422",
     "invalid_params": "http_422",
     "429": "http_429",
-    "429_quota": "http_429_quota",
-    "429_unknown": "http_429_unknown",
+    "429_quota": "http_429_balance",
+    "429_balance": "http_429_balance",
+    "429_org_spend": "http_429_org_spend",
+    "429_project_spend": "http_429_project_spend",
+    "429_org_usage": "http_429_org_usage",
+    "429_quota_type": "http_429_quota_type",
+    "429_unknown": "http_429",
     "rate_limit": "http_429",
     "ratelimit": "http_429",
     "500": "http_500",
@@ -66,23 +71,41 @@ SCENARIO_ALIASES = {
 
 HTTP_ERRORS = {
     "http_400": (400, "invalid_request_error", "invalid_request", "Invalid request format."),
-    "http_401": (401, "authentication_error", "invalid_api_key", "Authentication failed."),
-    "http_402": (402, "request_error", "payment_required", "The provider rejected the request."),
+    "http_401": (401, None, None, "Authentication failed."),
+    "http_402": (402, None, None, "The provider rejected the request."),
     "http_422": (422, "invalid_request_error", "invalid_parameters", "Invalid request parameters."),
     "http_400_sensitive_input": (
         400,
-        "invalid_request_error",
-        "content_policy_violation",
+        None,
+        None,
         "Request rejected by the content safety policy.",
     ),
-    "http_429": (429, "rate_limit_error", "rate_limit_exceeded", "Rate limit reached."),
-    "http_429_quota": (
+    "http_429": (429, None, None, "The provider limited the request."),
+    "http_429_balance": (
         429,
         "insufficient_quota",
         "credit_balance_exhausted",
         "Credit balance exhausted.",
     ),
-    "http_429_unknown": (429, "provider_error", "gateway_limit", "Request was limited."),
+    "http_429_org_spend": (
+        429,
+        "insufficient_quota",
+        "organization_spend_limit_exceeded",
+        "Organization spend limit reached.",
+    ),
+    "http_429_project_spend": (
+        429,
+        "insufficient_quota",
+        "project_spend_limit_exceeded",
+        "Project spend limit reached.",
+    ),
+    "http_429_org_usage": (
+        429,
+        "insufficient_quota",
+        "organization_usage_limit_exceeded",
+        "Organization usage limit reached.",
+    ),
+    "http_429_quota_type": (429, "insufficient_quota", None, "Quota exhausted."),
     "http_500": (500, "server_error", "internal_server_error", "The upstream server failed."),
     "http_503": (503, "server_error", "server_overloaded", "The upstream server is overloaded."),
 }
@@ -282,7 +305,12 @@ class FakeOpenAIHandler(BaseHTTPRequestHandler):
         if scenario in HTTP_ERRORS:
             status, error_type, code, message = HTTP_ERRORS[scenario]
             headers = {"Retry-After": "2"} if status in {429, 503} else {}
-            self._send_json(status, {"error": {"message": message, "type": error_type, "param": None, "code": code}}, headers)
+            error = {"message": message}
+            if error_type is not None:
+                error["type"] = error_type
+            if code is not None:
+                error["code"] = code
+            self._send_json(status, {"error": error}, headers)
             return
         if scenario in MINIMAX_ERRORS:
             status_code, status_msg = MINIMAX_ERRORS[scenario]

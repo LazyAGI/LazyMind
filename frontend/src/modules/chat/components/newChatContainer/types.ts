@@ -80,6 +80,10 @@ export interface ChatMessage {
   }[];
   finish_reason?: string;
   run_status?: "completed" | "interrupted" | "failed" | "cancelled";
+  model_retry?: {
+    retry_index: number;
+    max_attempts: number;
+  };
   run_terminal?: {
     status: "completed" | "interrupted" | "failed" | "cancelled";
     reason:
@@ -93,8 +97,6 @@ export interface ChatMessage {
     partial_output: boolean;
     model_call_id?: string;
     diagnostic_id?: string;
-    provider_http_status?: number;
-    retry_after_ms?: number;
   };
   inputs?: Query[];
   reasoning_content?: string;

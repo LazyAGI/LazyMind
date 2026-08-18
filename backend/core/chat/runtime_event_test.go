@@ -125,23 +125,40 @@ func TestStreamChatUpstreamRejectsMalformedFrame(t *testing.T) {
 	}
 }
 
-func TestRunTerminalPreservesProviderFailureMetadata(t *testing.T) {
+func TestRunTerminalPreservesPublicFailureMetadata(t *testing.T) {
 	event := runFinishedEvent("run_test", RunTerminal{
-		Status:             "failed",
-		Reason:             "model_failure",
-		Code:               "rate_limited",
-		PartialOutput:      false,
-		ModelCallID:        "call_test",
-		DiagnosticID:       "diag_test",
-		ProviderHTTPStatus: 429,
-		RetryAfterMS:       2000,
+		Status:        "failed",
+		Reason:        "model_failure",
+		Code:          "too_many_requests",
+		PartialOutput: false,
+		ModelCallID:   "call_test",
+		DiagnosticID:  "diag_test",
 	})
 
 	terminal, err := event.Terminal()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if terminal.Code != "rate_limited" || terminal.ProviderHTTPStatus != 429 || terminal.RetryAfterMS != 2000 {
+	if terminal.Code != "too_many_requests" || terminal.DiagnosticID != "diag_test" {
 		t.Fatalf("provider failure metadata was not preserved: %#v", terminal)
+	}
+}
+
+func TestStoredRunEventDropsLegacyProviderTransportFields(t *testing.T) {
+	event := storedRunEvent("run_test", json.RawMessage(`{
+		"status":"failed",
+		"reason":"model_failure",
+		"code":"too_many_requests",
+		"partial_output":false,
+		"diagnostic_id":"diag_test",
+		"provider_http_status":429,
+		"retry_after_ms":2000
+	}`))
+
+	if err := event.Validate("run_test"); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(event.Data), "provider_http_status") || strings.Contains(string(event.Data), "retry_after_ms") {
+		t.Fatalf("legacy transport fields were re-exposed: %s", event.Data)
 	}
 }

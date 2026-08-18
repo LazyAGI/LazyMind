@@ -53,6 +53,11 @@ class FakeOpenAIServerTest(unittest.TestCase):
             ("422", 422),
             ("429", 429),
             ("429_quota", 429),
+            ("429_balance", 429),
+            ("429_org_spend", 429),
+            ("429_project_spend", 429),
+            ("429_org_usage", 429),
+            ("429_quota_type", 429),
             ("429_unknown", 429),
             ("500", 500),
             ("503", 503),
@@ -67,11 +72,21 @@ class FakeOpenAIServerTest(unittest.TestCase):
                     self.assertEqual(exc_info.exception.headers["Retry-After"], "2")
 
     def test_openai_compatible_ambiguity_envelopes(self):
+        for marker in ["401", "402", "429", "429_unknown", "sensitive_input"]:
+            with self.subTest(marker=marker):
+                with self.assertRaises(urllib.error.HTTPError) as exc_info:
+                    self._post(f"trigger [fake:{marker}]")
+                error = json.load(exc_info.exception)["error"]
+                self.assertNotIn("code", error)
+                self.assertNotIn("type", error)
+
+    def test_openai_billing_envelopes(self):
         expected_codes = {
-            "402": "payment_required",
-            "429": "rate_limit_exceeded",
             "429_quota": "credit_balance_exhausted",
-            "429_unknown": "gateway_limit",
+            "429_balance": "credit_balance_exhausted",
+            "429_org_spend": "organization_spend_limit_exceeded",
+            "429_project_spend": "project_spend_limit_exceeded",
+            "429_org_usage": "organization_usage_limit_exceeded",
         }
         for marker, expected_code in expected_codes.items():
             with self.subTest(marker=marker):
@@ -79,6 +94,13 @@ class FakeOpenAIServerTest(unittest.TestCase):
                     self._post(f"trigger [fake:{marker}]")
                 body = json.load(exc_info.exception)
                 self.assertEqual(body["error"]["code"], expected_code)
+                self.assertEqual(body["error"]["type"], "insufficient_quota")
+
+        with self.assertRaises(urllib.error.HTTPError) as exc_info:
+            self._post("trigger [fake:429_quota_type]")
+        error = json.load(exc_info.exception)["error"]
+        self.assertEqual(error["type"], "insufficient_quota")
+        self.assertNotIn("code", error)
 
     def test_minimax_business_errors_use_http_200_base_resp(self):
         for marker, expected_code in [("minimax_1002", 1002), ("minimax_1008", 1008)]:

@@ -53,10 +53,6 @@ class RunAccumulator:
         if isinstance(failure, dict):
             if failure.get('diagnostic_id'):
                 data['diagnostic_id'] = failure['diagnostic_id']
-            if isinstance(failure.get('provider_http_status'), int):
-                data['provider_http_status'] = failure['provider_http_status']
-            if isinstance(failure.get('retry_after_ms'), int):
-                data['retry_after_ms'] = failure['retry_after_ms']
         return runtime_event('run_finished', self.run_id, data)
 
     def _terminal_fields(self, succeeded: bool) -> tuple[str, str, str]:

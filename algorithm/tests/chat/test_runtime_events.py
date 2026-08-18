@@ -53,7 +53,7 @@ def test_run_accumulator_maps_model_terminal(terminal, status, reason):
     assert event['data']['reason'] == reason
 
 
-def test_run_accumulator_propagates_safe_provider_failure_fields():
+def test_run_accumulator_only_propagates_public_failure_fields():
     accumulator = RunAccumulator(run_id='run-1', last_model_terminal={
         'model_call_id': 'call-1',
         'kind': 'failure',
@@ -76,8 +76,6 @@ def test_run_accumulator_propagates_safe_provider_failure_fields():
         'partial_output': False,
         'model_call_id': 'call-1',
         'diagnostic_id': 'diag-1',
-        'provider_http_status': 429,
-        'retry_after_ms': 2000,
     }
 
 

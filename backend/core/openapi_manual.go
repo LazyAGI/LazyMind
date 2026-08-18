@@ -515,7 +515,7 @@ func manualSchemas() map[string]any {
 			prop("data", refSchema("EpisodeMemory")),
 		),
 		"SetChatHistoryResponse":      obj(prop("history_id", strSchema())),
-		"RunTerminal":                 obj(prop("status", strSchema()), prop("reason", strSchema()), prop("code", strSchema()), prop("partial_output", boolSchema()), prop("model_call_id", strSchema()), prop("diagnostic_id", strSchema()), prop("provider_http_status", intSchema()), prop("retry_after_ms", int64Schema())),
+		"RunTerminal":                 obj(prop("status", strSchema()), prop("reason", strSchema()), prop("code", strSchema()), prop("partial_output", boolSchema()), prop("model_call_id", strSchema()), prop("diagnostic_id", strSchema())),
 		"ChatRuntimeEvent":            obj(prop("schema_version", intSchema()), prop("event_id", strSchema()), prop("run_id", strSchema()), prop("type", strSchema()), prop("data", obj())),
 		"ChatChunkResponse":           obj(prop("conversation_id", strSchema()), prop("seq", intSchema()), prop("message", strSchema()), prop("delta", strSchema()), prop("history_id", strSchema()), prop("sources", array(obj())), prop("prompt_questions", array(strSchema())), prop("reasoning_content", strSchema()), prop("thinking_duration_s", int64Schema()), prop("runtime_event", refSchema("ChatRuntimeEvent")), prop("execution", refSchema("ExternalExecutionProjection"))),
 		"ACLApiResponse":              obj(prop("code", intSchema()), prop("message", strSchema()), prop("data", obj())),

@@ -431,6 +431,15 @@
         cursor: help;
       }
 
+      .chat-model-retry-status {
+        align-self: flex-start;
+        margin-bottom: 12px;
+        color: #8a6812;
+        font-size: 12px;
+        line-height: 20px;
+        white-space: nowrap;
+      }
+
       .chat-think-status {
         display: flex;
         height: 20px;

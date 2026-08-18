@@ -11,22 +11,19 @@ vi.mock("react-i18next", () => ({
 }));
 
 describe("RunStatusCard", () => {
-  it("renders a safe provider reason, HTTP status, retry hint, and partial-output state", () => {
+  it("renders a safe provider reason and partial-output state", () => {
     render(<RunStatusCard terminal={{
       status: "interrupted",
       reason: "model_failure",
-      code: "rate_limited",
+      code: "organization_spend_limit_exceeded",
       partial_output: true,
-      provider_http_status: 429,
-      retry_after_ms: 2000,
     }} />);
 
     expect(screen.getByText("chat.runStatus.interrupted")).toBeInTheDocument();
-    expect(screen.getByText(/chat\.runStatus\.codes\.rate_limited/)).toBeInTheDocument();
+    expect(screen.getByText(/chat\.runStatus\.codes\.organization_spend_limit_exceeded/)).toBeInTheDocument();
     expect(screen.getByText(/chat\.runStatus\.partialOutput/)).toBeInTheDocument();
-    expect(screen.queryByText(/provider_http_status/)).not.toBeInTheDocument();
-    expect(screen.getByText(/chat\.runStatus\.httpStatus.*429/)).toBeInTheDocument();
-    expect(screen.getByText(/chat\.runStatus\.retryAfterSeconds.*2/)).toBeInTheDocument();
+    expect(screen.queryByText(/HTTP/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Retry-After/)).not.toBeInTheDocument();
   });
 
   it("does not render an unknown provider code or a raw provider message", () => {

@@ -483,6 +483,20 @@ export function useChatConversation({
 
     const updateMessageListInternal = (list: any[]) => {
       const newList = [...list];
+      const runtimeEventType = result.runtime_event?.type;
+      const runtimeEventData = result.runtime_event?.data;
+      const scheduledRetry =
+        runtimeEventType === "model_retry_scheduled" &&
+        runtimeEventData &&
+        typeof runtimeEventData === "object"
+          ? {
+              retry_index: Number(runtimeEventData.retry_index || 0),
+              max_attempts: Number(runtimeEventData.max_attempts || 1),
+            }
+          : undefined;
+      const clearsRetry =
+        runtimeEventType === "model_call_finished" ||
+        runtimeEventType === "run_finished";
       if (result.history_id) {
         const lastUserIndex = newList.findLastIndex(
           (item) => item?.role === RoleTypes.USER,
@@ -567,6 +581,8 @@ export function useChatConversation({
       assistantMessage = {
         ...assistantMessage,
         ...result,
+        model_retry: scheduledRetry ??
+          (clearsRetry ? undefined : assistantMessage.model_retry),
         run_terminal: finalRunTerminal || assistantMessage.run_terminal,
         run_status: finalRunTerminal?.status || assistantMessage.run_status,
         id: result.messageId,
