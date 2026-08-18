@@ -24,6 +24,11 @@ from lazymind.chat.engine.tools.writer import (
 )
 
 
+HAN = re.compile(r'[\u3400-\u4dbf\u4e00-\u9fff]')
+MARKDOWN_HEADING = re.compile(r'^(#{3,5})\s+(.+?)\s*$')
+BOLD_LEAD = re.compile(r'^(\s*)\*\*(.+?)\*\*(.*)$')
+
+
 def _workspace_root() -> Path:
     context = require_context()
     root = Path(context.workspace_path) if context.workspace_path else Path('/tmp')
@@ -224,13 +229,76 @@ def bid_writer_plan_sections(
     writing_task_path: str,
     outline_document_path: str,
     writing_context_path: str,
+    effective_outline_path: str,
 ) -> dict[str, Any]:
-    """Generate section instructions with LazyMind's shared Writer planner."""
+    """Generate Writer plans and attach the authoritative bid leaf contract."""
     payload = _json_value(WriterCreateToolkit().generate_section_instructions(
         writing_task_json=_read_json(writing_task_path),
         outline_json=_read_text(outline_document_path),
         writing_context_json=_read_json(writing_context_path),
     ), {})
+    outline = _json_value(_read_text(effective_outline_path), {})
+    chapters = outline.get('chapters') if isinstance(outline, dict) else None
+    instructions = payload.get('section_instructions', {}).get('instructions') \
+        if isinstance(payload, dict) else None
+    if not isinstance(chapters, list) or not isinstance(instructions, list):
+        raise ValueError('Bid section planning requires a validated effective outline.')
+    by_title = {
+        str(chapter.get('title') or '').strip(): chapter
+        for chapter in chapters if isinstance(chapter, dict)
+    }
+    for instruction in instructions:
+        if not isinstance(instruction, dict):
+            continue
+        chapter = by_title.get(str(instruction.get('section_title') or '').strip())
+        if not chapter:
+            raise ValueError(
+                f"Writer section {instruction.get('section_title')!r} is absent from effective_outline."
+            )
+        leaves = _bid_leaves([chapter])
+        contract = [{
+            'number': str(leaf.get('number') or ''),
+            'title': str(leaf.get('title') or '').strip(),
+            'markdown_level': _leaf_markdown_level(leaf),
+            'target_words': int(leaf.get('target_words') or 0),
+            'bid_requirements_refs': list(leaf.get('bid_requirements_refs') or []),
+            'disqualification_refs': list(leaf.get('disqualification_refs') or []),
+        } for leaf in leaves if isinstance(leaf, dict) and str(leaf.get('title') or '').strip()]
+        if not contract:
+            raise ValueError(f"Bid section {instruction.get('section_title')!r} has no leaf contract.")
+        heading_lines = '；'.join(
+            f"标题行 `{'#' * leaf['markdown_level']} {leaf['title']}` 的正文不少于 "
+            f"{leaf['target_words']} 个中文字符"
+            for leaf in contract
+        )
+        required = list(instruction.get('required_points') or [])
+        required.insert(0, (
+            '结构硬约束：必须按以下顺序逐字输出指定层级的 Markdown 标题，不得改写标题、'
+            '添加前后缀、合并叶子或用粗体代替标题：' + heading_lines
+        ))
+        required.insert(1, (
+            '字数硬约束：本章中文字符最低目标为 '
+            f"{int(chapter.get('target_words') or sum(item['target_words'] for item in contract))}，"
+            '每个叶子标题下的正文不得低于给定目标；达到最低目标后保持简洁，避免重复背景、'
+            '泛化说明和边界声明，不得通过重复需求原文凑字数。'
+        ))
+        styles = list(instruction.get('style_constraints') or [])
+        styles.extend([
+            '叶子标题必须使用上述层级的独立 Markdown 标题行；不得使用 **粗体** 模拟标题。',
+            '每个叶子仅撰写其分配内容与追溯 ID，避免跨叶重复介绍相同背景。',
+        ])
+        instruction['required_points'] = required
+        instruction['style_constraints'] = styles
+        meta = dict(instruction.get('meta') or {})
+        meta['bid_leaf_contract'] = contract
+        meta['bid_chapter_target_words'] = int(chapter.get('target_words') or 0)
+        meta['bid_total_word_target'] = int(outline.get('total_word_target') or 0)
+        instruction['meta'] = meta
+    if len(instructions) != len(chapters):
+        raise ValueError(
+            f'Writer planned {len(instructions)} top-level sections, but effective_outline '
+            f'requires {len(chapters)}.'
+        )
     root = _run_root('section-plan')
     return {
         'section_instructions': _write_json(
@@ -240,10 +308,123 @@ def bid_writer_plan_sections(
     }
 
 
+def _normalized_title(value: str) -> str:
+    text = re.sub(r'^\s*\d+(?:\.\d+)*[、.．\s　]+', '', str(value or ''))
+    return re.sub(r'[\s\W_]+', '', text, flags=re.UNICODE).lower()
+
+
+def _bid_leaves(nodes: list[Any]) -> list[dict[str, Any]]:
+    leaves: list[dict[str, Any]] = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        children = node.get('children') if isinstance(node.get('children'), list) else []
+        if children:
+            leaves.extend(_bid_leaves(children))
+        else:
+            leaves.append(node)
+    return leaves
+
+
+def _leaf_markdown_level(leaf: dict[str, Any]) -> int:
+    return min(5, max(3, int(leaf.get('level') or 2) + 1))
+
+
+def _title_similarity(expected: str, actual: str) -> float:
+    left, right = _normalized_title(expected), _normalized_title(actual)
+    if not left or not right:
+        return 0.0
+    if left == right:
+        return 1.0
+    if min(len(left), len(right)) >= 4 and (left in right or right in left):
+        return 0.95
+    left_pairs = {left[index:index + 2] for index in range(max(0, len(left) - 1))}
+    right_pairs = {right[index:index + 2] for index in range(max(0, len(right) - 1))}
+    if not left_pairs or not right_pairs:
+        return 0.0
+    return 2 * len(left_pairs & right_pairs) / (len(left_pairs) + len(right_pairs))
+
+
+def _canonicalize_leaf_headings(markdown: str, leaves: list[dict[str, Any]]) -> str:
+    """Normalize obvious Writer heading variants without inventing missing sections."""
+    lines = str(markdown or '').splitlines()
+    candidates: list[tuple[int, str, str]] = []
+    for index, line in enumerate(lines):
+        heading = MARKDOWN_HEADING.match(line.strip())
+        if heading:
+            candidates.append((index, heading.group(2), 'heading'))
+            continue
+        bold = BOLD_LEAD.match(line)
+        if bold:
+            candidates.append((index, bold.group(2).rstrip('。；:：'), 'bold'))
+    cursor = 0
+    for leaf in leaves:
+        expected = str(leaf.get('title') or '').strip()
+        expected_level = _leaf_markdown_level(leaf)
+        best: tuple[float, int, str] | None = None
+        for position in range(cursor, len(candidates)):
+            line_index, actual, kind = candidates[position]
+            score = _title_similarity(expected, actual)
+            if score >= 0.58 and (best is None or score > best[0]):
+                best = (score, position, kind)
+                if score >= 0.95:
+                    break
+        if best is None:
+            continue
+        _, position, kind = best
+        line_index, _, _ = candidates[position]
+        if kind == 'bold':
+            match = BOLD_LEAD.match(lines[line_index])
+            tail = str(match.group(3) if match else '').strip()
+            lines[line_index] = (
+                f"{'#' * expected_level} {expected}" + (f'\n\n{tail}' if tail else '')
+            )
+        else:
+            lines[line_index] = f"{'#' * expected_level} {expected}"
+        cursor = position + 1
+    return '\n'.join(lines).strip()
+
+
+def _enforce_draft_contract(sections: list[str], effective_outline: dict[str, Any]) -> list[str]:
+    chapters = effective_outline.get('chapters') if isinstance(effective_outline, dict) else None
+    if not isinstance(chapters, list) or len(chapters) != len(sections):
+        raise ValueError('Writer draft sections do not match the effective outline chapter count.')
+    normalized: list[str] = []
+    missing: list[str] = []
+    actual_total = 0
+    target_total = max(1, int(effective_outline.get('total_word_target') or 0))
+    for chapter, section in zip(chapters, sections):
+        leaves = _bid_leaves([chapter])
+        value = _canonicalize_leaf_headings(str(section), leaves)
+        headings = {
+            (len(match.group(1)), _normalized_title(match.group(2)))
+            for line in value.splitlines()
+            if (match := re.match(r'^(#{3,5})\s+(.+?)\s*$', line.strip()))
+        }
+        for leaf in leaves:
+            title = str(leaf.get('title') or '').strip()
+            if (_leaf_markdown_level(leaf), _normalized_title(title)) not in headings:
+                missing.append(f"{leaf.get('number')} {title}")
+        actual_total += len(HAN.findall(value))
+        normalized.append(value)
+    if missing:
+        raise ValueError(
+            'Writer draft violated the authoritative leaf-heading contract: ' + '、'.join(missing)
+        )
+    if actual_total < target_total:
+        shortfall = target_total - actual_total
+        raise ValueError(
+            f'Writer draft Chinese-character count {actual_total} is below the minimum '
+            f'{target_total} by {shortfall}; regenerate with the injected minimum budgets.'
+        )
+    return normalized
+
+
 def bid_writer_write_sections(
     writing_task_path: str,
     section_instructions_path: str,
     writing_context_path: str,
+    effective_outline_path: str,
 ) -> list[str]:
     """Stream and persist one Markdown artifact per planned proposal section."""
     events = DraftMarkdownStreamEventEmitter(require_context().emit)
@@ -257,6 +438,10 @@ def bid_writer_write_sections(
         ), [])
         if not isinstance(sections, list) or not sections:
             raise ValueError('Shared Writer returned no draft sections.')
+        effective_outline = _json_value(_read_text(effective_outline_path), {})
+        sections = _enforce_draft_contract(
+            [str(section) for section in sections], effective_outline,
+        )
         root = _run_root('draft-sections')
         paths = [
             _write_markdown(root, f'draft_section_{index:04d}', str(section))

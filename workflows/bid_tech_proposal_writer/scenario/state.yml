@@ -128,24 +128,26 @@ steps:
       pass guessed kb_ids, and never use web search. Search only the implicit selected scope.
 
       Read raw_bid_text, technical_requirements, and disqualification_items. If one or more
-      knowledge bases were selected for this conversation, make exactly one kb_search call,
-      matching the single-call collection pattern used by the built-in image workflow. The
-      query must express one natural-language intent: retrieve reference solutions and
-      product capabilities that can support this project's technical-proposal writing. Base
-      it on the project name and core construction objective rather than a comma-separated
-      keyword/topic list. Keep it under 120 Chinese characters and use the tool's default
-      retrieval and reranking sizes; do not pass kb_ids, filters, retriever_topk, rerank_topk,
-      k_max, or image_topk, and do not issue follow-up searches. Consolidate only retrieved
-      evidence that can improve the proposal, retaining document/source labels and citation
-      markers from the tool result. Clearly separate retrieved facts from solution
-      recommendations and do not turn uncited knowledge into a mandatory tender requirement.
+      knowledge bases were selected for this conversation, perform multiple complementary
+      kb_search calls as needed, normally 2–4, to cover distinct evidence needs derived from
+      the tender requirements. Each query must express one natural-language intent, such as
+      relevant reference solutions, matching product capabilities, implementation practices,
+      or service and security evidence. Base every query on the project name, construction
+      objective, and requirement IDs rather than a comma-separated keyword/topic list. Keep
+      each query under 120 Chinese characters, avoid duplicate queries, and use the tool's
+      default retrieval and reranking sizes; do not pass kb_ids, filters, retriever_topk,
+      rerank_topk, k_max, or image_topk. Consolidate only retrieved evidence that can improve
+      the proposal, retaining document/source labels and citation markers from every useful
+      tool result. Clearly separate retrieved facts from solution recommendations and do not
+      turn uncited knowledge into a mandatory tender requirement.
 
       If kb_search is unavailable or reports that no knowledge base is selected, do not
       discover a replacement knowledge base. Save exactly one short Markdown artifact
       explaining that no knowledge base was specified and that this run will use the tender
-      document only. If that one search fails, record the retrieval failure honestly and
-      continue without retrying or formulating another query. In every branch save as
-      knowledge_evidence with content_type="text"; this output must always exist so the
+      document only. If an individual search fails, record that failure, continue with other
+      distinct evidence queries, and retry the same query at most once only when the error is
+      transient. In every branch save the combined successful evidence and any failure notes
+      as knowledge_evidence with content_type="text"; this output must always exist so the
       pipeline remains deterministic.
 
       Then call bid_writer_prepare_context(user_request="{{user_input}}",
@@ -321,13 +323,27 @@ steps:
       A. Generate or fully rewrite from the selected outline:
          1. Call bid_writer_update_context with the latest outline_document and the baseline
             writing_context_after_outline.
-         2. Call bid_writer_plan_sections with writing_task, outline_document, and the
-            refreshed context. Save section_instructions as a file.
-         3. Call bid_writer_write_sections. It delegates actual section drafting and live
-            preview streaming to LazyMind Writer. Save every returned path as a separate,
-            ordered chapter_contents file artifact; never stringify the path list.
-         4. Call bid_writer_assemble_draft using one returned section path as the anchor,
-            the refreshed context, outline_document, and project_name from effective_outline.
+         2. Call bid_writer_plan_sections with writing_task_path=writing_task,
+            outline_document_path=outline_document,
+            writing_context_path=<the path returned by step 1>, and
+            effective_outline_path=effective_outline. The bridge injects the exact ordered
+            leaf headings and target_words into the shared Writer plan. Save
+            section_instructions as a file.
+         3. Call bid_writer_write_sections with writing_task_path=writing_task,
+            section_instructions_path=section_instructions,
+            writing_context_path=<the path returned by step 1>, and
+            effective_outline_path=effective_outline. It delegates drafting and live preview
+            to LazyMind Writer, then deterministically canonicalizes compatible heading
+            variants and rejects missing leaves or a total character count below the user's
+            minimum target. Text above the target is allowed. Save every
+            returned path as a separate, ordered chapter_contents file artifact; never
+            stringify the path list.
+         4. Call bid_writer_assemble_draft with
+            draft_sections_anchor_path=<one returned section path>,
+            writing_context_path=<the path returned by step 1>,
+            outline_document_path=outline_document, and
+            document_title="" so the shared Writer derives the exact H1 title from
+            outline_document instead of risking a project-name mismatch.
             Save its path as draft_document with content_type="file".
 
       B. Targeted AI revision of an existing draft_document:
@@ -341,12 +357,20 @@ steps:
 
       Writer generation must still obey the bid contract carried in writing_task/context:
       each leaf explicitly covers its mapped IDs, retains a compact “追溯：ID...” line,
-      respects target_words within ±10%, and uses solution-expert language with no invented
-      number, first person, requirement-echo opening, vague promise, or defensive wording.
+      treats target_words as a minimum rather than a maximum, and uses solution-expert
+      language with no invented number, first person, requirement-echo opening, vague
+      promise, or defensive wording.
       The section plan and draft must use relevant concrete facts from
       `bid-selected-knowledge-evidence` in the architecture, platform, data-governance,
       security, and operations sections. Do not merely mention that knowledge was retrieved,
       and do not force irrelevant evidence into a section.
+
+      The effective outline is authoritative for structure. Every leaf must appear in the
+      same order as one independent exact Markdown heading at its mapped H3/H4/H5 level;
+      never add title suffixes, merge leaves, or replace a leaf heading with bold text.
+      Do not continue to assembly
+      when the Writer bridge reports a heading-contract or word-budget error; regenerate
+      the section draft using the already injected constraints.
 
       Finally call bid_writer_update_context with the final draft_document and the refreshed
       outline context. Save its path as writing_context_after_draft. Every returned Writer
@@ -496,12 +520,14 @@ steps:
       content_type="text" and returned summary as validation_summary with
       content_type="json" in one call.
 
-      Report overall and per-leaf Chinese-character deviations, missing headings,
+      Report overall and per-leaf Chinese-character attainment, missing headings,
       uncovered requirement IDs, uncovered D-NNN items, selected delivery-file validity and
       actionable remediation. For DOCX also validate the Office package and embedded-image
       count; for Markdown validate that the file matches the final Markdown exactly. A total
-      word-count deviation above 5%, any missing leaf, any uncovered explicit rejection item,
-      fewer than six generated images, or an invalid selected delivery file must not be PASS.
+      total word count below the user's minimum target, any missing leaf, any uncovered
+      explicit rejection item, fewer than six generated images, or an invalid selected
+      delivery file must not be PASS. Text above the minimum target is valid and must not
+      lower the status by itself.
     tools: [validate_proposal_from_inputs]
     inputs:
       - material: final_proposal_markdown

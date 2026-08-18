@@ -682,31 +682,120 @@ def validate_and_allocate_outline(outline_json: str, requirements_markdown: str,
             'errors': errors, 'warnings': warnings, 'leaf_count': len(leaves)}
 
 
+def _normalized_section_title(value: str) -> str:
+    text = re.sub(r'^\s*\d+(?:\.\d+)*[、.．\s　]+', '', str(value or ''))
+    return re.sub(r'[\s\W_]+', '', text, flags=re.UNICODE).lower()
+
+
+def _section_title_similarity(expected: str, actual: str) -> float:
+    left, right = _normalized_section_title(expected), _normalized_section_title(actual)
+    if not left or not right:
+        return 0.0
+    if left == right:
+        return 1.0
+    if min(len(left), len(right)) >= 4 and (left in right or right in left):
+        return 0.95
+    left_pairs = {left[index:index + 2] for index in range(max(0, len(left) - 1))}
+    right_pairs = {right[index:index + 2] for index in range(max(0, len(right) - 1))}
+    if not left_pairs or not right_pairs:
+        return 0.0
+    return 2 * len(left_pairs & right_pairs) / (len(left_pairs) + len(right_pairs))
+
+
+def _section_anchors(markdown_text: str) -> list[dict[str, Any]]:
+    anchors: list[dict[str, Any]] = []
+    cursor = 0
+    for line in str(markdown_text or '').splitlines(keepends=True):
+        stripped = line.strip()
+        heading = re.match(r'^(#{1,6})\s+(.+?)\s*$', stripped)
+        if heading:
+            raw_title = heading.group(2).strip()
+            number_match = re.match(r'^(\d+(?:\.\d+)*)[、.．\s　]+(.+)$', raw_title)
+            anchors.append({
+                'position': cursor,
+                'title': number_match.group(2).strip() if number_match else raw_title,
+                'number': number_match.group(1) if number_match else '',
+                'kind': 'heading',
+                'level': len(heading.group(1)),
+            })
+        else:
+            # Shared Writer sometimes renders planned leaf labels as a bold lead
+            # instead of a Markdown heading. Treat only a leading bold span as a
+            # compatibility anchor; ordinary bold text later in a paragraph is ignored.
+            bold = re.match(r'^\*\*(.+?)\*\*', stripped)
+            if bold:
+                anchors.append({
+                    'position': cursor,
+                    'title': bold.group(1).rstrip('。；:：').strip(),
+                    'number': '',
+                    'kind': 'bold',
+                    'level': 3,
+                })
+        cursor += len(line)
+    return anchors
+
+
 def _section_character_counts(markdown_text: str, leaves: list[dict[str, Any]]) -> list[dict[str, Any]]:
     text = str(markdown_text or '')
-    headings: list[tuple[int, str, int]] = []
+    anchors = _section_anchors(text)
+    matched: list[dict[str, Any] | None] = []
     cursor = 0
-    for line in text.splitlines(keepends=True):
-        match = re.match(r'^#{1,4}\s+(.+?)\s*$', line.strip())
-        if match:
-            headings.append((cursor, re.sub(r'^\d+(?:\.\d+)*\s+', '', match.group(1)).strip(), len(line) - len(line.lstrip('#'))))
-        cursor += len(line)
-    results = []
     for leaf in leaves:
-        title = str(leaf.get('title') or '')
-        starts = [position for position, heading, _ in headings if heading == title]
-        if not starts:
-            results.append({'number': leaf.get('number'), 'title': title, 'found': False,
-                            'actual': 0, 'target': int(leaf.get('target_words') or 0), 'deviation_pct': 100.0})
+        title = str(leaf.get('title') or '').strip()
+        number = str(leaf.get('number') or '').strip()
+        best: tuple[float, int, str] | None = None
+        for index in range(cursor, len(anchors)):
+            anchor = anchors[index]
+            number_match = bool(number and anchor['number'] == number)
+            score = _section_title_similarity(title, anchor['title'])
+            # A matching numeric prefix is useful ordering evidence, but must never
+            # turn an unrelated heading into a valid leaf section on its own.
+            if number_match and score >= 0.35:
+                score = max(score, 0.9)
+            if score < 0.58:
+                continue
+            expected_level = min(5, max(3, int(leaf.get('level') or 2) + 1))
+            canonical = (
+                _normalized_section_title(title) == _normalized_section_title(anchor['title'])
+                and anchor['kind'] == 'heading' and anchor['level'] == expected_level
+            )
+            mode = 'exact' if canonical else ('number' if number_match else 'compatible')
+            if best is None or score > best[0]:
+                best = (score, index, mode)
+                if score >= 1.0:
+                    break
+        if best is None:
+            matched.append(None)
             continue
-        start = starts[0]
-        next_positions = [position for position, _, _ in headings if position > start]
+        score, index, mode = best
+        anchor = dict(anchors[index])
+        anchor.update({'match_mode': mode, 'match_score': round(score, 3)})
+        matched.append(anchor)
+        cursor = index + 1
+
+    matched_positions = [item['position'] for item in matched if item]
+    results = []
+    for leaf, anchor in zip(leaves, matched):
+        title = str(leaf.get('title') or '').strip()
+        target = max(1, int(leaf.get('target_words') or 0))
+        if anchor is None:
+            results.append({'number': leaf.get('number'), 'title': title, 'found': False,
+                            'actual': 0, 'target': target, 'deviation_pct': 100.0,
+                            'match_mode': 'missing', 'matched_title': ''})
+            continue
+        start = int(anchor['position'])
+        next_positions = [position for position in matched_positions if position > start]
         end = min(next_positions) if next_positions else len(text)
         actual = len(HAN.findall(text[start:end]))
-        target = max(1, int(leaf.get('target_words') or 0))
-        results.append({'number': leaf.get('number'), 'title': title, 'found': True,
-                        'actual': actual, 'target': target,
-                        'deviation_pct': round(abs(actual - target) * 100 / target, 2)})
+        results.append({
+            'number': leaf.get('number'), 'title': title, 'found': True,
+            'actual': actual, 'target': target,
+            'deviation_pct': round(abs(actual - target) * 100 / target, 2),
+            'shortfall_pct': round(max(0, target - actual) * 100 / target, 2),
+            'excess_pct': round(max(0, actual - target) * 100 / target, 2),
+            'match_mode': anchor['match_mode'], 'matched_title': anchor['title'],
+            'match_score': anchor['match_score'],
+        })
     return results
 
 
@@ -770,7 +859,13 @@ def validate_proposal_package(markdown_text: str, docx_path: str, outline_json: 
     leaves = _leaves(outline.get('chapters') or [])
     leaf_results = _section_character_counts(markdown_text, leaves)
     missing_leaves = [item for item in leaf_results if not item['found']]
-    leaf_warnings = [item for item in leaf_results if item['found'] and item['deviation_pct'] > 10]
+    leaf_warnings = [
+        item for item in leaf_results
+        if item['found'] and item.get('shortfall_pct', 0) > 10
+    ]
+    compatible_headings = [
+        item for item in leaf_results if item['found'] and item.get('match_mode') != 'exact'
+    ]
 
     req_ids = sorted(set(REQ_ID.findall(str(requirements_markdown or ''))))
     disq_ids = sorted(set(DISQ_ID.findall(str(disqualification_markdown or ''))))
@@ -791,12 +886,16 @@ def validate_proposal_package(markdown_text: str, docx_path: str, outline_json: 
         failures.append('缺少叶子章节：' + '、'.join(str(item['number']) for item in missing_leaves))
     if uncovered_disq:
         failures.append('未应答废标项：' + '、'.join(uncovered_disq))
-    if total_deviation > 5:
-        warnings.append(f'总字数偏差 {total_deviation}% 超过 5%')
+    if actual_words < target:
+        failures.append(f'总字数不足：{actual_words}/{target}，缺少 {target - actual_words} 个中文字符')
     if uncovered_req:
         warnings.append('未覆盖技术要求：' + '、'.join(uncovered_req))
     if leaf_warnings:
-        warnings.append('叶子章节字数偏差超过 10%：' + '、'.join(str(item['number']) for item in leaf_warnings))
+        warnings.append('叶子章节低于分配目标 10% 以上：' + '、'.join(str(item['number']) for item in leaf_warnings))
+    if compatible_headings:
+        warnings.append(
+            f'兼容识别了 {len(compatible_headings)} 个非规范叶子标题；建议恢复为有效大纲中的原始标题'
+        )
     if manifest_images < 6:
         warnings.append(f'图像清单仅 {manifest_images} 张，低于 1+5 的最低要求')
     if normalized_format == 'docx' and package_valid and embedded_images < manifest_images:
@@ -805,8 +904,16 @@ def validate_proposal_package(markdown_text: str, docx_path: str, outline_json: 
     summary = {
         'status': status, 'target_chinese_characters': target,
         'actual_chinese_characters': actual_words, 'total_deviation_pct': total_deviation,
+        'word_target_mode': 'minimum', 'word_target_met': actual_words >= target,
+        'word_shortfall': max(0, target - actual_words),
+        'word_excess': max(0, actual_words - target),
         'leaf_count': len(leaves), 'missing_leaf_count': len(missing_leaves),
         'leaf_word_warning_count': len(leaf_warnings),
+        'compatible_heading_count': len(compatible_headings),
+        'compatible_headings': [{
+            'number': item['number'], 'expected': item['title'],
+            'actual': item.get('matched_title'), 'mode': item.get('match_mode'),
+        } for item in compatible_headings],
         'requirements_total': len(req_ids), 'requirements_uncovered': uncovered_req,
         'disqualification_total': len(disq_ids), 'disqualification_uncovered': uncovered_disq,
         'manifest_image_count': manifest_images, 'docx_embedded_image_count': embedded_images,
@@ -824,7 +931,9 @@ def validate_proposal_package(markdown_text: str, docx_path: str, outline_json: 
              f'- 交付文件：{path.name or "—"}',
              f'- 交付文件有效：{"是" if package_valid else "否"}',
              f'- 文件大小：{summary["delivery_size"]} bytes',
-             f'- 中文字符：{actual_words} / {target}（偏差 {total_deviation}%）',
+             (f'- 中文字符：{actual_words} / 最低目标 {target}（已达到，超出 {total_deviation}%）'
+              if actual_words >= target else
+              f'- 中文字符：{actual_words} / 最低目标 {target}（未达到，缺少 {target - actual_words}）'),
              (f'- 图片：清单 {manifest_images} 张，DOCX 嵌入 {embedded_images} 张'
               if normalized_format == 'docx' else
               f'- 图片：清单 {manifest_images} 张（Markdown 正文与图片附件分别交付）'), '',
@@ -833,8 +942,14 @@ def validate_proposal_package(markdown_text: str, docx_path: str, outline_json: 
              f'- 废标项：{len(disq_ids) - len(uncovered_disq)}/{len(disq_ids)}', '',
              '## 分章字数']
     lines.extend(
-        f"- {item['number']} {item['title']}：{item['actual']}/{item['target']}，偏差 {item['deviation_pct']}%"
-        + ('' if item['found'] else '（缺失）') for item in leaf_results
+        f"- {item['number']} {item['title']}：{item['actual']}/最低目标 {item['target']}"
+        + (f"，不足 {item.get('shortfall_pct', 0)}%" if item['found'] and item['actual'] < item['target']
+           else f"，已达到（超出 {item.get('excess_pct', 0)}%）" if item['found']
+           else '')
+        + ('' if item['found'] else '（缺失）')
+        + (f"（兼容识别：{item.get('matched_title')}）"
+           if item['found'] and item.get('match_mode') != 'exact' else '')
+        for item in leaf_results
     )
     if failures:
         lines.extend(['', '## 必须修复', *[f'- {item}' for item in failures]])
