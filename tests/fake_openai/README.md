@@ -36,11 +36,11 @@ from the latest user query, using a marker such as `[fake:length]`.
 | `[fake:401]` | HTTP 401 authentication failure |
 | `[fake:402]` | HTTP 402 with no recognized Provider business code |
 | `[fake:422]` | HTTP 422 invalid parameters |
-| `[fake:429]` | Bare HTTP 429 with `Retry-After: 2`; expected `too_many_requests` |
+| `[fake:429]` | Bare HTTP 429 with `Retry-After: 2`; expected normalized `rate_limited` |
 | `[fake:429_quota]` / `[fake:429_balance]` | HTTP 429 with OpenAI `credit_balance_exhausted` |
 | `[fake:429_org_spend]` | HTTP 429 with OpenAI `organization_spend_limit_exceeded` |
 | `[fake:429_project_spend]` | HTTP 429 with OpenAI `project_spend_limit_exceeded` |
-| `[fake:429_org_usage]` | HTTP 429 with OpenAI `organization_usage_limit_exceeded` |
+| `[fake:429_org_usage]` | HTTP 429 with OpenAI `organization_usage_limit_exceeded`; expected normalized `usage_limit_exceeded` |
 | `[fake:429_quota_type]` | HTTP 429 with only `error.type=insufficient_quota` |
 | `[fake:429_unknown]` | Alias of the bare HTTP 429 scenario |
 | `[fake:500]` | HTTP 500 server error |

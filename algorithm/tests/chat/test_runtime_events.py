@@ -43,6 +43,12 @@ def test_translator_binds_model_event_to_run():
     ({'kind': 'failure', 'failure': {'origin': 'http', 'code': 'rate_limited'},
       'has_semantic_output': False},
      'failed', 'model_failure'),
+    ({'kind': 'failure', 'failure': {'origin': 'provider', 'code': 'usage_limit_exceeded'},
+      'has_semantic_output': False},
+     'failed', 'model_failure'),
+    ({'kind': 'failure', 'failure': {'origin': 'provider', 'code': 'concurrency_limited'},
+      'has_semantic_output': False},
+     'failed', 'model_failure'),
 ])
 def test_run_accumulator_maps_model_terminal(terminal, status, reason):
     accumulator = RunAccumulator(run_id='run-1', last_model_terminal=terminal)

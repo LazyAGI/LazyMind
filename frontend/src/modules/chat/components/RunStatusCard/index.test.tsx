@@ -11,6 +11,22 @@ vi.mock("react-i18next", () => ({
 }));
 
 describe("RunStatusCard", () => {
+  it.each([
+    "usage_limit_exceeded",
+    "concurrency_limited",
+    "rate_limited",
+  ])("renders normalized throttling code %s", (code) => {
+    render(<RunStatusCard terminal={{
+      status: "failed",
+      reason: "model_failure",
+      code,
+      partial_output: false,
+    }} />);
+
+    expect(screen.getByText(new RegExp(`chat\\.runStatus\\.codes\\.${code}`))).toBeInTheDocument();
+    expect(screen.getByText(/chat\.runStatus\.noOutput/)).toBeInTheDocument();
+  });
+
   it("renders a safe provider reason and partial-output state", () => {
     render(<RunStatusCard terminal={{
       status: "interrupted",

@@ -129,7 +129,7 @@ func TestRunTerminalPreservesPublicFailureMetadata(t *testing.T) {
 	event := runFinishedEvent("run_test", RunTerminal{
 		Status:        "failed",
 		Reason:        "model_failure",
-		Code:          "too_many_requests",
+		Code:          "rate_limited",
 		PartialOutput: false,
 		ModelCallID:   "call_test",
 		DiagnosticID:  "diag_test",
@@ -139,7 +139,7 @@ func TestRunTerminalPreservesPublicFailureMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if terminal.Code != "too_many_requests" || terminal.DiagnosticID != "diag_test" {
+	if terminal.Code != "rate_limited" || terminal.DiagnosticID != "diag_test" {
 		t.Fatalf("provider failure metadata was not preserved: %#v", terminal)
 	}
 }
@@ -148,7 +148,7 @@ func TestStoredRunEventDropsLegacyProviderTransportFields(t *testing.T) {
 	event := storedRunEvent("run_test", json.RawMessage(`{
 		"status":"failed",
 		"reason":"model_failure",
-		"code":"too_many_requests",
+		"code":"rate_limited",
 		"partial_output":false,
 		"diagnostic_id":"diag_test",
 		"provider_http_status":429,
