@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -1616,10 +1617,51 @@ func (s skillSourceRequest) toServiceSource() (skillservice.SourceInput, error) 
 		if strings.TrimSpace(s.URL) == "" {
 			return skillservice.SourceInput{}, fmt.Errorf("url required")
 		}
-		return skillservice.SourceInput{Type: "url", URL: strings.TrimSpace(s.URL)}, nil
+		downloadURL, pathPrefix, err := normalizeSkillImportURL(strings.TrimSpace(s.URL))
+		if err != nil {
+			return skillservice.SourceInput{}, err
+		}
+		return skillservice.SourceInput{Type: "url", URL: downloadURL, SourceURL: strings.TrimSpace(s.URL), PathPrefix: pathPrefix}, nil
 	default:
 		return skillservice.SourceInput{}, fmt.Errorf("unsupported source type %q", sourceType)
 	}
+}
+
+func normalizeSkillImportURL(rawURL string) (string, string, error) {
+	parsed, err := url.ParseRequestURI(rawURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", "", skillImportURLValidationError("invalid skill import URL")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", "", skillImportURLValidationError("skill import URL must use HTTP or HTTPS")
+	}
+	if !strings.EqualFold(strings.TrimPrefix(parsed.Hostname(), "www."), "github.com") {
+		return rawURL, "", nil
+	}
+	parts := strings.Split(strings.Trim(parsed.EscapedPath(), "/"), "/")
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", skillImportURLValidationError("GitHub URL must identify a repository")
+	}
+	owner := parts[0]
+	repository := strings.TrimSuffix(parts[1], ".git")
+	if repository == "" {
+		return "", "", skillImportURLValidationError("GitHub URL must identify a repository")
+	}
+	if len(parts) == 2 {
+		return "https://github.com/" + owner + "/" + repository + "/archive/HEAD.zip", "", nil
+	}
+	if len(parts) < 4 || parts[2] != "tree" || parts[3] == "" {
+		return rawURL, "", nil
+	}
+	ref := parts[3]
+	pathPrefix := strings.Join(parts[4:], "/")
+	return "https://github.com/" + owner + "/" + repository + "/archive/refs/heads/" + url.PathEscape(ref) + ".zip", pathPrefix, nil
+}
+
+type skillImportURLValidationError string
+
+func (e skillImportURLValidationError) Error() string {
+	return string(e)
 }
 
 func createSkillSourceFromRequest(name, category, description, content string, children []legacyChildSkillInput, sourceReq skillSourceRequest) (skillservice.SourceInput, func(), error) {
@@ -2118,34 +2160,38 @@ func (s dbUploadStore) Get(ctx context.Context, uploadID string) (skillservice.U
 
 type httpZipDownloader struct{}
 
-func (httpZipDownloader) Download(ctx context.Context, rawURL string) (string, error) {
+func (httpZipDownloader) Download(ctx context.Context, rawURL string) (skillservice.DownloadedZip, error) {
 	rawURL = strings.TrimSpace(rawURL)
 	if rawURL == "" {
-		return "", fmt.Errorf("url required")
+		return skillservice.DownloadedZip{}, fmt.Errorf("url required")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return "", err
+		return skillservice.DownloadedZip{}, err
 	}
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return skillservice.DownloadedZip{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("download failed: %s", resp.Status)
+		return skillservice.DownloadedZip{}, fmt.Errorf("download failed: %s", resp.Status)
 	}
 	f, err := os.CreateTemp("", "lazymind-skill-*.zip")
 	if err != nil {
-		return "", err
+		return skillservice.DownloadedZip{}, err
 	}
-	defer f.Close()
 	if _, err := io.Copy(f, resp.Body); err != nil {
+		_ = f.Close()
 		_ = os.Remove(f.Name())
-		return "", err
+		return skillservice.DownloadedZip{}, err
 	}
-	return f.Name(), nil
+	if err := f.Close(); err != nil {
+		_ = os.Remove(f.Name())
+		return skillservice.DownloadedZip{}, err
+	}
+	return skillservice.DownloadedZip{Path: f.Name(), Cleanup: func() { _ = os.Remove(f.Name()) }}, nil
 }
 
 func writeInlineSkillZip(content string) (string, error) {
