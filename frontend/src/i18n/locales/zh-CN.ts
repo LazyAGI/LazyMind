@@ -1464,6 +1464,7 @@ const zhCN = {
       bold: "加粗",
       italic: "斜体",
       crossReference: "交叉引用",
+      removeCrossReference: "取消交叉引用",
       collapseSection: "收起",
       expandSection: "展开",
       dragBlock: "拖动块",

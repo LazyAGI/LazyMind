@@ -120,23 +120,4 @@ describe('SlotWriterDocument render refresh', () => {
     expect(screen.getByText('# latest document')).toBeInTheDocument();
     expect(document.querySelector('.workflow-slot--error')).not.toBeInTheDocument();
   });
-
-  it('renders a recognized source document through the numbering API', async () => {
-    workflowApi.renderWriterDocument.mockResolvedValue(renderedMarkdown('# numbered outline'));
-    const source = { ...writerSlot(1), slot_id: 'source_document', slot: 'source_document' };
-
-    render(
-      <SlotRenderer
-        slot={source}
-        sessionId='writer-session'
-        slotId='source_document'
-      />,
-    );
-
-    await waitFor(() => expect(workflowApi.renderWriterDocument).toHaveBeenCalledWith(
-      'writer-session',
-      'source_document',
-      expect.anything(),
-    ));
-  });
 });

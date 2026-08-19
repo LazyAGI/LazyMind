@@ -1016,6 +1016,50 @@ function withWriterInternalReference(
   };
 }
 
+function writerSpanWithDisplayText(span: WriterSpan): WriterSpan {
+  const displayText = getWriterInternalReference(span)?.displayText;
+  return displayText !== undefined && displayText !== span.text
+    ? { ...span, text: displayText }
+    : span;
+}
+
+function writerBlockDisplaySpans(block: WriterBlock): WriterSpan[] {
+  const sourceSpans = block.spans?.length
+    && block.spans.map((span) => span.text).join('') === (block.content ?? '')
+    ? block.spans
+    : spanForEditedContent(block, block.content ?? '');
+  return sourceSpans.map(writerSpanWithDisplayText);
+}
+
+function writerSpanWithCurrentReferenceDisplayText(span: WriterSpan): WriterSpan {
+  const reference = getWriterInternalReference(span);
+  if (!reference) return span;
+  const key = isRecord(span.style)
+    ? 'style'
+    : isRecord(span.stype)
+      ? 'stype'
+      : undefined;
+  if (!key) return span;
+  const styles = span[key] as Record<string, unknown>;
+  const link = isRecord(styles.link) ? styles.link : undefined;
+  if (!link || link.display_text === span.text) return span;
+  return {
+    ...span,
+    [key]: {
+      ...styles,
+      link: { ...link, display_text: span.text },
+    },
+  };
+}
+
+function withoutWriterInternalReference(span: WriterSpan): WriterSpan {
+  if (!getWriterInternalReference(span)) return span;
+  const key = span.style === undefined && span.stype !== undefined ? 'stype' : 'style';
+  const nextStyles = writerStyleMap(span);
+  delete nextStyles.link;
+  return { ...span, [key]: nextStyles };
+}
+
 /** Apply an IR internal reference to the selected source-text range. */
 export function applyWriterBlockInternalReference(
   document: WriterDocument,
@@ -1044,6 +1088,64 @@ export function applyWriterBlockInternalReference(
       ...sliceWriterSpans(sourceSpans, safeEnd, contentLength),
     ]);
     return { ...block, spans };
+  });
+  return result.changed ? { ...document, blocks: result.blocks } : document;
+}
+
+/** Whether any text in the selected range carries an IR internal reference. */
+export function writerBlockRangeHasInternalReference(
+  block: WriterBlock,
+  start: number,
+  end: number,
+): boolean {
+  if (start < 0 || end <= start) return false;
+  const sourceSpans = writerBlockDisplaySpans(block);
+  const contentLength = sourceSpans.reduce(
+    (total, span) => total + Array.from(span.text).length,
+    0,
+  );
+  const safeStart = Math.min(start, contentLength);
+  const safeEnd = Math.min(end, contentLength);
+  if (safeEnd <= safeStart) return false;
+  return sliceWriterSpans(sourceSpans, safeStart, safeEnd)
+    .some((span) => getWriterInternalReference(span) !== undefined);
+}
+
+/** Remove internal-reference styling from the selected text without changing its wording. */
+export function removeWriterBlockInternalReference(
+  document: WriterDocument,
+  nodeId: string,
+  start: number,
+  end: number,
+): WriterDocument {
+  if (start < 0 || end <= start) return document;
+  const result = replaceBlockInTree(document.blocks, nodeId, (block) => {
+    if (block.type === 'document' || block.editable === false) return block;
+    const sourceSpans = writerBlockDisplaySpans(block);
+    const displayContent = sourceSpans.map((span) => span.text).join('');
+    const contentLength = Array.from(displayContent).length;
+    const safeStart = Math.min(start, contentLength);
+    const safeEnd = Math.min(end, contentLength);
+    if (safeEnd <= safeStart) return block;
+
+    const displaySpansInRange = (rangeStart: number, rangeEnd: number) => (
+      sliceWriterSpans(sourceSpans, rangeStart, rangeEnd)
+        .map(writerSpanWithCurrentReferenceDisplayText)
+    );
+    let removed = false;
+    const selectedSpans = displaySpansInRange(safeStart, safeEnd).map((span) => {
+      const nextSpan = withoutWriterInternalReference(span);
+      if (nextSpan !== span) removed = true;
+      return nextSpan;
+    });
+    if (!removed) return block;
+
+    const spans = mergeAdjacentWriterSpans([
+      ...displaySpansInRange(0, safeStart),
+      ...selectedSpans,
+      ...displaySpansInRange(safeEnd, contentLength),
+    ]);
+    return { ...block, content: displayContent, spans };
   });
   return result.changed ? { ...document, blocks: result.blocks } : document;
 }

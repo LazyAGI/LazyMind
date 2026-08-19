@@ -11,7 +11,6 @@ import {
   type RenderWriterDocumentResult,
   type RewriteSelectionPreview,
   type WriterDocumentSlot,
-  type WriterDocumentRenderSlot,
 } from "@/modules/chat/utils/request";
 import { FilePreviewDrawer } from "./FilePreviewDrawer";
 import {
@@ -2327,10 +2326,8 @@ function useRegisterArtifactDownload({
   }, [actionKey, enabled, label, registerFooterAction, tabActive]);
 }
 
-function isWriterDocumentRenderSlot(slotId: string): slotId is WriterDocumentRenderSlot {
-  return slotId === 'source_document'
-    || slotId === 'outline_document'
-    || slotId === 'draft_document';
+function isWriterDocumentSlot(slotId: string): slotId is WriterDocumentSlot {
+  return slotId === 'outline_document' || slotId === 'draft_document';
 }
 
 function isRenderedWriterDocument(value: unknown): value is RenderWriterDocumentResult {
@@ -2344,7 +2341,7 @@ function isRenderedWriterDocument(value: unknown): value is RenderWriterDocument
 interface SlotWriterDocumentProps {
   slot: SlotRevision;
   sessionId: string;
-  slotId: WriterDocumentRenderSlot;
+  slotId: WriterDocumentSlot;
   revisionCount?: number;
   onRefresh?: () => void;
   readOnly?: boolean;
@@ -2453,8 +2450,7 @@ function SlotWriterDocument({
   const displayRevision = localRevision;
   const displayRevisionCount = localRevisionCount ?? revisionCount;
   const showVersionBadge = Boolean(displayRevisionCount && displayRevisionCount > 0);
-  const editableSlot: WriterDocumentSlot | null = slotId === 'source_document' ? null : slotId;
-  const canEdit = !readOnly && editableSlot !== null;
+  const canEdit = !readOnly;
   const canEditWriterIR = canEdit && writerDocument?.ui_editable === true;
   const canRewrite = canEdit
     && displayRevision > 0
@@ -2479,7 +2475,7 @@ function SlotWriterDocument({
     document: WriterDocument,
     sourceRevision?: string | number,
   ): Promise<WriterIRSaveResult> => {
-    if (readOnly || editableSlot === null || typeof sourceRevision !== 'number' || sourceRevision <= 0) {
+    if (readOnly || typeof sourceRevision !== 'number' || sourceRevision <= 0) {
       throw new Error(tr('chat.writerIR.saveFailed'));
     }
     try {
@@ -2487,7 +2483,7 @@ function SlotWriterDocument({
         sessionId,
         sourceRevision,
         normalizeWriterDocumentForSync(document),
-        editableSlot,
+        slotId,
         { silentError: true } as never,
       );
       const result = response?.data?.data;
@@ -2512,10 +2508,10 @@ function SlotWriterDocument({
       }
       throw saveError;
     }
-  }, [applySavedRevision, editableSlot, mediaLibrary, onRefresh, readOnly, sessionId]);
+  }, [applySavedRevision, mediaLibrary, onRefresh, readOnly, sessionId, slotId]);
 
   const saveMarkdown = useCallback(async (document: string, baseRevision: number) => {
-    if (readOnly || editableSlot === null || baseRevision <= 0) {
+    if (readOnly || baseRevision <= 0) {
       throw new Error(tr('chat.writerMarkdown.saveFailed'));
     }
     try {
@@ -2523,7 +2519,7 @@ function SlotWriterDocument({
         sessionId,
         baseRevision,
         document,
-        editableSlot,
+        slotId,
         { silentError: true } as never,
       );
       const result = response?.data?.data;
@@ -2547,7 +2543,7 @@ function SlotWriterDocument({
       }
       throw saveError;
     }
-  }, [applySavedRevision, editableSlot, onRefresh, readOnly, sessionId]);
+  }, [applySavedRevision, onRefresh, readOnly, sessionId, slotId]);
 
   const handleWriterEditingChange = useCallback((editing: boolean) => {
     setWriterEditing(editing);
@@ -4243,7 +4239,7 @@ export function SlotRenderer({
   if (
     sessionId
     && (slot.list_index ?? -1) === -1
-    && isWriterDocumentRenderSlot(resolvedWriterSlotId)
+    && isWriterDocumentSlot(resolvedWriterSlotId)
   ) {
     return (
       <SlotWriterDocument

@@ -22,11 +22,14 @@ import {
   type JsxEditorProps,
 } from '@mdxeditor/editor';
 import {
+  DisconnectOutlined,
   DownOutlined,
+  FontSizeOutlined,
   HighlightOutlined,
   LinkOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  PictureOutlined,
 } from '@ant-design/icons';
 import { Dropdown } from 'antd';
 import '@mdxeditor/editor/style.css';
@@ -54,10 +57,11 @@ import type { RewriteSelectionPreview } from '@/modules/chat/utils/request';
 import {
   applyWriterMarkdownInternalReference,
   collectWriterMarkdownOutline,
+  collectWriterMarkdownReferenceTargets,
+  removeWriterMarkdownInternalReference,
   writerMarkdownForEditor,
   writerMarkdownForSave,
 } from './writerMarkdownAnchors';
-import { resolveMarkdownImageUrlAsync } from '@/modules/knowledge/utils/imageUrl';
 import './MarkdownArtifactEditor.scss';
 
 function WriterAnchorEditor(props: JsxEditorProps) {
@@ -74,6 +78,80 @@ function internalWriterReferenceLink(target: EventTarget | null): HTMLAnchorElem
   return target instanceof Element
     ? target.closest<HTMLAnchorElement>('a[href^="#block-"]')
     : null;
+}
+
+interface MarkdownSelectionRestorePoint {
+  paragraphIndex: number;
+  startOffset: number;
+  endOffset: number;
+  text: string;
+}
+
+function markdownEditable(root: HTMLElement): HTMLElement | null {
+  return root.querySelector<HTMLElement>(
+    '.mdxeditor-root-contenteditable [contenteditable="true"]',
+  );
+}
+
+function markdownSelectionRestorePoint(
+  root: HTMLElement,
+  selection: MarkdownSelection,
+): MarkdownSelectionRestorePoint | null {
+  const editable = markdownEditable(root);
+  const paragraph = selection.paragraph;
+  const startOffset = selection.startOffset;
+  if (!editable || !paragraph || startOffset === undefined || !editable.contains(paragraph)) {
+    return null;
+  }
+  const paragraphIndex = Array.from(editable.querySelectorAll('p'))
+    .findIndex((candidate) => candidate === paragraph);
+  if (paragraphIndex < 0) return null;
+  return {
+    paragraphIndex,
+    startOffset,
+    endOffset: startOffset + selection.text.length,
+    text: selection.text,
+  };
+}
+
+function markdownTextBoundary(
+  paragraph: HTMLElement,
+  offset: number,
+): { node: Node; offset: number } {
+  const walker = globalThis.document.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT);
+  let remaining = Math.max(0, offset);
+  let textNode = walker.nextNode();
+  while (textNode) {
+    const length = textNode.textContent?.length ?? 0;
+    if (remaining <= length) return { node: textNode, offset: remaining };
+    remaining -= length;
+    textNode = walker.nextNode();
+  }
+  return { node: paragraph, offset: paragraph.childNodes.length };
+}
+
+function restoreMarkdownSelection(
+  root: HTMLElement,
+  restorePoint: MarkdownSelectionRestorePoint,
+): void {
+  const editable = markdownEditable(root);
+  const paragraph = editable?.querySelectorAll('p')[restorePoint.paragraphIndex];
+  if (
+    !editable
+    || !(paragraph instanceof HTMLElement)
+    || (paragraph.textContent ?? '').slice(restorePoint.startOffset, restorePoint.endOffset)
+      !== restorePoint.text
+  ) return;
+
+  const start = markdownTextBoundary(paragraph, restorePoint.startOffset);
+  const end = markdownTextBoundary(paragraph, restorePoint.endOffset);
+  const range = globalThis.document.createRange();
+  range.setStart(start.node, start.offset);
+  range.setEnd(end.node, end.offset);
+  editable.focus({ preventScroll: true });
+  const browserSelection = globalThis.getSelection();
+  browserSelection?.removeAllRanges();
+  browserSelection?.addRange(range);
 }
 
 function backtickRunLength(value: string, start: number): number {
@@ -120,7 +198,7 @@ function normalizeMarkdownForMdxEditor(markdown: string): string {
   let fenceLength = 0;
 
   return writerMarkdownForEditor(markdown).split('\n').map((line) => {
-    const fence = line.match(/^ {0,3}(`{3,}|~{3,})/);
+    const fence = line.match(/^\s*(`{3,}|~{3,})/);
     if (fence) {
       const marker = fence[1];
       if (!fenceCharacter) {
@@ -233,6 +311,7 @@ export function MarkdownArtifactEditor({
   const [outlineOpen, setOutlineOpen] = useState(false);
   const [selection, setSelection] = useState<MarkdownSelection | null>(null);
   const [selectionToolbar, setSelectionToolbar] = useState<FloatingToolbarAnchor | null>(null);
+  const [referenceDropdownOpen, setReferenceDropdownOpen] = useState(false);
   const [rewriteLayer, setRewriteLayer] = useState<HTMLDivElement | null>(null);
   const [rewriteSelectionPinned, setRewriteSelectionPinned] = useState(false);
   const rootRef = useRef<HTMLElement>(null);
@@ -253,7 +332,10 @@ export function MarkdownArtifactEditor({
     () => collectWriterMarkdownOutline(draftMarkdown),
     [draftMarkdown],
   );
-  const referenceTargets = markdownOutline.items;
+  const referenceTargets = useMemo(
+    () => collectWriterMarkdownReferenceTargets(draftMarkdown),
+    [draftMarkdown],
+  );
   const outlineBaseLevel = Math.min(
     ...markdownOutline.items.map((item) => item.level),
     6,
@@ -269,6 +351,7 @@ export function MarkdownArtifactEditor({
   const dismissSelectionToolbar = useCallback(() => {
     selectionToolbarDismissedRef.current = true;
     setSelectionToolbar(null);
+    setReferenceDropdownOpen(false);
   }, []);
 
   const updateSelectionToolbar = useCallback(() => {
@@ -525,11 +608,48 @@ export function MarkdownArtifactEditor({
     onRewriteSelection(selection);
     dismissSelectionToolbar();
   }, [dismissSelectionToolbar, onRewriteSelection, polishDisabled, selection]);
+  const removableReferenceMarkdown = useMemo(() => {
+    if (!selection?.supported) return null;
+    const nextMarkdown = removeWriterMarkdownInternalReference(
+      draftMarkdown,
+      selection.paragraph?.textContent ?? '',
+      selection.startOffset ?? -1,
+      selection.text,
+    );
+    return nextMarkdown === draftMarkdown ? null : nextMarkdown;
+  }, [draftMarkdown, selection]);
   const referenceDisabled = readOnly
     || !selection?.supported
     || saving
     || conflict
+    || Boolean(removableReferenceMarkdown)
     || referenceTargets.length === 0;
+  const removeReferenceDisabled = readOnly
+    || !selection?.supported
+    || saving
+    || conflict
+    || !removableReferenceMarkdown;
+  const persistReferenceEdit = useCallback((
+    nextDraft: string,
+    selectionToRestore: MarkdownSelection,
+  ) => {
+    const editor = editorRef.current;
+    if (!editor) return;
+    const root = rootRef.current;
+    const surface = root?.querySelector<HTMLElement>('.writer-markdown-editor__surface');
+    const scrollTop = surface?.scrollTop;
+    const restorePoint = root
+      ? markdownSelectionRestorePoint(root, selectionToRestore)
+      : null;
+    editor.setMarkdown(nextDraft);
+    window.requestAnimationFrame(() => {
+      if (root && restorePoint) restoreMarkdownSelection(root, restorePoint);
+      if (surface && scrollTop !== undefined) surface.scrollTop = scrollTop;
+      setDraftMarkdown(nextDraft);
+      void persistMarkdown(nextDraft, baseRevision);
+    });
+    dismissSelectionToolbar();
+  }, [baseRevision, dismissSelectionToolbar, persistMarkdown]);
   const applyCrossReference = useCallback((anchorId: string) => {
     const editor = editorRef.current;
     const referenceSelection = referenceSelectionRef.current;
@@ -551,17 +671,29 @@ export function MarkdownArtifactEditor({
       anchorId,
     );
     if (nextDraft === currentMarkdown) return;
+    persistReferenceEdit(nextDraft, referenceSelection);
+  }, [persistReferenceEdit, readOnly]);
 
-    const surface = rootRef.current?.querySelector<HTMLElement>('.writer-markdown-editor__surface');
-    const scrollTop = surface?.scrollTop;
-    editor.setMarkdown(nextDraft);
-    window.requestAnimationFrame(() => {
-      if (surface && scrollTop !== undefined) surface.scrollTop = scrollTop;
-      setDraftMarkdown(nextDraft);
-      void persistMarkdown(nextDraft, baseRevision);
-    });
-    dismissSelectionToolbar();
-  }, [baseRevision, dismissSelectionToolbar, persistMarkdown, readOnly]);
+  const removeCrossReference = useCallback(() => {
+    const editor = editorRef.current;
+    const referenceSelection = referenceSelectionRef.current ?? selection;
+    if (
+      !editor
+      || !referenceSelection?.supported
+      || savingRef.current
+      || conflictRef.current
+      || readOnly
+    ) return;
+    const currentMarkdown = normalizeMarkdownForMdxEditor(editor.getMarkdown());
+    const nextDraft = removeWriterMarkdownInternalReference(
+      currentMarkdown,
+      referenceSelection.paragraph?.textContent ?? '',
+      referenceSelection.startOffset ?? -1,
+      referenceSelection.text,
+    );
+    if (nextDraft === currentMarkdown) return;
+    persistReferenceEdit(nextDraft, referenceSelection);
+  }, [persistReferenceEdit, readOnly, selection]);
 
   const scrollToMarkdownTarget = useCallback((target: HTMLElement | null) => {
     const surface = rootRef.current?.querySelector<HTMLElement>(
@@ -622,7 +754,6 @@ export function MarkdownArtifactEditor({
       style={selectionToolbarStyle}
       onMouseDownCapture={(event) => {
         if (!internalWriterReferenceLink(event.target)) return;
-        event.preventDefault();
         event.stopPropagation();
       }}
       onClickCapture={(event) => {
@@ -630,6 +761,18 @@ export function MarkdownArtifactEditor({
         if (!link) return;
         event.preventDefault();
         event.stopPropagation();
+        const browserSelection = globalThis.getSelection();
+        if (
+          browserSelection
+          && !browserSelection.isCollapsed
+          && (
+            link.contains(browserSelection.anchorNode)
+            || link.contains(browserSelection.focusNode)
+          )
+        ) {
+          recordSelection();
+          return;
+        }
         const anchorId = decodeURIComponent(link.hash.slice(1));
         navigateToOutlineItem(anchorId);
       }}
@@ -781,7 +924,7 @@ export function MarkdownArtifactEditor({
                   Editor: WriterAnchorEditor,
                 }],
               }),
-              imagePlugin({ imagePreviewHandler: resolveMarkdownImageUrlAsync }),
+              imagePlugin(),
               codeBlockPlugin({ defaultCodeBlockLanguage: 'text' }),
               codeMirrorPlugin({ codeBlockLanguages: MARKDOWN_CODE_LANGUAGES }),
               markdownShortcutPlugin(),
@@ -820,6 +963,10 @@ export function MarkdownArtifactEditor({
                         placement='bottomLeft'
                         overlayClassName='writer-markdown-editor__reference-dropdown'
                         disabled={referenceDisabled}
+                        open={referenceDropdownOpen}
+                        onOpenChange={(open: boolean) => {
+                          setReferenceDropdownOpen(open && !referenceDisabled);
+                        }}
                         menu={{
                           items: referenceTargets.map((target) => ({
                             key: target.anchorId,
@@ -828,11 +975,23 @@ export function MarkdownArtifactEditor({
                                 className='writer-markdown-editor__reference-option'
                                 title={target.label}
                               >
-                                {target.label}
+                                <span
+                                  className='writer-markdown-editor__reference-option-icon'
+                                  aria-hidden='true'
+                                >
+                                  {target.type === 'image'
+                                    ? <PictureOutlined />
+                                    : <FontSizeOutlined />}
+                                </span>
+                                <span className='writer-markdown-editor__reference-option-label'>
+                                  {target.label}
+                                </span>
                               </span>
                             ),
                           })),
-                          onClick: ({ key }) => applyCrossReference(String(key)),
+                          onClick: ({ key }: { key: string | number }) => {
+                            applyCrossReference(String(key));
+                          },
                         }}
                       >
                         <button
@@ -841,6 +1000,7 @@ export function MarkdownArtifactEditor({
                           disabled={referenceDisabled}
                           aria-label={t('chat.writerIR.crossReference')}
                           aria-haspopup='menu'
+                          aria-expanded={referenceDropdownOpen}
                           title={t('chat.writerIR.crossReference')}
                           onMouseDown={(event) => {
                             event.preventDefault();
@@ -856,6 +1016,24 @@ export function MarkdownArtifactEditor({
                           />
                         </button>
                       </Dropdown>
+                      <button
+                        type='button'
+                        className={
+                          'writer-markdown-editor__reference-select '
+                          + 'writer-markdown-editor__reference-remove'
+                        }
+                        disabled={removeReferenceDisabled}
+                        aria-label={t('chat.writerIR.removeCrossReference')}
+                        title={t('chat.writerIR.removeCrossReference')}
+                        onMouseDown={(event) => {
+                          event.preventDefault();
+                          event.stopPropagation();
+                          if (selection?.supported) referenceSelectionRef.current = selection;
+                        }}
+                        onClick={removeCrossReference}
+                      >
+                        <DisconnectOutlined aria-hidden />
+                      </button>
                     </div>
                   </>
                 ),

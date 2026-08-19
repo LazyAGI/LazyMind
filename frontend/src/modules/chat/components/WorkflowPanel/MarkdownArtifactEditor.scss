@@ -339,7 +339,7 @@
 
 .writer-markdown-editor__polish-action:focus-visible,
 .writer-markdown-editor__reference-select:focus-visible {
-  outline: 2px solid rgba(51, 112, 255, 0.42);
+  outline: 2px solid #3370ff;
   outline-offset: 1px;
 }
 
@@ -373,6 +373,13 @@
 
 .writer-markdown-editor__reference-select:active:not(:disabled) {
   transform: translateY(1px);
+}
+
+.writer-markdown-editor__reference-remove {
+  justify-content: center;
+  width: 30px;
+  min-width: 30px;
+  padding: 0;
 }
 
 .writer-markdown-editor__reference-select > svg {
@@ -443,7 +450,31 @@
 }
 
 .writer-markdown-editor__reference-option {
-  display: block;
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.writer-markdown-editor__reference-option-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: #f8fafc;
+  color: #64748b;
+}
+
+.writer-markdown-editor__reference-option-icon > svg {
+  width: 13px;
+  height: 13px;
+}
+
+.writer-markdown-editor__reference-option-label {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

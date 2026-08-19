@@ -379,9 +379,162 @@
   opacity: 0.55;
 }
 
-.writer-ir__format-select--reference {
-  min-width: 96px;
-  max-width: 180px;
+.writer-ir__reference-trigger {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  min-width: 112px;
+  min-height: 30px;
+  padding: 0 8px 0 9px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  background: #fff;
+  color: #475569;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.writer-ir__reference-trigger:hover:not(:disabled) {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+  color: #334155;
+}
+
+.writer-ir__reference-trigger--open,
+.writer-ir__reference-trigger--open:hover:not(:disabled) {
+  border-color: #93c5fd;
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.writer-ir__reference-trigger:focus-visible {
+  outline: 2px solid var(--writer-ir-accent);
+  outline-offset: 1px;
+}
+
+.writer-ir__reference-trigger:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.writer-ir__reference-trigger > svg {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  color: #64748b;
+}
+
+.writer-ir__reference-trigger--open > svg {
+  color: #1d4ed8;
+}
+
+.writer-ir__reference-caret {
+  width: 10px !important;
+  height: 10px !important;
+  margin-left: 2px;
+  color: #94a3b8 !important;
+  transition: transform 120ms ease;
+}
+
+.writer-ir__reference-trigger--open .writer-ir__reference-caret {
+  color: #60a5fa !important;
+  transform: rotate(180deg);
+}
+
+.writer-ir__reference-dropdown {
+  z-index: 1300 !important;
+  width: min(320px, calc(100vw - 24px));
+}
+
+.writer-ir__reference-dropdown .ant-dropdown-menu {
+  width: 100%;
+  max-height: 320px;
+  padding: 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.99);
+  box-shadow:
+    0 2px 6px rgba(15, 23, 42, 0.06),
+    0 16px 36px rgba(15, 23, 42, 0.14);
+  scrollbar-color: #cbd5e1 transparent;
+  scrollbar-width: thin;
+}
+
+.writer-ir__reference-dropdown .ant-dropdown-menu-item {
+  min-height: 40px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  color: #334155;
+  font-size: 12px;
+  line-height: 20px;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.writer-ir__reference-dropdown .ant-dropdown-menu-item:hover,
+.writer-ir__reference-dropdown .ant-dropdown-menu-item-active {
+  background: #f1f5f9 !important;
+  color: #0f172a !important;
+}
+
+.writer-ir__reference-dropdown .ant-dropdown-menu-item:active {
+  background: #e8f0ff !important;
+  color: #245bdb !important;
+}
+
+.writer-ir__reference-dropdown .ant-dropdown-menu-title-content {
+  min-width: 0;
+}
+
+.writer-ir__reference-option {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.writer-ir__reference-option-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: #f8fafc;
+  color: #64748b;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.writer-ir__reference-option-icon > svg {
+  width: 13px;
+  height: 13px;
+}
+
+.writer-ir__reference-option-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.writer-ir__reference-dropdown .ant-dropdown-menu-item:hover .writer-ir__reference-option-icon,
+.writer-ir__reference-dropdown .ant-dropdown-menu-item-active .writer-ir__reference-option-icon {
+  background: #e8f0ff;
+  color: #245bdb;
 }
 
 .writer-ir__format-toolbar .writer-ir__format-button {
@@ -574,8 +727,13 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .writer-ir__format-toolbar--floating {
+  .writer-ir__format-toolbar--floating,
+  .writer-ir__reference-trigger,
+  .writer-ir__reference-caret,
+  .writer-ir__reference-dropdown .ant-dropdown-menu-item,
+  .writer-ir__reference-option-icon {
     animation: none;
+    transition: none;
   }
 }
 
@@ -639,6 +797,15 @@
 
 .writer-ir__children {
   margin: 8px 0 0 20px;
+}
+
+// Section body text follows the document margin. Structural nesting is kept
+// in the IR without adding a visual indent after pressing Enter on a heading.
+.writer-ir__block--heading > .writer-ir__children {
+  // Each nested editable block reserves a 22px control gutter while the base
+  // block already pulls 7px left. Offset the remaining 15px so its text aligns
+  // with the heading without moving the drag handle over the content.
+  margin-left: -15px;
 }
 
 .writer-ir__block {

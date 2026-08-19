@@ -1,10 +1,17 @@
 import {
   BoldOutlined,
+  CodeOutlined,
+  DisconnectOutlined,
   DownOutlined,
+  FontSizeOutlined,
   ItalicOutlined,
+  LinkOutlined,
   OrderedListOutlined,
+  PictureOutlined,
+  TableOutlined,
   UnorderedListOutlined,
 } from '@ant-design/icons';
+import { Dropdown } from 'antd';
 import {
   useCallback,
   useEffect,
@@ -39,6 +46,7 @@ import {
   liftWriterBlockAfterParent,
   normalizeWriterCodeLanguage,
   relocateWriterBlock,
+  removeWriterBlockInternalReference,
   sameWriterDocument,
   sameWriterDocumentForSync,
   splitWriterBlock,
@@ -54,6 +62,7 @@ import {
   WRITER_TEXT_COLOR_PALETTE,
   writerBackgroundColorHex,
   writerBlockRangeHasInlineStyle,
+  writerBlockRangeHasInternalReference,
   writerBlockRangeSpanColor,
   writerTextColorHex,
   type WriterBlockFormat,
@@ -144,6 +153,13 @@ function escapeHtmlAttribute(value: string): string {
 
 function writerBlockDomId(nodeId: string): string {
   return `writer-block-${nodeId}`;
+}
+
+function writerReferenceTargetIcon(type: string) {
+  if (type === 'image') return <PictureOutlined aria-hidden />;
+  if (type === 'table') return <TableOutlined aria-hidden />;
+  if (type === 'code') return <CodeOutlined aria-hidden />;
+  return <FontSizeOutlined aria-hidden />;
 }
 
 function renderSpan(span: WriterSpan): string {
@@ -945,6 +961,17 @@ function textBoundaryAt(
   return { node: contentElement, offset: contentElement.childNodes.length };
 }
 
+function closestVerticalScrollContainer(editor: HTMLElement): HTMLElement | null {
+  let scroller: HTMLElement | null = editor.parentElement;
+  while (scroller) {
+    const style = globalThis.getComputedStyle(scroller);
+    const canScrollY = /(auto|scroll|overlay)/.test(style.overflowY);
+    if (canScrollY && scroller.scrollHeight > scroller.clientHeight) return scroller;
+    scroller = scroller.parentElement;
+  }
+  return null;
+}
+
 function scrollSelectionIntoView(editor: HTMLElement): void {
   const selection = globalThis.getSelection();
   if (!selection || selection.rangeCount === 0 || !editor.contains(selection.anchorNode)) {
@@ -959,31 +986,32 @@ function scrollSelectionIntoView(editor: HTMLElement): void {
   );
   const target = anchorElement?.closest<HTMLElement>('[data-writer-block][data-node-id]')
     ?? (anchorElement instanceof HTMLElement ? anchorElement : null);
-
-  if (target) {
-    target.scrollIntoView({ block: 'nearest', inline: 'nearest' });
-    return;
-  }
-
-  // Fallback for empty / edge carets without a rendered block wrapper.
-  const rect = range.getBoundingClientRect();
+  const rangeRect = typeof range.getBoundingClientRect === 'function'
+    ? range.getBoundingClientRect()
+    : undefined;
+  const hasRangeRect = Boolean(
+    rangeRect
+    && (rangeRect.width !== 0 || rangeRect.height !== 0 || rangeRect.top !== 0),
+  );
+  const rect = hasRangeRect
+    ? rangeRect!
+    : target
+      ? blockContentElement(target).getBoundingClientRect()
+      : undefined;
   if (!rect || (rect.width === 0 && rect.height === 0 && rect.top === 0)) return;
-  let scroller: HTMLElement | null = editor.parentElement;
-  while (scroller) {
-    const style = globalThis.getComputedStyle(scroller);
-    const canScrollY = /(auto|scroll|overlay)/.test(style.overflowY);
-    if (canScrollY && scroller.scrollHeight > scroller.clientHeight) {
-      const scrollerRect = scroller.getBoundingClientRect();
-      const padding = 24;
-      if (rect.bottom > scrollerRect.bottom - padding) {
-        scroller.scrollTop += rect.bottom - (scrollerRect.bottom - padding);
-      } else if (rect.top < scrollerRect.top + padding) {
-        scroller.scrollTop -= (scrollerRect.top + padding) - rect.top;
-      }
-      return;
-    }
-    scroller = scroller.parentElement;
+  const scroller = closestVerticalScrollContainer(editor);
+  if (!scroller) return;
+
+  const scrollerRect = scroller.getBoundingClientRect();
+  const padding = 24;
+  let nextScrollTop = scroller.scrollTop;
+  if (rect.bottom > scrollerRect.bottom - padding) {
+    nextScrollTop += rect.bottom - (scrollerRect.bottom - padding);
+  } else if (rect.top < scrollerRect.top + padding) {
+    nextScrollTop -= (scrollerRect.top + padding) - rect.top;
   }
+  const maxScrollTop = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+  scroller.scrollTop = Math.min(maxScrollTop, Math.max(0, nextScrollTop));
 }
 
 function writerEditorSelectionRange(
@@ -1008,21 +1036,32 @@ function restoreEditorSelection(
 ): void {
   const range = writerEditorSelectionRange(editor, savedSelection);
   if (!range) return;
+  // Focus first so the browser cannot replace the restored Range with its
+  // default contenteditable caret while processing focus.
+  editor.focus({ preventScroll: true });
   const selection = globalThis.getSelection();
   selection?.removeAllRanges();
   selection?.addRange(range);
-  // Keep focus from jumping the page; callers request caret follow explicitly.
-  editor.focus({ preventScroll: true });
   if (options?.scrollIntoView) scrollSelectionIntoView(editor);
 }
 
 function selectWriterEditorContents(editor: HTMLElement): void {
   const range = globalThis.document.createRange();
   range.selectNodeContents(editor);
+  editor.focus({ preventScroll: true });
   const selection = globalThis.getSelection();
   selection?.removeAllRanges();
   selection?.addRange(range);
-  editor.focus({ preventScroll: true });
+}
+
+function isWriterEditorFullySelected(editor: HTMLElement): boolean {
+  const selection = globalThis.getSelection();
+  if (!selection || selection.isCollapsed || selection.rangeCount !== 1) return false;
+  const range = selection.getRangeAt(0);
+  return range.startContainer === editor
+    && range.startOffset === 0
+    && range.endContainer === editor
+    && range.endOffset === editor.childNodes.length;
 }
 
 function writerEditorPlainText(editor: HTMLElement): string {
@@ -1091,6 +1130,8 @@ export function WriterIRDocumentEditor({
   const lastEmittedDocumentRef = useRef<WriterDocument>();
   const lastRenderedDocumentRef = useRef<WriterDocument | undefined>(undefined);
   const savedSelectionRef = useRef<WriterEditorSelection | null>(null);
+  const referenceSelectionRef = useRef<WriterEditorSelection | null>(null);
+  const referenceMenuOpenRef = useRef(false);
   const pendingSelectionRef = useRef<WriterEditorSelection | null>(null);
   const isComposingRef = useRef(false);
   const handledEnterKeyDownRef = useRef(false);
@@ -1102,6 +1143,7 @@ export function WriterIRDocumentEditor({
   rewriteDialogOpenRef.current = rewriteDialogOpen;
   const [formatToolbarStyle, setFormatToolbarStyle] = useState<CSSProperties | undefined>();
   const [colorPanelOpen, setColorPanelOpen] = useState(false);
+  const [referenceMenuOpen, setReferenceMenuOpen] = useState(false);
   const [collapseVersion, setCollapseVersion] = useState(0);
   const [draggingNodeId, setDraggingNodeId] = useState<string | null>(null);
   const collapsedNodeIdsRef = useRef<Set<string>>(new Set());
@@ -1145,6 +1187,8 @@ export function WriterIRDocumentEditor({
     }
 
     const selectionToRestore = pendingSelectionRef.current ?? readEditorSelection(editor);
+    const scrollContainer = closestVerticalScrollContainer(editor);
+    const previousScrollTop = scrollContainer?.scrollTop;
     pendingSelectionRef.current = null;
     editor.innerHTML = renderDocument(
       document,
@@ -1156,6 +1200,9 @@ export function WriterIRDocumentEditor({
     lastRenderedDocumentRef.current = document;
     lastCollapseVersionRef.current = collapseVersion;
     syncBlockControlPositions(editor);
+    if (scrollContainer && previousScrollTop != null) {
+      scrollContainer.scrollTop = previousScrollTop;
+    }
     if (selectionToRestore) {
       restoreEditorSelection(editor, selectionToRestore, {
         // Only follow the caret for user-driven structural edits (Enter/Tab/…).
@@ -1202,7 +1249,9 @@ export function WriterIRDocumentEditor({
 
   const getPinnedRewriteRange = useCallback((): Range | null => {
     const editor = editorRef.current;
-    const selection = pinnedRewriteSelection ?? savedSelectionRef.current;
+    const selection = pinnedRewriteSelection
+      ?? (referenceMenuOpenRef.current ? referenceSelectionRef.current : null)
+      ?? savedSelectionRef.current;
     if (!editor || !selection || selection.end <= selection.start) return null;
     return writerEditorSelectionRange(editor, selection);
   }, [pinnedRewriteSelection]);
@@ -1509,6 +1558,9 @@ export function WriterIRDocumentEditor({
       setActiveSelection(null);
       return;
     }
+    if (selectAllScopeRef.current?.type === 'editor') {
+      selectAllScopeRef.current = null;
+    }
     savedSelectionRef.current = selection;
     setActiveSelection(selection);
   }, []);
@@ -1562,9 +1614,14 @@ export function WriterIRDocumentEditor({
       && (
         event.relatedTarget.closest('.artifact-rewrite-form')
         || event.relatedTarget.closest('.writer-ir__format-toolbar')
+        || event.relatedTarget.closest('.writer-ir__reference-dropdown')
       )
     ) return;
-    if (rewriteDialogOpenRef.current || pinnedRewriteSelectionRef.current) return;
+    if (
+      rewriteDialogOpenRef.current
+      || pinnedRewriteSelectionRef.current
+      || referenceMenuOpenRef.current
+    ) return;
     selectAllScopeRef.current = null;
     savedSelectionRef.current = null;
     setActiveSelection(null);
@@ -1623,6 +1680,15 @@ export function WriterIRDocumentEditor({
     && activeSelection.end > activeSelection.start,
   );
   const canChangeBlockFormat = canFormatBlock && (activeBlock?.children?.length ?? 0) === 0;
+  const selectionHasInternalReference = Boolean(
+    activeBlock
+    && activeSelection
+    && writerBlockRangeHasInternalReference(
+      activeBlock,
+      activeSelection.start,
+      activeSelection.end,
+    ),
+  );
   const referenceTargets = useMemo(
     () => collectWriterReferenceTargets(document.blocks)
       .filter((target) => target.nodeId !== activeBlock?.node_id),
@@ -1833,7 +1899,7 @@ export function WriterIRDocumentEditor({
 
   const applyCrossReference = useCallback((targetNodeId: string) => {
     if (disabled || !targetNodeId) return;
-    const selection = savedSelectionRef.current;
+    const selection = referenceSelectionRef.current ?? savedSelectionRef.current;
     if (!selection || selection.end <= selection.start) return;
     const block = findWriterBlock(document.blocks, selection.nodeId);
     if (!block || block.editable === false || block.node_id === targetNodeId) return;
@@ -1846,9 +1912,37 @@ export function WriterIRDocumentEditor({
     );
     if (nextDocument === document) return;
     pendingSelectionRef.current = selection;
+    referenceSelectionRef.current = null;
     lastEmittedDocumentRef.current = undefined;
     (onCrossReferenceApplied ?? onChange)(nextDocument);
   }, [disabled, document, onChange, onCrossReferenceApplied]);
+
+  const removeCrossReference = useCallback(() => {
+    if (disabled) return;
+    const selection = savedSelectionRef.current;
+    if (!selection || selection.end <= selection.start) return;
+    const block = findWriterBlock(document.blocks, selection.nodeId);
+    if (!block || block.editable === false) return;
+    const nextDocument = removeWriterBlockInternalReference(
+      document,
+      selection.nodeId,
+      selection.start,
+      selection.end,
+    );
+    if (nextDocument === document) return;
+    pendingSelectionRef.current = selection;
+    referenceSelectionRef.current = null;
+    lastEmittedDocumentRef.current = undefined;
+    (onCrossReferenceApplied ?? onChange)(nextDocument);
+  }, [disabled, document, onChange, onCrossReferenceApplied]);
+
+  const handleReferenceMenuOpenChange = useCallback((open: boolean) => {
+    referenceMenuOpenRef.current = open;
+    if (open) {
+      referenceSelectionRef.current = savedSelectionRef.current;
+    }
+    setReferenceMenuOpen(open);
+  }, []);
 
   const applySpanColor = useCallback((
     field: WriterSpanColorField,
@@ -2013,26 +2107,13 @@ export function WriterIRDocumentEditor({
       }
     }
 
-    // Heading at end: enter the section body (create first child if needed).
+    // Heading at end: always create a new first body paragraph. Reusing an
+    // existing child makes Enter jump into old content instead of adding a line.
     if (block.type === 'heading' && isAtEnd) {
-      const children = block.children ?? [];
-      if (children.length === 0) {
-        const inserted = insertWriterChildParagraph(document, block.node_id);
-        if (inserted.insertedNodeId) {
-          commitStructuralEdit(inserted.document, inserted.insertedNodeId);
-        }
-        return;
+      const inserted = insertWriterChildParagraph(document, block.node_id);
+      if (inserted.insertedNodeId) {
+        commitStructuralEdit(inserted.document, inserted.insertedNodeId);
       }
-      const firstChild = children[0];
-      const nextSelection = {
-        nodeId: firstChild.node_id,
-        start: 0,
-        end: 0,
-      };
-      savedSelectionRef.current = nextSelection;
-      pendingSelectionRef.current = nextSelection;
-      setActiveSelection(nextSelection);
-      restoreEditorSelection(editor, nextSelection, { scrollIntoView: true });
       return;
     }
 
@@ -2064,7 +2145,12 @@ export function WriterIRDocumentEditor({
   const handleBeforeInput = (event: FormEvent<HTMLElement>) => {
     const nativeEvent = event.nativeEvent as InputEvent;
     const inputType = nativeEvent.inputType;
-    if (selectAllScopeRef.current?.type === 'editor') {
+    const entireEditorSelected = selectAllScopeRef.current?.type === 'editor'
+      && isWriterEditorFullySelected(event.currentTarget);
+    if (selectAllScopeRef.current?.type === 'editor' && !entireEditorSelected) {
+      selectAllScopeRef.current = null;
+    }
+    if (entireEditorSelected) {
       if (inputType.startsWith('delete')) {
         event.preventDefault();
         replaceEditorSelection('');
@@ -2078,7 +2164,7 @@ export function WriterIRDocumentEditor({
     }
     if (inputType !== 'insertParagraph' && inputType !== 'insertLineBreak') return;
     event.preventDefault();
-    if (selectAllScopeRef.current?.type === 'editor') {
+    if (entireEditorSelected) {
       replaceEditorSelection('');
       return;
     }
@@ -2136,9 +2222,15 @@ export function WriterIRDocumentEditor({
       return;
     }
 
+    const entireEditorSelected = selectAllScopeRef.current?.type === 'editor'
+      && isWriterEditorFullySelected(event.currentTarget);
+    if (selectAllScopeRef.current?.type === 'editor' && !entireEditorSelected) {
+      selectAllScopeRef.current = null;
+    }
+
     if (
       event.key === 'Enter'
-      && selectAllScopeRef.current?.type === 'editor'
+      && entireEditorSelected
       && !isComposingRef.current
       && !event.nativeEvent.isComposing
       && event.keyCode !== 229
@@ -2369,23 +2461,64 @@ export function WriterIRDocumentEditor({
           <span className='writer-ir__format-divider' aria-hidden='true' />
 
           <div className='writer-ir__format-group'>
-            <select
-              className='writer-ir__format-select writer-ir__format-select--reference'
-              value=''
-              onChange={(event) => applyCrossReference(event.target.value)}
+            <Dropdown
+              trigger={['click']}
+              placement='bottomLeft'
+              overlayClassName='writer-ir__reference-dropdown'
               disabled={disabled || !hasTextSelection || referenceTargets.length === 0}
-              aria-label={t('chat.writerIR.crossReference')}
-              title={t('chat.writerIR.crossReference')}
+              onOpenChange={handleReferenceMenuOpenChange}
+              menu={{
+                selectable: false,
+                items: referenceTargets.map((target) => ({
+                  key: target.nodeId,
+                  label: (
+                    <span
+                      className='writer-ir__reference-option'
+                      title={target.label}
+                    >
+                      <span className='writer-ir__reference-option-icon' aria-hidden='true'>
+                        {writerReferenceTargetIcon(target.type)}
+                      </span>
+                      <span className='writer-ir__reference-option-label'>
+                        {target.label}
+                      </span>
+                    </span>
+                  ),
+                })),
+                onClick: ({ key }: { key: string }) => applyCrossReference(key),
+              }}
             >
-              <option value='' disabled>
-                {t('chat.writerIR.crossReference')}
-              </option>
-              {referenceTargets.map((target) => (
-                <option value={target.nodeId} key={target.nodeId}>
-                  {target.label}
-                </option>
-              ))}
-            </select>
+              <button
+                type='button'
+                className={`writer-ir__reference-trigger${
+                  referenceMenuOpen ? ' writer-ir__reference-trigger--open' : ''
+                }`}
+                disabled={disabled || !hasTextSelection || referenceTargets.length === 0}
+                aria-label={t('chat.writerIR.crossReference')}
+                aria-haspopup='menu'
+                aria-expanded={referenceMenuOpen}
+                title={t('chat.writerIR.crossReference')}
+                onMouseDown={(event) => {
+                  event.preventDefault();
+                  referenceSelectionRef.current = savedSelectionRef.current;
+                }}
+              >
+                <LinkOutlined aria-hidden />
+                <span>{t('chat.writerIR.crossReference')}</span>
+                <DownOutlined className='writer-ir__reference-caret' aria-hidden />
+              </button>
+            </Dropdown>
+            <button
+              type='button'
+              className='writer-ir__format-button'
+              disabled={disabled || !selectionHasInternalReference}
+              aria-label={t('chat.writerIR.removeCrossReference')}
+              title={t('chat.writerIR.removeCrossReference')}
+              onMouseDown={(event) => event.preventDefault()}
+              onClick={removeCrossReference}
+            >
+              <DisconnectOutlined aria-hidden />
+            </button>
           </div>
 
           <span className='writer-ir__format-divider' aria-hidden='true' />
@@ -2586,7 +2719,7 @@ export function WriterIRDocumentEditor({
       <ArtifactRewriteSelectionHighlight
         layer={rewriteLayer}
         getRange={getPinnedRewriteRange}
-        active={Boolean(pinnedRewriteSelection)}
+        active={Boolean(pinnedRewriteSelection) || referenceMenuOpen}
       />
       {rewritePreview && rewriteTarget && rewriteLayer && onRewritePreviewApplied && onRewritePreviewRejected && (
         <ArtifactRewriteInlineDiff

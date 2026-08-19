@@ -241,7 +241,6 @@ export interface WriteBackWriterDocumentRequest {
 }
 
 export type WriterDocumentSlot = 'outline_document' | 'draft_document';
-export type WriterDocumentRenderSlot = 'source_document' | WriterDocumentSlot;
 export type WriterDocumentRepresentation = 'markdown' | 'ir';
 export type RenderedWriterDocument = string | Record<string, unknown>;
 
@@ -413,7 +412,7 @@ export function WorkflowSessionApi() {
     },
     renderWriterDocument(
       sessionId: string,
-      slot: WriterDocumentRenderSlot,
+      slot: WriterDocumentSlot,
       options?: RawAxiosRequestConfig,
     ) {
       return axiosInstance.post<{

@@ -1509,6 +1509,7 @@ const enUS = {
       bold: "Bold",
       italic: "Italic",
       crossReference: "Cross-reference",
+      removeCrossReference: "Remove cross-reference",
       collapseSection: "Collapse",
       expandSection: "Expand",
       dragBlock: "Drag block",
