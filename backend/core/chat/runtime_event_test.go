@@ -140,6 +140,19 @@ func TestStreamChatUpstreamRejectsPayloadOnTerminalFrame(t *testing.T) {
 	}
 }
 
+func TestStreamChatUpstreamRejectsMismatchedRunIDAsPureError(t *testing.T) {
+	server := streamServer(t, "run_test", runFinishedFrame(t, "wrong_run"))
+	defer server.Close()
+
+	chunks := collectUpstream(t, server.URL, "run_test")
+	if len(chunks) != 1 || chunks[0].Err == nil || !strings.Contains(chunks[0].Err.Error(), "run_id mismatch") {
+		t.Fatalf("unexpected chunks: %#v", chunks)
+	}
+	if chunks[0].RuntimeEvent != nil || hasBusinessStreamPayload(chunks[0]) {
+		t.Fatalf("protocol error was not emitted as a pure error chunk: %#v", chunks[0])
+	}
+}
+
 func TestStreamChatUpstreamRejectsMalformedFrame(t *testing.T) {
 	server := streamServer(t, "run_test", "not-json")
 	defer server.Close()
@@ -168,6 +181,12 @@ func TestRunTerminalRejectsInvalidContract(t *testing.T) {
 		{name: "invalid combination", data: `{"status":"completed","reason":"runtime_failure","partial_output":false}`},
 		{name: "missing partial output", data: `{"status":"failed","reason":"runtime_failure"}`},
 		{name: "invalid partial output", data: `{"status":"failed","reason":"runtime_failure","partial_output":null}`},
+		{name: "completed with code", data: `{"status":"completed","reason":"normal","code":"rate_limited","partial_output":false}`},
+		{name: "cancelled with code", data: `{"status":"cancelled","reason":"user_cancelled","code":"user_cancelled","partial_output":false}`},
+		{name: "model incomplete without code", data: `{"status":"interrupted","reason":"model_incomplete","partial_output":true}`},
+		{name: "model incomplete with failure code", data: `{"status":"interrupted","reason":"model_incomplete","code":"rate_limited","partial_output":true}`},
+		{name: "model failure without code", data: `{"status":"failed","reason":"model_failure","partial_output":false}`},
+		{name: "runtime failure without code", data: `{"status":"failed","reason":"runtime_failure","partial_output":false}`},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -176,6 +195,65 @@ func TestRunTerminalRejectsInvalidContract(t *testing.T) {
 				t.Fatal("invalid run terminal was accepted")
 			}
 		})
+	}
+}
+
+func TestRuntimeEventValidatesModelRetryScheduled(t *testing.T) {
+	valid := json.RawMessage(`{"model_call_id":"call-1","retry_index":1,"max_attempts":3,"delay_ms":1000,"future_field":true}`)
+	if err := (&ChatRuntimeEvent{
+		SchemaVersion: 1, EventID: "evt-1", RunID: "run-1", Type: RuntimeEventModelRetryScheduled, Data: valid,
+	}).Validate("run-1"); err != nil {
+		t.Fatalf("valid retry event rejected: %v", err)
+	}
+
+	invalid := []string{
+		`{}`,
+		`{"model_call_id":"call-1","retry_index":0,"max_attempts":3,"delay_ms":0}`,
+		`{"model_call_id":"call-1","retry_index":3,"max_attempts":3,"delay_ms":0}`,
+		`{"model_call_id":"call-1","retry_index":1,"max_attempts":3,"delay_ms":-1}`,
+		`{"model_call_id":"call-1","retry_index":1.5,"max_attempts":3,"delay_ms":0}`,
+	}
+	for _, raw := range invalid {
+		event := &ChatRuntimeEvent{
+			SchemaVersion: 1, EventID: "evt-1", RunID: "run-1", Type: RuntimeEventModelRetryScheduled, Data: json.RawMessage(raw),
+		}
+		if err := event.Validate("run-1"); err == nil {
+			t.Fatalf("invalid retry event was accepted: %s", raw)
+		}
+	}
+}
+
+func TestRuntimeEventValidatesModelCallFinished(t *testing.T) {
+	valid := []string{
+		`{"model_call_id":"call-1","attempt_count":1,"kind":"finish","has_semantic_output":true,"finish":"stop","future_field":true}`,
+		`{"model_call_id":"call-1","attempt_count":2,"kind":"failure","has_semantic_output":false,"failure":{"origin":"http","code":"rate_limited","future_field":true}}`,
+	}
+	for _, raw := range valid {
+		event := &ChatRuntimeEvent{
+			SchemaVersion: 1, EventID: "evt-1", RunID: "run-1", Type: RuntimeEventModelCallFinished, Data: json.RawMessage(raw),
+		}
+		if err := event.Validate("run-1"); err != nil {
+			t.Fatalf("valid model terminal rejected: %s: %v", raw, err)
+		}
+	}
+
+	invalid := []string{
+		`{}`,
+		`{"model_call_id":"call-1","attempt_count":0,"kind":"finish","has_semantic_output":false,"finish":"stop"}`,
+		`{"model_call_id":"call-1","attempt_count":1,"kind":"finish","has_semantic_output":false}`,
+		`{"model_call_id":"call-1","attempt_count":1,"kind":"finish","has_semantic_output":false,"finish":"custom"}`,
+		`{"model_call_id":"call-1","attempt_count":1,"kind":"finish","has_semantic_output":false,"finish":"stop","failure":{"origin":"http","code":"rate_limited"}}`,
+		`{"model_call_id":"call-1","attempt_count":1,"kind":"failure","has_semantic_output":false}`,
+		`{"model_call_id":"call-1","attempt_count":1,"kind":"failure","has_semantic_output":false,"failure":{"origin":"custom","code":"rate_limited"}}`,
+		`{"model_call_id":"call-1","attempt_count":1,"kind":"failure","has_semantic_output":false,"failure":{"origin":"http","code":"custom"}}`,
+	}
+	for _, raw := range invalid {
+		event := &ChatRuntimeEvent{
+			SchemaVersion: 1, EventID: "evt-1", RunID: "run-1", Type: RuntimeEventModelCallFinished, Data: json.RawMessage(raw),
+		}
+		if err := event.Validate("run-1"); err == nil {
+			t.Fatalf("invalid model terminal was accepted: %s", raw)
+		}
 	}
 }
 

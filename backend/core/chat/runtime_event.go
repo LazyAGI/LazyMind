@@ -29,6 +29,51 @@ type RunTerminal struct {
 	DiagnosticID  string `json:"diagnostic_id,omitempty"`
 }
 
+type ModelRetryScheduledData struct {
+	ModelCallID string `json:"model_call_id"`
+	RetryIndex  *int   `json:"retry_index"`
+	MaxAttempts *int   `json:"max_attempts"`
+	DelayMS     *int   `json:"delay_ms"`
+}
+
+type ModelFailureData struct {
+	Origin       string `json:"origin"`
+	Code         string `json:"code"`
+	DiagnosticID string `json:"diagnostic_id,omitempty"`
+}
+
+type ModelCallFinishedData struct {
+	ModelCallID       string            `json:"model_call_id"`
+	AttemptCount      *int              `json:"attempt_count"`
+	Kind              string            `json:"kind"`
+	HasSemanticOutput *bool             `json:"has_semantic_output"`
+	Finish            *string           `json:"finish,omitempty"`
+	Failure           *ModelFailureData `json:"failure,omitempty"`
+}
+
+var validModelFinishes = map[string]struct{}{
+	"stop": {}, "tool_calls": {}, "length": {}, "content_filter": {},
+	"insufficient_system_resource": {}, "unknown": {},
+}
+
+var validIncompleteModelFinishes = map[string]struct{}{
+	"length": {}, "content_filter": {}, "insufficient_system_resource": {}, "unknown": {},
+}
+
+var validModelFailureOrigins = map[string]struct{}{
+	"transport": {}, "http": {}, "provider": {}, "protocol": {},
+}
+
+var validModelFailureCodes = map[string]struct{}{
+	"invalid_request": {}, "authentication_failed": {}, "permission_denied": {}, "not_found": {},
+	"rate_limited": {}, "usage_limit_exceeded": {}, "concurrency_limited": {}, "quota_exhausted": {},
+	"balance_exhausted": {}, "organization_spend_limit_exceeded": {}, "project_spend_limit_exceeded": {},
+	"input_filtered": {}, "output_filtered": {}, "token_limit": {}, "request_timeout": {},
+	"provider_overloaded": {}, "service_unavailable": {}, "provider_internal_error": {},
+	"provider_rejected": {}, "conflict": {}, "unprocessable_entity": {}, "protocol_error": {},
+	"transport_error": {},
+}
+
 func (e *ChatRuntimeEvent) Validate(expectedRunID string) error {
 	if e == nil {
 		return errors.New("runtime event is nil")
@@ -40,16 +85,61 @@ func (e *ChatRuntimeEvent) Validate(expectedRunID string) error {
 		return errors.New("runtime event run_id mismatch")
 	}
 	switch e.Type {
-	case RuntimeEventModelRetryScheduled, RuntimeEventModelCallFinished:
-		var data map[string]any
-		if err := json.Unmarshal(e.Data, &data); err != nil || data == nil {
-			return errors.New("runtime event data must be an object")
-		}
+	case RuntimeEventModelRetryScheduled:
+		return validateModelRetryScheduled(e.Data)
+	case RuntimeEventModelCallFinished:
+		return validateModelCallFinished(e.Data)
 	case RuntimeEventRunFinished:
 		_, err := e.Terminal()
 		return err
 	default:
 		return errors.New("unsupported runtime event type")
+	}
+	return nil
+}
+
+func validateModelRetryScheduled(raw json.RawMessage) error {
+	var data ModelRetryScheduledData
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return errors.New("invalid model_retry_scheduled data")
+	}
+	if strings.TrimSpace(data.ModelCallID) == "" || data.RetryIndex == nil || data.MaxAttempts == nil || data.DelayMS == nil {
+		return errors.New("model_retry_scheduled fields are required")
+	}
+	if *data.RetryIndex < 1 || *data.MaxAttempts <= *data.RetryIndex || *data.DelayMS < 0 {
+		return errors.New("invalid model_retry_scheduled values")
+	}
+	return nil
+}
+
+func validateModelCallFinished(raw json.RawMessage) error {
+	var data ModelCallFinishedData
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return errors.New("invalid model_call_finished data")
+	}
+	if strings.TrimSpace(data.ModelCallID) == "" || data.AttemptCount == nil || *data.AttemptCount < 1 || data.HasSemanticOutput == nil {
+		return errors.New("model_call_finished fields are required")
+	}
+	switch data.Kind {
+	case "finish":
+		if data.Finish == nil || data.Failure != nil {
+			return errors.New("model_call_finished finish outcome is invalid")
+		}
+		if _, ok := validModelFinishes[*data.Finish]; !ok {
+			return errors.New("unsupported model finish")
+		}
+	case "failure":
+		if data.Finish != nil || data.Failure == nil {
+			return errors.New("model_call_finished failure outcome is invalid")
+		}
+		if _, ok := validModelFailureOrigins[data.Failure.Origin]; !ok {
+			return errors.New("unsupported model failure origin")
+		}
+		if _, ok := validModelFailureCodes[data.Failure.Code]; !ok {
+			return errors.New("unsupported model failure code")
+		}
+	default:
+		return errors.New("unsupported model_call_finished kind")
 	}
 	return nil
 }
@@ -78,16 +168,33 @@ func parseRunTerminal(raw json.RawMessage) (*RunTerminal, error) {
 	if err := json.Unmarshal(raw, &terminal); err != nil {
 		return nil, errors.New("invalid run_finished data")
 	}
+	codeRaw, codePresent := fields["code"]
+	if codePresent {
+		var code string
+		if err := json.Unmarshal(codeRaw, &code); err != nil {
+			return nil, errors.New("run_finished code must be a string")
+		}
+	}
 	valid := false
 	switch terminal.Status {
 	case "completed":
-		valid = terminal.Reason == "normal" || terminal.Reason == "awaiting_user_input"
+		valid = (terminal.Reason == "normal" || terminal.Reason == "awaiting_user_input") && !codePresent
 	case "interrupted":
-		valid = terminal.Reason == "model_incomplete" || terminal.Reason == "model_failure"
+		switch terminal.Reason {
+		case "model_incomplete":
+			_, valid = validIncompleteModelFinishes[terminal.Code]
+		case "model_failure":
+			_, valid = validModelFailureCodes[terminal.Code]
+		}
 	case "failed":
-		valid = terminal.Reason == "model_failure" || terminal.Reason == "runtime_failure"
+		switch terminal.Reason {
+		case "model_failure":
+			_, valid = validModelFailureCodes[terminal.Code]
+		case "runtime_failure":
+			valid = strings.TrimSpace(terminal.Code) != ""
+		}
 	case "cancelled":
-		valid = terminal.Reason == "user_cancelled"
+		valid = terminal.Reason == "user_cancelled" && !codePresent
 	}
 	if !valid {
 		return nil, errors.New("invalid run status/reason combination")

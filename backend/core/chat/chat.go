@@ -851,15 +851,19 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 				}
 				chunk.Err = fmt.Errorf("algorithm chat stream failed: %s", message)
 			}
+			if chunk.Err != nil {
+				select {
+				case out <- UpstreamStreamChunk{Err: chunk.Err}:
+				case <-ctx.Done():
+				}
+				return
+			}
 			if isTerminalFrame && chunk.Err == nil {
 				continue
 			}
 			select {
 			case out <- chunk:
 			case <-ctx.Done():
-				return
-			}
-			if chunk.Err != nil {
 				return
 			}
 		}
