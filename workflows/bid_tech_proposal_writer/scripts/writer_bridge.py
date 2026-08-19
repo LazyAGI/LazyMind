@@ -27,6 +27,8 @@ from lazymind.chat.engine.tools.writer import (
 HAN = re.compile(r'[\u3400-\u4dbf\u4e00-\u9fff]')
 MARKDOWN_HEADING = re.compile(r'^(#{3,5})\s+(.+?)\s*$')
 BOLD_LEAD = re.compile(r'^(\s*)\*\*(.+?)\*\*(.*)$')
+TRACE_LINE = re.compile(r'^(\s*(?:[-*]\s*)?追溯\s*[：:]\s*)(.*?)\s*$')
+BID_TRACE_ID = re.compile(r'\b(?:(?:BG|FUNC|PERF|SEC|SVC|IMPL)|D)-\d{3}\b')
 
 
 def _workspace_root() -> Path:
@@ -394,6 +396,61 @@ def _canonicalize_leaf_headings(markdown: str, leaves: list[dict[str, Any]]) -> 
     return '\n'.join(lines).strip()
 
 
+def _ensure_leaf_trace_refs(markdown: str, leaves: list[dict[str, Any]]) -> str:
+    """Complete each leaf's trace line from the authoritative outline mapping."""
+    lines = str(markdown or '').splitlines()
+    positions: list[int] = []
+    cursor = 0
+    for leaf in leaves:
+        expected = str(leaf.get('title') or '').strip()
+        expected_level = _leaf_markdown_level(leaf)
+        position = next((
+            index for index in range(cursor, len(lines))
+            if (match := MARKDOWN_HEADING.match(lines[index].strip()))
+            and len(match.group(1)) == expected_level
+            and _normalized_title(match.group(2)) == _normalized_title(expected)
+        ), -1)
+        positions.append(position)
+        if position >= 0:
+            cursor = position + 1
+
+    # Work backwards so inserting a trace line cannot invalidate earlier boundaries.
+    for leaf_index in range(len(leaves) - 1, -1, -1):
+        start = positions[leaf_index]
+        if start < 0:
+            continue
+        end = positions[leaf_index + 1] if leaf_index + 1 < len(positions) else len(lines)
+        refs = list(dict.fromkeys(
+            str(ref).strip()
+            for ref in (
+                list(leaves[leaf_index].get('bid_requirements_refs') or [])
+                + list(leaves[leaf_index].get('disqualification_refs') or [])
+            )
+            if str(ref).strip()
+        ))
+        if not refs:
+            continue
+        trace_index = next((
+            index for index in range(start + 1, end)
+            if TRACE_LINE.match(lines[index])
+        ), -1)
+        if trace_index >= 0:
+            existing = set(BID_TRACE_ID.findall(lines[trace_index]))
+            missing = [ref for ref in refs if ref not in existing]
+            if missing:
+                base = lines[trace_index].rstrip().rstrip('。；;,，、')
+                lines[trace_index] = f"{base}；{'、'.join(missing)}。"
+            continue
+
+        insert_at = end
+        while insert_at > start + 1 and not lines[insert_at - 1].strip():
+            insert_at -= 1
+        prefix = [] if insert_at == start + 1 or not lines[insert_at - 1].strip() else ['']
+        lines[insert_at:insert_at] = prefix + [f"追溯：{'、'.join(refs)}。", '']
+
+    return '\n'.join(lines).strip()
+
+
 def _enforce_draft_contract(sections: list[str], effective_outline: dict[str, Any]) -> list[str]:
     chapters = effective_outline.get('chapters') if isinstance(effective_outline, dict) else None
     if not isinstance(chapters, list) or len(chapters) != len(sections):
@@ -405,6 +462,7 @@ def _enforce_draft_contract(sections: list[str], effective_outline: dict[str, An
     for chapter, section in zip(chapters, sections):
         leaves = _bid_leaves([chapter])
         value = _canonicalize_leaf_headings(str(section), leaves)
+        value = _ensure_leaf_trace_refs(value, leaves)
         headings = {
             (len(match.group(1)), _normalized_title(match.group(2)))
             for line in value.splitlines()
