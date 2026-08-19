@@ -531,7 +531,8 @@ def _rule_profile(query: str, *, has_attachments: bool = False) -> tuple[TaskPro
     secondary_deliverables = tuple(_DELIVERABLE_BY_OUTCOME[item] for item in secondary)
     research_required = current or 'research' in matches
     skill_mode: SkillMode = 'explicit' if explicit_skill else (
-        'suppress' if primary in {'learn', 'transform'} or is_simple_fact else 'candidates'
+        'suppress' if is_simple_fact or bool(_TRIVIAL_CHAT_INPUT.fullmatch(text.strip()))
+        else 'candidates'
     )
     subject_kind, input_mode = _subject_and_input(text, has_attachments)
     source_strategy = (
@@ -877,8 +878,10 @@ def _validate_llm_profile(
     # Explicit freshness and skill wording are authoritative deterministic signals.
     if rule.freshness == 'current':
         freshness = 'current'
-    if rule.skill_mode == 'explicit':
-        skill_mode = 'explicit'
+    if rule.skill_mode in {'explicit', 'suppress'}:
+        skill_mode = rule.skill_mode
+    else:
+        skill_mode = 'candidates'
     primary_subtype = (
         rule.outcome_subtype if primary == rule.primary_outcome else _outcome_subtype(primary, query)
     )
@@ -988,7 +991,7 @@ def resolve_task_profile(
     except Exception as exc:
         return replace(
             rule,
-            skill_mode='explicit' if rule.skill_mode == 'explicit' else 'suppress',
+            skill_mode=rule.skill_mode,
             source='fallback',
             router_latency_ms=int((time.monotonic() - started) * 1000),
             router_error=f'{type(exc).__name__}: {exc}'[:240],
@@ -1044,26 +1047,3 @@ def selected_prompt_modules(profile: TaskProfile) -> list[str]:
     if assessment.interaction_need == 'blocking':
         modules.append('clarification')
     return list(dict.fromkeys(modules))
-
-
-def select_skill_candidates(
-    available_skills: list[str] | None,
-    query: str,
-    profile: TaskProfile,
-    *,
-    limit: int = 5,
-) -> list[str] | None:
-    if profile.skill_mode == 'suppress':
-        return []
-    if profile.skill_mode == 'explicit':
-        selected = profile.explicit_resources.skill_names
-        if not selected:
-            return available_skills
-        available = set(available_skills or [])
-        return [skill for skill in selected if skill in available]
-    # Skill references are identifiers, not semantic metadata. Filtering them by
-    # lexical overlap can discard a relevant skill before LazyLLM's SkillManager
-    # reads its SKILL.md description and lets the model decide whether to use it.
-    # Keep query/limit in the interface for existing callers, but delegate
-    # candidate relevance to the downstream skill mechanism.
-    return [str(item) for item in (available_skills or []) if str(item).strip()]

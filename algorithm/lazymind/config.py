@@ -178,6 +178,12 @@ config.add('core_internal_token', str, '', 'AUTH_SERVICE_INTERNAL_TOKEN',
 config.add('agentic_kb_name', str, 'general_algo', 'AGENTIC_KB_NAME',
            description='Default knowledge base name for agentic.')
 config.add('skill_fs_url', str, 'remote://skills', 'SKILL_FS_URL', description='Skill filesystem URL.')
+config.add('skill_retrieval_topk', int, 8, 'SKILL_RETRIEVAL_TOPK',
+           description='Maximum number of Skill metadata candidates exposed by initial retrieval.')
+config.add('skill_retrieval_small_catalog_threshold', int, 20, 'SKILL_RETRIEVAL_SMALL_CATALOG_THRESHOLD',
+           description='Expose all allowed Skill metadata when the catalog is no larger than this value.')
+config.add('skill_retrieval_embedding_timeout', float, 3.0, 'SKILL_RETRIEVAL_EMBEDDING_TIMEOUT',
+           description='Seconds before Skill dense retrieval falls back to lexical retrieval.')
 _validate_positive_integer_env('LAZYMIND_PREFERENCE_INDEX_MAX_ITEMS')
 config.add(
     'preference_index_max_items',

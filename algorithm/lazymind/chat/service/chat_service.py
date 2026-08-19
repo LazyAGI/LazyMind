@@ -25,9 +25,9 @@ from lazymind.chat.config import (
 from lazymind.chat.engine.prompts import (
     add_standard_system_sections,
     resolve_task_profile,
-    select_skill_candidates,
     selected_prompt_modules,
 )
+from lazymind.chat.engine.skills import SkillRetriever
 from lazymind.common.memory import (
     EpisodeReadError,
     EpisodeType,
@@ -65,6 +65,7 @@ from lazymind.chat.engine.tools.intent_writer import (
     render_intent_section,
 )
 from lazymind.chat.engine.tools.skill_listing import build_list_skills_tool
+from lazymind.chat.engine.tools.skill_search import build_search_skills_tool
 from lazymind.chat.service.utils import (
     SensitiveFilter,
     SensitiveMatch,
@@ -76,10 +77,15 @@ from lazymind.chat.service.utils import (
     validate_and_resolve_files,
 )
 from lazyllm.tools.fs.client import FS
-from lazymind.model_config import inject_model_config, summarize_model_config_for_log
+from lazymind.model_config import (
+    inject_model_config,
+    is_model_role_available,
+    summarize_model_config_for_log,
+)
 from lazyllm.tools.tool_config_inject import inject_tool_config
 from lazyllm import AutoModel
 from lazyllm.tools.mcp.client import MCPClient
+from lazyllm.tools.agent.skill_manager import SkillManager as LazySkillManager
 from lazymind.config import config as _cfg
 
 rag_sem = asyncio.Semaphore(MAX_CONCURRENCY)
@@ -109,6 +115,34 @@ _TASK_PROFILE_ROUTER_TIMEOUT_SECONDS = 20
 _SENSITIVE_MATCH_UNSET = object()
 _mcp_tool_cache: dict[str, tuple[float, list[Any]]] = {}
 _mcp_tool_cache_lock = threading.Lock()
+
+
+def _skill_embedding_cache_namespace(model_config: dict[str, Any] | None) -> str:
+    role_config = (model_config or {}).get('embed_main') or {}
+
+    def safe(value: Any) -> Any:
+        if isinstance(value, dict):
+            return {
+                str(key): safe(item)
+                for key, item in value.items()
+                if not any(secret in str(key).lower() for secret in ('key', 'token', 'secret'))
+            }
+        if isinstance(value, (list, tuple)):
+            return [safe(item) for item in value]
+        return value if isinstance(value, (str, int, float, bool)) or value is None else str(value)
+
+    payload = json.dumps(safe(role_config), ensure_ascii=False, sort_keys=True, separators=(',', ':'))
+    return hashlib.sha256(payload.encode('utf-8')).hexdigest()[:16]
+
+
+def _build_skill_retriever(model_config: dict[str, Any] | None) -> SkillRetriever:
+    embedder = AutoModel(model='embed_main') if is_model_role_available('embed_main') else None
+    return SkillRetriever(
+        embedder=embedder,
+        cache_namespace=_skill_embedding_cache_namespace(model_config),
+        small_catalog_threshold=_cfg['skill_retrieval_small_catalog_threshold'],
+        embedding_timeout_seconds=_cfg['skill_retrieval_embedding_timeout'],
+    )
 
 
 def _select_episode_reference_items(
@@ -828,8 +862,63 @@ async def _handle_chat_impl(
     artifact_tools = _build_chat_artifact_tools()
     workspace = chat_agent_workspace(user_id or '0', conversation_id)
     skill_listing_tools = [build_list_skills_tool(agent.available_skills)]
+    workflow_skill_dir = ''
+    workflow_skill_name = ''
+    if agentic_config.get('enable_workflow', True):
+        from lazymind.workflow_toolkit import WORKFLOW_SKILL_NAME, workflow_skills_dir
+        workflow_skill_name = WORKFLOW_SKILL_NAME
+        workflow_skill_dir = workflow_skills_dir()
+
+    allowed_skill_ids = list(dict.fromkeys([
+        *(agent.available_skills or []),
+        *([workflow_skill_name] if workflow_skill_name else []),
+    ]))
+    active_skill_ids = _active_skills_from_history(agent_history, agent.available_skills)
+    if task_profile is None:
+        initial_skill_ids = list(allowed_skill_ids)
+    elif task_profile.skill_mode == 'explicit':
+        initial_skill_ids = list(dict.fromkeys([
+            *active_skill_ids,
+            *task_profile.explicit_resources.skill_names,
+        ]))
+    else:
+        initial_skill_ids = list(active_skill_ids)
+    if workflow_skill_name:
+        initial_skill_ids = list(dict.fromkeys([*initial_skill_ids, workflow_skill_name]))
+
+    skill_manager = None
+    skill_retriever = None
+    skill_retrieval_result = None
+    if allowed_skill_ids:
+        skill_manager = LazySkillManager(
+            dir=','.join(filter(None, [_cfg['skill_fs_url'], workflow_skill_dir])),
+            skills=initial_skill_ids,
+            allowed_skills=allowed_skill_ids,
+            fs=FS,
+        )
+        if task_profile is not None:
+            skill_retriever = _build_skill_retriever(runtime.llm_config)
+        if task_profile is not None and task_profile.skill_mode == 'candidates':
+            skill_catalog = await asyncio.to_thread(
+                skill_manager.list_skill_metadata, 'allowed',
+            )
+            skill_retrieval_result = await asyncio.to_thread(
+                skill_retriever.retrieve,
+                language_query,
+                skill_catalog,
+                _cfg['skill_retrieval_topk'],
+            )
+            skill_manager.expose_skills(skill_retrieval_result.skill_ids)
+
+    skill_search_tools = (
+        [build_search_skills_tool(skill_manager, skill_retriever)]
+        if skill_manager is not None and skill_retriever is not None else []
+    )
+    selected_skills = [
+        item['id'] for item in skill_manager.list_skill_metadata('visible')
+    ] if skill_manager is not None else []
     all_tools = ([intentwriter] + agent_tools + artifact_tools + subagent_tools + attachment_tools
-                 + skill_listing_tools + ask_user_tools + workflow_tools + mcp_tools)
+                 + skill_listing_tools + skill_search_tools + ask_user_tools + workflow_tools + mcp_tools)
     active_workflow_tool_isolation = bool(
         isinstance(effective_workflow_context, dict)
         and effective_workflow_context.get('session_id')
@@ -853,21 +942,6 @@ async def _handle_chat_impl(
             task_profile.primary_outcome,
             [getattr(tool, '__name__', str(tool)) for tool in all_tools],
         )
-    skill_config = agent.available_skills
-    selected_skills = agent.available_skills
-    if task_profile is not None:
-        selected_skills = select_skill_candidates(agent.available_skills, language_query, task_profile)
-        selected_skills = list(dict.fromkeys([
-            *_active_skills_from_history(agent_history, agent.available_skills),
-            *(selected_skills or []),
-        ]))
-        skill_config = selected_skills or False
-    workflow_skill_dir = ''
-    if agentic_config.get('enable_workflow', True):
-        from lazymind.workflow_toolkit import WORKFLOW_SKILL_NAME, workflow_skills_dir
-        selected_skills = list(dict.fromkeys([*(selected_skills or []), WORKFLOW_SKILL_NAME]))
-        skill_config = selected_skills
-        workflow_skill_dir = workflow_skills_dir()
     set_trace_context({
         'trace_id': conversation.session_id, 'session_id': conversation.session_id, 'sampled': True,
         'module_trace': {
@@ -887,6 +961,9 @@ async def _handle_chat_impl(
             'router_error': task_profile.router_error if task_profile else '',
             'prompt_modules': selected_prompt_modules(task_profile) if task_profile else [],
             'skills_exposed': list(selected_skills or []),
+            'skill_retrieval': (
+                skill_retrieval_result.to_trace_dict() if skill_retrieval_result else {}
+            ),
         },
     })
     episode_store = None
@@ -1093,11 +1170,9 @@ async def _handle_chat_impl(
         stop_tools=stop_tools,
         force_summarize_context=query,
         execution_options=AgentExecutionOptions(
-            skills=skill_config,
+            skill_manager=skill_manager,
             workspace=workspace,
             keep_full_turns=_cfg['agentic_keep_full_turns'],
-            fs=FS,
-            skills_dir=','.join(filter(None, [_cfg['skill_fs_url'], workflow_skill_dir])),
             max_retries={
                 'low': _cfg['agentic_max_rounds_low'],
                 'medium': _cfg['agentic_max_rounds_medium'],
