@@ -1403,6 +1403,7 @@ const zhCN = {
     stopGenerate: "停止生成",
     send: "发送",
     workflowContinue: "继续",
+    workflowContinueWithLatestOutline: "根据最新大纲生成成稿",
     workflowSaveAndContinue: "保存并继续",
     workflowRetry: "重试",
     workflowGeneratedImage: "生成图片",

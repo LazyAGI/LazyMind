@@ -37,6 +37,7 @@ import {
 } from './SlotComponents';
 import { WorkflowPanelTabActiveContext, SlotEditingContext, type SlotFooterAction } from './slotEditingContext';
 import { findWriterArtifactStream } from './writerArtifactStream';
+import { resolveCompletedWriterContinueStep } from './workflowContinue';
 import './WorkflowPanel.scss';
 
 const DOCUMENT_FOOTER_LINK_ORDER = 20;
@@ -1346,8 +1347,14 @@ export function WorkflowPanel({
   const buttonsDisabled = sessionBusy || actionPending;
   const dismissDisabled = dismissing || anySlotEditing || actionPending;
   const collapseDisabled = (anySlotEditing || actionPending) && !collapsed;
-  // "继续" is only shown in waiting/active; completed/failed show rollback step picker instead.
-  const showContinue = displayStatus === 'waiting' || displayStatus === 'active';
+  const completedContinueStepId = resolveCompletedWriterContinueStep(
+    session,
+    tabs[activeTabIdx],
+  );
+  // A completed Writer outline can be edited and used to regenerate the final document.
+  const showContinue = displayStatus === 'waiting'
+    || displayStatus === 'active'
+    || Boolean(completedContinueStepId);
   const showStepRollback =
     (session.status === 'completed' || session.status === 'failed')
     && Boolean(session.steps && session.steps.length > 0);
@@ -1380,7 +1387,10 @@ export function WorkflowPanel({
   }
 
   function handleContinue() {
-    void runFooterAction(() => onSendMessage?.(t('chat.workflowContinue')));
+    const message = completedContinueStepId
+      ? `${t('chat.workflowRollbackPrefix')}${completedContinueStepId}`
+      : t('chat.workflowContinue');
+    void runFooterAction(() => onSendMessage?.(message));
   }
 
   function handleRetry() {
@@ -1735,7 +1745,9 @@ export function WorkflowPanel({
                       ? t('chat.workflowBtnDisabledHint')
                       : anySlotEditing
                         ? t('chat.workflowContinueFlushHint')
-                        : continueLabel
+                        : completedContinueStepId
+                          ? t('chat.workflowContinueWithLatestOutline')
+                          : continueLabel
               }
             >
               {actionPending ? t('chat.workflowSavingBeforeAction') : continueLabel}

@@ -19,6 +19,9 @@ vi.mock('@mdxeditor/editor', async () => {
         <div className='mdxeditor-root-contenteditable'>
           <div contentEditable suppressContentEditableWarning>
             <p>Alpha beta gamma</p>
+            <a href='#block-sec-1'>Chapter 1</a>
+            <a href='https://example.com'>External link</a>
+            <span id='block-sec-1'>Target</span>
           </div>
         </div>
       </div>
@@ -108,6 +111,36 @@ function Harness() {
 }
 
 describe('MarkdownArtifactEditor rewrite selection highlight', () => {
+  it('navigates internal references without opening the link editor', () => {
+    const { container } = render(<Harness />);
+    const surface = container.querySelector<HTMLElement>('.writer-markdown-editor__surface');
+    const editableRoot = container.querySelector<HTMLElement>('.mdxeditor-root-contenteditable');
+    const internalLink = container.querySelector<HTMLAnchorElement>('a[href^="#block-"]');
+    const externalLink = container.querySelector<HTMLAnchorElement>('a[href^="https://"]');
+    const linkEditorClick = vi.fn();
+    const scrollTo = vi.fn();
+
+    expect(surface).not.toBeNull();
+    expect(editableRoot).not.toBeNull();
+    expect(internalLink).not.toBeNull();
+    expect(externalLink).not.toBeNull();
+    Object.defineProperty(surface!, 'scrollTo', { value: scrollTo });
+    editableRoot!.addEventListener('click', (event) => {
+      event.preventDefault();
+      linkEditorClick();
+    });
+
+    const internalClick = new MouseEvent('click', { bubbles: true, cancelable: true });
+    internalLink!.dispatchEvent(internalClick);
+
+    expect(internalClick.defaultPrevented).toBe(true);
+    expect(linkEditorClick).not.toHaveBeenCalled();
+    expect(scrollTo).toHaveBeenCalledTimes(1);
+
+    externalLink!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(linkEditorClick).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps the selection highlighted while AI polish is open and clears it on close', async () => {
     const { container } = render(<Harness />);
     const paragraph = container.querySelector('p');

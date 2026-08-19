@@ -1449,6 +1449,7 @@ const enUS = {
     stopGenerate: "Stop",
     send: "Send",
     workflowContinue: "Continue",
+    workflowContinueWithLatestOutline: "Generate the final document from the latest outline",
     workflowSaveAndContinue: "Save and continue",
     workflowRetry: "Retry",
     workflowGeneratedImage: "Generated Image",

@@ -69,6 +69,12 @@ function WriterAnchorEditor(props: JsxEditorProps) {
   return <GenericJsxEditor {...props} />;
 }
 
+function internalWriterReferenceLink(target: EventTarget | null): HTMLAnchorElement | null {
+  return target instanceof Element
+    ? target.closest<HTMLAnchorElement>('a[href^="#block-"]')
+    : null;
+}
+
 function backtickRunLength(value: string, start: number): number {
   let end = start;
   while (value[end] === '`') end += 1;
@@ -613,6 +619,19 @@ export function MarkdownArtifactEditor({
       aria-label={t('chat.writerMarkdown.documentRegion')}
       ref={rootRef}
       style={selectionToolbarStyle}
+      onMouseDownCapture={(event) => {
+        if (!internalWriterReferenceLink(event.target)) return;
+        event.preventDefault();
+        event.stopPropagation();
+      }}
+      onClickCapture={(event) => {
+        const link = internalWriterReferenceLink(event.target);
+        if (!link) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const anchorId = decodeURIComponent(link.hash.slice(1));
+        navigateToOutlineItem(anchorId);
+      }}
       onMouseDown={(event) => {
         const target = event.target instanceof Element ? event.target : null;
         if (target?.closest('.mdxeditor-toolbar')) {
@@ -622,15 +641,6 @@ export function MarkdownArtifactEditor({
       onMouseUp={() => recordSelection()}
       onKeyUp={(event) => {
         if (event.key !== 'Escape') recordSelection();
-      }}
-      onClick={(event) => {
-        const link = event.target instanceof Element
-          ? event.target.closest<HTMLAnchorElement>('a[href^="#block-"]')
-          : null;
-        if (!link) return;
-        event.preventDefault();
-        const anchorId = decodeURIComponent(link.hash.slice(1));
-        navigateToOutlineItem(anchorId);
       }}
     >
       {conflict && (
