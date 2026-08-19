@@ -69,6 +69,25 @@ describe('Writer Markdown system anchors', () => {
     expect(restored).not.toContain('\n\n\n');
   });
 
+  it('preserves an image anchor when the editor serializes Markdown as HTML', () => {
+    const source = [
+      '<a id="block-image-1"></a>',
+      '![灯塔](https://example.com/lighthouse.png)',
+    ].join('\n');
+    const edited = [
+      '<img height="712" width="712" alt="灯塔" src="https://example.com/lighthouse.png" />',
+    ].join('\n');
+    const restored = protectWriterMarkdownHeadingAnchors(source, edited);
+
+    expect(restored).toBe([
+      '<a id="block-image-1" />',
+      '<img height="712" width="712" alt="灯塔" src="https://example.com/lighthouse.png" />',
+    ].join('\n'));
+    expect(collectWriterMarkdownReferenceTargets(restored)).toEqual([
+      { anchorId: 'block-image-1', label: '灯塔', type: 'image' },
+    ]);
+  });
+
   it('assigns an anchor when a document starts with a section heading', () => {
     const restored = protectWriterMarkdownHeadingAnchors('', '## 新章节');
 

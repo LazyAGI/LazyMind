@@ -27,6 +27,36 @@ interface WriterMarkdownTargetBinding {
   signature: string;
 }
 
+interface WriterMarkdownImageTarget {
+  source: string;
+  label: string;
+}
+
+function writerMarkdownImageTarget(line: string): WriterMarkdownImageTarget | undefined {
+  const markdownImage = line.match(/!\[((?:\\.|[^\\\]])*)\]\(((?:\\.|[^)])*)\)/);
+  if (markdownImage) {
+    return {
+      source: markdownImage[2].trim(),
+      label: markdownImage[1].replace(/\\([\\\]])/g, '$1').trim(),
+    };
+  }
+
+  // MDXEditor serializes images with dimensions as HTML <img> elements.
+  // Treat that as the same semantic image so its sidecar anchor survives the
+  // Markdown -> editor -> Markdown round trip.
+  const htmlImage = line.match(/<img\b([^>]*)\/?\s*>/i);
+  if (!htmlImage) return undefined;
+  const attributes = new Map<string, string>();
+  const attributePattern = /\b(src|alt)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/gi;
+  let attribute: RegExpExecArray | null;
+  while ((attribute = attributePattern.exec(htmlImage[1])) !== null) {
+    attributes.set(attribute[1].toLowerCase(), attribute[2] ?? attribute[3] ?? attribute[4] ?? '');
+  }
+  const source = attributes.get('src')?.trim();
+  if (!source) return undefined;
+  return { source, label: attributes.get('alt')?.trim() ?? '' };
+}
+
 function writerMarkdownTargetBindings(markdown: string): WriterMarkdownTargetBinding[] {
   const bindings: WriterMarkdownTargetBinding[] = [];
   let pendingAnchor: { id: string; lineIndex: number } | undefined;
@@ -70,7 +100,7 @@ function writerMarkdownTargetBindings(markdown: string): WriterMarkdownTargetBin
         signature: `${heading[1].length}:${heading[2].trim()}`,
       });
     } else {
-      const image = trimmed.match(/!\[((?:\\.|[^\\\]])*)\]\(((?:\\.|[^)])*)\)/);
+      const image = writerMarkdownImageTarget(trimmed);
       if (image) {
         bindings.push({
           lineIndex,
@@ -78,7 +108,7 @@ function writerMarkdownTargetBindings(markdown: string): WriterMarkdownTargetBin
           anchorId: pendingAnchor?.id,
           type: 'image',
           // The URL is the stable identity when numbering changes image alt text.
-          signature: `image:${image[2].trim()}`,
+          signature: `image:${image.source}`,
         });
       }
     }
@@ -422,11 +452,11 @@ export function collectWriterMarkdownReferenceTargets(
         type: 'heading',
       });
     } else if (pendingAnchorId) {
-      const image = trimmed.match(/!\[((?:\\.|[^\\\]])*)\]\((?:\\.|[^)])*\)/);
+      const image = writerMarkdownImageTarget(trimmed);
       if (image) {
         targets.push({
           anchorId: pendingAnchorId,
-          label: image[1].replace(/\\([\\\]])/g, '$1').trim() || pendingAnchorId,
+          label: image.label || pendingAnchorId,
           type: 'image',
         });
       }

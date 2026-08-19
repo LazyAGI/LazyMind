@@ -459,9 +459,26 @@ export function MarkdownArtifactEditor({
         target.dataset.writerSystemAnchor = 'true';
       });
     };
+    const scheduleDomAnchors = () => {
+      if (frame !== undefined) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = undefined;
+        applyDomAnchors();
+      });
+    };
+    const observer = new MutationObserver(scheduleDomAnchors);
+    observer.observe(root, {
+      childList: true,
+      subtree: true,
+      // Image previews resolve asynchronously. Reconcile again when the
+      // editor updates the real image node after the Markdown render.
+      attributes: true,
+      attributeFilter: ['src'],
+    });
     applyDomAnchors();
-    frame = window.requestAnimationFrame(applyDomAnchors);
+    scheduleDomAnchors();
     return () => {
+      observer.disconnect();
       if (frame !== undefined) window.cancelAnimationFrame(frame);
     };
   }, [materializedDraftMarkdown]);
