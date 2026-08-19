@@ -446,6 +446,7 @@ func manualSchemas() map[string]any {
 			prop("unfiled_dialog_count", int64Schema()), prop("unfiled_task_count", int64Schema()), prop("unfiled_total_count", int64Schema()),
 		),
 		"ConversationArchiveFolderCreateResponse": objReq([]string{"folder"}, prop("folder", refSchema("ConversationArchiveFolder"))),
+		"ConversationArchiveFolderDeleteResponse": objReq([]string{"moved_count"}, prop("moved_count", int64Schema())),
 		"ConversationRecoveryItem": objReq(
 			[]string{"conversation_id", "display_name", "kind", "create_time", "update_time"},
 			prop("conversation_id", strSchema()), prop("display_name", strSchema()),
@@ -731,6 +732,23 @@ func manualPaths() map[string]any {
 				"summary": "Create a conversation archive folder", "requestBody": jsonBody(refSchema("ConversationArchiveFolderRequest"), true),
 				"responses": map[string]any{"201": response(201, "Archive folder created", refSchema("ConversationArchiveFolderCreateResponse"))},
 			},
+		},
+		"/conversation-archive-folders/{folder_id}": map[string]any{
+			"patch": op(
+				"Rename a conversation archive folder",
+				queryParams(param("path", "folder_id", true, strSchema())),
+				jsonBody(refSchema("ConversationArchiveFolderRequest"), true),
+				response(200, "Archive folder renamed", refSchema("EmptyObject")),
+			),
+			"delete": op(
+				"Delete a conversation archive folder",
+				queryParams(
+					param("path", "folder_id", true, strSchema()),
+					param("query", "move_to_folder_id", false, strSchema()),
+				),
+				nil,
+				response(200, "Archive folder deleted", refSchema("ConversationArchiveFolderDeleteResponse")),
+			),
 		},
 		"/conversations:archived": map[string]any{"get": op(
 			"List archived conversations", recoveryListParams(true), nil,

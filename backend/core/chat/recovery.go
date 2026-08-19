@@ -29,6 +29,11 @@ const (
 
 var errConversationInTrash = errors.New("conversation is in trash")
 
+var (
+	errArchiveFolderNotEmpty = errors.New("archive folder is not empty; choose a move target")
+	errArchiveFolderMoveSelf = errors.New("archive folder move target must differ from source")
+)
+
 type conversationArchiveRequest struct {
 	FolderID *string `json:"folder_id"`
 }
@@ -62,6 +67,11 @@ func normalizedArchiveFolderName(raw string) (string, string, error) {
 		return "", "", fmt.Errorf("folder name must be at most %d characters", maxArchiveFolderName)
 	}
 	return name, strings.ToLower(name), nil
+}
+
+func isArchiveFolderNameConflict(err error) bool {
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "unique") || strings.Contains(message, "duplicate")
 }
 
 func resolveArchiveFolderID(db *gorm.DB, userID string, raw *string) (*string, error) {
@@ -486,7 +496,7 @@ func CreateConversationArchiveFolder(w http.ResponseWriter, r *http.Request) {
 		CreatedAt: now, UpdatedAt: now,
 	}
 	if err := store.DB().Create(&folder).Error; err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "unique") || strings.Contains(strings.ToLower(err.Error()), "duplicate") {
+		if isArchiveFolderNameConflict(err) {
 			common.ReplyErr(w, "archive folder name already exists", http.StatusConflict)
 			return
 		}
@@ -497,6 +507,101 @@ func CreateConversationArchiveFolder(w http.ResponseWriter, r *http.Request) {
 		"id": folder.ID, "name": folder.Name, "dialog_count": 0, "task_count": 0, "total_count": 0,
 		"created_at": folder.CreatedAt.UTC().Format(time.RFC3339), "updated_at": folder.UpdatedAt.UTC().Format(time.RFC3339),
 	}})
+}
+
+func UpdateConversationArchiveFolder(w http.ResponseWriter, r *http.Request) {
+	folderID := strings.TrimSpace(common.PathVar(r, "folder_id"))
+	if folderID == "" {
+		common.ReplyErr(w, "invalid archive folder id", http.StatusBadRequest)
+		return
+	}
+	var body archiveFolderRequest
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	name, normalized, err := normalizedArchiveFolderName(body.Name)
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+	result := store.DB().WithContext(r.Context()).Model(&orm.ConversationArchiveFolder{}).
+		Where("id = ? AND user_id = ?", folderID, recoveryUserID(r)).
+		Updates(map[string]any{"name": name, "normalized_name": normalized, "updated_at": time.Now().UTC()})
+	if result.Error != nil {
+		if isArchiveFolderNameConflict(result.Error) {
+			common.ReplyErr(w, "archive folder name already exists", http.StatusConflict)
+			return
+		}
+		common.ReplyErr(w, "update archive folder failed", http.StatusInternalServerError)
+		return
+	}
+	if result.RowsAffected == 0 {
+		common.ReplyErr(w, "archive folder not found", http.StatusNotFound)
+		return
+	}
+	writeConversationJSON(w, http.StatusOK, map[string]any{})
+}
+
+func DeleteConversationArchiveFolder(w http.ResponseWriter, r *http.Request) {
+	folderID := strings.TrimSpace(common.PathVar(r, "folder_id"))
+	if folderID == "" {
+		common.ReplyErr(w, "invalid archive folder id", http.StatusBadRequest)
+		return
+	}
+	moveTarget := strings.TrimSpace(r.URL.Query().Get("move_to_folder_id"))
+	userID := recoveryUserID(r)
+	var movedCount int64
+	err := store.DB().WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
+		var folder orm.ConversationArchiveFolder
+		if err := tx.Where("id = ? AND user_id = ?", folderID, userID).First(&folder).Error; err != nil {
+			return err
+		}
+
+		if err := tx.Model(&orm.Conversation{}).
+			Where("create_user_id = ? AND archive_folder_id = ?", userID, folderID).
+			Count(&movedCount).Error; err != nil {
+			return err
+		}
+		if movedCount > 0 {
+			if moveTarget == "" {
+				return errArchiveFolderNotEmpty
+			}
+			if moveTarget == folderID {
+				return errArchiveFolderMoveSelf
+			}
+			targetID, err := resolveArchiveFolderID(tx, userID, &moveTarget)
+			if err != nil {
+				return err
+			}
+			if err := tx.Model(&orm.Conversation{}).
+				Where("create_user_id = ? AND archive_folder_id = ?", userID, folderID).
+				Updates(map[string]any{"archive_folder_id": targetID, "updated_at": time.Now().UTC()}).Error; err != nil {
+				return err
+			}
+		}
+
+		result := tx.Where("id = ? AND user_id = ?", folderID, userID).Delete(&orm.ConversationArchiveFolder{})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
+	})
+	switch {
+	case errors.Is(err, gorm.ErrRecordNotFound):
+		common.ReplyErr(w, "archive folder not found", http.StatusNotFound)
+	case errors.Is(err, errArchiveFolderNotEmpty):
+		common.ReplyErr(w, errArchiveFolderNotEmpty.Error(), http.StatusConflict)
+	case errors.Is(err, errArchiveFolderMoveSelf):
+		common.ReplyErr(w, errArchiveFolderMoveSelf.Error(), http.StatusBadRequest)
+	case err != nil:
+		common.ReplyErr(w, "delete archive folder failed", http.StatusInternalServerError)
+	default:
+		writeConversationJSON(w, http.StatusOK, map[string]any{"moved_count": movedCount})
+	}
 }
 
 // PurgeExpiredConversationTrash removes every expired item independently so a

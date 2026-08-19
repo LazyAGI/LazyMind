@@ -826,7 +826,9 @@
 .recovery-move-form .ant-select-selector { min-height: 34px; border-color: #d3dfed; border-radius: 8px; box-shadow: none; }
 .recovery-toolbar > .ant-select { width: 100%; }
 .recovery-toolbar > .ant-btn,
+.recovery-folder-toolbar-actions .ant-btn,
 .recovery-actions .ant-btn { white-space: nowrap; box-shadow: none; }
+.recovery-folder-toolbar-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
 .recovery-segment { display: inline-flex; padding: 2px; border: 1px solid #d5dfeb; border-radius: 8px; background: #f3f6fa; }
 .recovery-segment button,
 .recovery-trash-tabs button { border: 0; color: #64748b; background: transparent; font-weight: 650; cursor: pointer; }
@@ -860,10 +862,20 @@
 .recovery-surface > .ant-pagination { display: flex; justify-content: flex-end; margin-top: 14px; }
 .recovery-move-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
 .recovery-move-form .ant-select { width: 100%; }
+.recovery-folder-manager { display: grid; gap: 8px; }
+.recovery-folder-manager-row { display: grid; min-height: 56px; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid #e0e8f2; border-radius: 9px; background: #fff; }
+.recovery-folder-manager-row strong,
+.recovery-folder-manager-row small { display: block; }
+.recovery-folder-manager-row strong { overflow: hidden; color: #273449; text-overflow: ellipsis; white-space: nowrap; }
+.recovery-folder-manager-row small { margin-top: 3px; color: #7b889b; }
+.recovery-folder-delete p { margin: 0; color: #526177; line-height: 1.6; }
+.recovery-folder-delete-target { display: grid; gap: 6px; margin-top: 14px; }
+.recovery-folder-delete-target label { color: #344157; font-size: 13px; font-weight: 650; }
+.recovery-folder-delete-target .ant-select { width: 100%; }
 
 @media (max-width: 1040px) {
   .recovery-toolbar.is-archive { grid-template-columns: auto minmax(180px, 1fr) minmax(140px, 180px); }
-  .recovery-toolbar.is-archive > .ant-btn { grid-column: 3; justify-self: end; }
+  .recovery-toolbar.is-archive > .recovery-folder-toolbar-actions { grid-column: 3; justify-self: end; }
   .recovery-table-head,
   .recovery-row { grid-template-columns: minmax(220px, 1fr) 150px minmax(220px, auto); gap: 10px; }
 }
@@ -875,7 +887,9 @@
   .recovery-toolbar.is-trash-skills,
   .recovery-toolbar.is-trash-conversations,
   .recovery-toolbar.is-trash-workflows { grid-template-columns: 1fr; }
-  .recovery-toolbar > .ant-btn { grid-column: auto; justify-self: start; }
+  .recovery-toolbar > .ant-btn,
+  .recovery-folder-toolbar-actions { grid-column: auto; justify-self: start; }
+  .recovery-folder-toolbar-actions { flex-wrap: wrap; }
   .recovery-segment { justify-self: start; }
   .recovery-table-head { display: none; }
   .recovery-row { grid-template-columns: minmax(0, 1fr) auto; min-height: 64px; padding: 10px 12px; }

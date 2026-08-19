@@ -23,7 +23,6 @@ interface SkillManagementToolbarProps {
   skillView: SkillViewMode | "workflows";
   onSkillViewChange: (view: SkillViewMode | "workflows") => void;
   installedCount: number;
-  trashCount?: number;
   onCreateSkill: (source: SkillCreateSource) => void;
   organizeMode: boolean;
   organizeDisabled: boolean;
@@ -55,7 +54,6 @@ export default function SkillManagementToolbar({
   skillView,
   onSkillViewChange,
   installedCount,
-  trashCount = 0,
   onCreateSkill,
   organizeMode,
   organizeDisabled,
@@ -277,15 +275,6 @@ export default function SkillManagementToolbar({
           onClick={() => onSkillViewChange("market")}
         >
           {t("admin.memorySkillViewMarket")}
-        </button>
-        <button
-          type="button"
-          role="tab"
-          className={`memory-skill-view-tab ${skillView === "trash" ? "is-active" : ""}`}
-          aria-selected={skillView === "trash"}
-          onClick={() => onSkillViewChange("trash")}
-        >
-          {t("admin.memorySkillViewTrashWithCount", { count: trashCount })}
         </button>
         <button
           type="button"

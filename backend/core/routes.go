@@ -560,6 +560,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/conversations/{name}:trail", []string{"qa.read"}, chat.GetConversationTrail)
 	handleAPI(r, "GET", "/conversation-archive-folders", []string{"qa.read"}, chat.ListConversationArchiveFolders)
 	handleAPI(r, "POST", "/conversation-archive-folders", []string{"qa.write"}, chat.CreateConversationArchiveFolder)
+	handleAPI(r, "PATCH", "/conversation-archive-folders/{folder_id}", []string{"qa.write"}, chat.UpdateConversationArchiveFolder)
+	handleAPI(r, "DELETE", "/conversation-archive-folders/{folder_id}", []string{"qa.write"}, chat.DeleteConversationArchiveFolder)
 	handleAPI(r, "GET", "/conversations:archived", []string{"qa.read"}, chat.ListArchivedConversations)
 	handleAPI(r, "GET", "/conversations:trash", []string{"qa.read"}, chat.ListTrashedConversations)
 	handleAPI(r, "DELETE", "/conversations:trash", []string{"qa.write"}, chat.EmptyConversationTrash)

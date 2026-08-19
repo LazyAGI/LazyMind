@@ -390,6 +390,11 @@ func init() {
 	registerAdditionalError("conversation is in trash", http.StatusConflict, 2002115)
 	registerAdditionalError("folder name is required", http.StatusBadRequest, 2002116)
 	registerAdditionalErrorPattern("folder name must be at most %d characters", "folder name is too long", http.StatusBadRequest, 2002117)
+	registerAdditionalError("invalid archive folder id", http.StatusBadRequest, 2002118)
+	registerAdditionalError("update archive folder failed", http.StatusInternalServerError, 2002119)
+	registerAdditionalError("archive folder is not empty; choose a move target", http.StatusConflict, 2002120)
+	registerAdditionalError("archive folder move target must differ from source", http.StatusBadRequest, 2002121)
+	registerAdditionalError("delete archive folder failed", http.StatusInternalServerError, 2002122)
 
 }
 

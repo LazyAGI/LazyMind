@@ -7,6 +7,8 @@ import RecoverySettings from "./RecoverySettings";
 const mocks = vi.hoisted(() => ({
   listArchiveFolders: vi.fn(),
   createArchiveFolder: vi.fn(),
+  updateArchiveFolder: vi.fn(),
+  deleteArchiveFolder: vi.fn(),
   listArchivedConversations: vi.fn(),
   listTrashedConversations: vi.fn(),
   listSkillTrash: vi.fn(),
@@ -37,9 +39,18 @@ vi.mock("react-i18next", () => ({
         "settingsPage.recovery.allFolders": "全部文件夹",
         "settingsPage.recovery.unfiled": "未分类",
         "settingsPage.recovery.newFolder": "新建文件夹",
+        "settingsPage.recovery.manageFolders": "管理文件夹",
         "settingsPage.recovery.folderName": "文件夹名称",
         "settingsPage.recovery.folderPlaceholder": "输入文件夹名称",
         "settingsPage.recovery.create": "创建",
+        "settingsPage.recovery.editFolderNamed": `编辑“${values?.name}”`,
+        "settingsPage.recovery.deleteFolderNamed": `删除“${values?.name}”`,
+        "settingsPage.recovery.deleteFolderTitle": `删除文件夹“${values?.name}”？`,
+        "settingsPage.recovery.deleteNonEmptyFolderDescription": `该文件夹包含 ${values?.count} 项，请选择移动目标后再删除。`,
+        "settingsPage.recovery.deleteMoveTarget": "内容移动到",
+        "settingsPage.recovery.deleteFolder": "删除文件夹",
+        "common.save": "保存",
+        "common.close": "关闭",
         "settingsPage.recovery.name": "名称",
         "settingsPage.recovery.archivedAt": "归档时间",
         "settingsPage.recovery.actions": "操作",
@@ -64,6 +75,8 @@ vi.mock("react-i18next", () => ({
 vi.mock("./recoveryApi", () => ({
   listArchiveFolders: mocks.listArchiveFolders,
   createArchiveFolder: mocks.createArchiveFolder,
+  updateArchiveFolder: mocks.updateArchiveFolder,
+  deleteArchiveFolder: mocks.deleteArchiveFolder,
   listArchivedConversations: mocks.listArchivedConversations,
   listTrashedConversations: mocks.listTrashedConversations,
   listSkillTrash: mocks.listSkillTrash,
@@ -126,6 +139,8 @@ describe("RecoverySettings", () => {
       created_at: "2026-08-18T09:00:00Z",
       updated_at: "2026-08-18T09:00:00Z",
     });
+    mocks.updateArchiveFolder.mockResolvedValue(undefined);
+    mocks.deleteArchiveFolder.mockResolvedValue(1);
   });
 
   it("opens on Archived and renders grouped conversation data", async () => {
@@ -163,5 +178,31 @@ describe("RecoverySettings", () => {
     fireEvent.click(within(dialog).getByRole("button", { name: /创\s*建/ }));
 
     await waitFor(() => expect(mocks.createArchiveFolder).toHaveBeenCalledWith("知识库"));
+  });
+
+  it("renames a custom archive folder from the folder manager", async () => {
+    render(<RecoverySettings headingRef={createRef<HTMLHeadingElement>()} />);
+    fireEvent.click(screen.getByRole("button", { name: "管理文件夹" }));
+    const dialog = await screen.findByRole("dialog", { name: "管理文件夹" });
+
+    expect(within(dialog).queryByText("未分类")).not.toBeInTheDocument();
+    fireEvent.click(await within(dialog).findByRole("button", { name: "编辑“产品设计”" }));
+    const input = within(dialog).getByRole("textbox", { name: "文件夹名称" });
+    fireEvent.change(input, { target: { value: "产品研发" } });
+    fireEvent.click(within(dialog).getByRole("button", { name: /保\s*存/ }));
+
+    await waitFor(() => expect(mocks.updateArchiveFolder).toHaveBeenCalledWith("folder-1", "产品研发"));
+  });
+
+  it("requires a move target when deleting a non-empty archive folder", async () => {
+    render(<RecoverySettings headingRef={createRef<HTMLHeadingElement>()} />);
+    fireEvent.click(screen.getByRole("button", { name: "管理文件夹" }));
+    const dialog = await screen.findByRole("dialog", { name: "管理文件夹" });
+
+    fireEvent.click(await within(dialog).findByRole("button", { name: "删除“产品设计”" }));
+    expect(await within(dialog).findByText("该文件夹包含 1 项，请选择移动目标后再删除。")).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole("button", { name: "删除文件夹" }));
+
+    await waitFor(() => expect(mocks.deleteArchiveFolder).toHaveBeenCalledWith("folder-1", "unfiled"));
   });
 });

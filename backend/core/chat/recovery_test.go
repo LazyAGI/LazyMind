@@ -153,6 +153,178 @@ func TestConversationArchiveFolderValidationAndIsolation(t *testing.T) {
 	}
 }
 
+func TestConversationArchiveFolderRenameAndDeleteLifecycle(t *testing.T) {
+	db := recoveryTestDB(t)
+	seedRecoveryConversation(t, db, "conv-folder-lifecycle", false)
+
+	createFolder := func(name string) orm.ConversationArchiveFolder {
+		t.Helper()
+		rec, req := recoveryRequest(http.MethodPost, "/conversation-archive-folders", map[string]any{"name": name}, nil)
+		CreateConversationArchiveFolder(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("create folder %q status=%d body=%s", name, rec.Code, rec.Body.String())
+		}
+		var folder orm.ConversationArchiveFolder
+		if err := db.Where("user_id = ? AND normalized_name = ?", "u1", strings.ToLower(name)).First(&folder).Error; err != nil {
+			t.Fatalf("load folder %q: %v", name, err)
+		}
+		return folder
+	}
+
+	source := createFolder("Source")
+	target := createFolder("Target")
+
+	renameRec, renameReq := recoveryRequest(
+		http.MethodPatch,
+		"/conversation-archive-folders/"+source.ID,
+		map[string]any{"name": "  Renamed Source  "},
+		map[string]string{"folder_id": source.ID},
+	)
+	UpdateConversationArchiveFolder(renameRec, renameReq)
+	if renameRec.Code != http.StatusOK {
+		t.Fatalf("rename folder status=%d body=%s", renameRec.Code, renameRec.Body.String())
+	}
+	if err := db.First(&source, "id = ?", source.ID).Error; err != nil {
+		t.Fatalf("reload renamed folder: %v", err)
+	}
+	if source.Name != "Renamed Source" || source.NormalizedName != "renamed source" {
+		t.Fatalf("unexpected renamed folder: %#v", source)
+	}
+
+	duplicateRec, duplicateReq := recoveryRequest(
+		http.MethodPatch,
+		"/conversation-archive-folders/"+source.ID,
+		map[string]any{"name": "target"},
+		map[string]string{"folder_id": source.ID},
+	)
+	UpdateConversationArchiveFolder(duplicateRec, duplicateReq)
+	if duplicateRec.Code != http.StatusConflict {
+		t.Fatalf("duplicate rename status=%d body=%s", duplicateRec.Code, duplicateRec.Body.String())
+	}
+
+	archiveRec, archiveReq := recoveryRequest(
+		http.MethodPost,
+		"/conversations/conv-folder-lifecycle:archive",
+		map[string]any{"folder_id": source.ID},
+		map[string]string{"name": "conv-folder-lifecycle:archive"},
+	)
+	ArchiveConversation(archiveRec, archiveReq)
+	if archiveRec.Code != http.StatusOK {
+		t.Fatalf("archive into source status=%d body=%s", archiveRec.Code, archiveRec.Body.String())
+	}
+
+	deleteRec, deleteReq := recoveryRequest(
+		http.MethodDelete,
+		"/conversation-archive-folders/"+source.ID,
+		nil,
+		map[string]string{"folder_id": source.ID},
+	)
+	DeleteConversationArchiveFolder(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusConflict {
+		t.Fatalf("delete non-empty folder without target status=%d body=%s", deleteRec.Code, deleteRec.Body.String())
+	}
+
+	selfRec, selfReq := recoveryRequest(
+		http.MethodDelete,
+		"/conversation-archive-folders/"+source.ID+"?move_to_folder_id="+source.ID,
+		nil,
+		map[string]string{"folder_id": source.ID},
+	)
+	DeleteConversationArchiveFolder(selfRec, selfReq)
+	if selfRec.Code != http.StatusBadRequest {
+		t.Fatalf("delete folder into itself status=%d body=%s", selfRec.Code, selfRec.Body.String())
+	}
+
+	deleteRec, deleteReq = recoveryRequest(
+		http.MethodDelete,
+		"/conversation-archive-folders/"+source.ID+"?move_to_folder_id="+target.ID,
+		nil,
+		map[string]string{"folder_id": source.ID},
+	)
+	DeleteConversationArchiveFolder(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("delete folder with target status=%d body=%s", deleteRec.Code, deleteRec.Body.String())
+	}
+	var sourceCount int64
+	db.Model(&orm.ConversationArchiveFolder{}).Where("id = ?", source.ID).Count(&sourceCount)
+	var conversation orm.Conversation
+	if err := db.First(&conversation, "id = ?", "conv-folder-lifecycle").Error; err != nil {
+		t.Fatalf("reload moved conversation: %v", err)
+	}
+	if sourceCount != 0 || conversation.ArchiveFolderID == nil || *conversation.ArchiveFolderID != target.ID || conversation.ArchivedAt == nil {
+		t.Fatalf("unexpected delete/move result: source_count=%d conversation=%#v", sourceCount, conversation)
+	}
+
+	empty := createFolder("Empty")
+	emptyRec, emptyReq := recoveryRequest(
+		http.MethodDelete,
+		"/conversation-archive-folders/"+empty.ID,
+		nil,
+		map[string]string{"folder_id": empty.ID},
+	)
+	DeleteConversationArchiveFolder(emptyRec, emptyReq)
+	if emptyRec.Code != http.StatusOK {
+		t.Fatalf("delete empty folder status=%d body=%s", emptyRec.Code, emptyRec.Body.String())
+	}
+}
+
+func TestConversationArchiveFolderDeleteToUnfiledAndOwnership(t *testing.T) {
+	db := recoveryTestDB(t)
+	seedRecoveryConversation(t, db, "conv-folder-unfiled", false)
+
+	createRec, createReq := recoveryRequest(http.MethodPost, "/conversation-archive-folders", map[string]any{"name": "Source"}, nil)
+	CreateConversationArchiveFolder(createRec, createReq)
+	var source orm.ConversationArchiveFolder
+	if err := db.Where("user_id = ?", "u1").First(&source).Error; err != nil {
+		t.Fatalf("load source folder: %v", err)
+	}
+
+	archiveRec, archiveReq := recoveryRequest(
+		http.MethodPost,
+		"/conversations/conv-folder-unfiled:archive",
+		map[string]any{"folder_id": source.ID},
+		map[string]string{"name": "conv-folder-unfiled:archive"},
+	)
+	ArchiveConversation(archiveRec, archiveReq)
+
+	otherRec, otherReq := recoveryRequest(http.MethodPost, "/conversation-archive-folders", map[string]any{"name": "Other"}, nil)
+	otherReq.Header.Set("X-User-Id", "u2")
+	CreateConversationArchiveFolder(otherRec, otherReq)
+	var otherFolder orm.ConversationArchiveFolder
+	if err := db.Where("user_id = ?", "u2").First(&otherFolder).Error; err != nil {
+		t.Fatalf("load other user's folder: %v", err)
+	}
+
+	crossUserRec, crossUserReq := recoveryRequest(
+		http.MethodDelete,
+		"/conversation-archive-folders/"+source.ID+"?move_to_folder_id="+otherFolder.ID,
+		nil,
+		map[string]string{"folder_id": source.ID},
+	)
+	DeleteConversationArchiveFolder(crossUserRec, crossUserReq)
+	if crossUserRec.Code != http.StatusNotFound {
+		t.Fatalf("cross-user delete target status=%d body=%s", crossUserRec.Code, crossUserRec.Body.String())
+	}
+
+	deleteRec, deleteReq := recoveryRequest(
+		http.MethodDelete,
+		"/conversation-archive-folders/"+source.ID+"?move_to_folder_id=unfiled",
+		nil,
+		map[string]string{"folder_id": source.ID},
+	)
+	DeleteConversationArchiveFolder(deleteRec, deleteReq)
+	if deleteRec.Code != http.StatusOK {
+		t.Fatalf("delete to unfiled status=%d body=%s", deleteRec.Code, deleteRec.Body.String())
+	}
+	var conversation orm.Conversation
+	if err := db.First(&conversation, "id = ?", "conv-folder-unfiled").Error; err != nil {
+		t.Fatalf("reload unfiled conversation: %v", err)
+	}
+	if conversation.ArchiveFolderID != nil || conversation.ArchivedAt == nil {
+		t.Fatalf("expected archived unfiled conversation, got %#v", conversation)
+	}
+}
+
 func TestConversationTrashRestoreAndPurgeLinksTaskCenterLifecycle(t *testing.T) {
 	db := recoveryTestDB(t)
 	seedRecoveryConversation(t, db, "conv-task", true)

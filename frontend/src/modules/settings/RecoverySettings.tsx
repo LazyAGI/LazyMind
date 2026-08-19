@@ -17,6 +17,7 @@ import {
 import type { MenuProps } from "antd";
 import {
   DeleteOutlined,
+  EditOutlined,
   FolderAddOutlined,
   FolderOutlined,
   InboxOutlined,
@@ -32,6 +33,7 @@ import { useTranslation } from "react-i18next";
 import {
   archiveConversation,
   createArchiveFolder,
+  deleteArchiveFolder,
   emptyConversationTrash,
   emptySkillTrash,
   emptyWorkflowTrash,
@@ -48,6 +50,7 @@ import {
   restoreWorkflow,
   trashConversation,
   unarchiveConversation,
+  updateArchiveFolder,
   type RecoveryFolderFilter,
   type RecoveryKind,
   type RecoverySkillItem,
@@ -104,6 +107,13 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
   const [folderModalOpen, setFolderModalOpen] = useState(false);
   const [folderName, setFolderName] = useState("");
   const [folderSaving, setFolderSaving] = useState(false);
+  const [folderManagerOpen, setFolderManagerOpen] = useState(false);
+  const [editingFolderId, setEditingFolderId] = useState("");
+  const [editingFolderName, setEditingFolderName] = useState("");
+  const [folderUpdatingId, setFolderUpdatingId] = useState("");
+  const [deleteFolder, setDeleteFolder] = useState<ConversationArchiveFolder | null>(null);
+  const [deleteMoveTarget, setDeleteMoveTarget] = useState("unfiled");
+  const [folderDeleting, setFolderDeleting] = useState(false);
   const [moveItem, setMoveItem] = useState<ConversationRecoveryItem | null>(null);
   const [moveFolderId, setMoveFolderId] = useState<string>("unfiled");
 
@@ -241,6 +251,10 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
     { value: "all", label: t("settingsPage.recovery.allFolders") },
     ...folderOptions,
   ], [folderOptions, t]);
+  const deleteTargetOptions = useMemo(
+    () => folderOptions.filter((option) => option.value !== deleteFolder?.id),
+    [deleteFolder?.id, folderOptions],
+  );
 
   const reloadArchive = () => {
     setArchiveRevision((value) => value + 1);
@@ -271,6 +285,76 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
     } finally {
       setFolderSaving(false);
     }
+  };
+
+  const startEditingFolder = (folder: ConversationArchiveFolder) => {
+    setEditingFolderId(folder.id);
+    setEditingFolderName(folder.name);
+  };
+
+  const saveFolderRename = async (folder: ConversationArchiveFolder) => {
+    const name = editingFolderName.trim();
+    if (!name) {
+      message.warning(t("settingsPage.recovery.folderRequired"));
+      return;
+    }
+    if (Array.from(name).length > 30) {
+      message.warning(t("settingsPage.recovery.folderTooLong"));
+      return;
+    }
+    if (name === folder.name) {
+      setEditingFolderId("");
+      return;
+    }
+    setFolderUpdatingId(folder.id);
+    try {
+      await updateArchiveFolder(folder.id, name);
+      setFolders((current) => current.map((item) => item.id === folder.id ? { ...item, name } : item));
+      setEditingFolderId("");
+      setFolderRevision((value) => value + 1);
+      message.success(t("settingsPage.recovery.folderRenamed"));
+    } catch {
+      message.error(t("settingsPage.recovery.folderRenameFailed"));
+    } finally {
+      setFolderUpdatingId("");
+    }
+  };
+
+  const startDeletingFolder = (folder: ConversationArchiveFolder) => {
+    setEditingFolderId("");
+    setDeleteFolder(folder);
+    setDeleteMoveTarget("unfiled");
+  };
+
+  const deleteSelectedFolder = async () => {
+    if (!deleteFolder) return;
+    const folderId = deleteFolder.id;
+    setFolderDeleting(true);
+    try {
+      await deleteArchiveFolder(folderId, deleteFolder.total_count > 0 ? deleteMoveTarget : undefined);
+      setFolders((current) => current.filter((folder) => folder.id !== folderId));
+      setDeleteFolder(null);
+      if (folderFilter === folderId) {
+        setFolderFilter("all");
+        setArchivePage(1);
+      }
+      reloadArchive();
+      message.success(t("settingsPage.recovery.folderDeleted"));
+    } catch {
+      message.error(t("settingsPage.recovery.folderDeleteFailed"));
+    } finally {
+      setFolderDeleting(false);
+    }
+  };
+
+  const closeFolderManager = () => {
+    if (folderDeleting || folderUpdatingId) return;
+    if (deleteFolder) {
+      setDeleteFolder(null);
+      return;
+    }
+    setEditingFolderId("");
+    setFolderManagerOpen(false);
   };
 
   const moveArchivedItem = async () => {
@@ -435,7 +519,10 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
       </div>
       <Input allowClear value={archiveKeyword} onChange={(event: ChangeEvent<HTMLInputElement>) => { setArchiveKeyword(event.target.value); setArchivePage(1); }} prefix={<SearchOutlined />} placeholder={t("settingsPage.recovery.searchArchived")} aria-label={t("settingsPage.recovery.searchArchived")} />
       <Select value={folderFilter} options={folderFilterOptions} loading={foldersLoading} onChange={(value: RecoveryFolderFilter) => { setFolderFilter(value); setArchivePage(1); }} aria-label={t("settingsPage.recovery.folderFilter")} />
-      <Button icon={<FolderAddOutlined />} onClick={() => { setMoveItem(null); setFolderName(""); setFolderModalOpen(true); }}>{t("settingsPage.recovery.newFolder")}</Button>
+      <div className="recovery-folder-toolbar-actions">
+        <Button icon={<FolderOutlined />} aria-label={t("settingsPage.recovery.manageFolders")} onClick={() => { setDeleteFolder(null); setEditingFolderId(""); setFolderManagerOpen(true); }}>{t("settingsPage.recovery.manageFolders")}</Button>
+        <Button icon={<FolderAddOutlined />} aria-label={t("settingsPage.recovery.newFolder")} onClick={() => { setMoveItem(null); setFolderName(""); setFolderModalOpen(true); }}>{t("settingsPage.recovery.newFolder")}</Button>
+      </div>
     </div>
     {folderError ? <Alert type="warning" showIcon message={t("settingsPage.recovery.folderLoadFailed")} action={<Button size="small" onClick={() => setFolderRevision((value) => value + 1)}>{t("common.retry")}</Button>} /> : null}
     {archiveLoading ? <div className="recovery-loading"><Skeleton active paragraph={{ rows: 5 }} /></div> : archiveError ? <Alert className="recovery-load-error" type="error" showIcon message={t("settingsPage.recovery.loadFailed")} action={<Button onClick={() => setArchiveRevision((value) => value + 1)}>{t("common.retry")}</Button>} /> : archiveItems.length === 0 ? <Empty description={archiveKeyword.trim() ? t("settingsPage.recovery.noResults") : t("settingsPage.recovery.archiveEmpty")} /> : <div className="recovery-groups">
@@ -474,6 +561,44 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
     </div>
     <section className="recovery-surface" aria-label={t(view === "archive" ? "settingsPage.recovery.archive" : "settingsPage.recovery.trash")}>{view === "archive" ? archivePanel : trashPanel}</section>
     <Modal title={t("settingsPage.recovery.newFolder")} open={folderModalOpen} confirmLoading={folderSaving} okText={t("settingsPage.recovery.create")} cancelText={t("common.cancel")} onOk={() => void saveFolder()} onCancel={() => setFolderModalOpen(false)} destroyOnHidden><Input autoFocus maxLength={30} showCount value={folderName} onChange={(event: ChangeEvent<HTMLInputElement>) => setFolderName(event.target.value)} onPressEnter={() => void saveFolder()} placeholder={t("settingsPage.recovery.folderPlaceholder")} aria-label={t("settingsPage.recovery.folderName")} /></Modal>
+    <Modal
+      title={deleteFolder ? t("settingsPage.recovery.deleteFolderTitle", { name: deleteFolder.name }) : t("settingsPage.recovery.manageFolders")}
+      open={folderManagerOpen}
+      footer={deleteFolder ? undefined : <Button onClick={closeFolderManager}>{t("common.close")}</Button>}
+      okText={t("settingsPage.recovery.deleteFolder")}
+      okButtonProps={{ danger: true }}
+      cancelText={t("common.cancel")}
+      confirmLoading={folderDeleting}
+      closable={!folderDeleting && !Boolean(folderUpdatingId)}
+      maskClosable={!folderDeleting && !Boolean(folderUpdatingId)}
+      onOk={() => void deleteSelectedFolder()}
+      onCancel={closeFolderManager}
+      destroyOnHidden
+    >
+      {deleteFolder ? <div className="recovery-folder-delete">
+        <p>{t(deleteFolder.total_count > 0 ? "settingsPage.recovery.deleteNonEmptyFolderDescription" : "settingsPage.recovery.deleteEmptyFolderDescription", { count: deleteFolder.total_count })}</p>
+        {deleteFolder.total_count > 0 ? <div className="recovery-folder-delete-target">
+          <label htmlFor="recovery-folder-delete-target">{t("settingsPage.recovery.deleteMoveTarget")}</label>
+          <Select id="recovery-folder-delete-target" value={deleteMoveTarget} options={deleteTargetOptions} onChange={setDeleteMoveTarget} aria-label={t("settingsPage.recovery.deleteMoveTarget")} />
+        </div> : null}
+      </div> : foldersLoading ? <Skeleton active paragraph={{ rows: 3 }} /> : folderError ? <Alert type="warning" showIcon message={t("settingsPage.recovery.folderLoadFailed")} action={<Button size="small" onClick={() => setFolderRevision((value) => value + 1)}>{t("common.retry")}</Button>} /> : folders.length === 0 ? <Empty description={t("settingsPage.recovery.folderManagerEmpty")} /> : <div className="recovery-folder-manager" role="list">
+        {folders.map((folder) => <div className="recovery-folder-manager-row" role="listitem" key={folder.id}>
+          {editingFolderId === folder.id ? <>
+            <Input autoFocus maxLength={30} showCount value={editingFolderName} onChange={(event: ChangeEvent<HTMLInputElement>) => setEditingFolderName(event.target.value)} onPressEnter={() => void saveFolderRename(folder)} aria-label={t("settingsPage.recovery.folderName")} />
+            <Space size={8}>
+              <Button type="primary" loading={folderUpdatingId === folder.id} onClick={() => void saveFolderRename(folder)}>{t("common.save")}</Button>
+              <Button disabled={Boolean(folderUpdatingId)} onClick={() => setEditingFolderId("")}>{t("common.cancel")}</Button>
+            </Space>
+          </> : <>
+            <div><strong>{folder.name}</strong><small>{t("settingsPage.recovery.itemCount", { count: folder.total_count })}</small></div>
+            <Space size={8}>
+              <Tooltip title={t("settingsPage.recovery.editFolderNamed", { name: folder.name })}><Button icon={<EditOutlined />} aria-label={t("settingsPage.recovery.editFolderNamed", { name: folder.name })} disabled={Boolean(folderUpdatingId)} onClick={() => startEditingFolder(folder)} /></Tooltip>
+              <Tooltip title={t("settingsPage.recovery.deleteFolderNamed", { name: folder.name })}><Button danger icon={<DeleteOutlined />} aria-label={t("settingsPage.recovery.deleteFolderNamed", { name: folder.name })} disabled={Boolean(folderUpdatingId)} onClick={() => startDeletingFolder(folder)} /></Tooltip>
+            </Space>
+          </>}
+        </div>)}
+      </div>}
+    </Modal>
     <Modal title={t("settingsPage.recovery.moveNamed", { name: moveItem?.display_name || "" })} open={Boolean(moveItem)} okText={t("settingsPage.recovery.move")} cancelText={t("common.cancel")} confirmLoading={busyKey.startsWith("move:")} onOk={() => void moveArchivedItem()} onCancel={() => setMoveItem(null)} destroyOnHidden>
       <div className="recovery-move-form"><Select value={moveFolderId} options={folderOptions} onChange={setMoveFolderId} aria-label={t("settingsPage.recovery.targetFolder")} /><Button icon={<FolderAddOutlined />} onClick={() => { setFolderName(""); setFolderModalOpen(true); }}>{t("settingsPage.recovery.createInline")}</Button></div>
     </Modal>

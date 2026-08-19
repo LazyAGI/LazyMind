@@ -63,6 +63,21 @@ export async function createArchiveFolder(name: string): Promise<ConversationArc
   return response.data.folder;
 }
 
+export async function updateArchiveFolder(folderId: string, name: string): Promise<void> {
+  await coreApi.apiCoreConversationArchiveFoldersFolderIdPatch({
+    folderId,
+    conversationArchiveFolderRequest: { name },
+  });
+}
+
+export async function deleteArchiveFolder(folderId: string, moveToFolderId?: string): Promise<number> {
+  const response = await coreApi.apiCoreConversationArchiveFoldersFolderIdDelete({
+    folderId,
+    moveToFolderId,
+  });
+  return response.data.moved_count || 0;
+}
+
 const toPage = (data: ConversationRecoveryListResponse): RecoveryPage<ConversationRecoveryItem> => ({
   items: data.items || [],
   total: data.total || 0,

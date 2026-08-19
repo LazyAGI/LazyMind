@@ -602,6 +602,14 @@ components:
             required:
                 - folder
             type: object
+        ConversationArchiveFolderDeleteResponse:
+            properties:
+                moved_count:
+                    format: int64
+                    type: integer
+            required:
+                - moved_count
+            type: object
         ConversationArchiveFolderListResponse:
             properties:
                 folders:
@@ -7757,6 +7765,48 @@ paths:
                                 $ref: '#/components/schemas/ConversationArchiveFolderCreateResponse'
                     description: Archive folder created
             summary: Create a conversation archive folder
+    /api/core/conversation-archive-folders/{folder_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: folder_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: move_to_folder_id
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ConversationArchiveFolderDeleteResponse'
+                    description: Archive folder deleted
+            summary: Delete a conversation archive folder
+        patch:
+            parameters:
+                - in: path
+                  name: folder_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ConversationArchiveFolderRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EmptyObject'
+                    description: Archive folder renamed
+            summary: Rename a conversation archive folder
     /api/core/conversation:export:
         post:
             requestBody:
