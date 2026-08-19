@@ -134,8 +134,8 @@ func TestEnqueueReusesFailedJob(t *testing.T) {
 	if job.ResourceID != "r-new" || job.CreateUserID != "u-new" || job.LockedBy != "" {
 		t.Fatalf("resource/user fields not refreshed: %+v", job)
 	}
-	if !job.CreatedAt.Equal(seed.CreatedAt.Truncate(time.Microsecond)) {
-		t.Fatalf("created_at changed: %v -> %v", seed.CreatedAt.Truncate(time.Microsecond), job.CreatedAt)
+	if !job.CreatedAt.Truncate(time.Microsecond).Equal(seed.CreatedAt.Truncate(time.Microsecond)) {
+		t.Fatalf("created_at changed: %v -> %v", seed.CreatedAt.Truncate(time.Microsecond), job.CreatedAt.Truncate(time.Microsecond))
 	}
 	var payload map[string]string
 	if err := json.Unmarshal(job.PayloadJSON, &payload); err != nil {
