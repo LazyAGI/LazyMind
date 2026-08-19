@@ -232,9 +232,20 @@ func resolveWriterArtifact(value json.RawMessage) (json.RawMessage, bool) {
 
 func writerArtifactIsMarkdown(value json.RawMessage) bool {
 	var artifact struct {
-		Path string `json:"path"`
+		Schema string          `json:"schema"`
+		Data   json.RawMessage `json:"data"`
+		Path   string          `json:"path"`
 	}
-	if json.Unmarshal(value, &artifact) != nil || artifact.Path == "" {
+	if json.Unmarshal(value, &artifact) != nil {
+		return false
+	}
+	if artifact.Schema == "text/markdown" {
+		var markdown string
+		if json.Unmarshal(artifact.Data, &markdown) == nil && strings.TrimSpace(markdown) != "" {
+			return true
+		}
+	}
+	if artifact.Path == "" {
 		return false
 	}
 	path := filepath.Clean(artifact.Path)

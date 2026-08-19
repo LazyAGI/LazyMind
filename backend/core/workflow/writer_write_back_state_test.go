@@ -72,6 +72,21 @@ func TestEnrichWriterWriteBackSlots_MarkdownInitialDelivery(t *testing.T) {
 	}
 }
 
+func TestEnrichWriterWriteBackSlots_InlineMarkdownInitialDelivery(t *testing.T) {
+	db := newTestDB(t)
+	draft := writerRevision("draft", "session", "draft_document", 1, "human", json.RawMessage(
+		`{"schema":"text/markdown","data":"# Ready for Feishu\n"}`,
+	))
+	mustCreateWriterRecord(t, db.DB.Create(&draft).Error)
+
+	slots := []slotDTO{toSlotDTO(&draft)}
+	enrichSlots(context.Background(), db.DB, "session", slots)
+	got := slots[0]
+	if !got.WriteBackReady || !got.WriteBackDirty || got.WriteBackState != writerWriteBackInitialDelivery {
+		t.Fatalf("unexpected inline Markdown delivery state: %+v", got)
+	}
+}
+
 func TestEnrichWriterWriteBackSlots_LocalIRInitialDelivery(t *testing.T) {
 	db := newTestDB(t)
 	root := t.TempDir()

@@ -127,7 +127,7 @@ def test_markdown_draft_blocks_do_not_pass_resolved_media(monkeypatch, tmp_path)
     assert Path(paths[0]).read_text(encoding='utf-8') == '## 第一章\n\n正文。\n'
 
 
-def test_markdown_media_fill_replaces_resolved_and_drops_unresolved():
+def test_markdown_media_fill_uses_persistent_uri_and_drops_missing_assets():
     tools = _load_tools_module()
 
     filled = tools._fill_markdown_media_placeholders(
@@ -154,10 +154,9 @@ def test_markdown_media_fill_replaces_resolved_and_drops_unresolved():
         },
     )
 
-    assert '![Resolved](/data/subagent/assets/generated-1.png)' in filled
-    assert '![Legacy](/data/subagent/assets/generated-1.png)' in filled
-    assert 'Unresolved' not in filled
-    assert 'unmaterialized.png' not in filled
+    assert '![Resolved](https://example.com/generated-1.png)' in filled
+    assert '![Legacy](https://example.com/generated-1.png)' in filled
+    assert '![Unresolved](https://example.com/unmaterialized.png)' in filled
     assert 'media-placeholder://' not in filled
     assert 'media-asset://' not in filled
 

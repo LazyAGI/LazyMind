@@ -57,6 +57,7 @@ import {
   writerMarkdownForEditor,
   writerMarkdownForSave,
 } from './writerMarkdownAnchors';
+import { resolveMarkdownImageUrlAsync } from '@/modules/knowledge/utils/imageUrl';
 import './MarkdownArtifactEditor.scss';
 
 function WriterAnchorEditor(props: JsxEditorProps) {
@@ -780,7 +781,7 @@ export function MarkdownArtifactEditor({
                   Editor: WriterAnchorEditor,
                 }],
               }),
-              imagePlugin(),
+              imagePlugin({ imagePreviewHandler: resolveMarkdownImageUrlAsync }),
               codeBlockPlugin({ defaultCodeBlockLanguage: 'text' }),
               codeMirrorPlugin({ codeBlockLanguages: MARKDOWN_CODE_LANGUAGES }),
               markdownShortcutPlugin(),

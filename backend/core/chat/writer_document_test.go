@@ -93,6 +93,27 @@ func TestWriterDocumentIsUnbound(t *testing.T) {
 	}
 }
 
+func TestWriterDocumentRenderSlotIncludesSource(t *testing.T) {
+	if slot, ok := writerDocumentRenderSlot("source_document"); !ok || slot != "source_document" {
+		t.Fatalf("source_document render slot = %q, %v", slot, ok)
+	}
+	if _, ok := writerDocumentSlot("source_document"); ok {
+		t.Fatal("source_document must remain read-only")
+	}
+}
+
+func TestLoadWriterWriteBackArtifact_InlineMarkdown(t *testing.T) {
+	artifact, err := loadWriterWriteBackArtifact(json.RawMessage(
+		`{"schema":"text/markdown","data":"# Draft\n"}`,
+	))
+	if err != nil {
+		t.Fatalf("load inline Markdown: %v", err)
+	}
+	if artifact.Format != "markdown" || artifact.Markdown != "# Draft\n" || artifact.Title != "Draft" {
+		t.Fatalf("unexpected inline Markdown artifact: %+v", artifact)
+	}
+}
+
 func TestLoadWriterWriteBackBaseline_UsesSourceDocumentForInitialSync(t *testing.T) {
 	db := orm.MigrateTestDB(t, &orm.WorkflowSlotRevision{})
 	source := json.RawMessage(`{"data":{"document_id":"feishu-doc","provider_binding":{"provider":"feishu","document_id":"feishu-doc"}}}`)
