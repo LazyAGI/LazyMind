@@ -1396,11 +1396,7 @@ func handleStreamChat(
 			_ = setChatRuntimeStatus(chatCtx, stateStore, convID, secondaryHistoryID, "generating", "", secondaryRunID, nil)
 			_ = setMultiAnswerInfo(chatCtx, stateStore, convID, historyID, secondaryHistoryID, target.Seq)
 		}
-		go func() {
-			if err := watchChatCancelSignal(chatCtx, stateStore, convID, historyID); err == nil {
-				chatCancel()
-			}
-		}()
+		go cancelChatOnStop(chatCtx, stateStore, convID, historyID, chatCancel)
 	}
 
 	if !dualReply {

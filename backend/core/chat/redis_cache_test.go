@@ -6,6 +6,8 @@ import (
 	"errors"
 	"testing"
 	"time"
+
+	"lazymind/core/state"
 )
 
 // --- Key generation functions ---
@@ -39,28 +41,99 @@ func TestChatStopKey(t *testing.T) {
 
 func TestRetryChatCancelSignalRecoversFromTransientErrors(t *testing.T) {
 	attempts := 0
-	err := retryChatCancelSignal(context.Background(), func(context.Context) error {
+	received, err := retryChatCancelSignal(context.Background(), func(context.Context) (bool, error) {
 		attempts++
 		if attempts < 3 {
-			return errors.New("temporary state backend failure")
+			return false, errors.New("temporary state backend failure")
 		}
-		return nil
-	}, nil, time.Microsecond, 2*time.Microsecond)
-	if err != nil || attempts != 3 {
-		t.Fatalf("err=%v attempts=%d, want nil/3", err, attempts)
+		return true, nil
+	}, nil, time.Microsecond, time.Microsecond, 2*time.Microsecond)
+	if err != nil || !received || attempts != 3 {
+		t.Fatalf("received=%v err=%v attempts=%d, want true/nil/3", received, err, attempts)
 	}
 }
 
 func TestRetryChatCancelSignalStopsBackoffOnContextCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
-	err := retryChatCancelSignal(ctx, func(context.Context) error {
-		return errors.New("temporary state backend failure")
+	received, err := retryChatCancelSignal(ctx, func(context.Context) (bool, error) {
+		return false, errors.New("temporary state backend failure")
 	}, func(error, time.Duration) {
 		cancel()
-	}, time.Hour, time.Hour)
-	if !errors.Is(err, context.Canceled) {
-		t.Fatalf("err=%v, want context canceled", err)
+	}, time.Hour, time.Hour, time.Hour)
+	if received || !errors.Is(err, context.Canceled) {
+		t.Fatalf("received=%v err=%v, want false/context canceled", received, err)
 	}
+}
+
+func TestRetryChatCancelSignalEmptyPollDoesNotCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	attempts := 0
+	received, err := retryChatCancelSignal(ctx, func(context.Context) (bool, error) {
+		attempts++
+		if attempts == 3 {
+			cancel()
+		}
+		return false, nil
+	}, nil, time.Microsecond, time.Microsecond, 2*time.Microsecond)
+	if received || !errors.Is(err, context.Canceled) || attempts != 3 {
+		t.Fatalf("received=%v err=%v attempts=%d, want false/context canceled/3", received, err, attempts)
+	}
+}
+
+func TestClearChatDataRemovesStaleStopSignal(t *testing.T) {
+	ctx := context.Background()
+	stateStore, err := state.NewSQLiteStore(t.TempDir() + "/state.db")
+	if err != nil {
+		t.Fatalf("new sqlite store: %v", err)
+	}
+	defer stateStore.Close()
+
+	if err := setChatCancelSignal(ctx, stateStore, "conv", "history"); err != nil {
+		t.Fatalf("set stop signal: %v", err)
+	}
+	if err := clearChatData(ctx, stateStore, "conv", "history"); err != nil {
+		t.Fatalf("clear chat data: %v", err)
+	}
+	received, err := stateStore.LPop(ctx, chatStopKey("conv", "history"))
+	if err != nil || received {
+		t.Fatalf("stale stop signal received=%v err=%v, want false/nil", received, err)
+	}
+}
+
+func TestCancelChatOnStopOnlyCancelsForReceivedSignal(t *testing.T) {
+	stateStore, err := state.NewSQLiteStore(t.TempDir() + "/state.db")
+	if err != nil {
+		t.Fatalf("new sqlite store: %v", err)
+	}
+	defer stateStore.Close()
+
+	t.Run("watcher context ends without stop", func(t *testing.T) {
+		watchCtx, stopWatcher := context.WithCancel(context.Background())
+		chatCtx, cancelChat := context.WithCancel(context.Background())
+		defer cancelChat()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			cancelChatOnStop(watchCtx, stateStore, "conv", "empty", cancelChat)
+		}()
+		stopWatcher()
+		<-done
+		if chatCtx.Err() != nil {
+			t.Fatalf("chat context error=%v, want nil", chatCtx.Err())
+		}
+	})
+
+	t.Run("received stop cancels chat", func(t *testing.T) {
+		if err := setChatCancelSignal(context.Background(), stateStore, "conv", "signal"); err != nil {
+			t.Fatalf("set stop signal: %v", err)
+		}
+		chatCtx, cancelChat := context.WithCancel(context.Background())
+		defer cancelChat()
+		cancelChatOnStop(context.Background(), stateStore, "conv", "signal", cancelChat)
+		if !errors.Is(chatCtx.Err(), context.Canceled) {
+			t.Fatalf("chat context error=%v, want context canceled", chatCtx.Err())
+		}
+	})
 }
 
 // TestChatMultiKey generates the correct Redis key format.

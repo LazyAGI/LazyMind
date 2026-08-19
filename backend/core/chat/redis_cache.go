@@ -27,6 +27,7 @@ const (
 
 	chatCacheExpireTime  = time.Hour * 2
 	chatStopExpireTime   = 15 * time.Minute
+	chatCancelPollTime   = 500 * time.Millisecond
 	convEventsExpireTime = time.Hour * 24
 	convEventsMaxLen     = int64(1000)
 )
@@ -227,6 +228,7 @@ func clearChatData(ctx context.Context, stateStore state.Store, conversationID, 
 	_ = stateStore.HDel(ctx, key, historyID)
 	_ = stateStore.Del(ctx, chatStreamKey(conversationID, historyID))
 	_ = stateStore.Del(ctx, chatInputKey(conversationID, historyID))
+	_ = stateStore.Del(ctx, chatStopKey(conversationID, historyID))
 	return nil
 }
 
@@ -289,50 +291,71 @@ func setChatCancelSignal(ctx context.Context, stateStore state.Store, conversati
 	return nil
 }
 
-func watchChatCancelSignal(ctx context.Context, stateStore state.Store, conversationID, historyID string) error {
+func watchChatCancelSignal(ctx context.Context, stateStore state.Store, conversationID, historyID string) (bool, error) {
 	key := chatStopKey(conversationID, historyID)
-	return retryChatCancelSignal(ctx, func(waitCtx context.Context) error {
-		return stateStore.BLPop(waitCtx, key, 0)
+	return retryChatCancelSignal(ctx, func(waitCtx context.Context) (bool, error) {
+		return stateStore.LPop(waitCtx, key)
 	}, func(err error, delay time.Duration) {
 		log.Logger.Warn().Err(err).
 			Str("conversation_id", conversationID).
 			Str("history_id", historyID).
 			Dur("retry_in", delay).
 			Msg("chat cancel watcher state read failed; retrying")
-	}, 100*time.Millisecond, 2*time.Second)
+	}, chatCancelPollTime, 100*time.Millisecond, 2*time.Second)
+}
+
+func cancelChatOnStop(ctx context.Context, stateStore state.Store, conversationID, historyID string, cancel context.CancelFunc) {
+	receivedStop, _ := watchChatCancelSignal(ctx, stateStore, conversationID, historyID)
+	if receivedStop {
+		cancel()
+	}
 }
 
 func retryChatCancelSignal(
 	ctx context.Context,
-	wait func(context.Context) error,
+	poll func(context.Context) (bool, error),
 	onRetry func(error, time.Duration),
-	initialDelay, maxDelay time.Duration,
-) error {
-	delay := initialDelay
+	pollInterval, initialRetryDelay, maxRetryDelay time.Duration,
+) (bool, error) {
+	retryDelay := initialRetryDelay
 	for {
-		err := wait(ctx)
+		received, err := poll(ctx)
 		if err == nil {
-			return nil
+			retryDelay = initialRetryDelay
+			if received {
+				return true, nil
+			}
+			if err := waitChatCancelPoll(ctx, pollInterval); err != nil {
+				return false, err
+			}
+			continue
 		}
 		if ctx.Err() != nil {
-			return ctx.Err()
+			return false, ctx.Err()
 		}
 		if onRetry != nil {
-			onRetry(err, delay)
+			onRetry(err, retryDelay)
 		}
-		timer := time.NewTimer(delay)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-timer.C:
+		if err := waitChatCancelPoll(ctx, retryDelay); err != nil {
+			return false, err
 		}
-		if delay < maxDelay {
-			delay *= 2
-			if delay > maxDelay {
-				delay = maxDelay
+		if retryDelay < maxRetryDelay {
+			retryDelay *= 2
+			if retryDelay > maxRetryDelay {
+				retryDelay = maxRetryDelay
 			}
 		}
+	}
+}
+
+func waitChatCancelPoll(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
 	}
 }
 
