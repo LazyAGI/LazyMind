@@ -3,6 +3,7 @@ import {
   BulbOutlined,
   CommentOutlined,
   DownOutlined,
+  LoadingOutlined,
   UpOutlined,
 } from "@ant-design/icons";
 import { ChatConversationsResponseFinishReasonEnum } from "@/api/generated/chatbot-client";
@@ -46,6 +47,7 @@ function ModelRetryStatus({
 
   return (
     <div className="chat-model-retry-status" role="status" aria-live="polite">
+      <LoadingOutlined spin />
       {t("chat.modelRetrying", {
         attempt: retry.retry_index + 1,
         max: retry.max_attempts,

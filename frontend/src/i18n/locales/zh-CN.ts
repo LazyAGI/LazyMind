@@ -1452,7 +1452,11 @@ const zhCN = {
     supportedUploadTypeSummary: "图片、PDF/Office 文档及常见纯文本/代码/配置",
     thinking: "思考中...",
     modelRetrying:
-      "网络连接异常，正在重试（第 {{attempt}}/{{max}} 次）……",
+      "模型服务调用失败，正在重试（第 {{attempt}}/{{max}} 次）……",
+    streamResuming:
+      "与 LazyMind 服务的连接已中断，正在恢复（第 {{attempt}}/{{max}} 次）……",
+    streamResumeFailed: "无法恢复与 LazyMind 服务的连接，当前内容已保留。",
+    streamReconnect: "重新连接",
     cite: "引用",
     clearCitation: "取消引用",
     maxCitationsWarning: "最多只能引用 {{count}} 处内容",

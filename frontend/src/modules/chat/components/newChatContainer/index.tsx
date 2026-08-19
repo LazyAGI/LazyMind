@@ -25,6 +25,7 @@ import { ChatSourcePanel } from "../AssistantMessage";
 import ChatMessageContent from "./components/ChatMessageContent";
 import ScrollToBottomButton from "./components/ScrollToBottomButton";
 import ConversationTrail from "./components/ConversationTrail";
+import StreamRecoveryBanner from "./components/StreamRecoveryBanner";
 import { useChatConversation } from "./hooks/useChatConversation";
 import { useCiteMessagesInput } from "./hooks/useCiteMessagesInput";
 import { useThinkingCollapse } from "./hooks/useThinkingCollapse";
@@ -367,6 +368,11 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
                 onClick={conversation.scroll.handleToBottom}
               />
             )}
+
+            <StreamRecoveryBanner
+              recovery={conversation.streamRecovery}
+              onReconnect={conversation.retryStreamRecovery}
+            />
 
             <ChatInput
               value={conversation.content}

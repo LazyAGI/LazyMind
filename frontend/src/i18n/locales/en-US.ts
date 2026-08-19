@@ -1497,7 +1497,12 @@ const enUS = {
     supportedUploadTypeSummary: "images, PDF/Office documents, and common plain-text/code/config files",
     thinking: "Thinking...",
     modelRetrying:
-      "Network connection interrupted, retrying (attempt {{attempt}}/{{max}})…",
+      "The model service call failed. Retrying (attempt {{attempt}}/{{max}})…",
+    streamResuming:
+      "The connection to the LazyMind service was interrupted. Reconnecting (attempt {{attempt}}/{{max}})…",
+    streamResumeFailed:
+      "Unable to reconnect to the LazyMind service. Current content has been preserved.",
+    streamReconnect: "Reconnect",
     cite: "Cite",
     clearCitation: "Remove citation",
     maxCitationsWarning: "You can cite up to {{count}} selections",
