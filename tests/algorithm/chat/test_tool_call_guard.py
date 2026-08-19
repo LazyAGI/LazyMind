@@ -8,6 +8,14 @@ def _call(name, arguments):
 
 
 def _failure(category, tool='search'):
+    actions = {
+        'UNKNOWN_TOOL': 'choose_tool',
+        'INVALID_ARGS': 'fix_arguments',
+        'TRANSIENT_ERROR': 'retry_later',
+        'PERMISSION_ERROR': 'request_authorization',
+        'DOMAIN_FAILURE': 'change_plan',
+        'POLICY_ERROR': 'change_plan',
+    }
     return {
         'ok': False,
         'value': None,
@@ -16,8 +24,7 @@ def _failure(category, tool='search'):
             'code': f'{category}_CODE',
             'tool': tool,
             'message': 'tool failed',
-            'retryable': True,
-            'recovery_attempts_remaining': 1,
+            'recovery_action': actions[category],
             'details': {},
         },
     }
@@ -26,12 +33,14 @@ def _failure(category, tool='search'):
 class _RecordingToolManager:
     def __init__(self, result_factory=None):
         self.calls = []
+        self.allowed_tool_names = []
         self.result_factory = result_factory or (
             lambda call: {'ok': True, 'value': call['function']['arguments']}
         )
 
-    def __call__(self, calls, verbose=False):
+    def __call__(self, calls, verbose=False, allowed_tool_names=None):
         self.calls.extend(calls)
+        self.allowed_tool_names.append(allowed_tool_names)
         return [self.result_factory(call) for call in calls]
 
 
@@ -59,6 +68,16 @@ def test_exact_duplicate_tool_calls_in_one_batch_are_merged():
     assert len(manager.calls) == 1
 
 
+def test_allowed_tool_names_are_forwarded_to_pending_calls():
+    manager = _RecordingToolManager()
+    guard = ToolCallGuard(manager)
+    allowed = {'url_fetch'}
+
+    guard([_call('url_fetch', {'url': 'https://example.com'})], allowed_tool_names=allowed)
+
+    assert manager.allowed_tool_names == [allowed]
+
+
 def test_repeated_exact_failure_is_blocked_without_reexecution():
     manager = _RecordingToolManager(
         lambda _: {'ok': False, 'value': None, 'msg': 'network error'},
@@ -71,7 +90,7 @@ def test_repeated_exact_failure_is_blocked_without_reexecution():
     assert len(manager.calls) == 1
     assert blocked[0]['ok'] is False
     assert '[Repeated Tool Failure]' in blocked[0]['msg']
-    assert blocked[0]['error']['category'] == 'DOMAIN_FAILURE'
+    assert blocked[0]['error']['category'] == 'POLICY_ERROR'
     assert blocked[0]['error']['code'] == 'REPEATED_TOOL_FAILURE'
 
 
@@ -87,6 +106,8 @@ def test_different_parameter_guesses_are_blocked_after_consecutive_failures():
 
     assert len(manager.calls) == 2
     assert '[Repeated Tool Failure]' in blocked[0]['msg']
+    assert blocked[0]['error']['category'] == 'POLICY_ERROR'
+    assert blocked[0]['error']['code'] == 'REPEATED_TOOL_FAILURE'
 
 
 def test_success_resets_consecutive_failure_count():
@@ -119,7 +140,7 @@ def test_transient_failure_can_be_retried_by_agent_but_is_not_auto_retried():
     assert len(manager.calls) == 2
 
 
-def test_invalid_args_and_unknown_tool_each_allow_one_recovery_attempt():
+def test_guard_preserves_agent_recovery_action():
     cases = (
         ('INVALID_ARGS', _call('search', {'limit': 'many'}), _call('search', {'limit': []})),
         ('UNKNOWN_TOOL', _call('seach', {}), _call('serch', {})),
@@ -131,8 +152,8 @@ def test_invalid_args_and_unknown_tool_each_allow_one_recovery_attempt():
         first = guard([first_call])[0]
         second = guard([second_call])[0]
 
-        assert first['error']['recovery_attempts_remaining'] == 1
-        assert second['error']['recovery_attempts_remaining'] == 0
+        assert first['error']['recovery_action'] == _failure(category)['error']['recovery_action']
+        assert second['error']['recovery_action'] == _failure(category)['error']['recovery_action']
 
 
 def test_unconfigured_stateful_tool_is_not_deduplicated():

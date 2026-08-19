@@ -10,6 +10,7 @@ from typing import Any, Dict, List, Optional
 import lazyllm
 from lazyllm import AutoModel
 from lazyllm.components.formatter import decode_query_with_filepaths
+from lazyllm.tools.agent import ToolDomainError, ToolInvalidArgumentsError
 
 from lazymind.chat.engine.tools.infra.image_generation_support import (
     _build_image_payload,
@@ -126,14 +127,14 @@ def run_video_model(
 ) -> Dict[str, Any]:
     text = str(prompt or '').strip()
     if not text:
-        raise ValueError('prompt is required')
+        raise ToolInvalidArgumentsError('prompt is required')
 
     res = str(resolution or _DEFAULT_VIDEO_RESOLUTION).strip() or _DEFAULT_VIDEO_RESOLUTION
     dur = int(duration or _DEFAULT_VIDEO_DURATION)
     # Minimum duration varies by model (e.g. Seedance 1.0: 2s, Seedance 2.0: 4s).
     # Use 2 as a shared lower bound; providers may reject unsupported values themselves.
     if dur < 2:
-        raise ValueError('duration must be at least 2')
+        raise ToolInvalidArgumentsError('duration must be at least 2')
     aspect = str(ratio or _DEFAULT_VIDEO_RATIO).strip() or _DEFAULT_VIDEO_RATIO
 
     call_kwargs: Dict[str, Any] = {
@@ -150,13 +151,16 @@ def run_video_model(
         raw = model(text, stream_output=False, **call_kwargs)
         temp_paths = _parse_generated_files(raw)
         if not temp_paths:
-            raise ValueError('model returned no generated video files')
+            raise ToolDomainError(
+                'Model returned no generated video files.',
+                code='EMPTY_TOOL_RESULT',
+                details={'resource_type': 'video'},
+            )
         paths = [_relocate_generated_video_to_upload(path) for path in temp_paths]
         _register_generated_image_paths(paths)
         videos = [_build_video_payload(path, label=basename_from_path(path)) for path in paths]
         primary = videos[0]
         return {
-            'success': True,
             'prompt': text,
             'resolution': res,
             'duration': dur,
@@ -189,16 +193,24 @@ def run_video_to_gif(
 ) -> Dict[str, Any]:
     src = Path(str(video_path or '').strip())
     if not src.is_file():
-        raise ValueError(f'video file not found: {video_path}')
+        raise ToolDomainError(
+            f'Video file not found: {video_path}',
+            code='RESOURCE_NOT_FOUND',
+            details={'resource_type': 'video'},
+        )
     if src.suffix.lower() not in _VIDEO_SUFFIXES:
-        raise ValueError(f'unsupported video format: {src.suffix}')
+        raise ToolDomainError(
+            f'Unsupported video format: {src.suffix}',
+            code='UNSUPPORTED_CONTENT_TYPE',
+            details={'resource_type': 'video'},
+        )
 
     out_fps = int(fps or _DEFAULT_GIF_FPS)
     out_width = int(width or _DEFAULT_GIF_WIDTH)
     if out_fps < 1:
-        raise ValueError('fps must be at least 1')
+        raise ToolInvalidArgumentsError('fps must be at least 1')
     if out_width < 16:
-        raise ValueError('width must be at least 16')
+        raise ToolInvalidArgumentsError('width must be at least 16')
 
     dest_dir = Path(_upload_root()).resolve() / _UPLOAD_SUBDIR
     dest_dir.mkdir(parents=True, exist_ok=True)
@@ -207,7 +219,11 @@ def run_video_to_gif(
 
     ffmpeg_bin, _ffprobe_bin = resolve_ffmpeg_binaries()
     if not ffmpeg_bin:
-        raise RuntimeError('ffmpeg not found')
+        raise ToolDomainError(
+            'FFmpeg was not found.',
+            code='DEPENDENCY_MISSING',
+            details={'required_capability': 'ffmpeg'},
+        )
 
     # Two-pass palette conversion: better colors and clearer frame diffs than single-pass gif.
     # Put -ss/-t before -i so they are input options (required for paletteuse's second -i).
@@ -226,7 +242,11 @@ def run_video_to_gif(
                 capture_output=True, text=True, timeout=300)
             if gen.returncode != 0 or not palette.is_file():
                 err = (gen.stderr or gen.stdout or '').strip() or f'exit={gen.returncode}'
-                raise RuntimeError(f'ffmpeg palettegen failed: {err}')
+                raise ToolDomainError(
+                    f'FFmpeg palette generation failed: {err}',
+                    code='MEDIA_CONVERSION_FAILED',
+                    details={'dependency': 'ffmpeg'},
+                )
 
             use = subprocess.run(
                 [*input_opts, '-i', str(palette),
@@ -235,7 +255,11 @@ def run_video_to_gif(
                 capture_output=True, text=True, timeout=300)
             if use.returncode != 0 or not dest.is_file():
                 err = (use.stderr or use.stdout or '').strip() or f'exit={use.returncode}'
-                raise RuntimeError(f'ffmpeg paletteuse failed: {err}')
+                raise ToolDomainError(
+                    f'FFmpeg GIF conversion failed: {err}',
+                    code='MEDIA_CONVERSION_FAILED',
+                    details={'dependency': 'ffmpeg'},
+                )
         finally:
             if palette.exists():
                 palette.unlink(missing_ok=True)
@@ -244,7 +268,6 @@ def run_video_to_gif(
         _register_generated_image_paths([local_path])
         payload = _build_image_payload(local_path, label=basename_from_path(local_path) or 'converted gif')
         return {
-            'success': True,
             'source': str(src),
             'fps': out_fps,
             'width': out_width,

@@ -822,10 +822,6 @@ _TOOL_NOT_AVAILABLE_RE = re.compile(
     r'Tool \[[^\]]+\] is not available\. Please choose from the available tools\.',
     re.IGNORECASE,
 )
-_TOOL_EXECUTION_ERROR_RE = re.compile(
-    r'^\s*(?:\[Tool Error\]|Tool \[[^\]]+\] (?:arguments format|parameters) error\b)',
-    re.IGNORECASE,
-)
 
 
 def _tool_name_suffixes(tool_name: str) -> list[str]:
@@ -1045,16 +1041,15 @@ def _friendly_preview_text(value: Any) -> str:
 def _representative_tool_result(tool_name: str, result: Any) -> Any:
     render_name, _ = _render_tool_context(tool_name)
     if isinstance(result, dict):
-        payload = result.get('result') if isinstance(result.get('result'), dict) else result
         key = _resolve_tool_key(render_name, _REPRESENTATIVE_TOOL_RESULTS)
-        if key and payload.get(key) is not None:
-            return payload.get(key)
+        if key and result.get(key) is not None:
+            return result.get(key)
         for fallback_key in _FALLBACK_REPRESENTATIVE_RESULT_KEYS:
-            if payload.get(fallback_key) is not None:
-                return payload.get(fallback_key)
-        if payload:
-            first_key = next(iter(payload))
-            return payload.get(first_key)
+            if result.get(fallback_key) is not None:
+                return result.get(fallback_key)
+        if result:
+            first_key = next(iter(result))
+            return result.get(first_key)
         return ''
     if isinstance(result, list):
         return result
@@ -1080,35 +1075,25 @@ def _truncate_tool_result_preview(value: Any) -> str:
 
 def _tool_result_status(result: Any) -> str:
     if isinstance(result, dict):
-        success = result.get('success')
-        if success is False:
+        if result.get('ok') is False and isinstance(result.get('error'), dict):
             return 'failed'
-        payload = result.get('result') if isinstance(result.get('result'), dict) else result
-        status = str(payload.get('status') or '').strip().lower()
+        status = str(result.get('status') or '').strip().lower()
         if status == 'needs_approval':
             return 'needs_approval'
-        if status in ('error', 'missing', 'failed', 'fail'):
-            return 'failed'
     elif isinstance(result, str):
         if _TOOL_NOT_AVAILABLE_RE.search(result):
             return 'inactive'
-        if _TOOL_EXECUTION_ERROR_RE.search(result):
-            return 'failed'
     return 'ok'
 
 
 def _tool_result_failure_detail(result: Any) -> str:
-    if isinstance(result, dict):
+    if isinstance(result, dict) and result.get('ok') is False:
         error = result.get('error')
         if isinstance(error, dict):
-            for key in ('reason', 'detail', 'type'):
+            for key in ('message', 'code'):
                 value = error.get(key)
                 if value:
                     return _truncate_tool_result_preview(value)
-        for key in ('reason', 'error', 'message', 'path', 'status'):
-            value = result.get(key)
-            if value:
-                return _truncate_tool_result_preview(value)
     return _truncate_tool_result_preview(result)
 
 
@@ -1214,15 +1199,8 @@ def _tool_result_preview_display_value(tool_name: str, result: Any, value: str =
 
 
 def _tool_result_mapping(value: Any) -> dict[str, Any] | None:
-    """Normalize mapping, nested-result, and JSON-string tool results."""
+    """Normalize mapping and JSON-string tool results."""
     if isinstance(value, dict):
-        nested = value.get('result')
-        if isinstance(nested, dict):
-            return nested
-        if isinstance(nested, str):
-            parsed = _tool_result_mapping(nested)
-            if parsed is not None:
-                return parsed
         return value
     if isinstance(value, str):
         try:
@@ -1269,8 +1247,7 @@ def _tool_result_preview(tool_name: str, result: Any, value: str = '', language:
             ),
             result,
         )
-    payload = result.get('result') if isinstance(result, dict) and isinstance(result.get('result'), dict) else result
-    if isinstance(payload, dict) and payload.get('total') == 0 and _tool_name_starts(tool_name, 'kb_'):
+    if isinstance(result, dict) and result.get('total') == 0 and _tool_name_starts(tool_name, 'kb_'):
         msg = _resolve_tool_key(tool_name, _KB_EMPTY_RESULT_MESSAGES)
         if msg:
             return _ensure_trailing_newline(msg.get(language) or msg.get('en', ''))

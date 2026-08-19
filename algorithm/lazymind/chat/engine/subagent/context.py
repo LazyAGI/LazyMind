@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import lazyllm
+from lazyllm.tools.agent import ToolDomainError
 
 # Key under which the SubAgent execution context is stored in lazyllm.globals.
 _CTX_KEY = 'subagent_ctx'
@@ -243,5 +244,9 @@ def get_context() -> Optional[SubAgentContext]:
 def require_context() -> SubAgentContext:
     ctx = get_context()
     if ctx is None:
-        raise RuntimeError('SubAgent context is not initialized for this session.')
+        raise ToolDomainError(
+            'SubAgent context is not initialized for this session.',
+            code='PRECONDITION_FAILED',
+            details={'required_capability': 'subagent_context'},
+        )
     return ctx

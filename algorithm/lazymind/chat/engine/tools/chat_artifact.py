@@ -9,6 +9,11 @@ import uuid
 from typing import Any, Dict, Literal, Optional
 
 import lazyllm
+from lazyllm.tools.agent import (
+    ToolDomainError,
+    ToolInvalidArgumentsError,
+    ToolPermissionError,
+)
 from lazyllm.tools.agent.base import _write_agent_data
 from lazyllm.tools.agent.file_tool import (
     list_dir as _list_dir,
@@ -17,8 +22,6 @@ from lazyllm.tools.agent.file_tool import (
 )
 
 from lazymind.config import config as _cfg
-from lazymind.chat.engine.tools.infra import tool_success
-
 _MAX_ARTIFACT_BYTES = 2 * 1024 * 1024
 _CHAT_FILE_DIRECTORY = 'chat-artifacts'
 
@@ -27,9 +30,11 @@ def _safe_filename(filename: str, content_type: str) -> str:
     name = str(filename or '').strip()
     if (not name or name in {'.', '..'} or '/' in name or '\\' in name
             or os.path.basename(name) != name):
-        raise ValueError('filename must be a plain file name without a directory path')
+        raise ToolInvalidArgumentsError(
+            'filename must be a plain file name without a directory path'
+        )
     if len(name) > 255 or any(unicodedata.category(char) == 'Cc' for char in name):
-        raise ValueError('filename is invalid or too long')
+        raise ToolInvalidArgumentsError('filename is invalid or too long')
     if content_type in {'text', 'json'} and '.' not in name:
         name += '.json' if content_type == 'json' else '.txt'
     return name
@@ -38,7 +43,7 @@ def _safe_filename(filename: str, content_type: str) -> str:
 def _normalize_caption(caption: Optional[str]) -> Optional[str]:
     normalized = str(caption).strip() if caption else None
     if normalized and len(normalized) > 2000:
-        raise ValueError('caption exceeds the 2000 character limit')
+        raise ToolInvalidArgumentsError('caption exceeds the 2000 character limit')
     return normalized
 
 
@@ -47,7 +52,11 @@ def _current_artifact_scope() -> tuple[str, str]:
     user_id = str(config.get('user_id') or '0').strip()
     conversation_id = str(config.get('conversation_id') or '').strip()
     if not conversation_id:
-        raise RuntimeError('conversation_id is required to publish a chat file')
+        raise ToolDomainError(
+            'conversation_id is required to publish a chat file',
+            code='PRECONDITION_FAILED',
+            details={'required_capability': 'conversation_context'},
+        )
     return user_id, conversation_id
 
 
@@ -112,7 +121,7 @@ def _resolve_workspace_path(path: str, user_id: str, conversation_id: str) -> tu
         # different drive letters. That is still an outside-workspace path.
         inside_workspace = False
     if not inside_workspace:
-        raise ValueError('path must stay inside the current main-Agent workspace')
+        raise ToolPermissionError('path must stay inside the current main-Agent workspace')
     return workspace, resolved
 
 
@@ -123,10 +132,14 @@ def _file_tool_root(workspace: str) -> Optional[str]:
 def _resolve_source_file(path: str, user_id: str, conversation_id: str) -> str:
     raw_path = str(path or '').strip()
     if not raw_path:
-        raise ValueError('path is required')
+        raise ToolInvalidArgumentsError('path is required')
     _, source = _resolve_workspace_path(raw_path, user_id, conversation_id)
     if not os.path.isfile(source):
-        raise ValueError('path must point to an existing regular file')
+        raise ToolDomainError(
+            'path must point to an existing regular file',
+            code='RESOURCE_NOT_FOUND',
+            details={'resource_type': 'file'},
+        )
     return source
 
 
@@ -152,7 +165,7 @@ def save_chat_artifact(
     """
     normalized_type = str(content_type or 'text').strip().lower()
     if normalized_type not in {'text', 'json', 'file'}:
-        raise ValueError("content_type must be 'text', 'json', or 'file'")
+        raise ToolInvalidArgumentsError("content_type must be 'text', 'json', or 'file'")
     safe_name = _safe_filename(filename, normalized_type)
     normalized_caption = _normalize_caption(caption)
     if normalized_type == 'file':
@@ -168,7 +181,7 @@ def save_chat_artifact(
         value, ensure_ascii=False, separators=(',', ':'),
     ).encode('utf-8')
     if len(encoded_value) > _MAX_ARTIFACT_BYTES:
-        raise ValueError('artifact content exceeds the 2 MiB limit')
+        raise ToolInvalidArgumentsError('artifact content exceeds the 2 MiB limit')
 
     artifact_id = str(uuid.uuid4())
     _write_agent_data(
@@ -179,12 +192,12 @@ def save_chat_artifact(
         value=value,
         caption=normalized_caption,
     )
-    return tool_success('save_chat_artifact', {
+    return {
         'artifact_id': artifact_id,
         'filename': safe_name,
         'content_type': normalized_type,
         'message': f"Saved downloadable artifact '{safe_name}'.",
-    })
+    }
 
 
 def save_chat_file(
@@ -231,13 +244,13 @@ def save_chat_file(
             shutil.rmtree(destination_dir, ignore_errors=True)
         raise
 
-    return tool_success('save_chat_artifact', {
+    return {
         'artifact_id': artifact_id,
         'filename': filename,
         'content_type': 'file',
         'size': size,
         'message': f"Saved downloadable artifact '{filename}'.",
-    })
+    }
 
 
 def write_file(
@@ -258,6 +271,8 @@ def write_file(
         create_parents: Create parent directories when needed.
         allow_unsafe: Allow overwriting an existing file. Append mode does not require it.
     """
+    if mode not in {'overwrite', 'append'}:
+        raise ToolInvalidArgumentsError('mode must be "overwrite" or "append".')
     user_id, conversation_id = _current_artifact_scope()
     workspace, target = _resolve_workspace_path(path, user_id, conversation_id)
     return _write_file(

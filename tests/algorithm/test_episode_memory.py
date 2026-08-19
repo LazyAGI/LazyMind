@@ -369,7 +369,7 @@ def test_memory_review_episode_search_is_tenant_scoped_and_capped(monkeypatch):
     lazyllm.globals['agentic_config'] = {
         'user_id': 'user-1',
         'memory_source_kind': 'memory_review',
-        'memory_tool_results': [],
+        'memory_operation_ledger': [],
     }
     monkeypatch.setattr(
         memory_tool_module,
@@ -381,10 +381,9 @@ def test_memory_review_episode_search_is_tenant_scoped_and_capped(monkeypatch):
         '健身记录 训练内容 减脂追踪',
     )
 
-    assert result['success'] is True
-    assert result['result']['candidate_count'] == 20
-    assert len(result['result']['items']) == 20
-    assert result['result']['items'][0] == {
+    assert result['candidate_count'] == 20
+    assert len(result['items']) == 20
+    assert result['items'][0] == {
         'id': 'ep_0',
         'summary': 'episode 0',
         'episode_type': 'decision',
@@ -392,10 +391,10 @@ def test_memory_review_episode_search_is_tenant_scoped_and_capped(monkeypatch):
         'conversation_id': 'conv-0',
         'score': 1.0,
     }
-    assert lazyllm.globals['agentic_config']['memory_tool_results'] == [{
-        'tool': 'episode_search',
-        'success': True,
-        'mutation': False,
+    assert lazyllm.globals['agentic_config']['memory_operation_ledger'] == [{
+        'operation': 'episode_search',
+        'status': 'succeeded',
+        'mutation': 'none',
         'result': {'candidate_count': 20},
         'retryable': False,
     }]
@@ -423,7 +422,7 @@ def test_memory_review_episode_delete_is_idempotent_and_recorded(
     lazyllm.globals['agentic_config'] = {
         'user_id': 'user-1',
         'memory_source_kind': 'memory_review',
-        'memory_tool_results': [],
+        'memory_operation_ledger': [],
     }
     monkeypatch.setattr(
         memory_tool_module,
@@ -433,20 +432,19 @@ def test_memory_review_episode_delete_is_idempotent_and_recorded(
 
     result = MemoryReviewEpisodeTools().episode_delete('ep_duplicate')
 
-    assert result['success'] is True
-    assert result['result'] == {
+    assert result == {
         'status': status,
         'id': 'ep_duplicate',
     }
     assert calls == [('user-1', 'ep_duplicate')]
-    assert lazyllm.globals['agentic_config']['memory_tool_results'] == [{
-        'tool': 'episode_delete',
-        'success': True,
-        'mutation': mutation,
+    assert lazyllm.globals['agentic_config']['memory_operation_ledger'] == [{
+        'operation': 'episode_delete',
+        'status': 'succeeded',
+        'mutation': 'applied' if mutation else 'none',
+        'retry_fingerprint': 'episode_delete:ep_duplicate',
         'result': {
             'status': status,
             'id': 'ep_duplicate',
-            'retry_fingerprint': 'episode_delete:ep_duplicate',
         },
         'retryable': False,
     }]
@@ -459,7 +457,7 @@ def _episode_runtime_config(*, source_kind: str = 'chat_explicit') -> dict[str, 
         'conversation_id': 'conv-1',
         'episode_occurred_at_ms': 1_700_000_000_000,
         'episode_source_kind': source_kind,
-        'memory_tool_results': [],
+        'memory_operation_ledger': [],
     }
 
 
@@ -482,20 +480,16 @@ def test_episode_create_uses_runtime_context_and_keeps_fingerprint_internal(monk
     result = MemoryTools().episode_create('用户明确要求保存此事件', 'event')
 
     assert result == {
-        'success': True,
-        'tool': 'episode_create',
-        'result': {
-            'status': 'created',
-            'id': next(iter(transport.rows)),
-        },
-        'retryable': False,
+        'status': 'created',
+        'id': next(iter(transport.rows)),
     }
     row = next(iter(transport.rows.values()))
     assert row['user_id'] == 'user-1'
     assert row['conversation_id'] == 'conv-1'
     assert row['occurred_at_ms'] == 1_700_000_000_000
     assert row['source_kind'] == 'chat_explicit'
-    ledger_result = config['memory_tool_results'][0]['result']
+    ledger = config['memory_operation_ledger'][0]
+    ledger_result = ledger['result']
     assert ledger_result['status'] == 'created'
-    assert ledger_result['retry_fingerprint'].startswith('episode_retry_')
-    assert 'retry_fingerprint' not in result['result']
+    assert ledger['retry_fingerprint'].startswith('episode_retry_')
+    assert 'retry_fingerprint' not in result

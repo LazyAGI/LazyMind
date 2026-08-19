@@ -1,6 +1,7 @@
 from lazymind.chat.service.component import AgentEventFrameTranslator
 from lazymind.chat.service.component.tool_rendering import (
     _tool_call_frame_text,
+    _tool_result_status,
     _tool_result_frame_text,
 )
 from lazymind.chat.service.utils.citations import (
@@ -8,6 +9,10 @@ from lazymind.chat.service.utils.citations import (
     annotate_citations,
     register_external_search_result,
 )
+
+
+def test_business_failed_status_is_not_a_tool_execution_failure():
+    assert _tool_result_status({'status': 'failed', 'message': 'Task did not finish.'}) == 'ok'
 
 
 def test_translator_rewrites_citations_registered_by_tools():
@@ -30,12 +35,8 @@ def test_translator_rewrites_citations_registered_by_tools():
             'id': 'call-1',
             'name': 'kb_search',
             'result': {
-                'success': True,
-                'tool': 'kb_search',
-                'result': {
-                    'total': 1,
-                    'items': [item],
-                },
+                'total': 1,
+                'items': [item],
             },
         }],
     })
@@ -298,7 +299,17 @@ def test_skill_reference_rendering_preserves_explicit_tool_failure():
     result_text = _tool_result_frame_text({
         'id': 'call-reference',
         'name': 'read_reference',
-        'result': '[Tool Error] FileNotFoundError: reference.md',
+        'result': {
+            'ok': False,
+            'error': {
+                'category': 'DOMAIN_FAILURE',
+                'code': 'RESOURCE_NOT_FOUND',
+                'tool': 'read_reference',
+                'message': 'reference.md not found',
+                'recovery_action': 'change_plan',
+                'details': {'resource_type': 'skill_reference'},
+            },
+        },
     }, language='zh', preview_value='reference.md')
 
     assert '未能读取 **reference.md** 技能参考资料。' in result_text
@@ -323,9 +334,15 @@ def test_create_skill_rendering_uses_single_segment_name_and_preserves_failure()
         'id': 'call-create-skill',
         'name': 'SkillManagementToolkit_create_skill',
         'result': {
-            'success': False,
-            'tool': 'create_skill',
-            'error': "Skill name 'internal2/skill' is invalid.",
+            'ok': False,
+            'error': {
+                'category': 'INVALID_ARGS',
+                'code': 'INVALID_TOOL_ARGUMENTS',
+                'tool': 'SkillManagementToolkit_create_skill',
+                'message': "Skill name 'internal2/skill' is invalid.",
+                'recovery_action': 'fix_arguments',
+                'details': {},
+            },
         },
     }, language='zh', preview_value='internal2/skill')
 

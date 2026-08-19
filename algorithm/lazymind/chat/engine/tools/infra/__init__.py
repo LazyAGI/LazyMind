@@ -23,9 +23,6 @@ _MODULE_EXPORTS = {
     '.vocab_manager': ('VocabManager',),
     '.vocab_planning': ('ActionPlanningModule', 'ChatHistoryRecord', 'SynonymCandidate', 'VocabEvolutionRequest'),
     '.vocab_registry': ('clear_vocab_registry', 'get_vocab_manager'),
-    '.tool_runtime': (
-        'handle_tool_errors', 'runtime_tool_failure', 'tool_error', 'tool_failure', 'tool_success',
-    ),
 }
 _EXPORTS = {
     name: (module_name, name)

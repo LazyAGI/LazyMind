@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+from lazyllm.tools.agent import ToolPermissionError
 from lazyllm.tools.fs import client as fs_client
 from lazymind.chat.engine.tools import chat_artifact
 
@@ -35,9 +36,8 @@ def test_chat_file_publish_supports_long_filename(tmp_path, monkeypatch):
 
     result = chat_artifact.save_chat_artifact(filename, filename, content_type='file')
 
-    assert result['success'] is True
     published_dir = chat_artifact._published_file_directory(
-        'windows-user', 'windows-conversation', result['result']['artifact_id'],
+        'windows-user', 'windows-conversation', result['artifact_id'],
     )
     assert (Path(published_dir) / filename).read_text(encoding='utf-8') == 'requirements'
     assert not [name for name in os.listdir(published_dir) if name.endswith('.tmp')]
@@ -103,7 +103,7 @@ def test_chat_file_tools_reject_outside_workspace_by_default(tmp_path, monkeypat
         chat_artifact, '_current_artifact_scope', lambda: ('windows-user', 'windows-conversation'),
     )
 
-    with pytest.raises(ValueError, match='inside the current main-Agent workspace'):
+    with pytest.raises(ToolPermissionError, match='inside the current main-Agent workspace'):
         chat_artifact.write_file(str(outside), 'blocked')
 
 

@@ -4,6 +4,7 @@ from typing import Any, Dict, List
 import lazyllm
 import requests
 from lazyllm import LOG
+from lazyllm.tools.agent import ToolInvalidArgumentsError, ToolTransientError
 
 from lazymind.chat.engine.tools.infra import (
     VocabSuggestion,
@@ -19,8 +20,6 @@ from lazymind.chat.engine.tools.infra import (
     summarize_vocab_action_for_log,
     summarize_vocab_candidate_for_log,
     summarize_vocab_suggestion_for_log,
-    tool_error,
-    tool_success,
 )
 
 
@@ -57,35 +56,27 @@ def vocab_learn(suggestions: List[VocabSuggestion]) -> Dict[str, Any]:
     """
 
     if not suggestions:
-        return tool_error(
-            'vocab_learn',
-            "'suggestions' must be a non-empty list.",
-            log_message="[VocabTool] rejected reason='suggestions' must be a non-empty list.",
-        )
+        LOG.warning("[VocabTool] rejected reason='suggestions' must be a non-empty list.")
+        raise ToolInvalidArgumentsError("'suggestions' must be a non-empty list.")
     if len(suggestions) > MAX_VOCAB_SUGGESTIONS_PER_CALL:
-        return tool_error(
-            'vocab_learn',
+        LOG.warning(
+            f'[VocabTool] rejected reason=too_many_suggestions count={len(suggestions)}'
+        )
+        raise ToolInvalidArgumentsError(
             f'At most {MAX_VOCAB_SUGGESTIONS_PER_CALL} suggestions are allowed per call; '
             f'got {len(suggestions)}.',
-            log_message=f'[VocabTool] rejected reason=too_many_suggestions count={len(suggestions)}',
         )
 
     agentic_config = lazyllm.globals['agentic_config']
     session_id = str(agentic_config.get('session_id') or '').strip()
     if not session_id:
-        return tool_error(
-            'vocab_learn',
-            "'session_id' is required in agentic_config.",
-            log_message="[VocabTool] rejected reason='session_id' is required in agentic_config.",
-        )
+        LOG.warning("[VocabTool] rejected reason='session_id' is required in agentic_config.")
+        raise ToolInvalidArgumentsError("'session_id' is required in agentic_config.")
 
     user_id = resolve_vocab_user_id(agentic_config)
     if not user_id:
-        return tool_error(
-            'vocab_learn',
-            'user_id is required in agentic_config.',
-            log_message="[VocabTool] rejected reason='user_id' is required in agentic_config.",
-        )
+        LOG.warning("[VocabTool] rejected reason='user_id' is required in agentic_config.")
+        raise ToolInvalidArgumentsError('user_id is required in agentic_config.')
 
     suggestion_log = json.dumps(
         [summarize_vocab_suggestion_for_log(item) for item in suggestions],
@@ -163,7 +154,7 @@ def vocab_learn(suggestions: List[VocabSuggestion]) -> Dict[str, Any]:
     }
     if not actions:
         LOG.info(f'[VocabTool] finish status=no-op result={json.dumps(result, ensure_ascii=False)}')
-        return tool_success('vocab_learn', result)
+        return result
 
     payload = {'action_list': actions}
     LOG.info(
@@ -173,12 +164,10 @@ def vocab_learn(suggestions: List[VocabSuggestion]) -> Dict[str, Any]:
     try:
         result.update(post_core_api(_WORD_GROUP_APPLY_INTERNAL_PATH, payload))
     except (requests.RequestException, RuntimeError) as exc:
-        return tool_error(
-            'vocab_learn',
+        LOG.error(f'[VocabTool] failed to submit vocab suggestions user_id={user_id!r}: {exc}')
+        raise ToolTransientError(
             f'Failed to submit vocab suggestions: {exc}',
-            log_message=f'[VocabTool] failed to submit vocab suggestions user_id={user_id!r}: {exc}',
-            log_level='error',
-        )
+        ) from exc
 
     LOG.info(f'[VocabTool] finish status=applied result={json.dumps(result, ensure_ascii=False)}')
-    return tool_success('vocab_learn', result)
+    return result

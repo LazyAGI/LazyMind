@@ -6,8 +6,9 @@ from typing import Any, AsyncIterator, Tuple
 import lazyllm
 import lazyllm.module.stream_helper as _sh
 import lazyllm.tools.agent as _agent_mod
+from lazyllm.tools.agent.toolError import tool_failure
 from lazymind.config import config as _cfg
-from lazymind.chat.engine.tools.infra import CitationResultMiddleware, runtime_tool_failure
+from lazymind.chat.engine.tools.infra import CitationResultMiddleware
 
 from .models import AgentRole, AgentRunPlan
 from .tool_limit_control import tool_limit_decision_coordinator
@@ -44,7 +45,6 @@ class ToolCallGuard:
         self._expanded_round_limit = expanded_round_limit
         self._repeated_call_limit = max(2, int(repeated_call_limit))
         self._signature_calls: dict[str, int] = {}
-        self._recovery_failures: dict[tuple[str, str], int] = {}
         self._cancel_check = cancel_check
 
     def __getattr__(self, name: str) -> Any:
@@ -69,21 +69,7 @@ class ToolCallGuard:
 
     @staticmethod
     def _failed(result: Any) -> bool:
-        if not isinstance(result, dict):
-            return False
-        if result.get('ok') is False:
-            return True
-        value = result.get('value')
-        if isinstance(value, dict):
-            if value.get('success') is False:
-                return True
-            payload = value.get('result')
-            if isinstance(payload, dict):
-                total = payload.get('total')
-                succeeded = payload.get('succeeded')
-                if isinstance(total, int) and total > 0 and succeeded == 0:
-                    return True
-        return False
+        return isinstance(result, dict) and result.get('ok') is False
 
     @staticmethod
     def _error(result: Any) -> dict[str, Any]:
@@ -91,30 +77,22 @@ class ToolCallGuard:
             return result['error']
         return {}
 
-    def _update_recovery_budget(self, name: str, result: Any) -> Any:
-        error = self._error(result)
-        category = str(error.get('category') or '')
-        if category not in {'UNKNOWN_TOOL', 'INVALID_ARGS'}:
-            return result
-        key = (category, '' if category == 'UNKNOWN_TOOL' else name)
-        failures = self._recovery_failures.get(key, 0) + 1
-        self._recovery_failures[key] = failures
-        if failures == 1:
-            return result
-        updated_error = {**error, 'recovery_attempts_remaining': 0}
-        return {**result, 'error': updated_error, 'msg': updated_error.get('message', '')}
-
     @staticmethod
     def _blocked(name: str, message: str) -> dict[str, Any]:
         message = f'[Repeated Tool Failure] {name}: {message}'
-        return runtime_tool_failure(name, message, code='REPEATED_TOOL_FAILURE')
+        return tool_failure(
+            'POLICY_ERROR', 'REPEATED_TOOL_FAILURE', name, message,
+        )
 
     @staticmethod
     def _loop_blocked(name: str, message: str) -> dict[str, Any]:
         message = f'[Repeated Tool Call] {name}: {message}'
-        return runtime_tool_failure(name, message, code='REPEATED_TOOL_CALL')
+        return tool_failure(
+            'POLICY_ERROR', 'REPEATED_TOOL_CALL', name, message,
+        )
 
-    def __call__(self, tools: Any, verbose: bool = False) -> Any:
+    def __call__(self, tools: Any, verbose: bool = False,
+                 allowed_tool_names: set[str] | None = None) -> Any:
         if self._cancel_check is not None:
             self._cancel_check(None)
         tool_calls = [tools] if isinstance(tools, dict) else list(tools or [])
@@ -176,10 +154,13 @@ class ToolCallGuard:
             if guarded:
                 pending_signatures[signature] = index
         if pending:
-            pending_results = self._manager(pending, verbose=verbose)
+            pending_results = self._manager(
+                pending,
+                verbose=verbose,
+                allowed_tool_names=allowed_tool_names,
+            )
             for index, tool_call, result in zip(pending_indices, pending, pending_results):
                 name = str((tool_call.get('function') or {}).get('name') or '')
-                result = self._update_recovery_budget(name, result)
                 results[index] = result
                 if name in self._failure_limits:
                     if self._failed(result):
@@ -187,7 +168,7 @@ class ToolCallGuard:
                             self._consecutive_failures.get(name, 0) + 1
                         )
                         error = self._error(result)
-                        if error.get('category') != 'TRANSIENT_ERROR' or not error.get('retryable'):
+                        if error.get('recovery_action') != 'retry_later':
                             self._failed_signatures.add(self._signature(tool_call))
                     else:
                         self._consecutive_failures[name] = 0

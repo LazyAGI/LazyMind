@@ -2,14 +2,13 @@ from typing import Any, Dict, List, Literal, Optional
 
 import lazyllm
 from lazyllm import AutoModel, LOG
+from lazyllm.tools.agent import ToolDomainError, ToolInvalidArgumentsError
 from lazyllm.tools.rag import Reranker, Retriever, TempDocRetriever
 from lazyllm.tools.rag.doc_impl import NodeGroupType
 
 from lazymind.chat.engine.tools.infra import (
     get_core_api,
-    handle_tool_errors,
     post_core_api,
-    tool_success,
 )
 from lazymind.chat.engine.tools._utils import (
     iter_lookup_ids,
@@ -312,7 +311,6 @@ class KBToolkit:
         agentic_config = lazyllm.globals.get('agentic_config') or {}
         return not bool((agentic_config.get('filters') or {}).get('kb_id'))
 
-    @handle_tool_errors
     def list_knowledge_bases(
         self,
         keyword: str = '',
@@ -326,9 +324,8 @@ class KBToolkit:
         tag_values = _string_list(tags)
         if tag_values:
             params['tags'] = ','.join(tag_values)
-        return tool_success('list_knowledge_bases', get_core_api('/datasets', params=params))
+        return get_core_api('/datasets', params=params)
 
-    @handle_tool_errors
     def list_knowledge_base_documents(
         self,
         knowledge_base_ids: List[str],
@@ -342,12 +339,8 @@ class KBToolkit:
         }
         if keyword:
             payload['keyword'] = keyword
-        return tool_success(
-            'list_knowledge_base_documents',
-            post_core_api('/documents:listByDatasets', payload)['response'],
-        )
+        return post_core_api('/documents:listByDatasets', payload)['response']
 
-    @handle_tool_errors
     def aggregate_knowledge_base_documents(
         self,
         knowledge_base_ids: Optional[List[str]] = None,
@@ -368,10 +361,7 @@ class KBToolkit:
             'tags': _string_list(tags),
             'group_by': _string_list(group_by),
         }
-        return tool_success(
-            'aggregate_knowledge_base_documents',
-            post_core_api('/system-query/documents:aggregate', payload),
-        )
+        return post_core_api('/system-query/documents:aggregate', payload)
 
     @staticmethod
     def _accessible_kb_ids() -> set[str]:
@@ -414,11 +404,17 @@ class KBToolkit:
         selected = explicit if explicit else (config.get('filters') or {}).get('kb_id')
         ids = [str(item).strip() for item in iter_lookup_ids(selected, field_name='kb_ids') if item]
         if not ids:
-            raise ValueError('kb_ids is required when no knowledge base is selected in the request')
+            raise ToolInvalidArgumentsError(
+                'kb_ids is required when no knowledge base is selected in the request'
+            )
         if explicit:
             accessible = KBToolkit._accessible_kb_ids()
             if any(kb_id not in accessible for kb_id in ids):
-                raise ValueError('one or more requested knowledge bases are unavailable')
+                raise ToolDomainError(
+                    'One or more requested knowledge bases are unavailable.',
+                    code='RESOURCE_NOT_FOUND',
+                    details={'resource_type': 'knowledge_base'},
+                )
         return ids
 
     def kb_search(
@@ -483,10 +479,7 @@ class KBToolkit:
             image_topk=image_topk or _DEFAULT_IMAGE_TOPK,
         )
         serialized = _serialize_kb_result(result)
-        return tool_success(
-            'kb_search',
-            serialized,
-        )
+        return serialized
 
     def kb_get_parent_node(self, node_id: str) -> Dict[str, Any]:
         """Get the parent node of a target document node.
@@ -524,7 +517,7 @@ class KBToolkit:
                 'total': 1 if parent else 0,
                 'items': [parent] if parent else [],
             }
-            return tool_success('kb_get_parent_node', result)
+            return result
 
         result = {
             'node_id': node_id,
@@ -533,7 +526,7 @@ class KBToolkit:
             'total': 0,
             'items': [],
         }
-        return tool_success('kb_get_parent_node', result)
+        return result
 
     def kb_get_window_nodes(
         self,
@@ -557,9 +550,9 @@ class KBToolkit:
         before = int(before)
         after = int(after)
         if before < 0 or after < 0:
-            raise ValueError('before and after must be non-negative')
+            raise ToolInvalidArgumentsError('before and after must be non-negative')
         if before + after + 1 > _MAX_RESULT_ITEMS:
-            raise ValueError(f'window cannot exceed {_MAX_RESULT_ITEMS} nodes')
+            raise ToolInvalidArgumentsError(f'window cannot exceed {_MAX_RESULT_ITEMS} nodes')
         doc = DOCUMENT
         seed_nodes = doc.get_nodes(uids=[node_id])
         seed_nodes = seed_nodes if isinstance(seed_nodes, list) else []
@@ -570,13 +563,13 @@ class KBToolkit:
                 'total': len(nodes),
                 'items': [_serialize_doc_node_like(n) for n in nodes],
             }
-            return tool_success('kb_get_window_nodes', result)
+            return result
 
         result = {
             'total': 0,
             'items': [],
         }
-        return tool_success('kb_get_window_nodes', result)
+        return result
 
     def kb_keyword_search(
         self,
@@ -625,9 +618,9 @@ class KBToolkit:
         docid = target if target_type == 'docid' else ''
         file_name = target if target_type == 'file_name' else None
         if not keyword:
-            raise ValueError('keyword is required')
+            raise ToolInvalidArgumentsError('keyword is required')
         if not (target and str(target).strip()):
-            raise ValueError('target is required')
+            raise ToolInvalidArgumentsError('target is required')
         LOG.info(f'[kb_keyword_search] store={_cfg["segment_store_type"]!r} keyword={keyword!r} docid={docid!r} '
                  f'file_name={file_name!r} group={group!r} phrase={phrase} sort_by={sort_by!r} size={size}')
 
@@ -650,12 +643,12 @@ class KBToolkit:
                 'total': len(nodes),
                 'items': [_store_dict_to_result(n) for n in nodes],
             }
-            return tool_success('kb_keyword_search', result)
+            return result
 
-        return tool_success('kb_keyword_search', {
+        return {
             'index': index_name, 'group': group, 'docid': docid,
             'file_name': file_name, 'keyword': keyword, 'total': 0, 'items': [],
-        })
+        }
 
 
 def kb_tmp_search(
@@ -705,7 +698,4 @@ def kb_tmp_search(
         k_max=k_max or _DEFAULT_K_MAX,
     )
     serialized = _serialize_kb_result(result)
-    return tool_success(
-        'kb_tmp_search',
-        serialized,
-    )
+    return serialized

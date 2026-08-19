@@ -166,7 +166,7 @@ def test_subagent_attachment_edit_publishes_through_task_artifact(monkeypatch, t
             content_type=content_type,
             source_tool=kwargs.get('source_tool'),
         )
-        return {'success': True, 'result': {'status': 'ok'}}
+        return {'status': 'ok'}
 
     monkeypatch.setattr(attachment_tools, '_save_artifact', fake_save)
 

@@ -2,6 +2,7 @@ from typing import get_args, get_type_hints
 from unittest.mock import patch
 
 import pytest
+from lazyllm.tools.agent import ToolInvalidArgumentsError
 
 from lazymind.chat.engine.tools.intent_writer import (
     build_intentwrite_tool,
@@ -87,7 +88,7 @@ def test_intentwrite_rejects_non_user_evidence():
     tool = build_intentwrite_tool(
         conversation_id='conv-1', current_query='请总结经验', current_intent={},
     )
-    with pytest.raises(ValueError, match='evidence'):
+    with pytest.raises(ToolInvalidArgumentsError, match='evidence'):
         tool('conversation', [_operation(evidence='用户没有说过')])
 
 
@@ -98,7 +99,7 @@ def test_workflow_step_is_validated_without_exposing_step_list():
     enable_workflow_intent_scopes(
         tool, session_id='ws-1', workflow_id='writer', valid_step_ids=['draft'],
     )
-    with pytest.raises(ValueError, match='unknown step_id'):
+    with pytest.raises(ToolInvalidArgumentsError, match='unknown step_id'):
         tool('workflow_step', [_operation(evidence='初稿')], step_id='unknown')
 
 

@@ -2,6 +2,9 @@ import io
 import zipfile
 from unittest.mock import patch
 
+import pytest
+from lazyllm.tools.agent import ToolDomainError
+
 from lazymind.chat.engine.tools.infra.github_skill_installer import (
     GitHubSkillInstaller,
     GitHubSkillSource,
@@ -136,8 +139,7 @@ def test_install_public_github_skill_to_remote_fs():
         'https://github.com/owner/example'
     )
 
-    assert result['success'] is True
-    assert result['result'] == {
+    assert result == {
         'status': 'installed',
         'skill_key': 'external/example',
         'github_url': 'https://github.com/owner/example',
@@ -176,8 +178,7 @@ def test_install_preserves_upstream_category_but_still_uses_external_path():
         'https://github.com/owner/example'
     )
 
-    assert result['success'] is True
-    assert result['result']['skill_key'] == 'external/example'
+    assert result['skill_key'] == 'external/example'
     assert remote_fs.calls[5][1] == 'remote://skills/external/example/SKILL.md'
     assert 'category: upstream-value' in remote_fs.calls[5][2]
 
@@ -192,7 +193,7 @@ def test_install_ignores_unreadable_internal_package_during_source_deduplication
         'https://github.com/owner/example'
     )
 
-    assert result['success'] is True
+    assert result['skill_key'] == 'external/example'
     assert store.read_calls == []
     assert store.installed[0][0:2] == ('external', 'example')
 
@@ -208,7 +209,7 @@ def test_install_skips_unreadable_external_package_during_source_deduplication()
             'https://github.com/owner/example'
         )
 
-    assert result['success'] is True
+    assert result['skill_key'] == 'external/example'
     assert store.read_calls == [('external', 'broken')]
     assert store.installed[0][0:2] == ('external', 'example')
     warning.assert_called_once()
@@ -226,14 +227,10 @@ def test_install_still_rejects_duplicate_external_github_source():
         },
     )
 
-    result = SkillManagementToolkit(store=store, installer=_PreparedInstaller()).install_skill(
-        'https://github.com/owner/example'
-    )
-
-    assert result['success'] is False
-    assert result['error']['reason'] == (
-        "GitHub source is already installed as 'external/existing'."
-    )
+    with pytest.raises(ToolDomainError, match="GitHub source is already installed as 'external/existing'"):
+        SkillManagementToolkit(store=store, installer=_PreparedInstaller()).install_skill(
+            'https://github.com/owner/example'
+        )
     assert store.installed == []
 
 
@@ -252,13 +249,9 @@ def test_install_finds_duplicate_external_source_after_unreadable_package():
         read_errors={('external', 'broken'): RuntimeError('not found')},
     )
 
-    result = SkillManagementToolkit(store=store, installer=_PreparedInstaller()).install_skill(
-        'https://github.com/owner/example'
-    )
-
-    assert result['success'] is False
-    assert result['error']['reason'] == (
-        "GitHub source is already installed as 'external/existing'."
-    )
+    with pytest.raises(ToolDomainError, match="GitHub source is already installed as 'external/existing'"):
+        SkillManagementToolkit(store=store, installer=_PreparedInstaller()).install_skill(
+            'https://github.com/owner/example'
+        )
     assert store.read_calls == [('external', 'broken'), ('external', 'existing')]
     assert store.installed == []

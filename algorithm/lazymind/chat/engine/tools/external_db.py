@@ -5,9 +5,10 @@ import re
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode
 
+from lazyllm.tools.agent import ToolInvalidArgumentsError
 from lazyllm.tools.sql.sql_manager import SqlManager
 
-from lazymind.chat.engine.tools.infra import get_core_api, handle_tool_errors, tool_error, tool_success
+from lazymind.chat.engine.tools.infra import get_core_api
 
 _DANGEROUS_SQL = re.compile(
     r'\b(insert|update|delete|drop|alter|truncate|create|replace|merge|grant|revoke|upsert|call|execute)\b',
@@ -87,15 +88,14 @@ class ExternalDatabaseToolkit:
 
     __public_apis__ = ['list_external_dbs', 'describe_external_db', 'external_db_query']
 
-    @handle_tool_errors
     def list_external_dbs(self) -> Dict[str, Any]:
         """List external database connections available to the current user."""
-        return tool_success('list_external_dbs', get_core_api('/data-sources/database-connections'))
+        return get_core_api('/data-sources/database-connections')
 
     def _connection(self, connection_id: str) -> Dict[str, Any]:
         connection_id = str(connection_id or '').strip()
         if not connection_id:
-            raise ValueError('connection_id is required')
+            raise ToolInvalidArgumentsError('connection_id is required')
         return get_core_api(f'/data-sources/database-connections/{connection_id}:secret')
 
     def _manager(self, connection_id: str) -> ReadOnlySqlManager:
@@ -113,31 +113,28 @@ class ExternalDatabaseToolkit:
             options_str=_options_str(conn.get('options')),
         )
 
-    @handle_tool_errors
     def describe_external_db(self, connection_id: str) -> Dict[str, Any]:
         """Inspect table schema before generating SQL for a configured external database connection."""
         manager = self._manager(connection_id)
         try:
             tables = manager.visible_tables
-            return tool_success('describe_external_db', {'tables': tables, 'schema': manager.desc})
+            return {'tables': tables, 'schema': manager.desc}
         finally:
             manager.dispose()
 
-    @handle_tool_errors
     def external_db_query(self, connection_id: str, sql: str) -> Dict[str, Any]:
         """Execute one Agent-generated read-only SELECT/WITH SQL statement on a configured external database."""
         readonly_sql = _validate_readonly_sql(sql)
         if not readonly_sql:
-            return tool_error(
-                'external_db_query',
+            raise ToolInvalidArgumentsError(
                 'Only one read-only SELECT/WITH SQL statement is allowed.',
-                error_type='ReadOnlySQLRejected',
+                details={'error_type': 'ReadOnlySQLRejected'},
             )
         manager = self._manager(connection_id)
         try:
             rows = manager.execute_readonly_query(readonly_sql)
             if isinstance(rows, list) and len(rows) > 200:
                 rows = rows[:200]
-            return tool_success('external_db_query', {'sql': readonly_sql, 'rows': rows})
+            return {'sql': readonly_sql, 'rows': rows}
         finally:
             manager.dispose()
