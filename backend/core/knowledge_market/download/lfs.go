@@ -42,11 +42,34 @@ func (modelscopeLFSRule) ResolveURL(_ context.Context, repoURL *url.URL, revisio
 		url.PathEscape(rev), escapePath(path)), nil
 }
 
+// huggingfaceLFSRule supports HuggingFace datasets/models/spaces:
+// https://huggingface.co/{repoType}/{namespace}/{name}/resolve/{revision}/{path}
+type huggingfaceLFSRule struct{}
+
+func (huggingfaceLFSRule) ResolveURL(_ context.Context, repoURL *url.URL, revision, path, _ string, _ int64) (string, error) {
+	segs := splitTrimmed(repoURL.Path, "/")
+	if len(segs) != 3 {
+		return "", fmt.Errorf("cannot parse HuggingFace repo path %q", repoURL.Path)
+	}
+	repoName := strings.TrimSuffix(segs[2], ".git")
+	if repoName == "" {
+		return "", fmt.Errorf("cannot parse HuggingFace repo path %q", repoURL.Path)
+	}
+	rev := strings.TrimSpace(revision)
+	if rev == "" {
+		rev = "main"
+	}
+	return fmt.Sprintf("https://%s/%s/%s/%s/resolve/%s/%s",
+		repoURL.Host, segs[0], url.PathEscape(segs[1]), url.PathEscape(repoName),
+		url.PathEscape(rev), escapePath(path)), nil
+}
+
 // lfsRules maps platform hosts to their LFS resolve rules; unknown hosts fail
 // with a clear error when a pointer file is encountered.
 var lfsRules = map[string]lfsRule{
 	"modelscope.cn":     modelscopeLFSRule{},
 	"www.modelscope.cn": modelscopeLFSRule{},
+	"huggingface.co":    huggingfaceLFSRule{},
 }
 
 type lfsPointer struct {

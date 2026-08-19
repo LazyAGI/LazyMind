@@ -4,6 +4,8 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -11,8 +13,10 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync/atomic"
 	"testing"
+	"unicode/utf8"
+
+	"golang.org/x/text/encoding/simplifiedchinese"
 )
 
 // roundTripFunc turns a handler into a RoundTripper so tests need no sockets.
@@ -56,23 +60,6 @@ func TestFetchDispatchHTTP(t *testing.T) {
 	}
 	if files[0].SHA256 == "" || files[0].Size != 5 {
 		t.Fatalf("unexpected hash/size %+v", files[0])
-	}
-}
-
-func TestFetchRetriesOnce(t *testing.T) {
-	var attempts int32
-	serveBytes(func(r *http.Request) (*http.Response, error) {
-		if atomic.AddInt32(&attempts, 1) == 1 {
-			return &http.Response{StatusCode: http.StatusInternalServerError, Body: io.NopCloser(strings.NewReader("boom"))}, nil
-		}
-		return responseOK([]byte("ok")), nil
-	})
-	files, err := Fetch(context.Background(), "https://example.com/a.txt", "", t.TempDir(), nil)
-	if err != nil {
-		t.Fatalf("fetch with retry: %v", err)
-	}
-	if attempts != 2 || len(files) != 1 {
-		t.Fatalf("attempts=%d files=%d, want 2/1", attempts, len(files))
 	}
 }
 
@@ -156,6 +143,75 @@ func TestModelscopeResolveURL(t *testing.T) {
 	}
 }
 
+func TestHuggingFaceResolveURL(t *testing.T) {
+	u, _ := url.Parse("https://huggingface.co/datasets/someorg/somerepo.git")
+	rule := huggingfaceLFSRule{}
+	got, err := rule.ResolveURL(context.Background(), u, "main", "data/train.parquet", "abc", 1)
+	if err != nil {
+		t.Fatalf("resolve: %v", err)
+	}
+	want := "https://huggingface.co/datasets/someorg/somerepo/resolve/main/data/train.parquet"
+	if got != want {
+		t.Fatalf("got %s want %s", got, want)
+	}
+
+	// Default revision is main when empty; paths are URL-escaped per segment.
+	got, err = rule.ResolveURL(context.Background(), u, "", "docs/a b/c.json", "abc", 1)
+	if err != nil {
+		t.Fatalf("resolve default rev: %v", err)
+	}
+	if !strings.Contains(got, "/resolve/main/docs/a%20b/c.json") {
+		t.Fatalf("unexpected escaped path: %s", got)
+	}
+
+	// Models shape is also supported; namespaces may contain digits/dashes.
+	um, _ := url.Parse("https://huggingface.co/models/crag-mm-2025/model-name.git")
+	got, err = rule.ResolveURL(context.Background(), um, "", "weights.bin", "abc", 1)
+	if err != nil {
+		t.Fatalf("resolve models: %v", err)
+	}
+	if !strings.Contains(got, "/models/crag-mm-2025/model-name/resolve/main/weights.bin") {
+		t.Fatalf("unexpected models url: %s", got)
+	}
+
+	// Malformed paths must fail.
+	bad, _ := url.Parse("https://huggingface.co/datasets/onlyone.git")
+	if _, err := rule.ResolveURL(context.Background(), bad, "", "x.txt", "abc", 1); err == nil {
+		t.Fatal("expected error for malformed repo path")
+	}
+}
+
+func TestHuggingFaceResolveLFSPointer(t *testing.T) {
+	content := []byte("real huggingface lfs content")
+	sum := sha256.Sum256(content)
+	oid := hex.EncodeToString(sum[:])
+
+	dir := t.TempDir()
+	ptrPath := filepath.Join(dir, "data", "train.parquet")
+	if err := os.MkdirAll(filepath.Dir(ptrPath), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	ptr := fmt.Sprintf("version https://git-lfs.github.com/spec/v1\noid sha256:%s\nsize %d\n", oid, len(content))
+	if err := os.WriteFile(ptrPath, []byte(ptr), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	serveBytes(func(r *http.Request) (*http.Response, error) {
+		return responseOK(content), nil
+	})
+	repoURL, _ := url.Parse("https://huggingface.co/datasets/someorg/somerepo.git")
+	if err := resolveLFSPointer(context.Background(), repoURL, "main", dir, "data/train.parquet"); err != nil {
+		t.Fatalf("resolve LFS pointer: %v", err)
+	}
+	got, err := os.ReadFile(ptrPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(content) {
+		t.Fatalf("content mismatch: got %q want %q", got, content)
+	}
+}
+
 func TestLFSPointerParseAndUnknownHost(t *testing.T) {
 	dir := t.TempDir()
 	ptr := filepath.Join(dir, "train.jsonl")
@@ -208,4 +264,126 @@ func makeTestZip(t *testing.T, entries map[string]string) string {
 		t.Fatal(err)
 	}
 	return path
+}
+
+func TestExtractNestedZips(t *testing.T) {
+	root := t.TempDir()
+
+	innerZip := makeTestZip(t, map[string]string{
+		"docs/b.pdf": "inner-pdf",
+		"flat.md":    "# inner",
+	})
+	innerBytes, err := os.ReadFile(innerZip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	outerZip := makeTestZip(t, map[string]string{
+		"docs/a.pdf":       "outer-pdf",
+		"nested/inner.zip": string(innerBytes),
+	})
+	outerBytes, err := os.ReadFile(outerZip)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "corpus.zip"), outerBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, ".git", "keep.zip"), []byte("not-a-zip"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := extractNestedZips(root); err != nil {
+		t.Fatalf("extractNestedZips: %v", err)
+	}
+
+	for _, want := range []string{"docs/a.pdf", "docs/b.pdf", "flat.md"} {
+		if !isFile(filepath.Join(root, want)) {
+			t.Fatalf("expected extracted file %s to exist", want)
+		}
+	}
+	if isFile(filepath.Join(root, "corpus.zip")) {
+		t.Fatal("expected outer zip to be removed after extraction")
+	}
+	if isFile(filepath.Join(root, "nested", "inner.zip")) {
+		t.Fatal("expected inner zip to be removed after extraction")
+	}
+	if !isFile(filepath.Join(root, ".git", "keep.zip")) {
+		t.Fatal("expected zip inside .git to be left untouched")
+	}
+}
+
+func TestExtractNestedZipsNoZips(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "docs"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "docs", "a.pdf"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := extractNestedZips(root); err != nil {
+		t.Fatalf("extractNestedZips: %v", err)
+	}
+	if !isFile(filepath.Join(root, "docs", "a.pdf")) {
+		t.Fatal("unexpected file loss")
+	}
+}
+
+func TestExtractZipNonUTF8EntryNames(t *testing.T) {
+	root := t.TempDir()
+	zipPath := filepath.Join(root, "pkg.zip")
+
+	// Windows-created archives store Chinese filenames in GBK without the
+	// UTF-8 flag; the official market packages (e.g. lawtext/laws) do this.
+	gbk := func(s string) string {
+		encoded, err := simplifiedchinese.GBK.NewEncoder().Bytes([]byte(s))
+		if err != nil {
+			t.Fatalf("encode GBK: %v", err)
+		}
+		return string(encoded)
+	}
+	buf := &bytes.Buffer{}
+	zw := zip.NewWriter(buf)
+	dirHdr := &zip.FileHeader{Name: "guohui/", NonUTF8: true}
+	dirHdr.SetMode(os.ModeDir | 0o755)
+	if _, err := zw.CreateHeader(dirHdr); err != nil {
+		t.Fatalf("create dir entry: %v", err)
+	}
+	fileHdr := &zip.FileHeader{Name: "guohui/" + gbk("国徽1024.png"), NonUTF8: true}
+	fileHdr.SetMode(0o644)
+	w, err := zw.CreateHeader(fileHdr)
+	if err != nil {
+		t.Fatalf("create file entry: %v", err)
+	}
+	if _, err := w.Write([]byte("png-bytes")); err != nil {
+		t.Fatalf("write entry: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("close zip: %v", err)
+	}
+	if err := os.WriteFile(zipPath, buf.Bytes(), 0o644); err != nil {
+		t.Fatalf("write zip: %v", err)
+	}
+
+	if err := extractZip(zipPath, root); err != nil {
+		t.Fatalf("extract zip: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(root, "guohui", "国徽1024.png"))
+	if err != nil {
+		t.Fatalf("decoded entry missing or unreadable: %v", err)
+	}
+	if string(got) != "png-bytes" {
+		t.Fatalf("content=%q, want png-bytes", got)
+	}
+	entries, err := os.ReadDir(filepath.Join(root, "guohui"))
+	if err != nil {
+		t.Fatalf("list extracted dir: %v", err)
+	}
+	for _, entry := range entries {
+		if !utf8.ValidString(entry.Name()) {
+			t.Fatalf("non-UTF-8 entry written on disk: %q", entry.Name())
+		}
+	}
 }

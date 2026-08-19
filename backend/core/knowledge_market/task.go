@@ -1,17 +1,21 @@
 package knowledge_market
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
+	"lazymind/core/asyncjob"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/common/readonlyorm"
 	"lazymind/core/doc"
+	"lazymind/core/log"
 	"lazymind/core/store"
 )
 
@@ -131,6 +135,9 @@ func MarketGetInstallTask(w http.ResponseWriter, r *http.Request) {
 		replyServiceError(w, err)
 		return
 	}
+	// Self-heal the split-brain case where the install already failed but the
+	// async job is still stuck in "running" (the two writes are not atomic).
+	healStuckMarketJob(r.Context(), db, &job, install)
 	parse := parseProgress(r, db, install)
 	stage, overall := installStageAndPercent(job, install, parse)
 	data := taskItemDTO(job, item, install)
@@ -181,10 +188,28 @@ func MarketListInstalls(w http.ResponseWriter, r *http.Request) {
 	// In-flight jobs per item plus a running one-click batch let the frontend
 	// render "installing/updating" from real activity and treat a stale
 	// intermediate install_state without any active job as abnormal/reinstallable.
-	activeByItem, batchRunning, err := activeMarketJobsForUser(r, db, userID)
+	activeJobs, batchRunning, err := activeMarketJobsForUser(r, db, userID)
 	if err != nil {
 		replyServiceError(w, err)
 		return
+	}
+	// Self-heal split-brain installs: an install row already failed while its
+	// async job is still stuck in "running" (a crash between the two writes).
+	// Marking the job failed un-sticks the card and unblocks reinstall.
+	installByItem := make(map[string]*orm.KnowledgeMarketInstall, len(rows))
+	for i := range rows {
+		installByItem[rows[i].MarketItemID] = &rows[i]
+	}
+	activeByItem := make(map[string]bool, len(activeJobs))
+	for i := range activeJobs {
+		job := activeJobs[i]
+		if job.JobType == updateAllJobType || strings.TrimSpace(job.ResourceID) == "" {
+			continue
+		}
+		healStuckMarketJob(r.Context(), db, &activeJobs[i], installByItem[job.ResourceID])
+		if activeJobs[i].Status == string(asyncjob.StatusRunning) {
+			activeByItem[job.ResourceID] = true
+		}
 	}
 	items := make([]map[string]any, 0, len(rows))
 	for _, row := range rows {
@@ -258,19 +283,19 @@ func buildTaskListItems(r *http.Request, db *gorm.DB, userID string, jobs []orm.
 	if err != nil {
 		return nil, err
 	}
-	for _, job := range jobs {
-		items = append(items, taskItemDTO(job, itemByID[job.ResourceID], installByItem[job.ResourceID]))
+	for i := range jobs {
+		install := installByItem[jobs[i].ResourceID]
+		healStuckMarketJob(r.Context(), db, &jobs[i], install)
+		items = append(items, taskItemDTO(jobs[i], itemByID[jobs[i].ResourceID], install))
 	}
 	return items, nil
 }
 
-// activeMarketJobsForUser returns the set of market items with an in-flight
-// install/update job for the user, plus whether a one-click batch is running.
-func activeMarketJobsForUser(r *http.Request, db *gorm.DB, userID string) (map[string]bool, bool, error) {
-	active := make(map[string]bool)
-	batchRunning := false
+// activeMarketJobsForUser returns the user's in-flight install/update jobs
+// (including a one-click update-all batch) plus whether a batch is running.
+func activeMarketJobsForUser(r *http.Request, db *gorm.DB, userID string) ([]orm.AsyncJob, bool, error) {
 	if strings.TrimSpace(userID) == "" {
-		return active, false, nil
+		return nil, false, nil
 	}
 	var rows []orm.AsyncJob
 	if err := db.WithContext(r.Context()).
@@ -279,16 +304,55 @@ func activeMarketJobsForUser(r *http.Request, db *gorm.DB, userID string) (map[s
 		Find(&rows).Error; err != nil {
 		return nil, false, err
 	}
-	for _, row := range rows {
-		if row.JobType == updateAllJobType {
+	batchRunning := false
+	for i := range rows {
+		if rows[i].JobType == updateAllJobType {
 			batchRunning = true
-			continue
-		}
-		if id := strings.TrimSpace(row.ResourceID); id != "" {
-			active[id] = true
 		}
 	}
-	return active, batchRunning, nil
+	return rows, batchRunning, nil
+}
+
+// healStuckMarketJob repairs the split-brain state where the install row is
+// already failed but the async job is still stuck in "running": the install
+// failure write and the runner's job transition are not atomic, so a crash or
+// lost update between them leaves the job running forever — the frontend keeps
+// polling and reinstall is blocked by the 409 active-job guard. The job is
+// marked failed (guarded on status='running' so concurrent polls only heal it
+// once) so the task reaches a terminal state. Any other state combination is
+// left untouched: a queued retry (pending) and an in-flight retry (install row
+// already reset to downloading) keep their normal behavior.
+func healStuckMarketJob(ctx context.Context, db *gorm.DB, job *orm.AsyncJob, install *orm.KnowledgeMarketInstall) bool {
+	if job == nil || install == nil {
+		return false
+	}
+	if job.Status != string(asyncjob.StatusRunning) || install.InstallState != string(orm.InstallStateFailed) {
+		return false
+	}
+	now := time.Now().UTC()
+	errorMessage := "install failed, please retry"
+	if err := db.WithContext(ctx).Model(&orm.AsyncJob{}).
+		Where("id = ? AND status = ?", job.ID, string(asyncjob.StatusRunning)).
+		Updates(map[string]any{
+			"status":        string(asyncjob.StatusFailed),
+			"error_code":    asyncjob.ErrorCodeHandlerFailed,
+			"error_message": errorMessage,
+			"locked_by":     "",
+			"lock_until":    nil,
+			"finished_at":   now,
+			"updated_at":    now,
+		}).Error; err != nil {
+		log.Logger.Warn().Err(err).Str("job_id", job.ID).Str("market_item_id", install.MarketItemID).Msg("heal stuck market job failed")
+		return false
+	}
+	job.Status = string(asyncjob.StatusFailed)
+	job.ErrorCode = asyncjob.ErrorCodeHandlerFailed
+	job.ErrorMessage = errorMessage
+	job.LockedBy = ""
+	job.LockUntil = nil
+	job.FinishedAt = &now
+	job.UpdatedAt = now
+	return true
 }
 
 // loadMarketItemByID loads one item or returns nil when the id is missing
@@ -547,6 +611,11 @@ func installStageAndPercent(job orm.AsyncJob, install *orm.KnowledgeMarketInstal
 	if job.Status == "failed" || job.Status == "canceled" {
 		stage = "failed"
 	}
+	// A failed install row is authoritative even when the async job is stale
+	// (lost failure update / queued retry): never present it as downloading.
+	if install != nil && install.InstallState == string(orm.InstallStateFailed) {
+		stage = "failed"
+	}
 	return stage, overallPercent(phase, job, parse)
 }
 
@@ -571,7 +640,12 @@ func phaseStage(install *orm.KnowledgeMarketInstall, job orm.AsyncJob, parse par
 			return "parsing"
 		}
 	case string(orm.InstallStateFailed):
-		// Freeze the bar at the phase where the install failed.
+		// Freeze the bar at the phase where the install failed. High-resolution
+		// download progress uses total=100; a failed download in that state must
+		// not be mistaken for the parsing/importing stage markers (total 2/3).
+		if job.ProgressTotal > 2 {
+			return "downloading"
+		}
 		switch {
 		case job.ProgressCurrent >= 2:
 			return "parsing"
@@ -589,7 +663,13 @@ func overallPercent(phase string, job orm.AsyncJob, parse parseProgressInfo) int
 	var p int64
 	switch phase {
 	case "downloading":
-		p = 40 * job.ProgressCurrent
+		if job.ProgressTotal > 2 {
+			// High-resolution download progress: current/total maps 0-100
+			// onto the 0-40 download band.
+			p = 40 * job.ProgressCurrent / job.ProgressTotal
+		} else {
+			p = 40 * job.ProgressCurrent
+		}
 	case "importing":
 		p = 40 + 20*(job.ProgressCurrent-1)
 	case "parsing", "failed":

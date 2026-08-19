@@ -106,3 +106,32 @@ func TestFetchHonorsContextDeadline(t *testing.T) {
 		t.Fatal("expected fetch to fail on context deadline")
 	}
 }
+
+func TestGitClonePercent(t *testing.T) {
+	cases := []struct {
+		name string
+		line string
+		want int
+		ok   bool
+	}{
+		{name: "receiving objects", line: "Receiving objects:  36% (199/551), 1.2 MiB | 2.1 MiB/s", want: 28, ok: true},
+		{name: "receiving complete", line: "Receiving objects: 100% (551/551), done.", want: 80, ok: true},
+		{name: "resolving deltas", line: "Resolving deltas:  50% (62/124)", want: 87, ok: true},
+		{name: "resolving complete", line: "Resolving deltas: 100% (124/124), done.", want: 95, ok: true},
+		{name: "checking out capped", line: "Checking out files: 100% (551/551), done.", want: 99, ok: true},
+		{name: "remote counting ignored", line: "remote: Counting objects: 100% (551/551), done.", ok: false},
+		{name: "no percent", line: "Cloning into 'repo'...", ok: false},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := gitClonePercent(tc.line)
+			if ok != tc.ok {
+				t.Fatalf("ok=%v, want %v", ok, tc.ok)
+			}
+			if got != tc.want {
+				t.Fatalf("percent=%d, want %d", got, tc.want)
+			}
+		})
+	}
+}

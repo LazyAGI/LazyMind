@@ -152,7 +152,12 @@ func HandleInstallJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.R
 	}
 	defer os.RemoveAll(tmpRoot)
 
-	files, err := download.Fetch(ctx, packageURL, payload.Revision, tmpRoot, nil)
+	downloadProgress := newMarketDownloadProgress(ctx, reporter)
+	var progress download.ProgressFunc
+	if downloadProgress != nil {
+		progress = downloadProgress.Report
+	}
+	files, err := download.Fetch(ctx, packageURL, payload.Revision, tmpRoot, progress)
 	if err != nil {
 		return failInstall(ctx, db, payload, fmt.Errorf("download package failed: %w", err))
 	}
@@ -240,6 +245,13 @@ func decodeInstallPayload(raw json.RawMessage) (installJobPayload, error) {
 
 // failInstall marks the install row failed and returns a handler result.
 func failInstall(ctx context.Context, db *gorm.DB, payload installJobPayload, err error) (asyncjob.Result, error) {
+	// Log the real failure reason: the job-row error_message may be lost when
+	// the process exits between this write and the runner's job transition.
+	log.Logger.Error().
+		Err(err).
+		Str("market_item_id", payload.MarketItemID).
+		Str("user_id", payload.UserID).
+		Msg("knowledge market install failed")
 	// A failed install should not leave a residual personal dataset behind.
 	// Delete the dataset created by this (or a previous retried) attempt and
 	// clear the install link so a retry starts from a clean state. Cleanup

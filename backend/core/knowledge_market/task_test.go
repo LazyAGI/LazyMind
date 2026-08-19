@@ -470,3 +470,105 @@ func TestMarketListInstalls(t *testing.T) {
 		t.Fatalf("missing user -> %d, want 400", rec.Code)
 	}
 }
+
+func TestMarketGetInstallTaskHealsStuckJob(t *testing.T) {
+	router := newTaskTestRouter(t)
+	db := store.DB()
+	base := time.Now().UTC().Add(-time.Hour)
+	// Split-brain state: the install row already failed but the async job is
+	// stuck in running (the two writes are not atomic; a crash between them
+	// leaves the job running forever).
+	insertInstallJob(t, db, "job_stuck", "user-a", "law-cn", "running", base, 80, 100, "")
+	insertInstall(t, db, "law-cn", "user-a", "failed", "", base.Add(time.Minute))
+
+	data := mustTaskData(t, performGetWithUser(t, router, "/knowledge-market/tasks/job_stuck", "user-a"))
+	if data["job_status"] != "failed" {
+		t.Fatalf("job_status=%v, want failed", data["job_status"])
+	}
+	if data["stage"] != "failed" {
+		t.Fatalf("stage=%v, want failed", data["stage"])
+	}
+	if data["error_message"] == "" {
+		t.Fatal("error_message must be filled by the heal")
+	}
+
+	var job orm.AsyncJob
+	if err := db.Where("id = ?", "job_stuck").Take(&job).Error; err != nil {
+		t.Fatalf("load job: %v", err)
+	}
+	if job.Status != "failed" || job.FinishedAt == nil || job.LockedBy != "" || job.LockUntil != nil {
+		t.Fatalf("job not healed: status=%s locked_by=%q lock_until=%v finished_at=%v", job.Status, job.LockedBy, job.LockUntil, job.FinishedAt)
+	}
+
+	// A second poll must not rewrite the healed row (idempotent heal).
+	before := job.UpdatedAt
+	time.Sleep(5 * time.Millisecond)
+	data = mustTaskData(t, performGetWithUser(t, router, "/knowledge-market/tasks/job_stuck", "user-a"))
+	if data["job_status"] != "failed" {
+		t.Fatalf("second poll job_status=%v, want failed", data["job_status"])
+	}
+	if err := db.Where("id = ?", "job_stuck").Take(&job).Error; err != nil {
+		t.Fatalf("reload job: %v", err)
+	}
+	if !job.UpdatedAt.Equal(before) {
+		t.Fatalf("healed job rewritten: updated_at %v -> %v", before, job.UpdatedAt)
+	}
+}
+
+func TestMarketListInstallsHealsStuckJob(t *testing.T) {
+	router := newTaskTestRouter(t)
+	db := store.DB()
+	base := time.Now().UTC().Add(-time.Hour)
+	insertInstallJob(t, db, "job_stuck2", "user-a", "law-cn", "running", base, 80, 100, "")
+	insertInstall(t, db, "law-cn", "user-a", "failed", "", base.Add(time.Minute))
+
+	data := mustTaskData(t, performGetWithUser(t, router, "/knowledge-market/installs", "user-a"))
+	items := data["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("items=%d, want 1", len(items))
+	}
+	item := items[0].(map[string]any)
+	if item["active"] != false {
+		t.Fatalf("active=%v, want false after heal", item["active"])
+	}
+	if item["install_state"] != "failed" {
+		t.Fatalf("install_state=%v, want failed", item["install_state"])
+	}
+
+	var job orm.AsyncJob
+	if err := db.Where("id = ?", "job_stuck2").Take(&job).Error; err != nil {
+		t.Fatalf("load job: %v", err)
+	}
+	if job.Status != "failed" {
+		t.Fatalf("job status=%s, want failed", job.Status)
+	}
+}
+
+func TestMarketListInstallTasksHealsStuckJob(t *testing.T) {
+	router := newTaskTestRouter(t)
+	db := store.DB()
+	base := time.Now().UTC().Add(-time.Hour)
+	insertInstallJob(t, db, "job_stuck3", "user-a", "law-cn", "running", base, 80, 100, "")
+	insertInstall(t, db, "law-cn", "user-a", "failed", "", base.Add(time.Minute))
+
+	data := mustTaskData(t, performGetWithUser(t, router, "/knowledge-market/tasks", "user-a"))
+	items := data["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("items=%d, want 1", len(items))
+	}
+	item := items[0].(map[string]any)
+	if item["job_status"] != "failed" {
+		t.Fatalf("job_status=%v, want failed", item["job_status"])
+	}
+	if item["error_message"] == "" {
+		t.Fatal("error_message must be filled by the heal")
+	}
+
+	var job orm.AsyncJob
+	if err := db.Where("id = ?", "job_stuck3").Take(&job).Error; err != nil {
+		t.Fatalf("load job: %v", err)
+	}
+	if job.Status != "failed" {
+		t.Fatalf("job status=%s, want failed", job.Status)
+	}
+}

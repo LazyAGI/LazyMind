@@ -234,7 +234,12 @@ func HandleUpdateJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Re
 	}
 	defer os.RemoveAll(tmpRoot)
 
-	files, err := download.Fetch(ctx, packageURL, payload.Revision, tmpRoot, nil)
+	downloadProgress := newMarketDownloadProgress(ctx, reporter)
+	var progress download.ProgressFunc
+	if downloadProgress != nil {
+		progress = downloadProgress.Report
+	}
+	files, err := download.Fetch(ctx, packageURL, payload.Revision, tmpRoot, progress)
 	if err != nil {
 		return failUpdate(ctx, db, payload, fmt.Errorf("download package failed: %w", err))
 	}
@@ -473,6 +478,11 @@ func decodeUpdateAllPayload(raw json.RawMessage) (updateAllJobPayload, error) {
 // update the knowledge base is empty, the failure stays visible and a retry
 // (or uninstall) remains possible.
 func failUpdate(ctx context.Context, db *gorm.DB, payload updateJobPayload, err error) (asyncjob.Result, error) {
+	log.Logger.Error().
+		Err(err).
+		Str("market_item_id", payload.MarketItemID).
+		Str("user_id", payload.UserID).
+		Msg("knowledge market update failed")
 	_ = setInstallState(ctx, db, payload.MarketItemID, payload.UserID, orm.InstallStateFailed, "", nil)
 	return asyncjob.Result{ErrorCode: asyncjob.ErrorCodeHandlerFailed}, err
 }

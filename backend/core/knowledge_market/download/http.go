@@ -14,6 +14,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
+
+	"golang.org/x/text/encoding/simplifiedchinese"
 )
 
 // fetchHTTP downloads a single URL and, when the payload is a zip archive,
@@ -143,7 +146,8 @@ func extractZip(zipPath, root string) error {
 	}
 	defer zr.Close()
 	for _, entry := range zr.File {
-		target, err := resolveOutputPath(root, entry.Name)
+		name := normalizeZipEntryName(entry.Name)
+		target, err := resolveOutputPath(root, name)
 		if err != nil {
 			return err
 		}
@@ -154,7 +158,7 @@ func extractZip(zipPath, root string) error {
 			continue
 		}
 		if entry.Mode()&fs.ModeSymlink != 0 {
-			return fmt.Errorf("zip entry is a symlink: %q", entry.Name)
+			return fmt.Errorf("zip entry is a symlink: %q", name)
 		}
 		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
 			return err
@@ -172,10 +176,26 @@ func extractZip(zipPath, root string) error {
 		out.Close()
 		rc.Close()
 		if copyErr != nil {
-			return fmt.Errorf("extract zip entry %s failed: %w", entry.Name, copyErr)
+			return fmt.Errorf("extract zip entry %s failed: %w", name, copyErr)
 		}
 	}
 	return nil
+}
+
+// normalizeZipEntryName converts a zip entry name to valid UTF-8 so
+// extraction works on filesystems that reject invalid UTF-8 filenames (for
+// example macOS-hosted volumes) and never produces mojibake names.
+// Windows-created archives commonly store Chinese names in GBK without the
+// UTF-8 flag; anything that still cannot be decoded is scrubbed to a safe
+// placeholder so extraction never fails on the name alone.
+func normalizeZipEntryName(name string) string {
+	if utf8.ValidString(name) {
+		return name
+	}
+	if decoded, err := simplifiedchinese.GB18030.NewDecoder().Bytes([]byte(name)); err == nil && utf8.Valid(decoded) {
+		return string(decoded)
+	}
+	return strings.ToValidUTF8(name, "_")
 }
 
 // hashFile returns the file size and SHA-256 digest.
