@@ -42,7 +42,7 @@ import { SlotEditingContext } from './slotEditingContext';
 import './WriterIRControl.scss';
 
 /** Idle debounce after the latest edit before draft autosave. */
-const WRITER_IR_AUTOSAVE_IDLE_MS = 3_000;
+const WRITER_IR_AUTOSAVE_IDLE_MS = 1_000;
 /** Max time a dirty draft can wait before a draft save is forced. */
 const WRITER_IR_AUTOSAVE_MAX_WAIT_MS = 15_000;
 /** Coalesce follow-up saves after an in-flight request finishes. */

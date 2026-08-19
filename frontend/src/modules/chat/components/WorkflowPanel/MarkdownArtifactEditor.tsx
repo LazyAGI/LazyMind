@@ -38,6 +38,7 @@ import {
   useContext,
   useEffect,
   useId,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -64,6 +65,9 @@ import {
 } from './writerMarkdownAnchors';
 import './MarkdownArtifactEditor.scss';
 
+/** Idle debounce after the latest edit before a silent draft save. */
+const MARKDOWN_AUTOSAVE_IDLE_MS = 1_000;
+
 function WriterAnchorEditor(props: JsxEditorProps) {
   const id = props.mdastNode.attributes.find(
     (attribute) => attribute.type === 'mdxJsxAttribute' && attribute.name === 'id',
@@ -85,6 +89,12 @@ interface MarkdownSelectionRestorePoint {
   startOffset: number;
   endOffset: number;
   text: string;
+}
+
+interface MarkdownEditorSelectionRestorePoint {
+  startOffset: number;
+  endOffset: number;
+  selectedText: string;
 }
 
 function markdownEditable(root: HTMLElement): HTMLElement | null {
@@ -152,6 +162,52 @@ function restoreMarkdownSelection(
   const browserSelection = globalThis.getSelection();
   browserSelection?.removeAllRanges();
   browserSelection?.addRange(range);
+}
+
+function markdownEditorSelectionRestorePoint(
+  editable: HTMLElement,
+): MarkdownEditorSelectionRestorePoint | null {
+  const selection = globalThis.getSelection();
+  if (!selection || selection.rangeCount === 0) return null;
+  const range = selection.getRangeAt(0);
+  if (!editable.contains(range.startContainer) || !editable.contains(range.endContainer)) {
+    return null;
+  }
+  const offsetBefore = (node: Node, offset: number) => {
+    const prefix = globalThis.document.createRange();
+    prefix.selectNodeContents(editable);
+    prefix.setEnd(node, offset);
+    return prefix.toString().length;
+  };
+  return {
+    startOffset: offsetBefore(range.startContainer, range.startOffset),
+    endOffset: offsetBefore(range.endContainer, range.endOffset),
+    selectedText: range.toString(),
+  };
+}
+
+function restoreMarkdownEditorSelection(
+  editable: HTMLElement,
+  restorePoint: MarkdownEditorSelectionRestorePoint,
+): boolean {
+  const text = editable.textContent ?? '';
+  const startOffset = Math.min(restorePoint.startOffset, text.length);
+  const endOffset = Math.min(restorePoint.endOffset, text.length);
+  if (
+    restorePoint.selectedText
+    && text.slice(startOffset, endOffset) !== restorePoint.selectedText
+  ) return false;
+
+  const start = markdownTextBoundary(editable, startOffset);
+  const end = markdownTextBoundary(editable, endOffset);
+  const range = globalThis.document.createRange();
+  range.setStart(start.node, start.offset);
+  range.setEnd(end.node, end.offset);
+  editable.focus({ preventScroll: true });
+  const selection = globalThis.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  return true;
 }
 
 function backtickRunLength(value: string, start: number): number {
@@ -243,7 +299,10 @@ interface MarkdownArtifactEditorProps {
   readOnly?: boolean;
   /** Stable key used to register flush-before-retry/continue with WorkflowPanel. */
   editingKey?: string;
-  onSave: (markdown: string, baseRevision: number) => Promise<number | undefined>;
+  onSave: (
+    markdown: string,
+    baseRevision: number,
+  ) => Promise<number | { markdown: string; revision?: number } | undefined>;
   onRefresh?: () => void;
   onDownload?: () => void;
   /** Reports the current draft so the write-back action can compare it with its Feishu baseline. */
@@ -304,7 +363,6 @@ export function MarkdownArtifactEditor({
   const [baseMarkdown, setBaseMarkdown] = useState(() => normalizeMarkdownForMdxEditor(markdown));
   const [draftMarkdown, setDraftMarkdown] = useState(() => normalizeMarkdownForMdxEditor(markdown));
   const [baseRevision, setBaseRevision] = useState(sourceRevision);
-  const [editorKey, setEditorKey] = useState(0);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string>();
   const [conflict, setConflict] = useState(false);
@@ -320,7 +378,11 @@ export function MarkdownArtifactEditor({
   const pinnedRewriteRangeRef = useRef<Range | null>(null);
   const selectionToolbarDismissedRef = useRef(false);
   const latestSourceRef = useRef({ markdown, revision: sourceRevision });
+  const staleSourceEchoRef = useRef<{ markdown: string; revision: number }>();
   const pendingSourceRef = useRef<{ markdown: string; revision: number }>();
+  const autoSaveTimerRef = useRef<number | undefined>(undefined);
+  const viewRestoreFrameRef = useRef<number | undefined>(undefined);
+  const draftMarkdownRef = useRef(draftMarkdown);
   const dirtyRef = useRef(false);
   const savingRef = useRef(false);
   const conflictRef = useRef(false);
@@ -341,12 +403,65 @@ export function MarkdownArtifactEditor({
     6,
   );
   dirtyRef.current = dirty;
+  draftMarkdownRef.current = draftMarkdown;
   savingRef.current = saving;
   conflictRef.current = conflict;
 
   useEffect(() => {
     onContentChange?.(writerMarkdownForSave(draftMarkdown));
   }, [draftMarkdown, onContentChange]);
+
+  const replaceMarkdownSilently = useCallback((nextMarkdown: string) => {
+    const root = rootRef.current;
+    const editor = editorRef.current;
+    const surface = root?.querySelector<HTMLElement>('.writer-markdown-editor__surface');
+    if (!root || !editor || !surface) return;
+    const artifactBody = surface.closest<HTMLElement>('.workflow-slot__artifact-body');
+    const editable = markdownEditable(root);
+    const hadFocus = Boolean(editable?.contains(globalThis.document.activeElement));
+    const selection = editable && hadFocus
+      ? markdownEditorSelectionRestorePoint(editable)
+      : null;
+    const surfaceScroll = { top: surface.scrollTop, left: surface.scrollLeft };
+    const artifactScroll = artifactBody
+      ? { top: artifactBody.scrollTop, left: artifactBody.scrollLeft }
+      : null;
+
+    const restoreView = () => {
+      if (!root.isConnected) return;
+      const nextSurface = root.querySelector<HTMLElement>('.writer-markdown-editor__surface');
+      const nextEditable = markdownEditable(root);
+      if (hadFocus && nextEditable) {
+        if (!selection || !restoreMarkdownEditorSelection(nextEditable, selection)) {
+          nextEditable.focus({ preventScroll: true });
+        }
+      }
+      if (nextSurface) {
+        nextSurface.scrollTop = surfaceScroll.top;
+        nextSurface.scrollLeft = surfaceScroll.left;
+      }
+      if (artifactBody && artifactScroll) {
+        artifactBody.scrollTop = artifactScroll.top;
+        artifactBody.scrollLeft = artifactScroll.left;
+      }
+    };
+
+    editor.setMarkdown(nextMarkdown);
+    restoreView();
+    if (viewRestoreFrameRef.current !== undefined) {
+      window.cancelAnimationFrame(viewRestoreFrameRef.current);
+    }
+    viewRestoreFrameRef.current = window.requestAnimationFrame(() => {
+      viewRestoreFrameRef.current = undefined;
+      restoreView();
+    });
+  }, []);
+
+  useEffect(() => () => {
+    if (viewRestoreFrameRef.current !== undefined) {
+      window.cancelAnimationFrame(viewRestoreFrameRef.current);
+    }
+  }, []);
 
   const dismissSelectionToolbar = useCallback(() => {
     selectionToolbarDismissedRef.current = true;
@@ -474,12 +589,24 @@ export function MarkdownArtifactEditor({
     };
   }, [dismissSelectionToolbar]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const latestSource = latestSourceRef.current;
     if (
       sourceRevision === latestSource.revision
       && markdown === latestSource.markdown
+    ) {
+      staleSourceEchoRef.current = undefined;
+      return;
+    }
+    // A save may resolve before its parent prop echo; ignore that exact stale
+    // snapshot without blocking a later intentional history revision change.
+    const staleSource = staleSourceEchoRef.current;
+    if (
+      staleSource
+      && sourceRevision === staleSource.revision
+      && markdown === staleSource.markdown
     ) return;
+    staleSourceEchoRef.current = undefined;
     latestSourceRef.current = { markdown, revision: sourceRevision };
 
     if (dirty) {
@@ -489,14 +616,17 @@ export function MarkdownArtifactEditor({
     }
 
     const normalizedMarkdown = normalizeMarkdownForMdxEditor(markdown);
+    if (normalizedMarkdown !== draftMarkdownRef.current) {
+      replaceMarkdownSilently(normalizedMarkdown);
+    }
     setBaseMarkdown(normalizedMarkdown);
+    draftMarkdownRef.current = normalizedMarkdown;
     setDraftMarkdown(normalizedMarkdown);
     setBaseRevision(sourceRevision);
     setSaveError(undefined);
     setConflict(false);
     pendingSourceRef.current = undefined;
-    setEditorKey((value) => value + 1);
-  }, [dirty, markdown, sourceRevision]);
+  }, [dirty, markdown, replaceMarkdownSilently, sourceRevision]);
 
   const persistMarkdown = useCallback(async (
     nextDraft: string,
@@ -508,13 +638,30 @@ export function MarkdownArtifactEditor({
     setSaveError(undefined);
 
     try {
+      const sourceBeforeSave = latestSourceRef.current;
       const savedMarkdown = writerMarkdownForSave(nextDraft);
-      const revision = await onSave(savedMarkdown, revisionBeforeSave);
-      const savedRevision = revision ?? revisionBeforeSave;
-      setBaseMarkdown(nextDraft);
-      setDraftMarkdown(nextDraft);
+      const result = await onSave(savedMarkdown, revisionBeforeSave);
+      const savedRevision = typeof result === 'number'
+        ? result
+        : result?.revision ?? revisionBeforeSave;
+      const backendMarkdown = typeof result === 'object'
+        ? normalizeMarkdownForMdxEditor(result.markdown)
+        : nextDraft;
+      const hasNewerDraft = draftMarkdownRef.current !== nextDraft;
+      setBaseMarkdown(backendMarkdown);
+      if (!hasNewerDraft) {
+        if (backendMarkdown !== draftMarkdownRef.current) {
+          replaceMarkdownSilently(backendMarkdown);
+        }
+        draftMarkdownRef.current = backendMarkdown;
+        setDraftMarkdown(backendMarkdown);
+      }
       setBaseRevision(savedRevision);
-      latestSourceRef.current = { markdown: savedMarkdown, revision: savedRevision };
+      staleSourceEchoRef.current = sourceBeforeSave;
+      latestSourceRef.current = {
+        markdown: writerMarkdownForSave(backendMarkdown),
+        revision: savedRevision,
+      };
       pendingSourceRef.current = undefined;
       setConflict(false);
       return true;
@@ -530,7 +677,7 @@ export function MarkdownArtifactEditor({
       savingRef.current = false;
       setSaving(false);
     }
-  }, [onSave, readOnly, t]);
+  }, [onSave, readOnly, replaceMarkdownSilently, t]);
 
   const saveChanges = useCallback(async (): Promise<boolean> => {
     if (!dirty || savingRef.current || readOnly) return false;
@@ -538,6 +685,32 @@ export function MarkdownArtifactEditor({
   }, [baseRevision, dirty, draftMarkdown, persistMarkdown, readOnly]);
 
   saveChangesRef.current = saveChanges;
+
+  useEffect(() => {
+    if (autoSaveTimerRef.current !== undefined) {
+      window.clearTimeout(autoSaveTimerRef.current);
+      autoSaveTimerRef.current = undefined;
+    }
+    if (!dirty || readOnly || saving || saveError || conflict) return undefined;
+
+    autoSaveTimerRef.current = window.setTimeout(() => {
+      autoSaveTimerRef.current = undefined;
+      void saveChangesRef.current();
+    }, MARKDOWN_AUTOSAVE_IDLE_MS);
+
+    return () => {
+      if (autoSaveTimerRef.current !== undefined) {
+        window.clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = undefined;
+      }
+    };
+  }, [conflict, dirty, draftMarkdown, readOnly, saveError, saving]);
+
+  const handleMarkdownChange = useCallback((nextDraft: string) => {
+    draftMarkdownRef.current = nextDraft;
+    setDraftMarkdown(nextDraft);
+    if (!conflictRef.current) setSaveError(undefined);
+  }, []);
 
   useEffect(() => {
     if (!editingKey || readOnly) return undefined;
@@ -645,6 +818,7 @@ export function MarkdownArtifactEditor({
     window.requestAnimationFrame(() => {
       if (root && restorePoint) restoreMarkdownSelection(root, restorePoint);
       if (surface && scrollTop !== undefined) surface.scrollTop = scrollTop;
+      draftMarkdownRef.current = nextDraft;
       setDraftMarkdown(nextDraft);
       void persistMarkdown(nextDraft, baseRevision);
     });
@@ -901,11 +1075,10 @@ export function MarkdownArtifactEditor({
         <div className='writer-markdown-editor__main'>
           <MDXEditor
             ref={editorRef}
-            key={editorKey}
             className='writer-markdown-editor__surface'
             markdown={baseMarkdown}
             readOnly={readOnly}
-            onChange={setDraftMarkdown}
+            onChange={handleMarkdownChange}
             plugins={[
               headingsPlugin(),
               listsPlugin(),

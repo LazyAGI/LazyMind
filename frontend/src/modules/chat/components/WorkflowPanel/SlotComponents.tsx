@@ -2536,7 +2536,7 @@ function SlotWriterDocument({
       setRendered({ ...result, document: displayDocument });
       setDownloadMarkdownContent(displayDocument);
       applySavedRevision(result.revision);
-      return result.revision;
+      return { markdown: displayDocument, revision: result.revision };
     } catch (saveError) {
       if ((saveError as { response?: { status?: number } })?.response?.status === 409) {
         onRefresh?.();
@@ -3796,7 +3796,7 @@ function SlotMarkdownFile({
       setLocalRevision(revision);
       setLocalRevisionCount((previous) => Math.max(previous ?? 0, revisionCount ?? 0, revision));
     }
-    return revision;
+    return { markdown, revision };
   }, [apiListIndex, markdownFilename, patchSlotItemValue, raw, readOnly, resolvedSlotId, revisionCount, sessionId, slotId]);
 
   const refreshMarkdown = useCallback(() => {
