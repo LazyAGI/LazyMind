@@ -121,7 +121,14 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch):
     assert '### User Instruction\n\nhello\n\nATTENTION — `ask_user`' in agent_queries[0]
     assert 'answer:### Runtime Context' in body
     assert 'hello' in body
-    assert '"status": "FINISHED"' in body
+    payloads = [json.loads(chunk) for chunk in body.strip().split('\n\n')]
+    terminal = payloads[-1]['data']['runtime_event']
+    assert terminal['type'] == 'run_finished'
+    assert terminal['data'] == {
+        'status': 'completed',
+        'reason': 'normal',
+        'partial_output': True,
+    }
 
 
 def test_sensitive_input_is_blocked_before_model_execution(monkeypatch):
@@ -155,7 +162,17 @@ def test_sensitive_input_is_blocked_before_model_execution(monkeypatch):
         'text': chat_service.SENSITIVE_FILTER_RESPONSE_TEXT,
         'sources': [],
     }
-    assert payloads[1]['data'] == {'status': 'FINISHED', 'tool_call_turns': 0}
+    terminal_payload = payloads[1]['data']
+    assert terminal_payload['think'] is None
+    assert terminal_payload['text'] is None
+    assert terminal_payload['sources'] == []
+    terminal = terminal_payload['runtime_event']
+    assert terminal['type'] == 'run_finished'
+    assert terminal['data'] == {
+        'status': 'completed',
+        'reason': 'normal',
+        'partial_output': True,
+    }
 
 
 def test_task_profile_review_emits_ephemeral_pseudo_stream(monkeypatch):
