@@ -43,7 +43,7 @@ func MarketListInstallTasks(w http.ResponseWriter, r *http.Request) {
 	}
 	userID := common.UserID(r)
 	if userID == "" {
-		common.ReplyErr(w, "X-User-Id is required", http.StatusBadRequest)
+		common.ReplyErr(w, "missing x-user-id", http.StatusBadRequest)
 		return
 	}
 	status := strings.TrimSpace(r.URL.Query().Get("status"))
@@ -101,7 +101,7 @@ func MarketGetInstallTask(w http.ResponseWriter, r *http.Request) {
 	}
 	userID := common.UserID(r)
 	if userID == "" {
-		common.ReplyErr(w, "X-User-Id is required", http.StatusBadRequest)
+		common.ReplyErr(w, "missing x-user-id", http.StatusBadRequest)
 		return
 	}
 	jobID := strings.TrimSpace(common.PathVar(r, "job_id"))
@@ -163,7 +163,7 @@ func MarketListInstalls(w http.ResponseWriter, r *http.Request) {
 	}
 	userID := common.UserID(r)
 	if userID == "" {
-		common.ReplyErr(w, "X-User-Id is required", http.StatusBadRequest)
+		common.ReplyErr(w, "missing x-user-id", http.StatusBadRequest)
 		return
 	}
 

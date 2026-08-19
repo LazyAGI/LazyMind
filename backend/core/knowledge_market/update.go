@@ -118,7 +118,7 @@ func MarketUpdateAll(w http.ResponseWriter, r *http.Request) {
 	userID := strings.TrimSpace(common.UserID(r))
 	userName := strings.TrimSpace(common.UserName(r))
 	if userID == "" {
-		common.ReplyErr(w, "X-User-Id is required", http.StatusBadRequest)
+		common.ReplyErr(w, "missing x-user-id", http.StatusBadRequest)
 		return
 	}
 	active, err := doc.HasActiveMarketBatch(r.Context(), db, userID)
