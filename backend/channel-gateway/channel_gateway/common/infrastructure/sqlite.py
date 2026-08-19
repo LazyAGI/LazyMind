@@ -215,6 +215,13 @@ def _snapshot(value: Any) -> dict[str, Any]:
             value = json.loads(value)
         except json.JSONDecodeError:
             return {}
+    if isinstance(value, list):
+        return {
+            'selection': {
+                'kind': 'conversation',
+                'items': list(value),
+            }
+        }
     return dict(value) if isinstance(value, dict) else {}
 
 
@@ -850,7 +857,7 @@ class SQLiteGatewayStore(GatewayStore):
                     or next_state.get('message_id')
                     or ''
                 )
-            value = {'feishu_workspace': next_state}
+            value['feishu_workspace'] = next_state
             result = connection.execute(
                 """
                 UPDATE channel_navigation_states
@@ -897,7 +904,7 @@ class SQLiteGatewayStore(GatewayStore):
             )
             workspace.update(patch)
             workspace['revision'] = current_revision + 1
-            value = {'feishu_workspace': workspace}
+            value['feishu_workspace'] = workspace
             connection.execute(
                 """
                 INSERT INTO channel_navigation_states(
@@ -950,7 +957,7 @@ class SQLiteGatewayStore(GatewayStore):
                 return dict(workspace)
             workspace = dict(workspace)
             workspace['message_id'] = message_id
-            value = {'feishu_workspace': workspace}
+            value['feishu_workspace'] = workspace
             connection.execute(
                 """
                 INSERT INTO channel_navigation_states(

@@ -243,6 +243,7 @@ func TestExternalAgentPromptCarriesOnlySafeLazyMindContext(t *testing.T) {
 			"skill_names": []string{"image-generation"}, "knowledge_base_ids": []string{"kb-1"},
 			"workflow_refs": []string{"builtin:image"},
 		},
+		"filters":     map[string]any{"kb_id": []string{"kb-configured"}},
 		"history":     []map[string]string{{"role": "user", "content": "earlier turn"}},
 		"llm_config":  map[string]any{"api_key": "must-not-leak"},
 		"tool_config": map[string]any{"token": "must-not-leak"},
@@ -251,6 +252,7 @@ func TestExternalAgentPromptCarriesOnlySafeLazyMindContext(t *testing.T) {
 	for _, required := range []string{
 		"session_id: session-1", "workflow_id: image", "current_step: prompt",
 		"skills: image-generation", "knowledge_base_ids: kb-1", "workflow_refs: builtin:image",
+		"knowledge_base_ids: kb-configured",
 		"earlier turn", "make an image",
 	} {
 		if !strings.Contains(prompt, required) {
@@ -267,6 +269,18 @@ func TestExternalAgentPromptCarriesOnlySafeLazyMindContext(t *testing.T) {
 	}, "next turn", true)
 	if strings.Contains(resumed, "do-not-replay") {
 		t.Fatalf("resumed provider thread received duplicate history: %s", resumed)
+	}
+}
+
+func TestExternalConversationKnowledgeBaseIDsRespectsExplicitEmptyScope(t *testing.T) {
+	ids := externalConversationKnowledgeBaseIDs(
+		context.Background(),
+		nil,
+		map[string]any{"filters": map[string]any{"kb_id": []string{}}},
+		"conversation-1",
+	)
+	if len(ids) != 0 {
+		t.Fatalf("explicit empty knowledge scope = %v, want none", ids)
 	}
 }
 

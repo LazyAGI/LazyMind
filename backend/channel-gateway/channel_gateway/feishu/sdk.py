@@ -550,6 +550,7 @@ class _LarkCardReplyStream(ReplyStream):
         timeout_seconds: float,
         message_id: str = '',
         should_render: Callable[[], bool] | None = None,
+        on_message_started: Callable[[str], None] | None = None,
         render_card: Callable[
             [CoreStreamUpdate, bool, bool],
             dict[str, Any],
@@ -561,6 +562,7 @@ class _LarkCardReplyStream(ReplyStream):
         self._timeout_seconds = timeout_seconds
         self.message_id = message_id
         self._should_render = should_render or (lambda: True)
+        self._on_message_started = on_message_started
         self._render_card = render_card
         self._updates: queue.Queue[tuple[object, object]] = queue.Queue()
         self._future = None
@@ -647,6 +649,11 @@ class _LarkCardReplyStream(ReplyStream):
             result.message_id,
         )
         self.message_id = str(result.message_id)
+        if self._on_message_started is not None:
+            await asyncio.to_thread(
+                self._on_message_started,
+                self.message_id,
+            )
         sequence = 0
         rendered: dict[str, str] = {}
         snapshot = CoreStreamUpdate()
@@ -1464,6 +1471,7 @@ class LarkChannelClient:
         initial_card: dict[str, Any],
         message_id: str = '',
         should_render: Callable[[], bool] | None = None,
+        on_message_started: Callable[[str], None] | None = None,
         render_card: Callable[
             [CoreStreamUpdate, bool, bool],
             dict[str, Any],
@@ -1479,6 +1487,7 @@ class LarkChannelClient:
             ),
             message_id=message_id,
             should_render=should_render,
+            on_message_started=on_message_started,
             render_card=render_card,
         )
 

@@ -25,6 +25,7 @@ type SubAgentTask struct {
 	WorkspacePath     string          `gorm:"column:workspace_path;type:varchar(512);not null;default:''"`
 	InputSlots        json.RawMessage `gorm:"column:input_slots;type:json;not null;default:'[]'"`
 	OutputSlots       json.RawMessage `gorm:"column:output_slots;type:json;not null;default:'[]'"`
+	Sources           RawJSON         `gorm:"column:sources;type:json;not null;default:'[]'"`
 	CreateUserID      string          `gorm:"column:create_user_id;type:varchar(255);not null;default:''"`
 	CreatedAt         time.Time       `gorm:"column:created_at;not null"`
 	UpdatedAt         time.Time       `gorm:"column:updated_at;not null"`

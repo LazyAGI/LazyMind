@@ -38,6 +38,7 @@ from channel_gateway.feishu.presentation import (
 from channel_gateway.feishu.task_monitor import find_task
 from channel_gateway.feishu.workspace import (
     FeishuWorkspaceState,
+    stale_workspace_card,
 )
 
 
@@ -276,6 +277,11 @@ class FeishuDeliveryProvider:
             message.provider_context.get('workspace_message_id')
             or ''
         )
+        reanchor_to_bottom = (
+            message.provider_context.get(
+                'workspace_reanchor_to_bottom'
+            ) is True
+        )
         management = (
             message.provider_context.get('workspace_surface') == 'management'
         )
@@ -286,10 +292,23 @@ class FeishuDeliveryProvider:
                     **message.provider_context,
                     'chat_id': chat_id,
                 }),
-                message_id=workspace_message_id,
+                message_id=(
+                    '' if reanchor_to_bottom else workspace_message_id
+                ),
                 should_render=(
                     (lambda: self._workspace_chat_is_visible(message))
-                    if management
+                    if management or reanchor_to_bottom
+                    else None
+                ),
+                on_message_started=(
+                    (
+                        lambda message_id: self._adopt_stream_message(
+                            message,
+                            sender,
+                            message_id,
+                        )
+                    )
+                    if reanchor_to_bottom
                     else None
                 ),
             )
@@ -306,6 +325,37 @@ class FeishuDeliveryProvider:
             core=self._lazymind,
             owner_user_id=message.owner_user_id,
         )
+
+    def _adopt_stream_message(
+        self,
+        message: ClaimedInbound,
+        sender: Any,
+        message_id: str,
+    ) -> None:
+        context = message.provider_context
+        source = FeishuWorkspaceState.from_dict(
+            context.get('workspace_state')
+        )
+        saved = self._store.save_feishu_workspace_message(
+            message.account_id,
+            message.order_key,
+            message_id,
+            source.active_operation_id,
+            source.message_id,
+            source.revision,
+        )
+        if str(saved.get('message_id') or '') != message_id:
+            context['_workspace_stream_suppress_final'] = True
+            sender.update_card(
+                message_id=message_id,
+                card=stale_workspace_card(
+                    str(saved.get('output_language') or 'zh')
+                ),
+            )
+            return
+        context['workspace_state'] = saved
+        context['workspace_message_id'] = message_id
+        context['workspace_stream_message_id'] = message_id
 
     def _workspace_chat_is_visible(
         self,
@@ -594,7 +644,12 @@ class FeishuDeliveryProvider:
                     part.get('replace_message_id')
                     or (
                         expected_message_id
-                        if part.get('workspace') is True
+                        if (
+                            part.get('workspace') is True
+                            and message.provider_context.get(
+                                'workspace_reanchor_to_bottom'
+                            ) is not True
+                        )
                         else ''
                     )
                     or ''

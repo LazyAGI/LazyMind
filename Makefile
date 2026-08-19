@@ -1,5 +1,5 @@
 # Code style: Python (flake8) + Go (gofmt). Mirrors algorithm/lazyllm Makefile pattern.
-.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary lint-workflow-naming lint-migration-immutability test test-hermetic test-hermetic-setup test-hermetic-check build up up-build local-runtime-manager-build lazymind-cli-build local-up local-up-lan local-down local-clean local-reset local-win-doctor local-win-build local-win-up local-win-up-lan local-win-down local-win-status local-win-clean local-win-reset down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-darwin-arm64 desktop-darwin-arm64-dmg desktop-darwin-arm64-clean desktop-windows-x64 desktop-windows-x64-installer desktop-windows-x64-clean desktop-cache-clean desktop-clean
+.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary lint-workflow-naming lint-migration-immutability test test-hermetic test-hermetic-setup test-hermetic-check build up up-build local-runtime-manager-build lazymind-cli-build assistant-bridge-start assistant-bridge-stop local-up local-up-lan local-down local-clean local-reset local-win-doctor local-win-build local-win-up local-win-up-lan local-win-down local-win-status local-win-clean local-win-reset down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-darwin-arm64 desktop-darwin-arm64-dmg desktop-darwin-arm64-clean desktop-windows-x64 desktop-windows-x64-installer desktop-windows-x64-clean desktop-cache-clean desktop-clean
 .DEFAULT_GOAL := help
 
 LOCAL_CONFIG_ENV ?= local/config.env
@@ -25,6 +25,10 @@ override export LAZYMIND_LOCAL_BUILD_ROOT := $(LOCAL_BUILD_DIR)
 override LOCAL_RUNTIME_MANAGER_BIN := $(LOCAL_BUILD_DIR)/bin/local-runtime-manager
 override LOCAL_RUNTIME_MANAGER_WIN_BIN := $(LOCAL_BUILD_DIR)/bin/local-runtime-manager.exe
 override LAZYMIND_CLI_BIN := $(LOCAL_BUILD_DIR)/bin/lazymind
+HOST_UNAME_S := $(shell uname -s 2>/dev/null)
+HOST_UNAME_M := $(shell uname -m 2>/dev/null)
+HOST_GOOS := $(if $(filter Darwin,$(HOST_UNAME_S)),darwin,$(if $(filter Linux,$(HOST_UNAME_S)),linux,unsupported))
+HOST_GOARCH := $(if $(filter arm64 aarch64,$(HOST_UNAME_M)),arm64,$(if $(filter x86_64 amd64,$(HOST_UNAME_M)),amd64,unsupported))
 LOCAL_WIN_SCRIPT := $(CURDIR)/local/scripts/local-win.ps1
 DESKTOP_WIN_SCRIPT := $(CURDIR)/desktop/scripts/build-windows-x64.ps1
 LAZYMIND_LOCAL_DOWN_TIMEOUT ?= 150s
@@ -185,11 +189,11 @@ GOLANGCI_LINT ?= $(shell command -v golangci-lint 2>/dev/null || printf '%s/bin/
 
 help:
 	@echo "LazyMind Make targets:"
-	@echo "  make up         - Start services in background (with derived profiles)"
+	@echo "  make up         - Start Docker services and the local Assistant Bridge"
 	@echo "                    file-watcher runs in compose by default"
 	@echo "                    Use LAZYMIND_FILE_WATCHER_MODE=host for host-process debugging"
 	@echo "                    Use SERVICES=svc1,svc2 to start specific services only"
-	@echo "  make up-build   - Build images and start services"
+	@echo "  make up-build   - Build images, start services, and start the Assistant Bridge"
 	@echo "                    Use SERVICES=svc1,svc2 to target specific services"
 	@echo "  make local-up - Build/start local LazyMind without containers"
 	@echo "  make local-up-lan - Build/start local LazyMind for LAN access with local admin auto-login enabled"
@@ -206,7 +210,7 @@ help:
 	@echo "  make local-win-doctor - Check native Windows local-runtime prerequisites"
 	@echo "  make local-clean - Remove repo-local local/build application artifacts"
 	@echo "  make local-reset - Stop local runtime, clear user-path runtime data, and remove local/build"
-	@echo "  make down       - Stop Cloud/Kong compose services"
+	@echo "  make down       - Stop Cloud/Kong compose services and the Assistant Bridge"
 	@echo "                    Use SERVICES=svc1,svc2 to stop specific services only"
 	@echo "  make build      - Build compose services (mineru profile only when needed)"
 	@echo "                    Use SERVICES=svc1,svc2 to build specific services"
@@ -419,8 +423,10 @@ up:
 	else \
 		echo "✅ file-watcher container enabled"; \
 	fi
+	@$(MAKE) --no-print-directory assistant-bridge-start
 
 down:
+	@$(MAKE) --no-print-directory assistant-bridge-stop
 	@echo "🛑 Stopping default Cloud/Kong compose stack, if present..."
 	@COMPOSE_PROFILES="$(_CLEANUP_COMPOSE_PROFILE_NAMES)" $(_COMPOSE_DEFAULT) $(_COMPOSE_DOWN_ACTION) \
 		$(_COMPOSE_DOWN_SERVICES) || true
@@ -441,6 +447,7 @@ up-build:
 	else \
 		echo "✅ file-watcher container enabled"; \
 	fi
+	@$(MAKE) --no-print-directory assistant-bridge-start
 
 local-runtime-manager-build:
 	@mkdir -p "$(dir $(LOCAL_RUNTIME_MANAGER_BIN))"
@@ -448,7 +455,31 @@ local-runtime-manager-build:
 
 lazymind-cli-build:
 	@mkdir -p "$(dir $(LAZYMIND_CLI_BIN))"
-	@cd local/lazymind-cli && $(GO) build -buildvcs=false -o "$(LAZYMIND_CLI_BIN)" ./cmd/lazymind
+	@if command -v "$(GO)" >/dev/null 2>&1; then \
+		cd local/lazymind-cli && $(GO) build -buildvcs=false -o "$(LAZYMIND_CLI_BIN)" ./cmd/lazymind; \
+	elif [ "$(HOST_GOOS)" != "unsupported" ] && [ "$(HOST_GOARCH)" != "unsupported" ]; then \
+		echo "🔨 Building the host Assistant Bridge with Docker ($(HOST_GOOS)/$(HOST_GOARCH))..."; \
+		docker run --rm \
+			--user "$$(id -u):$$(id -g)" \
+			-e CGO_ENABLED=0 -e GOOS="$(HOST_GOOS)" -e GOARCH="$(HOST_GOARCH)" \
+			-e GOCACHE=/tmp/go-cache -e GOMODCACHE=/tmp/go-mod \
+			-e GOPROXY="$(GOPROXY)" -e GOSUMDB="$(GOSUMDB)" \
+			-v "$(CURDIR):/src" -w /src/local/lazymind-cli \
+			"$(DOCKER_MIRROR)golang:1.25.11" \
+			go build -buildvcs=false -o /src/local/build/bin/lazymind ./cmd/lazymind; \
+	else \
+		echo "❌ This host platform is not supported by the Docker Assistant Bridge builder."; \
+		exit 1; \
+	fi
+
+assistant-bridge-start: lazymind-cli-build
+	@"$(LAZYMIND_CLI_BIN)" assistant start >/dev/null
+	@echo "✅ LazyMind 助理桥接器已启动；可直接在设置 → 助理中连接本机 Agent"
+
+assistant-bridge-stop:
+	@if [ -x "$(LAZYMIND_CLI_BIN)" ]; then \
+		"$(LAZYMIND_CLI_BIN)" assistant stop >/dev/null || true; \
+	fi
 
 desktop-darwin-arm64:
 	@bash desktop/scripts/build-darwin-arm64.sh
@@ -513,11 +544,14 @@ endif
 
 local-up: local-runtime-manager-build lazymind-cli-build
 	@"$(LOCAL_RUNTIME_MANAGER_BIN)" up
+	@$(MAKE) --no-print-directory assistant-bridge-start
 
 local-up-lan: local-runtime-manager-build lazymind-cli-build
 	@LAZYMIND_LOCAL_NETWORK_PROFILE=lan LAZYMIND_LOCAL_AUTO_LOGIN_ALLOW_LAN=true "$(LOCAL_RUNTIME_MANAGER_BIN)" up
+	@$(MAKE) --no-print-directory assistant-bridge-start
 
 local-down:
+	@$(MAKE) --no-print-directory assistant-bridge-stop
 	@if [ -x "$(LOCAL_RUNTIME_MANAGER_BIN)" ]; then \
 		"$(LOCAL_RUNTIME_MANAGER_BIN)" down; \
 	else \

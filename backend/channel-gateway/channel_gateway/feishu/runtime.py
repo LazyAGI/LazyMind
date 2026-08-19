@@ -41,6 +41,7 @@ from channel_gateway.feishu.workspace import (
     FeishuWorkspaceState,
     MENU_EVENT_VIEWS,
     menu_command,
+    stale_workspace_card,
 )
 _logger = logging.getLogger(__name__)
 
@@ -48,11 +49,11 @@ _logger = logging.getLogger(__name__)
 _MAX_INBOUND_IMAGE_BYTES = 10 * 1024 * 1024
 _ACTION_REFRESH_DELAY_SECONDS = 0.35
 _ACTION_REFRESH_RETRY_DELAYS = (0.5, 1.0, 2.0, 4.0)
-_BOT_MENU_CONFIG_VERSION = 5
+_BOT_MENU_CONFIG_VERSION = 6
 
 
 _RESULT_WORKSPACE_ACTIONS = {
-    'maintenance.clear_conversation',
+    'maintenance.new_conversation',
     'new_session.create',
     'prompt.run',
 }
@@ -482,6 +483,7 @@ class FeishuRuntime:
         provider_context = {
             **provider_context,
             'workspace_surface': 'reply',
+            'workspace_reanchor_to_bottom': True,
             'channel_execution': execution.to_dict(),
             'command_action': _chat_command_action(
                 effective_text,
@@ -623,7 +625,7 @@ class FeishuRuntime:
             ).encode('utf-8')
         ).hexdigest()
         if workspace.message_id and workspace.message_id != action.message_id:
-            return None
+            return stale_workspace_card(workspace.output_language)
 
         action_data = action.workspace_action or {}
         action_kind = str(action_data.get('kind') or '')
@@ -635,27 +637,7 @@ class FeishuRuntime:
             or str(action_data.get('expected_operation_id') or '')
             != workspace.active_operation_id
         ):
-            if action.action == 'local' and workspace.view in {
-                'chat',
-                'settings',
-            }:
-                card = FeishuWorkspaceRenderer.render(
-                    provider_context=self._workspace_provider_context(
-                        account_id=route.account_id,
-                        address_hash=address_hash,
-                        workspace=workspace,
-                        chat_id=action.chat_id,
-                        conversation_id=conversation_id,
-                    ),
-                    presentations=[],
-                )
-                self._log_action_ready(
-                    action,
-                    started_at=started_at,
-                    cached=True,
-                )
-                return card
-            return None
+            return stale_workspace_card(workspace.output_language)
         if action_kind == 'setting.update':
             command_action = action.command_action
             parameters = (
@@ -666,27 +648,21 @@ class FeishuRuntime:
             expected_conversation_id = str(
                 action_data.get('expected_conversation_id') or ''
             )
+            change = (
+                parameters.get('change')
+                if isinstance(parameters, dict)
+                else None
+            )
             if (
                 str(action_data.get('view') or 'capabilities')
-                not in {'capabilities', 'settings'}
-                or not expected_conversation_id
+                not in {'capabilities', 'assistant', 'settings'}
                 or not isinstance(parameters, dict)
+                or not isinstance(change, dict)
                 or str(parameters.get('expected_conversation_id') or '')
                 != expected_conversation_id
                 or expected_conversation_id != conversation_id
             ):
-                return None
-        if action_kind == 'new_session.workflow_mode':
-            navigation = self._store.get_navigation_state(
-                route.account_id,
-                address_hash,
-            ) or {}
-            if (
-                conversation_id
-                or navigation.get('mode') != 'new_pending'
-                or not workspace.active_operation_id
-            ):
-                return None
+                return stale_workspace_card(workspace.output_language)
         if action.action == 'local' and not action_kind:
             return None
 
@@ -804,7 +780,7 @@ class FeishuRuntime:
             envelope,
             lease.fence,
         ):
-            return None
+            return stale_workspace_card(workspace.output_language)
         self._log_action_ready(
             action,
             started_at=started_at,
@@ -925,6 +901,15 @@ class FeishuRuntime:
                 address_hash,
             )
         )
+        if not source_message_id:
+            source_message_id = current.message_id
+            source_operation_id = current.active_operation_id
+            source_revision = current.revision
+            state = current
+            state.navigate(view)
+            state.active_operation_id = message_key
+            state.advance()
+            prepared_state = state.to_dict()
         if (
             source_message_id
             and (
@@ -962,6 +947,7 @@ class FeishuRuntime:
                 text={
                     'capabilities': '查看能力',
                     'conversations': '切换会话',
+                    'assistant': '查看助理',
                 }[view],
                 provider_context=provider_context,
             )
@@ -1256,13 +1242,6 @@ class FeishuRuntime:
             workspace.view = 'conversations'
         elif kind == 'history.open':
             workspace.view = 'conversations'
-        elif kind == 'capability.toggle':
-            workspace.view = 'capabilities'
-        elif kind == 'new_session.workflow_mode':
-            mode = str(action.get('mode') or '')
-            if mode in {'auto', 'dynamic'}:
-                workspace.pending_workflow_mode = mode
-            workspace.view = 'capabilities'
         elif kind == 'new_session.open':
             workspace.open_new_session()
         elif kind == 'new_session.cancel':
@@ -1272,7 +1251,7 @@ class FeishuRuntime:
             workspace.prepare_new_session()
         elif kind == 'setting.update':
             target_view = str(action.get('view') or 'capabilities')
-            if target_view in {'capabilities', 'settings'}:
+            if target_view in {'capabilities', 'assistant', 'settings'}:
                 workspace.view = target_view
         elif kind == 'preference':
             name = str(action.get('name') or '')
@@ -1295,7 +1274,7 @@ class FeishuRuntime:
         elif kind == 'maintenance.reset_preferences':
             workspace.reset_preferences()
             workspace.view = 'settings'
-        elif kind == 'maintenance.clear_conversation':
+        elif kind == 'maintenance.new_conversation':
             workspace.prepare_new_session()
 
     def _workspace_provider_context(
@@ -1327,7 +1306,10 @@ class FeishuRuntime:
             ),
             include_capability_settings=(
                 workspace.view == 'capabilities'
-                and bool(conversation_id)
+                and bool(
+                    conversation_id
+                    or navigation.get('mode') == 'new_pending'
+                )
             ),
         )
         return {

@@ -238,6 +238,16 @@
 .settings-integrated-master p { margin: 0; color: #64748b; font-size: 12px; line-height: 1.55; }
 .settings-integrated-master-action { display: flex; align-items: center; gap: 12px; }
 .settings-integrated-surface { min-width: 0; }
+.settings-integrated-surface.is-assistants .agent-integration-page {
+  min-height: 0;
+  padding: 0;
+  background: transparent;
+}
+.settings-integrated-surface.is-assistants .agent-integration-header,
+.settings-integrated-surface.is-assistants .agent-integration-page > .ant-alert,
+.settings-integrated-surface.is-assistants .agent-integration-page > .ant-spin-nested-loading {
+  max-width: none;
+}
 
 .settings-integrated-surface.is-models .model-provider-service-page,
 .settings-integrated-surface.is-system-tools .model-provider-service-page {

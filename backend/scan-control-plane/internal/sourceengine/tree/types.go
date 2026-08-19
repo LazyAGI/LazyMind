@@ -95,6 +95,11 @@ type TargetTreeSearchRequest struct {
 	MaxItems         int                     `json:"max_items,omitempty"`
 }
 
+type TargetTreeRecommendationRequest struct {
+	AgentID         string         `json:"agent_id,omitempty"`
+	ProviderOptions map[string]any `json:"provider_options,omitempty"`
+}
+
 type SourceTreeChildrenRequest struct {
 	SourceID          string         `json:"-"`
 	BindingID         string         `json:"binding_id,omitempty"`
@@ -181,6 +186,8 @@ type SourceDocumentListResponse struct {
 type TargetTreeEngine interface {
 	ListChildren(ctx context.Context, req TargetTreeChildrenRequest) (TreeNodePage, error)
 	Search(ctx context.Context, req TargetTreeSearchRequest) (TreeNodePage, error)
+	Recommend(ctx context.Context, req TargetTreeRecommendationRequest) (TreeNodePage, error)
+	RecommendList(ctx context.Context, req TargetTreeRecommendationRequest) (TreeNodePage, error)
 }
 
 type SourceTreeQueryEngine interface {

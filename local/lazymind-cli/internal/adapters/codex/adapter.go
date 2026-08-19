@@ -188,13 +188,17 @@ func (a *Adapter) Connect(ctx context.Context) (Status, error) {
 }
 
 func (a *Adapter) Status(ctx context.Context) (Status, error) {
+	probe, probeErr := a.bridge.Probe(ctx)
+	return a.StatusWithProbe(ctx, probe, probeErr)
+}
+
+func (a *Adapter) StatusWithProbe(ctx context.Context, probe mcpbridge.ProbeResult, probeErr error) (Status, error) {
 	if a.discoveryError != nil {
 		return Status{
 			Agent: "codex", Installed: false, Ready: false,
 			ReadinessError: a.discoveryError.Error(),
 		}, nil
 	}
-	probe, probeErr := a.bridge.Probe(ctx)
 	status := Status{Agent: "codex", Installed: true, ServiceReady: probeErr == nil}
 	if probeErr == nil {
 		status.Endpoint = probe.Endpoint
@@ -225,11 +229,6 @@ func (a *Adapter) Disconnect(ctx context.Context) (Status, error) {
 }
 
 func (a *Adapter) populateStatus(ctx context.Context, status Status) (Status, error) {
-	version, err := agentexec.Run(ctx, a.binary, "--version")
-	if err != nil {
-		return Status{}, fmt.Errorf("read Codex version: %w", err)
-	}
-	status.Version = strings.TrimSpace(version)
 	config, exists, err := a.getConfig(ctx)
 	if err != nil {
 		return Status{}, err
