@@ -51,6 +51,19 @@ func NewTestDB(t *testing.T) *TestDB {
 	return &TestDB{DB: db}
 }
 
+func RelaxSQLiteFixtureSkillUniqueIndexes(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	if db == nil || db.Dialector.Name() != "sqlite" {
+		return
+	}
+	if err := db.Exec("DROP INDEX IF EXISTS uk_skills_owner_identity").Error; err != nil {
+		t.Fatalf("drop sqlite fixture skill identity index: %v", err)
+	}
+	if err := db.Exec("DROP INDEX IF EXISTS uk_skills_owner_relative_root").Error; err != nil {
+		t.Fatalf("drop sqlite fixture skill relative root index: %v", err)
+	}
+}
+
 func ResetSkillTables(t *testing.T, db *TestDB) {
 	t.Helper()
 

@@ -6,7 +6,7 @@ import {
   ChatConversationsResponseFinishReasonEnum,
 } from "@/api/generated/chatbot-client";
 import { allowedImageTypes } from "../../ImageUpload";
-import type { ChatFileList, ChatInputImperativeProps, SendMessageParams } from "../../ChatInput";
+import type { ChatFileList, ChatInputImperativeProps, SendMessageParams } from "../../ChatInput/types";
 import { RoleTypes } from "@/modules/chat/constants/common";
 import {
   CHAT_AUTO_ADVANCE_EVENT,
@@ -14,7 +14,6 @@ import {
   CHAT_RESUME_CONVERSATION_KEY,
   type ChatAutoAdvanceDetail,
 } from "@/modules/chat/constants/chat";
-import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
 import { streamManager } from "@/modules/chat/utils/StreamManager";
 import { ChatServiceApi } from "@/modules/chat/utils/request";
 import UIUtils from "@/modules/chat/utils/ui";
@@ -327,42 +326,6 @@ export function useChatConversation({
       showFFmpegDependencyPrompt();
     }
 
-    if (result.task_created && result.task_created.task_id) {
-      const convId =
-        result.conversation_id || currentConversationIdRef.current || "";
-      const tc = result.task_created;
-      const taskStore = useTaskCenterStore.getState();
-      const existingTask = taskStore.getTasks(convId).find(
-        (task) => task.task_id === tc.task_id,
-      );
-      const terminal = existingTask && [
-        "succeeded", "failed", "interrupted", "canceled",
-      ].includes(existingTask.status);
-      taskStore.upsertTask(convId, {
-        task_id: tc.task_id,
-        trigger_history_id: tc.trigger_history_id || result.history_id,
-        seq_in_conversation: tc.seq_in_conversation,
-        title: tc.title,
-        agent_type: tc.agent_type,
-        mode: tc.mode,
-        ...(terminal ? {} : { status: tc.status || "pending" }),
-      });
-      if (!terminal) taskStore.subscribeTask(convId, tc.task_id);
-      if (tc.agent_type === "workflow_step" && tc.workflow_session_id) {
-        import("@/modules/chat/store/workflowPanel").then(({ useWorkflowStore }) => {
-          useWorkflowStore.getState().loadActiveSession(convId);
-        });
-      }
-    }
-
-    if (result.artifact_created?.artifact_id) {
-      const convId = result.conversation_id || currentConversationIdRef.current || "";
-      useTaskCenterStore.getState().upsertConversationArtifact(
-        convId,
-        result.artifact_created,
-      );
-    }
-
     const messageConversationId = result.conversation_id || "";
     const currentConversationIdAtStart = currentConversationIdRef.current;
     const isUsingTempId = currentConversationIdAtStart.startsWith("temp_");
@@ -520,6 +483,27 @@ export function useChatConversation({
           assistantMessageIndex = existingAssistantIndex;
           assistantMessage = newList[existingAssistantIndex];
         }
+      }
+
+
+      const incomingExternalSequence = Number(
+        result.external_event_sequence || 0,
+      );
+      const currentExternalSequence = Number(
+        assistantMessage?.external_event_sequence || 0,
+      );
+      const executionChanged =
+        !!result.execution &&
+        JSON.stringify(result.execution) !==
+          JSON.stringify(assistantMessage?.execution);
+      if (
+        incomingExternalSequence > 0 &&
+        currentExternalSequence >= incomingExternalSequence &&
+        (!result.history_id ||
+          result.history_id === assistantMessage?.history_id) &&
+        !executionChanged
+      ) {
+        return newList;
       }
 
       const isLastAssistantCompleted =
@@ -721,7 +705,13 @@ export function useChatConversation({
       error: (e) => onError(e),
       timeout: (e) => onTimeout(e),
     };
-    const sse = onOpenResumeSSE(conversationId, {});
+    const latestAssistant = messageListRef.current.findLast(
+      (item) => item?.role === RoleTypes.ASSISTANT,
+    );
+    const sse = onOpenResumeSSE(conversationId, {}, {
+      historyId: latestAssistant?.history_id,
+      afterSequence: Number(latestAssistant?.external_event_sequence || 0),
+    });
     sseRef.current = sse;
 
     streamManager.registerStream(conversationId, sse, callbacks);
@@ -991,7 +981,7 @@ export function useChatConversation({
           messageListRef.current,
         );
         disconnectConversationStream(previousConversationId, {
-          persistResumeKey: true,
+          persistResumeKey: false,
         });
       }
 
@@ -999,12 +989,6 @@ export function useChatConversation({
     }
 
     currentConversationIdRef.current = id;
-
-    if (id) {
-      import("@/modules/chat/store/workflowPanel").then(({ useWorkflowStore }) => {
-        useWorkflowStore.getState().loadActiveSession(id);
-      });
-    }
 
     streamManager.setActiveConversation(id || null);
     if (id) {

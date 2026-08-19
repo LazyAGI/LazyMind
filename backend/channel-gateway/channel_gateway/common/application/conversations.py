@@ -79,8 +79,6 @@ class ConversationActions:
         source_messages: Sequence[str] = (),
         catalog: dict[str, Any],
         features: ChannelFeatureProfile,
-        conversation_id_override: str | None = None,
-        external_agent: bool = False,
         activate_route: bool = True,
         ask_answers_structured: dict[str, Any] | None = None,
         inputs: Sequence[dict[str, str]] = (),
@@ -88,13 +86,9 @@ class ConversationActions:
         thinking_depth: str | None = None,
         on_stream: Callable[[CoreStreamUpdate], None] | None = None,
     ) -> ConversationResult:
-        conversation_id = (
-            conversation_id_override
-            if conversation_id_override is not None
-            else self._store.get_route(
-                account_id,
-                external_address_hash,
-            )
+        conversation_id = self._store.get_route(
+            account_id,
+            external_address_hash,
         )
         state = self._store.get_navigation_state(account_id, external_address_hash) or {}
         explicit_new = state.get('mode') == 'new_pending'
@@ -187,7 +181,6 @@ class ConversationActions:
                     structured=ask_answers_structured,
                 )
             options.features = features
-            options.external_agent = external_agent
             options.inputs.extend(dict(item) for item in inputs)
             options.ask_answers_structured = ask_answers_structured
             options.mentions.extend(dict(item) for item in mentions)

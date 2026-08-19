@@ -610,14 +610,28 @@ func skillBlobReferenced(tx *gorm.DB, hash string) (bool, error) {
 }
 
 func (s *SkillService) ListSkills(ctx context.Context, req ListSkillsRequest) (ListSkillsResponse, error) {
-	var rows []skillRow
-	if err := s.db.WithContext(ctx).
-		Where("owner_user_id = ? AND deleted_at IS NULL", req.UserID).
-		Where("NOT EXISTS (SELECT 1 FROM skill_market_items AS market_items WHERE market_items.source_skill_id = skills.id)").
-		Order("created_at DESC, id DESC").
-		Find(&rows).Error; err != nil {
+	req.UserID = strings.TrimSpace(req.UserID)
+	req.Keyword = strings.ToLower(strings.TrimSpace(req.Keyword))
+	req.Category = strings.TrimSpace(req.Category)
+	req.Tags = compactStrings(req.Tags)
+	if req.Offset < 0 {
+		req.Offset = 0
+	}
+
+	var total int64
+	if err := s.listSkillsQuery(ctx, req).Count(&total).Error; err != nil {
 		return ListSkillsResponse{}, err
 	}
+
+	var rows []skillRow
+	query := s.listSkillsQuery(ctx, req).Order("created_at DESC, id DESC")
+	if req.Limit > 0 {
+		query = query.Offset(req.Offset).Limit(req.Limit)
+	}
+	if err := query.Find(&rows).Error; err != nil {
+		return ListSkillsResponse{}, err
+	}
+
 	items := make([]SkillSummary, 0, len(rows))
 	for _, row := range rows {
 		summary, err := s.summaryFor(ctx, row)
@@ -626,7 +640,32 @@ func (s *SkillService) ListSkills(ctx context.Context, req ListSkillsRequest) (L
 		}
 		items = append(items, summary)
 	}
-	return ListSkillsResponse{Items: items}, nil
+	return ListSkillsResponse{Items: items, Total: total}, nil
+}
+
+func (s *SkillService) listSkillsQuery(ctx context.Context, req ListSkillsRequest) *gorm.DB {
+	query := s.db.WithContext(ctx).
+		Model(&skillRow{}).
+		Where("owner_user_id = ? AND deleted_at IS NULL", req.UserID).
+		Where("NOT EXISTS (SELECT 1 FROM skill_market_items AS market_items WHERE market_items.source_skill_id = skills.id)")
+	query = s.applyListSkillFilters(query, req)
+	if req.Keyword != "" {
+		query = query.Scopes(skillsearch.NewService(skillsearch.ServiceDeps{DB: s.db}).KeywordScope(req.Keyword))
+	}
+	return query
+}
+
+func (s *SkillService) applyListSkillFilters(query *gorm.DB, req ListSkillsRequest) *gorm.DB {
+	if req.EnabledOnly {
+		query = query.Where("is_enabled = ? AND head_revision_id IS NOT NULL", true)
+	}
+	if req.Category != "" {
+		query = query.Where("category = ?", req.Category)
+	}
+	for _, tag := range req.Tags {
+		query = query.Where(tagsTextExpr(s.db)+" LIKE ? ESCAPE '!'", jsonStringElementLikePattern(tag))
+	}
+	return query
 }
 
 func (s *SkillService) GetSkill(ctx context.Context, req GetSkillRequest) (SkillDetail, error) {

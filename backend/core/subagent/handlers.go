@@ -117,12 +117,6 @@ func InternalIngestTaskEvent(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "persist task event failed", http.StatusServiceUnavailable)
 		return
 	}
-	if task, err := GetTask(r.Context(), store.DB(), taskID); err == nil && EventHooks != nil &&
-		(event.Type == "task_start" || event.Type == "progress" || event.Type == "artifact" ||
-			event.Type == "done" || event.Type == "error") {
-		EventHooks.CallConversationEvent(r.Context(), store.State(), task.ConversationID, "",
-			"workflow_runtime_updated", map[string]any{"task_id": taskID, "change": event.Type})
-	}
 	common.ReplyOK(w, map[string]any{"accepted": true})
 }
 
@@ -183,6 +177,7 @@ type taskDTO struct {
 	Summary          string          `json:"summary"`
 	InputSlots       json.RawMessage `json:"input_slots"`
 	OutputSlots      json.RawMessage `json:"output_slots"`
+	Sources          json.RawMessage `json:"sources"`
 	CreatedAt        time.Time       `json:"created_at"`
 	UpdatedAt        time.Time       `json:"updated_at"`
 	Artifacts        []artifactDTO   `json:"artifacts,omitempty"`
@@ -231,6 +226,7 @@ func toTaskDTO(t *orm.SubAgentTask) taskDTO {
 		Summary:          t.Summary,
 		InputSlots:       normalizeJSON(t.InputSlots, "[]"),
 		OutputSlots:      normalizeJSON(t.OutputSlots, "[]"),
+		Sources:          normalizeJSON(json.RawMessage(t.Sources), "[]"),
 		CreatedAt:        t.CreatedAt,
 		UpdatedAt:        t.UpdatedAt,
 	}

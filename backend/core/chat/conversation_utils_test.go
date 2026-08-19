@@ -60,6 +60,67 @@ func TestMergeChunksToFirstChunk_Multiple(t *testing.T) {
 	}
 }
 
+func TestMergeChunksToFirstChunk_PreservesLastNonEmptySources(t *testing.T) {
+	external := map[string]any{
+		"source_type": "external",
+		"index":       "1.1",
+		"title":       "Example",
+		"url":         "https://example.com",
+	}
+	got := mergeChunksToFirstChunk([]*ChatChunkResponse{
+		{Delta: "answer", Sources: []any{external}},
+		{FinishReason: "FINISH_REASON_STOP"},
+	})
+	if len(got.Sources) != 1 {
+		t.Fatalf("sources: got %d, want 1", len(got.Sources))
+	}
+	if got.Sources[0].(map[string]any)["url"] != "https://example.com" {
+		t.Fatalf("unexpected source: %#v", got.Sources[0])
+	}
+}
+
+func TestRetrievalSourcesPreservesExternalSource(t *testing.T) {
+	sources := []any{map[string]any{
+		"source_type":  "external",
+		"index":        "2.1",
+		"title":        "External source",
+		"url":          "https://example.com/article",
+		"content":      "Evidence",
+		"source_roles": []any{"cited", "searched"},
+	}}
+	got := retrievalSources(marshalRetrievalResult(sources))
+	if len(got) != 1 {
+		t.Fatalf("sources: got %d, want 1", len(got))
+	}
+	source := got[0].(map[string]any)
+	if source["source_type"] != "external" || source["index"] != "2.1" {
+		t.Fatalf("unexpected source: %#v", source)
+	}
+	roles, ok := source["source_roles"].([]any)
+	if !ok || len(roles) != 2 || roles[0] != "cited" || roles[1] != "searched" {
+		t.Fatalf("source roles were not preserved: %#v", source["source_roles"])
+	}
+}
+
+func TestRetrievalSourcesSupportsLegacySourceMap(t *testing.T) {
+	raw := []byte(`{"sources":{` +
+		`"9.1":{"source_type":"external","title":"Legacy","url":"https://example.com"},` +
+		`"1.1":{"file_name":"guide.pdf","index":"existing"}` +
+		`}}`)
+	got := retrievalSources(raw)
+	if len(got) != 2 {
+		t.Fatalf("sources: got %d, want 2", len(got))
+	}
+	first := got[0].(map[string]any)
+	if first["index"] != "existing" || first["file_name"] != "guide.pdf" {
+		t.Fatalf("existing index should be preserved: %#v", first)
+	}
+	second := got[1].(map[string]any)
+	if second["index"] != "9.1" || second["title"] != "Legacy" {
+		t.Fatalf("map key should be restored as index: %#v", second)
+	}
+}
+
 // TestMergeChunksToFirstChunk_SkipNil skips nil entries in the slice.
 func TestMergeChunksToFirstChunk_SkipNil(t *testing.T) {
 	chunks := []*ChatChunkResponse{

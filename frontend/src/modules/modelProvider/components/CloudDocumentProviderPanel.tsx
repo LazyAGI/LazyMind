@@ -223,10 +223,6 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
             />
           </div>
           <div className="model-provider-cloud-doc-resource-controls">
-            <div className="model-provider-cloud-doc-directory-count">
-              <strong>{vm.localSourceCount}</strong>
-              <span>{t("modelProvider.cloudDocuments.directoryCountUnit")}</span>
-            </div>
             <button
               type="button"
               className="model-provider-cloud-doc-resource-action"
@@ -350,7 +346,13 @@ export function CloudDocumentModals({ vm }: { vm: CloudDocumentProvidersVm }) {
           name="appId"
           rules={[{ required: true, message: t("modelProvider.cloudDocuments.appIdRequired") }]}
         >
-          <Input placeholder={t("modelProvider.cloudDocuments.appIdPlaceholder")} />
+          <Input
+            placeholder={t(
+              cloudSetupProvider === "notion"
+                ? "modelProvider.cloudDocuments.notionAppIdPlaceholder"
+                : "modelProvider.cloudDocuments.appIdPlaceholder",
+            )}
+          />
         </Form.Item>
         <Form.Item
           label={t("modelProvider.cloudDocuments.appSecret")}

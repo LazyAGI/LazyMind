@@ -69,6 +69,7 @@ const manifest = {
   },
   binaries: {
     "process-supervisor": executable("process-compose"),
+    "agent-connector": executable("lazymind"),
     "local-proxy": executable("local-proxy"),
     "core": executable("core"),
     "scan-control-plane": executable("scan-control-plane"),

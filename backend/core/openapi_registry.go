@@ -1888,14 +1888,78 @@ type userUIPreferencesPatchOpenAPIRequest struct {
 	ChatPreferenceNoticeDismissed *bool   `json:"chat_preference_notice_dismissed,omitempty"`
 	DeveloperModeActive           *bool   `json:"developer_mode_active,omitempty"`
 	AcceptedUserAgreementVersion  *string `json:"accepted_user_agreement_version,omitempty"`
+	TaskCenterEnabled             *bool   `json:"task_center_enabled,omitempty"`
+	SkillsEnabled                 *bool   `json:"skills_enabled,omitempty"`
+	WorkflowsEnabled              *bool   `json:"workflows_enabled,omitempty"`
+	MCPEnabled                    *bool   `json:"mcp_enabled,omitempty"`
+	DocumentParsingEnabled        *bool   `json:"document_parsing_enabled,omitempty"`
 }
 
 type userUIPreferencesOpenAPIResponse struct {
 	ChatPreferenceNoticeDismissed bool   `json:"chat_preference_notice_dismissed"`
 	DeveloperModeActive           bool   `json:"developer_mode_active"`
 	AcceptedUserAgreementVersion  string `json:"accepted_user_agreement_version"`
+	TaskCenterEnabled             bool   `json:"task_center_enabled"`
+	SkillsEnabled                 bool   `json:"skills_enabled"`
+	WorkflowsEnabled              bool   `json:"workflows_enabled"`
+	MCPEnabled                    bool   `json:"mcp_enabled"`
+	DocumentParsingEnabled        bool   `json:"document_parsing_enabled"`
 	UserPreferenceConfigured      bool   `json:"user_preference_configured"`
 	UpdatedAt                     string `json:"updated_at"`
+}
+
+type settingsFeatureControlsOpenAPIResponse struct {
+	TaskCenterEnabled      bool `json:"task_center_enabled"`
+	SkillsEnabled          bool `json:"skills_enabled"`
+	WorkflowsEnabled       bool `json:"workflows_enabled"`
+	MCPEnabled             bool `json:"mcp_enabled"`
+	DocumentParsingEnabled bool `json:"document_parsing_enabled"`
+}
+
+type settingsOverviewCountsOpenAPIResponse struct {
+	Total      int64 `json:"total"`
+	Enabled    int64 `json:"enabled"`
+	Verified   int64 `json:"verified"`
+	Runnable   int64 `json:"runnable"`
+	Configured int64 `json:"configured"`
+}
+
+type settingsOverviewSectionOpenAPIResponse struct {
+	ID               string                                `json:"id"`
+	Title            string                                `json:"title"`
+	Route            string                                `json:"route"`
+	RawEnabled       *bool                                 `json:"raw_enabled,omitempty"`
+	EffectiveEnabled *bool                                 `json:"effective_enabled,omitempty"`
+	Counts           settingsOverviewCountsOpenAPIResponse `json:"counts"`
+	Status           string                                `json:"status"`
+	Detail           string                                `json:"detail"`
+}
+
+type settingsOverviewIssueOpenAPIResponse struct {
+	ID       string `json:"id"`
+	Severity string `json:"severity"`
+	Message  string `json:"message"`
+	Section  string `json:"section"`
+}
+
+type settingsOverviewOpenAPIResponse struct {
+	Controls  settingsFeatureControlsOpenAPIResponse   `json:"controls"`
+	Sections  []settingsOverviewSectionOpenAPIResponse `json:"sections"`
+	Issues    []settingsOverviewIssueOpenAPIResponse   `json:"issues"`
+	UpdatedAt string                                   `json:"updated_at"`
+}
+
+type settingsCheckResultOpenAPIResponse struct {
+	ID      string `json:"id"`
+	Status  string `json:"status"`
+	Message string `json:"message"`
+	Section string `json:"section"`
+}
+
+type settingsChecksOpenAPIResponse struct {
+	StartedAt  string                               `json:"started_at"`
+	FinishedAt string                               `json:"finished_at"`
+	Results    []settingsCheckResultOpenAPIResponse `json:"results"`
 }
 
 type localFSChatSettingOpenAPIRequest struct {
@@ -3383,10 +3447,24 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "PATCH",
 			Path:        "/user/ui-preferences",
 			Summary:     "Partially update current user's UI preferences",
-			Description: "Partial update. Every field inside the request body is optional; send only fields that should change.",
+			Description: "Partial update. Every field inside the request body is optional; send only fields that should change. Updating skills_enabled sets all current user skills to the same state; updating workflows_enabled independently sets all available workflows in one transaction.",
 			Tags:        []string{"user"},
 			RequestBody: jsonBodyOf(userUIPreferencesPatchOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Updated current user's UI preferences", userUIPreferencesOpenAPIResponse{})},
+		},
+		{
+			Method:    "GET",
+			Path:      "/settings/overview",
+			Summary:   "Get current user's settings overview",
+			Tags:      []string{"settings"},
+			Responses: map[int]openAPIResponse{200: resp("Settings overview", settingsOverviewOpenAPIResponse{})},
+		},
+		{
+			Method:    "POST",
+			Path:      "/settings/checks",
+			Summary:   "Run current user's settings checks",
+			Tags:      []string{"settings"},
+			Responses: map[int]openAPIResponse{200: resp("Settings checks", settingsChecksOpenAPIResponse{})},
 		},
 		{
 			Method:      "GET",
@@ -3543,6 +3621,14 @@ func registeredCoreOperations() []openAPIOperation {
 			Tags:        []string{"mcp_servers"},
 			RequestBody: jsonBodyOf(mcp.CreateServerRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Created MCP server", mcp.ServerResponse{})},
+		},
+		{
+			Method:      "PATCH",
+			Path:        "/mcp_servers:enabled",
+			Summary:     "Enable or disable owned MCP servers",
+			Tags:        []string{"mcp_servers"},
+			RequestBody: jsonBodyOf(mcp.BulkUpdateServerEnabledRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Bulk updated MCP servers", mcp.BulkUpdateServerEnabledResponse{})},
 		},
 		{
 			Method:     "GET",

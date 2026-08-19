@@ -10,7 +10,7 @@ from channel_gateway.common.domain.channel import (
     ClaimedOutbound,
     sanitize_channel_text,
 )
-from channel_gateway.common.domain.outbound import OutboundRenderer
+from channel_gateway.common.domain.outbound import OutboundRenderer, optional_int
 from channel_gateway.feishu.cardkit import (
     ASK_OTHER_OPTION,
     MAX_ASK_QUESTION_CHARS,
@@ -318,35 +318,22 @@ class FeishuPresentationRenderer:
             for part in parts
             if part.get('kind') == 'text'
         ) or message.text
-        extra_elements = _ask_elements(
-            presentations,
-            message.provider_context,
-        )
+        extra_elements = [
+            *_execution_elements(presentations, message.provider_context),
+            *_ask_elements(presentations, message.provider_context),
+        ]
         workspace_surface = message.provider_context.get(
             'workspace_surface'
         )
-        if workspace_surface in {'management', 'assistant'}:
-            non_text_parts = [
-                part for part in parts if part.get('kind') != 'text'
-            ]
-            if (
-                workspace_surface == 'assistant'
-                and message.metadata.get('streamed_text') is True
-            ):
-                return non_text_parts
-            rendered = [
-                {
-                    'kind': 'card',
-                    'card': FeishuWorkspaceRenderer.render(
-                        provider_context=message.provider_context,
-                        presentations=presentations,
-                    ),
-                    'workspace': True,
-                },
-            ]
-            if workspace_surface == 'assistant':
-                rendered.extend(non_text_parts)
-            return rendered
+        if workspace_surface == 'management':
+            return [{
+                'kind': 'card',
+                'card': FeishuWorkspaceRenderer.render(
+                    provider_context=message.provider_context,
+                    presentations=presentations,
+                ),
+                'workspace': True,
+            }]
         task = next(
             (
                 presentation
@@ -389,7 +376,11 @@ class FeishuPresentationRenderer:
                 ),
                 extra_elements=extra_elements,
             ),
-            'workspace': False,
+            'workspace': (
+                message.provider_context.get(
+                    'workspace_reanchor_to_bottom'
+                ) is True
+            ),
             'replace_message_id': str(
                 message.provider_context.get(
                     'workspace_stream_message_id'
@@ -405,68 +396,40 @@ class FeishuPresentationRenderer:
         ]
 
     @staticmethod
-    def task_workflow_card(
-        tasks: list[dict[str, Any]],
+    def task_card(
+        task: dict[str, Any],
         *,
-        waiting_for_next_step: bool,
         inflight_image_count: int,
         failed_image_count: int,
         omitted_image_count: int,
     ) -> dict[str, Any]:
-        """Render legacy in-flight task outbounds during rolling upgrades."""
-        ordered = sorted(
-            tasks,
-            key=lambda task: int(
-                task.get('seq_in_conversation') or 0
-            ),
-        )
-        current = ordered[-1] if ordered else {}
-        status = str(current.get('status') or 'pending')
+        """Render the task state reported by Core without inferring a workflow."""
+        status = str(task.get('status') or 'pending')
         status_label, template = _task_status(status)
-        waiting_for_retry = (
-            waiting_for_next_step
-            and status.lower() in {
-                'failed',
-                'cancelled',
-                'canceled',
-                'stopped',
-                'interrupted',
-            }
-        )
-        if waiting_for_retry:
-            status_label, template = '等待自动重试', 'orange'
-        elif waiting_for_next_step:
-            status_label, template = '准备下一步', 'blue'
+        title = presentable_feishu_text(
+            str(task.get('title') or '后台任务')
+        )[:200]
         builder = (
             new_card()
             .config(wide_screen_mode=True)
             .header(
-                _workflow_title(
-                    str(current.get('title') or '工作流')
-                ),
-                subtitle='LazyMind 工作流',
+                title,
+                subtitle='LazyMind 后台任务',
                 template=template,
             )
         )
-        if ordered:
-            attempts: dict[str, int] = {}
-            lines: list[str] = []
-            for index, task in enumerate(ordered, start=1):
-                step_key = _workflow_step_key(task)
-                attempts[step_key] = attempts.get(step_key, 0) + 1
-                lines.append(
-                    _workflow_step_line(
-                        index,
-                        task,
-                        attempt=attempts[step_key],
-                    )
-                )
-            builder.markdown('\n'.join(lines))
+        progress = _optional_percent(
+            task.get('progress_pct', task.get('progress'))
+        )
+        task_line = f'**状态**　{status_label}'
+        if progress is not None:
+            task_line += f'　{progress}%'
+        builder.markdown(task_line)
         phase = presentable_feishu_text(
-            str(current.get('current_phase') or '')
+            str(task.get('current_phase') or '')
         )
         summary = _presentable_task_summary(
-            str(current.get('summary') or '')
+            str(task.get('summary') or '')
         )
         if phase and phase not in {'执行中...', '执行中…'}:
             builder.divider().markdown(f'**当前阶段**\n{phase[:500]}')
@@ -486,28 +449,15 @@ class FeishuPresentationRenderer:
             )
         if omitted_image_count > 0:
             delivery_notices.append(
-                f'{omitted_image_count} 张历史图片超过每步骤 20 张的展示上限'
+                f'{omitted_image_count} 张历史图片超过每个任务 20 张的展示上限'
             )
         if delivery_notices:
             builder.footer('；'.join(delivery_notices) + '。')
-        elif waiting_for_retry:
-            builder.footer(
-                '本次尝试失败，Auto 模式正在等待并检测自动重试；'
-                '后续步骤会继续更新在这张卡片中。'
-            )
-        elif waiting_for_next_step:
-            builder.footer(
-                '当前步骤已完成，正在等待你审批结果；'
-                '发送“继续”后进入下一步。'
-            )
         elif _task_terminal(status):
-            builder.footer(
-                'Workflow 已经结束；最终图片会继续以飞书原生消息发送。'
-            )
+            builder.footer('任务已结束；最终图片会继续以飞书原生消息发送。')
         else:
             builder.footer('状态会在这张卡片中自动更新。')
         card = builder.build().data
-        progress = _workflow_progress(ordered)
         tags = [(status_label, template)]
         if progress is not None:
             tags.append((f'{progress}%', 'blue'))
@@ -521,7 +471,7 @@ class FeishuPresentationRenderer:
             .config(wide_screen_mode=True)
             .header(
                 '任务卡已更新',
-                subtitle='LazyMind 工作流',
+                subtitle='LazyMind 后台任务',
                 template='grey',
             )
             .markdown('请使用此会话中最新的任务卡片。')
@@ -597,6 +547,85 @@ def _ask_elements(
         }
     )
     return elements
+
+
+def _execution_elements(
+    presentations: list[dict[str, Any]],
+    provider_context: dict[str, Any],
+) -> list[dict[str, Any]]:
+    execution = next(
+        (
+            presentation
+            for presentation in presentations
+            if presentation.get('kind') == 'execution'
+        ),
+        None,
+    )
+    if execution is None:
+        return []
+    language = _reply_language(provider_context)
+    provider = str(execution.get('provider') or '').capitalize()
+    status = str(execution.get('status') or '')
+    status_label = {
+        'pending': 'Waiting' if language == 'en' else '等待执行',
+        'running': 'Running' if language == 'en' else '执行中',
+        'completed': 'Completed' if language == 'en' else '执行完成',
+        'failed': 'Failed' if language == 'en' else '执行失败',
+        'stopped': 'Stopped' if language == 'en' else '已停止',
+    }.get(status, status)
+    lines = [f'**{provider} · {status_label}**']
+    invocation_count = optional_int(execution.get('invocation_count')) or 0
+    tools = [
+        str(tool)
+        for tool in (
+            execution.get('tools')
+            if isinstance(execution.get('tools'), list)
+            else []
+        )
+        if str(tool)
+    ]
+    if invocation_count or tools:
+        call_label = (
+            f'{invocation_count} LazyMind call(s)'
+            if language == 'en'
+            else f'{invocation_count} 次 LazyMind 调用'
+        )
+        lines.append(f'{call_label}' + (f' · {", ".join(tools)}' if tools else ''))
+    recovery_count = optional_int(execution.get('recovery_count')) or 0
+    if recovery_count:
+        lines.append(
+            f'Recovered {recovery_count} time(s)'
+            if language == 'en'
+            else f'已恢复 {recovery_count} 次'
+        )
+    workflows = execution.get('workflows')
+    if isinstance(workflows, list) and workflows:
+        lines.append(f'Workflow · {", ".join(str(item) for item in workflows)}')
+    artifact_count = optional_int(execution.get('artifact_count')) or 0
+    revision_count = optional_int(execution.get('artifact_revision_count')) or 0
+    if revision_count:
+        lines.append(
+            f'{artifact_count} artifact(s) · {revision_count} revision(s)'
+            if language == 'en'
+            else f'{artifact_count} 个产物 · {revision_count} 个版本'
+        )
+    host_id = str(execution.get('host_id') or '')
+    if host_id:
+        online = execution.get('host_online') is True
+        lines.append(
+            f'Host · {host_id} · {"online" if online else "offline"}'
+            if language == 'en'
+            else f'执行端 · {host_id} · {"在线" if online else "已离线"}'
+        )
+    error = presentable_feishu_text(
+        str(execution.get('error_message') or '')
+    ).strip()
+    if error:
+        lines.append(f'<font color="red">{error[:500]}</font>')
+    return [
+        {'tag': 'hr'},
+        {'tag': 'markdown', 'content': '\n'.join(lines)[:3500]},
+    ]
 
 
 def _merge_reference_parts(
@@ -684,102 +713,21 @@ def _task_status(status: str) -> tuple[str, str]:
     }.get(normalized, (status or '已创建', 'blue'))
 
 
-def _workflow_title(task_title: str) -> str:
-    workflow = task_title.split(':', 1)[0].strip().lower()
-    return {
-        'writer-workflow': 'AI Writer 写作工作流',
-        'image-workflow': 'AI 绘图工作流',
-    }.get(
-        workflow,
-        (
-            f'{workflow.removesuffix("-workflow")} 工作流'
-            if workflow
-            else '工作流'
-        ),
-    )
-
-
-def _workflow_step_line(
-    index: int,
-    task: dict[str, Any],
-    *,
-    attempt: int,
-) -> str:
-    status = str(task.get('status') or 'pending').lower()
-    icon = {
-        'completed': '✅',
-        'succeeded': '✅',
-        'success': '✅',
-        'failed': '❌',
-        'cancelled': '⏹️',
-        'canceled': '⏹️',
-        'stopped': '⏹️',
-        'interrupted': '⏸️',
-        'running': '🔄',
-    }.get(status, '⏳')
-    step = _workflow_step_key(task)
-    label = {
-        'prepare': '准备素材与上下文',
-        'outline': '生成大纲',
-        'write_document': '撰写正文',
-        'write-document': '撰写正文',
-        'deliver': '交付结果',
-        'generate': '生成内容',
-        'analyze_subject': '分析主题',
-        'collect_materials': '收集素材',
-        'optimize_prompt': '优化提示词',
-        'generate_image': '生成图片',
-        'enhance_image': '编辑图片',
-        'video_to_gif': '转换为动图',
-    }.get(step.lower(), step.replace('_', ' ') or f'步骤 {index}')
-    if attempt > 1:
-        label = f'{label}（重试 {attempt - 1}）'
-    status_label, _template = _task_status(status)
-    return f'{icon} **{index}. {label}**　{status_label}'
-
-
-def _workflow_step_key(task: dict[str, Any]) -> str:
-    raw_title = str(task.get('title') or '')
-    return raw_title.split(':', 1)[-1].strip().lower()[:200]
-
-
-def _workflow_progress(
-    tasks: list[dict[str, Any]],
-) -> int | None:
-    if not tasks:
-        return None
-    return _optional_percent(
-        tasks[-1].get(
-            'progress_pct',
-            tasks[-1].get('progress'),
-        )
-    )
-
-
-def workflow_progress_text(tasks: list[dict[str, Any]]) -> str:
-    """Compact live Workflow state for the in-flight answer card."""
-    ordered = sorted(
-        tasks[-20:],
-        key=lambda task: int(task.get('seq_in_conversation') or 0),
-    )
-    if not ordered:
+def task_progress_text(task: dict[str, Any] | None) -> str:
+    """Compact live projection of the task state reported by Core."""
+    if task is None:
         return ''
-    attempts: dict[str, int] = {}
-    lines = ['**Workflow 进度**']
-    for index, task in enumerate(ordered, start=1):
-        step = _workflow_step_key(task)
-        attempts[step] = attempts.get(step, 0) + 1
-        lines.append(
-            _workflow_step_line(
-                index,
-                task,
-                attempt=attempts[step],
-            )
-        )
-    current = ordered[-1]
-    progress = _workflow_progress(ordered)
+    status = str(task.get('status') or 'pending')
+    status_label, _template = _task_status(status)
+    title = presentable_feishu_text(
+        str(task.get('title') or '后台任务')
+    )[:200]
+    lines = [f'**后台任务：{title}**', f'状态：{status_label}']
+    progress = _optional_percent(
+        task.get('progress_pct', task.get('progress'))
+    )
     phase = presentable_feishu_text(
-        str(current.get('current_phase') or '')
+        str(task.get('current_phase') or '')
     )
     detail = []
     if progress is not None:
@@ -803,7 +751,6 @@ def _presentable_task_summary(value: str) -> str:
     for marker in (
         '\n执行路径：',
         '\n执行路径:',
-        '\n[assistant]',
         '\n[tool:',
     ):
         summary = summary.split(marker, 1)[0]

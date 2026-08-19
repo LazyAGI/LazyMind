@@ -1,6 +1,14 @@
 package main
 
-import "testing"
+import (
+	"net/http"
+	"net/http/httptest"
+	"testing"
+
+	"github.com/gorilla/mux"
+
+	"lazymind/core/externallease"
+)
 
 func TestOpenAPIArtifactExportCanBeDisabledForSignedDesktopBundle(t *testing.T) {
 	t.Setenv("LAZYMIND_OPENAPI_ARTIFACT_EXPORT_ENABLED", "false")
@@ -11,6 +19,26 @@ func TestOpenAPIArtifactExportCanBeDisabledForSignedDesktopBundle(t *testing.T) 
 	t.Setenv("LAZYMIND_OPENAPI_ARTIFACT_EXPORT_ENABLED", "")
 	if !openAPIArtifactExportEnabled() {
 		t.Fatal("OpenAPI artifact export should remain enabled by default")
+	}
+}
+
+func TestExternalAgentOperationExposesOnlyMCPRuntimeSurface(t *testing.T) {
+	tests := []struct {
+		method, path string
+		want         externallease.Operation
+	}{
+		{http.MethodPost, "/api/core/mcp/capabilities/v1", externallease.OperationCapabilityRead},
+		{http.MethodPost, "/api/core/agent-invocations/inv-1:start", externallease.OperationInvocationWrite},
+		{http.MethodGet, "/api/core/workflow-sessions/session-1/projection", externallease.OperationWorkflowRead},
+		{http.MethodPost, "/api/core/workflow-sessions/session-1/hosted-attempts/attempt-1:submit", externallease.OperationWorkflowWrite},
+		{http.MethodPost, "/api/core/workflow-sessions/session-1/hosted-attempts/attempt-1:delete", ""},
+		{http.MethodPost, "/api/core/conversations:chat", ""},
+		{http.MethodDelete, "/api/core/workflow-artifacts/artifact-1", ""},
+	}
+	for _, test := range tests {
+		if got := externalAgentOperation(test.method, test.path); got != test.want {
+			t.Fatalf("externalAgentOperation(%q, %q) = %q, want %q", test.method, test.path, got, test.want)
+		}
 	}
 }
 
@@ -47,6 +75,20 @@ func TestBackgroundJobsEnabledAcceptsFalseValues(t *testing.T) {
 				t.Fatalf("background jobs should be disabled for %q", value)
 			}
 		})
+	}
+}
+
+func TestCapabilityMCPRouteIsMounted(t *testing.T) {
+	router := mux.NewRouter()
+	registerCoreRoutes(router)
+	registerCapabilityMCPRoute(router, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	request := httptest.NewRequest(http.MethodPost, "/mcp/capabilities/v1", nil)
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusNoContent {
+		t.Fatalf("capability MCP status = %d, want %d", response.Code, http.StatusNoContent)
 	}
 }
 

@@ -137,9 +137,11 @@ steps:
       each query under 120 Chinese characters, avoid duplicate queries, and use the tool's
       default retrieval and reranking sizes; do not pass kb_ids, filters, retriever_topk,
       rerank_topk, k_max, or image_topk. Consolidate only retrieved evidence that can improve
-      the proposal, retaining document/source labels and citation markers from every useful
-      tool result. Clearly separate retrieved facts from solution recommendations and do not
-      turn uncited knowledge into a mandatory tender requirement.
+      the proposal, retaining document/source labels and evidence identifiers exposed by every
+      useful tool result. The runtime collects clickable sources separately for the Task card,
+      so do not invent inline citation markers that the tool did not return. Clearly separate
+      retrieved facts from solution recommendations and do not turn unsupported knowledge
+      into a mandatory tender requirement.
 
       If kb_search is unavailable or reports that no knowledge base is selected, do not
       discover a replacement knowledge base. Save exactly one short Markdown artifact
@@ -176,8 +178,9 @@ steps:
       - material: resource_profiles
       - material: writing_context
     acceptance_criteria: |
-      knowledge_evidence truthfully states the selected-KB evidence with source
-      labels/citations, that no KB was selected, or that the single retrieval attempt failed.
+      knowledge_evidence truthfully states the selected-KB evidence with available source
+      labels/evidence identifiers, that no KB was selected, or the outcome of every attempted
+      query when retrieval failed.
       writing_task, resource_profiles, and writing_context are real files returned by the
       shared Writer capability and the Writer resources include the knowledge evidence.
 

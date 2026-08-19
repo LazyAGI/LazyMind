@@ -422,6 +422,25 @@ test("Desktop opens the home page from the sidecar readiness event with status p
   );
 });
 
+test("Desktop supervises the external Agent host until the application quits", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  assert.match(
+    source,
+    /function scheduleAgentHostRestart\(\)[\s\S]*isQuitting[\s\S]*setTimeout\([\s\S]*startAgentHost\(\)/,
+    "an unexpected Agent host exit must schedule a bounded restart",
+  );
+  assert.match(
+    source,
+    /child\.once\("close"[\s\S]*scheduleAgentHostRestart\(\)/,
+    "the Agent host close handler must enter supervision",
+  );
+  assert.match(
+    source,
+    /function beginFastQuit[\s\S]*clearTimeout\(agentHostRestartTimer\)[\s\S]*agentHostProcess\?\.kill\(\)/,
+    "application shutdown must disable supervision before stopping the Agent host",
+  );
+});
+
 test("Desktop close and quit destroy renderers while keeping the runtime resident", () => {
   const source = readFileSync(electronMainScript, "utf8");
   const backgroundStart = source.indexOf("function enterBackgroundMode");

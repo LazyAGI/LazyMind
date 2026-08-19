@@ -11,30 +11,15 @@ from dataclasses import dataclass, field, replace
 from typing import Any
 
 from channel_gateway.common.domain.channel import (
-    ClaimedInbound,
     InboundEnvelope,
-    OutboundMessage,
 )
 from channel_gateway.common.domain.chat import (
     ChannelAttachment,
     ChannelExecutionContext,
 )
-from channel_gateway.common.ports.core import LazyMindCore
 from channel_gateway.common.ports.providers import (
     RuntimeCredentialStore,
     RuntimeLease,
-)
-from channel_gateway.feishu.assistant import (
-    assistant_view_with_ui,
-    detail_conversation_id,
-    detail_readonly,
-    detail_run_status,
-    detail_snapshot,
-    detail_with_prompt,
-    detail_view,
-    projects_view,
-    sessions_view,
-    user_input_answers,
 )
 from channel_gateway.feishu.domain import (
     FeishuAddressFactory,
@@ -56,6 +41,7 @@ from channel_gateway.feishu.workspace import (
     FeishuWorkspaceState,
     MENU_EVENT_VIEWS,
     menu_command,
+    stale_workspace_card,
 )
 _logger = logging.getLogger(__name__)
 
@@ -63,34 +49,13 @@ _logger = logging.getLogger(__name__)
 _MAX_INBOUND_IMAGE_BYTES = 10 * 1024 * 1024
 _ACTION_REFRESH_DELAY_SECONDS = 0.35
 _ACTION_REFRESH_RETRY_DELAYS = (0.5, 1.0, 2.0, 4.0)
-_ASSISTANT_PROVIDER = 'codex'
-_ASSISTANT_TURN_PAGE_SIZE = 1
-_ASSISTANT_PROJECT_PAGE_SIZE = 6
-_ASSISTANT_SESSION_PAGE_SIZE = 4
-_BOT_MENU_CONFIG_VERSION = 4
+_BOT_MENU_CONFIG_VERSION = 6
 
 
 _RESULT_WORKSPACE_ACTIONS = {
-    'maintenance.clear_conversation',
+    'maintenance.new_conversation',
     'new_session.create',
     'prompt.run',
-}
-_REMOTE_ASSISTANT_ACTIONS = {
-    'assistant.refresh',
-    'assistant.retry',
-    'assistant.project',
-    'assistant.projects',
-    'assistant.projects_page',
-    'assistant.new',
-    'assistant.open',
-    'assistant.back',
-    'assistant.sessions_page',
-    'assistant.turns_page',
-    'assistant.answer_page',
-    'assistant.respond',
-    'assistant.release',
-    'assistant.delete',
-    'assistant.cancel',
 }
 
 
@@ -124,13 +89,11 @@ class FeishuRuntime:
         credentials: RuntimeCredentialStore,
         channels: FeishuReceiverFactory,
         addresses: FeishuAddressFactory,
-        core: LazyMindCore,
     ):
         self._store = store
         self._credentials = credentials
         self._channels = channels
         self._addresses = addresses
-        self._core = core
         self._shutdown = threading.Event()
         self._lock = threading.Lock()
         self._workers: dict[str, _AppWorker] = {}
@@ -448,28 +411,17 @@ class FeishuRuntime:
             account_id = self._owner_routes.get(
                 (worker.app_id, message.sender_id)
             )
-            route = (
-                self._accounts.get(account_id)
-                if account_id
-                else None
-            )
+            route = self._accounts.get(account_id) if account_id else None
             lease = worker.lease
         if route is None:
-            route = self._load_route_for_message(
-                worker,
-                message.sender_id,
-            )
-            if route is None:
-                return
-        if (
-            route is None
-            or route.sender_id != message.sender_id
-        ):
+            route = self._load_route_for_message(worker, message.sender_id)
+        if route is None or route.sender_id != message.sender_id:
             return
         if lease is None:
             raise FeishuRuntimeError(
                 'Feishu runtime lease is unavailable'
             )
+
         address = self._addresses.direct(
             route.account_id,
             message.chat_id,
@@ -478,7 +430,7 @@ class FeishuRuntime:
         address_hash = address.route_hash
         self._remember_direct_chat(route.account_id, message.chat_id)
         effective_text = message.text or '请描述并分析这张图片。'
-        chat_inputs: list[dict[str, str]] = []
+        attachments: tuple[ChannelAttachment, ...] = ()
         if message.image_key:
             account = self._credentials.load_runtime_account(
                 route.account_id
@@ -493,195 +445,51 @@ class FeishuRuntime:
                 sender.close()
             if not content or len(content) > _MAX_INBOUND_IMAGE_BYTES:
                 raise FeishuRuntimeError('飞书图片为空或超过 10 MB')
-            chat_inputs.append(
-                {
-                    'input_type': 'image',
-                    'input_base64': _image_data_url(content),
-                }
-            )
+            attachment = ChannelAttachment.from_dict({
+                'input_type': 'image',
+                'input_base64': _image_data_url(content),
+            })
+            attachments = (attachment,) if attachment is not None else ()
+
         workspace = FeishuWorkspaceState.from_dict(
             self._store.get_feishu_workspace_state(
                 route.account_id,
                 address_hash,
             )
         )
-        workspace_revision = workspace.revision
         message_key = hashlib.sha256(
             message.message_id.encode('utf-8')
         ).hexdigest()
-        assistant_detail = (
-            workspace.view == 'assistant'
-            and workspace.assistant_mode == 'detail'
-        )
-        if workspace.view == 'assistant' and not assistant_detail:
-            self._send_input_notice(
-                route=route,
-                chat_id=message.chat_id,
-                message_id=message.message_id,
-                text='请先在 Codex 卡片中选择项目和会话，再从底部输入框发送任务。',
-            )
-            return
-        assistant_view: dict[str, Any] = {}
-        if assistant_detail and not workspace.assistant_selected_thread_id:
-            self._send_input_notice(
-                route=route,
-                chat_id=message.chat_id,
-                message_id=message.message_id,
-                text='Codex 会话尚未准备完成，本次消息未提交，请稍后重试。',
-            )
-            return
-        if assistant_detail:
-            try:
-                assistant_view = self._read_assistant_detail(
-                    owner_user_id=route.owner_user_id,
-                    request_id=f'feishu_assistant_read_{message_key[:24]}',
-                    provider=_ASSISTANT_PROVIDER,
-                    thread_id=workspace.assistant_selected_thread_id,
-                )
-            except Exception:
-                self._send_input_notice(
-                    route=route,
-                    chat_id=message.chat_id,
-                    message_id=message.message_id,
-                    text='Codex 会话读取失败，本次消息未提交；最后一张有效卡片已保留。',
-                )
-                return
-        assistant_selected = (
-            assistant_detail
-            and bool(workspace.assistant_selected_thread_id)
-        )
-        assistant_run_status = detail_run_status(assistant_view)
-        if assistant_selected and (
-            assistant_run_status in {
-                'running',
-                'waiting_for_input',
-                'releasing',
-                'release_failed',
-            }
-        ):
-            self._send_input_notice(
-                route=route,
-                chat_id=message.chat_id,
-                message_id=message.message_id,
-                text='Codex 正在处理上一项任务，本次消息未提交。',
-            )
-            return
-        if assistant_selected and detail_readonly(assistant_view):
-            self._send_input_notice(
-                route=route,
-                chat_id=message.chat_id,
-                message_id=message.message_id,
-                text='当前 Codex 会话为只读，本次消息未提交。',
-            )
-            return
-        assistant_active = (
-            assistant_selected
-            and bool(detail_conversation_id(assistant_view))
-        )
-        if assistant_selected and not assistant_active:
-            try:
-                self._core.bind_external_thread(
-                    owner_user_id=route.owner_user_id,
-                    request_id=f'feishu_assistant_bind_{message_key[:24]}',
-                    provider=_ASSISTANT_PROVIDER,
-                    provider_thread_id=workspace.assistant_selected_thread_id,
-                )
-                assistant_view = self._read_assistant_detail(
-                    owner_user_id=route.owner_user_id,
-                    request_id=f'feishu_assistant_bound_{message_key[:24]}',
-                    provider=_ASSISTANT_PROVIDER,
-                    thread_id=workspace.assistant_selected_thread_id,
-                )
-                assistant_active = bool(
-                    detail_conversation_id(assistant_view)
-                )
-                if not assistant_active:
-                    raise FeishuRuntimeError(
-                        'Codex binding did not return a conversation'
-                    )
-            except Exception as exc:
-                if workspace.message_id:
-                    self._schedule_action_card_refresh(
-                        route.account_id,
-                        workspace.message_id,
-                        FeishuWorkspaceRenderer.render(
-                            provider_context={
-                                'chat_id': message.chat_id,
-                                'workspace_state': workspace.to_dict(),
-                                'assistant_view': assistant_view_with_ui(
-                                    assistant_view,
-                                    'error',
-                                    str(exc),
-                                ),
-                            },
-                            presentations=[],
-                        ),
-                        address_hash=address_hash,
-                        expected_revision=workspace.revision,
-                        expected_operation_id=workspace.active_operation_id,
-                    )
-                return
+        source_revision = workspace.revision
+        source_message_id = workspace.message_id
+        source_operation_id = workspace.active_operation_id
+        workspace.begin_operation(message_key)
+        workspace.advance()
         conversation_id = self._store.get_route(
             route.account_id,
             address_hash,
         )
-        expected_revision = workspace_revision
-        expected_message_id = workspace.message_id
-        expected_operation_id = workspace.active_operation_id
-        is_new_operation = workspace.active_operation_id != message_key
-        assistant_render_view = assistant_view
-        if assistant_active:
-            workspace.active_operation_id = message_key
-            workspace.assistant_answer_page = 0
-            workspace.images = []
-            assistant_view = detail_with_prompt(
-                assistant_view,
+        provider_context = self._workspace_provider_context(
+            account_id=route.account_id,
+            address_hash=address_hash,
+            workspace=workspace,
+            chat_id=message.chat_id,
+            conversation_id=conversation_id,
+        )
+        execution = replace(
+            ChannelExecutionContext.from_provider_context(provider_context),
+            attachments=attachments,
+        )
+        provider_context = {
+            **provider_context,
+            'workspace_surface': 'reply',
+            'workspace_reanchor_to_bottom': True,
+            'channel_execution': execution.to_dict(),
+            'command_action': _chat_command_action(
                 effective_text,
-            )
-            assistant_render_view = assistant_view_with_ui(
-                assistant_view,
-                'dispatching',
-            )
-        else:
-            workspace.begin_operation(message_key)
-        workspace.advance()
-        workspace_context = (
-            {
-                'chat_id': message.chat_id,
-                'surface': 'card',
-                'workspace_message_id': workspace.message_id,
-                'workspace_operation_id': workspace.active_operation_id,
-                'workspace_state': workspace.to_dict(),
-            }
-            if assistant_active
-            else self._workspace_provider_context(
-                account_id=route.account_id,
-                address_hash=address_hash,
-                workspace=workspace,
-                chat_id=message.chat_id,
-                conversation_id=conversation_id,
-            )
-        )
-        execution = ChannelExecutionContext.from_provider_context(
-            workspace_context
-        )
-        if assistant_active:
-            execution = ChannelExecutionContext(
-                external_agent_conversation_id=detail_conversation_id(
-                    assistant_view
-                )
-            )
-        elif chat_inputs:
-            execution = replace(
-                execution,
-                attachments=tuple(
-                    attachment
-                    for item in chat_inputs
-                    if (
-                        attachment := ChannelAttachment.from_dict(item)
-                    ) is not None
-                ),
-            )
+                required=bool(attachments),
+            ),
+        }
         envelope = InboundEnvelope(
             provider='feishu',
             account_id=route.account_id,
@@ -691,141 +499,24 @@ class FeishuRuntime:
             owner_user_id=route.owner_user_id,
             recipient_id=message.chat_id,
             text=effective_text,
-            provider_context={
-                **workspace_context,
-                'workspace_surface': (
-                    'assistant' if assistant_active else 'reply'
-                ),
-                'workspace_message_id': (
-                    workspace.message_id
-                    if assistant_active
-                    else ''
-                ),
-                'channel_execution': execution.to_dict(),
-                **({
-                    'assistant_view': assistant_view,
-                } if assistant_active else {}),
-                'command_action': _chat_command_action(
-                    effective_text,
-                    required=bool(assistant_active or chat_inputs),
-                ),
-            },
+            provider_context=provider_context,
         )
-        try:
-            if is_new_operation and assistant_active:
-                workspace.message_id = self._move_assistant_card_to_bottom(
-                    route=route,
-                    chat_id=message.chat_id,
-                    inbound_message_id=message.message_id,
-                    workspace=workspace,
-                    assistant_view=assistant_render_view,
-                )
-                envelope.provider_context['workspace_message_id'] = (
-                    workspace.message_id
-                )
-            envelope.provider_context['workspace_state'] = workspace.to_dict()
-            envelope.provider_context['workspace_message_id'] = (
-                workspace.message_id
-                if assistant_active
-                else ''
+        if not self._store.claim_feishu_workspace_and_ingest(
+            route.account_id,
+            address_hash,
+            workspace.to_dict(),
+            source_revision,
+            source_message_id,
+            source_operation_id,
+            envelope,
+            lease.fence,
+        ):
+            self._send_input_notice(
+                route=route,
+                chat_id=message.chat_id,
+                message_id=message.message_id,
+                text='上一项操作仍在处理中，本次消息未提交，请稍后重试。',
             )
-            claimed = self._store.claim_feishu_workspace_and_ingest(
-                route.account_id,
-                address_hash,
-                workspace.to_dict(),
-                expected_revision,
-                expected_message_id,
-                expected_operation_id,
-                envelope,
-                lease.fence,
-            )
-            if not claimed:
-                if assistant_active:
-                    current = FeishuWorkspaceState.from_dict(
-                        self._store.get_feishu_workspace_state(
-                            route.account_id,
-                            address_hash,
-                        )
-                    )
-                    self._expire_workspace_card(
-                        account_id=route.account_id,
-                        address_hash=address_hash,
-                        message_id=workspace.message_id,
-                        current_message_id=current.message_id,
-                        language=current.output_language,
-                    )
-                else:
-                    self._send_input_notice(
-                        route=route,
-                        chat_id=message.chat_id,
-                        message_id=message.message_id,
-                        text='上一项操作仍在处理中，本次消息未提交，请稍后重试。',
-                    )
-                return
-        except Exception:
-            current = FeishuWorkspaceState.from_dict(
-                self._store.get_feishu_workspace_state(
-                    route.account_id,
-                    address_hash,
-                )
-            )
-            if (
-                assistant_active
-                and current.message_id != workspace.message_id
-            ):
-                self._expire_workspace_card(
-                    account_id=route.account_id,
-                    address_hash=address_hash,
-                    message_id=workspace.message_id,
-                    current_message_id=current.message_id,
-                    language=current.output_language,
-                )
-            raise
-
-    def _move_assistant_card_to_bottom(
-        self,
-        *,
-        route: _AccountRoute,
-        chat_id: str,
-        inbound_message_id: str,
-        workspace: FeishuWorkspaceState,
-        assistant_view: dict[str, Any],
-    ) -> str:
-        old_message_id = workspace.message_id
-        sender = None
-        try:
-            account = self._credentials.load_runtime_account(
-                route.account_id
-            )
-            sender = self._channels.create_sender(account['credentials'])
-            provider_context = {
-                'chat_id': chat_id,
-                'workspace_state': workspace.to_dict(),
-                'assistant_view': assistant_view,
-            }
-            card = FeishuWorkspaceRenderer.render(
-                provider_context=provider_context,
-                presentations=[],
-                streaming=True,
-            )
-            return self._send_card_to_bottom(
-                sender=sender,
-                chat_id=chat_id,
-                card=card,
-                idempotency_key=(
-                    f'feishu-workspace-bottom:{inbound_message_id}'
-                ),
-            )
-        except Exception:
-            _logger.warning(
-                'feishu_workspace_card_move_failed message_id=%s',
-                old_message_id,
-                exc_info=True,
-            )
-            return old_message_id
-        finally:
-            if sender is not None:
-                sender.close()
 
     def _send_input_notice(
         self,
@@ -843,7 +534,7 @@ class FeishuRuntime:
             sender.send_markdown(
                 chat_id=chat_id,
                 text=text,
-                idempotency_key=f'feishu-assistant-input:{message_id}',
+                idempotency_key=f'feishu-input-notice:{message_id}',
             )
         finally:
             sender.close()
@@ -865,961 +556,6 @@ class FeishuRuntime:
             raise FeishuRuntimeError('Feishu workspace card send returned no id')
         return str(new_message_id)
 
-    def handle_inbound_action(
-        self,
-        message: ClaimedInbound,
-    ) -> OutboundMessage | None:
-        context = dict(message.provider_context)
-        action = context.get('assistant_action')
-        if (
-            context.get('workspace_surface') != 'assistant'
-            or not isinstance(action, dict)
-        ):
-            return None
-        source = FeishuWorkspaceState.from_dict(context.get('workspace_state'))
-        current = FeishuWorkspaceState.from_dict(
-            self._store.get_feishu_workspace_state(
-                message.account_id,
-                message.order_key,
-            )
-        )
-        if (
-            current.view != 'assistant'
-            or current.message_id != source.message_id
-            or current.active_operation_id != source.active_operation_id
-            or (
-                context.get('_parallel_inbound') is not True
-                and current.active_operation_id != message.message_key
-            )
-        ):
-            return self._assistant_action_outbound(
-                message,
-                current,
-                {},
-                suppressed=True,
-            )
-        request_id = f'channel_{message.message_key[:24]}'
-        if current.revision == source.revision + 1:
-            try:
-                view = self._load_current_assistant_view(
-                    current,
-                    message.owner_user_id,
-                    request_id + '_recover',
-                )
-            except Exception as exc:
-                view = assistant_view_with_ui({}, 'error', str(exc))
-            return self._assistant_action_outbound(message, current, view)
-        if current.revision != source.revision:
-            return self._assistant_action_outbound(
-                message,
-                current,
-                {},
-                suppressed=True,
-            )
-        try:
-            view = self._execute_remote_assistant_action(
-                workspace=current,
-                owner_user_id=message.owner_user_id,
-                request_id=request_id,
-                values=action,
-            )
-        except Exception as exc:
-            _logger.warning(
-                'feishu_assistant_action_failed kind=%s',
-                str(action.get('kind') or ''),
-                exc_info=True,
-            )
-            try:
-                view = self._load_current_assistant_view(
-                    current,
-                    message.owner_user_id,
-                    request_id + '_error_view',
-                )
-            except Exception:
-                view = {}
-            view = assistant_view_with_ui(view, 'error', str(exc))
-        expected_revision = current.revision
-        current.advance()
-        if not self._store.save_feishu_workspace_state_if_revision(
-            message.account_id,
-            message.order_key,
-            current.to_dict(),
-            expected_revision,
-        ):
-            authoritative = FeishuWorkspaceState.from_dict(
-                self._store.get_feishu_workspace_state(
-                    message.account_id,
-                    message.order_key,
-                )
-            )
-            if (
-                authoritative.revision != source.revision + 1
-                or authoritative.active_operation_id
-                != source.active_operation_id
-            ):
-                return self._assistant_action_outbound(
-                    message,
-                    authoritative,
-                    {},
-                    suppressed=True,
-                )
-            current = authoritative
-        return self._assistant_action_outbound(message, current, view)
-
-    def _assistant_action_outbound(
-        self,
-        message: ClaimedInbound,
-        workspace: FeishuWorkspaceState,
-        view: dict[str, Any],
-        *,
-        suppressed: bool = False,
-    ) -> OutboundMessage:
-        context = {
-            **message.provider_context,
-            'workspace_state': workspace.to_dict(),
-            'workspace_message_id': workspace.message_id,
-            'workspace_operation_id': workspace.active_operation_id,
-            'assistant_view': view,
-        }
-        context.pop('assistant_action', None)
-        if suppressed:
-            context['_workspace_delivery_suppressed'] = True
-        return OutboundMessage(
-            provider=message.provider,
-            account_id=message.account_id,
-            order_key=message.order_key,
-            recipient_id=message.recipient_id,
-            provider_context=context,
-            text='',
-            intent_kind='external_agent',
-        )
-
-    def _load_current_assistant_view(
-        self,
-        workspace: FeishuWorkspaceState,
-        owner_user_id: str,
-        request_id: str,
-    ) -> dict[str, Any]:
-        if workspace.assistant_mode == 'projects':
-            return self._load_assistant_projects(
-                workspace,
-                owner_user_id,
-                request_id,
-                workspace.assistant_projects_cursor,
-            )
-        if workspace.assistant_mode == 'sessions':
-            return self._load_assistant_threads(
-                workspace,
-                owner_user_id,
-                request_id,
-                workspace.assistant_threads_cursor,
-            )
-        return self._read_assistant_detail(
-            owner_user_id=owner_user_id,
-            request_id=request_id,
-            provider=_ASSISTANT_PROVIDER,
-            thread_id=workspace.assistant_selected_thread_id,
-        )
-
-    def _handle_assistant_action(
-        self,
-        *,
-        route: _AccountRoute,
-        action: FeishuInboundAction,
-        address_hash: str,
-        workspace: FeishuWorkspaceState,
-        conversation_id: str,
-        message_key: str,
-        runtime_fence: Any,
-    ) -> dict[str, Any] | None:
-        values = dict(action.workspace_action or {})
-        if (
-            str(values.get('kind') or '') == 'assistant.respond'
-            and isinstance(action.ask_answers_structured, dict)
-        ):
-            values['answers'] = user_input_answers(
-                action.ask_answers_structured
-            )
-        kind = str(values.get('kind') or '')
-        expected_mode = {
-            'assistant.project': 'projects',
-            'assistant.projects_page': 'projects',
-            'assistant.projects': 'sessions',
-            'assistant.sessions_page': 'sessions',
-            'assistant.open': 'sessions',
-            'assistant.new': 'sessions',
-            'assistant.back': 'detail',
-            'assistant.turns_page': 'detail',
-            'assistant.answer_page': 'detail',
-            'assistant.respond': 'detail',
-            'assistant.release': 'detail',
-            'assistant.delete': 'detail',
-        }.get(kind)
-        if expected_mode and workspace.assistant_mode != expected_mode:
-            return None
-        required_values = {
-            'assistant.project': {
-                'expected_projects_cursor',
-                'expected_project_page',
-            },
-            'assistant.projects_page': {
-                'expected_projects_cursor',
-                'expected_project_page',
-            },
-            'assistant.projects': {'expected_project_cwd'},
-            'assistant.sessions_page': {
-                'expected_project_cwd',
-                'expected_threads_cursor',
-                'expected_threads_page',
-            },
-            'assistant.open': {
-                'thread_id',
-                'expected_project_cwd',
-                'expected_threads_cursor',
-                'expected_threads_page',
-            },
-            'assistant.new': {
-                'expected_project_cwd',
-                'expected_threads_cursor',
-                'expected_threads_page',
-            },
-            'assistant.back': {'thread_id'},
-            'assistant.turns_page': {'thread_id'},
-            'assistant.answer_page': {
-                'thread_id',
-                'expected_answer_page',
-            },
-            'assistant.respond': {
-                'thread_id',
-                'request_id',
-                'request_kind',
-            },
-            'assistant.release': {'thread_id'},
-            'assistant.delete': {'thread_id', 'conversation_id'},
-        }.get(kind, set())
-        if not required_values.issubset(values):
-            return None
-        expected_navigation = {
-            'expected_project_cwd': workspace.assistant_project_cwd,
-            'expected_projects_cursor': workspace.assistant_projects_cursor,
-            'expected_project_page': workspace.assistant_project_page,
-            'expected_threads_cursor': workspace.assistant_threads_cursor,
-            'expected_threads_page': workspace.assistant_threads_page,
-            'expected_answer_page': workspace.assistant_answer_page,
-        }
-        if any(
-            key in values and str(values.get(key)) != str(current)
-            for key, current in expected_navigation.items()
-        ):
-            return None
-        action_thread_id = str(values.get('thread_id') or '')
-        if (
-            kind in {
-                'assistant.back',
-                'assistant.turns_page',
-                'assistant.answer_page',
-                'assistant.respond',
-                'assistant.release',
-                'assistant.delete',
-            }
-            and action_thread_id
-            and action_thread_id != workspace.assistant_selected_thread_id
-        ):
-            return None
-        if kind in _REMOTE_ASSISTANT_ACTIONS:
-            parallel_control = kind in {
-                'assistant.respond',
-                'assistant.cancel',
-            }
-            source_revision = workspace.revision
-            source_message_id = workspace.message_id
-            source_operation_id = workspace.active_operation_id
-            workspace.bind_message(action.message_id)
-            if not parallel_control:
-                workspace.begin_operation(message_key)
-            workspace.advance()
-            provider_context = {
-                **self._workspace_provider_context(
-                    account_id=route.account_id,
-                    address_hash=address_hash,
-                    workspace=workspace,
-                    chat_id=action.chat_id,
-                    conversation_id=conversation_id,
-                    workspace_action=values,
-                ),
-                'workspace_surface': 'assistant',
-                'assistant_action': values,
-                '_parallel_inbound': parallel_control,
-            }
-            envelope = InboundEnvelope(
-                provider='feishu',
-                account_id=route.account_id,
-                message_key=message_key,
-                order_key=address_hash,
-                external_address_hash=address_hash,
-                owner_user_id=route.owner_user_id,
-                recipient_id=action.chat_id,
-                text=action.text,
-                provider_context=provider_context,
-            )
-            claimed = self._store.claim_feishu_workspace_and_ingest(
-                route.account_id,
-                address_hash,
-                workspace.to_dict(),
-                source_revision,
-                source_message_id,
-                source_operation_id,
-                envelope,
-                runtime_fence,
-            )
-            if not claimed:
-                _logger.info(
-                    'feishu_assistant_action_not_claimed kind=%s',
-                    kind,
-                )
-                return None
-            _logger.info(
-                'feishu_assistant_action_queued kind=%s',
-                kind,
-            )
-            return None
-        card = FeishuWorkspaceRenderer.render(
-            provider_context={
-                'chat_id': action.chat_id,
-                'workspace_state': workspace.to_dict(),
-                'assistant_view': assistant_view_with_ui(
-                    {},
-                    'error',
-                    'Unsupported assistant action',
-                ),
-            },
-            presentations=[],
-        )
-        card['config'].pop('streaming_config', None)
-        return card
-
-    def _execute_remote_assistant_action(
-        self,
-        *,
-        workspace: FeishuWorkspaceState,
-        owner_user_id: str,
-        request_id: str,
-        values: dict[str, Any],
-    ) -> dict[str, Any]:
-        kind = str(values.get('kind') or '')
-        if kind in {'assistant.refresh', 'assistant.retry'}:
-            if workspace.assistant_mode == 'projects':
-                return self._load_assistant_projects(
-                    workspace,
-                    owner_user_id,
-                    request_id,
-                )
-            if workspace.assistant_mode == 'sessions':
-                workspace.assistant_threads_previous_cursors = []
-                workspace.assistant_threads_page = 0
-                return self._load_assistant_threads(
-                    workspace,
-                    owner_user_id,
-                    request_id,
-                    '',
-                )
-            if not workspace.assistant_selected_thread_id:
-                workspace.leave_assistant_thread()
-                return self._load_assistant_threads(
-                    workspace,
-                    owner_user_id,
-                    request_id,
-                    workspace.assistant_threads_cursor,
-                )
-            return self._read_assistant_detail(
-                owner_user_id=owner_user_id,
-                request_id=request_id,
-                provider=_ASSISTANT_PROVIDER,
-                thread_id=workspace.assistant_selected_thread_id,
-            )
-        if kind == 'assistant.project':
-            cwd = str(values.get('project_cwd') or '')[:500]
-            if not cwd:
-                raise FeishuRuntimeError('Codex project cwd is missing')
-            view = self._load_assistant_threads(
-                workspace,
-                owner_user_id,
-                request_id,
-                '',
-                cwd=cwd,
-            )
-            workspace.assistant_mode = 'sessions'
-            workspace.assistant_project_cwd = cwd
-            workspace.assistant_threads_previous_cursors = []
-            workspace.assistant_threads_page = 0
-            return view
-        if kind == 'assistant.projects':
-            view = self._load_assistant_projects(
-                workspace,
-                owner_user_id,
-                request_id,
-            )
-            workspace.assistant_mode = 'projects'
-            workspace.assistant_project_page = 0
-            workspace.assistant_project_cwd = ''
-            workspace.assistant_projects_previous_cursors = []
-            return view
-        if kind == 'assistant.projects_page':
-            direction = str(values.get('direction') or '')
-            cursor = workspace.assistant_projects_cursor
-            previous = list(
-                workspace.assistant_projects_previous_cursors
-            )
-            page = workspace.assistant_project_page
-            if direction == 'next':
-                if not workspace.assistant_projects_next_cursor:
-                    return self._load_assistant_projects(
-                        workspace,
-                        owner_user_id,
-                        request_id,
-                        cursor,
-                    )
-                previous.append(cursor)
-                cursor = workspace.assistant_projects_next_cursor
-                page += 1
-            elif direction == 'previous':
-                if not previous:
-                    return self._load_assistant_projects(
-                        workspace,
-                        owner_user_id,
-                        request_id,
-                        cursor,
-                    )
-                cursor = previous.pop()
-                page = max(0, page - 1)
-            else:
-                raise FeishuRuntimeError('Unsupported project page direction')
-            view = self._load_assistant_projects(
-                workspace,
-                owner_user_id,
-                request_id,
-                cursor,
-            )
-            workspace.assistant_projects_previous_cursors = previous
-            workspace.assistant_project_page = page
-            return view
-        if kind == 'assistant.sessions_page':
-            direction = str(values.get('direction') or '')
-            cursor = workspace.assistant_threads_cursor
-            previous = list(workspace.assistant_threads_previous_cursors)
-            page = workspace.assistant_threads_page
-            if direction == 'older':
-                if not workspace.assistant_threads_next_cursor:
-                    return self._load_assistant_threads(
-                        workspace,
-                        owner_user_id,
-                        request_id,
-                        cursor,
-                    )
-                previous.append(cursor)
-                cursor = workspace.assistant_threads_next_cursor
-                page += 1
-            elif direction == 'newer':
-                if not previous:
-                    return self._load_assistant_threads(
-                        workspace,
-                        owner_user_id,
-                        request_id,
-                        cursor,
-                    )
-                cursor = previous.pop()
-                page = max(0, page - 1)
-            else:
-                raise FeishuRuntimeError('Unsupported assistant page direction')
-            view = self._load_assistant_threads(
-                workspace,
-                owner_user_id,
-                request_id,
-                cursor,
-            )
-            workspace.assistant_threads_previous_cursors = previous
-            workspace.assistant_threads_page = page
-            return view
-        if kind == 'assistant.back':
-            if not workspace.assistant_selected_thread_id:
-                workspace.leave_assistant_thread()
-                return self._load_assistant_threads(
-                    workspace,
-                    owner_user_id,
-                    request_id,
-                    workspace.assistant_threads_cursor,
-                )
-            view = self._read_assistant_detail(
-                owner_user_id=owner_user_id,
-                request_id=request_id,
-                provider=_ASSISTANT_PROVIDER,
-                thread_id=workspace.assistant_selected_thread_id,
-            )
-            if detail_run_status(view) in {
-                'running',
-                'waiting_for_input',
-                'releasing',
-                'release_failed',
-            }:
-                return view
-            conversation_id = detail_conversation_id(view)
-            if conversation_id:
-                self._release_and_confirm_assistant(
-                    owner_user_id=owner_user_id,
-                    request_id=request_id,
-                    conversation_id=conversation_id,
-                    thread_id=workspace.assistant_selected_thread_id,
-                )
-            workspace.leave_assistant_thread()
-            return self._load_assistant_threads(
-                workspace,
-                owner_user_id,
-                request_id,
-                workspace.assistant_threads_cursor,
-            )
-        if kind == 'assistant.open':
-            thread_id = str(values.get('thread_id') or '')
-            view = self._read_assistant_detail(
-                owner_user_id=owner_user_id,
-                request_id=request_id,
-                provider=_ASSISTANT_PROVIDER,
-                thread_id=thread_id,
-            )
-            workspace.assistant_mode = 'detail'
-            workspace.assistant_selected_thread_id = thread_id
-            workspace.assistant_answer_page = 0
-            workspace.images = []
-            return view
-        if kind == 'assistant.new':
-            cwd = str(values.get('cwd') or workspace.assistant_project_cwd)
-            binding = self._core.bind_external_thread(
-                owner_user_id=owner_user_id,
-                request_id=request_id,
-                provider=_ASSISTANT_PROVIDER,
-                provider_thread_id='',
-                new_session=True,
-                cwd=cwd,
-                display_name=str(values.get('display_name') or '')[:200],
-            )
-            binding_data = dict(binding.get('binding') or binding)
-            native_thread = dict(binding.get('thread') or {})
-            thread_id = str(
-                binding_data.get('provider_thread_id')
-                or native_thread.get('id')
-                or binding.get('thread_id')
-                or ''
-            )
-            if not thread_id:
-                raise FeishuRuntimeError(
-                    'Codex did not return a thread binding'
-                )
-            workspace.assistant_mode = 'detail'
-            workspace.assistant_selected_thread_id = thread_id
-            workspace.assistant_answer_page = 0
-            workspace.images = []
-            try:
-                view = self._read_assistant_detail(
-                    owner_user_id=owner_user_id,
-                    request_id=request_id,
-                    provider=_ASSISTANT_PROVIDER,
-                    thread_id=thread_id,
-                )
-            except Exception as exc:
-                native_thread.update({
-                    'id': thread_id,
-                    'cwd': str(native_thread.get('cwd') or cwd),
-                    'conversation_id': str(
-                        binding_data.get('conversation_id') or ''
-                    ),
-                    'created_by_lazymind': True,
-                    'available': False,
-                    'controlled_by_lazymind': False,
-                })
-                return assistant_view_with_ui(
-                    detail_view({
-                        'thread': native_thread,
-                        'turns': [],
-                        'offset': 0,
-                        'total_turns': 0,
-                        'snapshot': {
-                            'conversation_id': str(
-                                binding_data.get('conversation_id') or ''
-                            ),
-                        },
-                    }),
-                    'error',
-                    (
-                        '会话已创建，但 Codex 详情暂时不可用：'
-                        f'{str(exc)[:300]}'
-                    ),
-                )
-            return view
-        if kind in {'assistant.turns_page', 'assistant.answer_page'}:
-            direction = str(values.get('direction') or '')
-            offset = max(0, int(values.get('offset') or 0))
-            total = max(0, int(values.get('total_turns') or 0))
-            selection = values.get('selection')
-            if kind == 'assistant.turns_page':
-                if selection is not None and str(selection).strip():
-                    page = max(0, int(str(selection)))
-                    offset = min(
-                        max(0, total - _ASSISTANT_TURN_PAGE_SIZE),
-                        page * _ASSISTANT_TURN_PAGE_SIZE,
-                    )
-                elif direction == 'older':
-                    offset = max(0, offset - _ASSISTANT_TURN_PAGE_SIZE)
-                elif direction == 'newer':
-                    offset = min(
-                        max(0, total - _ASSISTANT_TURN_PAGE_SIZE),
-                        offset + _ASSISTANT_TURN_PAGE_SIZE,
-                    )
-            page = self._core.read_external_thread(
-                owner_user_id=owner_user_id,
-                request_id=request_id,
-                provider=_ASSISTANT_PROVIDER,
-                thread_id=workspace.assistant_selected_thread_id,
-                offset=offset,
-                limit=_ASSISTANT_TURN_PAGE_SIZE,
-            )
-            view = detail_view(page)
-            if kind == 'assistant.turns_page':
-                workspace.assistant_answer_page = 0
-            elif direction == 'previous':
-                workspace.assistant_answer_page = max(
-                    0,
-                    workspace.assistant_answer_page - 1,
-                )
-            elif direction == 'next':
-                workspace.assistant_answer_page += 1
-            return view
-        if kind == 'assistant.respond':
-            view = self._read_assistant_detail(
-                owner_user_id=owner_user_id,
-                request_id=f'{request_id}_read',
-                provider=_ASSISTANT_PROVIDER,
-                thread_id=workspace.assistant_selected_thread_id,
-            )
-            snapshot = detail_snapshot(view)
-            pending = snapshot.get('pending_request')
-            pending = dict(pending) if isinstance(pending, dict) else {}
-            external_request_id = str(values.get('request_id') or '')
-            if external_request_id != str(pending.get('request_id') or ''):
-                return view
-            request_kind = str(values.get('request_kind') or '')
-            if request_kind != str(pending.get('kind') or ''):
-                return view
-            action_id = str(values.get('action_id') or '').strip()
-            if not action_id:
-                raise FeishuRuntimeError('Codex request action is missing')
-            answers = values.get('answers')
-            answers = answers if isinstance(answers, dict) else None
-            self._core.respond_external_request(
-                owner_user_id=owner_user_id,
-                request_id=request_id,
-                external_request_id=external_request_id,
-                action_id=action_id,
-                answers=answers,
-            )
-            view = self._read_assistant_detail(
-                owner_user_id=owner_user_id,
-                request_id=request_id,
-                provider=_ASSISTANT_PROVIDER,
-                thread_id=workspace.assistant_selected_thread_id,
-            )
-            return view
-        if kind == 'assistant.release':
-            view = self._read_assistant_detail(
-                owner_user_id=owner_user_id,
-                request_id=f'{request_id}_read',
-                provider=_ASSISTANT_PROVIDER,
-                thread_id=workspace.assistant_selected_thread_id,
-            )
-            snapshot = detail_snapshot(view)
-            conversation_id = detail_conversation_id(view)
-            if not conversation_id:
-                raise FeishuRuntimeError('Codex conversation is missing')
-            control_release = str(snapshot.get('control_release') or '')
-            if (
-                str(snapshot.get('status') or '') == 'releasing'
-                or control_release == 'pending'
-                or control_release in {
-                    'unsubscribed',
-                    'notSubscribed',
-                    'notLoaded',
-                    'not_loaded',
-                }
-            ):
-                return view
-            try:
-                return self._release_and_confirm_assistant(
-                    owner_user_id=owner_user_id,
-                    request_id=request_id,
-                    conversation_id=conversation_id,
-                    thread_id=workspace.assistant_selected_thread_id,
-                )
-            except Exception:
-                view = self._read_assistant_detail(
-                    owner_user_id=owner_user_id,
-                    request_id=request_id,
-                    provider=_ASSISTANT_PROVIDER,
-                    thread_id=workspace.assistant_selected_thread_id,
-                )
-                snapshot = detail_snapshot(view)
-                if str(snapshot.get('control_release') or '') in {
-                    'pending',
-                    'failed',
-                    'unsubscribed',
-                    'notSubscribed',
-                    'notLoaded',
-                    'not_loaded',
-                }:
-                    return view
-                raise
-        if kind == 'assistant.delete':
-            view = self._read_assistant_detail(
-                owner_user_id=owner_user_id,
-                request_id=f'{request_id}_read',
-                provider=_ASSISTANT_PROVIDER,
-                thread_id=workspace.assistant_selected_thread_id,
-            )
-            conversation_id = detail_conversation_id(view)
-            if (
-                not conversation_id
-                or conversation_id
-                != str(values.get('conversation_id') or '')
-            ):
-                return view
-            if detail_run_status(view) in {
-                'running',
-                'waiting_for_input',
-                'releasing',
-                'release_failed',
-            }:
-                return view
-            self._core.delete_external_conversation(
-                owner_user_id=owner_user_id,
-                request_id=request_id,
-                conversation_id=conversation_id,
-            )
-            workspace.leave_assistant_thread()
-            return self._load_assistant_threads(
-                workspace,
-                owner_user_id,
-                request_id,
-                workspace.assistant_threads_cursor,
-            )
-        if kind == 'assistant.cancel':
-            view = self._read_assistant_detail(
-                owner_user_id=owner_user_id,
-                request_id=f'{request_id}_read',
-                provider=_ASSISTANT_PROVIDER,
-                thread_id=workspace.assistant_selected_thread_id,
-            )
-            snapshot = detail_snapshot(view)
-            conversation_id = detail_conversation_id(view)
-            expected_run_id = str(values.get('run_id') or '')
-            if (
-                detail_run_status(view) not in {
-                    'running',
-                    'waiting_for_input',
-                }
-                or not conversation_id
-                or str(snapshot.get('run_id') or '') != expected_run_id
-            ):
-                return view
-            self._core.interrupt_external_conversation(
-                owner_user_id=owner_user_id,
-                request_id=request_id,
-                conversation_id=conversation_id,
-                expected_run_id=expected_run_id,
-            )
-            return assistant_view_with_ui(view, 'cancelling')
-        raise FeishuRuntimeError('Unsupported assistant action')
-
-    def _read_assistant_detail(
-        self,
-        *,
-        owner_user_id: str,
-        request_id: str,
-        provider: str,
-        thread_id: str,
-    ) -> dict[str, Any]:
-        if not thread_id:
-            raise FeishuRuntimeError('Codex thread is missing')
-        page = self._core.read_external_thread(
-            owner_user_id=owner_user_id,
-            request_id=request_id,
-            provider=provider,
-            thread_id=thread_id,
-            offset=0,
-            limit=_ASSISTANT_TURN_PAGE_SIZE,
-            tail=True,
-        )
-        return detail_view(page)
-
-    def _release_and_confirm_assistant(
-        self,
-        *,
-        owner_user_id: str,
-        request_id: str,
-        conversation_id: str,
-        thread_id: str,
-    ) -> dict[str, Any]:
-        self._core.release_external_conversation(
-            owner_user_id=owner_user_id,
-            request_id=request_id,
-            conversation_id=conversation_id,
-        )
-        for attempt in range(4):
-            released = self._read_assistant_detail(
-                owner_user_id=owner_user_id,
-                request_id=f'{request_id}_verify_{attempt}',
-                provider=_ASSISTANT_PROVIDER,
-                thread_id=thread_id,
-            )
-            thread = released.get('thread')
-            thread = dict(thread) if isinstance(thread, dict) else {}
-            if (
-                thread.get('available') is True
-                and not thread.get('controlled_by_lazymind')
-            ):
-                return released
-            if attempt < 3:
-                time.sleep(0.25)
-        raise FeishuRuntimeError('Codex control release was not confirmed')
-
-    def _schedule_assistant_threads(
-        self,
-        *,
-        route: _AccountRoute,
-        address_hash: str,
-        chat_id: str,
-        revision: int,
-    ) -> None:
-        thread = threading.Thread(
-            target=self._refresh_assistant_threads,
-            args=(route, address_hash, chat_id, revision),
-            name='feishu-assistant-threads',
-            daemon=True,
-        )
-        thread.start()
-
-    def _refresh_assistant_threads(
-        self,
-        route: _AccountRoute,
-        address_hash: str,
-        chat_id: str,
-        revision: int,
-    ) -> None:
-        workspace = FeishuWorkspaceState.from_dict(
-            self._store.get_feishu_workspace_state(route.account_id, address_hash)
-        )
-        if workspace.revision != revision or workspace.view != 'assistant':
-            return
-        assistant_view: dict[str, Any] = {}
-        load_failed = False
-        try:
-            if workspace.assistant_mode == 'projects':
-                assistant_view = self._load_assistant_projects(
-                    workspace,
-                    route.owner_user_id,
-                    f'feishu_assistant_projects_{revision}',
-                )
-            else:
-                assistant_view = self._load_assistant_threads(
-                    workspace,
-                    route.owner_user_id,
-                    f'feishu_assistant_list_{revision}',
-                    '',
-                )
-        except Exception as exc:
-            load_failed = True
-            assistant_view = assistant_view_with_ui({}, 'error', str(exc))
-        current = FeishuWorkspaceState.from_dict(
-            self._store.get_feishu_workspace_state(route.account_id, address_hash)
-        )
-        if current.revision != revision or current.view != 'assistant':
-            return
-        if load_failed:
-            workspace = current
-        else:
-            workspace.advance()
-            if not self._store.save_feishu_workspace_state_if_revision(
-                route.account_id,
-                address_hash,
-                workspace.to_dict(),
-                revision,
-            ):
-                return
-        if not workspace.message_id:
-            return
-        self._schedule_action_card_refresh(
-            route.account_id,
-            workspace.message_id,
-            FeishuWorkspaceRenderer.render(
-                provider_context={
-                    'chat_id': chat_id,
-                    'workspace_state': workspace.to_dict(),
-                    'assistant_view': assistant_view,
-                },
-                presentations=[],
-            ),
-            address_hash=address_hash,
-            expected_revision=workspace.revision,
-            expected_operation_id=workspace.active_operation_id,
-        )
-
-    def _load_assistant_projects(
-        self,
-        workspace: FeishuWorkspaceState,
-        owner_user_id: str,
-        request_id: str,
-        cursor: str | None = None,
-    ) -> dict[str, Any]:
-        cursor = (
-            workspace.assistant_projects_cursor
-            if cursor is None
-            else str(cursor)
-        )
-        response = self._core.list_external_projects(
-            owner_user_id=owner_user_id,
-            request_id=request_id,
-            provider=_ASSISTANT_PROVIDER,
-            cursor=cursor,
-            limit=_ASSISTANT_PROJECT_PAGE_SIZE,
-        )
-        view = projects_view(response)
-        workspace.assistant_projects_cursor = cursor[:512]
-        workspace.assistant_projects_next_cursor = view['next_cursor']
-        return view
-
-    def _load_assistant_threads(
-        self,
-        workspace: FeishuWorkspaceState,
-        owner_user_id: str,
-        request_id: str,
-        cursor: str,
-        *,
-        cwd: str | None = None,
-    ) -> dict[str, Any]:
-        project_cwd = (
-            workspace.assistant_project_cwd
-            if cwd is None
-            else str(cwd)
-        )
-        response = self._core.list_external_threads(
-            owner_user_id=owner_user_id,
-            request_id=request_id,
-            provider=_ASSISTANT_PROVIDER,
-            cursor=str(cursor or ''),
-            cwd=project_cwd,
-            limit=_ASSISTANT_SESSION_PAGE_SIZE,
-        )
-        view = sessions_view(response)
-        workspace.assistant_threads_cursor = str(cursor or '')[:512]
-        workspace.assistant_threads_next_cursor = view['next_cursor']
-        return view
-
     def _handle_action(
         self,
         worker: _AppWorker,
@@ -1833,7 +569,7 @@ class FeishuRuntime:
             or not action.text
             or action.intended_chat_id not in {'', action.chat_id}
         ):
-            return
+            return None
         started_at = time.monotonic()
         with self._lock:
             account_id = self._owner_routes.get(
@@ -1841,21 +577,18 @@ class FeishuRuntime:
             )
             route = self._accounts.get(account_id) if account_id else None
             lease = worker.lease
-        if (
-            route is None
-            or route.sender_id != action.sender_id
-        ):
-            return
+        if route is None or route.sender_id != action.sender_id:
+            return None
         if lease is None:
             raise FeishuRuntimeError(
                 'Feishu runtime lease is unavailable'
             )
-        address = self._addresses.direct(
+
+        address_hash = self._addresses.direct(
             route.account_id,
             action.chat_id,
             action.sender_id,
-        )
-        address_hash = address.route_hash
+        ).route_hash
         self._remember_direct_chat(route.account_id, action.chat_id)
         conversation_id = self._store.get_route(
             route.account_id,
@@ -1892,50 +625,19 @@ class FeishuRuntime:
             ).encode('utf-8')
         ).hexdigest()
         if workspace.message_id and workspace.message_id != action.message_id:
-            self._expire_workspace_card(
-                account_id=route.account_id,
-                address_hash=address_hash,
-                message_id=action.message_id,
-                current_message_id=workspace.message_id,
-                language=workspace.output_language,
-            )
-            return None
-        action_kind = str((action.workspace_action or {}).get('kind') or '')
+            return stale_workspace_card(workspace.output_language)
+
         action_data = action.workspace_action or {}
-        if (
-            action_kind
-            and not action_kind.startswith('assistant.')
-            and action_kind != 'operation.cancel'
+        action_kind = str(action_data.get('kind') or '')
+        if action_kind == 'operation.cancel':
+            return None
+        if action_kind and (
+            str(action_data.get('expected_view') or '') != workspace.view
+            or action_data.get('expected_revision') != workspace.revision
+            or str(action_data.get('expected_operation_id') or '')
+            != workspace.active_operation_id
         ):
-            if (
-                str(action_data.get('expected_view') or '')
-                != workspace.view
-                or action_data.get('expected_revision')
-                != workspace.revision
-                or str(action_data.get('expected_operation_id') or '')
-                != workspace.active_operation_id
-            ):
-                if action.action == 'local' and workspace.view in {
-                    'chat',
-                    'settings',
-                }:
-                    card = FeishuWorkspaceRenderer.render(
-                        provider_context=self._workspace_provider_context(
-                            account_id=route.account_id,
-                            address_hash=address_hash,
-                            workspace=workspace,
-                            chat_id=action.chat_id,
-                            conversation_id=conversation_id,
-                        ),
-                        presentations=[],
-                    )
-                    self._log_action_ready(
-                        action,
-                        started_at=started_at,
-                        cached=True,
-                    )
-                    return card
-                return None
+            return stale_workspace_card(workspace.output_language)
         if action_kind == 'setting.update':
             command_action = action.command_action
             parameters = (
@@ -1943,100 +645,27 @@ class FeishuRuntime:
                 if isinstance(command_action, dict)
                 else None
             )
-            inner_conversation_id = (
-                str(parameters.get('expected_conversation_id') or '')
-                if isinstance(parameters, dict)
-                else ''
-            )
-            target_view = str(
-                action_data.get('view')
-                or 'capabilities'
-            )
-            outer_conversation_id = str(
+            expected_conversation_id = str(
                 action_data.get('expected_conversation_id') or ''
             )
+            change = (
+                parameters.get('change')
+                if isinstance(parameters, dict)
+                else None
+            )
             if (
-                target_view not in {'capabilities', 'settings'}
-                or not outer_conversation_id
-                or inner_conversation_id != outer_conversation_id
-                or outer_conversation_id != conversation_id
+                str(action_data.get('view') or 'capabilities')
+                not in {'capabilities', 'assistant', 'settings'}
+                or not isinstance(parameters, dict)
+                or not isinstance(change, dict)
+                or str(parameters.get('expected_conversation_id') or '')
+                != expected_conversation_id
+                or expected_conversation_id != conversation_id
             ):
-                return None
-        if action_kind == 'new_session.workflow_mode':
-            navigation = self._store.get_navigation_state(
-                route.account_id,
-                address_hash,
-            ) or {}
-            if (
-                conversation_id
-                or navigation.get('mode') != 'new_pending'
-                or not workspace.active_operation_id
-            ):
-                return None
-        if action_kind.startswith('assistant.'):
-            if workspace.view != 'assistant':
-                return None
-            return self._handle_assistant_action(
-                route=route,
-                action=action,
-                address_hash=address_hash,
-                workspace=workspace,
-                conversation_id=conversation_id or '',
-                message_key=message_key,
-                runtime_fence=lease.fence,
-            )
-        if action_kind == 'operation.cancel':
-            action_thread_id = str(
-                (action.workspace_action or {}).get('thread_id') or ''
-            )
-            action_operation_id = str(
-                (action.workspace_action or {}).get('operation_id') or ''
-            )
-            action_run_id = str(
-                (action.workspace_action or {}).get('run_id') or ''
-            )
-            assistant_cancel = any((
-                action_thread_id,
-                action_operation_id,
-                action_run_id,
-            ))
-            if assistant_cancel and workspace.view != 'assistant':
-                return None
-            if (
-                workspace.view == 'assistant'
-                and (
-                    not action_thread_id
-                    or not action_operation_id
-                    or not action_run_id
-                    or action_thread_id
-                    != workspace.assistant_selected_thread_id
-                    or action_operation_id
-                    != workspace.active_operation_id
-                )
-            ):
-                return None
-            if workspace.view == 'assistant':
-                cancel_action = replace(
-                    action,
-                    workspace_action={
-                        **dict(action.workspace_action or {}),
-                        'kind': 'assistant.cancel',
-                    },
-                )
-                return self._handle_assistant_action(
-                    route=route,
-                    action=cancel_action,
-                    address_hash=address_hash,
-                    workspace=workspace,
-                    conversation_id=conversation_id or '',
-                    message_key=message_key,
-                    runtime_fence=lease.fence,
-                )
+                return stale_workspace_card(workspace.output_language)
+        if action.action == 'local' and not action_kind:
             return None
-        if action.action == 'local' and (
-            not action_kind or workspace.view == 'assistant'
-        ):
-            return None
+
         source_revision = workspace.revision
         source_message_id = workspace.message_id
         source_operation_id = workspace.active_operation_id
@@ -2056,6 +685,7 @@ class FeishuRuntime:
         ):
             workspace.begin_operation(message_key)
         workspace.advance()
+
         if action.action == 'local':
             if not self._store.save_feishu_workspace_state_if_revision(
                 route.account_id,
@@ -2074,6 +704,7 @@ class FeishuRuntime:
                 route.account_id,
                 address_hash,
             ) or ''
+
         provider_context = self._workspace_provider_context(
             account_id=route.account_id,
             address_hash=address_hash,
@@ -2127,6 +758,7 @@ class FeishuRuntime:
                 cached=True,
             )
             return card
+
         envelope = InboundEnvelope(
             provider='feishu',
             account_id=route.account_id,
@@ -2148,7 +780,7 @@ class FeishuRuntime:
             envelope,
             lease.fence,
         ):
-            return None
+            return stale_workspace_card(workspace.output_language)
         self._log_action_ready(
             action,
             started_at=started_at,
@@ -2171,7 +803,7 @@ class FeishuRuntime:
             route = self._accounts.get(account_id) if account_id else None
             lease = worker.lease
             chat_id = (
-                getattr(self, '_direct_chats', {}).get(route.account_id, '')
+                self._direct_chats.get(route.account_id, '')
                 if route is not None
                 else ''
             )
@@ -2179,205 +811,71 @@ class FeishuRuntime:
             return
         if lease is None:
             raise FeishuRuntimeError('Feishu runtime lease is unavailable')
+
         message_key = hashlib.sha256(
             (
                 f'menu:{menu.event_id}:{menu.sender_id}:'
                 f'{menu.event_key}'
             ).encode('utf-8')
         ).hexdigest()
-        menu_card_key = (
-            f'feishu-menu-card:{route.account_id}:'
-            f'{menu.event_id}:{view}'
-        )
-
-        navigation_blocked = False
-        card_pinned = False
-        assistant_view: dict[str, Any] = {}
-        detail_unavailable = False
-        source_lineage_loaded = False
         source_message_id = ''
         source_operation_id = ''
         source_revision = 0
+        state = FeishuWorkspaceState(view=view)
+        if chat_id:
+            address_hash = self._addresses.direct(
+                route.account_id,
+                chat_id,
+                menu.sender_id,
+            ).route_hash
+            state = FeishuWorkspaceState.from_dict(
+                self._store.get_feishu_workspace_state(
+                    route.account_id,
+                    address_hash,
+                )
+            )
+            source_message_id = state.message_id
+            source_operation_id = state.active_operation_id
+            source_revision = state.revision
+            if state.view == view and state.active_operation_id == message_key:
+                return
+        state.navigate(view)
+        state.active_operation_id = message_key
+        state.advance()
+        prepared_state = state.to_dict()
+        card = FeishuWorkspaceRenderer.render(
+            provider_context={
+                'chat_id': chat_id,
+                'workspace_state': prepared_state,
+            },
+            presentations=[],
+        )
+
         sender = self._channels.create_sender(
             self._credentials.load_runtime_account(
                 route.account_id
             )['credentials']
         )
         try:
-            state = FeishuWorkspaceState(view=view)
-            message_id = ''
-            if chat_id:
-                address_hash = self._addresses.direct(
-                    route.account_id,
-                    chat_id,
-                    menu.sender_id,
-                ).route_hash
-                state = FeishuWorkspaceState.from_dict(
-                    self._store.get_feishu_workspace_state(
-                        route.account_id,
-                        address_hash,
-                    )
-                )
-                source_lineage_loaded = True
-                source_message_id = state.message_id
-                source_operation_id = state.active_operation_id
-                source_revision = state.revision
-                if state.view == 'assistant' and view == 'assistant':
-                    if state.active_operation_id == message_key:
-                        self._schedule_assistant_threads(
-                            route=route,
-                            address_hash=address_hash,
-                            chat_id=chat_id,
-                            revision=state.revision,
-                        )
-                    return
-                if (
-                    state.view == view
-                    and state.active_operation_id == message_key
-                ):
-                    return
-                if (
-                    state.view == 'assistant'
-                    and state.assistant_mode == 'detail'
-                    and state.assistant_selected_thread_id
-                ):
-                    try:
-                        assistant_view = self._read_assistant_detail(
-                            owner_user_id=route.owner_user_id,
-                            request_id=(
-                                'feishu_assistant_menu_read_'
-                                + hashlib.sha256(
-                                    (menu.event_id or menu.event_key).encode(
-                                        'utf-8'
-                                    )
-                                ).hexdigest()[:24]
-                            ),
-                            provider=_ASSISTANT_PROVIDER,
-                            thread_id=state.assistant_selected_thread_id,
-                        )
-                    except Exception:
-                        _logger.warning(
-                            'feishu_assistant_menu_read_failed',
-                            exc_info=True,
-                        )
-                        if view == 'assistant':
-                            return
-                        detail_unavailable = True
-                if (
-                    state.view == 'assistant'
-                    and state.assistant_mode == 'detail'
-                ):
-                    card_pinned = detail_unavailable or detail_run_status(
-                        assistant_view
-                    ) in {
-                        'running',
-                        'waiting_for_input',
-                        'releasing',
-                        'release_failed',
-                    }
-                navigation_blocked = self._assistant_navigation_blocked(
-                    state,
-                    account_id=route.account_id,
-                    address_hash=address_hash,
-                    target_view=view,
-                    assistant_view=assistant_view,
-                    detail_unavailable=detail_unavailable,
-                )
-                if navigation_blocked:
-                    if chat_id:
-                        sender.send_markdown(
-                            chat_id=chat_id,
-                            text='Codex 正在处理任务，菜单切换未执行。',
-                            idempotency_key=(
-                                f'feishu-menu-blocked:{route.account_id}:'
-                                f'{menu.event_id or menu.event_key}'
-                            ),
-                        )
-                    return
-                if state.view == 'assistant' and view != 'assistant':
-                    try:
-                        assistant_view = self._release_idle_assistant(
-                            state,
-                            account_id=route.account_id,
-                            address_hash=address_hash,
-                            owner_user_id=route.owner_user_id,
-                            request_id=(
-                                'feishu_assistant_menu_release_'
-                                + hashlib.sha256(
-                                    menu.event_id.encode('utf-8')
-                                ).hexdigest()[:24]
-                            ),
-                        )
-                    except Exception as exc:
-                        _logger.warning(
-                            'feishu_assistant_menu_release_failed',
-                            exc_info=True,
-                        )
-                        navigation_blocked = True
-                        view = 'assistant'
-                        card_pinned = True
-                        assistant_view = assistant_view_with_ui(
-                            assistant_view,
-                            'error',
-                            str(exc),
-                        )
-                message_id = state.message_id
-            entering_assistant = (
-                view == 'assistant'
-                and (
-                    not source_lineage_loaded
-                    or state.view != 'assistant'
-                )
-            )
-            state.navigate(view)
-            if not navigation_blocked:
-                state.active_operation_id = message_key
-            if entering_assistant and not navigation_blocked:
-                state.assistant_mode = 'projects'
-                state.assistant_project_cwd = ''
-                state.assistant_project_page = 0
-                state.assistant_projects_cursor = ''
-                state.assistant_projects_next_cursor = ''
-                state.assistant_projects_previous_cursors = []
-                state.assistant_threads_cursor = ''
-                state.assistant_threads_next_cursor = ''
-                state.assistant_threads_previous_cursors = []
-                state.assistant_threads_page = 0
-            state.advance()
-            prepared_state = state.to_dict()
-            card = FeishuWorkspaceRenderer.render(
-                provider_context={
-                    'chat_id': chat_id,
-                    'workspace_state': prepared_state,
-                    'assistant_view': assistant_view,
-                },
-                presentations=[],
-            )
-            if message_id and card_pinned:
-                try:
-                    sender.update_card(message_id=message_id, card=card)
-                except Exception as exc:
-                    if not workspace_card_expired(exc):
-                        raise
-                    message_id = self._send_card_to_bottom(
-                        sender=sender,
-                        chat_id=chat_id,
-                        card=card,
-                        idempotency_key=menu_card_key,
-                    )
-            elif message_id:
+            if state.message_id and chat_id:
                 message_id = self._send_card_to_bottom(
                     sender=sender,
                     chat_id=chat_id,
                     card=card,
-                    idempotency_key=menu_card_key,
+                    idempotency_key=(
+                        f'feishu-menu-card:{route.account_id}:'
+                        f'{menu.event_id}:{view}'
+                    ),
                 )
             else:
                 message_id, resolved_chat_id = (
                     sender.send_card_to_user_with_chat(
                         open_id=menu.sender_id,
                         card=card,
-                        idempotency_key=menu_card_key,
+                        idempotency_key=(
+                            f'feishu-menu-card:{route.account_id}:'
+                            f'{menu.event_id}:{view}'
+                        ),
                     )
                 )
                 chat_id = resolved_chat_id or chat_id
@@ -2388,7 +886,6 @@ class FeishuRuntime:
                 'Feishu menu response is missing chat or message id'
             )
         self._remember_direct_chat(route.account_id, chat_id)
-
         address_hash = self._addresses.direct(
             route.account_id,
             chat_id,
@@ -2398,87 +895,33 @@ class FeishuRuntime:
             route.account_id,
             address_hash,
         )
-        current_state = FeishuWorkspaceState.from_dict(
+        current = FeishuWorkspaceState.from_dict(
             self._store.get_feishu_workspace_state(
                 route.account_id,
                 address_hash,
             )
         )
-        lineage_changed = source_lineage_loaded and (
-            current_state.message_id != source_message_id
-            or current_state.active_operation_id != source_operation_id
-            or current_state.revision != source_revision
-        )
-        if lineage_changed:
-            self._expire_workspace_card(
-                account_id=route.account_id,
-                address_hash=address_hash,
-                message_id=message_id,
-                current_message_id=current_state.message_id,
-                language=current_state.output_language,
+        if not source_message_id:
+            source_message_id = current.message_id
+            source_operation_id = current.active_operation_id
+            source_revision = current.revision
+            state = current
+            state.navigate(view)
+            state.active_operation_id = message_key
+            state.advance()
+            prepared_state = state.to_dict()
+        if (
+            source_message_id
+            and (
+                current.message_id != source_message_id
+                or current.active_operation_id != source_operation_id
+                or current.revision != source_revision
             )
-            if (
-                message_id == current_state.message_id
-                and current_state.view == 'assistant'
-            ):
-                try:
-                    request_id = (
-                        'feishu_assistant_menu_stale_reconcile_'
-                        + hashlib.sha256(
-                            menu.event_id.encode('utf-8')
-                        ).hexdigest()[:24]
-                    )
-                    if (
-                        current_state.assistant_mode == 'detail'
-                        and current_state.assistant_selected_thread_id
-                    ):
-                        current_assistant_view = self._read_assistant_detail(
-                            owner_user_id=route.owner_user_id,
-                            request_id=request_id,
-                            provider=_ASSISTANT_PROVIDER,
-                            thread_id=(
-                                current_state.assistant_selected_thread_id
-                            ),
-                        )
-                    elif current_state.assistant_mode == 'sessions':
-                        current_assistant_view = self._load_assistant_threads(
-                            current_state,
-                            route.owner_user_id,
-                            request_id,
-                            current_state.assistant_threads_cursor,
-                        )
-                    else:
-                        current_assistant_view = self._load_assistant_projects(
-                            current_state,
-                            route.owner_user_id,
-                            request_id,
-                        )
-                except Exception:
-                    return
-                self._schedule_action_card_refresh(
-                    route.account_id,
-                    current_state.message_id,
-                    FeishuWorkspaceRenderer.render(
-                        provider_context={
-                            'chat_id': chat_id,
-                            'workspace_state': current_state.to_dict(),
-                            'assistant_view': current_assistant_view,
-                        },
-                        presentations=[],
-                    ),
-                    address_hash=address_hash,
-                    expected_revision=current_state.revision,
-                    expected_operation_id=(
-                        current_state.active_operation_id
-                    ),
-                )
+        ):
             return
-        state_revision = current_state.revision
-        assistant_state_write = (
-            current_state.view == 'assistant' or view == 'assistant'
-        )
+
         state = FeishuWorkspaceState.from_dict(prepared_state)
-        state.message_id = message_id
+        state.message_id = str(message_id)
         command = menu_command(view)
         if command is not None:
             provider_context = {
@@ -2492,7 +935,6 @@ class FeishuRuntime:
                 ),
                 'workspace_surface': 'management',
                 'command_action': command,
-                'assistant_view': assistant_view,
             }
             envelope = InboundEnvelope(
                 provider='feishu',
@@ -2505,142 +947,38 @@ class FeishuRuntime:
                 text={
                     'capabilities': '查看能力',
                     'conversations': '切换会话',
+                    'assistant': '查看助理',
                 }[view],
                 provider_context=provider_context,
             )
-            if self._store.claim_feishu_workspace_and_ingest(
+            claimed = self._store.claim_feishu_workspace_and_ingest(
                 route.account_id,
                 address_hash,
                 state.to_dict(),
-                state_revision,
+                source_revision,
                 source_message_id,
                 source_operation_id,
                 envelope,
                 lease.fence,
-            ):
+            )
+            if claimed:
                 self._retire_replaced_workspace_card(
                     account_id=route.account_id,
                     address_hash=address_hash,
                     previous_message_id=source_message_id,
-                    current_message_id=message_id,
-                    language=state.output_language,
-                )
-                return
-            current = FeishuWorkspaceState.from_dict(
-                self._store.get_feishu_workspace_state(
-                    route.account_id,
-                    address_hash,
-                )
-            )
-            if current.message_id != message_id:
-                self._expire_workspace_card(
-                    account_id=route.account_id,
-                    address_hash=address_hash,
-                    message_id=message_id,
-                    current_message_id=current.message_id,
-                    language=current.output_language,
-                )
-            return
-        saved = self._store.save_feishu_workspace_state_if_revision(
-            route.account_id,
-            address_hash,
-            state.to_dict(),
-            state_revision,
-            preserve_current_message=False,
-        )
-        if not saved:
-            state = FeishuWorkspaceState.from_dict(
-                self._store.get_feishu_workspace_state(
-                    route.account_id,
-                    address_hash,
-                )
-            )
-            if not assistant_state_write:
-                self._expire_workspace_card(
-                    account_id=route.account_id,
-                    address_hash=address_hash,
-                    message_id=message_id,
                     current_message_id=state.message_id,
                     language=state.output_language,
                 )
-                return
-            if assistant_state_write:
-                if source_lineage_loaded and (
-                    state.message_id != source_message_id
-                    or state.active_operation_id != source_operation_id
-                ):
-                    self._expire_workspace_card(
-                        account_id=route.account_id,
-                        address_hash=address_hash,
-                        message_id=message_id,
-                        current_message_id=state.message_id,
-                        language=state.output_language,
-                    )
-                    return
-                state.message_id = message_id
-                state = FeishuWorkspaceState.from_dict(
-                    self._store.save_feishu_workspace_message(
-                        route.account_id,
-                        address_hash,
-                        message_id,
-                        state.active_operation_id,
-                        source_message_id,
-                    )
-                )
-                if state.message_id != message_id:
-                    return
-                view = state.view
-                entering_assistant = False
-                if (
-                    state.view == 'assistant'
-                    and state.assistant_mode == 'detail'
-                    and state.assistant_selected_thread_id
-                ):
-                    thread = assistant_view.get('thread')
-                    thread = dict(thread) if isinstance(thread, dict) else {}
-                    if str(thread.get('id') or '') != (
-                        state.assistant_selected_thread_id
-                    ):
-                        try:
-                            assistant_view = self._read_assistant_detail(
-                                owner_user_id=route.owner_user_id,
-                                request_id='feishu_assistant_menu_reconcile',
-                                provider=_ASSISTANT_PROVIDER,
-                                thread_id=state.assistant_selected_thread_id,
-                            )
-                        except Exception:
-                            return
-                elif state.view == 'assistant':
-                    try:
-                        assistant_view = (
-                            self._load_assistant_projects(
-                                state,
-                                route.owner_user_id,
-                                'feishu_assistant_menu_reconcile',
-                            )
-                            if state.assistant_mode == 'projects'
-                            else self._load_assistant_threads(
-                                state,
-                                route.owner_user_id,
-                                'feishu_assistant_menu_reconcile',
-                                state.assistant_threads_cursor,
-                            )
-                        )
-                    except Exception:
-                        return
-        provider_context = {
-            **self._workspace_provider_context(
-                account_id=route.account_id,
-                address_hash=address_hash,
-                workspace=state,
-                chat_id=chat_id,
-                conversation_id=conversation_id,
-                workspace_action={'kind': 'navigate', 'view': view},
-            ),
-            'workspace_surface': 'management',
-            'command_action': command,
-            'assistant_view': assistant_view,
-        }
+            return
+
+        if not self._store.save_feishu_workspace_state_if_revision(
+            route.account_id,
+            address_hash,
+            state.to_dict(),
+            source_revision,
+            preserve_current_message=False,
+        ):
+            return
         self._retire_replaced_workspace_card(
             account_id=route.account_id,
             address_hash=address_hash,
@@ -2648,98 +986,6 @@ class FeishuRuntime:
             current_message_id=state.message_id,
             language=state.output_language,
         )
-        self._schedule_action_card_refresh(
-            route.account_id,
-            message_id,
-            FeishuWorkspaceRenderer.render(
-                provider_context=provider_context,
-                presentations=[],
-            ),
-            address_hash=address_hash,
-            expected_revision=state.revision,
-            expected_operation_id=state.active_operation_id,
-        )
-        if entering_assistant and not navigation_blocked:
-            self._schedule_assistant_threads(
-                route=route,
-                address_hash=address_hash,
-                chat_id=chat_id,
-                revision=state.revision,
-            )
-
-    def _assistant_navigation_blocked(
-        self,
-        state: FeishuWorkspaceState,
-        *,
-        account_id: str,
-        address_hash: str,
-        target_view: str,
-        assistant_view: dict[str, Any],
-        detail_unavailable: bool,
-    ) -> bool:
-        run_status = (
-            detail_run_status(assistant_view)
-            if assistant_view.get('kind') == 'detail'
-            else 'idle'
-        )
-        blocked = (
-            state.view == 'assistant'
-            and target_view != 'assistant'
-            and (
-                detail_unavailable
-                or self._store.has_active_inbound(
-                    account_id,
-                    address_hash,
-                )
-                or run_status in {
-                    'running',
-                    'waiting_for_input',
-                    'releasing',
-                    'release_failed',
-                }
-            )
-        )
-        return blocked
-
-    def _release_idle_assistant(
-        self,
-        state: FeishuWorkspaceState,
-        *,
-        account_id: str,
-        address_hash: str,
-        owner_user_id: str,
-        request_id: str,
-    ) -> dict[str, Any]:
-        if self._store.has_active_inbound(account_id, address_hash):
-            raise FeishuRuntimeError(
-                'Codex conversation is still being submitted'
-            )
-        if not state.assistant_selected_thread_id:
-            return {}
-        view = self._read_assistant_detail(
-            owner_user_id=owner_user_id,
-            request_id=f'{request_id}_read',
-            provider=_ASSISTANT_PROVIDER,
-            thread_id=state.assistant_selected_thread_id,
-        )
-        if detail_run_status(view) in {
-            'running',
-            'waiting_for_input',
-            'releasing',
-            'release_failed',
-        }:
-            raise FeishuRuntimeError(
-                'Codex conversation cannot be released yet'
-            )
-        conversation_id = detail_conversation_id(view)
-        if conversation_id:
-            return self._release_and_confirm_assistant(
-                owner_user_id=owner_user_id,
-                request_id=request_id,
-                conversation_id=conversation_id,
-                thread_id=state.assistant_selected_thread_id,
-            )
-        return view
 
     def _remember_direct_chat(self, account_id: str, chat_id: str) -> None:
         if not account_id or not chat_id:
@@ -2905,7 +1151,6 @@ class FeishuRuntime:
                                 expected_operation_id,
                                 message_id,
                                 expected_revision,
-                                advance_revision=False,
                             )
                             if saved.get('message_id') != new_message_id:
                                 self._expire_workspace_card(
@@ -2997,13 +1242,6 @@ class FeishuRuntime:
             workspace.view = 'conversations'
         elif kind == 'history.open':
             workspace.view = 'conversations'
-        elif kind == 'capability.toggle':
-            workspace.view = 'capabilities'
-        elif kind == 'new_session.workflow_mode':
-            mode = str(action.get('mode') or '')
-            if mode in {'auto', 'dynamic'}:
-                workspace.pending_workflow_mode = mode
-            workspace.view = 'capabilities'
         elif kind == 'new_session.open':
             workspace.open_new_session()
         elif kind == 'new_session.cancel':
@@ -3013,7 +1251,7 @@ class FeishuRuntime:
             workspace.prepare_new_session()
         elif kind == 'setting.update':
             target_view = str(action.get('view') or 'capabilities')
-            if target_view in {'capabilities', 'settings'}:
+            if target_view in {'capabilities', 'assistant', 'settings'}:
                 workspace.view = target_view
         elif kind == 'preference':
             name = str(action.get('name') or '')
@@ -3036,7 +1274,7 @@ class FeishuRuntime:
         elif kind == 'maintenance.reset_preferences':
             workspace.reset_preferences()
             workspace.view = 'settings'
-        elif kind == 'maintenance.clear_conversation':
+        elif kind == 'maintenance.new_conversation':
             workspace.prepare_new_session()
 
     def _workspace_provider_context(
@@ -3065,6 +1303,13 @@ class FeishuRuntime:
                     'max',
                 }
                 else None
+            ),
+            include_capability_settings=(
+                workspace.view == 'capabilities'
+                and bool(
+                    conversation_id
+                    or navigation.get('mode') == 'new_pending'
+                )
             ),
         )
         return {

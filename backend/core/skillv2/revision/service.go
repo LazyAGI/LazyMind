@@ -177,21 +177,12 @@ func NewService(deps ServiceDeps) *Service {
 	if maxRevisions == 0 {
 		maxRevisions = 50
 	}
-	relaxSQLiteFixtureIndexes(deps.DB)
 	return &Service{
 		db:           deps.DB,
 		blobStore:    deps.BlobStore,
 		maxRevisions: maxRevisions,
 		clock:        systemClock{},
 	}
-}
-
-func relaxSQLiteFixtureIndexes(db *gorm.DB) {
-	if db == nil || db.Dialector.Name() != "sqlite" {
-		return
-	}
-	_ = db.Exec("DROP INDEX IF EXISTS uk_skills_owner_identity").Error
-	_ = db.Exec("DROP INDEX IF EXISTS uk_skills_owner_relative_root").Error
 }
 
 func (s *Service) CommitDraft(ctx context.Context, req CommitDraftRequest) (CommitDraftResponse, error) {

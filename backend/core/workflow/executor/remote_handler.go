@@ -356,21 +356,5 @@ func (h RemoteHandler) Complete(w http.ResponseWriter, r *http.Request) {
 // ValidateCompletion is called by the terminal handler before accepting a
 // remote success. Runtime, not the worker, is authoritative for required output.
 func (h RemoteHandler) ValidateCompletion(ctx AttemptContext) error {
-	if len(ctx.RequiredOutputs) == 0 {
-		return nil
-	}
-	var rows []orm.WorkflowSlotRevision
-	if err := h.DB.Where("producer_attempt_id = ? AND validity = 'effective'", ctx.AttemptID).Find(&rows).Error; err != nil {
-		return err
-	}
-	seen := map[string]bool{}
-	for _, row := range rows {
-		seen[row.SlotID] = true
-	}
-	for _, slot := range ctx.RequiredOutputs {
-		if !seen[slot] {
-			return errors.New("required output missing: " + slot)
-		}
-	}
-	return nil
+	return ValidateRequiredOutputs(context.Background(), h.DB, ctx)
 }

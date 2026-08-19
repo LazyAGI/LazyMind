@@ -257,6 +257,8 @@ func (h *Handler) registerRoutes(mux *http.ServeMux) {
 	// Binding target tree — used during source creation/editing.
 	routeAPI(mux, "POST", "/api/scan/binding-targets/tree/children", []string{"scan.write"}, h.listBindingTargetChildren)
 	routeAPI(mux, "POST", "/api/scan/binding-targets/tree/search", []string{"scan.write"}, h.searchBindingTargets)
+	routeAPI(mux, "POST", "/api/scan/binding-targets/tree/recommendations", []string{"scan.write"}, h.recommendBindingTargets)
+	routeAPI(mux, "POST", "/api/scan/binding-targets/tree/recommendations-list", []string{"scan.write"}, h.listRecommendedBindingTargets)
 	routeAPI(mux, "POST", "/api/scan/binding-targets/validate", []string{"scan.write"}, h.validateBindingTarget)
 
 	// Sources CRUD.

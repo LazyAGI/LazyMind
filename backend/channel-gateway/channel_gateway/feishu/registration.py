@@ -56,6 +56,7 @@ _MENU_ITEMS = (
     ('lazymind_settings', '设置', 'Settings', 'setting_outlined'),
     ('lazymind_assistant', '助理', 'Assistant', 'robot_outlined'),
 )
+_PUBLISH_VERSION_EXISTS = 50516
 
 
 def _menu_payload() -> list[BotMenuNode]:
@@ -131,7 +132,7 @@ def configure_bot_menu(
             .mobile_default_ability('bot')
             .pc_default_ability('bot')
             .remark('LazyMind 原生菜单与对话接入')
-            .changelog('新增能力、切换会话、设置和助理悬浮菜单。')
+            .changelog('能力、会话、设置和助理菜单统一由 LazyMind Core 执行。')
             .version(publish_version)
             .build()
         )
@@ -145,7 +146,10 @@ def configure_bot_menu(
         raise FeishuRuntimeError(
             'Feishu bot menu publish request failed'
         ) from exc
-    if not publish_response.success():
+    if (
+        not publish_response.success()
+        and publish_response.code != _PUBLISH_VERSION_EXISTS
+    ):
         raise FeishuRuntimeError(
             'Feishu bot menu publish failed '
             f'code={publish_response.code} msg={publish_response.msg}'

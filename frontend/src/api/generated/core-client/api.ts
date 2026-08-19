@@ -421,6 +421,11 @@ export interface ApplyWordGroupActionResponse {
     'group_ids'?: Array<string>;
     'skipped_words'?: Array<string>;
 }
+export interface ArtifactActionPreviewOpenAPIRequest {
+    'action': string;
+    'base_revision': number;
+    'input'?: { [key: string]: object; };
+}
 export interface AuthorizationSubjectGrant {
     'grantee_id'?: string;
     'grantee_type'?: string;
@@ -486,6 +491,15 @@ export interface BuiltinSkillOpenAPIResponse {
     'installed_skill_id'?: string;
     'name': string;
 }
+export interface BulkUpdateServerEnabledRequest {
+    'enabled'?: boolean;
+}
+export interface BulkUpdateServerEnabledResponse {
+    'enabled': boolean;
+    'skipped_unverified_count': number;
+    'total_count': number;
+    'updated_count': number;
+}
 export interface CanResult {
     'allowed'?: boolean;
 }
@@ -513,6 +527,7 @@ export interface ChannelIntentOpenAPIResponse {
 export interface ChatChunkResponse {
     'conversation_id'?: string;
     'delta'?: string;
+    'execution'?: ExternalExecutionProjection;
     'finish_reason'?: string;
     'history_id'?: string;
     'message'?: string;
@@ -555,13 +570,6 @@ export interface CheckWordsExistRequest {
 }
 export interface CheckWordsExistResponse {
     'existing'?: Array<string>;
-}
-export interface CommitResponse {
-    'content': string;
-    'path': string;
-    'ref': ResourceRef;
-    'revision_id': string;
-    'revision_no': number;
 }
 export interface CompleteUploadRequest {
     'auto_start'?: boolean;
@@ -611,6 +619,7 @@ export type ConversationFeedbackRequestType = number | string;
 
 export interface ConversationHistoryItem {
     'create_time'?: string;
+    'execution'?: ExternalExecutionProjection;
     'expected_answer'?: string;
     'feed_back'?: number;
     'id'?: string;
@@ -794,6 +803,177 @@ export interface CreatedAlias {
     'id': string;
     'word': string;
 }
+export interface CurrentMemoryAvatarData {
+    'content_type': CurrentMemoryAvatarDataContentTypeEnum;
+    'kind': CurrentMemoryAvatarDataKindEnum;
+    'size': number;
+    'updated_at': number;
+}
+
+export const CurrentMemoryAvatarDataContentTypeEnum = {
+    ImagePng: 'image/png',
+    ImageJpeg: 'image/jpeg',
+    ImageWebp: 'image/webp'
+} as const;
+
+export type CurrentMemoryAvatarDataContentTypeEnum = typeof CurrentMemoryAvatarDataContentTypeEnum[keyof typeof CurrentMemoryAvatarDataContentTypeEnum];
+export const CurrentMemoryAvatarDataKindEnum = {
+    Soul: 'soul',
+    Profile: 'profile'
+} as const;
+
+export type CurrentMemoryAvatarDataKindEnum = typeof CurrentMemoryAvatarDataKindEnum[keyof typeof CurrentMemoryAvatarDataKindEnum];
+
+export interface CurrentMemoryAvatarResponse {
+    'code': number;
+    'data': CurrentMemoryAvatarData;
+    'message': string;
+}
+export interface CurrentMemoryConflictData {
+    'current_etag'?: string;
+}
+/**
+ * @type CurrentMemoryDocumentValue
+ */
+export type CurrentMemoryDocumentValue = null | Array<string> | string | { [key: string]: CurrentMemoryDocumentValue; };
+
+export interface CurrentMemoryErrorResponse {
+    'code': number;
+    'data'?: CurrentMemoryConflictData;
+    'message': string;
+}
+export interface CurrentMemoryOperation {
+    'op': CurrentMemoryOperationOpEnum;
+    'path': string;
+    'value'?: string;
+}
+
+export const CurrentMemoryOperationOpEnum = {
+    Set: 'set',
+    Clear: 'clear',
+    Add: 'add',
+    Remove: 'remove'
+} as const;
+
+export type CurrentMemoryOperationOpEnum = typeof CurrentMemoryOperationOpEnum[keyof typeof CurrentMemoryOperationOpEnum];
+
+export interface CurrentMemoryOperationsRequest {
+    'operations': Array<CurrentMemoryOperation>;
+}
+export interface CurrentMemoryPreferenceDetailData {
+    'item': CurrentMemoryPreferenceItem;
+    'reference': CurrentMemoryReference | null;
+    'reference_status': CurrentMemoryPreferenceDetailDataReferenceStatusEnum;
+}
+
+export const CurrentMemoryPreferenceDetailDataReferenceStatusEnum = {
+    Available: 'available',
+    Missing: 'missing'
+} as const;
+
+export type CurrentMemoryPreferenceDetailDataReferenceStatusEnum = typeof CurrentMemoryPreferenceDetailDataReferenceStatusEnum[keyof typeof CurrentMemoryPreferenceDetailDataReferenceStatusEnum];
+
+export interface CurrentMemoryPreferenceDetailResponse {
+    'code': number;
+    'data': CurrentMemoryPreferenceDetailData;
+    'message': string;
+}
+export interface CurrentMemoryPreferenceItem {
+    'created_at': string;
+    'name': string;
+    'summary': string;
+    'updated_at': string;
+}
+export interface CurrentMemoryPreferenceListData {
+    'etag': string;
+    'items': Array<CurrentMemoryPreferenceItem>;
+    'resident_index_usage': CurrentMemoryPreferenceResidentIndexUsage;
+    'total_size': number;
+    'updated_at': number;
+}
+export interface CurrentMemoryPreferenceListResponse {
+    'code': number;
+    'data': CurrentMemoryPreferenceListData;
+    'message': string;
+}
+export interface CurrentMemoryPreferenceOrderRequest {
+    'expected_etag': string;
+    'ordered_names': Array<string>;
+}
+export interface CurrentMemoryPreferenceResidentIndexUsage {
+    'max_items': number;
+    'over_limit': boolean;
+    'used_items': number;
+}
+export interface CurrentMemoryPresentation {
+    'fallbacks': { [key: string]: { [key: string]: string; }; };
+    'sections': Array<CurrentMemoryPresentationSection>;
+}
+export interface CurrentMemoryPresentationField {
+    'labels': { [key: string]: string; };
+    'path': string;
+    'summary_role': CurrentMemoryPresentationFieldSummaryRoleEnum;
+}
+
+export const CurrentMemoryPresentationFieldSummaryRoleEnum = {
+    Title: 'title',
+    Subtitle: 'subtitle',
+    Description: 'description',
+    Tag: 'tag',
+    None: 'none'
+} as const;
+
+export type CurrentMemoryPresentationFieldSummaryRoleEnum = typeof CurrentMemoryPresentationFieldSummaryRoleEnum[keyof typeof CurrentMemoryPresentationFieldSummaryRoleEnum];
+
+export interface CurrentMemoryPresentationSection {
+    'fields': Array<CurrentMemoryPresentationField>;
+    'labels': { [key: string]: string; };
+    'path': string;
+}
+export interface CurrentMemoryProfileData {
+    'document': { [key: string]: CurrentMemoryDocumentValue; };
+    'presentation': CurrentMemoryPresentation;
+    'template_version': number;
+    'updated_at': number;
+}
+export interface CurrentMemoryProfileResponse {
+    'code': number;
+    'data': CurrentMemoryProfileData;
+    'message': string;
+}
+export interface CurrentMemoryReference {
+    'application_scenarios': string;
+    'created_at': string;
+    'name': string;
+    'preference_details': string;
+    'reason': string;
+    'source': CurrentMemoryReferenceSource;
+    'summary': string;
+    'updated_at': string;
+}
+export interface CurrentMemoryReferenceSource {
+    'conversation_id': string;
+    'kind': CurrentMemoryReferenceSourceKindEnum;
+}
+
+export const CurrentMemoryReferenceSourceKindEnum = {
+    MemoryReview: 'memory_review',
+    ChatExplicit: 'chat_explicit'
+} as const;
+
+export type CurrentMemoryReferenceSourceKindEnum = typeof CurrentMemoryReferenceSourceKindEnum[keyof typeof CurrentMemoryReferenceSourceKindEnum];
+
+export interface CurrentMemorySoulData {
+    'document': { [key: string]: CurrentMemoryDocumentValue; };
+    'presentation': CurrentMemoryPresentation;
+    'template_version': number;
+    'updated_at': number;
+}
+export interface CurrentMemorySoulResponse {
+    'code': number;
+    'data': CurrentMemorySoulData;
+    'message': string;
+}
 export interface DatabaseConnectionRequest {
     'database_name': string;
     'db_type': string;
@@ -894,20 +1074,6 @@ export interface DeleteWordGroupResponse {
     'deleted_rows': number;
     'group_id': string;
 }
-export interface DiffEntryLine {
-    'decision'?: string;
-    'display_no_new_line_warning'?: boolean;
-    'html': string;
-    'hunk_id'?: string;
-    'new_line': number;
-    'new_lines'?: number;
-    'new_start'?: number;
-    'old_line': number;
-    'old_lines'?: number;
-    'old_start'?: number;
-    'text': string;
-    'type': string;
-}
 export interface DiffEntryLineOpenAPIResponse {
     'displayNoNewLineWarning'?: boolean;
     'html'?: string;
@@ -996,32 +1162,47 @@ export interface DocumentTableColumn {
 export interface DocumentTagsResponse {
     'tags'?: Array<string>;
 }
-export interface DraftPreviewResponse {
-    'accepted_count': number;
-    'base_revision_id'?: string;
-    'can_undo': boolean;
-    'draft_content': string;
-    'draft_status': string;
-    'draft_version': number;
-    'file_diff': FileDiff;
-    'head_content': string;
-    'path': string;
-    'pending_count': number;
-    'ref': ResourceRef;
-    'rejected_count': number;
-    'resource_type': string;
-    'review_id'?: string;
-    'review_version'?: number;
+export interface EpisodeMemory {
+    'conversation_id': string;
+    'episode_type': EpisodeMemoryEpisodeTypeEnum;
+    'hit_count': number;
+    'id': string;
+    'occurred_at_ms': number;
+    'recorded_at_ms': number;
+    'source_kind': EpisodeMemorySourceKindEnum;
+    'summary': string;
 }
-export interface DraftResponse {
-    'base_revision_id'?: string;
-    'blob_hash': string;
-    'content_hash': string;
-    'draft_status': string;
-    'draft_updated_at'?: string;
-    'draft_version': number;
-    'path': string;
-    'ref': ResourceRef;
+
+export const EpisodeMemoryEpisodeTypeEnum = {
+    Decision: 'decision',
+    Progress: 'progress',
+    Result: 'result',
+    Blocker: 'blocker',
+    Event: 'event'
+} as const;
+
+export type EpisodeMemoryEpisodeTypeEnum = typeof EpisodeMemoryEpisodeTypeEnum[keyof typeof EpisodeMemoryEpisodeTypeEnum];
+export const EpisodeMemorySourceKindEnum = {
+    ChatExplicit: 'chat_explicit',
+    MemoryReview: 'memory_review'
+} as const;
+
+export type EpisodeMemorySourceKindEnum = typeof EpisodeMemorySourceKindEnum[keyof typeof EpisodeMemorySourceKindEnum];
+
+export interface EpisodeMemoryDetailResponse {
+    'code': number;
+    'data': EpisodeMemory;
+    'message': string;
+}
+export interface EpisodeMemoryListData {
+    'items': Array<EpisodeMemory>;
+    'next_page_token': string;
+    'total_size': number;
+}
+export interface EpisodeMemoryListResponse {
+    'code': number;
+    'data': EpisodeMemoryListData;
+    'message': string;
 }
 export interface ErrorResponse {
     'code'?: number;
@@ -1101,34 +1282,54 @@ export interface ExportConversationsRequest {
 export interface ExportConversationsResponse {
     'uris'?: Array<string>;
 }
-export interface FileDiff {
-    'binary': boolean;
-    'diff_entry_lines'?: Array<DiffEntryLine>;
-    'editable_text': boolean;
-    'hunk_count': number;
-    'path': string;
-    'status': string;
-    'supported': boolean;
-    'too_large': boolean;
-    'unsupported_reason'?: string;
+export interface ExternalExecutionInvocation {
+    'failed'?: number;
+    'interrupted'?: number;
+    'running'?: number;
+    'succeeded'?: number;
+    'tools'?: Array<string>;
+    'total'?: number;
 }
-export interface FileResponse {
-    'agent_persona'?: string;
-    'binary': boolean;
-    'blob_hash': string;
-    'content'?: string;
-    'content_hash': string;
-    'draft_status'?: string;
-    'draft_version'?: number;
-    'file_type': string;
-    'mime': string;
-    'path': string;
-    'preferred_name'?: string;
-    'resource_type': string;
-    'response_style'?: string;
-    'revision_id'?: string;
-    'revision_no'?: number;
-    'size': number;
+export interface ExternalExecutionProjection {
+    'artifact_count'?: number;
+    'artifact_revision_count'?: number;
+    'claim_count'?: number;
+    'claimed_at'?: string;
+    'completed_at'?: string;
+    'created_at'?: string;
+    'error_message'?: string;
+    'event_count'?: number;
+    'history_id'?: string;
+    'host_id'?: string;
+    'host_online'?: boolean;
+    'invocation'?: ExternalExecutionInvocation;
+    'last_heartbeat_at'?: string;
+    'provider'?: string;
+    'recovery_count'?: number;
+    'run_id'?: string;
+    'status'?: ExternalExecutionProjectionStatusEnum;
+    'updated_at'?: string;
+    'workflows'?: Array<ExternalExecutionWorkflow>;
+}
+
+export const ExternalExecutionProjectionStatusEnum = {
+    Pending: 'pending',
+    Running: 'running',
+    Completed: 'completed',
+    Failed: 'failed',
+    Stopped: 'stopped'
+} as const;
+
+export type ExternalExecutionProjectionStatusEnum = typeof ExternalExecutionProjectionStatusEnum[keyof typeof ExternalExecutionProjectionStatusEnum];
+
+export interface ExternalExecutionWorkflow {
+    'artifact_count'?: number;
+    'artifact_revision_count'?: number;
+    'current_step_id'?: string;
+    'session_id'?: string;
+    'state_version'?: number;
+    'status'?: string;
+    'workflow_id'?: string;
 }
 export interface GetKBAuthorizationResponse {
     'grants'?: Array<AuthorizationSubjectGrant>;
@@ -1328,27 +1529,6 @@ export interface LocalFSChatSettingOpenAPIRequest {
 export interface LocalFSChatSettingOpenAPIResponse {
     'enabled': boolean;
 }
-export interface ManagedStateListOpenAPIResponse {
-    'items'?: Array<ManagedStateOpenAPIResponse>;
-}
-export interface ManagedStateOpenAPIResponse {
-    'agent_persona'?: string;
-    'auto_evo': boolean;
-    'auto_evo_apply_status': string;
-    'auto_evo_error': string;
-    'auto_evo_generation': number;
-    'content': string;
-    'content_summary': string;
-    'has_pending_review_result': boolean;
-    'latest_version_change'?: LatestVersionChangeOpenAPIResponse;
-    'preferred_name'?: string;
-    'resource_id': string;
-    'resource_type': string;
-    'response_style'?: string;
-    'review_status': string;
-    'title': string;
-    'version': number;
-}
 export interface MarketDeleteOpenAPIResponse {
     'deleted': boolean;
     'market_item_id': string;
@@ -1430,21 +1610,6 @@ export interface MergeWordGroupsRequest {
     'group_ids'?: Array<string>;
     'term': string;
 }
-export interface MetadataResponse {
-    'agent_persona'?: string;
-    'auto_evo': boolean;
-    'auto_evo_apply_status': string;
-    'auto_evo_error': string;
-    'auto_evo_generation': number;
-    'enabled_from_off': boolean;
-    'preferred_name'?: string;
-    'ref': ResourceRef;
-    'resource_id': string;
-    'response_style'?: string;
-    'updated_at': string;
-    'updated_by'?: string;
-    'updated_by_name'?: string;
-}
 export interface ModelFeaturesResponse {
     'image_embed_enabled': boolean;
     'image_embed_required': boolean;
@@ -1468,61 +1633,11 @@ export interface PermissionResult {
     'permissions'?: Array<string>;
     'source'?: string;
 }
-export interface PersonalResourceCommitOpenAPIRequest {
-    'expected_draft_version'?: number;
-    'expected_head_revision_id'?: string;
-    'message'?: string;
-    'source_ref_id'?: string;
-    'source_ref_type'?: string;
-}
-export interface PersonalResourceGenerateOpenAPIRequest {
-    'user_instruct': string;
-}
-export interface PersonalResourceGenerateOpenAPIResponse {
-    'draft_content': string;
-    'draft_source_version': number;
-    'draft_status': string;
-    'draft_version': number;
-}
-export interface PersonalResourcePatchOpenAPIRequest {
-    'agent_persona'?: string;
-    'auto_evo'?: boolean;
-    'preferred_name'?: string;
-    'response_style'?: string;
-}
-export interface PersonalResourceReviewActionOpenAPIRequest {
-    'expected_review_version'?: number;
-    'items'?: Array<ReviewActionItem>;
-}
-export interface PersonalResourceReviewUndoOpenAPIRequest {
-    'expected_review_version'?: number;
-}
-export interface PersonalResourceRollbackOpenAPIRequest {
-    'expected_head_revision_id'?: string;
-    'message'?: string;
-    'revision_id': string;
-}
-export interface PersonalResourceWriteDraftOpenAPIRequest {
-    'content'?: string;
-    'conversation_id'?: string;
-    'expected_draft_version'?: number;
-    'task_id'?: string;
-}
 export interface PersonalizationSettingOpenAPIRequest {
     'enabled': boolean;
 }
 export interface PersonalizationSettingOpenAPIResponse {
     'enabled': boolean;
-}
-export interface WorkflowRepairPreviewOpenAPIRequest {
-    'mode': string;
-    'target': string;
-}
-export interface WorkflowWorkflowConfirmOpenAPIRequest {
-    'analysis_id': string;
-    'candidate_id': string;
-    'draft_version': number;
-    'source_skill_revision_id': string;
 }
 export interface PromptCategory {
     'id': string;
@@ -1647,49 +1762,6 @@ export interface QuestionTypeOption {
 export interface QuestionTypeOptionsResponse {
     'items'?: Array<QuestionTypeOption>;
 }
-export interface RemoteFSCopyOpenAPIRequest {
-    'from': string;
-    'overwrite': boolean;
-    'to': string;
-}
-export interface RemoteFSDirOpenAPIRequest {
-    'path': string;
-    'recursive': boolean;
-}
-export interface RemoteFSExistsOpenAPIResponse {
-    'exists': boolean;
-}
-export interface RemoteFSInfoOpenAPIResponse {
-    'binary'?: boolean;
-    'file_type'?: string;
-    'mime'?: string;
-    'path': string;
-    'size'?: number;
-    'type': string;
-}
-export interface RemoteFSItemOpenAPIResponse {
-    'binary'?: boolean;
-    'file_type'?: string;
-    'mime'?: string;
-    'name': string;
-    'path': string;
-    'size'?: number;
-    'type': string;
-}
-export interface RemoteFSListOpenAPIResponse {
-    'items'?: Array<RemoteFSItemOpenAPIResponse>;
-}
-export interface RemoteFSMoveOpenAPIRequest {
-    'from': string;
-    'to': string;
-}
-export interface RemoteFSTrashOpenAPIRequest {
-    'path': string;
-}
-export interface ResourceRef {
-    'resource_type': string;
-    'user_id': string;
-}
 export interface ResourceUpdateTaskOpenAPIResponse {
     'attempt_count': number;
     'created_at': string;
@@ -1712,65 +1784,6 @@ export interface ResourceUpdateTaskOpenAPIResponse {
 }
 export interface ResumeTaskRequest {
     'task_id'?: string;
-}
-export interface ReviewActionItem {
-    'decision': string;
-    'hunk_id': string;
-    'path'?: string;
-}
-export interface ReviewActionResponse {
-    'batch_id': string;
-    'can_undo': boolean;
-    'draft_content': string;
-    'draft_version': number;
-    'items'?: Array<ReviewActionItem>;
-    'ref': ResourceRef;
-    'review_id': string;
-    'review_version': number;
-}
-export interface ReviewUndoResponse {
-    'can_undo': boolean;
-    'draft_content': string;
-    'draft_version': number;
-    'items'?: Array<ReviewActionItem>;
-    'ref': ResourceRef;
-    'review_id': string;
-    'review_version': number;
-    'undone_batch_id': string;
-}
-export interface RevisionDetailResponse {
-    'binary': boolean;
-    'blob_hash': string;
-    'content': string;
-    'file_type': string;
-    'mime': string;
-    'revisionSummary': RevisionSummary;
-}
-export interface RevisionListResponse {
-    'items'?: Array<RevisionSummary>;
-}
-export interface RevisionSummary {
-    'change_source': string;
-    'content_hash': string;
-    'created_at': string;
-    'created_by'?: string;
-    'id': string;
-    'is_head': boolean;
-    'message': string;
-    'parent_revision_id'?: string;
-    'path': string;
-    'revision_id': string;
-    'revision_no': number;
-    'size': number;
-    'source_ref_id': string;
-    'source_ref_type': string;
-}
-export interface RollbackResponse {
-    'content': string;
-    'path': string;
-    'ref': ResourceRef;
-    'revision_id': string;
-    'revision_no': number;
 }
 export interface RouterAlgorithmTraffic {
     'actual_ratio': number;
@@ -1926,6 +1939,53 @@ export interface SetSharedProviderOpenAPIRequest {
     'group_id': string;
     'share': boolean;
 }
+export interface SettingsCheckResultOpenAPIResponse {
+    'id': string;
+    'message': string;
+    'section': string;
+    'status': string;
+}
+export interface SettingsChecksOpenAPIResponse {
+    'finished_at': string;
+    'results'?: Array<SettingsCheckResultOpenAPIResponse>;
+    'started_at': string;
+}
+export interface SettingsFeatureControlsOpenAPIResponse {
+    'document_parsing_enabled': boolean;
+    'mcp_enabled': boolean;
+    'skills_enabled': boolean;
+    'task_center_enabled': boolean;
+    'workflows_enabled': boolean;
+}
+export interface SettingsOverviewCountsOpenAPIResponse {
+    'configured': number;
+    'enabled': number;
+    'runnable': number;
+    'total': number;
+    'verified': number;
+}
+export interface SettingsOverviewIssueOpenAPIResponse {
+    'id': string;
+    'message': string;
+    'section': string;
+    'severity': string;
+}
+export interface SettingsOverviewOpenAPIResponse {
+    'controls': SettingsFeatureControlsOpenAPIResponse;
+    'issues'?: Array<SettingsOverviewIssueOpenAPIResponse>;
+    'sections'?: Array<SettingsOverviewSectionOpenAPIResponse>;
+    'updated_at': string;
+}
+export interface SettingsOverviewSectionOpenAPIResponse {
+    'counts': SettingsOverviewCountsOpenAPIResponse;
+    'detail': string;
+    'effective_enabled'?: boolean;
+    'id': string;
+    'raw_enabled'?: boolean;
+    'route': string;
+    'status': string;
+    'title': string;
+}
 export interface ShareSkillOpenAPIRequest {
     'message'?: string;
     'target_group_ids'?: Array<string>;
@@ -1942,16 +2002,16 @@ export interface ShowcaseCase {
     'primary_category'?: string;
     'prompt': string;
     'prompt_short': string;
-    'result_highlights': Array<string>;
+    'result_highlights'?: Array<string>;
     'result_summary': string;
     'secondary_options'?: Array<ShowcaseCaseOption>;
-    'steps': Array<ShowcaseCaseStep>;
+    'steps'?: Array<ShowcaseCaseStep>;
     'tasks'?: Array<ShowcaseCaseTask>;
     'title': string;
 }
 export interface ShowcaseCaseListResponse {
-    'cases': Array<ShowcaseCase>;
-    'categories': Array<string>;
+    'cases'?: Array<ShowcaseCase>;
+    'categories'?: Array<string>;
     'total': number;
 }
 export interface ShowcaseCaseOption {
@@ -2618,13 +2678,23 @@ export interface UserUIPreferencesOpenAPIResponse {
     'accepted_user_agreement_version': string;
     'chat_preference_notice_dismissed': boolean;
     'developer_mode_active': boolean;
+    'document_parsing_enabled': boolean;
+    'mcp_enabled': boolean;
+    'skills_enabled': boolean;
+    'task_center_enabled': boolean;
     'updated_at': string;
     'user_preference_configured': boolean;
+    'workflows_enabled': boolean;
 }
 export interface UserUIPreferencesPatchOpenAPIRequest {
     'accepted_user_agreement_version'?: string;
     'chat_preference_notice_dismissed'?: boolean;
     'developer_mode_active'?: boolean;
+    'document_parsing_enabled'?: boolean;
+    'mcp_enabled'?: boolean;
+    'skills_enabled'?: boolean;
+    'task_center_enabled'?: boolean;
+    'workflows_enabled'?: boolean;
 }
 export interface VerifiedProviderGroupOpenAPIItem {
     'base_url': string;
@@ -2659,263 +2729,9 @@ export interface WriterDocumentSyncOpenAPIRequest {
     'revised_document'?: { [key: string]: object; };
     'source_document'?: { [key: string]: object; };
 }
-export interface CurrentMemoryAvatarData {
-    'content_type': CurrentMemoryAvatarDataContentTypeEnum;
-    'kind': CurrentMemoryAvatarDataKindEnum;
-    'size': number;
-    'updated_at': number;
+export interface WriterDocumentWriteBackOpenAPIRequest {
+    'base_revision': number;
 }
-
-
-export const CurrentMemoryAvatarDataContentTypeEnum = {
-    ImagePng: 'image/png',
-    ImageJpeg: 'image/jpeg',
-    ImageWebp: 'image/webp'
-} as const;
-
-
-export type CurrentMemoryAvatarDataContentTypeEnum = typeof CurrentMemoryAvatarDataContentTypeEnum[keyof typeof CurrentMemoryAvatarDataContentTypeEnum];
-
-export const CurrentMemoryAvatarDataKindEnum = {
-    Soul: 'soul',
-    Profile: 'profile'
-} as const;
-
-
-export type CurrentMemoryAvatarDataKindEnum = typeof CurrentMemoryAvatarDataKindEnum[keyof typeof CurrentMemoryAvatarDataKindEnum];
-
-
-export interface CurrentMemoryAvatarResponse {
-    'code': number;
-    'data': CurrentMemoryAvatarData;
-    'message': string;
-}
-
-export interface CurrentMemoryConflictData {
-    'current_etag'?: string;
-}
-
-/**
- * @type CurrentMemoryDocumentValue
- */
-export type CurrentMemoryDocumentValue = null | Array<string> | string | { [key: string]: CurrentMemoryDocumentValue; };
-
-
-export interface CurrentMemoryErrorResponse {
-    'code': number;
-    'data'?: CurrentMemoryConflictData;
-    'message': string;
-}
-
-export interface CurrentMemoryOperation {
-    'op': CurrentMemoryOperationOpEnum;
-    'path': string;
-    'value'?: string;
-}
-
-
-export const CurrentMemoryOperationOpEnum = {
-    Set: 'set',
-    Clear: 'clear',
-    Add: 'add',
-    Remove: 'remove'
-} as const;
-
-
-export type CurrentMemoryOperationOpEnum = typeof CurrentMemoryOperationOpEnum[keyof typeof CurrentMemoryOperationOpEnum];
-
-
-export interface CurrentMemoryOperationsRequest {
-    'operations': Array<CurrentMemoryOperation>;
-}
-
-export interface CurrentMemoryPreferenceDetailData {
-    'item': CurrentMemoryPreferenceItem;
-    'reference': CurrentMemoryReference | null;
-    'reference_status': CurrentMemoryPreferenceDetailDataReferenceStatusEnum;
-}
-
-
-export const CurrentMemoryPreferenceDetailDataReferenceStatusEnum = {
-    Available: 'available',
-    Missing: 'missing'
-} as const;
-
-
-export type CurrentMemoryPreferenceDetailDataReferenceStatusEnum = typeof CurrentMemoryPreferenceDetailDataReferenceStatusEnum[keyof typeof CurrentMemoryPreferenceDetailDataReferenceStatusEnum];
-
-
-export interface CurrentMemoryPreferenceDetailResponse {
-    'code': number;
-    'data': CurrentMemoryPreferenceDetailData;
-    'message': string;
-}
-
-export interface CurrentMemoryPreferenceItem {
-    'created_at': string;
-    'name': string;
-    'summary': string;
-    'updated_at': string;
-}
-
-export interface CurrentMemoryPreferenceListData {
-    'etag': string;
-    'items': Array<CurrentMemoryPreferenceItem>;
-    'resident_index_usage': CurrentMemoryPreferenceResidentIndexUsage;
-    'total_size': number;
-    'updated_at': number;
-}
-
-export interface CurrentMemoryPreferenceListResponse {
-    'code': number;
-    'data': CurrentMemoryPreferenceListData;
-    'message': string;
-}
-
-export interface CurrentMemoryPreferenceOrderRequest {
-    'expected_etag': string;
-    'ordered_names': Array<string>;
-}
-
-export interface CurrentMemoryPreferenceResidentIndexUsage {
-    'max_items': number;
-    'over_limit': boolean;
-    'used_items': number;
-}
-
-export interface CurrentMemoryPresentation {
-    'fallbacks': { [key: string]: { [key: string]: string; }; };
-    'sections': Array<CurrentMemoryPresentationSection>;
-}
-
-export interface CurrentMemoryPresentationField {
-    'labels': { [key: string]: string; };
-    'path': string;
-    'summary_role': CurrentMemoryPresentationFieldSummaryRoleEnum;
-}
-
-
-export const CurrentMemoryPresentationFieldSummaryRoleEnum = {
-    Title: 'title',
-    Subtitle: 'subtitle',
-    Description: 'description',
-    Tag: 'tag',
-    None: 'none'
-} as const;
-
-
-export type CurrentMemoryPresentationFieldSummaryRoleEnum = typeof CurrentMemoryPresentationFieldSummaryRoleEnum[keyof typeof CurrentMemoryPresentationFieldSummaryRoleEnum];
-
-
-export interface CurrentMemoryPresentationSection {
-    'fields': Array<CurrentMemoryPresentationField>;
-    'labels': { [key: string]: string; };
-    'path': string;
-}
-
-export interface CurrentMemoryProfileData {
-    'document': { [key: string]: CurrentMemoryDocumentValue; };
-    'presentation': CurrentMemoryPresentation;
-    'template_version': number;
-    'updated_at': number;
-}
-
-export interface CurrentMemoryProfileResponse {
-    'code': number;
-    'data': CurrentMemoryProfileData;
-    'message': string;
-}
-
-export interface CurrentMemoryReference {
-    'application_scenarios': string;
-    'created_at': string;
-    'name': string;
-    'preference_details': string;
-    'reason': string;
-    'source': CurrentMemoryReferenceSource;
-    'summary': string;
-    'updated_at': string;
-}
-
-export interface CurrentMemoryReferenceSource {
-    'conversation_id': string;
-    'kind': CurrentMemoryReferenceSourceKindEnum;
-}
-
-
-export const CurrentMemoryReferenceSourceKindEnum = {
-    MemoryReview: 'memory_review',
-    ChatExplicit: 'chat_explicit'
-} as const;
-
-
-export type CurrentMemoryReferenceSourceKindEnum = typeof CurrentMemoryReferenceSourceKindEnum[keyof typeof CurrentMemoryReferenceSourceKindEnum];
-
-
-export interface CurrentMemorySoulData {
-    'document': { [key: string]: CurrentMemoryDocumentValue; };
-    'presentation': CurrentMemoryPresentation;
-    'template_version': number;
-    'updated_at': number;
-}
-
-export interface CurrentMemorySoulResponse {
-    'code': number;
-    'data': CurrentMemorySoulData;
-    'message': string;
-}
-
-export interface EpisodeMemory {
-    'conversation_id': string;
-    'episode_type': EpisodeMemoryEpisodeTypeEnum;
-    'hit_count': number;
-    'id': string;
-    'occurred_at_ms': number;
-    'recorded_at_ms': number;
-    'source_kind': EpisodeMemorySourceKindEnum;
-    'summary': string;
-}
-
-
-export const EpisodeMemoryEpisodeTypeEnum = {
-    Decision: 'decision',
-    Progress: 'progress',
-    Result: 'result',
-    Blocker: 'blocker',
-    Event: 'event'
-} as const;
-
-
-export type EpisodeMemoryEpisodeTypeEnum = typeof EpisodeMemoryEpisodeTypeEnum[keyof typeof EpisodeMemoryEpisodeTypeEnum];
-
-export const EpisodeMemorySourceKindEnum = {
-    ChatExplicit: 'chat_explicit',
-    MemoryReview: 'memory_review'
-} as const;
-
-
-export type EpisodeMemorySourceKindEnum = typeof EpisodeMemorySourceKindEnum[keyof typeof EpisodeMemorySourceKindEnum];
-
-
-export interface EpisodeMemoryDetailResponse {
-    'code': number;
-    'data': EpisodeMemory;
-    'message': string;
-}
-
-export interface EpisodeMemoryListData {
-    'items': Array<EpisodeMemory>;
-    'next_page_token': string;
-    'total_size': number;
-}
-
-export interface EpisodeMemoryListResponse {
-    'code': number;
-    'data': EpisodeMemoryListData;
-    'message': string;
-}
-
-
 
 /**
  * AgentApi - axios parameter creator
@@ -7280,6 +7096,101 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary GET /agent-invocations
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAgentInvocationsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/agent-invocations`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /agent-invocations/{invocation_id}:finish
+         * @param {string} invocationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAgentInvocationsInvocationIdFinishPost: async (invocationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'invocationId' is not null or undefined
+            assertParamExists('apiCoreAgentInvocationsInvocationIdFinishPost', 'invocationId', invocationId)
+            const localVarPath = `/api/core/agent-invocations/{invocation_id}:finish`
+                .replace(`{${"invocation_id"}}`, encodeURIComponent(String(invocationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /agent-invocations/{invocation_id}:start
+         * @param {string} invocationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAgentInvocationsInvocationIdStartPost: async (invocationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'invocationId' is not null or undefined
+            assertParamExists('apiCoreAgentInvocationsInvocationIdStartPost', 'invocationId', invocationId)
+            const localVarPath = `/api/core/agent-invocations/{invocation_id}:start`
+                .replace(`{${"invocation_id"}}`, encodeURIComponent(String(invocationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary POST /automation-groups:batch-create
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -7385,6 +7296,35 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             }
 
             const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /chat/executors
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreChatExecutorsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/chat/executors`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
@@ -7719,114 +7659,15 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary GET /conversations/{conversation_id}/workflow-sessions:active
+         * @summary PATCH /conversations/{conversation_id}/settings
          * @param {string} conversationId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreConversationsConversationIdWorkflowSessionsActiveGet: async (conversationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreConversationsConversationIdSettingsPatch: async (conversationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'conversationId' is not null or undefined
-            assertParamExists('apiCoreConversationsConversationIdWorkflowSessionsActiveGet', 'conversationId', conversationId)
-            const localVarPath = `/api/core/conversations/{conversation_id}/workflow-sessions:active`
-                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary GET /conversations/{conversation_id}/workflow-sessions
-         * @param {string} conversationId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreConversationsConversationIdWorkflowSessionsGet: async (conversationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'conversationId' is not null or undefined
-            assertParamExists('apiCoreConversationsConversationIdWorkflowSessionsGet', 'conversationId', conversationId)
-            const localVarPath = `/api/core/conversations/{conversation_id}/workflow-sessions`
-                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary GET /conversations/{conversation_id}/workflow-sessions:latest
-         * @param {string} conversationId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreConversationsConversationIdWorkflowSessionsLatestGet: async (conversationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'conversationId' is not null or undefined
-            assertParamExists('apiCoreConversationsConversationIdWorkflowSessionsLatestGet', 'conversationId', conversationId)
-            const localVarPath = `/api/core/conversations/{conversation_id}/workflow-sessions:latest`
-                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary PATCH /conversations/{conversation_id}/workflow-settings
-         * @param {string} conversationId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreConversationsConversationIdWorkflowSettingsPatch: async (conversationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'conversationId' is not null or undefined
-            assertParamExists('apiCoreConversationsConversationIdWorkflowSettingsPatch', 'conversationId', conversationId)
-            const localVarPath = `/api/core/conversations/{conversation_id}/workflow-settings`
+            assertParamExists('apiCoreConversationsConversationIdSettingsPatch', 'conversationId', conversationId)
+            const localVarPath = `/api/core/conversations/{conversation_id}/settings`
                 .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -7973,6 +7814,138 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarQueryParameter = {} as any;
 
             localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /conversations/{conversation_id}/workflow-sessions:active
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdWorkflowSessionsActiveGet: async (conversationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdWorkflowSessionsActiveGet', 'conversationId', conversationId)
+            const localVarPath = `/api/core/conversations/{conversation_id}/workflow-sessions:active`
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /conversations/{conversation_id}/workflow-sessions
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdWorkflowSessionsGet: async (conversationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdWorkflowSessionsGet', 'conversationId', conversationId)
+            const localVarPath = `/api/core/conversations/{conversation_id}/workflow-sessions`
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /conversations/{conversation_id}/workflow-sessions:latest
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdWorkflowSessionsLatestGet: async (conversationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdWorkflowSessionsLatestGet', 'conversationId', conversationId)
+            const localVarPath = `/api/core/conversations/{conversation_id}/workflow-sessions:latest`
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary PATCH /conversations/{conversation_id}/workflow-settings
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdWorkflowSettingsPatch: async (conversationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdWorkflowSettingsPatch', 'conversationId', conversationId)
+            const localVarPath = `/api/core/conversations/{conversation_id}/workflow-settings`
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -9309,6 +9282,167 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary POST /external-chat/hosts/{provider}:claim
+         * @param {string} provider
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreExternalChatHostsProviderClaimPost: async (provider: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'provider' is not null or undefined
+            assertParamExists('apiCoreExternalChatHostsProviderClaimPost', 'provider', provider)
+            const localVarPath = `/api/core/external-chat/hosts/{provider}:claim`
+                .replace(`{${"provider"}}`, encodeURIComponent(String(provider)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /external-chat/hosts/{provider}:status
+         * @param {string} provider
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreExternalChatHostsProviderStatusGet: async (provider: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'provider' is not null or undefined
+            assertParamExists('apiCoreExternalChatHostsProviderStatusGet', 'provider', provider)
+            const localVarPath = `/api/core/external-chat/hosts/{provider}:status`
+                .replace(`{${"provider"}}`, encodeURIComponent(String(provider)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /external-chat/runs
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreExternalChatRunsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/external-chat/runs`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /external-chat/runs/{run_id}:event
+         * @param {string} runId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreExternalChatRunsRunIdEventPost: async (runId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'runId' is not null or undefined
+            assertParamExists('apiCoreExternalChatRunsRunIdEventPost', 'runId', runId)
+            const localVarPath = `/api/core/external-chat/runs/{run_id}:event`
+                .replace(`{${"run_id"}}`, encodeURIComponent(String(runId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /external-chat/runs/{run_id}:heartbeat
+         * @param {string} runId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreExternalChatRunsRunIdHeartbeatPost: async (runId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'runId' is not null or undefined
+            assertParamExists('apiCoreExternalChatRunsRunIdHeartbeatPost', 'runId', runId)
+            const localVarPath = `/api/core/external-chat/runs/{run_id}:heartbeat`
+                .replace(`{${"run_id"}}`, encodeURIComponent(String(runId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary GET /health
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -9344,229 +9478,6 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
          */
         apiCoreHelloGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/hello`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary POST /internal/workflow-sessions:plan-start
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreInternalWorkflowSessionsPlanStartPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/core/internal/workflow-sessions:plan-start`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary GET /internal/workflow-sessions/{session_id}/projection
-         * @param {string} sessionId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreInternalWorkflowSessionsSessionIdProjectionGet: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'sessionId' is not null or undefined
-            assertParamExists('apiCoreInternalWorkflowSessionsSessionIdProjectionGet', 'sessionId', sessionId)
-            const localVarPath = `/api/core/internal/workflow-sessions/{session_id}/projection`
-                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary POST /internal/workflow-sessions/{session_id}:transition
-         * @param {string} sessionId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreInternalWorkflowSessionsSessionIdTransitionPost: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'sessionId' is not null or undefined
-            assertParamExists('apiCoreInternalWorkflowSessionsSessionIdTransitionPost', 'sessionId', sessionId)
-            const localVarPath = `/api/core/internal/workflow-sessions/{session_id}:transition`
-                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary POST /internal/workflow-sessions:start
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreInternalWorkflowSessionsStartPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/core/internal/workflow-sessions:start`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary GET /internal/workflow-transition-commands/{command_id}
-         * @param {string} commandId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreInternalWorkflowTransitionCommandsCommandIdGet: async (commandId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'commandId' is not null or undefined
-            assertParamExists('apiCoreInternalWorkflowTransitionCommandsCommandIdGet', 'commandId', commandId)
-            const localVarPath = `/api/core/internal/workflow-transition-commands/{command_id}`
-                .replace(`{${"command_id"}}`, encodeURIComponent(String(commandId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary GET /internal/subagent/tasks/{task_id}/events
-         * @param {string} taskId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreInternalSubagentTasksTaskIdEventsGet: async (taskId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'taskId' is not null or undefined
-            assertParamExists('apiCoreInternalSubagentTasksTaskIdEventsGet', 'taskId', taskId)
-            const localVarPath = `/api/core/internal/subagent/tasks/{task_id}/events`
-                .replace(`{${"task_id"}}`, encodeURIComponent(String(taskId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary GET /internal/subagent/tasks/{task_id}
-         * @param {string} taskId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreInternalSubagentTasksTaskIdGet: async (taskId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'taskId' is not null or undefined
-            assertParamExists('apiCoreInternalSubagentTasksTaskIdGet', 'taskId', taskId)
-            const localVarPath = `/api/core/internal/subagent/tasks/{task_id}`
-                .replace(`{${"task_id"}}`, encodeURIComponent(String(taskId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -10138,6 +10049,577 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary Delete an Episode Memory item
+         * @param {string} episodeId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryEpisodesEpisodeIdDelete: async (episodeId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'episodeId' is not null or undefined
+            assertParamExists('apiCoreMemoryEpisodesEpisodeIdDelete', 'episodeId', episodeId)
+            const localVarPath = `/api/core/memory/episodes/{episode_id}`
+                .replace(`{${"episode_id"}}`, encodeURIComponent(String(episodeId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Get an Episode Memory item
+         * @param {string} episodeId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryEpisodesEpisodeIdGet: async (episodeId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'episodeId' is not null or undefined
+            assertParamExists('apiCoreMemoryEpisodesEpisodeIdGet', 'episodeId', episodeId)
+            const localVarPath = `/api/core/memory/episodes/{episode_id}`
+                .replace(`{${"episode_id"}}`, encodeURIComponent(String(episodeId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary List current user\'s Episode Memory
+         * @param {number} [pageSize]
+         * @param {string} [pageToken]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryEpisodesGet: async (pageSize?: number, pageToken?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/memory/episodes`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (pageSize !== undefined) {
+                localVarQueryParameter['page_size'] = pageSize;
+            }
+
+            if (pageToken !== undefined) {
+                localVarQueryParameter['page_token'] = pageToken;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary List current user\'s Preference memory
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryPreferencesGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/memory/preferences`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Atomically removes the item and its now-unreferenced reference file. Missing items, including other users\' items, are idempotent success.
+         * @summary Delete a current Preference item
+         * @param {string} name
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryPreferencesNameDelete: async (name: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'name' is not null or undefined
+            assertParamExists('apiCoreMemoryPreferencesNameDelete', 'name', name)
+            const localVarPath = `/api/core/memory/preferences/{name}`
+                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * A missing reference file is represented by HTTP 200 with reference_status=missing and reference=null.
+         * @summary Get a current Preference item and its reference detail
+         * @param {string} name
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryPreferencesNameGet: async (name: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'name' is not null or undefined
+            assertParamExists('apiCoreMemoryPreferencesNameGet', 'name', name)
+            const localVarPath = `/api/core/memory/preferences/{name}`
+                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * ordered_names must be an exact, unnormalized permutation of every current Preference name. expected_etag must equal the list response etag.
+         * @summary Replace the order of current user\'s Preference items
+         * @param {CurrentMemoryPreferenceOrderRequest} currentMemoryPreferenceOrderRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryPreferencesOrderPut: async (currentMemoryPreferenceOrderRequest: CurrentMemoryPreferenceOrderRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'currentMemoryPreferenceOrderRequest' is not null or undefined
+            assertParamExists('apiCoreMemoryPreferencesOrderPut', 'currentMemoryPreferenceOrderRequest', currentMemoryPreferenceOrderRequest)
+            const localVarPath = `/api/core/memory/preferences:order`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(currentMemoryPreferenceOrderRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Delete current user\'s Profile avatar
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryProfileAvatarDelete: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/memory/profile/avatar`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Get current user\'s Profile avatar
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryProfileAvatarGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/memory/profile/avatar`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'image/jpeg,image/png,image/webp,application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Upload current user\'s Profile avatar
+         * @param {File} file
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryProfileAvatarPut: async (file: File, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'file' is not null or undefined
+            assertParamExists('apiCoreMemoryProfileAvatarPut', 'file', file)
+            const localVarPath = `/api/core/memory/profile/avatar`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+            const localVarFormParams = new ((configuration && configuration.formDataCtor) || FormData)();
+
+
+            if (file !== undefined) {
+                localVarFormParams.append('file', file as any);
+            }
+            localVarHeaderParameter['Content-Type'] = 'multipart/form-data';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = localVarFormParams;
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Get current user\'s Profile memory
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryProfileGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/memory/profile`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Applies an atomic batch. Scalar fields accept set/clear; list fields accept add/remove/clear.
+         * @summary Apply operations to current user\'s Profile memory
+         * @param {CurrentMemoryOperationsRequest} currentMemoryOperationsRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryProfilePatch: async (currentMemoryOperationsRequest: CurrentMemoryOperationsRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'currentMemoryOperationsRequest' is not null or undefined
+            assertParamExists('apiCoreMemoryProfilePatch', 'currentMemoryOperationsRequest', currentMemoryOperationsRequest)
+            const localVarPath = `/api/core/memory/profile`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(currentMemoryOperationsRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Delete current user\'s Soul avatar
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemorySoulAvatarDelete: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/memory/soul/avatar`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Get current user\'s Soul avatar
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemorySoulAvatarGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/memory/soul/avatar`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'image/jpeg,image/png,image/webp,application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Upload current user\'s Soul avatar
+         * @param {File} file
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemorySoulAvatarPut: async (file: File, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'file' is not null or undefined
+            assertParamExists('apiCoreMemorySoulAvatarPut', 'file', file)
+            const localVarPath = `/api/core/memory/soul/avatar`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+            const localVarFormParams = new ((configuration && configuration.formDataCtor) || FormData)();
+
+
+            if (file !== undefined) {
+                localVarFormParams.append('file', file as any);
+            }
+            localVarHeaderParameter['Content-Type'] = 'multipart/form-data';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = localVarFormParams;
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Get current user\'s Soul memory
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemorySoulGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/memory/soul`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Applies an atomic batch of set operations. Core migrates legacy content and retries an internal content compare-and-swap up to three times.
+         * @summary Apply operations to current user\'s Soul memory
+         * @param {CurrentMemoryOperationsRequest} currentMemoryOperationsRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemorySoulPatch: async (currentMemoryOperationsRequest: CurrentMemoryOperationsRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'currentMemoryOperationsRequest' is not null or undefined
+            assertParamExists('apiCoreMemorySoulPatch', 'currentMemoryOperationsRequest', currentMemoryOperationsRequest)
+            const localVarPath = `/api/core/memory/soul`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(currentMemoryOperationsRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary DELETE /model_providers/{model_provider_id}/groups/{group_id}/keys
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -10270,1036 +10752,6 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary POST /workflow-drafts/{draft_id}:ai-generate
-         * @param {string} draftId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowDraftsDraftIdAiGeneratePost: async (draftId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'draftId' is not null or undefined
-            assertParamExists('apiCoreWorkflowDraftsDraftIdAiGeneratePost', 'draftId', draftId)
-            const localVarPath = `/api/core/workflow-drafts/{draft_id}:ai-generate`
-                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary POST /workflow-drafts/{draft_id}:ai-repair
-         * @param {string} draftId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowDraftsDraftIdAiRepairPost: async (draftId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'draftId' is not null or undefined
-            assertParamExists('apiCoreWorkflowDraftsDraftIdAiRepairPost', 'draftId', draftId)
-            const localVarPath = `/api/core/workflow-drafts/{draft_id}:ai-repair`
-                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary DELETE /workflow-drafts/{draft_id}
-         * @param {string} draftId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowDraftsDraftIdDelete: async (draftId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'draftId' is not null or undefined
-            assertParamExists('apiCoreWorkflowDraftsDraftIdDelete', 'draftId', draftId)
-            const localVarPath = `/api/core/workflow-drafts/{draft_id}`
-                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary GET /workflow-drafts/{draft_id}
-         * @param {string} draftId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowDraftsDraftIdGet: async (draftId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'draftId' is not null or undefined
-            assertParamExists('apiCoreWorkflowDraftsDraftIdGet', 'draftId', draftId)
-            const localVarPath = `/api/core/workflow-drafts/{draft_id}`
-                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary POST /workflow-drafts/{draft_id}:publish
-         * @param {string} draftId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowDraftsDraftIdPublishPost: async (draftId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'draftId' is not null or undefined
-            assertParamExists('apiCoreWorkflowDraftsDraftIdPublishPost', 'draftId', draftId)
-            const localVarPath = `/api/core/workflow-drafts/{draft_id}:publish`
-                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary POST /workflow-drafts/{draft_id}:save
-         * @param {string} draftId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowDraftsDraftIdSavePost: async (draftId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'draftId' is not null or undefined
-            assertParamExists('apiCoreWorkflowDraftsDraftIdSavePost', 'draftId', draftId)
-            const localVarPath = `/api/core/workflow-drafts/{draft_id}:save`
-                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary POST /workflow-drafts/{draft_id}:validate
-         * @param {string} draftId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowDraftsDraftIdValidatePost: async (draftId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'draftId' is not null or undefined
-            assertParamExists('apiCoreWorkflowDraftsDraftIdValidatePost', 'draftId', draftId)
-            const localVarPath = `/api/core/workflow-drafts/{draft_id}:validate`
-                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary GET /workflow-drafts
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowDraftsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/core/workflow-drafts`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary POST /workflow-drafts:polish-info
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowDraftsPolishInfoPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/core/workflow-drafts:polish-info`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary POST /workflow-drafts
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowDraftsPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/core/workflow-drafts`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary POST /workflow-sessions/{session_id}/artifacts
-         * @param {string} sessionId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdArtifactsPost: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'sessionId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdArtifactsPost', 'sessionId', sessionId)
-            const localVarPath = `/api/core/workflow-sessions/{session_id}/artifacts`
-                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary POST /workflow-sessions/{session_id}:dismiss
-         * @param {string} sessionId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdDismissPost: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'sessionId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdDismissPost', 'sessionId', sessionId)
-            const localVarPath = `/api/core/workflow-sessions/{session_id}:dismiss`
-                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary GET /workflow-sessions/{session_id}
-         * @param {string} sessionId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdGet: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'sessionId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdGet', 'sessionId', sessionId)
-            const localVarPath = `/api/core/workflow-sessions/{session_id}`
-                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary GET /workflow-sessions/{session_id}/projection
-         * @param {string} sessionId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdProjectionGet: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'sessionId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdProjectionGet', 'sessionId', sessionId)
-            const localVarPath = `/api/core/workflow-sessions/{session_id}/projection`
-                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary POST /workflow-sessions/{session_id}:restore
-         * @param {string} sessionId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdRestorePost: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'sessionId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdRestorePost', 'sessionId', sessionId)
-            const localVarPath = `/api/core/workflow-sessions/{session_id}:restore`
-                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary GET /workflow-sessions/{session_id}/slots
-         * @param {string} sessionId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdSlotsGet: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'sessionId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsGet', 'sessionId', sessionId)
-            const localVarPath = `/api/core/workflow-sessions/{session_id}/slots`
-                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption
-         * @param {string} sessionId
-         * @param {string} slotId
-         * @param {string} listIndex
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch: async (sessionId: string, slotId: string, listIndex: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'sessionId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch', 'sessionId', sessionId)
-            // verify required parameter 'slotId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch', 'slotId', slotId)
-            // verify required parameter 'listIndex' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch', 'listIndex', listIndex)
-            const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption`
-                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
-                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)))
-                .replace(`{${"list_index"}}`, encodeURIComponent(String(listIndex)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary DELETE /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
-         * @param {string} sessionId
-         * @param {string} slotId
-         * @param {string} listIndex
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete: async (sessionId: string, slotId: string, listIndex: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'sessionId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete', 'sessionId', sessionId)
-            // verify required parameter 'slotId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete', 'slotId', slotId)
-            // verify required parameter 'listIndex' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete', 'listIndex', listIndex)
-            const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}`
-                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
-                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)))
-                .replace(`{${"list_index"}}`, encodeURIComponent(String(listIndex)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
-         * @param {string} sessionId
-         * @param {string} slotId
-         * @param {string} listIndex
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch: async (sessionId: string, slotId: string, listIndex: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'sessionId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch', 'sessionId', sessionId)
-            // verify required parameter 'slotId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch', 'slotId', slotId)
-            // verify required parameter 'listIndex' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch', 'listIndex', listIndex)
-            const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}`
-                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
-                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)))
-                .replace(`{${"list_index"}}`, encodeURIComponent(String(listIndex)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary POST /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback
-         * @param {string} sessionId
-         * @param {string} slotId
-         * @param {string} listIndex
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost: async (sessionId: string, slotId: string, listIndex: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'sessionId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost', 'sessionId', sessionId)
-            // verify required parameter 'slotId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost', 'slotId', slotId)
-            // verify required parameter 'listIndex' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost', 'listIndex', listIndex)
-            const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback`
-                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
-                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)))
-                .replace(`{${"list_index"}}`, encodeURIComponent(String(listIndex)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary GET /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions
-         * @param {string} sessionId
-         * @param {string} slotId
-         * @param {string} listIndex
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet: async (sessionId: string, slotId: string, listIndex: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'sessionId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet', 'sessionId', sessionId)
-            // verify required parameter 'slotId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet', 'slotId', slotId)
-            // verify required parameter 'listIndex' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet', 'listIndex', listIndex)
-            const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions`
-                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
-                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)))
-                .replace(`{${"list_index"}}`, encodeURIComponent(String(listIndex)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary POST /workflow-sessions/{session_id}/slots/{slot_id}/items
-         * @param {string} sessionId
-         * @param {string} slotId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPost: async (sessionId: string, slotId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'sessionId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPost', 'sessionId', sessionId)
-            // verify required parameter 'slotId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPost', 'slotId', slotId)
-            const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items`
-                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
-                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary GET /workflow-sessions/{session_id}/slots/{slot_id}/order
-         * @param {string} sessionId
-         * @param {string} slotId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGet: async (sessionId: string, slotId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'sessionId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGet', 'sessionId', sessionId)
-            // verify required parameter 'slotId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGet', 'slotId', slotId)
-            const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}/order`
-                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
-                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}/order
-         * @param {string} sessionId
-         * @param {string} slotId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatch: async (sessionId: string, slotId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'sessionId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatch', 'sessionId', sessionId)
-            // verify required parameter 'slotId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatch', 'slotId', slotId)
-            const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}/order`
-                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
-                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}
-         * @param {string} sessionId
-         * @param {string} slotId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdSlotsSlotIdPatch: async (sessionId: string, slotId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'sessionId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdPatch', 'sessionId', sessionId)
-            // verify required parameter 'slotId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdPatch', 'slotId', slotId)
-            const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}`
-                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
-                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary GET /workflow-sessions/{session_id}/state-graph
-         * @param {string} sessionId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdStateGraphGet: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'sessionId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdStateGraphGet', 'sessionId', sessionId)
-            const localVarPath = `/api/core/workflow-sessions/{session_id}/state-graph`
-                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary GET /workflow-sessions/{session_id}/steps
-         * @param {string} sessionId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdStepsGet: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'sessionId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdStepsGet', 'sessionId', sessionId)
-            const localVarPath = `/api/core/workflow-sessions/{session_id}/steps`
-                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary POST /workflow-sessions/{session_id}:sync-search-config
-         * @param {string} sessionId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdSyncSearchConfigPost: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'sessionId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdSyncSearchConfigPost', 'sessionId', sessionId)
-            const localVarPath = `/api/core/workflow-sessions/{session_id}:sync-search-config`
-                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary GET /workflows
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/core/workflows`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary GET /workflows/{workflow_id}
-         * @param {string} workflowId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowsWorkflowIdGet: async (workflowId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'workflowId' is not null or undefined
-            assertParamExists('apiCoreWorkflowsWorkflowIdGet', 'workflowId', workflowId)
-            const localVarPath = `/api/core/workflows/{workflow_id}`
-                .replace(`{${"workflow_id"}}`, encodeURIComponent(String(workflowId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
          * @summary POST /published-workflows/{workflow_ref:.+}:archive
          * @param {string} workflowRef
          * @param {*} [options] Override http request option.
@@ -11309,6 +10761,39 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'workflowRef' is not null or undefined
             assertParamExists('apiCorePublishedWorkflowsWorkflowRefArchivePost', 'workflowRef', workflowRef)
             const localVarPath = `/api/core/published-workflows/{workflow_ref:.+}:archive`
+                .replace(`{${"workflow_ref:.+"}}`, encodeURIComponent(String(workflowRef)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /published-workflows/{workflow_ref:.+}:restore
+         * @param {string} workflowRef
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePublishedWorkflowsWorkflowRefRestorePost: async (workflowRef: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'workflowRef' is not null or undefined
+            assertParamExists('apiCorePublishedWorkflowsWorkflowRefRestorePost', 'workflowRef', workflowRef)
+            const localVarPath = `/api/core/published-workflows/{workflow_ref:.+}:restore`
                 .replace(`{${"workflow_ref:.+"}}`, encodeURIComponent(String(workflowRef)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -11549,6 +11034,39 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             }
 
             const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary DELETE /schedules/{schedule_id}
+         * @param {string} scheduleId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSchedulesScheduleIdDelete: async (scheduleId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'scheduleId' is not null or undefined
+            assertParamExists('apiCoreSchedulesScheduleIdDelete', 'scheduleId', scheduleId)
+            const localVarPath = `/api/core/schedules/{schedule_id}`
+                .replace(`{${"schedule_id"}}`, encodeURIComponent(String(scheduleId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
@@ -12459,16 +11977,16 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary Delete an Episode Memory item
-         * @param {string} episodeId
+         * @summary DELETE /workflow-artifacts/{artifact_id}
+         * @param {string} artifactId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreMemoryEpisodesEpisodeIdDelete: async (episodeId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'episodeId' is not null or undefined
-            assertParamExists('apiCoreMemoryEpisodesEpisodeIdDelete', 'episodeId', episodeId)
-            const localVarPath = `/api/core/memory/episodes/{episode_id}`
-                .replace(`{${"episode_id"}}`, encodeURIComponent(String(episodeId)));
+        apiCoreWorkflowArtifactsArtifactIdDelete: async (artifactId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'artifactId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdDelete', 'artifactId', artifactId)
+            const localVarPath = `/api/core/workflow-artifacts/{artifact_id}`
+                .replace(`{${"artifact_id"}}`, encodeURIComponent(String(artifactId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -12480,7 +11998,6 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
-            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -12493,16 +12010,16 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary Get an Episode Memory item
-         * @param {string} episodeId
+         * @summary GET /workflow-artifacts/{artifact_id}
+         * @param {string} artifactId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreMemoryEpisodesEpisodeIdGet: async (episodeId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'episodeId' is not null or undefined
-            assertParamExists('apiCoreMemoryEpisodesEpisodeIdGet', 'episodeId', episodeId)
-            const localVarPath = `/api/core/memory/episodes/{episode_id}`
-                .replace(`{${"episode_id"}}`, encodeURIComponent(String(episodeId)));
+        apiCoreWorkflowArtifactsArtifactIdGet: async (artifactId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'artifactId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdGet', 'artifactId', artifactId)
+            const localVarPath = `/api/core/workflow-artifacts/{artifact_id}`
+                .replace(`{${"artifact_id"}}`, encodeURIComponent(String(artifactId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -12514,7 +12031,6 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
-            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -12527,318 +12043,16 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary List current user\'s Episode Memory
-         * @param {number} [pageSize]
-         * @param {string} [pageToken]
+         * @summary PATCH /workflow-artifacts/{artifact_id}
+         * @param {string} artifactId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreMemoryEpisodesGet: async (pageSize?: number, pageToken?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/core/memory/episodes`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            if (pageSize !== undefined) {
-                localVarQueryParameter['page_size'] = pageSize;
-            }
-
-            if (pageToken !== undefined) {
-                localVarQueryParameter['page_token'] = pageToken;
-            }
-
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary List current user\'s Preference memory
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreMemoryPreferencesGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/core/memory/preferences`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         * Atomically removes the item and its now-unreferenced reference file. Missing items, including other users\' items, are idempotent success.
-         * @summary Delete a current Preference item
-         * @param {string} name
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreMemoryPreferencesNameDelete: async (name: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'name' is not null or undefined
-            assertParamExists('apiCoreMemoryPreferencesNameDelete', 'name', name)
-            const localVarPath = `/api/core/memory/preferences/{name}`
-                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         * A missing reference file is represented by HTTP 200 with reference_status=missing and reference=null.
-         * @summary Get a current Preference item and its reference detail
-         * @param {string} name
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreMemoryPreferencesNameGet: async (name: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'name' is not null or undefined
-            assertParamExists('apiCoreMemoryPreferencesNameGet', 'name', name)
-            const localVarPath = `/api/core/memory/preferences/{name}`
-                .replace(`{${"name"}}`, encodeURIComponent(String(name)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         * ordered_names must be an exact, unnormalized permutation of every current Preference name. expected_etag must equal the list response etag.
-         * @summary Replace the order of current user\'s Preference items
-         * @param {CurrentMemoryPreferenceOrderRequest} currentMemoryPreferenceOrderRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreMemoryPreferencesOrderPut: async (currentMemoryPreferenceOrderRequest: CurrentMemoryPreferenceOrderRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'currentMemoryPreferenceOrderRequest' is not null or undefined
-            assertParamExists('apiCoreMemoryPreferencesOrderPut', 'currentMemoryPreferenceOrderRequest', currentMemoryPreferenceOrderRequest)
-            const localVarPath = `/api/core/memory/preferences:order`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(currentMemoryPreferenceOrderRequest, localVarRequestOptions, configuration)
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary Delete current user\'s Profile avatar
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreMemoryProfileAvatarDelete: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/core/memory/profile/avatar`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary Get current user\'s Profile avatar
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreMemoryProfileAvatarGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/core/memory/profile/avatar`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Accept'] = 'image/jpeg,image/png,image/webp,application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary Upload current user\'s Profile avatar
-         * @param {File} file
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreMemoryProfileAvatarPut: async (file: File, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'file' is not null or undefined
-            assertParamExists('apiCoreMemoryProfileAvatarPut', 'file', file)
-            const localVarPath = `/api/core/memory/profile/avatar`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-            const localVarFormParams = new ((configuration && configuration.formDataCtor) || FormData)();
-
-
-            if (file !== undefined) {
-                localVarFormParams.append('file', file as any);
-            }
-            localVarHeaderParameter['Content-Type'] = 'multipart/form-data';
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = localVarFormParams;
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary Get current user\'s Profile memory
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreMemoryProfileGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/core/memory/profile`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         * Applies an atomic batch. Scalar fields accept set/clear; list fields accept add/remove/clear.
-         * @summary Apply operations to current user\'s Profile memory
-         * @param {CurrentMemoryOperationsRequest} currentMemoryOperationsRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreMemoryProfilePatch: async (currentMemoryOperationsRequest: CurrentMemoryOperationsRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'currentMemoryOperationsRequest' is not null or undefined
-            assertParamExists('apiCoreMemoryProfilePatch', 'currentMemoryOperationsRequest', currentMemoryOperationsRequest)
-            const localVarPath = `/api/core/memory/profile`;
+        apiCoreWorkflowArtifactsArtifactIdPatch: async (artifactId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'artifactId' is not null or undefined
+            assertParamExists('apiCoreWorkflowArtifactsArtifactIdPatch', 'artifactId', artifactId)
+            const localVarPath = `/api/core/workflow-artifacts/{artifact_id}`
+                .replace(`{${"artifact_id"}}`, encodeURIComponent(String(artifactId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -12850,13 +12064,10 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(currentMemoryOperationsRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -12865,12 +12076,334 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary Delete current user\'s Soul avatar
+         * @summary GET /workflow-authoring/v1/drafts/{draft_id}/diagnostics
+         * @param {string} draftId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreMemorySoulAvatarDelete: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/core/memory/soul/avatar`;
+        apiCoreWorkflowAuthoringV1DraftsDraftIdDiagnosticsGet: async (draftId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'draftId' is not null or undefined
+            assertParamExists('apiCoreWorkflowAuthoringV1DraftsDraftIdDiagnosticsGet', 'draftId', draftId)
+            const localVarPath = `/api/core/workflow-authoring/v1/drafts/{draft_id}/diagnostics`
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary PUT /workflow-authoring/v1/drafts/{draft_id}/files
+         * @param {string} draftId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowAuthoringV1DraftsDraftIdFilesPut: async (draftId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'draftId' is not null or undefined
+            assertParamExists('apiCoreWorkflowAuthoringV1DraftsDraftIdFilesPut', 'draftId', draftId)
+            const localVarPath = `/api/core/workflow-authoring/v1/drafts/{draft_id}/files`
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-authoring/v1/drafts/{draft_id}:publish
+         * @param {string} draftId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowAuthoringV1DraftsDraftIdPublishPost: async (draftId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'draftId' is not null or undefined
+            assertParamExists('apiCoreWorkflowAuthoringV1DraftsDraftIdPublishPost', 'draftId', draftId)
+            const localVarPath = `/api/core/workflow-authoring/v1/drafts/{draft_id}:publish`
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-authoring/v1/drafts
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowAuthoringV1DraftsPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/workflow-authoring/v1/drafts`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /workflow-authoring/v1/fixture
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowAuthoringV1FixtureGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/workflow-authoring/v1/fixture`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /workflow-authoring/v1/skill-context
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowAuthoringV1SkillContextGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/workflow-authoring/v1/skill-context`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /workflow-commands/{command_id}
+         * @param {string} commandId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowCommandsCommandIdGet: async (commandId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'commandId' is not null or undefined
+            assertParamExists('apiCoreWorkflowCommandsCommandIdGet', 'commandId', commandId)
+            const localVarPath = `/api/core/workflow-commands/{command_id}`
+                .replace(`{${"command_id"}}`, encodeURIComponent(String(commandId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-drafts/{draft_id}:ai-generate
+         * @param {string} draftId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsDraftIdAiGeneratePost: async (draftId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'draftId' is not null or undefined
+            assertParamExists('apiCoreWorkflowDraftsDraftIdAiGeneratePost', 'draftId', draftId)
+            const localVarPath = `/api/core/workflow-drafts/{draft_id}:ai-generate`
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-drafts/{draft_id}:ai-repair
+         * @param {string} draftId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsDraftIdAiRepairPost: async (draftId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'draftId' is not null or undefined
+            assertParamExists('apiCoreWorkflowDraftsDraftIdAiRepairPost', 'draftId', draftId)
+            const localVarPath = `/api/core/workflow-drafts/{draft_id}:ai-repair`
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-drafts/{draft_id}:confirm-workflow
+         * @param {string} draftId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsDraftIdConfirmWorkflowPost: async (draftId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'draftId' is not null or undefined
+            assertParamExists('apiCoreWorkflowDraftsDraftIdConfirmWorkflowPost', 'draftId', draftId)
+            const localVarPath = `/api/core/workflow-drafts/{draft_id}:confirm-workflow`
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary DELETE /workflow-drafts/{draft_id}
+         * @param {string} draftId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsDraftIdDelete: async (draftId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'draftId' is not null or undefined
+            assertParamExists('apiCoreWorkflowDraftsDraftIdDelete', 'draftId', draftId)
+            const localVarPath = `/api/core/workflow-drafts/{draft_id}`
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -12882,7 +12415,6 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
-            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -12895,12 +12427,16 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary Get current user\'s Soul avatar
+         * @summary GET /workflow-drafts/{draft_id}/generation-analysis
+         * @param {string} draftId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreMemorySoulAvatarGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/core/memory/soul/avatar`;
+        apiCoreWorkflowDraftsDraftIdGenerationAnalysisGet: async (draftId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'draftId' is not null or undefined
+            assertParamExists('apiCoreWorkflowDraftsDraftIdGenerationAnalysisGet', 'draftId', draftId)
+            const localVarPath = `/api/core/workflow-drafts/{draft_id}/generation-analysis`
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -12912,7 +12448,6 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
-            localVarHeaderParameter['Accept'] = 'image/jpeg,image/png,image/webp,application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -12925,52 +12460,16 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary Upload current user\'s Soul avatar
-         * @param {File} file
+         * @summary GET /workflow-drafts/{draft_id}
+         * @param {string} draftId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreMemorySoulAvatarPut: async (file: File, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'file' is not null or undefined
-            assertParamExists('apiCoreMemorySoulAvatarPut', 'file', file)
-            const localVarPath = `/api/core/memory/soul/avatar`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-            const localVarFormParams = new ((configuration && configuration.formDataCtor) || FormData)();
-
-
-            if (file !== undefined) {
-                localVarFormParams.append('file', file as any);
-            }
-            localVarHeaderParameter['Content-Type'] = 'multipart/form-data';
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = localVarFormParams;
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary Get current user\'s Soul memory
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreMemorySoulGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/core/memory/soul`;
+        apiCoreWorkflowDraftsDraftIdGet: async (draftId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'draftId' is not null or undefined
+            assertParamExists('apiCoreWorkflowDraftsDraftIdGet', 'draftId', draftId)
+            const localVarPath = `/api/core/workflow-drafts/{draft_id}`
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -12982,7 +12481,6 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
-            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -12994,16 +12492,1036 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             };
         },
         /**
-         * Applies an atomic batch of set operations. Core migrates legacy content and retries an internal content compare-and-swap up to three times.
-         * @summary Apply operations to current user\'s Soul memory
-         * @param {CurrentMemoryOperationsRequest} currentMemoryOperationsRequest
+         *
+         * @summary POST /workflow-drafts/{draft_id}:publish
+         * @param {string} draftId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreMemorySoulPatch: async (currentMemoryOperationsRequest: CurrentMemoryOperationsRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'currentMemoryOperationsRequest' is not null or undefined
-            assertParamExists('apiCoreMemorySoulPatch', 'currentMemoryOperationsRequest', currentMemoryOperationsRequest)
-            const localVarPath = `/api/core/memory/soul`;
+        apiCoreWorkflowDraftsDraftIdPublishPost: async (draftId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'draftId' is not null or undefined
+            assertParamExists('apiCoreWorkflowDraftsDraftIdPublishPost', 'draftId', draftId)
+            const localVarPath = `/api/core/workflow-drafts/{draft_id}:publish`
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-drafts/{draft_id}:repair-preview
+         * @param {string} draftId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsDraftIdRepairPreviewPost: async (draftId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'draftId' is not null or undefined
+            assertParamExists('apiCoreWorkflowDraftsDraftIdRepairPreviewPost', 'draftId', draftId)
+            const localVarPath = `/api/core/workflow-drafts/{draft_id}:repair-preview`
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /workflow-drafts/{draft_id}/repair-runs/{repair_id}
+         * @param {string} draftId
+         * @param {string} repairId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGet: async (draftId: string, repairId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'draftId' is not null or undefined
+            assertParamExists('apiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGet', 'draftId', draftId)
+            // verify required parameter 'repairId' is not null or undefined
+            assertParamExists('apiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGet', 'repairId', repairId)
+            const localVarPath = `/api/core/workflow-drafts/{draft_id}/repair-runs/{repair_id}`
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)))
+                .replace(`{${"repair_id"}}`, encodeURIComponent(String(repairId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-drafts/{draft_id}:save
+         * @param {string} draftId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsDraftIdSavePost: async (draftId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'draftId' is not null or undefined
+            assertParamExists('apiCoreWorkflowDraftsDraftIdSavePost', 'draftId', draftId)
+            const localVarPath = `/api/core/workflow-drafts/{draft_id}:save`
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-drafts/{draft_id}:validate
+         * @param {string} draftId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsDraftIdValidatePost: async (draftId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'draftId' is not null or undefined
+            assertParamExists('apiCoreWorkflowDraftsDraftIdValidatePost', 'draftId', draftId)
+            const localVarPath = `/api/core/workflow-drafts/{draft_id}:validate`
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /workflow-drafts
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/workflow-drafts`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-drafts:polish-info
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsPolishInfoPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/workflow-drafts:polish-info`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-drafts
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/workflow-drafts`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-input-resources
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowInputResourcesPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/workflow-input-resources`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /workflow-input-resources/{resource_id}
+         * @param {string} resourceId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowInputResourcesResourceIdGet: async (resourceId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'resourceId' is not null or undefined
+            assertParamExists('apiCoreWorkflowInputResourcesResourceIdGet', 'resourceId', resourceId)
+            const localVarPath = `/api/core/workflow-input-resources/{resource_id}`
+                .replace(`{${"resource_id"}}`, encodeURIComponent(String(resourceId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-preparations
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowPreparationsPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/workflow-preparations`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-preparations/{preparation_id}:consume
+         * @param {string} preparationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowPreparationsPreparationIdConsumePost: async (preparationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'preparationId' is not null or undefined
+            assertParamExists('apiCoreWorkflowPreparationsPreparationIdConsumePost', 'preparationId', preparationId)
+            const localVarPath = `/api/core/workflow-preparations/{preparation_id}:consume`
+                .replace(`{${"preparation_id"}}`, encodeURIComponent(String(preparationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /workflow-runtime/v1/workflows
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowRuntimeV1WorkflowsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/workflow-runtime/v1/workflows`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /workflow-runtime/v1/workflows/{workflow_id}
+         * @param {string} workflowId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowRuntimeV1WorkflowsWorkflowIdGet: async (workflowId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'workflowId' is not null or undefined
+            assertParamExists('apiCoreWorkflowRuntimeV1WorkflowsWorkflowIdGet', 'workflowId', workflowId)
+            const localVarPath = `/api/core/workflow-runtime/v1/workflows/{workflow_id}`
+                .replace(`{${"workflow_id"}}`, encodeURIComponent(String(workflowId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/workflow-sessions`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}:advance-step-and-hand-off
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdAdvanceStepAndHandOffPost: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdAdvanceStepAndHandOffPost', 'sessionId', sessionId)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}:advance-step-and-hand-off`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}:advance-step
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdAdvanceStepPost: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdAdvanceStepPost', 'sessionId', sessionId)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}:advance-step`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/artifacts
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdArtifactsGet: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdArtifactsGet', 'sessionId', sessionId)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}/artifacts`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}/artifacts
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdArtifactsPost: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdArtifactsPost', 'sessionId', sessionId)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}/artifacts`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}:dismiss
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdDismissPost: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdDismissPost', 'sessionId', sessionId)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}:dismiss`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/events
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdEventsGet: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdEventsGet', 'sessionId', sessionId)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}/events`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdGet: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdGet', 'sessionId', sessionId)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:begin
+         * @param {string} sessionId
+         * @param {string} attemptId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdBeginPost: async (sessionId: string, attemptId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdBeginPost', 'sessionId', sessionId)
+            // verify required parameter 'attemptId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdBeginPost', 'attemptId', attemptId)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:begin`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"attempt_id"}}`, encodeURIComponent(String(attemptId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:resume
+         * @param {string} sessionId
+         * @param {string} attemptId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdResumePost: async (sessionId: string, attemptId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdResumePost', 'sessionId', sessionId)
+            // verify required parameter 'attemptId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdResumePost', 'attemptId', attemptId)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:resume`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"attempt_id"}}`, encodeURIComponent(String(attemptId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:submit
+         * @param {string} sessionId
+         * @param {string} attemptId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdSubmitPost: async (sessionId: string, attemptId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdSubmitPost', 'sessionId', sessionId)
+            // verify required parameter 'attemptId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdSubmitPost', 'attemptId', attemptId)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:submit`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"attempt_id"}}`, encodeURIComponent(String(attemptId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/input-bindings
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdInputBindingsGet: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdInputBindingsGet', 'sessionId', sessionId)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}/input-bindings`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}/input-bindings
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdInputBindingsPost: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdInputBindingsPost', 'sessionId', sessionId)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}/input-bindings`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/projection
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdProjectionGet: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdProjectionGet', 'sessionId', sessionId)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}/projection`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}:restore
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdRestorePost: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdRestorePost', 'sessionId', sessionId)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}:restore`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}:resume
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdResumePost: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdResumePost', 'sessionId', sessionId)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}:resume`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/slots
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdSlotsGet: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsGet', 'sessionId', sessionId)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}/slots`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption
+         * @param {string} sessionId
+         * @param {string} slotId
+         * @param {string} listIndex
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch: async (sessionId: string, slotId: string, listIndex: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch', 'sessionId', sessionId)
+            // verify required parameter 'slotId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch', 'slotId', slotId)
+            // verify required parameter 'listIndex' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch', 'listIndex', listIndex)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)))
+                .replace(`{${"list_index"}}`, encodeURIComponent(String(listIndex)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -13015,13 +13533,516 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(currentMemoryOperationsRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary DELETE /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
+         * @param {string} sessionId
+         * @param {string} slotId
+         * @param {string} listIndex
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete: async (sessionId: string, slotId: string, listIndex: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete', 'sessionId', sessionId)
+            // verify required parameter 'slotId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete', 'slotId', slotId)
+            // verify required parameter 'listIndex' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete', 'listIndex', listIndex)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)))
+                .replace(`{${"list_index"}}`, encodeURIComponent(String(listIndex)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
+         * @param {string} sessionId
+         * @param {string} slotId
+         * @param {string} listIndex
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch: async (sessionId: string, slotId: string, listIndex: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch', 'sessionId', sessionId)
+            // verify required parameter 'slotId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch', 'slotId', slotId)
+            // verify required parameter 'listIndex' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch', 'listIndex', listIndex)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)))
+                .replace(`{${"list_index"}}`, encodeURIComponent(String(listIndex)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback
+         * @param {string} sessionId
+         * @param {string} slotId
+         * @param {string} listIndex
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost: async (sessionId: string, slotId: string, listIndex: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost', 'sessionId', sessionId)
+            // verify required parameter 'slotId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost', 'slotId', slotId)
+            // verify required parameter 'listIndex' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost', 'listIndex', listIndex)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)))
+                .replace(`{${"list_index"}}`, encodeURIComponent(String(listIndex)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions
+         * @param {string} sessionId
+         * @param {string} slotId
+         * @param {string} listIndex
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet: async (sessionId: string, slotId: string, listIndex: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet', 'sessionId', sessionId)
+            // verify required parameter 'slotId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet', 'slotId', slotId)
+            // verify required parameter 'listIndex' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet', 'listIndex', listIndex)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)))
+                .replace(`{${"list_index"}}`, encodeURIComponent(String(listIndex)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}/slots/{slot_id}/items
+         * @param {string} sessionId
+         * @param {string} slotId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPost: async (sessionId: string, slotId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPost', 'sessionId', sessionId)
+            // verify required parameter 'slotId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPost', 'slotId', slotId)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/slots/{slot_id}/order
+         * @param {string} sessionId
+         * @param {string} slotId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGet: async (sessionId: string, slotId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGet', 'sessionId', sessionId)
+            // verify required parameter 'slotId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGet', 'slotId', slotId)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}/order`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}/order
+         * @param {string} sessionId
+         * @param {string} slotId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatch: async (sessionId: string, slotId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatch', 'sessionId', sessionId)
+            // verify required parameter 'slotId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatch', 'slotId', slotId)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}/order`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}
+         * @param {string} sessionId
+         * @param {string} slotId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdSlotsSlotIdPatch: async (sessionId: string, slotId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdPatch', 'sessionId', sessionId)
+            // verify required parameter 'slotId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdPatch', 'slotId', slotId)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/state-graph
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdStateGraphGet: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdStateGraphGet', 'sessionId', sessionId)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}/state-graph`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/steps
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdStepsGet: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdStepsGet', 'sessionId', sessionId)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}/steps`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}:stop
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdStopPost: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdStopPost', 'sessionId', sessionId)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}:stop`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}:sync-search-config
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdSyncSearchConfigPost: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSyncSearchConfigPost', 'sessionId', sessionId)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}:sync-search-config`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /workflows
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/workflows`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /workflows/{workflow_id}
+         * @param {string} workflowId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowsWorkflowIdGet: async (workflowId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'workflowId' is not null or undefined
+            assertParamExists('apiCoreWorkflowsWorkflowIdGet', 'workflowId', workflowId)
+            const localVarPath = `/api/core/workflows/{workflow_id}`
+                .replace(`{${"workflow_id"}}`, encodeURIComponent(String(workflowId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -13059,6 +14080,44 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAdminGet(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAdminGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /agent-invocations
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAgentInvocationsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAgentInvocationsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAgentInvocationsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /agent-invocations/{invocation_id}:finish
+         * @param {string} invocationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAgentInvocationsInvocationIdFinishPost(invocationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAgentInvocationsInvocationIdFinishPost(invocationId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAgentInvocationsInvocationIdFinishPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /agent-invocations/{invocation_id}:start
+         * @param {string} invocationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreAgentInvocationsInvocationIdStartPost(invocationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAgentInvocationsInvocationIdStartPost(invocationId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAgentInvocationsInvocationIdStartPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -13108,6 +14167,18 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreAutomationGroupsPost(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreAutomationGroupsPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /chat/executors
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreChatExecutorsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreChatExecutorsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreChatExecutorsGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -13238,54 +14309,15 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary GET /conversations/{conversation_id}/workflow-sessions:active
+         * @summary PATCH /conversations/{conversation_id}/settings
          * @param {string} conversationId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreConversationsConversationIdWorkflowSessionsActiveGet(conversationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdWorkflowSessionsActiveGet(conversationId, options);
+        async apiCoreConversationsConversationIdSettingsPatch(conversationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdSettingsPatch(conversationId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdWorkflowSessionsActiveGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary GET /conversations/{conversation_id}/workflow-sessions
-         * @param {string} conversationId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreConversationsConversationIdWorkflowSessionsGet(conversationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdWorkflowSessionsGet(conversationId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdWorkflowSessionsGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary GET /conversations/{conversation_id}/workflow-sessions:latest
-         * @param {string} conversationId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreConversationsConversationIdWorkflowSessionsLatestGet(conversationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdWorkflowSessionsLatestGet(conversationId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdWorkflowSessionsLatestGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary PATCH /conversations/{conversation_id}/workflow-settings
-         * @param {string} conversationId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreConversationsConversationIdWorkflowSettingsPatch(conversationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdWorkflowSettingsPatch(conversationId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdWorkflowSettingsPatch']?.[localVarOperationServerIndex]?.url;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdSettingsPatch']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -13338,6 +14370,58 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdToolLimitDecisionPost(conversationId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdToolLimitDecisionPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /conversations/{conversation_id}/workflow-sessions:active
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsConversationIdWorkflowSessionsActiveGet(conversationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdWorkflowSessionsActiveGet(conversationId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdWorkflowSessionsActiveGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /conversations/{conversation_id}/workflow-sessions
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsConversationIdWorkflowSessionsGet(conversationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdWorkflowSessionsGet(conversationId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdWorkflowSessionsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /conversations/{conversation_id}/workflow-sessions:latest
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsConversationIdWorkflowSessionsLatestGet(conversationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdWorkflowSessionsLatestGet(conversationId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdWorkflowSessionsLatestGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary PATCH /conversations/{conversation_id}/workflow-settings
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsConversationIdWorkflowSettingsPatch(conversationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdWorkflowSettingsPatch(conversationId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdWorkflowSettingsPatch']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -13824,6 +14908,70 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary POST /external-chat/hosts/{provider}:claim
+         * @param {string} provider
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreExternalChatHostsProviderClaimPost(provider: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreExternalChatHostsProviderClaimPost(provider, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreExternalChatHostsProviderClaimPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /external-chat/hosts/{provider}:status
+         * @param {string} provider
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreExternalChatHostsProviderStatusGet(provider: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreExternalChatHostsProviderStatusGet(provider, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreExternalChatHostsProviderStatusGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /external-chat/runs
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreExternalChatRunsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreExternalChatRunsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreExternalChatRunsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /external-chat/runs/{run_id}:event
+         * @param {string} runId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreExternalChatRunsRunIdEventPost(runId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreExternalChatRunsRunIdEventPost(runId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreExternalChatRunsRunIdEventPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /external-chat/runs/{run_id}:heartbeat
+         * @param {string} runId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreExternalChatRunsRunIdHeartbeatPost(runId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreExternalChatRunsRunIdHeartbeatPost(runId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreExternalChatRunsRunIdHeartbeatPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary GET /health
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -13844,95 +14992,6 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreHelloGet(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreHelloGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary POST /internal/workflow-sessions:plan-start
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreInternalWorkflowSessionsPlanStartPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreInternalWorkflowSessionsPlanStartPost(options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreInternalWorkflowSessionsPlanStartPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary GET /internal/workflow-sessions/{session_id}/projection
-         * @param {string} sessionId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreInternalWorkflowSessionsSessionIdProjectionGet(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreInternalWorkflowSessionsSessionIdProjectionGet(sessionId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreInternalWorkflowSessionsSessionIdProjectionGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary POST /internal/workflow-sessions/{session_id}:transition
-         * @param {string} sessionId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreInternalWorkflowSessionsSessionIdTransitionPost(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreInternalWorkflowSessionsSessionIdTransitionPost(sessionId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreInternalWorkflowSessionsSessionIdTransitionPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary POST /internal/workflow-sessions:start
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreInternalWorkflowSessionsStartPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreInternalWorkflowSessionsStartPost(options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreInternalWorkflowSessionsStartPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary GET /internal/workflow-transition-commands/{command_id}
-         * @param {string} commandId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreInternalWorkflowTransitionCommandsCommandIdGet(commandId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreInternalWorkflowTransitionCommandsCommandIdGet(commandId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreInternalWorkflowTransitionCommandsCommandIdGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary GET /internal/subagent/tasks/{task_id}/events
-         * @param {string} taskId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreInternalSubagentTasksTaskIdEventsGet(taskId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreInternalSubagentTasksTaskIdEventsGet(taskId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreInternalSubagentTasksTaskIdEventsGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary GET /internal/subagent/tasks/{task_id}
-         * @param {string} taskId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreInternalSubagentTasksTaskIdGet(taskId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreInternalSubagentTasksTaskIdGet(taskId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreInternalSubagentTasksTaskIdGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -14139,6 +15198,221 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Delete an Episode Memory item
+         * @param {string} episodeId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreMemoryEpisodesEpisodeIdDelete(episodeId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryEpisodesEpisodeIdDelete(episodeId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryEpisodesEpisodeIdDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Get an Episode Memory item
+         * @param {string} episodeId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreMemoryEpisodesEpisodeIdGet(episodeId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<EpisodeMemoryDetailResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryEpisodesEpisodeIdGet(episodeId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryEpisodesEpisodeIdGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary List current user\'s Episode Memory
+         * @param {number} [pageSize]
+         * @param {string} [pageToken]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreMemoryEpisodesGet(pageSize?: number, pageToken?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<EpisodeMemoryListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryEpisodesGet(pageSize, pageToken, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryEpisodesGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary List current user\'s Preference memory
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreMemoryPreferencesGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CurrentMemoryPreferenceListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryPreferencesGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryPreferencesGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Atomically removes the item and its now-unreferenced reference file. Missing items, including other users\' items, are idempotent success.
+         * @summary Delete a current Preference item
+         * @param {string} name
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreMemoryPreferencesNameDelete(name: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryPreferencesNameDelete(name, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryPreferencesNameDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * A missing reference file is represented by HTTP 200 with reference_status=missing and reference=null.
+         * @summary Get a current Preference item and its reference detail
+         * @param {string} name
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreMemoryPreferencesNameGet(name: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CurrentMemoryPreferenceDetailResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryPreferencesNameGet(name, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryPreferencesNameGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * ordered_names must be an exact, unnormalized permutation of every current Preference name. expected_etag must equal the list response etag.
+         * @summary Replace the order of current user\'s Preference items
+         * @param {CurrentMemoryPreferenceOrderRequest} currentMemoryPreferenceOrderRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreMemoryPreferencesOrderPut(currentMemoryPreferenceOrderRequest: CurrentMemoryPreferenceOrderRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CurrentMemoryPreferenceListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryPreferencesOrderPut(currentMemoryPreferenceOrderRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryPreferencesOrderPut']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Delete current user\'s Profile avatar
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreMemoryProfileAvatarDelete(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryProfileAvatarDelete(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryProfileAvatarDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Get current user\'s Profile avatar
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreMemoryProfileAvatarGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<File>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryProfileAvatarGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryProfileAvatarGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Upload current user\'s Profile avatar
+         * @param {File} file
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreMemoryProfileAvatarPut(file: File, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CurrentMemoryAvatarResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryProfileAvatarPut(file, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryProfileAvatarPut']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Get current user\'s Profile memory
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreMemoryProfileGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CurrentMemoryProfileResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryProfileGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryProfileGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Applies an atomic batch. Scalar fields accept set/clear; list fields accept add/remove/clear.
+         * @summary Apply operations to current user\'s Profile memory
+         * @param {CurrentMemoryOperationsRequest} currentMemoryOperationsRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreMemoryProfilePatch(currentMemoryOperationsRequest: CurrentMemoryOperationsRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CurrentMemoryProfileResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryProfilePatch(currentMemoryOperationsRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryProfilePatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Delete current user\'s Soul avatar
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreMemorySoulAvatarDelete(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemorySoulAvatarDelete(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemorySoulAvatarDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Get current user\'s Soul avatar
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreMemorySoulAvatarGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<File>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemorySoulAvatarGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemorySoulAvatarGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Upload current user\'s Soul avatar
+         * @param {File} file
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreMemorySoulAvatarPut(file: File, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CurrentMemoryAvatarResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemorySoulAvatarPut(file, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemorySoulAvatarPut']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Get current user\'s Soul memory
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreMemorySoulGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CurrentMemorySoulResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemorySoulGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemorySoulGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Applies an atomic batch of set operations. Core migrates legacy content and retries an internal content compare-and-swap up to three times.
+         * @summary Apply operations to current user\'s Soul memory
+         * @param {CurrentMemoryOperationsRequest} currentMemoryOperationsRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreMemorySoulPatch(currentMemoryOperationsRequest: CurrentMemoryOperationsRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CurrentMemorySoulResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemorySoulPatch(currentMemoryOperationsRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemorySoulPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary DELETE /model_providers/{model_provider_id}/groups/{group_id}/keys
          * @param {string} modelProviderId
          * @param {string} groupId
@@ -14191,406 +15465,6 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary POST /workflow-drafts/{draft_id}:ai-generate
-         * @param {string} draftId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowDraftsDraftIdAiGeneratePost(draftId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsDraftIdAiGeneratePost(draftId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsDraftIdAiGeneratePost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary POST /workflow-drafts/{draft_id}:ai-repair
-         * @param {string} draftId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowDraftsDraftIdAiRepairPost(draftId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsDraftIdAiRepairPost(draftId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsDraftIdAiRepairPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary DELETE /workflow-drafts/{draft_id}
-         * @param {string} draftId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowDraftsDraftIdDelete(draftId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsDraftIdDelete(draftId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsDraftIdDelete']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary GET /workflow-drafts/{draft_id}
-         * @param {string} draftId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowDraftsDraftIdGet(draftId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsDraftIdGet(draftId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsDraftIdGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary POST /workflow-drafts/{draft_id}:publish
-         * @param {string} draftId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowDraftsDraftIdPublishPost(draftId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsDraftIdPublishPost(draftId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsDraftIdPublishPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary POST /workflow-drafts/{draft_id}:save
-         * @param {string} draftId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowDraftsDraftIdSavePost(draftId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsDraftIdSavePost(draftId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsDraftIdSavePost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary POST /workflow-drafts/{draft_id}:validate
-         * @param {string} draftId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowDraftsDraftIdValidatePost(draftId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsDraftIdValidatePost(draftId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsDraftIdValidatePost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary GET /workflow-drafts
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowDraftsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsGet(options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary POST /workflow-drafts:polish-info
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowDraftsPolishInfoPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsPolishInfoPost(options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsPolishInfoPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary POST /workflow-drafts
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowDraftsPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsPost(options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary POST /workflow-sessions/{session_id}/artifacts
-         * @param {string} sessionId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowSessionsSessionIdArtifactsPost(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdArtifactsPost(sessionId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdArtifactsPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary POST /workflow-sessions/{session_id}:dismiss
-         * @param {string} sessionId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowSessionsSessionIdDismissPost(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdDismissPost(sessionId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdDismissPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary GET /workflow-sessions/{session_id}
-         * @param {string} sessionId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowSessionsSessionIdGet(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdGet(sessionId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary GET /workflow-sessions/{session_id}/projection
-         * @param {string} sessionId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowSessionsSessionIdProjectionGet(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdProjectionGet(sessionId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdProjectionGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary POST /workflow-sessions/{session_id}:restore
-         * @param {string} sessionId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowSessionsSessionIdRestorePost(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdRestorePost(sessionId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdRestorePost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary GET /workflow-sessions/{session_id}/slots
-         * @param {string} sessionId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowSessionsSessionIdSlotsGet(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdSlotsGet(sessionId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdSlotsGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption
-         * @param {string} sessionId
-         * @param {string} slotId
-         * @param {string} listIndex
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch(sessionId: string, slotId: string, listIndex: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch(sessionId, slotId, listIndex, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary DELETE /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
-         * @param {string} sessionId
-         * @param {string} slotId
-         * @param {string} listIndex
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete(sessionId: string, slotId: string, listIndex: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete(sessionId, slotId, listIndex, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
-         * @param {string} sessionId
-         * @param {string} slotId
-         * @param {string} listIndex
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch(sessionId: string, slotId: string, listIndex: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch(sessionId, slotId, listIndex, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary POST /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback
-         * @param {string} sessionId
-         * @param {string} slotId
-         * @param {string} listIndex
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost(sessionId: string, slotId: string, listIndex: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost(sessionId, slotId, listIndex, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary GET /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions
-         * @param {string} sessionId
-         * @param {string} slotId
-         * @param {string} listIndex
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet(sessionId: string, slotId: string, listIndex: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet(sessionId, slotId, listIndex, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary POST /workflow-sessions/{session_id}/slots/{slot_id}/items
-         * @param {string} sessionId
-         * @param {string} slotId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPost(sessionId: string, slotId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPost(sessionId, slotId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary GET /workflow-sessions/{session_id}/slots/{slot_id}/order
-         * @param {string} sessionId
-         * @param {string} slotId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGet(sessionId: string, slotId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGet(sessionId, slotId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}/order
-         * @param {string} sessionId
-         * @param {string} slotId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatch(sessionId: string, slotId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatch(sessionId, slotId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatch']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}
-         * @param {string} sessionId
-         * @param {string} slotId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowSessionsSessionIdSlotsSlotIdPatch(sessionId: string, slotId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdSlotsSlotIdPatch(sessionId, slotId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdSlotsSlotIdPatch']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary GET /workflow-sessions/{session_id}/state-graph
-         * @param {string} sessionId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowSessionsSessionIdStateGraphGet(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdStateGraphGet(sessionId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdStateGraphGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary GET /workflow-sessions/{session_id}/steps
-         * @param {string} sessionId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowSessionsSessionIdStepsGet(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdStepsGet(sessionId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdStepsGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary POST /workflow-sessions/{session_id}:sync-search-config
-         * @param {string} sessionId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowSessionsSessionIdSyncSearchConfigPost(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdSyncSearchConfigPost(sessionId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdSyncSearchConfigPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary GET /workflows
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowsGet(options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowsGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary GET /workflows/{workflow_id}
-         * @param {string} workflowId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowsWorkflowIdGet(workflowId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowsWorkflowIdGet(workflowId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowsWorkflowIdGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
          * @summary POST /published-workflows/{workflow_ref:.+}:archive
          * @param {string} workflowRef
          * @param {*} [options] Override http request option.
@@ -14600,6 +15474,19 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePublishedWorkflowsWorkflowRefArchivePost(workflowRef, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCorePublishedWorkflowsWorkflowRefArchivePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /published-workflows/{workflow_ref:.+}:restore
+         * @param {string} workflowRef
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCorePublishedWorkflowsWorkflowRefRestorePost(workflowRef: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePublishedWorkflowsWorkflowRefRestorePost(workflowRef, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCorePublishedWorkflowsWorkflowRefRestorePost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -14691,6 +15578,19 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSchedulesScheduleIdCancelPost(scheduleId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreSchedulesScheduleIdCancelPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary DELETE /schedules/{schedule_id}
+         * @param {string} scheduleId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreSchedulesScheduleIdDelete(scheduleId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSchedulesScheduleIdDelete(scheduleId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreSchedulesScheduleIdDelete']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -15050,217 +15950,815 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary Delete an Episode Memory item
-         * @param {string} episodeId
+         * @summary DELETE /workflow-artifacts/{artifact_id}
+         * @param {string} artifactId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreMemoryEpisodesEpisodeIdDelete(episodeId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryEpisodesEpisodeIdDelete(episodeId, options);
+        async apiCoreWorkflowArtifactsArtifactIdDelete(artifactId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowArtifactsArtifactIdDelete(artifactId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryEpisodesEpisodeIdDelete']?.[localVarOperationServerIndex]?.url;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowArtifactsArtifactIdDelete']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
          *
-         * @summary Get an Episode Memory item
-         * @param {string} episodeId
+         * @summary GET /workflow-artifacts/{artifact_id}
+         * @param {string} artifactId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreMemoryEpisodesEpisodeIdGet(episodeId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<EpisodeMemoryDetailResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryEpisodesEpisodeIdGet(episodeId, options);
+        async apiCoreWorkflowArtifactsArtifactIdGet(artifactId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowArtifactsArtifactIdGet(artifactId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryEpisodesEpisodeIdGet']?.[localVarOperationServerIndex]?.url;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowArtifactsArtifactIdGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
          *
-         * @summary List current user\'s Episode Memory
-         * @param {number} [pageSize]
-         * @param {string} [pageToken]
+         * @summary PATCH /workflow-artifacts/{artifact_id}
+         * @param {string} artifactId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreMemoryEpisodesGet(pageSize?: number, pageToken?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<EpisodeMemoryListResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryEpisodesGet(pageSize, pageToken, options);
+        async apiCoreWorkflowArtifactsArtifactIdPatch(artifactId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowArtifactsArtifactIdPatch(artifactId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryEpisodesGet']?.[localVarOperationServerIndex]?.url;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowArtifactsArtifactIdPatch']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
          *
-         * @summary List current user\'s Preference memory
+         * @summary GET /workflow-authoring/v1/drafts/{draft_id}/diagnostics
+         * @param {string} draftId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreMemoryPreferencesGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CurrentMemoryPreferenceListResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryPreferencesGet(options);
+        async apiCoreWorkflowAuthoringV1DraftsDraftIdDiagnosticsGet(draftId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowAuthoringV1DraftsDraftIdDiagnosticsGet(draftId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryPreferencesGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         * Atomically removes the item and its now-unreferenced reference file. Missing items, including other users\' items, are idempotent success.
-         * @summary Delete a current Preference item
-         * @param {string} name
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreMemoryPreferencesNameDelete(name: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryPreferencesNameDelete(name, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryPreferencesNameDelete']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         * A missing reference file is represented by HTTP 200 with reference_status=missing and reference=null.
-         * @summary Get a current Preference item and its reference detail
-         * @param {string} name
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreMemoryPreferencesNameGet(name: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CurrentMemoryPreferenceDetailResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryPreferencesNameGet(name, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryPreferencesNameGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         * ordered_names must be an exact, unnormalized permutation of every current Preference name. expected_etag must equal the list response etag.
-         * @summary Replace the order of current user\'s Preference items
-         * @param {CurrentMemoryPreferenceOrderRequest} currentMemoryPreferenceOrderRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreMemoryPreferencesOrderPut(currentMemoryPreferenceOrderRequest: CurrentMemoryPreferenceOrderRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CurrentMemoryPreferenceListResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryPreferencesOrderPut(currentMemoryPreferenceOrderRequest, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryPreferencesOrderPut']?.[localVarOperationServerIndex]?.url;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowAuthoringV1DraftsDraftIdDiagnosticsGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
          *
-         * @summary Delete current user\'s Profile avatar
+         * @summary PUT /workflow-authoring/v1/drafts/{draft_id}/files
+         * @param {string} draftId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreMemoryProfileAvatarDelete(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryProfileAvatarDelete(options);
+        async apiCoreWorkflowAuthoringV1DraftsDraftIdFilesPut(draftId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowAuthoringV1DraftsDraftIdFilesPut(draftId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryProfileAvatarDelete']?.[localVarOperationServerIndex]?.url;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowAuthoringV1DraftsDraftIdFilesPut']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
          *
-         * @summary Get current user\'s Profile avatar
+         * @summary POST /workflow-authoring/v1/drafts/{draft_id}:publish
+         * @param {string} draftId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreMemoryProfileAvatarGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<File>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryProfileAvatarGet(options);
+        async apiCoreWorkflowAuthoringV1DraftsDraftIdPublishPost(draftId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowAuthoringV1DraftsDraftIdPublishPost(draftId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryProfileAvatarGet']?.[localVarOperationServerIndex]?.url;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowAuthoringV1DraftsDraftIdPublishPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
          *
-         * @summary Upload current user\'s Profile avatar
-         * @param {File} file
+         * @summary POST /workflow-authoring/v1/drafts
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreMemoryProfileAvatarPut(file: File, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CurrentMemoryAvatarResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryProfileAvatarPut(file, options);
+        async apiCoreWorkflowAuthoringV1DraftsPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowAuthoringV1DraftsPost(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryProfileAvatarPut']?.[localVarOperationServerIndex]?.url;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowAuthoringV1DraftsPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
          *
-         * @summary Get current user\'s Profile memory
+         * @summary GET /workflow-authoring/v1/fixture
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreMemoryProfileGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CurrentMemoryProfileResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryProfileGet(options);
+        async apiCoreWorkflowAuthoringV1FixtureGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowAuthoringV1FixtureGet(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryProfileGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         * Applies an atomic batch. Scalar fields accept set/clear; list fields accept add/remove/clear.
-         * @summary Apply operations to current user\'s Profile memory
-         * @param {CurrentMemoryOperationsRequest} currentMemoryOperationsRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreMemoryProfilePatch(currentMemoryOperationsRequest: CurrentMemoryOperationsRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CurrentMemoryProfileResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemoryProfilePatch(currentMemoryOperationsRequest, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemoryProfilePatch']?.[localVarOperationServerIndex]?.url;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowAuthoringV1FixtureGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
          *
-         * @summary Delete current user\'s Soul avatar
+         * @summary GET /workflow-authoring/v1/skill-context
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreMemorySoulAvatarDelete(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemorySoulAvatarDelete(options);
+        async apiCoreWorkflowAuthoringV1SkillContextGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowAuthoringV1SkillContextGet(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemorySoulAvatarDelete']?.[localVarOperationServerIndex]?.url;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowAuthoringV1SkillContextGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
          *
-         * @summary Get current user\'s Soul avatar
+         * @summary GET /workflow-commands/{command_id}
+         * @param {string} commandId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreMemorySoulAvatarGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<File>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemorySoulAvatarGet(options);
+        async apiCoreWorkflowCommandsCommandIdGet(commandId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowCommandsCommandIdGet(commandId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemorySoulAvatarGet']?.[localVarOperationServerIndex]?.url;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowCommandsCommandIdGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
          *
-         * @summary Upload current user\'s Soul avatar
-         * @param {File} file
+         * @summary POST /workflow-drafts/{draft_id}:ai-generate
+         * @param {string} draftId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreMemorySoulAvatarPut(file: File, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CurrentMemoryAvatarResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemorySoulAvatarPut(file, options);
+        async apiCoreWorkflowDraftsDraftIdAiGeneratePost(draftId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsDraftIdAiGeneratePost(draftId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemorySoulAvatarPut']?.[localVarOperationServerIndex]?.url;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsDraftIdAiGeneratePost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
          *
-         * @summary Get current user\'s Soul memory
+         * @summary POST /workflow-drafts/{draft_id}:ai-repair
+         * @param {string} draftId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreMemorySoulGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CurrentMemorySoulResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemorySoulGet(options);
+        async apiCoreWorkflowDraftsDraftIdAiRepairPost(draftId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsDraftIdAiRepairPost(draftId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemorySoulGet']?.[localVarOperationServerIndex]?.url;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsDraftIdAiRepairPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Applies an atomic batch of set operations. Core migrates legacy content and retries an internal content compare-and-swap up to three times.
-         * @summary Apply operations to current user\'s Soul memory
-         * @param {CurrentMemoryOperationsRequest} currentMemoryOperationsRequest
+         *
+         * @summary POST /workflow-drafts/{draft_id}:confirm-workflow
+         * @param {string} draftId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreMemorySoulPatch(currentMemoryOperationsRequest: CurrentMemoryOperationsRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CurrentMemorySoulResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMemorySoulPatch(currentMemoryOperationsRequest, options);
+        async apiCoreWorkflowDraftsDraftIdConfirmWorkflowPost(draftId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsDraftIdConfirmWorkflowPost(draftId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreMemorySoulPatch']?.[localVarOperationServerIndex]?.url;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsDraftIdConfirmWorkflowPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary DELETE /workflow-drafts/{draft_id}
+         * @param {string} draftId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowDraftsDraftIdDelete(draftId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsDraftIdDelete(draftId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsDraftIdDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /workflow-drafts/{draft_id}/generation-analysis
+         * @param {string} draftId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowDraftsDraftIdGenerationAnalysisGet(draftId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsDraftIdGenerationAnalysisGet(draftId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsDraftIdGenerationAnalysisGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /workflow-drafts/{draft_id}
+         * @param {string} draftId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowDraftsDraftIdGet(draftId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsDraftIdGet(draftId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsDraftIdGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /workflow-drafts/{draft_id}:publish
+         * @param {string} draftId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowDraftsDraftIdPublishPost(draftId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsDraftIdPublishPost(draftId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsDraftIdPublishPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /workflow-drafts/{draft_id}:repair-preview
+         * @param {string} draftId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowDraftsDraftIdRepairPreviewPost(draftId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsDraftIdRepairPreviewPost(draftId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsDraftIdRepairPreviewPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /workflow-drafts/{draft_id}/repair-runs/{repair_id}
+         * @param {string} draftId
+         * @param {string} repairId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGet(draftId: string, repairId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGet(draftId, repairId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /workflow-drafts/{draft_id}:save
+         * @param {string} draftId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowDraftsDraftIdSavePost(draftId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsDraftIdSavePost(draftId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsDraftIdSavePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /workflow-drafts/{draft_id}:validate
+         * @param {string} draftId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowDraftsDraftIdValidatePost(draftId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsDraftIdValidatePost(draftId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsDraftIdValidatePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /workflow-drafts
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowDraftsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /workflow-drafts:polish-info
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowDraftsPolishInfoPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsPolishInfoPost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsPolishInfoPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /workflow-drafts
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowDraftsPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsPost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /workflow-input-resources
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowInputResourcesPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowInputResourcesPost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowInputResourcesPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /workflow-input-resources/{resource_id}
+         * @param {string} resourceId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowInputResourcesResourceIdGet(resourceId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowInputResourcesResourceIdGet(resourceId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowInputResourcesResourceIdGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /workflow-preparations
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowPreparationsPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowPreparationsPost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowPreparationsPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /workflow-preparations/{preparation_id}:consume
+         * @param {string} preparationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowPreparationsPreparationIdConsumePost(preparationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowPreparationsPreparationIdConsumePost(preparationId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowPreparationsPreparationIdConsumePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /workflow-runtime/v1/workflows
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowRuntimeV1WorkflowsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowRuntimeV1WorkflowsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowRuntimeV1WorkflowsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /workflow-runtime/v1/workflows/{workflow_id}
+         * @param {string} workflowId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowRuntimeV1WorkflowsWorkflowIdGet(workflowId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowRuntimeV1WorkflowsWorkflowIdGet(workflowId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowRuntimeV1WorkflowsWorkflowIdGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}:advance-step-and-hand-off
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdAdvanceStepAndHandOffPost(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdAdvanceStepAndHandOffPost(sessionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdAdvanceStepAndHandOffPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}:advance-step
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdAdvanceStepPost(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdAdvanceStepPost(sessionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdAdvanceStepPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/artifacts
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdArtifactsGet(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdArtifactsGet(sessionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdArtifactsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}/artifacts
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdArtifactsPost(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdArtifactsPost(sessionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdArtifactsPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}:dismiss
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdDismissPost(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdDismissPost(sessionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdDismissPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/events
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdEventsGet(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdEventsGet(sessionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdEventsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdGet(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdGet(sessionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:begin
+         * @param {string} sessionId
+         * @param {string} attemptId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdBeginPost(sessionId: string, attemptId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdBeginPost(sessionId, attemptId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdBeginPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:resume
+         * @param {string} sessionId
+         * @param {string} attemptId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdResumePost(sessionId: string, attemptId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdResumePost(sessionId, attemptId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdResumePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:submit
+         * @param {string} sessionId
+         * @param {string} attemptId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdSubmitPost(sessionId: string, attemptId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdSubmitPost(sessionId, attemptId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdSubmitPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/input-bindings
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdInputBindingsGet(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdInputBindingsGet(sessionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdInputBindingsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}/input-bindings
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdInputBindingsPost(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdInputBindingsPost(sessionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdInputBindingsPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/projection
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdProjectionGet(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdProjectionGet(sessionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdProjectionGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}:restore
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdRestorePost(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdRestorePost(sessionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdRestorePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}:resume
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdResumePost(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdResumePost(sessionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdResumePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/slots
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdSlotsGet(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdSlotsGet(sessionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdSlotsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption
+         * @param {string} sessionId
+         * @param {string} slotId
+         * @param {string} listIndex
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch(sessionId: string, slotId: string, listIndex: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch(sessionId, slotId, listIndex, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary DELETE /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
+         * @param {string} sessionId
+         * @param {string} slotId
+         * @param {string} listIndex
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete(sessionId: string, slotId: string, listIndex: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete(sessionId, slotId, listIndex, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
+         * @param {string} sessionId
+         * @param {string} slotId
+         * @param {string} listIndex
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch(sessionId: string, slotId: string, listIndex: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch(sessionId, slotId, listIndex, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback
+         * @param {string} sessionId
+         * @param {string} slotId
+         * @param {string} listIndex
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost(sessionId: string, slotId: string, listIndex: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost(sessionId, slotId, listIndex, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions
+         * @param {string} sessionId
+         * @param {string} slotId
+         * @param {string} listIndex
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet(sessionId: string, slotId: string, listIndex: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet(sessionId, slotId, listIndex, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}/slots/{slot_id}/items
+         * @param {string} sessionId
+         * @param {string} slotId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPost(sessionId: string, slotId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPost(sessionId, slotId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/slots/{slot_id}/order
+         * @param {string} sessionId
+         * @param {string} slotId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGet(sessionId: string, slotId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGet(sessionId, slotId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}/order
+         * @param {string} sessionId
+         * @param {string} slotId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatch(sessionId: string, slotId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatch(sessionId, slotId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}
+         * @param {string} sessionId
+         * @param {string} slotId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdSlotsSlotIdPatch(sessionId: string, slotId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdSlotsSlotIdPatch(sessionId, slotId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdSlotsSlotIdPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/state-graph
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdStateGraphGet(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdStateGraphGet(sessionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdStateGraphGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/steps
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdStepsGet(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdStepsGet(sessionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdStepsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}:stop
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdStopPost(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdStopPost(sessionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdStopPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}:sync-search-config
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdSyncSearchConfigPost(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdSyncSearchConfigPost(sessionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdSyncSearchConfigPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /workflows
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /workflows/{workflow_id}
+         * @param {string} workflowId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowsWorkflowIdGet(workflowId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowsWorkflowIdGet(workflowId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowsWorkflowIdGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
     }
@@ -15289,6 +16787,35 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreAdminGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreAdminGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /agent-invocations
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAgentInvocationsGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreAgentInvocationsGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /agent-invocations/{invocation_id}:finish
+         * @param {DefaultApiApiCoreAgentInvocationsInvocationIdFinishPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAgentInvocationsInvocationIdFinishPost(requestParameters: DefaultApiApiCoreAgentInvocationsInvocationIdFinishPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreAgentInvocationsInvocationIdFinishPost(requestParameters.invocationId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /agent-invocations/{invocation_id}:start
+         * @param {DefaultApiApiCoreAgentInvocationsInvocationIdStartPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreAgentInvocationsInvocationIdStartPost(requestParameters: DefaultApiApiCoreAgentInvocationsInvocationIdStartPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreAgentInvocationsInvocationIdStartPost(requestParameters.invocationId, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -15326,6 +16853,15 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreAutomationGroupsPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreAutomationGroupsPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /chat/executors
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreChatExecutorsGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreChatExecutorsGet(options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -15425,43 +16961,13 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary GET /conversations/{conversation_id}/workflow-sessions:active
-         * @param {DefaultApiApiCoreConversationsConversationIdWorkflowSessionsActiveGetRequest} requestParameters Request parameters.
+         * @summary PATCH /conversations/{conversation_id}/settings
+         * @param {DefaultApiApiCoreConversationsConversationIdSettingsPatchRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreConversationsConversationIdWorkflowSessionsActiveGet(requestParameters: DefaultApiApiCoreConversationsConversationIdWorkflowSessionsActiveGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreConversationsConversationIdWorkflowSessionsActiveGet(requestParameters.conversationId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary GET /conversations/{conversation_id}/workflow-sessions
-         * @param {DefaultApiApiCoreConversationsConversationIdWorkflowSessionsGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreConversationsConversationIdWorkflowSessionsGet(requestParameters: DefaultApiApiCoreConversationsConversationIdWorkflowSessionsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreConversationsConversationIdWorkflowSessionsGet(requestParameters.conversationId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary GET /conversations/{conversation_id}/workflow-sessions:latest
-         * @param {DefaultApiApiCoreConversationsConversationIdWorkflowSessionsLatestGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreConversationsConversationIdWorkflowSessionsLatestGet(requestParameters: DefaultApiApiCoreConversationsConversationIdWorkflowSessionsLatestGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreConversationsConversationIdWorkflowSessionsLatestGet(requestParameters.conversationId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary PATCH /conversations/{conversation_id}/workflow-settings
-         * @param {DefaultApiApiCoreConversationsConversationIdWorkflowSettingsPatchRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreConversationsConversationIdWorkflowSettingsPatch(requestParameters: DefaultApiApiCoreConversationsConversationIdWorkflowSettingsPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreConversationsConversationIdWorkflowSettingsPatch(requestParameters.conversationId, options).then((request) => request(axios, basePath));
+        apiCoreConversationsConversationIdSettingsPatch(requestParameters: DefaultApiApiCoreConversationsConversationIdSettingsPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreConversationsConversationIdSettingsPatch(requestParameters.conversationId, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -15502,6 +17008,46 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreConversationsConversationIdToolLimitDecisionPost(requestParameters: DefaultApiApiCoreConversationsConversationIdToolLimitDecisionPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<object> {
             return localVarFp.apiCoreConversationsConversationIdToolLimitDecisionPost(requestParameters.conversationId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /conversations/{conversation_id}/workflow-sessions:active
+         * @param {DefaultApiApiCoreConversationsConversationIdWorkflowSessionsActiveGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdWorkflowSessionsActiveGet(requestParameters: DefaultApiApiCoreConversationsConversationIdWorkflowSessionsActiveGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreConversationsConversationIdWorkflowSessionsActiveGet(requestParameters.conversationId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /conversations/{conversation_id}/workflow-sessions
+         * @param {DefaultApiApiCoreConversationsConversationIdWorkflowSessionsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdWorkflowSessionsGet(requestParameters: DefaultApiApiCoreConversationsConversationIdWorkflowSessionsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreConversationsConversationIdWorkflowSessionsGet(requestParameters.conversationId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /conversations/{conversation_id}/workflow-sessions:latest
+         * @param {DefaultApiApiCoreConversationsConversationIdWorkflowSessionsLatestGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdWorkflowSessionsLatestGet(requestParameters: DefaultApiApiCoreConversationsConversationIdWorkflowSessionsLatestGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreConversationsConversationIdWorkflowSessionsLatestGet(requestParameters.conversationId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary PATCH /conversations/{conversation_id}/workflow-settings
+         * @param {DefaultApiApiCoreConversationsConversationIdWorkflowSettingsPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdWorkflowSettingsPatch(requestParameters: DefaultApiApiCoreConversationsConversationIdWorkflowSettingsPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreConversationsConversationIdWorkflowSettingsPatch(requestParameters.conversationId, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -15850,6 +17396,55 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary POST /external-chat/hosts/{provider}:claim
+         * @param {DefaultApiApiCoreExternalChatHostsProviderClaimPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreExternalChatHostsProviderClaimPost(requestParameters: DefaultApiApiCoreExternalChatHostsProviderClaimPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreExternalChatHostsProviderClaimPost(requestParameters.provider, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /external-chat/hosts/{provider}:status
+         * @param {DefaultApiApiCoreExternalChatHostsProviderStatusGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreExternalChatHostsProviderStatusGet(requestParameters: DefaultApiApiCoreExternalChatHostsProviderStatusGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreExternalChatHostsProviderStatusGet(requestParameters.provider, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /external-chat/runs
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreExternalChatRunsGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreExternalChatRunsGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /external-chat/runs/{run_id}:event
+         * @param {DefaultApiApiCoreExternalChatRunsRunIdEventPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreExternalChatRunsRunIdEventPost(requestParameters: DefaultApiApiCoreExternalChatRunsRunIdEventPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreExternalChatRunsRunIdEventPost(requestParameters.runId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /external-chat/runs/{run_id}:heartbeat
+         * @param {DefaultApiApiCoreExternalChatRunsRunIdHeartbeatPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreExternalChatRunsRunIdHeartbeatPost(requestParameters: DefaultApiApiCoreExternalChatRunsRunIdHeartbeatPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreExternalChatRunsRunIdHeartbeatPost(requestParameters.runId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary GET /health
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -15865,74 +17460,6 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreHelloGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreHelloGet(options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary POST /internal/workflow-sessions:plan-start
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreInternalWorkflowSessionsPlanStartPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreInternalWorkflowSessionsPlanStartPost(options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary GET /internal/workflow-sessions/{session_id}/projection
-         * @param {DefaultApiApiCoreInternalWorkflowSessionsSessionIdProjectionGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreInternalWorkflowSessionsSessionIdProjectionGet(requestParameters: DefaultApiApiCoreInternalWorkflowSessionsSessionIdProjectionGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreInternalWorkflowSessionsSessionIdProjectionGet(requestParameters.sessionId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary POST /internal/workflow-sessions/{session_id}:transition
-         * @param {DefaultApiApiCoreInternalWorkflowSessionsSessionIdTransitionPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreInternalWorkflowSessionsSessionIdTransitionPost(requestParameters: DefaultApiApiCoreInternalWorkflowSessionsSessionIdTransitionPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreInternalWorkflowSessionsSessionIdTransitionPost(requestParameters.sessionId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary POST /internal/workflow-sessions:start
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreInternalWorkflowSessionsStartPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreInternalWorkflowSessionsStartPost(options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary GET /internal/workflow-transition-commands/{command_id}
-         * @param {DefaultApiApiCoreInternalWorkflowTransitionCommandsCommandIdGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreInternalWorkflowTransitionCommandsCommandIdGet(requestParameters: DefaultApiApiCoreInternalWorkflowTransitionCommandsCommandIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreInternalWorkflowTransitionCommandsCommandIdGet(requestParameters.commandId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary GET /internal/subagent/tasks/{task_id}/events
-         * @param {DefaultApiApiCoreInternalSubagentTasksTaskIdEventsGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreInternalSubagentTasksTaskIdEventsGet(requestParameters: DefaultApiApiCoreInternalSubagentTasksTaskIdEventsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreInternalSubagentTasksTaskIdEventsGet(requestParameters.taskId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary GET /internal/subagent/tasks/{task_id}
-         * @param {DefaultApiApiCoreInternalSubagentTasksTaskIdGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreInternalSubagentTasksTaskIdGet(requestParameters: DefaultApiApiCoreInternalSubagentTasksTaskIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreInternalSubagentTasksTaskIdGet(requestParameters.taskId, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -16082,6 +17609,169 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary Delete an Episode Memory item
+         * @param {DefaultApiApiCoreMemoryEpisodesEpisodeIdDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryEpisodesEpisodeIdDelete(requestParameters: DefaultApiApiCoreMemoryEpisodesEpisodeIdDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreMemoryEpisodesEpisodeIdDelete(requestParameters.episodeId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Get an Episode Memory item
+         * @param {DefaultApiApiCoreMemoryEpisodesEpisodeIdGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryEpisodesEpisodeIdGet(requestParameters: DefaultApiApiCoreMemoryEpisodesEpisodeIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<EpisodeMemoryDetailResponse> {
+            return localVarFp.apiCoreMemoryEpisodesEpisodeIdGet(requestParameters.episodeId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary List current user\'s Episode Memory
+         * @param {DefaultApiApiCoreMemoryEpisodesGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryEpisodesGet(requestParameters: DefaultApiApiCoreMemoryEpisodesGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<EpisodeMemoryListResponse> {
+            return localVarFp.apiCoreMemoryEpisodesGet(requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary List current user\'s Preference memory
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryPreferencesGet(options?: RawAxiosRequestConfig): AxiosPromise<CurrentMemoryPreferenceListResponse> {
+            return localVarFp.apiCoreMemoryPreferencesGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Atomically removes the item and its now-unreferenced reference file. Missing items, including other users\' items, are idempotent success.
+         * @summary Delete a current Preference item
+         * @param {DefaultApiApiCoreMemoryPreferencesNameDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryPreferencesNameDelete(requestParameters: DefaultApiApiCoreMemoryPreferencesNameDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreMemoryPreferencesNameDelete(requestParameters.name, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * A missing reference file is represented by HTTP 200 with reference_status=missing and reference=null.
+         * @summary Get a current Preference item and its reference detail
+         * @param {DefaultApiApiCoreMemoryPreferencesNameGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryPreferencesNameGet(requestParameters: DefaultApiApiCoreMemoryPreferencesNameGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<CurrentMemoryPreferenceDetailResponse> {
+            return localVarFp.apiCoreMemoryPreferencesNameGet(requestParameters.name, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * ordered_names must be an exact, unnormalized permutation of every current Preference name. expected_etag must equal the list response etag.
+         * @summary Replace the order of current user\'s Preference items
+         * @param {DefaultApiApiCoreMemoryPreferencesOrderPutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryPreferencesOrderPut(requestParameters: DefaultApiApiCoreMemoryPreferencesOrderPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<CurrentMemoryPreferenceListResponse> {
+            return localVarFp.apiCoreMemoryPreferencesOrderPut(requestParameters.currentMemoryPreferenceOrderRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Delete current user\'s Profile avatar
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryProfileAvatarDelete(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreMemoryProfileAvatarDelete(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Get current user\'s Profile avatar
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryProfileAvatarGet(options?: RawAxiosRequestConfig): AxiosPromise<File> {
+            return localVarFp.apiCoreMemoryProfileAvatarGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Upload current user\'s Profile avatar
+         * @param {DefaultApiApiCoreMemoryProfileAvatarPutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryProfileAvatarPut(requestParameters: DefaultApiApiCoreMemoryProfileAvatarPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<CurrentMemoryAvatarResponse> {
+            return localVarFp.apiCoreMemoryProfileAvatarPut(requestParameters.file, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Get current user\'s Profile memory
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryProfileGet(options?: RawAxiosRequestConfig): AxiosPromise<CurrentMemoryProfileResponse> {
+            return localVarFp.apiCoreMemoryProfileGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Applies an atomic batch. Scalar fields accept set/clear; list fields accept add/remove/clear.
+         * @summary Apply operations to current user\'s Profile memory
+         * @param {DefaultApiApiCoreMemoryProfilePatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemoryProfilePatch(requestParameters: DefaultApiApiCoreMemoryProfilePatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<CurrentMemoryProfileResponse> {
+            return localVarFp.apiCoreMemoryProfilePatch(requestParameters.currentMemoryOperationsRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Delete current user\'s Soul avatar
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemorySoulAvatarDelete(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreMemorySoulAvatarDelete(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Get current user\'s Soul avatar
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemorySoulAvatarGet(options?: RawAxiosRequestConfig): AxiosPromise<File> {
+            return localVarFp.apiCoreMemorySoulAvatarGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Upload current user\'s Soul avatar
+         * @param {DefaultApiApiCoreMemorySoulAvatarPutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemorySoulAvatarPut(requestParameters: DefaultApiApiCoreMemorySoulAvatarPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<CurrentMemoryAvatarResponse> {
+            return localVarFp.apiCoreMemorySoulAvatarPut(requestParameters.file, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Get current user\'s Soul memory
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemorySoulGet(options?: RawAxiosRequestConfig): AxiosPromise<CurrentMemorySoulResponse> {
+            return localVarFp.apiCoreMemorySoulGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Applies an atomic batch of set operations. Core migrates legacy content and retries an internal content compare-and-swap up to three times.
+         * @summary Apply operations to current user\'s Soul memory
+         * @param {DefaultApiApiCoreMemorySoulPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMemorySoulPatch(requestParameters: DefaultApiApiCoreMemorySoulPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<CurrentMemorySoulResponse> {
+            return localVarFp.apiCoreMemorySoulPatch(requestParameters.currentMemoryOperationsRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary DELETE /model_providers/{model_provider_id}/groups/{group_id}/keys
          * @param {DefaultApiApiCoreModelProvidersModelProviderIdGroupsGroupIdKeysDeleteRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -16120,302 +17810,6 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary POST /workflow-drafts/{draft_id}:ai-generate
-         * @param {DefaultApiApiCoreWorkflowDraftsDraftIdAiGeneratePostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowDraftsDraftIdAiGeneratePost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdAiGeneratePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowDraftsDraftIdAiGeneratePost(requestParameters.draftId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary POST /workflow-drafts/{draft_id}:ai-repair
-         * @param {DefaultApiApiCoreWorkflowDraftsDraftIdAiRepairPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowDraftsDraftIdAiRepairPost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdAiRepairPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowDraftsDraftIdAiRepairPost(requestParameters.draftId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary DELETE /workflow-drafts/{draft_id}
-         * @param {DefaultApiApiCoreWorkflowDraftsDraftIdDeleteRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowDraftsDraftIdDelete(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowDraftsDraftIdDelete(requestParameters.draftId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary GET /workflow-drafts/{draft_id}
-         * @param {DefaultApiApiCoreWorkflowDraftsDraftIdGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowDraftsDraftIdGet(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowDraftsDraftIdGet(requestParameters.draftId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary POST /workflow-drafts/{draft_id}:publish
-         * @param {DefaultApiApiCoreWorkflowDraftsDraftIdPublishPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowDraftsDraftIdPublishPost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdPublishPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowDraftsDraftIdPublishPost(requestParameters.draftId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary POST /workflow-drafts/{draft_id}:save
-         * @param {DefaultApiApiCoreWorkflowDraftsDraftIdSavePostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowDraftsDraftIdSavePost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdSavePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowDraftsDraftIdSavePost(requestParameters.draftId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary POST /workflow-drafts/{draft_id}:validate
-         * @param {DefaultApiApiCoreWorkflowDraftsDraftIdValidatePostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowDraftsDraftIdValidatePost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdValidatePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowDraftsDraftIdValidatePost(requestParameters.draftId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary GET /workflow-drafts
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowDraftsGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowDraftsGet(options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary POST /workflow-drafts:polish-info
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowDraftsPolishInfoPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowDraftsPolishInfoPost(options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary POST /workflow-drafts
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowDraftsPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowDraftsPost(options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary POST /workflow-sessions/{session_id}/artifacts
-         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdArtifactsPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdArtifactsPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdArtifactsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowSessionsSessionIdArtifactsPost(requestParameters.sessionId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary POST /workflow-sessions/{session_id}:dismiss
-         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdDismissPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdDismissPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdDismissPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowSessionsSessionIdDismissPost(requestParameters.sessionId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary GET /workflow-sessions/{session_id}
-         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowSessionsSessionIdGet(requestParameters.sessionId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary GET /workflow-sessions/{session_id}/projection
-         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdProjectionGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdProjectionGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdProjectionGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowSessionsSessionIdProjectionGet(requestParameters.sessionId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary POST /workflow-sessions/{session_id}:restore
-         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdRestorePostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdRestorePost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdRestorePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowSessionsSessionIdRestorePost(requestParameters.sessionId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary GET /workflow-sessions/{session_id}/slots
-         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdSlotsGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowSessionsSessionIdSlotsGet(requestParameters.sessionId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption
-         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatchRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary DELETE /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
-         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDeleteRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
-         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatchRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary POST /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback
-         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary GET /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions
-         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary POST /workflow-sessions/{session_id}/slots/{slot_id}/items
-         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPost(requestParameters.sessionId, requestParameters.slotId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary GET /workflow-sessions/{session_id}/slots/{slot_id}/order
-         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGet(requestParameters.sessionId, requestParameters.slotId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}/order
-         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatchRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatch(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatch(requestParameters.sessionId, requestParameters.slotId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}
-         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdPatchRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdSlotsSlotIdPatch(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowSessionsSessionIdSlotsSlotIdPatch(requestParameters.sessionId, requestParameters.slotId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary GET /workflow-sessions/{session_id}/state-graph
-         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdStateGraphGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdStateGraphGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdStateGraphGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowSessionsSessionIdStateGraphGet(requestParameters.sessionId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary GET /workflow-sessions/{session_id}/steps
-         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdStepsGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdStepsGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdStepsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowSessionsSessionIdStepsGet(requestParameters.sessionId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary POST /workflow-sessions/{session_id}:sync-search-config
-         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSyncSearchConfigPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdSyncSearchConfigPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSyncSearchConfigPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowSessionsSessionIdSyncSearchConfigPost(requestParameters.sessionId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary GET /workflows
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowsGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowsGet(options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary GET /workflows/{workflow_id}
-         * @param {DefaultApiApiCoreWorkflowsWorkflowIdGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowsWorkflowIdGet(requestParameters: DefaultApiApiCoreWorkflowsWorkflowIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreWorkflowsWorkflowIdGet(requestParameters.workflowId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
          * @summary POST /published-workflows/{workflow_ref:.+}:archive
          * @param {DefaultApiApiCorePublishedWorkflowsWorkflowRefArchivePostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -16423,6 +17817,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCorePublishedWorkflowsWorkflowRefArchivePost(requestParameters: DefaultApiApiCorePublishedWorkflowsWorkflowRefArchivePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCorePublishedWorkflowsWorkflowRefArchivePost(requestParameters.workflowRef, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /published-workflows/{workflow_ref:.+}:restore
+         * @param {DefaultApiApiCorePublishedWorkflowsWorkflowRefRestorePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCorePublishedWorkflowsWorkflowRefRestorePost(requestParameters: DefaultApiApiCorePublishedWorkflowsWorkflowRefRestorePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCorePublishedWorkflowsWorkflowRefRestorePost(requestParameters.workflowRef, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -16491,6 +17895,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreSchedulesScheduleIdCancelPost(requestParameters: DefaultApiApiCoreSchedulesScheduleIdCancelPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreSchedulesScheduleIdCancelPost(requestParameters.scheduleId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary DELETE /schedules/{schedule_id}
+         * @param {DefaultApiApiCoreSchedulesScheduleIdDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSchedulesScheduleIdDelete(requestParameters: DefaultApiApiCoreSchedulesScheduleIdDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreSchedulesScheduleIdDelete(requestParameters.scheduleId, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -16762,169 +18176,629 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary Delete an Episode Memory item
-         * @param {DefaultApiApiCoreMemoryEpisodesEpisodeIdDeleteRequest} requestParameters Request parameters.
+         * @summary DELETE /workflow-artifacts/{artifact_id}
+         * @param {DefaultApiApiCoreWorkflowArtifactsArtifactIdDeleteRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreMemoryEpisodesEpisodeIdDelete(requestParameters: DefaultApiApiCoreMemoryEpisodesEpisodeIdDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreMemoryEpisodesEpisodeIdDelete(requestParameters.episodeId, options).then((request) => request(axios, basePath));
+        apiCoreWorkflowArtifactsArtifactIdDelete(requestParameters: DefaultApiApiCoreWorkflowArtifactsArtifactIdDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowArtifactsArtifactIdDelete(requestParameters.artifactId, options).then((request) => request(axios, basePath));
         },
         /**
          *
-         * @summary Get an Episode Memory item
-         * @param {DefaultApiApiCoreMemoryEpisodesEpisodeIdGetRequest} requestParameters Request parameters.
+         * @summary GET /workflow-artifacts/{artifact_id}
+         * @param {DefaultApiApiCoreWorkflowArtifactsArtifactIdGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreMemoryEpisodesEpisodeIdGet(requestParameters: DefaultApiApiCoreMemoryEpisodesEpisodeIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<EpisodeMemoryDetailResponse> {
-            return localVarFp.apiCoreMemoryEpisodesEpisodeIdGet(requestParameters.episodeId, options).then((request) => request(axios, basePath));
+        apiCoreWorkflowArtifactsArtifactIdGet(requestParameters: DefaultApiApiCoreWorkflowArtifactsArtifactIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowArtifactsArtifactIdGet(requestParameters.artifactId, options).then((request) => request(axios, basePath));
         },
         /**
          *
-         * @summary List current user\'s Episode Memory
-         * @param {DefaultApiApiCoreMemoryEpisodesGetRequest} requestParameters Request parameters.
+         * @summary PATCH /workflow-artifacts/{artifact_id}
+         * @param {DefaultApiApiCoreWorkflowArtifactsArtifactIdPatchRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreMemoryEpisodesGet(requestParameters: DefaultApiApiCoreMemoryEpisodesGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<EpisodeMemoryListResponse> {
-            return localVarFp.apiCoreMemoryEpisodesGet(requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(axios, basePath));
+        apiCoreWorkflowArtifactsArtifactIdPatch(requestParameters: DefaultApiApiCoreWorkflowArtifactsArtifactIdPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowArtifactsArtifactIdPatch(requestParameters.artifactId, options).then((request) => request(axios, basePath));
         },
         /**
          *
-         * @summary List current user\'s Preference memory
+         * @summary GET /workflow-authoring/v1/drafts/{draft_id}/diagnostics
+         * @param {DefaultApiApiCoreWorkflowAuthoringV1DraftsDraftIdDiagnosticsGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreMemoryPreferencesGet(options?: RawAxiosRequestConfig): AxiosPromise<CurrentMemoryPreferenceListResponse> {
-            return localVarFp.apiCoreMemoryPreferencesGet(options).then((request) => request(axios, basePath));
-        },
-        /**
-         * Atomically removes the item and its now-unreferenced reference file. Missing items, including other users\' items, are idempotent success.
-         * @summary Delete a current Preference item
-         * @param {DefaultApiApiCoreMemoryPreferencesNameDeleteRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreMemoryPreferencesNameDelete(requestParameters: DefaultApiApiCoreMemoryPreferencesNameDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreMemoryPreferencesNameDelete(requestParameters.name, options).then((request) => request(axios, basePath));
-        },
-        /**
-         * A missing reference file is represented by HTTP 200 with reference_status=missing and reference=null.
-         * @summary Get a current Preference item and its reference detail
-         * @param {DefaultApiApiCoreMemoryPreferencesNameGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreMemoryPreferencesNameGet(requestParameters: DefaultApiApiCoreMemoryPreferencesNameGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<CurrentMemoryPreferenceDetailResponse> {
-            return localVarFp.apiCoreMemoryPreferencesNameGet(requestParameters.name, options).then((request) => request(axios, basePath));
-        },
-        /**
-         * ordered_names must be an exact, unnormalized permutation of every current Preference name. expected_etag must equal the list response etag.
-         * @summary Replace the order of current user\'s Preference items
-         * @param {DefaultApiApiCoreMemoryPreferencesOrderPutRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreMemoryPreferencesOrderPut(requestParameters: DefaultApiApiCoreMemoryPreferencesOrderPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<CurrentMemoryPreferenceListResponse> {
-            return localVarFp.apiCoreMemoryPreferencesOrderPut(requestParameters.currentMemoryPreferenceOrderRequest, options).then((request) => request(axios, basePath));
+        apiCoreWorkflowAuthoringV1DraftsDraftIdDiagnosticsGet(requestParameters: DefaultApiApiCoreWorkflowAuthoringV1DraftsDraftIdDiagnosticsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowAuthoringV1DraftsDraftIdDiagnosticsGet(requestParameters.draftId, options).then((request) => request(axios, basePath));
         },
         /**
          *
-         * @summary Delete current user\'s Profile avatar
+         * @summary PUT /workflow-authoring/v1/drafts/{draft_id}/files
+         * @param {DefaultApiApiCoreWorkflowAuthoringV1DraftsDraftIdFilesPutRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreMemoryProfileAvatarDelete(options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreMemoryProfileAvatarDelete(options).then((request) => request(axios, basePath));
+        apiCoreWorkflowAuthoringV1DraftsDraftIdFilesPut(requestParameters: DefaultApiApiCoreWorkflowAuthoringV1DraftsDraftIdFilesPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowAuthoringV1DraftsDraftIdFilesPut(requestParameters.draftId, options).then((request) => request(axios, basePath));
         },
         /**
          *
-         * @summary Get current user\'s Profile avatar
+         * @summary POST /workflow-authoring/v1/drafts/{draft_id}:publish
+         * @param {DefaultApiApiCoreWorkflowAuthoringV1DraftsDraftIdPublishPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreMemoryProfileAvatarGet(options?: RawAxiosRequestConfig): AxiosPromise<File> {
-            return localVarFp.apiCoreMemoryProfileAvatarGet(options).then((request) => request(axios, basePath));
+        apiCoreWorkflowAuthoringV1DraftsDraftIdPublishPost(requestParameters: DefaultApiApiCoreWorkflowAuthoringV1DraftsDraftIdPublishPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowAuthoringV1DraftsDraftIdPublishPost(requestParameters.draftId, options).then((request) => request(axios, basePath));
         },
         /**
          *
-         * @summary Upload current user\'s Profile avatar
-         * @param {DefaultApiApiCoreMemoryProfileAvatarPutRequest} requestParameters Request parameters.
+         * @summary POST /workflow-authoring/v1/drafts
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreMemoryProfileAvatarPut(requestParameters: DefaultApiApiCoreMemoryProfileAvatarPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<CurrentMemoryAvatarResponse> {
-            return localVarFp.apiCoreMemoryProfileAvatarPut(requestParameters.file, options).then((request) => request(axios, basePath));
+        apiCoreWorkflowAuthoringV1DraftsPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowAuthoringV1DraftsPost(options).then((request) => request(axios, basePath));
         },
         /**
          *
-         * @summary Get current user\'s Profile memory
+         * @summary GET /workflow-authoring/v1/fixture
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreMemoryProfileGet(options?: RawAxiosRequestConfig): AxiosPromise<CurrentMemoryProfileResponse> {
-            return localVarFp.apiCoreMemoryProfileGet(options).then((request) => request(axios, basePath));
-        },
-        /**
-         * Applies an atomic batch. Scalar fields accept set/clear; list fields accept add/remove/clear.
-         * @summary Apply operations to current user\'s Profile memory
-         * @param {DefaultApiApiCoreMemoryProfilePatchRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreMemoryProfilePatch(requestParameters: DefaultApiApiCoreMemoryProfilePatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<CurrentMemoryProfileResponse> {
-            return localVarFp.apiCoreMemoryProfilePatch(requestParameters.currentMemoryOperationsRequest, options).then((request) => request(axios, basePath));
+        apiCoreWorkflowAuthoringV1FixtureGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowAuthoringV1FixtureGet(options).then((request) => request(axios, basePath));
         },
         /**
          *
-         * @summary Delete current user\'s Soul avatar
+         * @summary GET /workflow-authoring/v1/skill-context
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreMemorySoulAvatarDelete(options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreMemorySoulAvatarDelete(options).then((request) => request(axios, basePath));
+        apiCoreWorkflowAuthoringV1SkillContextGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowAuthoringV1SkillContextGet(options).then((request) => request(axios, basePath));
         },
         /**
          *
-         * @summary Get current user\'s Soul avatar
+         * @summary GET /workflow-commands/{command_id}
+         * @param {DefaultApiApiCoreWorkflowCommandsCommandIdGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreMemorySoulAvatarGet(options?: RawAxiosRequestConfig): AxiosPromise<File> {
-            return localVarFp.apiCoreMemorySoulAvatarGet(options).then((request) => request(axios, basePath));
+        apiCoreWorkflowCommandsCommandIdGet(requestParameters: DefaultApiApiCoreWorkflowCommandsCommandIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowCommandsCommandIdGet(requestParameters.commandId, options).then((request) => request(axios, basePath));
         },
         /**
          *
-         * @summary Upload current user\'s Soul avatar
-         * @param {DefaultApiApiCoreMemorySoulAvatarPutRequest} requestParameters Request parameters.
+         * @summary POST /workflow-drafts/{draft_id}:ai-generate
+         * @param {DefaultApiApiCoreWorkflowDraftsDraftIdAiGeneratePostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreMemorySoulAvatarPut(requestParameters: DefaultApiApiCoreMemorySoulAvatarPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<CurrentMemoryAvatarResponse> {
-            return localVarFp.apiCoreMemorySoulAvatarPut(requestParameters.file, options).then((request) => request(axios, basePath));
+        apiCoreWorkflowDraftsDraftIdAiGeneratePost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdAiGeneratePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowDraftsDraftIdAiGeneratePost(requestParameters.draftId, options).then((request) => request(axios, basePath));
         },
         /**
          *
-         * @summary Get current user\'s Soul memory
+         * @summary POST /workflow-drafts/{draft_id}:ai-repair
+         * @param {DefaultApiApiCoreWorkflowDraftsDraftIdAiRepairPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreMemorySoulGet(options?: RawAxiosRequestConfig): AxiosPromise<CurrentMemorySoulResponse> {
-            return localVarFp.apiCoreMemorySoulGet(options).then((request) => request(axios, basePath));
+        apiCoreWorkflowDraftsDraftIdAiRepairPost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdAiRepairPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowDraftsDraftIdAiRepairPost(requestParameters.draftId, options).then((request) => request(axios, basePath));
         },
         /**
-         * Applies an atomic batch of set operations. Core migrates legacy content and retries an internal content compare-and-swap up to three times.
-         * @summary Apply operations to current user\'s Soul memory
-         * @param {DefaultApiApiCoreMemorySoulPatchRequest} requestParameters Request parameters.
+         *
+         * @summary POST /workflow-drafts/{draft_id}:confirm-workflow
+         * @param {DefaultApiApiCoreWorkflowDraftsDraftIdConfirmWorkflowPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreMemorySoulPatch(requestParameters: DefaultApiApiCoreMemorySoulPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<CurrentMemorySoulResponse> {
-            return localVarFp.apiCoreMemorySoulPatch(requestParameters.currentMemoryOperationsRequest, options).then((request) => request(axios, basePath));
+        apiCoreWorkflowDraftsDraftIdConfirmWorkflowPost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdConfirmWorkflowPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowDraftsDraftIdConfirmWorkflowPost(requestParameters.draftId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary DELETE /workflow-drafts/{draft_id}
+         * @param {DefaultApiApiCoreWorkflowDraftsDraftIdDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsDraftIdDelete(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowDraftsDraftIdDelete(requestParameters.draftId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /workflow-drafts/{draft_id}/generation-analysis
+         * @param {DefaultApiApiCoreWorkflowDraftsDraftIdGenerationAnalysisGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsDraftIdGenerationAnalysisGet(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdGenerationAnalysisGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowDraftsDraftIdGenerationAnalysisGet(requestParameters.draftId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /workflow-drafts/{draft_id}
+         * @param {DefaultApiApiCoreWorkflowDraftsDraftIdGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsDraftIdGet(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowDraftsDraftIdGet(requestParameters.draftId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /workflow-drafts/{draft_id}:publish
+         * @param {DefaultApiApiCoreWorkflowDraftsDraftIdPublishPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsDraftIdPublishPost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdPublishPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowDraftsDraftIdPublishPost(requestParameters.draftId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /workflow-drafts/{draft_id}:repair-preview
+         * @param {DefaultApiApiCoreWorkflowDraftsDraftIdRepairPreviewPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsDraftIdRepairPreviewPost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdRepairPreviewPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowDraftsDraftIdRepairPreviewPost(requestParameters.draftId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /workflow-drafts/{draft_id}/repair-runs/{repair_id}
+         * @param {DefaultApiApiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGet(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGet(requestParameters.draftId, requestParameters.repairId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /workflow-drafts/{draft_id}:save
+         * @param {DefaultApiApiCoreWorkflowDraftsDraftIdSavePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsDraftIdSavePost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdSavePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowDraftsDraftIdSavePost(requestParameters.draftId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /workflow-drafts/{draft_id}:validate
+         * @param {DefaultApiApiCoreWorkflowDraftsDraftIdValidatePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsDraftIdValidatePost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdValidatePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowDraftsDraftIdValidatePost(requestParameters.draftId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /workflow-drafts
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowDraftsGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /workflow-drafts:polish-info
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsPolishInfoPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowDraftsPolishInfoPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /workflow-drafts
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowDraftsPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /workflow-input-resources
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowInputResourcesPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowInputResourcesPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /workflow-input-resources/{resource_id}
+         * @param {DefaultApiApiCoreWorkflowInputResourcesResourceIdGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowInputResourcesResourceIdGet(requestParameters: DefaultApiApiCoreWorkflowInputResourcesResourceIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowInputResourcesResourceIdGet(requestParameters.resourceId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /workflow-preparations
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowPreparationsPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowPreparationsPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /workflow-preparations/{preparation_id}:consume
+         * @param {DefaultApiApiCoreWorkflowPreparationsPreparationIdConsumePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowPreparationsPreparationIdConsumePost(requestParameters: DefaultApiApiCoreWorkflowPreparationsPreparationIdConsumePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowPreparationsPreparationIdConsumePost(requestParameters.preparationId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /workflow-runtime/v1/workflows
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowRuntimeV1WorkflowsGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowRuntimeV1WorkflowsGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /workflow-runtime/v1/workflows/{workflow_id}
+         * @param {DefaultApiApiCoreWorkflowRuntimeV1WorkflowsWorkflowIdGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowRuntimeV1WorkflowsWorkflowIdGet(requestParameters: DefaultApiApiCoreWorkflowRuntimeV1WorkflowsWorkflowIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowRuntimeV1WorkflowsWorkflowIdGet(requestParameters.workflowId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}:advance-step-and-hand-off
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdAdvanceStepAndHandOffPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdAdvanceStepAndHandOffPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdAdvanceStepAndHandOffPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdAdvanceStepAndHandOffPost(requestParameters.sessionId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}:advance-step
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdAdvanceStepPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdAdvanceStepPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdAdvanceStepPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdAdvanceStepPost(requestParameters.sessionId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/artifacts
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdArtifactsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdArtifactsGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdArtifactsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdArtifactsGet(requestParameters.sessionId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}/artifacts
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdArtifactsPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdArtifactsPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdArtifactsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdArtifactsPost(requestParameters.sessionId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}:dismiss
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdDismissPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdDismissPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdDismissPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdDismissPost(requestParameters.sessionId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/events
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdEventsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdEventsGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdEventsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdEventsGet(requestParameters.sessionId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdGet(requestParameters.sessionId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:begin
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdBeginPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdBeginPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdBeginPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdBeginPost(requestParameters.sessionId, requestParameters.attemptId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:resume
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdResumePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdResumePost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdResumePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdResumePost(requestParameters.sessionId, requestParameters.attemptId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:submit
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdSubmitPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdSubmitPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdSubmitPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdSubmitPost(requestParameters.sessionId, requestParameters.attemptId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/input-bindings
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdInputBindingsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdInputBindingsGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdInputBindingsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdInputBindingsGet(requestParameters.sessionId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}/input-bindings
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdInputBindingsPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdInputBindingsPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdInputBindingsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdInputBindingsPost(requestParameters.sessionId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/projection
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdProjectionGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdProjectionGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdProjectionGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdProjectionGet(requestParameters.sessionId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}:restore
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdRestorePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdRestorePost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdRestorePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdRestorePost(requestParameters.sessionId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}:resume
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdResumePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdResumePost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdResumePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdResumePost(requestParameters.sessionId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/slots
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdSlotsGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdSlotsGet(requestParameters.sessionId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary DELETE /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}/slots/{slot_id}/items
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPost(requestParameters.sessionId, requestParameters.slotId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/slots/{slot_id}/order
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGet(requestParameters.sessionId, requestParameters.slotId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}/order
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatch(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatch(requestParameters.sessionId, requestParameters.slotId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdSlotsSlotIdPatch(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdSlotsSlotIdPatch(requestParameters.sessionId, requestParameters.slotId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/state-graph
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdStateGraphGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdStateGraphGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdStateGraphGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdStateGraphGet(requestParameters.sessionId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /workflow-sessions/{session_id}/steps
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdStepsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdStepsGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdStepsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdStepsGet(requestParameters.sessionId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}:stop
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdStopPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdStopPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdStopPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdStopPost(requestParameters.sessionId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}:sync-search-config
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSyncSearchConfigPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdSyncSearchConfigPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSyncSearchConfigPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdSyncSearchConfigPost(requestParameters.sessionId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /workflows
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowsGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowsGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /workflows/{workflow_id}
+         * @param {DefaultApiApiCoreWorkflowsWorkflowIdGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowsWorkflowIdGet(requestParameters: DefaultApiApiCoreWorkflowsWorkflowIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowsWorkflowIdGet(requestParameters.workflowId, options).then((request) => request(axios, basePath));
         },
     };
 };
+
+/**
+ * Request parameters for apiCoreAgentInvocationsInvocationIdFinishPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreAgentInvocationsInvocationIdFinishPostRequest {
+    readonly invocationId: string
+}
+
+/**
+ * Request parameters for apiCoreAgentInvocationsInvocationIdStartPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreAgentInvocationsInvocationIdStartPostRequest {
+    readonly invocationId: string
+}
 
 /**
  * Request parameters for apiCoreAutomationGroupsGroupIdDelete operation in DefaultApi.
@@ -16976,30 +18850,9 @@ export interface DefaultApiApiCoreConversationsConversationIdEventsGetRequest {
 }
 
 /**
- * Request parameters for apiCoreConversationsConversationIdWorkflowSessionsActiveGet operation in DefaultApi.
+ * Request parameters for apiCoreConversationsConversationIdSettingsPatch operation in DefaultApi.
  */
-export interface DefaultApiApiCoreConversationsConversationIdWorkflowSessionsActiveGetRequest {
-    readonly conversationId: string
-}
-
-/**
- * Request parameters for apiCoreConversationsConversationIdWorkflowSessionsGet operation in DefaultApi.
- */
-export interface DefaultApiApiCoreConversationsConversationIdWorkflowSessionsGetRequest {
-    readonly conversationId: string
-}
-
-/**
- * Request parameters for apiCoreConversationsConversationIdWorkflowSessionsLatestGet operation in DefaultApi.
- */
-export interface DefaultApiApiCoreConversationsConversationIdWorkflowSessionsLatestGetRequest {
-    readonly conversationId: string
-}
-
-/**
- * Request parameters for apiCoreConversationsConversationIdWorkflowSettingsPatch operation in DefaultApi.
- */
-export interface DefaultApiApiCoreConversationsConversationIdWorkflowSettingsPatchRequest {
+export interface DefaultApiApiCoreConversationsConversationIdSettingsPatchRequest {
     readonly conversationId: string
 }
 
@@ -17028,6 +18881,34 @@ export interface DefaultApiApiCoreConversationsConversationIdTasksGetRequest {
  * Request parameters for apiCoreConversationsConversationIdToolLimitDecisionPost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreConversationsConversationIdToolLimitDecisionPostRequest {
+    readonly conversationId: string
+}
+
+/**
+ * Request parameters for apiCoreConversationsConversationIdWorkflowSessionsActiveGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsConversationIdWorkflowSessionsActiveGetRequest {
+    readonly conversationId: string
+}
+
+/**
+ * Request parameters for apiCoreConversationsConversationIdWorkflowSessionsGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsConversationIdWorkflowSessionsGetRequest {
+    readonly conversationId: string
+}
+
+/**
+ * Request parameters for apiCoreConversationsConversationIdWorkflowSessionsLatestGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsConversationIdWorkflowSessionsLatestGetRequest {
+    readonly conversationId: string
+}
+
+/**
+ * Request parameters for apiCoreConversationsConversationIdWorkflowSettingsPatch operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsConversationIdWorkflowSettingsPatchRequest {
     readonly conversationId: string
 }
 
@@ -17306,38 +19187,31 @@ export interface DefaultApiApiCoreDatasetsDatasetUploadsUploadFileIdDownloadGetR
 }
 
 /**
- * Request parameters for apiCoreInternalWorkflowSessionsSessionIdProjectionGet operation in DefaultApi.
+ * Request parameters for apiCoreExternalChatHostsProviderClaimPost operation in DefaultApi.
  */
-export interface DefaultApiApiCoreInternalWorkflowSessionsSessionIdProjectionGetRequest {
-    readonly sessionId: string
+export interface DefaultApiApiCoreExternalChatHostsProviderClaimPostRequest {
+    readonly provider: string
 }
 
 /**
- * Request parameters for apiCoreInternalWorkflowSessionsSessionIdTransitionPost operation in DefaultApi.
+ * Request parameters for apiCoreExternalChatHostsProviderStatusGet operation in DefaultApi.
  */
-export interface DefaultApiApiCoreInternalWorkflowSessionsSessionIdTransitionPostRequest {
-    readonly sessionId: string
+export interface DefaultApiApiCoreExternalChatHostsProviderStatusGetRequest {
+    readonly provider: string
 }
 
 /**
- * Request parameters for apiCoreInternalWorkflowTransitionCommandsCommandIdGet operation in DefaultApi.
+ * Request parameters for apiCoreExternalChatRunsRunIdEventPost operation in DefaultApi.
  */
-export interface DefaultApiApiCoreInternalWorkflowTransitionCommandsCommandIdGetRequest {
-    readonly commandId: string
+export interface DefaultApiApiCoreExternalChatRunsRunIdEventPostRequest {
+    readonly runId: string
 }
 
 /**
- * Request parameters for apiCoreInternalSubagentTasksTaskIdEventsGet operation in DefaultApi.
+ * Request parameters for apiCoreExternalChatRunsRunIdHeartbeatPost operation in DefaultApi.
  */
-export interface DefaultApiApiCoreInternalSubagentTasksTaskIdEventsGetRequest {
-    readonly taskId: string
-}
-
-/**
- * Request parameters for apiCoreInternalSubagentTasksTaskIdGet operation in DefaultApi.
- */
-export interface DefaultApiApiCoreInternalSubagentTasksTaskIdGetRequest {
-    readonly taskId: string
+export interface DefaultApiApiCoreExternalChatRunsRunIdHeartbeatPostRequest {
+    readonly runId: string
 }
 
 /**
@@ -17440,6 +19314,78 @@ export interface DefaultApiApiCoreKbPermissionBatchPostRequest {
 }
 
 /**
+ * Request parameters for apiCoreMemoryEpisodesEpisodeIdDelete operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreMemoryEpisodesEpisodeIdDeleteRequest {
+    readonly episodeId: string
+}
+
+/**
+ * Request parameters for apiCoreMemoryEpisodesEpisodeIdGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreMemoryEpisodesEpisodeIdGetRequest {
+    readonly episodeId: string
+}
+
+/**
+ * Request parameters for apiCoreMemoryEpisodesGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreMemoryEpisodesGetRequest {
+    readonly pageSize?: number
+
+    readonly pageToken?: string
+}
+
+/**
+ * Request parameters for apiCoreMemoryPreferencesNameDelete operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreMemoryPreferencesNameDeleteRequest {
+    readonly name: string
+}
+
+/**
+ * Request parameters for apiCoreMemoryPreferencesNameGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreMemoryPreferencesNameGetRequest {
+    readonly name: string
+}
+
+/**
+ * Request parameters for apiCoreMemoryPreferencesOrderPut operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreMemoryPreferencesOrderPutRequest {
+    readonly currentMemoryPreferenceOrderRequest: CurrentMemoryPreferenceOrderRequest
+}
+
+/**
+ * Request parameters for apiCoreMemoryProfileAvatarPut operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreMemoryProfileAvatarPutRequest {
+    readonly file: File
+}
+
+/**
+ * Request parameters for apiCoreMemoryProfilePatch operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreMemoryProfilePatchRequest {
+    readonly currentMemoryOperationsRequest: CurrentMemoryOperationsRequest
+}
+
+/**
+ * Request parameters for apiCoreMemorySoulAvatarPut operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreMemorySoulAvatarPutRequest {
+    readonly file: File
+}
+
+/**
+ * Request parameters for apiCoreMemorySoulPatch operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreMemorySoulPatchRequest {
+    readonly currentMemoryOperationsRequest: CurrentMemoryOperationsRequest
+}
+
+/**
  * Request parameters for apiCoreModelProvidersModelProviderIdGroupsGroupIdKeysDelete operation in DefaultApi.
  */
 export interface DefaultApiApiCoreModelProvidersModelProviderIdGroupsGroupIdKeysDeleteRequest {
@@ -17458,219 +19404,16 @@ export interface DefaultApiApiCoreModelProvidersModelProviderIdGroupsGroupIdKeys
 }
 
 /**
- * Request parameters for apiCoreWorkflowDraftsDraftIdAiGeneratePost operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowDraftsDraftIdAiGeneratePostRequest {
-    readonly draftId: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowDraftsDraftIdAiRepairPost operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowDraftsDraftIdAiRepairPostRequest {
-    readonly draftId: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowDraftsDraftIdDelete operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowDraftsDraftIdDeleteRequest {
-    readonly draftId: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowDraftsDraftIdGet operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowDraftsDraftIdGetRequest {
-    readonly draftId: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowDraftsDraftIdPublishPost operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowDraftsDraftIdPublishPostRequest {
-    readonly draftId: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowDraftsDraftIdSavePost operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowDraftsDraftIdSavePostRequest {
-    readonly draftId: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowDraftsDraftIdValidatePost operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowDraftsDraftIdValidatePostRequest {
-    readonly draftId: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowSessionsSessionIdArtifactsPost operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowSessionsSessionIdArtifactsPostRequest {
-    readonly sessionId: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowSessionsSessionIdDismissPost operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowSessionsSessionIdDismissPostRequest {
-    readonly sessionId: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowSessionsSessionIdGet operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowSessionsSessionIdGetRequest {
-    readonly sessionId: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowSessionsSessionIdProjectionGet operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowSessionsSessionIdProjectionGetRequest {
-    readonly sessionId: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowSessionsSessionIdRestorePost operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowSessionsSessionIdRestorePostRequest {
-    readonly sessionId: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowSessionsSessionIdSlotsGet operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowSessionsSessionIdSlotsGetRequest {
-    readonly sessionId: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatchRequest {
-    readonly sessionId: string
-
-    readonly slotId: string
-
-    readonly listIndex: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDeleteRequest {
-    readonly sessionId: string
-
-    readonly slotId: string
-
-    readonly listIndex: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatchRequest {
-    readonly sessionId: string
-
-    readonly slotId: string
-
-    readonly listIndex: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPostRequest {
-    readonly sessionId: string
-
-    readonly slotId: string
-
-    readonly listIndex: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGetRequest {
-    readonly sessionId: string
-
-    readonly slotId: string
-
-    readonly listIndex: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPost operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPostRequest {
-    readonly sessionId: string
-
-    readonly slotId: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGet operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGetRequest {
-    readonly sessionId: string
-
-    readonly slotId: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatch operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatchRequest {
-    readonly sessionId: string
-
-    readonly slotId: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowSessionsSessionIdSlotsSlotIdPatch operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdPatchRequest {
-    readonly sessionId: string
-
-    readonly slotId: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowSessionsSessionIdStateGraphGet operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowSessionsSessionIdStateGraphGetRequest {
-    readonly sessionId: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowSessionsSessionIdStepsGet operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowSessionsSessionIdStepsGetRequest {
-    readonly sessionId: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowSessionsSessionIdSyncSearchConfigPost operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowSessionsSessionIdSyncSearchConfigPostRequest {
-    readonly sessionId: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowsWorkflowIdGet operation in DefaultApi.
- */
-export interface DefaultApiApiCoreWorkflowsWorkflowIdGetRequest {
-    readonly workflowId: string
-}
-
-/**
  * Request parameters for apiCorePublishedWorkflowsWorkflowRefArchivePost operation in DefaultApi.
  */
 export interface DefaultApiApiCorePublishedWorkflowsWorkflowRefArchivePostRequest {
+    readonly workflowRef: string
+}
+
+/**
+ * Request parameters for apiCorePublishedWorkflowsWorkflowRefRestorePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCorePublishedWorkflowsWorkflowRefRestorePostRequest {
     readonly workflowRef: string
 }
 
@@ -17710,6 +19453,13 @@ export interface DefaultApiApiCorePublishedWorkflowsWorkflowRefVersionsRevisionI
  * Request parameters for apiCoreSchedulesScheduleIdCancelPost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreSchedulesScheduleIdCancelPostRequest {
+    readonly scheduleId: string
+}
+
+/**
+ * Request parameters for apiCoreSchedulesScheduleIdDelete operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreSchedulesScheduleIdDeleteRequest {
     readonly scheduleId: string
 }
 
@@ -17832,87 +19582,397 @@ export interface DefaultApiApiCoreTempUploadsPostRequest {
 }
 
 /**
- * Request parameters for apiCoreMemoryEpisodesEpisodeIdDelete operation in DefaultApi.
+ * Request parameters for apiCoreWorkflowArtifactsArtifactIdDelete operation in DefaultApi.
  */
-export interface DefaultApiApiCoreMemoryEpisodesEpisodeIdDeleteRequest {
-    readonly episodeId: string
+export interface DefaultApiApiCoreWorkflowArtifactsArtifactIdDeleteRequest {
+    readonly artifactId: string
 }
-
 
 /**
- * Request parameters for apiCoreMemoryEpisodesEpisodeIdGet operation in DefaultApi.
+ * Request parameters for apiCoreWorkflowArtifactsArtifactIdGet operation in DefaultApi.
  */
-export interface DefaultApiApiCoreMemoryEpisodesEpisodeIdGetRequest {
-    readonly episodeId: string
+export interface DefaultApiApiCoreWorkflowArtifactsArtifactIdGetRequest {
+    readonly artifactId: string
 }
-
 
 /**
- * Request parameters for apiCoreMemoryEpisodesGet operation in DefaultApi.
+ * Request parameters for apiCoreWorkflowArtifactsArtifactIdPatch operation in DefaultApi.
  */
-export interface DefaultApiApiCoreMemoryEpisodesGetRequest {
-    readonly pageSize?: number
-
-    readonly pageToken?: string
+export interface DefaultApiApiCoreWorkflowArtifactsArtifactIdPatchRequest {
+    readonly artifactId: string
 }
-
 
 /**
- * Request parameters for apiCoreMemoryPreferencesNameDelete operation in DefaultApi.
+ * Request parameters for apiCoreWorkflowAuthoringV1DraftsDraftIdDiagnosticsGet operation in DefaultApi.
  */
-export interface DefaultApiApiCoreMemoryPreferencesNameDeleteRequest {
-    readonly name: string
+export interface DefaultApiApiCoreWorkflowAuthoringV1DraftsDraftIdDiagnosticsGetRequest {
+    readonly draftId: string
 }
-
 
 /**
- * Request parameters for apiCoreMemoryPreferencesNameGet operation in DefaultApi.
+ * Request parameters for apiCoreWorkflowAuthoringV1DraftsDraftIdFilesPut operation in DefaultApi.
  */
-export interface DefaultApiApiCoreMemoryPreferencesNameGetRequest {
-    readonly name: string
+export interface DefaultApiApiCoreWorkflowAuthoringV1DraftsDraftIdFilesPutRequest {
+    readonly draftId: string
 }
-
 
 /**
- * Request parameters for apiCoreMemoryPreferencesOrderPut operation in DefaultApi.
+ * Request parameters for apiCoreWorkflowAuthoringV1DraftsDraftIdPublishPost operation in DefaultApi.
  */
-export interface DefaultApiApiCoreMemoryPreferencesOrderPutRequest {
-    readonly currentMemoryPreferenceOrderRequest: CurrentMemoryPreferenceOrderRequest
+export interface DefaultApiApiCoreWorkflowAuthoringV1DraftsDraftIdPublishPostRequest {
+    readonly draftId: string
 }
-
 
 /**
- * Request parameters for apiCoreMemoryProfileAvatarPut operation in DefaultApi.
+ * Request parameters for apiCoreWorkflowCommandsCommandIdGet operation in DefaultApi.
  */
-export interface DefaultApiApiCoreMemoryProfileAvatarPutRequest {
-    readonly file: File
+export interface DefaultApiApiCoreWorkflowCommandsCommandIdGetRequest {
+    readonly commandId: string
 }
-
 
 /**
- * Request parameters for apiCoreMemoryProfilePatch operation in DefaultApi.
+ * Request parameters for apiCoreWorkflowDraftsDraftIdAiGeneratePost operation in DefaultApi.
  */
-export interface DefaultApiApiCoreMemoryProfilePatchRequest {
-    readonly currentMemoryOperationsRequest: CurrentMemoryOperationsRequest
+export interface DefaultApiApiCoreWorkflowDraftsDraftIdAiGeneratePostRequest {
+    readonly draftId: string
 }
-
 
 /**
- * Request parameters for apiCoreMemorySoulAvatarPut operation in DefaultApi.
+ * Request parameters for apiCoreWorkflowDraftsDraftIdAiRepairPost operation in DefaultApi.
  */
-export interface DefaultApiApiCoreMemorySoulAvatarPutRequest {
-    readonly file: File
+export interface DefaultApiApiCoreWorkflowDraftsDraftIdAiRepairPostRequest {
+    readonly draftId: string
 }
-
 
 /**
- * Request parameters for apiCoreMemorySoulPatch operation in DefaultApi.
+ * Request parameters for apiCoreWorkflowDraftsDraftIdConfirmWorkflowPost operation in DefaultApi.
  */
-export interface DefaultApiApiCoreMemorySoulPatchRequest {
-    readonly currentMemoryOperationsRequest: CurrentMemoryOperationsRequest
+export interface DefaultApiApiCoreWorkflowDraftsDraftIdConfirmWorkflowPostRequest {
+    readonly draftId: string
 }
 
+/**
+ * Request parameters for apiCoreWorkflowDraftsDraftIdDelete operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowDraftsDraftIdDeleteRequest {
+    readonly draftId: string
+}
 
+/**
+ * Request parameters for apiCoreWorkflowDraftsDraftIdGenerationAnalysisGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowDraftsDraftIdGenerationAnalysisGetRequest {
+    readonly draftId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowDraftsDraftIdGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowDraftsDraftIdGetRequest {
+    readonly draftId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowDraftsDraftIdPublishPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowDraftsDraftIdPublishPostRequest {
+    readonly draftId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowDraftsDraftIdRepairPreviewPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowDraftsDraftIdRepairPreviewPostRequest {
+    readonly draftId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGetRequest {
+    readonly draftId: string
+
+    readonly repairId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowDraftsDraftIdSavePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowDraftsDraftIdSavePostRequest {
+    readonly draftId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowDraftsDraftIdValidatePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowDraftsDraftIdValidatePostRequest {
+    readonly draftId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowInputResourcesResourceIdGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowInputResourcesResourceIdGetRequest {
+    readonly resourceId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowPreparationsPreparationIdConsumePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowPreparationsPreparationIdConsumePostRequest {
+    readonly preparationId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowRuntimeV1WorkflowsWorkflowIdGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowRuntimeV1WorkflowsWorkflowIdGetRequest {
+    readonly workflowId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdAdvanceStepAndHandOffPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdAdvanceStepAndHandOffPostRequest {
+    readonly sessionId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdAdvanceStepPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdAdvanceStepPostRequest {
+    readonly sessionId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdArtifactsGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdArtifactsGetRequest {
+    readonly sessionId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdArtifactsPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdArtifactsPostRequest {
+    readonly sessionId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdDismissPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdDismissPostRequest {
+    readonly sessionId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdEventsGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdEventsGetRequest {
+    readonly sessionId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdGetRequest {
+    readonly sessionId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdBeginPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdBeginPostRequest {
+    readonly sessionId: string
+
+    readonly attemptId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdResumePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdResumePostRequest {
+    readonly sessionId: string
+
+    readonly attemptId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdSubmitPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdSubmitPostRequest {
+    readonly sessionId: string
+
+    readonly attemptId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdInputBindingsGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdInputBindingsGetRequest {
+    readonly sessionId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdInputBindingsPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdInputBindingsPostRequest {
+    readonly sessionId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdProjectionGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdProjectionGetRequest {
+    readonly sessionId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdRestorePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdRestorePostRequest {
+    readonly sessionId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdResumePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdResumePostRequest {
+    readonly sessionId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdSlotsGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdSlotsGetRequest {
+    readonly sessionId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatchRequest {
+    readonly sessionId: string
+
+    readonly slotId: string
+
+    readonly listIndex: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDeleteRequest {
+    readonly sessionId: string
+
+    readonly slotId: string
+
+    readonly listIndex: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatchRequest {
+    readonly sessionId: string
+
+    readonly slotId: string
+
+    readonly listIndex: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPostRequest {
+    readonly sessionId: string
+
+    readonly slotId: string
+
+    readonly listIndex: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGetRequest {
+    readonly sessionId: string
+
+    readonly slotId: string
+
+    readonly listIndex: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPostRequest {
+    readonly sessionId: string
+
+    readonly slotId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGetRequest {
+    readonly sessionId: string
+
+    readonly slotId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatch operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatchRequest {
+    readonly sessionId: string
+
+    readonly slotId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdSlotsSlotIdPatch operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdPatchRequest {
+    readonly sessionId: string
+
+    readonly slotId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdStateGraphGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdStateGraphGetRequest {
+    readonly sessionId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdStepsGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdStepsGetRequest {
+    readonly sessionId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdStopPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdStopPostRequest {
+    readonly sessionId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdSyncSearchConfigPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdSyncSearchConfigPostRequest {
+    readonly sessionId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowsWorkflowIdGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowsWorkflowIdGetRequest {
+    readonly workflowId: string
+}
 
 /**
  * DefaultApi - object-oriented interface
@@ -17936,6 +19996,38 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreAdminGet(options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreAdminGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /agent-invocations
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAgentInvocationsGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreAgentInvocationsGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /agent-invocations/{invocation_id}:finish
+     * @param {DefaultApiApiCoreAgentInvocationsInvocationIdFinishPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAgentInvocationsInvocationIdFinishPost(requestParameters: DefaultApiApiCoreAgentInvocationsInvocationIdFinishPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreAgentInvocationsInvocationIdFinishPost(requestParameters.invocationId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /agent-invocations/{invocation_id}:start
+     * @param {DefaultApiApiCoreAgentInvocationsInvocationIdStartPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreAgentInvocationsInvocationIdStartPost(requestParameters: DefaultApiApiCoreAgentInvocationsInvocationIdStartPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreAgentInvocationsInvocationIdStartPost(requestParameters.invocationId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -17977,6 +20069,16 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreAutomationGroupsPost(options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreAutomationGroupsPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /chat/executors
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreChatExecutorsGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreChatExecutorsGet(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -18087,46 +20189,13 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary GET /conversations/{conversation_id}/workflow-sessions:active
-     * @param {DefaultApiApiCoreConversationsConversationIdWorkflowSessionsActiveGetRequest} requestParameters Request parameters.
+     * @summary PATCH /conversations/{conversation_id}/settings
+     * @param {DefaultApiApiCoreConversationsConversationIdSettingsPatchRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public apiCoreConversationsConversationIdWorkflowSessionsActiveGet(requestParameters: DefaultApiApiCoreConversationsConversationIdWorkflowSessionsActiveGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdWorkflowSessionsActiveGet(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary GET /conversations/{conversation_id}/workflow-sessions
-     * @param {DefaultApiApiCoreConversationsConversationIdWorkflowSessionsGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreConversationsConversationIdWorkflowSessionsGet(requestParameters: DefaultApiApiCoreConversationsConversationIdWorkflowSessionsGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdWorkflowSessionsGet(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary GET /conversations/{conversation_id}/workflow-sessions:latest
-     * @param {DefaultApiApiCoreConversationsConversationIdWorkflowSessionsLatestGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreConversationsConversationIdWorkflowSessionsLatestGet(requestParameters: DefaultApiApiCoreConversationsConversationIdWorkflowSessionsLatestGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdWorkflowSessionsLatestGet(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary PATCH /conversations/{conversation_id}/workflow-settings
-     * @param {DefaultApiApiCoreConversationsConversationIdWorkflowSettingsPatchRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreConversationsConversationIdWorkflowSettingsPatch(requestParameters: DefaultApiApiCoreConversationsConversationIdWorkflowSettingsPatchRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdWorkflowSettingsPatch(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
+    public apiCoreConversationsConversationIdSettingsPatch(requestParameters: DefaultApiApiCoreConversationsConversationIdSettingsPatchRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdSettingsPatch(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -18171,6 +20240,50 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreConversationsConversationIdToolLimitDecisionPost(requestParameters: DefaultApiApiCoreConversationsConversationIdToolLimitDecisionPostRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdToolLimitDecisionPost(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /conversations/{conversation_id}/workflow-sessions:active
+     * @param {DefaultApiApiCoreConversationsConversationIdWorkflowSessionsActiveGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsConversationIdWorkflowSessionsActiveGet(requestParameters: DefaultApiApiCoreConversationsConversationIdWorkflowSessionsActiveGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdWorkflowSessionsActiveGet(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /conversations/{conversation_id}/workflow-sessions
+     * @param {DefaultApiApiCoreConversationsConversationIdWorkflowSessionsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsConversationIdWorkflowSessionsGet(requestParameters: DefaultApiApiCoreConversationsConversationIdWorkflowSessionsGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdWorkflowSessionsGet(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /conversations/{conversation_id}/workflow-sessions:latest
+     * @param {DefaultApiApiCoreConversationsConversationIdWorkflowSessionsLatestGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsConversationIdWorkflowSessionsLatestGet(requestParameters: DefaultApiApiCoreConversationsConversationIdWorkflowSessionsLatestGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdWorkflowSessionsLatestGet(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary PATCH /conversations/{conversation_id}/workflow-settings
+     * @param {DefaultApiApiCoreConversationsConversationIdWorkflowSettingsPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsConversationIdWorkflowSettingsPatch(requestParameters: DefaultApiApiCoreConversationsConversationIdWorkflowSettingsPatchRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdWorkflowSettingsPatch(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -18271,7 +20384,7 @@ export class DefaultApi extends BaseAPI {
     }
 
     /**
-      *
+     *
      * @summary List conversation trail metadata (paginated)
      * @param {DefaultApiApiCoreConversationsNameTrailGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -18282,7 +20395,7 @@ export class DefaultApi extends BaseAPI {
     }
 
     /**
-      *
+     *
      * @summary Resume conversation stream
      * @param {DefaultApiApiCoreConversationsResumeChatPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -18555,6 +20668,60 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary POST /external-chat/hosts/{provider}:claim
+     * @param {DefaultApiApiCoreExternalChatHostsProviderClaimPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreExternalChatHostsProviderClaimPost(requestParameters: DefaultApiApiCoreExternalChatHostsProviderClaimPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreExternalChatHostsProviderClaimPost(requestParameters.provider, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /external-chat/hosts/{provider}:status
+     * @param {DefaultApiApiCoreExternalChatHostsProviderStatusGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreExternalChatHostsProviderStatusGet(requestParameters: DefaultApiApiCoreExternalChatHostsProviderStatusGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreExternalChatHostsProviderStatusGet(requestParameters.provider, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /external-chat/runs
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreExternalChatRunsGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreExternalChatRunsGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /external-chat/runs/{run_id}:event
+     * @param {DefaultApiApiCoreExternalChatRunsRunIdEventPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreExternalChatRunsRunIdEventPost(requestParameters: DefaultApiApiCoreExternalChatRunsRunIdEventPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreExternalChatRunsRunIdEventPost(requestParameters.runId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /external-chat/runs/{run_id}:heartbeat
+     * @param {DefaultApiApiCoreExternalChatRunsRunIdHeartbeatPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreExternalChatRunsRunIdHeartbeatPost(requestParameters: DefaultApiApiCoreExternalChatRunsRunIdHeartbeatPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreExternalChatRunsRunIdHeartbeatPost(requestParameters.runId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary GET /health
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -18571,81 +20738,6 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreHelloGet(options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreHelloGet(options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary POST /internal/workflow-sessions:plan-start
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreInternalWorkflowSessionsPlanStartPost(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreInternalWorkflowSessionsPlanStartPost(options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary GET /internal/workflow-sessions/{session_id}/projection
-     * @param {DefaultApiApiCoreInternalWorkflowSessionsSessionIdProjectionGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreInternalWorkflowSessionsSessionIdProjectionGet(requestParameters: DefaultApiApiCoreInternalWorkflowSessionsSessionIdProjectionGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreInternalWorkflowSessionsSessionIdProjectionGet(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary POST /internal/workflow-sessions/{session_id}:transition
-     * @param {DefaultApiApiCoreInternalWorkflowSessionsSessionIdTransitionPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreInternalWorkflowSessionsSessionIdTransitionPost(requestParameters: DefaultApiApiCoreInternalWorkflowSessionsSessionIdTransitionPostRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreInternalWorkflowSessionsSessionIdTransitionPost(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary POST /internal/workflow-sessions:start
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreInternalWorkflowSessionsStartPost(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreInternalWorkflowSessionsStartPost(options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary GET /internal/workflow-transition-commands/{command_id}
-     * @param {DefaultApiApiCoreInternalWorkflowTransitionCommandsCommandIdGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreInternalWorkflowTransitionCommandsCommandIdGet(requestParameters: DefaultApiApiCoreInternalWorkflowTransitionCommandsCommandIdGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreInternalWorkflowTransitionCommandsCommandIdGet(requestParameters.commandId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary GET /internal/subagent/tasks/{task_id}/events
-     * @param {DefaultApiApiCoreInternalSubagentTasksTaskIdEventsGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreInternalSubagentTasksTaskIdEventsGet(requestParameters: DefaultApiApiCoreInternalSubagentTasksTaskIdEventsGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreInternalSubagentTasksTaskIdEventsGet(requestParameters.taskId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary GET /internal/subagent/tasks/{task_id}
-     * @param {DefaultApiApiCoreInternalSubagentTasksTaskIdGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreInternalSubagentTasksTaskIdGet(requestParameters: DefaultApiApiCoreInternalSubagentTasksTaskIdGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreInternalSubagentTasksTaskIdGet(requestParameters.taskId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -18811,6 +20903,186 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary Delete an Episode Memory item
+     * @param {DefaultApiApiCoreMemoryEpisodesEpisodeIdDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreMemoryEpisodesEpisodeIdDelete(requestParameters: DefaultApiApiCoreMemoryEpisodesEpisodeIdDeleteRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreMemoryEpisodesEpisodeIdDelete(requestParameters.episodeId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Get an Episode Memory item
+     * @param {DefaultApiApiCoreMemoryEpisodesEpisodeIdGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreMemoryEpisodesEpisodeIdGet(requestParameters: DefaultApiApiCoreMemoryEpisodesEpisodeIdGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreMemoryEpisodesEpisodeIdGet(requestParameters.episodeId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary List current user\'s Episode Memory
+     * @param {DefaultApiApiCoreMemoryEpisodesGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreMemoryEpisodesGet(requestParameters: DefaultApiApiCoreMemoryEpisodesGetRequest = {}, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreMemoryEpisodesGet(requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary List current user\'s Preference memory
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreMemoryPreferencesGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreMemoryPreferencesGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Atomically removes the item and its now-unreferenced reference file. Missing items, including other users\' items, are idempotent success.
+     * @summary Delete a current Preference item
+     * @param {DefaultApiApiCoreMemoryPreferencesNameDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreMemoryPreferencesNameDelete(requestParameters: DefaultApiApiCoreMemoryPreferencesNameDeleteRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreMemoryPreferencesNameDelete(requestParameters.name, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * A missing reference file is represented by HTTP 200 with reference_status=missing and reference=null.
+     * @summary Get a current Preference item and its reference detail
+     * @param {DefaultApiApiCoreMemoryPreferencesNameGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreMemoryPreferencesNameGet(requestParameters: DefaultApiApiCoreMemoryPreferencesNameGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreMemoryPreferencesNameGet(requestParameters.name, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * ordered_names must be an exact, unnormalized permutation of every current Preference name. expected_etag must equal the list response etag.
+     * @summary Replace the order of current user\'s Preference items
+     * @param {DefaultApiApiCoreMemoryPreferencesOrderPutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreMemoryPreferencesOrderPut(requestParameters: DefaultApiApiCoreMemoryPreferencesOrderPutRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreMemoryPreferencesOrderPut(requestParameters.currentMemoryPreferenceOrderRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Delete current user\'s Profile avatar
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreMemoryProfileAvatarDelete(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreMemoryProfileAvatarDelete(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Get current user\'s Profile avatar
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreMemoryProfileAvatarGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreMemoryProfileAvatarGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Upload current user\'s Profile avatar
+     * @param {DefaultApiApiCoreMemoryProfileAvatarPutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreMemoryProfileAvatarPut(requestParameters: DefaultApiApiCoreMemoryProfileAvatarPutRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreMemoryProfileAvatarPut(requestParameters.file, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Get current user\'s Profile memory
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreMemoryProfileGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreMemoryProfileGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Applies an atomic batch. Scalar fields accept set/clear; list fields accept add/remove/clear.
+     * @summary Apply operations to current user\'s Profile memory
+     * @param {DefaultApiApiCoreMemoryProfilePatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreMemoryProfilePatch(requestParameters: DefaultApiApiCoreMemoryProfilePatchRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreMemoryProfilePatch(requestParameters.currentMemoryOperationsRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Delete current user\'s Soul avatar
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreMemorySoulAvatarDelete(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreMemorySoulAvatarDelete(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Get current user\'s Soul avatar
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreMemorySoulAvatarGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreMemorySoulAvatarGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Upload current user\'s Soul avatar
+     * @param {DefaultApiApiCoreMemorySoulAvatarPutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreMemorySoulAvatarPut(requestParameters: DefaultApiApiCoreMemorySoulAvatarPutRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreMemorySoulAvatarPut(requestParameters.file, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Get current user\'s Soul memory
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreMemorySoulGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreMemorySoulGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Applies an atomic batch of set operations. Core migrates legacy content and retries an internal content compare-and-swap up to three times.
+     * @summary Apply operations to current user\'s Soul memory
+     * @param {DefaultApiApiCoreMemorySoulPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreMemorySoulPatch(requestParameters: DefaultApiApiCoreMemorySoulPatchRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreMemorySoulPatch(requestParameters.currentMemoryOperationsRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary DELETE /model_providers/{model_provider_id}/groups/{group_id}/keys
      * @param {DefaultApiApiCoreModelProvidersModelProviderIdGroupsGroupIdKeysDeleteRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -18853,332 +21125,6 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary POST /workflow-drafts/{draft_id}:ai-generate
-     * @param {DefaultApiApiCoreWorkflowDraftsDraftIdAiGeneratePostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowDraftsDraftIdAiGeneratePost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdAiGeneratePostRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdAiGeneratePost(requestParameters.draftId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary POST /workflow-drafts/{draft_id}:ai-repair
-     * @param {DefaultApiApiCoreWorkflowDraftsDraftIdAiRepairPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowDraftsDraftIdAiRepairPost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdAiRepairPostRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdAiRepairPost(requestParameters.draftId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary DELETE /workflow-drafts/{draft_id}
-     * @param {DefaultApiApiCoreWorkflowDraftsDraftIdDeleteRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowDraftsDraftIdDelete(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdDeleteRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdDelete(requestParameters.draftId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary GET /workflow-drafts/{draft_id}
-     * @param {DefaultApiApiCoreWorkflowDraftsDraftIdGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowDraftsDraftIdGet(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdGet(requestParameters.draftId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary POST /workflow-drafts/{draft_id}:publish
-     * @param {DefaultApiApiCoreWorkflowDraftsDraftIdPublishPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowDraftsDraftIdPublishPost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdPublishPostRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdPublishPost(requestParameters.draftId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary POST /workflow-drafts/{draft_id}:save
-     * @param {DefaultApiApiCoreWorkflowDraftsDraftIdSavePostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowDraftsDraftIdSavePost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdSavePostRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdSavePost(requestParameters.draftId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary POST /workflow-drafts/{draft_id}:validate
-     * @param {DefaultApiApiCoreWorkflowDraftsDraftIdValidatePostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowDraftsDraftIdValidatePost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdValidatePostRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdValidatePost(requestParameters.draftId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary GET /workflow-drafts
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowDraftsGet(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsGet(options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary POST /workflow-drafts:polish-info
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowDraftsPolishInfoPost(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsPolishInfoPost(options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary POST /workflow-drafts
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowDraftsPost(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsPost(options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary POST /workflow-sessions/{session_id}/artifacts
-     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdArtifactsPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowSessionsSessionIdArtifactsPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdArtifactsPostRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdArtifactsPost(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary POST /workflow-sessions/{session_id}:dismiss
-     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdDismissPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowSessionsSessionIdDismissPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdDismissPostRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdDismissPost(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary GET /workflow-sessions/{session_id}
-     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowSessionsSessionIdGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdGet(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary GET /workflow-sessions/{session_id}/projection
-     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdProjectionGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowSessionsSessionIdProjectionGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdProjectionGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdProjectionGet(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary POST /workflow-sessions/{session_id}:restore
-     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdRestorePostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowSessionsSessionIdRestorePost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdRestorePostRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdRestorePost(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary GET /workflow-sessions/{session_id}/slots
-     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowSessionsSessionIdSlotsGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdSlotsGet(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption
-     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatchRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatchRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary DELETE /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
-     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDeleteRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDeleteRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
-     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatchRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatchRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary POST /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback
-     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPostRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary GET /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions
-     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary POST /workflow-sessions/{session_id}/slots/{slot_id}/items
-     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPostRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPost(requestParameters.sessionId, requestParameters.slotId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary GET /workflow-sessions/{session_id}/slots/{slot_id}/order
-     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGet(requestParameters.sessionId, requestParameters.slotId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}/order
-     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatchRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatch(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatchRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatch(requestParameters.sessionId, requestParameters.slotId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}
-     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdPatchRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowSessionsSessionIdSlotsSlotIdPatch(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdPatchRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdSlotsSlotIdPatch(requestParameters.sessionId, requestParameters.slotId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary GET /workflow-sessions/{session_id}/state-graph
-     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdStateGraphGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowSessionsSessionIdStateGraphGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdStateGraphGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdStateGraphGet(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary GET /workflow-sessions/{session_id}/steps
-     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdStepsGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowSessionsSessionIdStepsGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdStepsGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdStepsGet(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary POST /workflow-sessions/{session_id}:sync-search-config
-     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSyncSearchConfigPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowSessionsSessionIdSyncSearchConfigPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSyncSearchConfigPostRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdSyncSearchConfigPost(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary GET /workflows
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowsGet(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowsGet(options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary GET /workflows/{workflow_id}
-     * @param {DefaultApiApiCoreWorkflowsWorkflowIdGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowsWorkflowIdGet(requestParameters: DefaultApiApiCoreWorkflowsWorkflowIdGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreWorkflowsWorkflowIdGet(requestParameters.workflowId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
      * @summary POST /published-workflows/{workflow_ref:.+}:archive
      * @param {DefaultApiApiCorePublishedWorkflowsWorkflowRefArchivePostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -19186,6 +21132,17 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCorePublishedWorkflowsWorkflowRefArchivePost(requestParameters: DefaultApiApiCorePublishedWorkflowsWorkflowRefArchivePostRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCorePublishedWorkflowsWorkflowRefArchivePost(requestParameters.workflowRef, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /published-workflows/{workflow_ref:.+}:restore
+     * @param {DefaultApiApiCorePublishedWorkflowsWorkflowRefRestorePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCorePublishedWorkflowsWorkflowRefRestorePost(requestParameters: DefaultApiApiCorePublishedWorkflowsWorkflowRefRestorePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCorePublishedWorkflowsWorkflowRefRestorePost(requestParameters.workflowRef, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -19261,6 +21218,17 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreSchedulesScheduleIdCancelPost(requestParameters: DefaultApiApiCoreSchedulesScheduleIdCancelPostRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreSchedulesScheduleIdCancelPost(requestParameters.scheduleId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary DELETE /schedules/{schedule_id}
+     * @param {DefaultApiApiCoreSchedulesScheduleIdDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreSchedulesScheduleIdDelete(requestParameters: DefaultApiApiCoreSchedulesScheduleIdDeleteRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreSchedulesScheduleIdDelete(requestParameters.scheduleId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -19558,184 +21526,676 @@ export class DefaultApi extends BaseAPI {
     public apiCoreUserChatSettingsPatch(options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreUserChatSettingsPatch(options).then((request) => request(this.axios, this.basePath));
     }
-    /**
-     *
-     * @summary Delete an Episode Memory item
-     * @param {DefaultApiApiCoreMemoryEpisodesEpisodeIdDeleteRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreMemoryEpisodesEpisodeIdDelete(requestParameters: DefaultApiApiCoreMemoryEpisodesEpisodeIdDeleteRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreMemoryEpisodesEpisodeIdDelete(requestParameters.episodeId, options).then((request) => request(this.axios, this.basePath));
-    }
 
     /**
      *
-     * @summary Get an Episode Memory item
-     * @param {DefaultApiApiCoreMemoryEpisodesEpisodeIdGetRequest} requestParameters Request parameters.
+     * @summary DELETE /workflow-artifacts/{artifact_id}
+     * @param {DefaultApiApiCoreWorkflowArtifactsArtifactIdDeleteRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public apiCoreMemoryEpisodesEpisodeIdGet(requestParameters: DefaultApiApiCoreMemoryEpisodesEpisodeIdGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreMemoryEpisodesEpisodeIdGet(requestParameters.episodeId, options).then((request) => request(this.axios, this.basePath));
+    public apiCoreWorkflowArtifactsArtifactIdDelete(requestParameters: DefaultApiApiCoreWorkflowArtifactsArtifactIdDeleteRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowArtifactsArtifactIdDelete(requestParameters.artifactId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
      *
-     * @summary List current user\'s Episode Memory
-     * @param {DefaultApiApiCoreMemoryEpisodesGetRequest} requestParameters Request parameters.
+     * @summary GET /workflow-artifacts/{artifact_id}
+     * @param {DefaultApiApiCoreWorkflowArtifactsArtifactIdGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public apiCoreMemoryEpisodesGet(requestParameters: DefaultApiApiCoreMemoryEpisodesGetRequest = {}, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreMemoryEpisodesGet(requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(this.axios, this.basePath));
+    public apiCoreWorkflowArtifactsArtifactIdGet(requestParameters: DefaultApiApiCoreWorkflowArtifactsArtifactIdGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowArtifactsArtifactIdGet(requestParameters.artifactId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
      *
-     * @summary List current user\'s Preference memory
+     * @summary PATCH /workflow-artifacts/{artifact_id}
+     * @param {DefaultApiApiCoreWorkflowArtifactsArtifactIdPatchRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public apiCoreMemoryPreferencesGet(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreMemoryPreferencesGet(options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     * Atomically removes the item and its now-unreferenced reference file. Missing items, including other users\' items, are idempotent success.
-     * @summary Delete a current Preference item
-     * @param {DefaultApiApiCoreMemoryPreferencesNameDeleteRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreMemoryPreferencesNameDelete(requestParameters: DefaultApiApiCoreMemoryPreferencesNameDeleteRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreMemoryPreferencesNameDelete(requestParameters.name, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     * A missing reference file is represented by HTTP 200 with reference_status=missing and reference=null.
-     * @summary Get a current Preference item and its reference detail
-     * @param {DefaultApiApiCoreMemoryPreferencesNameGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreMemoryPreferencesNameGet(requestParameters: DefaultApiApiCoreMemoryPreferencesNameGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreMemoryPreferencesNameGet(requestParameters.name, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     * ordered_names must be an exact, unnormalized permutation of every current Preference name. expected_etag must equal the list response etag.
-     * @summary Replace the order of current user\'s Preference items
-     * @param {DefaultApiApiCoreMemoryPreferencesOrderPutRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreMemoryPreferencesOrderPut(requestParameters: DefaultApiApiCoreMemoryPreferencesOrderPutRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreMemoryPreferencesOrderPut(requestParameters.currentMemoryPreferenceOrderRequest, options).then((request) => request(this.axios, this.basePath));
+    public apiCoreWorkflowArtifactsArtifactIdPatch(requestParameters: DefaultApiApiCoreWorkflowArtifactsArtifactIdPatchRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowArtifactsArtifactIdPatch(requestParameters.artifactId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
      *
-     * @summary Delete current user\'s Profile avatar
+     * @summary GET /workflow-authoring/v1/drafts/{draft_id}/diagnostics
+     * @param {DefaultApiApiCoreWorkflowAuthoringV1DraftsDraftIdDiagnosticsGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public apiCoreMemoryProfileAvatarDelete(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreMemoryProfileAvatarDelete(options).then((request) => request(this.axios, this.basePath));
+    public apiCoreWorkflowAuthoringV1DraftsDraftIdDiagnosticsGet(requestParameters: DefaultApiApiCoreWorkflowAuthoringV1DraftsDraftIdDiagnosticsGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowAuthoringV1DraftsDraftIdDiagnosticsGet(requestParameters.draftId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
      *
-     * @summary Get current user\'s Profile avatar
+     * @summary PUT /workflow-authoring/v1/drafts/{draft_id}/files
+     * @param {DefaultApiApiCoreWorkflowAuthoringV1DraftsDraftIdFilesPutRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public apiCoreMemoryProfileAvatarGet(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreMemoryProfileAvatarGet(options).then((request) => request(this.axios, this.basePath));
+    public apiCoreWorkflowAuthoringV1DraftsDraftIdFilesPut(requestParameters: DefaultApiApiCoreWorkflowAuthoringV1DraftsDraftIdFilesPutRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowAuthoringV1DraftsDraftIdFilesPut(requestParameters.draftId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
      *
-     * @summary Upload current user\'s Profile avatar
-     * @param {DefaultApiApiCoreMemoryProfileAvatarPutRequest} requestParameters Request parameters.
+     * @summary POST /workflow-authoring/v1/drafts/{draft_id}:publish
+     * @param {DefaultApiApiCoreWorkflowAuthoringV1DraftsDraftIdPublishPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public apiCoreMemoryProfileAvatarPut(requestParameters: DefaultApiApiCoreMemoryProfileAvatarPutRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreMemoryProfileAvatarPut(requestParameters.file, options).then((request) => request(this.axios, this.basePath));
+    public apiCoreWorkflowAuthoringV1DraftsDraftIdPublishPost(requestParameters: DefaultApiApiCoreWorkflowAuthoringV1DraftsDraftIdPublishPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowAuthoringV1DraftsDraftIdPublishPost(requestParameters.draftId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
      *
-     * @summary Get current user\'s Profile memory
+     * @summary POST /workflow-authoring/v1/drafts
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public apiCoreMemoryProfileGet(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreMemoryProfileGet(options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     * Applies an atomic batch. Scalar fields accept set/clear; list fields accept add/remove/clear.
-     * @summary Apply operations to current user\'s Profile memory
-     * @param {DefaultApiApiCoreMemoryProfilePatchRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreMemoryProfilePatch(requestParameters: DefaultApiApiCoreMemoryProfilePatchRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreMemoryProfilePatch(requestParameters.currentMemoryOperationsRequest, options).then((request) => request(this.axios, this.basePath));
+    public apiCoreWorkflowAuthoringV1DraftsPost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowAuthoringV1DraftsPost(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
      *
-     * @summary Delete current user\'s Soul avatar
+     * @summary GET /workflow-authoring/v1/fixture
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public apiCoreMemorySoulAvatarDelete(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreMemorySoulAvatarDelete(options).then((request) => request(this.axios, this.basePath));
+    public apiCoreWorkflowAuthoringV1FixtureGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowAuthoringV1FixtureGet(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
      *
-     * @summary Get current user\'s Soul avatar
+     * @summary GET /workflow-authoring/v1/skill-context
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public apiCoreMemorySoulAvatarGet(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreMemorySoulAvatarGet(options).then((request) => request(this.axios, this.basePath));
+    public apiCoreWorkflowAuthoringV1SkillContextGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowAuthoringV1SkillContextGet(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
      *
-     * @summary Upload current user\'s Soul avatar
-     * @param {DefaultApiApiCoreMemorySoulAvatarPutRequest} requestParameters Request parameters.
+     * @summary GET /workflow-commands/{command_id}
+     * @param {DefaultApiApiCoreWorkflowCommandsCommandIdGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public apiCoreMemorySoulAvatarPut(requestParameters: DefaultApiApiCoreMemorySoulAvatarPutRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreMemorySoulAvatarPut(requestParameters.file, options).then((request) => request(this.axios, this.basePath));
+    public apiCoreWorkflowCommandsCommandIdGet(requestParameters: DefaultApiApiCoreWorkflowCommandsCommandIdGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowCommandsCommandIdGet(requestParameters.commandId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
      *
-     * @summary Get current user\'s Soul memory
+     * @summary POST /workflow-drafts/{draft_id}:ai-generate
+     * @param {DefaultApiApiCoreWorkflowDraftsDraftIdAiGeneratePostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public apiCoreMemorySoulGet(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreMemorySoulGet(options).then((request) => request(this.axios, this.basePath));
+    public apiCoreWorkflowDraftsDraftIdAiGeneratePost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdAiGeneratePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdAiGeneratePost(requestParameters.draftId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
-     * Applies an atomic batch of set operations. Core migrates legacy content and retries an internal content compare-and-swap up to three times.
-     * @summary Apply operations to current user\'s Soul memory
-     * @param {DefaultApiApiCoreMemorySoulPatchRequest} requestParameters Request parameters.
+     *
+     * @summary POST /workflow-drafts/{draft_id}:ai-repair
+     * @param {DefaultApiApiCoreWorkflowDraftsDraftIdAiRepairPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public apiCoreMemorySoulPatch(requestParameters: DefaultApiApiCoreMemorySoulPatchRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreMemorySoulPatch(requestParameters.currentMemoryOperationsRequest, options).then((request) => request(this.axios, this.basePath));
+    public apiCoreWorkflowDraftsDraftIdAiRepairPost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdAiRepairPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdAiRepairPost(requestParameters.draftId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-drafts/{draft_id}:confirm-workflow
+     * @param {DefaultApiApiCoreWorkflowDraftsDraftIdConfirmWorkflowPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowDraftsDraftIdConfirmWorkflowPost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdConfirmWorkflowPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdConfirmWorkflowPost(requestParameters.draftId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary DELETE /workflow-drafts/{draft_id}
+     * @param {DefaultApiApiCoreWorkflowDraftsDraftIdDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowDraftsDraftIdDelete(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdDeleteRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdDelete(requestParameters.draftId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /workflow-drafts/{draft_id}/generation-analysis
+     * @param {DefaultApiApiCoreWorkflowDraftsDraftIdGenerationAnalysisGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowDraftsDraftIdGenerationAnalysisGet(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdGenerationAnalysisGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdGenerationAnalysisGet(requestParameters.draftId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /workflow-drafts/{draft_id}
+     * @param {DefaultApiApiCoreWorkflowDraftsDraftIdGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowDraftsDraftIdGet(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdGet(requestParameters.draftId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-drafts/{draft_id}:publish
+     * @param {DefaultApiApiCoreWorkflowDraftsDraftIdPublishPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowDraftsDraftIdPublishPost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdPublishPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdPublishPost(requestParameters.draftId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-drafts/{draft_id}:repair-preview
+     * @param {DefaultApiApiCoreWorkflowDraftsDraftIdRepairPreviewPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowDraftsDraftIdRepairPreviewPost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdRepairPreviewPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdRepairPreviewPost(requestParameters.draftId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /workflow-drafts/{draft_id}/repair-runs/{repair_id}
+     * @param {DefaultApiApiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGet(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGet(requestParameters.draftId, requestParameters.repairId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-drafts/{draft_id}:save
+     * @param {DefaultApiApiCoreWorkflowDraftsDraftIdSavePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowDraftsDraftIdSavePost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdSavePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdSavePost(requestParameters.draftId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-drafts/{draft_id}:validate
+     * @param {DefaultApiApiCoreWorkflowDraftsDraftIdValidatePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowDraftsDraftIdValidatePost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdValidatePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdValidatePost(requestParameters.draftId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /workflow-drafts
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowDraftsGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-drafts:polish-info
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowDraftsPolishInfoPost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsPolishInfoPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-drafts
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowDraftsPost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-input-resources
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowInputResourcesPost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowInputResourcesPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /workflow-input-resources/{resource_id}
+     * @param {DefaultApiApiCoreWorkflowInputResourcesResourceIdGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowInputResourcesResourceIdGet(requestParameters: DefaultApiApiCoreWorkflowInputResourcesResourceIdGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowInputResourcesResourceIdGet(requestParameters.resourceId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-preparations
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowPreparationsPost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowPreparationsPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-preparations/{preparation_id}:consume
+     * @param {DefaultApiApiCoreWorkflowPreparationsPreparationIdConsumePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowPreparationsPreparationIdConsumePost(requestParameters: DefaultApiApiCoreWorkflowPreparationsPreparationIdConsumePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowPreparationsPreparationIdConsumePost(requestParameters.preparationId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /workflow-runtime/v1/workflows
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowRuntimeV1WorkflowsGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowRuntimeV1WorkflowsGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /workflow-runtime/v1/workflows/{workflow_id}
+     * @param {DefaultApiApiCoreWorkflowRuntimeV1WorkflowsWorkflowIdGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowRuntimeV1WorkflowsWorkflowIdGet(requestParameters: DefaultApiApiCoreWorkflowRuntimeV1WorkflowsWorkflowIdGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowRuntimeV1WorkflowsWorkflowIdGet(requestParameters.workflowId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /workflow-sessions
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-sessions/{session_id}:advance-step-and-hand-off
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdAdvanceStepAndHandOffPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdAdvanceStepAndHandOffPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdAdvanceStepAndHandOffPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdAdvanceStepAndHandOffPost(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-sessions/{session_id}:advance-step
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdAdvanceStepPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdAdvanceStepPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdAdvanceStepPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdAdvanceStepPost(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /workflow-sessions/{session_id}/artifacts
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdArtifactsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdArtifactsGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdArtifactsGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdArtifactsGet(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-sessions/{session_id}/artifacts
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdArtifactsPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdArtifactsPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdArtifactsPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdArtifactsPost(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-sessions/{session_id}:dismiss
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdDismissPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdDismissPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdDismissPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdDismissPost(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /workflow-sessions/{session_id}/events
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdEventsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdEventsGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdEventsGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdEventsGet(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /workflow-sessions/{session_id}
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdGet(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:begin
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdBeginPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdBeginPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdBeginPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdBeginPost(requestParameters.sessionId, requestParameters.attemptId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:resume
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdResumePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdResumePost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdResumePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdResumePost(requestParameters.sessionId, requestParameters.attemptId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:submit
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdSubmitPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdSubmitPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdSubmitPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdHostedAttemptsAttemptIdSubmitPost(requestParameters.sessionId, requestParameters.attemptId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /workflow-sessions/{session_id}/input-bindings
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdInputBindingsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdInputBindingsGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdInputBindingsGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdInputBindingsGet(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-sessions/{session_id}/input-bindings
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdInputBindingsPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdInputBindingsPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdInputBindingsPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdInputBindingsPost(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /workflow-sessions/{session_id}/projection
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdProjectionGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdProjectionGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdProjectionGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdProjectionGet(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-sessions/{session_id}:restore
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdRestorePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdRestorePost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdRestorePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdRestorePost(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-sessions/{session_id}:resume
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdResumePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdResumePost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdResumePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdResumePost(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /workflow-sessions/{session_id}/slots
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdSlotsGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdSlotsGet(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatchRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary DELETE /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDeleteRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexDelete(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatchRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexPatch(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexRollbackPost(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexVersionsGet(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-sessions/{session_id}/slots/{slot_id}/items
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsPost(requestParameters.sessionId, requestParameters.slotId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /workflow-sessions/{session_id}/slots/{slot_id}/order
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderGet(requestParameters.sessionId, requestParameters.slotId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}/order
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatch(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatchRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdSlotsSlotIdOrderPatch(requestParameters.sessionId, requestParameters.slotId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdSlotsSlotIdPatch(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdPatchRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdSlotsSlotIdPatch(requestParameters.sessionId, requestParameters.slotId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /workflow-sessions/{session_id}/state-graph
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdStateGraphGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdStateGraphGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdStateGraphGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdStateGraphGet(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /workflow-sessions/{session_id}/steps
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdStepsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdStepsGet(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdStepsGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdStepsGet(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-sessions/{session_id}:stop
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdStopPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdStopPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdStopPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdStopPost(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-sessions/{session_id}:sync-search-config
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSyncSearchConfigPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdSyncSearchConfigPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSyncSearchConfigPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdSyncSearchConfigPost(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /workflows
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowsGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowsGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /workflows/{workflow_id}
+     * @param {DefaultApiApiCoreWorkflowsWorkflowIdGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowsWorkflowIdGet(requestParameters: DefaultApiApiCoreWorkflowsWorkflowIdGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowsWorkflowIdGet(requestParameters.workflowId, options).then((request) => request(this.axios, this.basePath));
     }
 }
 
@@ -22296,6 +24756,41 @@ export const McpServersApiAxiosParamCreator = function (configuration?: Configur
     return {
         /**
          *
+         * @summary Enable or disable owned MCP servers
+         * @param {BulkUpdateServerEnabledRequest} bulkUpdateServerEnabledRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMcpServersEnabledPatch: async (bulkUpdateServerEnabledRequest: BulkUpdateServerEnabledRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'bulkUpdateServerEnabledRequest' is not null or undefined
+            assertParamExists('apiCoreMcpServersEnabledPatch', 'bulkUpdateServerEnabledRequest', bulkUpdateServerEnabledRequest)
+            const localVarPath = `/api/core/mcp_servers:enabled`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(bulkUpdateServerEnabledRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary List MCP servers
          * @param {string} [keyword]
          * @param {number} [page]
@@ -22599,6 +25094,19 @@ export const McpServersApiFp = function(configuration?: Configuration) {
     return {
         /**
          *
+         * @summary Enable or disable owned MCP servers
+         * @param {BulkUpdateServerEnabledRequest} bulkUpdateServerEnabledRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreMcpServersEnabledPatch(bulkUpdateServerEnabledRequest: BulkUpdateServerEnabledRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<BulkUpdateServerEnabledResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreMcpServersEnabledPatch(bulkUpdateServerEnabledRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['McpServersApi.apiCoreMcpServersEnabledPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary List MCP servers
          * @param {string} [keyword]
          * @param {number} [page]
@@ -22716,6 +25224,16 @@ export const McpServersApiFactory = function (configuration?: Configuration, bas
     return {
         /**
          *
+         * @summary Enable or disable owned MCP servers
+         * @param {McpServersApiApiCoreMcpServersEnabledPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreMcpServersEnabledPatch(requestParameters: McpServersApiApiCoreMcpServersEnabledPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<BulkUpdateServerEnabledResponse> {
+            return localVarFp.apiCoreMcpServersEnabledPatch(requestParameters.bulkUpdateServerEnabledRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary List MCP servers
          * @param {McpServersApiApiCoreMcpServersGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -22798,6 +25316,13 @@ export const McpServersApiFactory = function (configuration?: Configuration, bas
 };
 
 /**
+ * Request parameters for apiCoreMcpServersEnabledPatch operation in McpServersApi.
+ */
+export interface McpServersApiApiCoreMcpServersEnabledPatchRequest {
+    readonly bulkUpdateServerEnabledRequest: BulkUpdateServerEnabledRequest
+}
+
+/**
  * Request parameters for apiCoreMcpServersGet operation in McpServersApi.
  */
 export interface McpServersApiApiCoreMcpServersGetRequest {
@@ -22865,6 +25390,17 @@ export interface McpServersApiApiCoreMcpServersPostRequest {
  * McpServersApi - object-oriented interface
  */
 export class McpServersApi extends BaseAPI {
+    /**
+     *
+     * @summary Enable or disable owned MCP servers
+     * @param {McpServersApiApiCoreMcpServersEnabledPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreMcpServersEnabledPatch(requestParameters: McpServersApiApiCoreMcpServersEnabledPatchRequest, options?: RawAxiosRequestConfig) {
+        return McpServersApiFp(this.configuration).apiCoreMcpServersEnabledPatch(requestParameters.bulkUpdateServerEnabledRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
     /**
      *
      * @summary List MCP servers
@@ -24490,1145 +27026,10 @@ export class ModelProvidersApi extends BaseAPI {
 
 
 /**
- * PersonalResourceApi - axios parameter creator
- */
-export const PersonalResourceApiAxiosParamCreator = function (configuration?: Configuration) {
-    return {
-        /**
-         *
-         * @summary Commit personal resource draft
-         * @param {string} resourceType
-         * @param {PersonalResourceCommitOpenAPIRequest} [personalResourceCommitOpenAPIRequest]
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCorePersonalResourceResourceTypeCommitPost: async (resourceType: string, personalResourceCommitOpenAPIRequest?: PersonalResourceCommitOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'resourceType' is not null or undefined
-            assertParamExists('apiCorePersonalResourceResourceTypeCommitPost', 'resourceType', resourceType)
-            const localVarPath = `/api/core/personal-resource/{resource_type}:commit`
-                .replace(`{${"resource_type"}}`, encodeURIComponent(String(resourceType)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(personalResourceCommitOpenAPIRequest, localVarRequestOptions, configuration)
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary Discard personal resource draft
-         * @param {string} resourceType
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCorePersonalResourceResourceTypeDiscardPost: async (resourceType: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'resourceType' is not null or undefined
-            assertParamExists('apiCorePersonalResourceResourceTypeDiscardPost', 'resourceType', resourceType)
-            const localVarPath = `/api/core/personal-resource/{resource_type}:discard`
-                .replace(`{${"resource_type"}}`, encodeURIComponent(String(resourceType)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary Preview personal resource draft diff
-         * @param {string} resourceType
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCorePersonalResourceResourceTypeDraftPreviewGet: async (resourceType: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'resourceType' is not null or undefined
-            assertParamExists('apiCorePersonalResourceResourceTypeDraftPreviewGet', 'resourceType', resourceType)
-            const localVarPath = `/api/core/personal-resource/{resource_type}:draft-preview`
-                .replace(`{${"resource_type"}}`, encodeURIComponent(String(resourceType)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary Write personal resource draft
-         * @param {string} resourceType
-         * @param {PersonalResourceWriteDraftOpenAPIRequest} personalResourceWriteDraftOpenAPIRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCorePersonalResourceResourceTypeDraftPut: async (resourceType: string, personalResourceWriteDraftOpenAPIRequest: PersonalResourceWriteDraftOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'resourceType' is not null or undefined
-            assertParamExists('apiCorePersonalResourceResourceTypeDraftPut', 'resourceType', resourceType)
-            // verify required parameter 'personalResourceWriteDraftOpenAPIRequest' is not null or undefined
-            assertParamExists('apiCorePersonalResourceResourceTypeDraftPut', 'personalResourceWriteDraftOpenAPIRequest', personalResourceWriteDraftOpenAPIRequest)
-            const localVarPath = `/api/core/personal-resource/{resource_type}:draft`
-                .replace(`{${"resource_type"}}`, encodeURIComponent(String(resourceType)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(personalResourceWriteDraftOpenAPIRequest, localVarRequestOptions, configuration)
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary Apply personal resource review actions
-         * @param {string} resourceType
-         * @param {string} reviewId
-         * @param {PersonalResourceReviewActionOpenAPIRequest} personalResourceReviewActionOpenAPIRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCorePersonalResourceResourceTypeDraftReviewReviewIdActionsPost: async (resourceType: string, reviewId: string, personalResourceReviewActionOpenAPIRequest: PersonalResourceReviewActionOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'resourceType' is not null or undefined
-            assertParamExists('apiCorePersonalResourceResourceTypeDraftReviewReviewIdActionsPost', 'resourceType', resourceType)
-            // verify required parameter 'reviewId' is not null or undefined
-            assertParamExists('apiCorePersonalResourceResourceTypeDraftReviewReviewIdActionsPost', 'reviewId', reviewId)
-            // verify required parameter 'personalResourceReviewActionOpenAPIRequest' is not null or undefined
-            assertParamExists('apiCorePersonalResourceResourceTypeDraftReviewReviewIdActionsPost', 'personalResourceReviewActionOpenAPIRequest', personalResourceReviewActionOpenAPIRequest)
-            const localVarPath = `/api/core/personal-resource/{resource_type}/draft-review/{review_id}/actions`
-                .replace(`{${"resource_type"}}`, encodeURIComponent(String(resourceType)))
-                .replace(`{${"review_id"}}`, encodeURIComponent(String(reviewId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(personalResourceReviewActionOpenAPIRequest, localVarRequestOptions, configuration)
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary Undo personal resource review action batch
-         * @param {string} resourceType
-         * @param {string} reviewId
-         * @param {PersonalResourceReviewUndoOpenAPIRequest} [personalResourceReviewUndoOpenAPIRequest]
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCorePersonalResourceResourceTypeDraftReviewReviewIdUndoPost: async (resourceType: string, reviewId: string, personalResourceReviewUndoOpenAPIRequest?: PersonalResourceReviewUndoOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'resourceType' is not null or undefined
-            assertParamExists('apiCorePersonalResourceResourceTypeDraftReviewReviewIdUndoPost', 'resourceType', resourceType)
-            // verify required parameter 'reviewId' is not null or undefined
-            assertParamExists('apiCorePersonalResourceResourceTypeDraftReviewReviewIdUndoPost', 'reviewId', reviewId)
-            const localVarPath = `/api/core/personal-resource/{resource_type}/draft-review/{review_id}:undo`
-                .replace(`{${"resource_type"}}`, encodeURIComponent(String(resourceType)))
-                .replace(`{${"review_id"}}`, encodeURIComponent(String(reviewId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(personalResourceReviewUndoOpenAPIRequest, localVarRequestOptions, configuration)
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary Read personal resource file
-         * @param {string} resourceType
-         * @param {string} [ref]
-         * @param {string} [revisionId]
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCorePersonalResourceResourceTypeFileGet: async (resourceType: string, ref?: string, revisionId?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'resourceType' is not null or undefined
-            assertParamExists('apiCorePersonalResourceResourceTypeFileGet', 'resourceType', resourceType)
-            const localVarPath = `/api/core/personal-resource/{resource_type}:file`
-                .replace(`{${"resource_type"}}`, encodeURIComponent(String(resourceType)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            if (ref !== undefined) {
-                localVarQueryParameter['ref'] = ref;
-            }
-
-            if (revisionId !== undefined) {
-                localVarQueryParameter['revision_id'] = revisionId;
-            }
-
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary Write personal resource draft file
-         * @param {string} resourceType
-         * @param {PersonalResourceWriteDraftOpenAPIRequest} personalResourceWriteDraftOpenAPIRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCorePersonalResourceResourceTypeFilePut: async (resourceType: string, personalResourceWriteDraftOpenAPIRequest: PersonalResourceWriteDraftOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'resourceType' is not null or undefined
-            assertParamExists('apiCorePersonalResourceResourceTypeFilePut', 'resourceType', resourceType)
-            // verify required parameter 'personalResourceWriteDraftOpenAPIRequest' is not null or undefined
-            assertParamExists('apiCorePersonalResourceResourceTypeFilePut', 'personalResourceWriteDraftOpenAPIRequest', personalResourceWriteDraftOpenAPIRequest)
-            const localVarPath = `/api/core/personal-resource/{resource_type}:file`
-                .replace(`{${"resource_type"}}`, encodeURIComponent(String(resourceType)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(personalResourceWriteDraftOpenAPIRequest, localVarRequestOptions, configuration)
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary Generate personal resource draft
-         * @param {string} resourceType
-         * @param {PersonalResourceGenerateOpenAPIRequest} personalResourceGenerateOpenAPIRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCorePersonalResourceResourceTypeGeneratePost: async (resourceType: string, personalResourceGenerateOpenAPIRequest: PersonalResourceGenerateOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'resourceType' is not null or undefined
-            assertParamExists('apiCorePersonalResourceResourceTypeGeneratePost', 'resourceType', resourceType)
-            // verify required parameter 'personalResourceGenerateOpenAPIRequest' is not null or undefined
-            assertParamExists('apiCorePersonalResourceResourceTypeGeneratePost', 'personalResourceGenerateOpenAPIRequest', personalResourceGenerateOpenAPIRequest)
-            const localVarPath = `/api/core/personal-resource/{resource_type}:generate`
-                .replace(`{${"resource_type"}}`, encodeURIComponent(String(resourceType)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(personalResourceGenerateOpenAPIRequest, localVarRequestOptions, configuration)
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary Update personal resource metadata
-         * @param {string} resourceType
-         * @param {PersonalResourcePatchOpenAPIRequest} personalResourcePatchOpenAPIRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCorePersonalResourceResourceTypePatch: async (resourceType: string, personalResourcePatchOpenAPIRequest: PersonalResourcePatchOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'resourceType' is not null or undefined
-            assertParamExists('apiCorePersonalResourceResourceTypePatch', 'resourceType', resourceType)
-            // verify required parameter 'personalResourcePatchOpenAPIRequest' is not null or undefined
-            assertParamExists('apiCorePersonalResourceResourceTypePatch', 'personalResourcePatchOpenAPIRequest', personalResourcePatchOpenAPIRequest)
-            const localVarPath = `/api/core/personal-resource/{resource_type}`
-                .replace(`{${"resource_type"}}`, encodeURIComponent(String(resourceType)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(personalResourcePatchOpenAPIRequest, localVarRequestOptions, configuration)
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary List personal resource revisions
-         * @param {string} resourceType
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCorePersonalResourceResourceTypeRevisionsGet: async (resourceType: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'resourceType' is not null or undefined
-            assertParamExists('apiCorePersonalResourceResourceTypeRevisionsGet', 'resourceType', resourceType)
-            const localVarPath = `/api/core/personal-resource/{resource_type}/revisions`
-                .replace(`{${"resource_type"}}`, encodeURIComponent(String(resourceType)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary Get personal resource revision
-         * @param {string} resourceType
-         * @param {string} revisionId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCorePersonalResourceResourceTypeRevisionsRevisionIdGet: async (resourceType: string, revisionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'resourceType' is not null or undefined
-            assertParamExists('apiCorePersonalResourceResourceTypeRevisionsRevisionIdGet', 'resourceType', resourceType)
-            // verify required parameter 'revisionId' is not null or undefined
-            assertParamExists('apiCorePersonalResourceResourceTypeRevisionsRevisionIdGet', 'revisionId', revisionId)
-            const localVarPath = `/api/core/personal-resource/{resource_type}/revisions/{revision_id}`
-                .replace(`{${"resource_type"}}`, encodeURIComponent(String(resourceType)))
-                .replace(`{${"revision_id"}}`, encodeURIComponent(String(revisionId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary Rollback personal resource
-         * @param {string} resourceType
-         * @param {PersonalResourceRollbackOpenAPIRequest} personalResourceRollbackOpenAPIRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCorePersonalResourceResourceTypeRollbackPost: async (resourceType: string, personalResourceRollbackOpenAPIRequest: PersonalResourceRollbackOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'resourceType' is not null or undefined
-            assertParamExists('apiCorePersonalResourceResourceTypeRollbackPost', 'resourceType', resourceType)
-            // verify required parameter 'personalResourceRollbackOpenAPIRequest' is not null or undefined
-            assertParamExists('apiCorePersonalResourceResourceTypeRollbackPost', 'personalResourceRollbackOpenAPIRequest', personalResourceRollbackOpenAPIRequest)
-            const localVarPath = `/api/core/personal-resource/{resource_type}:rollback`
-                .replace(`{${"resource_type"}}`, encodeURIComponent(String(resourceType)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(personalResourceRollbackOpenAPIRequest, localVarRequestOptions, configuration)
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-    }
-};
-
-/**
- * PersonalResourceApi - functional programming interface
- */
-export const PersonalResourceApiFp = function(configuration?: Configuration) {
-    const localVarAxiosParamCreator = PersonalResourceApiAxiosParamCreator(configuration)
-    return {
-        /**
-         *
-         * @summary Commit personal resource draft
-         * @param {string} resourceType
-         * @param {PersonalResourceCommitOpenAPIRequest} [personalResourceCommitOpenAPIRequest]
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCorePersonalResourceResourceTypeCommitPost(resourceType: string, personalResourceCommitOpenAPIRequest?: PersonalResourceCommitOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CommitResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePersonalResourceResourceTypeCommitPost(resourceType, personalResourceCommitOpenAPIRequest, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['PersonalResourceApi.apiCorePersonalResourceResourceTypeCommitPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary Discard personal resource draft
-         * @param {string} resourceType
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCorePersonalResourceResourceTypeDiscardPost(resourceType: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DraftResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePersonalResourceResourceTypeDiscardPost(resourceType, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['PersonalResourceApi.apiCorePersonalResourceResourceTypeDiscardPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary Preview personal resource draft diff
-         * @param {string} resourceType
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCorePersonalResourceResourceTypeDraftPreviewGet(resourceType: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DraftPreviewResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePersonalResourceResourceTypeDraftPreviewGet(resourceType, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['PersonalResourceApi.apiCorePersonalResourceResourceTypeDraftPreviewGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary Write personal resource draft
-         * @param {string} resourceType
-         * @param {PersonalResourceWriteDraftOpenAPIRequest} personalResourceWriteDraftOpenAPIRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCorePersonalResourceResourceTypeDraftPut(resourceType: string, personalResourceWriteDraftOpenAPIRequest: PersonalResourceWriteDraftOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DraftResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePersonalResourceResourceTypeDraftPut(resourceType, personalResourceWriteDraftOpenAPIRequest, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['PersonalResourceApi.apiCorePersonalResourceResourceTypeDraftPut']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary Apply personal resource review actions
-         * @param {string} resourceType
-         * @param {string} reviewId
-         * @param {PersonalResourceReviewActionOpenAPIRequest} personalResourceReviewActionOpenAPIRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCorePersonalResourceResourceTypeDraftReviewReviewIdActionsPost(resourceType: string, reviewId: string, personalResourceReviewActionOpenAPIRequest: PersonalResourceReviewActionOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ReviewActionResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePersonalResourceResourceTypeDraftReviewReviewIdActionsPost(resourceType, reviewId, personalResourceReviewActionOpenAPIRequest, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['PersonalResourceApi.apiCorePersonalResourceResourceTypeDraftReviewReviewIdActionsPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary Undo personal resource review action batch
-         * @param {string} resourceType
-         * @param {string} reviewId
-         * @param {PersonalResourceReviewUndoOpenAPIRequest} [personalResourceReviewUndoOpenAPIRequest]
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCorePersonalResourceResourceTypeDraftReviewReviewIdUndoPost(resourceType: string, reviewId: string, personalResourceReviewUndoOpenAPIRequest?: PersonalResourceReviewUndoOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ReviewUndoResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePersonalResourceResourceTypeDraftReviewReviewIdUndoPost(resourceType, reviewId, personalResourceReviewUndoOpenAPIRequest, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['PersonalResourceApi.apiCorePersonalResourceResourceTypeDraftReviewReviewIdUndoPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary Read personal resource file
-         * @param {string} resourceType
-         * @param {string} [ref]
-         * @param {string} [revisionId]
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCorePersonalResourceResourceTypeFileGet(resourceType: string, ref?: string, revisionId?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<FileResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePersonalResourceResourceTypeFileGet(resourceType, ref, revisionId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['PersonalResourceApi.apiCorePersonalResourceResourceTypeFileGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary Write personal resource draft file
-         * @param {string} resourceType
-         * @param {PersonalResourceWriteDraftOpenAPIRequest} personalResourceWriteDraftOpenAPIRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCorePersonalResourceResourceTypeFilePut(resourceType: string, personalResourceWriteDraftOpenAPIRequest: PersonalResourceWriteDraftOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<DraftResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePersonalResourceResourceTypeFilePut(resourceType, personalResourceWriteDraftOpenAPIRequest, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['PersonalResourceApi.apiCorePersonalResourceResourceTypeFilePut']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary Generate personal resource draft
-         * @param {string} resourceType
-         * @param {PersonalResourceGenerateOpenAPIRequest} personalResourceGenerateOpenAPIRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCorePersonalResourceResourceTypeGeneratePost(resourceType: string, personalResourceGenerateOpenAPIRequest: PersonalResourceGenerateOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<PersonalResourceGenerateOpenAPIResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePersonalResourceResourceTypeGeneratePost(resourceType, personalResourceGenerateOpenAPIRequest, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['PersonalResourceApi.apiCorePersonalResourceResourceTypeGeneratePost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary Update personal resource metadata
-         * @param {string} resourceType
-         * @param {PersonalResourcePatchOpenAPIRequest} personalResourcePatchOpenAPIRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCorePersonalResourceResourceTypePatch(resourceType: string, personalResourcePatchOpenAPIRequest: PersonalResourcePatchOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<MetadataResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePersonalResourceResourceTypePatch(resourceType, personalResourcePatchOpenAPIRequest, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['PersonalResourceApi.apiCorePersonalResourceResourceTypePatch']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary List personal resource revisions
-         * @param {string} resourceType
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCorePersonalResourceResourceTypeRevisionsGet(resourceType: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RevisionListResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePersonalResourceResourceTypeRevisionsGet(resourceType, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['PersonalResourceApi.apiCorePersonalResourceResourceTypeRevisionsGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary Get personal resource revision
-         * @param {string} resourceType
-         * @param {string} revisionId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCorePersonalResourceResourceTypeRevisionsRevisionIdGet(resourceType: string, revisionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RevisionDetailResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePersonalResourceResourceTypeRevisionsRevisionIdGet(resourceType, revisionId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['PersonalResourceApi.apiCorePersonalResourceResourceTypeRevisionsRevisionIdGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary Rollback personal resource
-         * @param {string} resourceType
-         * @param {PersonalResourceRollbackOpenAPIRequest} personalResourceRollbackOpenAPIRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCorePersonalResourceResourceTypeRollbackPost(resourceType: string, personalResourceRollbackOpenAPIRequest: PersonalResourceRollbackOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RollbackResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePersonalResourceResourceTypeRollbackPost(resourceType, personalResourceRollbackOpenAPIRequest, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['PersonalResourceApi.apiCorePersonalResourceResourceTypeRollbackPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-    }
-};
-
-/**
- * PersonalResourceApi - factory interface
- */
-export const PersonalResourceApiFactory = function (configuration?: Configuration, basePath?: string, axios?: AxiosInstance) {
-    const localVarFp = PersonalResourceApiFp(configuration)
-    return {
-        /**
-         *
-         * @summary Commit personal resource draft
-         * @param {PersonalResourceApiApiCorePersonalResourceResourceTypeCommitPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCorePersonalResourceResourceTypeCommitPost(requestParameters: PersonalResourceApiApiCorePersonalResourceResourceTypeCommitPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<CommitResponse> {
-            return localVarFp.apiCorePersonalResourceResourceTypeCommitPost(requestParameters.resourceType, requestParameters.personalResourceCommitOpenAPIRequest, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary Discard personal resource draft
-         * @param {PersonalResourceApiApiCorePersonalResourceResourceTypeDiscardPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCorePersonalResourceResourceTypeDiscardPost(requestParameters: PersonalResourceApiApiCorePersonalResourceResourceTypeDiscardPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<DraftResponse> {
-            return localVarFp.apiCorePersonalResourceResourceTypeDiscardPost(requestParameters.resourceType, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary Preview personal resource draft diff
-         * @param {PersonalResourceApiApiCorePersonalResourceResourceTypeDraftPreviewGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCorePersonalResourceResourceTypeDraftPreviewGet(requestParameters: PersonalResourceApiApiCorePersonalResourceResourceTypeDraftPreviewGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<DraftPreviewResponse> {
-            return localVarFp.apiCorePersonalResourceResourceTypeDraftPreviewGet(requestParameters.resourceType, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary Write personal resource draft
-         * @param {PersonalResourceApiApiCorePersonalResourceResourceTypeDraftPutRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCorePersonalResourceResourceTypeDraftPut(requestParameters: PersonalResourceApiApiCorePersonalResourceResourceTypeDraftPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<DraftResponse> {
-            return localVarFp.apiCorePersonalResourceResourceTypeDraftPut(requestParameters.resourceType, requestParameters.personalResourceWriteDraftOpenAPIRequest, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary Apply personal resource review actions
-         * @param {PersonalResourceApiApiCorePersonalResourceResourceTypeDraftReviewReviewIdActionsPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCorePersonalResourceResourceTypeDraftReviewReviewIdActionsPost(requestParameters: PersonalResourceApiApiCorePersonalResourceResourceTypeDraftReviewReviewIdActionsPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ReviewActionResponse> {
-            return localVarFp.apiCorePersonalResourceResourceTypeDraftReviewReviewIdActionsPost(requestParameters.resourceType, requestParameters.reviewId, requestParameters.personalResourceReviewActionOpenAPIRequest, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary Undo personal resource review action batch
-         * @param {PersonalResourceApiApiCorePersonalResourceResourceTypeDraftReviewReviewIdUndoPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCorePersonalResourceResourceTypeDraftReviewReviewIdUndoPost(requestParameters: PersonalResourceApiApiCorePersonalResourceResourceTypeDraftReviewReviewIdUndoPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ReviewUndoResponse> {
-            return localVarFp.apiCorePersonalResourceResourceTypeDraftReviewReviewIdUndoPost(requestParameters.resourceType, requestParameters.reviewId, requestParameters.personalResourceReviewUndoOpenAPIRequest, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary Read personal resource file
-         * @param {PersonalResourceApiApiCorePersonalResourceResourceTypeFileGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCorePersonalResourceResourceTypeFileGet(requestParameters: PersonalResourceApiApiCorePersonalResourceResourceTypeFileGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<FileResponse> {
-            return localVarFp.apiCorePersonalResourceResourceTypeFileGet(requestParameters.resourceType, requestParameters.ref, requestParameters.revisionId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary Write personal resource draft file
-         * @param {PersonalResourceApiApiCorePersonalResourceResourceTypeFilePutRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCorePersonalResourceResourceTypeFilePut(requestParameters: PersonalResourceApiApiCorePersonalResourceResourceTypeFilePutRequest, options?: RawAxiosRequestConfig): AxiosPromise<DraftResponse> {
-            return localVarFp.apiCorePersonalResourceResourceTypeFilePut(requestParameters.resourceType, requestParameters.personalResourceWriteDraftOpenAPIRequest, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary Generate personal resource draft
-         * @param {PersonalResourceApiApiCorePersonalResourceResourceTypeGeneratePostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCorePersonalResourceResourceTypeGeneratePost(requestParameters: PersonalResourceApiApiCorePersonalResourceResourceTypeGeneratePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<PersonalResourceGenerateOpenAPIResponse> {
-            return localVarFp.apiCorePersonalResourceResourceTypeGeneratePost(requestParameters.resourceType, requestParameters.personalResourceGenerateOpenAPIRequest, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary Update personal resource metadata
-         * @param {PersonalResourceApiApiCorePersonalResourceResourceTypePatchRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCorePersonalResourceResourceTypePatch(requestParameters: PersonalResourceApiApiCorePersonalResourceResourceTypePatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<MetadataResponse> {
-            return localVarFp.apiCorePersonalResourceResourceTypePatch(requestParameters.resourceType, requestParameters.personalResourcePatchOpenAPIRequest, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary List personal resource revisions
-         * @param {PersonalResourceApiApiCorePersonalResourceResourceTypeRevisionsGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCorePersonalResourceResourceTypeRevisionsGet(requestParameters: PersonalResourceApiApiCorePersonalResourceResourceTypeRevisionsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<RevisionListResponse> {
-            return localVarFp.apiCorePersonalResourceResourceTypeRevisionsGet(requestParameters.resourceType, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary Get personal resource revision
-         * @param {PersonalResourceApiApiCorePersonalResourceResourceTypeRevisionsRevisionIdGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCorePersonalResourceResourceTypeRevisionsRevisionIdGet(requestParameters: PersonalResourceApiApiCorePersonalResourceResourceTypeRevisionsRevisionIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<RevisionDetailResponse> {
-            return localVarFp.apiCorePersonalResourceResourceTypeRevisionsRevisionIdGet(requestParameters.resourceType, requestParameters.revisionId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary Rollback personal resource
-         * @param {PersonalResourceApiApiCorePersonalResourceResourceTypeRollbackPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCorePersonalResourceResourceTypeRollbackPost(requestParameters: PersonalResourceApiApiCorePersonalResourceResourceTypeRollbackPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<RollbackResponse> {
-            return localVarFp.apiCorePersonalResourceResourceTypeRollbackPost(requestParameters.resourceType, requestParameters.personalResourceRollbackOpenAPIRequest, options).then((request) => request(axios, basePath));
-        },
-    };
-};
-
-/**
- * Request parameters for apiCorePersonalResourceResourceTypeCommitPost operation in PersonalResourceApi.
- */
-export interface PersonalResourceApiApiCorePersonalResourceResourceTypeCommitPostRequest {
-    readonly resourceType: string
-
-    readonly personalResourceCommitOpenAPIRequest?: PersonalResourceCommitOpenAPIRequest
-}
-
-/**
- * Request parameters for apiCorePersonalResourceResourceTypeDiscardPost operation in PersonalResourceApi.
- */
-export interface PersonalResourceApiApiCorePersonalResourceResourceTypeDiscardPostRequest {
-    readonly resourceType: string
-}
-
-/**
- * Request parameters for apiCorePersonalResourceResourceTypeDraftPreviewGet operation in PersonalResourceApi.
- */
-export interface PersonalResourceApiApiCorePersonalResourceResourceTypeDraftPreviewGetRequest {
-    readonly resourceType: string
-}
-
-/**
- * Request parameters for apiCorePersonalResourceResourceTypeDraftPut operation in PersonalResourceApi.
- */
-export interface PersonalResourceApiApiCorePersonalResourceResourceTypeDraftPutRequest {
-    readonly resourceType: string
-
-    readonly personalResourceWriteDraftOpenAPIRequest: PersonalResourceWriteDraftOpenAPIRequest
-}
-
-/**
- * Request parameters for apiCorePersonalResourceResourceTypeDraftReviewReviewIdActionsPost operation in PersonalResourceApi.
- */
-export interface PersonalResourceApiApiCorePersonalResourceResourceTypeDraftReviewReviewIdActionsPostRequest {
-    readonly resourceType: string
-
-    readonly reviewId: string
-
-    readonly personalResourceReviewActionOpenAPIRequest: PersonalResourceReviewActionOpenAPIRequest
-}
-
-/**
- * Request parameters for apiCorePersonalResourceResourceTypeDraftReviewReviewIdUndoPost operation in PersonalResourceApi.
- */
-export interface PersonalResourceApiApiCorePersonalResourceResourceTypeDraftReviewReviewIdUndoPostRequest {
-    readonly resourceType: string
-
-    readonly reviewId: string
-
-    readonly personalResourceReviewUndoOpenAPIRequest?: PersonalResourceReviewUndoOpenAPIRequest
-}
-
-/**
- * Request parameters for apiCorePersonalResourceResourceTypeFileGet operation in PersonalResourceApi.
- */
-export interface PersonalResourceApiApiCorePersonalResourceResourceTypeFileGetRequest {
-    readonly resourceType: string
-
-    readonly ref?: string
-
-    readonly revisionId?: string
-}
-
-/**
- * Request parameters for apiCorePersonalResourceResourceTypeFilePut operation in PersonalResourceApi.
- */
-export interface PersonalResourceApiApiCorePersonalResourceResourceTypeFilePutRequest {
-    readonly resourceType: string
-
-    readonly personalResourceWriteDraftOpenAPIRequest: PersonalResourceWriteDraftOpenAPIRequest
-}
-
-/**
- * Request parameters for apiCorePersonalResourceResourceTypeGeneratePost operation in PersonalResourceApi.
- */
-export interface PersonalResourceApiApiCorePersonalResourceResourceTypeGeneratePostRequest {
-    readonly resourceType: string
-
-    readonly personalResourceGenerateOpenAPIRequest: PersonalResourceGenerateOpenAPIRequest
-}
-
-/**
- * Request parameters for apiCorePersonalResourceResourceTypePatch operation in PersonalResourceApi.
- */
-export interface PersonalResourceApiApiCorePersonalResourceResourceTypePatchRequest {
-    readonly resourceType: string
-
-    readonly personalResourcePatchOpenAPIRequest: PersonalResourcePatchOpenAPIRequest
-}
-
-/**
- * Request parameters for apiCorePersonalResourceResourceTypeRevisionsGet operation in PersonalResourceApi.
- */
-export interface PersonalResourceApiApiCorePersonalResourceResourceTypeRevisionsGetRequest {
-    readonly resourceType: string
-}
-
-/**
- * Request parameters for apiCorePersonalResourceResourceTypeRevisionsRevisionIdGet operation in PersonalResourceApi.
- */
-export interface PersonalResourceApiApiCorePersonalResourceResourceTypeRevisionsRevisionIdGetRequest {
-    readonly resourceType: string
-
-    readonly revisionId: string
-}
-
-/**
- * Request parameters for apiCorePersonalResourceResourceTypeRollbackPost operation in PersonalResourceApi.
- */
-export interface PersonalResourceApiApiCorePersonalResourceResourceTypeRollbackPostRequest {
-    readonly resourceType: string
-
-    readonly personalResourceRollbackOpenAPIRequest: PersonalResourceRollbackOpenAPIRequest
-}
-
-/**
- * PersonalResourceApi - object-oriented interface
- */
-export class PersonalResourceApi extends BaseAPI {
-    /**
-     *
-     * @summary Commit personal resource draft
-     * @param {PersonalResourceApiApiCorePersonalResourceResourceTypeCommitPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCorePersonalResourceResourceTypeCommitPost(requestParameters: PersonalResourceApiApiCorePersonalResourceResourceTypeCommitPostRequest, options?: RawAxiosRequestConfig) {
-        return PersonalResourceApiFp(this.configuration).apiCorePersonalResourceResourceTypeCommitPost(requestParameters.resourceType, requestParameters.personalResourceCommitOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary Discard personal resource draft
-     * @param {PersonalResourceApiApiCorePersonalResourceResourceTypeDiscardPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCorePersonalResourceResourceTypeDiscardPost(requestParameters: PersonalResourceApiApiCorePersonalResourceResourceTypeDiscardPostRequest, options?: RawAxiosRequestConfig) {
-        return PersonalResourceApiFp(this.configuration).apiCorePersonalResourceResourceTypeDiscardPost(requestParameters.resourceType, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary Preview personal resource draft diff
-     * @param {PersonalResourceApiApiCorePersonalResourceResourceTypeDraftPreviewGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCorePersonalResourceResourceTypeDraftPreviewGet(requestParameters: PersonalResourceApiApiCorePersonalResourceResourceTypeDraftPreviewGetRequest, options?: RawAxiosRequestConfig) {
-        return PersonalResourceApiFp(this.configuration).apiCorePersonalResourceResourceTypeDraftPreviewGet(requestParameters.resourceType, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary Write personal resource draft
-     * @param {PersonalResourceApiApiCorePersonalResourceResourceTypeDraftPutRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCorePersonalResourceResourceTypeDraftPut(requestParameters: PersonalResourceApiApiCorePersonalResourceResourceTypeDraftPutRequest, options?: RawAxiosRequestConfig) {
-        return PersonalResourceApiFp(this.configuration).apiCorePersonalResourceResourceTypeDraftPut(requestParameters.resourceType, requestParameters.personalResourceWriteDraftOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary Apply personal resource review actions
-     * @param {PersonalResourceApiApiCorePersonalResourceResourceTypeDraftReviewReviewIdActionsPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCorePersonalResourceResourceTypeDraftReviewReviewIdActionsPost(requestParameters: PersonalResourceApiApiCorePersonalResourceResourceTypeDraftReviewReviewIdActionsPostRequest, options?: RawAxiosRequestConfig) {
-        return PersonalResourceApiFp(this.configuration).apiCorePersonalResourceResourceTypeDraftReviewReviewIdActionsPost(requestParameters.resourceType, requestParameters.reviewId, requestParameters.personalResourceReviewActionOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary Undo personal resource review action batch
-     * @param {PersonalResourceApiApiCorePersonalResourceResourceTypeDraftReviewReviewIdUndoPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCorePersonalResourceResourceTypeDraftReviewReviewIdUndoPost(requestParameters: PersonalResourceApiApiCorePersonalResourceResourceTypeDraftReviewReviewIdUndoPostRequest, options?: RawAxiosRequestConfig) {
-        return PersonalResourceApiFp(this.configuration).apiCorePersonalResourceResourceTypeDraftReviewReviewIdUndoPost(requestParameters.resourceType, requestParameters.reviewId, requestParameters.personalResourceReviewUndoOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary Read personal resource file
-     * @param {PersonalResourceApiApiCorePersonalResourceResourceTypeFileGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCorePersonalResourceResourceTypeFileGet(requestParameters: PersonalResourceApiApiCorePersonalResourceResourceTypeFileGetRequest, options?: RawAxiosRequestConfig) {
-        return PersonalResourceApiFp(this.configuration).apiCorePersonalResourceResourceTypeFileGet(requestParameters.resourceType, requestParameters.ref, requestParameters.revisionId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary Write personal resource draft file
-     * @param {PersonalResourceApiApiCorePersonalResourceResourceTypeFilePutRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCorePersonalResourceResourceTypeFilePut(requestParameters: PersonalResourceApiApiCorePersonalResourceResourceTypeFilePutRequest, options?: RawAxiosRequestConfig) {
-        return PersonalResourceApiFp(this.configuration).apiCorePersonalResourceResourceTypeFilePut(requestParameters.resourceType, requestParameters.personalResourceWriteDraftOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary Generate personal resource draft
-     * @param {PersonalResourceApiApiCorePersonalResourceResourceTypeGeneratePostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCorePersonalResourceResourceTypeGeneratePost(requestParameters: PersonalResourceApiApiCorePersonalResourceResourceTypeGeneratePostRequest, options?: RawAxiosRequestConfig) {
-        return PersonalResourceApiFp(this.configuration).apiCorePersonalResourceResourceTypeGeneratePost(requestParameters.resourceType, requestParameters.personalResourceGenerateOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary Update personal resource metadata
-     * @param {PersonalResourceApiApiCorePersonalResourceResourceTypePatchRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCorePersonalResourceResourceTypePatch(requestParameters: PersonalResourceApiApiCorePersonalResourceResourceTypePatchRequest, options?: RawAxiosRequestConfig) {
-        return PersonalResourceApiFp(this.configuration).apiCorePersonalResourceResourceTypePatch(requestParameters.resourceType, requestParameters.personalResourcePatchOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary List personal resource revisions
-     * @param {PersonalResourceApiApiCorePersonalResourceResourceTypeRevisionsGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCorePersonalResourceResourceTypeRevisionsGet(requestParameters: PersonalResourceApiApiCorePersonalResourceResourceTypeRevisionsGetRequest, options?: RawAxiosRequestConfig) {
-        return PersonalResourceApiFp(this.configuration).apiCorePersonalResourceResourceTypeRevisionsGet(requestParameters.resourceType, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary Get personal resource revision
-     * @param {PersonalResourceApiApiCorePersonalResourceResourceTypeRevisionsRevisionIdGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCorePersonalResourceResourceTypeRevisionsRevisionIdGet(requestParameters: PersonalResourceApiApiCorePersonalResourceResourceTypeRevisionsRevisionIdGetRequest, options?: RawAxiosRequestConfig) {
-        return PersonalResourceApiFp(this.configuration).apiCorePersonalResourceResourceTypeRevisionsRevisionIdGet(requestParameters.resourceType, requestParameters.revisionId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary Rollback personal resource
-     * @param {PersonalResourceApiApiCorePersonalResourceResourceTypeRollbackPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCorePersonalResourceResourceTypeRollbackPost(requestParameters: PersonalResourceApiApiCorePersonalResourceResourceTypeRollbackPostRequest, options?: RawAxiosRequestConfig) {
-        return PersonalResourceApiFp(this.configuration).apiCorePersonalResourceResourceTypeRollbackPost(requestParameters.resourceType, requestParameters.personalResourceRollbackOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
-    }
-}
-
-
-
-/**
  * PersonalizationApi - axios parameter creator
  */
 export const PersonalizationApiAxiosParamCreator = function (configuration?: Configuration) {
     return {
-        /**
-         *
-         * @summary List managed memory and preference items
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCorePersonalizationItemsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/core/personalization-items`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
         /**
          *
          * @summary Get personalization setting
@@ -25705,18 +27106,6 @@ export const PersonalizationApiFp = function(configuration?: Configuration) {
     return {
         /**
          *
-         * @summary List managed memory and preference items
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCorePersonalizationItemsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ManagedStateListOpenAPIResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCorePersonalizationItemsGet(options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['PersonalizationApi.apiCorePersonalizationItemsGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
          * @summary Get personalization setting
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -25749,15 +27138,6 @@ export const PersonalizationApiFp = function(configuration?: Configuration) {
 export const PersonalizationApiFactory = function (configuration?: Configuration, basePath?: string, axios?: AxiosInstance) {
     const localVarFp = PersonalizationApiFp(configuration)
     return {
-        /**
-         *
-         * @summary List managed memory and preference items
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCorePersonalizationItemsGet(options?: RawAxiosRequestConfig): AxiosPromise<ManagedStateListOpenAPIResponse> {
-            return localVarFp.apiCorePersonalizationItemsGet(options).then((request) => request(axios, basePath));
-        },
         /**
          *
          * @summary Get personalization setting
@@ -25793,16 +27173,6 @@ export interface PersonalizationApiApiCorePersonalizationSettingPutRequest {
 export class PersonalizationApi extends BaseAPI {
     /**
      *
-     * @summary List managed memory and preference items
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCorePersonalizationItemsGet(options?: RawAxiosRequestConfig) {
-        return PersonalizationApiFp(this.configuration).apiCorePersonalizationItemsGet(options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
      * @summary Get personalization setting
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -25820,459 +27190,6 @@ export class PersonalizationApi extends BaseAPI {
      */
     public apiCorePersonalizationSettingPut(requestParameters: PersonalizationApiApiCorePersonalizationSettingPutRequest, options?: RawAxiosRequestConfig) {
         return PersonalizationApiFp(this.configuration).apiCorePersonalizationSettingPut(requestParameters.personalizationSettingOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
-    }
-}
-
-
-
-/**
- * WorkflowApi - axios parameter creator
- */
-export const WorkflowApiAxiosParamCreator = function (configuration?: Configuration) {
-    return {
-        /**
-         *
-         * @summary Confirm Skill workflow candidate
-         * @param {string} draftId
-         * @param {WorkflowWorkflowConfirmOpenAPIRequest} workflowWorkflowConfirmOpenAPIRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowDraftsDraftIdConfirmWorkflowPost: async (draftId: string, workflowWorkflowConfirmOpenAPIRequest: WorkflowWorkflowConfirmOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'draftId' is not null or undefined
-            assertParamExists('apiCoreWorkflowDraftsDraftIdConfirmWorkflowPost', 'draftId', draftId)
-            // verify required parameter 'workflowWorkflowConfirmOpenAPIRequest' is not null or undefined
-            assertParamExists('apiCoreWorkflowDraftsDraftIdConfirmWorkflowPost', 'workflowWorkflowConfirmOpenAPIRequest', workflowWorkflowConfirmOpenAPIRequest)
-            const localVarPath = `/api/core/workflow-drafts/{draft_id}:confirm-workflow`
-                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(workflowWorkflowConfirmOpenAPIRequest, localVarRequestOptions, configuration)
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary Get Workflow generation analysis
-         * @param {string} draftId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowDraftsDraftIdGenerationAnalysisGet: async (draftId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'draftId' is not null or undefined
-            assertParamExists('apiCoreWorkflowDraftsDraftIdGenerationAnalysisGet', 'draftId', draftId)
-            const localVarPath = `/api/core/workflow-drafts/{draft_id}/generation-analysis`
-                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary Preview Workflow repair
-         * @param {string} draftId
-         * @param {WorkflowRepairPreviewOpenAPIRequest} workflowRepairPreviewOpenAPIRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowDraftsDraftIdRepairPreviewPost: async (draftId: string, workflowRepairPreviewOpenAPIRequest: WorkflowRepairPreviewOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'draftId' is not null or undefined
-            assertParamExists('apiCoreWorkflowDraftsDraftIdRepairPreviewPost', 'draftId', draftId)
-            // verify required parameter 'workflowRepairPreviewOpenAPIRequest' is not null or undefined
-            assertParamExists('apiCoreWorkflowDraftsDraftIdRepairPreviewPost', 'workflowRepairPreviewOpenAPIRequest', workflowRepairPreviewOpenAPIRequest)
-            const localVarPath = `/api/core/workflow-drafts/{draft_id}:repair-preview`
-                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(workflowRepairPreviewOpenAPIRequest, localVarRequestOptions, configuration)
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary Get Workflow repair run
-         * @param {string} draftId
-         * @param {string} repairId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGet: async (draftId: string, repairId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'draftId' is not null or undefined
-            assertParamExists('apiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGet', 'draftId', draftId)
-            // verify required parameter 'repairId' is not null or undefined
-            assertParamExists('apiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGet', 'repairId', repairId)
-            const localVarPath = `/api/core/workflow-drafts/{draft_id}/repair-runs/{repair_id}`
-                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)))
-                .replace(`{${"repair_id"}}`, encodeURIComponent(String(repairId)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary Sync an edited WriterDocument to Feishu
-         * @param {string} sessionId
-         * @param {string} slotId
-         * @param {number} listIndex
-         * @param {WriterDocumentSyncOpenAPIRequest} writerDocumentSyncOpenAPIRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost: async (sessionId: string, slotId: string, listIndex: number, writerDocumentSyncOpenAPIRequest: WriterDocumentSyncOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'sessionId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost', 'sessionId', sessionId)
-            // verify required parameter 'slotId' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost', 'slotId', slotId)
-            // verify required parameter 'listIndex' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost', 'listIndex', listIndex)
-            // verify required parameter 'writerDocumentSyncOpenAPIRequest' is not null or undefined
-            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost', 'writerDocumentSyncOpenAPIRequest', writerDocumentSyncOpenAPIRequest)
-            const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:sync-writer-document`
-                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
-                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)))
-                .replace(`{${"list_index"}}`, encodeURIComponent(String(listIndex)));
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(writerDocumentSyncOpenAPIRequest, localVarRequestOptions, configuration)
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-    }
-};
-
-/**
- * WorkflowApi - functional programming interface
- */
-export const WorkflowApiFp = function(configuration?: Configuration) {
-    const localVarAxiosParamCreator = WorkflowApiAxiosParamCreator(configuration)
-    return {
-        /**
-         *
-         * @summary Confirm Skill workflow candidate
-         * @param {string} draftId
-         * @param {WorkflowWorkflowConfirmOpenAPIRequest} workflowWorkflowConfirmOpenAPIRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowDraftsDraftIdConfirmWorkflowPost(draftId: string, workflowWorkflowConfirmOpenAPIRequest: WorkflowWorkflowConfirmOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<{ [key: string]: any; }>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsDraftIdConfirmWorkflowPost(draftId, workflowWorkflowConfirmOpenAPIRequest, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreWorkflowDraftsDraftIdConfirmWorkflowPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary Get Workflow generation analysis
-         * @param {string} draftId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowDraftsDraftIdGenerationAnalysisGet(draftId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<{ [key: string]: any; }>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsDraftIdGenerationAnalysisGet(draftId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreWorkflowDraftsDraftIdGenerationAnalysisGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary Preview Workflow repair
-         * @param {string} draftId
-         * @param {WorkflowRepairPreviewOpenAPIRequest} workflowRepairPreviewOpenAPIRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowDraftsDraftIdRepairPreviewPost(draftId: string, workflowRepairPreviewOpenAPIRequest: WorkflowRepairPreviewOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<{ [key: string]: any; }>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsDraftIdRepairPreviewPost(draftId, workflowRepairPreviewOpenAPIRequest, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreWorkflowDraftsDraftIdRepairPreviewPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary Get Workflow repair run
-         * @param {string} draftId
-         * @param {string} repairId
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGet(draftId: string, repairId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<{ [key: string]: any; }>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGet(draftId, repairId, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary Sync an edited WriterDocument to Feishu
-         * @param {string} sessionId
-         * @param {string} slotId
-         * @param {number} listIndex
-         * @param {WriterDocumentSyncOpenAPIRequest} writerDocumentSyncOpenAPIRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost(sessionId: string, slotId: string, listIndex: number, writerDocumentSyncOpenAPIRequest: WriterDocumentSyncOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<{ [key: string]: any; }>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost(sessionId, slotId, listIndex, writerDocumentSyncOpenAPIRequest, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-    }
-};
-
-/**
- * WorkflowApi - factory interface
- */
-export const WorkflowApiFactory = function (configuration?: Configuration, basePath?: string, axios?: AxiosInstance) {
-    const localVarFp = WorkflowApiFp(configuration)
-    return {
-        /**
-         *
-         * @summary Confirm Skill workflow candidate
-         * @param {WorkflowApiApiCoreWorkflowDraftsDraftIdConfirmWorkflowPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowDraftsDraftIdConfirmWorkflowPost(requestParameters: WorkflowApiApiCoreWorkflowDraftsDraftIdConfirmWorkflowPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<{ [key: string]: any; }> {
-            return localVarFp.apiCoreWorkflowDraftsDraftIdConfirmWorkflowPost(requestParameters.draftId, requestParameters.workflowWorkflowConfirmOpenAPIRequest, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary Get Workflow generation analysis
-         * @param {WorkflowApiApiCoreWorkflowDraftsDraftIdGenerationAnalysisGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowDraftsDraftIdGenerationAnalysisGet(requestParameters: WorkflowApiApiCoreWorkflowDraftsDraftIdGenerationAnalysisGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<{ [key: string]: any; }> {
-            return localVarFp.apiCoreWorkflowDraftsDraftIdGenerationAnalysisGet(requestParameters.draftId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary Preview Workflow repair
-         * @param {WorkflowApiApiCoreWorkflowDraftsDraftIdRepairPreviewPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowDraftsDraftIdRepairPreviewPost(requestParameters: WorkflowApiApiCoreWorkflowDraftsDraftIdRepairPreviewPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<{ [key: string]: any; }> {
-            return localVarFp.apiCoreWorkflowDraftsDraftIdRepairPreviewPost(requestParameters.draftId, requestParameters.workflowRepairPreviewOpenAPIRequest, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary Get Workflow repair run
-         * @param {WorkflowApiApiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGet(requestParameters: WorkflowApiApiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<{ [key: string]: any; }> {
-            return localVarFp.apiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGet(requestParameters.draftId, requestParameters.repairId, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary Sync an edited WriterDocument to Feishu
-         * @param {WorkflowApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost(requestParameters: WorkflowApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<{ [key: string]: any; }> {
-            return localVarFp.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, requestParameters.writerDocumentSyncOpenAPIRequest, options).then((request) => request(axios, basePath));
-        },
-    };
-};
-
-/**
- * Request parameters for apiCoreWorkflowDraftsDraftIdConfirmWorkflowPost operation in WorkflowApi.
- */
-export interface WorkflowApiApiCoreWorkflowDraftsDraftIdConfirmWorkflowPostRequest {
-    readonly draftId: string
-
-    readonly workflowWorkflowConfirmOpenAPIRequest: WorkflowWorkflowConfirmOpenAPIRequest
-}
-
-/**
- * Request parameters for apiCoreWorkflowDraftsDraftIdGenerationAnalysisGet operation in WorkflowApi.
- */
-export interface WorkflowApiApiCoreWorkflowDraftsDraftIdGenerationAnalysisGetRequest {
-    readonly draftId: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowDraftsDraftIdRepairPreviewPost operation in WorkflowApi.
- */
-export interface WorkflowApiApiCoreWorkflowDraftsDraftIdRepairPreviewPostRequest {
-    readonly draftId: string
-
-    readonly workflowRepairPreviewOpenAPIRequest: WorkflowRepairPreviewOpenAPIRequest
-}
-
-/**
- * Request parameters for apiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGet operation in WorkflowApi.
- */
-export interface WorkflowApiApiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGetRequest {
-    readonly draftId: string
-
-    readonly repairId: string
-}
-
-/**
- * Request parameters for apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost operation in WorkflowApi.
- */
-export interface WorkflowApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPostRequest {
-    readonly sessionId: string
-
-    readonly slotId: string
-
-    readonly listIndex: number
-
-    readonly writerDocumentSyncOpenAPIRequest: WriterDocumentSyncOpenAPIRequest
-}
-
-/**
- * WorkflowApi - object-oriented interface
- */
-export class WorkflowApi extends BaseAPI {
-    /**
-     *
-     * @summary Confirm Skill workflow candidate
-     * @param {WorkflowApiApiCoreWorkflowDraftsDraftIdConfirmWorkflowPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowDraftsDraftIdConfirmWorkflowPost(requestParameters: WorkflowApiApiCoreWorkflowDraftsDraftIdConfirmWorkflowPostRequest, options?: RawAxiosRequestConfig) {
-        return WorkflowApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdConfirmWorkflowPost(requestParameters.draftId, requestParameters.workflowWorkflowConfirmOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary Get Workflow generation analysis
-     * @param {WorkflowApiApiCoreWorkflowDraftsDraftIdGenerationAnalysisGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowDraftsDraftIdGenerationAnalysisGet(requestParameters: WorkflowApiApiCoreWorkflowDraftsDraftIdGenerationAnalysisGetRequest, options?: RawAxiosRequestConfig) {
-        return WorkflowApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdGenerationAnalysisGet(requestParameters.draftId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary Preview Workflow repair
-     * @param {WorkflowApiApiCoreWorkflowDraftsDraftIdRepairPreviewPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowDraftsDraftIdRepairPreviewPost(requestParameters: WorkflowApiApiCoreWorkflowDraftsDraftIdRepairPreviewPostRequest, options?: RawAxiosRequestConfig) {
-        return WorkflowApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdRepairPreviewPost(requestParameters.draftId, requestParameters.workflowRepairPreviewOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary Get Workflow repair run
-     * @param {WorkflowApiApiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGet(requestParameters: WorkflowApiApiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGetRequest, options?: RawAxiosRequestConfig) {
-        return WorkflowApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGet(requestParameters.draftId, requestParameters.repairId, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary Sync an edited WriterDocument to Feishu
-     * @param {WorkflowApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost(requestParameters: WorkflowApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPostRequest, options?: RawAxiosRequestConfig) {
-        return WorkflowApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, requestParameters.writerDocumentSyncOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
     }
 }
 
@@ -27266,155 +28183,18 @@ export class PromptsApi extends BaseAPI {
 
 
 /**
- * RemoteFsApi - axios parameter creator
+ * SettingsApi - axios parameter creator
  */
-export const RemoteFsApiAxiosParamCreator = function (configuration?: Configuration) {
+export const SettingsApiAxiosParamCreator = function (configuration?: Configuration) {
     return {
         /**
-         * Reads package content using task_id semantics: review_ sees existing draft, org_ and editor session ids see publish unless they own the current draft.
-         * @summary Read remote skill filesystem content
-         * @param {string} userId Required. Target user id used to resolve skills owned by the user.
-         * @param {string} path RemoteFS package path: skills/&lt;category&gt;/&lt;skill_name&gt;[/rel_path].
-         * @param {string} taskId Required package content task id. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-         * @param {ApiCoreRemoteFsContentGetEncodingomitemptyEnum} [encodingomitempty] Optional content encoding for GET /remote-fs/content.
-         * @param {ApiCoreRemoteFsContentGetModeEnum} [mode] Conversation mode.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreRemoteFsContentGet: async (userId: string, path: string, taskId: string, encodingomitempty?: ApiCoreRemoteFsContentGetEncodingomitemptyEnum, mode?: ApiCoreRemoteFsContentGetModeEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'userId' is not null or undefined
-            assertParamExists('apiCoreRemoteFsContentGet', 'userId', userId)
-            // verify required parameter 'path' is not null or undefined
-            assertParamExists('apiCoreRemoteFsContentGet', 'path', path)
-            // verify required parameter 'taskId' is not null or undefined
-            assertParamExists('apiCoreRemoteFsContentGet', 'taskId', taskId)
-            const localVarPath = `/api/core/remote-fs/content`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            if (userId !== undefined) {
-                localVarQueryParameter['user_id'] = userId;
-            }
-
-            if (path !== undefined) {
-                localVarQueryParameter['path'] = path;
-            }
-
-            if (taskId !== undefined) {
-                localVarQueryParameter['task_id'] = taskId;
-            }
-
-            if (encodingomitempty !== undefined) {
-                localVarQueryParameter['encoding,omitempty'] = encodingomitempty;
-            }
-
-            if (mode !== undefined) {
-                localVarQueryParameter['mode'] = mode;
-            }
-
-            localVarHeaderParameter['Accept'] = 'application/octet-stream';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         * Writes raw body bytes into the task draft. review_ may write an existing draft without changing draft ownership; org_ and editor session ids conflict with another task draft.
-         * @summary Write remote skill filesystem content
-         * @param {string} userId Required. Target user id used to resolve skills owned by the user.
-         * @param {string} path RemoteFS package path: skills/&lt;category&gt;/&lt;skill_name&gt;[/rel_path].
-         * @param {string} taskId Required package content task id. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-         * @param {File} body
-         * @param {ApiCoreRemoteFsContentPutEncodingomitemptyEnum} [encodingomitempty] Optional content encoding for GET /remote-fs/content.
-         * @param {ApiCoreRemoteFsContentPutModeEnum} [mode] Conversation mode.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreRemoteFsContentPut: async (userId: string, path: string, taskId: string, body: File, encodingomitempty?: ApiCoreRemoteFsContentPutEncodingomitemptyEnum, mode?: ApiCoreRemoteFsContentPutModeEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'userId' is not null or undefined
-            assertParamExists('apiCoreRemoteFsContentPut', 'userId', userId)
-            // verify required parameter 'path' is not null or undefined
-            assertParamExists('apiCoreRemoteFsContentPut', 'path', path)
-            // verify required parameter 'taskId' is not null or undefined
-            assertParamExists('apiCoreRemoteFsContentPut', 'taskId', taskId)
-            // verify required parameter 'body' is not null or undefined
-            assertParamExists('apiCoreRemoteFsContentPut', 'body', body)
-            const localVarPath = `/api/core/remote-fs/content`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            if (userId !== undefined) {
-                localVarQueryParameter['user_id'] = userId;
-            }
-
-            if (path !== undefined) {
-                localVarQueryParameter['path'] = path;
-            }
-
-            if (taskId !== undefined) {
-                localVarQueryParameter['task_id'] = taskId;
-            }
-
-            if (encodingomitempty !== undefined) {
-                localVarQueryParameter['encoding,omitempty'] = encodingomitempty;
-            }
-
-            if (mode !== undefined) {
-                localVarQueryParameter['mode'] = mode;
-            }
-
-            localVarHeaderParameter['Content-Type'] = 'application/octet-stream';
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(body, localVarRequestOptions, configuration)
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
          *
-         * @summary Copy remote skill filesystem path
-         * @param {string} userId Required. Target user id used to resolve skills owned by the user.
-         * @param {string} taskId Required mutation task id. Prefix review_ writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-         * @param {RemoteFSCopyOpenAPIRequest} remoteFSCopyOpenAPIRequest
-         * @param {ApiCoreRemoteFsCopyPostModeEnum} [mode] Conversation mode. auto marks a newly created Skill draft for idle-time auto commit.
+         * @summary Run current user\'s settings checks
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreRemoteFsCopyPost: async (userId: string, taskId: string, remoteFSCopyOpenAPIRequest: RemoteFSCopyOpenAPIRequest, mode?: ApiCoreRemoteFsCopyPostModeEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'userId' is not null or undefined
-            assertParamExists('apiCoreRemoteFsCopyPost', 'userId', userId)
-            // verify required parameter 'taskId' is not null or undefined
-            assertParamExists('apiCoreRemoteFsCopyPost', 'taskId', taskId)
-            // verify required parameter 'remoteFSCopyOpenAPIRequest' is not null or undefined
-            assertParamExists('apiCoreRemoteFsCopyPost', 'remoteFSCopyOpenAPIRequest', remoteFSCopyOpenAPIRequest)
-            const localVarPath = `/api/core/remote-fs/copy`;
+        apiCoreSettingsChecksPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/settings/checks`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -27426,25 +28206,11 @@ export const RemoteFsApiAxiosParamCreator = function (configuration?: Configurat
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
-            if (userId !== undefined) {
-                localVarQueryParameter['user_id'] = userId;
-            }
-
-            if (taskId !== undefined) {
-                localVarQueryParameter['task_id'] = taskId;
-            }
-
-            if (mode !== undefined) {
-                localVarQueryParameter['mode'] = mode;
-            }
-
-            localVarHeaderParameter['Content-Type'] = 'application/json';
             localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(remoteFSCopyOpenAPIRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -27453,77 +28219,12 @@ export const RemoteFsApiAxiosParamCreator = function (configuration?: Configurat
         },
         /**
          *
-         * @summary Create remote skill filesystem directory or empty package
-         * @param {string} userId Required. Target user id used to resolve skills owned by the user.
-         * @param {string} taskId Required mutation task id. Prefix review_ writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-         * @param {RemoteFSDirOpenAPIRequest} remoteFSDirOpenAPIRequest
-         * @param {ApiCoreRemoteFsDirPostModeEnum} [mode] Conversation mode. auto marks a newly created Skill draft for idle-time auto commit.
+         * @summary Get current user\'s settings overview
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreRemoteFsDirPost: async (userId: string, taskId: string, remoteFSDirOpenAPIRequest: RemoteFSDirOpenAPIRequest, mode?: ApiCoreRemoteFsDirPostModeEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'userId' is not null or undefined
-            assertParamExists('apiCoreRemoteFsDirPost', 'userId', userId)
-            // verify required parameter 'taskId' is not null or undefined
-            assertParamExists('apiCoreRemoteFsDirPost', 'taskId', taskId)
-            // verify required parameter 'remoteFSDirOpenAPIRequest' is not null or undefined
-            assertParamExists('apiCoreRemoteFsDirPost', 'remoteFSDirOpenAPIRequest', remoteFSDirOpenAPIRequest)
-            const localVarPath = `/api/core/remote-fs/dir`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            if (userId !== undefined) {
-                localVarQueryParameter['user_id'] = userId;
-            }
-
-            if (taskId !== undefined) {
-                localVarQueryParameter['task_id'] = taskId;
-            }
-
-            if (mode !== undefined) {
-                localVarQueryParameter['mode'] = mode;
-            }
-
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(remoteFSDirOpenAPIRequest, localVarRequestOptions, configuration)
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         * Package paths require task_id so RemoteFS can choose publish view, current task draft view, or review draft view.
-         * @summary Check remote skill filesystem path exists
-         * @param {string} userId Required. Target user id used to resolve skills owned by the user.
-         * @param {string} path RemoteFS package path: skills/&lt;category&gt;/&lt;skill_name&gt;[/rel_path].
-         * @param {string} taskId Required package content task id. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-         * @param {ApiCoreRemoteFsExistsGetEncodingomitemptyEnum} [encodingomitempty] Optional content encoding for GET /remote-fs/content.
-         * @param {ApiCoreRemoteFsExistsGetModeEnum} [mode] Conversation mode.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreRemoteFsExistsGet: async (userId: string, path: string, taskId: string, encodingomitempty?: ApiCoreRemoteFsExistsGetEncodingomitemptyEnum, mode?: ApiCoreRemoteFsExistsGetModeEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'userId' is not null or undefined
-            assertParamExists('apiCoreRemoteFsExistsGet', 'userId', userId)
-            // verify required parameter 'path' is not null or undefined
-            assertParamExists('apiCoreRemoteFsExistsGet', 'path', path)
-            // verify required parameter 'taskId' is not null or undefined
-            assertParamExists('apiCoreRemoteFsExistsGet', 'taskId', taskId)
-            const localVarPath = `/api/core/remote-fs/exists`;
+        apiCoreSettingsOverviewGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/settings/overview`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
             let baseOptions;
@@ -27535,301 +28236,11 @@ export const RemoteFsApiAxiosParamCreator = function (configuration?: Configurat
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
-            if (userId !== undefined) {
-                localVarQueryParameter['user_id'] = userId;
-            }
-
-            if (path !== undefined) {
-                localVarQueryParameter['path'] = path;
-            }
-
-            if (taskId !== undefined) {
-                localVarQueryParameter['task_id'] = taskId;
-            }
-
-            if (encodingomitempty !== undefined) {
-                localVarQueryParameter['encoding,omitempty'] = encodingomitempty;
-            }
-
-            if (mode !== undefined) {
-                localVarQueryParameter['mode'] = mode;
-            }
-
             localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         * Package paths require task_id so RemoteFS can choose publish view, current task draft view, or review draft view.
-         * @summary Get remote skill filesystem path info
-         * @param {string} userId Required. Target user id used to resolve skills owned by the user.
-         * @param {string} path RemoteFS package path: skills/&lt;category&gt;/&lt;skill_name&gt;[/rel_path].
-         * @param {string} taskId Required package content task id. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-         * @param {ApiCoreRemoteFsInfoGetEncodingomitemptyEnum} [encodingomitempty] Optional content encoding for GET /remote-fs/content.
-         * @param {ApiCoreRemoteFsInfoGetModeEnum} [mode] Conversation mode.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreRemoteFsInfoGet: async (userId: string, path: string, taskId: string, encodingomitempty?: ApiCoreRemoteFsInfoGetEncodingomitemptyEnum, mode?: ApiCoreRemoteFsInfoGetModeEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'userId' is not null or undefined
-            assertParamExists('apiCoreRemoteFsInfoGet', 'userId', userId)
-            // verify required parameter 'path' is not null or undefined
-            assertParamExists('apiCoreRemoteFsInfoGet', 'path', path)
-            // verify required parameter 'taskId' is not null or undefined
-            assertParamExists('apiCoreRemoteFsInfoGet', 'taskId', taskId)
-            const localVarPath = `/api/core/remote-fs/info`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            if (userId !== undefined) {
-                localVarQueryParameter['user_id'] = userId;
-            }
-
-            if (path !== undefined) {
-                localVarQueryParameter['path'] = path;
-            }
-
-            if (taskId !== undefined) {
-                localVarQueryParameter['task_id'] = taskId;
-            }
-
-            if (encodingomitempty !== undefined) {
-                localVarQueryParameter['encoding,omitempty'] = encodingomitempty;
-            }
-
-            if (mode !== undefined) {
-                localVarQueryParameter['mode'] = mode;
-            }
-
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         * List skills root/category without task_id, or list package content with task-aware view selection.
-         * @summary List remote skill filesystem path
-         * @param {string} userId Required. Target user id used to resolve skills owned by the user.
-         * @param {string} path RemoteFS path. Use skills for categories, skills/&lt;category&gt; for package list, or skills/&lt;category&gt;/&lt;skill_name&gt;[/rel_path] for package content.
-         * @param {string} [taskIdomitempty] Optional for skills root/category list; required when path enters a package. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-         * @param {ApiCoreRemoteFsListGetModeEnum} [mode] Conversation mode. auto marks a newly created Skill draft for idle-time auto commit.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreRemoteFsListGet: async (userId: string, path: string, taskIdomitempty?: string, mode?: ApiCoreRemoteFsListGetModeEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'userId' is not null or undefined
-            assertParamExists('apiCoreRemoteFsListGet', 'userId', userId)
-            // verify required parameter 'path' is not null or undefined
-            assertParamExists('apiCoreRemoteFsListGet', 'path', path)
-            const localVarPath = `/api/core/remote-fs/list`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            if (userId !== undefined) {
-                localVarQueryParameter['user_id'] = userId;
-            }
-
-            if (path !== undefined) {
-                localVarQueryParameter['path'] = path;
-            }
-
-            if (taskIdomitempty !== undefined) {
-                localVarQueryParameter['task_id,omitempty'] = taskIdomitempty;
-            }
-
-            if (mode !== undefined) {
-                localVarQueryParameter['mode'] = mode;
-            }
-
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary Move remote skill filesystem path
-         * @param {string} userId Required. Target user id used to resolve skills owned by the user.
-         * @param {string} taskId Required mutation task id. Prefix review_ writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-         * @param {RemoteFSMoveOpenAPIRequest} remoteFSMoveOpenAPIRequest
-         * @param {ApiCoreRemoteFsMovePostModeEnum} [mode] Conversation mode. auto marks a newly created Skill draft for idle-time auto commit.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreRemoteFsMovePost: async (userId: string, taskId: string, remoteFSMoveOpenAPIRequest: RemoteFSMoveOpenAPIRequest, mode?: ApiCoreRemoteFsMovePostModeEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'userId' is not null or undefined
-            assertParamExists('apiCoreRemoteFsMovePost', 'userId', userId)
-            // verify required parameter 'taskId' is not null or undefined
-            assertParamExists('apiCoreRemoteFsMovePost', 'taskId', taskId)
-            // verify required parameter 'remoteFSMoveOpenAPIRequest' is not null or undefined
-            assertParamExists('apiCoreRemoteFsMovePost', 'remoteFSMoveOpenAPIRequest', remoteFSMoveOpenAPIRequest)
-            const localVarPath = `/api/core/remote-fs/move`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            if (userId !== undefined) {
-                localVarQueryParameter['user_id'] = userId;
-            }
-
-            if (taskId !== undefined) {
-                localVarQueryParameter['task_id'] = taskId;
-            }
-
-            if (mode !== undefined) {
-                localVarQueryParameter['mode'] = mode;
-            }
-
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(remoteFSMoveOpenAPIRequest, localVarRequestOptions, configuration)
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary Delete remote skill filesystem path
-         * @param {string} userId Required. Target user id used to resolve skills owned by the user.
-         * @param {string} path RemoteFS path to delete.
-         * @param {string} [taskIdomitempty] Required for package-internal delete; not required for confirmed permanent package purge.
-         * @param {boolean} [permanentomitempty] Required true for package root physical purge.
-         * @param {boolean} [confirmomitempty] Required true for package root physical purge.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreRemoteFsPathDelete: async (userId: string, path: string, taskIdomitempty?: string, permanentomitempty?: boolean, confirmomitempty?: boolean, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'userId' is not null or undefined
-            assertParamExists('apiCoreRemoteFsPathDelete', 'userId', userId)
-            // verify required parameter 'path' is not null or undefined
-            assertParamExists('apiCoreRemoteFsPathDelete', 'path', path)
-            const localVarPath = `/api/core/remote-fs/path`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            if (userId !== undefined) {
-                localVarQueryParameter['user_id'] = userId;
-            }
-
-            if (path !== undefined) {
-                localVarQueryParameter['path'] = path;
-            }
-
-            if (taskIdomitempty !== undefined) {
-                localVarQueryParameter['task_id,omitempty'] = taskIdomitempty;
-            }
-
-            if (permanentomitempty !== undefined) {
-                localVarQueryParameter['permanent,omitempty'] = permanentomitempty;
-            }
-
-            if (confirmomitempty !== undefined) {
-                localVarQueryParameter['confirm,omitempty'] = confirmomitempty;
-            }
-
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary Trash remote skill package
-         * @param {string} userId Required. Target user id used to resolve skills owned by the user.
-         * @param {RemoteFSTrashOpenAPIRequest} remoteFSTrashOpenAPIRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreRemoteFsTrashPost: async (userId: string, remoteFSTrashOpenAPIRequest: RemoteFSTrashOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'userId' is not null or undefined
-            assertParamExists('apiCoreRemoteFsTrashPost', 'userId', userId)
-            // verify required parameter 'remoteFSTrashOpenAPIRequest' is not null or undefined
-            assertParamExists('apiCoreRemoteFsTrashPost', 'remoteFSTrashOpenAPIRequest', remoteFSTrashOpenAPIRequest)
-            const localVarPath = `/api/core/remote-fs/trash`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            if (userId !== undefined) {
-                localVarQueryParameter['user_id'] = userId;
-            }
-
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(remoteFSTrashOpenAPIRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -27840,717 +28251,90 @@ export const RemoteFsApiAxiosParamCreator = function (configuration?: Configurat
 };
 
 /**
- * RemoteFsApi - functional programming interface
+ * SettingsApi - functional programming interface
  */
-export const RemoteFsApiFp = function(configuration?: Configuration) {
-    const localVarAxiosParamCreator = RemoteFsApiAxiosParamCreator(configuration)
+export const SettingsApiFp = function(configuration?: Configuration) {
+    const localVarAxiosParamCreator = SettingsApiAxiosParamCreator(configuration)
     return {
         /**
-         * Reads package content using task_id semantics: review_ sees existing draft, org_ and editor session ids see publish unless they own the current draft.
-         * @summary Read remote skill filesystem content
-         * @param {string} userId Required. Target user id used to resolve skills owned by the user.
-         * @param {string} path RemoteFS package path: skills/&lt;category&gt;/&lt;skill_name&gt;[/rel_path].
-         * @param {string} taskId Required package content task id. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-         * @param {ApiCoreRemoteFsContentGetEncodingomitemptyEnum} [encodingomitempty] Optional content encoding for GET /remote-fs/content.
-         * @param {ApiCoreRemoteFsContentGetModeEnum} [mode] Conversation mode.
+         *
+         * @summary Run current user\'s settings checks
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreRemoteFsContentGet(userId: string, path: string, taskId: string, encodingomitempty?: ApiCoreRemoteFsContentGetEncodingomitemptyEnum, mode?: ApiCoreRemoteFsContentGetModeEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<File>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreRemoteFsContentGet(userId, path, taskId, encodingomitempty, mode, options);
+        async apiCoreSettingsChecksPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SettingsChecksOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSettingsChecksPost(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['RemoteFsApi.apiCoreRemoteFsContentGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         * Writes raw body bytes into the task draft. review_ may write an existing draft without changing draft ownership; org_ and editor session ids conflict with another task draft.
-         * @summary Write remote skill filesystem content
-         * @param {string} userId Required. Target user id used to resolve skills owned by the user.
-         * @param {string} path RemoteFS package path: skills/&lt;category&gt;/&lt;skill_name&gt;[/rel_path].
-         * @param {string} taskId Required package content task id. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-         * @param {File} body
-         * @param {ApiCoreRemoteFsContentPutEncodingomitemptyEnum} [encodingomitempty] Optional content encoding for GET /remote-fs/content.
-         * @param {ApiCoreRemoteFsContentPutModeEnum} [mode] Conversation mode.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreRemoteFsContentPut(userId: string, path: string, taskId: string, body: File, encodingomitempty?: ApiCoreRemoteFsContentPutEncodingomitemptyEnum, mode?: ApiCoreRemoteFsContentPutModeEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<OkOpenAPIResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreRemoteFsContentPut(userId, path, taskId, body, encodingomitempty, mode, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['RemoteFsApi.apiCoreRemoteFsContentPut']?.[localVarOperationServerIndex]?.url;
+            const localVarOperationServerBasePath = operationServerMap['SettingsApi.apiCoreSettingsChecksPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
          *
-         * @summary Copy remote skill filesystem path
-         * @param {string} userId Required. Target user id used to resolve skills owned by the user.
-         * @param {string} taskId Required mutation task id. Prefix review_ writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-         * @param {RemoteFSCopyOpenAPIRequest} remoteFSCopyOpenAPIRequest
-         * @param {ApiCoreRemoteFsCopyPostModeEnum} [mode] Conversation mode. auto marks a newly created Skill draft for idle-time auto commit.
+         * @summary Get current user\'s settings overview
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreRemoteFsCopyPost(userId: string, taskId: string, remoteFSCopyOpenAPIRequest: RemoteFSCopyOpenAPIRequest, mode?: ApiCoreRemoteFsCopyPostModeEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<OkOpenAPIResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreRemoteFsCopyPost(userId, taskId, remoteFSCopyOpenAPIRequest, mode, options);
+        async apiCoreSettingsOverviewGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SettingsOverviewOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSettingsOverviewGet(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['RemoteFsApi.apiCoreRemoteFsCopyPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary Create remote skill filesystem directory or empty package
-         * @param {string} userId Required. Target user id used to resolve skills owned by the user.
-         * @param {string} taskId Required mutation task id. Prefix review_ writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-         * @param {RemoteFSDirOpenAPIRequest} remoteFSDirOpenAPIRequest
-         * @param {ApiCoreRemoteFsDirPostModeEnum} [mode] Conversation mode. auto marks a newly created Skill draft for idle-time auto commit.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreRemoteFsDirPost(userId: string, taskId: string, remoteFSDirOpenAPIRequest: RemoteFSDirOpenAPIRequest, mode?: ApiCoreRemoteFsDirPostModeEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<OkOpenAPIResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreRemoteFsDirPost(userId, taskId, remoteFSDirOpenAPIRequest, mode, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['RemoteFsApi.apiCoreRemoteFsDirPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         * Package paths require task_id so RemoteFS can choose publish view, current task draft view, or review draft view.
-         * @summary Check remote skill filesystem path exists
-         * @param {string} userId Required. Target user id used to resolve skills owned by the user.
-         * @param {string} path RemoteFS package path: skills/&lt;category&gt;/&lt;skill_name&gt;[/rel_path].
-         * @param {string} taskId Required package content task id. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-         * @param {ApiCoreRemoteFsExistsGetEncodingomitemptyEnum} [encodingomitempty] Optional content encoding for GET /remote-fs/content.
-         * @param {ApiCoreRemoteFsExistsGetModeEnum} [mode] Conversation mode.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreRemoteFsExistsGet(userId: string, path: string, taskId: string, encodingomitempty?: ApiCoreRemoteFsExistsGetEncodingomitemptyEnum, mode?: ApiCoreRemoteFsExistsGetModeEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RemoteFSExistsOpenAPIResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreRemoteFsExistsGet(userId, path, taskId, encodingomitempty, mode, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['RemoteFsApi.apiCoreRemoteFsExistsGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         * Package paths require task_id so RemoteFS can choose publish view, current task draft view, or review draft view.
-         * @summary Get remote skill filesystem path info
-         * @param {string} userId Required. Target user id used to resolve skills owned by the user.
-         * @param {string} path RemoteFS package path: skills/&lt;category&gt;/&lt;skill_name&gt;[/rel_path].
-         * @param {string} taskId Required package content task id. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-         * @param {ApiCoreRemoteFsInfoGetEncodingomitemptyEnum} [encodingomitempty] Optional content encoding for GET /remote-fs/content.
-         * @param {ApiCoreRemoteFsInfoGetModeEnum} [mode] Conversation mode.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreRemoteFsInfoGet(userId: string, path: string, taskId: string, encodingomitempty?: ApiCoreRemoteFsInfoGetEncodingomitemptyEnum, mode?: ApiCoreRemoteFsInfoGetModeEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RemoteFSInfoOpenAPIResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreRemoteFsInfoGet(userId, path, taskId, encodingomitempty, mode, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['RemoteFsApi.apiCoreRemoteFsInfoGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         * List skills root/category without task_id, or list package content with task-aware view selection.
-         * @summary List remote skill filesystem path
-         * @param {string} userId Required. Target user id used to resolve skills owned by the user.
-         * @param {string} path RemoteFS path. Use skills for categories, skills/&lt;category&gt; for package list, or skills/&lt;category&gt;/&lt;skill_name&gt;[/rel_path] for package content.
-         * @param {string} [taskIdomitempty] Optional for skills root/category list; required when path enters a package. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-         * @param {ApiCoreRemoteFsListGetModeEnum} [mode] Conversation mode. auto marks a newly created Skill draft for idle-time auto commit.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreRemoteFsListGet(userId: string, path: string, taskIdomitempty?: string, mode?: ApiCoreRemoteFsListGetModeEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RemoteFSListOpenAPIResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreRemoteFsListGet(userId, path, taskIdomitempty, mode, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['RemoteFsApi.apiCoreRemoteFsListGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary Move remote skill filesystem path
-         * @param {string} userId Required. Target user id used to resolve skills owned by the user.
-         * @param {string} taskId Required mutation task id. Prefix review_ writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-         * @param {RemoteFSMoveOpenAPIRequest} remoteFSMoveOpenAPIRequest
-         * @param {ApiCoreRemoteFsMovePostModeEnum} [mode] Conversation mode. auto marks a newly created Skill draft for idle-time auto commit.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreRemoteFsMovePost(userId: string, taskId: string, remoteFSMoveOpenAPIRequest: RemoteFSMoveOpenAPIRequest, mode?: ApiCoreRemoteFsMovePostModeEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<OkOpenAPIResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreRemoteFsMovePost(userId, taskId, remoteFSMoveOpenAPIRequest, mode, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['RemoteFsApi.apiCoreRemoteFsMovePost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary Delete remote skill filesystem path
-         * @param {string} userId Required. Target user id used to resolve skills owned by the user.
-         * @param {string} path RemoteFS path to delete.
-         * @param {string} [taskIdomitempty] Required for package-internal delete; not required for confirmed permanent package purge.
-         * @param {boolean} [permanentomitempty] Required true for package root physical purge.
-         * @param {boolean} [confirmomitempty] Required true for package root physical purge.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreRemoteFsPathDelete(userId: string, path: string, taskIdomitempty?: string, permanentomitempty?: boolean, confirmomitempty?: boolean, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<OkOpenAPIResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreRemoteFsPathDelete(userId, path, taskIdomitempty, permanentomitempty, confirmomitempty, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['RemoteFsApi.apiCoreRemoteFsPathDelete']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary Trash remote skill package
-         * @param {string} userId Required. Target user id used to resolve skills owned by the user.
-         * @param {RemoteFSTrashOpenAPIRequest} remoteFSTrashOpenAPIRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreRemoteFsTrashPost(userId: string, remoteFSTrashOpenAPIRequest: RemoteFSTrashOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<OkOpenAPIResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreRemoteFsTrashPost(userId, remoteFSTrashOpenAPIRequest, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['RemoteFsApi.apiCoreRemoteFsTrashPost']?.[localVarOperationServerIndex]?.url;
+            const localVarOperationServerBasePath = operationServerMap['SettingsApi.apiCoreSettingsOverviewGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
     }
 };
 
 /**
- * RemoteFsApi - factory interface
+ * SettingsApi - factory interface
  */
-export const RemoteFsApiFactory = function (configuration?: Configuration, basePath?: string, axios?: AxiosInstance) {
-    const localVarFp = RemoteFsApiFp(configuration)
+export const SettingsApiFactory = function (configuration?: Configuration, basePath?: string, axios?: AxiosInstance) {
+    const localVarFp = SettingsApiFp(configuration)
     return {
         /**
-         * Reads package content using task_id semantics: review_ sees existing draft, org_ and editor session ids see publish unless they own the current draft.
-         * @summary Read remote skill filesystem content
-         * @param {RemoteFsApiApiCoreRemoteFsContentGetRequest} requestParameters Request parameters.
+         *
+         * @summary Run current user\'s settings checks
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreRemoteFsContentGet(requestParameters: RemoteFsApiApiCoreRemoteFsContentGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<File> {
-            return localVarFp.apiCoreRemoteFsContentGet(requestParameters.userId, requestParameters.path, requestParameters.taskId, requestParameters.encodingomitempty, requestParameters.mode, options).then((request) => request(axios, basePath));
-        },
-        /**
-         * Writes raw body bytes into the task draft. review_ may write an existing draft without changing draft ownership; org_ and editor session ids conflict with another task draft.
-         * @summary Write remote skill filesystem content
-         * @param {RemoteFsApiApiCoreRemoteFsContentPutRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreRemoteFsContentPut(requestParameters: RemoteFsApiApiCoreRemoteFsContentPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<OkOpenAPIResponse> {
-            return localVarFp.apiCoreRemoteFsContentPut(requestParameters.userId, requestParameters.path, requestParameters.taskId, requestParameters.body, requestParameters.encodingomitempty, requestParameters.mode, options).then((request) => request(axios, basePath));
+        apiCoreSettingsChecksPost(options?: RawAxiosRequestConfig): AxiosPromise<SettingsChecksOpenAPIResponse> {
+            return localVarFp.apiCoreSettingsChecksPost(options).then((request) => request(axios, basePath));
         },
         /**
          *
-         * @summary Copy remote skill filesystem path
-         * @param {RemoteFsApiApiCoreRemoteFsCopyPostRequest} requestParameters Request parameters.
+         * @summary Get current user\'s settings overview
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreRemoteFsCopyPost(requestParameters: RemoteFsApiApiCoreRemoteFsCopyPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<OkOpenAPIResponse> {
-            return localVarFp.apiCoreRemoteFsCopyPost(requestParameters.userId, requestParameters.taskId, requestParameters.remoteFSCopyOpenAPIRequest, requestParameters.mode, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary Create remote skill filesystem directory or empty package
-         * @param {RemoteFsApiApiCoreRemoteFsDirPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreRemoteFsDirPost(requestParameters: RemoteFsApiApiCoreRemoteFsDirPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<OkOpenAPIResponse> {
-            return localVarFp.apiCoreRemoteFsDirPost(requestParameters.userId, requestParameters.taskId, requestParameters.remoteFSDirOpenAPIRequest, requestParameters.mode, options).then((request) => request(axios, basePath));
-        },
-        /**
-         * Package paths require task_id so RemoteFS can choose publish view, current task draft view, or review draft view.
-         * @summary Check remote skill filesystem path exists
-         * @param {RemoteFsApiApiCoreRemoteFsExistsGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreRemoteFsExistsGet(requestParameters: RemoteFsApiApiCoreRemoteFsExistsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<RemoteFSExistsOpenAPIResponse> {
-            return localVarFp.apiCoreRemoteFsExistsGet(requestParameters.userId, requestParameters.path, requestParameters.taskId, requestParameters.encodingomitempty, requestParameters.mode, options).then((request) => request(axios, basePath));
-        },
-        /**
-         * Package paths require task_id so RemoteFS can choose publish view, current task draft view, or review draft view.
-         * @summary Get remote skill filesystem path info
-         * @param {RemoteFsApiApiCoreRemoteFsInfoGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreRemoteFsInfoGet(requestParameters: RemoteFsApiApiCoreRemoteFsInfoGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<RemoteFSInfoOpenAPIResponse> {
-            return localVarFp.apiCoreRemoteFsInfoGet(requestParameters.userId, requestParameters.path, requestParameters.taskId, requestParameters.encodingomitempty, requestParameters.mode, options).then((request) => request(axios, basePath));
-        },
-        /**
-         * List skills root/category without task_id, or list package content with task-aware view selection.
-         * @summary List remote skill filesystem path
-         * @param {RemoteFsApiApiCoreRemoteFsListGetRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreRemoteFsListGet(requestParameters: RemoteFsApiApiCoreRemoteFsListGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<RemoteFSListOpenAPIResponse> {
-            return localVarFp.apiCoreRemoteFsListGet(requestParameters.userId, requestParameters.path, requestParameters.taskIdomitempty, requestParameters.mode, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary Move remote skill filesystem path
-         * @param {RemoteFsApiApiCoreRemoteFsMovePostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreRemoteFsMovePost(requestParameters: RemoteFsApiApiCoreRemoteFsMovePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<OkOpenAPIResponse> {
-            return localVarFp.apiCoreRemoteFsMovePost(requestParameters.userId, requestParameters.taskId, requestParameters.remoteFSMoveOpenAPIRequest, requestParameters.mode, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary Delete remote skill filesystem path
-         * @param {RemoteFsApiApiCoreRemoteFsPathDeleteRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreRemoteFsPathDelete(requestParameters: RemoteFsApiApiCoreRemoteFsPathDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<OkOpenAPIResponse> {
-            return localVarFp.apiCoreRemoteFsPathDelete(requestParameters.userId, requestParameters.path, requestParameters.taskIdomitempty, requestParameters.permanentomitempty, requestParameters.confirmomitempty, options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary Trash remote skill package
-         * @param {RemoteFsApiApiCoreRemoteFsTrashPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreRemoteFsTrashPost(requestParameters: RemoteFsApiApiCoreRemoteFsTrashPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<OkOpenAPIResponse> {
-            return localVarFp.apiCoreRemoteFsTrashPost(requestParameters.userId, requestParameters.remoteFSTrashOpenAPIRequest, options).then((request) => request(axios, basePath));
+        apiCoreSettingsOverviewGet(options?: RawAxiosRequestConfig): AxiosPromise<SettingsOverviewOpenAPIResponse> {
+            return localVarFp.apiCoreSettingsOverviewGet(options).then((request) => request(axios, basePath));
         },
     };
 };
 
 /**
- * Request parameters for apiCoreRemoteFsContentGet operation in RemoteFsApi.
+ * SettingsApi - object-oriented interface
  */
-export interface RemoteFsApiApiCoreRemoteFsContentGetRequest {
+export class SettingsApi extends BaseAPI {
     /**
-     * Required. Target user id used to resolve skills owned by the user.
-     */
-    readonly userId: string
-
-    /**
-     * RemoteFS package path: skills/&lt;category&gt;/&lt;skill_name&gt;[/rel_path].
-     */
-    readonly path: string
-
-    /**
-     * Required package content task id. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-     */
-    readonly taskId: string
-
-    /**
-     * Optional content encoding for GET /remote-fs/content.
-     */
-    readonly encodingomitempty?: ApiCoreRemoteFsContentGetEncodingomitemptyEnum
-
-    /**
-     * Conversation mode.
-     */
-    readonly mode?: ApiCoreRemoteFsContentGetModeEnum
-}
-
-/**
- * Request parameters for apiCoreRemoteFsContentPut operation in RemoteFsApi.
- */
-export interface RemoteFsApiApiCoreRemoteFsContentPutRequest {
-    /**
-     * Required. Target user id used to resolve skills owned by the user.
-     */
-    readonly userId: string
-
-    /**
-     * RemoteFS package path: skills/&lt;category&gt;/&lt;skill_name&gt;[/rel_path].
-     */
-    readonly path: string
-
-    /**
-     * Required package content task id. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-     */
-    readonly taskId: string
-
-    readonly body: File
-
-    /**
-     * Optional content encoding for GET /remote-fs/content.
-     */
-    readonly encodingomitempty?: ApiCoreRemoteFsContentPutEncodingomitemptyEnum
-
-    /**
-     * Conversation mode.
-     */
-    readonly mode?: ApiCoreRemoteFsContentPutModeEnum
-}
-
-/**
- * Request parameters for apiCoreRemoteFsCopyPost operation in RemoteFsApi.
- */
-export interface RemoteFsApiApiCoreRemoteFsCopyPostRequest {
-    /**
-     * Required. Target user id used to resolve skills owned by the user.
-     */
-    readonly userId: string
-
-    /**
-     * Required mutation task id. Prefix review_ writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-     */
-    readonly taskId: string
-
-    readonly remoteFSCopyOpenAPIRequest: RemoteFSCopyOpenAPIRequest
-
-    /**
-     * Conversation mode. auto marks a newly created Skill draft for idle-time auto commit.
-     */
-    readonly mode?: ApiCoreRemoteFsCopyPostModeEnum
-}
-
-/**
- * Request parameters for apiCoreRemoteFsDirPost operation in RemoteFsApi.
- */
-export interface RemoteFsApiApiCoreRemoteFsDirPostRequest {
-    /**
-     * Required. Target user id used to resolve skills owned by the user.
-     */
-    readonly userId: string
-
-    /**
-     * Required mutation task id. Prefix review_ writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-     */
-    readonly taskId: string
-
-    readonly remoteFSDirOpenAPIRequest: RemoteFSDirOpenAPIRequest
-
-    /**
-     * Conversation mode. auto marks a newly created Skill draft for idle-time auto commit.
-     */
-    readonly mode?: ApiCoreRemoteFsDirPostModeEnum
-}
-
-/**
- * Request parameters for apiCoreRemoteFsExistsGet operation in RemoteFsApi.
- */
-export interface RemoteFsApiApiCoreRemoteFsExistsGetRequest {
-    /**
-     * Required. Target user id used to resolve skills owned by the user.
-     */
-    readonly userId: string
-
-    /**
-     * RemoteFS package path: skills/&lt;category&gt;/&lt;skill_name&gt;[/rel_path].
-     */
-    readonly path: string
-
-    /**
-     * Required package content task id. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-     */
-    readonly taskId: string
-
-    /**
-     * Optional content encoding for GET /remote-fs/content.
-     */
-    readonly encodingomitempty?: ApiCoreRemoteFsExistsGetEncodingomitemptyEnum
-
-    /**
-     * Conversation mode.
-     */
-    readonly mode?: ApiCoreRemoteFsExistsGetModeEnum
-}
-
-/**
- * Request parameters for apiCoreRemoteFsInfoGet operation in RemoteFsApi.
- */
-export interface RemoteFsApiApiCoreRemoteFsInfoGetRequest {
-    /**
-     * Required. Target user id used to resolve skills owned by the user.
-     */
-    readonly userId: string
-
-    /**
-     * RemoteFS package path: skills/&lt;category&gt;/&lt;skill_name&gt;[/rel_path].
-     */
-    readonly path: string
-
-    /**
-     * Required package content task id. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-     */
-    readonly taskId: string
-
-    /**
-     * Optional content encoding for GET /remote-fs/content.
-     */
-    readonly encodingomitempty?: ApiCoreRemoteFsInfoGetEncodingomitemptyEnum
-
-    /**
-     * Conversation mode.
-     */
-    readonly mode?: ApiCoreRemoteFsInfoGetModeEnum
-}
-
-/**
- * Request parameters for apiCoreRemoteFsListGet operation in RemoteFsApi.
- */
-export interface RemoteFsApiApiCoreRemoteFsListGetRequest {
-    /**
-     * Required. Target user id used to resolve skills owned by the user.
-     */
-    readonly userId: string
-
-    /**
-     * RemoteFS path. Use skills for categories, skills/&lt;category&gt; for package list, or skills/&lt;category&gt;/&lt;skill_name&gt;[/rel_path] for package content.
-     */
-    readonly path: string
-
-    /**
-     * Optional for skills root/category list; required when path enters a package. Prefix review_ reads/writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-     */
-    readonly taskIdomitempty?: string
-
-    /**
-     * Conversation mode. auto marks a newly created Skill draft for idle-time auto commit.
-     */
-    readonly mode?: ApiCoreRemoteFsListGetModeEnum
-}
-
-/**
- * Request parameters for apiCoreRemoteFsMovePost operation in RemoteFsApi.
- */
-export interface RemoteFsApiApiCoreRemoteFsMovePostRequest {
-    /**
-     * Required. Target user id used to resolve skills owned by the user.
-     */
-    readonly userId: string
-
-    /**
-     * Required mutation task id. Prefix review_ writes existing draft, org_ is skill organization, other values are skill_editor session ids.
-     */
-    readonly taskId: string
-
-    readonly remoteFSMoveOpenAPIRequest: RemoteFSMoveOpenAPIRequest
-
-    /**
-     * Conversation mode. auto marks a newly created Skill draft for idle-time auto commit.
-     */
-    readonly mode?: ApiCoreRemoteFsMovePostModeEnum
-}
-
-/**
- * Request parameters for apiCoreRemoteFsPathDelete operation in RemoteFsApi.
- */
-export interface RemoteFsApiApiCoreRemoteFsPathDeleteRequest {
-    /**
-     * Required. Target user id used to resolve skills owned by the user.
-     */
-    readonly userId: string
-
-    /**
-     * RemoteFS path to delete.
-     */
-    readonly path: string
-
-    /**
-     * Required for package-internal delete; not required for confirmed permanent package purge.
-     */
-    readonly taskIdomitempty?: string
-
-    /**
-     * Required true for package root physical purge.
-     */
-    readonly permanentomitempty?: boolean
-
-    /**
-     * Required true for package root physical purge.
-     */
-    readonly confirmomitempty?: boolean
-}
-
-/**
- * Request parameters for apiCoreRemoteFsTrashPost operation in RemoteFsApi.
- */
-export interface RemoteFsApiApiCoreRemoteFsTrashPostRequest {
-    /**
-     * Required. Target user id used to resolve skills owned by the user.
-     */
-    readonly userId: string
-
-    readonly remoteFSTrashOpenAPIRequest: RemoteFSTrashOpenAPIRequest
-}
-
-/**
- * RemoteFsApi - object-oriented interface
- */
-export class RemoteFsApi extends BaseAPI {
-    /**
-     * Reads package content using task_id semantics: review_ sees existing draft, org_ and editor session ids see publish unless they own the current draft.
-     * @summary Read remote skill filesystem content
-     * @param {RemoteFsApiApiCoreRemoteFsContentGetRequest} requestParameters Request parameters.
+     *
+     * @summary Run current user\'s settings checks
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public apiCoreRemoteFsContentGet(requestParameters: RemoteFsApiApiCoreRemoteFsContentGetRequest, options?: RawAxiosRequestConfig) {
-        return RemoteFsApiFp(this.configuration).apiCoreRemoteFsContentGet(requestParameters.userId, requestParameters.path, requestParameters.taskId, requestParameters.encodingomitempty, requestParameters.mode, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     * Writes raw body bytes into the task draft. review_ may write an existing draft without changing draft ownership; org_ and editor session ids conflict with another task draft.
-     * @summary Write remote skill filesystem content
-     * @param {RemoteFsApiApiCoreRemoteFsContentPutRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreRemoteFsContentPut(requestParameters: RemoteFsApiApiCoreRemoteFsContentPutRequest, options?: RawAxiosRequestConfig) {
-        return RemoteFsApiFp(this.configuration).apiCoreRemoteFsContentPut(requestParameters.userId, requestParameters.path, requestParameters.taskId, requestParameters.body, requestParameters.encodingomitempty, requestParameters.mode, options).then((request) => request(this.axios, this.basePath));
+    public apiCoreSettingsChecksPost(options?: RawAxiosRequestConfig) {
+        return SettingsApiFp(this.configuration).apiCoreSettingsChecksPost(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
      *
-     * @summary Copy remote skill filesystem path
-     * @param {RemoteFsApiApiCoreRemoteFsCopyPostRequest} requestParameters Request parameters.
+     * @summary Get current user\'s settings overview
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public apiCoreRemoteFsCopyPost(requestParameters: RemoteFsApiApiCoreRemoteFsCopyPostRequest, options?: RawAxiosRequestConfig) {
-        return RemoteFsApiFp(this.configuration).apiCoreRemoteFsCopyPost(requestParameters.userId, requestParameters.taskId, requestParameters.remoteFSCopyOpenAPIRequest, requestParameters.mode, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary Create remote skill filesystem directory or empty package
-     * @param {RemoteFsApiApiCoreRemoteFsDirPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreRemoteFsDirPost(requestParameters: RemoteFsApiApiCoreRemoteFsDirPostRequest, options?: RawAxiosRequestConfig) {
-        return RemoteFsApiFp(this.configuration).apiCoreRemoteFsDirPost(requestParameters.userId, requestParameters.taskId, requestParameters.remoteFSDirOpenAPIRequest, requestParameters.mode, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     * Package paths require task_id so RemoteFS can choose publish view, current task draft view, or review draft view.
-     * @summary Check remote skill filesystem path exists
-     * @param {RemoteFsApiApiCoreRemoteFsExistsGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreRemoteFsExistsGet(requestParameters: RemoteFsApiApiCoreRemoteFsExistsGetRequest, options?: RawAxiosRequestConfig) {
-        return RemoteFsApiFp(this.configuration).apiCoreRemoteFsExistsGet(requestParameters.userId, requestParameters.path, requestParameters.taskId, requestParameters.encodingomitempty, requestParameters.mode, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     * Package paths require task_id so RemoteFS can choose publish view, current task draft view, or review draft view.
-     * @summary Get remote skill filesystem path info
-     * @param {RemoteFsApiApiCoreRemoteFsInfoGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreRemoteFsInfoGet(requestParameters: RemoteFsApiApiCoreRemoteFsInfoGetRequest, options?: RawAxiosRequestConfig) {
-        return RemoteFsApiFp(this.configuration).apiCoreRemoteFsInfoGet(requestParameters.userId, requestParameters.path, requestParameters.taskId, requestParameters.encodingomitempty, requestParameters.mode, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     * List skills root/category without task_id, or list package content with task-aware view selection.
-     * @summary List remote skill filesystem path
-     * @param {RemoteFsApiApiCoreRemoteFsListGetRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreRemoteFsListGet(requestParameters: RemoteFsApiApiCoreRemoteFsListGetRequest, options?: RawAxiosRequestConfig) {
-        return RemoteFsApiFp(this.configuration).apiCoreRemoteFsListGet(requestParameters.userId, requestParameters.path, requestParameters.taskIdomitempty, requestParameters.mode, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary Move remote skill filesystem path
-     * @param {RemoteFsApiApiCoreRemoteFsMovePostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreRemoteFsMovePost(requestParameters: RemoteFsApiApiCoreRemoteFsMovePostRequest, options?: RawAxiosRequestConfig) {
-        return RemoteFsApiFp(this.configuration).apiCoreRemoteFsMovePost(requestParameters.userId, requestParameters.taskId, requestParameters.remoteFSMoveOpenAPIRequest, requestParameters.mode, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary Delete remote skill filesystem path
-     * @param {RemoteFsApiApiCoreRemoteFsPathDeleteRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreRemoteFsPathDelete(requestParameters: RemoteFsApiApiCoreRemoteFsPathDeleteRequest, options?: RawAxiosRequestConfig) {
-        return RemoteFsApiFp(this.configuration).apiCoreRemoteFsPathDelete(requestParameters.userId, requestParameters.path, requestParameters.taskIdomitempty, requestParameters.permanentomitempty, requestParameters.confirmomitempty, options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary Trash remote skill package
-     * @param {RemoteFsApiApiCoreRemoteFsTrashPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreRemoteFsTrashPost(requestParameters: RemoteFsApiApiCoreRemoteFsTrashPostRequest, options?: RawAxiosRequestConfig) {
-        return RemoteFsApiFp(this.configuration).apiCoreRemoteFsTrashPost(requestParameters.userId, requestParameters.remoteFSTrashOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    public apiCoreSettingsOverviewGet(options?: RawAxiosRequestConfig) {
+        return SettingsApiFp(this.configuration).apiCoreSettingsOverviewGet(options).then((request) => request(this.axios, this.basePath));
     }
 }
 
-export const ApiCoreRemoteFsContentGetEncodingomitemptyEnum = {
-    Raw: 'raw',
-    Base64: 'base64'
-} as const;
-export type ApiCoreRemoteFsContentGetEncodingomitemptyEnum = typeof ApiCoreRemoteFsContentGetEncodingomitemptyEnum[keyof typeof ApiCoreRemoteFsContentGetEncodingomitemptyEnum];
-export const ApiCoreRemoteFsContentGetModeEnum = {
-    Auto: 'auto',
-    Manual: 'manual'
-} as const;
-export type ApiCoreRemoteFsContentGetModeEnum = typeof ApiCoreRemoteFsContentGetModeEnum[keyof typeof ApiCoreRemoteFsContentGetModeEnum];
-export const ApiCoreRemoteFsContentPutEncodingomitemptyEnum = {
-    Raw: 'raw',
-    Base64: 'base64'
-} as const;
-export type ApiCoreRemoteFsContentPutEncodingomitemptyEnum = typeof ApiCoreRemoteFsContentPutEncodingomitemptyEnum[keyof typeof ApiCoreRemoteFsContentPutEncodingomitemptyEnum];
-export const ApiCoreRemoteFsContentPutModeEnum = {
-    Auto: 'auto',
-    Manual: 'manual'
-} as const;
-export type ApiCoreRemoteFsContentPutModeEnum = typeof ApiCoreRemoteFsContentPutModeEnum[keyof typeof ApiCoreRemoteFsContentPutModeEnum];
-export const ApiCoreRemoteFsCopyPostModeEnum = {
-    Auto: 'auto',
-    Manual: 'manual'
-} as const;
-export type ApiCoreRemoteFsCopyPostModeEnum = typeof ApiCoreRemoteFsCopyPostModeEnum[keyof typeof ApiCoreRemoteFsCopyPostModeEnum];
-export const ApiCoreRemoteFsDirPostModeEnum = {
-    Auto: 'auto',
-    Manual: 'manual'
-} as const;
-export type ApiCoreRemoteFsDirPostModeEnum = typeof ApiCoreRemoteFsDirPostModeEnum[keyof typeof ApiCoreRemoteFsDirPostModeEnum];
-export const ApiCoreRemoteFsExistsGetEncodingomitemptyEnum = {
-    Raw: 'raw',
-    Base64: 'base64'
-} as const;
-export type ApiCoreRemoteFsExistsGetEncodingomitemptyEnum = typeof ApiCoreRemoteFsExistsGetEncodingomitemptyEnum[keyof typeof ApiCoreRemoteFsExistsGetEncodingomitemptyEnum];
-export const ApiCoreRemoteFsExistsGetModeEnum = {
-    Auto: 'auto',
-    Manual: 'manual'
-} as const;
-export type ApiCoreRemoteFsExistsGetModeEnum = typeof ApiCoreRemoteFsExistsGetModeEnum[keyof typeof ApiCoreRemoteFsExistsGetModeEnum];
-export const ApiCoreRemoteFsInfoGetEncodingomitemptyEnum = {
-    Raw: 'raw',
-    Base64: 'base64'
-} as const;
-export type ApiCoreRemoteFsInfoGetEncodingomitemptyEnum = typeof ApiCoreRemoteFsInfoGetEncodingomitemptyEnum[keyof typeof ApiCoreRemoteFsInfoGetEncodingomitemptyEnum];
-export const ApiCoreRemoteFsInfoGetModeEnum = {
-    Auto: 'auto',
-    Manual: 'manual'
-} as const;
-export type ApiCoreRemoteFsInfoGetModeEnum = typeof ApiCoreRemoteFsInfoGetModeEnum[keyof typeof ApiCoreRemoteFsInfoGetModeEnum];
-export const ApiCoreRemoteFsListGetModeEnum = {
-    Auto: 'auto',
-    Manual: 'manual'
-} as const;
-export type ApiCoreRemoteFsListGetModeEnum = typeof ApiCoreRemoteFsListGetModeEnum[keyof typeof ApiCoreRemoteFsListGetModeEnum];
-export const ApiCoreRemoteFsMovePostModeEnum = {
-    Auto: 'auto',
-    Manual: 'manual'
-} as const;
-export type ApiCoreRemoteFsMovePostModeEnum = typeof ApiCoreRemoteFsMovePostModeEnum[keyof typeof ApiCoreRemoteFsMovePostModeEnum];
 
 
 /**
@@ -28599,13 +28383,13 @@ export const ShowcaseApiAxiosParamCreator = function (configuration?: Configurat
         /**
          *
          * @summary Showcase case list
-         * @param {string} [acceptLanguage] Optional UI locale. zh and zh-* use zh-CN; en and en-* use en-US. Missing or unsupported values default to zh-CN.
          * @param {string} [keyword]
          * @param {string} [category]
+         * @param {string} [acceptLanguage] Optional UI locale. zh and zh-* use zh-CN; en and en-* use en-US. Missing or unsupported values default to zh-CN.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreShowcaseCasesGet: async (acceptLanguage?: string, keyword?: string, category?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreShowcaseCasesGet: async (keyword?: string, category?: string, acceptLanguage?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/showcase/cases`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -28666,14 +28450,14 @@ export const ShowcaseApiFp = function(configuration?: Configuration) {
         /**
          *
          * @summary Showcase case list
-         * @param {string} [acceptLanguage] Optional UI locale. zh and zh-* use zh-CN; en and en-* use en-US. Missing or unsupported values default to zh-CN.
          * @param {string} [keyword]
          * @param {string} [category]
+         * @param {string} [acceptLanguage] Optional UI locale. zh and zh-* use zh-CN; en and en-* use en-US. Missing or unsupported values default to zh-CN.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreShowcaseCasesGet(acceptLanguage?: string, keyword?: string, category?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ShowcaseCaseListResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreShowcaseCasesGet(acceptLanguage, keyword, category, options);
+        async apiCoreShowcaseCasesGet(keyword?: string, category?: string, acceptLanguage?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ShowcaseCaseListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreShowcaseCasesGet(keyword, category, acceptLanguage, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['ShowcaseApi.apiCoreShowcaseCasesGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -28705,7 +28489,7 @@ export const ShowcaseApiFactory = function (configuration?: Configuration, baseP
          * @throws {RequiredError}
          */
         apiCoreShowcaseCasesGet(requestParameters: ShowcaseApiApiCoreShowcaseCasesGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<ShowcaseCaseListResponse> {
-            return localVarFp.apiCoreShowcaseCasesGet(requestParameters.acceptLanguage, requestParameters.keyword, requestParameters.category, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreShowcaseCasesGet(requestParameters.keyword, requestParameters.category, requestParameters.acceptLanguage, options).then((request) => request(axios, basePath));
         },
     };
 };
@@ -28726,14 +28510,14 @@ export interface ShowcaseApiApiCoreShowcaseCasesCaseIdGetRequest {
  * Request parameters for apiCoreShowcaseCasesGet operation in ShowcaseApi.
  */
 export interface ShowcaseApiApiCoreShowcaseCasesGetRequest {
+    readonly keyword?: string
+
+    readonly category?: string
+
     /**
      * Optional UI locale. zh and zh-* use zh-CN; en and en-* use en-US. Missing or unsupported values default to zh-CN.
      */
     readonly acceptLanguage?: string
-
-    readonly keyword?: string
-
-    readonly category?: string
 }
 
 /**
@@ -28759,7 +28543,7 @@ export class ShowcaseApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public apiCoreShowcaseCasesGet(requestParameters: ShowcaseApiApiCoreShowcaseCasesGetRequest = {}, options?: RawAxiosRequestConfig) {
-        return ShowcaseApiFp(this.configuration).apiCoreShowcaseCasesGet(requestParameters.acceptLanguage, requestParameters.keyword, requestParameters.category, options).then((request) => request(this.axios, this.basePath));
+        return ShowcaseApiFp(this.configuration).apiCoreShowcaseCasesGet(requestParameters.keyword, requestParameters.category, requestParameters.acceptLanguage, options).then((request) => request(this.axios, this.basePath));
     }
 }
 
@@ -36159,7 +35943,7 @@ export const UserApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
-         * Partial update. Every field inside the request body is optional; send only fields that should change.
+         * Partial update. Every field inside the request body is optional; send only fields that should change. Updating skills_enabled sets all current user skills to the same state; updating workflows_enabled independently sets all available workflows in one transaction.
          * @summary Partially update current user\'s UI preferences
          * @param {UserUIPreferencesPatchOpenAPIRequest} userUIPreferencesPatchOpenAPIRequest
          * @param {*} [options] Override http request option.
@@ -36215,7 +35999,7 @@ export const UserApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Partial update. Every field inside the request body is optional; send only fields that should change.
+         * Partial update. Every field inside the request body is optional; send only fields that should change. Updating skills_enabled sets all current user skills to the same state; updating workflows_enabled independently sets all available workflows in one transaction.
          * @summary Partially update current user\'s UI preferences
          * @param {UserUIPreferencesPatchOpenAPIRequest} userUIPreferencesPatchOpenAPIRequest
          * @param {*} [options] Override http request option.
@@ -36246,7 +36030,7 @@ export const UserApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.apiCoreUserUiPreferencesGet(options).then((request) => request(axios, basePath));
         },
         /**
-         * Partial update. Every field inside the request body is optional; send only fields that should change.
+         * Partial update. Every field inside the request body is optional; send only fields that should change. Updating skills_enabled sets all current user skills to the same state; updating workflows_enabled independently sets all available workflows in one transaction.
          * @summary Partially update current user\'s UI preferences
          * @param {UserApiApiCoreUserUiPreferencesPatchRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -36280,7 +36064,7 @@ export class UserApi extends BaseAPI {
     }
 
     /**
-     * Partial update. Every field inside the request body is optional; send only fields that should change.
+     * Partial update. Every field inside the request body is optional; send only fields that should change. Updating skills_enabled sets all current user skills to the same state; updating workflows_enabled independently sets all available workflows in one transaction.
      * @summary Partially update current user\'s UI preferences
      * @param {UserApiApiCoreUserUiPreferencesPatchRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -37480,6 +37264,316 @@ export class WordGroupApi extends BaseAPI {
 
 
 /**
+ * WorkflowApi - axios parameter creator
+ */
+export const WorkflowApiAxiosParamCreator = function (configuration?: Configuration) {
+    return {
+        /**
+         *
+         * @summary Preview a Workflow-owned artifact action
+         * @param {string} sessionId
+         * @param {string} slotId
+         * @param {number} listIndex
+         * @param {ArtifactActionPreviewOpenAPIRequest} artifactActionPreviewOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionPreviewPost: async (sessionId: string, slotId: string, listIndex: number, artifactActionPreviewOpenAPIRequest: ArtifactActionPreviewOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionPreviewPost', 'sessionId', sessionId)
+            // verify required parameter 'slotId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionPreviewPost', 'slotId', slotId)
+            // verify required parameter 'listIndex' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionPreviewPost', 'listIndex', listIndex)
+            // verify required parameter 'artifactActionPreviewOpenAPIRequest' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionPreviewPost', 'artifactActionPreviewOpenAPIRequest', artifactActionPreviewOpenAPIRequest)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-preview`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)))
+                .replace(`{${"list_index"}}`, encodeURIComponent(String(listIndex)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(artifactActionPreviewOpenAPIRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Sync an edited WriterDocument to Feishu
+         * @param {string} sessionId
+         * @param {string} slotId
+         * @param {number} listIndex
+         * @param {WriterDocumentSyncOpenAPIRequest} writerDocumentSyncOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost: async (sessionId: string, slotId: string, listIndex: number, writerDocumentSyncOpenAPIRequest: WriterDocumentSyncOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost', 'sessionId', sessionId)
+            // verify required parameter 'slotId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost', 'slotId', slotId)
+            // verify required parameter 'listIndex' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost', 'listIndex', listIndex)
+            // verify required parameter 'writerDocumentSyncOpenAPIRequest' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost', 'writerDocumentSyncOpenAPIRequest', writerDocumentSyncOpenAPIRequest)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:sync-writer-document`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)))
+                .replace(`{${"list_index"}}`, encodeURIComponent(String(listIndex)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(writerDocumentSyncOpenAPIRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Write the active WriterDocument back to Feishu
+         * @param {string} sessionId
+         * @param {WriterDocumentWriteBackOpenAPIRequest} writerDocumentWriteBackOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPost: async (sessionId: string, writerDocumentWriteBackOpenAPIRequest: WriterDocumentWriteBackOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPost', 'sessionId', sessionId)
+            // verify required parameter 'writerDocumentWriteBackOpenAPIRequest' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPost', 'writerDocumentWriteBackOpenAPIRequest', writerDocumentWriteBackOpenAPIRequest)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}/writer-document:write-back`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(writerDocumentWriteBackOpenAPIRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+    }
+};
+
+/**
+ * WorkflowApi - functional programming interface
+ */
+export const WorkflowApiFp = function(configuration?: Configuration) {
+    const localVarAxiosParamCreator = WorkflowApiAxiosParamCreator(configuration)
+    return {
+        /**
+         *
+         * @summary Preview a Workflow-owned artifact action
+         * @param {string} sessionId
+         * @param {string} slotId
+         * @param {number} listIndex
+         * @param {ArtifactActionPreviewOpenAPIRequest} artifactActionPreviewOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionPreviewPost(sessionId: string, slotId: string, listIndex: number, artifactActionPreviewOpenAPIRequest: ArtifactActionPreviewOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<{ [key: string]: any; }>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionPreviewPost(sessionId, slotId, listIndex, artifactActionPreviewOpenAPIRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionPreviewPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Sync an edited WriterDocument to Feishu
+         * @param {string} sessionId
+         * @param {string} slotId
+         * @param {number} listIndex
+         * @param {WriterDocumentSyncOpenAPIRequest} writerDocumentSyncOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost(sessionId: string, slotId: string, listIndex: number, writerDocumentSyncOpenAPIRequest: WriterDocumentSyncOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<{ [key: string]: any; }>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost(sessionId, slotId, listIndex, writerDocumentSyncOpenAPIRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Write the active WriterDocument back to Feishu
+         * @param {string} sessionId
+         * @param {WriterDocumentWriteBackOpenAPIRequest} writerDocumentWriteBackOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPost(sessionId: string, writerDocumentWriteBackOpenAPIRequest: WriterDocumentWriteBackOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<{ [key: string]: any; }>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPost(sessionId, writerDocumentWriteBackOpenAPIRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['WorkflowApi.apiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+    }
+};
+
+/**
+ * WorkflowApi - factory interface
+ */
+export const WorkflowApiFactory = function (configuration?: Configuration, basePath?: string, axios?: AxiosInstance) {
+    const localVarFp = WorkflowApiFp(configuration)
+    return {
+        /**
+         *
+         * @summary Preview a Workflow-owned artifact action
+         * @param {WorkflowApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionPreviewPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionPreviewPost(requestParameters: WorkflowApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionPreviewPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<{ [key: string]: any; }> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionPreviewPost(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, requestParameters.artifactActionPreviewOpenAPIRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Sync an edited WriterDocument to Feishu
+         * @param {WorkflowApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost(requestParameters: WorkflowApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<{ [key: string]: any; }> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, requestParameters.writerDocumentSyncOpenAPIRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Write the active WriterDocument back to Feishu
+         * @param {WorkflowApiApiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPost(requestParameters: WorkflowApiApiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<{ [key: string]: any; }> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPost(requestParameters.sessionId, requestParameters.writerDocumentWriteBackOpenAPIRequest, options).then((request) => request(axios, basePath));
+        },
+    };
+};
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionPreviewPost operation in WorkflowApi.
+ */
+export interface WorkflowApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionPreviewPostRequest {
+    readonly sessionId: string
+
+    readonly slotId: string
+
+    readonly listIndex: number
+
+    readonly artifactActionPreviewOpenAPIRequest: ArtifactActionPreviewOpenAPIRequest
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost operation in WorkflowApi.
+ */
+export interface WorkflowApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPostRequest {
+    readonly sessionId: string
+
+    readonly slotId: string
+
+    readonly listIndex: number
+
+    readonly writerDocumentSyncOpenAPIRequest: WriterDocumentSyncOpenAPIRequest
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPost operation in WorkflowApi.
+ */
+export interface WorkflowApiApiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPostRequest {
+    readonly sessionId: string
+
+    readonly writerDocumentWriteBackOpenAPIRequest: WriterDocumentWriteBackOpenAPIRequest
+}
+
+/**
+ * WorkflowApi - object-oriented interface
+ */
+export class WorkflowApi extends BaseAPI {
+    /**
+     *
+     * @summary Preview a Workflow-owned artifact action
+     * @param {WorkflowApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionPreviewPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionPreviewPost(requestParameters: WorkflowApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionPreviewPostRequest, options?: RawAxiosRequestConfig) {
+        return WorkflowApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionPreviewPost(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, requestParameters.artifactActionPreviewOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Sync an edited WriterDocument to Feishu
+     * @param {WorkflowApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost(requestParameters: WorkflowApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPostRequest, options?: RawAxiosRequestConfig) {
+        return WorkflowApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, requestParameters.writerDocumentSyncOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Write the active WriterDocument back to Feishu
+     * @param {WorkflowApiApiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPost(requestParameters: WorkflowApiApiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPostRequest, options?: RawAxiosRequestConfig) {
+        return WorkflowApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPost(requestParameters.sessionId, requestParameters.writerDocumentWriteBackOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+}
+
+
+
+/**
  * WriterApi - axios parameter creator
  */
 export const WriterApiAxiosParamCreator = function (configuration?: Configuration) {
@@ -37531,6 +37625,45 @@ export const WriterApiAxiosParamCreator = function (configuration?: Configuratio
                 options: localVarRequestOptions,
             };
         },
+        /**
+         *
+         * @summary Write the active WriterDocument back to Feishu
+         * @param {string} sessionId
+         * @param {WriterDocumentWriteBackOpenAPIRequest} writerDocumentWriteBackOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPost: async (sessionId: string, writerDocumentWriteBackOpenAPIRequest: WriterDocumentWriteBackOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPost', 'sessionId', sessionId)
+            // verify required parameter 'writerDocumentWriteBackOpenAPIRequest' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPost', 'writerDocumentWriteBackOpenAPIRequest', writerDocumentWriteBackOpenAPIRequest)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}/writer-document:write-back`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(writerDocumentWriteBackOpenAPIRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
     }
 };
 
@@ -37556,6 +37689,20 @@ export const WriterApiFp = function(configuration?: Configuration) {
             const localVarOperationServerBasePath = operationServerMap['WriterApi.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
+        /**
+         *
+         * @summary Write the active WriterDocument back to Feishu
+         * @param {string} sessionId
+         * @param {WriterDocumentWriteBackOpenAPIRequest} writerDocumentWriteBackOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPost(sessionId: string, writerDocumentWriteBackOpenAPIRequest: WriterDocumentWriteBackOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<{ [key: string]: any; }>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPost(sessionId, writerDocumentWriteBackOpenAPIRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['WriterApi.apiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
     }
 };
 
@@ -37575,6 +37722,16 @@ export const WriterApiFactory = function (configuration?: Configuration, basePat
         apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost(requestParameters: WriterApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<{ [key: string]: any; }> {
             return localVarFp.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, requestParameters.writerDocumentSyncOpenAPIRequest, options).then((request) => request(axios, basePath));
         },
+        /**
+         *
+         * @summary Write the active WriterDocument back to Feishu
+         * @param {WriterApiApiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPost(requestParameters: WriterApiApiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<{ [key: string]: any; }> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPost(requestParameters.sessionId, requestParameters.writerDocumentWriteBackOpenAPIRequest, options).then((request) => request(axios, basePath));
+        },
     };
 };
 
@@ -37592,6 +37749,15 @@ export interface WriterApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxLis
 }
 
 /**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPost operation in WriterApi.
+ */
+export interface WriterApiApiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPostRequest {
+    readonly sessionId: string
+
+    readonly writerDocumentWriteBackOpenAPIRequest: WriterDocumentWriteBackOpenAPIRequest
+}
+
+/**
  * WriterApi - object-oriented interface
  */
 export class WriterApi extends BaseAPI {
@@ -37605,6 +37771,15 @@ export class WriterApi extends BaseAPI {
     public apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost(requestParameters: WriterApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPostRequest, options?: RawAxiosRequestConfig) {
         return WriterApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexSyncWriterDocumentPost(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, requestParameters.writerDocumentSyncOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
     }
+
+    /**
+     *
+     * @summary Write the active WriterDocument back to Feishu
+     * @param {WriterApiApiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPost(requestParameters: WriterApiApiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPostRequest, options?: RawAxiosRequestConfig) {
+        return WriterApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdWriterDocumentWriteBackPost(requestParameters.sessionId, requestParameters.writerDocumentWriteBackOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
 }
-
-

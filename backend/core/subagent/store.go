@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"time"
 
 	"gorm.io/gorm"
@@ -94,6 +95,7 @@ func CreateTask(ctx context.Context, db *gorm.DB, in CreateTaskInput) (*orm.SubA
 			WorkspacePath:     in.WorkspacePath,
 			InputSlots:        normalizeJSON(in.InputSlots, "[]"),
 			OutputSlots:       normalizeJSON(in.OutputSlots, "[]"),
+			Sources:           orm.RawJSON(`[]`),
 			CreateUserID:      in.CreateUserID,
 			CreatedAt:         now,
 			UpdatedAt:         now,
@@ -108,6 +110,20 @@ func CreateTask(ctx context.Context, db *gorm.DB, in CreateTaskInput) (*orm.SubA
 		return nil, err
 	}
 	return task, nil
+}
+
+// UpdateSources replaces the task-scoped searched-source snapshot.
+func UpdateSources(ctx context.Context, db *gorm.DB, taskID string, sources json.RawMessage) error {
+	sources = normalizeJSON(sources, "[]")
+	var items []json.RawMessage
+	if err := json.Unmarshal(sources, &items); err != nil {
+		return fmt.Errorf("invalid sources snapshot: %w", err)
+	}
+	return db.WithContext(ctx).Model(&orm.SubAgentTask{}).Where("id = ?", taskID).
+		Updates(map[string]any{
+			"sources":    orm.RawJSON(sources),
+			"updated_at": time.Now().UTC(),
+		}).Error
 }
 
 // GetTask loads a single task by id.
@@ -129,14 +145,14 @@ func ListTasksByConversation(ctx context.Context, db *gorm.DB, convID string) ([
 	return tasks, nil
 }
 
-// ListTasksByConversationForUser returns tasks only when they belong to the
-// requesting user. Public Task Center APIs must use this ownership-scoped form.
+// ListTasksByConversationForUser returns independent tasks owned by the user.
+// Workflow attempts are rendered from Workflow Runtime and never enter Task Center.
 func ListTasksByConversationForUser(
 	ctx context.Context, db *gorm.DB, convID, userID string,
 ) ([]orm.SubAgentTask, error) {
 	var tasks []orm.SubAgentTask
 	if err := db.WithContext(ctx).
-		Where("conversation_id = ? AND create_user_id = ?", convID, userID).
+		Where("conversation_id = ? AND create_user_id = ? AND agent_type <> ?", convID, userID, "workflow_step").
 		Order("seq_in_conversation ASC").Find(&tasks).Error; err != nil {
 		return nil, err
 	}

@@ -721,6 +721,13 @@
         background: #f0f5ff;
         color: #1769e0;
       }
+
+      &:disabled,
+      &:disabled:hover {
+        background: transparent;
+        color: #9aa6b8;
+        cursor: not-allowed;
+      }
     }
 
     .chat-mention-option-name {
@@ -729,6 +736,13 @@
       font-size: 12px;
       font-weight: 500;
       text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .chat-mention-option-status {
+      flex: 0 0 auto;
+      color: #8b96a8;
+      font-size: 11px;
       white-space: nowrap;
     }
 
@@ -891,6 +905,12 @@
   flex-direction: column;
   gap: 3px;
 
+  .chat-add-resource-menu-tooltip-anchor,
+  .chat-add-resource-menu-tooltip-anchor > button {
+    display: flex;
+    width: 100%;
+  }
+
   button {
     display: flex;
     align-items: center;
@@ -926,6 +946,17 @@
       .anticon {
         background: #e5efff;
         color: #1268db;
+      }
+    }
+
+    &:disabled {
+      background: transparent;
+      color: #aeb9c9;
+      cursor: not-allowed;
+
+      .anticon {
+        background: #f4f6f9;
+        color: #aeb9c9;
       }
     }
   }

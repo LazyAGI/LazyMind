@@ -93,8 +93,6 @@ class FeishuWorkspaceRepository(Protocol):
         operation_id: str,
         expected_message_id: str,
         expected_revision: int | None = None,
-        *,
-        advance_revision: bool = True,
     ) -> dict[str, Any]:
         ...
 
@@ -425,6 +423,7 @@ class FeishuOutboundClient(Protocol):
         initial_card: dict[str, Any],
         message_id: str = '',
         should_render: Callable[[], bool] | None = None,
+        on_message_started: Callable[[str], None] | None = None,
         render_card: Callable[
             [CoreStreamUpdate, bool, bool],
             dict[str, Any],

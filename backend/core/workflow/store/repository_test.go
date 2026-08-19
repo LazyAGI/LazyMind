@@ -27,6 +27,25 @@ func testRepo(t *testing.T) *Repository {
 	return repo
 }
 
+func TestAuthorizeConversationScopesWorkflowBindingToOwner(t *testing.T) {
+	repo := testRepo(t)
+	if err := repo.db.AutoMigrate(&orm.Conversation{}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := repo.db.Create(&orm.Conversation{ID: "conversation-1", BaseModel: orm.BaseModel{
+		CreateUserID: "owner", CreatedAt: now, UpdatedAt: now,
+	}}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.AuthorizeConversation(t.Context(), "conversation-1", "owner"); err != nil {
+		t.Fatalf("owner could not bind Workflow to conversation: %v", err)
+	}
+	if err := repo.AuthorizeConversation(t.Context(), "conversation-1", "other"); !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("another owner could bind Workflow to conversation: %v", err)
+	}
+}
+
 func TestDeleteArtifactCreatesTombstoneAndPreservesHistory(t *testing.T) {
 	repo := testRepo(t)
 	ctx := context.Background()

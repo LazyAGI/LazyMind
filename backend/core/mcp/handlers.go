@@ -60,6 +60,20 @@ func Create(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, resp)
 }
 
+func BulkUpdateEnabled(w http.ResponseWriter, r *http.Request) {
+	var req BulkUpdateServerEnabledRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Enabled == nil {
+		common.ReplyErr(w, "invalid body: enabled is required", http.StatusBadRequest)
+		return
+	}
+	resp, err := SetOwnedServersEnabled(r.Context(), store.DB(), store.UserID(r), *req.Enabled)
+	if err != nil {
+		replyError(w, err, "bulk update mcp servers failed")
+		return
+	}
+	common.ReplyOK(w, resp)
+}
+
 func Get(w http.ResponseWriter, r *http.Request) {
 	resp, err := GetServer(r.Context(), store.DB(), store.UserID(r), common.PathVar(r, "id"))
 	if err != nil {

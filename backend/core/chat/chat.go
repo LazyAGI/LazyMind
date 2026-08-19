@@ -1,4 +1,4 @@
-// chat text /api/chat text /api/chat_stream text，
+// Package chat adapts Core conversation requests to the LazyMind chat stream.
 package chat
 
 import (
@@ -19,7 +19,6 @@ import (
 )
 
 const (
-	chatPath       = "/api/chat"
 	streamChatPath = "/api/chat/stream"
 
 	defaultDialTimeout = 10 * time.Second
@@ -220,7 +219,7 @@ type WorkflowPreflightUpdatedEvent struct {
 	Snapshot map[string]any `json:"snapshot,omitempty"`
 }
 
-// LazyChatResponse text /api/chat textResponse。
+// LazyChatResponse is one line emitted by the algorithm chat stream.
 type LazyChatResponse struct {
 	Code int          `json:"code"`
 	Msg  string       `json:"msg"`
@@ -234,9 +233,9 @@ type LazyStreamData struct {
 	Resp    *LazyChatResponse
 }
 
-// ChatService text（/api/chat text /api/chat_stream）。
+// ChatService owns the algorithm chat-stream connection.
 type ChatService struct {
-	chatURL       string
+	baseURL       string
 	streamChatURL string
 	client        *http.Client
 }
@@ -268,42 +267,10 @@ func NewChatServiceWithEndpoint(endpoint string) *ChatService {
 		Timeout: totalTimeout,
 	}
 	return &ChatService{
-		chatURL:       endpoint + chatPath,
+		baseURL:       endpoint,
 		streamChatURL: endpoint + streamChatPath,
 		client:        client,
 	}
-}
-
-// Chat text /api/chat，Gettext。
-func (c *ChatService) Chat(ctx context.Context, req *LazyChatRequest) (*LazyChatResponse, error) {
-	bodyBytes, err := json.Marshal(req)
-	if err != nil {
-		return nil, err
-	}
-	fmt.Printf(
-		"[Core] [CHAT_UPSTREAM_REQUEST] [stream=false] [url=%s] [session_id=%s] [user_id=%s] [reasoning=%v] [%s]\n",
-		c.chatURL, req.Conversation.SessionID, req.Conversation.UserID, req.Runtime.Reasoning,
-		modelconfig.SummarizeLLMConfigForLog(req.Runtime.LLMConfig),
-	)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.chatURL, bytes.NewReader(bodyBytes))
-	if err != nil {
-		return nil, err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.client.Do(httpReq)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New("upstream /api/chat returned non-200")
-	}
-	var out LazyChatResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, err
-	}
-	return &out, nil
 }
 
 // StreamChat text /api/chat_stream，text channel；ctx Unsettext channel text。
@@ -384,6 +351,9 @@ type UpstreamStreamChunk struct {
 	WorkflowPreflightUpdated *WorkflowPreflightUpdatedEvent `json:"workflow_preflight_updated,omitempty"`
 	Heartbeat                bool                           `json:"heartbeat,omitempty"`
 	ToolCallTurns            int64                          `json:"tool_call_turns"`
+	ExternalEventSequence    int64                          `json:"external_event_sequence,omitempty"`
+	Execution                *externalExecutionProjection   `json:"execution,omitempty"`
+	Err                      error                          `json:"-"`
 }
 
 type upstreamStreamLine struct {
@@ -818,6 +788,13 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 				continue
 			}
 			chunk := upstreamStreamChunkFromData(d.Resp.Data)
+			if d.Resp.Code != http.StatusOK {
+				message := strings.TrimSpace(d.Resp.Msg)
+				if message == "" {
+					message = "algorithm chat stream failed"
+				}
+				chunk.Err = fmt.Errorf("algorithm chat stream failed: %s", message)
+			}
 			select {
 			case out <- chunk:
 			case <-ctx.Done():

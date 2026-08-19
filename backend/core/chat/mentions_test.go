@@ -80,6 +80,21 @@ func TestApplyChatMentionsResolvesWorkflowWireType(t *testing.T) {
 	}
 }
 
+func TestApplyChatMentionsRejectsWorkflowWhenWorkflowControlIsPaused(t *testing.T) {
+	raw := map[string]any{"mentions": []any{
+		map[string]any{"mention_id": "m1", "type": "workflow", "resource_id": "builtin:paused-workflow", "display_name": "Paused Workflow"},
+	}}
+	db := orm.MigrateTestDB(t, &orm.WorkflowResource{}, &orm.UserUIPreferences{})
+	now := time.Now().UTC()
+	if err := db.Model(&orm.UserUIPreferences{}).Create(map[string]any{"user_id": "user-1", "task_center_enabled": true, "skills_enabled": true, "workflows_enabled": false, "mcp_enabled": true, "created_at": now, "updated_at": now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	_, _, err := applyChatMentions(context.Background(), db.DB, raw, "user-1", "conversation-1", "session-1", "执行 Paused Workflow", nil)
+	if err == nil || !strings.Contains(err.Error(), "workflows are paused") {
+		t.Fatalf("expected paused master switch error, got %v", err)
+	}
+}
+
 func TestConversationWorkflowBindingSurvivesFollowUpAndClearsAtSessionEnd(t *testing.T) {
 	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.WorkflowSession{})
 	now := time.Now().UTC()

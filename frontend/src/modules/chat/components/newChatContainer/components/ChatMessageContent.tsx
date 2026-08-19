@@ -7,6 +7,7 @@ import {
 } from "@ant-design/icons";
 import { ChatConversationsResponseFinishReasonEnum } from "@/api/generated/chatbot-client";
 import MarkdownViewer from "@/modules/chat/components/MarkdownViewer";
+import { getCitationSources } from "@/modules/chat/utils/sourceAdapter";
 import { RoleTypes } from "@/modules/chat/constants/common";
 import {
   formatThinkingForDisplay,
@@ -41,6 +42,7 @@ export default function ChatMessageContent({
   isThinkingCollapsed,
   onToggleThinkingCollapse,
 }: ChatMessageContentProps) {
+  const sources = getCitationSources(item.sources);
   const { t } = useTranslation();
   const thinkingKey = uniqueKey || item.history_id || item.id || "default";
   const citeMessageList =
@@ -125,7 +127,7 @@ export default function ChatMessageContent({
           </div>
           <div className={isCollapsed ? "chat-collapse" : "chat-expand"}>
             <div className="chat-think-text">
-              <MarkdownViewer sources={item.sources} IS_STREAMING={isStreaming}>
+              <MarkdownViewer sources={sources} IS_STREAMING={isStreaming}>
                 {formatThinkingForDisplay(item.reasoning_content)}
               </MarkdownViewer>
             </div>
@@ -134,7 +136,7 @@ export default function ChatMessageContent({
         </>
       )}
       <div className="chat-text">
-        <MarkdownViewer sources={item.sources} IS_STREAMING={isStreaming}>
+        <MarkdownViewer sources={sources} IS_STREAMING={isStreaming}>
           {item.display_delta || item.delta}
         </MarkdownViewer>
       </div>
