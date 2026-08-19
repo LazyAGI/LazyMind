@@ -396,7 +396,7 @@ func DeleteWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 
 	db := store.DB()
 	var draft orm.WorkflowDraft
-	if err := db.Select("id", "plugin_id").Where("id = ? AND created_by = ?", draftID, userID).First(&draft).Error; err != nil {
+	if err := db.Select("id").Where("id = ? AND created_by = ?", draftID, userID).First(&draft).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			common.ReplyErr(w, "not found", http.StatusNotFound)
 			return
@@ -409,27 +409,6 @@ func DeleteWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 	// them atomically with the draft so a later import of the same Skill cannot
 	// reuse decisions made for a Workflow the user explicitly deleted.
 	if err := db.Transaction(func(tx *gorm.DB) error {
-		// A published Workflow has a lifecycle independent from its editable
-		// draft. From the user's Workflow list, however, deleting the user-owned
-		// Workflow must also remove it from discovery. Archive the publication
-		// (preserving pinned revisions and historical sessions) and disable it.
-		if workflowID := strings.TrimSpace(draft.WorkflowID); workflowID != "" {
-			var resource orm.WorkflowResource
-			err := tx.Where("owner_user_id = ? AND plugin_id = ?", userID, workflowID).First(&resource).Error
-			if err == nil {
-				now := time.Now().UTC()
-				if err := tx.Model(&resource).Updates(map[string]any{"status": "archived", "updated_at": now}).Error; err != nil {
-					return err
-				}
-				if err := tx.Model(&orm.UserWorkflowSetting{}).
-					Where("user_id = ? AND plugin_ref = ?", userID, resource.WorkflowRef).
-					Updates(map[string]any{"enabled": false, "updated_at": now}).Error; err != nil {
-					return err
-				}
-			} else if err != gorm.ErrRecordNotFound {
-				return err
-			}
-		}
 		if err := tx.Where("draft_id = ? AND user_id = ?", draftID, userID).Delete(&orm.WorkflowRepairRun{}).Error; err != nil {
 			return err
 		}

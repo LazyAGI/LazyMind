@@ -24,21 +24,19 @@ tool_scripts:
       - extract_technical_requirements
       - extract_disqualification_items
       - validate_and_allocate_outline
-      - validate_proposal_package
       - validate_proposal_from_inputs
   - path: scripts/visual_renderer.py
     functions:
       - render_proposal_image
   - path: scripts/document_builder.py
     functions:
-      - export_proposal_markdown
-      - compose_proposal_docx
       - compose_proposal_from_inputs
   - path: scripts/writer_bridge.py
     functions:
       - bid_writer_prepare_context
       - bid_writer_generate_outline
       - bid_writer_save_validated_outline
+      - bid_writer_save_effective_outline
       - bid_writer_read_markdown
       - bid_writer_update_context
       - bid_writer_plan_sections
@@ -191,7 +189,7 @@ slots:
     exposed: false
   - id: effective_outline
     label: 正文生效大纲
-    type: json
+    type: file
     cardinality: single
     exposed: false
   - id: effective_outline_check_report

@@ -1,15 +1,13 @@
 """Deterministic business tools for the bid technical-proposal workflow.
 
-The module is intentionally self-contained: it never imports LazyMind project code,
-never relies on the source skill directory, and accepts only runtime material paths or
-artifact text passed by the workflow step.
+The business algorithms are self-contained and never rely on the source skill directory.
+Only the final input-wrapper reads immutable material paths from the Workflow runtime.
 """
 
 from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -630,9 +628,27 @@ def validate_and_allocate_outline(outline_json: str, requirements_markdown: str,
 
     weights = [max(1, int(leaf.get('target_words') or 1)) for leaf in leaves]
     weight_sum = sum(weights) or len(leaves) or 1
-    allocated = [max(100, round(target * weight / weight_sum)) for weight in weights]
-    if allocated:
-        allocated[-1] += target - sum(allocated)
+    # Keep the normal 100-character floor when the requested total permits it.
+    # Small smoke-test targets may legitimately have more leaves than target/100;
+    # in that case use a dynamic positive floor instead of subtracting the whole
+    # overflow from the final leaf (which previously produced negative targets).
+    minimum = min(100, max(1, target // len(leaves))) if leaves else 0
+    remaining = max(0, target - minimum * len(leaves))
+    extras = [(remaining * weight) // weight_sum for weight in weights]
+    remainder = remaining - sum(extras)
+    if remainder:
+        ranked = sorted(
+            range(len(weights)),
+            key=lambda index: ((remaining * weights[index]) % weight_sum, -index),
+            reverse=True,
+        )
+        for index in ranked[:remainder]:
+            extras[index] += 1
+    allocated = [minimum + extra for extra in extras]
+    if leaves and target < 100 * len(leaves):
+        warnings.append(
+            f'目标字数不足以按每个叶子 100 字分配，已使用动态下限 {minimum} 字'
+        )
     for leaf, amount in zip(leaves, allocated):
         leaf['target_words'] = amount
     _set_parent_targets(chapters)

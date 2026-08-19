@@ -2,7 +2,7 @@ import base64
 
 import pytest
 
-from lazymind.chat.workflow.script_tools import resolve_declared_script_tools
+from lazymind.workflow_toolkit import load_workflow_package_tools, workflow_package_input_types
 
 
 def _encoded(value: str) -> str:
@@ -32,9 +32,8 @@ def build_report(title: str) -> str:
         },
     }
 
-    tools = resolve_declared_script_tools(
-        package,
-        ['build_report', 'undeclared_helper'],
+    tools = load_workflow_package_tools(
+        package, ['build_report', 'undeclared_helper'], 'workflow-1', 'revision-1',
     )
 
     assert set(tools) == {'build_report'}
@@ -54,7 +53,9 @@ tool_scripts:
         },
     }
 
-    assert resolve_declared_script_tools(package, ['unsafe']) == {}
+    assert load_workflow_package_tools(
+        package, ['unsafe'], 'workflow-1', 'revision-1',
+    ) == {}
 
 
 def test_rejects_duplicate_function_declarations():
@@ -74,4 +75,17 @@ tool_scripts:
     }
 
     with pytest.raises(ValueError, match='multiple scripts'):
-        resolve_declared_script_tools(package, ['run'])
+        load_workflow_package_tools(package, ['run'], 'workflow-1', 'revision-1')
+
+
+def test_reads_external_input_types_from_published_package():
+    package = {'files': {'workflow.yaml': _encoded('''
+slots:
+  - {id: source, type: file, external: true}
+  - {id: word_target, type: text, external: true}
+  - {id: result, type: text}
+''')}}
+
+    assert workflow_package_input_types(package) == {
+        'source': 'file', 'word_target': 'text',
+    }

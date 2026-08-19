@@ -12,7 +12,6 @@ import (
 	"time"
 
 	"github.com/gorilla/mux"
-	"gorm.io/gorm"
 
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
@@ -106,44 +105,6 @@ func TestValidateWorkflowDraft_ValidDraft(t *testing.T) {
 	data, _ := resp["data"].(map[string]any)
 	if data == nil || data["valid"] == nil {
 		t.Fatalf("expected valid field in response: %s", rec.Body.String())
-	}
-}
-
-func TestDeleteWorkflowDraftArchivesPublicationAndDisablesSetting(t *testing.T) {
-	db := newHandlerTestDB(t)
-	draftID := "11111111-1111-4111-8111-111111111111"
-	seedWorkflowDraft(t, db, draftID, "user-1")
-	now := time.Now().UTC()
-	resource := orm.WorkflowResource{
-		ID: "resource-1", WorkflowRef: "user:user-1:test-plugin", WorkflowID: "test-plugin",
-		OwnerUserID: "user-1", OwnerScope: "u_user-1", SourceType: "user",
-		RelativeRoot: "workflows/u_user-1/test-plugin", Name: "Test Workflow",
-		Status: "active", CreatedAt: now, UpdatedAt: now,
-	}
-	if err := db.DB.Create(&resource).Error; err != nil {
-		t.Fatal(err)
-	}
-	setting := orm.UserWorkflowSetting{UserID: "user-1", WorkflowRef: resource.WorkflowRef, Enabled: true, UpdatedAt: now}
-	if err := db.DB.Create(&setting).Error; err != nil {
-		t.Fatal(err)
-	}
-
-	req := httptest.NewRequest(http.MethodDelete, "/workflow-drafts/"+draftID, nil)
-	req = mux.SetURLVars(req, map[string]string{"draft_id": draftID})
-	req.Header.Set("X-User-Id", "user-1")
-	rec := httptest.NewRecorder()
-	DeleteWorkflowDraft(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("got %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
-	}
-	if err := db.DB.Where("id = ?", draftID).First(&orm.WorkflowDraft{}).Error; err != gorm.ErrRecordNotFound {
-		t.Fatalf("draft should be deleted, got err=%v", err)
-	}
-	if err := db.DB.Where("id = ?", resource.ID).First(&resource).Error; err != nil || resource.Status != "archived" {
-		t.Fatalf("publication status=%q err=%v, want archived", resource.Status, err)
-	}
-	if err := db.DB.Where("user_id = ? AND plugin_ref = ?", "user-1", resource.WorkflowRef).First(&setting).Error; err != nil || setting.Enabled {
-		t.Fatalf("setting enabled=%v err=%v, want false", setting.Enabled, err)
 	}
 }
 

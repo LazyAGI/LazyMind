@@ -21,7 +21,6 @@ from lazymind.chat.service.utils.static_file_url import (
     local_path_from_static_file_url,
     resolve_local_image_path,
 )
-from lazymind.chat.workflow.artifacts import materialize_data_image
 
 from .context import get_context, require_context, LARGE_ARTIFACT_THRESHOLD
 
@@ -43,7 +42,7 @@ def _materialize_local_path(path: str) -> str:
     raw = str(path or '').strip()
     if not raw:
         return raw
-    if raw.lower().startswith(('http://', 'https://', 'data:')):
+    if raw.lower().startswith(('http://', 'https://')):
         return raw
     resolved = resolve_local_image_path(raw) or local_path_from_static_file_url(raw)
     if resolved and (resolved == raw or os.path.exists(resolved) or not os.path.exists(raw)):
@@ -54,7 +53,7 @@ def _materialize_local_path(path: str) -> str:
 def _sign_static_file_url(path: str) -> Optional[str]:
     """Ask Go core to sign a local upload path. Returns None on any failure."""
     raw = str(path or '').strip()
-    if not raw or raw.lower().startswith(('http://', 'https://', 'data:')):
+    if not raw or raw.lower().startswith(('http://', 'https://')):
         return None
     if raw.startswith('/static-files/'):
         return raw
@@ -472,7 +471,9 @@ def get_artifact(key: str, sort_order: Optional[int] = None, task_ref: Optional[
 
     if workflow_session_id:
         local = ctx.local_artifacts(keys=[key])
-        remote_path = (ctx.params.get('remote_inputs') or {}).get(key)
+        remote_inputs = ctx.params.get('remote_inputs') or {}
+        has_remote_input = key in remote_inputs
+        remote_path = remote_inputs.get(key)
         if local:
             artifacts = local
             if sort_order is not None:
@@ -480,8 +481,9 @@ def get_artifact(key: str, sort_order: Optional[int] = None, task_ref: Optional[
             result = tool_success('get_artifact', {
                 'status': 'ok', 'key': key, 'artifacts': artifacts,
             })
-        elif remote_path:
+        elif has_remote_input:
             remote_paths = remote_path if isinstance(remote_path, list) else [remote_path]
+            remote_paths = [path for path in remote_paths if path]
             if sort_order is not None:
                 remote_paths = remote_paths[sort_order - 1:sort_order] if sort_order > 0 else []
             if not remote_paths:
@@ -1454,38 +1456,17 @@ def find_artifact(slot: str, sort_order: Optional[int] = None) -> Dict[str, Any]
         signed_url = value['url']
 
     path: Optional[str] = value.get('path') or value.get('url')
-    # Remote Workflow persistence may place an image data URL in either path or
-    # text. It is materialized below before any filesystem lookup. Arbitrary
-    # text artifacts are deliberately not treated as paths; callers should use
-    # get_artifact for their content instead.
-    text_value = value.get('text')
-    if not path and isinstance(text_value, str) and text_value.lower().startswith('data:image/'):
-        path = text_value
     if not path or not isinstance(path, str):
         return tool_success('find_artifact', {
             'status': 'error',
             'message': f"Artifact '{slot}' has no resolvable path.",
         })
 
-    is_data_url = path.lower().startswith('data:')
-    if is_data_url:
-        try:
-            path = materialize_data_image(path, ctx.workspace_path)
-        except ValueError as exc:
-            return tool_success('find_artifact', {
-                'status': 'error',
-                'message': str(exc),
-            })
-    if not path.lower().startswith(('http://', 'https://', '/static-files/', 'data:')):
+    if not path.lower().startswith(('http://', 'https://', '/static-files/')):
         path = _materialize_local_path(path)
 
     # Re-sign local paths when the slots API did not already provide a URL.
-    if is_data_url:
-        # The decoded file lives in this executor's ephemeral workspace and is
-        # intended for another local tool in the same attempt. Do not return or
-        # re-sign the original multi-hundred-KB data URL.
-        signed_url = None
-    elif not signed_url:
+    if not signed_url:
         signed_url = _sign_static_file_url(path)
 
     out: Dict[str, Any] = {

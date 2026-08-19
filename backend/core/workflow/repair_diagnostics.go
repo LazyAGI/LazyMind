@@ -48,30 +48,6 @@ func diagnoseWorkflowWithProfile(workflowYAML, stateYAML, scenario, scriptsJSON 
 			}
 		}
 	}
-	// `command` was accepted by early authoring YAML but is not part of the
-	// runtime graph contract.  Reject it instead of silently letting the model
-	// pretend that a CLI command ran successfully.
-	if steps, ok := workflowDoc["steps"].([]any); ok {
-		for index, raw := range steps {
-			step, _ := raw.(map[string]any)
-			command, _ := step["command"].(string)
-			if strings.TrimSpace(command) != "" {
-				nodeID, _ := step["id"].(string)
-				out = append(out, repairDiagnostic{
-					Code: "E_STEP_COMMAND_UNSUPPORTED", Path: fmt.Sprintf("workflow.yaml.steps[%d].command", index),
-					Message:  "step command is not executable; use a declared tool or redesign this step with built-in capabilities",
-					Severity: "error", NodeID: strings.TrimSpace(nodeID), Fixable: true,
-				})
-			}
-		}
-	}
-	if len(scripts) == 0 && (strings.Contains(workflowYAML, "scripts/") || strings.Contains(stateYAML, "scripts/")) {
-		out = append(out, repairDiagnostic{
-			Code: "E_STEP_SCRIPT_REFERENCE_MISSING", Path: "workflow.yaml/scenario/state.yml",
-			Message:  "workflow instructions reference scripts/ but the published package contains no scripts; use declared packaged tools or an honest built-in-capability fallback",
-			Severity: "error", Fixable: true,
-		})
-	}
 	return out
 }
 

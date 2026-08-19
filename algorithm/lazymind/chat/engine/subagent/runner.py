@@ -25,7 +25,6 @@ from lazymind.chat.engine.agent_runtime import (
 from lazymind.chat.engine.prompts import add_standard_system_sections
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 from lazymind.chat.workflow.artifacts import build_artifact_context_section
-from lazymind.chat.workflow.script_tools import load_pinned_workflow_tools
 from lazymind.chat.service.component.tool_registry import (
     ATTACHMENT_EDIT_TOOL_CONFIG,
     DEFAULT_TOOLS,
@@ -41,6 +40,7 @@ from lazymind.chat.service.utils import (
 )
 from lazymind.config import config as _cfg
 from lazymind.model_config import inject_model_config
+from lazymind.workflow_toolkit import load_workflow_package_tools
 
 from . import SUBAGENT_ATTACHMENT_CONTEXT_KEY, SUBAGENT_CORE_TOOL_NAMES
 from . import tools as subagent_tools
@@ -102,29 +102,38 @@ async def merge_agent_and_stream_events(
                 pending.cancel()
 
 
-def _build_artifact_context_section(
-    ctx: 'SubAgentContext', db: 'SubAgentDB'
-) -> List[str]:
-    """Build a multi-line artifact summary block to inject into the objective prompt.
-
-    Returns an empty list when there are no input artifacts.
-
-    Workflow scenario (params contains session_id):
-      Reads the public Artifact projection supplied by the Workflow runtime.
-
-    Ordinary SubAgents receive their attachment context through params and do not
-    participate in Workflow resource resolution.
-    """
-    _ = db
-    return build_artifact_context_section(ctx.params)
-
-
 def _resolve_workflow_step_tools(params: Dict[str, Any]) -> Optional[List[str]]:
     """Use the immutable tool names supplied by public Attempt Context."""
     declared = params.get('legacy_tools') or params.get('tools') or []
     if not isinstance(declared, list):
         return None
     return list(dict.fromkeys([*SUBAGENT_CORE_TOOL_NAMES, *map(str, declared)]))
+
+
+def load_workflow_tools(params: Dict[str, Any], names: List[str]) -> Dict[str, Any]:
+    """Load declared callables from the exact published Workflow revision."""
+    workflow_id = str(params.get('workflow_id') or '').strip()
+    revision_id = str(params.get('revision_id') or '').strip()
+    if not workflow_id or not revision_id or not names:
+        return {}
+    try:
+        import httpx
+        from lazymind.config import config
+        from lazymind.workflow_sdk import WorkflowClient
+
+        package = WorkflowClient(
+            str(config['core_api_url']).rstrip('/'),
+            str(params.get('user_id') or ''), host='lazymind', transport=httpx,
+        ).get_workflow(workflow_id, revision_id).result
+        if str(package.get('revision_id') or '') != revision_id:
+            raise RuntimeError('Core returned a different Workflow revision')
+        expected_hash = str(params.get('tree_hash') or '').strip()
+        if expected_hash and str(package.get('tree_hash') or '') != expected_hash:
+            raise RuntimeError('Core returned a Workflow package with a different tree hash')
+        return load_workflow_package_tools(package, names, workflow_id, revision_id)
+    except Exception as exc:
+        LOG.warning('[SubAgent] failed to load pinned Workflow script tools: %s', exc)
+        return {}
 
 
 def _resolve_runtime_tools(
@@ -151,7 +160,7 @@ def _resolve_runtime_tools(
         ]
         # Published Workflow script functions are resolved from the exact
         # revision before falling back to framework/global tools.
-        package_by_name = load_pinned_workflow_tools(params or {}, name_list)
+        package_by_name = load_workflow_tools(params or {}, name_list)
         # Build lookup from DEFAULT_TOOLS.
         default_by_name = {cfg.name: cfg for cfg in DEFAULT_TOOLS if tool_is_active(cfg)}
         result = []
@@ -357,7 +366,7 @@ def _build_subagent_plan(
     # ordinary SubAgent reads from sub_agent_artifacts of prior succeeded steps.
     session_id: str = ctx.params.get('session_id', '')
     if session_id or ctx.input_slots:
-        artifact_section = _build_artifact_context_section(ctx, db) if db else []
+        artifact_section = build_artifact_context_section(ctx.params) if db else []
         if artifact_section:
             builder.runtime(
                 'subagent_artifacts', 'Existing Artifacts', '\n'.join(artifact_section),

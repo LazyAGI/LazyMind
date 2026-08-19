@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
@@ -81,6 +79,16 @@ def _remote_workflow_inputs() -> dict[str, Any]:
     if not isinstance(values, dict):
         raise RuntimeError('Workflow input paths are unavailable in this Attempt.')
     return values
+
+
+def _run_root() -> Path:
+    from lazymind.chat.engine.subagent.context import require_context
+    workspace = str(require_context().workspace_path or '').strip()
+    if not workspace:
+        raise RuntimeError('The active Workflow workspace is unavailable.')
+    root = Path(workspace) / 'bid-proposal-documents' / uuid.uuid4().hex
+    root.mkdir(parents=True, exist_ok=True)
+    return root
 
 
 def _required_path(values: dict[str, Any], slot: str) -> str:
@@ -387,8 +395,7 @@ def export_proposal_markdown(markdown_text: str,
     text = str(markdown_text or '').strip()
     if len(text) < 200:
         raise ValueError('markdown_text must contain the complete proposal.')
-    root = Path(tempfile.gettempdir()) / 'bid_tech_proposal_writer' / 'documents' / uuid.uuid4().hex
-    root.mkdir(parents=True, exist_ok=True)
+    root = _run_root()
     output = root / _safe_markdown_output_name(output_name)
     output.write_text(text + '\n', encoding='utf-8')
     return {
@@ -430,8 +437,7 @@ def compose_proposal_docx(markdown_text: str, outline_json: str,
     except ImportError as exc:
         raise RuntimeError('python-docx is required for proposal composition.') from exc
 
-    root = Path(tempfile.gettempdir()) / 'bid_tech_proposal_writer' / 'documents' / uuid.uuid4().hex
-    root.mkdir(parents=True, exist_ok=True)
+    root = _run_root()
     output = root / _safe_output_name(output_name)
     document = Document()
     if use_default_template:

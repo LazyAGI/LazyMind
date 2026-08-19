@@ -31,7 +31,9 @@ BOLD_LEAD = re.compile(r'^(\s*)\*\*(.+?)\*\*(.*)$')
 
 def _workspace_root() -> Path:
     context = require_context()
-    root = Path(context.workspace_path) if context.workspace_path else Path('/tmp')
+    if not context.workspace_path:
+        raise RuntimeError('The active Workflow workspace is unavailable.')
+    root = Path(context.workspace_path)
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -206,6 +208,13 @@ def bid_writer_save_validated_outline(outline_json: str) -> str:
                 lines.append('')
     render(outline['chapters'])
     return _write_markdown(_run_root('validated-outline'), 'outline_document', '\n'.join(lines))
+
+
+def bid_writer_save_effective_outline(outline_json: dict[str, Any]) -> str:
+    """Persist the approved structured outline for path-based Writer tools."""
+    if not isinstance(outline_json, dict) or not isinstance(outline_json.get('chapters'), list):
+        raise ValueError('outline_json must contain chapters.')
+    return _write_json(_run_root('effective-outline'), 'effective_outline', outline_json)
 
 
 def bid_writer_read_markdown(document_path: str) -> str:

@@ -293,7 +293,7 @@ export default function WorkflowInstalledView({
               />
             </Tooltip>
             <Popconfirm
-              title={t(row.published ? 'admin.memoryWorkflowDeletePublishedConfirm' : 'admin.memoryWorkflowDeleteConfirm')}
+              title={t('admin.memoryWorkflowDeleteConfirm')}
               okText={t('admin.memoryWorkflowDeleteOk')}
               cancelText={t('common.cancel')}
               okButtonProps={{ danger: true }}

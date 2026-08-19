@@ -2957,7 +2957,9 @@
 
     // FileViewer fills the drawer height. Let its content own the scroll area;
     // otherwise the generic overflow:hidden rule clips DOCX after page one.
-    > .file-viewer-container > .file-viewer-content {
+    // Office renderers add a second nested file-viewer container. Override both
+    // content layers so the inner DOCX pages are not clipped at the first page.
+    .file-viewer-container .file-viewer-content {
       overflow: auto;
       overscroll-behavior: contain;
     }

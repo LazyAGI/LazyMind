@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { AgentAppsAuth } from "@/components/auth";
 import { axiosInstance, localizeErrorCode } from "@/components/request";
 import { Method, SSE } from "@/modules/chat/utils/sse";
-import { TaskServiceApi, convEventsUrl } from "@/modules/chat/utils/request";
+import { TaskServiceApi, convEventsUrl, taskStreamUrl } from "@/modules/chat/utils/request";
 import { resolveCoreAssetUrl } from "@/modules/knowledge/utils/imageUrl";
 import UIUtils from "@/modules/chat/utils/ui";
 import { WORKFLOW_GRAPH_REFRESH_EVENT } from "@/components/StateGraphModal";
@@ -15,6 +15,7 @@ import type { ChatSource } from "@/modules/chat/utils/sourceAdapter";
 
 let convReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let workflowRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+const taskReconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 function scheduleWorkflowSessionRefresh(conversationId: string, delayMs = 100): void {
   if (workflowRefreshTimer) clearTimeout(workflowRefreshTimer);
@@ -113,6 +114,13 @@ export interface SubAgentTask {
   execution_log: TaskLogEntry[];
 }
 
+const TERMINAL: TaskStatus[] = [
+  "succeeded",
+  "failed",
+  "interrupted",
+  "canceled",
+];
+
 const WRITER_MARKDOWN_STREAM_SLOT_IDS = new Set(['outline_document', 'draft_document']);
 function artifactKey(a: TaskArtifact): string {
   return `${a.slot}#${a.seq}`;
@@ -138,6 +146,9 @@ interface TaskCenterStore {
   // in-flight loadConversationTasks calls keyed by conversation_id.
   _loadingTasks: Record<string, boolean>;
   _loadingArtifacts: Record<string, boolean>;
+  // Workflow task streams carry token/tool/progress events that Core deliberately
+  // omits from the conversation stream. Independent tasks stay on that single stream.
+  _streams: Record<string, SSE>;
   // The only background execution stream: one connection for the active conversation.
   _convStream: SSE | null;
 
@@ -145,6 +156,8 @@ interface TaskCenterStore {
   upsertTask: (conversationId: string, task: Partial<SubAgentTask> & { task_id: string }) => void;
   applyTaskEvent: (conversationId: string, taskId: string, event: any) => void;
   loadArtifactStreamContent: (conversationId: string, taskId: string, artifact: TaskArtifact) => Promise<void>;
+  subscribeTask: (conversationId: string, taskId: string) => void;
+  unsubscribeTask: (taskId: string) => void;
   loadConversationTasks: (conversationId: string) => Promise<void>;
   loadConversationArtifacts: (conversationId: string) => Promise<void>;
   refreshConversationExecution: (conversationId: string) => Promise<void>;
@@ -154,10 +167,24 @@ interface TaskCenterStore {
   reset: (conversationId: string) => void;
 }
 
+function appendTaskLogEntry(log: TaskLogEntry[], entry: TaskLogEntry): TaskLogEntry[] {
+  const previous = log[log.length - 1];
+  if (
+    previous
+    && (entry.type === "text" || entry.type === "think")
+    && previous.type === entry.type
+  ) {
+    const next = log.slice();
+    next[next.length - 1] = { ...previous, content: previous.content + entry.content };
+    return next;
+  }
+  return [...log, entry];
+}
+
 // Convert persisted sub_agent_steps rows back to TaskLogEntry[] for display.
 function stepsToExecutionLog(steps: any[]): TaskLogEntry[] {
   if (!steps || steps.length === 0) return [];
-  return steps.flatMap((s): TaskLogEntry[] => {
+  const entries = steps.flatMap((s): TaskLogEntry[] => {
     const role: string = s.role ?? "";
     const content = s.content ?? {};
     if (role === "think") {
@@ -186,6 +213,7 @@ function stepsToExecutionLog(steps: any[]): TaskLogEntry[] {
     }
     return [];
   });
+  return entries.reduce<TaskLogEntry[]>(appendTaskLogEntry, []);
 }
 
 export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
@@ -194,6 +222,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
   activeConversationId: '',
   _loadingTasks: {},
   _loadingArtifacts: {},
+  _streams: {},
   _convStream: null,
 
   getTasks: (conversationId) => {
@@ -397,20 +426,20 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
         case "text": {
           const textContent = event.text ?? "";
           if (textContent) {
-            task.execution_log = [
-              ...(task.execution_log ?? []),
+            task.execution_log = appendTaskLogEntry(
+              task.execution_log ?? [],
               { type: "text", content: textContent },
-            ];
+            );
           }
           break;
         }
         case "think": {
           const thinkContent = event.think ?? "";
           if (thinkContent) {
-            task.execution_log = [
-              ...(task.execution_log ?? []),
+            task.execution_log = appendTaskLogEntry(
+              task.execution_log ?? [],
               { type: "think", content: thinkContent },
-            ];
+            );
           }
           break;
         }
@@ -537,6 +566,98 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
       });
     }
   },
+
+  subscribeTask: (conversationId, taskId) => {
+    if (!conversationId || !taskId || get()._streams[taskId]) return;
+    const task = get().getTasks(conversationId).find((item) => item.task_id === taskId);
+    if (!task || task.agent_type !== "workflow_step") return;
+    if (TERMINAL.includes(task.status)) return;
+
+    const stream = new SSE(taskStreamUrl(taskId), {
+      method: Method.GET,
+      headers: {
+        Accept: "text/event-stream",
+        ...AgentAppsAuth.getAuthHeaders(),
+      },
+      timeout: 3600000,
+      callbacks: {
+        message: (event: CustomEvent) => {
+          if (get().activeConversationId !== conversationId) return;
+          const raw = (event as any).data;
+          if (!raw || raw === "[DONE]") return;
+          const payload = UIUtils.jsonParser(raw);
+          if (!payload?.type) return;
+
+          get().applyTaskEvent(conversationId, taskId, payload);
+          if (payload.type === "artifact") {
+            void get().loadArtifactStreamContent(conversationId, taskId, {
+              slot: payload.slot,
+              content_type: payload.content_type,
+              seq: payload.seq ?? 1,
+              value: payload.value,
+            });
+          }
+          if (payload.type === "done" || payload.type === "error") {
+            get().unsubscribeTask(taskId);
+            void get().loadConversationTasks(conversationId);
+            void get().loadConversationArtifacts(conversationId);
+          }
+        },
+        error: () => {
+          const currentStream = get()._streams[taskId];
+          try { currentStream?.close(); } catch { /* ignore */ }
+          set((state) => {
+            const streams = { ...state._streams };
+            delete streams[taskId];
+            const tasks = state.tasksByConversation[conversationId] ?? [];
+            return {
+              _streams: streams,
+              tasksByConversation: {
+                ...state.tasksByConversation,
+                [conversationId]: tasks.map((item) => item.task_id === taskId
+                  ? { ...item, execution_log: [], artifacts: [], artifact_streams: [] }
+                  : item),
+              },
+            };
+          });
+
+          const currentTask = get().getTasks(conversationId).find(
+            (item) => item.task_id === taskId,
+          );
+          if (
+            get().activeConversationId !== conversationId
+            || (currentTask && TERMINAL.includes(currentTask.status))
+          ) {
+            return;
+          }
+          void get().loadConversationTasks(conversationId);
+          if (!taskReconnectTimers.has(taskId)) {
+            taskReconnectTimers.set(taskId, setTimeout(() => {
+              taskReconnectTimers.delete(taskId);
+              if (get().activeConversationId === conversationId) {
+                get().subscribeTask(conversationId, taskId);
+              }
+            }, 1000));
+          }
+        },
+      },
+    });
+    set((state) => ({ _streams: { ...state._streams, [taskId]: stream } }));
+  },
+
+  unsubscribeTask: (taskId) => {
+    const reconnectTimer = taskReconnectTimers.get(taskId);
+    if (reconnectTimer) clearTimeout(reconnectTimer);
+    taskReconnectTimers.delete(taskId);
+    const stream = get()._streams[taskId];
+    set((state) => {
+      const streams = { ...state._streams };
+      delete streams[taskId];
+      return { _streams: streams };
+    });
+    try { stream?.close(); } catch { /* ignore */ }
+  },
+
   loadConversationTasks: async (conversationId) => {
     if (!conversationId) {
       return;
@@ -572,6 +693,11 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           [conversationId]: normalized,
         },
       }));
+      normalized.forEach((task) => {
+        if (!TERMINAL.includes(task.status)) {
+          get().subscribeTask(conversationId, task.task_id);
+        }
+      });
     } catch {
       // ignore load failures; panel just stays empty.
     } finally {
@@ -650,10 +776,6 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           const replayed = event.replayed === true;
           if (type === 'task_created' && payload?.task_id) {
             if (replayed) return;
-            if (payload.agent_type === 'workflow_step') {
-              scheduleWorkflowSessionRefresh(conversationId);
-              return;
-            }
             get().upsertTask(conversationId, {
               task_id: payload.task_id,
               trigger_history_id: payload.trigger_history_id,
@@ -663,6 +785,11 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
               mode: payload.mode,
               status: payload.status || 'pending',
             });
+            get().subscribeTask(conversationId, payload.task_id);
+            if (payload.agent_type === 'workflow_step') {
+              scheduleWorkflowSessionRefresh(conversationId);
+              return;
+            }
           } else if (type === 'task_updated' && payload?.task_id && payload?.event) {
             if (replayed) return;
             const taskEvent = payload.event;
@@ -696,8 +823,17 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
               },
             }));
             useWorkflowStore.getState().setAutoRunning(conversationId, true);
+          } else if (type === 'workflow_runtime_updated') {
+            if (replayed) return;
+            window.dispatchEvent(
+              new CustomEvent(WORKFLOW_GRAPH_REFRESH_EVENT, { detail: { conversationId } }),
+            );
+            if (payload?.change === 'done' || payload?.change === 'error') {
+              void get().loadConversationTasks(conversationId);
+              void get().loadConversationArtifacts(conversationId);
+            }
+            scheduleWorkflowSessionRefresh(conversationId);
           } else if (
-            type === 'workflow_runtime_updated' ||
             type === 'step_waiting' ||
             type === 'workflow_completed' ||
             type === 'workflow_error'
@@ -773,10 +909,14 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
 
   unsubscribeConvEvents: (conversationId) => {
     if (get().activeConversationId !== conversationId) return;
+    const convStream = get()._convStream;
     if (convReconnectTimer) clearTimeout(convReconnectTimer);
     convReconnectTimer = null;
     cancelWorkflowSessionRefresh();
-    try { get()._convStream?.close(); } catch { /* ignore */ }
     set({ activeConversationId: '', _convStream: null });
+    (get().tasksByConversation[conversationId] ?? []).forEach((task) => {
+      get().unsubscribeTask(task.task_id);
+    });
+    try { convStream?.close(); } catch { /* ignore */ }
   },
 }));

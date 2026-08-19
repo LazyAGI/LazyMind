@@ -213,43 +213,6 @@ func TestDBArtifactSinkIsIdempotentAndEmitsRevisionEvents(t *testing.T) {
 	}
 }
 
-func TestDBArtifactSinkAdvancesPastDeselectedSingleRevision(t *testing.T) {
-	db := executorComponentDB(t, &orm.WorkflowSession{}, &orm.WorkflowSlotRevision{},
-		&orm.WorkflowHumanArtifact{}, &orm.WorkflowEvent{})
-	now := time.Now().UTC()
-	if err := db.Create(&orm.WorkflowSession{ID: "session-retry", ConversationID: "conversation-1", WorkflowID: "workflow-1",
-		CreateUserID: "user-1", Status: "active", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
-		t.Fatal(err)
-	}
-	sink := DBArtifactSink{DB: db}
-	firstAttempt := AttemptContext{AttemptID: "attempt-first", SessionID: "session-retry", StepID: "write", AttemptNo: 1}
-	if err := sink.Save(context.Background(), firstAttempt,
-		Artifact{Slot: "report", ContentType: "text", Seq: 1, Value: json.RawMessage(`{"text":"first"}`)}); err != nil {
-		t.Fatal(err)
-	}
-	if err := db.Model(&orm.WorkflowSlotRevision{}).
-		Where("session_id = ? AND slot_id = ?", "session-retry", "report").
-		Update("selected", false).Error; err != nil {
-		t.Fatal(err)
-	}
-
-	retryAttempt := AttemptContext{AttemptID: "attempt-retry", SessionID: "session-retry", StepID: "write", AttemptNo: 2}
-	if err := sink.Save(context.Background(), retryAttempt,
-		Artifact{Slot: "report", ContentType: "text", Seq: 1, Value: json.RawMessage(`{"text":"retry"}`)}); err != nil {
-		t.Fatal(err)
-	}
-
-	var revisions []orm.WorkflowSlotRevision
-	if err := db.Where("session_id = ? AND slot_id = ?", "session-retry", "report").
-		Order("revision").Find(&revisions).Error; err != nil {
-		t.Fatal(err)
-	}
-	if len(revisions) != 2 || revisions[0].Revision != 1 || revisions[0].Selected ||
-		revisions[1].Revision != 2 || !revisions[1].Selected {
-		t.Fatalf("revisions=%#v", revisions)
-	}
-}
-
 func TestDBArtifactSinkPreservesEveryListArtifact(t *testing.T) {
 	db := executorComponentDB(t, &orm.WorkflowSession{}, &orm.WorkflowSlotRevision{},
 		&orm.WorkflowHumanArtifact{}, &orm.WorkflowEvent{}, &orm.WorkflowSlotOrder{})

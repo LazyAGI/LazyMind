@@ -134,6 +134,12 @@ export function exportContextPrompt(payload: Record<string, unknown>) {
     .then((response) => response.data as Blob);
 }
 
+// Detailed SubAgent stream. The conversation stream discovers tasks and
+// workflow lifecycle changes; this stream carries task text, thinking, tools,
+// artifacts, and progress without bloating the conversation event log.
+export const taskStreamUrl = (taskId: string) =>
+  `${coreApiBaseUrl}/tasks/${encodeURIComponent(taskId)}:stream`;
+
 // Conversation-level events SSE endpoint.
 export const convEventsUrl = (conversationId: string) =>
   `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/events`;

@@ -5,7 +5,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import tempfile
 import uuid
 from pathlib import Path
 from typing import Any
@@ -33,6 +32,16 @@ FONT_CANDIDATES = (
     '/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc',
     '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
 )
+
+
+def _run_root() -> Path:
+    from lazymind.chat.engine.subagent.context import require_context
+    workspace = str(require_context().workspace_path or '').strip()
+    if not workspace:
+        raise RuntimeError('The active Workflow workspace is unavailable.')
+    root = Path(workspace) / 'bid-proposal-images' / uuid.uuid4().hex
+    root.mkdir(parents=True, exist_ok=True)
+    return root
 
 
 def _font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -475,8 +484,7 @@ def render_proposal_image(spec_json: str, image_type: str = 'architecture',
     if not filename.lower().endswith('.png'):
         filename += '.png'
     filename = re.sub(r'[^A-Za-z0-9._-]+', '_', filename).strip('._') or f'{kind}.png'
-    root = Path(tempfile.gettempdir()) / 'bid_tech_proposal_writer' / 'images' / uuid.uuid4().hex
-    root.mkdir(parents=True, exist_ok=True)
+    root = _run_root()
     output = root / filename
     width, height = 1920, 1080
     image = Image.new('RGB', (width, height), palette['bg'])

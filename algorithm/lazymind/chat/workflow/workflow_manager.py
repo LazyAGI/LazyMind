@@ -16,9 +16,11 @@ import httpx
 import lazyllm
 
 from lazymind.chat.engine.tools.intent_writer import enable_workflow_intent_scopes
+from lazymind.chat.workflow.artifacts import artifact_inventory
 from lazymind.workflow_sdk import AdvanceRequest, StepCommand, WorkflowClient, WorkflowClientError
 from lazymind.workflow_toolkit import (
     AgentWorkflowToolProjection, HostWorkflowToolkit, StepCommandInput,
+    workflow_package_input_types,
 )
 
 LOG = logging.getLogger(__name__)
@@ -158,21 +160,6 @@ def _artifact_by_handle(toolkit: HostWorkflowToolkit, session_id: str,
     return matches[0]
 
 
-def _artifact_inventory(response: Dict[str, Any]) -> Dict[str, Any]:
-    """Return list metadata only; artifact bodies are available through read_artifact."""
-    result = dict(response)
-    values = response.get('artifacts') if isinstance(response, dict) else []
-    result['artifacts'] = [{
-        key: item[key] for key in (
-            'artifact_id', 'slot_id', 'slot', 'content_type', 'revision', 'list_index',
-            'selected', 'caption', 'created_at',
-        ) if key in item
-    } for item in (values or []) if isinstance(item, dict)]
-    result['content_omitted'] = True
-    result['read_hint'] = 'Use read_artifact with an exact slot handle only when content is needed.'
-    return result
-
-
 def _safe_session_tools(
     toolkit: HostWorkflowToolkit,
     session: Union[str, Callable[[], str]],
@@ -246,7 +233,7 @@ def _safe_session_tools(
 
     def list_artifacts() -> Dict[str, Any]:
         """List selected Artifacts for this Session."""
-        return _artifact_inventory(toolkit.list_artifacts(session_id()))
+        return artifact_inventory(toolkit.list_artifacts(session_id()))
 
     def read_artifact(artifact_ref: str) -> Dict[str, Any]:
         """Read a selected Artifact by exact slot handle such as report or images[0].
@@ -529,19 +516,32 @@ def _workflow_trigger_tools(
         ) -> Any:
             def run_trigger(input_bindings: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
                 effective_context = bound_query
+                client = _client()
+                package = client.get_workflow(bound_id, bound_revision).result
+                input_types = workflow_package_input_types(package)
                 resolved_bindings: Dict[str, Any] = {}
                 for material_id, attachment_ref in (input_bindings or {}).items():
                     from lazymind.chat.engine.subagent.tools import _resolve_attachment
                     binding = str(attachment_ref or '').strip()
                     if not binding:
                         raise WorkflowClientError('WORKFLOW_INPUT_EMPTY', f'Input {material_id} is empty.')
+                    material_type = input_types.get(str(material_id), '')
+                    if material_type and material_type != 'file':
+                        resolved_bindings[material_id] = _import_text_binding(
+                            str(material_id), binding,
+                        )
+                        continue
                     path, error = _resolve_attachment(binding)
+                    if material_type == 'file' and (error or not path):
+                        raise WorkflowClientError(
+                            'ATTACHMENT_NOT_SELECTED',
+                            error or 'The referenced conversation attachment was not found.',
+                        )
                     resolved_bindings[material_id] = (
-                        _import_attachment(path) if not error and path
+                        _import_attachment(path)
+                        if path and not error and material_type in {'', 'file'}
                         else _import_text_binding(str(material_id), binding)
                     )
-                client = _client()
-                package = client.get_workflow(bound_id, bound_revision).result
                 toolkit = HostWorkflowToolkit(
                     _client,
                     allowed_workflow_ids=[bound_id],
@@ -646,8 +646,8 @@ def _workflow_trigger_tools(
             'conversation attachments, and scalar text/json material IDs to their literal '
             'values. Never pass a filesystem path for a file material.'
             if attachments_available else
-            ' No user attachments are available; start without input bindings so the '
-            'Workflow can generate from text or collect images itself.'
+            ' No user attachments are available: do not bind file materials, but pass '
+            'literal values for required scalar text/json materials.'
         )
         trigger_workflow.__doc__ = description + attachment_guidance
         tools.append(trigger_workflow)

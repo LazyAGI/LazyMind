@@ -164,7 +164,7 @@ func TestListTasksByConversationForUserEnforcesOwnership(t *testing.T) {
 	}
 }
 
-func TestListTasksByConversationForUserExcludesWorkflowAttempts(t *testing.T) {
+func TestListTasksByConversationForUserIncludesOwnedWorkflowAttempts(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
 	for _, input := range []CreateTaskInput{
@@ -179,8 +179,8 @@ func TestListTasksByConversationForUserExcludesWorkflowAttempts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(tasks) != 1 || tasks[0].ID != "independent" {
-		t.Fatalf("public tasks = %#v, want only independent task", tasks)
+	if len(tasks) != 2 || tasks[0].ID != "independent" || tasks[1].ID != "workflow" {
+		t.Fatalf("public tasks = %#v, want independent and workflow tasks", tasks)
 	}
 }
 

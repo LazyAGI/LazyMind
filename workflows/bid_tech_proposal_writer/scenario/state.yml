@@ -229,7 +229,9 @@ steps:
       - preserve any source-mandated chapter names/order, otherwise use the software
         project skeleton: 项目背景、需求分析、总体架构、功能设计、集成接口、实施运维、
         售后服务、项目价值 as applicable;
-      - keep the leaf count practical for the requested total, normally 12–30.
+      - keep the leaf count practical for the requested total: never exceed
+        floor(word_target / 100), with 3–30 leaves overall; 12–30 is only the normal
+        range when the requested total is large enough.
 
       Call validate_and_allocate_outline(outline_json=<candidate>,
       requirements_markdown=<requirements>, disqualification_markdown=<items>,
@@ -316,10 +318,11 @@ steps:
       from the authoritative technical_requirements and disqualification_items. Ignore
       the single H1 document title and map H2..H5 to chapter levels 1..4. Map every
       requirement and D-NNN ID exactly once or more, then call validate_and_allocate_outline.
-      Fix all errors until PASS using generation_parameters.word_target. Save the resulting
-      normalized object as effective_outline
-      and its report as effective_outline_check_report. Never reuse the old structure when
-      a human has changed the Markdown outline.
+      Fix all errors until PASS using generation_parameters.word_target. Call
+      bid_writer_save_effective_outline with the resulting normalized object, then save its
+      returned JSON file path as effective_outline with content_type="file" and save the
+      report as effective_outline_check_report. Never save effective_outline as inline JSON,
+      and never reuse the old structure when a human has changed the Markdown outline.
 
       Select exactly one writing mode:
 
@@ -381,6 +384,7 @@ steps:
     tools:
       - bid_writer_read_markdown
       - validate_and_allocate_outline
+      - bid_writer_save_effective_outline
       - bid_writer_update_context
       - bid_writer_plan_sections
       - bid_writer_write_sections
@@ -527,7 +531,7 @@ steps:
       uncovered requirement IDs, uncovered D-NNN items, selected delivery-file validity and
       actionable remediation. For DOCX also validate the Office package and embedded-image
       count; for Markdown validate that the file matches the final Markdown exactly. A total
-      total word count below the user's minimum target, any missing leaf, any uncovered
+      word count below the user's minimum target, any missing leaf, any uncovered
       explicit rejection item, fewer than six generated images, or an invalid selected
       delivery file must not be PASS. Text above the minimum target is valid and must not
       lower the status by itself.

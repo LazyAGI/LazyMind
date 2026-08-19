@@ -379,29 +379,14 @@ func ListConversationArtifacts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, artifact := range subagentArtifacts {
-		contentType, value, caption, durable := subagent.ResolveDurableWorkflowArtifact(
-			r.Context(), db, artifact.TaskID, artifact.Slot, artifact.Seq,
-			artifact.ContentType, artifact.Value, artifact.Caption,
-		)
-		if durable {
-			value = subagent.SignArtifactImageValue(contentType, value)
-		} else {
-			value = subagent.SignArtifactValue(contentType, value, artifact.WorkspacePath)
-		}
-		historyID := artifact.TriggerHistoryID
-		if historyID == "" {
-			var history orm.ChatHistory
-			if db.WithContext(r.Context()).Where(
-				"conversation_id = ? AND create_time <= ?", conversationID, artifact.CreatedAt,
-			).Order("create_time DESC").First(&history).Error == nil {
-				historyID = history.ID
-			}
-		}
 		out = append(out, ConversationArtifactDTO{
 			ArtifactID: artifact.ArtifactID, ConversationID: conversationID,
-			HistoryID: historyID, ProducerType: "subagent", ProducerID: artifact.TaskID,
-			Slot: artifact.Slot, ContentType: contentType, Seq: artifact.Seq,
-			Value: value, Caption: caption, CreatedAt: artifact.CreatedAt,
+			HistoryID: artifact.TriggerHistoryID, ProducerType: "subagent", ProducerID: artifact.TaskID,
+			Slot: artifact.Slot, ContentType: artifact.ContentType, Seq: artifact.Seq,
+			Value: subagent.SignArtifactValue(
+				artifact.ContentType, artifact.Value, artifact.WorkspacePath,
+			),
+			Caption: artifact.Caption, CreatedAt: artifact.CreatedAt,
 		})
 	}
 	sort.SliceStable(out, func(i, j int) bool {

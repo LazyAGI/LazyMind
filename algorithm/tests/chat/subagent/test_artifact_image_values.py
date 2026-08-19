@@ -1,5 +1,6 @@
 import lazyllm
 
+from lazymind.chat.engine.subagent import tools as subagent_tools
 from lazymind.chat.engine.subagent.context import SubAgentContext, set_context
 from lazymind.chat.engine.subagent.tools import (
     _build_artifact_value,
@@ -91,6 +92,31 @@ def test_get_artifact_preserves_remote_list_input_order(tmp_path):
 
     all_items = get_artifact('effect_images')['result']['artifacts']
     second = get_artifact('effect_images', sort_order=2)['result']['artifacts']
+    ctx.params['remote_inputs']['empty_images'] = []
+    empty = get_artifact('empty_images')['result']
 
     assert [item['value']['path'] for item in all_items] == paths
     assert [item['value']['path'] for item in second] == paths[1:]
+    assert empty['status'] == 'empty'
+
+
+def test_find_artifact_does_not_treat_plain_text_as_a_path(monkeypatch, tmp_path):
+    set_context(_context(str(tmp_path)))
+    monkeypatch.setattr(
+        subagent_tools,
+        'get_artifact',
+        lambda slot, sort_order=None: {
+            'success': True,
+            'result': {
+                'status': 'ok',
+                'artifacts': [{'value': {'text': 'ordinary artifact content'}}],
+            },
+        },
+    )
+    lazyllm.globals['agentic_config'] = {'workflow_session_id': 'session-1'}
+
+    result = subagent_tools.find_artifact('report')
+
+    assert result['success'] is True
+    assert result['result']['status'] == 'error'
+    assert 'no resolvable path' in result['result']['message']

@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
+import yaml
 from pydantic import BaseModel, ConfigDict, Field
 
 from lazymind.workflow_sdk import (
@@ -23,34 +24,84 @@ from lazymind.workflow_sdk import (
 LOG = logging.getLogger(__name__)
 
 
+def _workflow_document(files: Dict[str, Any]) -> Dict[str, Any]:
+    encoded = files.get('workflow.yaml')
+    if encoded is None:
+        return {}
+    source = base64.b64decode(encoded) if isinstance(encoded, str) else bytes(encoded)
+    document = yaml.safe_load(source.decode('utf-8')) or {}
+    return document if isinstance(document, dict) else {}
+
+
+def _declared_workflow_tools(files: Dict[str, Any]) -> Dict[str, str]:
+    document = _workflow_document(files)
+    declared: Dict[str, str] = {}
+    for item in document.get('tool_scripts') or []:
+        if not isinstance(item, dict):
+            continue
+        path = str(item.get('path') or '').strip()
+        if (not path.startswith('scripts/') or not path.endswith('.py')
+                or '..' in path.split('/')):
+            continue
+        for raw_name in item.get('functions') or []:
+            name = str(raw_name or '').strip()
+            if not name.isidentifier():
+                continue
+            previous = declared.get(name)
+            if previous is not None and previous != path:
+                raise ValueError(f'Workflow tool is declared by multiple scripts: {name}')
+            declared[name] = path
+    return declared
+
+
+def workflow_package_input_types(package: Dict[str, Any]) -> Dict[str, str]:
+    """Return external material types declared by a published package."""
+    files = package.get('files') if isinstance(package.get('files'), dict) else {}
+    document = _workflow_document(files)
+    result: Dict[str, str] = {}
+    for slot in document.get('slots') or []:
+        if not isinstance(slot, dict):
+            continue
+        if slot.get('external') is not True and slot.get('producer') != 'external':
+            continue
+        material_id = str(slot.get('id') or '').strip()
+        if material_id:
+            result[material_id] = str(slot.get('type') or 'text').strip().lower()
+    return result
+
+
 def load_workflow_package_tools(
     package: Dict[str, Any], names: List[str], workflow_id: str, revision_id: str,
 ) -> Dict[str, Any]:
-    """Load named callables from an already validated Workflow package."""
+    """Load explicitly declared callables from an already validated package."""
     files = package.get('files') if isinstance(package.get('files'), dict) else {}
-    remaining = set(names)
+    declarations = _declared_workflow_tools(files)
+    remaining = {name for name in names if name in declarations}
     resolved: Dict[str, Any] = {}
-    for path in sorted(files):
+    for module_index, path in enumerate(sorted({declarations[name] for name in remaining})):
         if not remaining:
             break
-        if not path.startswith('scripts/') or not path.endswith('.py'):
+        encoded = files.get(path)
+        if encoded is None:
             continue
-        encoded = files[path]
         source = base64.b64decode(encoded) if isinstance(encoded, str) else bytes(encoded)
         module = types.ModuleType(
-            f'_lazymind_workflow_{revision_id.replace("-", "_")}_{len(resolved)}'
+            f'_lazymind_workflow_{revision_id.replace("-", "_")}_{module_index}'
         )
         module.__file__ = f'{workflow_id}@{revision_id}/{path}'
         exec(compile(source.decode('utf-8'), module.__file__, 'exec'), module.__dict__)
         for name in tuple(remaining):
+            if declarations[name] != path:
+                continue
             candidate = module.__dict__.get(name)
             if callable(candidate):
                 if not str(getattr(candidate, '__doc__', '') or '').strip():
                     candidate.__doc__ = f'Execute the published Workflow tool {name}.'
                 resolved[name] = candidate
                 remaining.remove(name)
-    if remaining:
-        LOG.warning('Workflow revision %s does not provide tools %s', revision_id, sorted(remaining))
+    missing = sorted(set(names) - set(resolved))
+    if missing:
+        LOG.warning('Workflow revision %s does not provide declared tools %s', revision_id, missing)
     return resolved
 
 
