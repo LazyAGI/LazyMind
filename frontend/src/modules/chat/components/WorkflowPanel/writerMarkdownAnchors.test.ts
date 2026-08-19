@@ -4,9 +4,11 @@ import {
   applyWriterMarkdownInternalReference,
   collectWriterMarkdownOutline,
   collectWriterMarkdownReferenceTargets,
+  protectWriterMarkdownHeadingAnchors,
   removeWriterMarkdownInternalReference,
   restoreWriterMarkdownInternalReferenceLabels,
   writerMarkdownForEditor,
+  writerMarkdownForEditing,
   writerMarkdownForSave,
   writerMarkdownInternalReference,
 } from './writerMarkdownAnchors';
@@ -25,6 +27,52 @@ describe('Writer Markdown system anchors', () => {
 
     expect(writerMarkdownForEditor(source)).toBe(source);
     expect(writerMarkdownForSave(source)).toBe(source);
+  });
+
+  it('keeps heading anchors out of the editable document without leaving blank blocks', () => {
+    const source = [
+      '# 标题',
+      '',
+      '',
+      '<a id="block-sec-1"></a>',
+      '## 1 章节',
+      '',
+      '<a id="block-image-1"></a>',
+      '![插图](https://example.com/image.png)',
+    ].join('\n');
+
+    expect(writerMarkdownForEditing(source)).toBe([
+      '# 标题',
+      '',
+      '## 1 章节',
+      '',
+      '<a id="block-image-1" />',
+      '![插图](https://example.com/image.png)',
+    ].join('\n'));
+  });
+
+  it('restores stable heading anchors on save and removes anchors for deleted headings', () => {
+    const source = [
+      '# 标题',
+      '',
+      '<a id="block-sec-1"></a>',
+      '## 1 第一章',
+      '',
+      '<a id="block-sec-2"></a>',
+      '## 2 第二章',
+    ].join('\n');
+    const edited = ['# 标题', '', '## 2 第二章'].join('\n');
+    const restored = protectWriterMarkdownHeadingAnchors(source, edited);
+
+    expect(restored).toContain('<a id="block-sec-2" />\n## 2 第二章');
+    expect(restored).not.toContain('block-sec-1');
+    expect(restored).not.toContain('\n\n\n');
+  });
+
+  it('assigns an anchor when a document starts with a section heading', () => {
+    const restored = protectWriterMarkdownHeadingAnchors('', '## 新章节');
+
+    expect(restored).toMatch(/^<a id="block-user-[^"]+" \/>\n## 新章节$/);
   });
 
   it('identifies only IR paragraphs that contain a system anchor', () => {

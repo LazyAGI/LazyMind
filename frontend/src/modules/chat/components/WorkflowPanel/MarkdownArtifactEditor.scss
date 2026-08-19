@@ -1,4 +1,5 @@
 .writer-markdown-editor {
+  --writer-markdown-page-max-width: 780px;
   position: relative;
   container: writer-markdown-editor / inline-size;
   display: flex;
@@ -9,6 +10,10 @@
   border-radius: 8px;
   overflow: hidden;
   background: var(--color-bg-base, #fff);
+}
+
+.writer-markdown-editor--width-wide {
+  --writer-markdown-page-max-width: 1080px;
 }
 
 .writer-markdown-editor__document-layout {
@@ -28,6 +33,58 @@
 .writer-markdown-editor__main {
   min-width: 0;
   grid-column: 2;
+}
+
+.writer-markdown-editor__display-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 34px;
+  padding: 2px 4px 8px;
+  border-bottom: 1px solid #edf1f5;
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.writer-markdown-editor__width-control,
+.writer-markdown-editor__width-options {
+  display: inline-flex;
+  align-items: center;
+}
+
+.writer-markdown-editor__width-control { gap: 7px; }
+
+.writer-markdown-editor__width-label {
+  color: #64748b;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.writer-markdown-editor__width-options {
+  padding: 2px;
+  border: 1px solid #dbe3ee;
+  border-radius: 7px;
+  background: #f8fafc;
+}
+
+.writer-markdown-editor .writer-markdown-editor__width-option {
+  min-height: 24px;
+  padding: 2px 9px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #64748b;
+  line-height: 1;
+}
+
+.writer-markdown-editor .writer-markdown-editor__width-option:hover {
+  background: #eef2f7;
+}
+
+.writer-markdown-editor .writer-markdown-editor__width-option[aria-pressed='true'] {
+  background: #fff;
+  color: #1e40af;
+  box-shadow: 0 1px 3px rgb(15 23 42 / 10%);
+  font-weight: 600;
 }
 
 .writer-markdown-editor__outline-rail {
@@ -506,6 +563,9 @@
 }
 
 .writer-markdown-editor__surface .mdxeditor-root-contenteditable {
+  box-sizing: border-box;
+  width: min(100%, var(--writer-markdown-page-max-width));
+  margin: 0 auto;
   min-height: 300px;
   padding: 20px 24px;
 }
