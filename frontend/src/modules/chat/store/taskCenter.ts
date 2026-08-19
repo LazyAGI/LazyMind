@@ -34,6 +34,8 @@ export interface TaskArtifactStream {
   stream_id: string;
   chunk_index: number;
   content: string;
+  /** Exact deltas received from the task SSE stream, in server order. */
+  deltas?: string[];
   state: "streaming" | "ended" | "aborted" | "ready";
   message?: string;
   artifact?: TaskArtifact;
@@ -330,6 +332,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             stream_id: event.stream_id,
             chunk_index: event.chunk_index ?? 1,
             content: "",
+            deltas: [],
             state: "streaming",
           });
           task.artifact_streams = next;
@@ -345,11 +348,15 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           // The server guarantees monotonically increasing chunk indexes. Ignore replayed
           // or out-of-order chunks so reconnects never duplicate preview text.
           if (chunkIndex <= stream.chunk_index) break;
+          const delta = typeof event.delta === "string" ? event.delta : "";
           const nextStreams = streams.slice();
           nextStreams[streamIndex] = {
             ...stream,
             chunk_index: chunkIndex,
-            content: stream.content + (typeof event.delta === "string" ? event.delta : ""),
+            content: stream.content + delta,
+            // Preserve backend event boundaries. The renderer can expose every
+            // server delta even when XHR delivers several SSE frames together.
+            deltas: [...(stream.deltas ?? (stream.content ? [stream.content] : [])), delta],
             state: "streaming",
           };
           task.artifact_streams = nextStreams;

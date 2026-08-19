@@ -954,7 +954,7 @@ function NamedTabSlot({
   const isImageList = slotDef.type === 'image' && slotDef.cardinality === 'list';
   const isDraggable = Boolean(slotDef.ordered) && !readOnly;
   const showStream = Boolean(artifactStream && (
-    revisions.length === 0 || artifactStream.state !== 'ready'
+    revisions.length === 0 || artifactStream.state === 'streaming'
   ));
 
   return (
