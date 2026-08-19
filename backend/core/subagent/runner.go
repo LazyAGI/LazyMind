@@ -229,9 +229,10 @@ func routeEventWithWorkflowHooks(ctx context.Context, db *gorm.DB, stateStore st
 		// Draft preview events are intentionally ephemeral: append to the Task
 		// stream below, without creating DB steps, artifacts, or workflow revisions.
 	}
-	if isArtifactStreamEvent(ev.Type) {
-		// Deliver Draft preview events immediately to SSE clients connected to
-		// this process, without waiting for the Redis replay copy.
+	if isArtifactStreamEvent(ev.Type) || ev.Type == "progress" ||
+		ev.Type == "done" || ev.Type == "error" {
+		// Deliver preview, phase, and terminal updates immediately to connected
+		// clients, without waiting for the Redis replay copy.
 		taskLiveEvents.publish(ev.TaskID, ev)
 	}
 	_ = AppendStreamEvent(ctx, stateStore, ev.TaskID, ev)

@@ -393,6 +393,16 @@ func tailRedisStream(
 		case <-ctx.Done():
 			return
 		case ev := <-liveEvents:
+			if ev.Type == "progress" {
+				writeTaskSSE(w, flusher, ev)
+				continue
+			}
+			if ev.Type == "done" || ev.Type == "error" {
+				writeTaskSSE(w, flusher, ev)
+				_, _ = w.Write([]byte("data: [DONE]\n\n"))
+				flusher.Flush()
+				return
+			}
 			if !isArtifactStreamEvent(ev.Type) {
 				continue
 			}
@@ -473,6 +483,7 @@ func pollDBUntilTerminal(
 	lastStepSeq int,
 ) {
 	lastProgress := -1
+	lastPhase := ""
 	sentArtifacts := map[string]bool{}
 	lastHeartbeat := time.Now()
 	heartbeatsEnabled := false
@@ -491,12 +502,13 @@ func pollDBUntilTerminal(
 			heartbeatsEnabled = isWriterDraftStreamTask(t)
 			heartbeatsConfigured = true
 		}
-		if t.ProgressPct != lastProgress {
+		if t.ProgressPct != lastProgress || t.CurrentPhase != lastPhase {
 			writeTaskSSE(w, flusher, TaskEvent{
 				Type: "progress", TaskID: taskID,
 				Progress: t.ProgressPct, CurrentPhase: t.CurrentPhase, EstimatedSec: t.EstimatedSec,
 			})
 			lastProgress = t.ProgressPct
+			lastPhase = t.CurrentPhase
 		}
 		steps, _ := LoadSteps(ctx, db, taskID)
 		for i := range steps {

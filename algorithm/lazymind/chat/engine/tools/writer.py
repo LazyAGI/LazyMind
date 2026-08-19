@@ -6,12 +6,13 @@ import hashlib
 import os
 import re
 import tempfile
+import time
 import uuid
 from collections.abc import Callable
 from copy import deepcopy
 from pathlib import Path
-from queue import Queue
-from threading import RLock
+from queue import Empty, Queue
+from threading import Event, RLock
 from typing import Any, ClassVar
 
 from lazyllm import LOG, AutoModel, ThreadPoolExecutor
@@ -1122,6 +1123,7 @@ class WriterToolkitBase:
         writing_context_json: str,
         on_delta: Callable[[str], None],
         on_section_end: Callable[[], None] | None = None,
+        on_progress: Callable[[dict[str, Any]], None] | None = None,
         visual_plan_json: str = '',
         checkpoint_dir: str = '',
     ) -> str:
@@ -1133,6 +1135,7 @@ class WriterToolkitBase:
             representation='markdown',
             on_delta=on_delta,
             on_section_end=on_section_end,
+            on_progress=on_progress,
             visual_plan_json=visual_plan_json,
             checkpoint_dir=checkpoint_dir,
         )
@@ -1144,6 +1147,7 @@ class WriterToolkitBase:
         writing_context_json: str,
         on_delta: Callable[[str], None],
         on_section_end: Callable[[], None] | None = None,
+        on_progress: Callable[[dict[str, Any]], None] | None = None,
         visual_plan_json: str = '',
         media_assets_json: str = '',
         checkpoint_dir: str = '',
@@ -1156,6 +1160,7 @@ class WriterToolkitBase:
             representation='ir',
             on_delta=on_delta,
             on_section_end=on_section_end,
+            on_progress=on_progress,
             visual_plan_json=visual_plan_json,
             media_assets_json=media_assets_json,
             checkpoint_dir=checkpoint_dir,
@@ -1170,6 +1175,7 @@ class WriterToolkitBase:
         representation: str,
         on_delta: Callable[[str], None],
         on_section_end: Callable[[], None] | None,
+        on_progress: Callable[[dict[str, Any]], None] | None,
         visual_plan_json: str = '',
         media_assets_json: str = '',
         checkpoint_dir: str = '',
@@ -1191,6 +1197,14 @@ class WriterToolkitBase:
                     '[Writer] Draft %s delta callback failed: %s',
                     representation, exc,
                 )
+
+        def forward_progress(**payload: Any) -> None:
+            if on_progress is None:
+                return
+            try:
+                on_progress(payload)
+            except Exception as exc:  # noqa: BLE001 - progress is observability only.
+                LOG.warning('[Writer] Draft progress callback failed: %s', exc)
 
         instruction_list_meta = instructions_data.get('meta')
         if not isinstance(instruction_list_meta, dict):
@@ -1241,6 +1255,20 @@ class WriterToolkitBase:
         checkpoint_root.mkdir(parents=True, exist_ok=True)
         sections: list[Any] = [None] * len(instructions)
         event_queues: list[Queue] = [Queue() for _ in instructions]
+        stop_event = Event()
+        progress_lock = RLock()
+        completed_count = 0
+        max_attempts = max(1, int(os.getenv('LAZYMIND_WRITER_SECTION_MAX_ATTEMPTS', '2')))
+        section_total_timeout = max(
+            1.0, float(os.getenv('LAZYMIND_WRITER_SECTION_TOTAL_TIMEOUT', '600')),
+        )
+        section_started_at: list[float | None] = [None] * len(instructions)
+        forward_progress(
+            progress=5,
+            current_phase='正在优先生成第 1 章',
+            section_total=len(instructions),
+            section_completed=0,
+        )
 
         def checkpoint_path(index: int, instruction_data: dict[str, Any]) -> Path:
             payload = json.dumps({
@@ -1287,63 +1315,251 @@ class WriterToolkitBase:
                 WriterBlock.model_validate(section), level=2,
             ).rstrip() + '\n'
 
+        def preview_has_body(preview: str) -> bool:
+            """A generated section title alone is not effective body progress."""
+            lines = preview.splitlines()
+            while lines and not lines[0].strip():
+                lines.pop(0)
+            if lines and re.match(r'^#{1,6}\s+\S', lines[0].strip()):
+                lines.pop(0)
+            remainder = '\n'.join(lines)
+            # Markdown structure alone (another heading/list prefix, fence,
+            # whitespace) is not document body progress.
+            visible_text = re.sub(r'[\s#>*_`~+\-\[\](){}|.!:;，。！？、]+', '', remainder)
+            return bool(visible_text)
+
+        def mark_completed(index: int, *, cached: bool = False) -> None:
+            nonlocal completed_count
+            with progress_lock:
+                completed_count += 1
+                done = completed_count
+            if done >= len(instructions):
+                phase = f'全部 {len(instructions)} 章已生成，正在按大纲顺序组装'
+            elif cached:
+                phase = f'已复用 {done}/{len(instructions)} 章 checkpoint，其他章节仍在生成'
+            else:
+                phase = f'已完成 {done}/{len(instructions)} 章，其他章节仍在后台生成'
+            forward_progress(
+                progress=5,
+                current_phase=phase,
+                section_index=index + 1,
+                section_total=len(instructions),
+                section_completed=done,
+                section_state='checkpointed',
+            )
+
         def generate_one(index: int, instruction_data: dict[str, Any]) -> None:
             events = event_queues[index]
             path = checkpoint_path(index, instruction_data)
+            section_started_at[index] = time.monotonic()
             try:
                 cached = load_checkpoint(path)
                 if cached is not None:
-                    events.put(('delta', cached_preview(cached)))
-                    events.put(('done', cached))
+                    if not stop_event.is_set():
+                        events.put(('delta', cached_preview(cached)))
+                        events.put(('done', cached))
+                        mark_completed(index, cached=True)
                     return
                 instruction = SectionInstruction.model_validate(instruction_data)
-                section_root = root / f'section-{index + 1:04d}'
-                section_root.mkdir(parents=True, exist_ok=True)
-                drafting = WriterDraftingTools(
-                    llm=AutoModel(model='llm'), artifact_store=str(section_root),
-                )
-                stream_factory = (
-                    drafting.stream_draft_section
-                    if representation == 'markdown'
-                    else drafting.stream_draft_section_ir
-                )
-                stream_kwargs: dict[str, Any] = {
-                    'task': task_path,
-                    'section_instruction': instruction,
-                    'context': context_path,
-                }
-                if visual_plan_path is not None:
-                    stream_kwargs['visual_plan'] = visual_plan_path
-                if media_assets_path is not None:
-                    stream_kwargs['media_assets'] = media_assets_path
-                with stream_factory(**stream_kwargs) as stream:
-                    for delta in stream:
-                        events.put(('delta', delta))
-                    result = stream.result()
-                section = _primary_data(result)
-                if representation == 'markdown' and not isinstance(section, str):
-                    raise TypeError('Markdown Draft stream returned a non-Markdown artifact.')
-                if representation == 'ir' and not isinstance(section, dict):
-                    raise TypeError('IR Draft stream returned a non-WriterBlock artifact.')
-                save_checkpoint(path, section)
-                events.put(('done', section))
+                for attempt in range(1, max_attempts + 1):
+                    buffered: list[str] = []
+                    body_started = False
+                    try:
+                        forward_progress(
+                            progress=5,
+                            current_phase=f'第 {index + 1} 章正在生成',
+                            section_index=index + 1,
+                            section_total=len(instructions),
+                            section_completed=completed_count,
+                            section_state='generating',
+                            section_attempt=attempt,
+                        )
+                        section_root = root / f'section-{index + 1:04d}-attempt-{attempt}'
+                        section_root.mkdir(parents=True, exist_ok=True)
+                        drafting = WriterDraftingTools(
+                            llm=AutoModel(model='llm'), artifact_store=str(section_root),
+                        )
+                        stream_factory = (
+                            drafting.stream_draft_section
+                            if representation == 'markdown'
+                            else drafting.stream_draft_section_ir
+                        )
+                        stream_kwargs: dict[str, Any] = {
+                            'task': task_path,
+                            'section_instruction': instruction,
+                            'context': context_path,
+                        }
+                        if visual_plan_path is not None:
+                            stream_kwargs['visual_plan'] = visual_plan_path
+                        if media_assets_path is not None:
+                            stream_kwargs['media_assets'] = media_assets_path
+                        with stream_factory(**stream_kwargs) as stream:
+                            for delta in stream:
+                                if stop_event.is_set():
+                                    return
+                                if body_started:
+                                    events.put(('delta', delta))
+                                    continue
+                                buffered.append(delta)
+                                if preview_has_body(''.join(buffered)):
+                                    body_started = True
+                                    for pending in buffered:
+                                        events.put(('delta', pending))
+                                    buffered.clear()
+                                    forward_progress(
+                                        progress=5,
+                                        current_phase=f'第 {index + 1} 章正在输出正文',
+                                        section_index=index + 1,
+                                        section_total=len(instructions),
+                                        section_completed=completed_count,
+                                        section_state='streaming',
+                                        section_attempt=attempt,
+                                    )
+                            result = stream.result()
+                        section = _primary_data(result)
+                        if representation == 'markdown' and not isinstance(section, str):
+                            raise TypeError('Markdown Draft stream returned a non-Markdown artifact.')
+                        if representation == 'ir' and not isinstance(section, dict):
+                            raise TypeError('IR Draft stream returned a non-WriterBlock artifact.')
+                        if not body_started and preview_has_body(cached_preview(section)):
+                            for pending in buffered:
+                                events.put(('delta', pending))
+                            body_started = True
+                        if not body_started:
+                            raise TimeoutError('Draft section completed without effective body content.')
+                        if stop_event.is_set():
+                            return
+                        save_checkpoint(path, section)
+                        events.put(('done', section))
+                        mark_completed(index)
+                        return
+                    except Exception as exc:
+                        if attempt >= max_attempts or body_started or stop_event.is_set():
+                            raise
+                        LOG.warning(
+                            '[Writer] Retrying section %d after no effective body output: %s',
+                            index + 1, exc,
+                        )
+                        forward_progress(
+                            progress=5,
+                            current_phase=(
+                                f'第 {index + 1} 章长时间无有效正文，'
+                                f'正在自动重试（{attempt}/{max_attempts - 1}）'
+                            ),
+                            section_index=index + 1,
+                            section_total=len(instructions),
+                            section_completed=completed_count,
+                            section_state='retrying',
+                            section_attempt=attempt + 1,
+                        )
             except Exception as exc:  # noqa: BLE001 - propagated on the ordered stream.
-                events.put(('error', exc))
+                if not stop_event.is_set():
+                    events.put(('error', exc))
 
         executor = ThreadPoolExecutor(max_workers=min(3, max(1, len(instructions))))
-        futures = [
-            executor.submit(generate_one, index, instruction_data)
-            for index, instruction_data in enumerate(instructions)
-        ]
+        futures: list[Any | None] = [None] * len(instructions)
+        futures[0] = executor.submit(generate_one, 0, instructions[0])
+        background_started = len(instructions) == 1
+
+        def start_background_sections() -> None:
+            nonlocal background_started
+            if background_started:
+                return
+            background_started = True
+            for background_index in range(1, len(instructions)):
+                futures[background_index] = executor.submit(
+                    generate_one,
+                    background_index,
+                    instructions[background_index],
+                )
+
         try:
             for index, events in enumerate(event_queues):
+                if index > 0:
+                    start_background_sections()
+                future = futures[index]
+                if future is None:
+                    raise RuntimeError(f'Draft section {index + 1} was not started.')
+                wait_started_at = time.monotonic()
+                last_wait_progress_at = wait_started_at
+                last_stream_progress_at = 0.0
+                streamed_chars = 0
+                section_stream_started = False
                 while True:
-                    event, payload = events.get()
+                    deadline = (
+                        section_started_at[index] or wait_started_at
+                    ) + section_total_timeout
+                    if time.monotonic() >= deadline and not future.done():
+                        raise TimeoutError(
+                            f'Draft section {index + 1} exceeded total timeout '
+                            f'of {section_total_timeout:g} seconds.'
+                        )
+                    try:
+                        event, payload = events.get(timeout=min(
+                            1.0, max(0.001, deadline - time.monotonic()),
+                        ))
+                    except Empty:
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError(
+                                f'Draft section {index + 1} exceeded total timeout '
+                                f'of {section_total_timeout:g} seconds.'
+                            )
+                        if future.done():
+                            future.result()
+                            raise RuntimeError(
+                                f'Draft section {index + 1} ended without a terminal event.'
+                            )
+                        now = time.monotonic()
+                        if now - last_wait_progress_at >= 10.0:
+                            with progress_lock:
+                                done = completed_count
+                            waiting_for = '后续正文' if section_stream_started else '有效正文'
+                            forward_progress(
+                                progress=5,
+                                current_phase=(
+                                    f'第 {index + 1} 章仍在生成，正在等待{waiting_for}'
+                                    f'（已完成 {done}/{len(instructions)} 章）'
+                                ),
+                                section_index=index + 1,
+                                section_total=len(instructions),
+                                section_completed=done,
+                                section_state='streaming' if section_stream_started else 'waiting_for_body',
+                            )
+                            last_wait_progress_at = now
+                        continue
                     if event == 'delta':
+                        if index == 0:
+                            # Give the first section exclusive access until its
+                            # first visible body arrives. Then keep streaming it
+                            # while the remaining sections run in the background.
+                            start_background_sections()
+                        section_stream_started = True
+                        streamed_chars += len(str(payload))
+                        now = time.monotonic()
+                        if last_stream_progress_at == 0.0 or now - last_stream_progress_at >= 2.0:
+                            with progress_lock:
+                                done = completed_count
+                            forward_progress(
+                                progress=5,
+                                current_phase=(
+                                    f'正在流式输出第 {index + 1} 章'
+                                    f'（已完成 {done}/{len(instructions)} 章，'
+                                    f'已输出 {streamed_chars} 字）'
+                                ),
+                                section_index=index + 1,
+                                section_total=len(instructions),
+                                section_completed=done,
+                                section_state='streaming',
+                                section_output_chars=streamed_chars,
+                            )
+                            last_stream_progress_at = now
+                            last_wait_progress_at = now
                         forward_delta(payload)
                         continue
                     if event == 'error':
                         raise payload
+                    if index == 0:
+                        start_background_sections()
                     sections[index] = payload
                     if on_section_end is not None:
                         try:
@@ -1355,9 +1571,11 @@ class WriterToolkitBase:
                             )
                     break
         finally:
+            stop_event.set()
             for future in futures:
-                future.cancel()
-            executor.shutdown(wait=True, cancel_futures=True)
+                if future is not None:
+                    future.cancel()
+            executor.shutdown(wait=False, cancel_futures=True)
         return _json_dumps(sections)
 
     def generate_draft_document(

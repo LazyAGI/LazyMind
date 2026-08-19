@@ -46,6 +46,7 @@ DRAFT_STREAM_EVENT_TYPES = frozenset({
     'artifact_stream',
     'artifact_stream_end',
     'artifact_stream_abort',
+    'progress',
 })
 
 
@@ -878,6 +879,9 @@ async def run_subagent_stream(
             if source == 'stream':
                 stream_event = dict(merged_payload)
                 stream_event['task_id'] = task_id
+                if stream_event.get('type') == 'progress':
+                    progress = max(progress, int(stream_event.get('progress') or 0))
+                    stream_event['progress'] = progress
                 yield _sse(stream_event)
                 continue
 

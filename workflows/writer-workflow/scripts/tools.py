@@ -19,6 +19,7 @@ from lazyllm import AutoModel
 from pydantic import BaseModel, ConfigDict
 from lazyllm.tools.writer.data_models import (
     ContentRef,
+    MediaAssetLibrary,
     ModifyInstruction,
     ModifyPlan,
     PatchResult,
@@ -97,6 +98,18 @@ WriterCommand.model_rebuild(_types_namespace={'Literal': Literal})
 def _writer_request_fingerprint(user_input: str) -> str:
     normalized = ' '.join(str(user_input or '').split())
     return hashlib.sha256(normalized.encode('utf-8')).hexdigest()
+
+
+def _emit_writer_progress(current_phase: str, **details: Any) -> None:
+    """Publish writer internals through the existing task phase channel."""
+    require_context().emit({
+        'type': 'progress',
+        # The subagent runner keeps progress monotonic. Reusing its initial value
+        # updates only current_phase and leaves the existing percentage policy intact.
+        'progress': 5,
+        'current_phase': current_phase,
+        **details,
+    })
 
 
 def _authoritative_writer_user_input(user_input: str) -> str:
@@ -954,16 +967,27 @@ def writer_prepare_outline(source_document_path: str) -> str:
 
 def writer_generate_outline(writing_task_path: str, writing_context_path: str) -> str:
     """Generate an outline-stage artifact with a Markdown preview stream."""
+    _emit_writer_progress('正在生成大纲')
     events = DraftMarkdownStreamEventEmitter(
         require_context().emit,
         slot='outline_document',
     )
+    output_started = False
+
+    def emit_delta(delta: str) -> None:
+        nonlocal output_started
+        if not output_started and str(delta).strip():
+            output_started = True
+            _emit_writer_progress('正在输出大纲内容')
+        events.feed(str(delta))
+
     try:
         generated = WriterCreateToolkit().stream_outline(
             writing_task_json=_read_json_string(writing_task_path),
             writing_context_json=_read_json_string(writing_context_path),
-            on_delta=events.feed,
+            on_delta=emit_delta,
         )
+        _emit_writer_progress('大纲生成完成，正在校验并保存')
         outline_path = _save_writer_document(
             'outline_document', generated, expected_stage='outline', editable=True,
         )
@@ -1093,6 +1117,7 @@ def writer_outline_workspace() -> dict:
         else '__end__',
     }
     if state.get('completed'):
+        _emit_writer_progress('正在复用已完成的大纲 checkpoint')
         if not state.get('artifacts_saved'):
             state['saved_artifact_keys'] = _save_draft_workspace_artifacts(result)
             state['artifacts_saved'] = True
@@ -1113,6 +1138,7 @@ def writer_outline_workspace() -> dict:
         if not source_document_path:
             raise ValueError('source_document_path is required for use_source.')
         if not result.get('outline_document'):
+            _emit_writer_progress('正在解析并规范化已有大纲')
             result['outline_document'] = writer_prepare_outline(source_document_path)
             state['result'] = result
             _persist_outline_workspace_state(state, checkpoint_path)
@@ -1122,6 +1148,7 @@ def writer_outline_workspace() -> dict:
         if not outline_document_path:
             raise ValueError('outline_document_path is required for revise.')
         if not result.get('outline_revision_task'):
+            _emit_writer_progress('正在解析大纲修改要求')
             result['outline_revision_task'] = writer_build_revision_task(
                 query=user_input,
                 base_document_path=outline_document_path,
@@ -1129,6 +1156,7 @@ def writer_outline_workspace() -> dict:
             state['result'] = result
             _persist_outline_workspace_state(state, checkpoint_path)
         if not result.get('outline_locate_result'):
+            _emit_writer_progress('正在定位需要修改的大纲结构')
             result['outline_locate_result'] = writer_locate_revision_target(
                 base_document_path=outline_document_path,
                 writing_context_path=writing_context_path,
@@ -1137,6 +1165,7 @@ def writer_outline_workspace() -> dict:
             state['result'] = result
             _persist_outline_workspace_state(state, checkpoint_path)
         if not result.get('outline_modify_plan'):
+            _emit_writer_progress('正在生成大纲修改计划')
             result['outline_modify_plan'] = writer_generate_modify_plan(
                 base_document_path=outline_document_path,
                 writing_context_path=writing_context_path,
@@ -1146,6 +1175,7 @@ def writer_outline_workspace() -> dict:
             state['result'] = result
             _persist_outline_workspace_state(state, checkpoint_path)
         if not result.get('outline_revision_set'):
+            _emit_writer_progress('正在生成大纲修改内容')
             result['outline_revision_set'] = writer_generate_revision_set(
                 base_document_path=outline_document_path,
                 writing_context_path=writing_context_path,
@@ -1154,6 +1184,7 @@ def writer_outline_workspace() -> dict:
             state['result'] = result
             _persist_outline_workspace_state(state, checkpoint_path)
         if not result.get('outline_document'):
+            _emit_writer_progress('正在应用并校验大纲修改')
             applied = writer_apply_revision(
                 base_document_path=outline_document_path,
                 writing_context_path=writing_context_path,
@@ -1167,11 +1198,13 @@ def writer_outline_workspace() -> dict:
             _persist_outline_workspace_state(state, checkpoint_path)
 
     if not result.get('writing_context_after_outline'):
+        _emit_writer_progress('大纲已完成，正在更新写作上下文')
         result['writing_context_after_outline'] = writer_update_writing_context(
             content_artifact_path=result['outline_document'],
             writing_context_path=writing_context_path,
         )
     state['result'] = result
+    _emit_writer_progress('大纲处理完成，正在保存工作区结果')
     state['saved_artifact_keys'] = _save_draft_workspace_artifacts(result)
     state['artifacts_saved'] = True
     _persist_outline_workspace_state(state, checkpoint_path, completed=True)
@@ -1206,12 +1239,13 @@ def writer_generate_rewrite_section_instructions(
         source_document_json=_read_json_string(source_document_path),
         writing_context_json=_read_json_string(writing_context_path),
     ), {})
+    section_instructions = payload.get('section_instructions') or {}
     visual_plan = payload.get('visual_plan') or {'instructions': []}
     visual_needs = visual_plan.get('instructions') or []
     return {
         'section_instructions': _save_json_artifact(
             'section_instructions',
-            json.dumps(payload.get('section_instructions') or {}, ensure_ascii=False),
+            json.dumps(section_instructions, ensure_ascii=False),
             writer_schema('planning.SectionInstructionList'),
         ),
         'visual_plan': _save_json_artifact(
@@ -1220,6 +1254,7 @@ def writer_generate_rewrite_section_instructions(
             writer_schema('multimodal.VisualPlan'),
         ),
         'visual_need_count': len(visual_needs),
+        'section_count': len(section_instructions.get('instructions') or []),
         'visual_need_ids': [str(need.get('need_id') or '') for need in visual_needs],
         'document_title': payload.get('document_title') or '',
         'warnings': payload.get('warnings') or [],
@@ -1237,12 +1272,13 @@ def writer_generate_section_instructions(
         outline_json=_read_json_string(outline_path),
         writing_context_json=_read_json_string(writing_context_path),
     ), {})
+    section_instructions = payload.get('section_instructions') or {}
     visual_plan = payload.get('visual_plan') or {'instructions': []}
     visual_needs = visual_plan.get('instructions') or []
     return {
         'section_instructions': _save_json_artifact(
             'section_instructions',
-            json.dumps(payload.get('section_instructions') or {}, ensure_ascii=False),
+            json.dumps(section_instructions, ensure_ascii=False),
             writer_schema('planning.SectionInstructionList'),
         ),
         'visual_plan': _save_json_artifact(
@@ -1251,6 +1287,7 @@ def writer_generate_section_instructions(
             writer_schema('multimodal.VisualPlan'),
         ),
         'visual_need_count': len(visual_needs),
+        'section_count': len(section_instructions.get('instructions') or []),
         'visual_need_ids': [str(need.get('need_id') or '') for need in visual_needs],
         'warnings': payload.get('warnings') or [],
     }
@@ -1466,7 +1503,12 @@ def writer_generate_draft_blocks(
     checkpoint_dir: str = '',
 ) -> list[str]:
     """Generate and persist all planned draft blocks."""
-    events = DraftMarkdownStreamEventEmitter(require_context().emit)
+    context = require_context()
+    events = DraftMarkdownStreamEventEmitter(context.emit)
+
+    def emit_progress(payload: dict[str, Any]) -> None:
+        context.emit({'type': 'progress', **payload})
+
     try:
         blocks = _json_loads(WriterCreateToolkit().stream_draft_blocks_ir(
             writing_task_json=_read_json_string(writing_task_path),
@@ -1480,6 +1522,7 @@ def writer_generate_draft_blocks(
             ),
             on_delta=events.feed,
             on_section_end=events.flush,
+            on_progress=emit_progress,
             checkpoint_dir=checkpoint_dir,
         ), [])
         root = _run_root('draft-blocks')
@@ -1506,7 +1549,12 @@ def writer_generate_draft_blocks_markdown(
     checkpoint_dir: str = '',
 ) -> list[str]:
     """Generate and persist all planned draft sections as Markdown."""
-    events = DraftMarkdownStreamEventEmitter(require_context().emit)
+    context = require_context()
+    events = DraftMarkdownStreamEventEmitter(context.emit)
+
+    def emit_progress(payload: dict[str, Any]) -> None:
+        context.emit({'type': 'progress', **payload})
+
     try:
         sections = _json_loads(WriterCreateToolkit().stream_draft_blocks_markdown(
             writing_task_json=_read_json_string(writing_task_path),
@@ -1517,6 +1565,7 @@ def writer_generate_draft_blocks_markdown(
             ),
             on_delta=events.feed,
             on_section_end=events.flush,
+            on_progress=emit_progress,
             checkpoint_dir=checkpoint_dir,
         ), [])
         root = _run_root('draft-sections-markdown')
@@ -1710,6 +1759,11 @@ def writer_generate_draft_document(
             visual_plan_path=visual_plan_path,
             checkpoint_dir=checkpoint_dir,
         )
+        require_context().emit({
+            'type': 'progress',
+            'progress': 5,
+            'current_phase': '章节已生成，正在组装文档并校验编号与引用',
+        })
         draft_document = _assemble_draft_document_markdown(
             draft_sections_anchor_path=draft_blocks[0] if draft_blocks else '',
             writing_context_path=writing_context_path,
@@ -1726,6 +1780,11 @@ def writer_generate_draft_document(
             media_assets_path=resolved_media_assets_path,
             checkpoint_dir=checkpoint_dir,
         )
+        require_context().emit({
+            'type': 'progress',
+            'progress': 5,
+            'current_phase': '章节已生成，正在组装文档并校验编号与引用',
+        })
         draft_document = _assemble_draft_document_ir(
             draft_blocks_anchor_path=draft_blocks[0] if draft_blocks else '',
             writing_context_path=writing_context_path,
@@ -1734,6 +1793,11 @@ def writer_generate_draft_document(
         )
     else:
         raise ValueError("writing_task output representation must be 'markdown' or 'ir'.")
+    require_context().emit({
+        'type': 'progress',
+        'progress': 5,
+        'current_phase': '文档组装完成，正在保存结果',
+    })
     return {
         'draft_blocks': draft_blocks,
         'draft_document': draft_document,
@@ -1991,7 +2055,7 @@ def _replace_document_and_read_back(
     target_document: Mapping[str, Any] | None = None,
     media_assets: Mapping[str, Any] | None = None,
 ) -> dict:
-    """Replace a Feishu document and return its provider-confirmed Writer IR."""
+    """Replace a Feishu document through the existing reference-preserving writer path."""
     root = _action_root(artifact_store, 'sync-document')
     if target_document:
         target = TargetDocument.model_validate(target_document)
@@ -2001,15 +2065,41 @@ def _replace_document_and_read_back(
         )
         target = TargetDocument.model_validate(created)
 
-    resource = WriterResourceTools(llm=None, artifact_store=str(root))
-    write_output = resource.replace_document(content, target, media_assets)
-    write_result = _read_json_file(_action_result_path(write_output))
-    refresh_target = target.model_copy(deep=True)
-    refresh_target.meta = {**refresh_target.meta, 'stage': 'final'}
-    refreshed_output = resource.document_to_docir(refresh_target)
-    persisted = load_artifact_json(
-        _action_result_path(refreshed_output), WriterDocument,
+    media_library = (
+        MediaAssetLibrary.model_validate(media_assets) if media_assets else None
     )
+    if isinstance(content, WriterDocument):
+        publish_document = content.model_copy(deep=True)
+    else:
+        publish_document = parse_document_markdown(
+            content,
+            document_id=f'writer-document-{uuid.uuid4()}',
+            stage='final',
+            media_assets=media_library,
+        )
+        # Drafting and revision tools already retain the local path beside the
+        # media asset id. Preserve the same established reference shape when
+        # Markdown is converted for provider delivery.
+        if media_library is not None:
+            for block in publish_document.iter_blocks():
+                if block.type != 'image':
+                    continue
+                for reference in block.references:
+                    asset = media_library.assets.get(reference.get('id'))
+                    if asset is not None and asset.uri:
+                        reference.setdefault('path', asset.uri)
+
+    payload = _json_loads(WriterResourceToolkit().replace_document(
+        content_json=json.dumps(publish_document.model_dump(), ensure_ascii=False),
+        source_document_json=json.dumps(publish_document.model_dump(), ensure_ascii=False),
+        target_document_json=json.dumps(target.model_dump(), ensure_ascii=False),
+        media_assets_json=(
+            json.dumps(media_library.model_dump(), ensure_ascii=False)
+            if media_library is not None else ''
+        ),
+    ), {})
+    write_result = payload.get('publish_result') or {}
+    persisted = WriterDocument.model_validate(payload.get('draft_document') or {})
     persisted.ui_editable = True
     result = PatchResult(
         success=True,
@@ -2404,6 +2494,7 @@ def _draft_workspace_completion(
 
 def writer_draft_workspace() -> dict:
     """Run one existing draft workflow branch through deterministic top-level tools."""
+    _emit_writer_progress('正在读取成稿任务与已有 checkpoint')
     user_input = _authoritative_writer_user_input('')
     writer_command_path = _authoritative_writer_input_path(
         'writer_command', require_workflow_binding=True,
@@ -2468,6 +2559,7 @@ def writer_draft_workspace() -> dict:
     result['operation'] = operation
     result['writer_command'] = writer_command_path
     if state.get('completed'):
+        _emit_writer_progress('正在复用已完成的成稿 checkpoint')
         saved_keys = list(state.get('saved_artifact_keys') or [])
         if not state.get('artifacts_saved'):
             saved_keys = _save_draft_workspace_artifacts(result)
@@ -2482,6 +2574,9 @@ def writer_draft_workspace() -> dict:
             if not outline_document_path:
                 raise ValueError('outline_document_path is required for generate.')
             if not result.get('section_instructions'):
+                _emit_writer_progress(
+                    '正在根据大纲规划 section instructions、视觉需求与辅助任务'
+                )
                 planning = writer_generate_section_instructions(
                     writing_task_path=writing_task_path,
                     outline_path=outline_document_path,
@@ -2491,10 +2586,24 @@ def writer_draft_workspace() -> dict:
                     'section_instructions': planning['section_instructions'],
                     'visual_plan': planning['visual_plan'],
                     'visual_need_count': planning['visual_need_count'],
+                    'section_count': planning['section_count'],
                     'warnings': list(planning.get('warnings') or []),
                 })
                 state['result'] = result
                 _persist_draft_workspace_state(state, checkpoint_path)
+                _emit_writer_progress(
+                    f"section instructions 已完成，共 {planning['section_count']} 章",
+                    section_total=planning['section_count'],
+                    visual_need_count=planning['visual_need_count'],
+                )
+            else:
+                instructions = _read_json_file(result['section_instructions'])
+                section_count = len((instructions or {}).get('instructions') or [])
+                result['section_count'] = section_count
+                _emit_writer_progress(
+                    f'已复用 section instructions checkpoint，共 {section_count} 章',
+                    section_total=section_count,
+                )
             document_title = ''
             outline_path = outline_document_path
         else:
@@ -2502,6 +2611,9 @@ def writer_draft_workspace() -> dict:
             if not rewrite_base:
                 raise ValueError('draft_document_path or source_document_path is required for rewrite.')
             if not result.get('section_instructions'):
+                _emit_writer_progress(
+                    '正在规划全文重写 section instructions、视觉需求与辅助任务'
+                )
                 planning = writer_generate_rewrite_section_instructions(
                     writing_task_path=writing_task_path,
                     source_document_path=rewrite_base,
@@ -2511,11 +2623,25 @@ def writer_draft_workspace() -> dict:
                     'section_instructions': planning['section_instructions'],
                     'visual_plan': planning['visual_plan'],
                     'visual_need_count': planning['visual_need_count'],
+                    'section_count': planning['section_count'],
                     'document_title': planning.get('document_title') or '',
                     'warnings': list(planning.get('warnings') or []),
                 })
                 state['result'] = result
                 _persist_draft_workspace_state(state, checkpoint_path)
+                _emit_writer_progress(
+                    f"重写 section instructions 已完成，共 {planning['section_count']} 章",
+                    section_total=planning['section_count'],
+                    visual_need_count=planning['visual_need_count'],
+                )
+            else:
+                instructions = _read_json_file(result['section_instructions'])
+                section_count = len((instructions or {}).get('instructions') or [])
+                result['section_count'] = section_count
+                _emit_writer_progress(
+                    f'已复用重写 section instructions checkpoint，共 {section_count} 章',
+                    section_total=section_count,
+                )
             document_title = str(result.get('document_title') or '')
             outline_path = ''
 
@@ -2525,6 +2651,10 @@ def writer_draft_workspace() -> dict:
         if needs_media and not resolved_media:
             if not media_assets_path:
                 raise ValueError('media_assets_path is required when the draft has visual media.')
+            _emit_writer_progress(
+                f"正在准备 {int(result.get('visual_need_count') or 0)} 项视觉素材与辅助资源",
+                visual_need_count=int(result.get('visual_need_count') or 0),
+            )
             media = writer_resolve_visual_media(
                 visual_plan_path=result['visual_plan'],
                 media_assets_path=media_assets_path,
@@ -2537,8 +2667,12 @@ def writer_draft_workspace() -> dict:
             ]
             state['result'] = result
             _persist_draft_workspace_state(state, checkpoint_path)
+            _emit_writer_progress('辅助资源已准备完成，正在启动章节生成')
+        elif not needs_media:
+            _emit_writer_progress('无需准备视觉素材，正在启动章节生成')
 
         if not result.get('draft_document'):
+            _emit_writer_progress('章节准备完成，正在优先生成并流式输出第 1 章')
             generated = writer_generate_draft_document(
                 writing_task_path=writing_task_path,
                 section_instructions_path=result['section_instructions'],
@@ -2559,6 +2693,7 @@ def writer_draft_workspace() -> dict:
             and (operation == 'rewrite' or not draft_document_path)
         )
         if should_write_back and not result.get('document_write_result'):
+            _emit_writer_progress('成稿已组装，正在写回目标文档')
             published = writer_replace_document(
                 content_path=result['draft_document'],
                 source_document_path=source_document_path,
@@ -2642,12 +2777,14 @@ def writer_draft_workspace() -> dict:
             _persist_draft_workspace_state(state, checkpoint_path)
 
     if not result.get('writing_context_after_draft'):
+        _emit_writer_progress('正在更新成稿上下文')
         result['writing_context_after_draft'] = writer_update_writing_context(
             content_artifact_path=result['draft_document'],
             writing_context_path=writing_context_path,
         )
     state['result'] = result
     _persist_draft_workspace_state(state, checkpoint_path)
+    _emit_writer_progress('成稿校验完成，正在保存工作区结果')
     saved_keys = _save_draft_workspace_artifacts(result)
     state['artifacts_saved'] = True
     state['saved_artifact_keys'] = saved_keys
