@@ -75,7 +75,7 @@ artifact_actions:
     slots: [draft_document]
     execute_tool: writer_sync_document
   render_document:
-    slots: [outline_document, draft_document]
+    slots: [source_document, outline_document, draft_document]
     preview_tool: writer_render_document
     execute_tool: writer_render_document
   save_document:
