@@ -98,7 +98,7 @@ func RestoreWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 		if draft.WorkflowID != "" {
 			var conflicts int64
 			if err := tx.Model(&orm.WorkflowDraft{}).
-				Where("created_by = ? AND plugin_id = ? AND deleted_at IS NULL AND id <> ?", userID, draft.WorkflowID, draft.ID).
+				Where("created_by = ? AND plugin_id = ? AND deleted_at IS NULL AND id <> ?", userID, draft.WorkflowID, draft.ID). // workflow-naming: persistence
 				Count(&conflicts).Error; err != nil {
 				return err
 			}
@@ -108,7 +108,7 @@ func RestoreWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 		}
 		if draft.WorkflowID != "" && draft.PublishedStatusBeforeTrash != "" {
 			if err := tx.Model(&orm.WorkflowResource{}).
-				Where("owner_user_id = ? AND plugin_id = ?", userID, draft.WorkflowID).
+				Where("owner_user_id = ? AND plugin_id = ?", userID, draft.WorkflowID). // workflow-naming: persistence
 				Updates(map[string]any{"status": draft.PublishedStatusBeforeTrash, "updated_at": time.Now().UTC()}).Error; err != nil {
 				return err
 			}
@@ -147,7 +147,7 @@ func purgeWorkflowDraft(tx *gorm.DB, draft orm.WorkflowDraft) error {
 	if draft.WorkflowID != "" {
 		var siblingDrafts int64
 		if err := tx.Model(&orm.WorkflowDraft{}).
-			Where("created_by = ? AND plugin_id = ? AND id <> ?", draft.CreatedBy, draft.WorkflowID, draft.ID).
+			Where("created_by = ? AND plugin_id = ? AND id <> ?", draft.CreatedBy, draft.WorkflowID, draft.ID). // workflow-naming: persistence
 			Count(&siblingDrafts).Error; err != nil {
 			return err
 		}

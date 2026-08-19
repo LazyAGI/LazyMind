@@ -102,7 +102,7 @@ func TestWorkflowTrashRestoreAndPurgeLogicalUnit(t *testing.T) {
 		{&orm.WorkflowRevision{}, "id = ?", "revision-1"},
 		{&orm.WorkflowRevisionEntry{}, "revision_id = ?", "revision-1"},
 		{&orm.WorkflowBlob{}, "hash = ?", hash},
-		{&orm.UserWorkflowSetting{}, "plugin_ref = ?", resource.WorkflowRef},
+		{&orm.UserWorkflowSetting{}, "plugin_ref = ?", resource.WorkflowRef}, // workflow-naming: persistence
 	}
 	for _, check := range checks {
 		var count int64
