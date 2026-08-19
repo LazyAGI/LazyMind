@@ -778,6 +778,12 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
       // Closing and reconnecting without Last-Event-ID asks the server for a fresh snapshot.
       workflowStreams.get(sessionId)?.subscription.resync();
     }
+    if (
+      event.type === 'artifact.upsert'
+      && (event.payload.slot === 'outline_document' || event.payload.slot === 'draft_document')
+    ) {
+      void get().refreshSlots(conversationId, sessionId);
+    }
   },
 
   subscribeWorkflowSession: (conversationId, sessionId) => {
