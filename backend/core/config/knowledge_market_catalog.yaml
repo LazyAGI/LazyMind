@@ -28,7 +28,7 @@ knowledge_market_items:
     description: 来自国家法律法规数据库的中国法律法规 Markdown 语料，覆盖宪法、法律、行政法规、司法解释、监察法规及附录，包含有效、修改、废止等全部状态文件，适合法条检索与 RAG 知识库。
     icon: ⚖
     domain: 法律
-    tags: [法律, 法律法规, Markdown]
+    tags: [法律, 法律法规]
     package_url: https://github.com/lawtext/laws.git
     package_revision: main
     online_access_url: https://github.com/lawtext/laws
@@ -67,7 +67,7 @@ knowledge_market_items:
     description: 收录 311 部现行有效法律的 Markdown 语料，按宪法、民商法、刑法、行政法、经济法、社会法、程序法等部门组织，并保留编章节条结构，适合法律问答与精细切片。
     icon: ⚖
     domain: 法律
-    tags: [法律, 现行法律, Markdown]
+    tags: [法律, 现行法律]
     package_url: https://github.com/ImCa0/just-laws.git
     package_revision: master
     online_access_url: https://github.com/ImCa0/just-laws
@@ -281,7 +281,7 @@ knowledge_market_items:
   - id: induocrbench
     category: evaluation
     name: InduOCRBench 工业文档 OCR 知识库
-    description: InduOCRBench（HuggingFace qihoo360/InduOCRBench）的 570 篇工业文档 Markdown 语料（官方 OCR 提取结果），覆盖表格、票据、说明书等工业场景，适合文档 OCR 与表格理解评测。原始 PDF 为扫描件，纯文本链路无法直接抽取，故导入官方 OCR 文本。
+    description: InduOCRBench（HuggingFace qihoo360/InduOCRBench）的 570 篇工业文档 Markdown 语料，覆盖表格、票据、说明书等工业场景，适合文档 OCR 与表格理解评测。
     icon: 📑
     domain: 工业
     tags: [评测集, OCR, 表格理解, 中文]
@@ -299,34 +299,10 @@ knowledge_market_items:
       - 某工业设备说明书中设备的额定功率是多少？
       - 某单据表格中金额合计是多少？
 
-  - id: uda-qa
-    category: evaluation
-    name: UDA-QA 文档分析评测知识库
-    description: UDA-QA（HuggingFace qinchuanhui/UDA-QA）整仓 clone 约 5.9GB（6 个文档 zip），入库 5,133 个原始文档：FinHybrid 788 份财报、TatHybrid 170 份财报、PaperTab/PaperText 1,394 篇论文、FetaTab/NqText 1,523 篇维基文档（PDF 3,610 + HTML 1,523）；按配置排除 extended_qa_info/tat_doc_pages 的 2,481 个页面级证据 PDF（MD5 哈希命名，内容与 tat_docs.zip 完整财报重复）。
-    icon: 🧠
-    domain: 通用
-    tags: [评测集, UDA-QA, 文档理解, RAG]
-    package_url: https://huggingface.co/datasets/qinchuanhui/UDA-QA.git
-    package_revision: main
-    online_access_url: https://huggingface.co/datasets/qinchuanhui/UDA-QA
-    data_source: HuggingFace qinchuanhui/UDA-QA
-    source_adapter: generic_file_copy
-    source_options:
-      extensions: [".pdf", ".html", ".htm"]
-      exclude:
-        - "^extended_qa_info/tat_doc_pages/"
-      display_name_template: "{{basename}}"
-      relative_path_template: "uda-qa/{{dir}}"
-      tags: ["uda-qa"]
-    sample_questions:
-      - 某公司年报中营业收入同比增长多少？
-      - 某论文中提出的方法在哪些数据集上进行了实验？
-      - 某维基表格中某城市的常住人口是多少？
-
   - id: financebench
     category: evaluation
     name: FinanceBench 财报问答评测知识库
-    description: FinanceBench（GitHub patronus-ai/financebench）pdfs/ 目录的 368 份美股财报 PDF（10-K/10-Q/8-K/年报，约 700MB），适合财报检索与数值推理评测。注意 cc-by-nc-4.0 非商用许可。
+    description: FinanceBench（GitHub patronus-ai/financebench）pdfs/ 目录的 368 份美股财报 PDF（10-K/10-Q/8-K/年报，约 700MB），适合财报检索与数值推理评测。。
     icon: 📈
     domain: 金融
     tags: [评测集, 财报, 金融, 英文]
@@ -349,7 +325,7 @@ knowledge_market_items:
   - id: open-ragbench
     category: evaluation
     name: Open RAGBench 论文检索评测知识库
-    description: Open RAGBench（HuggingFace vectara/open_ragbench）pdf/arxiv/corpus/ 的 1,000 篇 arXiv 论文原始 JSON（约 742MB，含章节文本、表格与图片），覆盖各学科论文，适合文档检索与 RAG 评测。注意 cc-by-nc-4.0 非商用许可。
+    description: Open RAGBench（HuggingFace vectara/open_ragbench）的 1,000 篇 arXiv 论文原始 JSON（约 742MB），覆盖各学科论文，适合文档检索与 RAG 评测。
     icon: 📄
     domain: 科研
     tags: [评测集, 论文, RAG, 英文]

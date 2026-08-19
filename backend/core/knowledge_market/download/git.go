@@ -33,23 +33,13 @@ func fetchGit(ctx context.Context, u *url.URL, revision, dstDir string, progress
 		return nil, fmt.Errorf("git clone start failed: %w", err)
 	}
 
-	var stderrLog strings.Builder
-	scanner := bufio.NewScanner(stderr)
-	for scanner.Scan() {
-		line := scanner.Text()
-		stderrLog.WriteString(line)
-		stderrLog.WriteByte('\n')
-		if percent, ok := gitClonePercent(line); ok && progress != nil {
-			progress(int64(percent), 100)
-		}
+	stderrLog, err := scanGitCloneStderr(stderr, progress)
+	if err != nil {
+		return nil, err
 	}
-	scanErr := scanner.Err()
 	waitErr := cmd.Wait()
-	if scanErr != nil {
-		return nil, fmt.Errorf("read git clone progress failed: %w", scanErr)
-	}
 	if waitErr != nil {
-		return nil, fmt.Errorf("git clone %s failed: %w: %s", u, waitErr, truncateBytes([]byte(stderrLog.String()), 512))
+		return nil, fmt.Errorf("git clone %s failed: %w: %s", u, waitErr, truncateBytes([]byte(stderrLog), 512))
 	}
 
 	paths, err := walkPackageFiles(dstDir)
@@ -83,6 +73,50 @@ func fetchGit(ctx context.Context, u *url.URL, revision, dstDir string, progress
 		files = append(files, FetchedFile{Path: rel, Size: size, SHA256: sha})
 	}
 	return files, nil
+}
+
+// scanGitCloneStderr consumes git clone stderr, records the raw text for
+// error reporting, and maps progress lines onto the optional callback.
+func scanGitCloneStderr(stderr io.Reader, progress ProgressFunc) (string, error) {
+	var stderrLog strings.Builder
+	scanner := bufio.NewScanner(stderr)
+	scanner.Split(scanGitProgressLines)
+	for scanner.Scan() {
+		line := scanner.Text()
+		stderrLog.WriteString(line)
+		stderrLog.WriteByte('\n')
+		if percent, ok := gitClonePercent(line); ok && progress != nil {
+			progress(int64(percent), 100)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("read git clone progress failed: %w", err)
+	}
+	return stderrLog.String(), nil
+}
+
+// scanGitProgressLines splits stderr on either '\n' or '\r'. git clone
+// --progress on a pipe overwrites the same line with '\r'-separated updates
+// and rarely emits '\n' during long transfers, so the default newline-only
+// split can accumulate a single token past bufio.Scanner's 64KB limit and
+// abort the whole download (observed on slow, multi-GB clones). Splitting on
+// '\r' keeps every progress update its own small token.
+func scanGitProgressLines(data []byte, atEOF bool) (advance int, token []byte, err error) {
+	if atEOF && len(data) == 0 {
+		return 0, nil, nil
+	}
+	for i, b := range data {
+		if b == '\n' || b == '\r' {
+			if i > 0 {
+				return i + 1, data[:i], nil
+			}
+			return 1, nil, nil
+		}
+	}
+	if atEOF {
+		return len(data), data, nil
+	}
+	return 0, nil, nil
 }
 
 // gitClonePercent maps a git clone stderr progress line onto a monotonic

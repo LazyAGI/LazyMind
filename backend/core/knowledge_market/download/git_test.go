@@ -1,11 +1,14 @@
 package download
 
 import (
+	"bufio"
 	"context"
+	"fmt"
 	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -133,5 +136,60 @@ func TestGitClonePercent(t *testing.T) {
 				t.Fatalf("percent=%d, want %d", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestScanGitProgressLines(t *testing.T) {
+	input := "a\rb\r\nc\nd"
+	var got []string
+	sc := bufio.NewScanner(strings.NewReader(input))
+	sc.Split(scanGitProgressLines)
+	for sc.Scan() {
+		got = append(got, sc.Text())
+	}
+	if err := sc.Err(); err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if want := []string{"a", "b", "c", "d"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("tokens = %q, want %q", got, want)
+	}
+}
+
+func TestScanGitCloneStderrLongCRStream(t *testing.T) {
+	// git clone --progress on a pipe writes '\r'-separated in-place updates
+	// with almost no newlines. A slow, long clone accumulates a single line
+	// past bufio.Scanner's 64KB default token cap, which used to abort the
+	// download with "bufio.Scanner: token too long".
+	var sb strings.Builder
+	for i := 0; i < 2000; i++ {
+		pct := i%90 + 1
+		fmt.Fprintf(&sb, "Receiving objects:  %3d%% (%d/200000), 123.45 MiB | 456.78 KiB/s\r", pct, i)
+	}
+	sb.WriteString("Resolving deltas: 100% (100/100), done.\n")
+	if sb.Len() <= 64*1024 {
+		t.Fatalf("test stream is %d bytes; must exceed the 64KB scanner token limit", sb.Len())
+	}
+
+	var got []int
+	raw, err := scanGitCloneStderr(strings.NewReader(sb.String()), func(cur, total int64) {
+		got = append(got, int(cur))
+	})
+	if err != nil {
+		t.Fatalf("scanGitCloneStderr: %v", err)
+	}
+	// 2000 receiving updates plus the trailing resolving-deltas line.
+	if len(got) != 2001 {
+		t.Fatalf("got %d progress callbacks, want 2001", len(got))
+	}
+	// First line is 1% of the receiving band: 80*1/100 = 0.
+	if got[0] != 0 {
+		t.Fatalf("first percent = %d, want 0", got[0])
+	}
+	// Last line is "Resolving deltas: 100%": 80 + 15*100/100 = 95.
+	if got[len(got)-1] != 95 {
+		t.Fatalf("last percent = %d, want 95", got[len(got)-1])
+	}
+	if !strings.Contains(raw, "Receiving objects") {
+		t.Fatal("stderr log missing progress text")
 	}
 }
