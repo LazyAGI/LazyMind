@@ -1,4 +1,4 @@
--- 20260814120500_add_subagent_sources
+-- 20260814120000_add_subagent_sources
 -- +migrate Down
 -- +migrate Dialect postgres
 ALTER TABLE sub_agent_tasks DROP COLUMN IF EXISTS sources;
