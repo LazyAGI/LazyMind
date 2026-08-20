@@ -1,4 +1,5 @@
 -- +migrate Dialect postgres
+DROP TABLE IF EXISTS writer_download_conversions;
 DROP INDEX IF EXISTS idx_multi_answers_chat_histories_run_id;
 ALTER TABLE multi_answers_chat_histories DROP COLUMN IF EXISTS run_terminal;
 ALTER TABLE multi_answers_chat_histories DROP COLUMN IF EXISTS run_status;
@@ -98,6 +99,7 @@ BEGIN
 END $$;
 
 -- +migrate Dialect sqlite
+DROP TABLE IF EXISTS writer_download_conversions;
 DROP INDEX IF EXISTS idx_multi_answers_chat_histories_run_id;
 ALTER TABLE multi_answers_chat_histories DROP COLUMN run_terminal;
 ALTER TABLE multi_answers_chat_histories DROP COLUMN run_status;
