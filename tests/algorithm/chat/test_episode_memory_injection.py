@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from types import SimpleNamespace
 
 import pytest
@@ -344,5 +345,13 @@ def test_episode_hit_does_not_increment_when_model_stream_fails(monkeypatch) -> 
 
     chunks = asyncio.run(drive())
 
-    assert any('"status": "FAILED"' in chunk for chunk in chunks)
+    payloads = [json.loads(chunk) for chunk in chunks]
+    terminal = payloads[-1]['data']['runtime_event']
+    assert terminal['type'] == 'run_finished'
+    assert terminal['data'] == {
+        'status': 'failed',
+        'reason': 'runtime_failure',
+        'partial_output': False,
+        'code': 'runtime_failure',
+    }
     assert store.hit_calls == []

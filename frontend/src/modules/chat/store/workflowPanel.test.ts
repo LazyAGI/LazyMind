@@ -15,6 +15,9 @@ describe('hydrateWorkflowUI', () => {
         },
       ],
       ui: {
+        slots: {
+          material_images: { widgetType: 'image-grid', maxHeight: 320 },
+        },
         tabs: [{
           id: 'materials',
           label: 'Materials',
@@ -30,11 +33,33 @@ describe('hydrateWorkflowUI', () => {
       type: 'image',
       cardinality: 'list',
       ordered: true,
+      widget: { widgetType: 'image-grid', maxHeight: 320 },
     });
   });
 
   it('keeps a standalone UI payload usable', () => {
     const ui = { tabs: [{ id: 'result', label: 'Result', slots: [] }] };
     expect(hydrateWorkflowUI({ ui })).toBe(ui);
+  });
+
+  it('preserves declarative tab actions while hydrating slots', () => {
+    const action = {
+      id: 'export_deck',
+      type: 'export' as const,
+      provider: 'html-presentation',
+      inputs: { pages: 'deck_pages' },
+      formats: ['pdf'],
+      alignment: 'sort_order' as const,
+    };
+    const ui = hydrateWorkflowUI({
+      slots: [{ id: 'deck_pages', type: 'text', cardinality: 'list', ordered: true }],
+      ui: {
+        slots: { deck_pages: { widgetType: 'html-slide' } },
+        tabs: [{ id: 'deck', slots: [{ id: 'deck_pages' }], actions: [action] }],
+      },
+    });
+
+    expect(ui.tabs?.[0].actions).toEqual([action]);
+    expect(ui.tabs?.[0].slots[0].widget?.widgetType).toBe('html-slide');
   });
 });

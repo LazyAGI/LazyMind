@@ -5,6 +5,8 @@ import os
 from typing import Any, Dict, List, Literal, Optional
 from urllib.parse import urlparse
 
+from typing_extensions import NotRequired, TypedDict
+
 from lazymind.chat.engine.attachment_reader import (
     is_chat_attachment_file,
     is_chat_image_file,
@@ -29,6 +31,17 @@ _CONTENT_TYPES = {'text', 'json', 'image', 'file', 'file_list'}
 
 UPLOAD_MARKER = '/var/lib/lazymind/uploads/'
 SUBAGENT_MARKER = '/data/subagent/'
+
+
+class ArtifactSaveItem(TypedDict):
+    """One save_artifacts entry exposed as a structured model-facing schema."""
+
+    key: str
+    value: Any
+    content_type: NotRequired[Literal['text', 'json', 'image', 'file', 'file_list']]
+    source_tool: NotRequired[str]
+    sort_order: NotRequired[int]
+    caption: NotRequired[str]
 
 
 def _materialize_local_path(path: str) -> str:
@@ -220,7 +233,8 @@ def _validate_declared_artifact_type(
 def _save_artifact(key: str, value: Any, content_type: str = 'text',
                    source_tool: Optional[str] = None,
                    sort_order: Optional[int] = None,
-                   caption: Optional[str] = None) -> Dict[str, Any]:
+                   caption: Optional[str] = None,
+                   *, internal_publish: bool = False) -> Dict[str, Any]:
     """Save one output artifact produced by this SubAgent.
 
     File-type values must be local absolute paths; the framework copies them into the
@@ -272,6 +286,19 @@ def _save_artifact(key: str, value: Any, content_type: str = 'text',
         A confirmation that the artifact was saved.
     """
     ctx = require_context()
+    policy = (ctx.params or {}).get('workflow_runtime') or {}
+    publisher_owned_slots = {
+        str(slot).strip()
+        for slot in (policy.get('publisher_owned_slots') or [])
+        if str(slot).strip()
+    } if isinstance(policy, dict) else set()
+    if key in publisher_owned_slots and not internal_publish:
+        return tool_error(
+            'save_artifacts',
+            f'Workflow slot {key!r} is publisher-owned. Use the package-declared '
+            'publisher tool; it writes the correct existing list_index and revision '
+            'automatically. Do not save this slot directly.',
+        )
     if ctx.output_slots and key not in ctx.output_slots:
         return tool_error(
             'save_artifacts',
@@ -313,13 +340,19 @@ def _save_artifact(key: str, value: Any, content_type: str = 'text',
     return tool_success('save_artifacts', {'status': 'ok', 'message': msg})
 
 
-def save_artifacts(artifacts: List[Dict[str, Any]]) -> Dict[str, Any]:
+def save_artifacts(artifacts: List[ArtifactSaveItem]) -> Dict[str, Any]:
     """Save one or more output artifacts in one tool call.
 
-    Always pass a list, including when saving a single artifact. Each item accepts
-    key, value, content_type, source_tool, sort_order, and caption. Keeping all
-    writes in one model turn prevents a step with many outputs from exhausting the
-    ReAct tool-turn budget.
+    Always pass a list, including when saving a single artifact. Every item MUST
+    contain ``key`` and ``value``. The payload field is named ``value`` — never
+    ``content`` or ``data``. Optional fields are content_type, source_tool,
+    sort_order, and caption. Keeping all writes in one model turn prevents a step
+    with many outputs from exhausting the ReAct tool-turn budget.
+
+    Correct example::
+
+        {"artifacts": [{"key": "result", "value": "Final output",
+                        "content_type": "text", "caption": "Result"}]}
     """
     if not isinstance(artifacts, list) or not artifacts:
         return tool_error('save_artifacts', 'artifacts must be a non-empty list.')
@@ -331,8 +364,16 @@ def save_artifacts(artifacts: List[Dict[str, Any]]) -> Dict[str, Any]:
         if not isinstance(item, dict):
             return tool_error('save_artifacts', f'artifacts[{index}] must be an object.')
         if 'key' not in item or 'value' not in item:
+            if 'key' in item and 'content' in item and 'value' not in item:
+                return tool_error(
+                    'save_artifacts',
+                    f'artifacts[{index}] uses content, but the payload field must be named value. '
+                    'Use: {"artifacts":[{"key":"<output key>","value":"<actual content>"}]}',
+                )
             return tool_error(
-                'save_artifacts', f'artifacts[{index}] requires key and value.',
+                'save_artifacts',
+                f'artifacts[{index}] requires key and value. '
+                'Use: {"artifacts":[{"key":"<output key>","value":"<actual content>"}]}',
             )
         saved = _save_artifact(
             key=str(item['key']),
@@ -403,11 +444,17 @@ def _resolve_list_index_from_sort_order(
         session_id: str = cfg.get('workflow_session_id', '')
         if not session_id:
             return None, None
-        artifacts = _public_workflow_artifacts(session_id, slot)
-        if not artifacts:
-            # Single-cardinality slot — sort_order is meaningless, ignore silently.
+        order_response = _workflow_client().get_slot_order(session_id, slot).result
+        raw_order = (
+            order_response.get('order_list')
+            if isinstance(order_response, dict) else None
+        )
+        order = [int(value) for value in (raw_order or [])]
+        if not order:
+            # No durable list order means this is either a single-cardinality
+            # slot or the first append into an empty list.
             return None, None
-        n = len(artifacts)
+        n = len(order)
         if sort_order < 1:
             return None, (
                 f'sort_order must be >= 1 (sort_order is 1-based, where 1 is the first item). '
@@ -419,7 +466,7 @@ def _resolve_list_index_from_sort_order(
                 f'(valid range: 1–{n}). Artifact appended as a new item instead. '
                 f'If you intended to overwrite, use a sort_order between 1 and {n}.'
             )
-        return sort_order - 1, None
+        return order[sort_order - 1], None
     except Exception:
         return None, None
 
@@ -959,7 +1006,10 @@ def discard_draft(key: str, sort_order: Optional[int] = None) -> Dict[str, Any]:
 
 
 def list_artifacts(task_ref: Optional[str] = None) -> Dict[str, Any]:
-    """List the artifact keys produced so far in the current task.
+    """List Workflow output artifacts produced so far in the current task.
+
+    This does not list user-uploaded attachments. Use find_user_attachment only when
+    the User Attachments context provides an exact filename.
 
     Args:
         task_ref (str): Optional task reference; when omitted lists artifacts of the current task.

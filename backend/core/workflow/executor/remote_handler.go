@@ -34,6 +34,15 @@ func safeArtifactPathPart(value string) string {
 	return value
 }
 
+func isPublicArtifactReference(value string) bool {
+	value = strings.TrimSpace(value)
+	return strings.HasPrefix(value, "http://") ||
+		strings.HasPrefix(value, "https://") ||
+		strings.HasPrefix(value, "data:") ||
+		strings.HasPrefix(value, "/static-files/") ||
+		strings.HasPrefix(value, "/api/core/static-files/")
+}
+
 // RemoteHandler is the wire boundary used by out-of-process Host Executors.
 // It deliberately exposes no database handles or Host model configuration.
 type RemoteHandler struct {
@@ -138,6 +147,18 @@ func (h RemoteHandler) Input(w http.ResponseWriter, r *http.Request) {
 			}
 			if json.Unmarshal(artifact.Value, &file) != nil || file.Path == "" {
 				remoteReply(w, 404, nil, "ATTEMPT_INPUT_NOT_FOUND", "artifact file path was not found")
+				return
+			}
+			// Web-found images and public static-file references are durable artifact
+			// values, not paths in Core's filesystem. Return their metadata unchanged
+			// so the Host can use the public URL without Core performing an unsafe
+			// server-side download. Core-owned uploaded files still take the binary
+			// materialization path below.
+			if isPublicArtifactReference(file.Path) {
+				remoteReply(w, 200, map[string]any{"material_id": mux.Vars(r)["material_id"],
+					"resource_id": revision.ID, "revision": revision.Revision, "name": revision.Slot + ".json",
+					"mime_type": "application/json", "size": len(artifact.Value),
+					"content_base64": base64.StdEncoding.EncodeToString(artifact.Value)}, "", "")
 				return
 			}
 			content, readErr := os.ReadFile(file.Path)

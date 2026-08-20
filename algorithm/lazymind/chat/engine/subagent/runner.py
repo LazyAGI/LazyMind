@@ -5,7 +5,11 @@ import json
 import os
 import re
 import time
+import base64
+import types
+import tempfile
 from collections.abc import AsyncIterator
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import lazyllm
@@ -39,7 +43,6 @@ from lazymind.chat.service.utils import (
 )
 from lazymind.config import config as _cfg
 from lazymind.model_config import inject_model_config
-from lazymind.workflow_toolkit import load_workflow_package_tools
 
 from . import SUBAGENT_ATTACHMENT_CONTEXT_KEY, SUBAGENT_CORE_TOOL_NAMES
 from . import tools as subagent_tools
@@ -52,6 +55,23 @@ DRAFT_STREAM_EVENT_TYPES = frozenset({
     'artifact_stream_end',
     'artifact_stream_abort',
 })
+
+
+def _publisher_owns_outputs(ctx: 'SubAgentContext') -> bool:
+    """Return whether this step's outputs are written by package publisher tools."""
+    policy = (ctx.params or {}).get('workflow_runtime') or {}
+    owned = {
+        str(key).strip()
+        for key in (policy.get('publisher_owned_slots') or [])
+        if str(key).strip()
+    } if isinstance(policy, dict) else set()
+    slots = {str(key).strip() for key in ctx.output_slots if str(key).strip()}
+    return (
+        str(ctx.agent_type or '') == 'workflow_step'
+        and bool(owned)
+        and bool(slots)
+        and slots.issubset(owned)
+    )
 
 
 async def merge_agent_and_stream_events(
@@ -148,6 +168,47 @@ def _resolve_workflow_step_tools(params: Dict[str, Any]) -> Optional[List[str]]:
     return list(dict.fromkeys([*SUBAGENT_CORE_TOOL_NAMES, *map(str, declared)]))
 
 
+def _materialize_workflow_package(
+    workflow_id: str,
+    revision_id: str,
+    tree_hash: str,
+    files: Dict[str, Any],
+) -> Path:
+    """Materialize one immutable Workflow revision for path-based tool assets.
+
+    Workflow tools may load sibling runtime files relative to ``__file__``.  Executing
+    only scripts/*.py from an in-memory pseudo path breaks those tools even though Core
+    returned the complete pinned package.  The tree hash makes this cache immutable.
+    """
+    safe_workflow = re.sub(r'[^0-9A-Za-z_.-]+', '_', workflow_id).strip('._') or 'workflow'
+    safe_revision = re.sub(r'[^0-9A-Za-z_.-]+', '_', revision_id).strip('._') or 'revision'
+    safe_tree = re.sub(r'[^0-9A-Za-z]+', '', tree_hash)[:64] or 'unhashed'
+    root = Path(tempfile.gettempdir()) / 'lazymind-workflow-packages' / (
+        f'{safe_workflow}@{safe_revision}-{safe_tree}'
+    )
+    root.mkdir(parents=True, exist_ok=True)
+    resolved_root = root.resolve()
+    for relative, encoded in files.items():
+        relative_path = Path(str(relative))
+        if relative_path.is_absolute() or '..' in relative_path.parts:
+            raise RuntimeError(f'unsafe Workflow package path: {relative!r}')
+        target = (root / relative_path).resolve()
+        if target != resolved_root and resolved_root not in target.parents:
+            raise RuntimeError(f'unsafe Workflow package path: {relative!r}')
+        if encoded is None:
+            # Core serializes empty blobs as null in the public package map.
+            raw = b''
+        else:
+            raw = base64.b64decode(encoded) if isinstance(encoded, str) else bytes(encoded)
+        if target.exists() and target.read_bytes() == raw:
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        temporary = target.with_name(f'.{target.name}.{os.getpid()}.tmp')
+        temporary.write_bytes(raw)
+        os.replace(temporary, target)
+    return root
+
+
 def load_workflow_tools(params: Dict[str, Any], names: List[str]) -> Dict[str, Any]:
     """Load declared callables from the exact published Workflow revision.
 
@@ -173,7 +234,44 @@ def load_workflow_tools(params: Dict[str, Any], names: List[str]) -> Dict[str, A
         expected_hash = str(params.get('tree_hash') or '').strip()
         if expected_hash and str(package.get('tree_hash') or '') != expected_hash:
             raise RuntimeError('Core returned a Workflow package with a different tree hash')
-        return load_workflow_package_tools(package, names, workflow_id, revision_id)
+        files = package.get('files') if isinstance(package.get('files'), dict) else {}
+        package_root = _materialize_workflow_package(
+            workflow_id,
+            revision_id,
+            str(package.get('tree_hash') or expected_hash),
+            files,
+        )
+        remaining = set(names)
+        resolved: Dict[str, Any] = {}
+        for path in sorted(files):
+            if not path.startswith('scripts/') or not path.endswith('.py'):
+                continue
+            script_path = package_root / path
+            raw_source = script_path.read_bytes()
+            source = raw_source.decode('utf-8')
+            module = types.ModuleType(
+                f'_lazymind_workflow_{revision_id.replace("-", "_")}_{len(resolved)}'
+            )
+            module.__file__ = str(script_path)
+            exec(compile(source, module.__file__, 'exec'), module.__dict__)
+            for name in tuple(remaining):
+                candidate = module.__dict__.get(name)
+                if callable(candidate):
+                    # Published Workflow scripts can predate the tool runtime's
+                    # docstring requirement. Their callable name, signature and
+                    # annotations are already pinned by the immutable revision;
+                    # provide a stable description so legacy revisions remain
+                    # executable instead of failing before the first tool call.
+                    if not str(getattr(candidate, '__doc__', '') or '').strip():
+                        candidate.__doc__ = f'Execute the published Workflow tool {name}.'
+                    resolved[name] = candidate
+                    remaining.remove(name)
+        if remaining:
+            LOG.warning(
+                '[SubAgent] Workflow revision %s does not provide declared tools %s',
+                revision_id, sorted(remaining),
+            )
+        return resolved
     except Exception as exc:
         LOG.warning('[SubAgent] failed to load pinned Workflow script tools: %s', exc)
         return {}
@@ -190,9 +288,10 @@ def _resolve_runtime_tools(
 
     When explicit is None/empty, fall back to all DEFAULT_TOOLS.
 
-    Note: save_artifacts, get_artifact, and list_artifacts are always available regardless
-    of this list — they are injected as mandatory base tools in _build_subagent_tools.
-    Names of base tools in the explicit list are silently ignored (already present).
+    Note: artifact infrastructure tools are managed separately by _build_subagent_tools.
+    Generic artifact writes are intentionally omitted for package-declared
+    publisher-owned output slots.
+    Names of base tools in the explicit list are silently ignored.
     """
     if explicit:
         core_tool_names = set(SUBAGENT_CORE_TOOL_NAMES)
@@ -220,23 +319,29 @@ def _resolve_runtime_tools(
 def _build_subagent_tools(
     extra_tools: Optional[List[Any]],
     attachment_configs: Optional[List[Any]] = None,
+    *,
+    include_artifact_writes: bool = True,
 ) -> List[Any]:
     """Combine mandatory SubAgent infra tools with optional domain tools.
 
-    Artifact and knowledge tools are always included regardless of the explicit
-    tools list. Attachment tools are included as one group when the parent task
-    carries attachment context, so the runtime tool list and its system prompt stay
-    consistent.
+    Read-only artifact and knowledge tools are always included regardless of the
+    explicit tools list. Publisher-owned workflow steps can disable generic artifact
+    writes so domain tools remain the only authority for their output slots.
+    Attachment tools are included as one group when the parent task carries attachment
+    context, so the runtime tool list and its system prompt stay consistent.
     """
     base = [
-        subagent_tools.save_artifacts,
         subagent_tools.get_artifact,
         subagent_tools.list_artifacts,
         subagent_tools.list_knowledge_bases,
         subagent_tools.find_artifact,
-        subagent_tools.patch_artifact,
-        subagent_tools.discard_draft,
     ]
+    if include_artifact_writes:
+        base.extend([
+            subagent_tools.save_artifacts,
+            subagent_tools.patch_artifact,
+            subagent_tools.discard_draft,
+        ])
     if attachment_configs:
         base.extend(config.tool for config in attachment_configs)
     if extra_tools:
@@ -456,6 +561,7 @@ def _build_subagent_plan(
                 authoritative=True,
                 content_kind='instruction',
             )
+    publisher_owned_outputs = _publisher_owns_outputs(ctx)
     if ctx.params.get('required_output_artifact_keys') is not None:
         required_keys = _coerce_str_list(ctx.params.get('required_output_artifact_keys'))
     elif str(ctx.agent_type or '') == 'workflow_step':
@@ -463,7 +569,14 @@ def _build_subagent_plan(
     else:
         required_keys = list(ctx.output_slots)
     output_lines = []
-    if required_keys:
+    if publisher_owned_outputs:
+        output_lines.append(
+            'The declared output slots are publisher-owned. The Workflow package tool '
+            'writes them at the correct list_index and revision automatically. Do not call '
+            'save_artifacts, patch_artifact, or any generic artifact write for these slots. '
+            'After the package publisher tool succeeds, stop and return a short summary.'
+        )
+    elif required_keys:
         output_lines.append(
             'Required output artifacts: '
             + ', '.join(required_keys)
@@ -476,22 +589,37 @@ def _build_subagent_plan(
             'the objective or step prompt, and never save placeholder content.'
         )
     optional_keys = [k for k in ctx.output_slots if k not in required_keys]
-    if optional_keys:
+    if optional_keys and not publisher_owned_outputs:
         output_lines.append(
             'Optional output artifact keys: ' + ', '.join(optional_keys)
         )
+    if not publisher_owned_outputs:
+        output_lines.append(
+            '## Exact save_artifacts call shape\n'
+            'Use this exact JSON structure:\n'
+            '{"artifacts":[{"key":"<declared output key>","value":"<actual content>",'
+            '"content_type":"text","caption":"<optional label>"}]}\n'
+            'The payload field MUST be named value. Never use content, data, body, or text '
+            'as a replacement for value. key and value are required inside EVERY artifacts item.\n'
+            'For multiple outputs, put all entries in the same artifacts array. Do not make a '
+            'small test/placeholder save before saving the real output.'
+        )
+        output_lines.append(
+            '## Overwrite vs. Append for list slots\n'
+            'Each save_artifacts entry has an optional sort_order parameter (1-based):\n'
+            '- Omit sort_order → append a new item at the end of the list.\n'
+            '- Pass sort_order=N → overwrite the item currently at display position N.\n'
+            'sort_order is NOT a page number or a desired append position. During a normal full '
+            'run that creates page 1, page 2, page 3, OMIT sort_order on all three entries.\n'
+            'If the objective says the user wants to replace a specific item '
+            '(e.g. "重新收集第二张图", "replace item 3", "redo position N"), '
+            'you MUST pass sort_order=N. Omitting it will append a new item instead of replacing.'
+        )
     output_lines.append(
-        '## Overwrite vs. Append for list slots\n'
-        'Each save_artifacts entry has an optional sort_order parameter (1-based):\n'
-        '- Omit sort_order → append a new item at the end of the list.\n'
-        '- Pass sort_order=N → overwrite the item currently at display position N.\n'
-        'If the objective says the user wants to replace a specific item '
-        '(e.g. "重新收集第二张图", "replace item 3", "redo position N"), '
-        'you MUST pass sort_order=N. Omitting it will append a new item instead of replacing.'
-    )
-    output_lines.append(
-        'After all required artifacts are saved, write a final summary that contains the '
-        'actual results and key findings — not only a reference to the artifacts. '
+        ('After the publisher tool succeeds, ' if publisher_owned_outputs
+         else 'After all required artifacts are saved, ')
+        + 'write a final summary that contains the actual results and key findings — not only '
+        'a reference to the artifacts. '
         'For example, if you searched for information, include the information itself. '
         'The summary must be self-contained and directly usable by the caller without '
         'opening any artifact.'
@@ -779,7 +907,11 @@ async def run_subagent_stream(
             )
             else []
         )
-        subagent_tools_all = _build_subagent_tools(runtime_tools, attachment_configs)
+        subagent_tools_all = _build_subagent_tools(
+            runtime_tools,
+            attachment_configs,
+            include_artifact_writes=not _publisher_owns_outputs(ctx),
+        )
         runtime_configs = _tool_configs_for_runtime_tools(runtime_tools)
         plan = _build_subagent_plan(
             ctx,

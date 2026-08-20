@@ -33,7 +33,15 @@ def load_workflow_package_tools(
     for path in sorted(files):
         if not remaining:
             break
-        if not path.startswith('scripts/') or not path.endswith('.py'):
+        # Published packages may carry their own regression tests. They are
+        # package assets, not runtime tool modules, and often rely on a source
+        # checkout layout that does not exist for an immutable revision.
+        if (
+            not path.startswith('scripts/')
+            or not path.endswith('.py')
+            or path.startswith('scripts/tests/')
+            or '/__tests__/' in path
+        ):
             continue
         encoded = files[path]
         source = base64.b64decode(encoded) if isinstance(encoded, str) else bytes(encoded)
