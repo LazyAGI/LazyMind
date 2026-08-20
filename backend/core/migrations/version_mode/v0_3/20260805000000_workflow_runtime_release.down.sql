@@ -27,6 +27,21 @@ DROP TABLE IF EXISTS public.episode_memories;
 DROP TABLE IF EXISTS public.memory_current_entries;
 DROP INDEX IF EXISTS public.idx_chat_histories_algorithm_create_time;
 ALTER TABLE public.chat_histories DROP COLUMN IF EXISTS algorithm_id;
+DROP INDEX IF EXISTS idx_plugin_drafts_user_trash;
+DROP INDEX IF EXISTS idx_plugin_drafts_user_plugin_id;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_plugin_drafts_user_plugin_id
+    ON plugin_drafts(created_by, plugin_id) WHERE plugin_id != '';
+ALTER TABLE task_center_tasks DROP COLUMN IF EXISTS archived_reason;
+ALTER TABLE skills DROP COLUMN IF EXISTS trash_expires_at;
+ALTER TABLE plugin_drafts DROP COLUMN IF EXISTS published_status_before_trash;
+ALTER TABLE plugin_drafts DROP COLUMN IF EXISTS trash_expires_at;
+ALTER TABLE plugin_drafts DROP COLUMN IF EXISTS deleted_at;
+DROP INDEX IF EXISTS idx_conversations_user_archive_folder;
+DROP INDEX IF EXISTS idx_conversations_user_lifecycle;
+DROP TABLE IF EXISTS conversation_archive_folders;
+ALTER TABLE conversations DROP COLUMN IF EXISTS archive_folder_id;
+ALTER TABLE conversations DROP COLUMN IF EXISTS trash_expires_at;
+ALTER TABLE conversations DROP COLUMN IF EXISTS archived_at;
 ALTER TABLE plugin_drafts DROP COLUMN IF EXISTS driver_content;
 ALTER TABLE plugin_attempt_input_bindings
     DROP COLUMN IF EXISTS content_hash,
@@ -110,6 +125,21 @@ DROP TABLE IF EXISTS episode_memories;
 DROP TABLE IF EXISTS memory_current_entries;
 DROP INDEX IF EXISTS idx_chat_histories_algorithm_create_time;
 ALTER TABLE chat_histories DROP COLUMN algorithm_id;
+DROP INDEX IF EXISTS idx_plugin_drafts_user_trash;
+DROP INDEX IF EXISTS idx_plugin_drafts_user_plugin_id;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_plugin_drafts_user_plugin_id
+    ON plugin_drafts(created_by, plugin_id) WHERE plugin_id != '';
+ALTER TABLE task_center_tasks DROP COLUMN archived_reason;
+ALTER TABLE skills DROP COLUMN trash_expires_at;
+ALTER TABLE plugin_drafts DROP COLUMN published_status_before_trash;
+ALTER TABLE plugin_drafts DROP COLUMN trash_expires_at;
+ALTER TABLE plugin_drafts DROP COLUMN deleted_at;
+DROP INDEX IF EXISTS idx_conversations_user_archive_folder;
+DROP INDEX IF EXISTS idx_conversations_user_lifecycle;
+DROP TABLE IF EXISTS conversation_archive_folders;
+ALTER TABLE conversations DROP COLUMN archive_folder_id;
+ALTER TABLE conversations DROP COLUMN trash_expires_at;
+ALTER TABLE conversations DROP COLUMN archived_at;
 ALTER TABLE plugin_drafts DROP COLUMN driver_content;
 ALTER TABLE plugin_attempt_input_bindings DROP COLUMN content_hash;
 ALTER TABLE plugin_attempt_input_bindings DROP COLUMN source_revision;

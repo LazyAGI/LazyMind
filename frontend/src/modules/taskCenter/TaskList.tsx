@@ -9,6 +9,8 @@ import type { Task } from './api';
 import TaskDetail, { StatusTag, formatDate } from './TaskDetail';
 import { CHAT_RESUME_CONVERSATION_KEY, selectChatConversationFilter } from '@/modules/chat/constants/chat';
 import StateGraphModal from '@/components/StateGraphModal';
+import ArchiveConversationModal from '@/modules/chat/components/ArchiveConversationModal';
+import { unarchiveConversation } from '@/modules/settings/recoveryApi';
 
 const PAGE_SIZE = 20;
 const POLL_INTERVAL_MS = 5_000;
@@ -31,6 +33,7 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
   const [keyword, setKeyword] = useState('');
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState<Task | null>(null);
+  const [archiveTask, setArchiveTask] = useState<Task | null>(null);
   const [graphTask, setGraphTask] = useState<Task | null>(null);
   const hasRunningTask = statusCounts.running > 0 || statusCounts.waiting_inputs > 0 || tasks.some((task) => task.status === 'running' || task.status === 'waiting_inputs');
 
@@ -125,6 +128,28 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
     await load();
   };
 
+  const showArchivedFeedback = (task: Task) => {
+    const messageKey = `task-archived:${task.conversation_id}`;
+    message.open({
+      key: messageKey,
+      type: 'success',
+      duration: 8,
+      content: <span className='archive-feedback'>
+        {t('settingsPage.recovery.archivedSuccess')}
+        <Button type='link' size='small' onClick={() => {
+          void unarchiveConversation(task.conversation_id)
+            .then(() => {
+              message.destroy(messageKey);
+              message.success(t('settingsPage.recovery.unarchived'));
+              void load();
+            })
+            .catch(() => message.error(t('settingsPage.recovery.operationFailed')));
+        }}>{t('settingsPage.recovery.undo')}</Button>
+        <Button type='link' size='small' onClick={() => navigate('/settings?section=recovery')}>{t('settingsPage.recovery.viewArchived')}</Button>
+      </span>,
+    });
+  };
+
   return (
     <div className='all-tasks'>
       <div className='all-tasks-toolbar'>
@@ -141,7 +166,21 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
         </div>
       </div>
       <Table rowKey='id' className='task-table' loading={loading} columns={columns} dataSource={tasks} onRow={(task: Task) => ({ onClick: () => setSelected(task) })} rowClassName={(task: Task) => `task-table-row status-${task.status}`} pagination={{ current: page, pageSize: PAGE_SIZE, total, onChange: onPageChange, showSizeChanger: false, showTotal: (value: number) => t('taskCenter.taskTotalItems', { total: value }) }} />
-      <TaskDetail task={selected} onClose={() => setSelected(null)} onOpenConversation={openConversation} onOpenGraph={() => selected && setGraphTask(selected)} onDelete={handleDelete} />
+      <TaskDetail task={selected} onClose={() => setSelected(null)} onOpenConversation={openConversation} onOpenGraph={() => selected && setGraphTask(selected)} onArchive={setArchiveTask} onDelete={handleDelete} />
+      <ArchiveConversationModal
+        open={Boolean(archiveTask)}
+        conversationId={archiveTask?.conversation_id}
+        title={archiveTask?.conversation_title || archiveTask?.title}
+        onCancel={() => setArchiveTask(null)}
+        onArchived={() => {
+          const archived = archiveTask;
+          setArchiveTask(null);
+          setSelected(null);
+          if (!archived) return;
+          showArchivedFeedback(archived);
+          void load();
+        }}
+      />
       {graphTask?.workflow_session_id && <StateGraphModal open onClose={() => setGraphTask(null)} sessionId={graphTask.workflow_session_id} workflowId='' liveRefresh={false} fallbackSteps={graphTask.steps} />}
     </div>
   );

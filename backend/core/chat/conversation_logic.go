@@ -22,6 +22,7 @@ import (
 	"lazymind/core/state"
 	"lazymind/core/store"
 	"lazymind/core/subagent"
+	"lazymind/core/taskcenter"
 	"lazymind/core/workflow"
 )
 
@@ -212,10 +213,22 @@ func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName st
 	var c orm.Conversation
 	err := db.Where("id = ? AND create_user_id = ?", convID, userID).First(&c).Error
 	if err == nil {
+		if c.DeletedAt != nil {
+			return nil, 0, errConversationInTrash
+		}
 		var count int64
 		db.Model(&orm.ChatHistory{}).Where("conversation_id = ?", convID).Count(&count)
 
 		updates := map[string]any{}
+		if c.ArchivedAt != nil {
+			updates["archived_at"] = nil
+			updates["archive_folder_id"] = nil
+			c.ArchivedAt = nil
+			c.ArchiveFolderID = nil
+			if err := taskcenter.RestoreTasksForConversations(ctx, db, userID, []string{convID}, taskcenter.ArchivedReasonConversationArchive, now.UTC()); err != nil {
+				return nil, 0, err
+			}
+		}
 		if len(searchConfig) > 0 && (len(c.SearchConfig) == 0 || string(c.SearchConfig) == "{}") {
 			updates["search_config"] = searchConfig
 		}
@@ -2940,7 +2953,7 @@ func SaveAskAnswers(w http.ResponseWriter, r *http.Request) {
 	}
 	// Verify the conversation owning this history belongs to the requesting user.
 	if err := db.WithContext(r.Context()).
-		Where("id = ? AND create_user_id = ?", h.ConversationID, userID).
+		Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", h.ConversationID, userID).
 		First(&orm.Conversation{}).Error; err != nil {
 		common.ReplyErr(w, "history not found", http.StatusNotFound)
 		return

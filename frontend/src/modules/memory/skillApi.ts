@@ -101,6 +101,7 @@ export interface SkillAssetRecord {
   autoEvo: boolean;
   isEnabled: boolean;
   deletedAt?: string;
+  trashExpiresAt?: string;
   deletedBy?: string;
 }
 
@@ -508,6 +509,10 @@ const normalizeSkillItem = (
     deletedAt:
       typeof (item as { deleted_at?: unknown }).deleted_at === "string"
         ? (item as { deleted_at?: string }).deleted_at
+        : undefined,
+    trashExpiresAt:
+      typeof (item as { trash_expires_at?: unknown }).trash_expires_at === "string"
+        ? (item as { trash_expires_at?: string }).trash_expires_at
         : undefined,
     deletedBy:
       typeof (item as { deleted_by?: unknown }).deleted_by === "string"
@@ -1128,7 +1133,7 @@ export async function trashSkillAsset(skillId: string) {
 
 export async function listTrashedSkillAssetsPage(
   options: ListSkillOptions = {},
-): Promise<SkillAssetListResult> {
+): Promise<SkillAssetListResult & { categories: string[] }> {
   const response = await skillsApi.apiCoreSkillsTrashGet({
     keyword: options.keyword?.trim() || undefined,
     category: options.category?.trim() || undefined,
@@ -1141,6 +1146,7 @@ export async function listTrashedSkillAssetsPage(
     page?: number;
     page_size?: number;
     total?: number;
+    categories?: string[];
   }>(response.data);
 
   const records = (payload.items || []).map((item) => normalizeSkillItem(item));
@@ -1150,6 +1156,7 @@ export async function listTrashedSkillAssetsPage(
     total: payload.total ?? records.length,
     page: payload.page ?? options.page ?? 1,
     pageSize: payload.page_size ?? options.pageSize ?? 200,
+    categories: payload.categories ?? [],
   };
 }
 

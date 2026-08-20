@@ -261,6 +261,10 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 
 	conversationRecord, seq, err := ensureConversation(r.Context(), db, convID, displayName, searchConfigJSON, modelsJSON, userID, userName, initialConversationSettings)
 	if err != nil {
+		if errors.Is(err, errConversationInTrash) {
+			common.ReplyErr(w, err.Error(), http.StatusConflict)
+			return
+		}
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "failed to ensure conversation", err), http.StatusInternalServerError)
 		return
 	}
@@ -961,7 +965,7 @@ func StopChatGeneration(w http.ResponseWriter, r *http.Request) {
 		userID = "0"
 	}
 	var conv orm.Conversation
-	if err := store.DB().Where("id = ? AND create_user_id = ?", convID, userID).First(&conv).Error; err != nil {
+	if err := store.DB().Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", convID, userID).First(&conv).Error; err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "conversation not found", err), http.StatusNotFound)
 		return
 	}
@@ -1029,7 +1033,7 @@ func DecideToolLimit(w http.ResponseWriter, r *http.Request) {
 		userID = "0"
 	}
 	var conv orm.Conversation
-	if err := store.DB().Where("id = ? AND create_user_id = ?", convID, userID).First(&conv).Error; err != nil {
+	if err := store.DB().Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", convID, userID).First(&conv).Error; err != nil {
 		common.ReplyErr(w, fmt.Sprintf("conversation not found: %v", err), http.StatusNotFound)
 		return
 	}
@@ -1570,6 +1574,7 @@ func archiveConversation(
 	userID string,
 ) error {
 	now := time.Now().UTC()
+	expiresAt := now.Add(30 * 24 * time.Hour)
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		res := tx.Model(&orm.Conversation{}).
 			Where(
@@ -1577,7 +1582,10 @@ func archiveConversation(
 				conversationID,
 				userID,
 			).
-			Updates(map[string]any{"deleted_at": now, "updated_at": now})
+			Updates(map[string]any{
+				"deleted_at": now, "trash_expires_at": expiresAt,
+				"archived_at": nil, "archive_folder_id": nil, "updated_at": now,
+			})
 		if res.Error != nil {
 			return res.Error
 		}
@@ -1585,7 +1593,7 @@ func archiveConversation(
 			return gorm.ErrRecordNotFound
 		}
 		if err := taskcenter.ArchiveTasksForConversations(
-			ctx, tx, userID, []string{conversationID}, now,
+			ctx, tx, userID, []string{conversationID}, taskcenter.ArchivedReasonConversationTrash, now,
 		); err != nil {
 			return err
 		}
@@ -1633,7 +1641,7 @@ func BatchDeleteConversations(w http.ResponseWriter, r *http.Request) {
 
 	var ownedIDs []string
 	if err := db.Model(&orm.Conversation{}).
-		Where("id IN ? AND create_user_id = ?", uniqueIDs, userID).
+		Where("id IN ? AND create_user_id = ? AND deleted_at IS NULL", uniqueIDs, userID).
 		Pluck("id", &ownedIDs).Error; err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "query conversations failed", err), http.StatusInternalServerError)
 		return
@@ -1645,11 +1653,15 @@ func BatchDeleteConversations(w http.ResponseWriter, r *http.Request) {
 
 	if err := db.Transaction(func(tx *gorm.DB) error {
 		now := time.Now().UTC()
+		expiresAt := now.Add(30 * 24 * time.Hour)
 		if err := tx.Model(&orm.Conversation{}).Where("id IN ? AND deleted_at IS NULL", ownedIDs).
-			Updates(map[string]any{"deleted_at": now, "updated_at": now}).Error; err != nil {
+			Updates(map[string]any{
+				"deleted_at": now, "trash_expires_at": expiresAt,
+				"archived_at": nil, "archive_folder_id": nil, "updated_at": now,
+			}).Error; err != nil {
 			return err
 		}
-		return taskcenter.ArchiveTasksForConversations(r.Context(), tx, userID, ownedIDs, now)
+		return taskcenter.ArchiveTasksForConversations(r.Context(), tx, userID, ownedIDs, taskcenter.ArchivedReasonConversationTrash, now)
 	}); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "batch delete conversations failed", err), http.StatusInternalServerError)
 		return
@@ -1682,7 +1694,7 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 	}
 
 	db := store.DB()
-	q := db.Model(&orm.Conversation{}).Where("create_user_id = ? AND deleted_at IS NULL", userID)
+	q := db.Model(&orm.Conversation{}).Where("create_user_id = ? AND deleted_at IS NULL AND archived_at IS NULL", userID)
 	if keyword != "" {
 		q = q.Where("display_name LIKE ?", "%"+keyword+"%")
 	}
@@ -1791,7 +1803,7 @@ func SetChatHistory(w http.ResponseWriter, r *http.Request) {
 		userID = "0"
 	}
 	var conv orm.Conversation
-	if err := db.Where("id = ? AND create_user_id = ?", selected.ConversationID, userID).First(&conv).Error; err != nil {
+	if err := db.Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", selected.ConversationID, userID).First(&conv).Error; err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "conversation not found", err), http.StatusNotFound)
 		return
 	}
@@ -1980,7 +1992,7 @@ func StreamConvEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var conv orm.Conversation
-	if err := db.Where("id = ? AND create_user_id = ?", convID, userID).First(&conv).Error; err != nil {
+	if err := db.Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", convID, userID).First(&conv).Error; err != nil {
 		common.ReplyErr(w, "conversation not found", http.StatusNotFound)
 		return
 	}

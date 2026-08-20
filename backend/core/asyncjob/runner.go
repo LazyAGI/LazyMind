@@ -18,6 +18,13 @@ const (
 	defaultConcurrency  = 2
 	defaultPollInterval = 2 * time.Second
 	defaultLockTTL      = 10 * time.Minute
+	// defaultFinalizeTimeout bounds the DB writes that record a job's outcome
+	// (markSucceeded / markFailedAttempt / markHandlerNotFound). These run with
+	// a context detached from the app ctx so that, when a SIGTERM cancels the
+	// app ctx mid-job, the interrupted job can still be returned to a retryable
+	// state and have its lease cleared — otherwise the row stays in `running`
+	// with an unexpired lock_until until the next startup's RecoverStaleJobs.
+	defaultFinalizeTimeout = 30 * time.Second
 )
 
 type Runner struct {
@@ -212,8 +219,15 @@ func (r *Runner) claimOne(ctx context.Context, now time.Time) (*orm.AsyncJob, er
 
 func (r *Runner) runJob(ctx context.Context, row orm.AsyncJob) error {
 	handler, ok := lookupHandler(row.JobType)
+	// The outcome writes below use a detached, bounded finalize context so an
+	// interrupted job is still recorded and its lease cleared even when the app
+	// ctx is already cancelled at shutdown; the handler itself still runs under
+	// the app ctx so it can react to cancellation.
+	finCtx, finCancel := context.WithTimeout(context.Background(), defaultFinalizeTimeout)
+	defer finCancel()
+
 	if !ok {
-		return r.markHandlerNotFound(ctx, row.ID)
+		return r.markHandlerNotFound(finCtx, row.ID)
 	}
 
 	reporter := &jobReporter{
@@ -224,9 +238,9 @@ func (r *Runner) runJob(ctx context.Context, row orm.AsyncJob) error {
 	}
 	result, err := handler(ctx, toJob(row), reporter)
 	if err == nil {
-		return r.markSucceeded(ctx, row.ID, result)
+		return r.markSucceeded(finCtx, row.ID, result)
 	}
-	return r.markFailedAttempt(ctx, row, result, err)
+	return r.markFailedAttempt(finCtx, row, result, err)
 }
 
 func toJob(row orm.AsyncJob) Job {

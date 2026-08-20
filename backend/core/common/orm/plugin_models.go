@@ -226,12 +226,15 @@ func (WorkflowStepIntent) TableName() string { return "plugin_step_intents" }
 // The original Content column is kept for backward compatibility; readers should prefer
 // the split columns and fall back to Content when the split columns are empty.
 type WorkflowDraft struct {
-	ID        string    `gorm:"column:id;type:varchar(36);primaryKey"`
-	Name      string    `gorm:"column:name;type:varchar(255);not null;default:''"`
-	Content   string    `gorm:"column:content;type:text;not null;default:''"`
-	CreatedBy string    `gorm:"column:created_by;type:varchar(255);not null;default:'';index:idx_plugin_drafts_created_by;uniqueIndex:idx_plugin_drafts_user_plugin_id,priority:1,where:plugin_id != ''"`
-	CreatedAt time.Time `gorm:"column:created_at;not null"`
-	UpdatedAt time.Time `gorm:"column:updated_at;not null"`
+	ID                         string     `gorm:"column:id;type:varchar(36);primaryKey"`
+	Name                       string     `gorm:"column:name;type:varchar(255);not null;default:''"`
+	Content                    string     `gorm:"column:content;type:text;not null;default:''"`
+	CreatedBy                  string     `gorm:"column:created_by;type:varchar(255);not null;default:'';index:idx_plugin_drafts_created_by;uniqueIndex:idx_plugin_drafts_user_plugin_id,priority:1,where:plugin_id != '' AND deleted_at IS NULL"`
+	CreatedAt                  time.Time  `gorm:"column:created_at;not null"`
+	UpdatedAt                  time.Time  `gorm:"column:updated_at;not null"`
+	DeletedAt                  *time.Time `gorm:"column:deleted_at"`
+	TrashExpiresAt             *time.Time `gorm:"column:trash_expires_at"`
+	PublishedStatusBeforeTrash string     `gorm:"column:published_status_before_trash;type:varchar(16);not null;default:''"`
 	// Split content columns (migration 20260706120000).
 	// generate_status: '' | 'generating' | 'brief_done' | 'skeleton_done' | 'state_done' | 'done' | 'failed'
 	//   ''             — never triggered AI generation

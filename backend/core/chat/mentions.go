@@ -526,7 +526,7 @@ func mentionedConversationContext(ctx context.Context, db *gorm.DB, userID, curr
 	var chunks []string
 	for _, id := range ids {
 		var conversation orm.Conversation
-		if err := db.WithContext(ctx).Where("id = ? AND create_user_id = ?", id, userID).Take(&conversation).Error; err != nil {
+		if err := db.WithContext(ctx).Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", id, userID).Take(&conversation).Error; err != nil {
 			return "", fmt.Errorf("conversation mention is not readable: %s", id)
 		}
 		if id == currentID {
