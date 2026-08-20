@@ -102,10 +102,10 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 		v03.Aggregate == nil || v03.Aggregate.Version != 20260805000000 {
 		t.Fatalf("unexpected v0_3 mode: %#v", v03)
 	}
-	if len(v03.Dev) != 28 {
-		t.Fatalf("v0_3 dev migration count=%d, want 28", len(v03.Dev))
+	if len(v03.Dev) != 29 {
+		t.Fatalf("v0_3 dev migration count=%d, want 29", len(v03.Dev))
 	}
-	for _, version := range []uint64{20260730100000, 20260803120000, 20260803150000, 20260803160000, 20260803220000, 20260804090000, 20260804100000, 20260805100000, 20260805120000, 20260805121000, 20260805173000, 20260806120000, 20260806173000, 20260807120000, 20260807160000, 20260809203000, 20260810100000, 20260811120000, 20260811153000, 20260811173000, 20260813120000, 20260813140000, 20260813190000, 20260814110000, 20260814120000, 20260815160000, 20260816120000, 20260817084853} {
+	for _, version := range []uint64{20260730100000, 20260803120000, 20260803150000, 20260803160000, 20260803220000, 20260804090000, 20260804100000, 20260805100000, 20260805120000, 20260805121000, 20260805173000, 20260806120000, 20260806173000, 20260807120000, 20260807160000, 20260809203000, 20260810100000, 20260811120000, 20260811153000, 20260811173000, 20260813120000, 20260813140000, 20260813190000, 20260814110000, 20260814120000, 20260815160000, 20260816120000, 20260817084853, 20260817120000} {
 		if !containsMigrationFileVersion(v03.Dev, version) {
 			t.Fatalf("v0_3 dev migrations are missing %d", version)
 		}
@@ -114,7 +114,7 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read v0_3 aggregate up: %v", err)
 	}
-	for _, token := range []string{"workflow_preparations", "workflow_outbox", "workflow_input_resources", "driver_content", "chat_executor", "external_chat_run_events", "external_chat_hosts", "lease_token", "sub_agent_tasks", "sources"} {
+	for _, token := range []string{"workflow_preparations", "workflow_outbox", "workflow_input_resources", "driver_content", "chat_executor", "external_chat_run_events", "external_chat_hosts", "lease_token", "sub_agent_tasks", "sources", "run_id", "run_status", "run_terminal"} {
 		if !strings.Contains(string(v03Up), token) {
 			t.Fatalf("v0_3 aggregate up is missing %s", token)
 		}

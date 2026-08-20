@@ -528,14 +528,21 @@ export interface ChatChunkResponse {
     'conversation_id'?: string;
     'delta'?: string;
     'execution'?: ExternalExecutionProjection;
-    'finish_reason'?: string;
     'history_id'?: string;
     'message'?: string;
     'prompt_questions'?: Array<string>;
     'reasoning_content'?: string;
+    'runtime_event'?: ChatRuntimeEvent;
     'seq'?: number;
     'sources'?: Array<object>;
     'thinking_duration_s'?: number;
+}
+export interface ChatRuntimeEvent {
+    'data'?: object;
+    'event_id'?: string;
+    'run_id'?: string;
+    'schema_version'?: number;
+    'type'?: string;
 }
 export interface CheckDatabaseConnectionResponse {
     'message': string;
@@ -655,6 +662,9 @@ export interface ConversationHistoryItem {
     'reason'?: string;
     'reasoning_content'?: string;
     'result'?: string;
+    'run_id'?: string;
+    'run_status'?: string;
+    'run_terminal'?: RunTerminal;
     'seq'?: number;
     'sources'?: Array<object>;
     'thinking_time_s'?: number;
@@ -2025,6 +2035,34 @@ export interface RouterTrafficSummary {
     'feedback_rate': number;
     'user_count': number;
 }
+export interface RunTerminal {
+    'code'?: string;
+    'diagnostic_id'?: string;
+    'model_call_id'?: string;
+    'partial_output': boolean;
+    'reason': RunTerminalReasonEnum;
+    'status': RunTerminalStatusEnum;
+}
+
+export const RunTerminalReasonEnum = {
+    Normal: 'normal',
+    AwaitingUserInput: 'awaiting_user_input',
+    ModelIncomplete: 'model_incomplete',
+    ModelFailure: 'model_failure',
+    RuntimeFailure: 'runtime_failure',
+    UserCancelled: 'user_cancelled'
+} as const;
+
+export type RunTerminalReasonEnum = typeof RunTerminalReasonEnum[keyof typeof RunTerminalReasonEnum];
+export const RunTerminalStatusEnum = {
+    Completed: 'completed',
+    Interrupted: 'interrupted',
+    Failed: 'failed',
+    Cancelled: 'cancelled'
+} as const;
+
+export type RunTerminalStatusEnum = typeof RunTerminalStatusEnum[keyof typeof RunTerminalStatusEnum];
+
 export interface SearchDatasetMemberRequest {
     'is_all'?: boolean;
     'name_prefix'?: string;
@@ -2375,7 +2413,6 @@ export interface SkillListItemOpenAPIResponse {
     'tags'?: Array<string>;
 }
 export interface SkillListOpenAPIResponse {
-    'categories'?: Array<string>;
     'items'?: Array<SkillListItemOpenAPIResponse>;
     'page': number;
     'page_size': number;

@@ -1,9 +1,18 @@
 {
-  "auth": "4fc46a4a59a91e07538d22b7855fabab24d2f6cc4c93da3a7a5e9bd5db5a5a5a",
   "core": {
-    "specHash": "61db35621d8c7b93c685bdfa78ba0084279f94d49c49a4d9592c2ca0dbe22e1a",
-    "outputHash": "88edc98eff3dbf433bdad6fd9050d631fbab2ac127977c36bd97b78edc935281"
+    "specHash": "4ece19f25a4dd5caf46084deb40d876cd487afb0415d6f4430982a38473f63ee",
+    "outputHash": "1fb176866e89b8ff940eca9e88b0712a98ef35914304911a3f958afd7a59aeb4"
   },
-  "scan": "f26bd2b462f1e95a130bbff6ab4148a2bbdd1dfd873156dad076e4f6ae0af389",
-  "channel-gateway": "78ea73040435bdc1bf8d6c767f2e1a017399b68b7001ac013de81fdacb576e4f"
+  "auth": {
+    "specHash": "4fc46a4a59a91e07538d22b7855fabab24d2f6cc4c93da3a7a5e9bd5db5a5a5a",
+    "outputHash": "060c597883dc01f011ee0b204e488d74af9018a7c7e6912a622d17820b88900a"
+  },
+  "scan": {
+    "specHash": "f26bd2b462f1e95a130bbff6ab4148a2bbdd1dfd873156dad076e4f6ae0af389",
+    "outputHash": "079bce234d99fd21031109b20f4d28e3f10acc76a71c349dcc46dc17c8a0216d"
+  },
+  "channel-gateway": {
+    "specHash": "78ea73040435bdc1bf8d6c767f2e1a017399b68b7001ac013de81fdacb576e4f",
+    "outputHash": "b3d6af935f748985e37e1a1371830531be05b9576ae379322b4fd059b88fed20"
+  }
 }
