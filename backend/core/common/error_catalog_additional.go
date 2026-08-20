@@ -396,8 +396,6 @@ func init() {
 	registerAdditionalError("archive folder move target must differ from source", http.StatusBadRequest, 2002121)
 	registerAdditionalError("delete archive folder failed", http.StatusInternalServerError, 2002122)
 	registerAdditionalError("codex tcp bridge token is required", http.StatusServiceUnavailable, 2002152)
-	registerAdditionalError("parse workflow slot manifest", http.StatusBadRequest, 2002153)
-	registerAdditionalErrorPattern("artifact slot %q is not declared in workflow revision %s", "artifact slot is not declared in workflow revision", http.StatusBadRequest, 2002154)
 	registerAdditionalError("writer download conversion is too large", http.StatusRequestEntityTooLarge, 2002155)
 	registerAdditionalError("slot must be source_document, outline_document, or draft_document", http.StatusBadRequest, 2002156)
 	registerAdditionalError("active", http.StatusNotFound, 2002157)

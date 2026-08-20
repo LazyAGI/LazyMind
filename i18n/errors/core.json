@@ -1229,8 +1229,6 @@
   "2002150": { "en-US": "Failed to parse the Workflow slot manifest", "zh-CN": "解析工作流素材清单失败" },
   "2002151": { "en-US": "The artifact slot is not declared in the Workflow revision", "zh-CN": "工作流版本未声明该产物素材槽" },
   "2002152": { "en-US": "Codex TCP bridge token is required", "zh-CN": "缺少 Codex TCP 桥接令牌" },
-  "2002153": { "en-US": "Failed to parse workflow slot manifest", "zh-CN": "解析工作流插槽清单失败" },
-  "2002154": { "en-US": "Artifact slot is not declared in workflow revision", "zh-CN": "工作流版本中未声明的制品插槽" },
   "2002155": { "en-US": "The converted Writer download is too large", "zh-CN": "转换后的 Writer 下载文件过大" },
   "2002156": { "en-US": "Writer document slot is invalid", "zh-CN": "Writer 文档插槽无效" },
   "2002157": { "en-US": "Active Writer artifact was not found", "zh-CN": "未找到活跃 Writer 制品" },

@@ -362,7 +362,7 @@ compose-host-permissions:
 	@for path in $(_COMPOSE_BIND_CRITICAL_READ_PATHS); do \
 		if [ -e "$$path" ]; then \
 			echo "  critical read: $$path"; \
-			# Skip node_modules: ppt-export named volume may leave a root-owned mountpoint under workflows/. \
+			: "Skip node_modules: ppt-export named volume may leave a root-owned mountpoint under workflows."; \
 			find "$$path" \( -name node_modules -o -name .git \) -prune -o -exec chmod a+rX {} +; \
 		fi; \
 	done
