@@ -36,6 +36,64 @@ func TestBuildChatRequestBodyUsesConversationIDDerivedSessionID(t *testing.T) {
 	}
 }
 
+func TestWorkflowSessionAvailableForRequest(t *testing.T) {
+	tests := []struct {
+		name    string
+		session *orm.WorkflowSession
+		raw     map[string]any
+		want    bool
+	}{
+		{
+			name:    "active session is injected without frontend context",
+			session: &orm.WorkflowSession{ID: "session-1", Status: "active"},
+			raw:     map[string]any{},
+			want:    true,
+		},
+		{
+			name:    "failed session remains available for recovery",
+			session: &orm.WorkflowSession{ID: "session-1", Status: "failed"},
+			raw:     map[string]any{},
+			want:    true,
+		},
+		{
+			name:    "completed session is available when explicitly focused",
+			session: &orm.WorkflowSession{ID: "session-1", Status: "completed"},
+			raw: map[string]any{
+				"workflow_context": map[string]any{"session_id": "session-1"},
+			},
+			want: true,
+		},
+		{
+			name:    "completed session is not sticky without explicit context",
+			session: &orm.WorkflowSession{ID: "session-1", Status: "completed"},
+			raw:     map[string]any{},
+			want:    false,
+		},
+		{
+			name:    "completed session rejects a stale frontend id",
+			session: &orm.WorkflowSession{ID: "session-1", Status: "completed"},
+			raw: map[string]any{
+				"workflow_context": map[string]any{"session_id": "session-old"},
+			},
+			want: false,
+		},
+		{
+			name:    "dismissed failed session is unavailable",
+			session: &orm.WorkflowSession{ID: "session-1", Status: "failed", Dismissed: true},
+			raw:     map[string]any{},
+			want:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := workflowSessionAvailableForRequest(tt.session, tt.raw); got != tt.want {
+				t.Fatalf("workflowSessionAvailableForRequest() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestPromoteAgentRuntimeFlagsPrefersExplicitRequest(t *testing.T) {
 	body := map[string]any{
 		"agentic_config": map[string]any{

@@ -1,9 +1,15 @@
+import base64
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pytest
 
-from lazymind.workflow_toolkit import HostWorkflowToolkit, WORKFLOW_SKILL_NAME, workflow_skills_dir
+from lazymind.workflow_toolkit import (
+    HostWorkflowToolkit,
+    WORKFLOW_SKILL_NAME,
+    load_workflow_package_tools,
+    workflow_skills_dir,
+)
 from lazymind.workflow_sdk import WorkflowClientError
 
 
@@ -18,6 +24,23 @@ def test_common_toolkit_exposes_complete_skill_capabilities():
         'import_input_resource', 'read_input_resource', 'bind_workflow_input',
         'list_artifacts', 'read_artifact', 'patch_artifact', 'delete_artifact',
     } <= names
+
+
+def test_package_tool_loader_skips_published_test_modules():
+    package = {'files': {
+        'scripts/tests/test_tool.py': base64.b64encode(
+            b'raise RuntimeError("tests must not execute at runtime")',
+        ).decode(),
+        'scripts/tools.py': base64.b64encode(
+            b'def selected_tool():\n    return "ok"\n',
+        ).decode(),
+    }}
+
+    loaded = load_workflow_package_tools(
+        package, ['selected_tool'], 'test-workflow', 'revision-1',
+    )
+
+    assert loaded['selected_tool']() == 'ok'
 
 
 def test_advance_step_exposes_strict_step_command_schema_and_accepts_it():

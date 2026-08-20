@@ -438,18 +438,29 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		if activeSess, err := workflow.GetLatestSession(r.Context(), db, convID); err == nil && activeSess != nil &&
-			(!workflowSessionTerminal(activeSess) || activeSess.Status == workflow.SessionStatusFailed) {
+		if activeSess, err := workflow.GetLatestSession(r.Context(), db, convID); err == nil &&
+			workflowSessionAvailableForRequest(activeSess, raw) {
+			refOrID := activeSess.WorkflowRef
+			if refOrID == "" {
+				refOrID = activeSess.WorkflowID
+			}
+			runtimePolicy, hasRuntimePolicy := workflow.RuntimePolicyForRevision(
+				r.Context(), db, userID, refOrID, activeSess.WorkflowRevisionID,
+			)
 			existing, hasPC := reqBody["workflow_context"].(map[string]any)
 			if !hasPC || existing == nil {
 				// Case 1: inject from DB.
-				reqBody["workflow_context"] = map[string]any{
+				existing = map[string]any{
 					"session_id":    activeSess.ID,
 					"workflow_id":   activeSess.WorkflowID,
 					"current_step":  activeSess.CurrentStepID,
 					"workflow_mode": workflowMode,
 					"workflow_ref":  activeSess.WorkflowRef, "revision_id": activeSess.WorkflowRevisionID, "revision_no": activeSess.WorkflowRevisionNo, "tree_hash": activeSess.WorkflowTreeHash, "remote_root": activeSess.WorkflowRemoteRoot,
 				}
+				if hasRuntimePolicy {
+					existing["runtime"] = runtimePolicy
+				}
+				reqBody["workflow_context"] = existing
 				fmt.Printf("[WORKFLOW_CONTEXT_INJECTED] conversation_id=%s session_id=%s workflow_id=%s current_step=%s workflow_mode=%s\n",
 					convID, activeSess.ID, activeSess.WorkflowID, activeSess.CurrentStepID, workflowMode)
 			} else {
@@ -473,6 +484,10 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 				existing["revision_no"] = activeSess.WorkflowRevisionNo
 				existing["tree_hash"] = activeSess.WorkflowTreeHash
 				existing["remote_root"] = activeSess.WorkflowRemoteRoot
+				delete(existing, "runtime")
+				if hasRuntimePolicy {
+					existing["runtime"] = runtimePolicy
+				}
 				if stale {
 					fmt.Printf("[WORKFLOW_CONTEXT_CORRECTED] conversation_id=%s session_id=%s workflow_id=%s current_step=%s\n",
 						convID, activeSess.ID, activeSess.WorkflowID, activeSess.CurrentStepID)
@@ -487,15 +502,16 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 				reqBody["workflow_context"] = retryContext
 			}
 		} else if existing, hasPC := reqBody["workflow_context"].(map[string]any); hasPC {
-			// No active session in DB but frontend sent a workflow_context — clear it to avoid
-			// Python entering advance-step mode with a stale/non-existent session.
-			for _, key := range []string{"session_id", "workflow_id", "current_step", "workflow_ref", "revision_id", "revision_no", "tree_hash", "remote_root"} {
+			// No request-addressable session in DB but the frontend sent a
+			// workflow_context — clear it to avoid Python entering advance-step mode
+			// with a stale, dismissed, or unrelated session.
+			for _, key := range []string{"session_id", "workflow_id", "current_step", "workflow_ref", "revision_id", "revision_no", "tree_hash", "remote_root", "runtime"} {
 				delete(existing, key)
 			}
 			existing["workflow_mode"] = workflowMode
 			reqBody["workflow_context"] = existing
 			if _, hasPreflight := existing["workflow_preflight"]; !hasPreflight {
-				fmt.Printf("[WORKFLOW_CONTEXT_CLEARED] conversation_id=%s no active session in DB\n", convID)
+				fmt.Printf("[WORKFLOW_CONTEXT_CLEARED] conversation_id=%s no request-addressable session in DB\n", convID)
 			}
 		}
 	}
@@ -546,6 +562,27 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	}
 
 	handleStreamChat(w, r, db, stateStore, baseURL, reqBody, convID, displayQuery, target, dualReply, historyExt)
+}
+
+// workflowSessionAvailableForRequest decides whether a workflow session should
+// remain attached to this chat turn. Active/waiting sessions and failed sessions
+// retain the existing recovery behaviour. A completed session is attached only
+// when the frontend explicitly sent that exact session id. This lets follow-up
+// edits update a completed workflow artifact (for example, one PPT page) without
+// making an old completed workflow sticky for unrelated future chat turns.
+func workflowSessionAvailableForRequest(session *orm.WorkflowSession, raw map[string]any) bool {
+	if session == nil || session.Dismissed {
+		return false
+	}
+	if !workflowSessionTerminal(session) || session.Status == workflow.SessionStatusFailed {
+		return true
+	}
+	if session.Status != workflow.SessionStatusCompleted {
+		return false
+	}
+	context, _ := raw["workflow_context"].(map[string]any)
+	requestSessionID, _ := context["session_id"].(string)
+	return strings.TrimSpace(requestSessionID) != "" && requestSessionID == session.ID
 }
 
 func userExplicitlyRequestedWorkflowRetry(query string) bool {

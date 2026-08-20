@@ -23,6 +23,7 @@ export interface BuiltinWorkflowUiTabSlot {
 
 export interface BuiltinWorkflowUiTab {
   id: string;
+  step_id?: string;
   label: string;
   layout: string;
   slots: BuiltinWorkflowUiTabSlot[];
@@ -32,6 +33,15 @@ export interface BuiltinWorkflowUiTab {
     empty_column_scope?: 'selected' | 'tab';
     mutually_exclusive?: Array<{ slots: string[]; prefer?: string[] }>;
   };
+  actions?: Array<{
+    id: string;
+    type: 'export';
+    provider: string;
+    label?: string;
+    inputs: Record<string, string>;
+    formats?: string[];
+    alignment?: 'sort_order';
+  }>;
 }
 
 export interface BuiltinWorkflow {

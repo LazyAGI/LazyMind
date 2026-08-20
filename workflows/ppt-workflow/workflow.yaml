@@ -1,0 +1,232 @@
+id: ppt-workflow
+name: AI PPT Planner
+preflight_disabled: true
+description: >
+  Plan a presentation from a user request, collect useful source material,
+  then generate free-form HTML slides via the workflow runtime (SenseNova-derived
+  subset under runtime/). Preview shows HTML pages in a flippable composite
+  workspace with speaker notes below. PPTX export is UI-only (Export button).
+
+when_to_use: >
+  Trigger this workflow when the user explicitly asks to use the PPT workflow, or
+  when the user wants to create, plan, draft, or revise a multi-slide
+  presentation/deck/PPT. Use it for requests such as "make a PPT", "generate a
+  presentation", "帮我做一个路演 PPT", or "做一份汇报幻灯片".
+  Uploaded materials are optional: text-only requests must start immediately
+  from the user's prompt and must never ask for an upload unless the user
+  explicitly asks to base the deck on a source file that is not available.
+  Before starting, collect only any missing presentation topic, slide count,
+  target customer/audience, and visual style declared by runtime policy.
+  Do not trigger for simple one-off explanations, ordinary image generation,
+  ordinary long-form writing, or requests that only ask to preview an uploaded
+  PowerPoint file.
+
+runtime:
+  publisher_owned_slots:
+    - slide_outline
+    - preview_html
+    - preview_notes
+  collects_knowledge: true
+  completed_edit_step: generate_ppt
+  clarification_fields:
+    - id: topic
+      label: 主题
+      question: 这份 PPT 的主题是什么？
+      type: text
+    - id: slide_count
+      label: 页数
+      question: 希望生成多少页？
+      type: single
+      choices:
+        - 3 页
+        - 5 页
+        - 8 页
+        - 10 页
+    - id: target_customer
+      label: 对应客户
+      question: 这份 PPT 面向哪位客户或哪类受众？
+      type: text
+    - id: visual_style
+      label: 风格
+      question: 希望采用什么视觉风格？
+      type: single
+      choices:
+        - 商务专业
+        - 科技未来
+        - 简洁极简
+        - 正式汇报
+
+tool_scripts:
+  - path: scripts/tools.py
+    functions:
+      - ppt_search_web_images
+      - ppt_register_material_images
+      - ppt_generate_material_images
+      - ppt_attach_material_images
+      - ppt_build_outline
+      - ppt_generate_pages
+      - ppt_init_deck
+      - ppt_find_deck
+      - ppt_run_stage
+      - ppt_list_pages
+      - ppt_publish_outline
+      - ppt_publish_pages
+      - ppt_read_page_html
+      - ppt_read_page_outline
+      - ppt_patch_page_outline
+      - ppt_edit_page_html
+      - ppt_delete_page
+      - ppt_preview_selection_edit
+      - ppt_apply_selection_edit
+
+artifact_actions:
+  rewrite_selection:
+    revision_policy: head
+    slots:
+      - preview_html
+    preview_tool: ppt_preview_selection_edit
+    execute_tool: ppt_apply_selection_edit
+
+steps:
+  - id: analyze_requirements
+    label: Analyze Requirements
+  - id: collect_materials
+    label: Collect Materials
+  - id: build_outline
+    label: Build Outline
+  - id: generate_ppt
+    label: Generate PPT
+
+slots:
+  - id: requirement_analysis
+    label: Requirement Analysis
+    type: text
+    cardinality: single
+    summary_max_chars: 600
+
+  - id: uploaded_materials
+    label: Uploaded Materials
+    type: file
+    cardinality: list
+    ordered: true
+    external: true
+    required: false
+    allow_manual_add: true
+
+  - id: material_summary
+    label: Material Summary
+    type: text
+    cardinality: single
+    summary_max_chars: 700
+
+  - id: material_images
+    label: Material Images
+    type: image
+    cardinality: list
+    ordered: true
+
+  - id: slide_outline
+    label: Slide Outline
+    type: text
+    cardinality: list
+    ordered: true
+    summary_max_chars: 900
+
+  - id: preview_html
+    label: Slide
+    type: text
+    cardinality: list
+    ordered: true
+    summary_max_chars: 500
+
+  - id: preview_notes
+    label: Speaker Notes
+    type: text
+    cardinality: list
+    ordered: true
+    summary_max_chars: 1200
+
+ui:
+  slots:
+    slide_outline:
+      widgetType: text-markdown
+      maxHeight: 420
+    preview_html:
+      widgetType: html-slide
+      maxHeight: 520
+    preview_notes:
+      widgetType: text-markdown
+      maxHeight: 200
+
+  tabs:
+    - id: analysis
+      step_id: analyze_requirements
+      label: Analysis
+      layout: list
+      slots:
+        - id: requirement_analysis
+
+    - id: materials
+      step_id: collect_materials
+      label: Materials
+      layout: list
+      slots:
+        - id: uploaded_materials
+        - id: material_summary
+        - id: material_images
+
+    - id: outline
+      step_id: build_outline
+      label: Outline
+      layout: list
+      slots:
+        - id: slide_outline
+
+    - id: composite_preview
+      step_id: generate_ppt
+      label: Slides
+      layout: composite
+      composite_tab_position: left
+      actions:
+        - id: export_presentation
+          type: export
+          provider: html-presentation
+          inputs:
+            pages: preview_html
+            notes: preview_notes
+          formats:
+            - raster-pptx
+            - pdf
+            - editable-pptx
+          alignment: sort_order
+      slots:
+        - id: preview_html
+        - id: preview_notes
+      composite_layout:
+        direction: column
+        children:
+          - slot: preview_html
+            weight: 3
+          - slot: preview_notes
+            weight: 1
+
+i18n:
+  zh-CN:
+    name: AI PPT 规划
+    steps:
+      analyze_requirements: {label: 需求分析}
+      collect_materials: {label: 收集素材}
+      build_outline: {label: 大纲}
+      generate_ppt: {label: 生成PPT}
+    tabs:
+      analysis: {label: 分析}
+      materials: {label: 素材}
+      outline: {label: 大纲}
+      composite_preview: {label: 幻灯片}
+    slots:
+      requirement_analysis: {label: 需求分析}
+      material_summary: {label: 素材摘要}
+      material_images: {label: 素材图片}
+      slide_outline: {label: 页面大纲}
+      preview_html: {label: 幻灯片}
+      preview_notes: {label: 讲稿}
