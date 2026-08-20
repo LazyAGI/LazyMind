@@ -8,6 +8,7 @@ import time
 from html import escape as escape_xml
 import sys
 from typing import Any, Dict, List, Optional, Union
+from uuid import uuid4
 import lazyllm
 from lazyllm import LOG, set_trace_context
 from fastapi.responses import StreamingResponse
@@ -557,6 +558,7 @@ async def _handle_chat_impl(
 
     conversation_id = (conversation.conversation_id or '').strip()
     user_id = (conversation.user_id or '').strip()
+    run_id = str(conversation.run_id or '').strip() or uuid4().hex
     LOG.info(
         f'[ChatServer] [MODEL_CONFIG_RECEIVED] [sid={conversation.session_id}] [user_id={user_id or ""}] '
         f'[{summarize_model_config_for_log(runtime.llm_config)}]'
@@ -608,7 +610,7 @@ async def _handle_chat_impl(
                 'sources': [],
             },
             cost,
-        ), final_data={'tool_call_turns': 0})
+        ), run_id=run_id)
     filters = dict(retrieval.filters or {})
     files_map: Dict[str, List[str]] = message.files if isinstance(message.files, dict) else {}
     flat_files: List[str] = []
@@ -629,9 +631,10 @@ async def _handle_chat_impl(
 
     raw_history = list(message.history) if isinstance(message.history, list) else []
     agent_history = normalize_history_for_agent(raw_history)
-    translator = AgentEventFrameTranslator(query=query)
+    translator = AgentEventFrameTranslator(query=query, run_id=run_id)
 
     agentic_config = {
+        'run_id': run_id,
         'session_id': conversation.session_id,
         'task_id': conversation.session_id,
         'episode_occurred_at_ms': int(start_time * 1000),
@@ -1205,6 +1208,7 @@ async def _handle_chat_impl(
 
     async def event_stream() -> Any:
         final_result: Any = None
+        succeeded = False
 
         try:
             async with rag_sem:
@@ -1234,6 +1238,8 @@ async def _handle_chat_impl(
                 cost = round(time.time() - start_time, 3)
                 yield log_and_emit_frame(frame, cost, query, conversation.session_id, tag='FINISH')
 
+            succeeded = True
+
             if episode_results:
                 try:
                     hit_results = await asyncio.to_thread(
@@ -1253,29 +1259,17 @@ async def _handle_chat_impl(
                         f'error_type={type(exc).__name__} error={exc}'
                     )
 
-        except Exception as exc:
+        except Exception:
             LOG.exception('[ChatServer] agent failed')
-            final_resp = response_payload(
-                500,
-                f'chat service failed: {exc}',
-                {'status': 'FAILED', 'tool_call_turns': translator.tool_call_turns},
-                0.0,
-            )
-        else:
-            final_resp = response_payload(
-                200,
-                'success',
-                {'status': 'FINISHED', 'tool_call_turns': translator.tool_call_turns},
-                0.0,
-            )
         finally:
             # Unregister the active session so the cancel endpoint no longer targets it.
             if _conv_id_key:
                 _unregister_active_session(_conv_id_key, conversation.session_id)
 
         cost = round(time.time() - start_time, 3)
-        final_resp['cost'] = cost
-        yield sse_line(final_resp)
+        terminal_frame = translator.finish_run(succeeded=succeeded)
+        terminal_frame['tool_call_turns'] = translator.tool_call_turns
+        yield log_and_emit_frame(terminal_frame, cost, query, conversation.session_id, tag='RUN_FINISH')
 
         databases_str = json.dumps(retrieval.databases, ensure_ascii=False) if retrieval.databases else []
         LOG.info(

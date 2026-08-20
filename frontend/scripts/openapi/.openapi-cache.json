@@ -1,8 +1,8 @@
 {
   "auth": "4fc46a4a59a91e07538d22b7855fabab24d2f6cc4c93da3a7a5e9bd5db5a5a5a",
   "core": {
-    "specHash": "8f74079079c015dac73e5c33fd3addbe1c22d907d7b2861917ebc7859625bd9a",
-    "outputHash": "bd96413d52514891a74a745403f7d95409e8814a0ab2338776225d1d9679faca"
+    "specHash": "31404de7b12b8ff4517a9b39b3b5a9a9a5c283e3e7a6d9c98f3bef586a739124",
+    "outputHash": "9ce913f576dd14d3fcd0275f16af1b7bb607af0e17f8b2227e5dd69e01e7cdcc"
   },
   "scan": "f26bd2b462f1e95a130bbff6ab4148a2bbdd1dfd873156dad076e4f6ae0af389",
   "channel-gateway": "78ea73040435bdc1bf8d6c767f2e1a017399b68b7001ac013de81fdacb576e4f"
