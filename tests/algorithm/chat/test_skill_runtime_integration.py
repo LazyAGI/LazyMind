@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import threading
 
 import lazyllm
 from lazyllm.common import new_session
@@ -130,6 +131,40 @@ def _tool_call(call_id: str, name: str, arguments: dict) -> dict:
     }
 
 
+class _DirectGetSkillLLM:
+    '''Fake LLM that calls get_skill immediately, without searching first.
+
+    Mirrors the production flow where chat_service exposes the initial
+    retrieval hits before the agent loop starts, so the loop's first action
+    can already be get_skill rather than search_skills.
+    '''
+
+    def __init__(self, skill_name: str) -> None:
+        self._module_id = f'direct-get-{id(self)}'
+        self._skill_name = skill_name
+        self._state = {'round': 0}
+
+    def share(self, **_kwargs):
+        return copy.copy(self)
+
+    def used_by(self, _module_id):
+        return self
+
+    def __call__(self, _input, **_kwargs):
+        history = lazyllm.locals.get('chat_history', {}).get(self._module_id, [])
+        current_messages = _input.get('input', []) if isinstance(_input, dict) else []
+        observations = [*history, *current_messages]
+        current_round = self._state['round']
+        self._state['round'] += 1
+        if current_round == 0:
+            return _tool_call('get-direct', 'get_skill', {'name': self._skill_name})
+        assert any(
+            item.get('role') == 'tool' and 'RESUME_WORKFLOW_MARKER' in str(item.get('content'))
+            for item in observations
+        ), 'the model did not receive the loaded SKILL.md via get_skill'
+        return {'role': 'assistant', 'content': 'Loaded RESUME_WORKFLOW_MARKER.'}
+
+
 def test_search_skills_expands_get_skill_visibility_in_same_agent_session(tmp_path) -> None:
     _write_skill(
         tmp_path,
@@ -224,3 +259,75 @@ def test_react_agent_can_refine_an_empty_skill_search_inside_the_loop(tmp_path) 
         result = agent('把过往背景变成应聘档案。')
 
     assert result == 'Recovered after refining the Skill search.'
+
+
+def test_initial_retrieval_exposure_is_visible_in_agent_loop(tmp_path) -> None:
+    _write_skill(
+        tmp_path,
+        'resume-assistant',
+        'Turn scattered experience into a professional resume or CV. RESUME_WORKFLOW_MARKER',
+        aliases=('简历', '履历'),
+    )
+    for index in range(49):
+        _write_skill(tmp_path, f'decoy-{index}', f'Unrelated workflow number {index}.')
+
+    allowed = ['resume-assistant', *(f'decoy-{index}' for index in range(49))]
+    manager = SkillManager(dir=str(tmp_path), skills=[], allowed_skills=allowed)
+    agent = ReactAgent(
+        llm=_DirectGetSkillLLM('resume-assistant'),
+        tools=[],
+        skill_manager=manager,
+        max_retries=2,
+        stream=False,
+        enable_builtin_tools=False,
+    )
+
+    with new_session('initial-exposure-agent-loop'):
+        assert manager.get_skill('resume-assistant')['status'] == 'missing'
+        manager.expose_skills(['resume-assistant'])
+        result = agent('Turn my scattered experience into a professional CV.')
+
+    assert result == 'Loaded RESUME_WORKFLOW_MARKER.'
+
+
+def test_concurrent_sessions_do_not_share_exposed_skills(tmp_path) -> None:
+    _write_skill(tmp_path, 'resume-assistant', 'resume workflow', aliases=('简历',))
+    _write_skill(tmp_path, 'hot-news-summary', 'news workflow', aliases=('热点',))
+    manager = SkillManager(
+        dir=str(tmp_path),
+        skills=[],
+        allowed_skills=['resume-assistant', 'hot-news-summary'],
+    )
+
+    results: dict[str, tuple[str, str]] = {}
+    barrier = threading.Barrier(2)
+
+    def run_resume_session() -> None:
+        with new_session('concurrent-resume-session'):
+            barrier.wait()
+            manager.expose_skills(['resume-assistant'])
+            results['resume'] = (
+                manager.get_skill('resume-assistant')['status'],
+                manager.get_skill('hot-news-summary')['status'],
+            )
+
+    def run_news_session() -> None:
+        with new_session('concurrent-news-session'):
+            barrier.wait()
+            manager.expose_skills(['hot-news-summary'])
+            results['news'] = (
+                manager.get_skill('hot-news-summary')['status'],
+                manager.get_skill('resume-assistant')['status'],
+            )
+
+    resume_thread = threading.Thread(target=run_resume_session)
+    news_thread = threading.Thread(target=run_news_session)
+    resume_thread.start()
+    news_thread.start()
+    resume_thread.join(timeout=30)
+    news_thread.join(timeout=30)
+
+    assert not resume_thread.is_alive()
+    assert not news_thread.is_alive()
+    assert results['resume'] == ('ok', 'missing')
+    assert results['news'] == ('ok', 'missing')

@@ -460,6 +460,35 @@ def test_search_tool_exposes_only_retrieved_allowed_skills() -> None:
     assert manager.exposed == ['resume-assistant']
 
 
+def test_duplicate_descriptors_are_deduplicated() -> None:
+    retriever = SkillRetriever(embedder=None, small_catalog_threshold=20)
+    duplicated = [*CATALOG, dict(CATALOG[0])]
+
+    result = retriever.retrieve('整理简历', duplicated, limit=10)
+
+    assert result.strategy == 'all'
+    assert result.skill_ids == [item['id'] for item in CATALOG]
+    assert len(result.hits) == len(CATALOG)
+
+
+def test_limit_is_clamped_to_catalog_size() -> None:
+    retriever = SkillRetriever(embedder=None, small_catalog_threshold=0)
+
+    result = retriever.retrieve('curriculum vitae', CATALOG, limit=100)
+
+    assert len(result.hits) <= len(CATALOG)
+
+
+def test_empty_query_returns_no_lexical_hits() -> None:
+    retriever = SkillRetriever(embedder=None, small_catalog_threshold=0)
+
+    result = retriever.retrieve('', CATALOG, limit=3)
+
+    assert result.strategy == 'lexical'
+    assert result.skill_ids == []
+    assert result.embedding_error == 'embedding model unavailable'
+
+
 @pytest.mark.skipif(
     os.environ.get('RUN_LIVE_SKILL_RETRIEVAL') != '1'
     or not os.environ.get('LIVE_SKILL_EMBED_API_KEY'),
