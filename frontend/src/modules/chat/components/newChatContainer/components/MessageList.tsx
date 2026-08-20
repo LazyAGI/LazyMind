@@ -41,7 +41,7 @@ function mentionHref(mention: ChatMention) {
         ? `/memory-management/workflows/builtin/${encodeURIComponent(mention.resource_id.slice(8))}`
         : `/memory-management/workflows/${id}`;
     case "tool":
-      return "/model-providers/tools";
+      return "/settings?section=system_tools";
     case "conversation":
       return `/agent/chat?conversation_id=${id}`;
     default:

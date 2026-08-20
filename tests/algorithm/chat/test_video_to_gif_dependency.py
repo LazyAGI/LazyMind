@@ -26,7 +26,7 @@ def test_video_to_gif_returns_dependency_error_when_ffmpeg_is_missing(monkeypatc
     assert 'FFMPEG_DEPENDENCY_MISSING' in result['error']['reason']
     assert result['meta'] == {
         'dependency': 'ffmpeg',
-        'settings_path': '/model-providers/tools#ffmpeg-dependency',
+        'settings_path': '/settings?section=system_tools#ffmpeg-dependency',
         'fallback': 'video',
     }
 

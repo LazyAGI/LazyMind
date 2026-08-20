@@ -140,7 +140,7 @@ export function useChatConversation({
       content: t("chat.ffmpegGifRequiredDesc"),
       okText: t("chat.configureFfmpeg"),
       cancelText: t("common.close"),
-      onOk: () => navigate("/model-providers/tools#ffmpeg-dependency"),
+      onOk: () => navigate("/settings?section=system_tools#ffmpeg-dependency"),
       afterClose: () => {
         ffmpegPromptOpenRef.current = false;
       },

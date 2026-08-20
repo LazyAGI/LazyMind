@@ -370,7 +370,7 @@ const Detail = () => {
           content: t("knowledge.ffmpegRequiredDesc"),
           okText: t("knowledge.configureFfmpeg"),
           cancelText: t("common.close"),
-          onOk: () => navigate("/model-providers/tools#ffmpeg-dependency"),
+          onOk: () => navigate("/settings?section=system_tools#ffmpeg-dependency"),
         });
       } catch (error) {
         console.error("Failed to inspect completed task:", error);
@@ -643,7 +643,7 @@ const Detail = () => {
                                 "knowledge.multimodalEmbeddingNotReadyBannerAdmin",
                               )}
                           <a
-                            href="/model-providers"
+                            href="/settings?section=models"
                             style={{
                               marginLeft: 8,
                               color: "#fff",
@@ -651,7 +651,7 @@ const Detail = () => {
                             }}
                             onClick={(e: MouseEvent<HTMLAnchorElement>) => {
                               e.preventDefault();
-                              navigate("/model-providers");
+                              navigate("/settings?section=models");
                             }}
                           >
                             {t("knowledge.goToConfig")}

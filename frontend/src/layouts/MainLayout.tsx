@@ -206,7 +206,6 @@ export default function MainLayout() {
     (import.meta.env as ImportMetaEnv & { VITE_APP_LOGO?: string })
       .VITE_APP_LOGO || "";
   const needsRestoreButtonSafeArea =
-    pathname.startsWith("/model-providers") ||
     pathname.startsWith("/cloud-documents") ||
     pathname.startsWith("/channels") ||
     pathname.startsWith("/settings") ||
