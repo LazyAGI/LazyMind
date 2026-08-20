@@ -44,6 +44,7 @@ func TestListBuiltinSkillsIncludesTemplatesAndUserInstallState(t *testing.T) {
 		Data struct {
 			Items []struct {
 				UID              string `json:"builtin_skill_uid"`
+				Name             string `json:"name"`
 				Content          string `json:"content"`
 				Installed        bool   `json:"installed"`
 				InstalledSkillID string `json:"installed_skill_id"`
@@ -60,5 +61,25 @@ func TestListBuiltinSkillsIncludesTemplatesAndUserInstallState(t *testing.T) {
 	first := response.Data.Items[0]
 	if first.UID != manifest.UID || first.Content == "" || !first.Installed || first.InstalledSkillID != "installed_builtin_skill" {
 		t.Fatalf("unexpected first builtin item: %#v", first)
+	}
+
+	wantUninstalled := map[string]string{
+		"bsk_01K0H0TNEWS2M8V5C7R4D9Q6P1": "hot-news-summary",
+		"bsk_01K0RESVME4N8V5C7D2Q9P6A3B": "resume-assistant",
+	}
+	for uid, name := range wantUninstalled {
+		found := false
+		for _, item := range response.Data.Items {
+			if item.UID != uid {
+				continue
+			}
+			found = true
+			if item.Name != name || item.Content == "" || item.Installed || item.InstalledSkillID != "" {
+				t.Fatalf("unexpected uninstalled builtin item: %#v", item)
+			}
+		}
+		if !found {
+			t.Fatalf("builtin item %s not listed", uid)
+		}
 	}
 }
