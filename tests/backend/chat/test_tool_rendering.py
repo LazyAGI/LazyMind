@@ -48,13 +48,9 @@ def test_list_data_sources_preview_hides_empty_keyword_and_internal_ids():
             'id': 'call-data-sources',
             'name': 'list_data_sources',
             'result': {
-                'success': True,
-                'tool': 'list_data_sources',
-                'result': {
-                    'provider_groups': [
-                        {'group_id': '593b933b257a492b9098eb771c6d9c06'}
-                    ],
-                },
+                'provider_groups': [
+                    {'group_id': '593b933b257a492b9098eb771c6d9c06'}
+                ],
             },
         },
         'zh',
@@ -224,16 +220,25 @@ def test_plugin_preflight_result_supports_ready_status_payload():
     assert 'Reason: **The user explicitly requested this plugin.**' in result_text
 
 
-def test_workflow_failure_template_handles_plain_tool_error_without_crashing():
-    error = '[Tool Error] ModuleExecutionError: workflow or revision was not found'
+def test_workflow_failure_template_handles_canonical_failure():
     result_text = _tool_result_frame_text(
         {
             'id': 'call-workflow',
             'name': 'trigger_test_workflow',
-            'result': error,
+            'result': {
+                'ok': False,
+                'error': {
+                    'category': 'DOMAIN_FAILURE',
+                    'code': 'WORKFLOW_NOT_FOUND',
+                    'tool': 'trigger_test_workflow',
+                    'message': 'workflow or revision was not found',
+                    'recovery_action': 'change_plan',
+                    'details': {},
+                },
+            },
         },
         'zh',
     )
 
-    assert '工作流初始化失败，结果是 **failed**' in result_text
+    assert '工作流初始化失败，结果是 **DOMAIN_FAILURE**' in result_text
     assert 'workflow or revision was not found' in result_text

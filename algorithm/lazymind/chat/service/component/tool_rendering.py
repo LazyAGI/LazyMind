@@ -814,6 +814,7 @@ _LOW_SIGNAL_ARGUMENT_KEYS = {
 
 _MAX_REPRESENTATIVE_RESULT_LENGTH = 200
 _MAX_TOOL_RESULT_PREVIEW_LENGTH = 50
+_MAX_SUCCESS_RESULT_NORMALIZATION_DEPTH = 6
 
 _ZH_PREVIEW_RE = re.compile('[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]')
 
@@ -1034,7 +1035,7 @@ def _friendly_preview_text(value: Any) -> str:
 
 def _representative_tool_result(tool_name: str, result: Any) -> Any:
     render_name, _ = _render_tool_context(tool_name)
-    result = _canonical_tool_result_value(result)
+    result = _normalized_success_business_value(result)
     if isinstance(result, dict):
         key = _resolve_tool_key(render_name, _REPRESENTATIVE_TOOL_RESULTS)
         if key and result.get(key) is not None:
@@ -1071,7 +1072,7 @@ def _truncate_tool_result_preview(value: Any) -> str:
 def _tool_result_status(result: Any) -> str:
     if isinstance(result, dict) and result.get('ok') is False and isinstance(result.get('error'), dict):
         return 'failed'
-    payload = _canonical_tool_result_value(result)
+    payload = _normalized_success_business_value(result)
     if isinstance(payload, dict):
         status = str(payload.get('status') or '').strip().lower()
         if status == 'needs_approval':
@@ -1191,10 +1192,26 @@ def _tool_result_preview_display_value(tool_name: str, result: Any, value: str =
     return value or _truncate_tool_result_preview(_representative_tool_result(tool_name, result))
 
 
-def _canonical_tool_result_value(value: Any) -> Any:
-    """Return the business value from a canonical successful ToolResult."""
+def _normalized_success_business_value(value: Any, depth: int = 0) -> Any:
+    """Normalize JSON-serialized successful business values for rendering."""
+    if depth >= _MAX_SUCCESS_RESULT_NORMALIZATION_DEPTH:
+        return value
+    if isinstance(value, dict) and value.get('ok') is False:
+        return value
     if isinstance(value, dict) and value.get('ok') is True and 'value' in value:
-        return value.get('value')
+        return _normalized_success_business_value(value.get('value'), depth + 1)
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except (TypeError, ValueError):
+            return value
+        if isinstance(parsed, (dict, list)):
+            return _normalized_success_business_value(parsed, depth + 1)
+        return value
+    if isinstance(value, dict) and isinstance(value.get('result'), (dict, str)):
+        nested = _normalized_success_business_value(value.get('result'), depth + 1)
+        if isinstance(nested, (dict, list)):
+            return nested
     return value
 
 
@@ -1208,7 +1225,7 @@ def _tool_result_mapping(value: Any) -> dict[str, Any] | None:
             mapping.setdefault('reason', error.get('message') or error.get('code') or 'Tool call failed')
             mapping.setdefault('details', error.get('details') or {})
             return mapping
-    payload = _canonical_tool_result_value(value)
+    payload = _normalized_success_business_value(value)
     return payload if isinstance(payload, dict) else None
 
 
