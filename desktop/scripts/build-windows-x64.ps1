@@ -354,6 +354,7 @@ function Build-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind = '
     $desktopManager = Join-Path $runtimeRoot 'bin\local-runtime-manager.exe'
     Build-GoBinary (Join-Path $repoRoot 'local\local-runtime-manager') $desktopManager -WindowsGUI
     Assert-WindowsGUISubsystem $desktopManager
+    Build-GoBinary (Join-Path $repoRoot 'local\lazymind-cli') (Join-Path $runtimeRoot 'bin\lazymind.exe') @('.\cmd\lazymind')
     Build-GoBinary (Join-Path $repoRoot 'local\local-proxy') (Join-Path $runtimeRoot 'bin\local-proxy.exe') @('.\cmd\local-proxy')
     Build-GoBinary (Join-Path $repoRoot 'backend\core') (Join-Path $runtimeRoot 'bin\core.exe')
     Build-GoBinary (Join-Path $repoRoot 'backend\scan-control-plane') (Join-Path $runtimeRoot 'bin\scan-control-plane.exe') @('.\cmd\scan-control-plane')

@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"lazymind/core/acl"
 	"lazymind/core/agent"
+	"lazymind/core/agentinvocation"
 	"lazymind/core/chat"
 	"lazymind/core/currentmemory"
 	"lazymind/core/datasource"
@@ -16,7 +18,6 @@ import (
 	"lazymind/core/episode"
 	"lazymind/core/evalset"
 	"lazymind/core/evolution"
-	"lazymind/core/externalagent"
 	"lazymind/core/file"
 	"lazymind/core/mcp"
 	"lazymind/core/modelprovider"
@@ -35,6 +36,7 @@ import (
 	workflowattempt "lazymind/core/workflow/attempt"
 	workflowexecutor "lazymind/core/workflow/executor"
 	workflowfacade "lazymind/core/workflow/facade"
+	workflowhosted "lazymind/core/workflow/hosted"
 	workflowstore "lazymind/core/workflow/store"
 	workflowstream "lazymind/core/workflow/stream"
 
@@ -75,6 +77,11 @@ func handleAgentThreadAPI(r *mux.Router, method, path string, perms []string, h 
 
 // registerAllRoutes text OpenAPI text（text Job），text handleAPI textPermissiontext（text extract_api_permissions.py text Kong RBAC）。
 func registerAllRoutes(r *mux.Router) {
+	invocationHandler := agentinvocation.Handler{Service: agentinvocation.New(corestore.DB())}
+	handleAPI(r, "POST", "/agent-invocations/{invocation_id}:start", []string{"qa.write"}, invocationHandler.Start)
+	handleAPI(r, "POST", "/agent-invocations/{invocation_id}:finish", []string{"qa.write"}, invocationHandler.Finish)
+	handleAPI(r, "GET", "/agent-invocations", []string{"qa.read"}, invocationHandler.List)
+
 	attemptHandler := workflowattempt.Handler{Service: workflowattempt.New(corestore.DB(), workflowattempt.Config{})}
 	remoteExecutorHandler := workflowexecutor.RemoteHandler{
 		DB: corestore.DB(), Attempts: attemptHandler.Service,
@@ -97,6 +104,13 @@ func registerAllRoutes(r *mux.Router) {
 		Hosts:      workflowexecutor.DefaultHostRegistry,
 		Projection: http.HandlerFunc(workflow.GetSessionProjection),
 	}
+	hostedService := &workflowhosted.Service{
+		DB: corestore.DB(), Store: workflowRepository,
+		Attempts:  workflowattempt.New(corestore.DB(), workflowattempt.Config{LeaseDuration: 30 * time.Minute}),
+		Contexts:  workflowexecutor.DBContextLoader{DB: corestore.DB()},
+		Artifacts: workflowexecutor.DBArtifactSink{DB: corestore.DB()},
+	}
+	hostedHandler := workflowhosted.Handler{Service: hostedService}
 
 	// ----- Datasettext -----
 	handleAPI(r, "GET", "/dataset/algos", []string{"document.read"}, doc.ListAlgos)
@@ -259,15 +273,6 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/agent/router/traffic-stats", []string{"user.admin"}, agent.GetRouterTrafficStats)
 
 	// ----- Conversation -----
-	handleAPI(r, "GET", "/external-agents/{provider}/projects", []string{"qa.read"}, externalagent.ListProjectsHTTP)
-	handleAPI(r, "GET", "/external-agents/{provider}/threads", []string{"qa.read"}, externalagent.ListThreadsHTTP)
-	handleAPI(r, "GET", "/external-agents/{provider}/threads/{thread_id}", []string{"qa.read"}, externalagent.ReadThreadHTTP)
-	handleAPI(r, "POST", "/external-agents/{provider}/bindings", []string{"qa.write"}, chat.BindExternalAgentConversation)
-	handleAPI(r, "POST", "/external-agent-conversations/{conversation_id}:run", []string{"qa.write"}, externalagent.RunHTTP)
-	handleAPI(r, "POST", "/external-agent-conversations/{conversation_id}:interrupt", []string{"qa.write"}, externalagent.InterruptHTTP)
-	handleAPI(r, "POST", "/external-agent-conversations/{conversation_id}:release", []string{"qa.write"}, externalagent.ReleaseHTTP)
-	handleAPI(r, "DELETE", "/external-agent-conversations/{conversation_id}", []string{"qa.write"}, chat.DeleteExternalAgentConversation)
-	handleAPI(r, "POST", "/external-agent-requests/{request_id}:respond", []string{"qa.write"}, externalagent.RespondRequestHTTP)
 	handleAPI(r, "POST", "/conversations:chat", []string{"qa.write"}, chat.ChatConversations)
 	handleAPI(r, "POST", "/conversations:estimateContextUsage", []string{"qa.read"}, chat.EstimateContextUsage)
 	handleAPI(r, "POST", "/conversations:exportContextPrompt", []string{"qa.read"}, chat.ExportContextPrompt)
@@ -276,6 +281,12 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/conversations/{conversation_id}:stop", []string{"qa.write"}, chat.StopChatGeneration)
 	handleAPI(r, "POST", "/conversations/{conversation_id}:toolLimitDecision", []string{"qa.write"}, chat.DecideToolLimit)
 	handleAPI(r, "GET", "/conversations/{conversation_id}:status", []string{"qa.read"}, chat.GetChatStatus)
+	handleAPI(r, "GET", "/chat/executors", []string{"qa.read"}, chat.ListChatExecutors)
+	handleAPI(r, "GET", "/external-chat/hosts/{provider}:status", []string{"qa.read"}, chat.ExternalChatHostStatus)
+	handleAPI(r, "GET", "/external-chat/runs", []string{"qa.read"}, chat.ListExternalChatRuns)
+	handleAPI(r, "POST", "/external-chat/hosts/{provider}:claim", []string{"qa.write"}, chat.ClaimExternalChatRun)
+	handleAPI(r, "POST", "/external-chat/runs/{run_id}:heartbeat", []string{"qa.write"}, chat.HeartbeatExternalChatRun)
+	handleAPI(r, "POST", "/external-chat/runs/{run_id}:event", []string{"qa.write"}, chat.PublishExternalChatEvent)
 
 	// ----- SubAgent (Task Center) -----
 	handleAPI(r, "GET", "/conversations/{conversation_id}/tasks", []string{"qa.read"}, subagent.ListConversationTasks)
@@ -301,6 +312,8 @@ func registerAllRoutes(r *mux.Router) {
 	// ----- Workflow Drafts (user-created workflow authoring) -----
 	handleAPI(r, "GET", "/workflow-drafts", []string{"qa.read"}, workflow.ListWorkflowDrafts)
 	handleAPI(r, "POST", "/workflow-drafts", []string{"qa.write"}, workflow.CreateWorkflowDraft)
+	handleAPI(r, "GET", "/workflow-drafts:trash", []string{"qa.read"}, workflow.ListWorkflowDraftTrash)
+	handleAPI(r, "DELETE", "/workflow-drafts:trash", []string{"qa.write"}, workflow.EmptyWorkflowDraftTrash)
 	handleAPI(r, "POST", "/workflow-drafts:polish-info", []string{"qa.write"}, workflow.PolishWorkflowDraftInfo)
 	handleAPI(r, "GET", "/workflow-drafts/{draft_id}", []string{"qa.read"}, workflow.GetWorkflowDraft)
 	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:save", []string{"qa.write"}, workflow.SaveWorkflowDraft)
@@ -312,6 +325,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/workflow-drafts/{draft_id}/repair-runs/{repair_id}", []string{"qa.read"}, workflow.GetWorkflowRepairRun)
 	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:repair-preview", []string{"qa.read"}, workflow.PreviewWorkflowRepair)
 	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:publish", []string{"qa.write"}, workflow.PublishWorkflowDraft)
+	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:restore", []string{"qa.write"}, workflow.RestoreWorkflowDraft)
+	handleAPI(r, "DELETE", "/workflow-drafts/{draft_id}:purge", []string{"qa.write"}, workflow.PurgeWorkflowDraft)
 	handleAPI(r, "DELETE", "/workflow-drafts/{draft_id}", []string{"qa.write"}, workflow.DeleteWorkflowDraft)
 	handleAPI(r, "GET", "/chat/settings/workflows", []string{"qa.read"}, workflow.ListUserWorkflowSettings)
 	handleAPI(r, "PATCH", "/chat/settings/workflows/{workflow_ref:.+}", []string{"qa.write"}, workflow.PatchUserWorkflowSetting)
@@ -352,7 +367,10 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "PATCH", "/user/ui-preferences", []string{}, userprefs.PatchUIPreferences)
 	handleAPI(r, "GET", "/settings/overview", []string{}, userprefs.GetSettingsOverview)
 	handleAPI(r, "POST", "/settings/checks", []string{}, userprefs.RunSettingsChecks)
-	handleAPI(r, "PATCH", "/conversations/{conversation_id}/workflow-settings", []string{"qa.write"}, chat.PatchConversationWorkflowSettings)
+	handleAPI(r, "PATCH", "/conversations/{conversation_id}/settings", []string{"qa.write"}, chat.PatchConversationSettings)
+	// Compatibility for clients installed before conversation settings included
+	// the Chat executor. New clients use /settings.
+	handleAPI(r, "PATCH", "/conversations/{conversation_id}/workflow-settings", []string{"qa.write"}, chat.PatchConversationSettings)
 
 	// ----- Workflow Sessions -----
 	// Public Runtime package endpoints are intentionally separate from the
@@ -370,8 +388,12 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/workflow-input-resources/{resource_id}", []string{"qa.read"}, workflowFacade.ReadInputResource)
 	handleAPI(r, "POST", "/workflow-preparations", []string{"qa.write"}, workflowFacade.Prepare)
 	handleAPI(r, "POST", "/workflow-preparations/{preparation_id}:consume", []string{"qa.write"}, workflowFacade.Consume)
+	handleAPI(r, "GET", "/workflow-sessions", []string{"qa.read"}, workflowFacade.ListSessions)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}:advance-step", []string{"qa.write"}, workflowFacade.Command(http.HandlerFunc(workflow.TransitionWorkflowSession)))
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}:advance-step-and-hand-off", []string{"qa.write"}, workflowFacade.Command(http.HandlerFunc(workflow.TransitionWorkflowSession)))
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:begin", []string{"qa.write"}, hostedHandler.Begin)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:resume", []string{"qa.write"}, hostedHandler.Resume)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:submit", []string{"qa.write"}, hostedHandler.Submit)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/input-bindings", []string{"qa.write"}, workflowFacade.BindInput)
 	handleAPI(r, "GET", "/workflow-sessions/{session_id}/input-bindings", []string{"qa.read"}, workflowFacade.ListInputs)
 	handleAPI(r, "GET", "/workflow-sessions/{session_id}/artifacts", []string{"qa.read"}, workflowFacade.ListArtifacts)
@@ -410,7 +432,7 @@ func registerAllRoutes(r *mux.Router) {
 	// Compatibility alias: old clients receive the same authoritative projection;
 	// no independent BFS state calculation remains on an active route.
 	handleAPI(r, "GET", "/workflow-sessions/{session_id}/state-graph", []string{"qa.read"}, workflow.GetSessionProjection)
-	handleAPI(r, "GET", "/workflow-sessions/{session_id}/projection", []string{"qa.read"}, workflow.GetSessionProjection)
+	handleAPI(r, "GET", "/workflow-sessions/{session_id}/projection", []string{"qa.read"}, workflowFacade.GetProjection)
 	handleAPI(r, "GET", "/internal/workflow-sessions/{session_id}/projection", nil, workflow.GetSessionProjection)
 	handleAPI(r, "POST", "/internal/workflow-sessions:plan-start", nil, workflow.PlanWorkflowSessionStart)
 	handleAPI(r, "POST", "/internal/workflow-sessions:start", nil, workflow.StartWorkflowSession)
@@ -541,6 +563,17 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/conversations/{name}:detail", []string{"qa.read"}, chat.GetConversationDetail)
 	handleAPI(r, "GET", "/conversations/{name}:history", []string{"qa.read"}, chat.GetConversationHistory)
 	handleAPI(r, "GET", "/conversations/{name}:trail", []string{"qa.read"}, chat.GetConversationTrail)
+	handleAPI(r, "GET", "/conversation-archive-folders", []string{"qa.read"}, chat.ListConversationArchiveFolders)
+	handleAPI(r, "POST", "/conversation-archive-folders", []string{"qa.write"}, chat.CreateConversationArchiveFolder)
+	handleAPI(r, "PATCH", "/conversation-archive-folders/{folder_id}", []string{"qa.write"}, chat.UpdateConversationArchiveFolder)
+	handleAPI(r, "DELETE", "/conversation-archive-folders/{folder_id}", []string{"qa.write"}, chat.DeleteConversationArchiveFolder)
+	handleAPI(r, "GET", "/conversations:archived", []string{"qa.read"}, chat.ListArchivedConversations)
+	handleAPI(r, "GET", "/conversations:trash", []string{"qa.read"}, chat.ListTrashedConversations)
+	handleAPI(r, "DELETE", "/conversations:trash", []string{"qa.write"}, chat.EmptyConversationTrash)
+	handleAPI(r, "POST", "/conversations/{conversation_id}:archive", []string{"qa.write"}, chat.ArchiveConversation)
+	handleAPI(r, "POST", "/conversations/{conversation_id}:unarchive", []string{"qa.write"}, chat.UnarchiveConversation)
+	handleAPI(r, "POST", "/conversations/{conversation_id}:restore", []string{"qa.write"}, chat.RestoreConversation)
+	handleAPI(r, "DELETE", "/conversations/{conversation_id}:purge", []string{"qa.write"}, chat.PurgeConversation)
 	handleAPI(r, "GET", "/conversations/{name}", []string{"qa.read"}, chat.GetConversation)
 	handleAPI(r, "DELETE", "/conversations/{name}", []string{"qa.write"}, chat.DeleteConversation)
 	handleAPI(r, "POST", "/conversations:batchDelete", []string{"qa.write"}, chat.BatchDeleteConversations)

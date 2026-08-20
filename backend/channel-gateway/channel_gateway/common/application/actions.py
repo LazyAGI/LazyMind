@@ -21,7 +21,6 @@ from channel_gateway.common.domain.commands import (
     ConversationSwitchCommand,
     HistoryMoreCommand,
     SelectionChooseCommand,
-    WorkflowInvokeCommand,
 )
 from channel_gateway.common.application.conversations import (
     ConversationActions,
@@ -95,9 +94,6 @@ class ChannelActionExecutor:
         try:
             if isinstance(command, ChatCommand):
                 parameters = command.parameters
-                assistant_conversation_id = self._external_agent_conversation(
-                    execution
-                )
                 text = self._conversations.chat(
                     message=parameters.message,
                     changes=parameters.resource_changes,
@@ -112,9 +108,6 @@ class ChannelActionExecutor:
                         item.to_dict() for item in execution.attachments
                     ),
                     thinking_depth=execution.thinking_depth,
-                    conversation_id_override=assistant_conversation_id,
-                    external_agent=assistant_conversation_id is not None,
-                    activate_route=assistant_conversation_id is None,
                     on_stream=on_stream,
                     **context,
                 )
@@ -235,32 +228,12 @@ class ChannelActionExecutor:
                         features=features,
                     )
                 )
-                presentations = (
-                    capability_presentation,
-                    settings_presentation,
-                )
-            elif isinstance(command, WorkflowInvokeCommand):
-                if not features.enable_workflow:
-                    raise ActionMessage(
-                        '当前渠道没有开放工作流功能，配置没有改变。'
+                presentations = (capability_presentation,)
+                if settings_presentation is not None:
+                    presentations = (
+                        capability_presentation,
+                        settings_presentation,
                     )
-                parameters = command.parameters
-                workflow = self._workflow(
-                    parameters.workflow_ref,
-                    catalog,
-                )
-                text = self._conversations.chat(
-                    message=parameters.message,
-                    changes=[],
-                    source_command=command,
-                    source_messages=grounding_messages,
-                    catalog=catalog,
-                    features=features,
-                    mentions=(self._client.mention('workflow', workflow),),
-                    thinking_depth=execution.thinking_depth,
-                    on_stream=on_stream,
-                    **context,
-                )
             elif isinstance(command, ClarifyCommand):
                 text = command.parameters.clarification_question
             elif isinstance(command, SelectionChooseCommand):
@@ -280,25 +253,3 @@ class ChannelActionExecutor:
             external_address_hash=external_address_hash,
             extra_presentations=presentations,
         )
-
-    @staticmethod
-    def _external_agent_conversation(
-        execution: ChannelExecutionContext,
-    ) -> str | None:
-        return execution.external_agent_conversation_id or None
-
-    @staticmethod
-    def _workflow(
-        workflow_ref: str,
-        catalog: dict[str, Any],
-    ) -> dict[str, Any]:
-        workflows = catalog.get('workflow')
-        if isinstance(workflows, list):
-            for item in workflows:
-                if (
-                    isinstance(item, dict)
-                    and bool(item.get('enabled', False))
-                    and str(item.get('id') or '') == workflow_ref
-                ):
-                    return item
-        raise ActionMessage('所选工作流当前不可用，请重新查看可用能力。')

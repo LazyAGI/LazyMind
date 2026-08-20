@@ -10,6 +10,8 @@ ALTER TABLE user_ui_preferences
 UPDATE user_ui_preferences SET workflows_enabled = skills_enabled;
 ALTER TABLE user_ui_preferences
     ADD COLUMN IF NOT EXISTS document_parsing_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE sub_agent_tasks
+    ADD COLUMN IF NOT EXISTS sources JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 -- +migrate Dialect sqlite
 ALTER TABLE user_ui_preferences ADD COLUMN task_center_enabled BOOLEAN NOT NULL DEFAULT TRUE;
@@ -18,6 +20,7 @@ ALTER TABLE user_ui_preferences ADD COLUMN mcp_enabled BOOLEAN NOT NULL DEFAULT 
 ALTER TABLE user_ui_preferences ADD COLUMN workflows_enabled BOOLEAN NOT NULL DEFAULT TRUE;
 UPDATE user_ui_preferences SET workflows_enabled = skills_enabled;
 ALTER TABLE user_ui_preferences ADD COLUMN document_parsing_enabled BOOLEAN NOT NULL DEFAULT TRUE;
+ALTER TABLE sub_agent_tasks ADD COLUMN sources JSON NOT NULL DEFAULT '[]';
 
 -- +migrate Dialect postgres
 ALTER TABLE user_plugin_settings
@@ -53,6 +56,9 @@ BEGIN
     END IF;
 END $$;
 
+ALTER TABLE conversations
+    ADD COLUMN IF NOT EXISTS chat_executor VARCHAR(32) NOT NULL DEFAULT 'lazymind';
+
 ALTER TABLE plugin_sessions ADD COLUMN IF NOT EXISTS origin_host VARCHAR(32) NOT NULL DEFAULT 'lazymind';
 ALTER TABLE plugin_sessions ADD COLUMN IF NOT EXISTS origin_ref VARCHAR(255) NOT NULL DEFAULT '';
 ALTER TABLE plugin_sessions ADD COLUMN IF NOT EXISTS controller_host VARCHAR(32) NOT NULL DEFAULT 'lazymind';
@@ -76,6 +82,9 @@ DELETE FROM user_chat_settings_next;
 INSERT INTO user_chat_settings_next SELECT * FROM user_chat_settings;
 DROP TABLE user_chat_settings;
 ALTER TABLE user_chat_settings_next RENAME TO user_chat_settings;
+
+ALTER TABLE conversations
+    ADD COLUMN chat_executor VARCHAR(32) NOT NULL DEFAULT 'lazymind';
 
 ALTER TABLE plugin_sessions ADD COLUMN origin_host varchar(32) NOT NULL DEFAULT 'lazymind';
 ALTER TABLE plugin_sessions ADD COLUMN origin_ref varchar(255) NOT NULL DEFAULT '';
@@ -277,6 +286,74 @@ ALTER TABLE plugin_drafts ADD COLUMN IF NOT EXISTS driver_content TEXT NOT NULL 
 ALTER TABLE plugin_drafts ADD COLUMN driver_content TEXT NOT NULL DEFAULT '';
 
 -- +migrate Dialect postgres
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS archived_at TIMESTAMP NULL;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS archive_folder_id VARCHAR(36) NULL;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS trash_expires_at TIMESTAMP NULL;
+CREATE TABLE IF NOT EXISTS conversation_archive_folders (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(255) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    normalized_name VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    CONSTRAINT uk_conversation_archive_folders_user_name
+        UNIQUE (user_id, normalized_name)
+);
+CREATE INDEX IF NOT EXISTS idx_conversations_user_lifecycle
+    ON conversations(create_user_id, deleted_at, archived_at, is_task_conv, updated_at);
+CREATE INDEX IF NOT EXISTS idx_conversations_user_archive_folder
+    ON conversations(create_user_id, archive_folder_id, archived_at);
+ALTER TABLE plugin_drafts ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP NULL;
+ALTER TABLE plugin_drafts ADD COLUMN IF NOT EXISTS trash_expires_at TIMESTAMP NULL;
+ALTER TABLE plugin_drafts ADD COLUMN IF NOT EXISTS published_status_before_trash VARCHAR(16) NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_plugin_drafts_user_trash
+    ON plugin_drafts(created_by, deleted_at, trash_expires_at);
+ALTER TABLE skills ADD COLUMN IF NOT EXISTS trash_expires_at TIMESTAMP NULL;
+ALTER TABLE task_center_tasks ADD COLUMN IF NOT EXISTS archived_reason VARCHAR(32) NOT NULL DEFAULT '';
+UPDATE conversations SET trash_expires_at = CURRENT_TIMESTAMP + INTERVAL '30 days'
+    WHERE deleted_at IS NOT NULL AND trash_expires_at IS NULL;
+UPDATE skills SET trash_expires_at = CURRENT_TIMESTAMP + INTERVAL '30 days'
+    WHERE deleted_at IS NOT NULL AND trash_expires_at IS NULL;
+DROP INDEX IF EXISTS idx_plugin_drafts_user_plugin_id;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_plugin_drafts_user_plugin_id
+    ON plugin_drafts(created_by, plugin_id)
+    WHERE plugin_id != '' AND deleted_at IS NULL;
+
+-- +migrate Dialect sqlite
+ALTER TABLE conversations ADD COLUMN archived_at DATETIME NULL;
+ALTER TABLE conversations ADD COLUMN archive_folder_id VARCHAR(36) NULL;
+ALTER TABLE conversations ADD COLUMN trash_expires_at DATETIME NULL;
+CREATE TABLE IF NOT EXISTS conversation_archive_folders (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(255) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    normalized_name VARCHAR(255) NOT NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    CONSTRAINT uk_conversation_archive_folders_user_name
+        UNIQUE (user_id, normalized_name)
+);
+CREATE INDEX IF NOT EXISTS idx_conversations_user_lifecycle
+    ON conversations(create_user_id, deleted_at, archived_at, is_task_conv, updated_at);
+CREATE INDEX IF NOT EXISTS idx_conversations_user_archive_folder
+    ON conversations(create_user_id, archive_folder_id, archived_at);
+ALTER TABLE plugin_drafts ADD COLUMN deleted_at DATETIME NULL;
+ALTER TABLE plugin_drafts ADD COLUMN trash_expires_at DATETIME NULL;
+ALTER TABLE plugin_drafts ADD COLUMN published_status_before_trash VARCHAR(16) NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_plugin_drafts_user_trash
+    ON plugin_drafts(created_by, deleted_at, trash_expires_at);
+ALTER TABLE skills ADD COLUMN trash_expires_at DATETIME NULL;
+ALTER TABLE task_center_tasks ADD COLUMN archived_reason VARCHAR(32) NOT NULL DEFAULT '';
+UPDATE conversations SET trash_expires_at = datetime('now', '+30 days')
+    WHERE deleted_at IS NOT NULL AND trash_expires_at IS NULL;
+UPDATE skills SET trash_expires_at = datetime('now', '+30 days')
+    WHERE deleted_at IS NOT NULL AND trash_expires_at IS NULL;
+DROP INDEX IF EXISTS idx_plugin_drafts_user_plugin_id;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_plugin_drafts_user_plugin_id
+    ON plugin_drafts(created_by, plugin_id)
+    WHERE plugin_id != '' AND deleted_at IS NULL;
+
+-- +migrate Dialect postgres
 ALTER TABLE public.chat_histories
     ADD COLUMN IF NOT EXISTS algorithm_id VARCHAR(64);
 CREATE INDEX IF NOT EXISTS idx_chat_histories_algorithm_create_time
@@ -373,6 +450,19 @@ CREATE TABLE IF NOT EXISTS external_agent_runs (
     error_message TEXT,
     control_release VARCHAR(32) NOT NULL DEFAULT '',
     control_error TEXT,
+	    prompt TEXT NOT NULL DEFAULT '',
+	    query TEXT NOT NULL DEFAULT '',
+	    sequence INTEGER NOT NULL DEFAULT 0,
+	    history_ext JSONB,
+	    host_id VARCHAR(128) NOT NULL DEFAULT '',
+	    lease_token VARCHAR(64) NOT NULL DEFAULT '',
+	    lease_expires_at TIMESTAMP,
+	    claimed_at TIMESTAMP,
+	    last_heartbeat_at TIMESTAMP,
+	    stop_requested BOOLEAN NOT NULL DEFAULT FALSE,
+	    claim_count INTEGER NOT NULL DEFAULT 0,
+	    next_event_sequence BIGINT NOT NULL DEFAULT 0,
+	    completed_at TIMESTAMP,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL,
     CONSTRAINT uk_external_agent_run_request UNIQUE (provider, request_id)
@@ -381,6 +471,36 @@ CREATE TABLE IF NOT EXISTS external_agent_runs (
 CREATE INDEX IF NOT EXISTS idx_external_agent_runs_conversation_id ON external_agent_runs (conversation_id);
 CREATE INDEX IF NOT EXISTS idx_external_agent_runs_provider_thread_id ON external_agent_runs (provider_thread_id);
 CREATE INDEX IF NOT EXISTS idx_external_agent_runs_status ON external_agent_runs (status);
+CREATE INDEX IF NOT EXISTS idx_external_agent_runs_history_id ON external_agent_runs (history_id);
+CREATE INDEX IF NOT EXISTS idx_external_agent_runs_actor_user_id ON external_agent_runs (actor_user_id);
+CREATE INDEX IF NOT EXISTS idx_external_agent_runs_claim
+    ON external_agent_runs (actor_user_id, provider, status, lease_expires_at, created_at);
+
+CREATE TABLE IF NOT EXISTS external_chat_run_events (
+    id VARCHAR(64) PRIMARY KEY,
+    run_id VARCHAR(36) NOT NULL,
+    sequence BIGINT NOT NULL,
+    type VARCHAR(32) NOT NULL,
+    text TEXT,
+    provider_thread_id VARCHAR(128) NOT NULL DEFAULT '',
+    error_message TEXT,
+    created_at TIMESTAMP NOT NULL,
+    CONSTRAINT uk_external_chat_run_event_sequence UNIQUE (run_id, sequence)
+);
+CREATE INDEX IF NOT EXISTS idx_external_chat_run_events_run_id ON external_chat_run_events (run_id);
+
+CREATE TABLE IF NOT EXISTS external_chat_hosts (
+    actor_user_id VARCHAR(255) NOT NULL,
+    provider VARCHAR(32) NOT NULL,
+    host_id VARCHAR(128) NOT NULL,
+    installed BOOLEAN NOT NULL,
+    ready BOOLEAN NOT NULL,
+    unavailable_reason VARCHAR(512) NOT NULL DEFAULT '',
+    last_seen TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    PRIMARY KEY (actor_user_id, provider, host_id)
+);
+CREATE INDEX IF NOT EXISTS idx_external_chat_hosts_last_seen ON external_chat_hosts (last_seen);
 
 CREATE TABLE IF NOT EXISTS external_agent_operations (
     id VARCHAR(36) PRIMARY KEY,
@@ -398,6 +518,113 @@ CREATE TABLE IF NOT EXISTS external_agent_operations (
 
 ALTER TABLE plugin_transition_commands
     ADD COLUMN IF NOT EXISTS retry_origin VARCHAR(16) NOT NULL DEFAULT 'automatic';
+
+DELETE FROM sub_agent_artifacts
+WHERE task_id IN (
+    SELECT task.id FROM sub_agent_tasks AS task
+    JOIN plugin_session_steps AS attempt ON attempt.task_id = task.id
+    JOIN plugin_sessions AS session ON session.id = attempt.session_id
+    WHERE task.agent_type = 'workflow_step' AND session.controller_host = 'external-agent'
+);
+DELETE FROM sub_agent_steps
+WHERE task_id IN (
+    SELECT task.id FROM sub_agent_tasks AS task
+    JOIN plugin_session_steps AS attempt ON attempt.task_id = task.id
+    JOIN plugin_sessions AS session ON session.id = attempt.session_id
+    WHERE task.agent_type = 'workflow_step' AND session.controller_host = 'external-agent'
+);
+DELETE FROM sub_agent_tasks
+WHERE id IN (
+    SELECT attempt.task_id FROM plugin_session_steps AS attempt
+    JOIN plugin_sessions AS session ON session.id = attempt.session_id
+    WHERE session.controller_host = 'external-agent'
+);
+
+-- +migrate Dialect postgres
+CREATE TABLE IF NOT EXISTS agent_invocations (
+    id VARCHAR(80) PRIMARY KEY,
+    owner_user_id VARCHAR(255) NOT NULL,
+    client_name VARCHAR(128) NOT NULL DEFAULT '',
+    client_version VARCHAR(128) NOT NULL DEFAULT '',
+    connector_name VARCHAR(128) NOT NULL DEFAULT '',
+    connector_version VARCHAR(64) NOT NULL DEFAULT '',
+    connector_instance_id VARCHAR(80) NOT NULL DEFAULT '',
+    protocol_version VARCHAR(64) NOT NULL DEFAULT '',
+    transport VARCHAR(32) NOT NULL DEFAULT 'stdio',
+    tool_name VARCHAR(128) NOT NULL,
+    read_only BOOLEAN NOT NULL DEFAULT FALSE,
+    status VARCHAR(32) NOT NULL,
+    request_hash VARCHAR(64) NOT NULL,
+    request_summary JSONB NOT NULL DEFAULT '{}',
+    result_summary JSONB NOT NULL DEFAULT '{}',
+    error_code VARCHAR(128) NOT NULL DEFAULT '',
+    retryable BOOLEAN NOT NULL DEFAULT FALSE,
+    workflow_id VARCHAR(255) NOT NULL DEFAULT '',
+    session_id VARCHAR(80) NOT NULL DEFAULT '',
+    step_id VARCHAR(128) NOT NULL DEFAULT '',
+    attempt_id VARCHAR(80) NOT NULL DEFAULT '',
+    resource_id VARCHAR(128) NOT NULL DEFAULT '',
+    artifact_id VARCHAR(80) NOT NULL DEFAULT '',
+    command_id VARCHAR(128) NOT NULL DEFAULT '',
+    external_ref VARCHAR(255) NOT NULL DEFAULT '',
+    started_at TIMESTAMP NOT NULL,
+    finished_at TIMESTAMP,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_invocations_owner_started ON agent_invocations(owner_user_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_invocations_client_name ON agent_invocations(client_name);
+CREATE INDEX IF NOT EXISTS idx_agent_invocations_connector_instance_id ON agent_invocations(connector_instance_id);
+CREATE INDEX IF NOT EXISTS idx_agent_invocations_tool_name ON agent_invocations(tool_name);
+CREATE INDEX IF NOT EXISTS idx_agent_invocations_status ON agent_invocations(status);
+CREATE INDEX IF NOT EXISTS idx_agent_invocations_workflow_id ON agent_invocations(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_agent_invocations_session_id ON agent_invocations(session_id);
+CREATE INDEX IF NOT EXISTS idx_agent_invocations_attempt_id ON agent_invocations(attempt_id);
+CREATE INDEX IF NOT EXISTS idx_chat_histories_conversation_seq
+    ON chat_histories (conversation_id, seq DESC);
+
+-- +migrate Dialect sqlite
+CREATE TABLE IF NOT EXISTS agent_invocations (
+    id VARCHAR(80) PRIMARY KEY,
+    owner_user_id VARCHAR(255) NOT NULL,
+    client_name VARCHAR(128) NOT NULL DEFAULT '',
+    client_version VARCHAR(128) NOT NULL DEFAULT '',
+    connector_name VARCHAR(128) NOT NULL DEFAULT '',
+    connector_version VARCHAR(64) NOT NULL DEFAULT '',
+    connector_instance_id VARCHAR(80) NOT NULL DEFAULT '',
+    protocol_version VARCHAR(64) NOT NULL DEFAULT '',
+    transport VARCHAR(32) NOT NULL DEFAULT 'stdio',
+    tool_name VARCHAR(128) NOT NULL,
+    read_only BOOLEAN NOT NULL DEFAULT FALSE,
+    status VARCHAR(32) NOT NULL,
+    request_hash VARCHAR(64) NOT NULL,
+    request_summary TEXT NOT NULL DEFAULT '{}',
+    result_summary TEXT NOT NULL DEFAULT '{}',
+    error_code VARCHAR(128) NOT NULL DEFAULT '',
+    retryable BOOLEAN NOT NULL DEFAULT FALSE,
+    workflow_id VARCHAR(255) NOT NULL DEFAULT '',
+    session_id VARCHAR(80) NOT NULL DEFAULT '',
+    step_id VARCHAR(128) NOT NULL DEFAULT '',
+    attempt_id VARCHAR(80) NOT NULL DEFAULT '',
+    resource_id VARCHAR(128) NOT NULL DEFAULT '',
+    artifact_id VARCHAR(80) NOT NULL DEFAULT '',
+    command_id VARCHAR(128) NOT NULL DEFAULT '',
+    external_ref VARCHAR(255) NOT NULL DEFAULT '',
+    started_at DATETIME NOT NULL,
+    finished_at DATETIME,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_agent_invocations_owner_started ON agent_invocations(owner_user_id, started_at DESC);
+CREATE INDEX IF NOT EXISTS idx_agent_invocations_client_name ON agent_invocations(client_name);
+CREATE INDEX IF NOT EXISTS idx_agent_invocations_connector_instance_id ON agent_invocations(connector_instance_id);
+CREATE INDEX IF NOT EXISTS idx_agent_invocations_tool_name ON agent_invocations(tool_name);
+CREATE INDEX IF NOT EXISTS idx_agent_invocations_status ON agent_invocations(status);
+CREATE INDEX IF NOT EXISTS idx_agent_invocations_workflow_id ON agent_invocations(workflow_id);
+CREATE INDEX IF NOT EXISTS idx_agent_invocations_session_id ON agent_invocations(session_id);
+CREATE INDEX IF NOT EXISTS idx_agent_invocations_attempt_id ON agent_invocations(attempt_id);
+CREATE INDEX IF NOT EXISTS idx_chat_histories_conversation_seq
+    ON chat_histories (conversation_id, seq DESC);
 
 -- +migrate Dialect sqlite
 CREATE TABLE IF NOT EXISTS memory_current_entries (
@@ -479,6 +706,19 @@ CREATE TABLE IF NOT EXISTS external_agent_runs (
     error_message TEXT,
     control_release VARCHAR(32) NOT NULL DEFAULT '',
     control_error TEXT,
+	    prompt TEXT NOT NULL DEFAULT '',
+	    query TEXT NOT NULL DEFAULT '',
+	    sequence INTEGER NOT NULL DEFAULT 0,
+	    history_ext TEXT,
+	    host_id VARCHAR(128) NOT NULL DEFAULT '',
+	    lease_token VARCHAR(64) NOT NULL DEFAULT '',
+	    lease_expires_at DATETIME,
+	    claimed_at DATETIME,
+	    last_heartbeat_at DATETIME,
+	    stop_requested BOOLEAN NOT NULL DEFAULT FALSE,
+	    claim_count INTEGER NOT NULL DEFAULT 0,
+	    next_event_sequence INTEGER NOT NULL DEFAULT 0,
+	    completed_at DATETIME,
     created_at TIMESTAMP NOT NULL,
     updated_at TIMESTAMP NOT NULL,
     CONSTRAINT uk_external_agent_run_request UNIQUE (provider, request_id)
@@ -487,6 +727,36 @@ CREATE TABLE IF NOT EXISTS external_agent_runs (
 CREATE INDEX IF NOT EXISTS idx_external_agent_runs_conversation_id ON external_agent_runs (conversation_id);
 CREATE INDEX IF NOT EXISTS idx_external_agent_runs_provider_thread_id ON external_agent_runs (provider_thread_id);
 CREATE INDEX IF NOT EXISTS idx_external_agent_runs_status ON external_agent_runs (status);
+CREATE INDEX IF NOT EXISTS idx_external_agent_runs_history_id ON external_agent_runs (history_id);
+CREATE INDEX IF NOT EXISTS idx_external_agent_runs_actor_user_id ON external_agent_runs (actor_user_id);
+CREATE INDEX IF NOT EXISTS idx_external_agent_runs_claim
+    ON external_agent_runs (actor_user_id, provider, status, lease_expires_at, created_at);
+
+CREATE TABLE IF NOT EXISTS external_chat_run_events (
+    id VARCHAR(64) PRIMARY KEY,
+    run_id VARCHAR(36) NOT NULL,
+    sequence INTEGER NOT NULL,
+    type VARCHAR(32) NOT NULL,
+    text TEXT,
+    provider_thread_id VARCHAR(128) NOT NULL DEFAULT '',
+    error_message TEXT,
+    created_at DATETIME NOT NULL,
+    CONSTRAINT uk_external_chat_run_event_sequence UNIQUE (run_id, sequence)
+);
+CREATE INDEX IF NOT EXISTS idx_external_chat_run_events_run_id ON external_chat_run_events (run_id);
+
+CREATE TABLE IF NOT EXISTS external_chat_hosts (
+    actor_user_id VARCHAR(255) NOT NULL,
+    provider VARCHAR(32) NOT NULL,
+    host_id VARCHAR(128) NOT NULL,
+    installed BOOLEAN NOT NULL,
+    ready BOOLEAN NOT NULL,
+    unavailable_reason VARCHAR(512) NOT NULL DEFAULT '',
+    last_seen DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    PRIMARY KEY (actor_user_id, provider, host_id)
+);
+CREATE INDEX IF NOT EXISTS idx_external_chat_hosts_last_seen ON external_chat_hosts (last_seen);
 
 CREATE TABLE IF NOT EXISTS external_agent_operations (
     id VARCHAR(36) PRIMARY KEY,
@@ -504,3 +774,24 @@ CREATE TABLE IF NOT EXISTS external_agent_operations (
 
 ALTER TABLE plugin_transition_commands
     ADD COLUMN retry_origin VARCHAR(16) NOT NULL DEFAULT 'automatic';
+
+DELETE FROM sub_agent_artifacts
+WHERE task_id IN (
+    SELECT task.id FROM sub_agent_tasks AS task
+    JOIN plugin_session_steps AS attempt ON attempt.task_id = task.id
+    JOIN plugin_sessions AS session ON session.id = attempt.session_id
+    WHERE task.agent_type = 'workflow_step' AND session.controller_host = 'external-agent'
+);
+DELETE FROM sub_agent_steps
+WHERE task_id IN (
+    SELECT task.id FROM sub_agent_tasks AS task
+    JOIN plugin_session_steps AS attempt ON attempt.task_id = task.id
+    JOIN plugin_sessions AS session ON session.id = attempt.session_id
+    WHERE task.agent_type = 'workflow_step' AND session.controller_host = 'external-agent'
+);
+DELETE FROM sub_agent_tasks
+WHERE id IN (
+    SELECT attempt.task_id FROM plugin_session_steps AS attempt
+    JOIN plugin_sessions AS session ON session.id = attempt.session_id
+    WHERE session.controller_host = 'external-agent'
+);

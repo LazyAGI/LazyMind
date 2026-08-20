@@ -35,7 +35,6 @@ from channel_gateway.common.ports.providers import (
 )
 from channel_gateway.common.ports.messaging import (
     DeliveryProvider,
-    InboundActionHandler,
     ReplyStreamProvider,
 )
 from channel_gateway.feishu.connection import FeishuConnectionService
@@ -97,7 +96,6 @@ class ProviderComponents:
     delivery: DeliveryProvider
     features: ChannelFeatureProfile = BASIC_CHAT_FEATURES
     streaming: ReplyStreamProvider | None = None
-    actions: InboundActionHandler | None = None
 
 
 class ProviderRegistry:
@@ -140,10 +138,6 @@ class ProviderRegistry:
     def streaming(self, name: str) -> ReplyStreamProvider | None:
         provider = self._provider(name)
         return provider.streaming if provider else None
-
-    def action_handler(self, name: str) -> InboundActionHandler | None:
-        provider = self._provider(name)
-        return provider.actions if provider else None
 
     def _provider(self, name: str) -> ProviderComponents | None:
         return self._providers.get(name.strip().lower())
@@ -228,7 +222,6 @@ def build_components(settings: Settings | None = None) -> GatewayComponents:
         credentials=feishu_credentials,
         channels=feishu_channels,
         addresses=feishu_addresses,
-        core=lazymind,
     )
     feishu_accounts = FeishuAccountService(
         store=store,
@@ -281,7 +274,6 @@ def build_components(settings: Settings | None = None) -> GatewayComponents:
             accounts=feishu_accounts,
             delivery=feishu_delivery,
             streaming=feishu_delivery,
-            actions=feishu_runtime,
             features=ChannelFeatureProfile(
                 enable_ask=True,
                 enable_workflow=True,
@@ -309,7 +301,6 @@ def build_components(settings: Settings | None = None) -> GatewayComponents:
         store=store,
         messages=messages,
         streams=providers,
-        actions=providers,
     )
     delivery_worker = DeliveryWorker(
         store=store,

@@ -550,6 +550,7 @@ class _LarkCardReplyStream(ReplyStream):
         timeout_seconds: float,
         message_id: str = '',
         should_render: Callable[[], bool] | None = None,
+        on_message_started: Callable[[str], None] | None = None,
         render_card: Callable[
             [CoreStreamUpdate, bool, bool],
             dict[str, Any],
@@ -561,6 +562,7 @@ class _LarkCardReplyStream(ReplyStream):
         self._timeout_seconds = timeout_seconds
         self.message_id = message_id
         self._should_render = should_render or (lambda: True)
+        self._on_message_started = on_message_started
         self._render_card = render_card
         self._updates: queue.Queue[tuple[object, object]] = queue.Queue()
         self._future = None
@@ -647,6 +649,11 @@ class _LarkCardReplyStream(ReplyStream):
             result.message_id,
         )
         self.message_id = str(result.message_id)
+        if self._on_message_started is not None:
+            await asyncio.to_thread(
+                self._on_message_started,
+                self.message_id,
+            )
         sequence = 0
         rendered: dict[str, str] = {}
         snapshot = CoreStreamUpdate()
@@ -722,7 +729,7 @@ class _LarkCardReplyStream(ReplyStream):
                         thinking=snapshot.thinking,
                         answer=final_text,
                         thinking_seconds=snapshot.thinking_seconds,
-                        workflow_progress=snapshot.workflow_progress,
+                        task_progress=snapshot.task_progress,
                     )
                     sequence = await self._render_snapshot(
                         card_id,
@@ -887,7 +894,7 @@ class _LarkCardReplyStream(ReplyStream):
                     thinking=snapshot.thinking,
                     answer=str(value or snapshot.answer),
                     thinking_seconds=snapshot.thinking_seconds,
-                    workflow_progress=snapshot.workflow_progress,
+                    task_progress=snapshot.task_progress,
                 )
                 if self._should_render():
                     card = self._message_snapshot_card(
@@ -1037,7 +1044,7 @@ class _LarkCardReplyStream(ReplyStream):
         if snapshot.thinking_seconds is not None:
             status += f' · {snapshot.thinking_seconds} 秒'
         answer = streamable_feishu_text(snapshot.answer)
-        progress = streamable_feishu_text(snapshot.workflow_progress)
+        progress = streamable_feishu_text(snapshot.task_progress)
         if progress:
             answer = f'{answer}\n\n---\n{progress}'.strip()
         return status, answer
@@ -1464,6 +1471,7 @@ class LarkChannelClient:
         initial_card: dict[str, Any],
         message_id: str = '',
         should_render: Callable[[], bool] | None = None,
+        on_message_started: Callable[[str], None] | None = None,
         render_card: Callable[
             [CoreStreamUpdate, bool, bool],
             dict[str, Any],
@@ -1479,6 +1487,7 @@ class LarkChannelClient:
             ),
             message_id=message_id,
             should_render=should_render,
+            on_message_started=on_message_started,
             render_card=render_card,
         )
 

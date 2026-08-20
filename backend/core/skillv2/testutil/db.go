@@ -51,6 +51,19 @@ func NewTestDB(t *testing.T) *TestDB {
 	return &TestDB{DB: db}
 }
 
+func RelaxSQLiteFixtureSkillUniqueIndexes(t *testing.T, db *gorm.DB) {
+	t.Helper()
+	if db == nil || db.Dialector.Name() != "sqlite" {
+		return
+	}
+	if err := db.Exec("DROP INDEX IF EXISTS uk_skills_owner_identity").Error; err != nil {
+		t.Fatalf("drop sqlite fixture skill identity index: %v", err)
+	}
+	if err := db.Exec("DROP INDEX IF EXISTS uk_skills_owner_relative_root").Error; err != nil {
+		t.Fatalf("drop sqlite fixture skill relative root index: %v", err)
+	}
+}
+
 func ResetSkillTables(t *testing.T, db *TestDB) {
 	t.Helper()
 
@@ -125,6 +138,7 @@ type SkillRow struct {
 	UpdateStatus          string     `gorm:"column:update_status;type:text;not null;default:'up_to_date'"`
 	Ext                   []byte     `gorm:"column:ext;type:json"`
 	DeletedAt             *time.Time `gorm:"column:deleted_at"`
+	TrashExpiresAt        *time.Time `gorm:"column:trash_expires_at"`
 	DeletedBy             *string    `gorm:"column:deleted_by;type:text"`
 	CreatedAt             time.Time  `gorm:"column:created_at;not null"`
 	UpdatedAt             time.Time  `gorm:"column:updated_at;not null"`

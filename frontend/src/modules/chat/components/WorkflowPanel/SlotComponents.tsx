@@ -1403,6 +1403,7 @@ export function SlotImage({
 }: SlotImageProps) {
   const raw = slot.artifact_value;
   const { displayUrl: url, pending, hasSource } = useSlotImageUrl(raw);
+  const downloadEnabled = useContext(SlotDownloadContext);
   const alt: string = slot.caption ?? raw?.alt ?? '';
   const { deleteSlotItem, patchSlotCaption, patchSlotItemValue } = useWorkflowStore();
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -1491,6 +1492,18 @@ export function SlotImage({
 
   const hasActions = Boolean(sessionId && slotId && slot.list_index !== undefined) && !readOnly;
   const showMutationActions = hasActions && !hideMutationActions;
+  const downloadName = String(raw?.name ?? raw?.filename ?? 'workflow-image.png');
+  const downloadUrl = url ? `${url}${url.includes('?') ? '&' : '?'}download=1` : '';
+  const downloadControl = downloadEnabled && downloadUrl ? (
+    <a
+      className='workflow-slot__download-btn--overlay'
+      href={downloadUrl}
+      download={downloadName}
+      title={tr('chat.slots.download')}
+      aria-label={tr('chat.slots.download')}
+      onClick={(event) => event.stopPropagation()}
+    >↓</a>
+  ) : null;
 
   // Overlays rendered directly on top of the image (no separate action bar)
   const overlays = hasActions ? (
@@ -1571,6 +1584,7 @@ export function SlotImage({
           <img src={url} alt={alt} className='workflow-slot__image-card-img' loading='lazy' />
           {alt && <div className='workflow-slot__image-card-caption'>{alt}</div>}
           {overlays}
+          {downloadControl}
         </div>
         {/* Hidden file input */}
         {showMutationActions && (
@@ -1617,6 +1631,7 @@ export function SlotImage({
     <div className='workflow-slot workflow-slot--image'>
       <img src={url} alt={alt} className='workflow-slot__image' loading='lazy' />
       {overlays}
+      {downloadControl}
       {hasActions && (
         <div className='workflow-slot__caption'>
           {captionEditing ? (

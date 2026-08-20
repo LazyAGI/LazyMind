@@ -5,6 +5,7 @@ import {
   useImperativeHandle,
   useMemo,
   useRef,
+  useState,
 } from "react";
 import { useTranslation } from "react-i18next";
 import i18n from "@/i18n";
@@ -20,6 +21,7 @@ import ChatInput, {
 } from "../ChatInput";
 import "./index.scss";
 import MessageList from "./components/MessageList";
+import { ChatSourcePanel } from "../AssistantMessage";
 import ChatMessageContent from "./components/ChatMessageContent";
 import ScrollToBottomButton from "./components/ScrollToBottomButton";
 import ConversationTrail from "./components/ConversationTrail";
@@ -30,6 +32,7 @@ import { useUserMessageEdit } from "./hooks/useUserMessageEdit";
 import type { ChatContainerProps, ChatImperativeProps } from "./types";
 import { useConversationTrail } from "./hooks/useConversationTrail";
 import { mergeConversationTrailIntoMessageList } from "@/modules/chat/utils/message";
+import type { ChatSource } from "@/modules/chat/utils/sourceAdapter";
 
 export type { ChatImperativeProps, ChatMessage } from "./types";
 
@@ -106,8 +109,8 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       disabledReason,
       disabledDescription,
       disabledAction,
-      onWorkflowSettingsChange,
-      initialWorkflowSettings,
+      onConversationSettingsChange,
+      initialConversationSettings,
       hasWorkflowSession,
     } = props;
 
@@ -115,8 +118,13 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       useChatMessageStore();
     const chatInputRef = useRef<ChatInputImperativeProps>(null);
     const userEditRef = useRef<ReturnType<typeof useUserMessageEdit>>();
+    const [sourcePanelSources, setSourcePanelSources] = useState<ChatSource[]>([]);
     const skillDepositWasReadyRef = useRef(false);
     const skillDepositMessageCountRef = useRef(0);
+
+    useEffect(() => {
+      setSourcePanelSources([]);
+    }, [sessionId]);
 
     const {
       thinkingCollapseMap,
@@ -323,85 +331,94 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
 
     return (
       <div className="chat-chat-container">
-        <div className="chat-box">
-          <MessageList
-            messageList={conversation.messageList}
-            initialCard={initialCard}
-            sendMessage={(text, clearInput, extras) => {
-              sendMessage({ text, clearInput, ...(extras ?? {}) });
-            }}
-            regenerate={conversation.regenerate}
-            stopGeneration={conversation.stopGeneration}
-            renderText={renderText}
-            updateAssistantMessage={conversation.updateAssistantMessage}
-            onCiteMessage={handleAddCiteMessage}
-            onScroll={conversation.scroll.handleScroll}
-            chatContentRef={conversation.scroll.chatContentRef}
-            sessionId={sessionId}
-            editingUserMessageIndex={userEdit.editingUserMessageIndex}
-            editingUserMessageText={userEdit.editingUserMessageText}
-            editingUserMessageCites={userEdit.editingUserMessageCites}
-            onUserMessageEditTextChange={userEdit.setEditingUserMessageText}
-            onRemoveEditingUserMessageCite={
-              userEdit.handleRemoveEditingUserMessageCite
-            }
-            onStartEditUserMessage={userEdit.handleStartEditUserMessage}
-            onCancelEditUserMessage={userEdit.handleCancelEditUserMessage}
-            onResendEditedUserMessage={userEdit.handleResendEditedUserMessage}
-            onCopyUserMessage={userEdit.handleCopyUserMessage}
-          />
+        <div className={`chat-box${sourcePanelSources.length ? " has-source-panel" : ""}`}>
+          <div className="chat-main-column">
+            <MessageList
+              messageList={conversation.messageList}
+              initialCard={initialCard}
+              sendMessage={(text, clearInput, extras) => {
+                sendMessage({ text, clearInput, ...(extras ?? {}) });
+              }}
+              regenerate={conversation.regenerate}
+              stopGeneration={conversation.stopGeneration}
+              renderText={renderText}
+              updateAssistantMessage={conversation.updateAssistantMessage}
+              onCiteMessage={handleAddCiteMessage}
+              onOpenSources={setSourcePanelSources}
+              onScroll={conversation.scroll.handleScroll}
+              chatContentRef={conversation.scroll.chatContentRef}
+              sessionId={sessionId}
+              editingUserMessageIndex={userEdit.editingUserMessageIndex}
+              editingUserMessageText={userEdit.editingUserMessageText}
+              editingUserMessageCites={userEdit.editingUserMessageCites}
+              onUserMessageEditTextChange={userEdit.setEditingUserMessageText}
+              onRemoveEditingUserMessageCite={
+                userEdit.handleRemoveEditingUserMessageCite
+              }
+              onStartEditUserMessage={userEdit.handleStartEditUserMessage}
+              onCancelEditUserMessage={userEdit.handleCancelEditUserMessage}
+              onResendEditedUserMessage={userEdit.handleResendEditedUserMessage}
+              onCopyUserMessage={userEdit.handleCopyUserMessage}
+            />
 
-          {conversation.messageList.length > 0 && (
-            <ScrollToBottomButton
-              visible={conversation.scroll.showScrollButton}
-              inputHeight={conversation.scroll.inputHeight}
-              onClick={conversation.scroll.handleToBottom}
+            {conversation.messageList.length > 0 && (
+              <ScrollToBottomButton
+                visible={conversation.scroll.showScrollButton}
+                inputHeight={conversation.scroll.inputHeight}
+                onClick={conversation.scroll.handleToBottom}
+              />
+            )}
+
+            <ChatInput
+              value={conversation.content}
+              onChange={conversation.setContent}
+              onSend={sendMessage}
+              openHistory={
+                setShowHistoryList ? () => setShowHistoryList(true) : undefined
+              }
+              isChatContent={true}
+              showHistoryList={showHistoryList}
+              showHistoryButton={showHistoryButton}
+              showPromptSuggestions={false}
+              openNewChat={conversation.createNewChat}
+              ref={chatInputRef}
+              onHeightChange={conversation.scroll.handleInputHeightChange}
+              chatConfig={chatConfig}
+              setChatConfig={setChatConfig}
+              setChatConfigFn={setChatConfigFn}
+              knowledgeRefreshKey={knowledgeRefreshKey}
+              embeddingReady={embeddingReady}
+              multimodalEmbeddingReady={multimodalEmbeddingReady}
+              rerankReady={rerankReady}
+              sessionId={sessionId}
+              isStreaming={conversation.isStreaming}
+              onStopGeneration={conversation.stopGeneration}
+              disabled={!canChat || conversation.runtimeWaiting}
+              disabledReason={canChat ? undefined : disabledReason}
+              disabledDescription={canChat ? undefined : disabledDescription}
+              disabledAction={canChat ? undefined : disabledAction}
+              citeMessages={citeMessages}
+              citeHistoryIds={citeHistoryIds}
+              onRemoveCiteMessage={handleRemoveCiteMessage}
+              onClearCiteMessage={clearCiteMessages}
+              skillDepositStats={skillDepositStats}
+              skillDepositDisabledReason={
+                isLastUserMessageSkillDepositPrompt
+                  ? t("chat.skillDepositAlreadyRequestedTooltip")
+                  : undefined
+              }
+              onSkillDeposit={handleSkillDeposit}
+              onConversationSettingsChange={onConversationSettingsChange}
+              initialConversationSettings={initialConversationSettings}
+              hasWorkflowSession={hasWorkflowSession}
+            />
+          </div>
+          {sourcePanelSources.length > 0 && (
+            <ChatSourcePanel
+              sources={sourcePanelSources}
+              onClose={() => setSourcePanelSources([])}
             />
           )}
-
-          <ChatInput
-            value={conversation.content}
-            onChange={conversation.setContent}
-            onSend={sendMessage}
-            openHistory={
-              setShowHistoryList ? () => setShowHistoryList(true) : undefined
-            }
-            isChatContent={true}
-            showHistoryList={showHistoryList}
-            showHistoryButton={showHistoryButton}
-            showPromptSuggestions={false}
-            openNewChat={conversation.createNewChat}
-            ref={chatInputRef}
-            onHeightChange={conversation.scroll.handleInputHeightChange}
-            chatConfig={chatConfig}
-            setChatConfig={setChatConfig}
-            setChatConfigFn={setChatConfigFn}
-            knowledgeRefreshKey={knowledgeRefreshKey}
-            embeddingReady={embeddingReady}
-            multimodalEmbeddingReady={multimodalEmbeddingReady}
-            rerankReady={rerankReady}
-            sessionId={sessionId}
-            isStreaming={conversation.isStreaming}
-            onStopGeneration={conversation.stopGeneration}
-            disabled={!canChat || conversation.runtimeWaiting}
-            disabledReason={canChat ? undefined : disabledReason}
-            disabledDescription={canChat ? undefined : disabledDescription}
-            disabledAction={canChat ? undefined : disabledAction}
-            citeMessages={citeMessages}
-            citeHistoryIds={citeHistoryIds}
-            onRemoveCiteMessage={handleRemoveCiteMessage}
-            onClearCiteMessage={clearCiteMessages}
-            skillDepositStats={skillDepositStats}
-            skillDepositDisabledReason={
-              isLastUserMessageSkillDepositPrompt
-                ? t("chat.skillDepositAlreadyRequestedTooltip")
-                : undefined
-            }
-            onSkillDeposit={handleSkillDeposit}
-            onWorkflowSettingsChange={onWorkflowSettingsChange}
-            initialWorkflowSettings={initialWorkflowSettings}
-            hasWorkflowSession={hasWorkflowSession}
-          />
         </div>
         <ConversationTrail
           key={sessionId || "new-conversation"}

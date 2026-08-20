@@ -21,6 +21,7 @@ import {
 import { customSchema } from "./config";
 import rehypeRaw from "rehype-raw";
 import {
+  basenameFromPath,
   resolveMarkdownImageUrlAsync,
 } from "@/modules/knowledge/utils/imageUrl";
 import HtmlBlock from "./HtmlBlock";
@@ -34,9 +35,11 @@ import {
   type ChatSource,
   findSourceByCitationId,
   getSourceEvidenceText,
+  getSourceFaviconUrl,
   getSourceHref,
   getSourceLabel,
   getSourceSubtitle,
+  isExternalSource,
   normalizeSourceMarkers,
   stripRedundantSourceUrls,
 } from "@/modules/chat/utils/sourceAdapter";
@@ -63,6 +66,62 @@ const MarkdownRenderContext = createContext<{
   isStreaming: false,
   markSources: [],
 });
+
+const SOURCE_PREVIEW_TEXT_LIMIT = 280;
+
+function getSourceBrandName(source: ChatSource) {
+  const subtitle = getSourceSubtitle(source).replace(/^www\./i, "");
+  return subtitle || getSourceLabel(source);
+}
+
+function getSourcePreviewText(source: ChatSource) {
+  const text = getSourceEvidenceText(source).replace(/\s+/g, " ").trim();
+  return text.length > SOURCE_PREVIEW_TEXT_LIMIT
+    ? `${text.slice(0, SOURCE_PREVIEW_TEXT_LIMIT).trimEnd()}…`
+    : text;
+}
+
+function SourceBrandIcon({ source }: { source: ChatSource }) {
+  const [hasFaviconError, setHasFaviconError] = useState(false);
+  const faviconUrl = getSourceFaviconUrl(source);
+  const label = getSourceBrandName(source);
+
+  return (
+    <span className="md-source-chip-icon" aria-hidden="true">
+      {faviconUrl && !hasFaviconError ? (
+        <img
+          src={faviconUrl}
+          alt=""
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          onError={() => setHasFaviconError(true)}
+        />
+      ) : (
+        <span>{label.slice(0, 1).toLocaleUpperCase() || "S"}</span>
+      )}
+    </span>
+  );
+}
+
+function SourcePreviewCard({ source }: { source: ChatSource }) {
+  const sourceHref = getSourceHref(source);
+  const sourceUrl = isExternalSource(source) && /^https?:\/\//i.test(sourceHref)
+    ? sourceHref
+    : "";
+  const previewText = getSourcePreviewText(source);
+
+  return (
+    <div className="md-source-preview">
+      <div className="md-source-preview-brand">
+        <SourceBrandIcon source={source} />
+        <span>{getSourceBrandName(source)}</span>
+      </div>
+      <strong className="md-source-preview-title">{getSourceLabel(source)}</strong>
+      {previewText && <p className="md-source-preview-summary">{previewText}</p>}
+      {sourceUrl && <span className="md-source-preview-url">{sourceUrl}</span>}
+    </div>
+  );
+}
 
 function getSourceIndex(href: any) {
   if (typeof href !== "string") {
@@ -208,7 +267,25 @@ const PreComponent = (props: any) => {
 
 const LinkComponent = (props: any) => {
   const { isStreaming, markSources } = useContext(MarkdownRenderContext);
-  const href = props.href;
+  const href = typeof props.href === "string" ? props.href : "";
+  const managedFile = href.includes("/static-files/");
+  const [resolvedHref, setResolvedHref] = useState(() =>
+    managedFile ? "" : href,
+  );
+  useEffect(() => {
+    let cancelled = false;
+    if (!managedFile) {
+      setResolvedHref(href);
+      return () => { cancelled = true; };
+    }
+    setResolvedHref("");
+    resolveMarkdownImageUrlAsync(href).then((url) => {
+      if (!cancelled) setResolvedHref(url);
+    }).catch(() => {
+      if (!cancelled) setResolvedHref("");
+    });
+    return () => { cancelled = true; };
+  }, [href, managedFile]);
   const sourceIndex = getSourceIndex(href);
 
   if (sourceIndex) {
@@ -219,8 +296,14 @@ const LinkComponent = (props: any) => {
       : typeof props.title === "string" && props.title
         ? props.title
         : "Source";
-    const subtitle = source ? getSourceSubtitle(source) : "";
-    const chipContent = <span className="md-source-chip-label">{label}</span>;
+    const chipContent = source ? (
+      <>
+        <SourceBrandIcon source={source} />
+        <span className="md-source-chip-label">{getSourceBrandName(source)}</span>
+      </>
+    ) : (
+      <span className="md-source-chip-label">{label}</span>
+    );
     const chip = source ? (
       <a
         className={classnames("md-source-chip", {
@@ -230,6 +313,8 @@ const LinkComponent = (props: any) => {
         href={sourceHref}
         target="_blank"
         rel="noopener noreferrer"
+        aria-label={label}
+        title={label}
       >
         {chipContent}
       </a>
@@ -246,15 +331,9 @@ const LinkComponent = (props: any) => {
     return (
       <Popover
         mouseEnterDelay={0.2}
+        placement="top"
         classNames={{ root: "md-source-popover" }}
-        title={subtitle ? `${label} · ${subtitle}` : label}
-        content={
-          <div className="md-content-card">
-            <div className="md-content-card-content">
-              <MarkdownViewer>{getSourceEvidenceText(source)}</MarkdownViewer>
-            </div>
-          </div>
-        }
+        content={<SourcePreviewCard source={source} />}
       >
         {chip}
       </Popover>
@@ -262,7 +341,15 @@ const LinkComponent = (props: any) => {
   }
 
   return (
-    <a href={props.href} target="_blank">
+    <a
+      href={managedFile && resolvedHref
+        ? `${resolvedHref}${resolvedHref.includes("?") ? "&" : "?"}download=1`
+        : resolvedHref || undefined}
+      target="_blank"
+      rel="noreferrer"
+      download={managedFile ? basenameFromPath(href) : undefined}
+      aria-disabled={managedFile && !resolvedHref}
+    >
       {props.children}
     </a>
   );

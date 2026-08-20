@@ -158,6 +158,29 @@ describe("buildChatMessageListFromHistory", () => {
     expect(list[2]).toMatchObject({ delta: "q2" });
   });
 
+  it("restores the authoritative external execution projection", () => {
+    const execution = {
+      run_id: "run-1",
+      history_id: "h1",
+      provider: "codex",
+      status: "completed" as const,
+      host_online: false,
+      claim_count: 2,
+      recovery_count: 1,
+      event_count: 4,
+      invocation: { total: 1, running: 0, succeeded: 1, failed: 0, interrupted: 0, tools: ["workflow.state"] },
+      workflows: [],
+      artifact_count: 0,
+      artifact_revision_count: 0,
+      created_at: "2026-01-01T00:00:00Z",
+      updated_at: "2026-01-01T00:00:01Z",
+    };
+    const list = buildChatMessageListFromHistory([
+      { id: "h1", query: "q", result: "a", execution },
+    ]);
+    expect(list[1]).toMatchObject({ role: RoleTypes.ASSISTANT, execution });
+  });
+
   it("strips citation markers from the displayed user query by default", () => {
     const history = [
       { id: "h1", query: "<cite_message>ctx</cite_message>real question", result: "answer" },

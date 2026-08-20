@@ -221,6 +221,41 @@
   background: #fbfdff;
 }
 
+.model-provider-cloud-service-setup {
+  min-height: 66px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 7px;
+  padding: 12px;
+  border: 1px dashed #cfe0ff;
+  border-radius: 12px;
+  background: #f8fbff;
+
+  &.is-loading,
+  &.is-error {
+    width: 100%;
+    min-height: 48px;
+  }
+
+  .ant-alert {
+    width: 100%;
+  }
+
+  strong {
+    color: #1e293b;
+    font-size: 13px;
+  }
+
+  p {
+    margin: 0;
+    color: #64748b;
+    font-size: 12px;
+    line-height: 1.55;
+  }
+}
+
 .model-provider-cloud-service-icon {
   width: 24px;
   height: 24px;
@@ -1006,6 +1041,68 @@
   margin-bottom: 18px;
 }
 
+.model-provider-setup-state {
+  min-height: 240px;
+  grid-column: 1 / -1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 28px;
+  border: 1px dashed #cfe0ff;
+  border-radius: 16px;
+  background: #f8fbff;
+  text-align: center;
+
+  &.is-loading,
+  &.is-error {
+    align-items: stretch;
+    justify-content: flex-start;
+    min-height: 0;
+    padding: 16px;
+    text-align: left;
+  }
+
+  &.is-loading > span {
+    color: #64748b;
+    font-size: 14px;
+  }
+
+  &.is-error .ant-alert {
+    width: 100%;
+  }
+}
+
+.model-provider-setup-icon {
+  width: 58px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  border: 1px solid #cfe0ff;
+  border-radius: 18px;
+  color: #2563eb;
+  background: #eef5ff;
+  font-size: 26px;
+}
+
+.model-provider-setup-copy {
+  h3 {
+    margin: 0 0 8px;
+    color: #0f172a;
+    font-size: 20px;
+    line-height: 1.35;
+  }
+
+  p {
+    max-width: 520px;
+    margin: 0;
+    color: #64748b;
+    font-size: 14px;
+    line-height: 1.7;
+  }
+}
+
 .model-provider-service-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1232,10 +1329,11 @@
 }
 
 .model-provider-service-logo-cyan {
-  background: #ecfeff;
+  border-color: rgba(8, 145, 178, 0.32);
+  background: #0891b2;
 
   .model-provider-service-logo-icon {
-    color: #0891b2;
+    color: #fff;
   }
 }
 
@@ -2224,24 +2322,6 @@
   }
 }
 
-.model-provider-cloud-doc-directory-count {
-  display: inline-flex;
-  align-items: baseline;
-  justify-content: flex-end;
-  gap: 4px;
-  color: #667085;
-
-  strong {
-    color: #344054;
-    font-size: 16px;
-    font-weight: 600;
-  }
-
-  span {
-    font-size: 12px;
-  }
-}
-
 .model-provider-cloud-doc-resource-status.ant-tag {
   min-width: 72px;
   margin: 0;
@@ -2330,10 +2410,6 @@
     grid-column: 2;
     align-items: flex-start;
     justify-self: flex-start;
-  }
-
-  .model-provider-cloud-doc-directory-count {
-    justify-content: flex-start;
   }
 
   .model-provider-cloud-doc-quick-actions {

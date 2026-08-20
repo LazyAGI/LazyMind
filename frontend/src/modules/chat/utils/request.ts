@@ -134,10 +134,6 @@ export function exportContextPrompt(payload: Record<string, unknown>) {
     .then((response) => response.data as Blob);
 }
 
-// SubAgent Task Center endpoints.
-export const taskStreamUrl = (taskId: string) =>
-  `${coreApiBaseUrl}/tasks/${encodeURIComponent(taskId)}:stream`;
-
 // Conversation-level events SSE endpoint.
 export const convEventsUrl = (conversationId: string) =>
   `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/events`;
@@ -957,23 +953,37 @@ export function TempUploadServiceApi() {
   };
 }
 
-export interface ConversationWorkflowSettings {
+export type ChatExecutor = string;
+
+export interface ChatExecutorDescriptor {
+  id: string;
+  display_name: string;
+  kind: 'internal' | 'external';
+  installed: boolean;
+  host_online: boolean;
+  available: boolean;
+  unavailable_reason?: string;
+}
+
+export interface ConversationRuntimeSettings {
   workflow_mode?: 'dynamic' | 'auto';
   enable_subagent?: boolean;
   enable_workflow?: boolean;
+  chat_executor?: ChatExecutor;
 }
 
-export function parseConversationWorkflowSettings(
+export function parseConversationRuntimeSettings(
   conversation?: {
     enable_workflow?: boolean | null;
     workflow_mode?: string | null;
     enable_subagent?: boolean | null;
+    chat_executor?: string | null;
   } | null,
-): ConversationWorkflowSettings | undefined {
+): ConversationRuntimeSettings | undefined {
   if (!conversation) {
     return undefined;
   }
-  const settings: ConversationWorkflowSettings = {};
+  const settings: ConversationRuntimeSettings = {};
   if (conversation.enable_workflow != null) {
     settings.enable_workflow = conversation.enable_workflow;
   }
@@ -984,25 +994,34 @@ export function parseConversationWorkflowSettings(
   if (conversation.enable_subagent != null) {
     settings.enable_subagent = conversation.enable_subagent;
   }
+  if (typeof conversation.chat_executor === 'string' && conversation.chat_executor.trim()) {
+    settings.chat_executor = conversation.chat_executor.trim();
+  }
   return Object.keys(settings).length > 0 ? settings : undefined;
 }
 
 export function ConversationSettingsApi() {
   return {
     getChatSettings(options?: RawAxiosRequestConfig) {
-      return axiosInstance.get<ConversationWorkflowSettings>(
+      return axiosInstance.get<ConversationRuntimeSettings>(
         `${coreApiBaseUrl}/user/chat-settings`,
         options,
       );
     },
-    patchWorkflowSettings(
+    patchConversationSettings(
       conversationId: string,
-      settings: ConversationWorkflowSettings,
+      settings: ConversationRuntimeSettings,
       options?: RawAxiosRequestConfig,
     ) {
       return axiosInstance.patch(
-        `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/workflow-settings`,
+        `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/settings`,
         settings,
+        options,
+      );
+    },
+    listChatExecutors(options?: RawAxiosRequestConfig) {
+      return axiosInstance.get<{ executors: ChatExecutorDescriptor[] }>(
+        `${coreApiBaseUrl}/chat/executors`,
         options,
       );
     },

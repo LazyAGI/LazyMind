@@ -54,6 +54,7 @@ func TestCreateAndCancelSchedule(t *testing.T) {
 
 	s := &orm.UserSchedule{
 		UserID:         "user-1",
+		Name:           "weekly report",
 		CronExpr:       "0 9 * * 1",
 		Timezone:       "Asia/Shanghai",
 		PromptTemplate: "weekly report",
@@ -79,6 +80,32 @@ func TestCreateAndCancelSchedule(t *testing.T) {
 	}
 	if got.Enabled {
 		t.Fatal("expected schedule to be disabled after cancel")
+	}
+}
+
+func TestCreateScheduleRejectsBlankName(t *testing.T) {
+	db := newTestSchedulerDB(t)
+
+	for _, name := range []string{"", "   "} {
+		s := &orm.UserSchedule{
+			UserID:         "user-1",
+			Name:           name,
+			CronExpr:       "0 9 * * 1",
+			Timezone:       "Asia/Shanghai",
+			PromptTemplate: "weekly report",
+			Enabled:        true,
+		}
+		if err := CreateSchedule(context.Background(), db.DB, s); err == nil || err.Error() != "name required" {
+			t.Fatalf("CreateSchedule(%q) error = %v, want name required", name, err)
+		}
+	}
+
+	var count int64
+	if err := db.Model(&orm.UserSchedule{}).Count(&count).Error; err != nil {
+		t.Fatalf("count schedules: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("blank schedule names must not be persisted, got %d rows", count)
 	}
 }
 

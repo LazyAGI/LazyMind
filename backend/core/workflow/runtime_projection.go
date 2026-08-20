@@ -193,7 +193,14 @@ func projectSession(ctx context.Context, db *gorm.DB, session *orm.WorkflowSessi
 		}
 		var artifactCount int64
 		if attempt.TaskID != "" {
-			if err := db.WithContext(ctx).Model(&orm.SubAgentArtifact{}).Where("task_id = ?", attempt.TaskID).Count(&artifactCount).Error; err != nil {
+			if err := db.WithContext(ctx).Model(&orm.SubAgentArtifact{}).
+				Where("task_id = ?", attempt.TaskID).Count(&artifactCount).Error; err != nil {
+				return projectionResponse{}, err
+			}
+		}
+		if artifactCount == 0 {
+			if err := db.WithContext(ctx).Model(&orm.WorkflowSlotRevision{}).
+				Where("producer_attempt_id = ?", attempt.ID).Count(&artifactCount).Error; err != nil {
 				return projectionResponse{}, err
 			}
 		}
@@ -303,6 +310,31 @@ func freezeRouteDecision(ctx context.Context, db *gorm.DB, sessionID, from, task
 		}
 		return reconcileSessionProjection(ctx, tx, &session)
 	})
+}
+
+// FinalizeHostAttempt applies the same terminal projection semantics used by
+// LazyMind's managed ChatAgent after a Host-neutral Attempt reaches terminal
+// state. Host transport and product names never enter the graph algorithm.
+func FinalizeHostAttempt(ctx context.Context, db *gorm.DB, sessionID, stepID, attemptID, status string) error {
+	switch status {
+	case "succeeded":
+		var existing int64
+		if err := db.WithContext(ctx).Model(&orm.WorkflowRouteDecision{}).
+			Where("session_id = ? AND from_step_id = ? AND source_attempt_id = ? AND validity = ?",
+				sessionID, stepID, attemptID, "effective").Count(&existing).Error; err != nil {
+			return err
+		}
+		if existing > 0 {
+			return nil
+		}
+		return freezeRouteDecision(ctx, db, sessionID, stepID, attemptID)
+	case "failed":
+		return UpdateSessionStatus(ctx, db, sessionID, SessionStatusFailed)
+	case "cancelled", "interrupted":
+		return UpdateSessionStatus(ctx, db, sessionID, SessionStatusWaiting)
+	default:
+		return gorm.ErrInvalidData
+	}
 }
 
 // reconcileSessionProjection derives terminal state from the same projection
