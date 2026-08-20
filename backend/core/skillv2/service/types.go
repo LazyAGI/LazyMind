@@ -73,6 +73,8 @@ type CreateSkillRequest struct {
 type CreateSkillResponse struct {
 	SkillID        string
 	HeadRevisionID string
+	Name           string
+	Description    string
 }
 
 type PatchSkillRequest struct {

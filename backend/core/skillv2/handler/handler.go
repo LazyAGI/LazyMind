@@ -240,6 +240,8 @@ func Create(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, map[string]any{
 		"skill_id":         resp.SkillID,
 		"head_revision_id": resp.HeadRevisionID,
+		"name":             resp.Name,
+		"description":      resp.Description,
 	})
 }
 

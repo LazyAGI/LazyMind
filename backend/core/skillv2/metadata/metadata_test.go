@@ -33,3 +33,40 @@ func TestParseRequiredRejectsMissingFields(t *testing.T) {
 		})
 	}
 }
+
+func TestParseAllowsMissingFrontmatterFields(t *testing.T) {
+	parsed, err := Parse([]byte("---\ndescription: Imported description\n---\n# Skill\n\n正文首段。\n"))
+	if err != nil {
+		t.Fatalf("Parse returned error: %v", err)
+	}
+	if parsed.HasName || !parsed.HasDescription {
+		t.Fatalf("Parse presence = name:%v description:%v", parsed.HasName, parsed.HasDescription)
+	}
+	if parsed.Description != "Imported description" || parsed.Body != "# Skill\n\n正文首段。\n" {
+		t.Fatalf("Parse result = %#v", parsed)
+	}
+
+	parsed, err = Parse([]byte("# Skill\r\n\r\n正文首段。\r\n"))
+	if err != nil {
+		t.Fatalf("Parse without frontmatter returned error: %v", err)
+	}
+	if parsed.HasName || parsed.HasDescription || parsed.Body != "# Skill\n\n正文首段。\n" {
+		t.Fatalf("Parse without frontmatter result = %#v", parsed)
+	}
+}
+
+func TestFirstBodyParagraphSkipsHeadingsAndTruncatesRunes(t *testing.T) {
+	if got := FirstBodyParagraph("# 标题\n\n这是第一段。\n仍是第一段。\n\n这是第二段。\n"); got != "这是第一段。 仍是第一段。" {
+		t.Fatalf("FirstBodyParagraph = %q", got)
+	}
+
+	long := strings.Repeat("技", 101)
+	if got := FirstBodyParagraph("## 标题\n\n" + long); got != strings.Repeat("技", 100)+"…" {
+		t.Fatalf("FirstBodyParagraph long result length = %d, value = %q", len([]rune(got)), got)
+	}
+
+	exact := strings.Repeat("能", 100)
+	if got := FirstBodyParagraph(exact); got != exact {
+		t.Fatalf("FirstBodyParagraph exact result = %q", got)
+	}
+}

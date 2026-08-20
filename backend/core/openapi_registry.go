@@ -1313,10 +1313,10 @@ type skillSourceOpenAPIRequest struct {
 }
 
 type skillCreateManagedOpenAPIRequest struct {
-	Name        string                    `json:"name,omitempty" desc:"Legacy inline-create field. ZIP and URL imports derive name from SKILL.md frontmatter."`
+	Name        string                    `json:"name,omitempty" desc:"Legacy inline-create field. ZIP and URL imports resolve name from SKILL.md frontmatter or package fallback metadata."`
 	Category    string                    `json:"category,omitempty" desc:"Legacy inline-create field. ZIP and URL imports use External."`
 	Source      skillSourceOpenAPIRequest `json:"source"`
-	Description string                    `json:"description,omitempty" desc:"Legacy inline-create field. ZIP and URL imports derive description from SKILL.md frontmatter."`
+	Description string                    `json:"description,omitempty" desc:"Legacy inline-create field. ZIP and URL imports resolve description from SKILL.md frontmatter or the first body paragraph."`
 	Tags        []string                  `json:"tags,omitempty"`
 	AutoEvo     *bool                     `json:"auto_evo,omitempty"`
 	IsEnabled   *bool                     `json:"is_enabled,omitempty"`
@@ -1388,6 +1388,8 @@ type skillDetailOpenAPIResponse struct {
 type skillWriteOpenAPIResponse struct {
 	SkillID        string `json:"skill_id"`
 	HeadRevisionID string `json:"head_revision_id,omitempty"`
+	Name           string `json:"name,omitempty"`
+	Description    string `json:"description,omitempty"`
 }
 
 type skillFileQueryParams struct {
@@ -2710,7 +2712,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "POST",
 			Path:        "/skills",
 			Summary:     "Create directory skill",
-			Description: "Creates one directory-based skill from an uploaded ZIP or URL. The package must contain SKILL.md; description is product metadata and is not written into SKILL.md front matter.",
+			Description: "Creates one directory-based skill from an uploaded ZIP or URL. The package must contain SKILL.md; missing name and description metadata are resolved without rewriting SKILL.md.",
 			Tags:        []string{"skills"},
 			RequestBody: jsonBodyOf(skillCreateManagedOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Created skill", skillWriteOpenAPIResponse{})},

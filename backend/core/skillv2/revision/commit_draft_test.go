@@ -158,6 +158,33 @@ func TestCommitDraft_InvalidFrontmatterRollsBackAndKeepsDraft(t *testing.T) {
 	}
 }
 
+func TestCommitDraft_ExternalSkillKeepsDatabaseMetadataWithoutFrontmatter(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	if err := db.Model(&testutil.SkillRow{}).Where("id = ?", "skill1").Updates(map[string]any{
+		"category":      "external",
+		"relative_root": "external/论文精读",
+	}).Error; err != nil {
+		t.Fatalf("mark skill external: %v", err)
+	}
+	testutil.SeedTextBlob(t, db, "h_external_no_frontmatter", "# Missing frontmatter\n\n更新后的正文。\n")
+	testutil.SeedDraftEntry(t, db, "skill1", "SKILL.md", "upsert", "file", "h_external_no_frontmatter")
+	service := NewService(ServiceDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
+
+	resp, err := service.CommitDraft(context.Background(), CommitDraftRequest{SkillID: "skill1", UserID: "user_001", DraftVersion: 1})
+	if err != nil {
+		t.Fatalf("CommitDraft returned error: %v", err)
+	}
+	testutil.AssertHeadRevision(t, db, "skill1", resp.RevisionID)
+	var skill testutil.SkillRow
+	if err := db.Where("id = ?", "skill1").Take(&skill).Error; err != nil {
+		t.Fatalf("query skill: %v", err)
+	}
+	if skill.SkillName != "论文精读" || skill.Description != "用于阅读和总结论文的技能" || skill.RelativeRoot != "external/论文精读" {
+		t.Fatalf("database metadata changed: %#v", skill)
+	}
+}
+
 func TestCommitDraft_RejectsEmptyCommit(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")

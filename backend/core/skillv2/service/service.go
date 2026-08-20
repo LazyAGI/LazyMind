@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/url"
 	"path"
 	"sort"
 	"strings"
@@ -47,15 +48,17 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 	req.Name = strings.TrimSpace(req.Name)
 	req.Category = strings.TrimSpace(req.Category)
 	req.Description = strings.TrimSpace(req.Description)
-	files, sourceRefType, sourceRefID, err := s.filesFromSource(ctx, req.OwnerUserID, req.Source)
+	skillID := newID()
+	pkg, sourceRefType, sourceRefID, err := s.filesFromSource(ctx, req.OwnerUserID, req.Source)
 	if err != nil {
 		return CreateSkillResponse{}, err
 	}
+	files := pkg.Files
 	if err := validateSkillFiles(files); err != nil {
 		return CreateSkillResponse{}, err
 	}
 	if isExternalImportSource(req.Source.Type) {
-		meta, err := skillmetadata.FromFiles(files)
+		meta, err := resolveExternalMetadata(pkg, skillID)
 		if err != nil {
 			return CreateSkillResponse{}, err
 		}
@@ -71,7 +74,6 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 		return CreateSkillResponse{}, err
 	}
 
-	skillID := newID()
 	revisionID := newID()
 	now := s.clock.Now()
 	tags, _ := json.Marshal(req.Tags)
@@ -130,7 +132,7 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 	if err != nil {
 		return CreateSkillResponse{}, err
 	}
-	return CreateSkillResponse{SkillID: skillID, HeadRevisionID: revisionID}, nil
+	return CreateSkillResponse{SkillID: skillID, HeadRevisionID: revisionID, Name: req.Name, Description: req.Description}, nil
 }
 
 func isExternalImportSource(sourceType string) bool {
@@ -290,10 +292,11 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 		if draftEntries > 0 {
 			return fmt.Errorf("cannot replace source while draft overlay exists")
 		}
-		files, sourceRefType, sourceRefID, err := s.filesFromSource(ctx, skill.OwnerUserID, *req.Source)
+		pkg, sourceRefType, sourceRefID, err := s.filesFromSource(ctx, skill.OwnerUserID, *req.Source)
 		if err != nil {
 			return err
 		}
+		files := pkg.Files
 		if err := validateSkillFiles(files); err != nil {
 			return err
 		}
@@ -302,7 +305,7 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 		nextDescription := skill.Description
 		externalImport := isExternalImportSource(req.Source.Type)
 		if externalImport {
-			meta, err := skillmetadata.FromFiles(files)
+			meta, err := resolveExternalMetadata(pkg, skill.ID)
 			if err != nil {
 				return err
 			}
@@ -937,43 +940,49 @@ func (s *SkillService) entriesFromFiles(ctx context.Context, tx *gorm.DB, revisi
 	return entries, hashTree(entries), nil
 }
 
-func (s *SkillService) filesFromSource(ctx context.Context, ownerUserID string, source SourceInput) (map[string][]byte, string, string, error) {
+type sourcePackage struct {
+	Files           map[string][]byte
+	PackageRoot     string
+	ArchiveFilename string
+}
+
+func (s *SkillService) filesFromSource(ctx context.Context, ownerUserID string, source SourceInput) (sourcePackage, string, string, error) {
 	switch source.Type {
 	case "uploaded_zip":
 		if s.uploadStore == nil {
-			return nil, "", "", fmt.Errorf("upload store is not configured")
+			return sourcePackage{}, "", "", fmt.Errorf("upload store is not configured")
 		}
 		session, err := s.uploadStore.Get(ctx, source.UploadID)
 		if err != nil {
-			return nil, "", "", err
+			return sourcePackage{}, "", "", err
 		}
 		if session.OwnerUserID != ownerUserID {
-			return nil, "", "", fmt.Errorf("upload belongs to another user")
+			return sourcePackage{}, "", "", fmt.Errorf("upload belongs to another user")
 		}
 		if session.State != "completed" {
-			return nil, "", "", fmt.Errorf("upload is not completed")
+			return sourcePackage{}, "", "", fmt.Errorf("upload is not completed")
 		}
-		files, err := readZipFiles(session.StoredPath)
-		return files, "upload", source.UploadID, err
+		pkg, err := readZipFiles(session.StoredPath, session.Filename)
+		return pkg, "upload", source.UploadID, err
 	case "local_zip":
 		if strings.TrimSpace(source.StoredPath) == "" {
-			return nil, "", "", fmt.Errorf("stored_path required")
+			return sourcePackage{}, "", "", fmt.Errorf("stored_path required")
 		}
-		files, err := readZipFiles(source.StoredPath)
-		return files, "local_zip", source.Filename, err
+		pkg, err := readZipFiles(source.StoredPath, source.Filename)
+		return pkg, "local_zip", source.Filename, err
 	case "url":
 		if s.downloader == nil {
-			return nil, "", "", fmt.Errorf("downloader is not configured")
+			return sourcePackage{}, "", "", fmt.Errorf("downloader is not configured")
 		}
 		zipPath, err := s.downloader.Download(ctx, source.URL)
 		if err != nil {
-			return nil, "", "", err
+			return sourcePackage{}, "", "", err
 		}
-		files, err := readZipFiles(zipPath)
-		ensureURLImportDefaults(files)
-		return files, "url", source.URL, err
+		pkg, err := readZipFiles(zipPath, archiveFilenameFromURL(source.URL))
+		ensureURLImportDefaults(pkg.Files)
+		return pkg, "url", source.URL, err
 	default:
-		return nil, "", "", fmt.Errorf("unsupported source type %q", source.Type)
+		return sourcePackage{}, "", "", fmt.Errorf("unsupported source type %q", source.Type)
 	}
 }
 
@@ -986,10 +995,10 @@ func ensureURLImportDefaults(files map[string][]byte) {
 	}
 }
 
-func readZipFiles(zipPath string) (map[string][]byte, error) {
+func readZipFiles(zipPath, archiveFilename string) (sourcePackage, error) {
 	reader, err := zip.OpenReader(zipPath)
 	if err != nil {
-		return nil, err
+		return sourcePackage{}, err
 	}
 	defer reader.Close()
 
@@ -997,51 +1006,52 @@ func readZipFiles(zipPath string) (map[string][]byte, error) {
 	for _, entry := range reader.File {
 		if entry.FileInfo().IsDir() {
 			if _, err := cleanSkillPath(strings.TrimSuffix(entry.Name, "/")); err != nil {
-				return nil, err
+				return sourcePackage{}, err
 			}
 			continue
 		}
 		name, err := cleanSkillPath(entry.Name)
 		if err != nil {
-			return nil, err
+			return sourcePackage{}, err
 		}
 		rc, err := entry.Open()
 		if err != nil {
-			return nil, err
+			return sourcePackage{}, err
 		}
 		data, readErr := io.ReadAll(rc)
 		closeErr := rc.Close()
 		if readErr != nil {
-			return nil, readErr
+			return sourcePackage{}, readErr
 		}
 		if closeErr != nil {
-			return nil, closeErr
+			return sourcePackage{}, closeErr
 		}
 		files[name] = data
 	}
-	return normalizeSkillPackageRoot(files), nil
+	normalized, packageRoot := normalizeSkillPackageRoot(files)
+	return sourcePackage{Files: normalized, PackageRoot: packageRoot, ArchiveFilename: archiveFilename}, nil
 }
 
-func normalizeSkillPackageRoot(files map[string][]byte) map[string][]byte {
+func normalizeSkillPackageRoot(files map[string][]byte) (map[string][]byte, string) {
 	if _, ok := files["SKILL.md"]; ok {
-		return files
+		return files, ""
 	}
 	root := ""
 	for filePath := range files {
 		parts := strings.SplitN(filePath, "/", 2)
 		if len(parts) != 2 || parts[1] == "" {
-			return files
+			return files, ""
 		}
 		if root == "" {
 			root = parts[0]
 			continue
 		}
 		if root != parts[0] {
-			return files
+			return files, ""
 		}
 	}
 	if root == "" {
-		return files
+		return files, ""
 	}
 	normalized := make(map[string][]byte, len(files))
 	prefix := root + "/"
@@ -1050,9 +1060,55 @@ func normalizeSkillPackageRoot(files map[string][]byte) map[string][]byte {
 		normalized[relPath] = data
 	}
 	if _, ok := normalized["SKILL.md"]; ok {
-		return normalized
+		return normalized, root
 	}
-	return files
+	return files, ""
+}
+
+func resolveExternalMetadata(pkg sourcePackage, skillID string) (skillmetadata.Metadata, error) {
+	content, ok := pkg.Files["SKILL.md"]
+	if !ok {
+		return skillmetadata.Metadata{}, fmt.Errorf("skill package must contain SKILL.md")
+	}
+	parsed, err := skillmetadata.Parse(content)
+	if err != nil {
+		return skillmetadata.Metadata{}, err
+	}
+	name := parsed.Name
+	if parsed.HasName {
+		if err := validatePathSegment(name); err != nil {
+			return skillmetadata.Metadata{}, fmt.Errorf("invalid SKILL.md frontmatter field \"name\": %w", err)
+		}
+	} else {
+		name = strings.TrimSpace(pkg.PackageRoot)
+		if err := validatePathSegment(name); err != nil {
+			name = archiveStem(pkg.ArchiveFilename)
+		}
+		if err := validatePathSegment(name); err != nil {
+			name = "lazymind-skill-" + skillID
+		}
+	}
+	description := parsed.Description
+	if !parsed.HasDescription {
+		description = skillmetadata.FirstBodyParagraph(parsed.Body)
+	}
+	return skillmetadata.Metadata{Name: name, Description: description}, nil
+}
+
+func archiveStem(filename string) string {
+	filename = strings.TrimSpace(path.Base(strings.ReplaceAll(filename, `\`, "/")))
+	if strings.EqualFold(path.Ext(filename), ".zip") {
+		filename = filename[:len(filename)-len(path.Ext(filename))]
+	}
+	return strings.TrimSpace(filename)
+}
+
+func archiveFilenameFromURL(rawURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return ""
+	}
+	return path.Base(parsed.Path)
 }
 
 func cleanSkillPath(name string) (string, error) {

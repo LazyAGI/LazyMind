@@ -5205,12 +5205,12 @@ components:
                     description: Legacy inline-create field. ZIP and URL imports use External.
                     type: string
                 description:
-                    description: Legacy inline-create field. ZIP and URL imports derive description from SKILL.md frontmatter.
+                    description: Legacy inline-create field. ZIP and URL imports resolve description from SKILL.md frontmatter or the first body paragraph.
                     type: string
                 is_enabled:
                     type: boolean
                 name:
-                    description: Legacy inline-create field. ZIP and URL imports derive name from SKILL.md frontmatter.
+                    description: Legacy inline-create field. ZIP and URL imports resolve name from SKILL.md frontmatter or package fallback metadata.
                     type: string
                 source:
                     $ref: '#/components/schemas/skillSourceOpenAPIRequest'
@@ -6061,7 +6061,11 @@ components:
             type: object
         skillWriteOpenAPIResponse:
             properties:
+                description:
+                    type: string
                 head_revision_id:
+                    type: string
+                name:
                     type: string
                 skill_id:
                     type: string
@@ -12269,7 +12273,7 @@ paths:
             tags:
                 - skills
         post:
-            description: Creates one directory-based skill from an uploaded ZIP or URL. The package must contain SKILL.md; description is product metadata and is not written into SKILL.md front matter.
+            description: Creates one directory-based skill from an uploaded ZIP or URL. The package must contain SKILL.md; missing name and description metadata are resolved without rewriting SKILL.md.
             requestBody:
                 content:
                     application/json:

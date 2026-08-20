@@ -54,6 +54,38 @@ func TestCreateSkillFromURL_CreatesInitialRevision(t *testing.T) {
 	assertBlobRouting(t, db, resp.HeadRevisionID)
 }
 
+func TestCreateSkillFromURL_ResolvesMissingMetadata(t *testing.T) {
+	db := newSkillV2TestDB(t)
+	zipPath := filepath.Join(t.TempDir(), "url-skill.zip")
+	content := []byte("# URL Skill\n\nURL 正文首段。\n")
+	writeSkillZip(t, zipPath, map[string][]byte{"SKILL.md": content})
+	downloader := NewFakeZipDownloader(map[string]string{
+		"https://example.test/url-skill.zip": zipPath,
+	})
+	svc := NewSkillService(SkillServiceDeps{
+		DB:         db,
+		Downloader: downloader,
+		BlobStore:  NewBlobStore(db, NewLocalObjectStore(t.TempDir())),
+		Clock:      fixedClock(),
+	})
+
+	resp, err := svc.CreateSkill(context.Background(), CreateSkillRequest{
+		OwnerUserID:  "user_001",
+		CreateUserID: "user_001",
+		Source:       SourceInput{Type: "url", URL: "https://example.test/url-skill.zip"},
+	})
+	if err != nil {
+		t.Fatalf("CreateSkill from URL returned error: %v", err)
+	}
+	if resp.Name != "url-skill" || resp.Description != "URL 正文首段。" {
+		t.Fatalf("resolved URL metadata = (%q, %q)", resp.Name, resp.Description)
+	}
+	blob := getBlobByPath(t, db, resp.HeadRevisionID, "SKILL.md")
+	if string(blob.Content) != string(content) {
+		t.Fatalf("stored SKILL.md changed: got %q want %q", blob.Content, content)
+	}
+}
+
 func TestCreateSkillFromURL_DownloadFailureDoesNotCreateSkill(t *testing.T) {
 	db := newSkillV2TestDB(t)
 	downloader := NewFakeZipDownloader(map[string]string{})

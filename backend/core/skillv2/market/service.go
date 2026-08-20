@@ -604,10 +604,7 @@ func copyHeadRevision(ctx context.Context, tx *gorm.DB, sourceSkillID, ownerUser
 	if source.HeadRevisionID == nil {
 		return "", "", fmt.Errorf("source skill has no head revision")
 	}
-	meta, err := skillmetadata.FromRevision(ctx, tx, *source.HeadRevisionID)
-	if err != nil {
-		return "", "", err
-	}
+	meta := skillmetadata.Metadata{Name: source.SkillName, Description: source.Description}
 	var conflicts int64
 	if err := tx.Model(&skillRow{}).
 		Where("owner_user_id = ? AND category = ? AND skill_name = ? AND deleted_at IS NULL", ownerUserID, skillmetadata.ExternalCategory, meta.Name).

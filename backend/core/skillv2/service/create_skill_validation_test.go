@@ -32,22 +32,110 @@ func TestCreateSkillFromUploadedZip_RequiresSkillMD(t *testing.T) {
 	assertNoSkillTruthRows(t, db)
 }
 
-func TestCreateSkillFromUploadedZip_RequiresFrontmatterMetadata(t *testing.T) {
+func TestCreateSkillFromUploadedZip_ResolvesMissingFrontmatterMetadata(t *testing.T) {
+	tests := []struct {
+		name            string
+		filename        string
+		entryPath       string
+		content         []byte
+		wantName        string
+		wantDescription string
+		wantGenerated   bool
+	}{
+		{
+			name:            "missing frontmatter at archive root",
+			filename:        "frontmatter.zip",
+			entryPath:       "SKILL.md",
+			content:         []byte("# Skill\n\n正文首段。\n"),
+			wantName:        "frontmatter",
+			wantDescription: "正文首段。",
+		},
+		{
+			name:            "missing name uses package root",
+			filename:        "archive-name.zip",
+			entryPath:       "package-root/SKILL.md",
+			content:         []byte("---\ndescription: description\n---\n# Skill\n"),
+			wantName:        "package-root",
+			wantDescription: "description",
+		},
+		{
+			name:            "invalid package root uses archive filename",
+			filename:        "archive-name.zip",
+			entryPath:       " /SKILL.md",
+			content:         []byte("---\ndescription: description\n---\n# Skill\n"),
+			wantName:        "archive-name",
+			wantDescription: "description",
+		},
+		{
+			name:            "missing package root and archive filename uses generated id",
+			entryPath:       "SKILL.md",
+			content:         []byte("---\ndescription: description\n---\n# Skill\n"),
+			wantDescription: "description",
+			wantGenerated:   true,
+		},
+		{
+			name:            "missing description uses first body paragraph",
+			filename:        "skill.zip",
+			entryPath:       "SKILL.md",
+			content:         []byte("---\nname: skill\n---\n# Skill\n\n第一段。\n继续第一段。\n\n第二段。\n"),
+			wantName:        "skill",
+			wantDescription: "第一段。 继续第一段。",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newSkillV2TestDB(t)
+			storedFilename := tc.filename
+			if storedFilename == "" {
+				storedFilename = "stored.zip"
+			}
+			zipPath := filepath.Join(t.TempDir(), storedFilename)
+			writeSkillZip(t, zipPath, map[string][]byte{tc.entryPath: tc.content})
+			uploadStore := newFakeUploadStore()
+			uploadID := "upload_" + strings.ReplaceAll(tc.name, " ", "_")
+			uploadStore.Put(UploadSession{UploadID: uploadID, OwnerUserID: "user_001", State: "completed", StoredPath: zipPath, Filename: tc.filename})
+			svc := newCreateSkillValidationService(t, db, uploadStore)
+
+			resp, err := svc.CreateSkill(context.Background(), validCreateSkillRequest(uploadID))
+			if err != nil {
+				t.Fatalf("CreateSkill returned error: %v", err)
+			}
+			wantName := tc.wantName
+			if tc.wantGenerated {
+				wantName = "lazymind-skill-" + resp.SkillID
+			}
+			if resp.Name != wantName || resp.Description != tc.wantDescription {
+				t.Fatalf("CreateSkill metadata = (%q, %q), want (%q, %q)", resp.Name, resp.Description, wantName, tc.wantDescription)
+			}
+			var skill testSkillV2SkillRow
+			if err := db.Where("id = ?", resp.SkillID).Take(&skill).Error; err != nil {
+				t.Fatalf("query created skill: %v", err)
+			}
+			if skill.SkillName != wantName || skill.Description != tc.wantDescription {
+				t.Fatalf("stored metadata = (%q, %q), want (%q, %q)", skill.SkillName, skill.Description, wantName, tc.wantDescription)
+			}
+			blob := getBlobByPath(t, db, resp.HeadRevisionID, "SKILL.md")
+			if string(blob.Content) != string(tc.content) {
+				t.Fatalf("stored SKILL.md changed: got %q want %q", blob.Content, tc.content)
+			}
+		})
+	}
+}
+
+func TestCreateSkillFromUploadedZip_RejectsInvalidExistingFrontmatter(t *testing.T) {
 	for name, content := range map[string][]byte{
-		"frontmatter": []byte("# Skill\n"),
-		"name":        []byte("---\ndescription: description\n---\n# Skill\n"),
-		"description": []byte("---\nname: skill\n---\n# Skill\n"),
+		"malformed yaml": []byte("---\nname: [broken\n---\n正文。\n"),
+		"invalid name":   []byte("---\nname: bad/name\ndescription: description\n---\n正文。\n"),
 	} {
 		t.Run(name, func(t *testing.T) {
 			db := newSkillV2TestDB(t)
-			zipPath := filepath.Join(t.TempDir(), name+".zip")
+			zipPath := filepath.Join(t.TempDir(), "skill.zip")
 			writeSkillZip(t, zipPath, map[string][]byte{"SKILL.md": content})
 			uploadStore := newFakeUploadStore()
-			uploadID := "upload_missing_" + name
-			uploadStore.Put(UploadSession{UploadID: uploadID, OwnerUserID: "user_001", State: "completed", StoredPath: zipPath, Filename: name + ".zip"})
+			uploadStore.Put(UploadSession{UploadID: "upload_invalid", OwnerUserID: "user_001", State: "completed", StoredPath: zipPath, Filename: "skill.zip"})
 			svc := newCreateSkillValidationService(t, db, uploadStore)
 
-			if _, err := svc.CreateSkill(context.Background(), validCreateSkillRequest(uploadID)); err == nil {
+			if _, err := svc.CreateSkill(context.Background(), validCreateSkillRequest("upload_invalid")); err == nil {
 				t.Fatal("CreateSkill succeeded")
 			}
 			assertNoSkillTruthRows(t, db)

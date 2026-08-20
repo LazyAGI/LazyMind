@@ -2410,7 +2410,9 @@ export interface SkillUpdateManagedOpenAPIRequest {
     'tags'?: Array<string>;
 }
 export interface SkillWriteOpenAPIResponse {
+    'description'?: string;
     'head_revision_id'?: string;
+    'name'?: string;
     'skill_id': string;
 }
 export interface StartTaskRequest {

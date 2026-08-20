@@ -2401,7 +2401,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     setSkillSaving(true);
 
     try {
-      await createSkillAsset({
+      const created = await createSkillAsset({
         name: t("admin.memorySkillUploadDefaultName"),
         description: t("admin.memorySkillUploadPersonalDesc"),
         category: "personal",
@@ -2412,7 +2412,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
       await Promise.all([refreshSkillAssets(), refreshSkillCategories()]);
       message.success(
         t("admin.memorySkillUploadSuccess", {
-          name: t("admin.memorySkillUploadDefaultName"),
+          name: created.name,
         }),
       );
     } catch (error) {
@@ -2449,7 +2449,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     try {
       setSkillSaving(true);
       const upload = await uploadSkillTempFile(file);
-      await createSkillAsset({
+      const created = await createSkillAsset({
         name: inferredName,
         description: t("admin.memorySkillUploadPersonalDesc"),
         category: "personal",
@@ -2459,7 +2459,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
       });
       await Promise.all([refreshSkillAssets(), refreshSkillCategories()]);
       message.success(
-        t("admin.memorySkillUploadSuccess", { name: inferredName }),
+        t("admin.memorySkillUploadSuccess", { name: created.name }),
       );
     } catch (error) {
       console.error("Upload skill package failed:", error);

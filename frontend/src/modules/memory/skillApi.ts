@@ -410,6 +410,12 @@ export interface CreateSkillPayload {
     | { type: "url"; url: string };
 }
 
+export interface CreateSkillResult {
+  skillId: string;
+  name: string;
+  description: string;
+}
+
 export interface PublishSkillToMarketPayload {
   name: string;
   tags: string[];
@@ -987,7 +993,9 @@ export async function getSkillAssetDetail(
   return normalizeSkillItem(payload, content);
 }
 
-export async function createSkillAsset(payload: CreateSkillPayload): Promise<string> {
+export async function createSkillAsset(
+  payload: CreateSkillPayload,
+): Promise<CreateSkillResult> {
   const request: SkillCreateManagedOpenAPIRequest = {
     name: payload.name,
     description: payload.description,
@@ -1004,8 +1012,16 @@ export async function createSkillAsset(payload: CreateSkillPayload): Promise<str
   const response = await skillsApi.apiCoreSkillsPost({
     skillCreateManagedOpenAPIRequest: request,
   });
-  const body = unwrapEnvelope<{ skill_id?: string }>(response.data);
-  return body.skill_id || "";
+  const body = unwrapEnvelope<{
+    skill_id?: string;
+    name?: string;
+    description?: string;
+  }>(response.data);
+  return {
+    skillId: body.skill_id || "",
+    name: body.name || payload.name,
+    description: body.description || "",
+  };
 }
 
 export async function enableBuiltinSkill(
