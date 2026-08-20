@@ -477,6 +477,29 @@ func TestOpenAPISpecIncludesKnowledgeMarketSurface(t *testing.T) {
 	}
 }
 
+func TestOpenAPISpecChatChunkDeltaModeValues(t *testing.T) {
+	router := mux.NewRouter()
+	registerCoreRoutes(router)
+
+	specJSON, err := buildOpenAPISpecFromRouter(router)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+	properties := schemaPropertiesForTest(t, schemas, "ChatChunkResponse")
+	deltaMode, ok := properties["delta_mode"].(map[string]any)
+	if !ok {
+		t.Fatalf("ChatChunkResponse delta_mode property = %#v", properties["delta_mode"])
+	}
+	if !reflect.DeepEqual(deltaMode["enum"], []any{"append", "replace"}) {
+		t.Fatalf("unexpected delta_mode values: %#v", deltaMode["enum"])
+	}
+}
+
 func TestOpenAPISpecRevisionSchemasIncludeHeadMarker(t *testing.T) {
 	r := mux.NewRouter()
 	registerCoreRoutes(r)

@@ -243,6 +243,7 @@ func TestChatChunkResponseRoundTrip(t *testing.T) {
 		ConversationID:   "conv-1",
 		Seq:              1,
 		Delta:            "hello",
+		DeltaMode:        ChatDeltaModeReplace,
 		HistoryID:        "hist-1",
 		ReasoningContent: "thinking...",
 		RuntimeEvent:     completedRunEvent("run-1", true),
@@ -255,7 +256,7 @@ func TestChatChunkResponseRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(bs, &restored); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if restored.ConversationID != orig.ConversationID || restored.Delta != orig.Delta {
+	if restored.ConversationID != orig.ConversationID || restored.Delta != orig.Delta || restored.DeltaMode != orig.DeltaMode {
 		t.Fatalf("roundtrip mismatch")
 	}
 }

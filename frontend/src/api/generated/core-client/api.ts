@@ -527,6 +527,7 @@ export interface ChannelIntentOpenAPIResponse {
 export interface ChatChunkResponse {
     'conversation_id'?: string;
     'delta'?: string;
+    'delta_mode'?: ChatChunkResponseDeltaModeEnum;
     'execution'?: ExternalExecutionProjection;
     'history_id'?: string;
     'message'?: string;
@@ -537,6 +538,14 @@ export interface ChatChunkResponse {
     'sources'?: Array<object>;
     'thinking_duration_s'?: number;
 }
+
+export const ChatChunkResponseDeltaModeEnum = {
+    Append: 'append',
+    Replace: 'replace'
+} as const;
+
+export type ChatChunkResponseDeltaModeEnum = typeof ChatChunkResponseDeltaModeEnum[keyof typeof ChatChunkResponseDeltaModeEnum];
+
 export interface ChatRuntimeEvent {
     'data'?: object;
     'event_id'?: string;

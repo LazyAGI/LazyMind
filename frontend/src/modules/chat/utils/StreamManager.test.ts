@@ -44,6 +44,27 @@ const terminal = (
 });
 
 describe("StreamManager runtime terminal", () => {
+  it("finishes a legacy stream from its terminal finish reason", () => {
+    const manager = new StreamManager();
+    const stream = new FakeSSE();
+    manager.registerStream("conv", stream as any, {});
+    stream.emit({
+      conversation_id: "conv",
+      history_id: "h1",
+      finish_reason: "FINISH_REASON_UNSPECIFIED",
+      delta: "answer",
+    });
+    expect(manager.isStreamFinished("conv")).toBe(false);
+
+    stream.emit({
+      conversation_id: "conv",
+      history_id: "h1",
+      finish_reason: "FINISH_REASON_STOP",
+    });
+
+    expect(manager.isStreamFinished("conv")).toBe(true);
+  });
+
   it("finishes a terminal-only run without a history id", () => {
     const manager = new StreamManager();
     const stream = new FakeSSE();
@@ -54,6 +75,24 @@ describe("StreamManager runtime terminal", () => {
     expect(manager.getStreamState("conv")?.runTerminals.r1.status).toBe(
       "completed",
     );
+  });
+
+  it("keeps a terminal first frame when registering the real conversation", () => {
+    const manager = new StreamManager();
+    const stream = new FakeSSE();
+    const firstFrame = {
+      data: JSON.stringify({
+        result: {
+          conversation_id: "real-conv",
+          history_id: "h1",
+          runtime_event: terminal("r1"),
+        },
+      }),
+    } as CustomEvent;
+
+    manager.registerStream("real-conv", stream as any, {}, firstFrame);
+
+    expect(manager.isStreamFinished("real-conv")).toBe(true);
   });
 
   it("finishes only after every answer branch has run_finished", () => {

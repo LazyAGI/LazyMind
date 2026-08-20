@@ -423,6 +423,11 @@ components:
                     type: string
                 delta:
                     type: string
+                delta_mode:
+                    enum:
+                        - append
+                        - replace
+                    type: string
                 execution:
                     $ref: '#/components/schemas/ExternalExecutionProjection'
                 history_id:
