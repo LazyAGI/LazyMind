@@ -395,6 +395,10 @@ func init() {
 	registerAdditionalError("archive folder is not empty; choose a move target", http.StatusConflict, 2002120)
 	registerAdditionalError("archive folder move target must differ from source", http.StatusBadRequest, 2002121)
 	registerAdditionalError("delete archive folder failed", http.StatusInternalServerError, 2002122)
+	registerAdditionalError("at least two internal skills are required", http.StatusBadRequest, 2002123)
+	registerAdditionalError("zip downloader is not configured", http.StatusInternalServerError, 2002124)
+	registerAdditionalErrorPattern("unsupported market skill source type %q", "Unsupported market skill source type", http.StatusBadRequest, 2002125)
+	registerAdditionalError("skill package stored path is required", http.StatusBadRequest, 2002126)
 
 }
 
