@@ -334,6 +334,15 @@
 .settings-knowledge-group-head h2 { margin: 0 0 4px; color: #253247; font-size: 17px; font-weight: 760; line-height: 1.35; }
 .settings-knowledge-group-head p { margin: 0; color: #748197; font-size: 12px; line-height: 1.45; }
 .settings-knowledge-group-head > .ant-tag { margin: 0; padding: 3px 9px; border: 0; border-radius: 6px; color: #158354; background: #eaf9f1; font-size: 11px; font-weight: 720; }
+.settings-knowledge-parser-controls { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
+.settings-knowledge-parser-controls > .ant-tag { margin: 0; padding: 3px 9px; border: 0; border-radius: 6px; color: #158354; background: #eaf9f1; font-size: 11px; font-weight: 720; }
+.settings-knowledge-parser-services { min-width: 0; margin: 0 18px 18px; }
+.settings-knowledge-parser-services .model-provider-service-page { height: auto; min-height: 0; overflow: visible; padding: 0; }
+.settings-knowledge-parser-services .model-provider-service-stack,
+.settings-knowledge-parser-services .model-provider-tools-substack { gap: 0; }
+.settings-knowledge-parser-services .model-provider-service-category { margin: 0; padding: 0; border: 0; background: transparent; box-shadow: none; }
+.settings-knowledge-parser-services .model-provider-service-category-top { display: none; }
+.settings-knowledge-parser-services .model-provider-service-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .settings-knowledge-tool-list {
   min-width: 0;
   overflow: hidden;
@@ -991,6 +1000,9 @@
   .settings-knowledge-group-head { grid-template-columns: 40px minmax(0, 1fr); }
   .settings-knowledge-group-head > span:not(.ant-tag) { width: 40px; height: 40px; }
   .settings-knowledge-group-head > .ant-tag { grid-column: 2; justify-self: start; }
+  .settings-knowledge-parser-controls { grid-column: 2; justify-content: flex-start; }
+  .settings-knowledge-parser-services { margin: 0 12px 12px; }
+  .settings-knowledge-parser-services .model-provider-service-grid { grid-template-columns: 1fr; }
   .settings-knowledge-tool-list { margin: 0 12px 12px; }
   .settings-knowledge-tool-row { grid-template-columns: 40px minmax(0, 1fr) auto auto; gap: 10px; padding: 13px 12px; }
   .settings-knowledge-tool-icon { width: 40px; height: 40px; grid-column: 1; grid-row: 1 / span 2; }
