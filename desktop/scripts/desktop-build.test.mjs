@@ -188,9 +188,9 @@ test("Windows installer diagnoses paths and does not roll back when warmup fails
   );
   assert.match(
     install,
-    /ExecWait[^\n]+--installer-warmup --timeout-seconds 240[^\n]+\$3[\s\S]*LMWarmupCheckStopped:[\s\S]*check-stopped --install-dir "\$INSTDIR"/,
+    /ExecWait[^\n]+--installer-warmup --timeout-seconds 360[^\n]+\$3[\s\S]*LMWarmupCheckStopped:[\s\S]*check-stopped --install-dir "\$INSTDIR"/,
   );
-  assert.match(install, /Starting Electron installer warmup \(timeout=240s\)/);
+  assert.match(install, /Starting Electron installer warmup \(timeout=360s\)/);
   assert.match(install, /installer-nsis\.log[\s\S]*Starting Electron installer warmup/);
   assert.match(install, /Electron installer warmup returned exit code \$3/);
   assert.match(

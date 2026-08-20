@@ -268,10 +268,10 @@
     CreateDirectory "$LOCALAPPDATA\LazyMind\logs"
     StrCpy $5 "$LOCALAPPDATA\LazyMind\logs\installer-nsis.log"
     FileOpen $6 "$5" a
-    FileWrite $6 "Starting Electron installer warmup (timeout=240s).$\r$\n"
+    FileWrite $6 "Starting Electron installer warmup (timeout=360s).$\r$\n"
     FileClose $6
     DetailPrint "Starting Electron installer warmup; log: $LOCALAPPDATA\LazyMind\logs\installer-warmup.log"
-    ExecWait '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" --installer-warmup --timeout-seconds 240' $3
+    ExecWait '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" --installer-warmup --timeout-seconds 360' $3
     FileOpen $6 "$5" a
     FileWrite $6 "Electron installer warmup returned exit code $3.$\r$\n"
     FileClose $6
