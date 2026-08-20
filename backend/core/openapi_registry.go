@@ -1705,7 +1705,7 @@ type marketInstallOpenAPIResponse struct {
 }
 
 type marketPublishOpenAPIRequest struct {
-	Name     string                    `json:"name"`
+	Name     string                    `json:"name,omitempty" desc:"Deprecated and ignored; the skill name is read from SKILL.md."`
 	Tags     []string                  `json:"tags" desc:"Marketplace discovery tags."`
 	Category string                    `json:"category,omitempty" desc:"Deprecated compatibility field; converted to one marketplace tag when tags is empty."`
 	Source   skillSourceOpenAPIRequest `json:"source"`
@@ -2693,7 +2693,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "POST",
 			Path:        "/skill_organize",
 			Summary:     "Submit skill organize task",
-			Description: "Submits a skill organize task for current user's SkillV2 files. The task runs asynchronously in the algorithm service.",
+			Description: "Submits 2 to 20 internal SkillV2 files for organization. The task runs asynchronously in the algorithm service.",
 			Tags:        []string{"skills"},
 			RequestBody: jsonBodyOf(skillOrganizeOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Skill organize task accepted", skillOrganizeOpenAPIResponse{})},
