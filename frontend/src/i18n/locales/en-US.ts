@@ -6586,9 +6586,8 @@ const enUS = {
       groups: {
         retrieval: {
           title: "Knowledge retrieval",
-          description: "Discover knowledge bases, query documents, and search temporary files in the current chat.",
+          description: "Discover knowledge bases, query documents, and run semantic retrieval.",
           kb: { name: "Knowledge base", description: "Discover knowledge bases, query documents and stats, and run semantic, keyword, and context retrieval" },
-          tempKb: { name: "Temporary file search", description: "Search content from temporary files uploaded in the current chat" },
         },
         data: {
           title: "Data sources",

@@ -1,7 +1,7 @@
 from typing import Any, Callable, List, Optional
 
 from lazyllm import Document, parallel
-from lazyllm.tools.rag import Reranker, Retriever, TempDocRetriever
+from lazyllm.tools.rag import Reranker, Retriever
 from lazyllm.tools.rag.rank_fusion.reciprocal_rank_fusion import RRFFusion
 
 from lazymind.chat.engine.tools.algo.kb_adaptive_topk import AdaptiveKComponent
@@ -78,21 +78,3 @@ def search_kb(
 
     image_nodes = list(image_retriever(query, filters=payload.get('filters') or {}, topk=image_topk) or [])
     return list(text_nodes or []) + image_nodes[:image_topk]
-
-
-def search_temp_files(
-    payload: dict,
-    *,
-    tmp_retriever: TempDocRetriever,
-    reranker: Optional[Reranker],
-    retriever_topk: int = 20,
-    rerank_topk: int = 20,
-    k_max: int = 10,
-):
-    query = payload['query']
-    expanded = get_vocab_manager(payload['user_id'])(query)
-
-    def _tmp_retrieve(expanded: str):
-        return tmp_retriever(payload.get('files') or [], expanded, topk=retriever_topk)
-
-    return _search_text(expanded, _tmp_retrieve, reranker, rerank_topk, k_max)

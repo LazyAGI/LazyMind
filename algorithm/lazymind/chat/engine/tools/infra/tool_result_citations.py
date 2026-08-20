@@ -22,7 +22,6 @@ _KNOWLEDGE_SEARCH_METHODS = {
     'kb_get_window_nodes',
     'kb_keyword_search',
 }
-_KNOWLEDGE_FUNCTIONS = {'kb_tmp_search'}
 _PAGE_FUNCTIONS = {'url_fetch'}
 
 
@@ -90,8 +89,6 @@ class CitationResultMiddleware:
         }:
             return 'external_search'
         if isinstance(instance, KBToolkit) and method in _KNOWLEDGE_SEARCH_METHODS:
-            return 'knowledge_base'
-        if name in _KNOWLEDGE_FUNCTIONS:
             return 'knowledge_base'
         if name in _PAGE_FUNCTIONS:
             return 'external_page'

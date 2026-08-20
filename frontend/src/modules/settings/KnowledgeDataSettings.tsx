@@ -69,7 +69,6 @@ export default function KnowledgeDataSettings({
       destination: "/lib/knowledge/list",
       tools: [
         { id: "kb", name: t("settingsPage.knowledge.groups.retrieval.kb.name"), description: t("settingsPage.knowledge.groups.retrieval.kb.description") },
-        { id: "temp_kb", name: t("settingsPage.knowledge.groups.retrieval.tempKb.name"), description: t("settingsPage.knowledge.groups.retrieval.tempKb.description") },
       ],
     },
     {

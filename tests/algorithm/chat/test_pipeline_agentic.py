@@ -84,7 +84,6 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch):
             agent={
                 'disabled_tools': [
                     'kb',
-                    'temp_kb',
                     'wikipedia',
                     'arxiv',
                     'sciverse',

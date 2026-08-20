@@ -17,7 +17,7 @@ def test_vision_extractor_rejects_pdf_before_vlm(monkeypatch, tmp_path):
     assert result['tool'] == 'vision_extractor'
     assert result['error']['type'] == 'UnsupportedFileType'
     assert 'only supports image files' in result['error']['reason']
-    assert 'kb_tmp_search' in result['error']['reason']
+    assert 'grep then read_file' in result['error']['reason']
 
 
 def test_run_image_model_uses_declared_role(monkeypatch):

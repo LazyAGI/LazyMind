@@ -200,36 +200,3 @@ dependency_gate.set()
     assert result['elapsed'] < 30
     assert result['rag'] == 'ready'
     assert result['dependencies_released'] is False
-
-
-def test_temporary_attachment_retrieval_triggers_rag_immediately():
-    result = _run_probe('''
-import json
-import threading
-import time
-import lazymind.chat.runtime_loader as loader
-from lazymind.chat.engine.tools.lazy_kb import kb_tmp_search
-dependency_gate = threading.Event()
-loader._wait_for_kb_runtime = lambda: dependency_gate.wait(30)
-loader.start_background_chat_runtime_warmup()
-real_ensure = loader.ensure_rag_runtime
-def load_then_stop():
-    real_ensure()
-    raise RuntimeError("stop after loading")
-loader.ensure_rag_runtime = load_then_stop
-started = time.perf_counter()
-try:
-    kb_tmp_search("search attachment", files=["report.pdf"])
-except RuntimeError as exc:
-    assert str(exc) == "stop after loading"
-print(json.dumps({
-    "elapsed": time.perf_counter() - started,
-    "rag": loader.rag_runtime_status(),
-    "dependencies_released": dependency_gate.is_set(),
-}))
-dependency_gate.set()
-''')
-
-    assert result['elapsed'] < 30
-    assert result['rag'] == 'ready'
-    assert result['dependencies_released'] is False

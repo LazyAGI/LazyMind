@@ -14,7 +14,6 @@ from lazymind.chat.service import chat_service
 
 DISABLED_TOOLS_EXCEPT_CALCULATOR = [
     'kb',
-    'temp_kb',
     'wikipedia',
     'arxiv',
     'sciverse',

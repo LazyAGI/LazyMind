@@ -6365,9 +6365,8 @@ const zhCN = {
       groups: {
         retrieval: {
           title: "知识检索",
-          description: "知识库发现、文档查询和当前对话临时文件检索。",
+          description: "知识库发现、文档查询与语义检索。",
           kb: { name: "知识库", description: "发现知识库、查询文档与统计，并进行语义、关键词和上下文检索" },
-          tempKb: { name: "临时文件检索", description: "从当前对话上传的临时文件中搜索相关内容" },
         },
         data: {
           title: "数据源",

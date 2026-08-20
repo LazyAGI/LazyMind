@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import time
 from typing import Any, AsyncIterator, Tuple
 
 import lazyllm
@@ -19,11 +20,101 @@ _EXPANDED_BUDGET_TOOLS = {
     'create_workflow_draft',
     'create_subagent',
 }
+_MAX_TOOL_LOG_CHARS = 800
+_RESULT_LOG_KEYS = (
+    'target', 'display_name', 'kind', 'file_id', 'offset', 'end_line',
+    'total_lines', 'eof', 'next_offset', 'limit', 'pattern', 'total',
+    'truncated', 'status', 'filename',
+)
 
 
 def _requires_expanded_budget(tool_name: str) -> bool:
     """Return whether invoking this tool starts workflow or SubAgent work."""
     return tool_name in _EXPANDED_BUDGET_TOOLS or tool_name.startswith('trigger_')
+
+
+def _tool_call_session_id() -> str:
+    cfg = lazyllm.globals.get('agentic_config') or {}
+    if isinstance(cfg, dict) and cfg.get('session_id'):
+        return str(cfg['session_id'])
+    try:
+        return str(getattr(lazyllm.globals, '_sid', '') or '')
+    except Exception:
+        return ''
+
+
+def _compact_json(value: Any, limit: int = _MAX_TOOL_LOG_CHARS) -> str:
+    try:
+        text = json.dumps(value, ensure_ascii=False, default=str)
+    except Exception:
+        text = str(value)
+    if len(text) > limit:
+        return text[:limit] + f'...<{len(text) - limit} more chars>'
+    return text
+
+
+def _parse_tool_arguments(function: dict[str, Any]) -> Any:
+    arguments = function.get('arguments', {})
+    if isinstance(arguments, str):
+        try:
+            return json.loads(arguments)
+        except Exception:
+            return arguments
+    return arguments
+
+
+def _summarize_tool_result(result: Any) -> dict[str, Any]:
+    summary: dict[str, Any] = {}
+    if not isinstance(result, dict):
+        summary['result_type'] = type(result).__name__
+        return summary
+    if 'ok' in result:
+        summary['ok'] = result.get('ok')
+    msg = result.get('msg')
+    if msg:
+        summary['msg'] = str(msg)[:240]
+    value = result.get('value') if 'value' in result else result
+    if not isinstance(value, dict):
+        return summary
+    if 'success' in value:
+        summary['success'] = value.get('success')
+    error = value.get('error')
+    if isinstance(error, dict) and error.get('reason'):
+        summary['error'] = str(error.get('reason'))[:240]
+    payload = value.get('result') if isinstance(value.get('result'), dict) else value
+    if not isinstance(payload, dict):
+        return summary
+    for key in _RESULT_LOG_KEYS:
+        if key in payload and payload[key] is not None:
+            summary[key] = payload[key]
+    matches = payload.get('matches')
+    if isinstance(matches, list):
+        summary['match_count'] = len(matches)
+    footer = payload.get('footer')
+    if isinstance(footer, str) and footer.strip():
+        summary['footer'] = footer.strip()[:240]
+    return summary
+
+
+def _format_log_fields(fields: dict[str, Any]) -> str:
+    parts: list[str] = []
+    for key, value in fields.items():
+        if value is None:
+            continue
+        if isinstance(value, (dict, list)):
+            rendered = _compact_json(value, 240)
+        else:
+            rendered = str(value)
+        parts.append(f'[{key}={rendered}]')
+    return ' '.join(parts)
+
+
+def _log_tool_call(event: str, name: str, **fields: Any) -> None:
+    extras = _format_log_fields(fields)
+    suffix = f' {extras}' if extras else ''
+    lazyllm.LOG.info(
+        f'[ToolCall] [sid={_tool_call_session_id()}] [event={event}] [name={name}]{suffix}'
+    )
 
 
 class ToolCallGuard:
@@ -127,14 +218,15 @@ class ToolCallGuard:
             signature = self._signature(tool_call)
             signature_calls = self._signature_calls.get(signature, 0) + 1
             self._signature_calls[signature] = signature_calls
+            arguments = _parse_tool_arguments(function)
             if signature_calls > self._repeated_call_limit:
                 results[index] = self._loop_blocked(
                     name,
                     f'the exact same call was already made {self._repeated_call_limit} times; '
                     'stop retrying it and synthesize from existing results or choose another tool.',
                 )
-                lazyllm.LOG.warning(
-                    f'[ToolCallGuard] blocked no-progress repeated call: {name}'
+                _log_tool_call(
+                    'blocked', name, reason='repeated_call', args=arguments,
                 )
                 continue
             guarded = name in self._failure_limits
@@ -142,11 +234,15 @@ class ToolCallGuard:
                 results[index] = self._blocked(
                     name, 'this exact call already failed; do not retry it with the same arguments.',
                 )
-                lazyllm.LOG.info(f'[ToolCallGuard] blocked repeated failed call: {name}')
+                _log_tool_call(
+                    'blocked', name, reason='repeated_failure', args=arguments,
+                )
                 continue
             if guarded and signature in pending_signatures:
                 duplicate_indices[index] = pending_signatures[signature]
-                lazyllm.LOG.info(f'[ToolCallGuard] merged duplicate tool call: {name}')
+                _log_tool_call(
+                    'merged', name, reason='duplicate_in_batch', args=arguments,
+                )
                 continue
             failures = self._consecutive_failures.get(name, 0)
             limit = self._failure_limits.get(name)
@@ -156,16 +252,32 @@ class ToolCallGuard:
                     f'{failures} consecutive attempts failed. Stop changing parameters and use '
                     'another grounded source or explain that the evidence is unavailable.',
                 )
+                _log_tool_call(
+                    'blocked', name, reason='consecutive_failures',
+                    failures=failures, args=arguments,
+                )
                 continue
             pending.append(tool_call)
             pending_indices.append(index)
             if guarded:
                 pending_signatures[signature] = index
         if pending:
+            for tool_call in pending:
+                function = tool_call.get('function') or {}
+                _log_tool_call(
+                    'start',
+                    str(function.get('name') or ''),
+                    args=_parse_tool_arguments(function),
+                )
+            started_at = time.perf_counter()
             pending_results = self._manager(pending, verbose=verbose)
+            elapsed = time.perf_counter() - started_at
             for index, tool_call, result in zip(pending_indices, pending, pending_results):
                 results[index] = result
                 name = str((tool_call.get('function') or {}).get('name') or '')
+                _log_tool_call(
+                    'done', name, elapsed=f'{elapsed:.3f}s', **_summarize_tool_result(result),
+                )
                 if name in self._failure_limits:
                     if self._failed(result):
                         self._consecutive_failures[name] = (

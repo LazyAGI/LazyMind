@@ -100,17 +100,3 @@ class KBToolkit:
         return _toolkit().kb_keyword_search(
             keyword, target, target_type, group, phrase, size, sort_by, kb_ids,
         )
-
-
-def kb_tmp_search(
-    query: str,
-    retriever_topk: Optional[int] = None,
-    rerank_topk: Optional[int] = None,
-    k_max: Optional[int] = None,
-    files: Optional[List[str]] = None,
-) -> Any:
-    """Search attached temporary uploaded files with the temporary document retriever."""
-    from lazymind.chat.runtime_loader import ensure_rag_runtime
-    return ensure_rag_runtime().kb_tmp_search(
-        query, retriever_topk, rerank_topk, k_max, files,
-    )

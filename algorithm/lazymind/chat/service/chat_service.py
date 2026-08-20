@@ -1130,7 +1130,6 @@ async def _handle_chat_impl(
                 'grep': 2,
                 'read_file': 2,
                 'kb_search': 2,
-                'kb_tmp_search': 2,
                 'list_knowledge_bases': 2,
                 'list_knowledge_base_documents': 2,
                 'aggregate_knowledge_base_documents': 2,

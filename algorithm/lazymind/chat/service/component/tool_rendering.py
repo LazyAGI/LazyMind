@@ -40,7 +40,6 @@ def _render_tool_context(tool_name: str) -> tuple[str, dict[str, str]]:
 
 _REPRESENTATIVE_TOOL_ARGUMENTS: dict[str, str] = {
     'kb_search': 'query',
-    'kb_tmp_search': 'query',
     'kb_get_parent_node': 'node_id',
     'kb_get_window_nodes': 'number',
     'kb_keyword_search': 'keyword',
@@ -160,7 +159,6 @@ _REPRESENTATIVE_TOOL_RESULTS: dict[str, str] = {
 
 _TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'kb_search': 'Checking {value} in the knowledge base for relevant material.',
-    'kb_tmp_search': 'Checking attached files for material related to {value}.',
     'kb_get_parent_node': 'Loading surrounding context for {value} before continuing now.',
     'kb_get_window_nodes': 'Expanding nearby related segments around {value} for review.',
     'kb_keyword_search': 'Searching target documents with {value} as the keyword.',
@@ -230,7 +228,6 @@ _TOOL_CALL_PREVIEW_TEMPLATES['ask_user'] = 'Gathering questions for you, please 
 
 _ZH_TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'kb_search': '正在知识库中检索与 {value} 相关的知识。',
-    'kb_tmp_search': '正在附件中检索与 {value} 相关的内容。',
     'kb_get_parent_node': '正在加载 {value} 的相关上下文。',
     'kb_get_window_nodes': '正在扩展 {value} 附近的相关片段。',
     'kb_keyword_search': '正在目标文档中搜索关键词 {value}。',
@@ -300,7 +297,6 @@ _ZH_TOOL_CALL_PREVIEW_TEMPLATES['ask_user'] = '我正在组织问题，请稍后
 
 _TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'kb_search': 'Knowledge base results for {value} are ready now.',
-    'kb_tmp_search': 'Attached file results for {value} are ready now.',
     'kb_get_parent_node': 'Surrounding context for {value} was loaded successfully now.',
     'kb_get_window_nodes': 'Nearby related segments around {value} were expanded successfully.',
     'kb_keyword_search': 'Document results for keyword {value} were found successfully.',
@@ -373,7 +369,6 @@ _TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
 
 _ZH_TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'kb_search': '已查询到 {value} 的知识库结果。',
-    'kb_tmp_search': '已查询到 {value} 的附件检索结果。',
     'kb_get_parent_node': '已成功加载 {value} 的相关上下文。',
     'kb_get_window_nodes': '已成功扩展 {value} 附近的相关片段。',
     'kb_keyword_search': '已找到关键词 {value} 的文档结果。',
@@ -444,7 +439,6 @@ _ZH_TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
 
 _TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
     'kb_search': 'Knowledge base results for {value} could not be found.',
-    'kb_tmp_search': 'Attached file results for {value} could not be found.',
     'kb_get_parent_node': 'Surrounding context for {value} could not be loaded.',
     'kb_get_window_nodes': 'Nearby related segments around {value} could not be expanded.',
     'kb_keyword_search': 'Document results for keyword {value} could not be found.',
@@ -514,7 +508,6 @@ _TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
 
 _ZH_TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
     'kb_search': '未能找到 {value} 的知识库结果。',
-    'kb_tmp_search': '未能找到 {value} 的附件检索结果。',
     'kb_get_parent_node': '未能加载 {value} 的相关上下文。',
     'kb_get_window_nodes': '未能扩展 {value} 附近的相关片段。',
     'kb_keyword_search': '未能找到关键词 {value} 的文档结果。',
