@@ -57,7 +57,45 @@ export type ConversationHistoryRecord = Omit<
     second_thinking_time_s?: number | string;
     tool_call_turns?: number | string;
     mentions?: ChatMention[] | null;
+    execution?: ExternalExecutionProjection;
   };
+
+export interface ExternalExecutionProjection {
+  run_id: string;
+  history_id: string;
+  provider: string;
+  status: "pending" | "running" | "completed" | "failed" | "stopped";
+  host_id?: string;
+  host_online: boolean;
+  claim_count: number;
+  recovery_count: number;
+  event_count: number;
+  invocation: {
+    total: number;
+    running: number;
+    succeeded: number;
+    failed: number;
+    interrupted: number;
+    tools: string[];
+  };
+  workflows: Array<{
+    session_id: string;
+    workflow_id: string;
+    status: string;
+    current_step_id?: string;
+    state_version: number;
+    artifact_count: number;
+    artifact_revision_count: number;
+  }>;
+  artifact_count: number;
+  artifact_revision_count: number;
+  error_message?: string;
+  claimed_at?: string;
+  last_heartbeat_at?: string;
+  completed_at?: string;
+  created_at: string;
+  updated_at: string;
+}
 
 export type ConversationTrailRecord = ConversationTrailItem & {
   history_id?: string;
@@ -213,6 +251,7 @@ export function buildChatMessageListFromHistory(
       thinking_time_s: record.thinking_time_s,
       tool_call_turns: record.tool_call_turns,
       intent_updated: (record as any).intent_updated,
+      execution: record.execution,
     };
 
     // Restore ask_pending from persisted ext so the AskCard is visible after page reload.

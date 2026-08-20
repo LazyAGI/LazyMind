@@ -18,6 +18,7 @@ from channel_gateway.common.domain.commands import (
 )
 from channel_gateway.common.domain.outbound import (
     CapabilityPresentation,
+    ConversationExecutorPresentation,
     ConversationSettingsPresentation,
 )
 from channel_gateway.common.ports.core import CapabilityClient
@@ -84,13 +85,38 @@ class CapabilityActions:
             external_address_hash,
         )
         if not conversation_id:
-            raise ActionMessage(
-                '当前还没有可设置的会话，请先新建或切换到一个会话。'
+            return self._pending_conversation_settings(
+                account_id=account_id,
+                external_address_hash=external_address_hash,
+                updated=updated,
             )
         detail = self._client.get_conversation_detail(
             owner_user_id=owner_user_id,
             conversation_id=conversation_id,
             request_id=f'{request_id}_conversation_settings',
+        )
+        executors = tuple(
+            ConversationExecutorPresentation(
+                id=str(item.get('id') or '')[:64],
+                display_name=str(item.get('display_name') or '')[:100],
+                kind=(
+                    'external'
+                    if str(item.get('kind') or '') == 'external'
+                    else 'internal'
+                ),
+                installed=bool(item.get('installed')),
+                host_online=bool(item.get('host_online')),
+                available=bool(item.get('available')),
+                unavailable_reason=str(
+                    item.get('unavailable_reason') or ''
+                )[:512],
+            )
+            for item in self._client.list_chat_executors(
+                owner_user_id=owner_user_id,
+                request_id=f'{request_id}_executor_catalog',
+            )
+            if str(item.get('id') or '')
+            and str(item.get('display_name') or '')
         )
         workflow_enabled = bool(
             detail.get('enable_workflow')
@@ -108,6 +134,16 @@ class CapabilityActions:
             if detail.get('enable_subagent') is not None
             else True
         )
+        chat_executor = str(detail.get('chat_executor') or '')[:64]
+        if not chat_executor:
+            chat_executor = next(
+                (
+                    executor.id
+                    for executor in executors
+                    if executor.kind == 'internal'
+                ),
+                '',
+            )
         title = str(detail.get('display_name') or '未命名会话')
         search_config = detail.get('search_config')
         dataset_list = (
@@ -135,6 +171,59 @@ class CapabilityActions:
                 workflow_enabled=workflow_enabled,
                 workflow_mode=workflow_mode,
                 subagent_enabled=subagent_enabled,
+                chat_executor=chat_executor,
+                executors=executors,
+            ),
+        )
+
+    def _pending_conversation_settings(
+        self,
+        *,
+        account_id: str,
+        external_address_hash: str,
+        updated: bool,
+    ) -> tuple[str, ConversationSettingsPresentation]:
+        navigation = self._store.get_navigation_state(
+            account_id,
+            external_address_hash,
+        ) or {}
+        if navigation.get('mode') != 'new_pending':
+            raise ActionMessage(
+                '当前还没有可设置的会话，请先新建或切换到一个会话。'
+            )
+        draft = self.options_from_dict(
+            self._store.get_new_conversation_draft(
+                account_id,
+                external_address_hash,
+            )
+        )
+        search_config = draft.search_config or {}
+        dataset_list = search_config.get('dataset_list')
+        dataset_ids = tuple(dict.fromkeys(
+            str(item.get('id') or '')[:_IDENTIFIER_LIMIT]
+            for item in (
+                dataset_list if isinstance(dataset_list, list) else []
+            )[:100]
+            if isinstance(item, dict) and str(item.get('id') or '')
+        ))
+        return (
+            '待创建会话的设置已保存。'
+            if updated
+            else '待创建会话的设置：',
+            ConversationSettingsPresentation(
+                kind='conversation_settings',
+                dataset_ids=dataset_ids,
+                workflow_enabled=(
+                    draft.enable_workflow
+                    if draft.enable_workflow is not None
+                    else True
+                ),
+                workflow_mode=(
+                    'auto' if draft.workflow_mode == 'auto' else 'dynamic'
+                ),
+                subagent_enabled=True,
+                chat_executor='',
+                executors=(),
             ),
         )
 
@@ -148,10 +237,18 @@ class CapabilityActions:
         external_address_hash: str,
         owner_user_id: str,
         request_id: str,
-    ) -> tuple[str, ConversationSettingsPresentation]:
+    ) -> tuple[str, ConversationSettingsPresentation | None]:
         conversation_id = self._store.get_route(
             account_id,
             external_address_hash,
+        )
+        navigation = self._store.get_navigation_state(
+            account_id,
+            external_address_hash,
+        ) or {}
+        pending_conversation = (
+            not conversation_id
+            and navigation.get('mode') == 'new_pending'
         )
         if (
             expected_conversation_id
@@ -160,7 +257,14 @@ class CapabilityActions:
             raise ActionMessage(
                 '会话已切换，这张设置卡已经过期。'
             )
-        if not conversation_id:
+        if (
+            not conversation_id
+            and change.setting in {
+                'executor',
+                'subagent',
+                'workflow_enabled',
+            }
+        ):
             raise ActionMessage(
                 '当前还没有可设置的会话，请先新建或切换到一个会话。'
             )
@@ -182,11 +286,33 @@ class CapabilityActions:
                 raise ActionMessage(
                     '这个知识库已不可用，请重新打开会话设置。'
                 )
-            dataset_ids = self.conversation_dataset_ids(
-                owner_user_id=owner_user_id,
-                conversation_id=conversation_id,
-                request_id=f'{request_id}_existing_kb',
-            )
+            if conversation_id:
+                dataset_ids = self.conversation_dataset_ids(
+                    owner_user_id=owner_user_id,
+                    conversation_id=conversation_id,
+                    request_id=f'{request_id}_existing_kb',
+                )
+            elif pending_conversation:
+                draft = self.options_from_dict(
+                    self._store.get_new_conversation_draft(
+                        account_id,
+                        external_address_hash,
+                    )
+                )
+                dataset_ids = [
+                    str(item.get('id') or '')
+                    for item in (
+                        (draft.search_config or {}).get('dataset_list')
+                        if isinstance(
+                            (draft.search_config or {}).get('dataset_list'),
+                            list,
+                        )
+                        else []
+                    )
+                    if isinstance(item, dict) and item.get('id')
+                ]
+            else:
+                dataset_ids = self.default_dataset_ids(catalog)
             if change.enabled:
                 dataset_ids = list(
                     dict.fromkeys([*dataset_ids, change.dataset_id])
@@ -197,28 +323,103 @@ class CapabilityActions:
                     for value in dataset_ids
                     if value != change.dataset_id
                 ]
-            self._client.update_conversation_search_config(
-                owner_user_id=owner_user_id,
-                conversation_id=conversation_id,
-                request_id=f'{request_id}_save_kb',
-                dataset_ids=dataset_ids,
-            )
-        elif change.setting in ('workflow_enabled', 'workflow_mode', 'subagent'):
+            if conversation_id:
+                self._client.update_conversation_search_config(
+                    owner_user_id=owner_user_id,
+                    conversation_id=conversation_id,
+                    request_id=f'{request_id}_save_kb',
+                    dataset_ids=dataset_ids,
+                )
+            elif pending_conversation:
+                draft.search_config = self.search_config(dataset_ids)
+                self._store.begin_new_conversation(
+                    account_id,
+                    external_address_hash,
+                    self.options_to_dict(draft),
+                )
+            else:
+                dataset = datasets[0]
+                self._client.set_default_dataset(
+                    owner_user_id=owner_user_id,
+                    request_id=f'{request_id}_save_default_kb',
+                    dataset_id=change.dataset_id,
+                    name=str(dataset.get('name') or ''),
+                    enabled=change.enabled,
+                )
+                self._mark_setting_enabled(
+                    catalog,
+                    'knowledge_base',
+                    change.dataset_id,
+                    change.enabled,
+                )
+                dataset['default'] = change.enabled
+        elif change.setting in (
+            'workflow_enabled',
+            'workflow_mode',
+            'subagent',
+            'executor',
+        ):
             if change.setting == 'workflow_enabled':
                 settings = {'enable_workflow': change.enabled}
             elif change.setting == 'workflow_mode':
-                settings = {
-                    'enable_workflow': True,
-                    'workflow_mode': change.mode,
-                }
-            else:
+                if not conversation_id:
+                    if not pending_conversation:
+                        raise ActionMessage(
+                            '请先创建新会话，再设置 Workflow 运行方式。'
+                        )
+                    draft = self.options_from_dict(
+                        self._store.get_new_conversation_draft(
+                            account_id,
+                            external_address_hash,
+                        )
+                    )
+                    draft.enable_workflow = True
+                    draft.workflow_mode = change.mode
+                    self._store.begin_new_conversation(
+                        account_id,
+                        external_address_hash,
+                        self.options_to_dict(draft),
+                    )
+                    settings = {}
+                else:
+                    settings = {
+                        'enable_workflow': True,
+                        'workflow_mode': change.mode,
+                    }
+            elif change.setting == 'subagent':
                 settings = {'enable_subagent': change.enabled}
-            self._client.update_conversation_agent_settings(
-                owner_user_id=owner_user_id,
-                conversation_id=conversation_id,
-                request_id=f'{request_id}_save_agent',
-                settings=settings,
-            )
+            else:
+                executors = self._client.list_chat_executors(
+                    owner_user_id=owner_user_id,
+                    request_id=f'{request_id}_executor_catalog',
+                )
+                executor = next(
+                    (
+                        item
+                        for item in executors
+                        if str(item.get('id') or '') == change.executor_id
+                    ),
+                    None,
+                )
+                if executor is None:
+                    raise ActionMessage(
+                        '这个会话执行器已不可用，请刷新后重试。'
+                    )
+                if executor.get('available') is not True:
+                    reason = str(
+                        executor.get('unavailable_reason') or ''
+                    ).strip()
+                    raise ActionMessage(
+                        reason or '这个会话执行器当前不可用。'
+                    )
+                settings = {'chat_executor': change.executor_id}
+            if settings:
+                self._client.update_conversation_agent_settings(
+                    owner_user_id=owner_user_id,
+                    conversation_id=conversation_id,
+                    request_id=f'{request_id}_save_agent',
+                    settings=settings,
+                )
         elif change.setting == 'skill':
             self._require_setting_item(
                 catalog,
@@ -294,13 +495,15 @@ class CapabilityActions:
             account_id,
             external_address_hash,
         )
-        return self.conversation_settings(
-            account_id=account_id,
-            external_address_hash=external_address_hash,
-            owner_user_id=owner_user_id,
-            request_id=f'{request_id}_verify',
-            updated=True,
-        )
+        if conversation_id or pending_conversation:
+            return self.conversation_settings(
+                account_id=account_id,
+                external_address_hash=external_address_hash,
+                owner_user_id=owner_user_id,
+                request_id=f'{request_id}_verify',
+                updated=True,
+            )
+        return '账号能力设置已保存。', None
 
     @staticmethod
     def _require_setting_item(

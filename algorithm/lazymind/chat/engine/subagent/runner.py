@@ -32,6 +32,11 @@ from lazymind.chat.service.component.tool_registry import (
     filter_tools,
     tool_is_active,
 )
+from lazymind.chat.service.utils import (
+    materialize_source_views,
+    register_existing_sources,
+    reset_citation_state,
+)
 from lazymind.config import config as _cfg
 from lazymind.model_config import inject_model_config
 from lazymind.workflow_toolkit import load_workflow_package_tools
@@ -722,6 +727,18 @@ async def run_subagent_stream(
     stream_events: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
     loop = asyncio.get_running_loop()
     clear_cancel_queue = True
+    source_state: Dict[str, Any] = {}
+    reset_citation_state(source_state)
+    last_sources_snapshot = '[]'
+
+    def _sources_event() -> Optional[Dict[str, Any]]:
+        nonlocal last_sources_snapshot
+        sources = materialize_source_views(source_state)
+        snapshot = json.dumps(sources, ensure_ascii=False, sort_keys=True, default=str)
+        if snapshot == last_sources_snapshot:
+            return None
+        last_sources_snapshot = snapshot
+        return {'type': 'sources', 'task_id': task_id, 'sources': sources}
 
     def _emit(ev: Dict[str, Any]) -> None:
         if ev.get('type') in DRAFT_STREAM_EVENT_TYPES:
@@ -761,6 +778,15 @@ async def run_subagent_stream(
         output_keys = _coerce_str_list(task.get('output_slots'))
         input_keys = _coerce_str_list(task.get('input_slots'))
         params = _coerce_dict(task.get('params'))
+        register_existing_sources(source_state, _coerce_source_list(task.get('sources')))
+        last_sources_snapshot = json.dumps(
+            materialize_source_views(source_state),
+            ensure_ascii=False,
+            sort_keys=True,
+            default=str,
+        )
+        # SubAgents collect searched sources for their Task Center card only.
+        # Tool results remain citation-free so the model does not emit body references.
         effective_agent_type = str(task.get('agent_type') or agent_type or '')
         if params.get('required_output_artifact_keys') is not None:
             required_output_keys = _coerce_str_list(params.get('required_output_artifact_keys'))
@@ -820,6 +846,8 @@ async def run_subagent_stream(
         set_context(ctx)
 
         agentic_config = _build_agentic_config(task, params, effective_agent_type)
+        agentic_config['citation_state'] = source_state
+        agentic_config['citation_mode'] = 'collect_only'
         lazyllm.globals['agentic_config'] = agentic_config
         # Materialize session bucket before Parallel-based tools (e.g. kb_search).
         _ = lazyllm.globals._data
@@ -946,6 +974,9 @@ async def run_subagent_stream(
                         ]
                         if results:
                             yield _sse({'type': 'tool_results', 'task_id': task_id, 'tool_results': results})
+                        source_event = _sources_event()
+                        if source_event is not None:
+                            yield _sse(source_event)
                     # Drain artifact events emitted synchronously by tools.
                     while emitted:
                         ev = emitted.pop(0)
@@ -987,6 +1018,10 @@ async def run_subagent_stream(
             ev_type = 'think' if frame.get('think') else 'text'
             yield _sse({'type': ev_type, 'task_id': task_id,
                         'think': frame.get('think'), 'text': frame.get('text')})
+
+        source_event = _sources_event()
+        if source_event is not None:
+            yield _sse(source_event)
 
         # Flush required drafts before checking graph material guarantees.
         if effective_agent_type == 'workflow_step' and required_output_keys:
@@ -1053,6 +1088,9 @@ async def run_subagent_stream(
         yield 'data: [DONE]\n\n'
     except Exception as exc:  # noqa: BLE001
         LOG.exception('[SubAgent] run failed')
+        source_event = _sources_event()
+        if source_event is not None:
+            yield _sse(source_event)
         exc_summary = str(exc)
         if db is not None:
             try:
@@ -1140,6 +1178,21 @@ def _coerce_dict(value: Any) -> Dict[str, Any]:
         if isinstance(parsed, dict):
             return parsed
     return {}
+
+
+def _coerce_source_list(value: Any) -> List[Dict[str, Any]]:
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    if isinstance(value, (bytes, bytearray)):
+        value = value.decode('utf-8')
+    if isinstance(value, str):
+        try:
+            parsed = json.loads(value)
+        except ValueError:
+            return []
+        if isinstance(parsed, list):
+            return [item for item in parsed if isinstance(item, dict)]
+    return []
 
 
 def _result_summary(result: Any, output_keys: List[str]) -> str:

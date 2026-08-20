@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/lazymind/scan_control_plane/internal/access"
+	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/tree"
 )
 
@@ -57,6 +58,47 @@ func (h *Handler) searchBindingTargets(w http.ResponseWriter, r *http.Request) {
 	}
 	req.ProviderOptions = withActorProviderOptions(req.ProviderOptions, actor)
 	page, err := h.targetTree.Search(r.Context(), req)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	writeJSON(w, http.StatusOK, page)
+}
+
+func (h *Handler) recommendBindingTargets(w http.ResponseWriter, r *http.Request) {
+	h.handleRecommendBindingTargets(w, r, false)
+}
+
+func (h *Handler) listRecommendedBindingTargets(w http.ResponseWriter, r *http.Request) {
+	h.handleRecommendBindingTargets(w, r, true)
+}
+
+func (h *Handler) handleRecommendBindingTargets(w http.ResponseWriter, r *http.Request, flatten bool) {
+	if h.targetTree == nil {
+		writeError(w, missingDependency("target tree engine"))
+		return
+	}
+	var req tree.TargetTreeRecommendationRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, invalidJSON(err))
+		return
+	}
+	actor, err := actorFromRequest(r)
+	if err != nil {
+		writeError(w, err)
+		return
+	}
+	if err := h.access.CanAccessBindingTarget(r.Context(), actor, targetAccessFromRecommendation(req)); err != nil {
+		writeError(w, err)
+		return
+	}
+	req.ProviderOptions = withActorProviderOptions(req.ProviderOptions, actor)
+	var page tree.TreeNodePage
+	if flatten {
+		page, err = h.targetTree.RecommendList(r.Context(), req)
+	} else {
+		page, err = h.targetTree.Recommend(r.Context(), req)
+	}
 	if err != nil {
 		writeError(w, err)
 		return
@@ -211,6 +253,14 @@ func targetAccessFromSearch(req tree.TargetTreeSearchRequest) access.BindingTarg
 		TargetType:       req.TargetType,
 		AgentID:          req.AgentID,
 		AuthConnectionID: req.AuthConnectionID,
+	}
+}
+
+func targetAccessFromRecommendation(req tree.TargetTreeRecommendationRequest) access.BindingTargetRequest {
+	return access.BindingTargetRequest{
+		ConnectorType: connector.ConnectorType("local_fs"),
+		TargetType:    connector.TargetType("local_path"),
+		AgentID:       req.AgentID,
 	}
 }
 

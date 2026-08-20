@@ -1,0 +1,362 @@
+package chat
+
+import (
+	"encoding/json"
+	"errors"
+	"net/http"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/gorilla/mux"
+	"gorm.io/gorm"
+
+	"lazymind/core/common"
+	"lazymind/core/common/orm"
+	"lazymind/core/store"
+)
+
+// ListChatExecutors is the authoritative catalog consumed by every LazyMind
+// client. Provider-specific process discovery stays in the local Host adapter.
+func ListChatExecutors(w http.ResponseWriter, r *http.Request) {
+	owner := store.UserID(r)
+	if owner == "" {
+		common.ReplyErr(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	app := newExternalChatApplication(store.DB())
+	executors := make([]chatExecutorStatus, 0, len(chatExecutorDefinitions))
+	for _, definition := range chatExecutorDefinitions {
+		status := chatExecutorStatus{ID: definition.ID, DisplayName: definition.DisplayName, Kind: definition.Kind}
+		if definition.Kind == "internal" {
+			status.Installed, status.HostOnline, status.Available = true, true, true
+		} else {
+			host, err := app.hostStatus(r.Context(), owner, definition.ID)
+			if err != nil {
+				common.ReplyErr(w, err.Error(), http.StatusServiceUnavailable)
+				return
+			}
+			status.Installed, status.HostOnline, status.Available = host.Installed, host.HostOnline, host.Available
+			status.UnavailableReason = host.UnavailableReason
+		}
+		executors = append(executors, status)
+	}
+	common.ReplyOK(w, map[string]any{"executors": executors})
+}
+
+// ExternalChatHostStatus is retained for CLI diagnostics. Product clients use
+// ListChatExecutors so provider names and availability rules have one source.
+func ExternalChatHostStatus(w http.ResponseWriter, r *http.Request) {
+	owner := store.UserID(r)
+	provider := strings.ToLower(strings.TrimSpace(mux.Vars(r)["provider"]))
+	if owner == "" || !isExternalChatProvider(provider) {
+		common.ReplyErr(w, "unsupported external chat provider", http.StatusBadRequest)
+		return
+	}
+	status, err := newExternalChatApplication(store.DB()).hostStatus(r.Context(), owner, provider)
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	common.ReplyOK(w, map[string]any{
+		"provider": provider, "installed": status.Installed, "host_online": status.HostOnline,
+		"available": status.Available, "unavailable_reason": status.UnavailableReason,
+	})
+}
+
+func ListExternalChatRuns(w http.ResponseWriter, r *http.Request) {
+	owner := store.UserID(r)
+	if owner == "" {
+		common.ReplyErr(w, "unauthorized", http.StatusUnauthorized)
+		return
+	}
+	query := store.DB().WithContext(r.Context()).Where("actor_user_id = ?", owner)
+	if conversationID := strings.TrimSpace(r.URL.Query().Get("conversation_id")); conversationID != "" {
+		query = query.Where("conversation_id = ?", conversationID)
+	}
+	if requestID := strings.TrimSpace(r.URL.Query().Get("request_id")); requestID != "" {
+		if len(requestID) > 512 {
+			common.ReplyErr(w, "external chat request_id is too long", http.StatusBadRequest)
+			return
+		}
+		query = query.Where("request_id = ?", externalChatRequestKey(owner, requestID))
+	}
+	var runs []orm.ExternalChatRun
+	if err := query.Order("created_at DESC").Limit(100).Find(&runs).Error; err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	if runs == nil {
+		runs = []orm.ExternalChatRun{}
+	}
+	common.ReplyOK(w, map[string]any{"runs": runs})
+}
+
+// ClaimExternalChatRun is the Host-facing long poll. Claim and lease fencing
+// are performed transactionally by Core; connector processes keep no queue.
+func ClaimExternalChatRun(w http.ResponseWriter, r *http.Request) {
+	owner := store.UserID(r)
+	provider := strings.ToLower(strings.TrimSpace(mux.Vars(r)["provider"]))
+	var input struct {
+		HostID            string `json:"host_id"`
+		Installed         *bool  `json:"installed"`
+		Ready             *bool  `json:"ready"`
+		UnavailableReason string `json:"unavailable_reason"`
+	}
+	if owner == "" || !isExternalChatProvider(provider) ||
+		json.NewDecoder(r.Body).Decode(&input) != nil || strings.TrimSpace(input.HostID) == "" {
+		common.ReplyErr(w, "valid provider and host_id are required", http.StatusBadRequest)
+		return
+	}
+	input.HostID = strings.TrimSpace(input.HostID)
+	if len(input.HostID) > 128 {
+		common.ReplyErr(w, "host_id is too long", http.StatusBadRequest)
+		return
+	}
+	input.UnavailableReason = strings.TrimSpace(input.UnavailableReason)
+	if len(input.UnavailableReason) > 512 {
+		input.UnavailableReason = input.UnavailableReason[:512]
+	}
+	installed, ready := true, true
+	if input.Installed != nil {
+		installed = *input.Installed
+	}
+	if input.Ready != nil {
+		ready = *input.Ready
+	}
+	app := newExternalChatApplication(store.DB())
+	if err := app.reportHost(r.Context(), owner, provider, input.HostID, installed, ready, input.UnavailableReason); err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusServiceUnavailable)
+		return
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		// Subscribe before checking the database so a run created between the
+		// query and the wait cannot be missed. The timer is only a multi-process
+		// fallback; local turns wake immediately without hot polling PostgreSQL.
+		available := externalRunsAvailable.subscribe()
+		var job *externalChatJob
+		var err error
+		if ready {
+			job, err = app.claim(r.Context(), owner, provider, input.HostID)
+		}
+		if err != nil {
+			common.ReplyErr(w, err.Error(), http.StatusServiceUnavailable)
+			return
+		}
+		if job != nil {
+			common.ReplyOK(w, map[string]any{"run": job})
+			return
+		}
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
+			common.ReplyOK(w, map[string]any{"run": nil})
+			return
+		}
+		if remaining > externalRunClaimFallback {
+			remaining = externalRunClaimFallback
+		}
+		timer := time.NewTimer(remaining)
+		select {
+		case <-r.Context().Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return
+		case <-available:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+		case <-timer.C:
+		}
+	}
+}
+
+func HeartbeatExternalChatRun(w http.ResponseWriter, r *http.Request) {
+	owner := store.UserID(r)
+	var input struct {
+		HostID     string `json:"host_id"`
+		LeaseToken string `json:"lease_token"`
+	}
+	if json.NewDecoder(r.Body).Decode(&input) != nil ||
+		strings.TrimSpace(input.HostID) == "" || strings.TrimSpace(input.LeaseToken) == "" {
+		common.ReplyErr(w, "host_id and lease_token are required", http.StatusBadRequest)
+		return
+	}
+	stop, err := newExternalChatApplication(store.DB()).heartbeat(
+		r.Context(), owner, mux.Vars(r)["run_id"], strings.TrimSpace(input.HostID), strings.TrimSpace(input.LeaseToken),
+	)
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusConflict)
+		return
+	}
+	common.ReplyOK(w, map[string]any{"stop_requested": stop})
+}
+
+func PublishExternalChatEvent(w http.ResponseWriter, r *http.Request) {
+	owner := store.UserID(r)
+	var input struct {
+		HostID     string `json:"host_id"`
+		LeaseToken string `json:"lease_token"`
+		externalChatEvent
+	}
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20)).Decode(&input) != nil ||
+		strings.TrimSpace(input.HostID) == "" || strings.TrimSpace(input.LeaseToken) == "" || strings.TrimSpace(input.EventID) == "" {
+		common.ReplyErr(w, "host_id, lease_token and event_id are required", http.StatusBadRequest)
+		return
+	}
+	input.EventID = strings.TrimSpace(input.EventID)
+	if len(input.EventID) > 64 {
+		common.ReplyErr(w, "event_id is too long", http.StatusBadRequest)
+		return
+	}
+	input.Type = strings.ToLower(strings.TrimSpace(input.Type))
+	if input.Type != "thread_started" && input.Type != "message" && input.Type != "turn_completed" &&
+		input.Type != "completed" && input.Type != "failed" {
+		common.ReplyErr(w, "unsupported external chat event", http.StatusBadRequest)
+		return
+	}
+	input.ProviderThreadID = strings.TrimSpace(input.ProviderThreadID)
+	input.Error = strings.TrimSpace(input.Error)
+	if len(input.ProviderThreadID) > 128 || len(input.Text) > 1<<20 || len(input.Error) > 64<<10 {
+		common.ReplyErr(w, "external chat event payload is too large", http.StatusBadRequest)
+		return
+	}
+	sequence, err := newExternalChatApplication(store.DB()).appendEvent(
+		r.Context(), owner, mux.Vars(r)["run_id"], strings.TrimSpace(input.HostID),
+		strings.TrimSpace(input.LeaseToken), input.externalChatEvent,
+	)
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusConflict)
+		return
+	}
+	if input.Type == "completed" || input.Type == "failed" {
+		_ = projectExternalChatRunStatus(r.Context(), store.DB(), store.State(), owner, mux.Vars(r)["run_id"])
+	}
+	common.ReplyOK(w, map[string]any{"sequence": sequence})
+}
+
+func externalResumeCursor(r *http.Request, bodyCursor int64) int64 {
+	if bodyCursor > 0 {
+		return bodyCursor
+	}
+	value := strings.TrimSpace(r.Header.Get("Last-Event-ID"))
+	if value == "" {
+		return 0
+	}
+	cursor, err := strconv.ParseInt(value, 10, 64)
+	if err != nil || cursor < 0 {
+		return 0
+	}
+	return cursor
+}
+
+// resumeExternalChatStream returns false when the requested history does not
+// belong to an External Chat run, allowing the existing Chat resume path to
+// continue unchanged.
+func resumeExternalChatStream(
+	r *http.Request,
+	db *gorm.DB,
+	owner, conversationID, historyID string,
+	after int64,
+	w http.ResponseWriter,
+	flusher http.Flusher,
+) bool {
+	app := newExternalChatApplication(db)
+	run, err := app.findRunForResume(r.Context(), owner, conversationID, historyID)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false
+	}
+	if err != nil {
+		writeSSEChunk(w, flusher, map[string]any{"finish_reason": "FINISH_REASON_UNKNOWN"})
+		return true
+	}
+	cursor := after
+	heartbeatAt := time.Time{}
+	for {
+		events, current, readErr := app.eventsAfter(r.Context(), owner, run.ID, cursor)
+		if readErr != nil {
+			writeSSEChunk(w, flusher, map[string]any{
+				"conversation_id": conversationID, "history_id": run.HistoryID,
+				"finish_reason": "FINISH_REASON_UNKNOWN", "error": readErr.Error(),
+			})
+			return true
+		}
+		for _, event := range events {
+			cursor = event.Sequence
+			projection := basicExternalExecutionProjection(current, time.Now().UTC())
+			switch event.Type {
+			case "message":
+				writeSSEChunk(w, flusher, &ChatChunkResponse{
+					ConversationID: conversationID, Seq: int32(run.Sequence), HistoryID: run.HistoryID,
+					Delta: event.Text, FinishReason: "FINISH_REASON_UNSPECIFIED", ExternalEventSequence: event.Sequence,
+					Execution: &projection,
+				})
+			case "failed":
+				message := strings.TrimSpace(event.ErrorMessage)
+				writeSSEChunk(w, flusher, &ChatChunkResponse{
+					ConversationID: conversationID, Seq: int32(run.Sequence), HistoryID: run.HistoryID,
+					Delta: "External Agent failed: " + message, FinishReason: "FINISH_REASON_UNKNOWN",
+					ExternalEventSequence: event.Sequence,
+					Execution:             &projection,
+				})
+			case "completed", "stopped":
+				finish := "FINISH_REASON_STOP"
+				if projections, err := app.executionProjections(r.Context(), owner, []string{run.HistoryID}); err == nil {
+					if full, ok := projections[run.HistoryID]; ok {
+						projection = full
+					}
+				}
+				writeSSEChunk(w, flusher, &ChatChunkResponse{
+					ConversationID: conversationID, Seq: int32(run.Sequence), HistoryID: run.HistoryID,
+					FinishReason: finish, ExternalEventSequence: event.Sequence,
+					Execution: &projection,
+				})
+				_, _ = w.Write([]byte("data: [DONE]\n\n"))
+				flusher.Flush()
+				return true
+			}
+		}
+		if externalRunTerminal(current.Status) {
+			finish := "FINISH_REASON_STOP"
+			if current.Status == "failed" {
+				finish = "FINISH_REASON_UNKNOWN"
+			}
+			projection := basicExternalExecutionProjection(current, time.Now().UTC())
+			if projections, err := app.executionProjections(r.Context(), owner, []string{run.HistoryID}); err == nil {
+				if full, ok := projections[run.HistoryID]; ok {
+					projection = full
+				}
+			}
+			writeSSEChunk(w, flusher, &ChatChunkResponse{
+				ConversationID: conversationID, Seq: int32(run.Sequence), HistoryID: run.HistoryID,
+				FinishReason: finish, ExternalEventSequence: current.NextEventSequence,
+				Execution: &projection,
+			})
+			_, _ = w.Write([]byte("data: [DONE]\n\n"))
+			flusher.Flush()
+			return true
+		}
+		now := time.Now()
+		if heartbeatAt.IsZero() || now.Sub(heartbeatAt) >= time.Second {
+			heartbeatAt = now
+			projection := basicExternalExecutionProjection(current, now.UTC())
+			writeSSEChunk(w, flusher, &ChatChunkResponse{
+				ConversationID: conversationID, Seq: int32(run.Sequence), HistoryID: run.HistoryID,
+				FinishReason: "FINISH_REASON_UNSPECIFIED", ExternalEventSequence: cursor,
+				Execution: &projection,
+			})
+		}
+		select {
+		case <-r.Context().Done():
+			return true
+		case <-time.After(200 * time.Millisecond):
+		}
+	}
+}

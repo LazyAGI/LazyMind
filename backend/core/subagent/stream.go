@@ -216,6 +216,10 @@ func StreamTask(w http.ResponseWriter, r *http.Request) {
 		Type: "progress", TaskID: taskID,
 		Progress: t.ProgressPct, CurrentPhase: t.CurrentPhase, EstimatedSec: t.EstimatedSec,
 	})
+	writeTaskSSE(w, flusher, TaskEvent{
+		Type: "sources", TaskID: taskID,
+		Sources: normalizeJSON(json.RawMessage(t.Sources), "[]"),
+	})
 	steps, _ := LoadSteps(ctx, db, taskID)
 	lastStepSeq := -1
 	for i := range steps {
@@ -484,6 +488,7 @@ func pollDBUntilTerminal(
 ) {
 	lastProgress := -1
 	lastPhase := ""
+	lastSources := ""
 	sentArtifacts := map[string]bool{}
 	lastHeartbeat := time.Now()
 	heartbeatsEnabled := false
@@ -509,6 +514,13 @@ func pollDBUntilTerminal(
 			})
 			lastProgress = t.ProgressPct
 			lastPhase = t.CurrentPhase
+		}
+		sources := string(normalizeJSON(json.RawMessage(t.Sources), "[]"))
+		if sources != lastSources {
+			writeTaskSSE(w, flusher, TaskEvent{
+				Type: "sources", TaskID: taskID, Sources: json.RawMessage(sources),
+			})
+			lastSources = sources
 		}
 		steps, _ := LoadSteps(ctx, db, taskID)
 		for i := range steps {

@@ -1644,6 +1644,7 @@
     &:hover .workflow-slot__delete-btn--overlay,
     &:hover .workflow-slot__top-right-actions,
     &:hover .workflow-slot__ref-btn--overlay,
+    &:hover .workflow-slot__download-btn--overlay,
     &:hover .workflow-slot__drag-handle--overlay {
       opacity: 1;
     }
@@ -1676,6 +1677,7 @@
     &:hover .workflow-slot__delete-btn--overlay,
     &:hover .workflow-slot__top-right-actions,
     &:hover .workflow-slot__ref-btn--overlay,
+    &:hover .workflow-slot__download-btn--overlay,
     &:hover .workflow-slot__drag-handle--overlay {
       opacity: 1;
     }
@@ -1713,6 +1715,26 @@
 
     &:hover:not(:disabled) { background: rgba(37, 99, 235, 0.85); }
     &:disabled { opacity: 0.5; cursor: default; }
+  }
+
+  &__download-btn--overlay {
+    position: absolute;
+    top: 6px;
+    left: 6px;
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.55);
+    border-radius: 50%;
+    text-decoration: none;
+    opacity: 0;
+    transition: opacity 0.15s, background 0.15s;
+    z-index: 4;
+
+    &:hover { color: #fff; background: rgba(37, 99, 235, 0.85); }
   }
 
   // Delete button — used inside __top-right-actions flex container

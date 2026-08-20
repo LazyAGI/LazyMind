@@ -13,6 +13,7 @@ from channel_gateway.common.domain.commands import (
 from channel_gateway.common.domain.outbound import (
     AskPresentation,
     AskQuestionPresentation,
+    ExecutionPresentation,
     ReplyPresentation,
     SelectionOption,
     SelectionPresentation,
@@ -36,6 +37,8 @@ def project_core_presentations(
             presentation = _ask(event.payload)
         elif event.type == 'task_created':
             presentation = _task(event.payload)
+        elif event.type == 'execution_projection':
+            presentation = _execution(event.payload)
         else:
             presentation = None
         if presentation is not None:
@@ -118,6 +121,57 @@ def _task(payload: dict) -> TaskPresentation | None:
         current_phase=str(payload.get('current_phase') or '')[:200],
         estimated_sec=optional_int(payload.get('estimated_sec')),
         summary=str(payload.get('summary') or '')[:1000],
+    )
+
+
+def _execution(payload: dict) -> ExecutionPresentation | None:
+    provider = str(payload.get('provider') or '').strip().lower()
+    status = str(payload.get('status') or '').strip().lower()
+    if (
+        not provider
+        or len(provider) > 32
+        or status not in {'pending', 'running', 'completed', 'failed', 'stopped'}
+    ):
+        return None
+    invocation = payload.get('invocation')
+    invocation = invocation if isinstance(invocation, dict) else {}
+    raw_workflows = payload.get('workflows')
+    workflows: list[str] = []
+    for workflow in raw_workflows if isinstance(raw_workflows, list) else []:
+        if not isinstance(workflow, dict):
+            continue
+        workflow_id = str(workflow.get('workflow_id') or '')[:64]
+        workflow_status = str(workflow.get('status') or '')[:32]
+        if workflow_id:
+            workflows.append(
+                f'{workflow_id} · {workflow_status}'
+                if workflow_status
+                else workflow_id
+            )
+    return ExecutionPresentation(
+        kind='execution',
+        provider=provider,
+        status=status,
+        host_id=str(payload.get('host_id') or '')[:128],
+        host_online=payload.get('host_online') is True,
+        recovery_count=max(0, optional_int(payload.get('recovery_count')) or 0),
+        invocation_count=max(0, optional_int(invocation.get('total')) or 0),
+        tools=tuple(
+            str(tool)[:128]
+            for tool in (
+                invocation.get('tools')
+                if isinstance(invocation.get('tools'), list)
+                else []
+            )[:20]
+            if str(tool)
+        ),
+        workflows=tuple(workflows[:10]),
+        artifact_count=max(0, optional_int(payload.get('artifact_count')) or 0),
+        artifact_revision_count=max(
+            0,
+            optional_int(payload.get('artifact_revision_count')) or 0,
+        ),
+        error_message=str(payload.get('error_message') or '')[:500],
     )
 
 

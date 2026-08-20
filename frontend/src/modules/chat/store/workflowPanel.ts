@@ -478,8 +478,6 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
         [conversationId]: (s.dismissedRefreshTrigger[conversationId] ?? 0) + 1,
       },
     }));
-    // Also refresh the cached dismissed list so any remounted component gets fresh data.
-    get().fetchDismissedSessions(conversationId);
   },
 
   fetchDismissedSessions: async (conversationId) => {

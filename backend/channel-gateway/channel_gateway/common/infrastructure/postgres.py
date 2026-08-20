@@ -27,6 +27,13 @@ def _snapshot(value: Any) -> dict[str, Any]:
             value = json.loads(value)
         except json.JSONDecodeError:
             return {}
+    if isinstance(value, list):
+        return {
+            'selection': {
+                'kind': 'conversation',
+                'items': list(value),
+            }
+        }
     return dict(value) if isinstance(value, dict) else {}
 
 
@@ -2407,8 +2414,21 @@ class GatewayStore:
             row = connection.execute(
                 """
                 UPDATE channel_navigation_states
-                SET snapshot_json = jsonb_build_object(
-                        'feishu_workspace',
+                SET snapshot_json = jsonb_set(
+                        CASE
+                            WHEN jsonb_typeof(snapshot_json) = 'object'
+                                THEN snapshot_json
+                            WHEN jsonb_typeof(snapshot_json) = 'array'
+                                THEN jsonb_build_object(
+                                    'selection',
+                                    jsonb_build_object(
+                                        'kind', 'conversation',
+                                        'items', snapshot_json
+                                    )
+                                )
+                            ELSE '{}'::jsonb
+                        END,
+                        '{feishu_workspace}',
                         jsonb_set(
                             %s::jsonb,
                             '{message_id}',
@@ -2429,7 +2449,8 @@ class GatewayStore:
                                 )
                             END,
                             true
-                        )
+                        ),
+                        true
                     ),
                     updated_at = CURRENT_TIMESTAMP
                 WHERE account_id = %s
@@ -2512,11 +2533,7 @@ class GatewayStore:
                 """,
                 (account_id, external_address_hash),
             ).fetchone()
-            snapshot = row.get('snapshot_json') if row else {}
-            if isinstance(snapshot, str):
-                snapshot = json.loads(snapshot)
-            if not isinstance(snapshot, dict):
-                snapshot = {}
+            snapshot = _snapshot(row.get('snapshot_json')) if row else {}
             current = snapshot.get('feishu_workspace')
             if not isinstance(current, dict):
                 current = {}
@@ -2529,7 +2546,8 @@ class GatewayStore:
                 != expected_operation_id
             ):
                 return False
-            snapshot_json = self._json({'feishu_workspace': state})
+            snapshot['feishu_workspace'] = state
+            snapshot_json = self._json(snapshot)
             connection.execute(
                 """
                 INSERT INTO channel_navigation_states(
@@ -2619,11 +2637,7 @@ class GatewayStore:
                 """,
                 (account_id, external_address_hash),
             ).fetchone()
-            snapshot = row.get('snapshot_json') if row else {}
-            if isinstance(snapshot, str):
-                snapshot = json.loads(snapshot)
-            if not isinstance(snapshot, dict):
-                snapshot = {}
+            snapshot = _snapshot(row.get('snapshot_json')) if row else {}
             workspace = snapshot.get('feishu_workspace')
             if not isinstance(workspace, dict):
                 workspace = {}
@@ -2637,11 +2651,8 @@ class GatewayStore:
             )
             workspace = {**workspace, **patch}
             workspace['revision'] = current_revision + 1
-            value = json.dumps(
-                {'feishu_workspace': workspace},
-                ensure_ascii=False,
-                separators=(',', ':'),
-            )
+            snapshot['feishu_workspace'] = workspace
+            value = self._json(snapshot)
             connection.execute(
                 """
                 INSERT INTO channel_navigation_states(
@@ -2664,8 +2675,6 @@ class GatewayStore:
         operation_id: str,
         expected_message_id: str,
         expected_revision: int | None = None,
-        *,
-        advance_revision: bool = True,
     ) -> dict[str, Any]:
         with self._connect() as connection:
             row = connection.execute(
@@ -2677,11 +2686,7 @@ class GatewayStore:
                 """,
                 (account_id, external_address_hash),
             ).fetchone()
-            snapshot = row.get('snapshot_json') if row else {}
-            if isinstance(snapshot, str):
-                snapshot = json.loads(snapshot)
-            if not isinstance(snapshot, dict):
-                snapshot = {}
+            snapshot = _snapshot(row.get('snapshot_json')) if row else {}
             workspace = snapshot.get('feishu_workspace')
             if not isinstance(workspace, dict):
                 workspace = {}
@@ -2698,38 +2703,21 @@ class GatewayStore:
                 return dict(workspace)
             workspace = dict(workspace)
             workspace['message_id'] = message_id
-            if advance_revision:
-                workspace['revision'] = max(
-                    0,
-                    int(workspace.get('revision') or 0),
-                ) + 1
-            value = json.dumps(
-                workspace,
-                ensure_ascii=False,
-                separators=(',', ':'),
-            )
+            snapshot['feishu_workspace'] = workspace
+            value = self._json(snapshot)
             connection.execute(
                 """
                 INSERT INTO channel_navigation_states(
                     account_id, external_address_hash, mode, snapshot_json
                 )
-                VALUES(
-                    %s, %s, 'active',
-                    jsonb_build_object(
-                        'feishu_workspace',
-                        %s::jsonb
-                    )
-                )
+                VALUES(%s, %s, 'active', %s::jsonb)
                 ON CONFLICT(account_id, external_address_hash) DO UPDATE SET
-                    snapshot_json = jsonb_build_object(
-                        'feishu_workspace', %s::jsonb
-                    ),
+                    snapshot_json = EXCLUDED.snapshot_json,
                     updated_at = CURRENT_TIMESTAMP
                 """,
                 (
                     account_id,
                     external_address_hash,
-                    value,
                     value,
                 ),
             )

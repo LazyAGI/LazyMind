@@ -2,6 +2,7 @@ package doc
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -65,7 +66,7 @@ type segmentSearchInput struct {
 }
 
 func ListSegments(w http.ResponseWriter, r *http.Request) {
-	datasetID, documentID, lazyDocID, algoID, group, ok := prepareSegmentRequest(w, r, "ListSegments", nil)
+	datasetID, kbID, documentID, lazyDocID, algoID, group, ok := prepareSegmentRequest(w, r, "ListSegments", nil)
 	if !ok {
 		return
 	}
@@ -75,7 +76,7 @@ func ListSegments(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid page_token", err), http.StatusBadRequest)
 		return
 	}
-	raw, queryURL, err := fetchChunksPage(r, datasetID, documentID, lazyDocID, algoID, group, page, pageSize, "ListSegments")
+	raw, queryURL, err := fetchChunksPage(r, datasetID, kbID, documentID, lazyDocID, algoID, group, page, pageSize, "ListSegments")
 	if err != nil {
 		common.ReplyAppErr(w, common.ResolveAppError(err.Error(), http.StatusBadGateway))
 		return
@@ -102,7 +103,7 @@ func ListSegments(w http.ResponseWriter, r *http.Request) {
 // keyword/order_by will be forwarded once supported by the downstream service.
 func SearchSegments(w http.ResponseWriter, r *http.Request) {
 	body := parseSegmentSearchInput(r)
-	datasetID, documentID, lazyDocID, algoID, group, ok := prepareSegmentRequest(w, r, "SearchSegments", body)
+	datasetID, kbID, documentID, lazyDocID, algoID, group, ok := prepareSegmentRequest(w, r, "SearchSegments", body)
 	if !ok {
 		return
 	}
@@ -112,7 +113,7 @@ func SearchSegments(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid page_token", err), http.StatusBadRequest)
 		return
 	}
-	raw, _, err := fetchChunksPage(r, datasetID, documentID, lazyDocID, algoID, group, page, pageSize, "SearchSegments")
+	raw, _, err := fetchChunksPage(r, datasetID, kbID, documentID, lazyDocID, algoID, group, page, pageSize, "SearchSegments")
 	if err != nil {
 		common.ReplyAppErr(w, common.ResolveAppError(err.Error(), http.StatusBadGateway))
 		return
@@ -122,7 +123,7 @@ func SearchSegments(w http.ResponseWriter, r *http.Request) {
 }
 
 func GetSegment(w http.ResponseWriter, r *http.Request) {
-	datasetID, documentID, lazyDocID, algoID, group, ok := prepareSegmentRequest(w, r, "GetSegment", nil)
+	datasetID, kbID, documentID, lazyDocID, algoID, group, ok := prepareSegmentRequest(w, r, "GetSegment", nil)
 	if !ok {
 		return
 	}
@@ -131,7 +132,7 @@ func GetSegment(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "missing segment", http.StatusBadRequest)
 		return
 	}
-	segment, found, err := fetchSegmentByID(r, datasetID, documentID, lazyDocID, algoID, group, segmentID)
+	segment, found, err := fetchSegmentByID(r, datasetID, kbID, documentID, lazyDocID, algoID, group, segmentID)
 	if err != nil {
 		common.ReplyAppErr(w, common.ResolveAppError(err.Error(), http.StatusBadGateway))
 		return
@@ -257,41 +258,42 @@ func resolveSegmentGroup(r *http.Request, algoID string, body *segmentSearchInpu
 			Msg("segment group resolved from request")
 		return group
 	}
-	if group := fetchChunkGroupName(r, algoID); group != "" {
-		log.Logger.Info().
-			Str("handler", "SearchSegments").
-			Str("algo_id", strings.TrimSpace(algoID)).
-			Str("group", strings.TrimSpace(group)).
-			Msg("segment group resolved from algo groups")
+	return resolveDefaultChunkSegmentGroup(r.Context(), algoID, "SearchSegments")
+}
+
+func resolveDefaultChunkSegmentGroup(ctx context.Context, algoID, handler string) string {
+	handler = firstNonEmpty(strings.TrimSpace(handler), "SearchSegments")
+	if group := fetchChunkGroupName(ctx, handler, algoID); group != "" {
 		return group
 	}
 	log.Logger.Warn().
-		Str("handler", "SearchSegments").
+		Str("handler", handler).
 		Str("algo_id", strings.TrimSpace(algoID)).
 		Str("group", "Chunk").
 		Msg("segment group fallback to default")
 	return "Chunk"
 }
 
-func fetchChunkGroupName(r *http.Request, algoID string) string {
+func fetchChunkGroupName(ctx context.Context, handler, algoID string) string {
 	algoID = strings.TrimSpace(algoID)
+	handler = firstNonEmpty(strings.TrimSpace(handler), "SearchSegments")
 	if algoID == "" {
 		log.Logger.Warn().
-			Str("handler", "SearchSegments").
+			Str("handler", handler).
 			Msg("fetch chunk group skipped because algo_id is empty")
 		return ""
 	}
 	url := common.JoinURL(common.AlgoServiceEndpoint(), "/v1/algo/"+algoID+"/groups")
 	log.Logger.Info().
-		Str("handler", "SearchSegments").
+		Str("handler", handler).
 		Str("algo_id", algoID).
 		Str("external_url", url).
 		Msg("calling external algo groups request")
 	var resp algoGroupInfoResp
-	if err := common.ApiGet(r.Context(), url, nil, &resp, 5_000_000_000); err != nil {
+	if err := common.ApiGet(ctx, url, nil, &resp, 5_000_000_000); err != nil {
 		log.Logger.Error().
 			Err(err).
-			Str("handler", "SearchSegments").
+			Str("handler", handler).
 			Str("algo_id", algoID).
 			Str("external_url", url).
 			Msg("external algo groups request failed")
@@ -299,7 +301,7 @@ func fetchChunkGroupName(r *http.Request, algoID string) string {
 	}
 	if resp.Code != 200 || len(resp.Data) == 0 {
 		log.Logger.Warn().
-			Str("handler", "SearchSegments").
+			Str("handler", handler).
 			Str("algo_id", algoID).
 			Str("external_url", url).
 			Int("algo_service_code", resp.Code).
@@ -312,7 +314,7 @@ func fetchChunkGroupName(r *http.Request, algoID string) string {
 		if strings.EqualFold(strings.TrimSpace(item.Type), "Chunk") && strings.TrimSpace(item.Name) != "" {
 			resolved := strings.TrimSpace(item.Name)
 			log.Logger.Info().
-				Str("handler", "SearchSegments").
+				Str("handler", handler).
 				Str("algo_id", algoID).
 				Str("external_url", url).
 				Str("group", resolved).
@@ -322,7 +324,7 @@ func fetchChunkGroupName(r *http.Request, algoID string) string {
 		}
 	}
 	log.Logger.Warn().
-		Str("handler", "SearchSegments").
+		Str("handler", handler).
 		Str("algo_id", algoID).
 		Str("external_url", url).
 		Any("response_data", resp.Data).
@@ -366,28 +368,34 @@ func buildParserChunksURL(kbID, algoID, lazyDocID, group string, page, pageSize 
 	return common.JoinURL(common.ParsingServiceEndpoint(), "/doc/chunks") + "?" + params.Encode()
 }
 
-func prepareSegmentRequest(w http.ResponseWriter, r *http.Request, handler string, body *segmentSearchInput) (datasetID, documentID, lazyDocID, algoID, group string, ok bool) {
+func prepareSegmentRequest(w http.ResponseWriter, r *http.Request, handler string, body *segmentSearchInput) (datasetID, kbID, documentID, lazyDocID, algoID, group string, ok bool) {
 	datasetID = datasetIDFromPath(r)
 	documentID = documentIDFromPath(r)
 	if datasetID == "" || documentID == "" {
 		common.ReplyErr(w, "missing dataset or document", http.StatusBadRequest)
-		return "", "", "", "", "", false
+		return "", "", "", "", "", "", false
 	}
-	if _, userID, allowed := requireDatasetPermission(r, datasetID, acl.PermissionDatasetRead); !allowed {
+	ds, userID, allowed := requireDatasetPermission(r, datasetID, acl.PermissionDatasetRead)
+	if !allowed {
 		if userID == "" {
 			common.ReplyErr(w, "missing X-User-Id", http.StatusBadRequest)
 		} else {
 			replyDatasetForbidden(w)
 		}
-		return "", "", "", "", "", false
+		return "", "", "", "", "", "", false
+	}
+	kbID = strings.TrimSpace(ds.KbID)
+	if kbID == "" {
+		common.ReplyErr(w, "knowledge backend id is empty", http.StatusInternalServerError)
+		return "", "", "", "", "", "", false
 	}
 	var docRow orm.Document
 	if err := store.DB().WithContext(r.Context()).Where("id = ? AND dataset_id = ? AND deleted_at IS NULL", documentID, datasetID).Take(&docRow).Error; err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "document not found", err), http.StatusNotFound)
-		return "", "", "", "", "", false
+		return "", "", "", "", "", "", false
 	}
 	lazyDocID = strings.TrimSpace(docRow.LazyllmDocID)
-	algoID = datasetAlgoIDByID(datasetID)
+	algoID = parseDatasetAlgo(ds.Ext).AlgoID
 	group = resolveSegmentGroup(r, algoID, body)
 	log.Logger.Info().
 		Str("handler", handler).
@@ -398,14 +406,14 @@ func prepareSegmentRequest(w http.ResponseWriter, r *http.Request, handler strin
 		Str("group", strings.TrimSpace(group)).
 		Any("request_body", body).
 		Msg("prepared segment request context")
-	return datasetID, documentID, lazyDocID, algoID, group, true
+	return datasetID, kbID, documentID, lazyDocID, algoID, group, true
 }
 
-func fetchChunksPage(r *http.Request, datasetID, documentID, lazyDocID, algoID, group string, page, pageSize int, handler string) (map[string]any, string, error) {
+func fetchChunksPage(r *http.Request, datasetID, kbID, documentID, lazyDocID, algoID, group string, page, pageSize int, handler string) (map[string]any, string, error) {
 	if strings.TrimSpace(lazyDocID) == "" {
 		return map[string]any{"items": []any{}, "total_size": 0}, "", nil
 	}
-	queryURL := buildChunksURL(datasetID, algoID, lazyDocID, group, page, pageSize)
+	queryURL := buildChunksURL(kbID, algoID, lazyDocID, group, page, pageSize)
 	log.Logger.Info().
 		Str("handler", handler).
 		Str("dataset_id", datasetID).
@@ -429,7 +437,7 @@ func fetchChunksPage(r *http.Request, datasetID, documentID, lazyDocID, algoID, 
 			Str("group", strings.TrimSpace(group)).
 			Str("external_url", queryURL).
 			Msg("external chunks request failed")
-		fallbackURL := buildParserChunksURL(datasetID, algoID, lazyDocID, group, page, pageSize)
+		fallbackURL := buildParserChunksURL(kbID, algoID, lazyDocID, group, page, pageSize)
 		log.Logger.Warn().
 			Err(err).
 			Str("handler", handler).
@@ -460,14 +468,14 @@ func fetchChunksPage(r *http.Request, datasetID, documentID, lazyDocID, algoID, 
 	return raw, queryURL, nil
 }
 
-func fetchSegmentByID(r *http.Request, datasetID, documentID, lazyDocID, algoID, group, segmentID string) (SegmentItem, bool, error) {
+func fetchSegmentByID(r *http.Request, datasetID, kbID, documentID, lazyDocID, algoID, group, segmentID string) (SegmentItem, bool, error) {
 	if strings.TrimSpace(lazyDocID) == "" {
 		return SegmentItem{}, false, nil
 	}
 	page := 1
 	pageSize := 100
 	for {
-		raw, _, err := fetchChunksPage(r, datasetID, documentID, lazyDocID, algoID, group, page, pageSize, "GetSegment")
+		raw, _, err := fetchChunksPage(r, datasetID, kbID, documentID, lazyDocID, algoID, group, page, pageSize, "GetSegment")
 		if err != nil {
 			return SegmentItem{}, false, err
 		}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Button,
   Input,
@@ -8,6 +8,7 @@ import {
 } from 'antd';
 import {
   CheckCircleFilled,
+  DownOutlined,
   LinkOutlined,
   MobileOutlined,
   QrcodeOutlined,
@@ -21,6 +22,7 @@ import { useTranslation } from 'react-i18next';
 
 import {
   listChannelAccounts,
+  type ChannelAccount,
   type ChannelProvider,
   type ConnectionSession,
 } from '../api';
@@ -58,6 +60,16 @@ function formatExpiry(value?: string | null) {
   if (!value) return '';
   const parsed = dayjs(value);
   return parsed.isValid() ? parsed.format('HH:mm:ss') : value;
+}
+
+function accountProvider(account: ChannelAccount): ChannelProvider {
+  return account.provider === 'feishu' ? 'feishu' : 'wechat';
+}
+
+function formatAccountTime(value?: string | null) {
+  if (!value) return '-';
+  const parsed = dayjs(value);
+  return parsed.isValid() ? parsed.format('MM/DD HH:mm') : value;
 }
 
 interface ProviderConnectionProps {
@@ -231,24 +243,69 @@ export default function TerminalConnectionQuickPanel({
 }: TerminalConnectionQuickPanelProps) {
   const { t } = useTranslation();
   const [provider, setProvider] = useState<ChannelProvider>('wechat');
-  const [connectedCount, setConnectedCount] = useState<number | null>(null);
+  const [accounts, setAccounts] = useState<ChannelAccount[]>([]);
+  const [accountsOpen, setAccountsOpen] = useState(false);
+  const [accountsLoading, setAccountsLoading] = useState(true);
+  const [accountsError, setAccountsError] = useState(false);
+  const [connectionRevision, setConnectionRevision] = useState(0);
+  const accountRequestRef = useRef(0);
+
+  const loadAccounts = useCallback(async () => {
+    const requestId = accountRequestRef.current + 1;
+    accountRequestRef.current = requestId;
+    setAccountsLoading(true);
+    setAccountsError(false);
+    try {
+      const [wechat, feishu] = await Promise.all([
+        listChannelAccounts('wechat'),
+        listChannelAccounts('feishu'),
+      ]);
+      if (accountRequestRef.current === requestId) {
+        setAccounts(
+          [...wechat.items, ...feishu.items]
+            .filter((account) => account.status === 'connected')
+            .sort((left, right) => (
+              dayjs(right.updated_at).valueOf() - dayjs(left.updated_at).valueOf()
+            )),
+        );
+      }
+    } catch {
+      if (accountRequestRef.current === requestId) {
+        setAccountsError(true);
+      }
+    } finally {
+      if (accountRequestRef.current === requestId) {
+        setAccountsLoading(false);
+      }
+    }
+  }, []);
 
   useEffect(() => {
-    let active = true;
-    void Promise.all([
-      listChannelAccounts('wechat'),
-      listChannelAccounts('feishu'),
-    ]).then(([wechat, feishu]) => {
-      if (active) {
-        setConnectedCount(wechat.items.length + feishu.items.length);
-      }
-    }).catch(() => {
-      if (active) setConnectedCount(0);
-    });
+    void loadAccounts();
     return () => {
-      active = false;
+      accountRequestRef.current += 1;
     };
-  }, []);
+  }, [loadAccounts]);
+
+  const showAccountQr = (account: ChannelAccount) => {
+    setProvider(accountProvider(account));
+    setAccountsOpen(false);
+    setConnectionRevision((current) => current + 1);
+  };
+
+  const toggleAccounts = () => {
+    const nextOpen = !accountsOpen;
+    setAccountsOpen(nextOpen);
+    if (!nextOpen) return;
+    if (accountsError) void loadAccounts();
+  };
+
+  const connectedCount = accountsLoading && accounts.length === 0
+    ? null
+    : accounts.length;
+  const providerAccounts = accounts.filter(
+    (account) => accountProvider(account) === provider,
+  );
 
   return (
     <section
@@ -265,11 +322,19 @@ export default function TerminalConnectionQuickPanel({
           <strong>{t('channelGateway.terminal.title')}</strong>
           <small>{t('channelGateway.terminal.quickSubtitle')}</small>
         </div>
-        <span className="terminal-quick-count">
+        <button
+          type="button"
+          className="terminal-quick-count"
+          aria-expanded={accountsOpen}
+          aria-controls="terminal-quick-connected-accounts"
+          disabled={connectedCount == null}
+          onClick={toggleAccounts}
+        >
           {connectedCount == null
             ? <Spin size="small" />
             : t('channelGateway.terminal.connectedCount', { count: connectedCount })}
-        </span>
+          {connectedCount != null ? <DownOutlined aria-hidden="true" /> : null}
+        </button>
       </header>
 
       <div className="terminal-quick-body">
@@ -288,7 +353,89 @@ export default function TerminalConnectionQuickPanel({
           ))}
         </div>
 
-        <ProviderConnection key={provider} provider={provider} />
+        {accountsOpen ? (
+          <section
+            id="terminal-quick-connected-accounts"
+            className="terminal-quick-accounts"
+            aria-label={t('channelGateway.terminal.connectedDetailsTitle')}
+          >
+            <header>
+              <div>
+                <strong>{t('channelGateway.terminal.connectedDetailsTitle')}</strong>
+                <small>{t('channelGateway.terminal.connectedDetailsHint')}</small>
+              </div>
+              <Button
+                type="text"
+                size="small"
+                icon={<ReloadOutlined />}
+                loading={accountsLoading}
+                onClick={() => void loadAccounts()}
+              >
+                {t('channelGateway.terminal.refreshAccounts')}
+              </Button>
+            </header>
+
+            {accountsLoading && accounts.length === 0 ? (
+              <div className="terminal-quick-accounts-state" role="status">
+                <Spin size="small" />
+                <span>{t('channelGateway.terminal.loadingAccounts')}</span>
+              </div>
+            ) : accountsError ? (
+              <div className="terminal-quick-accounts-state" role="alert">
+                <span>{t('channelGateway.terminal.loadAccountsFailed')}</span>
+                <Button size="small" onClick={() => void loadAccounts()}>
+                  {t('channelGateway.terminal.retryAccounts')}
+                </Button>
+              </div>
+            ) : providerAccounts.length === 0 ? (
+              <div className="terminal-quick-accounts-state">
+                {t(`channelGateway.${provider}.accountsEmpty`)}
+              </div>
+            ) : (
+              <ul className="terminal-quick-account-list">
+                {providerAccounts.map((account) => {
+                  const itemProvider = accountProvider(account);
+                  return (
+                    <li key={account.id}>
+                      <button
+                        type="button"
+                        aria-label={t('channelGateway.terminal.showAccountQr', {
+                          account: account.label,
+                          provider: t(`channelGateway.terminal.${itemProvider}Title`),
+                        })}
+                        onClick={() => showAccountQr(account)}
+                      >
+                        <span className={`terminal-quick-account-icon is-${itemProvider}`} aria-hidden="true">
+                          <ProviderIcon provider={itemProvider} />
+                        </span>
+                        <span className="terminal-quick-account-copy">
+                          <strong>{account.label || t(`channelGateway.terminal.${itemProvider}Title`)}</strong>
+                          <small>
+                            {t(`channelGateway.${itemProvider}.accountStatusMap.${account.status}`, {
+                              defaultValue: account.status,
+                            })}
+                            {' · '}
+                            {t(`channelGateway.${itemProvider}.runtimeStatusMap.${account.runtime_status}`, {
+                              defaultValue: account.runtime_status,
+                            })}
+                            {' · '}
+                            {t('channelGateway.terminal.connectedAt')}: {formatAccountTime(account.connected_at)}
+                          </small>
+                        </span>
+                        <span className="terminal-quick-account-action">
+                          <QrcodeOutlined aria-hidden="true" />
+                          {t('channelGateway.terminal.showQr')}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </section>
+        ) : (
+          <ProviderConnection key={`${provider}-${connectionRevision}`} provider={provider} />
+        )}
       </div>
 
       <footer className="terminal-quick-footer">

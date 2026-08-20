@@ -25,4 +25,3 @@ func (e *DefaultEngine) IsBindingPathAccessible(ctx context.Context, agentID, ta
 	}
 	return true // connector doesn'''t support path checking, assume accessible
 }
-

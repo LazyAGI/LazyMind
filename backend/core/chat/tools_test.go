@@ -453,14 +453,14 @@ func TestChatConversationsMergesPersistedDisabledTools(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{"items": []any{}, "total": 0})
 			return
 		}
-		if r.URL.Path != "/api/chat" {
+		if r.URL.Path != "/api/chat/stream" {
 			http.NotFound(w, r)
 			return
 		}
 		if err := json.NewDecoder(r.Body).Decode(&upstreamBody); err != nil {
 			t.Fatalf("decode upstream body: %v", err)
 		}
-		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Content-Type", "application/x-ndjson")
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"code": 200,
 			"msg":  "success",
@@ -489,13 +489,15 @@ func TestChatConversationsMergesPersistedDisabledTools(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
-	rawDisabled, _ := upstreamBody["disabled_tools"].([]any)
+	agent, _ := upstreamBody["agent"].(map[string]any)
+	rawDisabled, _ := agent["disabled_tools"].([]any)
 	if len(rawDisabled) != 1 || rawDisabled[0] != "bing" {
-		t.Fatalf("expected disabled_tools to include persisted tool, got %#v", upstreamBody["disabled_tools"])
+		t.Fatalf("expected disabled_tools to include persisted tool, got %#v", agent["disabled_tools"])
 	}
-	rawMCPConfig, _ := upstreamBody["mcp_config"].([]any)
+	runtime, _ := upstreamBody["runtime"].(map[string]any)
+	rawMCPConfig, _ := runtime["mcp_config"].([]any)
 	if len(rawMCPConfig) != 1 {
-		t.Fatalf("expected mcp_config to be forwarded for chat, got %#v", upstreamBody["mcp_config"])
+		t.Fatalf("expected mcp_config to be forwarded for chat, got %#v", runtime["mcp_config"])
 	}
 	firstMCPConfig, _ := rawMCPConfig[0].(map[string]any)
 	headers, _ := firstMCPConfig["headers"].(map[string]any)

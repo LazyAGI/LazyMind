@@ -353,10 +353,61 @@ func treeNodeSearchMatches(node TreeNode, keyword string) bool {
 	if needle == "" {
 		return true
 	}
+	if strings.EqualFold(strings.TrimSpace(node.ConnectorType), "local_fs") {
+		segments := normalizedPathSegments(keyword)
+		if len(segments) > 1 {
+			for _, candidate := range treeNodePathCandidates(node) {
+				if pathHasExactSuffix(candidate, segments) {
+					return true
+				}
+			}
+			return false
+		}
+		if len(segments) == 1 {
+			needle = segments[0]
+		}
+	}
 	for _, value := range []string{node.SearchName, node.DisplayName} {
 		if strings.Contains(strings.ToLower(value), needle) {
 			return true
 		}
 	}
 	return false
+}
+
+func normalizedPathSegments(value string) []string {
+	normalized := strings.ReplaceAll(strings.TrimSpace(value), "\\", "/")
+	raw := strings.Split(normalized, "/")
+	segments := make([]string, 0, len(raw))
+	for _, segment := range raw {
+		segment = strings.ToLower(strings.TrimSpace(segment))
+		if segment == "" || segment == "." {
+			continue
+		}
+		segments = append(segments, segment)
+	}
+	return segments
+}
+
+func treeNodePathCandidates(node TreeNode) []string {
+	candidates := []string{node.NodeRef, node.TargetRef}
+	if value, ok := node.ProviderMeta["path"].(string); ok {
+		candidates = append(candidates, value)
+	}
+	candidates = append(candidates, node.ObjectKey, node.Key)
+	return candidates
+}
+
+func pathHasExactSuffix(candidate string, expected []string) bool {
+	segments := normalizedPathSegments(candidate)
+	if len(segments) < len(expected) {
+		return false
+	}
+	offset := len(segments) - len(expected)
+	for index := range expected {
+		if segments[offset+index] != expected[index] {
+			return false
+		}
+	}
+	return true
 }

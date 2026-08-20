@@ -121,11 +121,18 @@ type DiscardDraftResponse struct {
 }
 
 type ListSkillsRequest struct {
-	UserID string
+	UserID      string
+	Keyword     string
+	Category    string
+	Tags        []string
+	Offset      int
+	Limit       int
+	EnabledOnly bool
 }
 
 type ListSkillsResponse struct {
 	Items []SkillSummary
+	Total int64
 }
 
 type GetSkillRequest struct {
@@ -147,6 +154,7 @@ type SkillSummary struct {
 	IsEnabled      bool
 	Draft          DraftSummary
 	DeletedAt      *time.Time
+	TrashExpiresAt *time.Time
 	DeletedBy      string
 }
 
@@ -243,6 +251,7 @@ type skillRow struct {
 	UpdateStatus          string     `gorm:"column:update_status;type:text;not null;default:'up_to_date'"`
 	Ext                   []byte     `gorm:"column:ext;type:json"`
 	DeletedAt             *time.Time `gorm:"column:deleted_at"`
+	TrashExpiresAt        *time.Time `gorm:"column:trash_expires_at"`
 	DeletedBy             *string    `gorm:"column:deleted_by;type:text"`
 	CreatedAt             time.Time  `gorm:"column:created_at;not null"`
 	UpdatedAt             time.Time  `gorm:"column:updated_at;not null"`
@@ -336,7 +345,11 @@ type skillMarketInstallRow struct {
 func (skillMarketInstallRow) TableName() string { return "skill_market_installs" }
 
 type skillSearchIndexRow struct {
-	SkillID string `gorm:"column:skill_id;type:varchar(36);primaryKey"`
+	SkillID        string    `gorm:"column:skill_id;type:varchar(36);primaryKey"`
+	OwnerUserID    string    `gorm:"column:owner_user_id;type:text;not null"`
+	HeadRevisionID string    `gorm:"column:head_revision_id;type:varchar(36);not null"`
+	Content        string    `gorm:"column:content;type:text;not null"`
+	UpdatedAt      time.Time `gorm:"column:updated_at;not null"`
 }
 
 func (skillSearchIndexRow) TableName() string { return "skill_search_indexes" }

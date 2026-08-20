@@ -127,7 +127,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   // Keep a local default option to avoid label flicker while tags are loading.
   const [tags, setTags] = useState<string[]>([ALL_TAGS]);
   const [sourceCategory, setSourceCategory] = useState<SourceCategory>("local");
-  const [activeView, setActiveView] = useState<KnowledgePageView>("square");
+  const [activeView, setActiveView] = useState<KnowledgePageView>("mine");
   const [officialStatus, setOfficialStatus] = useState<KnowledgeSquareStatusMap>(
     createInitialKnowledgeSquareStatus,
   );
