@@ -1262,6 +1262,13 @@ class WriterToolkitBase:
         section_total_timeout = max(
             1.0, float(os.getenv('LAZYMIND_WRITER_SECTION_TOTAL_TIMEOUT', '600')),
         )
+        section_stream_idle_timeout = max(
+            1.0, float(os.getenv('LAZYMIND_WRITER_SECTION_STREAM_IDLE_TIMEOUT', '180')),
+        )
+        first_section_idle_timeout = max(
+            section_stream_idle_timeout,
+            float(os.getenv('LAZYMIND_WRITER_FIRST_SECTION_IDLE_TIMEOUT', '360')),
+        )
         section_started_at: list[float | None] = [None] * len(instructions)
         forward_progress(
             progress=5,
@@ -1393,6 +1400,10 @@ class WriterToolkitBase:
                             stream_kwargs['visual_plan'] = visual_plan_path
                         if media_assets_path is not None:
                             stream_kwargs['media_assets'] = media_assets_path
+                        stream_kwargs['idle_timeout'] = (
+                            first_section_idle_timeout if index == 0 and attempt == 1
+                            else section_stream_idle_timeout
+                        )
                         with stream_factory(**stream_kwargs) as stream:
                             for delta in stream:
                                 if stop_event.is_set():
