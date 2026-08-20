@@ -238,7 +238,23 @@ export interface WriteBackWriterDocumentRequest {
 
 export type RewriteSelection =
   | { type: 'ir'; node_id: string }
-  | { type: 'markdown'; selected_text: string };
+  | { type: 'markdown'; selected_text: string }
+  | {
+    type: 'ppt_html';
+    page: number;
+    el: string;
+    group?: string;
+    selected_text?: string;
+    computed_style?: {
+      font_size?: string;
+      width?: string;
+      height?: string;
+      line_height?: string;
+      letter_spacing?: string;
+      text_align?: string;
+      font_weight?: string;
+    };
+  };
 
 export interface RewriteSelectionPreviewRequest {
   action: 'rewrite_selection';
@@ -253,24 +269,46 @@ export interface RewriteSelectionPreview {
   status: 'ready';
   action: 'rewrite_selection';
   base_revision: number;
-  representation: 'ir' | 'markdown';
+  representation: 'ir' | 'markdown' | 'ppt_html';
   target: {
     type: 'block';
     block_type: string;
     node_id?: string;
+    el?: string;
+    group?: string;
+    page?: number;
   };
   preview: {
     old_text: string;
     new_text: string;
   };
   patch: {
-    type: 'writer_ir_patch' | 'string_replace_set';
+    type: 'writer_ir_patch' | 'string_replace_set' | 'ppt_html_ops';
     payload: Record<string, unknown>;
   };
   artifact: {
     content_type: string;
-    value: Record<string, unknown>;
+    value: Record<string, unknown> | string;
+    caption?: string;
   };
+  candidate_html?: string;
+  commit?: { token: string };
+  layout_notes?: string[];
+}
+
+export interface ExecuteArtifactActionRequest {
+  action: 'rewrite_selection';
+  base_revision: number;
+  input: { commit_token: string };
+}
+
+export interface ExecuteArtifactActionResult {
+  status: 'applied';
+  action: 'rewrite_selection';
+  base_revision: number;
+  revision: number;
+  representation: 'ppt_html';
+  artifact: RewriteSelectionPreview['artifact'];
 }
 
 // Workflow Session API.
@@ -371,6 +409,23 @@ export function WorkflowSessionApi() {
         data: RewriteSelectionPreview;
       }>(
         `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}:action-preview`,
+        payload,
+        options,
+      );
+    },
+    executeArtifactAction(
+      sessionId: string,
+      slotId: string,
+      listIndex: number,
+      payload: ExecuteArtifactActionRequest,
+      options?: RawAxiosRequestConfig,
+    ) {
+      return axiosInstance.post<{
+        code: number;
+        message: string;
+        data: ExecuteArtifactActionResult;
+      }>(
+        `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}:action-execute`,
         payload,
         options,
       );

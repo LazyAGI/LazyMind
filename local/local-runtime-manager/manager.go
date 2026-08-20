@@ -1156,25 +1156,57 @@ func resolvedLocalPorts(cfg RuntimeConfig) []localPortItem {
 }
 
 func firstLANIPv4() string {
-	addrs, err := net.InterfaceAddrs()
+	interfaces, err := net.Interfaces()
 	if err != nil {
 		return ""
 	}
-	for _, addr := range addrs {
-		var ip net.IP
-		switch v := addr.(type) {
-		case *net.IPNet:
-			ip = v.IP
-		case *net.IPAddr:
-			ip = v.IP
+	candidates := make([]lanIPv4Candidate, 0, len(interfaces))
+	for _, networkInterface := range interfaces {
+		addrs, addrErr := networkInterface.Addrs()
+		if addrErr != nil {
+			continue
 		}
-		ip = ip.To4()
-		if ip == nil || ip.IsLoopback() {
+		for _, addr := range addrs {
+			var ip net.IP
+			switch value := addr.(type) {
+			case *net.IPNet:
+				ip = value.IP
+			case *net.IPAddr:
+				ip = value.IP
+			}
+			candidates = append(candidates, lanIPv4Candidate{
+				name:  networkInterface.Name,
+				flags: networkInterface.Flags,
+				ip:    ip,
+			})
+		}
+	}
+	return selectLANIPv4(candidates)
+}
+
+type lanIPv4Candidate struct {
+	name  string
+	flags net.Flags
+	ip    net.IP
+}
+
+func selectLANIPv4(candidates []lanIPv4Candidate) string {
+	var virtualFallback string
+	for _, candidate := range candidates {
+		ip := candidate.ip.To4()
+		if ip == nil || ip.IsLoopback() || candidate.flags&net.FlagLoopback != 0 || candidate.flags&net.FlagUp == 0 {
+			continue
+		}
+		name := strings.ToLower(candidate.name)
+		if strings.HasPrefix(name, "docker") || strings.HasPrefix(name, "br-") || strings.HasPrefix(name, "veth") || strings.HasPrefix(name, "virbr") {
+			if virtualFallback == "" {
+				virtualFallback = ip.String()
+			}
 			continue
 		}
 		return ip.String()
 	}
-	return ""
+	return virtualFallback
 }
 
 func acquireUpLock(paths RuntimePaths) (func(), error) {

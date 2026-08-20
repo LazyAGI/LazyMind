@@ -16,6 +16,16 @@ export interface FFmpegDependencyStatus {
   message?: string;
 }
 
+export interface EditablePPTDependencyStatus {
+  installed: boolean;
+  installDir?: string;
+  chromiumPath?: string;
+  affectedFeatures: string[];
+  runtimeLocal: boolean;
+  installSupported: boolean;
+  message?: string;
+}
+
 interface ApiEnvelope<T> {
   data?: T;
 }
@@ -55,4 +65,29 @@ export async function installFFmpegDependency() {
     { timeout: 30 * 60 * 1000 },
   );
   return unwrapApiData<FFmpegDependencyStatus>(response.data);
+}
+
+export async function getEditablePPTDependencyStatus() {
+  const response = await axiosInstance.get<
+    ApiEnvelope<EditablePPTDependencyStatus> | EditablePPTDependencyStatus
+  >(`${basePath}/api/core/system-dependencies/editable-ppt`);
+  return unwrapApiData<EditablePPTDependencyStatus>(response.data);
+}
+
+export async function checkEditablePPTDependency() {
+  const response = await axiosInstance.post<
+    ApiEnvelope<EditablePPTDependencyStatus> | EditablePPTDependencyStatus
+  >(`${basePath}/api/core/system-dependencies/editable-ppt:check`);
+  return unwrapApiData<EditablePPTDependencyStatus>(response.data);
+}
+
+export async function installEditablePPTDependency() {
+  const response = await axiosInstance.post<
+    ApiEnvelope<EditablePPTDependencyStatus> | EditablePPTDependencyStatus
+  >(
+    `${basePath}/api/core/system-dependencies/editable-ppt:install`,
+    undefined,
+    { timeout: 45 * 60 * 1000 },
+  );
+  return unwrapApiData<EditablePPTDependencyStatus>(response.data);
 }

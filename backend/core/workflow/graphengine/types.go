@@ -40,8 +40,9 @@ type MaterialRef struct {
 }
 
 type ProducerRef struct {
-	Kind   string `json:"kind"` // external | step
-	StepID string `json:"step_id,omitempty"`
+	Kind     string `json:"kind"` // external | step
+	StepID   string `json:"step_id,omitempty"`
+	Optional bool   `json:"optional,omitempty"`
 }
 
 type CompiledNode struct {
@@ -76,10 +77,37 @@ type CompiledBypass struct {
 	To     []string `json:"to"`
 }
 
+// ClarificationField describes one semantic input that the Chat host should
+// collect before it initializes a Workflow session. It is deliberately part of
+// the package contract: hosts must not branch on a particular workflow id.
+type ClarificationField struct {
+	ID       string   `json:"id" yaml:"id"`
+	Label    string   `json:"label,omitempty" yaml:"label,omitempty"`
+	Question string   `json:"question" yaml:"question"`
+	Type     string   `json:"type,omitempty" yaml:"type,omitempty"`
+	Choices  []string `json:"choices,omitempty" yaml:"choices,omitempty"`
+}
+
+// RuntimePolicy contains host-neutral execution behavior declared by a
+// Workflow package. Hosts consume this policy instead of branching on a
+// particular workflow id.
+type RuntimePolicy struct {
+	PublisherOwnedSlots []string             `json:"publisher_owned_slots,omitempty" yaml:"publisher_owned_slots,omitempty"`
+	CollectsKnowledge   bool                 `json:"collects_knowledge,omitempty" yaml:"collects_knowledge,omitempty"`
+	CompletedEditStep   string               `json:"completed_edit_step,omitempty" yaml:"completed_edit_step,omitempty"`
+	ClarificationFields []ClarificationField `json:"clarification_fields,omitempty" yaml:"clarification_fields,omitempty"`
+}
+
+func (p RuntimePolicy) IsZero() bool {
+	return len(p.PublisherOwnedSlots) == 0 && !p.CollectsKnowledge &&
+		p.CompletedEditStep == "" && len(p.ClarificationFields) == 0
+}
+
 type CompiledStateGraph struct {
 	SchemaVersion     string                   `json:"schema_version"`
 	GraphHash         string                   `json:"graph_hash"`
 	StartRoute        string                   `json:"start_route"`
+	Runtime           RuntimePolicy            `json:"runtime,omitempty"`
 	Nodes             map[string]CompiledNode  `json:"nodes"`
 	ControlEdges      []CompiledEdge           `json:"control_edges"`
 	MaterialProducers map[string]ProducerRef   `json:"material_producers"`

@@ -69,7 +69,7 @@ func TestMergeChunksToFirstChunk_PreservesLastNonEmptySources(t *testing.T) {
 	}
 	got := mergeChunksToFirstChunk([]*ChatChunkResponse{
 		{Delta: "answer", Sources: []any{external}},
-		{FinishReason: "FINISH_REASON_STOP"},
+		{},
 	})
 	if len(got.Sources) != 1 {
 		t.Fatalf("sources: got %d, want 1", len(got.Sources))

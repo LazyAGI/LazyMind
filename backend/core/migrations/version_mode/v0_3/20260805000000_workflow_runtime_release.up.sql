@@ -1,4 +1,34 @@
 -- +migrate Dialect postgres
+CREATE TABLE IF NOT EXISTS plugin_step_intents (
+    id VARCHAR(36) PRIMARY KEY,
+    session_id VARCHAR(36) NOT NULL,
+    step_id VARCHAR(64) NOT NULL,
+    intent_context TEXT NOT NULL DEFAULT '{}',
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_plugin_step_intent
+    ON plugin_step_intents (session_id, step_id);
+
+ALTER TABLE chat_histories ADD COLUMN IF NOT EXISTS run_id VARCHAR(64);
+ALTER TABLE chat_histories ADD COLUMN IF NOT EXISTS run_status VARCHAR(32);
+ALTER TABLE chat_histories ADD COLUMN IF NOT EXISTS run_terminal JSONB;
+CREATE INDEX IF NOT EXISTS idx_chat_histories_run_id ON chat_histories(run_id);
+ALTER TABLE multi_answers_chat_histories ADD COLUMN IF NOT EXISTS run_id VARCHAR(64);
+ALTER TABLE multi_answers_chat_histories ADD COLUMN IF NOT EXISTS run_status VARCHAR(32);
+ALTER TABLE multi_answers_chat_histories ADD COLUMN IF NOT EXISTS run_terminal JSONB;
+CREATE INDEX IF NOT EXISTS idx_multi_answers_chat_histories_run_id ON multi_answers_chat_histories(run_id);
+
+-- +migrate Dialect sqlite
+ALTER TABLE chat_histories ADD COLUMN run_id TEXT;
+ALTER TABLE chat_histories ADD COLUMN run_status TEXT;
+ALTER TABLE chat_histories ADD COLUMN run_terminal TEXT;
+CREATE INDEX IF NOT EXISTS idx_chat_histories_run_id ON chat_histories(run_id);
+ALTER TABLE multi_answers_chat_histories ADD COLUMN run_id TEXT;
+ALTER TABLE multi_answers_chat_histories ADD COLUMN run_status TEXT;
+ALTER TABLE multi_answers_chat_histories ADD COLUMN run_terminal TEXT;
+CREATE INDEX IF NOT EXISTS idx_multi_answers_chat_histories_run_id ON multi_answers_chat_histories(run_id);
+
+-- +migrate Dialect postgres
 ALTER TABLE user_ui_preferences
     ADD COLUMN IF NOT EXISTS task_center_enabled BOOLEAN NOT NULL DEFAULT TRUE;
 ALTER TABLE user_ui_preferences
@@ -14,6 +44,16 @@ ALTER TABLE sub_agent_tasks
     ADD COLUMN IF NOT EXISTS sources JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 -- +migrate Dialect sqlite
+CREATE TABLE IF NOT EXISTS plugin_step_intents (
+    id VARCHAR(36) PRIMARY KEY,
+    session_id VARCHAR(36) NOT NULL,
+    step_id VARCHAR(64) NOT NULL,
+    intent_context TEXT NOT NULL DEFAULT '{}',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_plugin_step_intent
+    ON plugin_step_intents (session_id, step_id);
+
 ALTER TABLE user_ui_preferences ADD COLUMN task_center_enabled BOOLEAN NOT NULL DEFAULT TRUE;
 ALTER TABLE user_ui_preferences ADD COLUMN skills_enabled BOOLEAN NOT NULL DEFAULT TRUE;
 ALTER TABLE user_ui_preferences ADD COLUMN mcp_enabled BOOLEAN NOT NULL DEFAULT TRUE;

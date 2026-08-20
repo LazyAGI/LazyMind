@@ -1,5 +1,3 @@
-
-
 import { SSE } from "./sse";
 import i18n from "@/i18n";
 
@@ -14,20 +12,36 @@ export interface StreamState {
   delta: string;
   reasoning_content: string;
   sources?: any[];
-  finish_reason?: string;
+  runTerminals: Record<string, RunTerminal>;
+  historyRunIds: Record<string, string>;
+  activeHistoryIds: string[];
+  connectionState: "connected" | "disconnected" | "resuming";
   messageId?: string;
   history_id?: string;
   messageList?: any[];
 }
 
+export interface RunTerminal {
+  status: "completed" | "interrupted" | "failed" | "cancelled";
+  reason:
+    | "normal"
+    | "awaiting_user_input"
+    | "model_incomplete"
+    | "model_failure"
+    | "runtime_failure"
+    | "user_cancelled";
+  code?: string;
+  partial_output: boolean;
+  model_call_id?: string;
+  diagnostic_id?: string;
+}
 
-class StreamManager {
+export class StreamManager {
   private streams: Map<string, SSE> = new Map();
   private callbacks: Map<string, StreamCallbacks> = new Map();
   private streamStates: Map<string, StreamState> = new Map();
   private activeConversationId: string | null = null;
 
-  
   registerStream(
     conversationId: string,
     sse: SSE,
@@ -72,7 +86,10 @@ class StreamManager {
         delta: "",
         reasoning_content: "",
         sources: undefined,
-        finish_reason: undefined,
+        runTerminals: {},
+        historyRunIds: {},
+        activeHistoryIds: [],
+        connectionState: "connected",
         messageId: undefined,
         history_id: undefined,
       });
@@ -81,7 +98,10 @@ class StreamManager {
       if (existingState) {
         existingState.delta = "";
         existingState.reasoning_content = "";
-        existingState.finish_reason = undefined;
+        existingState.runTerminals = {};
+        existingState.historyRunIds = {};
+        existingState.activeHistoryIds = [];
+        existingState.connectionState = "connected";
       }
     }
 
@@ -104,21 +124,30 @@ class StreamManager {
               return;
             }
           }
-        } catch {
-        }
+        } catch {}
 
-        this.updateStreamState(conversationId, e);
+        if (!this.updateStreamState(conversationId, e)) {
+          return;
+        }
         if (callbacks.message) {
           callbacks.message(e);
         }
       },
       error: (e: CustomEvent) => {
+        const state = this.streamStates.get(conversationId);
+        if (state && !this.isStreamFinished(conversationId)) {
+          state.connectionState = "disconnected";
+        }
         if (callbacks.error) {
           callbacks.error(e);
         }
         this.cleanupStream(conversationId);
       },
       timeout: (e: CustomEvent) => {
+        const state = this.streamStates.get(conversationId);
+        if (state && !this.isStreamFinished(conversationId)) {
+          state.connectionState = "resuming";
+        }
         if (callbacks.timeout) {
           callbacks.timeout(e);
         }
@@ -139,15 +168,17 @@ class StreamManager {
     }
   }
 
-  
-  private updateStreamState(conversationId: string, e: CustomEvent): void {
+  private updateStreamState(conversationId: string, e: CustomEvent): boolean {
     if (!this.streamStates.has(conversationId)) {
       this.streamStates.set(conversationId, {
         conversationId,
         delta: "",
         reasoning_content: "",
         sources: undefined,
-        finish_reason: undefined,
+        runTerminals: {},
+        historyRunIds: {},
+        activeHistoryIds: [],
+        connectionState: "connected",
         messageId: undefined,
         history_id: undefined,
       });
@@ -155,7 +186,7 @@ class StreamManager {
 
     const state = this.streamStates.get(conversationId);
     if (!state) {
-      return;
+      return false;
     }
 
     try {
@@ -170,8 +201,31 @@ class StreamManager {
           if (result.sources && result.sources.length > 0) {
             state.sources = result.sources;
           }
-          if (result.finish_reason) {
-            state.finish_reason = result.finish_reason;
+          const runtimeEvent = result.runtime_event;
+          const hasBusinessPayload = Boolean(
+            result.delta ||
+              result.reasoning_content ||
+              result.task_created ||
+              result.artifact_created ||
+              result.ask_pending ||
+              result.tool_limit_pending,
+          );
+          if (this.isStreamFinished(conversationId) && hasBusinessPayload) {
+            console.error("Ignored payload emitted after run_finished");
+            return false;
+          }
+          if (
+            result.history_id &&
+            !state.activeHistoryIds.includes(result.history_id)
+          ) {
+            state.activeHistoryIds.push(result.history_id);
+          }
+          if (result.history_id && runtimeEvent?.run_id) {
+            state.historyRunIds[result.history_id] = runtimeEvent.run_id;
+          }
+          if (runtimeEvent?.type === "run_finished" && runtimeEvent.run_id) {
+            state.runTerminals[runtimeEvent.run_id] =
+              runtimeEvent.data as RunTerminal;
           }
           if (result.messageId) {
             state.messageId = result.messageId;
@@ -182,24 +236,24 @@ class StreamManager {
           if (result.conversation_id) {
             state.conversationId = result.conversation_id;
           }
+          state.connectionState = "connected";
         }
       }
     } catch (error) {
       console.error("Failed to parse stream data:", error);
+      return false;
     }
+    return true;
   }
 
-  
   setActiveConversation(conversationId: string | null): void {
     this.activeConversationId = conversationId;
   }
 
-  
   getStreamState(conversationId: string): StreamState | null {
     return this.streamStates.get(conversationId) || null;
   }
 
-  
   saveMessageList(conversationId: string, messageList: any[]): void {
     const state = this.streamStates.get(conversationId);
     if (state) {
@@ -209,12 +263,15 @@ class StreamManager {
         conversationId,
         delta: "",
         reasoning_content: "",
+        runTerminals: {},
+        historyRunIds: {},
+        activeHistoryIds: [],
+        connectionState: "connected",
         messageList,
       });
     }
   }
 
-  
   hasActiveStream(conversationId: string): boolean {
     const stream = this.streams.get(conversationId);
     if (!stream) {
@@ -223,17 +280,14 @@ class StreamManager {
     return stream.readyState === 0 || stream.readyState === 1;
   }
 
-  
   getStream(conversationId: string): SSE | null {
     return this.streams.get(conversationId) || null;
   }
 
-  
   getCallbacks(conversationId: string): StreamCallbacks | null {
     return this.callbacks.get(conversationId) || null;
   }
 
-  
   closeStream(conversationId: string): void {
     const stream = this.streams.get(conversationId);
     if (stream) {
@@ -242,7 +296,6 @@ class StreamManager {
     this.cleanupStream(conversationId);
   }
 
-  
   private cleanupStream(conversationId: string): void {
     const stream = this.streams.get(conversationId);
     if (stream) {
@@ -268,22 +321,55 @@ class StreamManager {
     }
 
     const state = this.streamStates.get(conversationId);
-    if (state?.finish_reason) {
+    if (state && this.isStreamFinished(conversationId)) {
       this.streams.delete(conversationId);
       this.callbacks.delete(conversationId);
     }
   }
 
-  
   isStreamFinished(conversationId: string): boolean {
     const state = this.streamStates.get(conversationId);
-    if (!state || !state.finish_reason) {
+    if (!state) {
       return false;
     }
-    return state.finish_reason !== "FINISH_REASON_UNSPECIFIED";
+    if (state.activeHistoryIds.length === 0) {
+      return Object.keys(state.runTerminals).length > 0;
+    }
+    return state.activeHistoryIds.every((historyId) =>
+      Boolean(
+        state.historyRunIds[historyId] &&
+          state.runTerminals[state.historyRunIds[historyId]],
+      ),
+    );
   }
 
-  
+  getAggregatedRunTerminal(conversationId: string): RunTerminal | undefined {
+    const state = this.streamStates.get(conversationId);
+    if (!state || !this.isStreamFinished(conversationId)) {
+      return undefined;
+    }
+    const terminals =
+      state.activeHistoryIds.length > 0
+        ? state.activeHistoryIds
+            .map((historyId) => state.historyRunIds[historyId])
+            .map((runId) => state.runTerminals[runId])
+        : Object.values(state.runTerminals);
+    const rank: Record<RunTerminal["status"], number> = {
+      failed: 0,
+      interrupted: 1,
+      cancelled: 2,
+      completed: 3,
+    };
+    return terminals.reduce<RunTerminal | undefined>((worst, terminal) => {
+      if (!terminal) {
+        return worst;
+      }
+      return !worst || rank[terminal.status] < rank[worst.status]
+        ? terminal
+        : worst;
+    }, undefined);
+  }
+
   closeAndCleanup(conversationId: string): void {
     const stream = this.streams.get(conversationId);
     if (stream) {
@@ -315,18 +401,15 @@ class StreamManager {
     }
   }
 
-  
   clearStreamState(conversationId: string): void {
     this.streamStates.delete(conversationId);
   }
 
-  
   removeStreamEntry(conversationId: string): void {
     this.streams.delete(conversationId);
     this.callbacks.delete(conversationId);
   }
 
-  
   restoreStreamCallbacks(
     conversationId: string,
     callbacks: StreamCallbacks,
@@ -377,21 +460,30 @@ class StreamManager {
               return;
             }
           }
-        } catch {
-        }
+        } catch {}
 
-        this.updateStreamState(conversationId, e);
+        if (!this.updateStreamState(conversationId, e)) {
+          return;
+        }
         if (callbacks.message) {
           callbacks.message(e);
         }
       },
       error: (e: CustomEvent) => {
+        const state = this.streamStates.get(conversationId);
+        if (state && !this.isStreamFinished(conversationId)) {
+          state.connectionState = "disconnected";
+        }
         if (callbacks.error) {
           callbacks.error(e);
         }
         this.cleanupStream(conversationId);
       },
       timeout: (e: CustomEvent) => {
+        const state = this.streamStates.get(conversationId);
+        if (state && !this.isStreamFinished(conversationId)) {
+          state.connectionState = "resuming";
+        }
         if (callbacks.timeout) {
           callbacks.timeout(e);
         }
@@ -412,14 +504,12 @@ class StreamManager {
     }
   }
 
-  
   getActiveConversationIds(): string[] {
     return Array.from(this.streams.keys()).filter((id) =>
       this.hasActiveStream(id),
     );
   }
 
-  
   cleanupFinishedStreams(): void {
     const finishedIds: string[] = [];
 
@@ -436,7 +526,6 @@ class StreamManager {
     }
   }
 
-  
   getDebugInfo(): any {
     const info: any = {
       activeConversationId: this.activeConversationId,
@@ -449,7 +538,9 @@ class StreamManager {
       info.streams[conversationId] = {
         isActive: this.hasActiveStream(conversationId),
         isFinished: this.isStreamFinished(conversationId),
-        finish_reason: state.finish_reason,
+        runTerminals: state.runTerminals,
+        historyRunIds: state.historyRunIds,
+        connectionState: state.connectionState,
         messageListLength: state.messageList?.length || 0,
       };
     });

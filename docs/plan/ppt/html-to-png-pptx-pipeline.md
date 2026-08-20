@@ -1,6 +1,9 @@
 # HTML → PNG → PPTX 导出方案
 
 > 目标：基于 **pptx skill** 生成的 HTML 幻灯片，在前端一键导出 PNG，并由后端/算法侧拼接为 PPTX。HTML 原文件与 PNG 预览一并保留。
+>
+> 补充产品计划（Composite 缩略图布局、可编辑/不可编辑模式选型）见：  
+> [ppt-plugin-composite-ux-and-modes.md](./ppt-plugin-composite-ux-and-modes.md)
 
 ## 总体流程
 

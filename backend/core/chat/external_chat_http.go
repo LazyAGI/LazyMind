@@ -274,7 +274,15 @@ func resumeExternalChatStream(
 		return false
 	}
 	if err != nil {
-		writeSSEChunk(w, flusher, map[string]any{"finish_reason": "FINISH_REASON_UNKNOWN"})
+		writeSSEChunk(w, flusher, map[string]any{"runtime_event": failedRunEvent(newID("run_"), "external_resume_failed", false)})
+		return true
+	}
+	hasSemanticOutput, err := app.hasSemanticOutput(r.Context(), run.ID)
+	if err != nil {
+		writeSSEChunk(w, flusher, map[string]any{
+			"conversation_id": conversationID, "history_id": run.HistoryID,
+			"runtime_event": failedRunEvent(run.ID, "external_resume_failed", false),
+		})
 		return true
 	}
 	cursor := after
@@ -284,7 +292,7 @@ func resumeExternalChatStream(
 		if readErr != nil {
 			writeSSEChunk(w, flusher, map[string]any{
 				"conversation_id": conversationID, "history_id": run.HistoryID,
-				"finish_reason": "FINISH_REASON_UNKNOWN", "error": readErr.Error(),
+				"runtime_event": failedRunEvent(run.ID, "external_resume_failed", hasSemanticOutput),
 			})
 			return true
 		}
@@ -293,21 +301,23 @@ func resumeExternalChatStream(
 			projection := basicExternalExecutionProjection(current, time.Now().UTC())
 			switch event.Type {
 			case "message":
+				if event.Text != "" {
+					hasSemanticOutput = true
+				}
 				writeSSEChunk(w, flusher, &ChatChunkResponse{
 					ConversationID: conversationID, Seq: int32(run.Sequence), HistoryID: run.HistoryID,
-					Delta: event.Text, FinishReason: "FINISH_REASON_UNSPECIFIED", ExternalEventSequence: event.Sequence,
+					Delta: event.Text, ExternalEventSequence: event.Sequence,
 					Execution: &projection,
 				})
 			case "failed":
-				message := strings.TrimSpace(event.ErrorMessage)
 				writeSSEChunk(w, flusher, &ChatChunkResponse{
 					ConversationID: conversationID, Seq: int32(run.Sequence), HistoryID: run.HistoryID,
-					Delta: "External Agent failed: " + message, FinishReason: "FINISH_REASON_UNKNOWN",
 					ExternalEventSequence: event.Sequence,
 					Execution:             &projection,
+					RuntimeEvent:          failedRunEvent(run.ID, "external_agent_failed", hasSemanticOutput),
 				})
+				return true
 			case "completed", "stopped":
-				finish := "FINISH_REASON_STOP"
 				if projections, err := app.executionProjections(r.Context(), owner, []string{run.HistoryID}); err == nil {
 					if full, ok := projections[run.HistoryID]; ok {
 						projection = full
@@ -315,19 +325,14 @@ func resumeExternalChatStream(
 				}
 				writeSSEChunk(w, flusher, &ChatChunkResponse{
 					ConversationID: conversationID, Seq: int32(run.Sequence), HistoryID: run.HistoryID,
-					FinishReason: finish, ExternalEventSequence: event.Sequence,
-					Execution: &projection,
+					ExternalEventSequence: event.Sequence,
+					Execution:             &projection,
+					RuntimeEvent:          externalRunTerminalEvent(run.ID, event.Type, hasSemanticOutput),
 				})
-				_, _ = w.Write([]byte("data: [DONE]\n\n"))
-				flusher.Flush()
 				return true
 			}
 		}
 		if externalRunTerminal(current.Status) {
-			finish := "FINISH_REASON_STOP"
-			if current.Status == "failed" {
-				finish = "FINISH_REASON_UNKNOWN"
-			}
 			projection := basicExternalExecutionProjection(current, time.Now().UTC())
 			if projections, err := app.executionProjections(r.Context(), owner, []string{run.HistoryID}); err == nil {
 				if full, ok := projections[run.HistoryID]; ok {
@@ -336,11 +341,10 @@ func resumeExternalChatStream(
 			}
 			writeSSEChunk(w, flusher, &ChatChunkResponse{
 				ConversationID: conversationID, Seq: int32(run.Sequence), HistoryID: run.HistoryID,
-				FinishReason: finish, ExternalEventSequence: current.NextEventSequence,
-				Execution: &projection,
+				ExternalEventSequence: current.NextEventSequence,
+				Execution:             &projection,
+				RuntimeEvent:          externalRunTerminalEvent(run.ID, current.Status, hasSemanticOutput),
 			})
-			_, _ = w.Write([]byte("data: [DONE]\n\n"))
-			flusher.Flush()
 			return true
 		}
 		now := time.Now()
@@ -349,8 +353,8 @@ func resumeExternalChatStream(
 			projection := basicExternalExecutionProjection(current, now.UTC())
 			writeSSEChunk(w, flusher, &ChatChunkResponse{
 				ConversationID: conversationID, Seq: int32(run.Sequence), HistoryID: run.HistoryID,
-				FinishReason: "FINISH_REASON_UNSPECIFIED", ExternalEventSequence: cursor,
-				Execution: &projection,
+				ExternalEventSequence: cursor,
+				Execution:             &projection,
 			})
 		}
 		select {

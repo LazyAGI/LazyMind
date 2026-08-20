@@ -283,6 +283,7 @@ function Finalize-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind 
         '--arch', 'amd64',
         '--trusted-local-mode', $trustedLocalMode
     )
+    Invoke-Native 'node.exe' @((Join-Path $repoRoot 'desktop\scripts\write-editable-ppt-dependency-config.mjs'), $runtimeRoot)
     $reparse = @(Get-ChildItem -LiteralPath $runtimeRoot -Recurse -Force -ErrorAction SilentlyContinue | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint })
     if ($reparse.Count -gt 0) {
         throw "Desktop runtime contains non-portable reparse points; first path: $($reparse[0].FullName)"

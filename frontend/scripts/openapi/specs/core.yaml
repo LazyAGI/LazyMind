@@ -425,8 +425,6 @@ components:
                     type: string
                 execution:
                     $ref: '#/components/schemas/ExternalExecutionProjection'
-                finish_reason:
-                    type: string
                 history_id:
                     type: string
                 message:
@@ -437,6 +435,8 @@ components:
                     type: array
                 reasoning_content:
                     type: string
+                runtime_event:
+                    $ref: '#/components/schemas/ChatRuntimeEvent'
                 seq:
                     type: integer
                 sources:
@@ -447,6 +447,20 @@ components:
                 thinking_duration_s:
                     format: int64
                     type: integer
+            type: object
+        ChatRuntimeEvent:
+            properties:
+                data:
+                    properties: {}
+                    type: object
+                event_id:
+                    type: string
+                run_id:
+                    type: string
+                schema_version:
+                    type: integer
+                type:
+                    type: string
             type: object
         CheckDatabaseConnectionResponse:
             properties:
@@ -722,6 +736,12 @@ components:
                     type: string
                 result:
                     type: string
+                run_id:
+                    type: string
+                run_status:
+                    type: string
+                run_terminal:
+                    $ref: '#/components/schemas/RunTerminal'
                 seq:
                     type: integer
                 sources:
@@ -3104,6 +3124,37 @@ components:
                 - feedback_rate
                 - user_count
             type: object
+        RunTerminal:
+            properties:
+                code:
+                    type: string
+                diagnostic_id:
+                    type: string
+                model_call_id:
+                    type: string
+                partial_output:
+                    type: boolean
+                reason:
+                    enum:
+                        - normal
+                        - awaiting_user_input
+                        - model_incomplete
+                        - model_failure
+                        - runtime_failure
+                        - user_cancelled
+                    type: string
+                status:
+                    enum:
+                        - completed
+                        - interrupted
+                        - failed
+                        - cancelled
+                    type: string
+            required:
+                - status
+                - reason
+                - partial_output
+            type: object
         SearchDatasetMemberRequest:
             properties:
                 is_all:
@@ -3495,6 +3546,7 @@ components:
                 id:
                     type: string
                 progress:
+                    properties: {}
                     type: object
                 schedule_id:
                     type: string
@@ -5883,10 +5935,6 @@ components:
             type: object
         skillListOpenAPIResponse:
             properties:
-                categories:
-                    items:
-                        type: string
-                    type: array
                 items:
                     items:
                         $ref: '#/components/schemas/skillListItemOpenAPIResponse'
