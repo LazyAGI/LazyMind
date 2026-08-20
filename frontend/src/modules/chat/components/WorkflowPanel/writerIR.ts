@@ -119,6 +119,8 @@ interface WriterMediaAsset {
   media_asset_id?: unknown;
   source_type?: unknown;
   uri?: unknown;
+  local_path?: unknown;
+  meta?: unknown;
 }
 
 interface WriterMediaAssetLibrary {
@@ -131,26 +133,17 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-/**
- * Supplies the local path for a legacy Feishu image only when the current
- * session has exactly one generated image. This makes existing documents
- * renderable without writing to Feishu and never guesses between multiple
- * media assets.
- */
+/** Restores renderable paths for legacy Feishu image blocks without changing provider state. */
 export function restoreLegacyWriterImageReference(
   document: WriterDocument,
   mediaLibrary: unknown,
 ): WriterDocument {
   const library = asRecord(mediaLibrary) as WriterMediaAssetLibrary | undefined;
-  const generatedAssets = Object.values(library?.assets ?? {}).filter((asset) => {
+  const assets = Object.values(library?.assets ?? {});
+  const generatedAssets = assets.filter((asset) => {
     const uri = typeof asset.uri === 'string' ? asset.uri.trim() : '';
     return asset.source_type === 'image_generation' && uri !== '';
   });
-  if (generatedAssets.length !== 1) return document;
-
-  const asset = generatedAssets[0];
-  const path = typeof asset.uri === 'string' ? asset.uri.trim() : '';
-  const assetID = typeof asset.media_asset_id === 'string' ? asset.media_asset_id : '';
   let changed = false;
 
   const restoreBlocks = (blocks: WriterBlock[]): WriterBlock[] => blocks.map((block) => {
@@ -158,6 +151,10 @@ export function restoreLegacyWriterImageReference(
     const mediaReference = block.references?.find((reference) => reference.type === 'media_asset');
     const rawBlock = asRecord(asRecord(block.provider_payload)?.raw_block);
     const image = asRecord(rawBlock?.image);
+    const providerBinding = asRecord(block.provider_binding);
+    const providerBlockID = typeof providerBinding?.block_id === 'string'
+      ? providerBinding.block_id.trim()
+      : '';
     const isLegacyFeishuImage = block.type === 'image'
       && typeof image?.token === 'string'
       && image.token.trim() !== '';
@@ -168,6 +165,31 @@ export function restoreLegacyWriterImageReference(
     if (!isLegacyFeishuImage || hasLocalPath) {
       return children === block.children ? block : { ...block, children };
     }
+
+    const sourceAssets = assets.filter((asset) => {
+      const meta = asRecord(asset.meta);
+      const assetBlockID = typeof meta?.provider_block_id === 'string'
+        ? meta.provider_block_id.trim()
+        : '';
+      return asset.source_type === 'input_resource'
+        && meta?.provider === 'feishu'
+        && meta?.origin === 'source_document'
+        && providerBlockID !== ''
+        && assetBlockID === providerBlockID;
+    });
+    const asset = sourceAssets.length === 1
+      ? sourceAssets[0]
+      : generatedAssets.length === 1 ? generatedAssets[0] : undefined;
+    if (!asset) {
+      return children === block.children ? block : { ...block, children };
+    }
+    const localPath = typeof asset.local_path === 'string' ? asset.local_path.trim() : '';
+    const uri = typeof asset.uri === 'string' ? asset.uri.trim() : '';
+    const path = asset.source_type === 'input_resource' ? localPath || uri : uri || localPath;
+    if (!path) {
+      return children === block.children ? block : { ...block, children };
+    }
+    const assetID = typeof asset.media_asset_id === 'string' ? asset.media_asset_id : '';
     changed = true;
     return {
       ...block,

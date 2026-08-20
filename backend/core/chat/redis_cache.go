@@ -29,7 +29,10 @@ const (
 	chatStopExpireTime   = 15 * time.Minute
 	chatCancelPollTime   = 500 * time.Millisecond
 	convEventsExpireTime = time.Hour * 24
-	convEventsMaxLen     = int64(1000)
+	// Writer previews can emit more than 1,000 deltas in one draft. Keep a
+	// complete live-workflow window so index-based conversation tailing never
+	// loses the end of an active artifact stream to list trimming.
+	convEventsMaxLen = int64(10000)
 )
 
 type ChatStatus struct {

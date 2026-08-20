@@ -299,13 +299,16 @@ function useArtifactFileUrl(
 
 function useWriterMediaLibrary(sessionId?: string): unknown {
   const sessionByConversation = useWorkflowStore((state) => state.sessionByConversation);
-  const mediaAssetSlot = useMemo(() => Object.values(sessionByConversation)
-    .find((session) => session?.session_id === sessionId)
-    ?.slots
-    ?.find((candidate) => candidate.slot_id === 'resolved_media_assets' && candidate.selected), [
-      sessionByConversation,
-      sessionId,
-    ]);
+  const mediaAssetSlot = useMemo(() => {
+    const slots = Object.values(sessionByConversation)
+      .find((session) => session?.session_id === sessionId)
+      ?.slots;
+    return slots?.find(
+      (candidate) => candidate.slot_id === 'resolved_media_assets' && candidate.selected,
+    ) ?? slots?.find(
+      (candidate) => candidate.slot_id === 'media_assets' && candidate.selected,
+    );
+  }, [sessionByConversation, sessionId]);
   const [fetchedMediaAssetSlot, setFetchedMediaAssetSlot] = useState<SlotRevision>();
   const selectedMediaAssetSlot = mediaAssetSlot ?? fetchedMediaAssetSlot;
 
@@ -317,8 +320,11 @@ function useWriterMediaLibrary(sessionId?: string): unknown {
     let cancelled = false;
     WorkflowSessionApi().getSlots(sessionId)
       .then((response) => {
-        const slot = (response?.data?.data?.slots ?? []).find(
+        const slots = response?.data?.data?.slots ?? [];
+        const slot = slots.find(
           (candidate: SlotRevision) => candidate.slot_id === 'resolved_media_assets' && candidate.selected,
+        ) ?? slots.find(
+          (candidate: SlotRevision) => candidate.slot_id === 'media_assets' && candidate.selected,
         );
         if (!cancelled) setFetchedMediaAssetSlot(slot);
       })

@@ -1,4 +1,4 @@
-import { FC, type ReactNode, useRef, useState, useEffect, useCallback } from "react";
+import { FC, type ReactNode, useRef, useState, useEffect, useCallback, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { localizeErrorCode } from "@/components/request";
 import { message } from "antd";
@@ -37,7 +37,7 @@ import {
 import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
 import { buildEnvironmentContext } from "@/modules/chat/utils/environment";
 import TaskCenter from "@/modules/chat/components/TaskCenter";
-import { useTaskCenterStore } from "@/modules/chat/store/taskCenter";
+import { isTaskCenterVisibleTask, useTaskCenterStore } from "@/modules/chat/store/taskCenter";
 import type { SubAgentTask } from "@/modules/chat/store/taskCenter";
 import { useChatInputStore } from "@/modules/chat/store/chatInput";
 import { useChatThinkStore } from "@/modules/chat/store/chatThink";
@@ -251,6 +251,10 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const tasks = useTaskCenterStore((s) =>
     sessionId ? s.tasksByConversation[sessionId] ?? EMPTY_TASKS : EMPTY_TASKS,
   );
+  const taskCenterTasks = useMemo(
+    () => tasks.filter(isTaskCenterVisibleTask),
+    [tasks],
+  );
   const refreshConversationExecution = useTaskCenterStore(
     (s) => s.refreshConversationExecution,
   );
@@ -271,11 +275,11 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const prevTasksLengthRef = useRef(0);
   useEffect(() => {
     const prev = prevTasksLengthRef.current;
-    prevTasksLengthRef.current = tasks.length;
-    if (prev === 0 && tasks.length > 0 && isDeveloperModeActive()) {
+    prevTasksLengthRef.current = taskCenterTasks.length;
+    if (prev === 0 && taskCenterTasks.length > 0 && isDeveloperModeActive()) {
       setIsTaskPanelCollapsed(false);
     }
-  }, [tasks.length]);
+  }, [taskCenterTasks.length]);
 
   // Also auto-expand when a workflow session first appears (even with no tasks yet).
   const prevHasWorkflowSessionRef = useRef(false);
@@ -714,7 +718,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   };
 
   const isTaskPanelRestoreVisible =
-    !workflowPanelExpanded && tasks.length > 0 && isTaskPanelCollapsed;
+    !workflowPanelExpanded && taskCenterTasks.length > 0 && isTaskPanelCollapsed;
 
   return (
     <div
@@ -755,7 +759,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           >
             <UnorderedListOutlined aria-hidden />
             <span>{t("taskCenter.panelTitle")}</span>
-            {tasks.length > 0 && <span className="expanded-rail-tabs__count">{tasks.length}</span>}
+            {taskCenterTasks.length > 0 && <span className="expanded-rail-tabs__count">{taskCenterTasks.length}</span>}
           </button>
         </div>
       )}
@@ -810,10 +814,10 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           title={t("taskCenter.panelTitle")}
         >
           <span className="task-panel-restore-icon">&#8249;</span>
-          <span className="task-panel-restore-label">{t("taskCenter.panelTitle")} ({tasks.length})</span>
+          <span className="task-panel-restore-label">{t("taskCenter.panelTitle")} ({taskCenterTasks.length})</span>
         </button>
       )}
-      {((tasks.length > 0 && !workflowPanelExpanded && !isTaskPanelCollapsed) || workflowPanelExpanded) && (
+      {((taskCenterTasks.length > 0 && !workflowPanelExpanded && !isTaskPanelCollapsed) || workflowPanelExpanded) && (
         <div
           className={`right-box${workflowPanelExpanded ? " right-box--expanded-tab" : ""}${workflowPanelExpanded && expandedRailTab !== "tasks" ? " right-box--tab-hidden" : ""}`}
           style={!workflowPanelExpanded && panelWidth ? { width: panelWidth, minWidth: panelWidth } : undefined}

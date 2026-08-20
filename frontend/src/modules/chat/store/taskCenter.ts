@@ -115,6 +115,10 @@ export interface SubAgentTask {
   execution_log: TaskLogEntry[];
 }
 
+export function isTaskCenterVisibleTask(task: Pick<SubAgentTask, 'agent_type'>): boolean {
+  return task.agent_type !== 'workflow_step';
+}
+
 const WRITER_MARKDOWN_STREAM_SLOT_IDS = new Set(['outline_document', 'draft_document']);
 function artifactKey(a: TaskArtifact): string {
   return `${a.slot}#${a.seq}`;
@@ -659,8 +663,9 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             if (replayed) return;
             if (payload.agent_type === 'workflow_step') {
               scheduleWorkflowSessionRefresh(conversationId);
-              return;
             }
+            // Workflow steps stay out of TaskCenter UI, but their live events
+            // still drive Writer outline and draft previews in WorkflowPanel.
             get().upsertTask(conversationId, {
               task_id: payload.task_id,
               trigger_history_id: payload.trigger_history_id,
