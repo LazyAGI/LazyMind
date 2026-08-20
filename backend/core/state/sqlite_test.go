@@ -2,10 +2,43 @@ package state
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"reflect"
 	"testing"
 )
+
+func TestSQLiteStoreLPop(t *testing.T) {
+	ctx := context.Background()
+	store, err := NewSQLiteStore(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("new sqlite store: %v", err)
+	}
+	defer store.Close()
+
+	received, err := store.LPop(ctx, "stop")
+	if err != nil || received {
+		t.Fatalf("empty lpop received=%v err=%v, want false/nil", received, err)
+	}
+	if err := store.LPush(ctx, "stop", []byte("1"), 0); err != nil {
+		t.Fatalf("lpush: %v", err)
+	}
+	received, err = store.LPop(ctx, "stop")
+	if err != nil || !received {
+		t.Fatalf("signal lpop received=%v err=%v, want true/nil", received, err)
+	}
+	received, err = store.LPop(ctx, "stop")
+	if err != nil || received {
+		t.Fatalf("consumed lpop received=%v err=%v, want false/nil", received, err)
+	}
+
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	received, err = store.LPop(cancelled, "stop")
+	if received || !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled lpop received=%v err=%v, want false/context canceled", received, err)
+	}
+}
 
 func TestSQLiteStoreLTrimKeepsRequestedRange(t *testing.T) {
 	ctx := context.Background()

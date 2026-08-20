@@ -122,7 +122,7 @@ func TestMergeChunksRetainsConversationIntentUpdate(t *testing.T) {
 	intent := &IntentUpdatedEvent{Scope: "conversation", IntentContext: map[string]any{"goal": "新目标"}}
 	merged := mergeChunksToFirstChunk([]*ChatChunkResponse{
 		{Delta: "前", IntentUpdated: intent},
-		{Delta: "后", FinishReason: "FINISH_REASON_STOP"},
+		{Delta: "后"},
 	})
 	if merged.Delta != "前后" || merged.IntentUpdated != intent {
 		t.Fatalf("intent update was not retained: %#v", merged)

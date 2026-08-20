@@ -32,6 +32,7 @@ import FeedbackModal from "../FeedbackModal";
 import AskCard from "@/modules/chat/components/AskCard";
 import ToolLimitCard from "@/modules/chat/components/ToolLimitCard";
 import ArtifactDownloadButton from "@/modules/chat/components/ArtifactCollectorCard/ArtifactDownloadButton";
+import RunStatusCard from "@/modules/chat/components/RunStatusCard";
 import {
   type ChatSource,
   type ChatSourceCollection,
@@ -87,7 +88,9 @@ function SourceFavicon({
           onError={() => setHasFaviconError(true)}
         />
       ) : isExternalSource(source) ? (
-        <span className="chat-source-brand-initial">{getSourceIconInitial(source)}</span>
+        <span className="chat-source-brand-initial">
+          {getSourceIconInitial(source)}
+        </span>
       ) : (
         <FileTextOutlined />
       )}
@@ -134,14 +137,19 @@ export function ChatSourcePanel({
                 <span className="chat-source-item-heading">
                   {getSourceSubtitle(source) || t("chat.references")}
                 </span>
-                <strong className="chat-source-item-title">{getSourceLabel(source)}</strong>
+                <strong className="chat-source-item-title">
+                  {getSourceLabel(source)}
+                </strong>
                 {getSourceEvidenceText(source) && (
                   <span className="chat-source-item-content">
                     {getSourceEvidenceText(source)}
                   </span>
                 )}
               </span>
-              <RightOutlined className="chat-source-item-arrow" aria-hidden="true" />
+              <RightOutlined
+                className="chat-source-item-arrow"
+                aria-hidden="true"
+              />
             </button>
           ))}
         </div>
@@ -161,8 +169,7 @@ async function copyTextToClipboard(text: string) {
       await navigator.clipboard.writeText(normalizedText);
       return;
     }
-  } catch {
-  }
+  } catch {}
 
   const textarea = document.createElement("textarea");
   textarea.value = normalizedText;
@@ -401,7 +408,9 @@ const AssistantMessage = (props: any) => {
   // instance with useRef so it is stable across re-renders.
   const persistAskAnswersRef = useRef(
     debounce((sid: string, hid: string, answers: Record<number, any>) => {
-      ChatServiceApi().conversationServiceSaveAskAnswers(sid, hid, answers).catch(() => {});
+      ChatServiceApi()
+        .conversationServiceSaveAskAnswers(sid, hid, answers)
+        .catch(() => {});
     }, 600),
   );
   const [feedbackState, dispatch] = useReducer(feedbackReducer, {
@@ -413,7 +422,7 @@ const AssistantMessage = (props: any) => {
   });
 
   const workflowSession = useWorkflowStore((s) =>
-    sessionId ? s.sessionByConversation[sessionId] ?? null : null,
+    sessionId ? (s.sessionByConversation[sessionId] ?? null) : null,
   );
 
   useEffect(() => {
@@ -542,10 +551,7 @@ const AssistantMessage = (props: any) => {
     const right = Math.max(...lineRects.map((lineRect) => lineRect.right));
     const centerX = (left + right) / 2;
     // Keep the fixed button inside the viewport (button ~ translateX(-50%)).
-    const clampedLeft = Math.min(
-      Math.max(centerX, 28),
-      window.innerWidth - 28,
-    );
+    const clampedLeft = Math.min(Math.max(centerX, 28), window.innerWidth - 28);
 
     showCiteButton(selectedText, Math.max(8, top - 42), clampedLeft);
   };
@@ -606,8 +612,12 @@ const AssistantMessage = (props: any) => {
               />
             ))}
           </span>
-          <span className="chat-source-button-label">{t("chat.references")}</span>
-          <span className="chat-source-button-count">{displaySources.length}</span>
+          <span className="chat-source-button-label">
+            {t("chat.references")}
+          </span>
+          <span className="chat-source-button-count">
+            {displaySources.length}
+          </span>
         </Button>
       </Tooltip>
     );
@@ -627,7 +637,11 @@ const AssistantMessage = (props: any) => {
       const answer = item.answers.find(
         (ans: any) => ans.history_id === resolvedHistoryId,
       );
-      if (answer && answer.feed_back !== undefined && answer.feed_back !== null) {
+      if (
+        answer &&
+        answer.feed_back !== undefined &&
+        answer.feed_back !== null
+      ) {
         return normalizeFeedbackType(answer.feed_back);
       }
     }
@@ -731,7 +745,10 @@ const AssistantMessage = (props: any) => {
         },
       })
       .then(() => {
-        const updatedItem = createUpdatedItem(nextFeedbackType, targetHistoryId);
+        const updatedItem = createUpdatedItem(
+          nextFeedbackType,
+          targetHistoryId,
+        );
         updateMessage(updatedItem);
 
         dispatch({
@@ -999,12 +1016,18 @@ const AssistantMessage = (props: any) => {
   }
 
   function renderBottom() {
+    const runActive =
+      !item.run_status &&
+      item.finish_reason ===
+        ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified;
+    const runFailed =
+      item.run_status === "failed" || item.run_status === "interrupted";
     if (
       item.tool_limit_pending &&
-      item.tool_limit_pending.decision_id !== item.resolved_tool_limit_decision_id &&
+      item.tool_limit_pending.decision_id !==
+        item.resolved_tool_limit_decision_id &&
       sessionId &&
-      item.finish_reason ===
-        ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified
+      runActive
     ) {
       return (
         <ToolLimitCard
@@ -1012,11 +1035,7 @@ const AssistantMessage = (props: any) => {
           pending={item.tool_limit_pending}
           onDecision={async (action) => {
             const decisionId = item.tool_limit_pending.decision_id;
-            await decideToolLimit(
-              sessionId,
-              decisionId,
-              action,
-            );
+            await decideToolLimit(sessionId, decisionId, action);
             updateMessage({
               id: item.id,
               history_id: item.history_id,
@@ -1042,28 +1061,38 @@ const AssistantMessage = (props: any) => {
           disabled={isReadOnly}
           savedAnswers={item.ask_saved_answers}
           onAnswerChange={(idx, ans) => {
-            const currentAnswers = { ...(item.ask_saved_answers || {}), [idx]: ans };
+            const currentAnswers = {
+              ...(item.ask_saved_answers || {}),
+              [idx]: ans,
+            };
             // Update in-memory message immediately so answers survive session switches.
             updateMessage({ ...item, ask_saved_answers: currentAnswers });
             // Debounced write to backend so answers survive page reload.
             if (sessionId && item.history_id) {
-              persistAskAnswersRef.current(sessionId, item.history_id, currentAnswers);
+              persistAskAnswersRef.current(
+                sessionId,
+                item.history_id,
+                currentAnswers,
+              );
             }
           }}
           onSubmit={(payload) => {
             persistAskAnswersRef.current.cancel();
             // Mark the card as answered in memory so it shows as disabled immediately.
-            updateMessage({ ...item, ask_answered: true, ask_saved_answers: undefined });
-            props.sendMessage?.(payload.text, undefined, { ask_answers_structured: payload.structured });
+            updateMessage({
+              ...item,
+              ask_answered: true,
+              ask_saved_answers: undefined,
+            });
+            props.sendMessage?.(payload.text, undefined, {
+              ask_answers_structured: payload.structured,
+            });
           }}
         />
       );
     }
     // Show stop button while still streaming (no card present).
-    if (
-      item.finish_reason ===
-      ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified
-    ) {
+    if (runActive) {
       return (
         <Button className="stop-btn" onClick={stopGeneration}>
           {t("chat.stopGenerate")}
@@ -1071,6 +1100,13 @@ const AssistantMessage = (props: any) => {
       );
     }
     // Show error + regenerate on unknown/failed finish.
+    if (runFailed) {
+      return (
+        <Button className="stop-btn" onClick={regenerate}>
+          {t("chat.regenerate")}
+        </Button>
+      );
+    }
     if (
       item.finish_reason ===
       ChatConversationsResponseFinishReasonEnum.FinishReasonUnknown
@@ -1104,11 +1140,18 @@ const AssistantMessage = (props: any) => {
     );
 
   const shouldShowLoading =
+    !item.model_retry &&
     !(item.delta && trim(item.delta)?.length > 0) &&
     !(item.reasoning_content && trim(item.reasoning_content)?.length > 0) &&
     !hasMultipleAnswersContent &&
+    !item.run_status &&
     item.finish_reason ===
       ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified;
+  const runCompleted =
+    item.run_status === "completed" ||
+    (!item.run_status &&
+      item.finish_reason ===
+        ChatConversationsResponseFinishReasonEnum.FinishReasonStop);
 
   const shouldUseMultiAnswerStyle =
     hasMultipleAnswers &&
@@ -1122,14 +1165,11 @@ const AssistantMessage = (props: any) => {
         className="chat-assistant-msg-multi-answer-wrap"
         onMouseUp={handleMouseUp}
       >
-        <IdentityAvatar
-          className="chat-avatar"
-          kind="soul"
-          size={32}
-        />
+        <IdentityAvatar className="chat-avatar" kind="soul" size={32} />
         <div className="chat-bot-box-multi">
           <div className="chat-bot">
             <ExternalExecutionSummary execution={item.execution} />
+            <RunStatusCard terminal={item.run_terminal} />
             {shouldShowLoading
               ? renderLoading()
               : renderText({ ...item, delta: "" })}
@@ -1162,21 +1202,14 @@ const AssistantMessage = (props: any) => {
                 );
               }}
               onSelectAnswer={onSelectAnswer}
-              disabled={
-                item.finish_reason !==
-                ChatConversationsResponseFinishReasonEnum.FinishReasonStop
-              }
-              renderFooter={
-                item.finish_reason ===
-                ChatConversationsResponseFinishReasonEnum.FinishReasonStop
-                  ? renderAnswerFooter
-                  : undefined
-              }
+              disabled={!runCompleted}
+              renderFooter={runCompleted ? renderAnswerFooter : undefined}
               initialSelectedIndex={item.selected_answer_index}
               initialPreference={item.answer_preference}
               isStreaming={
+                !item.run_status &&
                 item.finish_reason ===
-                ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified
+                  ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified
               }
             />
           </div>
@@ -1207,14 +1240,11 @@ const AssistantMessage = (props: any) => {
       className="chat-assistant-msg-single-answer-wrap"
       onMouseUp={handleMouseUp}
     >
-      <IdentityAvatar
-        className="chat-avatar"
-        kind="soul"
-        size={32}
-      />
+      <IdentityAvatar className="chat-avatar" kind="soul" size={32} />
       <div className="chat-bot-box-single">
         <div className="chat-bot">
           <ExternalExecutionSummary execution={item.execution} />
+          <RunStatusCard terminal={item.run_terminal} />
           {shouldShowLoading
             ? renderLoading()
             : item.onboardingInfo
@@ -1225,10 +1255,7 @@ const AssistantMessage = (props: any) => {
             renderError()}
 
           {}
-          {item.finish_reason ===
-            ChatConversationsResponseFinishReasonEnum.FinishReasonStop &&
-            !item.onboardingInfo &&
-            renderFooter()}
+          {runCompleted && !item.onboardingInfo && renderFooter()}
         </div>
         {(item.ask_pending || index === length - 1) && renderBottom()}
         {index === length - 1 && workflowSession && sessionId && (

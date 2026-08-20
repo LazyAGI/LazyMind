@@ -411,27 +411,95 @@ func manualSchemas() map[string]any {
 			prop("status", strSchema()),
 			prop("error_message", strSchema()),
 		),
-		"ListTasksResponse":               obj(prop("tasks", array(refSchema("TaskResponse"))), prop("total_size", intSchema()), prop("next_page_token", strSchema())),
-		"PromptRequest":                   objReq([]string{"display_name", "content"}, prop("display_name", strSchema()), prop("content", strSchema()), prop("category", strSchema())),
-		"PromptPatchRequest":              obj(prop("display_name", strSchema()), prop("content", strSchema()), prop("category", strSchema())),
-		"PromptCategoryRequest":           objReq([]string{"name"}, prop("name", strSchema())),
-		"PromptCategory":                  objReq([]string{"id", "name"}, prop("id", strSchema()), prop("name", strSchema())),
-		"PromptCategoryListResponse":      obj(prop("categories", array(refSchema("PromptCategory")))),
-		"PromptPolishRequest":             objReq([]string{"content", "user_instruct"}, prop("content", strSchema()), prop("user_instruct", strSchema())),
-		"PromptPolishResponse":            obj(prop("content", strSchema())),
-		"PromptItem":                      obj(prop("name", strSchema()), prop("id", strSchema()), prop("content", strSchema()), prop("display_name", strSchema()), prop("category", strSchema()), prop("source", strSchema()), prop("is_favorite", boolSchema()), prop("usage_count", int64Schema()), prop("last_used_at", strSchema()), prop("created_at", strSchema()), prop("updated_at", strSchema())),
-		"PromptFacets":                    obj(prop("scopes", obj()), prop("categories", obj()), prop("category_total", int64Schema())),
-		"PromptListResponse":              obj(prop("prompts", array(refSchema("PromptItem"))), prop("custom_categories", array(refSchema("PromptCategory"))), prop("next_page_token", strSchema()), prop("total", int64Schema()), prop("facets", refSchema("PromptFacets"))),
-		"PromptStateResponse":             obj(prop("id", strSchema()), prop("is_favorite", boolSchema()), prop("usage_count", int64Schema()), prop("last_used_at", strSchema())),
-		"ToolMethod":                      obj(prop("name", strSchema()), prop("summary", strSchema())),
-		"ToolGroup":                       obj(prop("name", strSchema()), prop("label", strSchema()), prop("description", strSchema()), prop("methods", array(refSchema("ToolMethod"))), prop("can_disable", boolSchema()), prop("active", boolSchema()), prop("disabled", boolSchema())),
-		"ToolListResponse":                obj(prop("tool_groups", array(refSchema("ToolGroup"))), prop("page", intSchema()), prop("page_size", intSchema()), prop("total", intSchema())),
-		"ToolStateResponse":               obj(prop("name", strSchema()), prop("disabled", boolSchema())),
-		"ConversationResumeRequest":       objReq([]string{"conversation_id"}, prop("conversation_id", strSchema()), prop("history_id", strSchema())),
-		"ConversationStopRequest":         objReq([]string{"conversation_id"}, prop("conversation_id", strSchema()), prop("history_id", strSchema())),
-		"ConversationSetHistoryRequest":   objReq([]string{"set_history_id", "deleted_history_id"}, prop("set_history_id", strSchema()), prop("deleted_history_id", strSchema())),
-		"ConversationBatchDeleteRequest":  objReq([]string{"conversation_ids"}, prop("conversation_ids", array(strSchema()))),
-		"ConversationBatchDeleteResponse": obj(prop("deleted_count", intSchema()), prop("deleted_ids", array(strSchema()))),
+		"ListTasksResponse":                obj(prop("tasks", array(refSchema("TaskResponse"))), prop("total_size", intSchema()), prop("next_page_token", strSchema())),
+		"PromptRequest":                    objReq([]string{"display_name", "content"}, prop("display_name", strSchema()), prop("content", strSchema()), prop("category", strSchema())),
+		"PromptPatchRequest":               obj(prop("display_name", strSchema()), prop("content", strSchema()), prop("category", strSchema())),
+		"PromptCategoryRequest":            objReq([]string{"name"}, prop("name", strSchema())),
+		"PromptCategory":                   objReq([]string{"id", "name"}, prop("id", strSchema()), prop("name", strSchema())),
+		"PromptCategoryListResponse":       obj(prop("categories", array(refSchema("PromptCategory")))),
+		"PromptPolishRequest":              objReq([]string{"content", "user_instruct"}, prop("content", strSchema()), prop("user_instruct", strSchema())),
+		"PromptPolishResponse":             obj(prop("content", strSchema())),
+		"PromptItem":                       obj(prop("name", strSchema()), prop("id", strSchema()), prop("content", strSchema()), prop("display_name", strSchema()), prop("category", strSchema()), prop("source", strSchema()), prop("is_favorite", boolSchema()), prop("usage_count", int64Schema()), prop("last_used_at", strSchema()), prop("created_at", strSchema()), prop("updated_at", strSchema())),
+		"PromptFacets":                     obj(prop("scopes", obj()), prop("categories", obj()), prop("category_total", int64Schema())),
+		"PromptListResponse":               obj(prop("prompts", array(refSchema("PromptItem"))), prop("custom_categories", array(refSchema("PromptCategory"))), prop("next_page_token", strSchema()), prop("total", int64Schema()), prop("facets", refSchema("PromptFacets"))),
+		"PromptStateResponse":              obj(prop("id", strSchema()), prop("is_favorite", boolSchema()), prop("usage_count", int64Schema()), prop("last_used_at", strSchema())),
+		"ToolMethod":                       obj(prop("name", strSchema()), prop("summary", strSchema())),
+		"ToolGroup":                        obj(prop("name", strSchema()), prop("label", strSchema()), prop("description", strSchema()), prop("methods", array(refSchema("ToolMethod"))), prop("can_disable", boolSchema()), prop("active", boolSchema()), prop("disabled", boolSchema())),
+		"ToolListResponse":                 obj(prop("tool_groups", array(refSchema("ToolGroup"))), prop("page", intSchema()), prop("page_size", intSchema()), prop("total", intSchema())),
+		"ToolStateResponse":                obj(prop("name", strSchema()), prop("disabled", boolSchema())),
+		"ConversationResumeRequest":        objReq([]string{"conversation_id"}, prop("conversation_id", strSchema()), prop("history_id", strSchema())),
+		"ConversationStopRequest":          objReq([]string{"conversation_id"}, prop("conversation_id", strSchema()), prop("history_id", strSchema())),
+		"ConversationSetHistoryRequest":    objReq([]string{"set_history_id", "deleted_history_id"}, prop("set_history_id", strSchema()), prop("deleted_history_id", strSchema())),
+		"ConversationBatchDeleteRequest":   objReq([]string{"conversation_ids"}, prop("conversation_ids", array(strSchema()))),
+		"ConversationBatchDeleteResponse":  obj(prop("deleted_count", intSchema()), prop("deleted_ids", array(strSchema()))),
+		"ConversationArchiveFolderRequest": objReq([]string{"name"}, prop("name", strSchema())),
+		"ConversationArchiveRequest":       obj(prop("folder_id", nullableSchema(strSchema()))),
+		"ConversationArchiveFolder": objReq(
+			[]string{"id", "name", "dialog_count", "task_count", "total_count", "created_at", "updated_at"},
+			prop("id", strSchema()), prop("name", strSchema()),
+			prop("dialog_count", int64Schema()), prop("task_count", int64Schema()), prop("total_count", int64Schema()),
+			prop("created_at", dateTimeSchema()), prop("updated_at", dateTimeSchema()),
+		),
+		"ConversationArchiveFolderListResponse": objReq(
+			[]string{"folders", "unfiled_dialog_count", "unfiled_task_count", "unfiled_total_count"},
+			prop("folders", array(refSchema("ConversationArchiveFolder"))),
+			prop("unfiled_dialog_count", int64Schema()), prop("unfiled_task_count", int64Schema()), prop("unfiled_total_count", int64Schema()),
+		),
+		"ConversationArchiveFolderCreateResponse": objReq([]string{"folder"}, prop("folder", refSchema("ConversationArchiveFolder"))),
+		"ConversationArchiveFolderDeleteResponse": objReq([]string{"moved_count"}, prop("moved_count", int64Schema())),
+		"ConversationRecoveryItem": objReq(
+			[]string{"conversation_id", "display_name", "kind", "create_time", "update_time"},
+			prop("conversation_id", strSchema()), prop("display_name", strSchema()),
+			prop("kind", enumStringSchema("dialog", "task")), prop("folder_id", nullableSchema(strSchema())),
+			prop("archive_folder_name", strSchema()), prop("create_time", dateTimeSchema()), prop("update_time", dateTimeSchema()),
+			prop("archived_at", dateTimeSchema()), prop("deleted_at", dateTimeSchema()), prop("trash_expires_at", dateTimeSchema()),
+		),
+		"ConversationRecoveryListResponse": objReq(
+			[]string{"items", "total", "page", "page_size"},
+			prop("items", array(refSchema("ConversationRecoveryItem"))), prop("total", int64Schema()),
+			prop("page", intSchema()), prop("page_size", intSchema()),
+		),
+		"RecoveryDeleteCountResponse": obj(prop("deleted_count", intSchema())),
+		"WorkflowTrashItem": objReq(
+			[]string{"id", "name", "deleted_at", "trash_expires_at", "updated_at"},
+			prop("id", strSchema()), prop("name", strSchema()), prop("workflow_id", strSchema()),
+			prop("published_workflow_ref", strSchema()), prop("published_status_before_trash", strSchema()),
+			prop("deleted_at", dateTimeSchema()), prop("trash_expires_at", dateTimeSchema()), prop("updated_at", dateTimeSchema()),
+		),
+		"WorkflowTrashListData": objReq(
+			[]string{"records", "total", "page", "page_size"}, prop("records", array(refSchema("WorkflowTrashItem"))),
+			prop("total", int64Schema()), prop("page", intSchema()), prop("page_size", intSchema()),
+		),
+		"WorkflowTrashListResponse": objReq(
+			[]string{"code", "message", "data"}, prop("code", intSchema()), prop("message", strSchema()), prop("data", refSchema("WorkflowTrashListData")),
+		),
+		"CoreEmptyResponse":      objReq([]string{"code", "message"}, prop("code", intSchema()), prop("message", strSchema())),
+		"WorkflowTrashEmptyData": obj(prop("purged", intSchema())),
+		"WorkflowTrashEmptyResponse": objReq(
+			[]string{"code", "message", "data"}, prop("code", intSchema()), prop("message", strSchema()), prop("data", refSchema("WorkflowTrashEmptyData")),
+		),
+		"TaskCenterStepInfo": objReq(
+			[]string{"step_id", "status"}, prop("step_id", strSchema()), prop("title", strSchema()),
+			prop("status", strSchema()), prop("current_phase", strSchema()), prop("summary", strSchema()), prop("artifact", strSchema()),
+		),
+		"TaskCenterTaskResponse": objReq(
+			[]string{"id", "user_id", "conversation_id", "conversation_state", "task_type", "status", "steps", "created_at", "updated_at"},
+			prop("id", strSchema()), prop("user_id", strSchema()), prop("conversation_id", strSchema()),
+			prop("conversation_state", enumStringSchema("active", "archived", "trash", "missing")), prop("conversation_title", strSchema()),
+			prop("workflow_session_id", strSchema()), prop("task_type", strSchema()), prop("title", strSchema()), prop("status", strSchema()),
+			prop("schedule_id", strSchema()), prop("schedule_name", strSchema()), prop("steps", array(refSchema("TaskCenterStepInfo"))),
+			prop("progress", obj()), prop("created_at", dateTimeSchema()), prop("updated_at", dateTimeSchema()),
+			prop("finished_at", dateTimeSchema()), prop("waiting_reason", strSchema()),
+		),
+		"TaskCenterStatusCounts": obj(
+			prop("all", int64Schema()), prop("pending", int64Schema()), prop("waiting", int64Schema()),
+			prop("waiting_inputs", int64Schema()), prop("running", int64Schema()), prop("succeeded", int64Schema()),
+			prop("failed", int64Schema()), prop("canceled", int64Schema()),
+		),
+		"TaskCenterTaskListResponse": objReq(
+			[]string{"items", "total", "page", "page_size"}, prop("items", array(refSchema("TaskCenterTaskResponse"))),
+			prop("total", int64Schema()), prop("page", intSchema()), prop("page_size", intSchema()), prop("status_counts", refSchema("TaskCenterStatusCounts")),
+		),
 		"ConversationFeedbackRequest": objReq(
 			[]string{"history_id", "type"},
 			prop("history_id", strSchema()),
@@ -467,7 +535,7 @@ func manualSchemas() map[string]any {
 			prop("created_at", dateTimeSchema()), prop("updated_at", dateTimeSchema()),
 		),
 		"ConversationHistoryItem": obj(
-			prop("seq", intSchema()), prop("query", strSchema()), prop("result", strSchema()), prop("id", strSchema()), prop("feed_back", intSchema()), prop("sources", array(obj())), prop("input", array(obj())), prop("reasoning_content", strSchema()), prop("thinking_time_s", int64Schema()), prop("reason", strSchema()), prop("expected_answer", strSchema()), prop("create_time", strSchema()), prop("execution", refSchema("ExternalExecutionProjection")),
+			prop("seq", intSchema()), prop("query", strSchema()), prop("result", strSchema()), prop("id", strSchema()), prop("feed_back", intSchema()), prop("sources", array(obj())), prop("input", array(obj())), prop("reasoning_content", strSchema()), prop("thinking_time_s", int64Schema()), prop("reason", strSchema()), prop("expected_answer", strSchema()), prop("create_time", strSchema()), prop("run_id", strSchema()), prop("run_status", strSchema()), prop("run_terminal", refSchema("RunTerminal")), prop("execution", refSchema("ExternalExecutionProjection")),
 		),
 		"ConversationDetailResponse":      obj(prop("conversation", refSchema("ConversationItem"))),
 		"ConversationHistoryListResponse": obj(prop("conversation_id", strSchema()), prop("name", strSchema()), prop("history", array(refSchema("ConversationHistoryItem"))), prop("total_size", int64Schema()), prop("next_page_token", strSchema())),
@@ -514,8 +582,18 @@ func manualSchemas() map[string]any {
 			prop("message", strSchema()),
 			prop("data", refSchema("EpisodeMemory")),
 		),
-		"SetChatHistoryResponse":      obj(prop("history_id", strSchema())),
-		"ChatChunkResponse":           obj(prop("conversation_id", strSchema()), prop("seq", intSchema()), prop("message", strSchema()), prop("delta", strSchema()), prop("finish_reason", strSchema()), prop("history_id", strSchema()), prop("sources", array(obj())), prop("prompt_questions", array(strSchema())), prop("reasoning_content", strSchema()), prop("thinking_duration_s", int64Schema()), prop("execution", refSchema("ExternalExecutionProjection"))),
+		"SetChatHistoryResponse": obj(prop("history_id", strSchema())),
+		"RunTerminal": objReq(
+			[]string{"status", "reason", "partial_output"},
+			prop("status", enumStringSchema("completed", "interrupted", "failed", "cancelled")),
+			prop("reason", enumStringSchema("normal", "awaiting_user_input", "model_incomplete", "model_failure", "runtime_failure", "user_cancelled")),
+			prop("code", strSchema()),
+			prop("partial_output", boolSchema()),
+			prop("model_call_id", strSchema()),
+			prop("diagnostic_id", strSchema()),
+		),
+		"ChatRuntimeEvent":            obj(prop("schema_version", intSchema()), prop("event_id", strSchema()), prop("run_id", strSchema()), prop("type", strSchema()), prop("data", obj())),
+		"ChatChunkResponse":           obj(prop("conversation_id", strSchema()), prop("seq", intSchema()), prop("message", strSchema()), prop("delta", strSchema()), prop("history_id", strSchema()), prop("sources", array(obj())), prop("prompt_questions", array(strSchema())), prop("reasoning_content", strSchema()), prop("thinking_duration_s", int64Schema()), prop("runtime_event", refSchema("ChatRuntimeEvent")), prop("execution", refSchema("ExternalExecutionProjection"))),
 		"ACLApiResponse":              obj(prop("code", intSchema()), prop("message", strSchema()), prop("data", obj())),
 		"AddACLRequest":               objReq([]string{"grantee_type", "grantee_id", "permission"}, prop("grantee_type", strSchema()), prop("grantee_id", strSchema()), prop("permission", strSchema()), prop("expires_at", dateTimeSchema())),
 		"UpdateACLRequest":            objReq([]string{"permission"}, prop("permission", strSchema()), prop("expires_at", dateTimeSchema())),
@@ -657,6 +735,76 @@ func manualPaths() map[string]any {
 			conversationTrailListParams(),
 			nil,
 			response(200, "Conversation navigation metadata ordered by seq ascending", refSchema("ConversationTrailListResponse")),
+		)},
+		"/conversation-archive-folders": map[string]any{
+			"get": op("List conversation archive folders", nil, nil, response(200, "Archive folders", refSchema("ConversationArchiveFolderListResponse"))),
+			"post": map[string]any{
+				"summary": "Create a conversation archive folder", "requestBody": jsonBody(refSchema("ConversationArchiveFolderRequest"), true),
+				"responses": map[string]any{"201": response(201, "Archive folder created", refSchema("ConversationArchiveFolderCreateResponse"))},
+			},
+		},
+		"/conversation-archive-folders/{folder_id}": map[string]any{
+			"patch": op(
+				"Rename a conversation archive folder",
+				queryParams(param("path", "folder_id", true, strSchema())),
+				jsonBody(refSchema("ConversationArchiveFolderRequest"), true),
+				response(200, "Archive folder renamed", refSchema("EmptyObject")),
+			),
+			"delete": op(
+				"Delete a conversation archive folder",
+				queryParams(
+					param("path", "folder_id", true, strSchema()),
+					param("query", "move_to_folder_id", false, strSchema()),
+				),
+				nil,
+				response(200, "Archive folder deleted", refSchema("ConversationArchiveFolderDeleteResponse")),
+			),
+		},
+		"/conversations:archived": map[string]any{"get": op(
+			"List archived conversations", recoveryListParams(true), nil,
+			response(200, "Archived conversation page", refSchema("ConversationRecoveryListResponse")),
+		)},
+		"/conversations:trash": map[string]any{
+			"get":    op("List trashed conversations", recoveryListParams(false), nil, response(200, "Conversation trash page", refSchema("ConversationRecoveryListResponse"))),
+			"delete": op("Empty conversation trash for one kind", queryParams(param("query", "kind", true, enumStringSchema("dialog", "task"))), nil, response(200, "Conversation trash emptied", refSchema("RecoveryDeleteCountResponse"))),
+		},
+		"/conversations/{conversation_id}:archive": map[string]any{"post": op(
+			"Archive or move a conversation", queryParams(param("path", "conversation_id", true, strSchema())), jsonBody(refSchema("ConversationArchiveRequest"), true),
+			response(200, "Conversation archived", refSchema("EmptyObject")),
+		)},
+		"/conversations/{conversation_id}:unarchive": map[string]any{"post": op(
+			"Unarchive a conversation", queryParams(param("path", "conversation_id", true, strSchema())), nil, response(200, "Conversation unarchived", refSchema("EmptyObject")),
+		)},
+		"/conversations/{conversation_id}:restore": map[string]any{"post": op(
+			"Restore a trashed conversation", queryParams(param("path", "conversation_id", true, strSchema())), nil, response(200, "Conversation restored", refSchema("EmptyObject")),
+		)},
+		"/conversations/{conversation_id}:purge": map[string]any{"delete": op(
+			"Permanently delete a trashed conversation", queryParams(param("path", "conversation_id", true, strSchema())), nil, response(200, "Conversation permanently deleted", refSchema("EmptyObject")),
+		)},
+		"/workflow-drafts:trash": map[string]any{
+			"get":    op("List workflow draft trash", recoveryPageParams(), nil, response(200, "Workflow trash page", refSchema("WorkflowTrashListResponse"))),
+			"delete": op("Empty workflow draft trash", nil, nil, response(200, "Workflow trash emptied", refSchema("WorkflowTrashEmptyResponse"))),
+		},
+		"/workflow-drafts/{draft_id}:restore": map[string]any{"post": op(
+			"Restore a workflow draft", queryParams(param("path", "draft_id", true, strSchema())), nil, response(200, "Workflow restored", refSchema("CoreEmptyResponse")),
+		)},
+		"/workflow-drafts/{draft_id}:purge": map[string]any{"delete": op(
+			"Permanently delete a workflow draft", queryParams(param("path", "draft_id", true, strSchema())), nil, response(200, "Workflow permanently deleted", refSchema("CoreEmptyResponse")),
+		)},
+		"/task-center/tasks": map[string]any{"get": op(
+			"List task-center tasks", queryParams(
+				param("query", "status", false, strSchema()), param("query", "task_type", false, strSchema()),
+				param("query", "keyword", false, strSchema()), param("query", "page", false, intSchema()), param("query", "page_size", false, intSchema()),
+			), nil, response(200, "Task-center task page", refSchema("TaskCenterTaskListResponse")),
+		)},
+		"/task-center/tasks/{task_id}": map[string]any{"get": op(
+			"Get a task-center task", queryParams(param("path", "task_id", true, strSchema())), nil,
+			response(200, "Task-center task", refSchema("TaskCenterTaskResponse")),
+		)},
+		"/task-center/schedules/{schedule_id}/tasks": map[string]any{"get": op(
+			"List tasks for a schedule", queryParams(
+				param("path", "schedule_id", true, strSchema()), param("query", "page", false, intSchema()), param("query", "page_size", false, intSchema()),
+			), nil, response(200, "Schedule task page", refSchema("TaskCenterTaskListResponse")),
 		)},
 		"/conversations": map[string]any{"get": op("Conversation list", queryParams(param("query", "keyword", false, strSchema()), param("query", "page_size", false, intSchema()), param("query", "page_token", false, strSchema())), nil, response(200, "Conversation list", refSchema("ConversationListResponse")))},
 		"/memory/soul": map[string]any{
@@ -917,6 +1065,23 @@ func conversationTrailListParams() []map[string]any {
 			"description": "Pagination offset token from a previous response next_page_token",
 		}),
 	}
+}
+
+func recoveryPageParams() []map[string]any {
+	return queryParams(
+		param("query", "keyword", false, strSchema()),
+		param("query", "page", false, intSchema()),
+		param("query", "page_size", false, intSchema()),
+	)
+}
+
+func recoveryListParams(withFolder bool) []map[string]any {
+	params := recoveryPageParams()
+	params = append(params, param("query", "kind", true, enumStringSchema("dialog", "task")))
+	if withFolder {
+		params = append(params, param("query", "folder_id", false, strSchema()))
+	}
+	return params
 }
 
 func jsonBody(schema map[string]any, required bool) map[string]any {

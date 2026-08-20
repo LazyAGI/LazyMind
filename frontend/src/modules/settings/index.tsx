@@ -7,6 +7,7 @@ import {
   CheckCircleFilled,
   CodeOutlined,
   DatabaseOutlined,
+  DeleteOutlined,
   ExperimentOutlined,
   InfoCircleOutlined,
   LinkOutlined,
@@ -41,6 +42,7 @@ import MemoryCapabilitySettings from "./MemoryCapabilitySettings";
 import KnowledgeDataSettings from "./KnowledgeDataSettings";
 import KnowledgeToolSettings, { isKnowledgeToolView } from "./KnowledgeToolSettings";
 import QuickModelSettings from "./QuickModelSettings";
+import RecoverySettings from "./RecoverySettings";
 import UserSkillWorkflowSettings, { type ResourceTab } from "./UserSkillWorkflowSettings";
 import {
   fetchSettingsOverview,
@@ -67,6 +69,7 @@ type SectionID =
   | "channels"
   | "diagnostics"
   | "organization"
+  | "recovery"
   | "developer";
 type MasterSetting = "task_center_enabled" | "skills_enabled" | "workflows_enabled" | "mcp_enabled" | "document_parsing_enabled";
 type Translate = (key: string, options?: Record<string, unknown>) => string;
@@ -137,6 +140,7 @@ function baseNavigation(isAdmin: boolean, t: Translate): NavigationGroup[] {
       title: t("settingsPage.navGroups.management"),
       items: [
         ...(isAdmin ? [{ id: "organization" as const, label: t("settingsPage.sections.organization"), keywords: t("settingsPage.sectionKeywords.organization"), icon: <TeamOutlined /> }] : []),
+        { id: "recovery", label: t("settingsPage.sections.recovery"), keywords: t("settingsPage.sectionKeywords.recovery"), icon: <DeleteOutlined /> },
         { id: "diagnostics", label: t("settingsPage.sections.diagnostics"), keywords: t("settingsPage.sectionKeywords.diagnostics"), icon: <CheckCircleFilled /> },
         ...(isAdmin ? [{ id: "developer" as const, label: t("settingsPage.sections.developer"), keywords: t("settingsPage.sectionKeywords.developer"), icon: <CodeOutlined />, status: t("settingsPage.sectionStatus.activated") }] : []),
       ],
@@ -733,6 +737,8 @@ export default function SettingsPage() {
       content = integratedSurface(<AgentIntegrationPage />, "is-assistants");
     } else if (section === "channels") {
       content = integratedSurface(<TerminalConnectionPage />, "is-channels");
+    } else if (section === "recovery") {
+      content = <RecoverySettings headingRef={headingRef} />;
     } else if (section === "diagnostics") {
       content = renderDiagnostics();
     } else {
