@@ -26,12 +26,13 @@ func (h Handler) Start(w http.ResponseWriter, r *http.Request) {
 	}
 	input.ID = mux.Vars(r)["invocation_id"]
 	input.ExternalRef = r.Header.Get("X-LazyMind-External-Ref")
-	record, created, err := h.Service.Start(r.Context(), owner, input)
+	input.ConversationID = r.Header.Get("X-LazyMind-Conversation-Id")
+	result, err := h.Service.StartLinked(r.Context(), owner, input)
 	if err != nil {
 		writeError(w, err)
 		return
 	}
-	common.ReplyOK(w, map[string]any{"invocation": record, "created": created})
+	common.ReplyOK(w, result)
 }
 
 func (h Handler) Finish(w http.ResponseWriter, r *http.Request) {
@@ -50,6 +51,23 @@ func (h Handler) Finish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	common.ReplyOK(w, map[string]any{"invocation": record})
+}
+
+func (h Handler) SyncTurn(w http.ResponseWriter, r *http.Request) {
+	owner, ok := requestOwner(w, r)
+	if !ok {
+		return
+	}
+	var input TurnSyncInput
+	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20)).Decode(&input) != nil {
+		common.ReplyErr(w, ErrInvalidInput.Error(), http.StatusBadRequest)
+		return
+	}
+	if err := h.Service.SyncTurn(r.Context(), owner, input); err != nil {
+		writeError(w, err)
+		return
+	}
+	common.ReplyOK(w, map[string]any{"synced": true})
 }
 
 func (h Handler) List(w http.ResponseWriter, r *http.Request) {

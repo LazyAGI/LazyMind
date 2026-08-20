@@ -31,6 +31,7 @@ _CAPABILITY_OVERVIEW_TYPES = (
     'tool',
 )
 _CAPABILITY_CATEGORIES = (
+    'cloud_document',
     'knowledge_base',
     'skill',
     'workflow',
@@ -41,6 +42,7 @@ _MAX_WORKSPACE_IMAGES = 6
 _MAX_CAPABILITY_ITEMS_PER_GROUP = 6
 _CAPABILITY_PAGE_SIZE = 10
 _CAPABILITY_LABELS = {
+    'cloud_document': '云文档',
     'knowledge_base': '知识库',
     'skill': 'Skill',
     'workflow': 'Workflow',
@@ -58,6 +60,60 @@ def _capability_command(
         'command': 'capability.list',
         'parameters': {
             'capabilities': list(capabilities),
+            'evidence': [evidence],
+        },
+    }
+
+
+def _cloud_document_list_command(
+    evidence: str,
+    page_token: str = '',
+) -> dict[str, Any]:
+    return {
+        'schema_version': '1',
+        'command': 'cloud_document.list',
+        'parameters': {
+            'page_token': page_token,
+            'evidence': [evidence],
+        },
+    }
+
+
+def _cloud_document_get_command(
+    evidence: str,
+    source_id: str,
+    page_token: str = '',
+    node_ref: str = '',
+    target_type: str = '',
+    target_ref: str = '',
+) -> dict[str, Any]:
+    return {
+        'schema_version': '1',
+        'command': 'cloud_document.get',
+        'parameters': {
+            'source_id': source_id,
+            'page_token': page_token,
+            'node_ref': node_ref,
+            'target_type': target_type,
+            'target_ref': target_ref,
+            'evidence': [evidence],
+        },
+    }
+
+
+def _cloud_document_search_command(
+    evidence: str,
+    source_id: str,
+    query: str,
+    page_token: str = '',
+) -> dict[str, Any]:
+    return {
+        'schema_version': '1',
+        'command': 'cloud_document.search',
+        'parameters': {
+            'source_id': source_id,
+            'query': query,
+            'page_token': page_token,
             'evidence': [evidence],
         },
     }
@@ -1369,6 +1425,7 @@ class FeishuWorkspaceRenderer:
                     state,
                     label,
                     {
+                        'cloud_document': 'Cloud documents',
                         'knowledge_base': 'Knowledge bases',
                         'skill': 'Skills',
                         'workflow': 'Workflows',
@@ -1401,6 +1458,15 @@ class FeishuWorkspaceRenderer:
                     ]
                 )
             )
+        if state.capability_category == 'cloud_document':
+            elements.extend(
+                _cloud_document_elements(
+                    state,
+                    presentations,
+                    chat_id,
+                )
+            )
+            return elements
         group = next(
             (
                 group
@@ -1851,10 +1917,15 @@ def _capability_catalog_action(
     if page is not None:
         workspace_action['page'] = max(0, page)
     text = f'查看{_CAPABILITY_LABELS.get(category, "知识库")}'
+    command = (
+        _cloud_document_list_command(text)
+        if category == 'cloud_document'
+        else _capability_command(text, (category,))
+    )
     return _command_action(
         chat_id=chat_id,
         text=text,
-        command=_capability_command(text, (category,)),
+        command=command,
         workspace_action=workspace_action,
     )
 
@@ -2179,6 +2250,211 @@ def _setting_action(
             'expected_conversation_id': expected_conversation_id,
         },
     )
+
+
+def _cloud_document_elements(
+    state: FeishuWorkspaceState,
+    presentations: list[dict[str, Any]],
+    chat_id: str,
+) -> list[dict[str, Any]]:
+    presentation = next(
+        (
+            item
+            for item in presentations
+            if item.get('kind') == 'cloud_document'
+        ),
+        {},
+    )
+    if not presentation:
+        return [{
+            'tag': 'markdown',
+            'content': _localized(
+                state,
+                '<font color="grey">正在读取 LazyMind 已授权云文档账号…</font>',
+                '<font color="grey">Loading cloud accounts connected to LazyMind…</font>',
+            ),
+        }]
+    mode = str(presentation.get('mode') or 'sources')
+    raw_items = presentation.get('items')
+    items = [
+        dict(item)
+        for item in (raw_items if isinstance(raw_items, list) else [])
+        if isinstance(item, dict)
+    ]
+    source = (
+        dict(presentation['source'])
+        if isinstance(presentation.get('source'), dict)
+        else {}
+    )
+    if mode == 'sources':
+        elements = _cloud_source_elements(state, chat_id, items)
+    else:
+        elements = _cloud_document_page_elements(
+            state,
+            chat_id,
+            mode,
+            source,
+            items,
+        )
+    next_page_token = str(presentation.get('next_page_token') or '')
+    if next_page_token:
+        elements.append(_cloud_next_page_element(
+            state,
+            chat_id,
+            mode,
+            source,
+            str(presentation.get('query') or ''),
+            next_page_token,
+        ))
+    return elements
+
+
+def _cloud_source_elements(
+    state: FeishuWorkspaceState,
+    chat_id: str,
+    items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    elements: list[dict[str, Any]] = [{
+        'tag': 'markdown',
+        'content': _localized(
+            state,
+            '**已授权云文档账号**　<font color="grey">在线只读，不扫盘、不建索引</font>',
+            '**Connected cloud accounts**　<font color="grey">Online read-only; no scan or index</font>',
+        ),
+    }]
+    if not items:
+        elements.append({
+            'tag': 'markdown',
+            'content': _localized(
+                state,
+                '<font color="grey">暂无已授权并启用对话的云文档账号。</font>',
+                '<font color="grey">No authorized cloud account is enabled for chat.</font>',
+            ),
+        })
+    for item in items:
+        source_id = str(item.get('id') or '')
+        if not source_id:
+            continue
+        name = str(item.get('name') or source_id)[:80]
+        text = f'浏览云文档账号 {name}'
+        elements.append(_button_row([{
+            'label': name,
+            'action': _command_action(
+                chat_id=chat_id,
+                text=text,
+                command=_cloud_document_get_command(text, source_id),
+                workspace_action=_cloud_workspace_action(state),
+            ),
+        }]))
+    return elements
+
+
+def _cloud_document_page_elements(
+    state: FeishuWorkspaceState,
+    chat_id: str,
+    mode: str,
+    source: dict[str, Any],
+    items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    source_id = str(source.get('id') or '')
+    source_name = str(source.get('name') or source_id or '云文档')[:100]
+    suffix = '在线搜索结果' if mode == 'search' else '在线文档'
+    elements: list[dict[str, Any]] = [
+        {'tag': 'markdown', 'content': f'**{source_name} · {suffix}**'}
+    ]
+    for index, item in enumerate(items, start=1):
+        name = str(
+            item.get('display_name')
+            or item.get('name')
+            or item.get('key')
+            or item.get('id')
+            or '未命名'
+        )[:160]
+        kind = '目录' if item.get('has_children') else '文档'
+        elements.append({
+            'tag': 'markdown',
+            'content': f'{index}. **{name}**　<font color="grey">{kind}</font>',
+        })
+        if item.get('has_children'):
+            text = f'打开云文档目录 {name}'
+            elements.append(_button_row([{
+                'label': _localized(state, '打开', 'Open'),
+                'action': _command_action(
+                    chat_id=chat_id,
+                    text=text,
+                    command=_cloud_document_get_command(
+                        text,
+                        source_id,
+                        node_ref=str(item.get('node_ref') or ''),
+                        target_type=str(item.get('target_type') or ''),
+                        target_ref=str(item.get('target_ref') or ''),
+                    ),
+                    workspace_action=_cloud_workspace_action(state),
+                ),
+            }]))
+    back_text = '返回云文档账号'
+    elements.append(_button_row([{
+        'label': back_text,
+        'action': _command_action(
+            chat_id=chat_id,
+            text=back_text,
+            command=_cloud_document_list_command(back_text),
+            workspace_action=_cloud_workspace_action(state),
+        ),
+    }]))
+    return elements
+
+
+def _cloud_next_page_element(
+    state: FeishuWorkspaceState,
+    chat_id: str,
+    mode: str,
+    source: dict[str, Any],
+    query: str,
+    page_token: str,
+) -> dict[str, Any]:
+    text = '下一页云文档'
+    source_id = str(source.get('id') or '')
+    if mode == 'documents':
+        command = _cloud_document_get_command(
+            text,
+            source_id,
+            page_token,
+            node_ref=str(source.get('node_ref') or ''),
+            target_type=str(source.get('target_type') or ''),
+            target_ref=str(source.get('target_ref') or ''),
+        )
+    elif mode == 'search':
+        command = _cloud_document_search_command(
+            text,
+            source_id,
+            query,
+            page_token,
+        )
+    else:
+        command = _cloud_document_list_command(text, page_token)
+    return _button_row([{
+        'label': _localized(state, '下一页', 'Next page'),
+        'style': 'primary',
+        'action': _command_action(
+            chat_id=chat_id,
+            text=text,
+            command=command,
+            workspace_action=_cloud_workspace_action(state),
+        ),
+    }])
+
+
+def _cloud_workspace_action(
+    state: FeishuWorkspaceState,
+) -> dict[str, Any]:
+    return {
+        'kind': 'capability.open',
+        'category': 'cloud_document',
+        'expected_view': state.view,
+        'expected_revision': state.revision,
+        'expected_operation_id': state.active_operation_id,
+    }
 
 
 def _capability_groups(

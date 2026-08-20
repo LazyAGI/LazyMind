@@ -54,6 +54,15 @@ class ChannelFeatureProfile:
 BASIC_CHAT_FEATURES = ChannelFeatureProfile()
 
 
+def retainable_provider_context(
+    provider_context: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Return delivery state without one-turn Core inputs or answers."""
+    retained = dict(provider_context or {})
+    retained.pop('channel_execution', None)
+    return retained
+
+
 @dataclass(frozen=True, slots=True)
 class ChannelAttachment:
     input_type: Literal['image', 'file']

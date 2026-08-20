@@ -25,6 +25,7 @@ from channel_gateway.common.errors import (
     InvalidStaticAssetError,
     LazyMindError,
     LazyMindHTTPError,
+    RetryableLazyMindError,
 )
 
 
@@ -1016,6 +1017,22 @@ class LazyMindClient:
                 'Cannot download LazyMind static file'
             ) from exc
 
+    def stop_chat_generation(
+        self,
+        *,
+        owner_user_id: str,
+        conversation_id: str,
+        request_id: str,
+    ) -> None:
+        self._request_json(
+            'POST',
+            f'{self._base_url}/conversations:stopChatGeneration',
+            owner_user_id=owner_user_id,
+            request_id=request_id,
+            json_body={'conversation_id': conversation_id},
+            error_label='conversation stop',
+        )
+
     def list_conversations(
         self,
         *,
@@ -1319,6 +1336,109 @@ class LazyMindClient:
             ],
         }
 
+    def list_cloud_documents(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+        keyword: str = '',
+        status: str = '',
+        page_token: str = '',
+        page_size: int = 10,
+    ) -> dict[str, Any]:
+        return self._channel_capability(
+            'list',
+            owner_user_id=owner_user_id,
+            request_id=request_id,
+            payload={
+                'keyword': keyword,
+                'status': status,
+                'page': {
+                    'page_size': page_size,
+                    'page_token': page_token,
+                },
+            },
+        )
+
+    def get_cloud_document(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+        source_id: str,
+        node_ref: str = '',
+        target_type: str = '',
+        target_ref: str = '',
+        page_token: str = '',
+        page_size: int = 10,
+    ) -> dict[str, Any]:
+        return self._channel_capability(
+            'get',
+            owner_user_id=owner_user_id,
+            request_id=request_id,
+            payload={
+                'source_id': source_id,
+                'node_ref': node_ref,
+                'target_type': target_type,
+                'target_ref': target_ref,
+                'include_documents': True,
+                'documents_page': {
+                    'page_size': page_size,
+                    'page_token': page_token,
+                },
+            },
+        )
+
+    def search_cloud_documents(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+        source_id: str,
+        query: str,
+        page_token: str = '',
+        page_size: int = 10,
+    ) -> dict[str, Any]:
+        return self._channel_capability(
+            'search',
+            owner_user_id=owner_user_id,
+            request_id=request_id,
+            payload={
+                'source_id': source_id,
+                'query': query,
+                'include_documents': True,
+                'include_containers': True,
+                'page': {
+                    'page_size': page_size,
+                    'page_token': page_token,
+                },
+            },
+        )
+
+    def _channel_capability(
+        self,
+        operation: str,
+        *,
+        owner_user_id: str,
+        request_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        response = self._request_json(
+            'POST',
+            f'{self._base_url}/channel-capabilities/'
+            f'cloud-documents:{operation}',
+            owner_user_id=owner_user_id,
+            request_id=request_id,
+            json_body=payload,
+            error_label=f'cloud document {operation}',
+        )
+        data = response.get('data')
+        if not isinstance(data, dict):
+            raise LazyMindError(
+                'LazyMind cloud document response is invalid'
+            )
+        return dict(data)
+
     def set_default_dataset(
         self,
         *,
@@ -1433,7 +1553,9 @@ class LazyMindClient:
                 ),
             )
         except httpx.HTTPError as exc:
-            raise LazyMindError(f'Cannot load LazyMind {error_label}') from exc
+            raise RetryableLazyMindError(
+                f'Cannot load LazyMind {error_label}'
+            ) from exc
         self._raise_for_status(response, error_label)
         try:
             payload = response.json()

@@ -466,6 +466,7 @@ class FeishuTaskOutboxRepository(Protocol):
         *,
         provider: str,
         limit: int,
+        after_sequence: int = 0,
     ) -> list[ClaimedOutbound]:
         ...
 

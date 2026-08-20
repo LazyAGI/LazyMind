@@ -16,6 +16,7 @@ import (
 	"lazymind/core/acl"
 	"lazymind/core/asyncjob"
 	capabilitybootstrap "lazymind/core/capability/bootstrap"
+	capabilityhttp "lazymind/core/capability/httpadapter"
 	"lazymind/core/chat"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
@@ -58,8 +59,8 @@ func openAPIArtifactExportEnabled() bool {
 	return raw != "0" && raw != "false" && raw != "no" && raw != "off"
 }
 
-func buildCapabilityMCPHandler() (http.Handler, error) {
-	return capabilitybootstrap.NewHandler(capabilitybootstrap.Config{
+func buildCapabilityRuntime() (*capabilitybootstrap.Runtime, error) {
+	return capabilitybootstrap.NewRuntime(capabilitybootstrap.Config{
 		DB:                        store.DB(),
 		LazyDB:                    store.LazyLLMDB(),
 		AuthServiceBaseURL:        common.AuthServiceBaseURL(),
@@ -67,6 +68,8 @@ func buildCapabilityMCPHandler() (http.Handler, error) {
 		KnowledgeSearchBaseURL:    common.ChatServiceEndpoint(),
 		InternalServiceToken:      os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN"),
 		KnowledgeSearchHTTPClient: &http.Client{Timeout: 60 * time.Second},
+		ScanBaseURL:               common.ScanControlPlaneEndpoint(),
+		ScanHTTPClient:            &http.Client{Timeout: 10 * time.Second},
 	})
 }
 
@@ -183,6 +186,15 @@ func registerCoreRoutes(r *mux.Router) {
 func registerCapabilityMCPRoute(r *mux.Router, handler http.Handler) {
 	handleAPI(r, "POST", "/mcp/capabilities/v1", []string{"qa.read"}, handler.ServeHTTP)
 	r.Handle("/mcp/capabilities/v1", handler).Methods(http.MethodGet, http.MethodDelete)
+}
+
+func registerCapabilityChannelRoutes(
+	r *mux.Router,
+	handler *capabilityhttp.Handler,
+) {
+	handleAPI(r, "POST", "/channel-capabilities/cloud-documents:list", []string{"qa.read"}, handler.ListCloudDocuments)
+	handleAPI(r, "POST", "/channel-capabilities/cloud-documents:get", []string{"qa.read"}, handler.GetCloudDocument)
+	handleAPI(r, "POST", "/channel-capabilities/cloud-documents:search", []string{"qa.read"}, handler.SearchCloudDocuments)
 }
 
 func coreListenAddr() string {
@@ -401,11 +413,16 @@ func main() {
 		w.Write(swaggerUIHTML)
 	}).Methods(http.MethodGet)
 
-	handler, err := buildCapabilityMCPHandler()
+	capabilityRuntime, err := buildCapabilityRuntime()
 	if err != nil {
 		log.Logger.Fatal().Err(err).Msg("initialize capability MCP failed")
 	}
-	registerCapabilityMCPRoute(r, handler)
+	registerCapabilityMCPRoute(r, capabilityRuntime.MCP)
+	channelHandler, err := capabilityhttp.New(capabilityRuntime.Service)
+	if err != nil {
+		log.Logger.Fatal().Err(err).Msg("initialize channel capability HTTP failed")
+	}
+	registerCapabilityChannelRoutes(r, channelHandler)
 	log.Logger.Info().Str("path", "/mcp/capabilities/v1").Msg("capability MCP enabled")
 
 	listenAddr := coreListenAddr()

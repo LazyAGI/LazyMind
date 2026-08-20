@@ -57,9 +57,20 @@ def _expire_workspace_card(
     message_id: str,
     workspace: dict[str, Any],
 ) -> None:
-    # Stale CardKit actions are fenced by message/revision/operation.  Do not
-    # create a second user-visible replacement card for an already stale card.
-    del sender, message_id, workspace
+    if not message_id:
+        return
+    language = str(workspace.get('output_language') or 'zh')
+    try:
+        sender.update_card(
+            message_id=message_id,
+            card=stale_workspace_card(language),
+        )
+    except Exception as exc:
+        if not workspace_card_expired(exc):
+            _logger.warning(
+                'feishu_workspace_card_expire_failed message_id=%s',
+                message_id,
+            )
 
 
 class _ManagedReplyStream:

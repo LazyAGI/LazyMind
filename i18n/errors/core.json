@@ -1174,6 +1174,8 @@
   "2002095": { "en-US": "Failed to create the managed artifact", "zh-CN": "创建托管产物失败" },
   "2002096": { "en-US": "Failed to write the managed artifact", "zh-CN": "写入托管产物失败" },
   "2002097": { "en-US": "Failed to commit the managed artifact", "zh-CN": "提交托管产物失败" },
+  "2002098": { "en-US": "Invalid external Agent source", "zh-CN": "外部 Agent 来源无效" },
+  "2002099": { "en-US": "External Agent thread belongs to another user or conversation", "zh-CN": "外部 Agent 会话已属于其他用户或对话" },
   "active_task_not_found": { "en-US": "Active task not found", "zh-CN": "活跃任务不存在" },
   "algo_failed": { "en-US": "Algorithm service operation failed", "zh-CN": "算法服务操作失败" },
   "auto_apply_failed": { "en-US": "Automatic apply failed", "zh-CN": "自动应用失败" },

@@ -1236,14 +1236,16 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 	var askAnswered bool
 	var askSavedAnswers any
 	var intentUpdated any
+	var externalAgentActivity any
 	if len(h.Ext) > 0 {
 		var ext struct {
-			Input           any  `json:"input"`
-			Mentions        any  `json:"mentions"`
-			AskPending      any  `json:"ask_pending"`
-			AskAnswered     bool `json:"ask_answered"`
-			AskSavedAnswers any  `json:"ask_saved_answers"`
-			IntentUpdated   any  `json:"intent_updated"`
+			Input                 any  `json:"input"`
+			Mentions              any  `json:"mentions"`
+			AskPending            any  `json:"ask_pending"`
+			AskAnswered           bool `json:"ask_answered"`
+			AskSavedAnswers       any  `json:"ask_saved_answers"`
+			IntentUpdated         any  `json:"intent_updated"`
+			ExternalAgentActivity any  `json:"external_agent_activity"`
 		}
 		if err := json.Unmarshal(h.Ext, &ext); err == nil {
 			input = ext.Input
@@ -1252,6 +1254,7 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 			askAnswered = ext.AskAnswered
 			askSavedAnswers = ext.AskSavedAnswers
 			intentUpdated = ext.IntentUpdated
+			externalAgentActivity = ext.ExternalAgentActivity
 		}
 	}
 	item := map[string]any{
@@ -1281,6 +1284,9 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 	}
 	if intentUpdated != nil {
 		item["intent_updated"] = intentUpdated
+	}
+	if externalAgentActivity != nil && strings.TrimSpace(h.Result) == "" {
+		item["external_user_only"] = true
 	}
 	return item
 }

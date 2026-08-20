@@ -18,6 +18,7 @@ from channel_gateway.common.infrastructure.postgres import (
     GatewayStore,
     PostgresRuntimeLease,
 )
+from channel_gateway.common.ports.providers import PayloadCipher
 
 
 _BOOLEAN_COLUMNS = {
@@ -228,8 +229,12 @@ def _snapshot(value: Any) -> dict[str, Any]:
 class SQLiteGatewayStore(GatewayStore):
     """SQLite dialect for the container store contract used by local/Desktop."""
 
-    def __init__(self, dsn: str):
-        super().__init__(dsn)
+    def __init__(
+        self,
+        dsn: str,
+        payload_cipher: PayloadCipher | None = None,
+    ):
+        super().__init__(dsn, payload_cipher)
         self._path = _database_path(dsn)
 
     def _connect(self) -> _SQLiteConnection:
@@ -359,6 +364,7 @@ class SQLiteGatewayStore(GatewayStore):
                 recipient_id TEXT NOT NULL,
                 text TEXT NOT NULL,
                 provider_context TEXT NOT NULL DEFAULT '{}',
+                sensitive_payload_ciphertext TEXT,
                 status VARCHAR(32) NOT NULL DEFAULT 'pending',
                 attempt_count INTEGER NOT NULL DEFAULT 0,
                 lease_owner TEXT,
@@ -473,6 +479,10 @@ class SQLiteGatewayStore(GatewayStore):
             CREATE INDEX IF NOT EXISTS channel_outbox_order_idx
             ON channel_outbox(account_id, order_key, created_sequence)
             """,
+            """
+            CREATE INDEX IF NOT EXISTS channel_outbox_monitor_idx
+            ON channel_outbox(provider, status, created_sequence)
+            """,
         )
         with self._connect() as connection:
             for statement in statements:
@@ -495,6 +505,9 @@ class SQLiteGatewayStore(GatewayStore):
             },
             'channel_connection_sessions': {
                 'cleanup_pending': 'BOOLEAN NOT NULL DEFAULT FALSE',
+            },
+            'channel_inbox': {
+                'sensitive_payload_ciphertext': 'TEXT',
             },
             'channel_processed_messages': {
                 'response_text': 'TEXT',

@@ -181,12 +181,22 @@ def build_components(settings: Settings | None = None) -> GatewayComponents:
         ),
         text_chunk_size=resolved_settings.wechat_text_chunk_size,
     )
-    store = (
-        SQLiteGatewayStore(resolved_settings.database_dsn)
-        if resolved_settings.database_dsn.startswith('sqlite:')
-        else GatewayStore(resolved_settings.database_dsn)
-    )
     cipher = JsonCipher(resolved_settings.credential_key_path)
+    payload_cipher = JsonCipher(
+        resolved_settings.credential_key_path,
+        key_purpose='inbox-payload',
+    )
+    store = (
+        SQLiteGatewayStore(
+            resolved_settings.database_dsn,
+            payload_cipher=payload_cipher,
+        )
+        if resolved_settings.database_dsn.startswith('sqlite:')
+        else GatewayStore(
+            resolved_settings.database_dsn,
+            payload_cipher=payload_cipher,
+        )
+    )
     lazymind = LazyMindClient(
         resolved_settings.core_base_url,
         resolved_settings.core_chat_timeout_seconds,

@@ -74,6 +74,15 @@ class ConversationClient(Protocol):
     ) -> dict[str, Any]:
         ...
 
+    def stop_chat_generation(
+        self,
+        *,
+        owner_user_id: str,
+        conversation_id: str,
+        request_id: str,
+    ) -> None:
+        ...
+
 
 class TaskClient(Protocol):
     def list_conversation_tasks(
@@ -84,6 +93,46 @@ class TaskClient(Protocol):
         request_id: str,
         summary_only: bool = False,
     ) -> list[dict[str, Any]]:
+        ...
+
+
+class CloudDocumentClient(Protocol):
+    def list_cloud_documents(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+        keyword: str = '',
+        status: str = '',
+        page_token: str = '',
+        page_size: int = 10,
+    ) -> dict[str, Any]:
+        ...
+
+    def get_cloud_document(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+        source_id: str,
+        node_ref: str = '',
+        target_type: str = '',
+        target_ref: str = '',
+        page_token: str = '',
+        page_size: int = 10,
+    ) -> dict[str, Any]:
+        ...
+
+    def search_cloud_documents(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+        source_id: str,
+        query: str,
+        page_token: str = '',
+        page_size: int = 10,
+    ) -> dict[str, Any]:
         ...
 
 
@@ -213,6 +262,7 @@ class LazyMindCore(
     IntentClient,
     ConversationClient,
     CapabilityClient,
+    CloudDocumentClient,
     StaticAssetClient,
     Protocol,
 ):

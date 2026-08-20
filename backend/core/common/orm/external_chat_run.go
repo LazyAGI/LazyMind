@@ -5,9 +5,24 @@ import (
 	"time"
 )
 
-// ExternalChatRun is the operational record for an external Agent turn.  The
-// historical table name is retained so existing installations need no data
-// copy; obsolete binding and operation concepts are intentionally not modeled.
+// ExternalAgentBinding is the durable one-to-one correspondence between a
+// provider-native thread and a LazyMind conversation. Provider transcript
+// content remains provider-owned; LazyMind stores only activity projections.
+type ExternalAgentBinding struct {
+	ID                string    `gorm:"column:id;type:varchar(36);primaryKey" json:"binding_id"`
+	ConversationID    string    `gorm:"column:conversation_id;type:varchar(36);not null;uniqueIndex:uk_external_agent_binding_conversation" json:"conversation_id"`
+	Provider          string    `gorm:"column:provider;type:varchar(32);not null;uniqueIndex:uk_external_agent_binding_thread,priority:1" json:"provider"`
+	ProviderThreadID  string    `gorm:"column:provider_thread_id;type:varchar(128);not null;uniqueIndex:uk_external_agent_binding_thread,priority:2" json:"provider_thread_id"`
+	ManagedByLazyMind bool      `gorm:"column:managed_by_lazymind;not null;default:false" json:"managed_by_lazymind"`
+	CreatedByUserID   string    `gorm:"column:created_by_user_id;type:varchar(255);not null" json:"-"`
+	CreatedAt         time.Time `gorm:"column:created_at;not null" json:"created_at"`
+	UpdatedAt         time.Time `gorm:"column:updated_at;not null" json:"updated_at"`
+}
+
+func (ExternalAgentBinding) TableName() string { return "external_agent_bindings" }
+
+// ExternalChatRun is the operational record for one external Agent turn. The
+// same read model covers LazyMind-managed turns and observed MCP activity.
 type ExternalChatRun struct {
 	ID                string          `gorm:"column:id;type:varchar(36);primaryKey" json:"run_id"`
 	RequestID         string          `gorm:"column:request_id;type:varchar(255);not null;uniqueIndex:uk_external_agent_run_request,priority:2" json:"request_id"`
@@ -15,6 +30,7 @@ type ExternalChatRun struct {
 	HistoryID         string          `gorm:"column:history_id;type:varchar(36);not null;index" json:"history_id"`
 	Provider          string          `gorm:"column:provider;type:varchar(32);not null;uniqueIndex:uk_external_agent_run_request,priority:1" json:"provider"`
 	ProviderThreadID  string          `gorm:"column:provider_thread_id;type:varchar(128);not null;default:'';index" json:"provider_thread_id,omitempty"`
+	ProviderTurnID    string          `gorm:"column:provider_turn_id;type:varchar(128)" json:"provider_turn_id,omitempty"`
 	ActorUserID       string          `gorm:"column:actor_user_id;type:varchar(255);not null;index" json:"-"`
 	Action            string          `gorm:"column:action;type:varchar(32);not null;default:'start'" json:"action"`
 	Status            string          `gorm:"column:status;type:varchar(32);not null;index" json:"status"`

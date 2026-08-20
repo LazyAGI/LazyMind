@@ -12,7 +12,12 @@ from channel_gateway.common.domain.channel import (
     OutboundMessage,
     WELCOME_MESSAGE,
 )
-from channel_gateway.common.errors import RetryableProviderSideEffectError
+from channel_gateway.common.domain.chat import retainable_provider_context
+from channel_gateway.common.errors import (
+    LazyMindHTTPError,
+    RetryableLazyMindError,
+    RetryableProviderSideEffectError,
+)
 from channel_gateway.common.ports.messaging import MessageWorkerRepository
 from channel_gateway.common.ports.messaging import (
     DeliveryProviderRegistry,
@@ -24,10 +29,8 @@ from channel_gateway.common.ports.messaging import (
 _logger = logging.getLogger(__name__)
 _INBOUND_LEASE_SECONDS = 120
 _OUTBOUND_LEASE_SECONDS = 120
-# Core currently has no durable idempotency contract. Retrying a returned
-# application error could duplicate a completed turn, so only lease recovery
-# after a process crash can re-enter an inbound message.
 _MAX_INBOUND_ATTEMPTS = 1
+_MAX_RETRYABLE_CORE_ATTEMPTS = 3
 _MAX_PROVIDER_SIDE_EFFECT_ATTEMPTS = 5
 _MAX_OUTBOUND_ATTEMPTS = 5
 
@@ -35,6 +38,14 @@ _MAX_OUTBOUND_ATTEMPTS = 5
 def _failure_message(provider_context: dict, exc: Exception) -> str:
     del provider_context, exc
     return 'LazyMind 暂时无法处理这条消息，请稍后重试。'
+
+
+def _inbound_attempt_limit(exc: Exception) -> int:
+    if isinstance(exc, RetryableLazyMindError):
+        return _MAX_RETRYABLE_CORE_ATTEMPTS
+    if isinstance(exc, LazyMindHTTPError) and exc.retryable:
+        return _MAX_RETRYABLE_CORE_ATTEMPTS
+    return _MAX_INBOUND_ATTEMPTS
 
 
 class LeaseLostError(RuntimeError):
@@ -134,12 +145,15 @@ class MessageWorker:
                 self._stop.wait(1.0)
 
     def _process(self, inbound: ClaimedInbound, claim_owner: str) -> None:
+        retained_context = retainable_provider_context(
+            inbound.provider_context
+        )
         fallback = OutboundMessage(
             provider=inbound.provider,
             account_id=inbound.account_id,
             order_key=inbound.order_key,
             recipient_id=inbound.recipient_id,
-            provider_context=inbound.provider_context,
+            provider_context=retained_context,
             text='LazyMind 暂时无法处理这条消息，请稍后重试。',
             intent_kind='failed',
         )
@@ -222,6 +236,7 @@ class MessageWorker:
                     inbound.inbox_id,
                     claim_owner,
                     outbound,
+                    retained_context,
                 ):
                     _logger.warning(
                         'channel_inbound_completion_fenced inbox_id=%s',
@@ -255,6 +270,7 @@ class MessageWorker:
                 error=exc.__class__.__name__,
                 fallback=fallback,
                 max_attempts=_MAX_PROVIDER_SIDE_EFFECT_ATTEMPTS,
+                retained_provider_context=retained_context,
             )
         except Exception as exc:
             if stream is not None:
@@ -273,7 +289,8 @@ class MessageWorker:
                 claim_owner,
                 error=exc.__class__.__name__,
                 fallback=fallback,
-                max_attempts=_MAX_INBOUND_ATTEMPTS,
+                max_attempts=_inbound_attempt_limit(exc),
+                retained_provider_context=retained_context,
             )
 
 

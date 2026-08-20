@@ -81,6 +81,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/agent-invocations/{invocation_id}:start", []string{"qa.write"}, invocationHandler.Start)
 	handleAPI(r, "POST", "/agent-invocations/{invocation_id}:finish", []string{"qa.write"}, invocationHandler.Finish)
 	handleAPI(r, "GET", "/agent-invocations", []string{"qa.read"}, invocationHandler.List)
+	handleAPI(r, "POST", "/external-agent/turns:sync", []string{"qa.write"}, invocationHandler.SyncTurn)
 
 	attemptHandler := workflowattempt.Handler{Service: workflowattempt.New(corestore.DB(), workflowattempt.Config{})}
 	remoteExecutorHandler := workflowexecutor.RemoteHandler{

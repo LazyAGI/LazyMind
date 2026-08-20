@@ -25,7 +25,7 @@ const (
 )
 
 type invocationRecorder interface {
-	StartInvocation(context.Context, string, coreapi.InvocationStart) error
+	StartInvocation(context.Context, string, coreapi.InvocationStart) (coreapi.InvocationStartResult, error)
 	FinishInvocation(context.Context, string, coreapi.InvocationFinish) error
 }
 
@@ -58,26 +58,119 @@ func invocationMiddleware(recorder invocationRecorder, connectorInstanceID strin
 				Transport: "stdio", ToolName: call.Params.Name, ReadOnly: readOnlyTools[call.Params.Name],
 				RequestHash: requestHash, RequestSummary: requestSummary,
 			}
-			if err := recorder.StartInvocation(ctx, invocationID, start); err != nil {
+			if strings.TrimSpace(os.Getenv("LAZYMIND_CONVERSATION_ID")) == "" &&
+				strings.TrimSpace(os.Getenv("LAZYMIND_EXTERNAL_REF")) == "" {
+				start.Source = invocationSource(clientName, call.Params.Meta, call.Params.Name, call.Params.Arguments)
+			}
+			started, err := recorder.StartInvocation(ctx, invocationID, start)
+			if err != nil {
 				return nil, fmt.Errorf("record LazyMind invocation before %s: %w", call.Params.Name, err)
+			}
+			conversationID, externalRef := "", ""
+			if started.Source != nil {
+				conversationID, externalRef = started.Source.ConversationID, started.Source.ExternalRef
 			}
 			callCtx := coreapi.WithInvocation(ctx, coreapi.InvocationMetadata{
 				ID: invocationID, ClientName: clientName, ConnectorInstanceID: connectorInstanceID,
+				ConversationID: conversationID, ExternalRef: externalRef,
 			})
 			result, callErr := next(callCtx, method, request)
 			finish := finishEvidence(callErr, result, requestSummary)
 			if finish.ExternalRef == "" {
 				finish.ExternalRef = strings.TrimSpace(os.Getenv("LAZYMIND_EXTERNAL_REF"))
 			}
+			if finish.ExternalRef == "" {
+				finish.ExternalRef = externalRef
+			}
 			finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finishTimeout)
 			finishErr := recorder.FinishInvocation(finishCtx, invocationID, finish)
 			cancel()
+			scheduleCodexTurnSync(recorder, start.Source)
 			if finishErr != nil && result == nil && callErr == nil {
 				return nil, fmt.Errorf("record LazyMind invocation result: %w", finishErr)
 			}
 			return result, callErr
 		}
 	}
+}
+
+func invocationSource(clientName string, metadata mcp.Meta, toolName string, arguments json.RawMessage) *coreapi.InvocationSource {
+	provider := providerForClient(clientName)
+	if provider == "" || len(metadata) == 0 {
+		return nil
+	}
+	nested, _ := metadata["x-codex-turn-metadata"].(map[string]any)
+	threadID := firstMetadataString(metadata, nested,
+		"threadId", "thread_id", "conversationId", "conversation_id", "sessionId", "session_id")
+	if threadID == "" {
+		return nil
+	}
+	turnID := firstMetadataString(metadata, nested, "turnId", "turn_id", "callId", "call_id")
+	threadSource := firstMetadataString(metadata, nested, "threadSource", "thread_source")
+	message := ""
+	if provider == "codex" {
+		message = codexTurnUserMessage(threadID, turnID)
+	}
+	if message == "" {
+		message = invocationSourceMessage(toolName, arguments)
+	}
+	return &coreapi.InvocationSource{
+		Provider: provider, ThreadID: threadID, TurnID: turnID, ThreadSource: threadSource,
+		Message: message,
+	}
+}
+
+func invocationSourceMessage(toolName string, arguments json.RawMessage) string {
+	var values map[string]any
+	if json.Unmarshal(arguments, &values) != nil {
+		return ""
+	}
+	keys := []string{}
+	switch toolName {
+	case "workflow.start":
+		keys = []string{"request_context"}
+	case "knowledge.search", "cloud_document.search":
+		keys = []string{"query"}
+	}
+	for _, key := range keys {
+		if value, ok := values[key].(string); ok {
+			value = strings.TrimSpace(value)
+			if len([]rune(value)) > 8192 {
+				value = string([]rune(value)[:8192])
+			}
+			return value
+		}
+	}
+	return ""
+}
+
+func providerForClient(clientName string) string {
+	value := strings.ToLower(strings.TrimSpace(clientName))
+	switch {
+	case strings.Contains(value, "codex"):
+		return "codex"
+	case strings.Contains(value, "cursor"):
+		return "cursor"
+	case strings.Contains(value, "workbuddy"):
+		return "workbuddy"
+	case strings.Contains(value, "trae"):
+		return "trae-work"
+	case strings.Contains(value, "deepseek"), strings.Contains(value, "dsh"):
+		return "deepseek-harness"
+	default:
+		return ""
+	}
+}
+
+func firstMetadataString(primary, secondary map[string]any, keys ...string) string {
+	for _, key := range keys {
+		for _, values := range []map[string]any{primary, secondary} {
+			if value, ok := values[key].(string); ok && strings.TrimSpace(value) != "" {
+				return strings.TrimSpace(value)
+			}
+		}
+	}
+	return ""
 }
 
 func newInvocationID(prefix string) (string, error) {

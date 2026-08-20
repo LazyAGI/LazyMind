@@ -19,12 +19,16 @@ class ActionKind(str, Enum):
     LIST = 'conversation.list'
     SWITCH = 'conversation.switch'
     CURRENT = 'conversation.current'
+    STOP = 'conversation.stop'
     HISTORY_MORE = 'history.more'
     SELECTION_CHOOSE = 'selection.choose'
     CAPABILITY_LIST = 'capability.list'
     CAPABILITY_CONFIGURE = 'capability.configure'
     CONVERSATION_SETTINGS = 'conversation.settings'
     CONVERSATION_SETTINGS_UPDATE = 'conversation.settings.update'
+    CLOUD_DOCUMENT_LIST = 'cloud_document.list'
+    CLOUD_DOCUMENT_GET = 'cloud_document.get'
+    CLOUD_DOCUMENT_SEARCH = 'cloud_document.search'
     CLARIFY = 'clarify'
 
 
@@ -420,6 +424,37 @@ class ClarifyParameters(_StrictModel):
     )
 
 
+class ConversationStopParameters(_StrictModel):
+    evidence: list[Evidence] = Field(
+        min_length=1,
+        max_length=2,
+        description='Verbatim substring requesting the active generation to stop.',
+    )
+
+
+class CloudDocumentListParameters(_StrictModel):
+    keyword: str = Field(default='', max_length=256)
+    status: str = Field(default='', max_length=64)
+    page_token: str = Field(default='', max_length=1024)
+    evidence: list[Evidence] = Field(min_length=1, max_length=4)
+
+
+class CloudDocumentGetParameters(_StrictModel):
+    source_id: str = Field(min_length=1, max_length=256)
+    node_ref: str = Field(default='', max_length=256)
+    target_type: str = Field(default='', max_length=64)
+    target_ref: str = Field(default='', max_length=256)
+    page_token: str = Field(default='', max_length=1024)
+    evidence: list[Evidence] = Field(min_length=1, max_length=4)
+
+
+class CloudDocumentSearchParameters(_StrictModel):
+    source_id: str = Field(min_length=1, max_length=256)
+    query: str = Field(min_length=1, max_length=4000)
+    page_token: str = Field(default='', max_length=1024)
+    evidence: list[Evidence] = Field(min_length=1, max_length=4)
+
+
 class _CommandBase(_StrictModel):
     schema_version: Literal['1']
 
@@ -441,6 +476,10 @@ _SWITCH_DESCRIPTION = (
     'change, or when state.latest_selection has no suspended continuation.'
 )
 _CURRENT_DESCRIPTION = 'Report which conversation is currently selected on this channel.'
+_STOP_DESCRIPTION = (
+    'Stop the active generation, external Agent run, Workflow and SubAgent work '
+    'for the current conversation only when the user explicitly requests it.'
+)
 _HISTORY_DESCRIPTION = 'Load older history from the currently selected conversation.'
 _SELECTION_CHOOSE_DESCRIPTION = (
     'Choose one numbered item only when state.latest_selection.has_continuation is true and '
@@ -470,6 +509,18 @@ _CONVERSATION_SETTINGS_UPDATE_DESCRIPTION = (
 _CLARIFY_DESCRIPTION = (
     'Ask one clarification question when no command and required parameters can be selected '
     'safely. It performs no other action.'
+)
+_CLOUD_DOCUMENT_LIST_DESCRIPTION = (
+    'List Feishu cloud accounts already authorized and enabled for LazyMind conversations. '
+    'This is online read-only access and never creates a scan source or starts synchronization.'
+)
+_CLOUD_DOCUMENT_GET_DESCRIPTION = (
+    'Browse one online page of folders and documents through an authorized LazyMind cloud account. '
+    'source_id and optional node fields normally come from a provider card action.'
+)
+_CLOUD_DOCUMENT_SEARCH_DESCRIPTION = (
+    'Search document and folder titles online through an authorized LazyMind cloud account. '
+    'This never creates a scan source, refreshes an index, or starts ingestion.'
 )
 
 
@@ -506,6 +557,13 @@ class ConversationCurrentCommand(_CommandBase):
     description: ClassVar[str] = _CURRENT_DESCRIPTION
     command: Literal[ActionKind.CURRENT] = Field(description=_CURRENT_DESCRIPTION)
     parameters: ConversationCurrentParameters
+
+
+class ConversationStopCommand(_CommandBase):
+    name: ClassVar[ActionKind] = ActionKind.STOP
+    description: ClassVar[str] = _STOP_DESCRIPTION
+    command: Literal[ActionKind.STOP] = Field(description=_STOP_DESCRIPTION)
+    parameters: ConversationStopParameters
 
 
 class HistoryMoreCommand(_CommandBase):
@@ -567,12 +625,40 @@ class ClarifyCommand(_CommandBase):
     parameters: ClarifyParameters
 
 
+class CloudDocumentListCommand(_CommandBase):
+    name: ClassVar[ActionKind] = ActionKind.CLOUD_DOCUMENT_LIST
+    description: ClassVar[str] = _CLOUD_DOCUMENT_LIST_DESCRIPTION
+    command: Literal[ActionKind.CLOUD_DOCUMENT_LIST] = Field(
+        description=_CLOUD_DOCUMENT_LIST_DESCRIPTION
+    )
+    parameters: CloudDocumentListParameters
+
+
+class CloudDocumentGetCommand(_CommandBase):
+    name: ClassVar[ActionKind] = ActionKind.CLOUD_DOCUMENT_GET
+    description: ClassVar[str] = _CLOUD_DOCUMENT_GET_DESCRIPTION
+    command: Literal[ActionKind.CLOUD_DOCUMENT_GET] = Field(
+        description=_CLOUD_DOCUMENT_GET_DESCRIPTION
+    )
+    parameters: CloudDocumentGetParameters
+
+
+class CloudDocumentSearchCommand(_CommandBase):
+    name: ClassVar[ActionKind] = ActionKind.CLOUD_DOCUMENT_SEARCH
+    description: ClassVar[str] = _CLOUD_DOCUMENT_SEARCH_DESCRIPTION
+    command: Literal[ActionKind.CLOUD_DOCUMENT_SEARCH] = Field(
+        description=_CLOUD_DOCUMENT_SEARCH_DESCRIPTION
+    )
+    parameters: CloudDocumentSearchParameters
+
+
 COMMAND_TYPES = (
     ChatCommand,
     ConversationNewCommand,
     ConversationListCommand,
     ConversationSwitchCommand,
     ConversationCurrentCommand,
+    ConversationStopCommand,
     HistoryMoreCommand,
     SelectionChooseCommand,
     CapabilityListCommand,
@@ -580,6 +666,9 @@ COMMAND_TYPES = (
     ConversationSettingsCommand,
     ConversationSettingsUpdateCommand,
     ClarifyCommand,
+    CloudDocumentListCommand,
+    CloudDocumentGetCommand,
+    CloudDocumentSearchCommand,
 )
 _CommandUnion = reduce(or_, COMMAND_TYPES)
 CommandEnvelope: TypeAlias = Annotated[_CommandUnion, Field(discriminator='command')]

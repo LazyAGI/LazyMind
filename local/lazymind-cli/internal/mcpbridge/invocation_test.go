@@ -42,6 +42,10 @@ func TestInvocationMiddlewareRecordsRealMCPCall(t *testing.T) {
 
 	result, err := clientSession.CallTool(ctx, &mcp.CallToolParams{Name: "workflow.step.begin", Arguments: map[string]any{
 		"session_id": "session-1", "step_id": "draft", "objective": "do not persist this prompt",
+	}, Meta: mcp.Meta{
+		"threadId":              "codex-thread-1",
+		"callId":                "tool-call-must-not-replace-turn",
+		"x-codex-turn-metadata": map[string]any{"turn_id": "codex-turn-1", "thread_source": "user"},
 	}})
 	if err != nil || result.IsError {
 		t.Fatalf("call tool: result=%+v err=%v", result, err)
@@ -56,6 +60,10 @@ func TestInvocationMiddlewareRecordsRealMCPCall(t *testing.T) {
 	if starts[0].ClientName != "codex-cli" || starts[0].ClientVersion != "1.2.3" ||
 		starts[0].ToolName != "workflow.step.begin" || starts[0].ReadOnly {
 		t.Fatalf("start evidence: %+v", starts[0])
+	}
+	if starts[0].Source == nil || starts[0].Source.Provider != "codex" ||
+		starts[0].Source.ThreadID != "codex-thread-1" || starts[0].Source.TurnID != "codex-turn-1" {
+		t.Fatalf("source context: %+v", starts[0].Source)
 	}
 	if strings.Contains(string(starts[0].RequestSummary), "do not persist") ||
 		!strings.Contains(string(starts[0].RequestSummary), `"objective_length":26`) {
@@ -102,6 +110,18 @@ func TestEvidenceSummaryExcludesContentAndAbsolutePath(t *testing.T) {
 	}
 }
 
+func TestInvocationSourceMessageUsesUserFacingToolFields(t *testing.T) {
+	if got := invocationSourceMessage("knowledge.search", json.RawMessage(`{"query":"原始问题"}`)); got != "原始问题" {
+		t.Fatalf("knowledge source message=%q", got)
+	}
+	if got := invocationSourceMessage("workflow.start", json.RawMessage(`{"request_context":"生成报告"}`)); got != "生成报告" {
+		t.Fatalf("Workflow source message=%q", got)
+	}
+	if got := invocationSourceMessage("knowledge.list", json.RawMessage(`{"keyword":"private"}`)); got != "" {
+		t.Fatalf("list tool leaked non-message field: %q", got)
+	}
+}
+
 type recordingInvocationRecorder struct {
 	mu        sync.Mutex
 	startErr  error
@@ -111,12 +131,17 @@ type recordingInvocationRecorder struct {
 	finishIDs []string
 }
 
-func (r *recordingInvocationRecorder) StartInvocation(_ context.Context, id string, input coreapi.InvocationStart) error {
+func (r *recordingInvocationRecorder) StartInvocation(_ context.Context, id string, input coreapi.InvocationStart) (coreapi.InvocationStartResult, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.startIDs = append(r.startIDs, id)
 	r.starts = append(r.starts, input)
-	return r.startErr
+	if r.startErr != nil {
+		return coreapi.InvocationStartResult{}, r.startErr
+	}
+	return coreapi.InvocationStartResult{Source: &coreapi.InvocationSourceLink{
+		ConversationID: "conversation-1", ExternalRef: "run-1",
+	}}, nil
 }
 
 func (r *recordingInvocationRecorder) FinishInvocation(_ context.Context, id string, input coreapi.InvocationFinish) error {

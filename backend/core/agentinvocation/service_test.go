@@ -16,6 +16,7 @@ import (
 	"gorm.io/gorm"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/externalcontext"
 )
 
 const testRequestHash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -70,6 +71,74 @@ func TestServiceInvocationLifecycleIsIdempotent(t *testing.T) {
 	}
 	if _, err = service.Finish(context.Background(), "user-2", input.ID, finish); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("owner isolation: %v", err)
+	}
+}
+
+func TestServiceLinksCodexThreadTurnsToOneConversation(t *testing.T) {
+	service := newTestService(t)
+	first := testStartInput("inv-source-1", "knowledge.list")
+	first.Source = &externalcontext.Source{
+		Provider: "codex", ThreadID: "codex-thread-1", TurnID: "codex-turn-1", ThreadSource: "user", Message: "第一轮用户消息",
+	}
+	started, err := service.StartLinked(context.Background(), "user-1", first)
+	if err != nil || started.Source == nil {
+		t.Fatalf("start linked: result=%+v err=%v", started, err)
+	}
+	if started.Source.ConversationID == "" || started.Source.ExternalRef == "" || started.Source.HistoryID == "" {
+		t.Fatalf("incomplete source link: %+v", started.Source)
+	}
+
+	parallel := testStartInput("inv-source-2", "workflow.list")
+	parallel.Source = first.Source
+	second, err := service.StartLinked(context.Background(), "user-1", parallel)
+	if err != nil || second.Source == nil || *second.Source != *started.Source {
+		t.Fatalf("same turn did not reuse source link: first=%+v second=%+v err=%v", started.Source, second.Source, err)
+	}
+	if _, err := service.Finish(context.Background(), "user-1", first.ID, FinishInput{Status: StatusSucceeded}); err != nil {
+		t.Fatal(err)
+	}
+	var run orm.ExternalChatRun
+	if err := service.db.First(&run, "id = ?", started.Source.ExternalRef).Error; err != nil || run.Status != "running" {
+		t.Fatalf("parallel turn completed early: run=%+v err=%v", run, err)
+	}
+	now := time.Now().UTC()
+	if err := service.db.Create(&orm.WorkflowSession{
+		ID: "legacy-session", WorkflowID: "workflow-1", Status: "completed", CreateUserID: "user-1",
+		CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Finish(context.Background(), "user-1", parallel.ID, FinishInput{
+		Status: StatusSucceeded, SessionID: "legacy-session",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.db.First(&run, "id = ?", started.Source.ExternalRef).Error; err != nil || run.Status != "completed" {
+		t.Fatalf("turn was not completed: run=%+v err=%v", run, err)
+	}
+	var legacy orm.WorkflowSession
+	if err := service.db.First(&legacy, "id = ?", "legacy-session").Error; err != nil ||
+		legacy.ConversationID != started.Source.ConversationID || legacy.OriginRef != started.Source.ExternalRef {
+		t.Fatalf("legacy Workflow was not attached: session=%+v err=%v", legacy, err)
+	}
+
+	nextTurn := testStartInput("inv-source-3", "workflow.start")
+	nextTurn.Source = &externalcontext.Source{Provider: "codex", ThreadID: "codex-thread-1", TurnID: "codex-turn-2", Message: "第二轮用户消息"}
+	third, err := service.StartLinked(context.Background(), "user-1", nextTurn)
+	if err != nil || third.Source == nil || third.Source.ConversationID != started.Source.ConversationID ||
+		third.Source.ExternalRef == started.Source.ExternalRef || third.Source.HistoryID == started.Source.HistoryID {
+		t.Fatalf("next turn mapping: first=%+v third=%+v err=%v", started.Source, third.Source, err)
+	}
+	var histories int64
+	if err := service.db.Model(&orm.ChatHistory{}).
+		Where("conversation_id = ?", started.Source.ConversationID).Count(&histories).Error; err != nil || histories != 2 {
+		t.Fatalf("history count=%d err=%v", histories, err)
+	}
+
+	foreign := testStartInput("inv-source-foreign", "knowledge.list")
+	foreign.Source = first.Source
+	if _, err := service.StartLinked(context.Background(), "user-2", foreign); !errors.Is(err, ErrConflict) {
+		t.Fatalf("foreign owner reused binding: %v", err)
 	}
 }
 
@@ -198,7 +267,10 @@ func newTestService(t *testing.T) *Service {
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}
-	if err := db.AutoMigrate(&orm.AgentInvocation{}); err != nil {
+	if err := db.AutoMigrate(
+		&orm.AgentInvocation{}, &orm.ExternalAgentBinding{}, &orm.Conversation{},
+		&orm.ExternalChatRun{}, &orm.ChatHistory{}, &orm.WorkflowSession{},
+	); err != nil {
 		t.Fatalf("migrate database: %v", err)
 	}
 	return New(db)

@@ -989,9 +989,10 @@ const zhCN = {
       disconnectAccount: "解除连接",
       disconnectConfirmTitle: "解除飞书助手连接？",
       disconnectConfirmContent:
-        "解除「{{account}}」后将停止接收和回复飞书消息，并删除本地保存的应用凭据。再次使用需要重新扫码。",
+        "解除「{{account}}」后将停止收发飞书消息并删除 LazyMind 本地凭据。飞书企业内的自建应用不会自动删除，请由管理员在飞书开放平台停用或删除。再次使用需要重新扫码。",
       disconnectConfirmOk: "确认解除",
-      disconnectSuccess: "飞书助手已解除连接",
+      disconnectSuccess:
+        "飞书助手已解除连接；如不再使用，请在飞书开放平台停用或删除对应自建应用",
       disconnectFailed: "解除飞书助手连接失败",
       loadAccountsFailed: "加载飞书账号失败",
       startFailed: "创建飞书扫码会话失败",

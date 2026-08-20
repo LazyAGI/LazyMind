@@ -12,6 +12,11 @@ from channel_gateway.common.domain.channel import ClaimedOutbound
 _MARKDOWN_IMAGE = re.compile(r'!\[([^\]]*)\]\(([^)\s]+)\)')
 
 
+def is_image_content_type(value: Any) -> bool:
+    content_type = str(value or '').strip().lower()
+    return content_type == 'image' or content_type.startswith('image/')
+
+
 @dataclass(frozen=True, slots=True)
 class SelectionOption:
     label: str
@@ -47,6 +52,30 @@ class CapabilityPresentation:
             'kind': self.kind,
             'groups': [dict(group) for group in self.groups],
         }
+
+
+@dataclass(frozen=True, slots=True)
+class CloudDocumentPresentation:
+    kind: Literal['cloud_document']
+    mode: Literal['sources', 'documents', 'search']
+    source: dict[str, Any] | None = None
+    items: tuple[dict[str, Any], ...] = ()
+    query: str = ''
+    next_page_token: str = ''
+    total: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        value: dict[str, Any] = {
+            'kind': self.kind,
+            'mode': self.mode,
+            'source': dict(self.source) if self.source else None,
+            'items': [dict(item) for item in self.items],
+            'query': self.query,
+            'next_page_token': self.next_page_token,
+        }
+        if self.total is not None:
+            value['total'] = self.total
+        return value
 
 
 @dataclass(frozen=True, slots=True)
@@ -222,6 +251,7 @@ class ConversationPresentation:
 ReplyPresentation: TypeAlias = (
     SelectionPresentation
     | CapabilityPresentation
+    | CloudDocumentPresentation
     | ConversationSettingsPresentation
     | AskPresentation
     | TaskPresentation
@@ -426,8 +456,7 @@ class OutboundRenderer:
                 continue
             kind = (
                 'image'
-                if content_type == 'image'
-                or content_type.startswith('image/')
+                if is_image_content_type(content_type)
                 else 'file'
                 if content_type == 'file'
                 else ''

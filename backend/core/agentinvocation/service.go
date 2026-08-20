@@ -16,6 +16,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/externalcontext"
 )
 
 const (
@@ -38,19 +39,32 @@ var (
 type Service struct{ db *gorm.DB }
 
 type StartInput struct {
-	ID                  string          `json:"-"`
-	ExternalRef         string          `json:"-"`
-	ClientName          string          `json:"client_name"`
-	ClientVersion       string          `json:"client_version,omitempty"`
-	ConnectorName       string          `json:"connector_name"`
-	ConnectorVersion    string          `json:"connector_version,omitempty"`
-	ConnectorInstanceID string          `json:"connector_instance_id"`
-	ProtocolVersion     string          `json:"protocol_version,omitempty"`
-	Transport           string          `json:"transport"`
-	ToolName            string          `json:"tool_name"`
-	ReadOnly            bool            `json:"read_only"`
-	RequestHash         string          `json:"request_hash"`
-	RequestSummary      json.RawMessage `json:"request_summary,omitempty"`
+	ID                  string                  `json:"-"`
+	ExternalRef         string                  `json:"-"`
+	ConversationID      string                  `json:"-"`
+	ClientName          string                  `json:"client_name"`
+	ClientVersion       string                  `json:"client_version,omitempty"`
+	ConnectorName       string                  `json:"connector_name"`
+	ConnectorVersion    string                  `json:"connector_version,omitempty"`
+	ConnectorInstanceID string                  `json:"connector_instance_id"`
+	ProtocolVersion     string                  `json:"protocol_version,omitempty"`
+	Transport           string                  `json:"transport"`
+	ToolName            string                  `json:"tool_name"`
+	ReadOnly            bool                    `json:"read_only"`
+	RequestHash         string                  `json:"request_hash"`
+	RequestSummary      json.RawMessage         `json:"request_summary,omitempty"`
+	Source              *externalcontext.Source `json:"source,omitempty"`
+}
+
+type StartResult struct {
+	Invocation orm.AgentInvocation   `json:"invocation"`
+	Created    bool                  `json:"created"`
+	Source     *externalcontext.Link `json:"source,omitempty"`
+}
+
+type TurnSyncInput struct {
+	Source externalcontext.Source `json:"source"`
+	Answer string                 `json:"answer"`
 }
 
 type FinishInput struct {
@@ -91,7 +105,58 @@ type pageCursor struct {
 
 func New(db *gorm.DB) *Service { return &Service{db: db} }
 
+func (s *Service) SyncTurn(ctx context.Context, owner string, input TurnSyncInput) error {
+	if s == nil || s.db == nil {
+		return ErrInvalidInput
+	}
+	if err := externalcontext.New(s.db).SyncTurnAnswer(ctx, owner, input.Source, input.Answer); errors.Is(err, externalcontext.ErrInvalidSource) {
+		return ErrInvalidInput
+	} else {
+		return err
+	}
+}
+
 func (s *Service) Start(ctx context.Context, owner string, input StartInput) (orm.AgentInvocation, bool, error) {
+	result, err := s.StartLinked(ctx, owner, input)
+	return result.Invocation, result.Created, err
+}
+
+func (s *Service) StartLinked(ctx context.Context, owner string, input StartInput) (StartResult, error) {
+	if s == nil || s.db == nil {
+		return StartResult{}, ErrInvalidInput
+	}
+	var output StartResult
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if input.Source != nil && strings.TrimSpace(input.ExternalRef) == "" && strings.TrimSpace(input.ConversationID) == "" {
+			link, err := externalcontext.New(tx).ResolveInvocation(ctx, owner, input.ID, input.ToolName, *input.Source)
+			if errors.Is(err, externalcontext.ErrInvalidSource) {
+				return ErrInvalidInput
+			}
+			if errors.Is(err, externalcontext.ErrThreadOwned) {
+				return ErrConflict
+			}
+			if err != nil {
+				return err
+			}
+			input.ExternalRef, input.ConversationID = link.ExternalRef, link.ConversationID
+			output.Source = &link
+		} else if strings.TrimSpace(input.ExternalRef) != "" || strings.TrimSpace(input.ConversationID) != "" {
+			output.Source = &externalcontext.Link{
+				ConversationID: strings.TrimSpace(input.ConversationID),
+				ExternalRef:    strings.TrimSpace(input.ExternalRef),
+			}
+		}
+		record, created, err := (&Service{db: tx}).startRecord(ctx, owner, input)
+		if err != nil {
+			return err
+		}
+		output.Invocation, output.Created = record, created
+		return nil
+	})
+	return output, err
+}
+
+func (s *Service) startRecord(ctx context.Context, owner string, input StartInput) (orm.AgentInvocation, bool, error) {
 	owner = strings.TrimSpace(owner)
 	input.ID = strings.TrimSpace(input.ID)
 	input.ClientName = strings.TrimSpace(input.ClientName)
@@ -142,6 +207,29 @@ func (s *Service) Start(ctx context.Context, owner string, input StartInput) (or
 }
 
 func (s *Service) Finish(ctx context.Context, owner, id string, input FinishInput) (orm.AgentInvocation, error) {
+	if s == nil || s.db == nil {
+		return orm.AgentInvocation{}, ErrInvalidInput
+	}
+	var output orm.AgentInvocation
+	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		record, err := (&Service{db: tx}).finishRecord(ctx, owner, id, input)
+		if err != nil {
+			return err
+		}
+		source := externalcontext.New(tx)
+		if err := source.LinkWorkflowSession(ctx, owner, record.ExternalRef, record.SessionID); err != nil {
+			return err
+		}
+		if err := source.CompleteObservedTurn(ctx, owner, record.ExternalRef); err != nil {
+			return err
+		}
+		output = record
+		return nil
+	})
+	return output, err
+}
+
+func (s *Service) finishRecord(ctx context.Context, owner, id string, input FinishInput) (orm.AgentInvocation, error) {
 	owner, id = strings.TrimSpace(owner), strings.TrimSpace(id)
 	input.Status = strings.ToLower(strings.TrimSpace(input.Status))
 	if s == nil || s.db == nil || !bounded(owner, 255) || !bounded(id, 80) || !terminalStatus(input.Status) {
@@ -163,6 +251,9 @@ func (s *Service) Finish(ctx context.Context, owner, id string, input FinishInpu
 			return orm.AgentInvocation{}, ErrNotFound
 		}
 		return orm.AgentInvocation{}, err
+	}
+	if strings.TrimSpace(input.ExternalRef) == "" {
+		input.ExternalRef = record.ExternalRef
 	}
 	if terminalStatus(record.Status) {
 		if !sameFinish(record, input, resultSummary) {

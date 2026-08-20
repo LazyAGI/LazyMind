@@ -52,6 +52,7 @@ class InboxWorkRepository(Protocol):
         inbox_id: str,
         claim_owner: str,
         outbound: list[OutboundMessage],
+        retained_provider_context: dict[str, Any],
     ) -> bool:
         ...
 
@@ -63,6 +64,7 @@ class InboxWorkRepository(Protocol):
         error: str,
         fallback: OutboundMessage,
         max_attempts: int,
+        retained_provider_context: dict[str, Any],
     ) -> bool:
         """Return True when the message reached its terminal fallback."""
         ...

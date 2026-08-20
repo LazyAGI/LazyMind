@@ -1031,9 +1031,10 @@ const enUS = {
       disconnectAccount: "Disconnect",
       disconnectConfirmTitle: "Disconnect this Feishu assistant?",
       disconnectConfirmContent:
-        "Disconnecting “{{account}}” stops receiving and replying to Feishu messages and removes the locally stored app credentials. Scan again to reconnect.",
+        "Disconnecting “{{account}}” stops Feishu messaging and deletes LazyMind's local credentials. It does not remove the custom app from your Feishu tenant; an administrator must disable or delete it in Feishu Open Platform. Scan again to reconnect.",
       disconnectConfirmOk: "Disconnect",
-      disconnectSuccess: "Feishu assistant disconnected",
+      disconnectSuccess:
+        "Feishu assistant disconnected. Disable or delete its custom app in Feishu Open Platform if it is no longer needed",
       disconnectFailed: "Failed to disconnect Feishu assistant",
       loadAccountsFailed: "Failed to load Feishu accounts",
       startFailed: "Failed to start Feishu QR connection",

@@ -83,6 +83,7 @@ class InboundEnvelope:
     recipient_id: str
     text: str
     provider_context: dict[str, Any] = field(default_factory=dict)
+    sensitive_context: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,6 +130,7 @@ class OutboundMessage:
 @dataclass(frozen=True, slots=True)
 class ClaimedOutbound:
     outbox_id: str
+    created_sequence: int
     provider: str
     account_id: str
     order_key: str

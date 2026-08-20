@@ -23,7 +23,7 @@ func newExternalChatTestApplication(t *testing.T) (*externalChatApplication, *go
 	db := database.DB
 	if err := db.AutoMigrate(
 		&orm.Conversation{}, &orm.ChatHistory{}, &orm.TaskCenterTask{},
-		&orm.ExternalChatRun{}, &orm.ExternalChatRunEvent{}, &orm.ExternalChatHost{}, &orm.AgentInvocation{},
+		&orm.ExternalAgentBinding{}, &orm.ExternalChatRun{}, &orm.ExternalChatRunEvent{}, &orm.ExternalChatHost{}, &orm.AgentInvocation{},
 		&orm.WorkflowSession{}, &orm.WorkflowSlotRevision{}, &orm.WorkflowHumanArtifact{}, &orm.ConversationArtifact{},
 	); err != nil {
 		t.Fatalf("migrate External Chat test store: %v", err)
@@ -52,6 +52,11 @@ func TestExternalExecutionProjectionJoinsAuthoritiesWithoutOwningState(t *testin
 	if _, err := app.appendEvent(ctx, "user-1", first.RunID, "host-1", first.LeaseToken,
 		externalChatEvent{EventID: "projection-thread", Type: "thread_started", ProviderThreadID: "private-thread"}); err != nil {
 		t.Fatal(err)
+	}
+	var binding orm.ExternalAgentBinding
+	if err := db.Where("provider = ? AND provider_thread_id = ?", ChatExecutorCodex, "private-thread").Take(&binding).Error; err != nil ||
+		binding.ConversationID != "conversation-1" || binding.CreatedByUserID != "user-1" || !binding.ManagedByLazyMind {
+		t.Fatalf("managed thread binding: binding=%+v err=%v", binding, err)
 	}
 	now := clock
 	if err := db.Create(&orm.AgentInvocation{
@@ -143,6 +148,23 @@ func TestExternalExecutionProjectionJoinsAuthoritiesWithoutOwningState(t *testin
 	foreign, err := app.executionProjections(ctx, "user-2", []string{second.HistoryID})
 	if err != nil || len(foreign) != 0 {
 		t.Fatalf("projection crossed owner boundary: %#v err=%v", foreign, err)
+	}
+}
+
+func TestExternalChatHostDoesNotClaimObservedMCPActivity(t *testing.T) {
+	app, db := newExternalChatTestApplication(t)
+	now := time.Now().UTC()
+	if err := db.Create(&orm.ExternalChatRun{
+		ID: "observed-run", RequestID: "observed-request", ConversationID: "conversation-1",
+		HistoryID: "observed-history", Provider: ChatExecutorCodex, ProviderThreadID: "external-thread",
+		ProviderTurnID: "external-turn", ActorUserID: "user-1", Action: "observe", Status: "running",
+		CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	job, err := app.claim(context.Background(), "user-1", ChatExecutorCodex, "host-1")
+	if err != nil || job != nil {
+		t.Fatalf("observed run was claimable: job=%+v err=%v", job, err)
 	}
 }
 

@@ -18,6 +18,7 @@ from channel_gateway.common.domain.outbound import (
     SelectionOption,
     SelectionPresentation,
     TaskPresentation,
+    is_image_content_type,
     optional_int,
 )
 from channel_gateway.common.ports.repository import NavigationRepository
@@ -222,7 +223,7 @@ def _durable_core_events(
             }
             if not bounded_value['paths']:
                 continue
-        elif content_type in {'image', 'file'} or content_type.startswith('image/'):
+        elif content_type == 'file' or is_image_content_type(content_type):
             source = str(value.get('url') or '')
             if (
                 not source

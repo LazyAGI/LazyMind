@@ -655,6 +655,27 @@ class ConversationActions:
             ),
         )
 
+    def stop(
+        self,
+        *,
+        account_id: str,
+        external_address_hash: str,
+        owner_user_id: str,
+        request_id: str,
+    ) -> str:
+        conversation_id = self._store.get_route(
+            account_id,
+            external_address_hash,
+        )
+        if not conversation_id:
+            return '当前没有正在执行的会话。'
+        self._client.stop_chat_generation(
+            owner_user_id=owner_user_id,
+            conversation_id=conversation_id,
+            request_id=request_id,
+        )
+        return '已请求停止当前会话的生成与后台执行。'
+
     def more_history(
         self,
         *,

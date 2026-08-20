@@ -7,17 +7,24 @@ from channel_gateway.common.application.capabilities import (
     ActionMessage,
     CapabilityActions,
 )
+from channel_gateway.common.application.cloud_documents import (
+    CloudDocumentActions,
+)
 from channel_gateway.common.domain.commands import (
     CapabilityConfigureCommand,
     CapabilityListCommand,
     ChatCommand,
     ClarifyCommand,
+    CloudDocumentGetCommand,
+    CloudDocumentListCommand,
+    CloudDocumentSearchCommand,
     CommandEnvelope,
     ConversationCurrentCommand,
     ConversationListCommand,
     ConversationNewCommand,
     ConversationSettingsCommand,
     ConversationSettingsUpdateCommand,
+    ConversationStopCommand,
     ConversationSwitchCommand,
     HistoryMoreCommand,
     SelectionChooseCommand,
@@ -55,6 +62,7 @@ class ChannelActionExecutor:
         self._store = store
         self._client = client
         self._capabilities = CapabilityActions(store=store, client=client)
+        self._cloud_documents = CloudDocumentActions(client)
         self._conversations = ConversationActions(
             store=store,
             client=client,
@@ -140,6 +148,37 @@ class ChannelActionExecutor:
                     features=features,
                     **context,
                 )
+            elif isinstance(command, ConversationStopCommand):
+                text = self._conversations.stop(**context)
+            elif isinstance(command, CloudDocumentListCommand):
+                text, presentation = self._cloud_documents.list_accounts(
+                    keyword=command.parameters.keyword,
+                    status=command.parameters.status,
+                    page_token=command.parameters.page_token,
+                    owner_user_id=owner_user_id,
+                    request_id=request_id,
+                )
+                presentations = (presentation,)
+            elif isinstance(command, CloudDocumentGetCommand):
+                text, presentation = self._cloud_documents.browse(
+                    source_id=command.parameters.source_id,
+                    node_ref=command.parameters.node_ref,
+                    target_type=command.parameters.target_type,
+                    target_ref=command.parameters.target_ref,
+                    page_token=command.parameters.page_token,
+                    owner_user_id=owner_user_id,
+                    request_id=request_id,
+                )
+                presentations = (presentation,)
+            elif isinstance(command, CloudDocumentSearchCommand):
+                text, presentation = self._cloud_documents.search(
+                    source_id=command.parameters.source_id,
+                    query=command.parameters.query,
+                    page_token=command.parameters.page_token,
+                    owner_user_id=owner_user_id,
+                    request_id=request_id,
+                )
+                presentations = (presentation,)
             elif isinstance(command, HistoryMoreCommand):
                 text = self._conversations.more_history(**context)
             elif isinstance(command, CapabilityListCommand):

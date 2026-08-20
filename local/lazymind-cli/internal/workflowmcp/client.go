@@ -332,11 +332,20 @@ func (c *Client) Start(ctx context.Context, input StartInput) (StartResult, erro
 		"input_bindings": input.InputBindings, "origin_host": "external-agent", "origin_ref": "mcp",
 		"controller_host": "external-agent", "request_context": input.RequestContext,
 	}
-	if c.origin.ExternalRef != "" {
-		request["origin_ref"] = c.origin.ExternalRef
+	origin := c.origin
+	if invocation, ok := coreapi.InvocationFromContext(ctx); ok {
+		if strings.TrimSpace(origin.ExternalRef) == "" {
+			origin.ExternalRef = strings.TrimSpace(invocation.ExternalRef)
+		}
+		if strings.TrimSpace(origin.ConversationID) == "" {
+			origin.ConversationID = strings.TrimSpace(invocation.ConversationID)
+		}
 	}
-	if c.origin.ConversationID != "" {
-		request["conversation_id"] = c.origin.ConversationID
+	if origin.ExternalRef != "" {
+		request["origin_ref"] = origin.ExternalRef
+	}
+	if origin.ConversationID != "" {
+		request["conversation_id"] = origin.ConversationID
 	}
 	var prepared struct {
 		PreparationID string `json:"preparation_id"`

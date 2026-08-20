@@ -58,6 +58,7 @@ export type ConversationHistoryRecord = Omit<
     tool_call_turns?: number | string;
     mentions?: ChatMention[] | null;
     execution?: ExternalExecutionProjection;
+    external_user_only?: boolean;
   };
 
 export interface ExternalExecutionProjection {
@@ -225,6 +226,10 @@ export function buildChatMessageListFromHistory(
 			? (record as any).collected_inputs
 			: [],
     });
+
+    if (record.external_user_only) {
+      return;
+    }
 
     const isLastRecord = record === lastRecord;
     const isActuallyGenerating = isGenerating && isLastRecord;

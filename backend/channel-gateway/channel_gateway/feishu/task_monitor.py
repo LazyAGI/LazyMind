@@ -9,6 +9,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from channel_gateway.common.domain.channel import ClaimedOutbound
+from channel_gateway.common.domain.outbound import is_image_content_type
 from channel_gateway.common.ports.core import TaskClient
 from channel_gateway.common.ports.providers import RuntimeCredentialStore
 from channel_gateway.feishu.domain import workspace_card_expired
@@ -76,21 +77,29 @@ class FeishuTaskCardMonitor:
     def _run(self) -> None:
         while not self._stop.is_set():
             try:
-                outbounds = self._store.list_sent_task_outbounds(
-                    provider='feishu',
-                    limit=_TASK_OUTBOX_LIMIT,
-                )
-                for outbound in outbounds:
-                    if self._stop.is_set():
-                        return
-                    try:
-                        self._refresh_outbound(outbound)
-                    except Exception:
-                        _logger.exception(
-                            'feishu_task_card_refresh_failed '
-                            'outbox_id=%s',
-                            outbound.outbox_id,
-                        )
+                after_sequence = 0
+                while not self._stop.is_set():
+                    outbounds = self._store.list_sent_task_outbounds(
+                        provider='feishu',
+                        limit=_TASK_OUTBOX_LIMIT,
+                        after_sequence=after_sequence,
+                    )
+                    if not outbounds:
+                        break
+                    for outbound in outbounds:
+                        if self._stop.is_set():
+                            return
+                        try:
+                            self._refresh_outbound(outbound)
+                        except Exception:
+                            _logger.exception(
+                                'feishu_task_card_refresh_failed '
+                                'outbox_id=%s',
+                                outbound.outbox_id,
+                            )
+                    after_sequence = outbounds[-1].created_sequence
+                    if len(outbounds) < _TASK_OUTBOX_LIMIT:
+                        break
             except Exception:
                 _logger.exception('feishu_task_card_monitor_failed')
             self._stop.wait(_POLL_SECONDS)
@@ -308,8 +317,7 @@ def _task_image_projection(
     ):
         if (
             not isinstance(artifact, dict)
-            or str(artifact.get('content_type') or '').lower()
-            != 'image'
+            or not is_image_content_type(artifact.get('content_type'))
         ):
             continue
         value = artifact.get('value')

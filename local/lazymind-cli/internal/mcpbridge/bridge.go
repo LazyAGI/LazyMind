@@ -19,6 +19,9 @@ import (
 )
 
 var requiredTools = []string{
+	"cloud_document.get",
+	"cloud_document.list",
+	"cloud_document.search",
 	"knowledge.document.get",
 	"knowledge.document.list",
 	"knowledge.list",
