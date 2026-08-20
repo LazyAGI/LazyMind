@@ -23,6 +23,7 @@ import (
 	"lazymind/core/store"
 	"lazymind/core/subagent"
 	"lazymind/core/taskcenter"
+	"lazymind/core/workflow/graphengine"
 )
 
 type chatStatusCacheEntry struct {
@@ -89,6 +90,10 @@ type WorkflowStepParams struct {
 	LegacyTools   []string `json:"legacy_tools,omitempty"`
 	TerminalTools []string `json:"terminal_tools,omitempty"`
 	ToolsOnly     bool     `json:"tools_only,omitempty"`
+
+	// Runtime is the package-declared host behavior for this immutable revision.
+	// It replaces workflow-id conditionals in the LazyMind executor.
+	Runtime graphengine.RuntimePolicy `json:"workflow_runtime,omitempty"`
 }
 
 // asMap serialises the params into the generic map expected by subagent.RunRequest.Params.
@@ -148,6 +153,9 @@ func (p WorkflowStepParams) asMap() map[string]any {
 	}
 	if p.ToolsOnly {
 		m["tools_only"] = true
+	}
+	if !p.Runtime.IsZero() {
+		m["workflow_runtime"] = p.Runtime
 	}
 	return m
 }
@@ -558,6 +566,9 @@ func launchWorkflowAttempt(
 	}
 	if params.ToolsOnly {
 		rawParamsMap["tools_only"] = true
+	}
+	if !params.Runtime.IsZero() {
+		rawParamsMap["workflow_runtime"] = params.Runtime
 	}
 	if params.HandOff != nil {
 		rawParamsMap["hand_off"] = *params.HandOff

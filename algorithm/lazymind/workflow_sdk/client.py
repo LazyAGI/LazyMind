@@ -343,6 +343,13 @@ class WorkflowClient:
     def list_artifacts(self, session_id: str) -> WorkflowResponse:
         return self._read(f'/workflow-sessions/{quote(session_id, safe="")}/artifacts')
 
+    def get_slot_order(self, session_id: str, slot_id: str) -> WorkflowResponse:
+        """Read the durable visual-order to list-index mapping for one slot."""
+        return self._read(
+            f'/workflow-sessions/{quote(session_id, safe="")}/slots/'
+            f'{quote(slot_id, safe="")}/order'
+        )
+
     def read_artifact(self, artifact_id: str) -> WorkflowResponse:
         return self._read(f'/workflow-artifacts/{quote(artifact_id, safe="")}')
 

@@ -145,14 +145,14 @@ func ListTasksByConversation(ctx context.Context, db *gorm.DB, convID string) ([
 	return tasks, nil
 }
 
-// ListTasksByConversationForUser returns independent tasks owned by the user.
-// Workflow attempts are rendered from Workflow Runtime and never enter Task Center.
+// ListTasksByConversationForUser returns all conversation tasks owned by the user,
+// including workflow_step attempts used by the chat-side SubAgent task panel.
 func ListTasksByConversationForUser(
 	ctx context.Context, db *gorm.DB, convID, userID string,
 ) ([]orm.SubAgentTask, error) {
 	var tasks []orm.SubAgentTask
 	if err := db.WithContext(ctx).
-		Where("conversation_id = ? AND create_user_id = ? AND agent_type <> ?", convID, userID, "workflow_step").
+		Where("conversation_id = ? AND create_user_id = ?", convID, userID).
 		Order("seq_in_conversation ASC").Find(&tasks).Error; err != nil {
 		return nil, err
 	}

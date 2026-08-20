@@ -813,6 +813,25 @@ const normalizeSkillReviewTaskStatus = (
   };
 };
 
+const normalizeSkillReviewResult = (value: unknown): SkillReviewResultRecord | null => {
+  const raw = toRawObject(value);
+  const id = toStringValue(raw?.id, "");
+
+  if (!id) {
+    return null;
+  }
+
+  return {
+    id,
+    skillName: toStringValue(raw?.skill_name, ""),
+    type: toStringValue(raw?.type, ""),
+    reviewStatus: toStringValue(raw?.review_status, ""),
+    requestId: toStringValue(raw?.requestid, ""),
+    summary: toStringValue(raw?.summary, ""),
+    time: toStringValue(raw?.time, ""),
+  };
+};
+
 export async function getSkillReviewSummary(): Promise<SkillReviewSummaryRecord> {
   const response = await axiosInstance.get(`${coreBasePath}/skill-review:summary`);
   const payload = unwrapEnvelope<unknown>(response.data);
@@ -828,6 +847,16 @@ export async function runSkillReview(): Promise<SkillReviewRunRecord> {
     summary: normalizeSkillReviewSummary(raw?.summary),
     requestId: toStringValue(raw?.requestid, ""),
   };
+}
+
+export async function getResourceUpdateTask(
+  taskId: string,
+): Promise<ResourceUpdateTaskRecord | null> {
+  const response = await axiosInstance.get(
+    `${coreBasePath}/evolution/tasks/${encodeURIComponent(taskId)}`,
+  );
+  const payload = unwrapEnvelope<unknown>(response.data);
+  return normalizeResourceUpdateTask(payload);
 }
 
 export async function listSkillReviewTasks(
@@ -852,6 +881,28 @@ export async function listSkillReviewTasks(
     page: toNumberValue(raw?.page, options.page ?? 1),
     pageSize: toNumberValue(raw?.page_size ?? raw?.pageSize, options.pageSize ?? 20),
   };
+}
+
+export async function listSkillReviewResultsByRequest(
+  requestId: string,
+): Promise<SkillReviewResultRecord[]> {
+  if (!requestId.trim()) {
+    return [];
+  }
+
+  const response = await axiosInstance.get(`${coreBasePath}/skill-review-results`, {
+    params: {
+      page: 1,
+      page_size: 50,
+      requestid: requestId.trim(),
+    },
+  });
+  const payload = unwrapEnvelope<unknown>(response.data);
+  const raw = toRawObject(payload);
+  const items = Array.isArray(raw?.items) ? raw.items : [];
+  return items
+    .map((item) => normalizeSkillReviewResult(item))
+    .filter((item): item is SkillReviewResultRecord => Boolean(item));
 }
 
 export async function listSkillAssets(

@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 
@@ -51,7 +53,14 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 		if err := tx.Where("id = ?", attempt.SessionID).First(&session).Error; err != nil {
 			return err
 		}
-		cardinality := attempt.OutputCardinality[artifact.Slot]
+		cardinality := strings.TrimSpace(attempt.OutputCardinality[artifact.Slot])
+		if cardinality == "" {
+			var loadErr error
+			cardinality, loadErr = loadSlotCardinality(tx, session.WorkflowRevisionID, artifact.Slot)
+			if loadErr != nil {
+				return loadErr
+			}
+		}
 		if cardinality != "list" {
 			cardinality = "single"
 		}
@@ -176,6 +185,49 @@ func appendArtifactListOrder(tx *gorm.DB, sessionID, slot string, listIndex int,
 	encoded, _ := json.Marshal(append(current, listIndex))
 	return tx.Model(&orm.WorkflowSlotOrder{}).Where("session_id = ? AND slot_id = ?", sessionID, slot).
 		Updates(map[string]any{"order_list": encoded, "order_version": order.OrderVersion + 1, "updated_at": now}).Error
+}
+
+type workflowSlotManifest struct {
+	Slots []struct {
+		ID          string `yaml:"id"`
+		Cardinality string `yaml:"cardinality"`
+	} `yaml:"slots"`
+}
+
+// loadSlotCardinality keeps compatibility with attempt payloads produced before
+// OutputCardinality was embedded in the neutral executor contract.
+func loadSlotCardinality(tx *gorm.DB, revisionID, slot string) (string, error) {
+	if strings.TrimSpace(revisionID) == "" {
+		return "single", nil
+	}
+	var blob orm.WorkflowBlob
+	err := tx.Table("plugin_blobs b").
+		Select("b.*").
+		Joins("JOIN plugin_revision_entries e ON e.blob_hash = b.hash").
+		Where("e.revision_id = ? AND e.path = ?", revisionID, "workflow.yaml").
+		First(&blob).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// Older hosted attempts can reference revisions whose compiled graph was
+		// persisted without the source manifest. They predate OutputCardinality,
+		// so retain the historical single-value default when no manifest exists.
+		return "single", nil
+	}
+	if err != nil {
+		return "", fmt.Errorf("load workflow slot manifest: %w", err)
+	}
+	var manifest workflowSlotManifest
+	if err := yaml.Unmarshal(blob.Content, &manifest); err != nil {
+		return "", fmt.Errorf("parse workflow slot manifest: %w", err)
+	}
+	for _, item := range manifest.Slots {
+		if item.ID == slot {
+			if strings.EqualFold(strings.TrimSpace(item.Cardinality), "list") {
+				return "list", nil
+			}
+			return "single", nil
+		}
+	}
+	return "", fmt.Errorf("artifact slot %q is not declared in workflow revision %s", slot, revisionID)
 }
 
 func metadataListIndex(metadata map[string]any) *int {

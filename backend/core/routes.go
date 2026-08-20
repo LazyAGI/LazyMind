@@ -18,6 +18,7 @@ import (
 	"lazymind/core/episode"
 	"lazymind/core/evalset"
 	"lazymind/core/evolution"
+	"lazymind/core/exporter"
 	"lazymind/core/file"
 	"lazymind/core/mcp"
 	"lazymind/core/modelprovider"
@@ -128,6 +129,9 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "PUT", "/system-dependencies/ffmpeg", []string{"document.write"}, systemdeps.UpdateFFmpegDependency)
 	handleAPI(r, "POST", "/system-dependencies/ffmpeg:check", []string{"document.read"}, systemdeps.CheckFFmpegDependency)
 	handleAPI(r, "POST", "/system-dependencies/ffmpeg:install", []string{"document.write"}, systemdeps.InstallFFmpegDependency)
+	handleAPI(r, "GET", "/system-dependencies/editable-ppt", []string{"document.read"}, systemdeps.GetEditablePPTDependency)
+	handleAPI(r, "POST", "/system-dependencies/editable-ppt:check", []string{"document.read"}, systemdeps.CheckEditablePPTDependency)
+	handleAPI(r, "POST", "/system-dependencies/editable-ppt:install", []string{"document.write"}, systemdeps.InstallEditablePPTDependency)
 	handleAPI(r, "GET", "/data-sources/database-connections", []string{"document.read"}, datasource.ListDatabaseConnections)
 	handleAPI(r, "POST", "/data-sources/database-connections", []string{"document.write"}, datasource.CreateDatabaseConnection)
 	handleAPI(r, "POST", "/data-sources/database-connections/{connection}:check", []string{"document.write"}, datasource.CheckDatabaseConnection)
@@ -309,6 +313,9 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/workflows/{workflow_id}", []string{"qa.read"}, func(w http.ResponseWriter, req *http.Request) {
 		workflow.GetWorkflowInfo(w, req)
 	})
+	// Export providers are independent from workflow installation and slot names.
+	handleAPI(r, "GET", "/exporters/{provider_id}:capabilities", []string{"qa.read"}, exporter.Capabilities)
+	handleAPI(r, "POST", "/exporters/{provider_id}:export", []string{"qa.write"}, exporter.Export)
 	// ----- Workflow Drafts (user-created workflow authoring) -----
 	handleAPI(r, "GET", "/workflow-drafts", []string{"qa.read"}, workflow.ListWorkflowDrafts)
 	handleAPI(r, "POST", "/workflow-drafts", []string{"qa.write"}, workflow.CreateWorkflowDraft)
@@ -440,6 +447,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/internal/workflow-transition-commands/{command_id}", nil, workflow.GetTransitionCommand)
 	handleAPI(r, "PATCH", "/workflow-sessions/{session_id}/slots/{slot_id}", []string{"qa.write"}, workflow.PatchSessionSlot)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-preview", []string{"qa.write"}, workflow.PreviewArtifactAction)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-execute", []string{"qa.write"}, workflow.ExecuteArtifactAction)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}:sync-search-config", []string{"qa.write"}, workflow.SyncSessionSearchConfig)
 	// Phase 3: slot item management.
 	// Stable list_index-based routes (preferred).

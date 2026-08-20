@@ -18,6 +18,7 @@ export type WidgetType =
   | 'text-single'
   | 'text-list'
   | 'text-markdown'
+  | 'html-slide'
   | 'image-single'
   | 'image-gallery'
   | 'file-card'
@@ -37,8 +38,8 @@ export const SLOT_DEFAULT_WIDGET: Record<string, WidgetType> = {
 
 /** Compatible widget types for each slot type+cardinality. */
 export const SLOT_COMPATIBLE_WIDGETS: Record<string, WidgetType[]> = {
-  'text/single':  ['text-single', 'text-markdown'],
-  'text/list':    ['text-list', 'text-markdown'],
+  'text/single':  ['text-single', 'text-markdown', 'html-slide'],
+  'text/list':    ['text-list', 'text-markdown', 'html-slide'],
   'image/single': ['image-single'],
   'image/list':   ['image-gallery'],
   'file/single':  ['file-card'],
@@ -69,6 +70,10 @@ export interface TextMarkdownConfig extends WidgetBaseConfig {
   widgetType: 'text-markdown';
 }
 
+export interface HtmlSlideConfig extends WidgetBaseConfig {
+  widgetType: 'html-slide';
+}
+
 export interface ImageSingleConfig extends WidgetBaseConfig {
   widgetType: 'image-single';
   imageHeight?: number;
@@ -96,6 +101,7 @@ export type WidgetConfig =
   | TextSingleConfig
   | TextListConfig
   | TextMarkdownConfig
+  | HtmlSlideConfig
   | ImageSingleConfig
   | ImageGalleryConfig
   | FileCardConfig
@@ -126,10 +132,36 @@ export interface CompositePanelNode {
   weight?: number;
 }
 
+/**
+ * Return every slot referenced by a composite tree in visual traversal order.
+ * The layout tree is the source of truth for a composite tab: keeping the tab's
+ * flat `slots` list in sync is required by both validation and runtime widget
+ * hydration.
+ */
+export function collectCompositeSlotIds(node?: CompositePanelNode): string[] {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  const add = (slotId?: string) => {
+    const normalized = slotId?.trim();
+    if (!normalized || seen.has(normalized)) return;
+    seen.add(normalized);
+    ids.push(normalized);
+  };
+  const visit = (current?: CompositePanelNode) => {
+    if (!current) return;
+    add(current.slot);
+    current.tabs?.forEach((tab) => add(tab.slot));
+    current.children?.forEach(visit);
+  };
+  visit(node);
+  return ids;
+}
+
 // ── Workflow UI model ───────────────────────────────────────────────────────────
 
 export interface WorkflowUiTab {
   id: string;
+  step_id?: string;
   label?: string;
   layout?: 'vertical' | 'grid' | 'horizontal' | 'composite';
   /** Number of columns in grid layout (undefined = auto-fill). */
@@ -142,6 +174,18 @@ export interface WorkflowUiTab {
   composite_layout?: CompositePanelNode;
   /** Generic composite display rules (hide empty columns, mutually exclusive groups). */
   composite_behavior?: CompositeBehavior;
+  /** Provider-backed actions declared by this tab. */
+  actions?: WorkflowTabAction[];
+}
+
+export interface WorkflowTabAction {
+  id: string;
+  type: 'export';
+  provider: string;
+  label?: string;
+  inputs: Record<string, string>;
+  formats?: string[];
+  alignment?: 'sort_order';
 }
 
 /** Mutually exclusive column group for composite tabs. */
@@ -161,12 +205,29 @@ export interface WorkflowToolScript {
   functions: string[];
 }
 
+export interface WorkflowRuntimePolicy {
+  publisher_owned_slots?: string[];
+  collects_knowledge?: boolean;
+  completed_edit_step?: string;
+  clarification_fields?: Array<{
+    id: string;
+    label?: string;
+    question: string;
+    type?: 'text' | 'boolean' | 'single' | 'multiple';
+    choices?: string[];
+  }>;
+}
+
 export interface WorkflowModel {
   id: string;
   name: string;
   description?: string;
   when_to_use?: string;
   tool_scripts?: WorkflowToolScript[];
+  /** Host-neutral execution policy; preserved even though the editor has no dedicated controls. */
+  runtime?: WorkflowRuntimePolicy;
+  /** Artifact actions are package contracts and are preserved as opaque declarations. */
+  artifact_actions?: Record<string, unknown>;
   /** Step metadata only (id + label). Execution details live in state.yml / GraphModel. */
   steps: Array<{ id: string; label: string }>;
   /** Slot definitions — list format, each entry is a complete WorkflowSlotDef. */

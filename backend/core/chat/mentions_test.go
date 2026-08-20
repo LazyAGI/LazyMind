@@ -280,6 +280,9 @@ func TestBuildLazyChatRequestPropagatesPreviewLLMConfirmation(t *testing.T) {
 func TestBackendBuildsAndPropagatesWorkflowActivation(t *testing.T) {
 	activation := buildWorkflowActivation(map[string]any{
 		"workflow_id": "image-workflow", "revision_id": "revision-1", "name": "Image",
+		"runtime": map[string]any{"clarification_fields": []map[string]any{{
+			"id": "topic", "question": "What is the topic?",
+		}}},
 	}, "builtin:image-workflow")
 	if activation["tool_name"] != "trigger_image_workflow" {
 		t.Fatalf("activation = %#v", activation)
@@ -287,6 +290,9 @@ func TestBackendBuildsAndPropagatesWorkflowActivation(t *testing.T) {
 	if !strings.Contains(fmt.Sprint(activation["tool_description"]), "executable Workflow") ||
 		!strings.Contains(fmt.Sprint(activation["prompt"]), "@workflow") {
 		t.Fatalf("workflow execution semantics missing: %#v", activation)
+	}
+	if activation["runtime"] == nil {
+		t.Fatalf("workflow runtime policy missing: %#v", activation)
 	}
 	req := buildLazyChatRequest(map[string]any{
 		"workflow_activations": []map[string]any{activation},

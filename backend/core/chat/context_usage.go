@@ -305,6 +305,14 @@ func estimateContext(w http.ResponseWriter, r *http.Request, exportPrompt bool) 
 			workflowContext["revision_no"] = active.WorkflowRevisionNo
 			workflowContext["tree_hash"] = active.WorkflowTreeHash
 			workflowContext["remote_root"] = active.WorkflowRemoteRoot
+			refOrID := active.WorkflowRef
+			if refOrID == "" {
+				refOrID = active.WorkflowID
+			}
+			delete(workflowContext, "runtime")
+			if runtimePolicy, ok := workflow.RuntimePolicyForRevision(r.Context(), db, userID, refOrID, active.WorkflowRevisionID); ok {
+				workflowContext["runtime"] = runtimePolicy
+			}
 		}
 	}
 	reqBody["workflow_context"] = workflowContext

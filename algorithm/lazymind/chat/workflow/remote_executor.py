@@ -76,6 +76,7 @@ class RemoteWorkflowExecutor:
     async def _run_claim(self, client: httpx.AsyncClient, claim: Dict[str, Any]) -> None:
         attempt_id = str(claim['attempt_id'])
         lease = str(claim['lease_token'])
+        task_id = ''
         try:
             context = await self.runtime.context(client, attempt_id, lease)
             metadata = context.get('metadata') or {}
@@ -88,7 +89,18 @@ class RemoteWorkflowExecutor:
         except Exception as exc:
             # A claimed Attempt must never remain stuck merely because Host setup
             # failed before the SubAgent stream started.
-            await self.runtime.fail(client, attempt_id, lease, f'executor setup failed: {exc}')
+            message = f'executor setup failed: {exc}'
+            await self.runtime.fail(client, attempt_id, lease, message)
+            # Keep the ordinary SubAgent projection in sync with the authoritative
+            # Attempt. Without this terminal event the task remains pending forever
+            # even though Workflow Runtime has already marked the Attempt failed.
+            if task_id:
+                try:
+                    await self.runtime.task_event(client, task_id, lease, {
+                        'type': 'error', 'status': 'failed', 'message': message,
+                    })
+                except Exception:
+                    LOG.exception('failed to mirror Workflow setup failure to SubAgent task %s', task_id)
             return
 
         stopped = threading.Event()
