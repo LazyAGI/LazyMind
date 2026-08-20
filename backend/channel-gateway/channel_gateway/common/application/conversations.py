@@ -12,6 +12,7 @@ from channel_gateway.common.application.capabilities import (
     ResolvedChanges,
 )
 from channel_gateway.common.domain.commands import (
+    AssistantProvider,
     CommandEnvelope,
     ConversationSwitchCommand,
     PreparedConversationTarget,
@@ -84,11 +85,13 @@ class ConversationActions:
         inputs: Sequence[dict[str, str]] = (),
         mentions: Sequence[dict[str, str]] = (),
         thinking_depth: str | None = None,
+        conversation_id_override: str | None = None,
         on_stream: Callable[[CoreStreamUpdate], None] | None = None,
     ) -> ConversationResult:
-        conversation_id = self._store.get_route(
-            account_id,
-            external_address_hash,
+        conversation_id = (
+            conversation_id_override
+            if conversation_id_override is not None
+            else self._store.get_route(account_id, external_address_hash)
         )
         state = self._store.get_navigation_state(account_id, external_address_hash) or {}
         explicit_new = state.get('mode') == 'new_pending'
@@ -365,20 +368,27 @@ class ConversationActions:
         external_address_hash: str,
         owner_user_id: str,
         request_id: str,
+        assistant: AssistantProvider = 'lazymind',
     ) -> str | ConversationResult:
-        items = self._all_conversations(owner_user_id, request_id)[:_LIST_LIMIT]
+        items = self._all_conversations(
+            owner_user_id,
+            request_id,
+            assistant=assistant,
+        )[:_LIST_LIMIT]
         snapshot = [
             {
                 'conversation_id': str(item.get('conversation_id') or ''),
                 'display_name': self._display_name(item),
                 'update_time': str(item.get('update_time') or ''),
+                'assistant': assistant,
             }
             for item in items
             if item.get('conversation_id')
         ]
         if not snapshot:
             self._store.clear_selection_snapshot(account_id, external_address_hash)
-            return '暂时没有历史会话。你可以说“帮我创建一个新会话”。'
+            label = self._assistant_label(assistant)
+            return f'{label} 暂时没有可继续的历史会话。'
         self._store.save_selection_snapshot(
             account_id,
             external_address_hash,
@@ -387,7 +397,7 @@ class ConversationActions:
             dt.datetime.now(dt.timezone.utc) + _SNAPSHOT_TTL,
         )
         current_id = self._store.get_route(account_id, external_address_hash)
-        lines = ['最近会话：']
+        lines = [f'{self._assistant_label(assistant)} 最近会话：']
         for index, item in enumerate(snapshot, start=1):
             marker = '●' if item['conversation_id'] == current_id else ' '
             lines.append(
@@ -830,6 +840,7 @@ class ConversationActions:
         self,
         owner_user_id: str,
         request_id: str,
+        assistant: str = '',
     ) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         page_token = ''
@@ -843,6 +854,7 @@ class ConversationActions:
                 request_id=request_id,
                 page_size=_CORE_PAGE_SIZE,
                 page_token=page_token,
+                assistant=assistant,
             )
             raw = payload.get('conversations')
             if isinstance(raw, list):
@@ -852,6 +864,15 @@ class ConversationActions:
                 return items
             page_token = next_token
         return items
+
+    @staticmethod
+    def _assistant_label(assistant: str) -> str:
+        return {
+            'lazymind': 'LazyMind',
+            'codex': 'Codex',
+            'cursor': 'Cursor',
+            'workbuddy': 'WorkBuddy',
+        }.get(assistant, 'LazyMind')
 
     def _match_conversations(
         self,

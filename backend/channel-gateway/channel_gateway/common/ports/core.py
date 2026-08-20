@@ -51,6 +51,7 @@ class ConversationClient(Protocol):
         request_id: str,
         page_size: int = 100,
         page_token: str = '',
+        assistant: str = '',
     ) -> dict[str, Any]:
         ...
 

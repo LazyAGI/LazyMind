@@ -67,7 +67,7 @@ func TestInputResourceImportAndBindingPinsStableRevision(t *testing.T) {
 
 func TestGetProjectionAuthorizesBeforeCallingRuntimeProjection(t *testing.T) {
 	h, db := testHandler(t)
-	if err := db.Exec(`INSERT INTO plugin_sessions(id, create_user_id) VALUES ('s1','owner')`).Error; err != nil {
+	if err := db.Exec(`INSERT INTO plugin_sessions(id, create_user_id, conversation_id) VALUES ('s1','owner','conversation-1')`).Error; err != nil {
 		t.Fatal(err)
 	}
 	var calls atomic.Int32
@@ -98,6 +98,14 @@ func TestGetProjectionAuthorizesBeforeCallingRuntimeProjection(t *testing.T) {
 	if calls.Load() != 1 {
 		t.Fatalf("projection calls=%d", calls.Load())
 	}
+	scoped := mux.SetURLVars(request(http.MethodGet, "/workflow-sessions/s1/projection", "owner", nil),
+		map[string]string{"session_id": "s1"})
+	scoped = scoped.WithContext(workflowstore.WithConversationScope(scoped.Context(), "conversation-2"))
+	denied := httptest.NewRecorder()
+	h.GetProjection(denied, scoped)
+	if denied.Code != http.StatusForbidden || decodeEnvelope(t, denied).Error.Code != "PERMISSION_DENIED" || calls.Load() != 1 {
+		t.Fatalf("cross-conversation projection=%d %s calls=%d", denied.Code, denied.Body.String(), calls.Load())
+	}
 }
 
 func TestListSessionsReturnsOnlyExternalAgentSessions(t *testing.T) {
@@ -114,18 +122,23 @@ func TestListSessionsReturnsOnlyExternalAgentSessions(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	if err := db.Create(&[]orm.WorkflowSession{
-		{ID: "external", OriginHost: "external-agent", ControllerHost: "external-agent", WorkflowID: "writer", Status: "active", CreateUserID: "owner", CreatedAt: now, UpdatedAt: now},
+		{ID: "external", ConversationID: "conversation-1", OriginHost: "external-agent", ControllerHost: "external-agent", WorkflowID: "writer", Status: "active", CreateUserID: "owner", CreatedAt: now, UpdatedAt: now},
+		{ID: "other-conversation", ConversationID: "conversation-2", OriginHost: "external-agent", ControllerHost: "external-agent", WorkflowID: "image", Status: "active", CreateUserID: "owner", CreatedAt: now, UpdatedAt: now},
 		{ID: "internal", OriginHost: "lazymind", ControllerHost: "lazymind", WorkflowID: "writer", Status: "active", CreateUserID: "owner", CreatedAt: now, UpdatedAt: now},
 	}).Error; err != nil {
 		t.Fatal(err)
 	}
 	w := httptest.NewRecorder()
-	Handler{Store: repo}.ListSessions(w, request(http.MethodGet, "/workflow-sessions?status=active&page_size=10", "owner", nil))
+	r := request(http.MethodGet, "/workflow-sessions?status=active&page_size=10", "owner", nil)
+	r = r.WithContext(workflowstore.WithConversationScope(r.Context(), "conversation-1"))
+	Handler{Store: repo}.ListSessions(w, r)
 	if w.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
 	}
 	encoded, _ := json.Marshal(decodeEnvelope(t, w).Data)
-	if !bytes.Contains(encoded, []byte(`"session_id":"external"`)) || bytes.Contains(encoded, []byte(`"session_id":"internal"`)) {
+	if !bytes.Contains(encoded, []byte(`"session_id":"external"`)) ||
+		bytes.Contains(encoded, []byte(`"session_id":"internal"`)) ||
+		bytes.Contains(encoded, []byte(`"session_id":"other-conversation"`)) {
 		t.Fatalf("session scope leaked: %s", encoded)
 	}
 }
@@ -181,7 +194,7 @@ func testHandler(t *testing.T) (Handler, *gorm.DB) {
 	if err := repo.AutoMigrate(); err != nil {
 		t.Fatal(err)
 	}
-	if err := db.Exec(`CREATE TABLE plugin_sessions (id TEXT PRIMARY KEY, create_user_id TEXT NOT NULL)`).Error; err != nil {
+	if err := db.Exec(`CREATE TABLE plugin_sessions (id TEXT PRIMARY KEY, create_user_id TEXT NOT NULL, conversation_id TEXT NOT NULL DEFAULT '')`).Error; err != nil {
 		t.Fatal(err)
 	}
 	return Handler{Store: repo}, db

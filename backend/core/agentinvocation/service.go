@@ -217,9 +217,6 @@ func (s *Service) Finish(ctx context.Context, owner, id string, input FinishInpu
 			return err
 		}
 		source := externalcontext.New(tx)
-		if err := source.LinkWorkflowSession(ctx, owner, record.ExternalRef, record.SessionID); err != nil {
-			return err
-		}
 		if err := source.CompleteObservedTurn(ctx, owner, record.ExternalRef); err != nil {
 			return err
 		}

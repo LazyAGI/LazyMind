@@ -73,7 +73,7 @@ func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chata
 		"-p", "--output-format", "stream-json", "--stream-partial-output",
 		"--approve-mcps", "--trust", "--auto-review", "--sandbox", "enabled", "--workspace", workspace,
 	}
-	if run.Action == "resume" && strings.TrimSpace(run.ProviderThreadID) != "" {
+	if (run.Action == "resume" || run.Action == "regenerate") && strings.TrimSpace(run.ProviderThreadID) != "" {
 		arguments = append(arguments, "--resume", run.ProviderThreadID)
 	}
 	arguments = append(arguments, run.Prompt)

@@ -209,6 +209,39 @@ func TestRealCodexExternalThreadBinding(t *testing.T) {
 	verifyCodexConversationProjection(t, ctx, serverURL, accessToken, threadID, conversationID)
 }
 
+func TestRealCodexWorkflowSessionScope(t *testing.T) {
+	if os.Getenv("LAZYMIND_REAL_CODEX_WORKFLOW_SCOPE_E2E") != "1" {
+		t.Skip("set LAZYMIND_REAL_CODEX_WORKFLOW_SCOPE_E2E=1 to validate Codex Workflow session scoping")
+	}
+	binary := strings.TrimSpace(os.Getenv("LAZYMIND_REAL_CONNECTOR_BIN"))
+	threadID := strings.TrimSpace(os.Getenv("LAZYMIND_REAL_SCOPE_THREAD_ID"))
+	if binary == "" || threadID == "" {
+		t.Fatal("LAZYMIND_REAL_CONNECTOR_BIN and LAZYMIND_REAL_SCOPE_THREAD_ID are required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+	defer cancel()
+	command := exec.CommandContext(ctx, binary, "mcp", "proxy")
+	command.Env = os.Environ()
+	session, err := mcp.NewClient(&mcp.Implementation{Name: "codex-workflow-scope-real-e2e", Version: "1"}, nil).
+		Connect(ctx, &mcp.CommandTransport{Command: command}, nil)
+	if err != nil {
+		t.Fatalf("connect through real Codex-scoped stdio bridge: %v", err)
+	}
+	defer session.Close()
+	meta := mcp.Meta{
+		"threadId": threadID, "turnId": fmt.Sprintf("scope-e2e-%d", time.Now().UnixNano()), "threadSource": "user",
+	}
+	listed := callToolWithMeta(t, ctx, session, "workflow.session.list", map[string]any{"page_size": 100}, meta)
+	rawSessions, ok := listed["sessions"].([]any)
+	if !ok || len(rawSessions) != 1 {
+		t.Fatalf("current Codex conversation returned %d Workflow sessions: %#v", len(rawSessions), listed)
+	}
+	current, ok := rawSessions[0].(map[string]any)
+	if !ok || stringField(t, current, "conversation_id") == "" || stringField(t, current, "session_id") == "" {
+		t.Fatalf("scoped Workflow session is incomplete: %#v", rawSessions[0])
+	}
+}
+
 func verifyRealWorkflowRuntime(t *testing.T, ctx context.Context, session *mcp.ClientSession) string {
 	t.Helper()
 	catalog := callTool(t, ctx, session, "workflow.list", map[string]any{})
@@ -1127,8 +1160,13 @@ func realRequest(t *testing.T, request *http.Request, output any) {
 }
 
 func callTool(t *testing.T, ctx context.Context, session *mcp.ClientSession, name string, arguments map[string]any) map[string]any {
+	return callToolWithMeta(t, ctx, session, name, arguments, nil)
+}
+
+func callToolWithMeta(t *testing.T, ctx context.Context, session *mcp.ClientSession, name string,
+	arguments map[string]any, meta mcp.Meta) map[string]any {
 	t.Helper()
-	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: arguments})
+	result, err := session.CallTool(ctx, &mcp.CallToolParams{Name: name, Arguments: arguments, Meta: meta})
 	if err != nil {
 		t.Fatalf("call real %s through stdio bridge: %v", name, err)
 	}

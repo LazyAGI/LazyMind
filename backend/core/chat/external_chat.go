@@ -349,20 +349,22 @@ func streamExternalChat(
 		return nil, "", err
 	}
 
-	var previous orm.ExternalChatRun
-	resume := db.WithContext(ctx).
-		Where("conversation_id = ? AND actor_user_id = ? AND provider = ? AND provider_thread_id <> '' AND status = ?", conversationID, owner, provider, "completed").
-		Order("created_at DESC").Take(&previous).Error == nil
-	action, threadID := "start", ""
+	threadID, resume, err := externalConversationThread(
+		ctx, db, owner, conversationID, provider,
+	)
+	if err != nil {
+		return nil, "", err
+	}
+	action := "start"
 	if resume {
-		action, threadID = "resume", previous.ProviderThreadID
+		action = "resume"
 	}
 	resumeProviderThread := resume
 	if isRegeneration {
-		// Regeneration is a new provider turn that replaces an existing LazyMind
-		// history row. Do not omit conversation history as if it were resuming the
-		// provider thread; every adapter intentionally starts a fresh thread here.
-		action, threadID, resumeProviderThread = "regenerate", "", false
+		// Regeneration replaces a LazyMind history row, but it must not fork the
+		// provider-native conversation. Adapters resume the authoritative binding
+		// when threadID is present and start only when no mapping exists yet.
+		action = "regenerate"
 	}
 	reqBody["_external_knowledge_base_ids"] = externalConversationKnowledgeBaseIDs(
 		ctx,
@@ -397,6 +399,39 @@ func streamExternalChat(
 		runID = existing.ID
 	}
 	return streamExistingExternalChat(ctx, db, owner, runID), "external:" + provider, nil
+}
+
+func externalConversationThread(
+	ctx context.Context,
+	db *gorm.DB,
+	owner, conversationID, provider string,
+) (string, bool, error) {
+	var binding orm.ExternalAgentBinding
+	err := db.WithContext(ctx).
+		Where("conversation_id = ? AND created_by_user_id = ? AND provider = ?", conversationID, owner, provider).
+		Take(&binding).Error
+	if err == nil {
+		threadID := strings.TrimSpace(binding.ProviderThreadID)
+		return threadID, threadID != "", nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", false, err
+	}
+
+	// Legacy runs created before bindings became authoritative remain a safe
+	// fallback. The next thread_started event will materialize the binding.
+	var previous orm.ExternalChatRun
+	err = db.WithContext(ctx).
+		Where("conversation_id = ? AND actor_user_id = ? AND provider = ? AND provider_thread_id <> '' AND status = ?", conversationID, owner, provider, "completed").
+		Order("created_at DESC").Take(&previous).Error
+	if err == nil {
+		threadID := strings.TrimSpace(previous.ProviderThreadID)
+		return threadID, threadID != "", nil
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", false, nil
+	}
+	return "", false, err
 }
 
 func streamExistingExternalChat(

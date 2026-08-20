@@ -35,6 +35,9 @@ func TestCloneRequestKeepsStandaloneSourceOutsideManagedLeaseHeaders(t *testing.
 	clone := cloneRequest(request, []byte(`{}`), "access-token")
 	if clone.Header.Get("X-LazyMind-External-Ref") != "" ||
 		clone.Header.Get("X-LazyMind-Conversation-Id") != "" {
-		t.Fatalf("missing standalone source headers: %#v", clone.Header)
+		t.Fatalf("standalone source leaked into managed lease headers: %#v", clone.Header)
+	}
+	if clone.Header.Get("X-LazyMind-Invocation-Conversation-Id") != "conversation-standalone" {
+		t.Fatalf("standalone invocation scope is missing: %#v", clone.Header)
 	}
 }

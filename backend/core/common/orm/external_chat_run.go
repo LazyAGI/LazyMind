@@ -5,13 +5,16 @@ import (
 	"time"
 )
 
-// ExternalAgentBinding is the durable one-to-one correspondence between a
-// provider-native thread and a LazyMind conversation. Provider transcript
-// content remains provider-owned; LazyMind stores only activity projections.
+// ExternalAgentBinding is the durable per-provider one-to-one correspondence
+// between a provider-native thread and a LazyMind conversation. A LazyMind
+// conversation may have one binding for each provider. ManagedByLazyMind records
+// the immutable thread origin, not which side initiated the latest turn.
+// Provider transcript content remains provider-owned; LazyMind stores only
+// activity projections.
 type ExternalAgentBinding struct {
 	ID                string    `gorm:"column:id;type:varchar(36);primaryKey" json:"binding_id"`
-	ConversationID    string    `gorm:"column:conversation_id;type:varchar(36);not null;uniqueIndex:uk_external_agent_binding_conversation" json:"conversation_id"`
-	Provider          string    `gorm:"column:provider;type:varchar(32);not null;uniqueIndex:uk_external_agent_binding_thread,priority:1" json:"provider"`
+	ConversationID    string    `gorm:"column:conversation_id;type:varchar(36);not null;uniqueIndex:uk_external_agent_binding_conversation_provider,priority:1" json:"conversation_id"`
+	Provider          string    `gorm:"column:provider;type:varchar(32);not null;uniqueIndex:uk_external_agent_binding_thread,priority:1;uniqueIndex:uk_external_agent_binding_conversation_provider,priority:2" json:"provider"`
 	ProviderThreadID  string    `gorm:"column:provider_thread_id;type:varchar(128);not null;uniqueIndex:uk_external_agent_binding_thread,priority:2" json:"provider_thread_id"`
 	ManagedByLazyMind bool      `gorm:"column:managed_by_lazymind;not null;default:false" json:"managed_by_lazymind"`
 	CreatedByUserID   string    `gorm:"column:created_by_user_id;type:varchar(255);not null" json:"-"`

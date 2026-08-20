@@ -726,7 +726,7 @@ Desktop 通过 Electron IPC 调用 connector；Docker 网页通过本机回环 A
 - `workflow.artifact.list`
 - `workflow.artifact.get`
 
-使用 Workflow 时，外部 Agent 先通过 `workflow.start` 建立持久会话，再按 `state → step.begin → 原生执行 → step.submit` 循环运行。Agent 丢失 Session ID 时用 `workflow.session.list` 找回；需要中止或继续整个会话时用 `workflow.session.stop` / `workflow.session.resume`；只有连接器中断但步骤仍在执行时才用 `workflow.step.resume` 恢复同一个 execution。LazyMind 固定 Workflow revision，并负责步骤状态、输入见证、产物内容、列表顺序和版本；外部 Agent 只执行 `step_contract`，不会成为 Core 内的 Executor 实现。
+使用 Workflow 时，外部 Agent 先通过 `workflow.start` 在当前外部会话对应的 LazyMind Conversation 中建立持久 Session，再按 `state → step.begin → 原生执行 → step.submit` 循环运行。新 Workflow 启动时会原子归档同一 Conversation 中已经 `completed`、`failed` 或 `stopped` 的旧 Session；`active` / `waiting` Session 仍需先停止。Agent 丢失 Session ID 时用 `workflow.session.list` 找回，该列表默认只返回当前外部会话的唯一未归档 Session，不再混入同一用户的其他 Agent 会话；`state`、步骤、产物和 stop/resume 同样受当前 Conversation 约束。只有连接器中断但步骤仍在执行时才用 `workflow.step.resume` 恢复同一个 execution。LazyMind 固定 Workflow revision，并负责步骤状态、输入见证、产物内容、列表顺序和版本；外部 Agent 只执行 `step_contract`，不会成为 Core 内的 Executor 实现。
 
 每个 `tools/call` 都会先建立持久调用记录，结束后写入成功、失败或中断状态，并关联 Workflow、Session、Step、Attempt、Artifact 等安全 ID。记录只保存参数哈希和白名单摘要，不保存 prompt、知识库查询正文、文件内容、绝对路径、Base64 或访问令牌。当前版本已经收集这些数据，LazyMind 前端展示留到后续版本。
 

@@ -102,6 +102,7 @@ class ChannelExecutionContext:
     ask_answers_structured: dict[str, Any] | None = None
     thinking_depth: Literal['low', 'medium', 'high', 'max'] | None = None
     include_capability_settings: bool = False
+    include_assistant_catalog: bool = False
 
     @classmethod
     def from_provider_context(
@@ -137,6 +138,9 @@ class ChannelExecutionContext:
             include_capability_settings=(
                 value.get('include_capability_settings') is True
             ),
+            include_assistant_catalog=(
+                value.get('include_assistant_catalog') is True
+            ),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -148,6 +152,7 @@ class ChannelExecutionContext:
             'include_capability_settings': (
                 self.include_capability_settings
             ),
+            'include_assistant_catalog': self.include_assistant_catalog,
         }
 
 

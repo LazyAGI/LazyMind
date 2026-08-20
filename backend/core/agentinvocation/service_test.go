@@ -101,27 +101,14 @@ func TestServiceLinksCodexThreadTurnsToOneConversation(t *testing.T) {
 	if err := service.db.First(&run, "id = ?", started.Source.ExternalRef).Error; err != nil || run.Status != "running" {
 		t.Fatalf("parallel turn completed early: run=%+v err=%v", run, err)
 	}
-	now := time.Now().UTC()
-	if err := service.db.Create(&orm.WorkflowSession{
-		ID: "legacy-session", WorkflowID: "workflow-1", Status: "completed", CreateUserID: "user-1",
-		CreatedAt: now, UpdatedAt: now,
-	}).Error; err != nil {
-		t.Fatal(err)
-	}
 	if _, err := service.Finish(context.Background(), "user-1", parallel.ID, FinishInput{
-		Status: StatusSucceeded, SessionID: "legacy-session",
+		Status: StatusSucceeded,
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := service.db.First(&run, "id = ?", started.Source.ExternalRef).Error; err != nil || run.Status != "completed" {
 		t.Fatalf("turn was not completed: run=%+v err=%v", run, err)
 	}
-	var legacy orm.WorkflowSession
-	if err := service.db.First(&legacy, "id = ?", "legacy-session").Error; err != nil ||
-		legacy.ConversationID != started.Source.ConversationID || legacy.OriginRef != started.Source.ExternalRef {
-		t.Fatalf("legacy Workflow was not attached: session=%+v err=%v", legacy, err)
-	}
-
 	nextTurn := testStartInput("inv-source-3", "workflow.start")
 	nextTurn.Source = &externalcontext.Source{Provider: "codex", ThreadID: "codex-thread-1", TurnID: "codex-turn-2", Message: "第二轮用户消息"}
 	third, err := service.StartLinked(context.Background(), "user-1", nextTurn)
@@ -139,6 +126,42 @@ func TestServiceLinksCodexThreadTurnsToOneConversation(t *testing.T) {
 	foreign.Source = first.Source
 	if _, err := service.StartLinked(context.Background(), "user-2", foreign); !errors.Is(err, ErrConflict) {
 		t.Fatalf("foreign owner reused binding: %v", err)
+	}
+}
+
+func TestServiceFinishDoesNotAdoptWorkflowSessionEvidence(t *testing.T) {
+	service := newTestService(t)
+	if err := service.db.Exec(`CREATE TABLE plugin_sessions (
+		id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL DEFAULT '', origin_ref TEXT NOT NULL DEFAULT '',
+		create_user_id TEXT NOT NULL
+	)`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := service.db.Exec(`INSERT INTO plugin_sessions(id, create_user_id) VALUES ('legacy-session','user-1')`).Error; err != nil {
+		t.Fatal(err)
+	}
+	input := testStartInput("inv-legacy-read", "workflow.state")
+	input.Source = &externalcontext.Source{
+		Provider: "codex", ThreadID: "current-thread", TurnID: "current-turn", Message: "读取当前工作流",
+	}
+	if _, err := service.StartLinked(context.Background(), "user-1", input); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Finish(context.Background(), "user-1", input.ID, FinishInput{
+		Status: StatusSucceeded, SessionID: "legacy-session",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var legacy struct {
+		ConversationID string
+		OriginRef      string
+	}
+	if err := service.db.Table("plugin_sessions").Select("conversation_id, origin_ref").
+		Where("id = ?", "legacy-session").Take(&legacy).Error; err != nil {
+		t.Fatal(err)
+	}
+	if legacy.ConversationID != "" || legacy.OriginRef != "" {
+		t.Fatalf("read-only Workflow evidence changed session ownership: %#v", legacy)
 	}
 }
 
@@ -269,7 +292,7 @@ func newTestService(t *testing.T) *Service {
 	}
 	if err := db.AutoMigrate(
 		&orm.AgentInvocation{}, &orm.ExternalAgentBinding{}, &orm.Conversation{},
-		&orm.ExternalChatRun{}, &orm.ChatHistory{}, &orm.WorkflowSession{},
+		&orm.ExternalChatRun{}, &orm.ChatHistory{},
 	); err != nil {
 		t.Fatalf("migrate database: %v", err)
 	}

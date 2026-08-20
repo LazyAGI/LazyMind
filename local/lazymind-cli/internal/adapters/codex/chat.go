@@ -58,7 +58,7 @@ func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chata
 		"--config", `approval_policy="on-request"`,
 		"--config", `approvals_reviewer="auto_review"`,
 	}
-	resume := (run.Action == "resume" || run.Action == "recover") && strings.TrimSpace(run.ProviderThreadID) != ""
+	resume := (run.Action == "resume" || run.Action == "recover" || run.Action == "regenerate") && strings.TrimSpace(run.ProviderThreadID) != ""
 	if resume {
 		arguments = append(arguments, "resume")
 		arguments = append(arguments, policy...)

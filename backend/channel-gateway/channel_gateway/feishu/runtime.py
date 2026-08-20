@@ -17,6 +17,7 @@ from channel_gateway.common.domain.chat import (
     ChannelAttachment,
     ChannelExecutionContext,
 )
+from channel_gateway.common.domain.commands import ASSISTANT_PROVIDERS
 from channel_gateway.common.ports.providers import (
     RuntimeCredentialStore,
     RuntimeLease,
@@ -734,7 +735,12 @@ class FeishuRuntime:
         )
         if action_kind == 'history.switch':
             workspace.begin_operation(message_key)
-            workspace.view = 'conversations'
+            target_view = str(action_data.get('view') or 'conversations')
+            workspace.view = (
+                target_view
+                if target_view in {'assistant', 'conversations'}
+                else 'conversations'
+            )
         elif action_kind == 'operation.cancel':
             workspace.begin_operation(message_key)
         elif (
@@ -997,7 +1003,7 @@ class FeishuRuntime:
 
         state = FeishuWorkspaceState.from_dict(prepared_state)
         state.message_id = str(message_id)
-        command = menu_command(view)
+        command = menu_command(view, state.assistant)
         if command is not None:
             provider_context = {
                 **self._workspace_provider_context(
@@ -1023,6 +1029,7 @@ class FeishuRuntime:
                     'capabilities': '查看能力',
                     'conversations': '切换会话',
                     'assistant': '查看助理',
+                    'settings': '查看设置',
                 }[view],
                 provider_context=provider_context,
             )
@@ -1333,9 +1340,24 @@ class FeishuRuntime:
                 workspace.capability_page = max(0, page)
             workspace.view = 'capabilities'
         elif kind == 'history.switch':
-            workspace.view = 'conversations'
+            target_view = str(action.get('view') or 'conversations')
+            workspace.view = (
+                target_view
+                if target_view in {'assistant', 'conversations'}
+                else 'conversations'
+            )
         elif kind == 'history.open':
-            workspace.view = 'conversations'
+            target_view = str(action.get('view') or 'conversations')
+            workspace.view = (
+                target_view
+                if target_view in {'assistant', 'conversations'}
+                else 'conversations'
+            )
+        elif kind == 'assistant.select':
+            assistant = str(action.get('assistant') or '')
+            if assistant in ASSISTANT_PROVIDERS:
+                workspace.assistant = assistant
+            workspace.view = 'assistant'
         elif kind == 'new_session.open':
             workspace.open_new_session()
         elif kind == 'new_session.cancel':
@@ -1405,6 +1427,7 @@ class FeishuRuntime:
                     or navigation.get('mode') == 'new_pending'
                 )
             ),
+            include_assistant_catalog=(workspace.view == 'assistant'),
         )
         return {
             'chat_id': chat_id,

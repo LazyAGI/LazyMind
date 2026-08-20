@@ -13,6 +13,7 @@ import (
 	"gorm.io/gorm"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/externalcontext"
 	"lazymind/core/state"
 	"lazymind/core/workflow/artifactfile"
 )
@@ -148,6 +149,109 @@ func TestExternalExecutionProjectionJoinsAuthoritiesWithoutOwningState(t *testin
 	foreign, err := app.executionProjections(ctx, "user-2", []string{second.HistoryID})
 	if err != nil || len(foreign) != 0 {
 		t.Fatalf("projection crossed owner boundary: %#v err=%v", foreign, err)
+	}
+}
+
+func TestExternalContinuationPreservesProviderOwnedConversation(t *testing.T) {
+	app, db := newExternalChatTestApplication(t)
+	now := time.Now().UTC()
+	if err := db.Create(&orm.ExternalAgentBinding{
+		ID: "external-binding", ConversationID: "conversation-1",
+		Provider: ChatExecutorCodex, ProviderThreadID: "external-thread",
+		ManagedByLazyMind: false, CreatedByUserID: "user-1",
+		CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := app.createRun(context.Background(), &orm.ExternalChatRun{
+		ID: "external-continuation", RequestID: "external-continuation",
+		ConversationID: "conversation-1", HistoryID: "external-history",
+		Provider: ChatExecutorCodex, ProviderThreadID: "external-thread",
+		ActorUserID: "user-1", Action: "resume", Prompt: "prompt",
+		Query: "continue", Sequence: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	job, err := app.claim(context.Background(), "user-1", ChatExecutorCodex, "host-1")
+	if err != nil || job == nil {
+		t.Fatalf("claim continuation: job=%#v err=%v", job, err)
+	}
+	if _, err := app.appendEvent(
+		context.Background(), "user-1", job.RunID, "host-1", job.LeaseToken,
+		externalChatEvent{EventID: "continued-thread", Type: "thread_started", ProviderThreadID: "external-thread"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	var binding orm.ExternalAgentBinding
+	if err := db.First(&binding, "id = ?", "external-binding").Error; err != nil {
+		t.Fatal(err)
+	}
+	if binding.ManagedByLazyMind {
+		t.Fatal("external continuation changed the immutable conversation origin")
+	}
+}
+
+func TestExternalConversationBindsOneThreadForEachProvider(t *testing.T) {
+	_, db := newExternalChatTestApplication(t)
+	service := externalcontext.New(db)
+	ctx := context.Background()
+	if err := service.BindManagedThread(ctx, "user-1", ChatExecutorCodex, "codex-thread", "conversation-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.BindManagedThread(ctx, "user-1", ChatExecutorCursor, "cursor-thread", "conversation-1"); err != nil {
+		t.Fatal(err)
+	}
+	var bindings []orm.ExternalAgentBinding
+	if err := db.Order("provider ASC").Find(&bindings, "conversation_id = ?", "conversation-1").Error; err != nil {
+		t.Fatal(err)
+	}
+	if len(bindings) != 2 || bindings[0].Provider != ChatExecutorCodex || bindings[1].Provider != ChatExecutorCursor {
+		t.Fatalf("per-provider bindings=%#v", bindings)
+	}
+	if err := service.BindManagedThread(ctx, "user-1", ChatExecutorCodex, "another-codex-thread", "conversation-1"); !errors.Is(err, externalcontext.ErrThreadOwned) {
+		t.Fatalf("second Codex thread err=%v, want ErrThreadOwned", err)
+	}
+}
+
+func TestExternalConversationThreadPrefersBindingOverRunHistory(t *testing.T) {
+	app, db := newExternalChatTestApplication(t)
+	now := time.Now().UTC()
+	if err := db.Create(&orm.ExternalAgentBinding{
+		ID: "authoritative-binding", ConversationID: "conversation-1",
+		Provider: ChatExecutorCodex, ProviderThreadID: "bound-thread",
+		ManagedByLazyMind: false, CreatedByUserID: "user-1",
+		CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := app.createRun(context.Background(), &orm.ExternalChatRun{
+		ID: "legacy-run", RequestID: "legacy-run", ConversationID: "conversation-1",
+		HistoryID: "legacy-history", Provider: ChatExecutorCodex,
+		ActorUserID: "user-1", Action: "resume", Prompt: "prompt",
+		Query: "query", Sequence: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&orm.ExternalChatRun{}).Where("id = ?", "legacy-run").Updates(map[string]any{
+		"status": "completed", "provider_thread_id": "stale-run-thread",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	threadID, resume, err := externalConversationThread(
+		context.Background(), db, "user-1", "conversation-1", ChatExecutorCodex,
+	)
+	if err != nil || !resume || threadID != "bound-thread" {
+		t.Fatalf("binding lookup thread=%q resume=%v err=%v", threadID, resume, err)
+	}
+	if err := db.Delete(&orm.ExternalAgentBinding{}, "id = ?", "authoritative-binding").Error; err != nil {
+		t.Fatal(err)
+	}
+	threadID, resume, err = externalConversationThread(
+		context.Background(), db, "user-1", "conversation-1", ChatExecutorCodex,
+	)
+	if err != nil || !resume || threadID != "stale-run-thread" {
+		t.Fatalf("legacy fallback thread=%q resume=%v err=%v", threadID, resume, err)
 	}
 }
 

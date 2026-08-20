@@ -81,6 +81,7 @@ type StartResult struct {
 
 type SessionSummary struct {
 	SessionID          string `json:"session_id"`
+	ConversationID     string `json:"conversation_id,omitempty"`
 	WorkflowID         string `json:"workflow_id"`
 	WorkflowRef        string `json:"workflow_ref,omitempty"`
 	WorkflowRevisionID string `json:"workflow_revision_id,omitempty"`

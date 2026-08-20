@@ -41,6 +41,18 @@ ResourceType = Literal[
     'conversation',
     'personalization',
 ]
+AssistantProvider: TypeAlias = Literal[
+    'lazymind',
+    'codex',
+    'cursor',
+    'workbuddy',
+]
+ASSISTANT_PROVIDERS: tuple[AssistantProvider, ...] = (
+    'lazymind',
+    'codex',
+    'cursor',
+    'workbuddy',
+)
 Evidence: TypeAlias = Annotated[str, Field(min_length=1, max_length=300)]
 GroundingMessage: TypeAlias = Annotated[str, Field(min_length=1, max_length=4000)]
 PreparedResourcePosition: TypeAlias = Annotated[
@@ -245,6 +257,7 @@ class ConversationNewParameters(_StrictModel):
 
 
 class ConversationListParameters(_StrictModel):
+    assistant: AssistantProvider = 'lazymind'
     evidence: list[Evidence] = Field(
         min_length=1,
         max_length=8,

@@ -1443,6 +1443,11 @@ func GetConversationDetail(w http.ResponseWriter, r *http.Request) {
 	var likeCnt, unlikeCnt int64
 	db.Model(&orm.ChatHistory{}).Where("conversation_id = ? AND feed_back = ?", c.ID, 1).Count(&likeCnt)
 	db.Model(&orm.ChatHistory{}).Where("conversation_id = ? AND feed_back = ?", c.ID, 2).Count(&unlikeCnt)
+	assistant, err := conversationAssistant(r.Context(), db, userID, c.ID)
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	writeConversationJSON(w, http.StatusOK, map[string]any{
 		"conversation": map[string]any{
@@ -1461,6 +1466,7 @@ func GetConversationDetail(w http.ResponseWriter, r *http.Request) {
 			"workflow_mode":         c.WorkflowMode,
 			"enable_subagent":       c.EnableSubagent,
 			"chat_executor":         c.ChatExecutor,
+			"assistant":             assistant,
 		},
 	})
 }
@@ -1663,6 +1669,22 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 
 	db := store.DB()
 	q := db.Model(&orm.Conversation{}).Where("create_user_id = ? AND deleted_at IS NULL", userID)
+	assistantFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("assistant")))
+	if assistantFilter != "" {
+		if normalized, valid := normalizeChatExecutor(assistantFilter); !valid || normalized != assistantFilter {
+			common.ReplyErr(w, "assistant must be 'lazymind', 'codex', 'cursor', or 'workbuddy'", http.StatusBadRequest)
+			return
+		}
+		unmanagedBinding := db.Model(&orm.ExternalAgentBinding{}).Select("1").
+			Where("external_agent_bindings.conversation_id = conversations.id").
+			Where("external_agent_bindings.created_by_user_id = ?", userID).
+			Where("external_agent_bindings.managed_by_lazymind = ?", false)
+		if assistantFilter == ChatExecutorLazyMind {
+			q = q.Where("NOT EXISTS (?)", unmanagedBinding)
+		} else {
+			q = q.Where("EXISTS (?)", unmanagedBinding.Where("external_agent_bindings.provider = ?", assistantFilter))
+		}
+	}
 	if keyword != "" {
 		q = q.Where("display_name LIKE ?", "%"+keyword+"%")
 	}
@@ -1684,6 +1706,15 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 	q.Count(&total)
 	var list []orm.Conversation
 	q.Order("updated_at DESC").Offset(offset).Limit(pageSize).Find(&list)
+	conversationIDs := make([]string, 0, len(list))
+	for _, conversation := range list {
+		conversationIDs = append(conversationIDs, conversation.ID)
+	}
+	assistants, err := conversationAssistants(r.Context(), db, userID, conversationIDs)
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	items := make([]map[string]any, 0, len(list))
 	for _, c := range list {
@@ -1717,6 +1748,8 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 			"update_time":           c.UpdatedAt.UTC().Format(time.RFC3339),
 			"models":                models,
 			"is_task_conv":          c.IsTaskConv,
+			"chat_executor":         c.ChatExecutor,
+			"assistant":             assistants[c.ID],
 		})
 	}
 	nextToken := ""
@@ -1728,6 +1761,37 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 		"total_size":      total,
 		"next_page_token": nextToken,
 	})
+}
+
+func conversationAssistant(ctx context.Context, db *gorm.DB, owner, conversationID string) (string, error) {
+	values, err := conversationAssistants(ctx, db, owner, []string{conversationID})
+	return values[conversationID], err
+}
+
+func conversationAssistants(ctx context.Context, db *gorm.DB, owner string, conversationIDs []string) (map[string]string, error) {
+	values := make(map[string]string, len(conversationIDs))
+	for _, conversationID := range conversationIDs {
+		values[conversationID] = ChatExecutorLazyMind
+	}
+	if len(conversationIDs) == 0 {
+		return values, nil
+	}
+	var bindings []orm.ExternalAgentBinding
+	if err := db.WithContext(ctx).
+		Where("created_by_user_id = ? AND conversation_id IN ?", owner, conversationIDs).
+		Order("created_at ASC, id ASC").
+		Find(&bindings).Error; err != nil {
+		return nil, err
+	}
+	for _, binding := range bindings {
+		if binding.ManagedByLazyMind || !isExternalChatProvider(binding.Provider) {
+			continue
+		}
+		if values[binding.ConversationID] == ChatExecutorLazyMind {
+			values[binding.ConversationID] = binding.Provider
+		}
+	}
+	return values, nil
 }
 
 // SetChatHistory text POST /api/v1/conversations:setChatHistory

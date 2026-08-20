@@ -9,6 +9,7 @@ from channel_gateway.common.domain.chat import (
     ChatOptions,
 )
 from channel_gateway.common.domain.commands import (
+    ASSISTANT_PROVIDERS,
     CommandEnvelope,
     ConversationSettingChange,
     PreparedConversationTarget,
@@ -17,6 +18,8 @@ from channel_gateway.common.domain.commands import (
     SelectionContinuation,
 )
 from channel_gateway.common.domain.outbound import (
+    AssistantCatalogPresentation,
+    AssistantPresentation,
     CapabilityPresentation,
     ConversationExecutorPresentation,
     ConversationSettingsPresentation,
@@ -95,28 +98,9 @@ class CapabilityActions:
             conversation_id=conversation_id,
             request_id=f'{request_id}_conversation_settings',
         )
-        executors = tuple(
-            ConversationExecutorPresentation(
-                id=str(item.get('id') or '')[:64],
-                display_name=str(item.get('display_name') or '')[:100],
-                kind=(
-                    'external'
-                    if str(item.get('kind') or '') == 'external'
-                    else 'internal'
-                ),
-                installed=bool(item.get('installed')),
-                host_online=bool(item.get('host_online')),
-                available=bool(item.get('available')),
-                unavailable_reason=str(
-                    item.get('unavailable_reason') or ''
-                )[:512],
-            )
-            for item in self._client.list_chat_executors(
-                owner_user_id=owner_user_id,
-                request_id=f'{request_id}_executor_catalog',
-            )
-            if str(item.get('id') or '')
-            and str(item.get('display_name') or '')
+        executors = self._executor_catalog(
+            owner_user_id=owner_user_id,
+            request_id=f'{request_id}_executor_catalog',
         )
         workflow_enabled = bool(
             detail.get('enable_workflow')
@@ -135,6 +119,7 @@ class CapabilityActions:
             else True
         )
         chat_executor = str(detail.get('chat_executor') or '')[:64]
+        assistant = str(detail.get('assistant') or 'lazymind')[:64]
         if not chat_executor:
             chat_executor = next(
                 (
@@ -173,7 +158,67 @@ class CapabilityActions:
                 subagent_enabled=subagent_enabled,
                 chat_executor=chat_executor,
                 executors=executors,
+                assistant=assistant,
             ),
+        )
+
+    def assistant_catalog(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+    ) -> AssistantCatalogPresentation:
+        executors = {
+            executor.id: executor
+            for executor in self._executor_catalog(
+                owner_user_id=owner_user_id,
+                request_id=request_id,
+            )
+        }
+        return AssistantCatalogPresentation(
+            kind='assistant_catalog',
+            assistants=tuple(
+                AssistantPresentation(
+                    id=provider,
+                    display_name=executors[provider].display_name,
+                    available=executors[provider].available,
+                    unavailable_reason=(
+                        executors[provider].unavailable_reason
+                    ),
+                )
+                for provider in ASSISTANT_PROVIDERS
+                if provider in executors
+            ),
+        )
+
+    def _executor_catalog(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+    ) -> tuple[ConversationExecutorPresentation, ...]:
+        return tuple(
+            ConversationExecutorPresentation(
+                id=str(item.get('id') or '')[:64],
+                display_name=str(item.get('display_name') or '')[:100],
+                kind=(
+                    'external'
+                    if str(item.get('kind') or '') == 'external'
+                    else 'internal'
+                ),
+                installed=bool(item.get('installed')),
+                host_online=bool(item.get('host_online')),
+                available=bool(item.get('available')),
+                unavailable_reason=str(
+                    item.get('unavailable_reason') or ''
+                )[:512],
+            )
+            for item in self._client.list_chat_executors(
+                owner_user_id=owner_user_id,
+                request_id=request_id,
+            )
+            if str(item.get('id') or '')
+            and str(item.get('display_name') or '')
         )
 
     def _pending_conversation_settings(
@@ -224,6 +269,7 @@ class CapabilityActions:
                 subagent_enabled=True,
                 chat_executor='',
                 executors=(),
+                assistant='lazymind',
             ),
         )
 

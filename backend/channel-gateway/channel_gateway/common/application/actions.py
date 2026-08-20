@@ -132,7 +132,17 @@ class ChannelActionExecutor:
                     **context,
                 )
             elif isinstance(command, ConversationListCommand):
-                text = self._conversations.list_conversations(**context)
+                text = self._conversations.list_conversations(
+                    assistant=command.parameters.assistant,
+                    **context,
+                )
+                if execution.include_assistant_catalog:
+                    presentations = (
+                        self._capabilities.assistant_catalog(
+                            owner_user_id=owner_user_id,
+                            request_id=f'{request_id}_assistant_catalog',
+                        ),
+                    )
             elif isinstance(command, ConversationSwitchCommand):
                 text = self._conversations.switch(
                     command=command,

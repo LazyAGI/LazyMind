@@ -1040,10 +1040,13 @@ class LazyMindClient:
         request_id: str,
         page_size: int = 100,
         page_token: str = '',
+        assistant: str = '',
     ) -> dict[str, Any]:
         params: dict[str, Any] = {'page_size': page_size}
         if page_token:
             params['page_token'] = page_token
+        if assistant:
+            params['assistant'] = assistant
         return self._request_json(
             'GET',
             f'{self._base_url}/conversations',

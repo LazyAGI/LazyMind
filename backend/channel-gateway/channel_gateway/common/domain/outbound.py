@@ -101,6 +101,34 @@ class ConversationExecutorPresentation:
 
 
 @dataclass(frozen=True, slots=True)
+class AssistantPresentation:
+    id: str
+    display_name: str
+    available: bool
+    unavailable_reason: str = ''
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'id': self.id,
+            'display_name': self.display_name,
+            'available': self.available,
+            'unavailable_reason': self.unavailable_reason,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AssistantCatalogPresentation:
+    kind: Literal['assistant_catalog']
+    assistants: tuple[AssistantPresentation, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'kind': self.kind,
+            'assistants': [assistant.to_dict() for assistant in self.assistants],
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class ConversationSettingsPresentation:
     kind: Literal['conversation_settings']
     dataset_ids: tuple[str, ...]
@@ -109,6 +137,7 @@ class ConversationSettingsPresentation:
     subagent_enabled: bool
     chat_executor: str
     executors: tuple[ConversationExecutorPresentation, ...]
+    assistant: str = 'lazymind'
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -119,6 +148,7 @@ class ConversationSettingsPresentation:
             'subagent_enabled': self.subagent_enabled,
             'chat_executor': self.chat_executor,
             'executors': [executor.to_dict() for executor in self.executors],
+            'assistant': self.assistant,
         }
 
 
@@ -252,6 +282,7 @@ ReplyPresentation: TypeAlias = (
     SelectionPresentation
     | CapabilityPresentation
     | CloudDocumentPresentation
+    | AssistantCatalogPresentation
     | ConversationSettingsPresentation
     | AskPresentation
     | TaskPresentation

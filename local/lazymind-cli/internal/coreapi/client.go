@@ -216,6 +216,9 @@ func cloneRequest(request *http.Request, body []byte, token string) *http.Reques
 		clone.Header.Set("X-LazyMind-Invocation-Id", invocation.ID)
 		clone.Header.Set("X-LazyMind-Invocation-Client", invocation.ClientName)
 		clone.Header.Set("X-LazyMind-Connector-Instance-Id", invocation.ConnectorInstanceID)
+		if conversationID := strings.TrimSpace(invocation.ConversationID); conversationID != "" {
+			clone.Header.Set("X-LazyMind-Invocation-Conversation-Id", conversationID)
+		}
 	}
 	if body != nil {
 		clone.Body = io.NopCloser(bytes.NewReader(body))

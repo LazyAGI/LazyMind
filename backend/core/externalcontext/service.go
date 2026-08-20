@@ -105,8 +105,21 @@ func (s *Service) BindManagedThread(
 		if existing.CreatedByUserID != owner || existing.ConversationID != conversationID {
 			return ErrThreadOwned
 		}
+		// The binding origin is immutable. Continuing an externally-originated
+		// thread through LazyMind makes this turn managed, not the thread itself.
+		// Reclassifying the binding here would move the conversation from its
+		// provider's assistant list into LazyMind after the first continuation.
 		return s.db.WithContext(ctx).Model(&orm.ExternalAgentBinding{}).Where("id = ?", existing.ID).
-			Updates(map[string]any{"managed_by_lazymind": true, "updated_at": s.now()}).Error
+			Update("updated_at", s.now()).Error
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	err = s.db.WithContext(ctx).
+		Where("conversation_id = ? AND provider = ?", conversationID, source.Provider).
+		Take(&existing).Error
+	if err == nil {
+		return ErrThreadOwned
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		return err
@@ -123,6 +136,18 @@ func (s *Service) BindManagedThread(
 	if err := s.db.WithContext(ctx).
 		Where("provider = ? AND provider_thread_id = ?", source.Provider, source.ThreadID).
 		Take(&existing).Error; err != nil {
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return err
+		}
+		// A concurrent first turn may have won the per-provider binding with
+		// another thread between the pre-check and insert.
+		if conflictErr := s.db.WithContext(ctx).
+			Where("conversation_id = ? AND provider = ?", conversationID, source.Provider).
+			Take(&existing).Error; conflictErr == nil {
+			return ErrThreadOwned
+		} else if !errors.Is(conflictErr, gorm.ErrRecordNotFound) {
+			return conflictErr
+		}
 		return err
 	}
 	if existing.CreatedByUserID != owner || existing.ConversationID != conversationID {
@@ -164,28 +189,6 @@ func (s *Service) CompleteObservedTurn(ctx context.Context, owner, externalRef s
 	}
 	return s.db.WithContext(ctx).Model(&orm.Conversation{}).Where("id = ?", run.ConversationID).
 		Updates(map[string]any{"updated_at": now}).Error
-}
-
-// LinkWorkflowSession repairs legacy standalone Workflow sessions that were
-// created before source context propagation existed. Existing non-empty
-// conversation ownership is never overwritten.
-func (s *Service) LinkWorkflowSession(ctx context.Context, owner, externalRef, sessionID string) error {
-	owner, externalRef, sessionID = strings.TrimSpace(owner), strings.TrimSpace(externalRef), strings.TrimSpace(sessionID)
-	if s == nil || s.db == nil || owner == "" || externalRef == "" || sessionID == "" {
-		return nil
-	}
-	var run orm.ExternalChatRun
-	if err := s.db.WithContext(ctx).
-		Where("id = ? AND actor_user_id = ? AND action = ?", externalRef, owner, ObservedAction).
-		Take(&run).Error; err != nil {
-		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil
-		}
-		return err
-	}
-	return s.db.WithContext(ctx).Model(&orm.WorkflowSession{}).
-		Where("id = ? AND create_user_id = ? AND (conversation_id = '' OR conversation_id IS NULL)", sessionID, owner).
-		Updates(map[string]any{"conversation_id": run.ConversationID, "origin_ref": run.ID, "updated_at": s.now()}).Error
 }
 
 // SyncTurnAnswer completes the user-visible mirror after Codex finishes the
