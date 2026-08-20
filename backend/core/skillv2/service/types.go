@@ -154,6 +154,7 @@ type SkillSummary struct {
 	IsEnabled      bool
 	Draft          DraftSummary
 	DeletedAt      *time.Time
+	TrashExpiresAt *time.Time
 	DeletedBy      string
 }
 
@@ -250,6 +251,7 @@ type skillRow struct {
 	UpdateStatus          string     `gorm:"column:update_status;type:text;not null;default:'up_to_date'"`
 	Ext                   []byte     `gorm:"column:ext;type:json"`
 	DeletedAt             *time.Time `gorm:"column:deleted_at"`
+	TrashExpiresAt        *time.Time `gorm:"column:trash_expires_at"`
 	DeletedBy             *string    `gorm:"column:deleted_by;type:text"`
 	CreatedAt             time.Time  `gorm:"column:created_at;not null"`
 	UpdatedAt             time.Time  `gorm:"column:updated_at;not null"`

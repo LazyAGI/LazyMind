@@ -26,6 +26,13 @@ var OnCancelHook func(ctx context.Context, convID string)
 
 const taskExecutionTimeoutReason = "任务执行超过2小时，未正常完成"
 
+const (
+	ArchivedReasonTaskRemove          = "task_remove"
+	ArchivedReasonConversationArchive = "conversation_archive"
+	ArchivedReasonConversationTrash   = "conversation_trash"
+	ArchivedReasonConversationPurged  = "conversation_purged"
+)
+
 // ── DB helpers ───────────────────────────────────────────────────────────────
 
 // CreateTask inserts a new TaskCenterTask row.
@@ -136,6 +143,72 @@ func isTerminal(status string) bool {
 // IsTerminalStatus is the exported variant of isTerminal for use by other packages.
 func IsTerminalStatus(status string) bool { return isTerminal(status) }
 
+// ArchiveTasksForConversations hides task-center rows for the linked task
+// conversations. Non-terminal tasks are canceled first so late status updates
+// cannot make them visible or running again.
+func ArchiveTasksForConversations(ctx context.Context, db *gorm.DB, userID string, conversationIDs []string, reason string, now time.Time) error {
+	if len(conversationIDs) == 0 {
+		return nil
+	}
+	updates := map[string]any{
+		"archived_at": now, "archived_reason": reason, "updated_at": now,
+	}
+	eligible := db.WithContext(ctx).Model(&orm.TaskCenterTask{}).
+		Where("user_id = ? AND conversation_id IN ?", userID, conversationIDs)
+	if reason == ArchivedReasonConversationTrash {
+		// Moving an already archived task conversation into trash changes the
+		// lifecycle reason so a later trash restore revives its task history.
+		eligible = eligible.Where("archived_at IS NULL OR archived_reason = ?", ArchivedReasonConversationArchive)
+	} else {
+		eligible = eligible.Where("archived_at IS NULL")
+	}
+	if err := eligible.
+		Where("status NOT IN ('succeeded','failed','skipped','canceled')").
+		Updates(map[string]any{
+			"status": "canceled", "dependency_status": "canceled", "finished_at": now,
+			"archived_at": now, "archived_reason": reason, "updated_at": now,
+		}).Error; err != nil {
+		return err
+	}
+	eligible = db.WithContext(ctx).Model(&orm.TaskCenterTask{}).
+		Where("user_id = ? AND conversation_id IN ?", userID, conversationIDs)
+	if reason == ArchivedReasonConversationTrash {
+		eligible = eligible.Where("archived_at IS NULL OR archived_reason = ?", ArchivedReasonConversationArchive)
+	} else {
+		eligible = eligible.Where("archived_at IS NULL")
+	}
+	if err := eligible.
+		Updates(updates).Error; err != nil {
+		return err
+	}
+	if OnCancelHook != nil {
+		for _, conversationID := range conversationIDs {
+			go OnCancelHook(context.Background(), conversationID)
+		}
+	}
+	return nil
+}
+
+// RestoreTasksForConversations only revives rows hidden by the matching
+// conversation lifecycle transition. It never revives tasks removed for other
+// reasons.
+func RestoreTasksForConversations(ctx context.Context, db *gorm.DB, userID string, conversationIDs []string, reason string, now time.Time) error {
+	if len(conversationIDs) == 0 {
+		return nil
+	}
+	return db.WithContext(ctx).Model(&orm.TaskCenterTask{}).
+		Where("user_id = ? AND conversation_id IN ? AND archived_reason = ?", userID, conversationIDs, reason).
+		Updates(map[string]any{"archived_at": nil, "archived_reason": "", "updated_at": now}).Error
+}
+
+func MarkConversationPurged(ctx context.Context, db *gorm.DB, userID, conversationID string, now time.Time) error {
+	return db.WithContext(ctx).Model(&orm.TaskCenterTask{}).
+		Where("user_id = ? AND conversation_id = ?", userID, conversationID).
+		Updates(map[string]any{
+			"archived_at": now, "archived_reason": ArchivedReasonConversationPurged, "updated_at": now,
+		}).Error
+}
+
 // ── response types ────────────────────────────────────────────────────────────
 
 type stepInfo struct {
@@ -151,6 +224,7 @@ type taskResponse struct {
 	ID                string          `json:"id"`
 	UserID            string          `json:"user_id"`
 	ConversationID    string          `json:"conversation_id"`
+	ConversationState string          `json:"conversation_state"`
 	ConversationTitle string          `json:"conversation_title,omitempty"`
 	WorkflowSessionID *string         `json:"workflow_session_id,omitempty"`
 	TaskType          string          `json:"task_type"`
@@ -166,7 +240,7 @@ type taskResponse struct {
 	WaitingReason     string          `json:"waiting_reason,omitempty"`
 }
 
-func toResponse(t orm.TaskCenterTask, conversationTitle string, scheduleName *string, steps []stepInfo) taskResponse {
+func toResponse(t orm.TaskCenterTask, conversationTitle, conversationState string, scheduleName *string, steps []stepInfo) taskResponse {
 	if steps == nil {
 		steps = []stepInfo{}
 	}
@@ -174,6 +248,7 @@ func toResponse(t orm.TaskCenterTask, conversationTitle string, scheduleName *st
 		ID:                t.ID,
 		UserID:            t.UserID,
 		ConversationID:    t.ConversationID,
+		ConversationState: conversationState,
 		ConversationTitle: conversationTitle,
 		WorkflowSessionID: t.WorkflowSessionID,
 		TaskType:          t.TaskType,
@@ -408,14 +483,22 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 
 	type rawRow struct {
 		orm.TaskCenterTask
-		ConvDisplayName string  `gorm:"column:conv_display_name"`
-		ScheduleName    *string `gorm:"column:schedule_name"`
+		ConvDisplayName   string  `gorm:"column:conv_display_name"`
+		ConversationState string  `gorm:"column:conversation_state"`
+		ScheduleName      *string `gorm:"column:schedule_name"`
 	}
 
 	var rows []rawRow
 	dataQ := db.WithContext(r.Context()).
 		Table("task_center_tasks tct").
-		Select("tct.*, c.display_name AS conv_display_name, us.name AS schedule_name").
+		Select(`tct.*, c.display_name AS conv_display_name,
+            CASE
+                WHEN c.id IS NULL THEN 'missing'
+                WHEN c.deleted_at IS NOT NULL THEN 'trash'
+                WHEN c.archived_at IS NOT NULL THEN 'archived'
+                ELSE 'active'
+            END AS conversation_state,
+            us.name AS schedule_name`).
 		Joins("LEFT JOIN conversations c ON c.id = tct.conversation_id").
 		Joins("LEFT JOIN user_schedules us ON us.id = tct.schedule_id").
 		Joins("LEFT JOIN plugin_sessions ps ON ps.id = tct.plugin_session_id"). // workflow-naming: persistence
@@ -480,7 +563,7 @@ func ListTasks(w http.ResponseWriter, r *http.Request) {
 		} else {
 			steps = loadStepsForConversation(r.Context(), db, t.ConversationID)
 		}
-		item := toResponse(t, resolvedItem.row.ConvDisplayName, resolvedItem.row.ScheduleName, steps)
+		item := toResponse(t, resolvedItem.row.ConvDisplayName, resolvedItem.row.ConversationState, resolvedItem.row.ScheduleName, steps)
 		item.WaitingReason = waitingDependencyReason(r.Context(), db, resolvedItem.row.TaskCenterTask)
 		items = append(items, item)
 	}
@@ -512,9 +595,12 @@ func GetTaskByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	type convRow struct {
-		DisplayName string `gorm:"column:display_name"`
+		DisplayName string     `gorm:"column:display_name"`
+		ArchivedAt  *time.Time `gorm:"column:archived_at"`
+		DeletedAt   *time.Time `gorm:"column:deleted_at"`
 	}
 	convTitle := ""
+	conversationState := "missing"
 	if t.ConversationID != "" {
 		var c convRow
 		if err := db.WithContext(r.Context()).
@@ -523,6 +609,14 @@ func GetTaskByID(w http.ResponseWriter, r *http.Request) {
 			Where("id = ?", t.ConversationID).
 			First(&c).Error; err == nil {
 			convTitle = c.DisplayName
+			switch {
+			case c.DeletedAt != nil:
+				conversationState = "trash"
+			case c.ArchivedAt != nil:
+				conversationState = "archived"
+			default:
+				conversationState = "active"
+			}
 		}
 	}
 
@@ -535,7 +629,7 @@ func GetTaskByID(w http.ResponseWriter, r *http.Request) {
 		steps = loadStepsForConversation(r.Context(), db, t.ConversationID)
 	}
 
-	common.ReplyJSON(w, toResponse(t, convTitle, nil, steps))
+	common.ReplyJSON(w, toResponse(t, convTitle, conversationState, nil, steps))
 }
 
 // CancelTaskByID handles POST /task-center/tasks/{task_id}:cancel
@@ -576,8 +670,7 @@ func CancelTaskByID(w http.ResponseWriter, r *http.Request) {
 }
 
 // RemoveTaskHandler handles POST /task-center/tasks/{task_id}:remove.
-// It archives the run and, for scheduler-owned task conversations, soft-deletes
-// the conversation as one operation.
+// The task and its task-conversation share the recovery lifecycle.
 func RemoveTaskHandler(w http.ResponseWriter, r *http.Request) {
 	userID := strings.TrimSpace(store.UserID(r))
 	path := strings.TrimPrefix(r.URL.Path, "/task-center/tasks/")
@@ -593,7 +686,7 @@ func RemoveTaskHandler(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "db unavailable", http.StatusInternalServerError)
 		return
 	}
-	existing, err := archiveTaskRun(r.Context(), db, userID, id)
+	existing, err := trashTaskRun(r.Context(), db, userID, id)
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		common.ReplyErr(w, "task not found", http.StatusNotFound)
 		return
@@ -610,6 +703,31 @@ func RemoveTaskHandler(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, nil)
 }
 
+func trashTaskRun(ctx context.Context, db *gorm.DB, userID, id string) (orm.TaskCenterTask, error) {
+	var existing orm.TaskCenterTask
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("id = ? AND user_id = ? AND archived_at IS NULL", id, userID).First(&existing).Error; err != nil {
+			return err
+		}
+		now := time.Now().UTC()
+		expiresAt := now.Add(30 * 24 * time.Hour)
+		result := tx.Model(&orm.Conversation{}).
+			Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", existing.ConversationID, userID).
+			Updates(map[string]any{
+				"deleted_at": now, "trash_expires_at": expiresAt,
+				"archived_at": nil, "archive_folder_id": nil, "updated_at": now,
+			})
+		if result.Error != nil {
+			return result.Error
+		}
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return ArchiveTasksForConversations(ctx, tx, userID, []string{existing.ConversationID}, ArchivedReasonConversationTrash, now)
+	})
+	return existing, err
+}
+
 func archiveTaskRun(ctx context.Context, db *gorm.DB, userID, id string) (orm.TaskCenterTask, error) {
 	var existing orm.TaskCenterTask
 	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -617,7 +735,7 @@ func archiveTaskRun(ctx context.Context, db *gorm.DB, userID, id string) (orm.Ta
 			return err
 		}
 		now := time.Now().UTC()
-		updates := map[string]any{"archived_at": now, "updated_at": now}
+		updates := map[string]any{"archived_at": now, "archived_reason": ArchivedReasonTaskRemove, "updated_at": now}
 		if !isTerminal(existing.Status) {
 			updates["status"] = "canceled"
 			updates["dependency_status"] = "canceled"
@@ -631,13 +749,6 @@ func archiveTaskRun(ctx context.Context, db *gorm.DB, userID, id string) (orm.Ta
 		}
 		if result.RowsAffected != 1 {
 			return gorm.ErrRecordNotFound
-		}
-		if existing.TaskType == "scheduled" && existing.ConversationID != "" {
-			if err := tx.Model(&orm.Conversation{}).
-				Where("id = ? AND create_user_id = ? AND is_task_conv = ? AND deleted_at IS NULL", existing.ConversationID, userID, true).
-				Updates(map[string]any{"deleted_at": now, "updated_at": now}).Error; err != nil {
-				return err
-			}
 		}
 		// Input rows are snapshots owned by this downstream run, so archive cleanup
 		// removes them together with the run's visible history.
@@ -660,53 +771,6 @@ func archiveTaskRun(ctx context.Context, db *gorm.DB, userID, id string) (orm.Ta
 		return nil
 	})
 	return existing, err
-}
-
-// ArchiveTasksForConversations keeps task-center membership intrinsic to how a
-// conversation was created: deleting a task conversation archives its tasks too.
-func ArchiveTasksForConversations(ctx context.Context, tx *gorm.DB, userID string, conversationIDs []string, now time.Time) error {
-	if len(conversationIDs) == 0 {
-		return nil
-	}
-	var tasks []orm.TaskCenterTask
-	if err := tx.WithContext(ctx).
-		Where("user_id = ? AND conversation_id IN ? AND archived_at IS NULL", userID, conversationIDs).
-		Find(&tasks).Error; err != nil {
-		return err
-	}
-	if len(tasks) == 0 {
-		return nil
-	}
-	taskIDs := make([]string, 0, len(tasks))
-	scheduleIDs := make(map[string]struct{})
-	for _, task := range tasks {
-		taskIDs = append(taskIDs, task.ID)
-		if task.ScheduleID != nil && *task.ScheduleID != "" {
-			scheduleIDs[*task.ScheduleID] = struct{}{}
-		}
-	}
-	if err := tx.WithContext(ctx).Model(&orm.TaskCenterTask{}).
-		Where("id IN ?", taskIDs).
-		Updates(map[string]any{"archived_at": now, "updated_at": now}).Error; err != nil {
-		return err
-	}
-	if err := tx.WithContext(ctx).Where("downstream_task_id IN ?", taskIDs).Delete(&orm.TaskRunInput{}).Error; err != nil {
-		return err
-	}
-	for scheduleID := range scheduleIDs {
-		var visibleRuns int64
-		if err := tx.WithContext(ctx).Model(&orm.TaskCenterTask{}).
-			Where("schedule_id = ? AND user_id = ? AND archived_at IS NULL", scheduleID, userID).
-			Count(&visibleRuns).Error; err != nil {
-			return err
-		}
-		if err := tx.WithContext(ctx).Model(&orm.UserSchedule{}).
-			Where("id = ? AND user_id = ?", scheduleID, userID).
-			Update("run_count", visibleRuns).Error; err != nil {
-			return err
-		}
-	}
-	return nil
 }
 
 // ListScheduleTasks handles GET /task-center/schedules/{schedule_id}/tasks
@@ -775,17 +839,28 @@ func ListScheduleTasks(w http.ResponseWriter, r *http.Request) {
 		convIDs = append(convIDs, t.ConversationID)
 	}
 	convTitles := map[string]string{}
+	convStates := map[string]string{}
 	if len(convIDs) > 0 {
 		type cRow struct {
-			ID          string `gorm:"column:id"`
-			DisplayName string `gorm:"column:display_name"`
+			ID          string     `gorm:"column:id"`
+			DisplayName string     `gorm:"column:display_name"`
+			ArchivedAt  *time.Time `gorm:"column:archived_at"`
+			DeletedAt   *time.Time `gorm:"column:deleted_at"`
 		}
 		var cRows []cRow
 		if err := db.WithContext(r.Context()).
-			Table("conversations").Select("id, display_name").
+			Table("conversations").Select("id, display_name, archived_at, deleted_at").
 			Where("id IN ?", convIDs).Find(&cRows).Error; err == nil {
 			for _, c := range cRows {
 				convTitles[c.ID] = c.DisplayName
+				switch {
+				case c.DeletedAt != nil:
+					convStates[c.ID] = "trash"
+				case c.ArchivedAt != nil:
+					convStates[c.ID] = "archived"
+				default:
+					convStates[c.ID] = "active"
+				}
 			}
 		}
 	}
@@ -801,7 +876,11 @@ func ListScheduleTasks(w http.ResponseWriter, r *http.Request) {
 			steps = loadStepsForConversation(r.Context(), db, t.ConversationID)
 		}
 		sn := schedName
-		item := toResponse(t, convTitles[t.ConversationID], &sn, steps)
+		conversationState := convStates[t.ConversationID]
+		if conversationState == "" {
+			conversationState = "missing"
+		}
+		item := toResponse(t, convTitles[t.ConversationID], conversationState, &sn, steps)
 		item.WaitingReason = waitingDependencyReason(r.Context(), db, t)
 		items = append(items, item)
 	}

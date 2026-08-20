@@ -592,6 +592,33 @@ export interface CompleteUploadResponse {
     'upload_id': string;
     'upload_scope'?: string;
 }
+export interface ConversationArchiveFolder {
+    'created_at': string;
+    'dialog_count': number;
+    'id': string;
+    'name': string;
+    'task_count': number;
+    'total_count': number;
+    'updated_at': string;
+}
+export interface ConversationArchiveFolderCreateResponse {
+    'folder': ConversationArchiveFolder;
+}
+export interface ConversationArchiveFolderDeleteResponse {
+    'moved_count': number;
+}
+export interface ConversationArchiveFolderListResponse {
+    'folders': Array<ConversationArchiveFolder>;
+    'unfiled_dialog_count': number;
+    'unfiled_task_count': number;
+    'unfiled_total_count': number;
+}
+export interface ConversationArchiveFolderRequest {
+    'name': string;
+}
+export interface ConversationArchiveRequest {
+    'folder_id'?: string | null;
+}
 export interface ConversationBatchDeleteRequest {
     'conversation_ids': Array<string>;
 }
@@ -657,6 +684,32 @@ export interface ConversationListResponse {
     'next_page_token'?: string;
     'total_size'?: number;
 }
+export interface ConversationRecoveryItem {
+    'archive_folder_name'?: string;
+    'archived_at'?: string;
+    'conversation_id': string;
+    'create_time': string;
+    'deleted_at'?: string;
+    'display_name': string;
+    'folder_id'?: string | null;
+    'kind': ConversationRecoveryItemKindEnum;
+    'trash_expires_at'?: string;
+    'update_time': string;
+}
+
+export const ConversationRecoveryItemKindEnum = {
+    Dialog: 'dialog',
+    Task: 'task'
+} as const;
+
+export type ConversationRecoveryItemKindEnum = typeof ConversationRecoveryItemKindEnum[keyof typeof ConversationRecoveryItemKindEnum];
+
+export interface ConversationRecoveryListResponse {
+    'items': Array<ConversationRecoveryItem>;
+    'page': number;
+    'page_size': number;
+    'total': number;
+}
 export interface ConversationResumeRequest {
     'conversation_id': string;
     'history_id'?: string;
@@ -698,6 +751,10 @@ export interface ConversationTrailListResponse {
     'name'?: string;
     'next_page_token'?: string;
     'total_size'?: number;
+}
+export interface CoreEmptyResponse {
+    'code': number;
+    'message': string;
 }
 export interface CreateEvalSetByImportRequest {
     'dataset_ids'?: Array<string>;
@@ -1894,6 +1951,9 @@ export interface QuestionTypeOption {
 export interface QuestionTypeOptionsResponse {
     'items'?: Array<QuestionTypeOption>;
 }
+export interface RecoveryDeleteCountResponse {
+    'deleted_count'?: number;
+}
 export interface ResourceUpdateTaskOpenAPIResponse {
     'attempt_count': number;
     'created_at': string;
@@ -2315,6 +2375,7 @@ export interface SkillListItemOpenAPIResponse {
     'tags'?: Array<string>;
 }
 export interface SkillListOpenAPIResponse {
+    'categories'?: Array<string>;
     'items'?: Array<SkillListItemOpenAPIResponse>;
     'page': number;
     'page_size': number;
@@ -2567,6 +2628,60 @@ export interface StartTasksResponse {
 export interface SuspendJobRequest {
     'task_id'?: string;
 }
+export interface TaskCenterStatusCounts {
+    'all'?: number;
+    'canceled'?: number;
+    'failed'?: number;
+    'pending'?: number;
+    'running'?: number;
+    'succeeded'?: number;
+    'waiting'?: number;
+    'waiting_inputs'?: number;
+}
+export interface TaskCenterStepInfo {
+    'artifact'?: string;
+    'current_phase'?: string;
+    'status': string;
+    'step_id': string;
+    'summary'?: string;
+    'title'?: string;
+}
+export interface TaskCenterTaskListResponse {
+    'items': Array<TaskCenterTaskResponse>;
+    'page': number;
+    'page_size': number;
+    'status_counts'?: TaskCenterStatusCounts;
+    'total': number;
+}
+export interface TaskCenterTaskResponse {
+    'conversation_id': string;
+    'conversation_state': TaskCenterTaskResponseConversationStateEnum;
+    'conversation_title'?: string;
+    'created_at': string;
+    'finished_at'?: string;
+    'id': string;
+    'progress'?: object;
+    'schedule_id'?: string;
+    'schedule_name'?: string;
+    'status': string;
+    'steps': Array<TaskCenterStepInfo>;
+    'task_type': string;
+    'title'?: string;
+    'updated_at': string;
+    'user_id': string;
+    'waiting_reason'?: string;
+    'workflow_session_id'?: string;
+}
+
+export const TaskCenterTaskResponseConversationStateEnum = {
+    Active: 'active',
+    Archived: 'archived',
+    Trash: 'trash',
+    Missing: 'missing'
+} as const;
+
+export type TaskCenterTaskResponseConversationStateEnum = typeof TaskCenterTaskResponseConversationStateEnum[keyof typeof TaskCenterTaskResponseConversationStateEnum];
+
 export interface TaskDocumentInfo {
     'display_name'?: string;
     'document_id'?: string;
@@ -2855,6 +2970,35 @@ export interface WordGroupConflictResponse {
     'reason': string;
     'updated_at': string;
     'word': string;
+}
+export interface WorkflowTrashEmptyData {
+    'purged'?: number;
+}
+export interface WorkflowTrashEmptyResponse {
+    'code': number;
+    'data': WorkflowTrashEmptyData;
+    'message': string;
+}
+export interface WorkflowTrashItem {
+    'deleted_at': string;
+    'id': string;
+    'name': string;
+    'published_status_before_trash'?: string;
+    'published_workflow_ref'?: string;
+    'trash_expires_at': string;
+    'updated_at': string;
+    'workflow_id'?: string;
+}
+export interface WorkflowTrashListData {
+    'page': number;
+    'page_size': number;
+    'records': Array<WorkflowTrashItem>;
+    'total': number;
+}
+export interface WorkflowTrashListResponse {
+    'code': number;
+    'data': WorkflowTrashListData;
+    'message': string;
 }
 export interface WriterDocumentSyncOpenAPIRequest {
     'base_revision': number;
@@ -7564,6 +7708,149 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary Delete a conversation archive folder
+         * @param {string} folderId
+         * @param {string} [moveToFolderId]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationArchiveFoldersFolderIdDelete: async (folderId: string, moveToFolderId?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'folderId' is not null or undefined
+            assertParamExists('apiCoreConversationArchiveFoldersFolderIdDelete', 'folderId', folderId)
+            const localVarPath = `/api/core/conversation-archive-folders/{folder_id}`
+                .replace(`{${"folder_id"}}`, encodeURIComponent(String(folderId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (moveToFolderId !== undefined) {
+                localVarQueryParameter['move_to_folder_id'] = moveToFolderId;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Rename a conversation archive folder
+         * @param {string} folderId
+         * @param {ConversationArchiveFolderRequest} conversationArchiveFolderRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationArchiveFoldersFolderIdPatch: async (folderId: string, conversationArchiveFolderRequest: ConversationArchiveFolderRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'folderId' is not null or undefined
+            assertParamExists('apiCoreConversationArchiveFoldersFolderIdPatch', 'folderId', folderId)
+            // verify required parameter 'conversationArchiveFolderRequest' is not null or undefined
+            assertParamExists('apiCoreConversationArchiveFoldersFolderIdPatch', 'conversationArchiveFolderRequest', conversationArchiveFolderRequest)
+            const localVarPath = `/api/core/conversation-archive-folders/{folder_id}`
+                .replace(`{${"folder_id"}}`, encodeURIComponent(String(folderId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(conversationArchiveFolderRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary List conversation archive folders
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationArchiveFoldersGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/conversation-archive-folders`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Create a conversation archive folder
+         * @param {ConversationArchiveFolderRequest} conversationArchiveFolderRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationArchiveFoldersPost: async (conversationArchiveFolderRequest: ConversationArchiveFolderRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationArchiveFolderRequest' is not null or undefined
+            assertParamExists('apiCoreConversationArchiveFoldersPost', 'conversationArchiveFolderRequest', conversationArchiveFolderRequest)
+            const localVarPath = `/api/core/conversation-archive-folders`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(conversationArchiveFolderRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Get multi-answer switch status
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -7629,6 +7916,63 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary List archived conversations
+         * @param {ApiCoreConversationsArchivedGetKindEnum} kind
+         * @param {string} [keyword]
+         * @param {number} [page]
+         * @param {number} [pageSize]
+         * @param {string} [folderId]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsArchivedGet: async (kind: ApiCoreConversationsArchivedGetKindEnum, keyword?: string, page?: number, pageSize?: number, folderId?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'kind' is not null or undefined
+            assertParamExists('apiCoreConversationsArchivedGet', 'kind', kind)
+            const localVarPath = `/api/core/conversations:archived`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (keyword !== undefined) {
+                localVarQueryParameter['keyword'] = keyword;
+            }
+
+            if (page !== undefined) {
+                localVarQueryParameter['page'] = page;
+            }
+
+            if (pageSize !== undefined) {
+                localVarQueryParameter['page_size'] = pageSize;
+            }
+
+            if (kind !== undefined) {
+                localVarQueryParameter['kind'] = kind;
+            }
+
+            if (folderId !== undefined) {
+                localVarQueryParameter['folder_id'] = folderId;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Batch delete conversations
          * @param {ConversationBatchDeleteRequest} conversationBatchDeleteRequest
          * @param {*} [options] Override http request option.
@@ -7685,6 +8029,45 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Archive or move a conversation
+         * @param {string} conversationId
+         * @param {ConversationArchiveRequest} conversationArchiveRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdArchivePost: async (conversationId: string, conversationArchiveRequest: ConversationArchiveRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdArchivePost', 'conversationId', conversationId)
+            // verify required parameter 'conversationArchiveRequest' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdArchivePost', 'conversationArchiveRequest', conversationArchiveRequest)
+            const localVarPath = `/api/core/conversations/{conversation_id}:archive`
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(conversationArchiveRequest, localVarRequestOptions, configuration)
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -7780,6 +8163,74 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Permanently delete a trashed conversation
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdPurgeDelete: async (conversationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdPurgeDelete', 'conversationId', conversationId)
+            const localVarPath = `/api/core/conversations/{conversation_id}:purge`
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Restore a trashed conversation
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdRestorePost: async (conversationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdRestorePost', 'conversationId', conversationId)
+            const localVarPath = `/api/core/conversations/{conversation_id}:restore`
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -7934,6 +8385,40 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             // verify required parameter 'conversationId' is not null or undefined
             assertParamExists('apiCoreConversationsConversationIdToolLimitDecisionPost', 'conversationId', conversationId)
             const localVarPath = `/api/core/conversations/{conversation_id}:toolLimitDecision`
+                .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Unarchive a conversation
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdUnarchivePost: async (conversationId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'conversationId' is not null or undefined
+            assertParamExists('apiCoreConversationsConversationIdUnarchivePost', 'conversationId', conversationId)
+            const localVarPath = `/api/core/conversations/{conversation_id}:unarchive`
                 .replace(`{${"conversation_id"}}`, encodeURIComponent(String(conversationId)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -8549,6 +9034,95 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
             localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
             localVarRequestOptions.data = serializeDataIfNeeded(conversationStopRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Empty conversation trash for one kind
+         * @param {ApiCoreConversationsTrashDeleteKindEnum} kind
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsTrashDelete: async (kind: ApiCoreConversationsTrashDeleteKindEnum, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'kind' is not null or undefined
+            assertParamExists('apiCoreConversationsTrashDelete', 'kind', kind)
+            const localVarPath = `/api/core/conversations:trash`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (kind !== undefined) {
+                localVarQueryParameter['kind'] = kind;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary List trashed conversations
+         * @param {ApiCoreConversationsTrashGetKindEnum} kind
+         * @param {string} [keyword]
+         * @param {number} [page]
+         * @param {number} [pageSize]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsTrashGet: async (kind: ApiCoreConversationsTrashGetKindEnum, keyword?: string, page?: number, pageSize?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'kind' is not null or undefined
+            assertParamExists('apiCoreConversationsTrashGet', 'kind', kind)
+            const localVarPath = `/api/core/conversations:trash`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (keyword !== undefined) {
+                localVarQueryParameter['keyword'] = keyword;
+            }
+
+            if (page !== undefined) {
+                localVarQueryParameter['page'] = page;
+            }
+
+            if (pageSize !== undefined) {
+                localVarQueryParameter['page_size'] = pageSize;
+            }
+
+            if (kind !== undefined) {
+                localVarQueryParameter['kind'] = kind;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
 
             return {
                 url: toPathString(localVarUrlObj),
@@ -11723,12 +12297,14 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary GET /task-center/schedules/{schedule_id}/tasks
+         * @summary List tasks for a schedule
          * @param {string} scheduleId
+         * @param {number} [page]
+         * @param {number} [pageSize]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreTaskCenterSchedulesScheduleIdTasksGet: async (scheduleId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreTaskCenterSchedulesScheduleIdTasksGet: async (scheduleId: string, page?: number, pageSize?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'scheduleId' is not null or undefined
             assertParamExists('apiCoreTaskCenterSchedulesScheduleIdTasksGet', 'scheduleId', scheduleId)
             const localVarPath = `/api/core/task-center/schedules/{schedule_id}/tasks`
@@ -11744,6 +12320,15 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            if (page !== undefined) {
+                localVarQueryParameter['page'] = page;
+            }
+
+            if (pageSize !== undefined) {
+                localVarQueryParameter['page_size'] = pageSize;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -11756,11 +12341,16 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary GET /task-center/tasks
+         * @summary List task-center tasks
+         * @param {string} [status]
+         * @param {string} [taskType]
+         * @param {string} [keyword]
+         * @param {number} [page]
+         * @param {number} [pageSize]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreTaskCenterTasksGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreTaskCenterTasksGet: async (status?: string, taskType?: string, keyword?: string, page?: number, pageSize?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/task-center/tasks`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -11773,6 +12363,27 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            if (status !== undefined) {
+                localVarQueryParameter['status'] = status;
+            }
+
+            if (taskType !== undefined) {
+                localVarQueryParameter['task_type'] = taskType;
+            }
+
+            if (keyword !== undefined) {
+                localVarQueryParameter['keyword'] = keyword;
+            }
+
+            if (page !== undefined) {
+                localVarQueryParameter['page'] = page;
+            }
+
+            if (pageSize !== undefined) {
+                localVarQueryParameter['page_size'] = pageSize;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -11818,7 +12429,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary GET /task-center/tasks/{task_id}
+         * @summary Get a task-center task
          * @param {string} taskId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -11839,6 +12450,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -12659,6 +13271,40 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary Permanently delete a workflow draft
+         * @param {string} draftId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsDraftIdPurgeDelete: async (draftId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'draftId' is not null or undefined
+            assertParamExists('apiCoreWorkflowDraftsDraftIdPurgeDelete', 'draftId', draftId)
+            const localVarPath = `/api/core/workflow-drafts/{draft_id}:purge`
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary POST /workflow-drafts/{draft_id}:repair-preview
          * @param {string} draftId
          * @param {*} [options] Override http request option.
@@ -12717,6 +13363,40 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Restore a workflow draft
+         * @param {string} draftId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsDraftIdRestorePost: async (draftId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'draftId' is not null or undefined
+            assertParamExists('apiCoreWorkflowDraftsDraftIdRestorePost', 'draftId', draftId)
+            const localVarPath = `/api/core/workflow-drafts/{draft_id}:restore`
+                .replace(`{${"draft_id"}}`, encodeURIComponent(String(draftId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -12870,6 +13550,81 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary Empty workflow draft trash
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsTrashDelete: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/workflow-drafts:trash`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'DELETE', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary List workflow draft trash
+         * @param {string} [keyword]
+         * @param {number} [page]
+         * @param {number} [pageSize]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsTrashGet: async (keyword?: string, page?: number, pageSize?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/workflow-drafts:trash`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (keyword !== undefined) {
+                localVarQueryParameter['keyword'] = keyword;
+            }
+
+            if (page !== undefined) {
+                localVarQueryParameter['page'] = page;
+            }
+
+            if (pageSize !== undefined) {
+                localVarQueryParameter['page_size'] = pageSize;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
 
             setSearchParams(localVarUrlObj, localVarQueryParameter);
             let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
@@ -14353,6 +15108,59 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Delete a conversation archive folder
+         * @param {string} folderId
+         * @param {string} [moveToFolderId]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationArchiveFoldersFolderIdDelete(folderId: string, moveToFolderId?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationArchiveFolderDeleteResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationArchiveFoldersFolderIdDelete(folderId, moveToFolderId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationArchiveFoldersFolderIdDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Rename a conversation archive folder
+         * @param {string} folderId
+         * @param {ConversationArchiveFolderRequest} conversationArchiveFolderRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationArchiveFoldersFolderIdPatch(folderId: string, conversationArchiveFolderRequest: ConversationArchiveFolderRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<object>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationArchiveFoldersFolderIdPatch(folderId, conversationArchiveFolderRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationArchiveFoldersFolderIdPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary List conversation archive folders
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationArchiveFoldersGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationArchiveFolderListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationArchiveFoldersGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationArchiveFoldersGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Create a conversation archive folder
+         * @param {ConversationArchiveFolderRequest} conversationArchiveFolderRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationArchiveFoldersPost(conversationArchiveFolderRequest: ConversationArchiveFolderRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationArchiveFolderCreateResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationArchiveFoldersPost(conversationArchiveFolderRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationArchiveFoldersPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Get multi-answer switch status
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -14378,6 +15186,23 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary List archived conversations
+         * @param {ApiCoreConversationsArchivedGetKindEnum} kind
+         * @param {string} [keyword]
+         * @param {number} [page]
+         * @param {number} [pageSize]
+         * @param {string} [folderId]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsArchivedGet(kind: ApiCoreConversationsArchivedGetKindEnum, keyword?: string, page?: number, pageSize?: number, folderId?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationRecoveryListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsArchivedGet(kind, keyword, page, pageSize, folderId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsArchivedGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Batch delete conversations
          * @param {ConversationBatchDeleteRequest} conversationBatchDeleteRequest
          * @param {*} [options] Override http request option.
@@ -14399,6 +15224,20 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsChatPost(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsChatPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Archive or move a conversation
+         * @param {string} conversationId
+         * @param {ConversationArchiveRequest} conversationArchiveRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsConversationIdArchivePost(conversationId: string, conversationArchiveRequest: ConversationArchiveRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<object>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdArchivePost(conversationId, conversationArchiveRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdArchivePost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -14438,6 +15277,32 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdEventsGet(conversationId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdEventsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Permanently delete a trashed conversation
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsConversationIdPurgeDelete(conversationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<object>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdPurgeDelete(conversationId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdPurgeDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Restore a trashed conversation
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsConversationIdRestorePost(conversationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<object>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdRestorePost(conversationId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdRestorePost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -14503,6 +15368,19 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdToolLimitDecisionPost(conversationId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdToolLimitDecisionPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Unarchive a conversation
+         * @param {string} conversationId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsConversationIdUnarchivePost(conversationId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<object>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsConversationIdUnarchivePost(conversationId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsConversationIdUnarchivePost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -14728,6 +15606,35 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsStopChatGenerationPost(conversationStopRequest, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsStopChatGenerationPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Empty conversation trash for one kind
+         * @param {ApiCoreConversationsTrashDeleteKindEnum} kind
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsTrashDelete(kind: ApiCoreConversationsTrashDeleteKindEnum, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<RecoveryDeleteCountResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsTrashDelete(kind, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsTrashDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary List trashed conversations
+         * @param {ApiCoreConversationsTrashGetKindEnum} kind
+         * @param {string} [keyword]
+         * @param {number} [page]
+         * @param {number} [pageSize]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreConversationsTrashGet(kind: ApiCoreConversationsTrashGetKindEnum, keyword?: string, page?: number, pageSize?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationRecoveryListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsTrashGet(kind, keyword, page, pageSize, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsTrashGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -15931,25 +16838,32 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary GET /task-center/schedules/{schedule_id}/tasks
+         * @summary List tasks for a schedule
          * @param {string} scheduleId
+         * @param {number} [page]
+         * @param {number} [pageSize]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreTaskCenterSchedulesScheduleIdTasksGet(scheduleId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterSchedulesScheduleIdTasksGet(scheduleId, options);
+        async apiCoreTaskCenterSchedulesScheduleIdTasksGet(scheduleId: string, page?: number, pageSize?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<TaskCenterTaskListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterSchedulesScheduleIdTasksGet(scheduleId, page, pageSize, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreTaskCenterSchedulesScheduleIdTasksGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
          *
-         * @summary GET /task-center/tasks
+         * @summary List task-center tasks
+         * @param {string} [status]
+         * @param {string} [taskType]
+         * @param {string} [keyword]
+         * @param {number} [page]
+         * @param {number} [pageSize]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreTaskCenterTasksGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterTasksGet(options);
+        async apiCoreTaskCenterTasksGet(status?: string, taskType?: string, keyword?: string, page?: number, pageSize?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<TaskCenterTaskListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterTasksGet(status, taskType, keyword, page, pageSize, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreTaskCenterTasksGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -15969,12 +16883,12 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary GET /task-center/tasks/{task_id}
+         * @summary Get a task-center task
          * @param {string} taskId
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreTaskCenterTasksTaskIdGet(taskId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+        async apiCoreTaskCenterTasksTaskIdGet(taskId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<TaskCenterTaskResponse>> {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreTaskCenterTasksTaskIdGet(taskId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreTaskCenterTasksTaskIdGet']?.[localVarOperationServerIndex]?.url;
@@ -16301,6 +17215,19 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Permanently delete a workflow draft
+         * @param {string} draftId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowDraftsDraftIdPurgeDelete(draftId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CoreEmptyResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsDraftIdPurgeDelete(draftId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsDraftIdPurgeDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary POST /workflow-drafts/{draft_id}:repair-preview
          * @param {string} draftId
          * @param {*} [options] Override http request option.
@@ -16324,6 +17251,19 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGet(draftId, repairId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Restore a workflow draft
+         * @param {string} draftId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowDraftsDraftIdRestorePost(draftId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<CoreEmptyResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsDraftIdRestorePost(draftId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsDraftIdRestorePost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -16386,6 +17326,33 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsPost(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary Empty workflow draft trash
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowDraftsTrashDelete(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<WorkflowTrashEmptyResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsTrashDelete(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsTrashDelete']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary List workflow draft trash
+         * @param {string} [keyword]
+         * @param {number} [page]
+         * @param {number} [pageSize]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowDraftsTrashGet(keyword?: string, page?: number, pageSize?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<WorkflowTrashListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowDraftsTrashGet(keyword, page, pageSize, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowDraftsTrashGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -17026,6 +17993,45 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary Delete a conversation archive folder
+         * @param {DefaultApiApiCoreConversationArchiveFoldersFolderIdDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationArchiveFoldersFolderIdDelete(requestParameters: DefaultApiApiCoreConversationArchiveFoldersFolderIdDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationArchiveFolderDeleteResponse> {
+            return localVarFp.apiCoreConversationArchiveFoldersFolderIdDelete(requestParameters.folderId, requestParameters.moveToFolderId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Rename a conversation archive folder
+         * @param {DefaultApiApiCoreConversationArchiveFoldersFolderIdPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationArchiveFoldersFolderIdPatch(requestParameters: DefaultApiApiCoreConversationArchiveFoldersFolderIdPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<object> {
+            return localVarFp.apiCoreConversationArchiveFoldersFolderIdPatch(requestParameters.folderId, requestParameters.conversationArchiveFolderRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary List conversation archive folders
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationArchiveFoldersGet(options?: RawAxiosRequestConfig): AxiosPromise<ConversationArchiveFolderListResponse> {
+            return localVarFp.apiCoreConversationArchiveFoldersGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Create a conversation archive folder
+         * @param {DefaultApiApiCoreConversationArchiveFoldersPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationArchiveFoldersPost(requestParameters: DefaultApiApiCoreConversationArchiveFoldersPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationArchiveFolderCreateResponse> {
+            return localVarFp.apiCoreConversationArchiveFoldersPost(requestParameters.conversationArchiveFolderRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Get multi-answer switch status
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -17045,6 +18051,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary List archived conversations
+         * @param {DefaultApiApiCoreConversationsArchivedGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsArchivedGet(requestParameters: DefaultApiApiCoreConversationsArchivedGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationRecoveryListResponse> {
+            return localVarFp.apiCoreConversationsArchivedGet(requestParameters.kind, requestParameters.keyword, requestParameters.page, requestParameters.pageSize, requestParameters.folderId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Batch delete conversations
          * @param {DefaultApiApiCoreConversationsBatchDeletePostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -17061,6 +18077,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreConversationsChatPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreConversationsChatPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Archive or move a conversation
+         * @param {DefaultApiApiCoreConversationsConversationIdArchivePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdArchivePost(requestParameters: DefaultApiApiCoreConversationsConversationIdArchivePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<object> {
+            return localVarFp.apiCoreConversationsConversationIdArchivePost(requestParameters.conversationId, requestParameters.conversationArchiveRequest, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -17091,6 +18117,26 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreConversationsConversationIdEventsGet(requestParameters: DefaultApiApiCoreConversationsConversationIdEventsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreConversationsConversationIdEventsGet(requestParameters.conversationId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Permanently delete a trashed conversation
+         * @param {DefaultApiApiCoreConversationsConversationIdPurgeDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdPurgeDelete(requestParameters: DefaultApiApiCoreConversationsConversationIdPurgeDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<object> {
+            return localVarFp.apiCoreConversationsConversationIdPurgeDelete(requestParameters.conversationId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Restore a trashed conversation
+         * @param {DefaultApiApiCoreConversationsConversationIdRestorePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdRestorePost(requestParameters: DefaultApiApiCoreConversationsConversationIdRestorePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<object> {
+            return localVarFp.apiCoreConversationsConversationIdRestorePost(requestParameters.conversationId, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -17141,6 +18187,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreConversationsConversationIdToolLimitDecisionPost(requestParameters: DefaultApiApiCoreConversationsConversationIdToolLimitDecisionPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<object> {
             return localVarFp.apiCoreConversationsConversationIdToolLimitDecisionPost(requestParameters.conversationId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Unarchive a conversation
+         * @param {DefaultApiApiCoreConversationsConversationIdUnarchivePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsConversationIdUnarchivePost(requestParameters: DefaultApiApiCoreConversationsConversationIdUnarchivePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<object> {
+            return localVarFp.apiCoreConversationsConversationIdUnarchivePost(requestParameters.conversationId, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -17309,6 +18365,26 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreConversationsStopChatGenerationPost(requestParameters: DefaultApiApiCoreConversationsStopChatGenerationPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<object> {
             return localVarFp.apiCoreConversationsStopChatGenerationPost(requestParameters.conversationStopRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Empty conversation trash for one kind
+         * @param {DefaultApiApiCoreConversationsTrashDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsTrashDelete(requestParameters: DefaultApiApiCoreConversationsTrashDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<RecoveryDeleteCountResponse> {
+            return localVarFp.apiCoreConversationsTrashDelete(requestParameters.kind, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary List trashed conversations
+         * @param {DefaultApiApiCoreConversationsTrashGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreConversationsTrashGet(requestParameters: DefaultApiApiCoreConversationsTrashGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<ConversationRecoveryListResponse> {
+            return localVarFp.apiCoreConversationsTrashGet(requestParameters.kind, requestParameters.keyword, requestParameters.page, requestParameters.pageSize, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -18193,22 +19269,23 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary GET /task-center/schedules/{schedule_id}/tasks
+         * @summary List tasks for a schedule
          * @param {DefaultApiApiCoreTaskCenterSchedulesScheduleIdTasksGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreTaskCenterSchedulesScheduleIdTasksGet(requestParameters: DefaultApiApiCoreTaskCenterSchedulesScheduleIdTasksGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreTaskCenterSchedulesScheduleIdTasksGet(requestParameters.scheduleId, options).then((request) => request(axios, basePath));
+        apiCoreTaskCenterSchedulesScheduleIdTasksGet(requestParameters: DefaultApiApiCoreTaskCenterSchedulesScheduleIdTasksGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<TaskCenterTaskListResponse> {
+            return localVarFp.apiCoreTaskCenterSchedulesScheduleIdTasksGet(requestParameters.scheduleId, requestParameters.page, requestParameters.pageSize, options).then((request) => request(axios, basePath));
         },
         /**
          *
-         * @summary GET /task-center/tasks
+         * @summary List task-center tasks
+         * @param {DefaultApiApiCoreTaskCenterTasksGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreTaskCenterTasksGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreTaskCenterTasksGet(options).then((request) => request(axios, basePath));
+        apiCoreTaskCenterTasksGet(requestParameters: DefaultApiApiCoreTaskCenterTasksGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<TaskCenterTaskListResponse> {
+            return localVarFp.apiCoreTaskCenterTasksGet(requestParameters.status, requestParameters.taskType, requestParameters.keyword, requestParameters.page, requestParameters.pageSize, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -18222,12 +19299,12 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary GET /task-center/tasks/{task_id}
+         * @summary Get a task-center task
          * @param {DefaultApiApiCoreTaskCenterTasksTaskIdGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreTaskCenterTasksTaskIdGet(requestParameters: DefaultApiApiCoreTaskCenterTasksTaskIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+        apiCoreTaskCenterTasksTaskIdGet(requestParameters: DefaultApiApiCoreTaskCenterTasksTaskIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<TaskCenterTaskResponse> {
             return localVarFp.apiCoreTaskCenterTasksTaskIdGet(requestParameters.taskId, options).then((request) => request(axios, basePath));
         },
         /**
@@ -18476,6 +19553,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary Permanently delete a workflow draft
+         * @param {DefaultApiApiCoreWorkflowDraftsDraftIdPurgeDeleteRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsDraftIdPurgeDelete(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdPurgeDeleteRequest, options?: RawAxiosRequestConfig): AxiosPromise<CoreEmptyResponse> {
+            return localVarFp.apiCoreWorkflowDraftsDraftIdPurgeDelete(requestParameters.draftId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary POST /workflow-drafts/{draft_id}:repair-preview
          * @param {DefaultApiApiCoreWorkflowDraftsDraftIdRepairPreviewPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -18493,6 +19580,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGet(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGet(requestParameters.draftId, requestParameters.repairId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Restore a workflow draft
+         * @param {DefaultApiApiCoreWorkflowDraftsDraftIdRestorePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsDraftIdRestorePost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdRestorePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<CoreEmptyResponse> {
+            return localVarFp.apiCoreWorkflowDraftsDraftIdRestorePost(requestParameters.draftId, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -18540,6 +19637,25 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreWorkflowDraftsPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreWorkflowDraftsPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary Empty workflow draft trash
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsTrashDelete(options?: RawAxiosRequestConfig): AxiosPromise<WorkflowTrashEmptyResponse> {
+            return localVarFp.apiCoreWorkflowDraftsTrashDelete(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary List workflow draft trash
+         * @param {DefaultApiApiCoreWorkflowDraftsTrashGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowDraftsTrashGet(requestParameters: DefaultApiApiCoreWorkflowDraftsTrashGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<WorkflowTrashListResponse> {
+            return localVarFp.apiCoreWorkflowDraftsTrashGet(requestParameters.keyword, requestParameters.page, requestParameters.pageSize, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -18948,6 +20064,31 @@ export interface DefaultApiApiCoreChatSettingsWorkflowsWorkflowRefPatchRequest {
 }
 
 /**
+ * Request parameters for apiCoreConversationArchiveFoldersFolderIdDelete operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationArchiveFoldersFolderIdDeleteRequest {
+    readonly folderId: string
+
+    readonly moveToFolderId?: string
+}
+
+/**
+ * Request parameters for apiCoreConversationArchiveFoldersFolderIdPatch operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationArchiveFoldersFolderIdPatchRequest {
+    readonly folderId: string
+
+    readonly conversationArchiveFolderRequest: ConversationArchiveFolderRequest
+}
+
+/**
+ * Request parameters for apiCoreConversationArchiveFoldersPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationArchiveFoldersPostRequest {
+    readonly conversationArchiveFolderRequest: ConversationArchiveFolderRequest
+}
+
+/**
  * Request parameters for apiCoreConversationSwitchStatusPost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreConversationSwitchStatusPostRequest {
@@ -18955,10 +20096,34 @@ export interface DefaultApiApiCoreConversationSwitchStatusPostRequest {
 }
 
 /**
+ * Request parameters for apiCoreConversationsArchivedGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsArchivedGetRequest {
+    readonly kind: ApiCoreConversationsArchivedGetKindEnum
+
+    readonly keyword?: string
+
+    readonly page?: number
+
+    readonly pageSize?: number
+
+    readonly folderId?: string
+}
+
+/**
  * Request parameters for apiCoreConversationsBatchDeletePost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreConversationsBatchDeletePostRequest {
     readonly conversationBatchDeleteRequest: ConversationBatchDeleteRequest
+}
+
+/**
+ * Request parameters for apiCoreConversationsConversationIdArchivePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsConversationIdArchivePostRequest {
+    readonly conversationId: string
+
+    readonly conversationArchiveRequest: ConversationArchiveRequest
 }
 
 /**
@@ -18979,6 +20144,20 @@ export interface DefaultApiApiCoreConversationsConversationIdDismissedWorkflowSe
  * Request parameters for apiCoreConversationsConversationIdEventsGet operation in DefaultApi.
  */
 export interface DefaultApiApiCoreConversationsConversationIdEventsGetRequest {
+    readonly conversationId: string
+}
+
+/**
+ * Request parameters for apiCoreConversationsConversationIdPurgeDelete operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsConversationIdPurgeDeleteRequest {
+    readonly conversationId: string
+}
+
+/**
+ * Request parameters for apiCoreConversationsConversationIdRestorePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsConversationIdRestorePostRequest {
     readonly conversationId: string
 }
 
@@ -19014,6 +20193,13 @@ export interface DefaultApiApiCoreConversationsConversationIdTasksGetRequest {
  * Request parameters for apiCoreConversationsConversationIdToolLimitDecisionPost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreConversationsConversationIdToolLimitDecisionPostRequest {
+    readonly conversationId: string
+}
+
+/**
+ * Request parameters for apiCoreConversationsConversationIdUnarchivePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsConversationIdUnarchivePostRequest {
     readonly conversationId: string
 }
 
@@ -19132,6 +20318,26 @@ export interface DefaultApiApiCoreConversationsSetChatHistoryPostRequest {
  */
 export interface DefaultApiApiCoreConversationsStopChatGenerationPostRequest {
     readonly conversationStopRequest: ConversationStopRequest
+}
+
+/**
+ * Request parameters for apiCoreConversationsTrashDelete operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsTrashDeleteRequest {
+    readonly kind: ApiCoreConversationsTrashDeleteKindEnum
+}
+
+/**
+ * Request parameters for apiCoreConversationsTrashGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreConversationsTrashGetRequest {
+    readonly kind: ApiCoreConversationsTrashGetKindEnum
+
+    readonly keyword?: string
+
+    readonly page?: number
+
+    readonly pageSize?: number
 }
 
 /**
@@ -19663,6 +20869,25 @@ export interface DefaultApiApiCoreStaticFilesPathGetRequest {
  */
 export interface DefaultApiApiCoreTaskCenterSchedulesScheduleIdTasksGetRequest {
     readonly scheduleId: string
+
+    readonly page?: number
+
+    readonly pageSize?: number
+}
+
+/**
+ * Request parameters for apiCoreTaskCenterTasksGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreTaskCenterTasksGetRequest {
+    readonly status?: string
+
+    readonly taskType?: string
+
+    readonly keyword?: string
+
+    readonly page?: number
+
+    readonly pageSize?: number
 }
 
 /**
@@ -19813,6 +21038,13 @@ export interface DefaultApiApiCoreWorkflowDraftsDraftIdPublishPostRequest {
 }
 
 /**
+ * Request parameters for apiCoreWorkflowDraftsDraftIdPurgeDelete operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowDraftsDraftIdPurgeDeleteRequest {
+    readonly draftId: string
+}
+
+/**
  * Request parameters for apiCoreWorkflowDraftsDraftIdRepairPreviewPost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreWorkflowDraftsDraftIdRepairPreviewPostRequest {
@@ -19829,6 +21061,13 @@ export interface DefaultApiApiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGetRequ
 }
 
 /**
+ * Request parameters for apiCoreWorkflowDraftsDraftIdRestorePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowDraftsDraftIdRestorePostRequest {
+    readonly draftId: string
+}
+
+/**
  * Request parameters for apiCoreWorkflowDraftsDraftIdSavePost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreWorkflowDraftsDraftIdSavePostRequest {
@@ -19840,6 +21079,17 @@ export interface DefaultApiApiCoreWorkflowDraftsDraftIdSavePostRequest {
  */
 export interface DefaultApiApiCoreWorkflowDraftsDraftIdValidatePostRequest {
     readonly draftId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowDraftsTrashGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowDraftsTrashGetRequest {
+    readonly keyword?: string
+
+    readonly page?: number
+
+    readonly pageSize?: number
 }
 
 /**
@@ -20247,6 +21497,49 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary Delete a conversation archive folder
+     * @param {DefaultApiApiCoreConversationArchiveFoldersFolderIdDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationArchiveFoldersFolderIdDelete(requestParameters: DefaultApiApiCoreConversationArchiveFoldersFolderIdDeleteRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationArchiveFoldersFolderIdDelete(requestParameters.folderId, requestParameters.moveToFolderId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Rename a conversation archive folder
+     * @param {DefaultApiApiCoreConversationArchiveFoldersFolderIdPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationArchiveFoldersFolderIdPatch(requestParameters: DefaultApiApiCoreConversationArchiveFoldersFolderIdPatchRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationArchiveFoldersFolderIdPatch(requestParameters.folderId, requestParameters.conversationArchiveFolderRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary List conversation archive folders
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationArchiveFoldersGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationArchiveFoldersGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Create a conversation archive folder
+     * @param {DefaultApiApiCoreConversationArchiveFoldersPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationArchiveFoldersPost(requestParameters: DefaultApiApiCoreConversationArchiveFoldersPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationArchiveFoldersPost(requestParameters.conversationArchiveFolderRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary Get multi-answer switch status
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -20268,6 +21561,17 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary List archived conversations
+     * @param {DefaultApiApiCoreConversationsArchivedGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsArchivedGet(requestParameters: DefaultApiApiCoreConversationsArchivedGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsArchivedGet(requestParameters.kind, requestParameters.keyword, requestParameters.page, requestParameters.pageSize, requestParameters.folderId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary Batch delete conversations
      * @param {DefaultApiApiCoreConversationsBatchDeletePostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -20285,6 +21589,17 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreConversationsChatPost(options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreConversationsChatPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Archive or move a conversation
+     * @param {DefaultApiApiCoreConversationsConversationIdArchivePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsConversationIdArchivePost(requestParameters: DefaultApiApiCoreConversationsConversationIdArchivePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdArchivePost(requestParameters.conversationId, requestParameters.conversationArchiveRequest, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -20318,6 +21633,28 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreConversationsConversationIdEventsGet(requestParameters: DefaultApiApiCoreConversationsConversationIdEventsGetRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdEventsGet(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Permanently delete a trashed conversation
+     * @param {DefaultApiApiCoreConversationsConversationIdPurgeDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsConversationIdPurgeDelete(requestParameters: DefaultApiApiCoreConversationsConversationIdPurgeDeleteRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdPurgeDelete(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Restore a trashed conversation
+     * @param {DefaultApiApiCoreConversationsConversationIdRestorePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsConversationIdRestorePost(requestParameters: DefaultApiApiCoreConversationsConversationIdRestorePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdRestorePost(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -20373,6 +21710,17 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreConversationsConversationIdToolLimitDecisionPost(requestParameters: DefaultApiApiCoreConversationsConversationIdToolLimitDecisionPostRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdToolLimitDecisionPost(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Unarchive a conversation
+     * @param {DefaultApiApiCoreConversationsConversationIdUnarchivePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsConversationIdUnarchivePost(requestParameters: DefaultApiApiCoreConversationsConversationIdUnarchivePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsConversationIdUnarchivePost(requestParameters.conversationId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -20558,6 +21906,28 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreConversationsStopChatGenerationPost(requestParameters: DefaultApiApiCoreConversationsStopChatGenerationPostRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreConversationsStopChatGenerationPost(requestParameters.conversationStopRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Empty conversation trash for one kind
+     * @param {DefaultApiApiCoreConversationsTrashDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsTrashDelete(requestParameters: DefaultApiApiCoreConversationsTrashDeleteRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsTrashDelete(requestParameters.kind, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary List trashed conversations
+     * @param {DefaultApiApiCoreConversationsTrashGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreConversationsTrashGet(requestParameters: DefaultApiApiCoreConversationsTrashGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreConversationsTrashGet(requestParameters.kind, requestParameters.keyword, requestParameters.page, requestParameters.pageSize, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -21534,23 +22904,24 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary GET /task-center/schedules/{schedule_id}/tasks
+     * @summary List tasks for a schedule
      * @param {DefaultApiApiCoreTaskCenterSchedulesScheduleIdTasksGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCoreTaskCenterSchedulesScheduleIdTasksGet(requestParameters: DefaultApiApiCoreTaskCenterSchedulesScheduleIdTasksGetRequest, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreTaskCenterSchedulesScheduleIdTasksGet(requestParameters.scheduleId, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).apiCoreTaskCenterSchedulesScheduleIdTasksGet(requestParameters.scheduleId, requestParameters.page, requestParameters.pageSize, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
      *
-     * @summary GET /task-center/tasks
+     * @summary List task-center tasks
+     * @param {DefaultApiApiCoreTaskCenterTasksGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
-    public apiCoreTaskCenterTasksGet(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreTaskCenterTasksGet(options).then((request) => request(this.axios, this.basePath));
+    public apiCoreTaskCenterTasksGet(requestParameters: DefaultApiApiCoreTaskCenterTasksGetRequest = {}, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreTaskCenterTasksGet(requestParameters.status, requestParameters.taskType, requestParameters.keyword, requestParameters.page, requestParameters.pageSize, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -21566,7 +22937,7 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary GET /task-center/tasks/{task_id}
+     * @summary Get a task-center task
      * @param {DefaultApiApiCoreTaskCenterTasksTaskIdGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -21846,6 +23217,17 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary Permanently delete a workflow draft
+     * @param {DefaultApiApiCoreWorkflowDraftsDraftIdPurgeDeleteRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowDraftsDraftIdPurgeDelete(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdPurgeDeleteRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdPurgeDelete(requestParameters.draftId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary POST /workflow-drafts/{draft_id}:repair-preview
      * @param {DefaultApiApiCoreWorkflowDraftsDraftIdRepairPreviewPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -21864,6 +23246,17 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGet(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGetRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdRepairRunsRepairIdGet(requestParameters.draftId, requestParameters.repairId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Restore a workflow draft
+     * @param {DefaultApiApiCoreWorkflowDraftsDraftIdRestorePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowDraftsDraftIdRestorePost(requestParameters: DefaultApiApiCoreWorkflowDraftsDraftIdRestorePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsDraftIdRestorePost(requestParameters.draftId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -21916,6 +23309,27 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreWorkflowDraftsPost(options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Empty workflow draft trash
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowDraftsTrashDelete(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsTrashDelete(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary List workflow draft trash
+     * @param {DefaultApiApiCoreWorkflowDraftsTrashGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowDraftsTrashGet(requestParameters: DefaultApiApiCoreWorkflowDraftsTrashGetRequest = {}, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowDraftsTrashGet(requestParameters.keyword, requestParameters.page, requestParameters.pageSize, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -22332,6 +23746,21 @@ export class DefaultApi extends BaseAPI {
     }
 }
 
+export const ApiCoreConversationsArchivedGetKindEnum = {
+    Dialog: 'dialog',
+    Task: 'task'
+} as const;
+export type ApiCoreConversationsArchivedGetKindEnum = typeof ApiCoreConversationsArchivedGetKindEnum[keyof typeof ApiCoreConversationsArchivedGetKindEnum];
+export const ApiCoreConversationsTrashDeleteKindEnum = {
+    Dialog: 'dialog',
+    Task: 'task'
+} as const;
+export type ApiCoreConversationsTrashDeleteKindEnum = typeof ApiCoreConversationsTrashDeleteKindEnum[keyof typeof ApiCoreConversationsTrashDeleteKindEnum];
+export const ApiCoreConversationsTrashGetKindEnum = {
+    Dialog: 'dialog',
+    Task: 'task'
+} as const;
+export type ApiCoreConversationsTrashGetKindEnum = typeof ApiCoreConversationsTrashGetKindEnum[keyof typeof ApiCoreConversationsTrashGetKindEnum];
 
 
 /**
