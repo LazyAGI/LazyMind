@@ -68,6 +68,19 @@ def test_exact_duplicate_tool_calls_in_one_batch_are_merged():
     assert len(manager.calls) == 1
 
 
+def test_same_batch_duplicates_do_not_consume_repeated_call_budget():
+    manager = _RecordingToolManager()
+    guard = ToolCallGuard(manager, {'url_fetch': 2}, repeated_call_limit=2)
+    call = _call('url_fetch', {'url': 'https://example.com'})
+
+    first = guard([call, call, call])
+    second = guard([call])
+
+    assert first[0] == first[1] == first[2]
+    assert second[0]['ok'] is True
+    assert len(manager.calls) == 2
+
+
 def test_allowed_tool_names_are_forwarded_to_pending_calls():
     manager = _RecordingToolManager()
     guard = ToolCallGuard(manager)
@@ -121,6 +134,24 @@ def test_success_resets_consecutive_failure_count():
         guard([_call('url_fetch', {'url': f'https://example.com/{index}'})])
 
     assert len(manager.calls) == 4
+
+
+def test_success_for_other_arguments_does_not_clear_failed_signature():
+    def result(call):
+        if call['function']['arguments']['url'].endswith('/failed'):
+            return _failure('DOMAIN_FAILURE', 'url_fetch')
+        return {'ok': True, 'value': 'loaded'}
+
+    manager = _RecordingToolManager(result)
+    guard = ToolCallGuard(manager, {'url_fetch': 3})
+    failed_call = _call('url_fetch', {'url': 'https://example.com/failed'})
+
+    guard([failed_call])
+    guard([_call('url_fetch', {'url': 'https://example.com/success'})])
+    blocked = guard([failed_call])
+
+    assert len(manager.calls) == 2
+    assert blocked[0]['error']['code'] == 'REPEATED_TOOL_FAILURE'
 
 
 def test_transient_failure_can_be_retried_by_agent_but_is_not_auto_retried():

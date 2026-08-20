@@ -822,6 +822,11 @@ _TOOL_NOT_AVAILABLE_RE = re.compile(
     r'Tool \[[^\]]+\] is not available\. Please choose from the available tools\.',
     re.IGNORECASE,
 )
+_TOOL_EXECUTION_ERROR_RE = re.compile(
+    r'^\s*(?:\[Tool Error\]|Tool \[[^\]]+\] (?:arguments format|parameters) error\b)',
+    re.IGNORECASE,
+)
+_MAX_TOOL_RESULT_NORMALIZATION_DEPTH = 6
 
 
 def _tool_name_suffixes(tool_name: str) -> list[str]:
@@ -1040,6 +1045,7 @@ def _friendly_preview_text(value: Any) -> str:
 
 def _representative_tool_result(tool_name: str, result: Any) -> Any:
     render_name, _ = _render_tool_context(tool_name)
+    result = _normalized_tool_result_payload(result)
     if isinstance(result, dict):
         key = _resolve_tool_key(render_name, _REPRESENTATIVE_TOOL_RESULTS)
         if key and result.get(key) is not None:
@@ -1077,23 +1083,39 @@ def _tool_result_status(result: Any) -> str:
     if isinstance(result, dict):
         if result.get('ok') is False and isinstance(result.get('error'), dict):
             return 'failed'
-        status = str(result.get('status') or '').strip().lower()
+        if result.get('success') is False:
+            return 'failed'
+        payload = _normalized_tool_result_payload(result)
+        if isinstance(payload, dict) and (
+            (payload.get('ok') is False and isinstance(payload.get('error'), dict))
+            or payload.get('success') is False
+        ):
+            return 'failed'
+        status = str(payload.get('status') or '').strip().lower() if isinstance(payload, dict) else ''
         if status == 'needs_approval':
             return 'needs_approval'
     elif isinstance(result, str):
         if _TOOL_NOT_AVAILABLE_RE.search(result):
             return 'inactive'
+        if _TOOL_EXECUTION_ERROR_RE.search(result):
+            return 'failed'
     return 'ok'
 
 
 def _tool_result_failure_detail(result: Any) -> str:
-    if isinstance(result, dict) and result.get('ok') is False:
+    if isinstance(result, dict):
         error = result.get('error')
         if isinstance(error, dict):
             for key in ('message', 'code'):
                 value = error.get(key)
                 if value:
                     return _truncate_tool_result_preview(value)
+        if error:
+            return _truncate_tool_result_preview(error)
+        for key in ('reason', 'message'):
+            value = result.get(key)
+            if value:
+                return _truncate_tool_result_preview(value)
     return _truncate_tool_result_preview(result)
 
 
@@ -1198,17 +1220,47 @@ def _tool_result_preview_display_value(tool_name: str, result: Any, value: str =
     return value or _truncate_tool_result_preview(_representative_tool_result(tool_name, result))
 
 
-def _tool_result_mapping(value: Any) -> dict[str, Any] | None:
-    """Normalize mapping and JSON-string tool results."""
-    if isinstance(value, dict):
+def _normalized_tool_result_payload(value: Any, depth: int = 0) -> Any:
+    """Unwrap canonical, nested, and JSON-string result payloads for rendering."""
+    if depth >= _MAX_TOOL_RESULT_NORMALIZATION_DEPTH:
         return value
     if isinstance(value, str):
         try:
             parsed = json.loads(value)
         except (TypeError, ValueError):
-            return None
-        return _tool_result_mapping(parsed) if isinstance(parsed, dict) else None
-    return None
+            return value
+        if isinstance(parsed, (dict, list)):
+            return _normalized_tool_result_payload(parsed, depth + 1)
+        return value
+    if not isinstance(value, dict):
+        return value
+    if value.get('ok') is True and 'value' in value:
+        return _normalized_tool_result_payload(value.get('value'), depth + 1)
+    if 'result' in value and isinstance(value.get('result'), (dict, str)):
+        nested = _normalized_tool_result_payload(value.get('result'), depth + 1)
+        if isinstance(nested, (dict, list)):
+            return nested
+    return value
+
+
+def _tool_result_mapping(value: Any) -> dict[str, Any] | None:
+    """Build the stable mapping consumed by dotted result templates."""
+    normalized = _normalized_tool_result_payload(value)
+    if isinstance(normalized, dict):
+        error = normalized.get('error')
+        if normalized.get('ok') is False and isinstance(error, dict):
+            mapping = dict(normalized)
+            mapping.setdefault('outcome', error.get('category') or error.get('code') or 'failed')
+            mapping.setdefault('reason', error.get('message') or error.get('code') or 'Tool call failed')
+            mapping.setdefault('details', error.get('details') or {})
+            return mapping
+        if normalized.get('success') is False:
+            mapping = dict(normalized)
+            reason = error.get('message') if isinstance(error, dict) else error
+            mapping.setdefault('outcome', 'failed')
+            mapping.setdefault('reason', reason or normalized.get('message') or 'Tool call failed')
+            return mapping
+    return normalized if isinstance(normalized, dict) else None
 
 
 def _tool_result_preview(tool_name: str, result: Any, value: str = '', language: str = 'en') -> str:

@@ -315,6 +315,72 @@ def test_skill_reference_rendering_preserves_explicit_tool_failure():
     assert '未能读取 **reference.md** 技能参考资料。' in result_text
 
 
+def test_skill_reference_rendering_preserves_legacy_string_failure():
+    result_text = _tool_result_frame_text({
+        'id': 'call-reference',
+        'name': 'read_reference',
+        'result': '[Tool Error] FileNotFoundError: reference.md',
+    }, language='zh', preview_value='reference.md')
+
+    assert '未能读取 **reference.md** 技能参考资料。' in result_text
+
+
+def test_workflow_rendering_normalizes_canonical_success_and_failure():
+    success_text = _tool_result_frame_text({
+        'id': 'call-workflow-success',
+        'name': 'trigger_writer_workflow',
+        'result': {
+            'ok': True,
+            'value': {'outcome': 'queued', 'reason': 'accepted'},
+        },
+    })
+    failure_text = _tool_result_frame_text({
+        'id': 'call-workflow-failure',
+        'name': 'trigger_writer_workflow',
+        'result': {
+            'ok': False,
+            'error': {
+                'category': 'TRANSIENT_ERROR',
+                'code': 'WORKFLOW_UNAVAILABLE',
+                'tool': 'trigger_writer_workflow',
+                'message': 'Workflow service is unavailable',
+                'recovery_action': 'retry_later',
+                'details': {},
+            },
+        },
+    })
+
+    assert 'Result: **queued**. Reason: **accepted**.' in success_text
+    assert 'Result: **TRANSIENT_ERROR**. Reason: **Workflow service is unavailable**.' in failure_text
+    assert '{result.' not in success_text
+    assert '{result.' not in failure_text
+
+
+def test_workflow_rendering_normalizes_nested_json_result():
+    result_text = _tool_result_frame_text({
+        'id': 'call-workflow',
+        'name': 'trigger_writer_workflow',
+        'result': {
+            'result': '{"outcome":"queued","reason":"accepted"}',
+        },
+    })
+
+    assert 'Result: **queued**. Reason: **accepted**.' in result_text
+
+
+def test_workflow_rendering_normalizes_legacy_failure_mapping():
+    result_text = _tool_result_frame_text({
+        'id': 'call-workflow',
+        'name': 'trigger_writer_workflow',
+        'result': {
+            'success': False,
+            'error': 'Workflow revision was not found',
+        },
+    })
+
+    assert 'Result: **failed**. Reason: **Workflow revision was not found**.' in result_text
+
+
 def test_create_skill_rendering_uses_single_segment_name_and_preserves_failure():
     call_text, preview_value = _tool_call_frame_text({
         'id': 'call-create-skill',

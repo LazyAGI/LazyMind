@@ -117,18 +117,6 @@ class ToolCallGuard:
                         f'tool round limit to {self._expanded_round_limit}.'
                     )
             signature = self._signature(tool_call)
-            signature_calls = self._signature_calls.get(signature, 0) + 1
-            self._signature_calls[signature] = signature_calls
-            if signature_calls > self._repeated_call_limit:
-                results[index] = self._loop_blocked(
-                    name,
-                    f'the exact same call was already made {self._repeated_call_limit} times; '
-                    'stop retrying it and synthesize from existing results or choose another tool.',
-                )
-                lazyllm.LOG.warning(
-                    f'[ToolCallGuard] blocked no-progress repeated call: {name}'
-                )
-                continue
             guarded = name in self._failure_limits
             if guarded and signature in self._failed_signatures:
                 results[index] = self._blocked(
@@ -149,6 +137,18 @@ class ToolCallGuard:
                     'another grounded source or explain that the evidence is unavailable.',
                 )
                 continue
+            signature_calls = self._signature_calls.get(signature, 0)
+            if signature_calls >= self._repeated_call_limit:
+                results[index] = self._loop_blocked(
+                    name,
+                    f'the exact same call was already made {self._repeated_call_limit} times; '
+                    'stop retrying it and synthesize from existing results or choose another tool.',
+                )
+                lazyllm.LOG.warning(
+                    f'[ToolCallGuard] blocked no-progress repeated call: {name}'
+                )
+                continue
+            self._signature_calls[signature] = signature_calls + 1
             pending.append(tool_call)
             pending_indices.append(index)
             if guarded:
@@ -172,10 +172,6 @@ class ToolCallGuard:
                             self._failed_signatures.add(self._signature(tool_call))
                     else:
                         self._consecutive_failures[name] = 0
-                        prefix = f'{name}:'
-                        self._failed_signatures = {
-                            item for item in self._failed_signatures if not item.startswith(prefix)
-                        }
         for duplicate_index, original_index in duplicate_indices.items():
             results[duplicate_index] = results[original_index]
         return results
