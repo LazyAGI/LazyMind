@@ -1,3 +1,15 @@
+.rag-markdown a.md-file-link,
+.rag-markdown span.md-file-link {
+  color: var(--color-accent-fg);
+  text-decoration: underline;
+  cursor: pointer;
+  word-break: break-all;
+}
+
+.rag-markdown span.md-file-link.md-file-link--pending {
+  cursor: progress;
+}
+
 .md-source-chip {
   display: inline-flex;
   max-width: min(240px, calc(100% - 8px));

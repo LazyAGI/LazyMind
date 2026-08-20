@@ -4,7 +4,7 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import classnames from "classnames";
 import "katex/dist/katex.min.css";
-import { Image, Popover } from "antd";
+import { Image, Popover, Tooltip } from "antd";
 import rehypeSanitize from "rehype-sanitize";
 import { useTranslation } from "react-i18next";
 import "../../../../components/MarkdownViewer/markdown.scss";
@@ -21,10 +21,27 @@ import {
 import { customSchema } from "./config";
 import rehypeRaw from "rehype-raw";
 import {
-	basenameFromPath,
+  basenameFromPath,
   resolveCoreAssetUrl,
   resolveMarkdownImageUrlAsync,
 } from "@/modules/knowledge/utils/imageUrl";
+import {
+  useTaskCenterStore,
+  type ConversationArtifact,
+} from "@/modules/chat/store/taskCenter";
+import {
+  ARTIFACT_DOWNLOAD_HINT,
+  appendDownloadParam,
+  conversationHasFileIdLink,
+  findArtifactByFileId,
+  getArtifactFilename,
+  getArtifactSignSource,
+  getArtifactTextContent,
+  getFileIdFromHref,
+  isBrowserDownloadHref,
+  isInlineDownloadableArtifact,
+  normalizeArtifactFileLinks,
+} from "@/modules/chat/utils/artifactLinks";
 import HtmlBlock from "./HtmlBlock";
 import MermaidBlock from "./MermaidBlock";
 import {
@@ -46,6 +63,7 @@ import {
 } from "@/modules/chat/utils/sourceAdapter";
 
 const SOURCE_PREFIXES = ["#source-", "#user-content-source-"];
+const EMPTY_CONVERSATION_ARTIFACTS: ConversationArtifact[] = [];
 const BOLD_BARE_URL_PATTERN = /\*\*((?:https?:\/\/|www\.)[^\s*<>()]+)\*\*/g;
 // Matches bare URLs that are NOT already inside Markdown link syntax [...](...)
 // Captures trailing fullwidth/CJK punctuation so it can be excluded from the URL.
@@ -63,9 +81,11 @@ const markdownRehypeWorkflows = [
 const MarkdownRenderContext = createContext<{
   isStreaming: boolean;
   markSources: ChatSource[];
+  artifacts: ConversationArtifact[];
 }>({
   isStreaming: false,
   markSources: [],
+  artifacts: EMPTY_CONVERSATION_ARTIFACTS,
 });
 
 const SOURCE_PREVIEW_TEXT_LIMIT = 280;
@@ -268,18 +288,81 @@ const PreComponent = (props: any) => {
   return <pre {...props} />;
 };
 
+function inlineArtifactBlobType(artifact: ConversationArtifact): string {
+  return artifact.content_type === "json"
+    ? "application/json"
+    : "text/plain;charset=utf-8";
+}
+
 const LinkComponent = (props: any) => {
-  const { isStreaming, markSources } = useContext(MarkdownRenderContext);
+  const { isStreaming, markSources, artifacts } = useContext(
+    MarkdownRenderContext,
+  );
   const href = typeof props.href === "string" ? props.href : "";
   const managedFile = href.includes("/static-files/");
+  const artifactFileId = getFileIdFromHref(href);
+  const linkedArtifact = artifactFileId
+    ? findArtifactByFileId(artifacts, artifactFileId)
+    : undefined;
+  const artifactFilename = linkedArtifact
+    ? getArtifactFilename(linkedArtifact)
+    : "";
+  const artifactDownloadHint = linkedArtifact ? ARTIFACT_DOWNLOAD_HINT : "";
+  const artifactSignSource = linkedArtifact
+    ? getArtifactSignSource(linkedArtifact)
+    : "";
+  const inlineArtifact = Boolean(
+    linkedArtifact && isInlineDownloadableArtifact(linkedArtifact),
+  );
+  const inlineText =
+    inlineArtifact && linkedArtifact
+      ? getArtifactTextContent(linkedArtifact)
+      : "";
+  const inlineBlobType =
+    inlineArtifact && linkedArtifact
+      ? inlineArtifactBlobType(linkedArtifact)
+      : "";
   const [resolvedHref, setResolvedHref] = useState(() =>
-    managedFile ? "" : href,
+    managedFile || artifactFileId ? "" : href,
   );
   useEffect(() => {
     let cancelled = false;
+    if (artifactFileId) {
+      if (inlineArtifact) {
+        const blob = new Blob([inlineText], { type: inlineBlobType });
+        const objectUrl = URL.createObjectURL(blob);
+        setResolvedHref(objectUrl);
+        return () => {
+          cancelled = true;
+          URL.revokeObjectURL(objectUrl);
+        };
+      }
+      if (!artifactSignSource) {
+        setResolvedHref("");
+        return () => {
+          cancelled = true;
+        };
+      }
+      setResolvedHref("");
+      const applySignedUrl = (url: string) => {
+        if (cancelled) return;
+        const resolved = url ? appendDownloadParam(url) : "";
+        setResolvedHref(isBrowserDownloadHref(resolved) ? resolved : "");
+      };
+      resolveMarkdownImageUrlAsync(artifactSignSource)
+        .then(applySignedUrl)
+        .catch(() => {
+          applySignedUrl(resolveCoreAssetUrl(artifactSignSource));
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
     if (!managedFile) {
       setResolvedHref(href);
-      return () => { cancelled = true; };
+      return () => {
+        cancelled = true;
+      };
     }
     setResolvedHref("");
     resolveMarkdownImageUrlAsync(href).then((url) => {
@@ -287,8 +370,18 @@ const LinkComponent = (props: any) => {
     }).catch(() => {
       if (!cancelled) setResolvedHref("");
     });
-    return () => { cancelled = true; };
-  }, [href, managedFile]);
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    href,
+    managedFile,
+    artifactFileId,
+    artifactSignSource,
+    inlineArtifact,
+    inlineText,
+    inlineBlobType,
+  ]);
   const sourceIndex = getSourceIndex(href);
 
   if (sourceIndex) {
@@ -343,10 +436,39 @@ const LinkComponent = (props: any) => {
     );
   }
 
+  if (artifactFileId) {
+    if (!resolvedHref) {
+      return (
+        <Tooltip
+          title={artifactDownloadHint || undefined}
+          mouseEnterDelay={0.1}
+        >
+          <span className="md-file-link md-file-link--pending">
+            {props.children}
+          </span>
+        </Tooltip>
+      );
+    }
+    const isBlobHref = resolvedHref.startsWith("blob:");
+    return (
+      <Tooltip title={artifactDownloadHint} mouseEnterDelay={0.1}>
+        <a
+          className="md-file-link"
+          href={resolvedHref}
+          target={isBlobHref ? undefined : "_blank"}
+          rel={isBlobHref ? undefined : "noreferrer"}
+          download={artifactFilename || undefined}
+        >
+          {props.children}
+        </a>
+      </Tooltip>
+    );
+  }
+
   return (
     <a
       href={managedFile && resolvedHref
-        ? `${resolvedHref}${resolvedHref.includes("?") ? "&" : "?"}download=1`
+        ? appendDownloadParam(resolvedHref)
         : resolvedHref || undefined}
       target="_blank"
       rel="noreferrer"
@@ -413,10 +535,35 @@ const MarkdownViewer = memo((props: any) => {
     typeof children === "string"
       ? normalizeBoldBareUrls(
           normalizeBareUrls(
-            stripRedundantSourceUrls(normalizeSourceMarkers(children)),
+            normalizeArtifactFileLinks(
+              stripRedundantSourceUrls(normalizeSourceMarkers(children)),
+            ),
           ),
         )
       : children;
+
+  const conversationId = useTaskCenterStore(
+    (state) => state.activeConversationId,
+  );
+  const artifacts = useTaskCenterStore((state) =>
+    conversationId
+      ? (state.artifactsByConversation[conversationId] ??
+        EMPTY_CONVERSATION_ARTIFACTS)
+      : EMPTY_CONVERSATION_ARTIFACTS,
+  );
+  const loadConversationArtifacts = useTaskCenterStore(
+    (state) => state.loadConversationArtifacts,
+  );
+  const hasFileIdLink =
+    typeof children === "string" && conversationHasFileIdLink(children);
+
+  useEffect(() => {
+    if (!conversationId || !hasFileIdLink) return;
+    const existing =
+      useTaskCenterStore.getState().artifactsByConversation[conversationId];
+    if (existing && existing.length > 0) return;
+    void loadConversationArtifacts(conversationId);
+  }, [conversationId, hasFileIdLink, loadConversationArtifacts]);
 
   const [markSources, setMarkSources] = useState<ChatSource[]>([]);
 
@@ -430,8 +577,9 @@ const MarkdownViewer = memo((props: any) => {
     () => ({
       isStreaming: Boolean(IS_STREAMING),
       markSources,
+      artifacts,
     }),
-    [IS_STREAMING, markSources],
+    [IS_STREAMING, markSources, artifacts],
   );
 
   const markdownComponents = useMemo(

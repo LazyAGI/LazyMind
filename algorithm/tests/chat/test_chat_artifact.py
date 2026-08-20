@@ -18,6 +18,9 @@ def test_save_chat_artifact_emits_downloadable_event(monkeypatch):
     result = chat_artifact.save_chat_artifact('hello.txt', '你好')
 
     assert result['success'] is True
+    artifact_id = result['result']['artifact_id']
+    assert result['result']['file_markdown'] == f'[hello.txt](file_id:{artifact_id})'
+    assert 'file_markdown' in (chat_artifact.save_chat_artifact.__doc__ or '')
     assert emitted[0]['tag'] == 'artifact_created'
     assert emitted[0]['filename'] == 'hello.txt'
     assert emitted[0]['value'] == {'text': '你好'}
@@ -56,6 +59,8 @@ def test_save_chat_artifact_file_copies_to_persistent_workspace(tmp_path, monkey
     )
 
     assert result['success'] is True
+    artifact_id = result['result']['artifact_id']
+    assert result['result']['file_markdown'] == f'[report.docx](file_id:{artifact_id})'
     assert emitted[0]['content_type'] == 'file'
     assert emitted[0]['filename'] == 'report.docx'
     published = emitted[0]['value']['path']
