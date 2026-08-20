@@ -60,6 +60,17 @@ def test_executor_passes_cancel_condition_to_chat_agent(monkeypatch) -> None:
     assert constructor.call_args.kwargs['extra_stop_condition'] is stop_condition
 
 
+def test_executor_passes_prebuilt_skill_manager(monkeypatch) -> None:
+    agent = MagicMock()
+    constructor = MagicMock(return_value=agent)
+    monkeypatch.setattr(executor_mod._agent_mod, 'ReactAgent', constructor)
+    skill_manager = object()
+
+    AgentExecutor().create_agent('llm', _plan(skill_manager=skill_manager))
+
+    assert constructor.call_args.kwargs['skill_manager'] is skill_manager
+
+
 def test_tool_guard_checks_cancellation_before_dispatch(monkeypatch) -> None:
     manager = MagicMock(return_value=[{'ok': True}])
     cancel_check = MagicMock(side_effect=CancelledError('stopped by user'))

@@ -8,7 +8,6 @@ import pytest
 from lazymind.chat.engine.prompts.system_prompt import add_standard_system_sections
 from lazymind.chat.engine.prompts.task_profile import (
     resolve_task_profile,
-    select_skill_candidates,
     selected_prompt_modules,
 )
 from lazymind.chat.engine.agent_runtime import AgentRole, PromptBuilder
@@ -407,7 +406,7 @@ def test_classifier_failure_scenarios_are_safe(query: str) -> None:
     profile = resolve_task_profile(query, classifier=lambda _: 'invalid')
     assert profile.source == 'fallback'
     assert profile.primary_outcome == 'answer'
-    assert profile.skill_mode == 'suppress'
+    assert profile.skill_mode == 'candidates'
 
 
 @pytest.mark.parametrize('scenario', RESOURCE_BINDING_SCENARIOS, ids=lambda item: item['id'])
@@ -420,8 +419,7 @@ def test_explicit_resource_binding_scenarios(scenario: dict) -> None:
     bindings = scenario['bindings']
     if bindings.get('skill_names') and not scenario.get('expected_excluded'):
         assert profile.skill_mode == 'explicit'
-        available = ['default/enabled-skill', *bindings['skill_names']]
-        assert select_skill_candidates(available, scenario['query'], profile) == bindings['skill_names']
+        assert profile.explicit_resources.skill_names == tuple(bindings['skill_names'])
     if bindings.get('knowledge_base_ids') and not scenario.get('expected_excluded'):
         assert profile.source_strategy == 'knowledge_base'
         assert profile.explicit_resources.knowledge_base_ids == tuple(bindings['knowledge_base_ids'])
@@ -443,12 +441,7 @@ def test_explicit_resource_binding_scenarios(scenario: dict) -> None:
     if scenario.get('expected_not_explicit'):
         assert profile.skill_mode != 'explicit'
     if 'expected_selected_skills' in scenario:
-        available = scenario.get('available_skills') or [
-            'default/enabled-skill', *bindings.get('skill_names', []),
-        ]
-        assert select_skill_candidates(available, scenario['query'], profile) == scenario[
-            'expected_selected_skills'
-        ]
+        assert list(profile.explicit_resources.skill_names) == scenario['expected_selected_skills']
 
 
 @pytest.mark.parametrize(('query', 'expected'), SCENARIOS)
@@ -457,7 +450,7 @@ def test_one_hundred_divergent_scenarios_route_by_user_outcome(query: str, expec
     assert profile.primary_outcome == expected
 
 
-def test_ai_video_learning_uses_research_tutorial_and_suppresses_skills() -> None:
+def test_ai_video_learning_keeps_skill_discovery_available() -> None:
     profile = resolve_task_profile('如何制作AI视频', enable_llm_fallback=False)
 
     assert profile.primary_outcome == 'learn'
@@ -466,7 +459,7 @@ def test_ai_video_learning_uses_research_tutorial_and_suppresses_skills() -> Non
     assert profile.freshness == 'current'
     assert profile.research_required is True
     assert profile.deliverable_kind == 'tutorial'
-    assert profile.skill_mode == 'suppress'
+    assert profile.skill_mode == 'candidates'
     assert selected_prompt_modules(profile) == [
         'learning', 'fresh_research', 'tutorial', 'skill_restraint',
     ]
@@ -502,7 +495,7 @@ def test_invalid_classifier_response_falls_back_without_raising() -> None:
     )
     assert profile.source == 'fallback'
     assert profile.primary_outcome == 'answer'
-    assert profile.skill_mode == 'suppress'
+    assert profile.skill_mode == 'candidates'
     assert profile.router_error
 
 
@@ -634,16 +627,19 @@ def test_optional_issue_uses_assumption_without_forcing_clarification() -> None:
     assert 'clarification' not in selected_prompt_modules(profile)
 
 
-def test_skill_candidates_are_relevance_ranked_and_capped_at_five() -> None:
+def test_nontrivial_request_enables_skill_retrieval() -> None:
     profile = resolve_task_profile('调研AI视频行业', enable_llm_fallback=False)
-    available = [f'research/video-{index}' for index in range(8)] + ['writing/poetry']
-    visible = select_skill_candidates(available, '调研AI视频行业', profile)
-    assert visible is not None
-    assert len(visible) == 5
-    assert all(item.startswith('research/video-') for item in visible)
+    assert profile.skill_mode == 'candidates'
 
 
-def test_explicit_skill_selection_overrides_learning_suppression() -> None:
+def test_skill_candidates_do_not_drop_semantically_relevant_cross_language_skill() -> None:
+    query = '用投资视角看看热点'
+    profile = resolve_task_profile(query, enable_llm_fallback=False)
+
+    assert profile.skill_mode == 'candidates'
+
+
+def test_explicit_skill_selection_overrides_semantic_retrieval() -> None:
     profile = resolve_task_profile(
         '教我制作AI视频',
         enable_llm_fallback=False,
@@ -651,9 +647,7 @@ def test_explicit_skill_selection_overrides_learning_suppression() -> None:
     )
     assert profile.primary_outcome == 'learn'
     assert profile.skill_mode == 'explicit'
-    assert select_skill_candidates(
-        ['research/deep-research', 'video/ai-production'], '教我制作AI视频', profile,
-    ) == ['video/ai-production']
+    assert profile.explicit_resources.skill_names == ('video/ai-production',)
 
 
 def test_explicit_knowledge_base_overrides_inferred_web_source() -> None:

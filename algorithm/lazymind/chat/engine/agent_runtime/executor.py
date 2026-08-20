@@ -224,6 +224,7 @@ class AgentExecutor:
         }
         optional = {
             'skills': options.skills,
+            'skill_manager': options.skill_manager,
             'workspace': options.workspace,
             'keep_full_turns': options.keep_full_turns,
             'fs': options.fs,

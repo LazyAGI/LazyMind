@@ -531,7 +531,8 @@ def _rule_profile(query: str, *, has_attachments: bool = False) -> tuple[TaskPro
     secondary_deliverables = tuple(_DELIVERABLE_BY_OUTCOME[item] for item in secondary)
     research_required = current or 'research' in matches
     skill_mode: SkillMode = 'explicit' if explicit_skill else (
-        'suppress' if primary in {'learn', 'transform'} or is_simple_fact else 'candidates'
+        'suppress' if is_simple_fact or bool(_TRIVIAL_CHAT_INPUT.fullmatch(text.strip()))
+        else 'candidates'
     )
     subject_kind, input_mode = _subject_and_input(text, has_attachments)
     source_strategy = (
@@ -877,8 +878,10 @@ def _validate_llm_profile(
     # Explicit freshness and skill wording are authoritative deterministic signals.
     if rule.freshness == 'current':
         freshness = 'current'
-    if rule.skill_mode == 'explicit':
-        skill_mode = 'explicit'
+    if rule.skill_mode in {'explicit', 'suppress'}:
+        skill_mode = rule.skill_mode
+    else:
+        skill_mode = 'candidates'
     primary_subtype = (
         rule.outcome_subtype if primary == rule.primary_outcome else _outcome_subtype(primary, query)
     )
@@ -988,7 +991,7 @@ def resolve_task_profile(
     except Exception as exc:
         return replace(
             rule,
-            skill_mode='explicit' if rule.skill_mode == 'explicit' else 'suppress',
+            skill_mode=rule.skill_mode,
             source='fallback',
             router_latency_ms=int((time.monotonic() - started) * 1000),
             router_error=f'{type(exc).__name__}: {exc}'[:240],
@@ -1044,51 +1047,3 @@ def selected_prompt_modules(profile: TaskProfile) -> list[str]:
     if assessment.interaction_need == 'blocking':
         modules.append('clarification')
     return list(dict.fromkeys(modules))
-
-
-_SKILL_OUTCOME_TERMS: dict[Outcome, tuple[str, ...]] = {
-    'research': ('research', 'review', 'search', '调研', '研究'),
-    'analyze': ('analysis', 'review', 'critique', '分析', '审查'),
-    'transform': ('transform', 'rewrite', 'translate', 'summary', '转换', '改写'),
-    'decide': ('decision', 'comparison', 'compare', '决策', '对比'),
-    'plan': ('planning', 'plan', 'roadmap', '规划', '计划'),
-    'create': ('create', 'writing', 'generation', '创作', '生成'),
-    'execute': ('automation', 'operation', 'deploy', '执行', '自动化'),
-    'diagnose': ('diagnose', 'debug', 'review', '排障', '诊断'),
-    'answer': ('answer',),
-    'learn': ('learning', 'tutorial'),
-}
-
-
-def _selection_tokens(value: str) -> set[str]:
-    text = str(value or '').lower()
-    latin = re.findall(r'[a-z0-9][a-z0-9_-]{1,}', text)
-    cjk = re.findall(r'[\u3400-\u9fff]{2,}', text)
-    bigrams = [token[index:index + 2] for token in cjk for index in range(len(token) - 1)]
-    return set(latin + cjk + bigrams)
-
-
-def select_skill_candidates(
-    available_skills: list[str] | None,
-    query: str,
-    profile: TaskProfile,
-    *,
-    limit: int = 5,
-) -> list[str] | None:
-    if profile.skill_mode == 'suppress':
-        return []
-    if profile.skill_mode == 'explicit':
-        selected = profile.explicit_resources.skill_names
-        if not selected:
-            return available_skills
-        available = set(available_skills or [])
-        return [skill for skill in selected if skill in available]
-    available = [str(item) for item in (available_skills or []) if str(item).strip()]
-    query_tokens = _selection_tokens(query)
-    query_tokens.update(_SKILL_OUTCOME_TERMS[profile.primary_outcome])
-    ranked = []
-    for index, skill in enumerate(available):
-        score = len(query_tokens & _selection_tokens(skill))
-        ranked.append((score, index, skill))
-    ranked.sort(key=lambda item: (-item[0], item[1]))
-    return [skill for score, _, skill in ranked if score > 0][:max(1, min(limit, 5))]
