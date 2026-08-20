@@ -144,8 +144,10 @@
     }
 
     .close {
-      display: none;
+      display: inline-flex;
       margin-left: 8px;
+      opacity: 0;
+      pointer-events: none;
 
       font-size: 12px;
 
@@ -164,12 +166,14 @@
       }
     }
 
-    &:hover {
+    &:hover,
+    &:focus-within {
       background: var(--color-primary-bg);
       border-radius: 4px;
 
       .close {
-        display: block;
+        opacity: 1;
+        pointer-events: auto;
       }
     }
   }

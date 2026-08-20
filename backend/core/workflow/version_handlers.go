@@ -109,7 +109,7 @@ func ReplaceDraftFromWorkflowVersion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var draft orm.WorkflowDraft
-	if err := store.DB().Where("created_by=? AND plugin_id=?", common.UserID(r), p.WorkflowID).First(&draft).Error; err != nil {
+	if err := store.DB().Where("created_by=? AND plugin_id=? AND deleted_at IS NULL", common.UserID(r), p.WorkflowID).First(&draft).Error; err != nil {
 		common.ReplyErr(w, "plugin draft not found", http.StatusNotFound)
 		return
 	}
@@ -130,6 +130,6 @@ func ReplaceDraftFromWorkflowVersion(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	_ = store.DB().Where("id=?", draft.ID).First(&draft).Error
+	_ = store.DB().Where("id=? AND deleted_at IS NULL", draft.ID).First(&draft).Error
 	common.ReplyOK(w, toEnrichedDraftResponse(store.DB(), draft))
 }
