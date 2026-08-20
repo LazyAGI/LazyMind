@@ -198,9 +198,6 @@ export interface WorkflowSession {
   workflow_id: string;
   /** Immutable package revision selected when this session was created. */
   pinned_revision_id?: string;
-  pinned_revision_no?: number;
-  /** Current published package revision; absent for built-ins without a resource head. */
-  head_revision_no?: number;
   status: "active" | "completed" | "failed" | "waiting" | "stopped";
   current_step_id: string;
   /** Global intent/constraint for this session, JSON string e.g. {"text":"..."} */
@@ -268,6 +265,15 @@ export interface SlotDef {
   caption_key?: string;
   /** Maximum characters shown in the artifact summary injected into the AI prompt. */
   summary_max_chars?: number;
+  /** Runtime widget configuration from ui.slots, hydrated when the workflow UI is loaded. */
+  widget?: SlotWidgetConfig;
+}
+
+export interface SlotWidgetConfig {
+  widgetType?: string;
+  readOnly?: boolean;
+  maxHeight?: number;
+  [key: string]: unknown;
 }
 
 // composite_layout node types (recursive) — format C.
@@ -297,6 +303,19 @@ export interface InnerTabsNode {
   tabs: CompositeLayoutNode[];
 }
 
+/** Declarative action rendered for a workflow tab. */
+export interface WorkflowTabAction {
+  id: string;
+  type: 'export';
+  provider: string;
+  label?: string;
+  /** Provider input names mapped to declared slot ids. */
+  inputs: Record<string, string>;
+  formats?: string[];
+  /** Align mapped list slots by their shared sort_order. */
+  alignment?: 'sort_order';
+}
+
 export interface TabDef {
   id: string;
   /** Optional workflow step id represented by this tab. Falls back to id when omitted. */
@@ -313,6 +332,8 @@ export interface TabDef {
    * WorkflowPanel must not special-case workflow IDs; it only executes these rules.
    */
   composite_behavior?: CompositeBehavior;
+  /** Actions are rendered through provider modules; the composite stays domain-neutral. */
+  actions?: WorkflowTabAction[];
 }
 
 /** Mutually exclusive column group: keep the first preferred slot that has data. */
@@ -363,7 +384,11 @@ export function hydrateWorkflowUI(raw: unknown, fallbackName?: string): Workflow
   }
 
   const name = typeof spec.name === 'string' ? spec.name : fallbackName;
-  if (!Array.isArray(ui.tabs) || slotDefs.size === 0) {
+  if (!Array.isArray(ui.tabs)) {
+    return name === undefined ? ui : { ...ui, name };
+  }
+  const hasWidgetConfigs = Boolean(ui.slots && Object.keys(ui.slots).length > 0);
+  if (slotDefs.size === 0 && !hasWidgetConfigs) {
     return name === undefined ? ui : { ...ui, name };
   }
   return {
@@ -372,7 +397,14 @@ export function hydrateWorkflowUI(raw: unknown, fallbackName?: string): Workflow
     tabs: ui.tabs.map((tab) => ({
       ...tab,
       slots: Array.isArray(tab.slots)
-        ? tab.slots.map((slot) => ({ ...slotDefs.get(slot.id), ...slot }))
+        ? tab.slots.map((slot) => {
+          const widget = ui.slots?.[slot.id];
+          return {
+            ...slotDefs.get(slot.id),
+            ...slot,
+            ...(widget ? { widget } : {}),
+          } as SlotDef;
+        })
         : [],
     })),
   };

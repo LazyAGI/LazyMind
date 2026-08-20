@@ -251,6 +251,15 @@ func runtimeCommandEnv(paths RuntimePaths, cfg RuntimeConfig) []string {
 		routerPortPoolStartEnvVar+"="+strconv.Itoa(routerPoolStart),
 		routerPortPoolEndEnvVar+"="+strconv.Itoa(routerPoolEnd),
 		routerPortsPerInstanceEnvVar+"="+strconv.Itoa(defaultRouterPortsPerInstance),
+		"LAZYMIND_NODE_EXECUTABLE="+envText("LAZYMIND_NODE_EXECUTABLE", ""),
+		"LAZYMIND_NODE_RUN_AS_NODE="+envText("LAZYMIND_NODE_RUN_AS_NODE", "false"),
+		"LAZYMIND_EDITABLE_PPT_BUNDLE_PATH="+envText("LAZYMIND_EDITABLE_PPT_BUNDLE_PATH", ""),
+		"LAZYMIND_EDITABLE_PPT_WINDOWS_X64_URL="+envText("LAZYMIND_EDITABLE_PPT_WINDOWS_X64_URL", ""),
+		"LAZYMIND_EDITABLE_PPT_WINDOWS_X64_SHA256="+envText("LAZYMIND_EDITABLE_PPT_WINDOWS_X64_SHA256", ""),
+		"LAZYMIND_EDITABLE_PPT_DARWIN_ARM64_URL="+envText("LAZYMIND_EDITABLE_PPT_DARWIN_ARM64_URL", ""),
+		"LAZYMIND_EDITABLE_PPT_DARWIN_ARM64_SHA256="+envText("LAZYMIND_EDITABLE_PPT_DARWIN_ARM64_SHA256", ""),
+		"LAZYMIND_EDITABLE_PPT_LINUX_X64_URL="+envText("LAZYMIND_EDITABLE_PPT_LINUX_X64_URL", ""),
+		"LAZYMIND_EDITABLE_PPT_LINUX_X64_SHA256="+envText("LAZYMIND_EDITABLE_PPT_LINUX_X64_SHA256", ""),
 	)
 	if binDir := loadFFmpegBinDirForRuntime(paths); binDir != "" {
 		env = prependPathEnv(env, binDir)

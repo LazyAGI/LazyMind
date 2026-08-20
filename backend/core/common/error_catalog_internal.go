@@ -516,6 +516,8 @@ func init() {
 		"built-in workflow package directory not found", "workflow.yaml missing from revision",
 		"pin legacy workflow session revision", "resolve conversation plugin binding failed",
 		"decode conversation ext",
+		"load artifact action head revision", "parse artifact action policy",
+		"artifact action head revision is incomplete",
 		"decode sync_document action response", "artifact sync state save failed",
 		"task unavailable",
 		"query task center settings failed", "query settings controls failed",

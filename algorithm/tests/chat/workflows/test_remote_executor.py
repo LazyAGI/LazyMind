@@ -106,6 +106,7 @@ async def test_execution_spec_failure_marks_claimed_attempt_failed():
 
     class Runtime:
         failure = ''
+        terminal = None
 
         async def context(self, *_):
             return {'metadata': {'task_id': 'missing-task'}, 'inputs': {}}
@@ -118,10 +119,16 @@ async def test_execution_spec_failure_marks_claimed_attempt_failed():
         async def fail(self, _client, _attempt, _lease, message):
             self.failure = message
 
+        async def task_event(self, _client, task, _lease, event):
+            self.terminal = (task, event)
+
     runtime = Runtime()
     worker.runtime = runtime
     await worker._run_claim(object(), {'attempt_id': 'attempt-1', 'lease_token': 'lease-1'})
     assert runtime.failure.startswith('executor setup failed:')
+    assert runtime.terminal == ('missing-task', {
+        'type': 'error', 'status': 'failed', 'message': runtime.failure,
+    })
 
 
 @pytest.mark.asyncio

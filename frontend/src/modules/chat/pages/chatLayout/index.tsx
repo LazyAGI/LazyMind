@@ -416,7 +416,8 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     const workflowContext =
       activeSession?.status === "active" ||
       activeSession?.status === "waiting" ||
-      activeSession?.status === "failed"
+      activeSession?.status === "failed" ||
+      activeSession?.status === "completed"
         ? {
             session_id: activeSession.session_id,
             workflow_id: activeSession.workflow_id,

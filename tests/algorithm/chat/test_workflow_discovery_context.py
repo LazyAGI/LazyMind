@@ -50,6 +50,7 @@ def test_workflow_discovery_context_renders_catalog_for_routing():
         'description': 'Generate, find, or edit images.',
         'when_to_use': 'Use for complex image requests; avoid simple one-shot images.',
         'trigger_tool': 'trigger_image_workflow',
+        'startup_clarification_fields': [],
     }
 
 
