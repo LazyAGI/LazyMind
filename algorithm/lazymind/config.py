@@ -24,9 +24,22 @@ EMBED_INDEX_KWARGS = [
 ]
 
 
+def apply_local_model_config_override(resolved_path):
+    """Prefer gitignored runtime_models.local.yaml next to an inner config."""
+    if not resolved_path:
+        return resolved_path
+    path = Path(resolved_path)
+    if path.name != 'runtime_models.inner.yaml':
+        return str(path)
+    local = path.with_name('runtime_models.local.yaml')
+    return str(local) if local.is_file() else str(path)
+
+
 def _model_config_path_post_action(resolved_path):
-    if not resolved_path: return
-    lazyllm.config['auto_model_config_map_path'] = str(resolved_path)
+    path = apply_local_model_config_override(resolved_path)
+    if not path:
+        return
+    lazyllm.config['auto_model_config_map_path'] = str(path)
 
 
 def _require_positive_config_value(env_name):
@@ -139,6 +152,7 @@ config.add('model_config_path', str, 'dynamic', 'MODEL_CONFIG_PATH',
            description='Runtime model config YAML path. Shorthand aliases are auto-resolved to absolute paths.',
            alias={
                'inner': str(_COMMON_DIR / 'runtime_models.inner.yaml'),
+               'local': str(_COMMON_DIR / 'runtime_models.local.yaml'),
                'online': str(_COMMON_DIR / 'runtime_models.online.yaml'),
                'dynamic': str(_COMMON_DIR / 'runtime_models.yaml'),
            },
@@ -232,6 +246,8 @@ config.add('episode_hit_saturation', int, 10, 'EPISODE_HIT_SATURATION')
 config.add('web_search_timeout', int, 10, 'WEB_SEARCH_TIMEOUT', description='Web search request timeout in seconds.')
 config.add('url_fetch_max_length', int, 4000, 'URL_FETCH_MAX_LENGTH',
            description='Maximum readable text length returned by url_fetch.')
+config.add('url_fetch_pdf_max_bytes', int, 100 * 1024 * 1024, 'URL_FETCH_PDF_MAX_BYTES',
+           description='Maximum PDF download size for url_fetch ingestion.')
 config.add('max_retries', int, 20, 'MAX_RETRIES', description='Max retries for agentic function call loop.')
 config.add('agentic_max_rounds_low', int, 6, 'AGENTIC_MAX_ROUNDS_LOW',
            description='Maximum ChatAgent ReAct rounds in low thinking-depth mode.')

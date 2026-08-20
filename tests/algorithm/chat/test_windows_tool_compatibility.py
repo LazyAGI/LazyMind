@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from lazyllm.tools.fs import client as fs_client
-from lazymind.chat.engine.tools import chat_artifact
+from lazymind.chat.engine.tools.local_file import workspace as chat_artifact
 
 
 def test_file_uri_with_windows_drive_becomes_native_path(monkeypatch):
@@ -92,7 +92,7 @@ def test_chat_write_file_append_does_not_require_overwrite_approval(tmp_path, mo
 
     assert first['status'] == 'ok'
     assert appended['status'] == 'ok'
-    assert chat_artifact.read_file('document.md')['content'] == 'first second'
+    assert 'first second' in chat_artifact.read_file('document.md')['result']['text']
 
 
 def test_chat_file_tools_reject_outside_workspace_by_default(tmp_path, monkeypatch):
@@ -122,5 +122,5 @@ def test_chat_file_tools_allow_absolute_host_paths_in_trusted_local_mode(tmp_pat
         listed = chat_artifact.list_dir(str(outside_dir))
 
     assert written['status'] == 'ok'
-    assert loaded['content'] == 'trusted'
+    assert 'trusted' in loaded['result']['text']
     assert listed['entries'] == ['document.md']

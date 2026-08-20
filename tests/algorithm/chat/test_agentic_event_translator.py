@@ -330,3 +330,27 @@ def test_create_skill_rendering_uses_single_segment_name_and_preserves_failure()
     }, language='zh', preview_value='internal2/skill')
 
     assert '未能创建 **internal2/skill** 技能。' in result_text
+
+
+def test_unified_grep_rendering_uses_target_and_distinguishes_zero_hits():
+    call_text, preview = _tool_call_frame_text({
+        'id': 'grep-1',
+        'function': {
+            'name': 'grep',
+            'arguments': {'target': 'papers.pdf', 'pattern': '实验'},
+        },
+    }, language='zh')
+    result_text = _tool_result_frame_text({
+        'id': 'grep-1',
+        'name': 'grep',
+        'result': {
+            'success': True,
+            'tool': 'grep',
+            'result': {'target': 'papers.pdf', 'total': 0, 'matches': []},
+        },
+    }, language='zh', preview_value=preview)
+
+    assert '正在文件 **papers.pdf** 中检索' in call_text
+    assert '实验' not in call_text.split('</tp>', 1)[0]
+    assert '文件中没有找到匹配行' in result_text
+    assert '已找到文件' not in result_text

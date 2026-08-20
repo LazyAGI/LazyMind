@@ -9,9 +9,11 @@ from lazymind.chat.engine.tools.infra import (
 
 
 def url_fetch(url: str) -> Dict[str, Any]:
-    """Fetch readable content from one public web page.
+    """Fetch readable content from one public web page, or ingest a public PDF.
 
-    Use this for public web pages. Do not use it for authenticated cloud-file
+    Use this for public web pages. PDF URLs are downloaded and ingested as a
+    file resource; the result contains file_id rather than document text — use
+    grep and read_file next. Do not use it for authenticated cloud-file
     URLs such as Feishu/Lark Wiki or Docs and Notion; use CloudFileToolkit for
     those links instead. Never invent or guess a URL: use a URL supplied by the
     user or returned by a search tool. To inspect several pages, issue multiple

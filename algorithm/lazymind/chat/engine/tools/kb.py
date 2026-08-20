@@ -1,4 +1,5 @@
 from typing import Any, Dict, List, Literal, Optional
+import os
 
 import lazyllm
 from lazyllm import AutoModel, LOG
@@ -689,11 +690,32 @@ def kb_tmp_search(
             request's agentic_config.files.
     """
     agentic_config = lazyllm.globals['agentic_config']
+    requested = files if files is not None else (agentic_config.get('files') or [])
+    pdf_names = [
+        os.path.basename(str(path))
+        for path in requested
+        if str(path).split('?', 1)[0].lower().endswith('.pdf')
+    ]
+    searchable = [
+        path for path in requested
+        if not str(path).split('?', 1)[0].lower().endswith('.pdf')
+    ]
+    if pdf_names and not searchable:
+        return tool_success('kb_tmp_search', {
+            'query': query.strip(),
+            'total': 0,
+            'items': [],
+            'message': (
+                'PDF attachments are indexed as file resources. '
+                'Use grep then read_file instead of kb_tmp_search. '
+                f'PDF files: {", ".join(pdf_names)}.'
+            ),
+        })
     tmp_retriever, reranker = _ensure_temp_search_runtime()
     payload = {
         'query': query.strip(),
         'filters': {},
-        'files': files,
+        'files': searchable or files,
         'user_id': agentic_config.get('user_id', ''),
     }
     result = search_temp_files(

@@ -1,0 +1,268 @@
+from pathlib import Path
+
+import lazymind.chat.engine.tools.local_file.resolver as resolver
+import lazymind.chat.engine.tools.local_file.workspace as workspace_tools
+from lazymind.chat.engine.subagent.runner import _build_subagent_tools
+from lazymind.chat.engine.tools.local_file.ingest import ingest_pdf_file
+from lazymind.chat.engine.tools.local_file.store import (
+    FileResourceStore,
+    render_file_resource_catalog,
+)
+from lazymind.chat.engine.tools.local_file.window import (
+    read_lines_window,
+    split_logical_lines,
+)
+
+
+def _write_pdf(path: Path, payload: bytes = b'%PDF-1.4 demo') -> Path:
+    path.write_bytes(payload)
+    return path
+
+
+def _set_scope(monkeypatch, tmp_path, *, files=None):
+    monkeypatch.setattr(resolver.lazyllm, 'globals', {
+        'agentic_config': {
+            'user_id': 'user-1',
+            'conversation_id': 'conversation-1',
+            'files': [str(path) for path in (files or [])],
+        },
+    })
+    monkeypatch.setattr(
+        workspace_tools,
+        'chat_agent_workspace',
+        lambda *_args: str(tmp_path),
+    )
+
+
+def _ingest(monkeypatch, tmp_path, text='searchable token omega', name='paper.pdf'):
+    store = FileResourceStore(str(tmp_path))
+    src = _write_pdf(tmp_path / name, payload=f'%PDF {text}'.encode())
+    monkeypatch.setattr(
+        'lazymind.chat.engine.tools.local_file.ingest.parse_pdf_pages',
+        lambda path: [(1, text)],
+    )
+    return ingest_pdf_file(str(src), display_name=name, store=store)
+
+
+def test_ingest_catalog_hides_internal_parsed_path(monkeypatch, tmp_path):
+    manifest = _ingest(
+        monkeypatch,
+        tmp_path,
+        text='Alpha methods.\n\nBeta results.\nGamma conclusion.',
+    )
+    catalog = render_file_resource_catalog(
+        FileResourceStore(str(tmp_path)),
+        current_turn_seq=1,
+    )
+
+    assert manifest['parse_status'] == 'ready'
+    assert manifest['file_id'] in catalog
+    assert 'parsed.md' not in catalog
+    assert 'grep' in catalog
+    assert 'read_file' in catalog
+
+
+def test_unified_read_footer_uses_only_next_offset_or_eof():
+    lines = [f'line-{index}' for index in range(1, 31)]
+    first = read_lines_window(lines, offset=1, limit=10)
+    rest = read_lines_window(lines, offset=11, limit=100)
+
+    assert first['eof'] is False
+    assert first['next_offset'] == 11
+    assert first['footer'] == (
+        'Showing lines 1-10 of 30.\nUse offset=11 to continue.'
+    )
+    assert rest['eof'] is True
+    assert rest['footer'] == 'End of file.'
+    assert rest['next_offset'] is None
+
+
+def test_unified_tools_resolve_file_id_and_unique_name(monkeypatch, tmp_path):
+    _set_scope(monkeypatch, tmp_path)
+    manifest = _ingest(monkeypatch, tmp_path)
+
+    searched = workspace_tools.grep(manifest['file_id'], 'omega')
+    line = searched['result']['matches'][0]['line']
+    by_id = workspace_tools.read_file(manifest['file_id'], offset=line, limit=5)
+    by_name = workspace_tools.read_file('paper.pdf')
+
+    assert searched['success'] is True
+    assert searched['result']['target'] == manifest['file_id']
+    assert 'omega' in by_id['result']['text']
+    assert 'omega' in by_name['result']['text']
+    assert by_name['result']['kind'] == 'file_resource'
+
+
+def test_unified_tools_resolve_workspace_and_text_attachment(monkeypatch, tmp_path):
+    workspace_file = tmp_path / 'notes.md'
+    workspace_file.write_text('workspace needle', encoding='utf-8')
+    attachment = tmp_path / 'upload.txt'
+    attachment.write_text('attachment needle', encoding='utf-8')
+    _set_scope(monkeypatch, tmp_path, files=[attachment])
+
+    workspace_read = workspace_tools.read_file('notes.md')
+    attachment_read = workspace_tools.read_file('upload.txt')
+    attachment_grep = workspace_tools.grep('upload.txt', 'needle')
+
+    assert 'workspace needle' in workspace_read['result']['text']
+    assert attachment_read['result']['kind'] == 'attachment_text'
+    assert 'attachment needle' in attachment_read['result']['text']
+    assert attachment_grep['result']['total'] == 1
+
+
+def test_office_attachment_parse_is_cached_by_content(monkeypatch, tmp_path):
+    attachment = tmp_path / 'report.docx'
+    attachment.write_bytes(b'office-content')
+    _set_scope(monkeypatch, tmp_path, files=[attachment])
+    calls = []
+    monkeypatch.setattr(
+        resolver,
+        'parse_attachment_content',
+        lambda path, priority=0: calls.append(path) or 'cached office text',
+    )
+
+    first = workspace_tools.read_file('report.docx')
+    second = workspace_tools.read_file('report.docx', offset=1)
+
+    assert first['success'] is True
+    assert second['success'] is True
+    assert calls == [str(attachment)]
+    assert list((tmp_path / 'attachment-text-cache').glob('*/parsed.txt'))
+
+
+def test_duplicate_resource_name_is_rejected(monkeypatch, tmp_path):
+    _set_scope(monkeypatch, tmp_path)
+    store = FileResourceStore(str(tmp_path))
+    first = _write_pdf(tmp_path / 'first.pdf', b'%PDF first')
+    second = _write_pdf(tmp_path / 'second.pdf', b'%PDF second')
+    monkeypatch.setattr(
+        'lazymind.chat.engine.tools.local_file.ingest.parse_pdf_pages',
+        lambda path: [(1, Path(path).stem)],
+    )
+    ingest_pdf_file(str(first), display_name='same.pdf', store=store)
+    ingest_pdf_file(str(second), display_name='same.pdf', store=store)
+
+    result = workspace_tools.read_file('same.pdf')
+
+    assert result['success'] is False
+    assert 'ambiguous' in result['error']['reason']
+
+
+def test_duplicate_attachment_name_across_turns_is_rejected(monkeypatch, tmp_path):
+    first = tmp_path / 'turn-1' / 'same.txt'
+    second = tmp_path / 'turn-2' / 'same.txt'
+    first.parent.mkdir()
+    second.parent.mkdir()
+    first.write_text('first', encoding='utf-8')
+    second.write_text('second', encoding='utf-8')
+    _set_scope(monkeypatch, tmp_path, files=[first, second])
+    resolver.lazyllm.globals['agentic_config']['history_files_per_turn'] = {
+        '1': [str(first)],
+        '2': [str(second)],
+    }
+
+    result = workspace_tools.read_file('same.txt')
+
+    assert result['success'] is False
+    assert 'ambiguous' in result['error']['reason']
+
+
+def test_long_physical_line_is_split_and_continuable(monkeypatch, tmp_path):
+    _set_scope(monkeypatch, tmp_path)
+    content = 'x' * 9001
+    (tmp_path / 'long.txt').write_text(content, encoding='utf-8')
+
+    lines = split_logical_lines(content)
+    first = workspace_tools.read_file('long.txt', limit=1)
+    second = workspace_tools.read_file(
+        'long.txt',
+        offset=first['result']['next_offset'],
+        limit=10,
+    )
+
+    assert [len(line) for line in lines] == [4000, 4000, 1001]
+    assert first['result']['next_offset'] == 2
+    assert second['result']['eof'] is True
+    assert first['result']['footer'].endswith('Use offset=2 to continue.')
+
+
+def test_grep_zero_matches_has_explicit_footer(monkeypatch, tmp_path):
+    _set_scope(monkeypatch, tmp_path)
+    (tmp_path / 'notes.txt').write_text('alpha', encoding='utf-8')
+
+    result = workspace_tools.grep('notes.txt', 'missing')
+
+    assert result['result']['total'] == 0
+    assert result['result']['footer'] == 'No matches.'
+
+
+def test_subagent_always_has_unified_read_tools():
+    names = {tool.__name__ for tool in _build_subagent_tools([])}
+
+    assert {'grep', 'read_file'} <= names
+
+
+def test_main_agent_always_registers_unified_read_tools():
+    from lazymind.chat.service.chat_service import _build_chat_artifact_tools
+    from lazymind.chat.service.component.tool_registry import DEFAULT_TOOLS
+
+    names = {tool.__name__ for tool in _build_chat_artifact_tools()}
+    optional = {cfg.name for cfg in DEFAULT_TOOLS}
+
+    assert {'grep', 'read_file', 'write_file', 'list_dir', 'save_chat_artifact'} <= names
+    assert {'grep', 'read_file'}.isdisjoint(optional)
+
+
+def test_find_by_display_name_requires_a_unique_match(monkeypatch, tmp_path):
+    _set_scope(monkeypatch, tmp_path)
+    store = FileResourceStore(str(tmp_path))
+    first = _write_pdf(tmp_path / 'first.pdf', b'%PDF first')
+    second = _write_pdf(tmp_path / 'second.pdf', b'%PDF second')
+    monkeypatch.setattr(
+        'lazymind.chat.engine.tools.local_file.ingest.parse_pdf_pages',
+        lambda path: [(1, Path(path).stem)],
+    )
+    ingest_pdf_file(str(first), display_name='same.pdf', store=store)
+    ingest_pdf_file(str(second), display_name='same.pdf', store=store)
+
+    assert store.find_by_display_name('same.pdf') is None
+    unique = ingest_pdf_file(
+        str(_write_pdf(tmp_path / 'unique.pdf', b'%PDF unique')),
+        display_name='unique.pdf',
+        store=store,
+    )
+    assert store.find_by_display_name('unique.pdf')['file_id'] == unique['file_id']
+
+
+def test_read_user_attachment_honors_turn(monkeypatch, tmp_path):
+    from lazymind.chat.engine.subagent import tools as subagent_tools
+
+    first = tmp_path / 'turn-1' / 'same.txt'
+    second = tmp_path / 'turn-2' / 'same.txt'
+    first.parent.mkdir()
+    second.parent.mkdir()
+    first.write_text('first-turn-body', encoding='utf-8')
+    second.write_text('second-turn-body', encoding='utf-8')
+    cfg = {
+        'user_id': 'user-1',
+        'conversation_id': 'conversation-1',
+        'files': [str(second)],
+        'history_files_per_turn': {
+            '1': [str(first)],
+            '2': [str(second)],
+        },
+    }
+    monkeypatch.setattr(resolver.lazyllm, 'globals', {'agentic_config': cfg})
+    monkeypatch.setattr(workspace_tools.lazyllm, 'globals', {'agentic_config': cfg})
+    monkeypatch.setattr(
+        workspace_tools,
+        'chat_agent_workspace',
+        lambda *_args: str(tmp_path),
+    )
+
+    selected = subagent_tools.read_user_attachment('same.txt', turn=1)
+
+    assert selected['success'] is True
+    assert selected['result']['status'] == 'ok'
+    assert 'first-turn-body' in selected['result']['content']
+    assert 'second-turn-body' not in selected['result']['content']

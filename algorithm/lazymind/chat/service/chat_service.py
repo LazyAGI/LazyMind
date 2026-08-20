@@ -58,7 +58,7 @@ from lazymind.chat.engine.agent_runtime import (
     report_to_dict,
     render_attachment_content,
 )
-from lazymind.chat.engine.tools.chat_artifact import chat_agent_workspace
+from lazymind.chat.engine.tools.local_file.workspace import chat_agent_workspace
 from lazymind.chat.engine.tools.intent_writer import (
     build_intentwrite_tool,
     render_intent_section,
@@ -337,13 +337,14 @@ def _should_register_subagent_tools(enable_subagent: Any, workflow_refs: Any) ->
 
 def _build_chat_artifact_tools() -> list:
     """Workspace and artifact tools for the main ChatAgent."""
-    from lazymind.chat.engine.tools.chat_artifact import (
+    from lazymind.chat.engine.tools.local_file.workspace import (
+        grep,
         list_dir,
         read_file,
         save_chat_artifact,
         write_file,
     )
-    return [save_chat_artifact, read_file, write_file, list_dir]
+    return [save_chat_artifact, grep, read_file, write_file, list_dir]
 
 
 def _build_user_attachment_tools(has_files: bool) -> list:
@@ -670,6 +671,24 @@ async def _handle_chat_impl(
     _inject_reader_config(runtime.ocr_config)
     lazyllm.globals['agentic_config'] = agentic_config
 
+    file_catalog = ''
+    try:
+        from lazymind.chat.engine.tools.local_file.ingest import ingest_upload_pdfs
+        from lazymind.chat.engine.tools.local_file.store import (
+            FileResourceStore,
+            render_file_resource_catalog,
+        )
+        if conversation_id and not is_context_inspection:
+            store = FileResourceStore(chat_agent_workspace(user_id or '0', conversation_id))
+            ingest_upload_pdfs(files_map, current_turn_seq=_eff_current_seq, store=store)
+            file_catalog = render_file_resource_catalog(store, current_turn_seq=_eff_current_seq)
+            agentic_config['file_resources'] = [
+                item.get('file_id') for item in store.load_index() if item.get('file_id')
+            ]
+            lazyllm.globals['agentic_config'] = agentic_config
+    except Exception as exc:
+        LOG.warning(f'[ChatServer] file resource ingest skipped: {exc}')
+
     memory_context = None
     if personalization.use_memory:
         memory_context = load_memory_context()
@@ -787,7 +806,12 @@ async def _handle_chat_impl(
         normalize_attachments(files_map, _eff_current_seq),
         role=AgentRole.CHAT,
         current_turn_seq=_eff_current_seq,
+        skip_pdf=True,
     )
+    if file_catalog:
+        attachment_content = (
+            f'{file_catalog}\n\n{attachment_content}' if attachment_content else file_catalog
+        )
 
     disabled = set(agent.disabled_tools or [])
     active_configs = filter_tools(
@@ -978,7 +1002,7 @@ async def _handle_chat_impl(
             f'Use `{workspace}` as the default working directory for generated and intermediate files. '
             'Trusted local mode is active: when the user requests it, you may read and write absolute local '
             'paths outside this workspace and use `shell_tool` to run local commands. Keep relative paths '
-            'inside the default workspace. Use `read_file`, `write_file`, and `list_dir` for file operations, '
+            'inside the default workspace. Use `read_file`, `grep`, `write_file`, and `list_dir` for file operations, '
             'then publish completed downloadable files with `save_chat_artifact`.'
         )
     else:
@@ -986,7 +1010,7 @@ async def _handle_chat_impl(
             f'Use `{workspace}` as the single working directory for all generated and intermediate files. '
             'When a skill requires an output directory, create it under this workspace and pass its absolute '
             'path to skill scripts. Treat files outside this workspace as read-only inputs. Use `read_file`, '
-            '`write_file`, and `list_dir` to inspect and update workspace files, then publish completed files '
+            '`grep`, `write_file`, and `list_dir` to inspect and update workspace files, then publish completed files '
             'with `save_chat_artifact`.'
         )
     prompt_builder.system(
@@ -1103,6 +1127,8 @@ async def _handle_chat_impl(
             }.get(thinking_depth, _cfg['agentic_max_rounds_medium']),
             tool_failure_limits={
                 'url_fetch': 2,
+                'grep': 2,
+                'read_file': 2,
                 'kb_search': 2,
                 'kb_tmp_search': 2,
                 'list_knowledge_bases': 2,

@@ -3,6 +3,8 @@ backend/auth-service/api_permissions.json
 backend/core/core
 .env
 docker-compose.override.yml
+# Machine-local model overlay; copy from runtime_models.inner.yaml.
+algorithm/lazymind/common/runtime_models.local.yaml
 
 .flake8-python.path
 __pycache__
@@ -44,6 +46,9 @@ lazyllm_chroma/
 docs/en/assets
 docs/zh/assets
 docs/superpowers/
+# Local design notes for chat file resources; keep out of review PRs.
+docs/plan/chat-file-resource-*.md
+docs/engineering/file-upload-algorithm-toolchain.md
 
 # Prerequisites
 *.d

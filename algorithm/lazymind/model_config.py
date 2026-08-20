@@ -55,18 +55,22 @@ def is_model_role_available(role: str, *, config_path: Optional[str] = None) -> 
 def get_config_path() -> str:
     '''Return the active runtime_models config file path as a string.
 
-    Controlled entirely by LAZYMIND_MODEL_CONFIG_PATH.  Three shorthand aliases
+    Controlled entirely by LAZYMIND_MODEL_CONFIG_PATH.  Shorthand aliases
     are accepted in addition to an explicit file path:
 
         inner    → runtime_models.inner.yaml   (intranet / on-prem deployment)
+        local    → runtime_models.local.yaml   (gitignored machine override)
         online   → runtime_models.online.yaml  (public cloud API deployment)
         dynamic  → runtime_models.yaml         (fully dynamic, key injected per request)
+
+    If inner is selected and a sibling runtime_models.local.yaml exists, that
+    file is used instead so local tunnel overrides stay out of git.
 
     Alias resolution is handled by algorithm/config.py (Config alias mechanism),
     so config['model_config_path'] always contains the resolved absolute path.
     '''
-    from lazymind.config import config as _cfg
-    return _cfg['model_config_path']
+    from lazymind.config import apply_local_model_config_override, config as _cfg
+    return apply_local_model_config_override(_cfg['model_config_path'])
 
 
 def load_model_config(config_path: str | None = None, *, expand_env: bool = False) -> Dict[str, Any]:

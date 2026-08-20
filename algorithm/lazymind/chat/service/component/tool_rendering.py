@@ -51,6 +51,7 @@ _REPRESENTATIVE_TOOL_ARGUMENTS: dict[str, str] = {
     'search_provider_meta_search': 'query',
     'search_provider_meta_catalog': 'include_sample_values',
     'url_fetch': 'url',
+    'grep': 'target',
     'vocab_learn': 'suggestions.word <-> suggestions.synonym',
     'vision_extractor': 'url',
     'skill_editor': 'name',
@@ -72,7 +73,7 @@ _REPRESENTATIVE_TOOL_ARGUMENTS: dict[str, str] = {
     'get_skill': 'name',
     'read_reference': 'rel_path',
     'run_script': 'rel_path',
-    'read_file': 'path',
+    'read_file': 'target',
     'list_dir': 'path',
     'search_in_files': 'pattern',
     'make_dir': 'path',
@@ -110,6 +111,7 @@ _REPRESENTATIVE_TOOL_RESULTS: dict[str, str] = {
     'search_provider_meta_search': 'total_count',
     'search_provider_meta_catalog': 'fields',
     'url_fetch': 'results.result.final_url / final_url',
+    'grep': 'total',
     'calculator': 'result',
     'vision_extractor': 'description',
     'skill_editor': 'reason',
@@ -129,7 +131,7 @@ _REPRESENTATIVE_TOOL_RESULTS: dict[str, str] = {
     'describe_external_db': 'tables',
     'external_db_query': 'rows',
     'run_script': 'stdout',
-    'read_file': 'content',
+    'read_file': 'eof',
     'list_dir': 'path',
     'search_in_files': 'status',
     'make_dir': 'path',
@@ -169,6 +171,7 @@ _TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'search_provider_meta_search': 'Searching {brand} metadata for {value}.',
     'search_provider_meta_catalog': 'Loading {brand} metadata fields.',
     'url_fetch': 'Reading page content from {value}.',
+    'grep': 'Searching file {value} for matching lines.',
     'vision_extractor': 'Extracting information from the image.',
     'vocab_learn': 'Updating vocabulary entries for {value} now.',
     'skill_editor': 'Updating reusable skill notes related to {value} now.',
@@ -190,7 +193,7 @@ _TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'get_skill': 'Opening skill details for {value} before continuing now.',
     'read_reference': 'Reading skill reference material from {value} for review.',
     'run_script': 'Running the selected skill helper script at {value} now.',
-    'read_file': 'Reading file content from {value} for review now.',
+    'read_file': 'Reading a bounded slice of file {value}.',
     'list_dir': 'Listing folder contents from {value} for review now.',
     'search_in_files': 'Searching project files for matches to {value} now.',
     'make_dir': 'Preparing folder {value} for the requested use now.',
@@ -238,6 +241,7 @@ _ZH_TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
     'search_provider_meta_search': '正在检索 {brand} 元数据 {value}。',
     'search_provider_meta_catalog': '正在加载 {brand} 元数据字段目录。',
     'url_fetch': '正在读取网页 {value} 。',
+    'grep': '正在文件 {value} 中检索匹配行。',
     'vision_extractor': '正在提取图像信息。',
     'vocab_learn': '正在更新与 {value} 相关的词汇表。',
     'skill_editor': '正在更新与 {value} 相关的技能。',
@@ -307,6 +311,7 @@ _TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'search_provider_meta_search': '{brand} metadata search found {value} matching records.',
     'search_provider_meta_catalog': '{brand} metadata fields were loaded successfully.',
     'url_fetch': 'Page content from {value} was loaded successfully.',
+    'grep': 'Matching lines from file {value} are ready.',
     'vision_extractor': 'Image information has been extracted.',
     'vocab_learn': 'Vocabulary entries for {value} were updated successfully.',
     'skill_editor': 'Skill operation for {value} completed successfully.',
@@ -329,7 +334,7 @@ _TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'read_reference': 'Skill reference material from {value} was loaded successfully.',
     'ask_user': 'Please answer the questions below.',
     'run_script': 'Skill helper script at {value} finished running successfully.',
-    'read_file': 'File content from {value} was loaded successfully now.',
+    'read_file': 'A bounded slice of file {value} was loaded successfully.',
     'list_dir': 'Folder contents from {value} were retrieved successfully now.',
     'search_in_files': 'Project file matches for {value} were found successfully.',
     'make_dir': 'Folder {value} is ready for the requested use.',
@@ -379,6 +384,7 @@ _ZH_TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
     'search_provider_meta_search': '已找到 {value} 条 {brand} 元数据结果。',
     'search_provider_meta_catalog': '已成功加载 {brand} 元数据字段目录。',
     'url_fetch': '已成功加载 {value} 的网页内容。',
+    'grep': '已找到文件 {value} 的匹配行。',
     'vision_extractor': '已成功提取图像信息。',
     'vocab_learn': '已成功更新 {value} 的词汇表。',
     'skill_editor': '{value} 技能操作已完成。',
@@ -449,6 +455,7 @@ _TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
     'search_provider_meta_search': '{brand} metadata results for {value} could not be retrieved.',
     'search_provider_meta_catalog': '{brand} metadata fields could not be loaded.',
     'url_fetch': 'Page content from {value} could not be loaded.',
+    'grep': 'File grep for {value} could not be completed.',
     'vision_extractor': 'Vision extraction for {value} could not be completed.',
     'vocab_learn': 'Vocabulary entries for {value} could not be updated.',
     'skill_editor': 'Reusable skill notes for {value} could not be updated.',
@@ -470,7 +477,7 @@ _TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
     'get_skill': 'Skill details for {value} could not be loaded.',
     'read_reference': 'Skill reference material from {value} could not be read.',
     'run_script': 'Skill helper script at {value} did not finish.',
-    'read_file': 'File content from {value} could not be read.',
+    'read_file': 'File slice for {value} could not be loaded.',
     'list_dir': 'Folder contents from {value} could not be listed.',
     'search_in_files': 'Project file search for {value} could not finish.',
     'make_dir': 'Folder {value} could not be prepared for use.',
@@ -518,6 +525,7 @@ _ZH_TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
     'search_provider_meta_search': '未能获取 {value} 的 {brand} 元数据结果。',
     'search_provider_meta_catalog': '未能加载 {brand} 元数据字段目录。',
     'url_fetch': '未能加载网页 {value} 的内容。',
+    'grep': '未能检索文件 {value}。',
     'vision_extractor': '未能完成 {value} 的图像信息提取。',
     'vocab_learn': '未能更新 {value} 的词汇表。',
     'skill_editor': '未能更新 {value} 的技能。',
@@ -1270,6 +1278,15 @@ def _tool_result_preview(tool_name: str, result: Any, value: str = '', language:
             result,
         )
     payload = result.get('result') if isinstance(result, dict) and isinstance(result.get('result'), dict) else result
+    if (
+        isinstance(payload, dict)
+        and payload.get('total') == 0
+        and _tool_name_is(tool_name, 'grep')
+    ):
+        return _ensure_trailing_newline(
+            '文件中没有找到匹配行。' if language == 'zh' else
+            'No matching lines were found in the file.'
+        )
     if isinstance(payload, dict) and payload.get('total') == 0 and _tool_name_starts(tool_name, 'kb_'):
         msg = _resolve_tool_key(tool_name, _KB_EMPTY_RESULT_MESSAGES)
         if msg:
