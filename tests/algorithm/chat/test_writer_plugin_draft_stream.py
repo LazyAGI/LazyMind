@@ -83,7 +83,7 @@ def test_write_document_revision_emits_markdown_draft_stream(monkeypatch, tmp_pa
         for event in events
         if event['type'] == 'artifact_stream'
     ]
-    assert ''.join(deltas) == '# Revised title\n\nUpdated body.\n'
+    assert ''.join(deltas) == '# Revised title\n\nUpdated body.'
     assert all(0 < len(delta) <= 2 for delta in deltas)
     assert [event['chunk_index'] for event in events] == list(
         range(1, len(events) + 1),
