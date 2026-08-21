@@ -120,6 +120,7 @@ import {
   type SkillShareAction,
   type SkillShareCenterTab,
   type SkillTreeNode,
+  type SkillViewMode,
   type StructuredAsset,
   GLOSSARY_ALIAS_MAX_LENGTH,
   GLOSSARY_CONTENT_MAX_LENGTH,
@@ -321,11 +322,9 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     defaultSkillListPageSize,
   );
   const [skillListTotal, setSkillListTotal] = useState(initialSkills.length);
-  const [skillView, setSkillView] = useState<
-    "installed" | "market" | "workflows" | "trash"
-  >(() => {
+  const [skillView, setSkillView] = useState<SkillViewMode | "workflows">(() => {
     const sv = new URLSearchParams(window.location.search).get("skillView");
-    if (sv === "workflows" || sv === "market" || sv === "trash") return sv;
+    if (sv === "workflows" || sv === "market") return sv;
     return "installed";
   });
   const [installedSkillSource, setInstalledSkillSource] = useState<

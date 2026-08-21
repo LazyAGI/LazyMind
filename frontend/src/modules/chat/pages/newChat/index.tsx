@@ -27,6 +27,7 @@ import { useChatThinkStore } from "@/modules/chat/store/chatThink";
 import FeaturedCases from "@/modules/showcase/FeaturedCases";
 import { getShowcaseCase, type ShowcaseCase } from "@/modules/showcase/api";
 import { useFeaturedSkillBinding } from "@/modules/showcase/useFeaturedSkillBinding";
+import { getKnowledgeMarketItem } from "@/modules/knowledge/api/knowledgeMarket";
 
 function readRunInBackgroundMode() {
   try {
@@ -92,6 +93,7 @@ const NewChatPage = () => {
   } = useFeaturedSkillBinding(showcaseCase?.builtin_skill_uid);
   const showcaseCaseId = searchParams.get("showcase_case");
   const showcaseTaskId = searchParams.get("showcase_task");
+  const officialKnowledgeId = searchParams.get("officialKnowledge");
 
   useEffect(() => {
     useChatThinkStore
@@ -129,7 +131,7 @@ const NewChatPage = () => {
       {t("chat.retryCheckModelProvider")}
     </Button>
   ) : (
-    <Button type="primary" size="small" onClick={() => navigate("/model-providers/default-services")}>
+    <Button type="primary" size="small" onClick={() => navigate("/settings?section=models")}>
       {t("chat.goConfigureModelProvider")}
     </Button>
   );
@@ -187,7 +189,7 @@ const NewChatPage = () => {
   useEffect(() => {
     if (!showcaseCaseId) {
       setShowcaseCase(null);
-      setInputValue("");
+      if (!officialKnowledgeId) setInputValue("");
       return;
     }
 
@@ -207,7 +209,31 @@ const NewChatPage = () => {
       });
 
     return () => controller.abort();
-  }, [locale, showcaseCaseId, showcaseTaskId]);
+  }, [locale, officialKnowledgeId, showcaseCaseId, showcaseTaskId]);
+
+  useEffect(() => {
+    if (!officialKnowledgeId || showcaseCaseId) return;
+
+    const controller = new AbortController();
+    getKnowledgeMarketItem(officialKnowledgeId, { signal: controller.signal })
+      .then((item) => {
+        if (!item.online_access_url) {
+          message.info(t("knowledge.onlineQueryUnavailable"));
+          return;
+        }
+        setInputValue(
+          t("knowledge.onlineQueryPrompt", {
+            name: item.name,
+            url: item.online_access_url,
+          }),
+        );
+      })
+      .catch(() => {
+        // The shared request interceptor displays the localized error.
+      });
+
+    return () => controller.abort();
+  }, [locale, officialKnowledgeId, showcaseCaseId, t]);
 
   const handleSetIsChatContent = (value: boolean) => {
     if (value && !chatLayoutMounted) {
@@ -428,7 +454,7 @@ const NewChatPage = () => {
                         type="primary"
                         size="small"
                         className="model-provider-warning-action"
-                        onClick={() => navigate("/model-providers/default-services")}
+                        onClick={() => navigate("/settings?section=models")}
                       >
                         {t("knowledge.goToConfig")}
                       </Button>

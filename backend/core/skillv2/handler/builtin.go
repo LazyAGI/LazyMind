@@ -106,7 +106,7 @@ func EnableBuiltinSkill(w http.ResponseWriter, r *http.Request) {
 	var trashed orm.SkillV2Skill
 	err = db.WithContext(r.Context()).
 		Where("owner_user_id = ? AND origin_builtin_skill_uid = ? AND deleted_at IS NOT NULL", userID, uid).
-		Order("deleted_at DESC").
+		Order("deleted_at DESC, created_at ASC").
 		Take(&trashed).Error
 	if err == nil {
 		service := newSkillService(db)

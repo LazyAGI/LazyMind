@@ -64,7 +64,12 @@ launch.
 
 Windows Desktop supports Windows 10/11 x64, runs as the current user, and does not require MinGW, administrator rights, or Developer Mode. Installer builds are unsigned unless standard electron-builder signing variables such as `CSC_LINK` are supplied.
 
-The assisted installer supports in-place upgrades, blocks downgrades, and warms the bundled Python, Node, and local services before completing. On a fresh or repair install, existing `%LOCALAPPDATA%\LazyMind` data can be retained (the default) or cleared. Upgrades always retain it. The uninstaller similarly defaults to removing the program only and can optionally clear Local AppData. Neither workflow reads, deletes, or moves `%USERPROFILE%\Documents\LazyMind`.
+The assisted installer supports in-place upgrades and blocks downgrades. It offers two installation types:
+
+- **Simple installation (default):** installs the bundled Python environment as a single archive, avoiding installation-time expansion and the long per-file firewall/antivirus scan. Python is expanded automatically on first launch.
+- **Full installation:** expands Python and warms the bundled Python, Node, and local services before setup completes, matching the previous installer behavior.
+
+Silent installs default to simple mode and accept `--simple-install` or `--full-install` explicitly. On a fresh or repair install, existing `%LOCALAPPDATA%\LazyMind` data can be retained (the default) or cleared. Upgrades always retain it. The uninstaller similarly defaults to removing the program only and can optionally clear Local AppData. Neither workflow reads, deletes, or moves `%USERPROFILE%\Documents\LazyMind`.
 
 ## Trusted local mode
 

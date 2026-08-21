@@ -256,6 +256,7 @@ fi
 node "${ROOT}/desktop/scripts/write-runtime-manifest.mjs" \
   "${RUNTIME_ROOT}" --platform darwin --arch arm64 \
   --trusted-local-mode "${TRUSTED_LOCAL_MODE}"
+node "${ROOT}/desktop/scripts/write-editable-ppt-dependency-config.mjs" "${RUNTIME_ROOT}"
 
 echo "==> Packaging Electron app"
 if [[ ! -f "${APP_ICON}" ]]; then

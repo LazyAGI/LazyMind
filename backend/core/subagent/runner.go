@@ -74,8 +74,8 @@ type TaskEvent struct {
 	// Text / think streaming content.
 	Text  string `json:"text,omitempty"`
 	Think string `json:"think,omitempty"`
-	// Attempt-scoped Markdown Draft preview fields. These events are stored only
-	// in the short-lived Task stream and never persisted as artifacts or steps.
+	// Attempt-scoped Markdown Draft preview fields. These events remain
+	// ephemeral and are never persisted as artifacts or steps.
 	StreamID   string `json:"stream_id,omitempty"`
 	ChunkIndex int64  `json:"chunk_index,omitempty"`
 	Delta      string `json:"delta,omitempty"`
@@ -234,9 +234,10 @@ func routeEventWithWorkflowHooks(ctx context.Context, db *gorm.DB, stateStore st
 		// Draft preview events are intentionally ephemeral: append to the Task
 		// stream below, without creating DB steps, artifacts, or workflow revisions.
 	}
-	if isArtifactStreamEvent(ev.Type) {
-		// Deliver Draft preview events immediately to SSE clients connected to
-		// this process, without waiting for the Redis replay copy.
+	if isArtifactStreamEvent(ev.Type) || ev.Type == "progress" ||
+		ev.Type == "done" || ev.Type == "error" {
+		// Deliver preview, phase, and terminal updates immediately to connected
+		// clients, without waiting for the Redis replay copy.
 		taskLiveEvents.publish(ev.TaskID, ev)
 	}
 	_ = AppendStreamEvent(ctx, stateStore, ev.TaskID, ev)
@@ -277,12 +278,18 @@ func PublishConversationTaskEvent(
 	}
 	if task.AgentType == "workflow_step" {
 		switch ev.Type {
+		case "artifact_stream_start", "artifact_stream", "artifact_stream_end", "artifact_stream_abort":
+			// WorkflowPanel consumes Writer previews from the one conversation
+			// stream even though workflow tasks stay hidden from TaskCenter.
+			EventHooks.CallConversationEvent(ctx, stateStore, task.ConversationID, "", "task_updated",
+				map[string]any{"task_id": ev.TaskID, "event": ev})
 		case "task_start", "progress", "artifact", "done", "error":
+			EventHooks.CallConversationEvent(ctx, stateStore, task.ConversationID, "",
+				"workflow_runtime_updated", map[string]any{"task_id": ev.TaskID, "change": ev.Type})
 		default:
-			return
+			// Tool and reasoning events for workflow steps are not shown in the
+			// standalone task panel and do not affect WorkflowPanel projections.
 		}
-		EventHooks.CallConversationEvent(ctx, stateStore, task.ConversationID, "",
-			"workflow_runtime_updated", map[string]any{"task_id": ev.TaskID, "change": ev.Type})
 		return
 	}
 	if ev.Type == "artifact" {

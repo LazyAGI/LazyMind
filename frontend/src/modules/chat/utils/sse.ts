@@ -77,6 +77,7 @@ type CustomEventReadyStateChangeType = CustomEvent & {
 /** Custom error event types. */
 type CustomEventErrorType = CustomEvent & {
   data: unknown;
+  status: number;
 };
 
 /** Custom data event types. */
@@ -321,7 +322,9 @@ class SSE {
     const event = new CustomEvent(TriggerEvent.ERROR) as CustomEventErrorType;
 
     /** Set the data for the error. */
-    event.data = (e.currentTarget as XMLHttpRequest).response;
+    const xhr = e.currentTarget as XMLHttpRequest;
+    event.data = xhr?.response;
+    event.status = Number(xhr?.status || this.xhr?.status || 0);
 
     /** Dispatch the event. */
     this.dispatchEvent(event);
