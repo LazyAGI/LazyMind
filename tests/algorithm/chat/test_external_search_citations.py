@@ -208,4 +208,4 @@ def test_allowed_tool_names_are_forwarded_to_tool_manager():
     )[0]
 
     assert result['ok'] is False
-    assert 'FakeSearch_search' in result['message']
+    assert 'FakeSearch_search' in result['value']

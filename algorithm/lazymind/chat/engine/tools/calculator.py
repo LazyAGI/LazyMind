@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import math
-from typing import Any, Dict
 
 from lazyllm.tools.agent import ToolExecutionError
 
@@ -21,7 +20,7 @@ def format_calculation_result(value: int | float) -> str:
     return text
 
 
-def calculator(expression: str) -> Dict[str, Any]:
+def calculator(expression: str) -> str:
     """Evaluate a mathematical expression safely.
 
     Use this tool for numeric calculations, unit conversions, percentages, and
@@ -38,7 +37,7 @@ def calculator(expression: str) -> Dict[str, Any]:
             pi, e, and tau are available.
 
     Returns:
-        The evaluated value and its formatted representation.
+        The formatted calculation result.
     """
     normalized = str(expression or '').strip()
     try:
@@ -50,10 +49,4 @@ def calculator(expression: str) -> Dict[str, Any]:
     except ValueError as exc:
         raise ToolExecutionError(str(exc)) from exc
 
-    formatted = format_calculation_result(value)
-    return {
-        'status': 'ok',
-        'expression': normalized,
-        'result': formatted,
-        'value': value,
-    }
+    return format_calculation_result(value)

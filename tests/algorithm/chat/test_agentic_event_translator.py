@@ -232,7 +232,7 @@ def test_searchbase_tool_rendering_extracts_provider_brand():
         'result': [{'title': 'Agent news item', 'url': 'https://example.test'}],
     }, preview_value=preview_value)
 
-    assert '**Tavily** search results for **agent news** are ready now.' in result_text
+    assert '**Tavily** search for **agent news** returned **1** results.' in result_text
     assert '"name":"TavilySearch_search"' in result_text
 
 
@@ -301,7 +301,7 @@ def test_tool_rendering_preserves_explicit_approval_signal():
         'name': 'read_reference',
         'result': {
             'ok': False,
-            'message': 'Reading reference.md requires approval.',
+            'value': 'Reading reference.md requires approval.',
             'needs_approval': True,
         },
     }, language='zh', preview_value='reference.md')
@@ -315,7 +315,7 @@ def test_skill_reference_rendering_preserves_explicit_tool_failure():
         'name': 'read_reference',
         'result': {
             'ok': False,
-            'message': 'reference.md not found',
+            'value': 'reference.md not found',
         },
     }, language='zh', preview_value='reference.md')
 
@@ -336,7 +336,7 @@ def test_workflow_rendering_normalizes_canonical_success_and_failure():
         'name': 'trigger_writer_workflow',
         'result': {
             'ok': False,
-            'message': 'Workflow service is unavailable',
+            'value': 'Workflow service is unavailable',
         },
     })
 
@@ -366,7 +366,7 @@ def test_create_skill_rendering_uses_single_segment_name_and_preserves_failure()
         'name': 'SkillManagementToolkit_create_skill',
         'result': {
             'ok': False,
-            'message': "Skill name 'internal2/skill' is invalid.",
+            'value': "Skill name 'internal2/skill' is invalid.",
         },
     }, language='zh', preview_value='internal2/skill')
 

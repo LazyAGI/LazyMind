@@ -6,7 +6,7 @@ def _call(name, arguments):
 
 
 def _failure(tool='search'):
-    return {'ok': False, 'message': f'{tool} failed'}
+    return {'ok': False, 'value': f'{tool} failed'}
 
 
 class _RecordingToolManager:
@@ -82,8 +82,8 @@ def test_repeated_exact_failure_respects_consecutive_failure_limit():
 
     assert len(manager.calls) == 2
     assert blocked[0]['ok'] is False
-    assert '[Repeated Tool Failure]' in blocked[0]['message']
-    assert set(blocked[0]) == {'ok', 'message'}
+    assert '[Repeated Tool Failure]' in blocked[0]['value']
+    assert set(blocked[0]) == {'ok', 'value'}
 
 
 def test_different_parameter_guesses_are_blocked_after_consecutive_failures():
@@ -97,7 +97,7 @@ def test_different_parameter_guesses_are_blocked_after_consecutive_failures():
     blocked = guard([_call('url_fetch', {'url': 'https://three.example'})])
 
     assert len(manager.calls) == 2
-    assert '[Repeated Tool Failure]' in blocked[0]['message']
+    assert '[Repeated Tool Failure]' in blocked[0]['value']
 
 
 def test_success_resets_consecutive_failure_count():
@@ -149,7 +149,7 @@ def test_failure_can_be_retried_by_agent_until_failure_limit():
 
     blocked = guard([call])
 
-    assert '[Repeated Tool Failure]' in blocked[0]['message']
+    assert '[Repeated Tool Failure]' in blocked[0]['value']
     assert len(manager.calls) == 2
 
 
