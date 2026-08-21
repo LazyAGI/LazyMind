@@ -1,0 +1,206 @@
+name: resume-assistant
+version: 1.0.0
+description: >-
+  AI-powered resume / CV assistant: polish resumes and CVs, customize for jobs,
+  export to Word/Markdown/HTML/LaTeX/PDF, and score with actionable feedback.
+author: resume-assistant-team
+license: MIT
+keywords:
+  - resume
+  - cv
+  - career
+  - polish
+  - export
+  - scoring
+  - job-search
+
+# ============================================================
+# Commands
+# ============================================================
+commands:
+  # ---------- /resume polish ----------
+  - name: polish
+    description: Polish and improve resume content with a comprehensive checklist review.
+    usage: /resume polish
+    arguments:
+      - name: resume_content
+        description: The resume content to polish (plain text or Markdown).
+        required: true
+        type: string
+      - name: language
+        description: "Resume language: 'en' for English, 'zh' for Chinese."
+        required: false
+        type: string
+        default: en
+
+  # ---------- /resume customize ----------
+  - name: customize
+    description: Tailor a resume for a specific job position with keyword optimization.
+    usage: /resume customize
+    arguments:
+      - name: resume_content
+        description: The resume content to customize.
+        required: true
+        type: string
+      - name: job_description
+        description: The target job description or job title.
+        required: true
+        type: string
+      - name: language
+        description: "Resume language: 'en' for English, 'zh' for Chinese."
+        required: false
+        type: string
+        default: en
+
+  # ---------- /resume export ----------
+  - name: export
+    description: Export a resume to Word, Markdown, HTML, LaTeX, or PDF format.
+    usage: /resume export
+    arguments:
+      - name: resume_content
+        description: The resume content to export (Markdown format preferred).
+        required: true
+        type: string
+      - name: format
+        description: Target export format.
+        required: true
+        type: string
+        enum:
+          - word
+          - markdown
+          - html
+          - latex
+          - pdf
+      - name: template
+        description: Template style for the export.
+        required: false
+        type: string
+        default: professional
+        enum:
+          - professional
+          - modern
+          - minimal
+          - academic
+
+  # ---------- /resume score ----------
+  - name: score
+    description: >-
+      Score an existing resume and provide strengths, weaknesses,
+      and actionable improvement suggestions.
+    usage: /resume score
+    arguments:
+      - name: resume_content
+        description: The resume content to evaluate.
+        required: true
+        type: string
+      - name: target_role
+        description: Optional target role to evaluate the resume against.
+        required: false
+        type: string
+      - name: language
+        description: "Resume language: 'en' for English, 'zh' for Chinese."
+        required: false
+        type: string
+        default: en
+
+# ============================================================
+# Prompts
+# ============================================================
+prompts:
+  system: prompts/system.md
+  polish: prompts/polish.md
+  customize: prompts/customize.md
+  export: prompts/export.md
+  score: prompts/score.md
+
+# ============================================================
+# Templates
+# ============================================================
+templates:
+  professional: templates/professional.md
+  modern: templates/modern.md
+  minimal: templates/minimal.md
+  academic: templates/academic.md
+
+# ============================================================
+# Configuration
+# ============================================================
+config:
+  max_resume_length: 10000
+  supported_languages:
+    - en
+    - zh
+  supported_export_formats:
+    - word
+    - markdown
+    - html
+    - latex
+    - pdf
+
+# ============================================================
+# Conversation Starters (Quick Start examples)
+# ============================================================
+conversation_starters:
+  - "Create a resume for a software engineer position"
+  - "Polish my resume and fix any issues"
+  - "Optimize my resume for ATS"
+  - "Tailor my resume for this job description: [paste JD]"
+  - "Convert my resume to PDF"
+  - "Score my resume and tell me how to improve"
+  - "帮我写一份产品经理的简历"
+  - "润色我的简历"
+  - "帮我把简历转成 Word 格式"
+  - "给我的简历打个分"
+
+# ============================================================
+# Natural Language Triggers (intent → command mapping)
+# ============================================================
+natural_language_triggers:
+  polish:
+    - "polish my resume"
+    - "fix my resume"
+    - "improve my resume"
+    - "review my resume"
+    - "optimize for ATS"
+    - "make ATS-friendly"
+    - "proofread my resume"
+    - "check my resume"
+    - "润色简历"
+    - "优化简历"
+    - "修改简历"
+    - "检查简历"
+  customize:
+    - "create a resume for"
+    - "write a resume for"
+    - "tailor my resume"
+    - "customize my resume"
+    - "adapt my resume for"
+    - "target this job"
+    - "match this job description"
+    - "写一份简历"
+    - "定制简历"
+    - "针对这个职位"
+  export:
+    - "convert to"
+    - "export as"
+    - "export to"
+    - "save as"
+    - "give me a PDF"
+    - "generate Word"
+    - "generate HTML"
+    - "generate LaTeX"
+    - "转换格式"
+    - "导出为"
+    - "转成PDF"
+    - "转成Word"
+  score:
+    - "score my resume"
+    - "rate my resume"
+    - "evaluate my resume"
+    - "how good is my resume"
+    - "what's wrong with my resume"
+    - "grade my resume"
+    - "assess my resume"
+    - "给简历打分"
+    - "评估简历"
+    - "简历怎么样"

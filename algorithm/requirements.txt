@@ -9,6 +9,7 @@ setuptools<81
 
 
 beautifulsoup4
+requests>=2.31.0,<3.0.0
 openpyxl==3.1.5
 python-docx
 pillow

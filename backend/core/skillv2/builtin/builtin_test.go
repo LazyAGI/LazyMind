@@ -1,6 +1,7 @@
 package builtin
 
 import (
+	"path/filepath"
 	"testing"
 )
 
@@ -93,5 +94,83 @@ func TestParseSkillMDMetadata_TrimsWhitespace(t *testing.T) {
 	name, desc := parseSkillMDMetadata(content)
 	if name != "Padded" || desc != "Desc with spaces" {
 		t.Fatalf("got name=%q desc=%q", name, desc)
+	}
+}
+
+func TestThirdPartyBuiltinSkillPackages(t *testing.T) {
+	root, err := filepath.Abs("../../../../skills")
+	if err != nil {
+		t.Fatalf("resolve builtin skill root: %v", err)
+	}
+	t.Setenv("LAZYMIND_BUILTIN_SKILLS_DIR", root)
+
+	tests := []struct {
+		dirName string
+		files   []string
+	}{
+		{
+			dirName: "hot-news-summary",
+			files: []string{
+				"SKILL.md",
+				"references/output-format.md",
+				"scripts/hot_list_fetcher.py",
+			},
+		},
+		{
+			dirName: "resume-assistant",
+			files: []string{
+				"README.md",
+				"README_ZH.md",
+				"SKILL.md",
+				"SKILL_ZH.md",
+				"_meta.json",
+				"examples/sample-resume-en.md",
+				"examples/sample-resume-weak.md",
+				"examples/sample-resume-zh.md",
+				"examples/usage.md",
+				"prompts/customize.md",
+				"prompts/export.md",
+				"prompts/polish.md",
+				"prompts/score.md",
+				"prompts/system.md",
+				"skill.json",
+				"skill.yaml",
+				"templates/academic.md",
+				"templates/export/resume.html",
+				"templates/minimal.md",
+				"templates/modern.md",
+				"templates/professional.md",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.dirName, func(t *testing.T) {
+			var manifest *Manifest
+			for i := range Manifests {
+				if Manifests[i].DirName == tt.dirName {
+					manifest = &Manifests[i]
+					break
+				}
+			}
+			if manifest == nil {
+				t.Fatalf("manifest for %s not found", tt.dirName)
+			}
+			pkg, err := LoadPackage(*manifest)
+			if err != nil {
+				t.Fatalf("load package: %v", err)
+			}
+			if pkg.Name == "" || pkg.Description == "" {
+				t.Fatalf("frontmatter metadata missing: name=%q description=%q", pkg.Name, pkg.Description)
+			}
+			if len(pkg.Files) != len(tt.files) {
+				t.Fatalf("package contains %d files, want %d: %#v", len(pkg.Files), len(tt.files), pkg.Files)
+			}
+			for _, filePath := range tt.files {
+				if _, ok := pkg.Files[filePath]; !ok {
+					t.Errorf("package missing %s", filePath)
+				}
+			}
+		})
 	}
 }

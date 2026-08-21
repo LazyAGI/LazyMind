@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{name}} — Resume</title>
+    <style>
+        /* === Reset & Base === */
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+            font-size: 14px;
+            line-height: 1.6;
+            color: #333;
+            background: #f5f5f5;
+        }
+
+        /* === Resume Container === */
+        .resume {
+            max-width: 800px;
+            margin: 40px auto;
+            background: #fff;
+            padding: 48px 56px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+        }
+
+        /* === Header === */
+        .header {
+            text-align: center;
+            margin-bottom: 28px;
+            padding-bottom: 18px;
+            border-bottom: 2px solid var(--primary, #2c3e50);
+        }
+        .header h1 {
+            font-size: 26px;
+            font-weight: 700;
+            color: var(--primary, #2c3e50);
+            letter-spacing: 1px;
+            margin-bottom: 6px;
+        }
+        .header .contact {
+            font-size: 13px;
+            color: #666;
+        }
+        .header .contact a {
+            color: var(--primary, #2c3e50);
+            text-decoration: none;
+        }
+        .header .contact .sep { margin: 0 6px; }
+
+        /* === Sections === */
+        .section { margin-bottom: 22px; }
+        .section h2 {
+            font-size: 15px;
+            font-weight: 700;
+            color: var(--primary, #2c3e50);
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            border-bottom: 1px solid #ddd;
+            padding-bottom: 5px;
+            margin-bottom: 12px;
+        }
+
+        /* === Experience === */
+        .entry { margin-bottom: 16px; }
+        .entry .row {
+            display: flex;
+            justify-content: space-between;
+            align-items: baseline;
+        }
+        .entry .title { font-weight: 700; font-size: 14px; color: var(--primary, #2c3e50); }
+        .entry .company { font-weight: 600; color: #555; }
+        .entry .meta { font-size: 13px; color: #888; }
+        .entry ul { margin-top: 5px; padding-left: 20px; }
+        .entry ul li { font-size: 13.5px; margin-bottom: 3px; line-height: 1.55; }
+
+        /* === Skills Grid === */
+        .skills-grid {
+            display: grid;
+            grid-template-columns: 130px 1fr;
+            gap: 5px 14px;
+        }
+        .skills-grid .cat { font-weight: 700; font-size: 13px; color: var(--primary, #2c3e50); }
+        .skills-grid .val { font-size: 13px; color: #555; }
+
+        /* === Print === */
+        @media print {
+            body { background: none; }
+            .resume { margin: 0; padding: 28px 36px; box-shadow: none; max-width: none; }
+            a { color: #333 !important; text-decoration: none !important; }
+            @page { margin: 0.5in; size: letter; }
+        }
+
+        /* === Professional (default) — navy #2c3e50 === */
+        .resume.professional { --primary: #2c3e50; }
+
+        /* === Modern — teal #00897b === */
+        .resume.modern { --primary: #00897b; border-left: 4px solid #00897b; }
+
+        /* === Minimal — charcoal #333 === */
+        .resume.minimal { --primary: #333; }
+        .resume.minimal .header { border-bottom: none; }
+        .resume.minimal .section h2 { text-transform: none; letter-spacing: 0; font-size: 14px; }
+
+        /* === Academic — dark navy, serif === */
+        .resume.academic { --primary: #1a1a2e; font-family: Georgia, 'Times New Roman', serif; }
+        .resume.academic .header h1 { font-size: 22px; }
+        .resume.academic .section h2 { text-transform: none; font-style: italic; }
+    </style>
+</head>
+<body>
+    <div class="resume {{template_class}}">
+
+        <div class="header">
+            <h1>{{name}}</h1>
+            <div class="contact">
+                {{email}} <span class="sep">·</span> {{phone}} <span class="sep">·</span> {{location}}
+                <br>
+                <a href="{{linkedin}}">LinkedIn</a> <span class="sep">·</span> <a href="{{portfolio}}">Portfolio</a>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Professional Summary</h2>
+            <p>{{summary}}</p>
+        </div>
+
+        <div class="section">
+            <h2>Experience</h2>
+            <!-- Repeat .entry for each position -->
+            <div class="entry">
+                <div class="row">
+                    <span class="title">{{job_title}}</span>
+                    <span class="meta">{{start_date}} – {{end_date}}</span>
+                </div>
+                <div class="row">
+                    <span class="company">{{company}}</span>
+                    <span class="meta">{{location}}</span>
+                </div>
+                <ul>
+                    <li>{{bullet}}</li>
+                </ul>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Education</h2>
+            <div class="entry">
+                <div class="row">
+                    <span class="title">{{degree}} in {{major}}</span>
+                    <span class="meta">{{graduation_date}}</span>
+                </div>
+                <span class="company">{{university}}</span>
+            </div>
+        </div>
+
+        <div class="section">
+            <h2>Skills</h2>
+            <div class="skills-grid">
+                <span class="cat">Technical:</span>
+                <span class="val">{{technical_skills}}</span>
+                <span class="cat">Tools:</span>
+                <span class="val">{{tools}}</span>
+                <span class="cat">Languages:</span>
+                <span class="val">{{languages}}</span>
+            </div>
+        </div>
+
+    </div>
+</body>
+</html>
