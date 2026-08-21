@@ -28,6 +28,7 @@ import {
   mergeChatMessageLists,
   stripAskUserReceipt,
 } from "@/modules/chat/utils/message";
+import { mergeChatStreamDelta } from "@/modules/chat/utils/streamDelta";
 import { splitThinkingContent } from "@/modules/chat/utils/thinking";
 import {
   buildCitedMessageText,
@@ -52,22 +53,6 @@ import {
 
 type UserEditApi = ReturnType<typeof useUserMessageEdit>;
 type RuntimeWaitingOperation = "chat" | "workflow";
-
-function appendStreamDelta(previous: string, incoming: string) {
-  if (!previous || !incoming) {
-    return previous + incoming;
-  }
-  if (incoming.startsWith(previous)) {
-    return incoming;
-  }
-  const maxOverlap = Math.min(previous.length, incoming.length);
-  for (let size = maxOverlap; size > 0; size -= 1) {
-    if (previous.endsWith(incoming.slice(0, size))) {
-      return previous + incoming.slice(size);
-    }
-  }
-  return previous + incoming;
-}
 
 interface UseChatConversationOptions {
   canChat: boolean;
@@ -140,7 +125,7 @@ export function useChatConversation({
       content: t("chat.ffmpegGifRequiredDesc"),
       okText: t("chat.configureFfmpeg"),
       cancelText: t("common.close"),
-      onOk: () => navigate("/model-providers/tools#ffmpeg-dependency"),
+      onOk: () => navigate("/settings?section=system_tools#ffmpeg-dependency"),
       afterClose: () => {
         ffmpegPromptOpenRef.current = false;
       },
@@ -225,6 +210,24 @@ export function useChatConversation({
     activeStreamRef.current = false;
     setLoading(false);
     setIsStreaming(false);
+  }
+
+  function rollbackFailedStreamOpen(conversationId: string, stream?: any) {
+    if (streamManager.getStream(conversationId)) {
+      streamManager.closeAndCleanup(conversationId);
+    } else {
+      try {
+        stream?.close?.();
+      } catch (error) {
+        console.error("Failed to close rejected chat stream:", error);
+      }
+    }
+    if (currentConversationIdRef.current === conversationId) {
+      if (conversationId.startsWith("temp_")) {
+        currentConversationIdRef.current = "";
+      }
+      closeSSE();
+    }
   }
 
   function disconnectConversationStream(
@@ -623,6 +626,7 @@ export function useChatConversation({
             result.conversation_id,
             sseRef.current,
             streamCallbacks,
+            event,
           );
 
           const cachedList = conversationMessagesCache.current.get(
@@ -658,8 +662,13 @@ export function useChatConversation({
       result.runtime_event?.type === "run_finished"
         ? result.runtime_event.data
         : undefined;
+    const legacyTerminal = Boolean(
+      result.finish_reason &&
+        result.finish_reason !==
+          ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified,
+    );
     const allRunsFinished = Boolean(
-      runTerminal &&
+      (runTerminal || legacyTerminal) &&
         (messageConversationId || currentConversationIdAtStart) &&
         streamManager.isStreamFinished(
           messageConversationId || currentConversationIdAtStart,
@@ -671,7 +680,12 @@ export function useChatConversation({
         )
       : undefined;
 
-    if (isActiveConversation && finalRunTerminal?.status === "completed") {
+    if (
+      isActiveConversation &&
+      (finalRunTerminal?.status === "completed" ||
+        result.finish_reason ===
+          ChatConversationsResponseFinishReasonEnum.FinishReasonStop)
+    ) {
       scroll.isMouseScrollingRef.current = true;
     }
 
@@ -780,9 +794,10 @@ export function useChatConversation({
 
       const previousRawDelta =
         assistantMessage.raw_delta || assistantMessage.delta || "";
-      const mergedRawDelta = appendStreamDelta(
+      const mergedRawDelta = mergeChatStreamDelta(
         previousRawDelta,
         result.delta || "",
+        result.delta_mode,
       );
       const splitResult = splitThinkingContent(
         mergedRawDelta,
@@ -871,17 +886,24 @@ export function useChatConversation({
       timeout: (e) => onTimeout(e),
     };
 
-    const sseOrPromise = onOpenSSE(input, action, {}, extras);
-    const sse =
-      sseOrPromise instanceof Promise ? await sseOrPromise : sseOrPromise;
-    sseRef.current = sse;
+    let sse: any;
+    try {
+      const sseOrPromise = onOpenSSE(input, action, {}, extras);
+      sse =
+        sseOrPromise instanceof Promise ? await sseOrPromise : sseOrPromise;
+      sseRef.current = sse;
 
-    streamManager.registerStream(conversationId, sse, callbacks);
-    streamManager.setActiveConversation(conversationId);
+      streamManager.registerStream(conversationId, sse, callbacks);
+      streamManager.setActiveConversation(conversationId);
 
-    const currentList = messageListRef.current;
-    conversationMessagesCache.current.set(conversationId, currentList);
-    streamManager.saveMessageList(conversationId, currentList);
+      const currentList = messageListRef.current;
+      conversationMessagesCache.current.set(conversationId, currentList);
+      streamManager.saveMessageList(conversationId, currentList);
+    } catch (error) {
+      console.error("Failed to open chat SSE:", error);
+      rollbackFailedStreamOpen(conversationId, sse);
+      return false;
+    }
 
     if (conversationId.startsWith("temp_")) {
       const tempId = conversationId;
@@ -997,6 +1019,7 @@ export function useChatConversation({
       return true;
     } catch (error) {
       console.error("Failed to open resume SSE:", error);
+      rollbackFailedStreamOpen(conversationId, sseRef.current);
       if (!isRecoveryCycle) {
         void handleStreamRecoveryFailure(conversationId, 0);
       }
@@ -1125,6 +1148,7 @@ export function useChatConversation({
     ) {
       return;
     }
+    const previousMessageList = messageListRef.current;
     const normalizedCiteMessages =
       paramsCiteMessages
         ?.map((item) => item.trim())
@@ -1212,20 +1236,32 @@ export function useChatConversation({
 
     scroll.isMouseScrollingRef.current = true;
     scroll.scrollToEnd();
-    await openSSE(inputs, ChatConversationsRequestActionEnum.ChatActionNext, {
-      ...(params.run_in_background ? { run_in_background: true } : {}),
-      ...(params.thinking_depth
-        ? { thinking_depth: params.thinking_depth }
-        : {}),
-      ...(params.mentions?.length ? { mentions: params.mentions } : {}),
-      ...(paramsCiteHistoryIds?.length
-        ? {
-            cite_history_ids: paramsCiteHistoryIds.filter(
-              (historyId): historyId is string => Boolean(historyId?.trim()),
-            ),
-          }
-        : {}),
-    });
+    const opened = await openSSE(
+      inputs,
+      ChatConversationsRequestActionEnum.ChatActionNext,
+      {
+        ...(params.run_in_background ? { run_in_background: true } : {}),
+        ...(params.thinking_depth
+          ? { thinking_depth: params.thinking_depth }
+          : {}),
+        ...(params.mentions?.length ? { mentions: params.mentions } : {}),
+        ...(paramsCiteHistoryIds?.length
+          ? {
+              cite_history_ids: paramsCiteHistoryIds.filter(
+                (historyId): historyId is string => Boolean(historyId?.trim()),
+              ),
+            }
+          : {}),
+      },
+    );
+    if (!opened) {
+      messageListRef.current = previousMessageList;
+      setMessageList(previousMessageList);
+      if (clearInput) {
+        setContent(normalizedText);
+      }
+      return;
+    }
 
     const currentId = currentConversationIdRef.current;
     if (currentId) {
@@ -1373,7 +1409,7 @@ export function useChatConversation({
     // until Core emits the authoritative cancelled run_finished event.
   }
 
-  function regenerate() {
+  async function regenerate() {
     if (!canChat) {
       if (disabledReason) {
         message.warning(disabledReason);
@@ -1393,6 +1429,7 @@ export function useChatConversation({
     }
 
     const currentId = currentConversationIdRef.current;
+    const previousMessageList = messageListRef.current;
     if (currentId) {
       clearStreamRecovery(currentId);
       streamManager.closeAndCleanup(currentId);
@@ -1424,10 +1461,21 @@ export function useChatConversation({
     }
 
     scroll.isMouseScrollingRef.current = true;
-    void openSSE(
+    const opened = await openSSE(
       regenerationInputs,
       ChatConversationsRequestActionEnum.ChatActionRegeneration,
     );
+    if (!opened) {
+      messageListRef.current = previousMessageList;
+      setMessageList(previousMessageList);
+      if (currentId) {
+        conversationMessagesCache.current.set(
+          currentId,
+          previousMessageList,
+        );
+        streamManager.saveMessageList(currentId, previousMessageList);
+      }
+    }
   }
 
   async function retryStreamRecovery() {

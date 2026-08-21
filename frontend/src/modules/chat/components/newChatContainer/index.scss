@@ -558,7 +558,7 @@
       display: flex;
       flex-direction: column;
       align-items: center;
-      justify-content: center;
+      justify-content: safe center;
       gap: 1px;
       overflow-y: auto;
       scrollbar-width: none;
@@ -573,8 +573,9 @@
       display: grid;
       place-items: center;
       width: 28px;
-      height: 16px;
-      flex: 0 0 16px;
+      height: 24px;
+      min-height: 24px;
+      flex: 0 0 24px;
       margin-left: calc(var(--trail-depth, 0) * 3px);
       padding: 0;
       border: 0;

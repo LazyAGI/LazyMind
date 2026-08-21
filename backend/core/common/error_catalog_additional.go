@@ -395,14 +395,14 @@ func init() {
 	registerAdditionalError("archive folder is not empty; choose a move target", http.StatusConflict, 2002120)
 	registerAdditionalError("archive folder move target must differ from source", http.StatusBadRequest, 2002121)
 	registerAdditionalError("delete archive folder failed", http.StatusInternalServerError, 2002122)
-	registerAdditionalError("codex tcp bridge token is required", http.StatusServiceUnavailable, 2002280)
-	registerAdditionalError("writer download conversion is too large", http.StatusRequestEntityTooLarge, 2002281)
-	registerAdditionalError("slot must be source_document, outline_document, or draft_document", http.StatusBadRequest, 2002282)
-	registerAdditionalError("active", http.StatusNotFound, 2002283)
-	registerAdditionalError("slot must be outline_document or draft_document", http.StatusBadRequest, 2002284)
-	registerAdditionalError("invalid document", http.StatusBadRequest, 2002285)
-	registerAdditionalError("decode attempt result", http.StatusInternalServerError, 2002286)
-	registerAdditionalErrorPattern("control.next_step %q is not a reachable choice from %q", "Workflow next step is not reachable", http.StatusInternalServerError, 2002287)
+	registerAdditionalError("codex tcp bridge token is required", http.StatusServiceUnavailable, 2002284)
+	registerAdditionalError("writer download conversion is too large", http.StatusRequestEntityTooLarge, 2002285)
+	registerAdditionalError("slot must be source_document, outline_document, or draft_document", http.StatusBadRequest, 2002286)
+	registerAdditionalError("active", http.StatusNotFound, 2002287)
+	registerAdditionalError("slot must be outline_document or draft_document", http.StatusBadRequest, 2002288)
+	registerAdditionalError("invalid document", http.StatusBadRequest, 2002289)
+	registerAdditionalError("decode attempt result", http.StatusInternalServerError, 2002290)
+	registerAdditionalErrorPattern("control.next_step %q is not a reachable choice from %q", "Workflow next step is not reachable", http.StatusInternalServerError, 2002291)
 
 	// Chat attachment, editable PPTX, and Workflow artifact errors.
 	registerAdditionalErrorPattern("resolve turn %q", "Failed to resolve chat turn attachments", http.StatusInternalServerError, 2002123)
@@ -434,7 +434,6 @@ func init() {
 	registerAdditionalError("final ppt action revision is incomplete", http.StatusInternalServerError, 2002149)
 	registerAdditionalError("parse workflow slot manifest", http.StatusInternalServerError, 2002150)
 	registerAdditionalErrorPattern("artifact slot %q is not declared in workflow revision %s", "Artifact slot is not declared in the Workflow revision", http.StatusUnprocessableEntity, 2002151)
-
 	registerAdditionalError("import files failed", http.StatusInternalServerError, 2002152)
 	registerAdditionalErrorPattern("import market files batch %d failed", "import market files batch %d failed", http.StatusInternalServerError, 2002153)
 	registerAdditionalError("input_extensions is required", http.StatusInternalServerError, 2002154)
@@ -564,6 +563,10 @@ func init() {
 	registerAdditionalError("git rev-parse head failed", http.StatusInternalServerError, 2002277)
 	registerAdditionalErrorPattern("git rev-parse head returned invalid commit %q", "git rev-parse head returned invalid commit %q", http.StatusInternalServerError, 2002278)
 	registerAdditionalErrorPattern("hash %s failed", "hash %s failed", http.StatusInternalServerError, 2002279)
+	registerAdditionalError("at least two internal skills are required", http.StatusBadRequest, 2002280)
+	registerAdditionalError("zip downloader is not configured", http.StatusInternalServerError, 2002281)
+	registerAdditionalErrorPattern("unsupported market skill source type %q", "Unsupported market skill source type", http.StatusBadRequest, 2002282)
+	registerAdditionalError("skill package stored path is required", http.StatusBadRequest, 2002283)
 }
 
 func registerAdditionalError(message string, status, code int) {

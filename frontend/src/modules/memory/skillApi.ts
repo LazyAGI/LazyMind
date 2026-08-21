@@ -412,7 +412,6 @@ export interface CreateSkillPayload {
 }
 
 export interface PublishSkillToMarketPayload {
-  name: string;
   tags: string[];
   source:
     | { type: "uploaded_zip"; uploadId: string }
@@ -1824,7 +1823,7 @@ export async function publishSkillToMarket(
 ): Promise<{ marketItemId: string; sourceSkillId: string }> {
   const response = await skillMarketApi.apiCoreSkillMarketAdminItemsPost({
     marketPublishOpenAPIRequest: {
-      name: payload.name,
+      name: "",
       tags: payload.tags,
       source:
         payload.source.type === "uploaded_zip"

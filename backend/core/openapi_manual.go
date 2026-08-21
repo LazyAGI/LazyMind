@@ -594,7 +594,7 @@ func manualSchemas() map[string]any {
 			prop("diagnostic_id", strSchema()),
 		),
 		"ChatRuntimeEvent":            obj(prop("schema_version", intSchema()), prop("event_id", strSchema()), prop("run_id", strSchema()), prop("type", strSchema()), prop("data", obj())),
-		"ChatChunkResponse":           obj(prop("conversation_id", strSchema()), prop("seq", intSchema()), prop("message", strSchema()), prop("delta", strSchema()), prop("history_id", strSchema()), prop("sources", array(obj())), prop("prompt_questions", array(strSchema())), prop("reasoning_content", strSchema()), prop("thinking_duration_s", int64Schema()), prop("runtime_event", refSchema("ChatRuntimeEvent")), prop("execution", refSchema("ExternalExecutionProjection"))),
+		"ChatChunkResponse":           obj(prop("conversation_id", strSchema()), prop("seq", intSchema()), prop("message", strSchema()), prop("delta", strSchema()), prop("delta_mode", enumStringSchema("append", "replace")), prop("history_id", strSchema()), prop("sources", array(obj())), prop("prompt_questions", array(strSchema())), prop("reasoning_content", strSchema()), prop("thinking_duration_s", int64Schema()), prop("runtime_event", refSchema("ChatRuntimeEvent")), prop("execution", refSchema("ExternalExecutionProjection"))),
 		"ACLApiResponse":              obj(prop("code", intSchema()), prop("message", strSchema()), prop("data", obj())),
 		"AddACLRequest":               objReq([]string{"grantee_type", "grantee_id", "permission"}, prop("grantee_type", strSchema()), prop("grantee_id", strSchema()), prop("permission", strSchema()), prop("expires_at", dateTimeSchema())),
 		"UpdateACLRequest":            objReq([]string{"permission"}, prop("permission", strSchema()), prop("expires_at", dateTimeSchema())),

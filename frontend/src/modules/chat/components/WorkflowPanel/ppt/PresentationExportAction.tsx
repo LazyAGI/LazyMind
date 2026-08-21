@@ -165,7 +165,7 @@ export function PresentationExportAction({
       content: t('chat.editablePptRequiredDesc'),
       okText: t('chat.configureEditablePpt'),
       cancelText: t('common.close'),
-      onOk: () => navigate(dependency?.settings_url || '/model-providers/tools#editable-ppt-dependency'),
+      onOk: () => navigate(dependency?.settings_url || '/settings?section=system_tools#editable-ppt-dependency'),
     });
   }, [navigate, t]);
 

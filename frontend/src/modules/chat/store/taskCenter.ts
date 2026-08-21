@@ -100,6 +100,8 @@ export interface SubAgentTask {
   conversation_id?: string;
   trigger_history_id?: string;
   seq_in_conversation?: number;
+  created_at?: string;
+  updated_at?: string;
   title: string;
   agent_type: string;
   mode: string;
@@ -108,6 +110,7 @@ export interface SubAgentTask {
   current_phase?: string;
   estimated_sec?: number;
   summary?: string;
+  input_slots?: string[];
   output_slots?: string[];
   artifacts: TaskArtifact[];
   sources: ChatSource[];
@@ -142,6 +145,7 @@ interface TaskCenterStore {
   activeConversationId: string;
   // in-flight loadConversationTasks calls keyed by conversation_id.
   _loadingTasks: Record<string, boolean>;
+  _taskLoadErrors: Record<string, boolean>;
   _loadingArtifacts: Record<string, boolean>;
   // The only background execution stream: one connection for the active conversation.
   _convStream: SSE | null;
@@ -198,6 +202,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
   artifactsByConversation: {},
   activeConversationId: '',
   _loadingTasks: {},
+  _taskLoadErrors: {},
   _loadingArtifacts: {},
   _convStream: null,
 
@@ -243,8 +248,12 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
         if (task.seq_in_conversation === undefined) {
           incoming.seq_in_conversation = current.seq_in_conversation;
         }
+        if (task.created_at === undefined) {
+          incoming.created_at = current.created_at;
+        }
         next[idx] = incoming;
       } else {
+        const createdAt = task.created_at ?? new Date().toISOString();
         next = [
           ...list,
           {
@@ -265,6 +274,8 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             conversation_id: conversationId,
             trigger_history_id: task.trigger_history_id,
             seq_in_conversation: task.seq_in_conversation,
+            created_at: createdAt,
+            updated_at: task.updated_at ?? createdAt,
           },
         ];
       }
@@ -285,6 +296,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
         return state;
       }
       const task = { ...list[idx] };
+      task.updated_at = new Date().toISOString();
       switch (event.type) {
         case "task_start":
           task.status = "running";
@@ -561,7 +573,10 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
     }
     // Deduplicate concurrent calls for the same conversation.
     if (get()._loadingTasks[conversationId]) return;
-    set((s) => ({ _loadingTasks: { ...s._loadingTasks, [conversationId]: true } }));
+    set((s) => ({
+      _loadingTasks: { ...s._loadingTasks, [conversationId]: true },
+      _taskLoadErrors: { ...s._taskLoadErrors, [conversationId]: false },
+    }));
     try {
       const res = await TaskServiceApi().listConversationTasks(conversationId);
       const tasks = res?.data?.data?.tasks ?? res?.data?.tasks ?? [];
@@ -570,6 +585,8 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           conversation_id: conversationId,
           trigger_history_id: t.trigger_history_id,
           seq_in_conversation: t.seq_in_conversation,
+          created_at: t.created_at,
+          updated_at: t.updated_at,
           title: t.title ?? "",
           agent_type: t.agent_type ?? "",
           mode: t.mode ?? "auto",
@@ -578,6 +595,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           current_phase: t.current_phase,
           estimated_sec: t.estimated_sec,
           summary: t.summary,
+          input_slots: t.input_slots,
           output_slots: t.output_slots,
           artifacts: t.artifacts ?? [],
           sources: t.sources ?? [],
@@ -591,7 +609,9 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
         },
       }));
     } catch {
-      // ignore load failures; panel just stays empty.
+      set((s) => ({
+        _taskLoadErrors: { ...s._taskLoadErrors, [conversationId]: true },
+      }));
     } finally {
       set((s) => ({ _loadingTasks: { ...s._loadingTasks, [conversationId]: false } }));
     }
@@ -638,6 +658,10 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
         ...state.artifactsByConversation,
         [conversationId]: [],
       },
+      _taskLoadErrors: {
+        ...state._taskLoadErrors,
+        [conversationId]: false,
+      },
     }));
   },
 
@@ -681,6 +705,8 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
               agent_type: payload.agent_type,
               mode: payload.mode,
               status: payload.status || 'pending',
+              created_at: payload.created_at,
+              updated_at: payload.updated_at,
             });
           } else if (type === 'task_updated' && payload?.task_id && payload?.event) {
             if (replayed) return;

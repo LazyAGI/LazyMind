@@ -58,11 +58,19 @@ type MultiAnswerInfo struct {
 	CreatedAt          int64  `json:"created_at"`
 }
 
+type ChatDeltaMode string
+
+const (
+	ChatDeltaModeAppend  ChatDeltaMode = "append"
+	ChatDeltaModeReplace ChatDeltaMode = "replace"
+)
+
 type ChatChunkResponse struct {
 	ConversationID        string                       `json:"conversation_id"`
 	Seq                   int32                        `json:"seq"`
 	Message               string                       `json:"message"`
 	Delta                 string                       `json:"delta"`
+	DeltaMode             ChatDeltaMode                `json:"delta_mode,omitempty"`
 	HistoryID             string                       `json:"history_id"`
 	Sources               []any                        `json:"sources,omitempty"`
 	PromptQuestions       []string                     `json:"prompt_questions,omitempty"`

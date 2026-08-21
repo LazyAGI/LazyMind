@@ -279,7 +279,7 @@ const ImportTaskList = (props: IProps) => {
                       <div className="ellipsis-text">{display}</div>
                     </Tooltip>
                     <Button
-                      onClick={() => navigate("/model-providers/tools#ffmpeg-dependency")}
+                      onClick={() => navigate("/settings?section=system_tools#ffmpeg-dependency")}
                       size="small"
                       type="link"
                     >

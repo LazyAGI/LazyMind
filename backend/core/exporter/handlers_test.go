@@ -86,4 +86,7 @@ func TestHTMLPresentationCapabilitiesReportDependency(t *testing.T) {
 	if dependency["id"] != "editable-ppt-dependency" {
 		t.Fatalf("dependency = %#v", dependency)
 	}
+	if dependency["settings_url"] != "/settings?section=system_tools#editable-ppt-dependency" {
+		t.Fatalf("dependency = %#v", dependency)
+	}
 }

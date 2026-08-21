@@ -32,10 +32,14 @@ import { mapMarketSkillRecordToAsset } from "./skillMarketMockData";
 import NewWorkflowModal from "@/modules/workflow/components/NewWorkflowModal";
 import { shouldShowSkillMessageCenter } from "./collaborationVisibility";
 import { renderSkillCategoryIcon } from "./skillCategoryIcon";
+import {
+  canSubmitSkillOrganize,
+  isSkillOrganizeEligible,
+  MAX_SKILL_ORGANIZE_SELECTION,
+} from "./skillOrganizeRules";
 import "./index.scss";
 
 const DEFAULT_MARKET_PAGE_SIZE = 8;
-const MAX_SKILL_ORGANIZE_SELECTION = 20;
 export default function SkillManagementSection() {
   const listContentRef = useRef<HTMLDivElement>(null);
   const marketRequestIdRef = useRef(0);
@@ -396,7 +400,9 @@ export default function SkillManagementSection() {
       return;
     }
 
-    const additions = records.filter((record) => !next.has(record.id));
+    const additions = records.filter(
+      (record) => isSkillOrganizeEligible(record) && !next.has(record.id),
+    );
     const availableSlots = Math.max(
       0,
       MAX_SKILL_ORGANIZE_SELECTION - next.size,
@@ -412,8 +418,14 @@ export default function SkillManagementSection() {
   };
 
   const handleOrganizeSubmit = async () => {
-    const skills = [...selectedOrganizeSkills.values()];
-    if (skills.length === 0 || organizeSubmitting) {
+    const skills = [...selectedOrganizeSkills.values()].filter(
+      isSkillOrganizeEligible,
+    );
+    if (!canSubmitSkillOrganize(skills.length)) {
+      message.warning(t("admin.memorySkillOrganizeMinimumWarning"));
+      return;
+    }
+    if (organizeSubmitting) {
       return;
     }
 
