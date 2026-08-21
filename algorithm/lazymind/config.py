@@ -152,7 +152,6 @@ config.add('model_config_path', str, 'dynamic', 'MODEL_CONFIG_PATH',
            description='Runtime model config YAML path. Shorthand aliases are auto-resolved to absolute paths.',
            alias={
                'inner': str(_COMMON_DIR / 'runtime_models.inner.yaml'),
-               'local': str(_COMMON_DIR / 'runtime_models.local.yaml'),
                'online': str(_COMMON_DIR / 'runtime_models.online.yaml'),
                'dynamic': str(_COMMON_DIR / 'runtime_models.yaml'),
            },
