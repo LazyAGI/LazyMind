@@ -6,6 +6,7 @@ import json
 import math
 from typing import Any
 
+from .budget import resolve_max_input_tokens
 from .models import (
     AgentRunPlan,
     ContextUsageCategory,
@@ -199,6 +200,17 @@ async def estimate_context_usage(
 
 def report_to_dict(report: ContextUsageReport) -> dict[str, Any]:
     return asdict(report)
+
+
+def attach_window_budget(
+    report_data: dict[str, Any],
+    llm_config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    max_tokens = resolve_max_input_tokens(llm_config=llm_config)
+    estimated = int(report_data.get('estimated_tokens') or 0)
+    report_data['max_input_tokens'] = max_tokens
+    report_data['estimated_ratio'] = (float(estimated) / float(max_tokens)) if max_tokens else 0.0
+    return report_data
 
 
 def render_context_markdown(plan: AgentRunPlan, agent_context: dict[str, Any]) -> str:

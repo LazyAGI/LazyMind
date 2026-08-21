@@ -137,6 +137,7 @@ def _append_pending_assistant(
     pending_text_parts: list[str],
     pending_tool_calls: list[dict[str, Any]],
     saw_structured_segments: bool,
+    history_seq: Any = None,
 ) -> None:
     reasoning = '\n'.join(
         part.strip() for part in pending_reasoning_parts if str(part).strip()
@@ -149,6 +150,8 @@ def _append_pending_assistant(
         msg['reasoning_content'] = reasoning
     if pending_tool_calls:
         msg['tool_calls'] = list(pending_tool_calls)
+    if history_seq is not None:
+        msg['history_seq'] = history_seq
     normalized.append(msg)
     pending_reasoning_parts.clear()
     pending_text_parts.clear()
@@ -219,6 +222,7 @@ def normalize_history_for_agent(
         role = str(message.get('role') or '').strip()
         if role == 'assistant':
             content = _history_message_content(message)
+            history_seq = message.get('history_seq')
             segments = _parse_history_assistant_content(content)
 
             pending_reasoning_parts: list[str] = []
@@ -260,8 +264,9 @@ def normalize_history_for_agent(
                         pending_text_parts,
                         pending_tool_calls,
                         saw_structured_segments,
+                        history_seq=history_seq,
                     )
-                    normalized.append({
+                    tool_msg = {
                         'role': 'tool',
                         'tool_call_id': seg['id'],
                         'name': seg['name'],
@@ -274,7 +279,10 @@ def normalize_history_for_agent(
                                 separators=(',', ':'),
                             )
                         ),
-                    })
+                    }
+                    if history_seq is not None:
+                        tool_msg['history_seq'] = history_seq
+                    normalized.append(tool_msg)
 
             _append_pending_assistant(
                 normalized,
@@ -282,16 +290,23 @@ def normalize_history_for_agent(
                 pending_text_parts,
                 pending_tool_calls,
                 saw_structured_segments,
+                history_seq=history_seq,
             )
             continue
 
         if role == 'user':
             content = _history_message_content(message)
             if content:
-                normalized.append({'role': 'user', 'content': content})
+                user_msg: dict[str, Any] = {'role': 'user', 'content': content}
+                if message.get('history_seq') is not None:
+                    user_msg['history_seq'] = message.get('history_seq')
+                normalized.append(user_msg)
             continue
 
         content = _history_message_content(message)
         if content:
-            normalized.append({'role': role or 'assistant', 'content': content})
+            other: dict[str, Any] = {'role': role or 'assistant', 'content': content}
+            if message.get('history_seq') is not None:
+                other['history_seq'] = message.get('history_seq')
+            normalized.append(other)
     return _drop_incomplete_tool_exchanges(normalized)

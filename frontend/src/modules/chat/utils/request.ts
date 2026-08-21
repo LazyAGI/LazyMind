@@ -110,6 +110,8 @@ export interface ContextUsageReport {
   estimated_tokens: number;
   max_input_tokens?: number;
   estimated_ratio?: number;
+  compression_applied?: boolean;
+  compression_covered_through_seq?: number;
   categories: ContextUsageCategory[];
   estimation_version: string;
   preview_accuracy?: "deterministic" | "rule_only" | "llm_enhanced";

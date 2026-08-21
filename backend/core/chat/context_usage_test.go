@@ -2,6 +2,29 @@ package chat
 
 import "testing"
 
+func TestApplyCatalogWindowIfMissingKeepsPythonBudget(t *testing.T) {
+	pythonBudget := int64(64000)
+	report := &ContextUsageResponse{
+		EstimatedTokens:               3200,
+		MaxInputTokens:                &pythonBudget,
+		CompressionApplied:            true,
+		CompressionCoveredThroughSeq: 14,
+	}
+	applyCatalogWindowIfMissing(t.Context(), nil, "user-1", report)
+	if report.MaxInputTokens == nil || *report.MaxInputTokens != 64000 {
+		t.Fatalf("MaxInputTokens = %v, want 64000 from python", report.MaxInputTokens)
+	}
+	if !report.CompressionApplied || report.CompressionCoveredThroughSeq != 14 {
+		t.Fatalf("compression fields mutated: %#v", report)
+	}
+	if report.EstimatedRatio == nil {
+		t.Fatal("EstimatedRatio is nil")
+	}
+	if got := *report.EstimatedRatio; got < 0.049 || got > 0.051 {
+		t.Fatalf("EstimatedRatio = %v, want ~0.05", got)
+	}
+}
+
 func TestParseMaxInputTokens(t *testing.T) {
 	tests := map[string]int64{
 		"128K": 128000,

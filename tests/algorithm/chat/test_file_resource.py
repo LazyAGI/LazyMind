@@ -1,16 +1,18 @@
 from pathlib import Path
 
-import lazymind.chat.engine.tools.local_file.resolver as resolver
 import lazymind.chat.engine.tools.local_file.workspace as workspace_tools
 from lazymind.chat.engine.subagent.runner import _build_subagent_tools
+from lazymind.chat.engine.tools.local_file import resolver
 from lazymind.chat.engine.tools.local_file.ingest import ingest_pdf_file
 from lazymind.chat.engine.tools.local_file.store import (
     FileResourceStore,
     render_file_resource_catalog,
 )
 from lazymind.chat.engine.tools.local_file.window import (
+    RESULT_BYTE_BUDGET,
     read_lines_window,
     split_logical_lines,
+    utf8_size,
 )
 
 
@@ -184,6 +186,36 @@ def test_long_physical_line_is_split_and_continuable(monkeypatch, tmp_path):
     assert first['result']['next_offset'] == 2
     assert second['result']['eof'] is True
     assert first['result']['footer'].endswith('Use offset=2 to continue.')
+
+
+def test_window_budget_is_utf8_aware_and_continuable():
+    for unit in ('x', '中', '😀'):
+        content = unit * 20_000
+        lines = split_logical_lines(content)
+        offset = 1
+        visited = []
+        while offset <= len(lines):
+            window = read_lines_window(lines, offset=offset, limit=4000)
+            assert utf8_size(window['text']) < 16 * 1024
+            visited.extend(lines[offset - 1:window['end_line']])
+            if window['eof']:
+                break
+            assert window['next_offset'] == window['end_line'] + 1
+            offset = window['next_offset']
+        assert ''.join(visited) == content
+
+
+def test_read_file_envelope_stays_below_spill_threshold(monkeypatch, tmp_path):
+    _set_scope(monkeypatch, tmp_path)
+    tool_spills = tmp_path / 'tool_spills'
+    tool_spills.mkdir()
+    for index, unit in enumerate(('x', '中', '😀'), start=1):
+        relative = f'tool_spills/{index}.txt'
+        (tmp_path / relative).write_text(unit * 20_000, encoding='utf-8')
+        result = workspace_tools.read_file(relative)
+        assert result['success'] is True
+        assert utf8_size(str(result)) < 16 * 1024
+        assert utf8_size(result['result']['text']) <= RESULT_BYTE_BUDGET + 128
 
 
 def test_grep_zero_matches_has_explicit_footer(monkeypatch, tmp_path):

@@ -124,3 +124,8 @@ backend/core/openapi.json
 backend/core/swagger.json
 backend/core/docs/swagger.json
 openapi-export/
+
+# local experiment / work notes
+agent-lab/
+ch-workstate/
+.online_env

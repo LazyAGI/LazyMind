@@ -331,6 +331,26 @@ func TestMentionResourceContextMarksWorkflowAsExecutable(t *testing.T) {
 	}
 }
 
+func TestBuildLazyChatRequestPropagatesModelContext(t *testing.T) {
+	req := buildLazyChatRequest(map[string]any{
+		"model_context": map[string]any{
+			"summary_text":        "condensed history",
+			"covered_through_seq": float64(12),
+			"version":             float64(1),
+		},
+	})
+	if req.ModelContext == nil {
+		t.Fatal("ModelContext is nil")
+	}
+	if got := req.ModelContext["summary_text"]; got != "condensed history" {
+		t.Fatalf("summary_text = %#v, want condensed history", got)
+	}
+	if got := req.ModelContext["covered_through_seq"]; got != float64(12) {
+		t.Fatalf("covered_through_seq = %#v, want 12", got)
+	}
+}
+
+
 func TestMergeMentionedDatasetsPreservesDefaultsAndDeduplicates(t *testing.T) {
 	raw := map[string]any{"conversation": map[string]any{"search_config": map[string]any{
 		"dataset_list": []any{map[string]any{"id": "default"}},

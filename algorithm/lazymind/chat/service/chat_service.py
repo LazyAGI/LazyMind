@@ -57,6 +57,7 @@ from lazymind.chat.engine.agent_runtime import (
     estimate_context_usage,
     render_context_markdown,
     report_to_dict,
+    attach_window_budget,
     render_attachment_content,
 )
 from lazymind.chat.engine.tools.local_file.workspace import chat_agent_workspace
@@ -390,15 +391,23 @@ def _should_register_subagent_tools(
     )
 
 
+def _build_chat_workspace_read_tools() -> list:
+    """Read-only file tools that remain safe during bound Workflow turns."""
+    from lazymind.chat.engine.tools.local_file.workspace import (
+        grep,
+        read_file,
+    )
+    return [grep, read_file]
+
+
 def _build_chat_artifact_tools() -> list:
     """Workspace and artifact tools for the main ChatAgent."""
     from lazymind.chat.engine.tools.local_file.workspace import (
-        grep,
         list_dir,
-        read_file,
         save_chat_artifact,
         write_file,
     )
+    grep, read_file = _build_chat_workspace_read_tools()
     return [save_chat_artifact, grep, read_file, write_file, list_dir]
 
 
@@ -512,6 +521,35 @@ def _resolve_task_profile_with_model(inputs: dict[str, Any]) -> Any:
         classifier=classify,
         enable_llm_fallback=True,
     )
+
+
+def _context_preview_status(
+    model_context: Any,
+    *,
+    llm_enhanced: bool,
+    task_profile: Any = None,
+) -> dict[str, Any]:
+    covered_through_seq = int(model_context.get('covered_through_seq') or 0) \
+        if isinstance(model_context, dict) else 0
+    has_runtime_summary = bool(
+        isinstance(model_context, dict)
+        and str(model_context.get('summary_text') or '').strip()
+        and covered_through_seq > 0
+    )
+    requires_llm = bool(
+        not llm_enhanced and task_profile and task_profile.routing_review_required
+    )
+    return {
+        'preview_accuracy': (
+            'llm_enhanced' if llm_enhanced
+            else 'rule_only' if requires_llm
+            else 'deterministic'
+        ),
+        'requires_llm': requires_llm,
+        'llm_reason': task_profile.routing_review_reason if requires_llm else '',
+        'compression_applied': has_runtime_summary,
+        'compression_covered_through_seq': covered_through_seq if has_runtime_summary else 0,
+    }
 
 
 async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingResponse]:
@@ -696,6 +734,8 @@ async def _handle_chat_impl(
         'filters': filters if RAG_MODE and filters else {},
         'files': resolved_files,
         'history_files_per_turn': files_map,
+        'current_turn_seq': message.current_turn_seq,
+        'model_context': request.model_context or {},
         'databases': retrieval.databases or [],
         'dataset': retrieval.dataset,
         'local_fs_sources': retrieval.local_fs_sources or [],
@@ -984,10 +1024,12 @@ async def _handle_chat_impl(
     )
     ask_user_tools = _build_ask_user_tool() if allow_ask_user else []
     ask_user_configs = [ASK_USER_TOOL_CONFIG] if ask_user_tools else []
-    # Generic chat files are not Workflow artifacts. Keeping save_chat_artifact
-    # available on a bound Workflow turn lets the model claim success after
-    # writing an isolated file while the selected Workflow preview is unchanged.
-    artifact_tools = [] if workflow_turn_is_bound else _build_chat_artifact_tools()
+    # Bound Workflows own mutation, but read-only workspace tools remain available
+    # so compacted tool results and referenced attachments can still be inspected.
+    workspace_read_tools = _build_chat_workspace_read_tools()
+    artifact_tools = (
+        workspace_read_tools if workflow_turn_is_bound else _build_chat_artifact_tools()
+    )
     workspace = chat_agent_workspace(user_id or '0', conversation_id)
     skill_listing_tools = (
         [] if workflow_turn_is_bound
@@ -1005,12 +1047,12 @@ async def _handle_chat_impl(
     )
     if active_workflow_tool_isolation:
         # An active workflow owns mutation of its artifacts. Generic execution tools
-        # would create side artifacts outside the workflow lineage (for example a
-        # standalone generated image), so expose only workflow control/query tools.
+        # would create side artifacts outside the workflow lineage, so expose only
+        # workflow control/query tools plus read-only workspace inspection.
         # The Workflow's declarative rerun_when metadata still decides the owning step.
         active_configs = []
         attachment_configs = []
-        all_tools = [intentwriter, *ask_user_tools, *workflow_tools]
+        all_tools = [intentwriter, *ask_user_tools, *workflow_tools, *workspace_read_tools]
         LOG.info(
             '[ChatServer] [ACTIVE_WORKFLOW_TOOL_ISOLATION] [sid=%s] '
             '[workflow_id=%s] [outcome=%s] [tools=%s]',
@@ -1278,6 +1320,8 @@ async def _handle_chat_impl(
             keep_full_turns=_cfg['agentic_keep_full_turns'],
             fs=FS,
             skills_dir=','.join(filter(None, [_cfg['skill_fs_url'], workflow_skill_dir])),
+            llm_config=runtime.llm_config or {},
+
             max_retries={
                 'low': _cfg['agentic_max_rounds_low'],
                 'medium': _cfg['agentic_max_rounds_medium'],
@@ -1315,20 +1359,12 @@ async def _handle_chat_impl(
                     ])
                 return {'prompt_markdown': prompt_markdown}
             report = await estimate_context_usage(plan, agent_context)
-            report_data = report_to_dict(report)
-            llm_enhanced = runtime.context_preview_allow_llm_routing
-            requires_llm = bool(
-                not llm_enhanced and task_profile and task_profile.routing_review_required
-            )
-            report_data.update({
-                'preview_accuracy': (
-                    'llm_enhanced' if llm_enhanced
-                    else 'rule_only' if requires_llm
-                    else 'deterministic'
-                ),
-                'requires_llm': requires_llm,
-                'llm_reason': task_profile.routing_review_reason if requires_llm else '',
-            })
+            report_data = attach_window_budget(report_to_dict(report), runtime.llm_config or {})
+            report_data.update(_context_preview_status(
+                request.model_context or {},
+                llm_enhanced=runtime.context_preview_allow_llm_routing,
+                task_profile=task_profile,
+            ))
             return report_data
         finally:
             lazyllm.globals._init_sid(sid=lazyllm_session_id)

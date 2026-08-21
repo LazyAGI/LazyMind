@@ -263,8 +263,93 @@ config.add('agentic_workspace', str, './workspace', 'AGENTIC_WORKSPACE',
            description='Workspace directory for agentic tools.')
 config.add('trusted_local_mode', bool, False, 'TRUSTED_LOCAL_MODE',
            description='Allow agents to access host paths outside their workspace and use local command tools.')
-config.add('agentic_keep_full_turns', int, 0, 'AGENTIC_KEEP_FULL_TURNS',
-           description='Number of full turns retained in agentic history; 0 disables rolling compaction.')
+config.add('agentic_keep_full_turns', int, 2, 'AGENTIC_KEEP_FULL_TURNS',
+           description='Number of recent tool results kept intact during context compression; 0 disables it.')
+# Context compression knobs (process-level via LAZYMIND_*). Master switch gates all
+# strategies. Code defaults are ON; local .env may set them false until validated.
+# Summary strategy gates with context_compression_enabled AND
+# context_summary_compression_enabled. Do not put flags in request payload,
+# llm_config, or runtime_models YAML.
+config.add(
+    'context_compression_enabled',
+    bool,
+    True,
+    'CONTEXT_COMPRESSION_ENABLED',
+    description=(
+        'Master switch for ChatAgent context compression '
+        '(deterministic tool-result prune/compact and summary).'
+    ),
+)
+config.add('context_compression_default_max_input_tokens', int, 128000,
+           'CONTEXT_COMPRESSION_DEFAULT_MAX_INPUT_TOKENS',
+           description=(
+               'Fallback max input tokens when runtime_models.yaml llm.max_input_tokens '
+               'and llm_config/catalog do not provide one.'
+           ))
+config.add('context_compression_trigger_ratio', float, 0.9, 'CONTEXT_COMPRESSION_TRIGGER_RATIO',
+           description='Compress when estimated tokens reach this fraction of the effective input budget.')
+config.add('context_compression_target_ratio', float, 0.45, 'CONTEXT_COMPRESSION_TARGET_RATIO',
+           description='Target fraction of the effective input budget after compression.')
+config.add('context_compression_reserved_output_tokens', int, 8192,
+           'CONTEXT_COMPRESSION_RESERVED_OUTPUT_TOKENS',
+           description='Tokens reserved for model output when computing the effective input budget.')
+config.add('context_compression_min_reclaim_tokens', int, 10000,
+           'CONTEXT_COMPRESSION_MIN_RECLAIM_TOKENS',
+           description='Abandon compression when reclaimed tokens fall below this threshold.')
+config.add(
+    'context_compression_spill_bytes',
+    int,
+    16384,
+    'CONTEXT_COMPRESSION_SPILL_BYTES',
+    description=(
+        'Offload a tool result to the chat workspace when its UTF-8 size exceeds this '
+        'many bytes, even if it is inside the keep_recent window.'
+    ),
+)
+config.add(
+    'context_summary_compression_enabled',
+    bool,
+    True,
+    'CONTEXT_SUMMARY_COMPRESSION_ENABLED',
+    description=(
+        'Enable LLM summary compression after deterministic prune when still over '
+        'target. Requires context_compression_enabled.'
+    ),
+)
+config.add(
+    'context_summary_keep_recent_ratio',
+    float,
+    0.10,
+    'CONTEXT_SUMMARY_KEEP_RECENT_RATIO',
+    description='Max fraction of effective input budget kept as uncompressed recent Tail.',
+)
+config.add(
+    'context_summary_min_recent_user_turns',
+    int,
+    1,
+    'CONTEXT_SUMMARY_MIN_RECENT_USER_TURNS',
+    description='Minimum recent user turns (1-3) kept intact in the Tail.',
+)
+config.add(
+    'context_compression_event_path',
+    str,
+    '',
+    'CONTEXT_COMPRESSION_EVENT_PATH',
+    description=(
+        'Deprecated alias for agent_lab_event_path. Prefer LAZYMIND_AGENT_LAB_EVENT_PATH.'
+    ),
+)
+config.add(
+    'agent_lab_event_path',
+    str,
+    '',
+    'AGENT_LAB_EVENT_PATH',
+    description=(
+        'Optional JSONL path for agent-lab runtime telemetry '
+        '(turns, tools, file reads, harness, prune, summary). Empty disables writing.'
+    ),
+)
+
 config.add('dynamic_prompt_modules', bool, True, 'DYNAMIC_PROMPT_MODULES',
            description='Enable per-turn task profiling and progressive prompt-module disclosure.')
 config.add('agentic_stream_chunk_size', int, 24, 'AGENTIC_STREAM_CHUNK_SIZE',

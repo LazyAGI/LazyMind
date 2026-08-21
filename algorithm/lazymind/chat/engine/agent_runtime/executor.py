@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, AsyncIterator, Tuple
+import types
 import uuid
 from typing import Any, AsyncIterator, Optional, Tuple
 
@@ -13,6 +13,15 @@ from lazymind.config import config as _cfg
 from lazymind.chat.engine.tools.infra import CitationResultMiddleware
 
 from .models import AgentRole, AgentRunPlan
+from .pruner import apply_pre_turn_pruning, estimate_history_tokens, make_history_compactor
+from .telemetry import (
+    append_event,
+    emit_tool_call,
+    emit_tool_result,
+    make_runtime_observer,
+    sid,
+    telemetry_enabled,
+)
 from .tool_limit_control import tool_limit_decision_coordinator
 
 
@@ -117,6 +126,34 @@ def _log_tool_call(event: str, name: str, **fields: Any) -> None:
     lazyllm.LOG.info(
         f'[ToolCall] [sid={_tool_call_session_id()}] [event={event}] [name={name}]{suffix}'
     )
+
+
+def _sanitize_tools(tools: list[Any]) -> list[Any]:
+    """Drop invalid tool entries (e.g. partially-imported modules) before ReactAgent."""
+    cleaned: list[Any] = []
+    for tool in tools:
+        if isinstance(tool, types.ModuleType):
+            lazyllm.LOG.error(
+                '[AgentExecutor] dropping invalid tool module '
+                f'name={getattr(tool, "__name__", None)} file={getattr(tool, "__file__", None)}'
+            )
+            continue
+        if isinstance(tool, dict):
+            children = tool.get('tools')
+            if isinstance(children, list):
+                kept = []
+                for child in children:
+                    if isinstance(child, types.ModuleType):
+                        lazyllm.LOG.error(
+                            '[AgentExecutor] dropping invalid ToolGroup child module '
+                            f'group={tool.get("name")} name={getattr(child, "__name__", None)} '
+                            f'file={getattr(child, "__file__", None)}'
+                        )
+                        continue
+                    kept.append(child)
+                tool = {**tool, 'tools': kept}
+        cleaned.append(tool)
+    return cleaned
 
 
 class ToolCallGuard:
@@ -236,12 +273,15 @@ class ToolCallGuard:
                 results[index] = self._blocked(
                     name, 'this exact call already failed; do not retry it with the same arguments.',
                 )
+                emit_tool_call(tool_call, blocked=True, reason='repeated_failed_signature')
+                emit_tool_result(tool_call, results[index])
                 _log_tool_call(
                     'blocked', name, reason='repeated_failure', args=arguments,
                 )
                 continue
             if guarded and signature in pending_signatures:
                 duplicate_indices[index] = pending_signatures[signature]
+                emit_tool_call(tool_call, blocked=True, reason='duplicate_merged')
                 _log_tool_call(
                     'merged', name, reason='duplicate_in_batch', args=arguments,
                 )
@@ -254,11 +294,14 @@ class ToolCallGuard:
                     f'{failures} consecutive attempts failed. Stop changing parameters and use '
                     'another grounded source or explain that the evidence is unavailable.',
                 )
+                emit_tool_call(tool_call, blocked=True, reason='consecutive_failure_limit')
+                emit_tool_result(tool_call, results[index])
                 _log_tool_call(
                     'blocked', name, reason='consecutive_failures',
                     failures=failures, args=arguments,
                 )
                 continue
+            emit_tool_call(tool_call)
             pending.append(tool_call)
             pending_indices.append(index)
             if guarded:
@@ -276,6 +319,7 @@ class ToolCallGuard:
             elapsed = time.perf_counter() - started_at
             for index, tool_call, result in zip(pending_indices, pending, pending_results):
                 results[index] = result
+                emit_tool_result(tool_call, result)
                 name = str((tool_call.get('function') or {}).get('name') or '')
                 _log_tool_call(
                     'done', name, elapsed=f'{elapsed:.3f}s', **_summarize_tool_result(result),
@@ -294,6 +338,8 @@ class ToolCallGuard:
                         }
         for duplicate_index, original_index in duplicate_indices.items():
             results[duplicate_index] = results[original_index]
+            if results[duplicate_index] is not None:
+                emit_tool_result(tool_calls[duplicate_index], results[duplicate_index])
         return results
 
 
@@ -324,6 +370,48 @@ class AgentExecutor:
         from lazymind.chat.lazyllm_tool_docs import ensure_lazyllm_tool_docs
 
         options = plan.execution_options
+        keep_full_turns = options.keep_full_turns
+        if keep_full_turns is None:
+            keep_full_turns = int(_cfg['agentic_keep_full_turns'])
+        history_compactor = options.history_compactor
+        if history_compactor is None and _cfg['context_compression_enabled']:
+            history_compactor = make_history_compactor(
+                max_input_tokens=options.max_input_tokens,
+                llm_config=options.llm_config,
+                keep_recent=keep_full_turns,
+                trigger='mid_turn',
+                llm=llm,
+                workspace=options.workspace,
+            )
+        estimated = estimate_history_tokens(plan.history) if plan.history else 0
+        if telemetry_enabled():
+            append_event(
+                'run_prepare',
+                role=getattr(plan.role, 'value', str(plan.role)),
+                compression_enabled=bool(_cfg['context_compression_enabled']),
+                history_len=len(plan.history or []),
+                estimated_tokens=estimated,
+                sid=sid(),
+            )
+        if _cfg['context_compression_enabled'] and plan.history:
+            projected, _event = apply_pre_turn_pruning(
+                plan.history,
+                estimated_tokens=estimated,
+                max_input_tokens=options.max_input_tokens,
+                llm_config=options.llm_config,
+                keep_recent=keep_full_turns,
+                llm=llm,
+                workspace=options.workspace,
+            )
+            plan.history = projected
+        run_id = uuid.uuid4().hex[:12]
+        observer = (
+            make_runtime_observer(
+                role=getattr(plan.role, 'value', str(plan.role)),
+                run_id=run_id,
+            )
+            if telemetry_enabled() else None
+        )
         kwargs = {
             'stream': True,
             'max_retries': options.max_retries or _cfg['max_retries'],
@@ -338,13 +426,15 @@ class AgentExecutor:
         optional = {
             'skills': options.skills,
             'workspace': options.workspace,
-            'keep_full_turns': options.keep_full_turns,
+            'keep_full_turns': keep_full_turns,
+            'history_compactor': history_compactor,
             'fs': options.fs,
             'skills_dir': options.skills_dir,
             'extra_stop_condition': options.extra_stop_condition,
+            'runtime_observer': observer,
         }
         kwargs.update({key: value for key, value in optional.items() if value is not None})
-        tools = _deduplicate_tools(plan.tools)
+        tools = _sanitize_tools(_deduplicate_tools(plan.tools))
         ensure_lazyllm_tool_docs(tools)
         agent = _agent_mod.ReactAgent(
             llm=llm,
@@ -358,6 +448,7 @@ class AgentExecutor:
             max(2, int(_cfg['agentic_expanded_max_rounds'])),
             cancel_check=options.extra_stop_condition,
         )
+        agent._agent_lab_run_id = run_id
         # Restore lazy Toolkit activation before the streaming helper takes over.
         # Relying only on ReactAgent._pre_process makes restoration dependent on
         # llm_chat_history surviving the helper/framework call path.
@@ -380,32 +471,55 @@ class AgentExecutor:
         plan: AgentRunPlan,
     ) -> AsyncIterator[Tuple[str, Any]]:
         history = plan.history if plan.history else None
+        run_id = getattr(agent, '_agent_lab_run_id', '')
+        if telemetry_enabled():
+            append_event(
+                'run_start',
+                role=getattr(plan.role, 'value', str(plan.role)),
+                run_id=run_id,
+                history_len=len(history or []),
+                estimated_tokens=estimate_history_tokens(history or []),
+                input_preview=(plan.prompt.current_input or '')[:240],
+                sid=sid(),
+            )
         helper = _sh.StreamCallHelper(agent, init_sid=False)
         kwargs = {'llm_chat_history': history} if history is not None else {}
         finished_model_calls: set[str] = set()
-        async for item in helper.astream(plan.prompt.current_input, **kwargs):
-            self._record_finished_model_call(item, finished_model_calls)
-            yield 'event', item
+        failed = False
         try:
-            result = helper.future.result()
-        except Exception as exc:
-            terminal = self._find_model_terminal(exc)
-            model_call_id = str((terminal or {}).get('model_call_id') or '')
-            if terminal and model_call_id not in finished_model_calls:
-                yield 'event', {
-                    'tag': 'runtime_event',
-                    'runtime_event': {
-                        'schema_version': 1,
-                        'event_id': uuid.uuid4().hex,
-                        'type': 'model_call_finished',
-                        'data': terminal,
-                    },
-                }
-            lazyllm.LOG.exception(
-                f'[AgentExecutor] agent future raised: {type(exc).__name__}: {exc}'
-            )
-            raise
-        yield 'final', result
+            async for item in helper.astream(plan.prompt.current_input, **kwargs):
+                self._record_finished_model_call(item, finished_model_calls)
+                yield 'event', item
+            try:
+                result = helper.future.result()
+            except Exception as exc:
+                failed = True
+                terminal = self._find_model_terminal(exc)
+                model_call_id = str((terminal or {}).get('model_call_id') or '')
+                if terminal and model_call_id not in finished_model_calls:
+                    yield 'event', {
+                        'tag': 'runtime_event',
+                        'runtime_event': {
+                            'schema_version': 1,
+                            'event_id': uuid.uuid4().hex,
+                            'type': 'model_call_finished',
+                            'data': terminal,
+                        },
+                    }
+                lazyllm.LOG.exception(
+                    f'[AgentExecutor] agent future raised: {type(exc).__name__}: {exc}'
+                )
+                raise
+            yield 'final', result
+        finally:
+            if telemetry_enabled():
+                append_event(
+                    'run_end',
+                    role=getattr(plan.role, 'value', str(plan.role)),
+                    run_id=run_id,
+                    ok=not failed,
+                    sid=sid(),
+                )
 
     @staticmethod
     def _record_finished_model_call(item: Any, seen: set[str]) -> None:

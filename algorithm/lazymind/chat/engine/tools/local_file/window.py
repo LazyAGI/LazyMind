@@ -11,8 +11,25 @@ _DEFAULT_LIMIT = 2000
 _MAX_LIMIT = 4000
 _MAX_GREP_RESULTS = 50
 _MAX_SOURCE_BYTES = 20 * 1024 * 1024
-_MAX_RESULT_CHARS = 32000
+RESULT_BYTE_BUDGET = 10 * 1024
 _MAX_LOGICAL_LINE_CHARS = 4000
+_MAX_LOGICAL_LINE_BYTES = 8 * 1024
+
+
+def utf8_size(text: str) -> int:
+    return len(str(text or '').encode('utf-8', errors='replace'))
+
+
+def _take_utf8_prefix(text: str, max_bytes: int) -> tuple[str, str]:
+    if utf8_size(text) <= max_bytes:
+        return text, ''
+    size = 0
+    for index, char in enumerate(text):
+        char_size = utf8_size(char)
+        if size + char_size > max_bytes:
+            return text[:index], text[index:]
+        size += char_size
+    return text, ''
 
 
 def clamp_limit(limit: Optional[int]) -> int:
@@ -29,19 +46,25 @@ def split_logical_lines(
     text: str,
     *,
     max_line_chars: int = _MAX_LOGICAL_LINE_CHARS,
+    max_line_bytes: int = _MAX_LOGICAL_LINE_BYTES,
 ) -> List[str]:
     """Split physical lines deterministically so offset continuation never skips text."""
     max_line_chars = max(1, int(max_line_chars))
+    max_line_bytes = max(1, int(max_line_bytes))
     physical_lines = str(text or '').splitlines()
     lines: List[str] = []
     for physical in physical_lines:
         if not physical:
             lines.append('')
             continue
-        lines.extend(
-            physical[index:index + max_line_chars]
-            for index in range(0, len(physical), max_line_chars)
-        )
+        remaining = physical
+        while remaining:
+            candidate = remaining[:max_line_chars]
+            chunk, overflow = _take_utf8_prefix(candidate, max_line_bytes)
+            if not chunk:
+                chunk, overflow = candidate[:1], candidate[1:]
+            lines.append(chunk)
+            remaining = overflow + remaining[len(candidate):]
     return lines
 
 
@@ -86,15 +109,15 @@ def read_lines_window(
     requested_end = min(start + limit - 1, total) if start <= total else total
     end = 0
     body_lines: List[str] = []
-    chars = 0
+    result_bytes = 0
     if start <= total:
         for index in range(start, requested_end + 1):
             rendered = f'{index}: {lines[index - 1]}'
-            added = len(rendered) + (1 if body_lines else 0)
-            if body_lines and chars + added > _MAX_RESULT_CHARS:
+            added = utf8_size(rendered) + (1 if body_lines else 0)
+            if body_lines and result_bytes + added > RESULT_BYTE_BUDGET:
                 break
             body_lines.append(rendered)
-            chars += added
+            result_bytes += added
             end = index
     eof = start > total or end >= total
     if eof:
@@ -140,7 +163,7 @@ def grep_lines(
 
     matches: List[Dict[str, Any]] = []
     total_matches = 0
-    chars = 0
+    result_bytes = 0
     for index, raw in enumerate(lines, start=1):
         line = raw
         if not is_hit(line):
@@ -149,10 +172,12 @@ def grep_lines(
         snippet = line.strip()
         if len(snippet) > 240:
             snippet = snippet[:237] + '...'
-        added = len(snippet) + 32
-        if len(matches) < max_results and (not matches or chars + added <= _MAX_RESULT_CHARS):
+        added = utf8_size(snippet) + 32
+        if len(matches) < max_results and (
+            not matches or result_bytes + added <= RESULT_BYTE_BUDGET
+        ):
             matches.append({'line': index, 'text': snippet})
-            chars += added
+            result_bytes += added
     truncated = total_matches > len(matches)
     hint = (
         'After a hit, call read_file with offset near that line '

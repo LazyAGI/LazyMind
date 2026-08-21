@@ -17,11 +17,16 @@ from lazyllm.tools.agent.file_tool import (
 
 from lazymind.config import config as _cfg
 from .resolver import resolve_text_target
-from .window import grep_lines, load_text_lines, read_lines_window
+from .window import (
+    RESULT_BYTE_BUDGET,
+    grep_lines,
+    load_text_lines,
+    read_lines_window,
+    utf8_size,
+)
 from lazymind.chat.engine.tools.infra import handle_tool_errors, tool_success
 
 _MAX_ARTIFACT_BYTES = 2 * 1024 * 1024
-_MAX_GREP_RESULT_CHARS = 32000
 _CHAT_FILE_DIRECTORY = 'chat-artifacts'
 
 
@@ -282,8 +287,8 @@ def read_file(
 ) -> Dict[str, Any]:
     """Read text from a PDF resource, attachment, or chat-workspace file.
 
-    Large files are always windowed. The footer is the only EOF signal:
-    continue when it says Use offset=N to continue; stop at End of file.
+    Large files are always windowed by a UTF-8 byte budget. The footer is the
+    only EOF signal: continue with next_offset when present; stop at End of file.
     After grep, pass offset near the hit line to inspect surrounding context.
 
     Args:
@@ -344,7 +349,7 @@ def grep(
     remaining = max(1, min(int(max_results or 50), 200))
     truncated = False
     total = 0
-    result_chars = 0
+    result_bytes = 0
     for file_path in files:
         if str(file_path).lower().endswith('.pdf'):
             continue
@@ -357,13 +362,13 @@ def grep(
         rel = os.path.relpath(file_path, resolved.workspace).replace('\\', '/')
         for item in found.get('matches') or []:
             match_target = target if len(files) == 1 else rel
-            added_chars = len(str(item.get('text') or '')) + len(match_target) + 32
-            if matches and result_chars + added_chars > _MAX_GREP_RESULT_CHARS:
+            added_bytes = utf8_size(str(item.get('text') or '')) + utf8_size(match_target) + 32
+            if matches and result_bytes + added_bytes > RESULT_BYTE_BUDGET:
                 truncated = True
                 remaining = 0
                 break
             matches.append({'target': match_target, **item})
-            result_chars += added_chars
+            result_bytes += added_bytes
             remaining -= 1
             if remaining <= 0:
                 truncated = True
