@@ -19,5 +19,5 @@ def test_core_api_http_status_is_preserved_for_tool_failure_normalization(
     failure = exception_failure('core_tool', exc_info.value)
 
     assert exc_info.value.status_code == status_code
-    assert f'HTTP {status_code}' in failure['message']
-    assert set(failure) == {'ok', 'message'}
+    assert f'HTTP {status_code}' in failure['value']
+    assert set(failure) == {'ok', 'value'}
