@@ -422,7 +422,7 @@ func (s *SkillService) ListTrashedSkills(ctx context.Context, req ListSkillsRequ
 func (s *SkillService) TrashSkill(ctx context.Context, req DeleteSkillRequest) error {
 	now := s.clock.Now()
 	updates := map[string]any{
-		"deleted_at": now,
+		"deleted_at": now, "trash_expires_at": now.Add(30 * 24 * time.Hour),
 		"updated_at": now,
 	}
 	if req.UserID != "" {
@@ -465,9 +465,10 @@ func (s *SkillService) RestoreSkill(ctx context.Context, req RestoreSkillRequest
 			return fmt.Errorf("skill package already exists")
 		}
 		if err := tx.Model(&skillRow{}).Where("id = ? AND deleted_at IS NOT NULL", req.SkillID).Updates(map[string]any{
-			"deleted_at": nil,
-			"deleted_by": nil,
-			"updated_at": now,
+			"deleted_at":       nil,
+			"trash_expires_at": nil,
+			"deleted_by":       nil,
+			"updated_at":       now,
 		}).Error; err != nil {
 			return err
 		}
@@ -1603,6 +1604,7 @@ func (s *SkillService) summaryFor(ctx context.Context, row skillRow) (SkillSumma
 		IsEnabled:      row.IsEnabled,
 		Draft:          draft,
 		DeletedAt:      row.DeletedAt,
+		TrashExpiresAt: row.TrashExpiresAt,
 		DeletedBy:      valueOrEmpty(row.DeletedBy),
 	}, nil
 }

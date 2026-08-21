@@ -25,6 +25,28 @@ when_to_use: >
   不得用于单独市场
   规模测算、路线图排序、技术架构、发布运维、数据分析方案或营销文案。
 
+runtime:
+  exclusive_tool_capabilities: [writer.create, writer.revise]
+  collects_knowledge: true
+  clarification_fields:
+    - {id: product_goal, label: 产品目标, question: 请说明本次要解决的产品问题和目标用户。, type: text}
+    - id: stage_chain
+      label: 执行范围
+      question: 请选择要执行的阶段或连续阶段。
+      type: single
+      choices: [产品方向, 竞品与生态位, 产品方案, PRD, 交互原型, 方案评审, 研发交付, 七阶段全流程]
+    - id: execution_depth
+      label: 执行深度
+      question: 请选择执行深度。
+      type: single
+      choices: [light, minimum-fill, full]
+    - {id: word_target, label: 文本篇幅, question: 请确认每份文本产物的目标字数；纯竞品或原型任务可答 not-applicable。, type: text}
+    - id: reference_sample_choice
+      label: 参照样例
+      question: 请确认是使用已提供样例，还是使用默认结构。
+      type: single
+      choices: [已提供, 使用默认结构, not-required]
+
 tool_scripts:
   - path: scripts/tools.py
     functions:

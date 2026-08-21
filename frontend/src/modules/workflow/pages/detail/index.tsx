@@ -678,7 +678,10 @@ export default function WorkflowDetailPage() {
   const phase = resolvePhase(draft.generate_status);
   const isRepairing = draft.generate_status === 'repairing';
   const isStillGenerating = GENERATING_STATUSES.has(draft.generate_status);
-  const editorReady = EDITOR_READY_STATUSES.has(draft.generate_status) || draft.generate_status === 'done';
+  // Blank drafts are editable immediately and never pass through the AI
+  // generation states. Treat them as ready so their publish action remains
+  // available after creating or editing the workflow manually.
+  const editorReady = draft.source_type === 'blank' || EDITOR_READY_STATUSES.has(draft.generate_status);
   const isFailed = draft.generate_status === 'failed';
   const isPhase3Running = draft.generate_status === 'state_done';
   const viewingHistory = selectedRevision !== 'draft' && versionContent !== null;

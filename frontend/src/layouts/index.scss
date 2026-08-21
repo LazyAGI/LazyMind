@@ -583,6 +583,10 @@
   overflow: hidden;
 }
 
+.main-layout-content.is-chat-page.is-sidebar-collapsed .workflow-panel__header {
+  padding-inline-start: 48px;
+}
+
 .main-layout-content.is-sidebar-collapsed {
   .knowledge-list-page .knowledge-title,
   .dataset-page .dataset-page-header,
@@ -1400,13 +1404,7 @@
   .terminal-quick-body {
     overflow-y: auto;
   }
-}
 
-.settings-popover-overlay {
-  .ant-popover-inner {
-    padding: 6px;
-    border-radius: 10px;
-  }
 }
 
 .settings-popover {
@@ -1421,40 +1419,64 @@
     min-width: 0;
     display: flex;
     align-items: center;
-    gap: 9px;
-    padding: 7px 6px 9px;
+    gap: 8px;
+    padding: 5px 6px 6px;
     border: 0;
     border-bottom: 1px solid rgba(15, 23, 42, 0.06);
+    border-radius: 7px 7px 0 0;
     background: transparent;
     color: #263244;
     text-align: left;
     cursor: pointer;
 
-    &:hover,
+    &:hover {
+      background: #f3f7fd;
+    }
+
     &:focus-visible {
       background: #f3f7fd;
-      outline: none;
+      outline: 2px solid #2f6bff;
+      outline-offset: -2px;
     }
   }
 
   .settings-popover-account-copy {
     flex: 1;
+
+    strong {
+      font-size: 14px;
+      line-height: 20px;
+    }
+
+    small {
+      margin-top: 0;
+      font-size: 12px;
+      line-height: 16px;
+    }
   }
 
   .settings-popover-button.ant-btn {
     width: 100%;
-    height: 28px;
+    height: 34px;
     display: flex;
     align-items: center;
     justify-content: flex-start;
-    gap: 6px;
-    padding: 0 6px;
-    border-radius: 6px;
+    gap: 8px;
+    padding: 0 10px;
+    border-radius: 7px;
     color: #323c47;
+    font-size: 14px;
+    line-height: 20px;
 
-    &:hover {
+    &:hover,
+    &:focus-visible {
       background: #f3f7fd;
       color: #006ae6;
+    }
+
+    &:focus-visible {
+      outline: 2px solid #2f6bff;
+      outline-offset: -2px;
     }
 
     span {
@@ -1462,15 +1484,12 @@
       align-items: center;
     }
 
-    .settings-popover-label {
-      min-width: 0;
-    }
-
     .settings-active-badge {
       margin-left: auto;
-      padding: 1px 5px;
+      padding: 0 6px;
       border-radius: 999px;
-      font-size: 11px;
+      font-size: 12px;
+      line-height: 18px;
       color: #0958d9;
       background: #dbeafe;
       border: 1px solid #bfdbfe;
@@ -1483,27 +1502,28 @@
   }
 
   .settings-popover-icon {
+    flex: 0 0 16px;
     font-size: 16px;
   }
 
-  .settings-popover-accessory {
-    margin-left: auto;
-    color: #7b8491;
-    font-size: 12px;
-  }
-
   .settings-popover-language {
-    height: 28px;
+    height: 34px;
     display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 0 6px;
-    border-radius: 6px;
+    gap: 8px;
+    padding: 0 10px;
+    border-radius: 7px;
     color: #323c47;
 
-    &:hover {
+    &:hover,
+    &:focus-within {
       background: #f3f7fd;
       color: #006ae6;
+    }
+
+    &:focus-within {
+      outline: 2px solid #2f6bff;
+      outline-offset: -2px;
     }
 
     .language-switcher {
@@ -1514,7 +1534,42 @@
       .ant-select-arrow {
         inset-inline-end: 0;
       }
+
+      .ant-select-selection-item {
+        font-size: 14px;
+        line-height: 20px;
+      }
     }
+  }
+
+  .settings-popover-separator {
+    height: 1px;
+    margin: 2px 6px;
+    background: rgba(15, 23, 42, 0.08);
+  }
+
+  .settings-popover-button--session.ant-btn {
+    color: #526174;
+
+    &:hover,
+    &:focus-visible {
+      background: #fff2f0;
+      color: #cf1322;
+    }
+  }
+}
+
+.settings-popover-overlay {
+  .ant-popover-inner {
+    overflow: hidden;
+    padding: 6px;
+    border: 1px solid #dbe4f0;
+    border-radius: 10px;
+    box-shadow: 0 12px 32px rgba(35, 53, 84, 0.16);
+  }
+
+  .ant-popover-inner-content {
+    min-width: 0;
   }
 }
 

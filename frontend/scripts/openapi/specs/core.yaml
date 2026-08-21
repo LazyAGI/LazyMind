@@ -423,10 +423,13 @@ components:
                     type: string
                 delta:
                     type: string
+                delta_mode:
+                    enum:
+                        - append
+                        - replace
+                    type: string
                 execution:
                     $ref: '#/components/schemas/ExternalExecutionProjection'
-                finish_reason:
-                    type: string
                 history_id:
                     type: string
                 message:
@@ -437,6 +440,8 @@ components:
                     type: array
                 reasoning_content:
                     type: string
+                runtime_event:
+                    $ref: '#/components/schemas/ChatRuntimeEvent'
                 seq:
                     type: integer
                 sources:
@@ -447,6 +452,20 @@ components:
                 thinking_duration_s:
                     format: int64
                     type: integer
+            type: object
+        ChatRuntimeEvent:
+            properties:
+                data:
+                    properties: {}
+                    type: object
+                event_id:
+                    type: string
+                run_id:
+                    type: string
+                schema_version:
+                    type: integer
+                type:
+                    type: string
             type: object
         CheckDatabaseConnectionResponse:
             properties:
@@ -565,6 +584,85 @@ components:
                 - stored_path
                 - upload_id
             type: object
+        ConversationArchiveFolder:
+            properties:
+                created_at:
+                    format: date-time
+                    type: string
+                dialog_count:
+                    format: int64
+                    type: integer
+                id:
+                    type: string
+                name:
+                    type: string
+                task_count:
+                    format: int64
+                    type: integer
+                total_count:
+                    format: int64
+                    type: integer
+                updated_at:
+                    format: date-time
+                    type: string
+            required:
+                - id
+                - name
+                - dialog_count
+                - task_count
+                - total_count
+                - created_at
+                - updated_at
+            type: object
+        ConversationArchiveFolderCreateResponse:
+            properties:
+                folder:
+                    $ref: '#/components/schemas/ConversationArchiveFolder'
+            required:
+                - folder
+            type: object
+        ConversationArchiveFolderDeleteResponse:
+            properties:
+                moved_count:
+                    format: int64
+                    type: integer
+            required:
+                - moved_count
+            type: object
+        ConversationArchiveFolderListResponse:
+            properties:
+                folders:
+                    items:
+                        $ref: '#/components/schemas/ConversationArchiveFolder'
+                    type: array
+                unfiled_dialog_count:
+                    format: int64
+                    type: integer
+                unfiled_task_count:
+                    format: int64
+                    type: integer
+                unfiled_total_count:
+                    format: int64
+                    type: integer
+            required:
+                - folders
+                - unfiled_dialog_count
+                - unfiled_task_count
+                - unfiled_total_count
+            type: object
+        ConversationArchiveFolderRequest:
+            properties:
+                name:
+                    type: string
+            required:
+                - name
+            type: object
+        ConversationArchiveRequest:
+            properties:
+                folder_id:
+                    nullable: true
+                    type: string
+            type: object
         ConversationBatchDeleteRequest:
             properties:
                 conversation_ids:
@@ -643,6 +741,12 @@ components:
                     type: string
                 result:
                     type: string
+                run_id:
+                    type: string
+                run_status:
+                    type: string
+                run_terminal:
+                    $ref: '#/components/schemas/RunTerminal'
                 seq:
                     type: integer
                 sources:
@@ -712,6 +816,63 @@ components:
                 total_size:
                     format: int64
                     type: integer
+            type: object
+        ConversationRecoveryItem:
+            properties:
+                archive_folder_name:
+                    type: string
+                archived_at:
+                    format: date-time
+                    type: string
+                conversation_id:
+                    type: string
+                create_time:
+                    format: date-time
+                    type: string
+                deleted_at:
+                    format: date-time
+                    type: string
+                display_name:
+                    type: string
+                folder_id:
+                    nullable: true
+                    type: string
+                kind:
+                    enum:
+                        - dialog
+                        - task
+                    type: string
+                trash_expires_at:
+                    format: date-time
+                    type: string
+                update_time:
+                    format: date-time
+                    type: string
+            required:
+                - conversation_id
+                - display_name
+                - kind
+                - create_time
+                - update_time
+            type: object
+        ConversationRecoveryListResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/ConversationRecoveryItem'
+                    type: array
+                page:
+                    type: integer
+                page_size:
+                    type: integer
+                total:
+                    format: int64
+                    type: integer
+            required:
+                - items
+                - total
+                - page
+                - page_size
             type: object
         ConversationResumeRequest:
             properties:
@@ -787,6 +948,16 @@ components:
                 total_size:
                     format: int64
                     type: integer
+            type: object
+        CoreEmptyResponse:
+            properties:
+                code:
+                    type: integer
+                message:
+                    type: string
+            required:
+                - code
+                - message
             type: object
         CreateEvalSetByImportRequest:
             properties:
@@ -1532,6 +1703,8 @@ components:
                     format: int64
                     type: integer
                 share_type:
+                    type: string
+                source_type:
                     type: string
                 state:
                     type: string
@@ -2816,6 +2989,11 @@ components:
                         $ref: '#/components/schemas/QuestionTypeOption'
                     type: array
             type: object
+        RecoveryDeleteCountResponse:
+            properties:
+                deleted_count:
+                    type: integer
+            type: object
         ResumeTaskRequest:
             properties:
                 task_id:
@@ -2952,6 +3130,37 @@ components:
                 - feedback_count
                 - feedback_rate
                 - user_count
+            type: object
+        RunTerminal:
+            properties:
+                code:
+                    type: string
+                diagnostic_id:
+                    type: string
+                model_call_id:
+                    type: string
+                partial_output:
+                    type: boolean
+                reason:
+                    enum:
+                        - normal
+                        - awaiting_user_input
+                        - model_incomplete
+                        - model_failure
+                        - runtime_failure
+                        - user_cancelled
+                    type: string
+                status:
+                    enum:
+                        - completed
+                        - interrupted
+                        - failed
+                        - cancelled
+                    type: string
+            required:
+                - status
+                - reason
+                - partial_output
             type: object
         SearchDatasetMemberRequest:
             properties:
@@ -3255,6 +3464,130 @@ components:
             properties:
                 task_id:
                     type: string
+            type: object
+        TaskCenterStatusCounts:
+            properties:
+                all:
+                    format: int64
+                    type: integer
+                canceled:
+                    format: int64
+                    type: integer
+                failed:
+                    format: int64
+                    type: integer
+                pending:
+                    format: int64
+                    type: integer
+                running:
+                    format: int64
+                    type: integer
+                succeeded:
+                    format: int64
+                    type: integer
+                waiting:
+                    format: int64
+                    type: integer
+                waiting_inputs:
+                    format: int64
+                    type: integer
+            type: object
+        TaskCenterStepInfo:
+            properties:
+                artifact:
+                    type: string
+                current_phase:
+                    type: string
+                status:
+                    type: string
+                step_id:
+                    type: string
+                summary:
+                    type: string
+                title:
+                    type: string
+            required:
+                - step_id
+                - status
+            type: object
+        TaskCenterTaskListResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/TaskCenterTaskResponse'
+                    type: array
+                page:
+                    type: integer
+                page_size:
+                    type: integer
+                status_counts:
+                    $ref: '#/components/schemas/TaskCenterStatusCounts'
+                total:
+                    format: int64
+                    type: integer
+            required:
+                - items
+                - total
+                - page
+                - page_size
+            type: object
+        TaskCenterTaskResponse:
+            properties:
+                conversation_id:
+                    type: string
+                conversation_state:
+                    enum:
+                        - active
+                        - archived
+                        - trash
+                        - missing
+                    type: string
+                conversation_title:
+                    type: string
+                created_at:
+                    format: date-time
+                    type: string
+                finished_at:
+                    format: date-time
+                    type: string
+                id:
+                    type: string
+                progress:
+                    properties: {}
+                    type: object
+                schedule_id:
+                    type: string
+                schedule_name:
+                    type: string
+                status:
+                    type: string
+                steps:
+                    items:
+                        $ref: '#/components/schemas/TaskCenterStepInfo'
+                    type: array
+                task_type:
+                    type: string
+                title:
+                    type: string
+                updated_at:
+                    format: date-time
+                    type: string
+                user_id:
+                    type: string
+                waiting_reason:
+                    type: string
+                workflow_session_id:
+                    type: string
+            required:
+                - id
+                - user_id
+                - conversation_id
+                - conversation_state
+                - task_type
+                - status
+                - steps
+                - created_at
+                - updated_at
             type: object
         TaskDocumentInfo:
             properties:
@@ -3719,6 +4052,84 @@ components:
                 - reason
                 - updated_at
                 - word
+            type: object
+        WorkflowTrashEmptyData:
+            properties:
+                purged:
+                    type: integer
+            type: object
+        WorkflowTrashEmptyResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/WorkflowTrashEmptyData'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        WorkflowTrashItem:
+            properties:
+                deleted_at:
+                    format: date-time
+                    type: string
+                id:
+                    type: string
+                name:
+                    type: string
+                published_status_before_trash:
+                    type: string
+                published_workflow_ref:
+                    type: string
+                trash_expires_at:
+                    format: date-time
+                    type: string
+                updated_at:
+                    format: date-time
+                    type: string
+                workflow_id:
+                    type: string
+            required:
+                - id
+                - name
+                - deleted_at
+                - trash_expires_at
+                - updated_at
+            type: object
+        WorkflowTrashListData:
+            properties:
+                page:
+                    type: integer
+                page_size:
+                    type: integer
+                records:
+                    items:
+                        $ref: '#/components/schemas/WorkflowTrashItem'
+                    type: array
+                total:
+                    format: int64
+                    type: integer
+            required:
+                - records
+                - total
+                - page
+                - page_size
+            type: object
+        WorkflowTrashListResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/WorkflowTrashListData'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
             type: object
         addModelProviderGroupModelOpenAPIRequest:
             properties:
@@ -4434,6 +4845,370 @@ components:
                 - content
                 - session_id
                 - skill_name
+            type: object
+        knowledgeMarketDetailOpenAPIResponse:
+            properties:
+                category:
+                    type: string
+                created_at:
+                    type: string
+                data_source:
+                    type: string
+                description:
+                    type: string
+                domain:
+                    type: string
+                icon:
+                    type: string
+                id:
+                    type: string
+                name:
+                    type: string
+                package_revision:
+                    type: string
+                package_url:
+                    type: string
+                sample_questions:
+                    items:
+                        type: string
+                    type: array
+                sort_order:
+                    type: integer
+                tags:
+                    items:
+                        type: string
+                    type: array
+                updated_at:
+                    type: string
+            required:
+                - category
+                - created_at
+                - data_source
+                - description
+                - domain
+                - icon
+                - id
+                - name
+                - package_revision
+                - package_url
+                - sort_order
+                - updated_at
+            type: object
+        knowledgeMarketDomainsGroupOpenAPIResponse:
+            properties:
+                evaluation:
+                    items:
+                        type: string
+                    type: array
+                industry:
+                    items:
+                        type: string
+                    type: array
+            type: object
+        knowledgeMarketDomainsOpenAPIResponse:
+            properties:
+                domains:
+                    $ref: '#/components/schemas/knowledgeMarketDomainsGroupOpenAPIResponse'
+            required:
+                - domains
+            type: object
+        knowledgeMarketInstallOpenAPIResponse:
+            properties:
+                job_id:
+                    type: string
+                state:
+                    type: string
+            required:
+                - job_id
+                - state
+            type: object
+        knowledgeMarketInstallsOpenAPIResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/knowledgeMarketInstallsOpenAPIResponseItem'
+                    type: array
+                total:
+                    type: integer
+            required:
+                - total
+            type: object
+        knowledgeMarketInstallsOpenAPIResponseItem:
+            properties:
+                active:
+                    type: boolean
+                dataset_id:
+                    type: string
+                domain:
+                    type: string
+                icon:
+                    type: string
+                install_state:
+                    type: string
+                installed_at:
+                    type: string
+                market_item_id:
+                    type: string
+                name:
+                    type: string
+                updated_at:
+                    type: string
+            required:
+                - active
+                - dataset_id
+                - domain
+                - icon
+                - install_state
+                - market_item_id
+                - name
+                - updated_at
+            type: object
+        knowledgeMarketListItemOpenAPIResponse:
+            properties:
+                category:
+                    type: string
+                created_at:
+                    type: string
+                data_source:
+                    type: string
+                description:
+                    type: string
+                domain:
+                    type: string
+                icon:
+                    type: string
+                id:
+                    type: string
+                name:
+                    type: string
+                online_access_url:
+                    type: string
+                sort_order:
+                    type: integer
+                tags:
+                    items:
+                        type: string
+                    type: array
+                updated_at:
+                    type: string
+            required:
+                - category
+                - created_at
+                - data_source
+                - description
+                - domain
+                - icon
+                - id
+                - name
+                - online_access_url
+                - sort_order
+                - updated_at
+            type: object
+        knowledgeMarketListOpenAPIResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/knowledgeMarketListItemOpenAPIResponse'
+                    type: array
+                page:
+                    type: integer
+                page_size:
+                    type: integer
+                total:
+                    type: integer
+            required:
+                - page
+                - page_size
+                - total
+            type: object
+        knowledgeMarketTaskDetailOpenAPIResponse:
+            properties:
+                attempt_count:
+                    type: integer
+                created_at:
+                    type: string
+                dataset_id:
+                    type: string
+                error_message:
+                    type: string
+                finished_at:
+                    type: string
+                icon:
+                    type: string
+                install_state:
+                    type: string
+                job_id:
+                    type: string
+                job_status:
+                    type: string
+                job_type:
+                    type: string
+                market_item_id:
+                    type: string
+                max_attempts:
+                    type: integer
+                name:
+                    type: string
+                overall_percent:
+                    format: int64
+                    type: integer
+                parse:
+                    $ref: '#/components/schemas/knowledgeMarketTaskParseOpenAPIResponse'
+                payload:
+                    $ref: '#/components/schemas/knowledgeMarketTaskPayloadOpenAPIResponse'
+                progress:
+                    $ref: '#/components/schemas/knowledgeMarketTaskProgressOpenAPIResponse'
+                result:
+                    $ref: '#/components/schemas/knowledgeMarketTaskResultOpenAPIResponse'
+                stage:
+                    type: string
+                started_at:
+                    type: string
+                updated_at:
+                    type: string
+            required:
+                - attempt_count
+                - created_at
+                - dataset_id
+                - error_message
+                - icon
+                - install_state
+                - job_id
+                - job_status
+                - job_type
+                - market_item_id
+                - max_attempts
+                - name
+                - overall_percent
+                - parse
+                - payload
+                - progress
+                - stage
+            type: object
+        knowledgeMarketTaskListItemOpenAPIResponse:
+            properties:
+                created_at:
+                    type: string
+                dataset_id:
+                    type: string
+                error_message:
+                    type: string
+                finished_at:
+                    type: string
+                icon:
+                    type: string
+                install_state:
+                    type: string
+                job_id:
+                    type: string
+                job_status:
+                    type: string
+                job_type:
+                    type: string
+                market_item_id:
+                    type: string
+                name:
+                    type: string
+                progress:
+                    $ref: '#/components/schemas/knowledgeMarketTaskProgressOpenAPIResponse'
+            required:
+                - created_at
+                - dataset_id
+                - error_message
+                - icon
+                - install_state
+                - job_id
+                - job_status
+                - job_type
+                - market_item_id
+                - name
+                - progress
+            type: object
+        knowledgeMarketTaskListOpenAPIResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/knowledgeMarketTaskListItemOpenAPIResponse'
+                    type: array
+                page:
+                    type: integer
+                page_size:
+                    type: integer
+                total:
+                    type: integer
+            required:
+                - page
+                - page_size
+                - total
+            type: object
+        knowledgeMarketTaskParseOpenAPIResponse:
+            properties:
+                done:
+                    type: integer
+                failed:
+                    type: integer
+                parsing:
+                    type: integer
+                pending:
+                    type: integer
+                state:
+                    type: string
+                total:
+                    type: integer
+            required:
+                - done
+                - failed
+                - parsing
+                - pending
+                - state
+                - total
+            type: object
+        knowledgeMarketTaskPayloadOpenAPIResponse:
+            properties:
+                force:
+                    type: boolean
+                market_item_id:
+                    type: string
+                revision:
+                    type: string
+            required:
+                - market_item_id
+            type: object
+        knowledgeMarketTaskProgressOpenAPIResponse:
+            properties:
+                current:
+                    format: int64
+                    type: integer
+                total:
+                    format: int64
+                    type: integer
+            required:
+                - current
+                - total
+            type: object
+        knowledgeMarketTaskResultOpenAPIResponse:
+            properties:
+                checked:
+                    type: integer
+                dataset_id:
+                    type: string
+                reason:
+                    type: string
+                removed:
+                    type: integer
+                skipped_items:
+                    items:
+                        type: string
+                    type: array
+                submitted:
+                    type: integer
+                updated_items:
+                    items:
+                        type: string
+                    type: array
+            required:
+                - dataset_id
+                - submitted
             type: object
         latestVersionChangeOpenAPIResponse:
             properties:
@@ -7384,6 +8159,73 @@ paths:
                 "200":
                     description: OK
             summary: PATCH /chat/settings/workflows/{workflow_ref:.+}
+    /api/core/conversation-archive-folders:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ConversationArchiveFolderListResponse'
+                    description: Archive folders
+            summary: List conversation archive folders
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ConversationArchiveFolderRequest'
+                required: true
+            responses:
+                "201":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ConversationArchiveFolderCreateResponse'
+                    description: Archive folder created
+            summary: Create a conversation archive folder
+    /api/core/conversation-archive-folders/{folder_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: folder_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: move_to_folder_id
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ConversationArchiveFolderDeleteResponse'
+                    description: Archive folder deleted
+            summary: Delete a conversation archive folder
+        patch:
+            parameters:
+                - in: path
+                  name: folder_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ConversationArchiveFolderRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EmptyObject'
+                    description: Archive folder renamed
+            summary: Rename a conversation archive folder
     /api/core/conversation:export:
         post:
             requestBody:
@@ -7580,6 +8422,60 @@ paths:
                 "200":
                     description: OK
             summary: PATCH /conversations/{conversation_id}/workflow-settings
+    /api/core/conversations/{conversation_id}:archive:
+        post:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ConversationArchiveRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EmptyObject'
+                    description: Conversation archived
+            summary: Archive or move a conversation
+    /api/core/conversations/{conversation_id}:purge:
+        delete:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EmptyObject'
+                    description: Conversation permanently deleted
+            summary: Permanently delete a trashed conversation
+    /api/core/conversations/{conversation_id}:restore:
+        post:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EmptyObject'
+                    description: Conversation restored
+            summary: Restore a trashed conversation
     /api/core/conversations/{conversation_id}:status:
         get:
             parameters:
@@ -7624,6 +8520,22 @@ paths:
                                 $ref: '#/components/schemas/EmptyObject'
                     description: Decision forwarded
             summary: Choose whether to continue after the tool-round limit
+    /api/core/conversations/{conversation_id}:unarchive:
+        post:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EmptyObject'
+                    description: Conversation unarchived
+            summary: Unarchive a conversation
     /api/core/conversations/{name}:
         delete:
             parameters:
@@ -7766,6 +8678,45 @@ paths:
                                 $ref: '#/components/schemas/ConversationTrailListResponse'
                     description: Conversation navigation metadata ordered by seq ascending
             summary: List conversation trail metadata (paginated)
+    /api/core/conversations:archived:
+        get:
+            parameters:
+                - in: query
+                  name: keyword
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: kind
+                  required: true
+                  schema:
+                    enum:
+                        - dialog
+                        - task
+                    type: string
+                - in: query
+                  name: folder_id
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ConversationRecoveryListResponse'
+                    description: Archived conversation page
+            summary: List archived conversations
     /api/core/conversations:batchDelete:
         post:
             requestBody:
@@ -7864,6 +8815,58 @@ paths:
                                 $ref: '#/components/schemas/EmptyObject'
                     description: Stopped successfully
             summary: Stop conversation generation
+    /api/core/conversations:trash:
+        delete:
+            parameters:
+                - in: query
+                  name: kind
+                  required: true
+                  schema:
+                    enum:
+                        - dialog
+                        - task
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RecoveryDeleteCountResponse'
+                    description: Conversation trash emptied
+            summary: Empty conversation trash for one kind
+        get:
+            parameters:
+                - in: query
+                  name: keyword
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: kind
+                  required: true
+                  schema:
+                    enum:
+                        - dialog
+                        - task
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ConversationRecoveryListResponse'
+                    description: Conversation trash page
+            summary: List trashed conversations
     /api/core/data-sources/database-connections:
         get:
             responses:
@@ -8077,7 +9080,7 @@ paths:
                     items:
                         type: string
                     type: array
-                - description: Filter datasets by creation source.
+                - description: 'Filter datasets by creation source: manual (local upload), cloud (cloud document sync) or official_installed (installed from the knowledge plaza).'
                   in: query
                   name: source
                   required: false
@@ -8085,6 +9088,7 @@ paths:
                     enum:
                         - manual
                         - cloud
+                        - official_installed
                     type: string
             responses:
                 "200":
@@ -10060,6 +11064,207 @@ paths:
                                       type: object
                     description: OK
             summary: Batch query knowledge base permissions
+    /api/core/knowledge-market:
+        get:
+            description: Read-only catalog browsing. Filters combine with AND semantics; only published items are returned.
+            parameters:
+                - description: 'Filter by category: industry or evaluation.'
+                  in: query
+                  name: category
+                  required: false
+                  schema:
+                    enum:
+                        - industry
+                        - evaluation
+                    type: string
+                - description: Filter by exact domain.
+                  in: query
+                  name: domain
+                  required: false
+                  schema:
+                    type: string
+                - description: Case-insensitive match on name, description or domain; tags are not searched.
+                  in: query
+                  name: keyword
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    type: integer
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketListOpenAPIResponse'
+                    description: Knowledge market item list
+            summary: List published knowledge market items
+            tags:
+                - knowledge-market
+    /api/core/knowledge-market/domains:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketDomainsOpenAPIResponse'
+                    description: Knowledge market domains
+            summary: List knowledge market domains grouped by category
+            tags:
+                - knowledge-market
+    /api/core/knowledge-market/installs:
+        get:
+            description: Returns the current user's install records (all states, no pagination) so plaza cards and the "my knowledge bases" tab can map each item to its install state.
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketInstallsOpenAPIResponse'
+                    description: My knowledge market installs
+            summary: List my knowledge market installs
+            tags:
+                - knowledge-market
+    /api/core/knowledge-market/items/{market_item_id}:
+        get:
+            description: Returns the full catalog entry including download package URL/revision and sample questions. Version fields are intentionally not exposed. 404 when the item does not exist or is not published.
+            parameters:
+                - in: path
+                  name: market_item_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketDetailOpenAPIResponse'
+                    description: Knowledge market item
+            summary: Get knowledge market item details
+            tags:
+                - knowledge-market
+    /api/core/knowledge-market/items/{market_item_id}:install:
+        post:
+            description: Enqueues a background install job that downloads the package, creates a personal dataset and submits every file to the parsing/vectorizing pipeline. Returns the job id; progress is polled via GET /knowledge-market/tasks/{job_id}. Conflicts with an in-flight install/update of the same item return 409.
+            parameters:
+                - in: path
+                  name: market_item_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketInstallOpenAPIResponse'
+                    description: Install job enqueued
+            summary: Install an official knowledge base
+            tags:
+                - knowledge-market
+    /api/core/knowledge-market/items/{market_item_id}:update:
+        post:
+            description: 'Enqueues a background update job (strategy A: clear old documents then import the new package). No-change updates finish with updated=false and write nothing. Conflicts with an in-flight install/update of the same item return 409; not-installed items return 404.'
+            parameters:
+                - in: path
+                  name: market_item_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketInstallOpenAPIResponse'
+                    description: Update job enqueued
+            summary: Update one installed official knowledge base
+            tags:
+                - knowledge-market
+    /api/core/knowledge-market/tasks:
+        get:
+            description: Returns the current user's knowledge market tasks (default job type knowledge_market_install; pass job_type for update/update-all) with market item info and install-state enrichment.
+            parameters:
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    type: integer
+                - description: Filter background tasks by async job status.
+                  in: query
+                  name: status
+                  required: false
+                  schema:
+                    enum:
+                        - pending
+                        - running
+                        - succeeded
+                        - failed
+                        - canceled
+                    type: string
+                - description: Async job type; defaults to knowledge_market_install.
+                  in: query
+                  name: job_type
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketTaskListOpenAPIResponse'
+                    description: Background install task list
+            summary: List background knowledge market tasks
+            tags:
+                - knowledge-market
+    /api/core/knowledge-market/tasks/{job_id}:
+        get:
+            description: Returns one knowledge market task (install/update/update-all) with payload, result and the derived stage/overall progress. 404 when the job does not exist or belongs to another user.
+            parameters:
+                - in: path
+                  name: job_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketTaskDetailOpenAPIResponse'
+                    description: Background install task detail
+            summary: Get background knowledge market task detail
+            tags:
+                - knowledge-market
+    /api/core/knowledge-market:update-all:
+        post:
+            description: Enqueues a check-only batch job that compares every installed item and spawns an independent update job per changed item. A second batch for the same user returns 409.
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/knowledgeMarketInstallOpenAPIResponse'
+                    description: Update-all job enqueued
+            summary: One-click update of all installed official knowledge bases
+            tags:
+                - knowledge-market
     /api/core/list_files:
         get:
             responses:
@@ -13245,16 +14450,60 @@ paths:
                   required: true
                   schema:
                     type: string
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    type: integer
             responses:
                 "200":
-                    description: OK
-            summary: GET /task-center/schedules/{schedule_id}/tasks
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/TaskCenterTaskListResponse'
+                    description: Schedule task page
+            summary: List tasks for a schedule
     /api/core/task-center/tasks:
         get:
+            parameters:
+                - in: query
+                  name: status
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: task_type
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: keyword
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    type: integer
             responses:
                 "200":
-                    description: OK
-            summary: GET /task-center/tasks
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/TaskCenterTaskListResponse'
+                    description: Task-center task page
+            summary: List task-center tasks
     /api/core/task-center/tasks/{task_id}:
         get:
             parameters:
@@ -13265,8 +14514,12 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /task-center/tasks/{task_id}
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/TaskCenterTaskResponse'
+                    description: Task-center task
+            summary: Get a task-center task
     /api/core/task-center/tasks/{task_id}:cancel:
         post:
             parameters:
@@ -14034,6 +15287,22 @@ paths:
                 "200":
                     description: OK
             summary: POST /workflow-drafts/{draft_id}:publish
+    /api/core/workflow-drafts/{draft_id}:purge:
+        delete:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CoreEmptyResponse'
+                    description: Workflow permanently deleted
+            summary: Permanently delete a workflow draft
     /api/core/workflow-drafts/{draft_id}:repair-preview:
         post:
             parameters:
@@ -14046,6 +15315,22 @@ paths:
                 "200":
                     description: OK
             summary: POST /workflow-drafts/{draft_id}:repair-preview
+    /api/core/workflow-drafts/{draft_id}:restore:
+        post:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CoreEmptyResponse'
+                    description: Workflow restored
+            summary: Restore a workflow draft
     /api/core/workflow-drafts/{draft_id}:save:
         post:
             parameters:
@@ -14076,6 +15361,41 @@ paths:
                 "200":
                     description: OK
             summary: POST /workflow-drafts:polish-info
+    /api/core/workflow-drafts:trash:
+        delete:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/WorkflowTrashEmptyResponse'
+                    description: Workflow trash emptied
+            summary: Empty workflow draft trash
+        get:
+            parameters:
+                - in: query
+                  name: keyword
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    type: integer
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/WorkflowTrashListResponse'
+                    description: Workflow trash page
+            summary: List workflow draft trash
     /api/core/workflow-input-resources:
         post:
             responses:

@@ -166,6 +166,22 @@ func TestAlgorithmServiceEnvTrustedLocalMode(t *testing.T) {
 	}
 }
 
+func TestAlgorithmServiceEnvDoesNotForceEditablePPT(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	cfg, paths, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+
+	env := algorithmServiceEnv(cfg, paths, chatProcessName)
+
+	assertEnvNotContains(t, env, "LAZYMIND_OUTPUT_EDITABLE_PPT=")
+	assertEnvContains(t, env, "LAZYMIND_PPT_EXPORT_CLI="+filepath.Join(paths.RepoRoot, "workflows", "ppt-workflow", "runtime", "scripts", "export_pptx", "html_to_pptx.mjs"))
+	assertEnvContains(t, env, "LAZYMIND_PPT_EXPORT_DEPS="+filepath.Join(paths.RuntimeRoot, "deps", "editable-ppt"))
+	assertEnvContains(t, env, "PLAYWRIGHT_BROWSERS_PATH="+filepath.Join(paths.RuntimeRoot, "deps", "editable-ppt", "browsers"))
+}
+
 func TestDesktopAlgorithmRegisterPolicyForInstallVersion(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)

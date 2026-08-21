@@ -135,6 +135,12 @@ export LAZYMIND_CORE_DATABASE_URL ?= postgresql+psycopg://root:123456@db:5432/co
 # PaddleOCR compose profile is temporarily disabled (needs GPU).
 export LAZYMIND_DEPLOY_MINERU ?= 0
 # export LAZYMIND_DEPLOY_PADDLEOCR ?= 0
+# Editable PPT export (Playwright ppt-export sidecar). true/false; default false → browser screenshot PPTX.
+# Shorthand: OUTPUT_EDITABLE_PPT=true is accepted as an alias.
+export LAZYMIND_OUTPUT_EDITABLE_PPT ?= false
+ifneq ($(strip $(OUTPUT_EDITABLE_PPT)),)
+export LAZYMIND_OUTPUT_EDITABLE_PPT := $(OUTPUT_EDITABLE_PPT)
+endif
 # Vector / segment stores — override to use external services (skips built-in profile)
 export LAZYMIND_MILVUS_URI ?= http://milvus:19530
 export LAZYMIND_OPENSEARCH_URI ?= https://opensearch:9200
@@ -215,6 +221,7 @@ help:
 	@echo "  make build      - Build compose services (mineru profile only when needed)"
 	@echo "                    Use SERVICES=svc1,svc2 to build specific services"
 	@echo "                    Use LAZYMIND_ENABLE_STORE_DASHBOARDS=1 to add Attu/OpenSearch Dashboards for built-in stores"
+	@echo "                    Use LAZYMIND_OUTPUT_EDITABLE_PPT=true (or OUTPUT_EDITABLE_PPT=true) to start Playwright editable PPTX export"
 	@echo "  make file-watcher-start - Rebuild and start host file-watcher"
 	@echo "  make file-watcher-stop  - Stop host file-watcher started by Makefile"
 	@echo "  make lint       - Run Python flake8 and Go gofmt checks"
@@ -301,6 +308,7 @@ test-hermetic:
 # Only mineru has build:; paddleocr/milvus/opensearch use image: only, so only needed for up.
 _need_mineru := $(filter 1 true TRUE yes YES on ON,$(LAZYMIND_DEPLOY_MINERU))
 # _need_paddleocr := $(filter 1 true TRUE yes YES on ON,$(LAZYMIND_DEPLOY_PADDLEOCR))  # needs GPU
+_need_editable_ppt := $(filter true TRUE,$(LAZYMIND_OUTPUT_EDITABLE_PPT))
 # Deploy milvus/opensearch only when URI exactly matches the built-in services; external URIs = no deployment
 _builtin_milvus_uris := http://milvus:19530 http://milvus:19530/
 _builtin_opensearch_uris := https://opensearch:9200 https://opensearch:9200/
@@ -312,8 +320,8 @@ _need_milvus_dashboard := $(and $(_need_milvus),$(_enable_milvus_dashboard))
 _need_opensearch_dashboard := $(and $(_need_opensearch),$(_enable_opensearch_dashboard))
 
 # Start/build profile flags are mode-aware. Cleanup profiles are intentionally exhaustive.
-_COMPOSE_PROFILES := $(strip $(if $(_need_mineru),--profile mineru) $(if $(_need_milvus),--profile milvus) $(if $(_need_opensearch),--profile opensearch) $(if $(_need_milvus_dashboard),--profile milvus-dashboard) $(if $(_need_opensearch_dashboard),--profile opensearch-dashboard))
-_CLEANUP_COMPOSE_PROFILE_NAMES := mineru,paddleocr,milvus,opensearch,milvus-dashboard,opensearch-dashboard,file-watcher-artifact
+_COMPOSE_PROFILES := $(strip $(if $(_need_mineru),--profile mineru) $(if $(_need_editable_ppt),--profile editable-ppt) $(if $(_need_milvus),--profile milvus) $(if $(_need_opensearch),--profile opensearch) $(if $(_need_milvus_dashboard),--profile milvus-dashboard) $(if $(_need_opensearch_dashboard),--profile opensearch-dashboard))
+_CLEANUP_COMPOSE_PROFILE_NAMES := mineru,paddleocr,editable-ppt,milvus,opensearch,milvus-dashboard,opensearch-dashboard,file-watcher-artifact
 _COMPOSE_FILE_WATCHER_SCALE := $(if $(filter container,$(LAZYMIND_FILE_WATCHER_MODE)),,--scale file-watcher=0)
 _COMPOSE_DOWN_ACTION := $(if $(SERVICES),stop,down)
 _COMPOSE_DOWN_SERVICES := $(if $(SERVICES),$(subst $(comma), ,$(SERVICES)),)
@@ -341,6 +349,7 @@ build:
 	@$(_COMPOSE) $(strip $(if $(_need_mineru),--profile mineru)) build \
 		$(if $(SERVICES),$(subst $(comma), ,$(SERVICES)),)
 
+# Skip node_modules: ppt-export named volume may leave a root-owned mountpoint under workflows/.
 compose-host-permissions:
 	@echo "🔐 Ensuring compose bind mounts are readable by containers..."
 	@dir="$(CURDIR)"; \
@@ -354,7 +363,8 @@ compose-host-permissions:
 	@for path in $(_COMPOSE_BIND_CRITICAL_READ_PATHS); do \
 		if [ -e "$$path" ]; then \
 			echo "  critical read: $$path"; \
-			chmod -R a+rX "$$path"; \
+			: "Skip node_modules: ppt-export named volume may leave a root-owned mountpoint under workflows."; \
+			find "$$path" \( -name node_modules -o -name .git \) -prune -o -exec chmod a+rX {} +; \
 		fi; \
 	done
 	@for path in $(_COMPOSE_BIND_BEST_EFFORT_READ_PATHS); do \

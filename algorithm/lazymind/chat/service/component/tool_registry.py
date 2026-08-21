@@ -97,11 +97,17 @@ ATTACHED_FILES_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
         '# Attached file rules\n'
         'Attachments are listed for reference only — do NOT parse or read them automatically.\n'
-        'Only filenames explicitly listed under User Attachments are attachments. Typed Workflow '
-        'material values, Workflow material paths, and paths returned by tools are not attachments. '
-        'Pass scalar values as values and file paths only to file/path arguments; save returned '
-        'paths as artifacts or use `get_artifact` when available. Never pass Workflow materials to '
-        '`read_user_attachment`, `find_user_attachment`, or attachment editing tools.\n'
+        '- Typed Workflow material values, Workflow material paths, and paths returned by tools '
+        'are not attachments. Pass scalar values as values and paths only to file/path arguments; '
+        'never pass them to attachment tools.\n'
+        '- Only call an attachment tool for an exact filename listed in the User Attachments '
+        'section. If that section says no attachments are available, do not call attachment tools, '
+        'guess common filenames, or retry with invented names.\n'
+        '- Workflow artifacts and user uploads are different stores. Never use `list_artifacts`, '
+        '`get_artifact`, or `find_artifact` to discover a user upload.\n'
+        '- Do not invent an attachment requirement. Unless the authoritative step objective or input '
+        'contract explicitly makes a file mandatory, continue using the available text and treat the '
+        'attachment as optional.\n'
         '- `find_user_attachment(filename, turn=N)`: get path/url to pass to image tools, '
         '`vision_extractor`, or a Host attachment importer. Prefer this for images when the task is '
         'visual (edit, generate, workflow) or you only need the file location.\n'
@@ -465,11 +471,13 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         description='基于统一 Writer IR 从资料画像和大纲构建章节草稿与最终成稿',
         tool=WriterCreateToolkit(), module='content', label_en='AI Writing',
         description_en='Create structured long-form writing with the unified Writer IR.',
+        capability_id='writer.create',
     ),
     ToolConfig(
         name='writer_revision', label='AI 修订', description='基于 Writer IR 结构化定位、规划和修改已有文档',
         tool=WriterRevisionToolkit(), module='content', label_en='AI Revision',
         description_en='Revise WriterDocument artifacts through a validated patch workflow.',
+        capability_id='writer.revise',
     ),
     ToolConfig(
         name='calculator',

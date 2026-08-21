@@ -17,6 +17,7 @@ import (
 	"gorm.io/gorm"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/workflow/graphengine"
 	workflowstore "lazymind/core/workflow/store"
 )
 
@@ -213,42 +214,40 @@ func TestPrepareHTTPRejectsUnknownPublicWorkflow(t *testing.T) {
 	}
 }
 
-func TestMissingPreparationInputsIgnoresOptionalOnlyExternalMaterials(t *testing.T) {
-	var graph preparationGraph
-	if err := json.Unmarshal([]byte(`{
-		"material_producers": {
-			"research_topic": {"kind": "external"},
-			"word_target": {"kind": "external"},
-			"reference_file": {"kind": "external"}
-		},
-		"input_expressions": {
-			"generate_outline": {"all": [
-				{"material": "research_topic"},
-				{"material": "word_target"}
-			]}
-		}
-	}`), &graph); err != nil {
-		t.Fatal(err)
-	}
-	missing := missingPreparationInputs(graph, map[string]any{"research_topic": "bound"})
-	if len(missing) != 1 || missing[0] != "word_target" {
-		t.Fatalf("optional reference_file must not block preparation: %#v", missing)
+func TestMissingExternalInputsSkipsOptionalExternalMaterials(t *testing.T) {
+	graph := preparationGraph{MaterialProducers: map[string]struct {
+		Kind     string `json:"kind"`
+		Optional bool   `json:"optional"`
+	}{
+		"required_source":    {Kind: "external"},
+		"uploaded_materials": {Kind: "external", Optional: true},
+		"generated":          {Kind: "step"},
+	}}
+	missing := missingExternalInputs(graph, map[string]any{})
+	if len(missing) != 1 || missing[0] != "required_source" {
+		t.Fatalf("missing inputs = %#v", missing)
 	}
 }
 
-func TestMissingPreparationInputsKeepsLegacyGraphBehavior(t *testing.T) {
-	var graph preparationGraph
-	if err := json.Unmarshal([]byte(`{
-		"material_producers": {
-			"source": {"kind": "external"},
-			"style": {"kind": "external"}
-		}
-	}`), &graph); err != nil {
-		t.Fatal(err)
+func TestMissingExternalInputsUsesRequiredExpressions(t *testing.T) {
+	graph := preparationGraph{
+		MaterialProducers: map[string]struct {
+			Kind     string `json:"kind"`
+			Optional bool   `json:"optional"`
+		}{
+			"research_topic": {Kind: "external"},
+			"word_target":    {Kind: "external"},
+			"reference_file": {Kind: "external"},
+		},
+		InputExpressions: map[string]graphengine.Expression{
+			"generate_outline": {All: []graphengine.Expression{
+				{Material: "research_topic"}, {Material: "word_target"},
+			}},
+		},
 	}
-	missing := missingPreparationInputs(graph, map[string]any{"source": "bound"})
-	if len(missing) != 1 || missing[0] != "style" {
-		t.Fatalf("legacy graph inputs changed unexpectedly: %#v", missing)
+	missing := missingExternalInputs(graph, map[string]any{"research_topic": "bound"})
+	if len(missing) != 1 || missing[0] != "word_target" {
+		t.Fatalf("optional-only reference_file must not block preparation: %#v", missing)
 	}
 }
 

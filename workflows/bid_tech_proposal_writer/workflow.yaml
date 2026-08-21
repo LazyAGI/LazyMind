@@ -16,6 +16,26 @@ when_to_use: >
   Word 是否使用默认投标样式（否则采用基础样式）？”，不要先启动再猜默认值。
   不用于仅编写商务报价、资质证明或制作 PPT 的请求。
 
+runtime:
+  exclusive_tool_capabilities: [writer.create, writer.revise]
+  collects_knowledge: true
+  clarification_fields:
+    - id: output_format
+      label: 导出格式
+      question: 请选择最终导出格式。
+      type: single
+      choices: [docx, md]
+    - id: word_target
+      label: 目标总字数
+      question: 请确认投标技术方案的目标总字数。
+      type: single
+      choices: ['5000', '10000', '20000', '30000']
+    - id: use_default_docx_template
+      label: DOCX 样式
+      question: 是否使用默认投标 DOCX 样式模板？
+      type: boolean
+      choices: [是, 否]
+
 tool_scripts:
   - path: scripts/pipeline_tools.py
     functions:
@@ -289,11 +309,11 @@ ui:
     technical_requirements: {widgetType: text-markdown, readOnly: true}
     disqualification_items: {widgetType: text-markdown, readOnly: true}
     knowledge_evidence: {widgetType: text-markdown, readOnly: true}
-    outline_document: {widgetType: file-card, readOnly: false}
+    outline_document: {widgetType: writer-document, readOnly: false}
     outline_check_report: {widgetType: text-markdown, readOnly: true}
     effective_outline_check_report: {widgetType: text-markdown, readOnly: true}
     chapter_contents: {widgetType: file-card, readOnly: true}
-    draft_document: {widgetType: file-card, readOnly: false}
+    draft_document: {widgetType: writer-document, readOnly: false}
     architecture_image: {widgetType: image-gallery, readOnly: true, itemWidth: 720, itemHeight: 405}
     effect_images: {widgetType: image-gallery, readOnly: true, itemLayout: grid, gridMaxCols: 2, itemWidth: 520, itemHeight: 292}
     image_manifest: {widgetType: json-block, readOnly: true, collapsed: true}

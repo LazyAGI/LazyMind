@@ -2,6 +2,7 @@ import importlib.util
 import json
 import sys
 import types
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -26,7 +27,10 @@ def _load_writer_tools():
     ).split()
     log = SimpleNamespace(warning=lambda *args, **kwargs: None, info=lambda *args, **kwargs: None)
     stubs = {
-        'lazyllm': _stub_module('lazyllm', LOG=log, AutoModel=lambda **kwargs: object()),
+        'lazyllm': _stub_module(
+            'lazyllm', LOG=log, AutoModel=lambda **kwargs: object(),
+            ThreadPoolExecutor=ThreadPoolExecutor,
+        ),
         'lazyllm.tools': _stub_module('lazyllm.tools'),
         'lazyllm.tools.writer': _stub_module('lazyllm.tools.writer'),
         'lazyllm.tools.writer.data_models': _stub_module(
@@ -35,10 +39,15 @@ def _load_writer_tools():
         'lazyllm.tools.writer.tools': _stub_module(
             'lazyllm.tools.writer.tools', **{name: object for name in tool_names},
         ),
+        'lazyllm.tools.writer.numbering': _stub_module(
+            'lazyllm.tools.writer.numbering', materialize_markdown=lambda value: value,
+        ),
         'lazyllm.tools.writer.utils': _stub_module(
             'lazyllm.tools.writer.utils',
+            render_block_markdown=lambda value, **kwargs: str(value),
             render_document_markdown=lambda value: str(value),
             save_artifact_json=lambda *args, **kwargs: '',
+            writer_document_to_markdown=lambda value: str(value),
         ),
     }
     previous = {name: sys.modules.get(name) for name in stubs}

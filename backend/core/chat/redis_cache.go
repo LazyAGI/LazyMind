@@ -9,6 +9,7 @@ import (
 	"gorm.io/gorm"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/log"
 	"lazymind/core/state"
 )
 
@@ -26,15 +27,21 @@ const (
 
 	chatCacheExpireTime  = time.Hour * 2
 	chatStopExpireTime   = 15 * time.Minute
+	chatCancelPollTime   = 500 * time.Millisecond
 	convEventsExpireTime = time.Hour * 24
-	convEventsMaxLen     = int64(1000)
+	// Writer previews can emit more than 1,000 deltas in one draft. Keep a
+	// complete live-workflow window so index-based conversation tailing never
+	// loses the end of an active artifact stream to list trimming.
+	convEventsMaxLen = int64(10000)
 )
 
 type ChatStatus struct {
-	Status        string `json:"status"`
-	CurrentResult string `json:"current_result"`
-	LastUpdate    int64  `json:"last_update"`
-	TotalChunks   int32  `json:"total_chunks"`
+	Status        string       `json:"status"`
+	RunID         string       `json:"run_id"`
+	RunTerminal   *RunTerminal `json:"run_terminal,omitempty"`
+	CurrentResult string       `json:"current_result"`
+	LastUpdate    int64        `json:"last_update"`
+	TotalChunks   int32        `json:"total_chunks"`
 }
 
 type ChatInput struct {
@@ -51,12 +58,19 @@ type MultiAnswerInfo struct {
 	CreatedAt          int64  `json:"created_at"`
 }
 
+type ChatDeltaMode string
+
+const (
+	ChatDeltaModeAppend  ChatDeltaMode = "append"
+	ChatDeltaModeReplace ChatDeltaMode = "replace"
+)
+
 type ChatChunkResponse struct {
 	ConversationID        string                       `json:"conversation_id"`
 	Seq                   int32                        `json:"seq"`
 	Message               string                       `json:"message"`
 	Delta                 string                       `json:"delta"`
-	FinishReason          string                       `json:"finish_reason"`
+	DeltaMode             ChatDeltaMode                `json:"delta_mode,omitempty"`
 	HistoryID             string                       `json:"history_id"`
 	Sources               []any                        `json:"sources,omitempty"`
 	PromptQuestions       []string                     `json:"prompt_questions,omitempty"`
@@ -70,6 +84,7 @@ type ChatChunkResponse struct {
 	AskPending            *AskPendingEvent             `json:"ask_pending,omitempty"`
 	ToolLimitPending      *ToolLimitPendingEvent       `json:"tool_limit_pending,omitempty"`
 	IntentUpdated         *IntentUpdatedEvent          `json:"intent_updated,omitempty"`
+	RuntimeEvent          *ChatRuntimeEvent            `json:"runtime_event,omitempty"`
 }
 
 // TaskCreatedNotice notifies the frontend that an independent SubAgent task exists.
@@ -98,13 +113,17 @@ func chatInputKey(cid, hid string) string { return fmt.Sprintf(chatInputKeyPrefi
 func convEventsKey(cid string) string     { return fmt.Sprintf(convEventsKeyPrefix, cid) }
 
 func setChatStatus(ctx context.Context, stateStore state.Store, conversationID, historyID, status, currentResult string) error {
+	return setChatRuntimeStatus(ctx, stateStore, conversationID, historyID, status, currentResult, "", nil)
+}
+
+func setChatRuntimeStatus(ctx context.Context, stateStore state.Store, conversationID, historyID, status, currentResult, runID string, terminal *RunTerminal) error {
 	key := chatStatusKey(conversationID)
 	totalChunks := int32(0)
 	chunks, _ := getChatChunks(ctx, stateStore, conversationID, historyID)
 	if len(chunks) > 0 {
 		totalChunks = int32(len(chunks))
 	}
-	data := ChatStatus{Status: status, CurrentResult: currentResult, LastUpdate: time.Now().Unix(), TotalChunks: totalChunks}
+	data := ChatStatus{Status: status, RunID: runID, RunTerminal: terminal, CurrentResult: currentResult, LastUpdate: time.Now().Unix(), TotalChunks: totalChunks}
 	bs, _ := json.Marshal(data)
 	if err := stateStore.HSet(ctx, key, map[string]any{historyID: string(bs)}, chatCacheExpireTime); err != nil {
 		return err
@@ -167,7 +186,9 @@ func reconcileGeneratingExternalChatStatuses(
 		if err := db.WithContext(ctx).Select("result").Where("id = ?", historyID).Take(&history).Error; err == nil {
 			result = history.Result
 		}
-		if err := setChatStatus(ctx, stateStore, conversationID, historyID, run.Status, result); err != nil {
+		terminalEvent := externalRunTerminalEvent(run.ID, run.Status, result != "")
+		terminal, _ := terminalEvent.Terminal()
+		if err := setChatRuntimeStatus(ctx, stateStore, conversationID, historyID, terminal.Status, result, run.ID, terminal); err != nil {
 			return ids, err
 		}
 	}
@@ -196,7 +217,9 @@ func projectExternalChatRunStatus(
 	if err := db.WithContext(ctx).Select("result").Where("id = ?", run.HistoryID).Take(&history).Error; err == nil {
 		result = history.Result
 	}
-	return setChatStatus(ctx, stateStore, run.ConversationID, run.HistoryID, run.Status, result)
+	terminalEvent := externalRunTerminalEvent(run.ID, run.Status, result != "")
+	terminal, _ := terminalEvent.Terminal()
+	return setChatRuntimeStatus(ctx, stateStore, run.ConversationID, run.HistoryID, terminal.Status, result, run.ID, terminal)
 }
 
 func getChatStatus(ctx context.Context, stateStore state.Store, conversationID, historyID string) (*ChatStatus, error) {
@@ -216,6 +239,7 @@ func clearChatData(ctx context.Context, stateStore state.Store, conversationID, 
 	_ = stateStore.HDel(ctx, key, historyID)
 	_ = stateStore.Del(ctx, chatStreamKey(conversationID, historyID))
 	_ = stateStore.Del(ctx, chatInputKey(conversationID, historyID))
+	_ = stateStore.Del(ctx, chatStopKey(conversationID, historyID))
 	return nil
 }
 
@@ -278,9 +302,72 @@ func setChatCancelSignal(ctx context.Context, stateStore state.Store, conversati
 	return nil
 }
 
-func watchChatCancelSignal(ctx context.Context, stateStore state.Store, conversationID, historyID string) error {
+func watchChatCancelSignal(ctx context.Context, stateStore state.Store, conversationID, historyID string) (bool, error) {
 	key := chatStopKey(conversationID, historyID)
-	return stateStore.BLPop(ctx, key, 0)
+	return retryChatCancelSignal(ctx, func(waitCtx context.Context) (bool, error) {
+		return stateStore.LPop(waitCtx, key)
+	}, func(err error, delay time.Duration) {
+		log.Logger.Warn().Err(err).
+			Str("conversation_id", conversationID).
+			Str("history_id", historyID).
+			Dur("retry_in", delay).
+			Msg("chat cancel watcher state read failed; retrying")
+	}, chatCancelPollTime, 100*time.Millisecond, 2*time.Second)
+}
+
+func cancelChatOnStop(ctx context.Context, stateStore state.Store, conversationID, historyID string, cancel context.CancelFunc) {
+	receivedStop, _ := watchChatCancelSignal(ctx, stateStore, conversationID, historyID)
+	if receivedStop {
+		cancel()
+	}
+}
+
+func retryChatCancelSignal(
+	ctx context.Context,
+	poll func(context.Context) (bool, error),
+	onRetry func(error, time.Duration),
+	pollInterval, initialRetryDelay, maxRetryDelay time.Duration,
+) (bool, error) {
+	retryDelay := initialRetryDelay
+	for {
+		received, err := poll(ctx)
+		if err == nil {
+			retryDelay = initialRetryDelay
+			if received {
+				return true, nil
+			}
+			if err := waitChatCancelPoll(ctx, pollInterval); err != nil {
+				return false, err
+			}
+			continue
+		}
+		if ctx.Err() != nil {
+			return false, ctx.Err()
+		}
+		if onRetry != nil {
+			onRetry(err, retryDelay)
+		}
+		if err := waitChatCancelPoll(ctx, retryDelay); err != nil {
+			return false, err
+		}
+		if retryDelay < maxRetryDelay {
+			retryDelay *= 2
+			if retryDelay > maxRetryDelay {
+				retryDelay = maxRetryDelay
+			}
+		}
+	}
+}
+
+func waitChatCancelPoll(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func watchChatChunks(ctx context.Context, stateStore state.Store, conversationID, historyID string, lastIndex int64, callback func(*ChatChunkResponse) error) error {
@@ -302,7 +389,7 @@ func watchChatChunks(ctx context.Context, stateStore state.Store, conversationID
 			st, _ := getChatStatus(ctx, stateStore, conversationID, historyID)
 			if st != nil {
 				switch st.Status {
-				case "completed", "stopped", "failed":
+				case "completed", "interrupted", "failed", "cancelled":
 					return nil
 				}
 			}

@@ -25,8 +25,13 @@ type FFmpegConfig struct {
 	BundledBinDir string       `json:"bundledBinDir,omitempty"`
 }
 
+type EditablePPTConfig struct {
+	InstalledDir string `json:"installedDir,omitempty"`
+}
+
 type DependenciesConfig struct {
-	FFmpeg FFmpegConfig `json:"ffmpeg"`
+	FFmpeg      FFmpegConfig      `json:"ffmpeg"`
+	EditablePPT EditablePPTConfig `json:"editablePpt"`
 }
 
 func RuntimeRootFromEnv() (string, error) {
@@ -49,6 +54,10 @@ func BundledFFmpegBinDir(runtimeRoot string) string {
 	return filepath.Join(runtimeRoot, "deps", "ffmpeg", "bin")
 }
 
+func EditablePPTInstallDir(runtimeRoot string) string {
+	return filepath.Join(runtimeRoot, "deps", "editable-ppt")
+}
+
 func LoadConfig(runtimeRoot string) (DependenciesConfig, error) {
 	path := ConfigPath(runtimeRoot)
 	raw, err := os.ReadFile(path)
@@ -63,11 +72,13 @@ func LoadConfig(runtimeRoot string) (DependenciesConfig, error) {
 		return DependenciesConfig{}, err
 	}
 	cfg.FFmpeg = normalizeFFmpegConfig(cfg.FFmpeg, runtimeRoot)
+	cfg.EditablePPT = normalizeEditablePPTConfig(cfg.EditablePPT, runtimeRoot)
 	return cfg, nil
 }
 
 func SaveConfig(runtimeRoot string, cfg DependenciesConfig) error {
 	cfg.FFmpeg = normalizeFFmpegConfig(cfg.FFmpeg, runtimeRoot)
+	cfg.EditablePPT = normalizeEditablePPTConfig(cfg.EditablePPT, runtimeRoot)
 	if err := os.MkdirAll(filepath.Join(runtimeRoot, "config"), 0o755); err != nil {
 		return err
 	}
@@ -89,7 +100,16 @@ func defaultConfig(runtimeRoot string) DependenciesConfig {
 			Source:        FFmpegSourceAuto,
 			BundledBinDir: BundledFFmpegBinDir(runtimeRoot),
 		},
+		EditablePPT: EditablePPTConfig{InstalledDir: EditablePPTInstallDir(runtimeRoot)},
 	}
+}
+
+func normalizeEditablePPTConfig(cfg EditablePPTConfig, runtimeRoot string) EditablePPTConfig {
+	cfg.InstalledDir = strings.TrimSpace(cfg.InstalledDir)
+	if cfg.InstalledDir == "" {
+		cfg.InstalledDir = EditablePPTInstallDir(runtimeRoot)
+	}
+	return cfg
 }
 
 func normalizeFFmpegConfig(cfg FFmpegConfig, runtimeRoot string) FFmpegConfig {

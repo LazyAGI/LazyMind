@@ -664,17 +664,19 @@ def product_writer_write_sections(
     writing_context_path: str,
 ) -> list[str]:
     """Stream or resume product-document sections using shared Writer checkpoints."""
-    events = DraftMarkdownStreamEventEmitter(require_context().emit)
+    ctx = require_context()
+    task_json = _read_json(writing_task_path)
+    task = _json_value(task_json, {})
+    stage = str((task.get('product_parameters') or {}).get('stage_id') or 'unknown')
+    events = DraftMarkdownStreamEventEmitter(ctx.emit, slot=f'{stage}_document')
     try:
-        task_json = _read_json(writing_task_path)
-        task = _json_value(task_json, {})
-        stage = str((task.get('product_parameters') or {}).get('stage_id') or 'unknown')
         sections = _json_value(WriterCreateToolkit().stream_draft_blocks_markdown(
             writing_task_json=task_json,
             section_instructions_json=_read_json(section_instructions_path),
             writing_context_json=_read_json(writing_context_path),
             on_delta=events.feed,
             on_section_end=events.flush,
+            on_progress=lambda payload: ctx.emit({'type': 'progress', **payload}),
             checkpoint_dir=str(
                 _workspace_root() / 'product-writer' / 'draft-checkpoints' / stage
             ),

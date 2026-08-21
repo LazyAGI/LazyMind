@@ -235,30 +235,31 @@ async def test_remote_executor_keeps_workflow_inputs_out_of_user_attachments(
 
 def test_workflow_material_prompt_forbids_attachment_tools():
     from lazymind.chat.engine.subagent.runner import (
-        _has_user_attachments,
-        _workflow_material_files_section,
+        _resolve_attachment_configs,
+        _workflow_material_bindings_section,
     )
 
-    prompt = _workflow_material_files_section({
+    params = {
         'remote_inputs': {
             'topic': '人工智能辅助软件测试',
             'outline_document': '/workspace/inputs/outline_document.md',
         },
         'remote_input_types': {'topic': 'text', 'outline_document': 'file'},
         'remote_input_value_slots': ['topic'],
-    })
+    }
+    prompt = _workflow_material_bindings_section(params)
 
     assert 'not user-uploaded attachments' in prompt
     assert 'kind=value' in prompt
     assert '"value": "人工智能辅助软件测试"' in prompt
     assert '"path": "/workspace/inputs/outline_document.md"' in prompt
     assert 'read_user_attachment' in prompt
-    assert not _has_user_attachments({
-        'remote_inputs': {'outline_document': '/workspace/inputs/outline_document.md'},
-    })
-    assert _has_user_attachments({
-        'history_files_per_turn': {'1': ['/uploads/real-user-file.txt']},
-    })
+    assert _resolve_attachment_configs({}, 'workflow_step', params) == []
+    assert _resolve_attachment_configs(
+        {'history_files_per_turn': {'1': ['/uploads/real-user-file.txt']}},
+        'ordinary_subagent',
+        {},
+    )
 
 
 @pytest.mark.asyncio
@@ -267,6 +268,7 @@ async def test_execution_spec_failure_marks_claimed_attempt_failed():
 
     class Runtime:
         failure = ''
+        terminal = None
 
         async def context(self, *_):
             return {'metadata': {'task_id': 'missing-task'}, 'inputs': {}}
@@ -279,10 +281,16 @@ async def test_execution_spec_failure_marks_claimed_attempt_failed():
         async def fail(self, _client, _attempt, _lease, message):
             self.failure = message
 
+        async def task_event(self, _client, task, _lease, event):
+            self.terminal = (task, event)
+
     runtime = Runtime()
     worker.runtime = runtime
     await worker._run_claim(object(), {'attempt_id': 'attempt-1', 'lease_token': 'lease-1'})
     assert runtime.failure.startswith('executor setup failed:')
+    assert runtime.terminal == ('missing-task', {
+        'type': 'error', 'status': 'failed', 'message': runtime.failure,
+    })
 
 
 @pytest.mark.asyncio

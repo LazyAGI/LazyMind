@@ -1,11 +1,14 @@
-import base64
 import inspect
+import json
 from unittest.mock import MagicMock, patch
 
 import lazyllm
 import pytest
 
-from lazymind.chat.workflow.workflow_manager import resolve_workflow_injection
+from lazymind.chat.workflow.workflow_manager import (
+    resolve_workflow_injection,
+    workflow_startup_clarification_already_asked,
+)
 from lazymind.workflow_sdk import WorkflowClientError
 
 
@@ -21,11 +24,27 @@ def workflow_enabled():
 
 
 def _tool(contribution, name):
-    return next(tool for tool in contribution.tools if tool.__name__ == name)
+    pending = list(contribution.tools)
+    while pending:
+        tool = pending.pop(0)
+        if isinstance(tool, dict):
+            pending.extend(tool.get('tools') or [])
+        elif tool.__name__ == name:
+            return tool
+    raise StopIteration(name)
 
 
 def _tool_names(contribution):
-    return {tool.__name__ for tool in contribution.tools}
+    names = set()
+    pending = list(contribution.tools)
+    while pending:
+        tool = pending.pop(0)
+        if isinstance(tool, dict):
+            names.add(str(tool.get('name') or ''))
+            pending.extend(tool.get('tools') or [])
+        else:
+            names.add(tool.__name__)
+    return names
 
 
 def test_mentioned_workflow_is_injected_as_authoritative_selection():
@@ -60,7 +79,7 @@ def test_mentioned_workflow_is_injected_as_authoritative_selection():
     )
     assert list(inspect.signature(
         _tool(contribution, 'trigger_image_workflow'),
-    ).parameters) == ['input_bindings']
+    ).parameters) == ['request_context']
     assert 'prepare_workflow' not in _tool_names(contribution)
     assert 'list_workflow_attachments' not in _tool_names(contribution)
     assert 'bind_workflow_input' not in _tool_names(contribution)
@@ -74,7 +93,7 @@ def test_dynamic_trigger_loads_pinned_remote_package_without_listing():
     }
     with patch('lazymind.chat.workflow.workflow_manager._client') as client_factory, patch(
         'lazymind.chat.workflow.workflow_manager.HostWorkflowToolkit', return_value=toolkit,
-    ), patch('lazymind.chat.engine.subagent.tools._resolve_attachment', return_value=(
+    ), patch('lazymind.chat.workflow.workflow_manager._resolve_workflow_attachment', return_value=(
         '/safe/report.pdf', None,
     )), patch('lazymind.chat.workflow.workflow_manager._import_attachment', return_value={
         'resource_id': 'resource-1', 'revision': 1, 'content_hash': 'sha256:test',
@@ -129,53 +148,6 @@ def test_dynamic_trigger_loads_pinned_remote_package_without_listing():
     toolkit.advance_step.assert_not_called()
 
 
-def test_dynamic_trigger_imports_literal_scalar_binding():
-    lazyllm.globals['agentic_config']['files'] = ['/safe/report.pdf']
-    toolkit = MagicMock()
-    toolkit.prepare_workflow.return_value = {
-        'status': 'needs_input', 'missing_inputs': ['source_document'],
-    }
-    with patch('lazymind.chat.workflow.workflow_manager._client') as client_factory, patch(
-        'lazymind.chat.workflow.workflow_manager.HostWorkflowToolkit', return_value=toolkit,
-    ), patch('lazymind.chat.engine.subagent.tools._resolve_attachment', return_value=(
-        None, 'not an attachment',
-    )), patch('lazymind.chat.workflow.workflow_manager._import_text_binding', return_value={
-        'resource_id': 'text-resource', 'revision': 1, 'content_hash': 'sha256:text',
-    }) as import_text:
-        client_factory.return_value.get_workflow.return_value.result = {
-            'workflow_id': 'report', 'revision_id': 'revision-1',
-        }
-        contribution = resolve_workflow_injection(
-            None, current_query='write about 3000 words',
-            workflow_catalog=[{
-                'workflow_ref': 'user:user-1:report', 'workflow_id': 'report',
-                'revision_id': 'revision-1',
-            }],
-            allowed_workflow_refs=['user:user-1:report'],
-            workflow_activations=[{
-                'workflow_ref': 'user:user-1:report', 'workflow_id': 'report',
-                'revision_id': 'revision-1', 'tool_name': 'trigger_report_workflow',
-            }],
-        )
-
-        result = _tool(contribution, 'trigger_report_workflow')({
-            'target_length': '3000',
-        })
-
-    import_text.assert_called_once_with('target_length', '3000')
-    toolkit.prepare_workflow.assert_called_once_with(
-        'report', input_bindings={
-            'target_length': {
-                'resource_id': 'text-resource', 'revision': 1,
-                'content_hash': 'sha256:text',
-            },
-        }, request_context='write about 3000 words',
-    )
-    assert result['status'] == 'waiting'
-    assert result['outcome'] == 'waiting_for_input'
-    assert 'literal values' in _tool(contribution, 'trigger_report_workflow').__doc__
-
-
 def test_dynamic_trigger_imports_scalar_binding_without_conversation_attachments():
     toolkit = MagicMock()
     toolkit.prepare_workflow.return_value = {
@@ -188,12 +160,7 @@ def test_dynamic_trigger_imports_scalar_binding_without_conversation_attachments
     }) as import_text:
         client_factory.return_value.get_workflow.return_value.result = {
             'workflow_id': 'report', 'revision_id': 'revision-1',
-            'files': {'workflow.yaml': base64.b64encode(b'''\
-slots:
-  - id: target_length
-    type: text
-    external: true
-''').decode()},
+            'compiled_graph': {'material_types': {'target_length': 'text'}},
         }
         client_factory.return_value.get_state.return_value = {
             'session_id': 'session-1', 'state_version': 1,
@@ -228,6 +195,196 @@ slots:
                 'content_hash': 'sha256:text',
             },
         }, request_context='write about 3000 words',
+    )
+
+
+def test_selected_workflow_declares_missing_only_startup_clarification():
+    runtime = {
+        'clarification_fields': [
+            {'id': 'topic', 'label': '主题', 'question': '主题是什么？', 'type': 'text'},
+            {'id': 'slide_count', 'label': '页数', 'question': '生成多少页？',
+             'type': 'single', 'choices': ['3 页', '5 页']},
+        ],
+    }
+    contribution = resolve_workflow_injection(
+        None,
+        current_query='给协和医院做一份科技风 PPT',
+        workflow_catalog=[{
+            'workflow_ref': 'builtin:ppt-workflow',
+            'workflow_id': 'ppt-workflow',
+            'revision_id': 'revision-1',
+            'runtime': runtime,
+        }],
+        allowed_workflow_refs=['builtin:ppt-workflow'],
+        workflow_activations=[{
+            'workflow_ref': 'builtin:ppt-workflow',
+            'workflow_id': 'ppt-workflow',
+            'revision_id': 'revision-1',
+            'tool_name': 'trigger_ppt_workflow',
+        }],
+    )
+
+    assert contribution.runtime_policy == runtime
+    assert 'startup_clarification_fields' in contribution.runtime_context
+    assert 'only those missing fields' in contribution.runtime_context
+    assert '主题是什么？' in contribution.runtime_context
+    assert '生成多少页？' in contribution.runtime_context
+    assert 'exactly once TOTAL' in contribution.runtime_context
+    assert 'context-specific suggested answers' in contribution.runtime_context
+
+
+def test_startup_clarification_is_single_shot_and_default_trigger_merges_context():
+    runtime = {
+        'clarification_fields': [
+            {'id': 'topic', 'question': '主题是什么？', 'type': 'text'},
+            {'id': 'target_customer', 'question': '面向哪类客户？', 'type': 'text'},
+        ],
+    }
+    history = [
+        {'role': 'user', 'content': '根据知识库生成两页企业招标准则 PPT'},
+        {
+            'role': 'assistant',
+            'content': '',
+            'tool_calls': [{
+                'id': 'ask-1',
+                'type': 'function',
+                'function': {
+                    'name': 'ask_user',
+                    'arguments': '{"questions":[{"id":"target_customer",'
+                                 '"text":"面向哪类客户？","type":"single",'
+                                 '"choices":["公司负责人","采购部门"]}]}',
+                },
+            }],
+        },
+        {'role': 'tool', 'name': 'ask_user', 'tool_call_id': 'ask-1',
+         'content': 'The user submitted the form.'},
+    ]
+    assert workflow_startup_clarification_already_asked(history, runtime)
+
+    toolkit = MagicMock()
+    toolkit.prepare_workflow.return_value = {
+        'session_id': 'session-1', 'state_version': 1,
+        'ready_steps': ['analyze_requirements'],
+    }
+    toolkit.get_ready_steps.return_value = {
+        'session_id': 'session-1', 'state_version': 1,
+        'ready_steps': ['analyze_requirements'],
+        'retryable_steps': [], 'rewindable_steps': [],
+    }
+    toolkit.advance_step.return_value = {'status': 'succeeded'}
+    with patch('lazymind.chat.workflow.workflow_manager._client') as client_factory, patch(
+        'lazymind.chat.workflow.workflow_manager.HostWorkflowToolkit', return_value=toolkit,
+    ):
+        client_factory.return_value.get_workflow.return_value.result = {
+            'workflow_id': 'ppt-workflow', 'revision_id': 'revision-1',
+        }
+        client_factory.return_value.get_state.return_value = {
+            'session_id': 'session-1', 'state_version': 1,
+            'projection': {'ready': ['analyze_requirements']},
+        }
+        contribution = resolve_workflow_injection(
+            None,
+            current_query='面向哪类客户？: 公司负责人',
+            conversation_history=history,
+            workflow_catalog=[{
+                'workflow_ref': 'builtin:ppt-workflow',
+                'workflow_id': 'ppt-workflow',
+                'revision_id': 'revision-1',
+                'runtime': runtime,
+            }],
+            allowed_workflow_refs=['builtin:ppt-workflow'],
+            workflow_activations=[{
+                'workflow_ref': 'builtin:ppt-workflow',
+                'workflow_id': 'ppt-workflow',
+                'revision_id': 'revision-1',
+                'tool_name': 'trigger_ppt_workflow',
+            }],
+        )
+        # Even if the model supplies only this turn's answer, Host preserves
+        # the original request and all of its already-known fields.
+        result = _tool(contribution, 'trigger_ppt_workflow')(
+            request_context='面向哪类客户？: 公司负责人',
+        )
+        _tool(contribution, 'advance_step')(['analyze_requirements'])
+
+    assert '根据知识库生成两页企业招标准则 PPT' in result['request_context']
+    assert '面向哪类客户？: 公司负责人' in result['request_context']
+    toolkit.prepare_workflow.assert_called_once_with(
+        'ppt-workflow', input_bindings={}, request_context=result['request_context'],
+    )
+    command = toolkit.advance_step.call_args.args[2][0]
+    assert command.user_input == result['request_context']
+
+
+def test_completed_historical_clarification_does_not_block_a_new_workflow_request():
+    runtime = {'clarification_fields': [{
+        'id': 'topic', 'question': '这份 PPT 的主题是什么？', 'type': 'text',
+    }]}
+    history = [
+        {'role': 'user', 'content': '做一个 PPT'},
+        {
+            'role': 'assistant',
+            'tool_calls': [{
+                'id': 'ask-old',
+                'type': 'function',
+                'function': {
+                    'name': 'ask_user',
+                    'arguments': json.dumps({'questions': [{
+                        'id': 'topic', 'text': '这份 PPT 的主题是什么？', 'type': 'text',
+                    }]}, ensure_ascii=False),
+                },
+            }],
+        },
+        {'role': 'tool', 'name': 'ask_user', 'tool_call_id': 'ask-old', 'content': '产品介绍'},
+        {'role': 'assistant', 'content': 'PPT 已生成完成。'},
+        {'role': 'user', 'content': '再做一份 PPT'},
+    ]
+
+    assert not workflow_startup_clarification_already_asked(history, runtime)
+
+
+def test_clarification_answer_turn_can_pass_merged_request_context_to_trigger():
+    toolkit = MagicMock()
+    toolkit.prepare_workflow.return_value = {
+        'session_id': 'session-1', 'state_version': 1,
+        'ready_steps': ['analyze_requirements'],
+    }
+    merged = (
+        '原始需求：制作医院智算应用技术方案。'
+        '补充：8页；客户是协和医院；科技未来风格。'
+    )
+    with patch('lazymind.chat.workflow.workflow_manager._client') as client_factory, patch(
+        'lazymind.chat.workflow.workflow_manager.HostWorkflowToolkit', return_value=toolkit,
+    ):
+        client_factory.return_value.get_workflow.return_value.result = {
+            'workflow_id': 'ppt-workflow', 'revision_id': 'revision-1',
+        }
+        client_factory.return_value.get_state.return_value = {
+            'session_id': 'session-1', 'state_version': 1,
+            'projection': {'ready': ['analyze_requirements']},
+        }
+        contribution = resolve_workflow_injection(
+            None,
+            current_query='8页，协和医院，科技未来风格',
+            workflow_catalog=[{
+                'workflow_ref': 'builtin:ppt-workflow',
+                'workflow_id': 'ppt-workflow',
+                'revision_id': 'revision-1',
+            }],
+            allowed_workflow_refs=['builtin:ppt-workflow'],
+            workflow_activations=[{
+                'workflow_ref': 'builtin:ppt-workflow',
+                'workflow_id': 'ppt-workflow',
+                'revision_id': 'revision-1',
+                'tool_name': 'trigger_ppt_workflow',
+            }],
+        )
+
+        result = _tool(contribution, 'trigger_ppt_workflow')(request_context=merged)
+
+    assert result['request_context'] == merged
+    toolkit.prepare_workflow.assert_called_once_with(
+        'ppt-workflow', input_bindings={}, request_context=merged,
     )
 
 
@@ -277,6 +434,61 @@ def test_dynamic_trigger_activates_advance_step_in_the_same_agent_turn():
     assert toolkit.advance_step.call_args.args[1] == 1
 
 
+def test_selected_workflow_session_tool_auto_initializes_without_attachments():
+    toolkit = MagicMock()
+    toolkit.prepare_workflow.return_value = {
+        'session_id': 'session-1', 'state_version': 1,
+        'ready_steps': ['analyze_requirements'],
+    }
+    toolkit.get_ready_steps.return_value = {
+        'session_id': 'session-1', 'state_version': 1,
+        'ready_steps': ['analyze_requirements'],
+        'retryable_steps': [], 'rewindable_steps': [],
+    }
+    with patch('lazymind.chat.workflow.workflow_manager._client') as client_factory, patch(
+        'lazymind.chat.workflow.workflow_manager.HostWorkflowToolkit', return_value=toolkit,
+    ):
+        client_factory.return_value.get_workflow.return_value.result = {
+            'workflow_id': 'ppt-workflow', 'revision_id': 'revision-1',
+        }
+        client_factory.return_value.get_state.return_value = {
+            'session_id': 'session-1', 'state_version': 1,
+            'projection': {
+                'reachable': ['analyze_requirements'],
+                'ready': ['analyze_requirements'],
+            },
+        }
+        contribution = resolve_workflow_injection(
+            None,
+            current_query='生成三页关于加减法数学题的PPT',
+            conversation_id='conversation-1',
+            workflow_catalog=[{
+                'workflow_ref': 'builtin:ppt-workflow',
+                'workflow_id': 'ppt-workflow',
+                'revision_id': 'revision-1',
+            }],
+            allowed_workflow_refs=['builtin:ppt-workflow'],
+            workflow_activations=[{
+                'workflow_ref': 'builtin:ppt-workflow',
+                'workflow_id': 'ppt-workflow',
+                'revision_id': 'revision-1',
+                'tool_name': 'trigger_ppt_workflow',
+            }],
+        )
+
+        result = _tool(contribution, 'get_ready_steps')()
+        repeated_trigger = _tool(contribution, 'trigger_ppt_workflow')()
+
+    assert result['ready_steps'] == ['analyze_requirements']
+    assert repeated_trigger['outcome'] == 'already_initialized'
+    assert repeated_trigger['session_id'] == 'session-1'
+    toolkit.prepare_workflow.assert_called_once_with(
+        'ppt-workflow', input_bindings={},
+        request_context='生成三页关于加减法数学题的PPT',
+    )
+    assert 'upload is required' in contribution.runtime_context
+
+
 def test_dynamic_trigger_exposes_handoff_after_session_is_created_in_same_turn():
     toolkit = MagicMock()
     toolkit.prepare_workflow.return_value = {
@@ -321,6 +533,49 @@ def test_dynamic_trigger_exposes_handoff_after_session_is_created_in_same_turn()
     assert request.session_id == 'session-1'
     assert request.handoff is True
     assert request.steps[0].step_id == 'review'
+    assert request.steps[0].user_input == 'run it'
+
+
+def test_active_workflow_forwards_current_edit_request_and_focus_to_step():
+    toolkit = MagicMock()
+    toolkit.get_ready_steps.return_value = {
+        'session_id': 'session-1', 'state_version': 7,
+        'ready_steps': [], 'retryable_steps': [], 'rewindable_steps': ['generate_ppt'],
+    }
+    toolkit.advance_step.return_value = {'status': 'succeeded'}
+    with patch('lazymind.chat.workflow.workflow_manager.HostWorkflowToolkit',
+               return_value=toolkit), patch(
+        'lazymind.chat.workflow.workflow_manager._client',
+    ) as client_factory:
+        client_factory.return_value.get_state.return_value = {
+            'status': 'completed', 'state_version': 7,
+            'projection': {
+                'completed': True,
+                'rewindable': ['generate_ppt'],
+            },
+        }
+        contribution = resolve_workflow_injection(
+            {
+                'session_id': 'session-1',
+                'workflow_id': 'deck-workflow',
+                'runtime': {'completed_edit_step': 'generate_ppt'},
+                'focused_tab': 'composite_preview',
+                'focused_sort_order': 2,
+            },
+            conversation_id='conversation-1',
+            current_query='把这一页标题改成期末练习',
+        )
+        # resolve_workflow_injection's patch is applied to agentic_config by ChatService.
+        lazyllm.globals['agentic_config'].update(contribution.agentic_config_patch)
+        result = _tool(contribution, 'advance_step')(['generate_ppt'])
+
+    assert result == {'status': 'succeeded'}
+    assert 'A completed Session is not immutable' in contribution.runtime_context
+    assert "advance_step(step_ids=['generate_ppt'])" in contribution.runtime_context
+    assert 'never paste replacement content into chat' in contribution.runtime_context
+    command = toolkit.advance_step.call_args.args[2][0]
+    assert command.user_input == '把这一页标题改成期末练习'
+    assert 'sort order 2' in command.runtime_instruction
 
 
 def test_dynamic_trigger_defaults_request_context_to_current_query():
@@ -387,13 +642,12 @@ def test_dynamic_trigger_returns_waiting_without_advancing_when_no_step_is_ready
     toolkit.advance_step.assert_not_called()
 
 
-def test_enabled_workflow_without_mention_keeps_generic_discovery_tools():
-    with patch('lazymind.chat.workflow.workflow_manager._client') as client_factory:
-        client_factory.return_value.get_workflow.return_value.result = {'workflow_id': 'any'}
-        contribution = resolve_workflow_injection(None, workflow_catalog=[])
+def test_enabled_workflow_without_catalog_exposes_only_lazy_authoring_group():
+    contribution = resolve_workflow_injection(None, workflow_catalog=[])
 
-        assert contribution.runtime_context == ''
-        assert _tool(contribution, 'get_workflow')('any') == {'workflow_id': 'any'}
+    assert contribution.runtime_context == ''
+    assert _tool_names(contribution) >= {'workflow_authoring', 'create_workflow_draft'}
+    assert 'get_workflow' not in _tool_names(contribution)
 
 
 def test_model_tool_projection_hides_controller_lifecycle_tools_without_session():

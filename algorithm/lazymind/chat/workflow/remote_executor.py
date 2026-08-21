@@ -77,6 +77,7 @@ class RemoteWorkflowExecutor:
     async def _run_claim(self, client: httpx.AsyncClient, claim: Dict[str, Any]) -> None:
         attempt_id = str(claim['attempt_id'])
         lease = str(claim['lease_token'])
+        task_id = ''
         try:
             context = await self.runtime.context(client, attempt_id, lease)
             metadata = context.get('metadata') or {}
@@ -89,7 +90,18 @@ class RemoteWorkflowExecutor:
         except Exception as exc:
             # A claimed Attempt must never remain stuck merely because Host setup
             # failed before the SubAgent stream started.
-            await self.runtime.fail(client, attempt_id, lease, f'executor setup failed: {exc}')
+            message = f'executor setup failed: {exc}'
+            await self.runtime.fail(client, attempt_id, lease, message)
+            # Keep the ordinary SubAgent projection in sync with the authoritative
+            # Attempt. Without this terminal event the task remains pending forever
+            # even though Workflow Runtime has already marked the Attempt failed.
+            if task_id:
+                try:
+                    await self.runtime.task_event(client, task_id, lease, {
+                        'type': 'error', 'status': 'failed', 'message': message,
+                    })
+                except Exception:
+                    LOG.exception('failed to mirror Workflow setup failure to SubAgent task %s', task_id)
             return
 
         stopped = threading.Event()
@@ -110,6 +122,7 @@ class RemoteWorkflowExecutor:
         heartbeat_thread.start()
         artifacts: list[Dict[str, Any]] = []
         summary = ''
+        control: Dict[str, Any] = {}
         failure: Optional[str] = None
         terminal_event: Optional[Dict[str, Any]] = None
         try:
@@ -172,6 +185,9 @@ class RemoteWorkflowExecutor:
                 elif kind == 'done':
                     terminal_event = event
                     summary = str(event.get('summary') or '')
+                    event_control = event.get('control')
+                    if isinstance(event_control, dict):
+                        control = dict(event_control)
                     if event.get('status') not in {None, '', 'succeeded'}:
                         failure = summary or str(event.get('status'))
                 elif kind == 'error':
@@ -190,7 +206,9 @@ class RemoteWorkflowExecutor:
                 await self.runtime.fail(client, attempt_id, lease, failure)
             else:
                 await self.runtime.complete(client, attempt_id, lease, {
-                    'summary': summary, 'executor_ref': task_id, 'artifacts': artifacts})
+                    'summary': summary, 'executor_ref': task_id, 'artifacts': artifacts,
+                    **({'control': control} if control else {}),
+                })
         except httpx.HTTPStatusError as exc:
             # A Runtime completion validation error is a terminal execution
             # failure, not a reason to leave the Attempt running until expiry.

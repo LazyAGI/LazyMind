@@ -14,8 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
-import yaml
 from pydantic import BaseModel, ConfigDict, Field
+import yaml
 
 from lazymind.workflow_sdk import (
     AdvanceRequest, StepCommand, WorkflowClient, WorkflowClientError,
@@ -33,33 +33,29 @@ def _workflow_document(files: Dict[str, Any]) -> Dict[str, Any]:
     return document if isinstance(document, dict) else {}
 
 
-def _declared_workflow_tools(files: Dict[str, Any]) -> Dict[str, str]:
-    document = _workflow_document(files)
-    declared: Dict[str, str] = {}
-    for item in document.get('tool_scripts') or []:
-        if not isinstance(item, dict):
-            continue
-        path = str(item.get('path') or '').strip()
-        if (not path.startswith('scripts/') or not path.endswith('.py')
-                or '..' in path.split('/')):
-            continue
-        for raw_name in item.get('functions') or []:
-            name = str(raw_name or '').strip()
-            if not name.isidentifier():
-                continue
-            previous = declared.get(name)
-            if previous is not None and previous != path:
-                raise ValueError(f'Workflow tool is declared by multiple scripts: {name}')
-            declared[name] = path
-    return declared
-
-
 def workflow_package_input_types(package: Dict[str, Any]) -> Dict[str, str]:
     """Return external material types declared by a published package."""
+    graph = package.get('compiled_graph') if isinstance(package.get('compiled_graph'), dict) else {}
+    compiled_types = graph.get('material_types') if isinstance(graph, dict) else None
+    if isinstance(compiled_types, dict) and compiled_types:
+        producers = graph.get('material_producers')
+        external_ids = {
+            str(material_id)
+            for material_id, producer in (producers or {}).items()
+            if isinstance(producer, dict) and producer.get('kind') == 'external'
+        }
+        # Older compiled revisions did not carry material producer metadata in
+        # every Host response. In that case preserve the type-only fallback;
+        # current revisions expose only true external inputs to the trigger.
+        candidates = external_ids or {str(material_id) for material_id in compiled_types}
+        return {
+            str(material_id): str(material_type or 'text').strip().lower()
+            for material_id, material_type in compiled_types.items()
+            if str(material_id) in candidates
+        }
     files = package.get('files') if isinstance(package.get('files'), dict) else {}
-    document = _workflow_document(files)
     result: Dict[str, str] = {}
-    for slot in document.get('slots') or []:
+    for slot in _workflow_document(files).get('slots') or []:
         if not isinstance(slot, dict):
             continue
         if slot.get('external') is not True and slot.get('producer') != 'external':
@@ -73,35 +69,39 @@ def workflow_package_input_types(package: Dict[str, Any]) -> Dict[str, str]:
 def load_workflow_package_tools(
     package: Dict[str, Any], names: List[str], workflow_id: str, revision_id: str,
 ) -> Dict[str, Any]:
-    """Load explicitly declared callables from an already validated package."""
+    """Load named callables from an already validated Workflow package."""
     files = package.get('files') if isinstance(package.get('files'), dict) else {}
-    declarations = _declared_workflow_tools(files)
-    remaining = {name for name in names if name in declarations}
+    remaining = set(names)
     resolved: Dict[str, Any] = {}
-    for module_index, path in enumerate(sorted({declarations[name] for name in remaining})):
+    for path in sorted(files):
         if not remaining:
             break
-        encoded = files.get(path)
-        if encoded is None:
+        # Published packages may carry their own regression tests. They are
+        # package assets, not runtime tool modules, and often rely on a source
+        # checkout layout that does not exist for an immutable revision.
+        if (
+            not path.startswith('scripts/')
+            or not path.endswith('.py')
+            or path.startswith('scripts/tests/')
+            or '/__tests__/' in path
+        ):
             continue
+        encoded = files[path]
         source = base64.b64decode(encoded) if isinstance(encoded, str) else bytes(encoded)
         module = types.ModuleType(
-            f'_lazymind_workflow_{revision_id.replace("-", "_")}_{module_index}'
+            f'_lazymind_workflow_{revision_id.replace("-", "_")}_{len(resolved)}'
         )
         module.__file__ = f'{workflow_id}@{revision_id}/{path}'
         exec(compile(source.decode('utf-8'), module.__file__, 'exec'), module.__dict__)
         for name in tuple(remaining):
-            if declarations[name] != path:
-                continue
             candidate = module.__dict__.get(name)
             if callable(candidate):
                 if not str(getattr(candidate, '__doc__', '') or '').strip():
                     candidate.__doc__ = f'Execute the published Workflow tool {name}.'
                 resolved[name] = candidate
                 remaining.remove(name)
-    missing = sorted(set(names) - set(resolved))
-    if missing:
-        LOG.warning('Workflow revision %s does not provide declared tools %s', revision_id, missing)
+    if remaining:
+        LOG.warning('Workflow revision %s does not provide tools %s', revision_id, sorted(remaining))
     return resolved
 
 

@@ -19,7 +19,7 @@ def test_filter_chat_document_files():
 
 
 def test_text_files_are_supported_chat_attachments():
-    files = ['/data/notes.txt', '/data/config.YAML', '/data/main.py']
+    files = ['/data/notes.txt', '/data/draft.lmd', '/data/config.YAML', '/data/main.py']
 
     assert all(ar.is_chat_text_file(path) for path in files)
     assert all(ar.is_chat_attachment_file(path) for path in files)

@@ -861,7 +861,8 @@ def academic_writer_write_sections(
     normalized_plan_path = _write_json(
         _run_root('normalized-section-plan'), 'section_instructions', section_instructions,
     )
-    events = DraftMarkdownStreamEventEmitter(require_context().emit)
+    ctx = require_context()
+    events = DraftMarkdownStreamEventEmitter(ctx.emit, slot='draft_document')
     try:
         sections = _json_value(WriterCreateToolkit().stream_draft_blocks_markdown(
             writing_task_json=_read_json(writing_task_path),
@@ -869,6 +870,7 @@ def academic_writer_write_sections(
             writing_context_json=_read_json(writing_context_path),
             on_delta=events.feed,
             on_section_end=events.flush,
+            on_progress=lambda payload: ctx.emit({'type': 'progress', **payload}),
             checkpoint_dir=str(_workspace_root() / 'academic-writer' / 'draft-checkpoints'),
         ), [])
         if not isinstance(sections, list) or not sections:

@@ -164,7 +164,7 @@ func TestListTasksByConversationForUserEnforcesOwnership(t *testing.T) {
 	}
 }
 
-func TestListTasksByConversationForUserIncludesOwnedWorkflowAttempts(t *testing.T) {
+func TestListTasksByConversationForUserIncludesWorkflowAttempts(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
 	for _, input := range []CreateTaskInput{

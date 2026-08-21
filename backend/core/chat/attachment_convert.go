@@ -15,6 +15,36 @@ func resolveChatAttachmentFiles(ctx context.Context, files any, ocrConfig map[st
 	}
 
 	switch xs := files.(type) {
+	case map[string]any:
+		if len(xs) == 0 {
+			return xs, nil
+		}
+		out := make(map[string]any, len(xs))
+		for turn, turnFiles := range xs {
+			resolved, err := resolveChatAttachmentFiles(ctx, turnFiles, ocrConfig)
+			if err != nil {
+				return nil, fmt.Errorf("resolve turn %q: %w", turn, err)
+			}
+			out[turn] = resolved
+		}
+		return out, nil
+	case map[string][]string:
+		if len(xs) == 0 {
+			return xs, nil
+		}
+		out := make(map[string][]string, len(xs))
+		for turn, turnFiles := range xs {
+			resolved, err := resolveChatAttachmentFiles(ctx, turnFiles, ocrConfig)
+			if err != nil {
+				return nil, fmt.Errorf("resolve turn %q: %w", turn, err)
+			}
+			paths, ok := resolved.([]string)
+			if !ok {
+				return nil, fmt.Errorf("resolve turn %q: unexpected files type %T", turn, resolved)
+			}
+			out[turn] = paths
+		}
+		return out, nil
 	case []string:
 		if len(xs) == 0 {
 			return nil, nil

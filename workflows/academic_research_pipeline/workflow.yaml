@@ -15,6 +15,33 @@ when_to_use: >
   直接使用；缺少任意项时一次性询问清楚，不能先启动后猜默认值。仅需单次检索、单独润色、
   单独审稿或格式转换时不应触发完整流程。
 
+runtime:
+  exclusive_tool_capabilities: [writer.create, writer.revise]
+  collects_knowledge: true
+  clarification_fields:
+    - {id: research_topic, label: 研究主题, question: 请确认论文的研究主题或核心问题。, type: text}
+    - id: paper_type
+      label: 论文类型
+      question: 请选择论文类型。
+      type: single
+      choices: [研究型论文, 实证研究, 文献综述, 理论研究, 案例研究, 会议论文]
+    - {id: word_target, label: 目标篇幅, question: 请确认论文正文的目标字数。, type: text}
+    - id: paper_language
+      label: 正文语言
+      question: 请选择论文正文语言。
+      type: single
+      choices: [中文, 英文]
+    - id: citation_style
+      label: 引用格式
+      question: 请选择引用格式。
+      type: single
+      choices: [APA 7, Chicago, MLA 9, IEEE, Vancouver, GB/T 7714]
+    - id: output_format
+      label: 导出格式
+      question: 请选择最终导出格式。
+      type: single
+      choices: [docx, md]
+
 tool_scripts:
   - path: scripts/pipeline_tools.py
     functions:
@@ -132,11 +159,11 @@ ui:
     search_log: {widgetType: text-markdown, readOnly: true}
     annotated_bibliography: {widgetType: text-markdown, readOnly: true, maxHeight: 680}
     research_synthesis: {widgetType: text-markdown, readOnly: true, maxHeight: 680}
-    outline_document: {widgetType: file-card, readOnly: false}
+    outline_document: {widgetType: writer-document, readOnly: false}
     outline_check_report: {widgetType: text-markdown, readOnly: true}
     effective_outline_check_report: {widgetType: text-markdown, readOnly: true}
     chapter_drafts: {widgetType: file-card, readOnly: true}
-    draft_document: {widgetType: file-card, readOnly: false}
+    draft_document: {widgetType: writer-document, readOnly: false}
     pre_integrity_report: {widgetType: text-markdown, readOnly: true}
     pre_integrity_summary: {widgetType: json-block, readOnly: true, collapsed: false}
     reviewer_configuration: {widgetType: text-markdown, readOnly: true}

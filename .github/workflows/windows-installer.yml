@@ -367,7 +367,7 @@ jobs:
           INSTALLER_PATH: ${{ steps.installer.outputs.path }}
         run: |
           $ErrorActionPreference = "Stop"
-          $install = Start-Process -FilePath $env:INSTALLER_PATH -ArgumentList "/S" -Wait -PassThru
+          $install = Start-Process -FilePath $env:INSTALLER_PATH -ArgumentList "/S --full-install" -Wait -PassThru
           "Installer exit code: $($install.ExitCode)"
           if ($install.ExitCode -ne 0) {
             $unsignedExitCode = [uint32]$install.ExitCode

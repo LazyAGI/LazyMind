@@ -32,6 +32,7 @@ type TaskCenterTask struct {
 	UpdatedAt         time.Time  `gorm:"column:updated_at;not null"`
 	FinishedAt        *time.Time `gorm:"column:finished_at"`
 	ArchivedAt        *time.Time `gorm:"column:archived_at"` // non-null = hidden from task center list
+	ArchivedReason    string     `gorm:"column:archived_reason;type:varchar(32);not null;default:''"`
 }
 
 func (TaskCenterTask) TableName() string { return "task_center_tasks" }

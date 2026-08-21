@@ -7,6 +7,7 @@ import {
   CheckCircleFilled,
   CodeOutlined,
   DatabaseOutlined,
+  DeleteOutlined,
   ExperimentOutlined,
   InfoCircleOutlined,
   LinkOutlined,
@@ -41,6 +42,7 @@ import MemoryCapabilitySettings from "./MemoryCapabilitySettings";
 import KnowledgeDataSettings from "./KnowledgeDataSettings";
 import KnowledgeToolSettings, { isKnowledgeToolView } from "./KnowledgeToolSettings";
 import QuickModelSettings from "./QuickModelSettings";
+import RecoverySettings from "./RecoverySettings";
 import UserSkillWorkflowSettings, { type ResourceTab } from "./UserSkillWorkflowSettings";
 import {
   fetchSettingsOverview,
@@ -67,6 +69,7 @@ type SectionID =
   | "channels"
   | "diagnostics"
   | "organization"
+  | "recovery"
   | "developer";
 type MasterSetting = "task_center_enabled" | "skills_enabled" | "workflows_enabled" | "mcp_enabled" | "document_parsing_enabled";
 type Translate = (key: string, options?: Record<string, unknown>) => string;
@@ -137,6 +140,7 @@ function baseNavigation(isAdmin: boolean, t: Translate): NavigationGroup[] {
       title: t("settingsPage.navGroups.management"),
       items: [
         ...(isAdmin ? [{ id: "organization" as const, label: t("settingsPage.sections.organization"), keywords: t("settingsPage.sectionKeywords.organization"), icon: <TeamOutlined /> }] : []),
+        { id: "recovery", label: t("settingsPage.sections.recovery"), keywords: t("settingsPage.sectionKeywords.recovery"), icon: <DeleteOutlined /> },
         { id: "diagnostics", label: t("settingsPage.sections.diagnostics"), keywords: t("settingsPage.sectionKeywords.diagnostics"), icon: <CheckCircleFilled /> },
         ...(isAdmin ? [{ id: "developer" as const, label: t("settingsPage.sections.developer"), keywords: t("settingsPage.sectionKeywords.developer"), icon: <CodeOutlined />, status: t("settingsPage.sectionStatus.activated") }] : []),
       ],
@@ -203,7 +207,7 @@ export default function SettingsPage() {
     dependencyMessage: hasLocalDependencies ? t("settingsPage.diagnostics.readingDeps") : t("settingsPage.diagnostics.cloudDeps"),
   });
   const [keyword, setKeyword] = useState("");
-  const [modelView, setModelView] = useState<"defaults" | "providers">("defaults");
+  const modelView = searchParams.get("view") === "providers" ? "providers" : "defaults";
   const [organizationView, setOrganizationView] = useState<"users" | "groups">("users");
   const [mcpRefreshToken, setMcpRefreshToken] = useState(0);
 
@@ -237,6 +241,11 @@ export default function SettingsPage() {
   }, [keyword, navigationGroups]);
 
   const selectSection = (next: SectionID) => setSearchParams({ section: next });
+  const selectModelView = (next: "defaults" | "providers") => {
+    setSearchParams(next === "providers"
+      ? { section: "models", view: "providers" }
+      : { section: "models" });
+  };
   const selectedSection = overview?.sections.find((item) => item.id === section) || sectionFallback(section, t);
 
   const syncOverview = useCallback(async () => {
@@ -647,8 +656,8 @@ export default function SettingsPage() {
       content = <>
         {integratedHeader(t("settingsPage.models.title"), selectedSection.detail)}
         <nav className="settings-model-tabs" aria-label={t("settingsPage.models.tabsAria")} role="tablist">
-          <button className={modelView === "defaults" ? "is-active" : ""} type="button" role="tab" aria-selected={modelView === "defaults"} onClick={() => setModelView("defaults")}>{t("settingsPage.models.defaultSettings")}</button>
-          <button ref={modelProviderTabRef} className={modelView === "providers" ? "is-active" : ""} type="button" role="tab" aria-selected={modelView === "providers"} onClick={() => setModelView("providers")}>{t("settingsPage.models.providers")}</button>
+          <button className={modelView === "defaults" ? "is-active" : ""} type="button" role="tab" aria-selected={modelView === "defaults"} onClick={() => selectModelView("defaults")}>{t("settingsPage.models.defaultSettings")}</button>
+          <button ref={modelProviderTabRef} className={modelView === "providers" ? "is-active" : ""} type="button" role="tab" aria-selected={modelView === "providers"} onClick={() => selectModelView("providers")}>{t("settingsPage.models.providers")}</button>
         </nav>
         {integratedSurface(modelView === "defaults" ? (
           <DefaultServicesPage
@@ -658,7 +667,7 @@ export default function SettingsPage() {
                 : "/settings?section=knowledge&tool=web-search",
             )}
             onConfigureProviders={() => {
-              setModelView("providers");
+              selectModelView("providers");
               requestAnimationFrame(() => modelProviderTabRef.current?.focus());
             }}
           />
@@ -733,6 +742,8 @@ export default function SettingsPage() {
       content = integratedSurface(<AgentIntegrationPage />, "is-assistants");
     } else if (section === "channels") {
       content = integratedSurface(<TerminalConnectionPage />, "is-channels");
+    } else if (section === "recovery") {
+      content = <RecoverySettings headingRef={headingRef} />;
     } else if (section === "diagnostics") {
       content = renderDiagnostics();
     } else {

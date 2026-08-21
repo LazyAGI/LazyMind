@@ -15,7 +15,7 @@ import (
 // with the strict publish profile.
 func ValidateWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 	var draft orm.WorkflowDraft
-	if err := store.DB().Where("id = ? AND created_by = ?", common.PathVar(r, "draft_id"), common.UserID(r)).First(&draft).Error; err != nil {
+	if err := store.DB().Where("id = ? AND created_by = ? AND deleted_at IS NULL", common.PathVar(r, "draft_id"), common.UserID(r)).First(&draft).Error; err != nil {
 		common.ReplyErr(w, "not found", http.StatusNotFound)
 		return
 	}

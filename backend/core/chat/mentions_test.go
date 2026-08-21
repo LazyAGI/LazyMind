@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/workflow"
 )
 
 func TestParseChatMentionsDeduplicatesByTypeAndResource(t *testing.T) {
@@ -92,6 +93,59 @@ func TestApplyChatMentionsRejectsWorkflowWhenWorkflowControlIsPaused(t *testing.
 	_, _, err := applyChatMentions(context.Background(), db.DB, raw, "user-1", "conversation-1", "session-1", "执行 Paused Workflow", nil)
 	if err == nil || !strings.Contains(err.Error(), "workflows are paused") {
 		t.Fatalf("expected paused master switch error, got %v", err)
+	}
+}
+
+func TestMergeMentionedWorkflowsAllowsManualAndRejectsPaused(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.UserWorkflowSetting{})
+	setting := orm.UserWorkflowSetting{
+		UserID: "user-1", WorkflowRef: "builtin:image-workflow", Enabled: true,
+		CallMode: workflow.WorkflowCallModeManual, UpdatedAt: time.Now().UTC(),
+	}
+	if err := db.Create(&setting).Error; err != nil {
+		t.Fatal(err)
+	}
+	selected, builtins, err := mergeMentionedWorkflows(
+		context.Background(), db.DB, "user-1", []string{"builtin:image-workflow"}, nil,
+	)
+	if err != nil || len(selected) != 0 || len(builtins) != 1 || builtins[0] != "image-workflow" {
+		t.Fatalf("manual mention selected=%#v builtins=%#v err=%v", selected, builtins, err)
+	}
+	if err := db.Model(&orm.UserWorkflowSetting{}).
+		Where("user_id=? AND plugin_ref=?", "user-1", "builtin:image-workflow"). // workflow-naming: persistence
+		Updates(map[string]any{"enabled": false, "call_mode": workflow.WorkflowCallModeDisabled}).Error; err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = mergeMentionedWorkflows(
+		context.Background(), db.DB, "user-1", []string{"builtin:image-workflow"}, nil,
+	)
+	if err == nil || !strings.Contains(err.Error(), "workflow is paused") {
+		t.Fatalf("paused workflow mention error = %v", err)
+	}
+}
+
+func TestApplyWorkflowContextCallModeClearsPausedSession(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.UserWorkflowSetting{})
+	if err := db.Create(&orm.UserWorkflowSetting{
+		UserID: "user-1", WorkflowRef: "builtin:image-workflow", Enabled: false,
+		CallMode: workflow.WorkflowCallModeDisabled, UpdatedAt: time.Now().UTC(),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	reqBody := map[string]any{"workflow_context": map[string]any{
+		"session_id": "session-1", "workflow_id": "image-workflow",
+		"workflow_ref": "builtin:image-workflow", "current_step": "generate",
+		"workflow_mode": "dynamic", "workflow_preflight": map[string]any{"status": "ready"},
+	}}
+	if err := applyWorkflowContextCallMode(db.DB, "user-1", reqBody); err != nil {
+		t.Fatal(err)
+	}
+	contextValue := reqBody["workflow_context"].(map[string]any)
+	if contextValue["session_id"] != nil || contextValue["workflow_ref"] != nil || contextValue["current_step"] != nil {
+		t.Fatalf("paused workflow context still active: %#v", contextValue)
+	}
+	if contextValue["workflow_mode"] != "dynamic" || contextValue["workflow_preflight"] == nil {
+		t.Fatalf("non-runtime workflow context was not preserved: %#v", contextValue)
 	}
 }
 
@@ -286,6 +340,9 @@ func TestBuildLazyChatRequestPropagatesPreviewLLMConfirmation(t *testing.T) {
 func TestBackendBuildsAndPropagatesWorkflowActivation(t *testing.T) {
 	activation := buildWorkflowActivation(map[string]any{
 		"workflow_id": "image-workflow", "revision_id": "revision-1", "name": "Image",
+		"runtime": map[string]any{"clarification_fields": []map[string]any{{
+			"id": "topic", "question": "What is the topic?",
+		}}},
 	}, "builtin:image-workflow")
 	if activation["tool_name"] != "trigger_image_workflow" {
 		t.Fatalf("activation = %#v", activation)
@@ -293,6 +350,9 @@ func TestBackendBuildsAndPropagatesWorkflowActivation(t *testing.T) {
 	if !strings.Contains(fmt.Sprint(activation["tool_description"]), "executable Workflow") ||
 		!strings.Contains(fmt.Sprint(activation["prompt"]), "@workflow") {
 		t.Fatalf("workflow execution semantics missing: %#v", activation)
+	}
+	if activation["runtime"] == nil {
+		t.Fatalf("workflow runtime policy missing: %#v", activation)
 	}
 	req := buildLazyChatRequest(map[string]any{
 		"workflow_activations": []map[string]any{activation},

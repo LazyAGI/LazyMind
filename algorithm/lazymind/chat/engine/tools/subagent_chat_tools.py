@@ -143,6 +143,9 @@ def create_subagent(
     mode = _mode()
     params = dict(params or {})
     params['_thinking_depth'] = str(_agentic_config().get('thinking_depth') or 'medium')
+    trace = lazyllm.get_trace_context()
+    if trace.trace_id and trace.parent_span_id:
+        params.update(trace_id=trace.trace_id, parent_span_id=trace.parent_span_id)
     attachment_context = _current_attachment_context()
     if attachment_context:
         params[SUBAGENT_ATTACHMENT_CONTEXT_KEY] = attachment_context

@@ -276,6 +276,7 @@ def _run_review_with_tool_results(monkeypatch, tool_results, *, response='Review
     fake_lazyllm = SimpleNamespace(
         globals=_SidDict(),
         locals=_SidDict(),
+        set_trace_context=lambda _ctx: None,
         tools=SimpleNamespace(agent=SimpleNamespace(ReactAgent=FakeReactAgent)),
     )
 
@@ -466,6 +467,7 @@ def test_review_memory_runs_agent_with_all_memory_tools(monkeypatch):
     fake_lazyllm = SimpleNamespace(
         globals=_SidDict(),
         locals=_SidDict({'_lazyllm_agent': {'completed': [{'stale': True}]}}),
+        set_trace_context=lambda _ctx: None,
         tools=SimpleNamespace(agent=SimpleNamespace(ReactAgent=FakeReactAgent)),
     )
 
@@ -579,6 +581,7 @@ def test_review_memory_stops_before_agent_when_fixed_memory_load_fails(monkeypat
     fake_lazyllm = SimpleNamespace(
         globals=_SidDict(),
         locals=_SidDict(),
+        set_trace_context=lambda _ctx: None,
         tools=SimpleNamespace(agent=SimpleNamespace(ReactAgent=object)),
     )
     _patch_runtime_bindings(
@@ -633,6 +636,7 @@ def test_review_memory_returns_success_when_no_tool_submission(monkeypatch):
     fake_lazyllm = SimpleNamespace(
         globals=_SidDict(),
         locals=_SidDict({'_lazyllm_agent': {}}),
+        set_trace_context=lambda _ctx: None,
         tools=SimpleNamespace(agent=SimpleNamespace(ReactAgent=FakeReactAgent)),
     )
 

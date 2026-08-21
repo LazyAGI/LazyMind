@@ -129,3 +129,21 @@ def test_sdk_delete_artifact_creates_public_tombstone_request():
     call = transport.delete.call_args
     assert call.args[0].endswith('/workflow-artifacts/a2')
     assert call.kwargs['json'] == {'base_revision': 2, 'command_id': 'cmd-delete'}
+
+
+def test_sdk_reads_durable_slot_order():
+    transport = MagicMock()
+    transport.get.return_value = MagicMock(
+        status_code=200,
+        json=lambda: {'ok': True, 'data': {'order_list': [7, 3], 'order_version': 2}},
+    )
+    from lazymind.workflow_sdk import WorkflowClient
+
+    result = WorkflowClient(
+        'http://core/api/core', 'u1', transport=transport,
+    ).get_slot_order('session 1', 'preview/html')
+
+    assert result.result['order_list'] == [7, 3]
+    assert transport.get.call_args.args[0].endswith(
+        '/workflow-sessions/session%201/slots/preview%2Fhtml/order'
+    )

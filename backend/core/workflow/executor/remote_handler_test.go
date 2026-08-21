@@ -123,13 +123,27 @@ func TestRemoteHandlerReadsResourceAndArtifactInputs(t *testing.T) {
 		Validity: "effective", CreatedAt: now}).Error; err != nil {
 		t.Fatal(err)
 	}
+	imageID := "image-1"
+	imageValue, _ := json.Marshal(map[string]any{
+		"path": "https://images.example.test/subject.png", "caption": "web reference",
+	})
+	if err := db.Create(&orm.WorkflowHumanArtifact{ID: imageID, SessionID: value.SessionID, Slot: "material_images",
+		ContentType: "image", Value: imageValue, CreatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowSlotRevision{ID: "revision-3", SessionID: value.SessionID, SlotID: "material_images",
+		Revision: 1, Selected: true, HumanArtifactID: &imageID, Slot: "material_images", StepID: "collect", Attempt: 1,
+		Validity: "effective", CreatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
 	tests := []struct {
 		material string
 		binding  map[string]any
 		want     string
 	}{{"brief", map[string]any{"source_type": "input_resource", "source_id": resource.ID}, "brief"},
 		{"draft", map[string]any{"source_type": "artifact", "source_revision_id": "revision-1"}, `{"ok":true}`},
-		{"draft_document", map[string]any{"source_type": "artifact", "source_revision_id": "revision-2"}, "# Durable draft"}}
+		{"draft_document", map[string]any{"source_type": "artifact", "source_revision_id": "revision-2"}, "# Durable draft"},
+		{"material_images", map[string]any{"source_type": "artifact", "source_revision_id": "revision-3"}, "https://images.example.test/subject.png"}}
 	for _, test := range tests {
 		t.Run(test.material, func(t *testing.T) {
 			ctx := value

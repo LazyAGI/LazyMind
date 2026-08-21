@@ -194,47 +194,47 @@ type preparationGraph struct {
 		LegacyTools  []string `json:"legacy_tools"`
 	} `json:"nodes"`
 	MaterialProducers map[string]struct {
-		Kind string `json:"kind"`
+		Kind     string `json:"kind"`
+		Optional bool   `json:"optional"`
 	} `json:"material_producers"`
 	InputExpressions map[string]graphengine.Expression `json:"input_expressions"`
 }
 
-func collectInputMaterials(expression graphengine.Expression, materials map[string]struct{}) {
+func collectRequiredInputMaterials(expression graphengine.Expression, materials map[string]struct{}) {
 	if expression.Material != "" {
 		materials[expression.Material] = struct{}{}
 	}
 	for _, nested := range expression.All {
-		collectInputMaterials(nested, materials)
+		collectRequiredInputMaterials(nested, materials)
 	}
 	for _, nested := range expression.Any {
-		// Preparation keeps the existing conservative behavior for alternatives:
-		// all candidate external inputs are requested. Optional-only materials are
-		// absent from InputExpressions and therefore do not block Session creation.
-		collectInputMaterials(nested, materials)
+		// Keep the existing conservative preparation contract for alternatives:
+		// every candidate branch input must be available before the Session starts.
+		collectRequiredInputMaterials(nested, materials)
 	}
 }
 
-func missingPreparationInputs(graph preparationGraph, bindings map[string]any) []string {
+func missingExternalInputs(graph preparationGraph, inputBindings map[string]any) []string {
 	required := map[string]struct{}{}
 	if graph.InputExpressions == nil {
-		// Older compiled graphs did not expose typed input expressions. Preserve
-		// their previous behavior instead of silently weakening their contract.
+		// Backward compatibility for compiled graphs without expression metadata.
 		for materialID, producer := range graph.MaterialProducers {
-			if producer.Kind == "external" {
+			if producer.Kind == "external" && !producer.Optional {
 				required[materialID] = struct{}{}
 			}
 		}
 	} else {
 		for _, expression := range graph.InputExpressions {
-			collectInputMaterials(expression, required)
+			collectRequiredInputMaterials(expression, required)
 		}
 	}
 	missing := make([]string, 0)
 	for materialID := range required {
-		if producer, exists := graph.MaterialProducers[materialID]; !exists || producer.Kind != "external" {
+		producer, exists := graph.MaterialProducers[materialID]
+		if !exists || producer.Kind != "external" || producer.Optional {
 			continue
 		}
-		if _, exists := bindings[materialID]; !exists {
+		if _, exists := inputBindings[materialID]; !exists {
 			missing = append(missing, materialID)
 		}
 	}
@@ -683,7 +683,7 @@ func (h Handler) Prepare(w http.ResponseWriter, r *http.Request) {
 					strings.Join(missing, ", "), false)
 				return
 			}
-			missingInputs := missingPreparationInputs(graph, req.InputBindings)
+			missingInputs := missingExternalInputs(graph, req.InputBindings)
 			if len(missingInputs) > 0 {
 				plan, _ = json.Marshal(map[string]any{"status": "needs_input", "workflow_ref": workflow.WorkflowRef,
 					"workflow_id": workflow.WorkflowID, "workflow_revision": workflow.RevisionID,
@@ -937,6 +937,7 @@ func (h Handler) Command(delegate http.Handler) http.HandlerFunc {
 							value["ready_steps"] = projection["ready"]
 							value["retryable_steps"] = projection["retryable"]
 							value["rewindable_steps"] = projection["rewindable"]
+							value["continue_steps"] = projection["continue"]
 						}
 					}
 				}

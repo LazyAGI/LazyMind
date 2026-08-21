@@ -213,10 +213,14 @@ func TestRemoteTaskEventsPersistStreamStateAndInvalidatePanel(t *testing.T) {
 	EventHooks = &eventHooks{}
 	t.Cleanup(func() { EventHooks = previousHooks })
 	updates := []string{}
+	streamUpdates := []TaskEvent{}
 	EventHooks.RegisterConversationEventHook(func(_ context.Context, _ state.Store, convID, _ string,
 		eventType string, payload map[string]any) {
 		if convID == "conversation-1" && eventType == "workflow_runtime_updated" {
 			updates = append(updates, payload["change"].(string))
+		}
+		if convID == "conversation-1" && eventType == "task_updated" {
+			streamUpdates = append(streamUpdates, payload["event"].(TaskEvent))
 		}
 	})
 
@@ -227,6 +231,14 @@ func TestRemoteTaskEventsPersistStreamStateAndInvalidatePanel(t *testing.T) {
 		{"type": "tool_calls", "tool_calls": []map[string]any{{"id": "1", "name": "read"}}},
 		{"type": "tool_results", "tool_results": []map[string]any{{"id": "1", "result": "ok"}}},
 		{"type": "progress", "progress": 42, "current_phase": "working"},
+		{"type": "artifact_stream_start", "slot": "draft_document", "content_type": "text/markdown",
+			"stream_id": "stream-1", "chunk_index": 1},
+		{"type": "artifact_stream", "slot": "draft_document", "content_type": "text/markdown",
+			"stream_id": "stream-1", "chunk_index": 2, "delta": "hello"},
+		{"type": "artifact_stream_end", "slot": "draft_document", "content_type": "text/markdown",
+			"stream_id": "stream-1", "chunk_index": 3},
+		{"type": "artifact_stream_abort", "slot": "outline_document", "content_type": "text/markdown",
+			"stream_id": "stream-2", "chunk_index": 2, "message": "stopped"},
 		{"type": "artifact", "slot": "report", "content_type": "text", "seq": 1,
 			"value": map[string]any{"text": "result"}},
 	}
@@ -256,6 +268,17 @@ func TestRemoteTaskEventsPersistStreamStateAndInvalidatePanel(t *testing.T) {
 	wantUpdates := []string{"task_start", "progress", "artifact"}
 	if !reflect.DeepEqual(updates, wantUpdates) {
 		t.Fatalf("updates=%v want=%v", updates, wantUpdates)
+	}
+	wantStreamTypes := []string{"artifact_stream_start", "artifact_stream", "artifact_stream_end", "artifact_stream_abort"}
+	gotStreamTypes := make([]string, 0, len(streamUpdates))
+	for _, event := range streamUpdates {
+		gotStreamTypes = append(gotStreamTypes, event.Type)
+	}
+	if !reflect.DeepEqual(gotStreamTypes, wantStreamTypes) {
+		t.Fatalf("stream updates=%v want=%v", gotStreamTypes, wantStreamTypes)
+	}
+	if streamUpdates[1].Delta != "hello" || streamUpdates[1].StreamID != "stream-1" || streamUpdates[1].ChunkIndex != 2 {
+		t.Fatalf("stream delta=%#v", streamUpdates[1])
 	}
 }
 
