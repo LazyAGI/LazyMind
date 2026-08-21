@@ -224,6 +224,7 @@ steps:
       - Follow any "Partial retry instruction" block for sort_order on list slots.
       - Stop after all required artifacts are saved.
     tools:
+      - find_user_attachment
       - kb
       - multimodal
       - web_search
@@ -512,6 +513,7 @@ steps:
       6. Final text image links MUST start with `/static-files/` if present.
       7. Stop after saving.
     tools:
+      - find_user_attachment
       - image_editor
       - multimodal
       - validate_image_ref

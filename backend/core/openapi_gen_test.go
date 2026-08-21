@@ -410,8 +410,93 @@ func TestOpenAPISpecIncludesDatasetSourceFilter(t *testing.T) {
 		t.Fatalf("dataset list must document the source query parameter")
 	}
 	sourceSchema := openAPIParameterSchemaForTest(t, op, "source")
-	if !reflect.DeepEqual(sourceSchema["enum"], []any{"manual", "cloud"}) {
+	if !reflect.DeepEqual(sourceSchema["enum"], []any{"manual", "cloud", "official_installed"}) {
 		t.Fatalf("unexpected dataset source values: %#v", sourceSchema["enum"])
+	}
+	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+	datasetProps := schemaPropertiesForTest(t, schemas, "Dataset")
+	if _, ok := datasetProps["source_type"]; !ok {
+		t.Fatalf("Dataset schema must document source_type")
+	}
+}
+
+func TestOpenAPISpecIncludesKnowledgeMarketSurface(t *testing.T) {
+	r := mux.NewRouter()
+	registerCoreRoutes(r)
+
+	specJSON, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+
+	installOp := openAPIOperationForTest(t, spec, "post", "/api/core/knowledge-market/items/{market_item_id}:install")
+	if got := openAPIObjectResponseRefForTest(t, installOp); got != "#/components/schemas/knowledgeMarketInstallOpenAPIResponse" {
+		t.Fatalf("install response ref = %q", got)
+	}
+
+	tasksOp := openAPIOperationForTest(t, spec, "get", "/api/core/knowledge-market/tasks")
+	if got := openAPIObjectResponseRefForTest(t, tasksOp); got != "#/components/schemas/knowledgeMarketTaskListOpenAPIResponse" {
+		t.Fatalf("tasks list response ref = %q", got)
+	}
+	statusSchema := openAPIParameterSchemaForTest(t, tasksOp, "status")
+	if !reflect.DeepEqual(statusSchema["enum"], []any{"pending", "running", "succeeded", "failed", "canceled"}) {
+		t.Fatalf("unexpected tasks status values: %#v", statusSchema["enum"])
+	}
+
+	taskOp := openAPIOperationForTest(t, spec, "get", "/api/core/knowledge-market/tasks/{job_id}")
+	if got := openAPIObjectResponseRefForTest(t, taskOp); got != "#/components/schemas/knowledgeMarketTaskDetailOpenAPIResponse" {
+		t.Fatalf("task detail response ref = %q", got)
+	}
+	taskParams := openAPIParameterNamesForTest(t, taskOp)
+	if _, ok := taskParams["job_id"]; !ok {
+		t.Fatalf("task detail must document the job_id path parameter")
+	}
+
+	installsOp := openAPIOperationForTest(t, spec, "get", "/api/core/knowledge-market/installs")
+	if got := openAPIObjectResponseRefForTest(t, installsOp); got != "#/components/schemas/knowledgeMarketInstallsOpenAPIResponse" {
+		t.Fatalf("installs response ref = %q", got)
+	}
+
+	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+	listProps := schemaPropertiesForTest(t, schemas, "knowledgeMarketListItemOpenAPIResponse")
+	if _, ok := listProps["doc_count"]; ok {
+		t.Fatalf("list item schema must not document doc_count")
+	}
+	detailProps := schemaPropertiesForTest(t, schemas, "knowledgeMarketDetailOpenAPIResponse")
+	for _, stale := range []string{"package_sha256", "package_size", "doc_count", "files"} {
+		if _, ok := detailProps[stale]; ok {
+			t.Fatalf("detail schema must not document %s", stale)
+		}
+	}
+	if _, ok := detailProps["package_revision"]; !ok {
+		t.Fatalf("detail schema must document package_revision")
+	}
+}
+
+func TestOpenAPISpecChatChunkDeltaModeValues(t *testing.T) {
+	router := mux.NewRouter()
+	registerCoreRoutes(router)
+
+	specJSON, err := buildOpenAPISpecFromRouter(router)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+	properties := schemaPropertiesForTest(t, schemas, "ChatChunkResponse")
+	deltaMode, ok := properties["delta_mode"].(map[string]any)
+	if !ok {
+		t.Fatalf("ChatChunkResponse delta_mode property = %#v", properties["delta_mode"])
+	}
+	if !reflect.DeepEqual(deltaMode["enum"], []any{"append", "replace"}) {
+		t.Fatalf("unexpected delta_mode values: %#v", deltaMode["enum"])
 	}
 }
 

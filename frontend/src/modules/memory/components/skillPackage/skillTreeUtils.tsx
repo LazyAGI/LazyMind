@@ -101,7 +101,7 @@ export const buildAntTreeData = (
       key: path,
       title: renderTitle ? renderTitle(fileItem, status) : child.name,
       icon: isDir ? <FolderOutlined /> : <FileOutlined />,
-      selectable: !isDir,
+      selectable: true,
       isLeaf: !isDir,
       className: getDiffStatusClass(status),
       children: isDir ? buildAntTreeData(child, diffStatusMap, renderTitle) : undefined,
@@ -139,6 +139,19 @@ export const resolveParentPathFromSelection = (selectedPath: string) => {
   const normalized = selectedPath.replace(/^\/+/, "");
   const lastSlash = normalized.lastIndexOf("/");
   return lastSlash >= 0 ? normalized.slice(0, lastSlash) : "";
+};
+
+export const resolveCreateParentPath = (
+  selectedPath: string,
+  directoryPaths: ReadonlySet<string>,
+) => {
+  const normalized = selectedPath.replace(/^\/+|\/+$/g, "");
+  if (!normalized) {
+    return "";
+  }
+  return directoryPaths.has(normalized)
+    ? normalized
+    : resolveParentPathFromSelection(normalized);
 };
 
 export const buildSkillItemPath = (parentPath: string, name: string) => {

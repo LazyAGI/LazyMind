@@ -52,8 +52,8 @@ function New-WindowsInstallerFileName {
         throw 'Could not resolve the Git commit for the Windows Desktop installer name.'
     }
     $package = Get-Content -LiteralPath (Join-Path $electronRoot 'package.json') -Raw | ConvertFrom-Json
-    if ([string]$package.version -notmatch '^\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?$') {
-        throw 'Windows installer package version must use SemVer (including alpha.N, beta.N, or rc.N).'
+    if ([string]$package.version -notmatch '^\d+\.\d+\.\d+(?:-dev|-(?:alpha|beta|rc)\.\d+)?$') {
+        throw 'Windows installer package version must use SemVer (including dev, alpha.N, beta.N, or rc.N).'
     }
     $timestamp = (Get-Date).ToString('yyyyMMdd-HHmmss', [Globalization.CultureInfo]::InvariantCulture)
     return "LazyMind-windows-x64-installer-$($package.version)-$timestamp-$commit.exe"
@@ -283,6 +283,7 @@ function Finalize-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind 
         '--arch', 'amd64',
         '--trusted-local-mode', $trustedLocalMode
     )
+    Invoke-Native 'node.exe' @((Join-Path $repoRoot 'desktop\scripts\write-editable-ppt-dependency-config.mjs'), $runtimeRoot)
     $reparse = @(Get-ChildItem -LiteralPath $runtimeRoot -Recurse -Force -ErrorAction SilentlyContinue | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint })
     if ($reparse.Count -gt 0) {
         throw "Desktop runtime contains non-portable reparse points; first path: $($reparse[0].FullName)"

@@ -259,10 +259,9 @@ def video_to_gif(
     ffmpeg_path, ffprobe_path = resolve_ffmpeg_binaries()
     if not ffmpeg_path or not ffprobe_path:
         raise ToolExecutionError(
-            (
-                'Animated GIF output requires FFmpeg. Configure it at '
-                '/model-providers/tools#ffmpeg-dependency; the generated video remains available.'
-            )
+            'Animated GIF output requires FFmpeg. Configure it at '
+            '/settings?section=system_tools#ffmpeg-dependency; '
+            'the generated video remains available.'
         )
     local_path = resolve_tool_video_path(raw)
     if not local_path:

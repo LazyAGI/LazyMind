@@ -147,6 +147,16 @@ def test_subagent_registers_attachment_tools_as_one_conditional_group():
     assert runner._resolve_runtime_tools(['string_replace']) == []
 
 
+def test_workflow_step_only_gets_declared_attachment_tools():
+    configs = runner._resolve_attachment_configs(
+        {'files': ['/uploads/source.lmd']},
+        'workflow_step',
+        {'legacy_tools': ['writer_load_local_document']},
+    )
+
+    assert configs == []
+
+
 def test_subagent_attachment_edit_publishes_through_task_artifact(monkeypatch, tmp_path):
     draft_path = tmp_path / 'edited.txt'
     draft_path.write_text('translated', encoding='utf-8')

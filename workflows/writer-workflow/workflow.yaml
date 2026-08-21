@@ -28,6 +28,13 @@ when_to_use: >
   including URLs supplied through ask_user; a content summary never replaces
   its locator.
 
+runtime:
+  exclusive_tool_capabilities:
+    - writer.create
+    - writer.revise
+  completed_continue_steps:
+    - write_document
+
 tool_scripts:
   - path: scripts/tools.py
     functions:
@@ -37,19 +44,21 @@ tool_scripts:
       - writer_load_document
       - writer_profile_resources
       - writer_create_writing_context
+      - writer_prepare_workspace
       - writer_prepare_outline
       - writer_generate_outline
+      - writer_outline_workspace
       - writer_generate_rewrite_outline
       - writer_generate_rewrite_section_instructions
       - writer_generate_section_instructions
       - writer_resolve_visual_media
       - writer_resolve_revision_media
-      - writer_generate_draft_blocks
-      - writer_generate_draft_blocks_markdown
       - writer_generate_draft_document
-      - writer_generate_draft_document_markdown
+      - writer_draft_workspace
       - writer_update_writing_context
       - writer_export_markdown
+      - writer_render_document
+      - writer_save_document
       - writer_convert_markdown_to_ir
       - writer_create_document
       - writer_publish_revision
@@ -72,6 +81,13 @@ artifact_actions:
   sync_document:
     slots: [draft_document]
     execute_tool: writer_sync_document
+  render_document:
+    slots: [source_document, outline_document, draft_document]
+    preview_tool: writer_render_document
+    execute_tool: writer_render_document
+  save_document:
+    slots: [outline_document, draft_document]
+    execute_tool: writer_save_document
 
 steps:
   - id: prepare
@@ -79,6 +95,10 @@ steps:
   - id: write_document
 
 slots:
+  - id: writer_command
+    label: Writer Command
+    type: file
+    cardinality: single
   - id: writing_task
     label: Writing Task
     type: file
@@ -188,6 +208,11 @@ slots:
     type: file
     cardinality: single
 ui:
+  slots:
+    outline_document:
+      widgetType: writer-document
+    draft_document:
+      widgetType: writer-document
   tabs:
     - id: prepare
       step_id: prepare
@@ -202,6 +227,7 @@ ui:
       layout: list
       slots:
         - id: outline_document
+      completed_continue_step: write_document
 
     - id: result
       step_id: write_document
@@ -223,6 +249,7 @@ i18n:
       result: {label: 成稿}
     slots:
       writing_task: {label: 写作任务}
+      writer_command: {label: 写作控制命令}
       media_assets: {label: 可用图片素材}
       resolved_media_assets: {label: 已解析图片素材}
       visual_plan: {label: 视觉规划}

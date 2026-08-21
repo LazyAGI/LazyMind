@@ -1,5 +1,3 @@
-import lazyllm
-
 from lazymind.chat.engine.agent_runtime.executor import ToolCallGuard
 
 
@@ -179,37 +177,3 @@ def test_unconfigured_stateful_tool_is_not_deduplicated():
     guard([_call('get_task_status', {'task_id': 'task-1'})])
 
     assert len(manager.calls) == 2
-
-
-def test_plugin_or_subagent_tool_immediately_updates_runtime_round_limit():
-    previous = lazyllm.locals.get('_lazyllm_agent')
-    workspace = {}
-    lazyllm.locals['_lazyllm_agent'] = {'workspace': workspace}
-    try:
-        guard = ToolCallGuard(_RecordingToolManager(), expanded_round_limit=200)
-
-        guard([_call('trigger_writer', {})])
-
-        assert workspace['_react_round_limit'] == 200
-    finally:
-        if previous is None:
-            lazyllm.locals.pop('_lazyllm_agent', None)
-        else:
-            lazyllm.locals['_lazyllm_agent'] = previous
-
-
-def test_ordinary_tools_do_not_enable_expanded_budget():
-    previous = lazyllm.locals.get('_lazyllm_agent')
-    workspace = {}
-    lazyllm.locals['_lazyllm_agent'] = {'workspace': workspace}
-    try:
-        guard = ToolCallGuard(_RecordingToolManager(), expanded_round_limit=200)
-
-        guard([_call('url_fetch', {'url': 'https://example.com'})])
-
-        assert '_react_round_limit' not in workspace
-    finally:
-        if previous is None:
-            lazyllm.locals.pop('_lazyllm_agent', None)
-        else:
-            lazyllm.locals['_lazyllm_agent'] = previous

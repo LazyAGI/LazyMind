@@ -136,7 +136,7 @@ func PatchConversationSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := db.WithContext(r.Context()).Model(&orm.Conversation{}).
-		Where("id = ? AND create_user_id = ?", convID, userID).
+		Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", convID, userID).
 		Updates(updates).Error; err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
 		return

@@ -24,7 +24,7 @@ def test_video_to_gif_returns_dependency_error_when_ffmpeg_is_missing(monkeypatc
     with pytest.raises(ToolExecutionError, match='Animated GIF output requires FFmpeg') as captured:
         multimodal.video_to_gif('/tmp/generated-video.mp4')
 
-    assert '/model-providers/tools#ffmpeg-dependency' in str(captured.value)
+    assert '/settings?section=system_tools#ffmpeg-dependency' in str(captured.value)
     assert 'generated video remains available' in str(captured.value)
 
 

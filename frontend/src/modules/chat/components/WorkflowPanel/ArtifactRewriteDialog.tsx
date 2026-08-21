@@ -66,6 +66,7 @@ interface ArtifactRewriteDialogProps {
   onClose: () => void;
   onApplied: (revision?: number) => void;
   onPreviewReady?: (preview: RewriteSelectionPreview) => void;
+  terminology?: 'polish' | 'edit';
 }
 
 type FormPhase = 'form' | 'previewing';
@@ -87,11 +88,11 @@ function errorCode(error: unknown): string | undefined {
 }
 
 function errorMessage(code: string | undefined, fallback: string): string {
-  if (code === 'REVISION_CONFLICT') return 'chat.artifactRewrite.errors.revisionConflict';
-  if (code === 'SELECTION_AMBIGUOUS') return 'chat.artifactRewrite.errors.ambiguous';
-  if (code === 'SELECTION_STALE') return 'chat.artifactRewrite.errors.stale';
-  if (code === 'SELECTION_UNSUPPORTED') return 'chat.artifactRewrite.errors.unsupported';
-  if (code === 'WORKFLOW_ACTION_FAILED') return 'chat.artifactRewrite.errors.workflowFailed';
+  if (code === 'REVISION_CONFLICT') return 'errors.revisionConflict';
+  if (code === 'SELECTION_AMBIGUOUS') return 'errors.ambiguous';
+  if (code === 'SELECTION_STALE') return 'errors.stale';
+  if (code === 'SELECTION_UNSUPPORTED') return 'errors.unsupported';
+  if (code === 'WORKFLOW_ACTION_FAILED') return 'errors.workflowFailed';
   return fallback;
 }
 
@@ -104,7 +105,7 @@ function isReadyPreview(value: unknown): value is RewriteSelectionPreview {
     && typeof data.preview?.old_text === 'string'
     && typeof data.preview?.new_text === 'string'
     && typeof data.artifact?.content_type === 'string'
-    && Boolean(data.artifact.value && typeof data.artifact.value === 'object');
+    && Boolean(data.artifact.value && ['object', 'string'].includes(typeof data.artifact.value));
 }
 
 export function ArtifactRewriteDialog({
@@ -116,8 +117,16 @@ export function ArtifactRewriteDialog({
   selection,
   onClose,
   onPreviewReady,
+  terminology = 'polish',
 }: ArtifactRewriteDialogProps) {
   const { t } = useTranslation();
+  const translationPrefix = terminology === 'edit'
+    ? 'chat.artifactEdit'
+    : 'chat.artifactRewrite';
+  const tr = useCallback(
+    (key: string) => t(`${translationPrefix}.${key}`),
+    [t, translationPrefix],
+  );
   const [instruction, setInstruction] = useState('');
   const [phase, setPhase] = useState<FormPhase>('form');
   const [error, setError] = useState<string>();
@@ -145,7 +154,7 @@ export function ArtifactRewriteDialog({
     setPhase('form');
     const timer = window.setTimeout(() => inputRef.current?.focus(), 0);
     return () => window.clearTimeout(timer);
-  }, [open, selection, t]);
+  }, [open, selection, tr]);
 
   const updateFormPosition = useCallback(() => {
     const form = formRef.current;
@@ -194,7 +203,7 @@ export function ArtifactRewriteDialog({
   }, [close, open]);
 
   const requestPreview = useCallback(async () => {
-    const trimmedInstruction = instruction.trim() || t('chat.artifactRewrite.defaultInstruction');
+    const trimmedInstruction = instruction.trim() || tr('defaultInstruction');
     if (!selection || phase !== 'form') return;
 
     const requestId = ++requestIdRef.current;
@@ -212,7 +221,20 @@ export function ArtifactRewriteDialog({
             instruction: trimmedInstruction,
             selection: selection.type === 'ir'
               ? { type: 'ir', node_id: selection.node_id }
-              : { type: 'markdown', selected_text: selection.selected_text },
+              : selection.type === 'ppt_html'
+                ? {
+                  type: 'ppt_html',
+                  page: selection.page,
+                  el: selection.el,
+                  ...(selection.group ? { group: selection.group } : {}),
+                  ...(selection.selectedText
+                    ? { selected_text: selection.selectedText }
+                    : {}),
+                  ...(selection.computed_style
+                    ? { computed_style: selection.computed_style }
+                    : {}),
+                }
+                : { type: 'markdown', selected_text: selection.selected_text },
           },
         },
         { silentError: true } as never,
@@ -228,10 +250,10 @@ export function ArtifactRewriteDialog({
       onClose();
     } catch (requestError) {
       if (!mountedRef.current || requestId !== requestIdRef.current) return;
-      setError(t(errorMessage(errorCode(requestError), 'chat.artifactRewrite.errors.previewFailed')));
+      setError(tr(errorMessage(errorCode(requestError), 'errors.previewFailed')));
       setPhase('form');
     }
-  }, [baseRevision, instruction, listIndex, onClose, onPreviewReady, phase, selection, sessionId, slotId, t]);
+  }, [baseRevision, instruction, listIndex, onClose, onPreviewReady, phase, selection, sessionId, slotId, tr]);
 
   const handleKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape') {
@@ -263,9 +285,9 @@ export function ArtifactRewriteDialog({
           className='artifact-rewrite-form__input'
           value={instruction}
           onChange={(event) => setInstruction(event.target.value)}
-          placeholder={t('chat.artifactRewrite.defaultInstruction')}
+          placeholder={tr('defaultInstruction')}
           disabled={busy}
-          aria-label={t('chat.artifactRewrite.instruction')}
+          aria-label={tr('instruction')}
           aria-describedby={error ? 'artifact-rewrite-form-error' : undefined}
         />
         <button
@@ -273,8 +295,8 @@ export function ArtifactRewriteDialog({
           className={`artifact-rewrite-form__submit${busy ? ' artifact-rewrite-form__submit--busy' : ''}`}
           onClick={() => void requestPreview()}
           disabled={!canPreview || busy}
-          aria-label={busy ? t('chat.artifactRewrite.previewing') : t('chat.artifactRewrite.preview')}
-          title={busy ? t('chat.artifactRewrite.previewing') : t('chat.artifactRewrite.preview')}
+          aria-label={busy ? tr('previewing') : tr('preview')}
+          title={busy ? tr('previewing') : tr('preview')}
         >
           <SendIcon aria-hidden='true' />
         </button>

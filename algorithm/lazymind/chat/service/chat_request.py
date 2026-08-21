@@ -17,6 +17,7 @@ class ChatMessageOptions(BaseModel):
 
 class ChatConversationOptions(BaseModel):
     session_id: str = 'session_id'
+    run_id: Optional[str] = None
     conversation_id: Optional[str] = None
     user_id: Optional[str] = None
     mode: Optional[str] = 'auto'

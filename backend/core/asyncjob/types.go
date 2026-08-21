@@ -56,6 +56,13 @@ type EnqueueRequest struct {
 	RunAt          time.Time
 	CreateUserID   string
 	CreateUserName string
+
+	// SkipSucceeded, when true, stops Enqueue from returning a previously
+	// succeeded job with the same idempotency key: the succeeded row is
+	// retired (its idempotency key is released so the history row is kept)
+	// and a fresh job is created. Callers whose invocation must always re-run
+	// (e.g. one-click update-all) set this to true.
+	SkipSucceeded bool
 }
 
 type Options struct {

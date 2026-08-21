@@ -17,6 +17,7 @@ import (
 	"lazymind/core/scheduler"
 	"lazymind/core/settings"
 	"lazymind/core/store"
+	"lazymind/core/workflow"
 )
 
 type uiPreferencesResponse struct {
@@ -148,6 +149,10 @@ func setAllSkillsEnabled(ctx context.Context, db *gorm.DB, userID string, enable
 func setAllWorkflowsEnabled(ctx context.Context, db *gorm.DB, userID string, enabled bool) error {
 	userID = strings.TrimSpace(userID)
 	now := time.Now().UTC()
+	callMode := workflow.WorkflowCallModeDisabled
+	if enabled {
+		callMode = workflow.WorkflowCallModeAuto
+	}
 	var workflowRefs []string
 	if err := db.WithContext(ctx).
 		Model(&orm.WorkflowResource{}).
@@ -165,13 +170,14 @@ func setAllWorkflowsEnabled(ctx context.Context, db *gorm.DB, userID string, ena
 			UserID:      userID,
 			WorkflowRef: workflowRef,
 			Enabled:     enabled,
+			CallMode:    callMode,
 			UpdatedAt:   now,
 		})
 	}
 	return db.WithContext(ctx).
 		Clauses(clause.OnConflict{
 			Columns:   []clause.Column{{Name: "user_id"}, {Name: "plugin_ref"}},
-			DoUpdates: clause.AssignmentColumns([]string{"enabled", "updated_at"}),
+			DoUpdates: clause.AssignmentColumns([]string{"enabled", "call_mode", "updated_at"}),
 		}).
 		Create(&settings).Error
 }
