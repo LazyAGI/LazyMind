@@ -4,7 +4,8 @@ from typing import Any
 
 # A tool selector and its localized state templates live together so additions
 # and renames cannot silently update only one of several parallel maps.
-TOOL_RENDER_PROFILES: dict[str, dict[str, Any]] = {'kb_search': {'argument': 'query',
+TOOL_RENDER_PROFILES: dict[str, dict[str, Any]] = (
+{'kb_search': {'argument': 'query',  # noqa: E122
                'call': {'en': 'Checking {value} in the knowledge base for relevant '
                               'material.',
                         'zh': '正在知识库中检索与 {value} 相关的知识。'},
@@ -1036,29 +1037,39 @@ TOOL_RENDER_PROFILES: dict[str, dict[str, Any]] = {'kb_search': {'argument': 'qu
                                       'failure': {'en': 'Document revision step '
                                                         'could not be completed.',
                                                   'zh': '未能完成文档修订步骤。'}}}
+)
 
-TOOL_RENDER_FALLBACKS: dict[str, dict[str, str]] = {'call': {'en': 'Calling {tool_name} to handle the request.',
+TOOL_RENDER_FALLBACKS: dict[str, dict[str, str]] = (
+{'call': {'en': 'Calling {tool_name} to handle the request.',  # noqa: E122
           'zh': '正在调用工具 {tool_name}...'},
  'success': {'en': '{tool_name} has finished.', 'zh': '工具 {tool_name} 已调用完成。'},
  'failure': {'en': '{tool_name} could not be completed.',
              'zh': '工具 {tool_name} 未能调用完成。'},
  'approval': {'en': 'This operation needs confirmation before continuing.',
               'zh': '此操作需要确认后才能继续。'}}
+)
 
 KB_EMPTY_RESULT_MESSAGES: dict[str, dict[str, str]] = (
-{   'kb_search': {   'en': 'Knowledge base search finished with no matching '
-                           'results',
-                     'zh': '知识库搜索已完成，但没有找到匹配结果'},
-    'kb_get_parent_node': {   'en': 'No parent context was found for the '
-                                    'requested node',
-                              'zh': '未找到请求节点的上级上下文'},
-    'kb_get_window_nodes': {   'en': 'No nearby knowledge base segments were '
-                                     'found',
-                               'zh': '未找到附近的知识库片段'},
-    'kb_keyword_search': {   'en': 'Keyword search finished with no matching '
-                                   'document segments',
-                             'zh': '关键词搜索已完成，但没有找到匹配的文档片段'},
-    'kb_tmp_search': {   'en': 'Attachment search finished with no matching '
-                               'results',
-                         'zh': '附件检索已完成，但没有找到匹配结果'}}
+    {
+        'kb_search': {
+            'en': 'Knowledge base search finished with no matching results',
+            'zh': '知识库搜索已完成，但没有找到匹配结果',
+        },
+        'kb_get_parent_node': {
+            'en': 'No parent context was found for the requested node',
+            'zh': '未找到请求节点的上级上下文',
+        },
+        'kb_get_window_nodes': {
+            'en': 'No nearby knowledge base segments were found',
+            'zh': '未找到附近的知识库片段',
+        },
+        'kb_keyword_search': {
+            'en': 'Keyword search finished with no matching document segments',
+            'zh': '关键词搜索已完成，但没有找到匹配的文档片段',
+        },
+        'kb_tmp_search': {
+            'en': 'Attachment search finished with no matching results',
+            'zh': '附件检索已完成，但没有找到匹配结果',
+        },
+    }
 )
