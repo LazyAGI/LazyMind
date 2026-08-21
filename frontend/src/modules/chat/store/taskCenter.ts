@@ -119,7 +119,6 @@ export function isTaskCenterVisibleTask(task: Pick<SubAgentTask, 'agent_type'>):
   return task.agent_type !== 'workflow_step';
 }
 
-const WRITER_MARKDOWN_STREAM_SLOT_IDS = new Set(['outline_document', 'draft_document']);
 function artifactKey(a: TaskArtifact): string {
   return `${a.slot}#${a.seq}`;
 }
@@ -477,11 +476,19 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
   },
 
   loadArtifactStreamContent: async (conversationId, taskId, artifact) => {
-    if (!WRITER_MARKDOWN_STREAM_SLOT_IDS.has(artifact.slot) || artifact.content_type !== "file") return;
+    if (artifact.content_type !== "file") return;
     if (isWriterIRArtifact(artifact)) return;
     const rawUrl = typeof artifact.value?.url === "string" ? artifact.value.url : "";
     const url = resolveCoreAssetUrl(rawUrl);
     if (!url) return;
+    const task = (get().tasksByConversation[conversationId] ?? [])
+      .find((candidate) => candidate.task_id === taskId);
+    const hasMatchingTextStream = (task?.artifact_streams ?? []).some((stream) => (
+      stream.slot === artifact.slot
+      && stream.artifact?.value?.url === rawUrl
+      && stream.content_type === "text/markdown"
+    ));
+    if (!hasMatchingTextStream) return;
 
     try {
       const response = await axiosInstance.get<string>(url, { responseType: "text" });

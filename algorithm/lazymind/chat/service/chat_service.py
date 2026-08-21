@@ -106,10 +106,6 @@ _CITE_MESSAGE_PATTERN = re.compile(
 )
 _MCP_TOOL_CACHE_TTL_SECONDS = 300
 _TASK_PROFILE_ROUTER_TIMEOUT_SECONDS = 20
-_EXPLICIT_WRITER_PREFIXES = (
-    '用写作插件', '使用写作插件', '请用写作插件',
-    '请使用写作插件', '调用写作插件',
-)
 _SENSITIVE_MATCH_UNSET = object()
 _mcp_tool_cache: dict[str, tuple[float, list[Any]]] = {}
 _mcp_tool_cache_lock = threading.Lock()
@@ -543,9 +539,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         or request.workflow.allowed_workflow_refs
         or str((request.workflow.workflow_context or {}).get('workflow_ref') or '').strip()
     )
-    query = str(request.message.user_query or request.message.query or '').strip()
-    explicitly_requests_writer = query.startswith(_EXPLICIT_WRITER_PREFIXES)
-    if has_explicit_workflow or explicitly_requests_writer or not provisional.routing_review_required:
+    if has_explicit_workflow or not provisional.routing_review_required:
         return await _handle_chat_impl(request, task_profile_override=provisional)
 
     raw_query = str(request.message.query or '')
@@ -926,18 +920,17 @@ async def _handle_chat_impl(
         [cfg for cfg in DEFAULT_TOOLS if cfg.name not in disabled],
         user_query=language_query,
     )
-    writer_workflow_available = any(
-        getattr(tool, '__name__', '') == 'trigger_writer_workflow'
-        for tool in workflow_tools
-        if not isinstance(tool, dict)
-    )
-    if writer_workflow_available:
-        # The Writer Workflow owns end-to-end document creation and revision.
-        # Do not let the ChatAgent bypass its session, ordered steps, artifacts,
-        # and UI card by calling the low-level Writer Toolkits directly.
+    exclusive_capabilities = {
+        str(capability).strip()
+        for item in effective_workflow_catalog
+        if isinstance(item, dict) and isinstance(item.get('runtime'), dict)
+        for capability in item['runtime'].get('exclusive_tool_capabilities', [])
+        if str(capability).strip()
+    }
+    if exclusive_capabilities:
         active_configs = [
             cfg for cfg in active_configs
-            if cfg.name not in {'writer_create', 'writer_revision'}
+            if not cfg.capability_id or cfg.capability_id not in exclusive_capabilities
         ]
     if _workflow_collects_knowledge_internally(
         effective_workflow_context,

@@ -103,6 +103,7 @@ def _handoff_tool(
             allowed = set(frontier.get('ready_steps') or [])
             allowed.update(frontier.get('retryable_steps') or [])
             allowed.update(frontier.get('rewindable_steps') or [])
+            allowed.update(frontier.get('continue_steps') or [])
             if step_id not in allowed:
                 if state_refreshed:
                     return _result_text(_state_changed_result(frontier, [step_id]))
@@ -253,6 +254,7 @@ def _safe_session_tools(
             allowed = set(frontier.get('ready_steps') or [])
             allowed.update(frontier.get('retryable_steps') or [])
             allowed.update(frontier.get('rewindable_steps') or [])
+            allowed.update(frontier.get('continue_steps') or [])
             if not requested or any(value not in allowed for value in requested):
                 if state_refreshed:
                     return _state_changed_result(frontier, requested)
@@ -358,6 +360,7 @@ def _state_changed_result(frontier: Dict[str, Any], requested: List[str]) -> Dic
         'ready_steps': frontier.get('ready_steps') or [],
         'retryable_steps': frontier.get('retryable_steps') or [],
         'rewindable_steps': frontier.get('rewindable_steps') or [],
+        'continue_steps': frontier.get('continue_steps') or [],
         'user_notice': (
             '工作流状态已被其他执行或后台更新改变，本次没有继续提交步骤。'
             '系统已读取最新状态；请根据当前可执行步骤重新确认下一步。'
@@ -933,6 +936,9 @@ def _workflow_trigger_tools(
                 rewindable_steps = step_ids(
                     projection.get('rewindable') or projection.get('rewindable_steps')
                 )
+                continue_steps = step_ids(
+                    projection.get('continue') or projection.get('continue_steps')
+                )
                 return {
                     **prepared,
                     'status': 'prepared',
@@ -955,11 +961,12 @@ def _workflow_trigger_tools(
                     'blocked_steps': blocked_steps,
                     'retryable_steps': retryable_steps,
                     'rewindable_steps': rewindable_steps,
+                    'continue_steps': continue_steps,
                     'next_action': {
                         'tool': 'advance_step',
                         'instruction': (
                             'Call advance_step using only exact members of ready_steps, '
-                            'retryable_steps, or rewindable_steps; Runtime resolves the operation.'
+                            'retryable_steps, rewindable_steps, or continue_steps; Runtime resolves the operation.'
                         ),
                     },
                 }
@@ -1210,7 +1217,7 @@ def resolve_workflow_injection(
                 'A completed Session is not immutable. When the current user query asks to '
                 'revise, delete, fix, or regenerate an existing Workflow output, do not '
                 'write replacement content in chat and do not use generic file/artifact '
-                'tools. Call get_ready_steps, select the matching exact rewindable_steps '
+                'tools. Call get_ready_steps, select the matching exact rewindable_steps or continue_steps '
                 'target, and call advance_step so Runtime starts a new step attempt and '
                 'publishes a new Workflow artifact revision. '
             )
@@ -1299,7 +1306,7 @@ def resolve_workflow_injection(
             + 'Workflow step requires human approval, execute it with advance_step_and_hand_off so '
             + 'the Host stops after execution for output review. Do not ask whether to execute it, '
             + 'and do not merely announce that later steps will run. For recovery, '
-            + 'use only exact retryable_steps or rewindable_steps returned by Runtime.\n'
+            + 'use only exact retryable_steps, rewindable_steps, or continue_steps returned by Runtime.\n'
             + json.dumps({
                 'current_query': current_query,
                 'allowed_workflow_refs': sorted(allowed_refs),

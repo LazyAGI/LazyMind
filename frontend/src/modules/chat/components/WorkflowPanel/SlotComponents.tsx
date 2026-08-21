@@ -2438,10 +2438,6 @@ function useRegisterArtifactDownload({
   }, [actionKey, enabled, label, registerFooterAction, tabActive]);
 }
 
-function isWriterDocumentSlot(slotId: string): slotId is WriterDocumentSlot {
-  return slotId === 'outline_document' || slotId === 'draft_document';
-}
-
 function isRenderedWriterDocument(value: unknown): value is RenderWriterDocumentResult {
   if (!value || typeof value !== 'object') return false;
   const result = value as Partial<RenderWriterDocumentResult>;
@@ -4354,17 +4350,17 @@ export function SlotRenderer({
     return <SlotPending type={expectedType ?? 'text'} cardMode={cardMode} />;
   }
 
-  const resolvedWriterSlotId = slotId ?? slot.slot;
+  const resolvedWidgetSlotId = slotId ?? slot.slot;
   if (
     sessionId
     && (slot.list_index ?? -1) === -1
-    && isWriterDocumentSlot(resolvedWriterSlotId)
+    && widget?.widgetType === 'writer-document'
   ) {
     return (
       <SlotWriterDocument
         slot={slot}
         sessionId={sessionId}
-        slotId={resolvedWriterSlotId}
+        slotId={resolvedWidgetSlotId as WriterDocumentSlot}
         revisionCount={revisionCount}
         onRefresh={onRefresh}
         readOnly={readOnly}

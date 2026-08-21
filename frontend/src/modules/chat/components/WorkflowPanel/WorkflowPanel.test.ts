@@ -1,31 +1,27 @@
 import { describe, expect, it } from 'vitest';
 
 import type { TabDef } from '@/modules/chat/store/workflowPanel';
-import { resolveCompletedWriterContinueStep } from './workflowContinue';
+import { resolveCompletedContinueStep } from './workflowContinue';
 
 const outlineTab: TabDef = {
   id: 'outline',
   step_id: 'outline',
   label: 'Outline',
   slots: [],
+  completed_continue_step: 'write_document',
 };
 
-describe('resolveCompletedWriterContinueStep', () => {
-  it('continues a completed Writer outline into final document generation', () => {
-    expect(resolveCompletedWriterContinueStep({
+describe('resolveCompletedContinueStep', () => {
+  it('uses the workflow-declared completed continuation', () => {
+    expect(resolveCompletedContinueStep({
       status: 'completed',
-      workflow_id: 'writer-workflow',
     }, outlineTab)).toBe('write_document');
   });
 
-  it('does not add the completed continuation to other tabs or workflows', () => {
-    expect(resolveCompletedWriterContinueStep({
+  it('does not invent a continuation for undeclared or active tabs', () => {
+    expect(resolveCompletedContinueStep({
       status: 'completed',
-      workflow_id: 'writer-workflow',
-    }, { ...outlineTab, id: 'result', step_id: 'write_document' })).toBeUndefined();
-    expect(resolveCompletedWriterContinueStep({
-      status: 'completed',
-      workflow_id: 'another-workflow',
-    }, outlineTab)).toBeUndefined();
+    }, { ...outlineTab, completed_continue_step: undefined })).toBeUndefined();
+    expect(resolveCompletedContinueStep({ status: 'active' }, outlineTab)).toBeUndefined();
   });
 });

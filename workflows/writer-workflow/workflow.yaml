@@ -28,6 +28,13 @@ when_to_use: >
   including URLs supplied through ask_user; a content summary never replaces
   its locator.
 
+runtime:
+  exclusive_tool_capabilities:
+    - writer.create
+    - writer.revise
+  completed_continue_steps:
+    - write_document
+
 tool_scripts:
   - path: scripts/tools.py
     functions:
@@ -201,6 +208,11 @@ slots:
     type: file
     cardinality: single
 ui:
+  slots:
+    outline_document:
+      widgetType: writer-document
+    draft_document:
+      widgetType: writer-document
   tabs:
     - id: prepare
       step_id: prepare
@@ -215,6 +227,7 @@ ui:
       layout: list
       slots:
         - id: outline_document
+      completed_continue_step: write_document
 
     - id: result
       step_id: write_document

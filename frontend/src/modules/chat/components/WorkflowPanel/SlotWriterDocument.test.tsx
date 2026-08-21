@@ -86,6 +86,7 @@ describe('SlotWriterDocument render refresh', () => {
     const { rerender } = render(
       <SlotRenderer
         slot={writerSlot(1)}
+        widget={{ widgetType: 'writer-document' }}
         sessionId='writer-session'
         slotId='draft_document'
         readOnly
@@ -96,6 +97,7 @@ describe('SlotWriterDocument render refresh', () => {
     rerender(
       <SlotRenderer
         slot={writerSlot(2)}
+        widget={{ widgetType: 'writer-document' }}
         sessionId='writer-session'
         slotId='draft_document'
         readOnly

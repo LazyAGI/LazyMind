@@ -107,17 +107,14 @@ func resetTaskHeartbeatTimer(timer *time.Timer) {
 	timer.Reset(taskWriterSSEHeartbeatInterval)
 }
 
-func isWriterDraftStreamTask(task *orm.SubAgentTask) bool {
+func taskStreamHeartbeatsEnabled(task *orm.SubAgentTask) bool {
 	if task == nil || task.AgentType != "workflow_step" {
 		return false
 	}
 	var params struct {
-		WorkflowID string `json:"workflow_id"`
-		StepID     string `json:"step_id"`
+		StreamHeartbeat bool `json:"stream_heartbeat"`
 	}
-	return json.Unmarshal(task.Params, &params) == nil &&
-		params.WorkflowID == "writer-workflow" &&
-		(params.StepID == "outline" || params.StepID == "write_document")
+	return json.Unmarshal(task.Params, &params) == nil && params.StreamHeartbeat
 }
 
 func writerDraftHeartbeatsEnabled(ctx context.Context, db *gorm.DB, taskID string) bool {
@@ -125,7 +122,7 @@ func writerDraftHeartbeatsEnabled(ctx context.Context, db *gorm.DB, taskID strin
 		return false
 	}
 	task, err := GetTask(ctx, db, taskID)
-	return err == nil && isWriterDraftStreamTask(task)
+	return err == nil && taskStreamHeartbeatsEnabled(task)
 }
 
 func isArtifactStreamEvent(eventType string) bool {
@@ -504,7 +501,7 @@ func pollDBUntilTerminal(
 			return
 		}
 		if !heartbeatsConfigured {
-			heartbeatsEnabled = isWriterDraftStreamTask(t)
+			heartbeatsEnabled = taskStreamHeartbeatsEnabled(t)
 			heartbeatsConfigured = true
 		}
 		if t.ProgressPct != lastProgress || t.CurrentPhase != lastPhase {

@@ -113,6 +113,24 @@ func normalizedTransitionTargets(req *transitionCommandRequest) ([]transitionTar
 	return targets, nil
 }
 
+func declaredCompletedContinueStep(graph *graphengine.CompiledStateGraph, target string) bool {
+	for _, stepID := range graph.Runtime.CompletedContinueSteps {
+		if stepID == target {
+			return true
+		}
+	}
+	return false
+}
+
+func containsProjectionStep(steps []string, target string) bool {
+	for _, stepID := range steps {
+		if stepID == target {
+			return true
+		}
+	}
+	return false
+}
+
 // selectLLMChoiceRoutes freezes an N-select-1 route only when ChatAgent starts
 // one of its Reachable candidates. The update shares the transition transaction,
 // so a batch either selects every compatible route and starts every task or does
@@ -302,7 +320,7 @@ func StartWorkflowSession(w http.ResponseWriter, r *http.Request) {
 		req.TaskID = uuid.NewString()
 	}
 	handOff := req.HandOff
-	params := WorkflowStepParams{WorkflowID: req.WorkflowID, WorkflowRef: req.WorkflowRef, RevisionID: req.WorkflowRevisionID, RevisionNo: req.WorkflowRevisionNo, TreeHash: req.WorkflowTreeHash, RemoteRoot: req.WorkflowRemoteRoot, StepID: req.TargetStepID, UserInput: req.UserInput, IsColdStart: true, HandOff: &handOff, PreflightID: req.PreflightID, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, UserID: req.UserID, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, RequiredOutputs: graph.Nodes[req.TargetStepID].RequiredOutputs, LegacyTools: graph.Nodes[req.TargetStepID].LegacyTools, TerminalTools: graph.Nodes[req.TargetStepID].TerminalTools, ToolsOnly: graph.Nodes[req.TargetStepID].ToolsOnly, Runtime: graph.Runtime}
+	params := WorkflowStepParams{WorkflowID: req.WorkflowID, WorkflowRef: req.WorkflowRef, RevisionID: req.WorkflowRevisionID, RevisionNo: req.WorkflowRevisionNo, TreeHash: req.WorkflowTreeHash, RemoteRoot: req.WorkflowRemoteRoot, StepID: req.TargetStepID, UserInput: req.UserInput, IsColdStart: true, HandOff: &handOff, PreflightID: req.PreflightID, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, UserID: req.UserID, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, RequiredOutputs: graph.Nodes[req.TargetStepID].RequiredOutputs, LegacyTools: graph.Nodes[req.TargetStepID].LegacyTools, TerminalTools: graph.Nodes[req.TargetStepID].TerminalTools, ToolsOnly: graph.Nodes[req.TargetStepID].ToolsOnly, StreamHeartbeat: graph.Nodes[req.TargetStepID].StreamHeartbeat, Runtime: graph.Runtime}
 	nodeDef := graph.Nodes[req.TargetStepID]
 	inputKeys := graphengine.Materials(nodeDef.Input)
 	for _, optional := range nodeDef.OptionalInputs {
@@ -571,7 +589,10 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 						"user_retry_available":   true})
 			}
 		}
-		if session.Status == SessionStatusCompleted && req.Operation != "retry" && req.Operation != "rewind" {
+		completedContinue := session.Status == SessionStatusCompleted && len(targets) == 1 &&
+			req.Operation == "execute" && declaredCompletedContinueStep(graph, targets[0].TargetStepID) &&
+			containsProjectionStep(projection.Continue, targets[0].TargetStepID)
+		if session.Status == SessionStatusCompleted && req.Operation != "retry" && req.Operation != "rewind" && !completedContinue {
 			return rejectTransition(req.CommandID, &session, projection, http.StatusConflict, "SESSION_TERMINAL", "plugin session is already completed", false, nil)
 		}
 		if req.Operation == "retry" || req.Operation == "rewind" {
@@ -594,15 +615,22 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 				continue
 			}
 			node := projection.Nodes[target.TargetStepID]
-			if node.Reachability != "reachable" {
+			if node.Reachability != "reachable" && !(completedContinue && declaredCompletedContinueStep(graph, target.TargetStepID)) {
 				invalidTargets = append(invalidTargets, map[string]any{"step_id": target.TargetStepID, "code": "STEP_NOT_REACHABLE"})
 				continue
 			}
-			if node.Readiness != "ready" {
+			if node.Readiness != "ready" && !completedContinue {
 				invalidTargets = append(invalidTargets, map[string]any{"step_id": target.TargetStepID, "code": "STEP_NOT_READY", "missing_groups": node.Evaluation.MissingGroups})
 				continue
 			}
 			evaluation := node.Evaluation
+			if completedContinue {
+				evaluation = graphengine.Evaluate(nodeDef.Input, snapshot.Materials)
+				if !evaluation.Satisfied {
+					invalidTargets = append(invalidTargets, map[string]any{"step_id": target.TargetStepID, "code": "STEP_NOT_READY", "missing_groups": evaluation.MissingGroups})
+					continue
+				}
+			}
 			evaluation.Witnesses = append(evaluation.Witnesses, graphengine.EvaluateOptional(nodeDef.OptionalInputs, snapshot.Materials).Witnesses...)
 			evaluations[target.TargetStepID] = evaluation
 		}
@@ -653,7 +681,7 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 				for _, optional := range nodeDef.OptionalInputs {
 					inputKeys = append(inputKeys, optional.Material)
 				}
-				params := WorkflowStepParams{WorkflowID: session.WorkflowID, WorkflowRef: session.WorkflowRef, RevisionID: session.WorkflowRevisionID, RevisionNo: session.WorkflowRevisionNo, TreeHash: session.WorkflowTreeHash, RemoteRoot: session.WorkflowRemoteRoot, StepID: target.TargetStepID, SessionID: session.ID, UserInput: target.UserInput, HandOff: &handOff, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, RetryHint: target.RuntimeInstruction, PartialIndices: target.PartialIndices, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, UserID: session.CreateUserID, RequiredOutputs: nodeDef.RequiredOutputs, LegacyTools: nodeDef.LegacyTools, TerminalTools: nodeDef.TerminalTools, ToolsOnly: nodeDef.ToolsOnly, Runtime: graph.Runtime}
+				params := WorkflowStepParams{WorkflowID: session.WorkflowID, WorkflowRef: session.WorkflowRef, RevisionID: session.WorkflowRevisionID, RevisionNo: session.WorkflowRevisionNo, TreeHash: session.WorkflowTreeHash, RemoteRoot: session.WorkflowRemoteRoot, StepID: target.TargetStepID, SessionID: session.ID, UserInput: target.UserInput, HandOff: &handOff, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, RetryHint: target.RuntimeInstruction, PartialIndices: target.PartialIndices, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, UserID: session.CreateUserID, RequiredOutputs: nodeDef.RequiredOutputs, LegacyTools: nodeDef.LegacyTools, TerminalTools: nodeDef.TerminalTools, ToolsOnly: nodeDef.ToolsOnly, StreamHeartbeat: nodeDef.StreamHeartbeat, Runtime: graph.Runtime}
 				var launchErr error
 				stepObjective := workflowStepObjective(nodeDef.Prompt, target.Objective, target.UserInput)
 				_, taskID, _, launchErr = launchWorkflowAttempt(r.Context(), tx, store.State(), session.ConversationID, session.TriggerHistoryID, session.CreateUserID, target.TaskID, session.WorkflowID+":"+target.TargetStepID, stepObjective, params, inputKeys, nodeDef.Outputs, req.LLMConfig, req.ToolConfig, false, false)

@@ -251,6 +251,7 @@ export interface WorkflowRuntimeProjection {
   current?: string[];
   reachable?: string[];
   ready?: string[];
+  continue?: string[];
   blocked?: string[];
   stale?: string[];
   pruned?: string[];
@@ -345,6 +346,8 @@ export interface TabDef {
   composite_behavior?: CompositeBehavior;
   /** Actions are rendered through provider modules; the composite stays domain-neutral. */
   actions?: WorkflowTabAction[];
+  /** Optional next step exposed after this tab completes; declared by the workflow package. */
+  completed_continue_step?: string;
 }
 
 /** Mutually exclusive column group: keep the first preferred slot that has data. */
@@ -808,10 +811,7 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
       // Closing and reconnecting without Last-Event-ID asks the server for a fresh snapshot.
       workflowStreams.get(sessionId)?.subscription.resync();
     }
-    if (
-      event.type === 'artifact.upsert'
-      && (event.payload.slot === 'outline_document' || event.payload.slot === 'draft_document')
-    ) {
+    if (event.type === 'artifact.upsert') {
       void get().refreshSlots(conversationId, sessionId);
     }
   },

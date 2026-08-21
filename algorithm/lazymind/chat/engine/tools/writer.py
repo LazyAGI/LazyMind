@@ -86,7 +86,7 @@ _MARKDOWN_NO_MEDIA_PATTERNS = (
     ),
     re.compile(
         r'\b(?:no|without)\s+(?:any\s+)?(?:images?|pictures?|illustrations?|visuals?)\b'
-        r'|\b(?:do\s+not|don\'t)\s+(?:use|include|add|generate|insert|show|display)\s+'
+        r"|\b(?:do\s+not|don't)\s+(?:use|include|add|generate|insert|show|display)\s+"
         r'(?:any\s+)?(?:images?|pictures?|illustrations?|visuals?)\b',
         re.IGNORECASE,
     ),
@@ -246,9 +246,13 @@ def _document_value(value: str) -> Any:
         return value
 
 
-def _markdown_media_is_explicitly_disabled(query: str) -> bool:
-    """Return whether the user forbids Markdown media, not text tables."""
-    return any(pattern.search(query or '') for pattern in _MARKDOWN_NO_MEDIA_PATTERNS)
+def _markdown_media_is_explicitly_disabled(writing_task: dict[str, Any]) -> bool:
+    """Return whether the structured Writer request policy forbids visual media."""
+    policy = (writing_task.get('constraints') or {}).get('visual_policy') or {}
+    if policy.get('allow_visuals') is False:
+        return True
+    query = str(writing_task.get('query') or '')
+    return any(pattern.search(query) for pattern in _MARKDOWN_NO_MEDIA_PATTERNS)
 
 
 def _requires_input_image_reuse(writing_task: dict[str, Any]) -> bool:
@@ -447,7 +451,7 @@ class WriterToolkitBase:
     __public_apis__: list[str] = []
 
     def build_writing_task(self, query: str, task_id: str = '') -> str:
-        """Build a writing task from the user's original request."""
+        """Build a provider-neutral writing task from the user's request."""
         task = WritingTask(
             task_id=task_id.strip() or None,
             query=query,
@@ -849,9 +853,7 @@ class WriterToolkitBase:
         warnings = []
         if (
             representation == 'markdown'
-            and _markdown_media_is_explicitly_disabled(
-                str(_json_loads(writing_task_json, {}).get('query') or ''),
-            )
+            and _markdown_media_is_explicitly_disabled(_json_loads(writing_task_json, {}))
         ):
             return _json_dumps({
                 'section_instructions': instructions.model_dump(exclude_defaults=True),
@@ -968,9 +970,7 @@ class WriterToolkitBase:
         visual_plan = VisualPlan().model_dump()
         if not (
             isinstance(_document_value(outline_json), str)
-            and _markdown_media_is_explicitly_disabled(
-                str(_json_loads(writing_task_json, {}).get('query') or ''),
-            )
+            and _markdown_media_is_explicitly_disabled(_json_loads(writing_task_json, {}))
         ):
             try:
                 visual_result = planning.generate_visual_plan(

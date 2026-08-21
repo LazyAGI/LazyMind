@@ -1,15 +1,10 @@
 import type { TabDef, WorkflowSession } from '@/modules/chat/store/workflowPanel';
 
-export function resolveCompletedWriterContinueStep(
-  session: Pick<WorkflowSession, 'status' | 'workflow_id'>,
+export function resolveCompletedContinueStep(
+  session: Pick<WorkflowSession, 'status'>,
   activeTab?: TabDef,
 ): string | undefined {
-  if (
-    session.status === 'completed'
-    && session.workflow_id === 'writer-workflow'
-    && (activeTab?.step_id ?? activeTab?.id) === 'outline'
-  ) {
-    return 'write_document';
-  }
-  return undefined;
+  if (session.status !== 'completed') return undefined;
+  const stepId = activeTab?.completed_continue_step?.trim();
+  return stepId || undefined;
 }
