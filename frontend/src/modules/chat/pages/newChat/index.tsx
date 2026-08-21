@@ -26,6 +26,7 @@ import { RightOutlined, ScheduleOutlined } from "@ant-design/icons";
 import { useChatThinkStore } from "@/modules/chat/store/chatThink";
 import FeaturedCases from "@/modules/showcase/FeaturedCases";
 import { getShowcaseCase, type ShowcaseCase } from "@/modules/showcase/api";
+import { getKnowledgeMarketItem } from "@/modules/knowledge/api/knowledgeMarket";
 
 function readRunInBackgroundMode() {
   try {
@@ -91,6 +92,7 @@ const NewChatPage = () => {
   const [showcaseCase, setShowcaseCase] = useState<ShowcaseCase | null>(null);
   const showcaseCaseId = searchParams.get("showcase_case");
   const showcaseTaskId = searchParams.get("showcase_task");
+  const officialKnowledgeId = searchParams.get("officialKnowledge");
   const [selectedShowcaseSecondaryId, setSelectedShowcaseSecondaryId] = useState<string>();
 
   useEffect(() => {
@@ -172,7 +174,7 @@ const NewChatPage = () => {
     if (!showcaseCaseId) {
       setShowcaseCase(null);
       setSelectedShowcaseSecondaryId(undefined);
-      setInputValue("");
+      if (!officialKnowledgeId) setInputValue("");
       return;
     }
 
@@ -196,7 +198,31 @@ const NewChatPage = () => {
       });
 
     return () => controller.abort();
-  }, [locale, showcaseCaseId, showcaseTaskId]);
+  }, [locale, officialKnowledgeId, showcaseCaseId, showcaseTaskId]);
+
+  useEffect(() => {
+    if (!officialKnowledgeId || showcaseCaseId) return;
+
+    const controller = new AbortController();
+    getKnowledgeMarketItem(officialKnowledgeId, { signal: controller.signal })
+      .then((item) => {
+        if (!item.online_access_url) {
+          message.info(t("knowledge.onlineQueryUnavailable"));
+          return;
+        }
+        setInputValue(
+          t("knowledge.onlineQueryPrompt", {
+            name: item.name,
+            url: item.online_access_url,
+          }),
+        );
+      })
+      .catch(() => {
+        // The shared request interceptor displays the localized error.
+      });
+
+    return () => controller.abort();
+  }, [locale, officialKnowledgeId, showcaseCaseId, t]);
 
   const handleShowcaseSecondaryChange = (secondaryId: string) => {
     setSelectedShowcaseSecondaryId(secondaryId);
