@@ -16,6 +16,9 @@ from threading import Event, RLock
 from typing import Any, ClassVar
 
 from lazyllm import LOG, AutoModel, ThreadPoolExecutor
+from lazyllm.module.llms.onlinemodule.base.model_call_runner import (
+    is_retryable_transport_error,
+)
 from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools.writer.data_models import (
     InputResource,
@@ -154,6 +157,20 @@ class DraftMarkdownStreamEventEmitter:
 
     def abort(self, message: str = '') -> None:
         self._finish('abort', message=message)
+
+    def restart(self, prefix: str = '') -> None:
+        """Replace an interrupted preview while keeping subsequent deltas live."""
+        with self._lock:
+            if not self._closed:
+                self._publish_locked(
+                    'abort', message='Interrupted section is being regenerated.',
+                )
+            self._stream_id = uuid.uuid4().hex
+            self._chunk_index = 0
+            self._closed = False
+            self._publish_locked('start')
+            if prefix:
+                self.feed(prefix)
 
     def flush(self) -> None:
         """Compatibility no-op: deltas are already published immediately."""
@@ -1214,6 +1231,7 @@ class WriterToolkitBase:
         on_delta: Callable[[str], None],
         on_section_end: Callable[[], None] | None = None,
         on_progress: Callable[[dict[str, Any]], None] | None = None,
+        on_preview_restart: Callable[[str], None] | None = None,
         visual_plan_json: str = '',
         checkpoint_dir: str = '',
     ) -> str:
@@ -1226,6 +1244,7 @@ class WriterToolkitBase:
             on_delta=on_delta,
             on_section_end=on_section_end,
             on_progress=on_progress,
+            on_preview_restart=on_preview_restart,
             visual_plan_json=visual_plan_json,
             checkpoint_dir=checkpoint_dir,
         )
@@ -1238,6 +1257,7 @@ class WriterToolkitBase:
         on_delta: Callable[[str], None],
         on_section_end: Callable[[], None] | None = None,
         on_progress: Callable[[dict[str, Any]], None] | None = None,
+        on_preview_restart: Callable[[str], None] | None = None,
         visual_plan_json: str = '',
         media_assets_json: str = '',
         checkpoint_dir: str = '',
@@ -1251,6 +1271,7 @@ class WriterToolkitBase:
             on_delta=on_delta,
             on_section_end=on_section_end,
             on_progress=on_progress,
+            on_preview_restart=on_preview_restart,
             visual_plan_json=visual_plan_json,
             media_assets_json=media_assets_json,
             checkpoint_dir=checkpoint_dir,
@@ -1266,6 +1287,7 @@ class WriterToolkitBase:
         on_delta: Callable[[str], None],
         on_section_end: Callable[[], None] | None,
         on_progress: Callable[[dict[str, Any]], None] | None,
+        on_preview_restart: Callable[[str], None] | None,
         visual_plan_json: str = '',
         media_assets_json: str = '',
         checkpoint_dir: str = '',
@@ -1296,6 +1318,14 @@ class WriterToolkitBase:
             except Exception as exc:  # noqa: BLE001 - progress is observability only.
                 LOG.warning('[Writer] Draft progress callback failed: %s', exc)
 
+        def restart_preview(prefix: str) -> None:
+            if on_preview_restart is None:
+                return
+            try:
+                on_preview_restart(prefix)
+            except Exception as exc:  # noqa: BLE001 - preview forwarding is best effort.
+                LOG.warning('[Writer] Draft preview restart callback failed: %s', exc)
+
         instruction_list_meta = instructions_data.get('meta')
         if not isinstance(instruction_list_meta, dict):
             instruction_list_meta = {}
@@ -1313,8 +1343,11 @@ class WriterToolkitBase:
             document_title = str(candidate or '').strip()
             if document_title:
                 break
+        committed_preview_parts: list[str] = []
         if document_title:
-            forward_delta(f'# {document_title}\n\n')
+            title_preview = f'# {document_title}\n\n'
+            committed_preview_parts.append(title_preview)
+            forward_delta(title_preview)
 
         root = _temp_root()
         task_path = _write_input_artifact(
@@ -1448,7 +1481,6 @@ class WriterToolkitBase:
         def generate_one(index: int, instruction_data: dict[str, Any]) -> None:
             events = event_queues[index]
             path = checkpoint_path(index, instruction_data)
-            section_started_at[index] = time.monotonic()
             try:
                 instruction = SectionInstruction.model_validate(instruction_data)
                 cached = load_checkpoint(path, instruction)
@@ -1459,6 +1491,7 @@ class WriterToolkitBase:
                         mark_completed(index, cached=True)
                     return
                 for attempt in range(1, max_attempts + 1):
+                    section_started_at[index] = time.monotonic()
                     buffered: list[str] = []
                     section_deltas: list[str] = []
                     body_started = False
@@ -1555,17 +1588,32 @@ class WriterToolkitBase:
                         mark_completed(index)
                         return
                     except Exception as exc:
-                        if attempt >= max_attempts or body_started or stop_event.is_set():
+                        retryable = (
+                            isinstance(exc, TimeoutError)
+                            or is_retryable_transport_error(exc)
+                        )
+                        preview_can_restart = not body_started or on_preview_restart is not None
+                        if (
+                            attempt >= max_attempts
+                            or stop_event.is_set()
+                            or not retryable
+                            or not preview_can_restart
+                        ):
                             raise
                         LOG.warning(
-                            '[Writer] Retrying section %d after no effective body output: %s',
+                            '[Writer] Retrying interrupted section %d from its instruction: %s',
                             index + 1, exc,
                         )
+                        if body_started:
+                            # Queue this after every already-published delta from the failed
+                            # attempt and before any delta from the next attempt. The ordered
+                            # consumer replaces the preview with committed sections only.
+                            events.put(('retry', None))
                         forward_progress(
                             progress=5,
                             current_phase=(
-                                f'第 {index + 1} 章长时间无有效正文，'
-                                f'正在自动重试（{attempt}/{max_attempts - 1}）'
+                                f'第 {index + 1} 章生成中断，正在根据原章节规划'
+                                f'从头重新生成（第 {attempt + 1}/{max_attempts} 次）'
                             ),
                             section_index=index + 1,
                             section_total=len(instructions),
@@ -1677,11 +1725,19 @@ class WriterToolkitBase:
                             last_wait_progress_at = now
                         forward_delta(payload)
                         continue
+                    if event == 'retry':
+                        restart_preview(''.join(committed_preview_parts))
+                        section_stream_started = False
+                        streamed_chars = 0
+                        last_stream_progress_at = 0.0
+                        last_wait_progress_at = time.monotonic()
+                        continue
                     if event == 'error':
                         raise payload
                     if index == 0:
                         start_background_sections()
                     sections[index] = payload
+                    committed_preview_parts.append(cached_preview(payload))
                     if on_section_end is not None:
                         try:
                             on_section_end()

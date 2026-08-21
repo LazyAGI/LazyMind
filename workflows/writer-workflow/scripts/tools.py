@@ -1552,6 +1552,7 @@ def writer_generate_draft_blocks(
             on_delta=events.feed,
             on_section_end=events.flush,
             on_progress=emit_progress,
+            on_preview_restart=events.restart,
             checkpoint_dir=checkpoint_dir,
         ), [])
         root = _run_root('draft-blocks')
@@ -1595,6 +1596,7 @@ def writer_generate_draft_blocks_markdown(
             on_delta=events.feed,
             on_section_end=events.flush,
             on_progress=emit_progress,
+            on_preview_restart=events.restart,
             checkpoint_dir=checkpoint_dir,
         ), [])
         root = _run_root('draft-sections-markdown')

@@ -127,6 +127,75 @@ def test_markdown_draft_blocks_do_not_pass_resolved_media(monkeypatch, tmp_path)
     assert Path(paths[0]).read_text(encoding='utf-8') == '## 第一章\n\n正文。\n'
 
 
+def test_interrupted_section_restarts_preview_and_retries(monkeypatch):
+    from lazymind.chat.engine.tools import writer
+
+    complete = '## 第一章\n\n完整正文。\n'
+    emitted: list[dict] = []
+    attempts = 0
+
+    class FakeStream:
+        def __init__(self, attempt, artifact_store):
+            self.attempt, self.artifact_store = attempt, Path(artifact_store)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def __iter__(self):
+            yield '## 第一章\n\n'
+            if self.attempt == 1:
+                yield '残缺正文'
+                raise ConnectionResetError
+            yield '完整正文。\n'
+
+        def result(self):
+            path = self.artifact_store / 'draft_section.md'
+            path.write_text(complete, encoding='utf-8')
+            return {'artifact_path': str(path)}
+
+    def drafting_tools(**kwargs):
+        nonlocal attempts
+        attempts += 1
+        return SimpleNamespace(
+            stream_draft_section=lambda **_kwargs: FakeStream(
+                attempts, kwargs['artifact_store'],
+            ),
+        )
+
+    monkeypatch.setenv('LAZYMIND_WRITER_SECTION_MAX_ATTEMPTS', '2')
+    monkeypatch.setattr(writer, 'AutoModel', lambda **_kwargs: object())
+    monkeypatch.setattr(writer, 'WriterDraftingTools', drafting_tools)
+    monkeypatch.setattr(
+        writer, 'SectionInstruction',
+        SimpleNamespace(model_validate=lambda value: value),
+    )
+    monkeypatch.setattr(writer, '_write_input_artifact', lambda *_args: '')
+
+    emitter = writer.DraftMarkdownStreamEventEmitter(emitted.append)
+    result = json.loads(writer.WriterCreateToolkit().stream_draft_blocks_markdown(
+        writing_task_json='{}',
+        section_instructions_json='{"instructions": [{}]}',
+        writing_context_json='{}',
+        on_delta=emitter.feed,
+        on_preview_restart=emitter.restart,
+    ))
+
+    assert attempts == 2
+    assert result == [complete]
+    starts = [event for event in emitted if event['type'] == 'artifact_stream_start']
+    assert len(starts) == 2
+    latest_preview = ''.join(
+        event['delta']
+        for event in emitted
+        if event['type'] == 'artifact_stream'
+        and event['stream_id'] == starts[-1]['stream_id']
+    )
+    assert latest_preview == complete
+
+
 def test_markdown_media_fill_uses_persistent_uri_and_drops_missing_assets():
     tools = _load_tools_module()
 
