@@ -27,6 +27,7 @@ import (
 	"lazymind/core/episode"
 	"lazymind/core/evalset"
 	"lazymind/core/externallease"
+	"lazymind/core/knowledge_market"
 	"lazymind/core/log"
 	"lazymind/core/migrate"
 	"lazymind/core/modelprovider"
@@ -393,6 +394,9 @@ func run(ctx context.Context) error {
 	datasourceCatalogPath := filepath.Join(".", "config", "datasource_catalog.yaml")
 	modelprovider.MustSeedDatasourceCatalog(ctx, db.DB, datasourceCatalogPath)
 
+	knowledgeMarketCatalogPath := filepath.Join(".", "config", "knowledge_market_catalog.yaml")
+	knowledge_market.MustSeedCatalog(context.Background(), db.DB, knowledgeMarketCatalogPath)
+
 	readonlyDriver := strings.TrimSpace(os.Getenv("LAZYMIND_READONLY_DB_DRIVER"))
 	readonlyDSN := strings.TrimSpace(os.Getenv("LAZYMIND_READONLY_DB_DSN"))
 	if readonlyDriver == "" {
@@ -437,6 +441,7 @@ func run(ctx context.Context) error {
 		return &startupError{msg: "seed built-in workflows", err: err}
 	}
 	evalset.RegisterAsyncJobs()
+	knowledge_market.RegisterAsyncJobs()
 	workflow.RegisterWorkflowDraftGenerateJob()
 	workflowHosts := workflowexecutor.DefaultHostRegistry
 	workflowHosts.RegisterHost("lazymind", workflowexecutor.HostRegistration{

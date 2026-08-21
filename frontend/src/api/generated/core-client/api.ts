@@ -1091,6 +1091,7 @@ export interface Dataset {
     'parsers'?: Array<ParserConfig>;
     'segment_count': number;
     'share_type': string;
+    'source_type'?: string;
     'state': string;
     'tags'?: Array<string>;
     'token_count': number;
@@ -1481,6 +1482,137 @@ export interface KBListRow {
     'name'?: string;
     'permissions'?: Array<string>;
     'visibility'?: string;
+}
+export interface KnowledgeMarketDetailOpenAPIResponse {
+    'category': string;
+    'created_at': string;
+    'data_source': string;
+    'description': string;
+    'domain': string;
+    'icon': string;
+    'id': string;
+    'name': string;
+    'package_revision': string;
+    'package_url': string;
+    'sample_questions'?: Array<string>;
+    'sort_order': number;
+    'tags'?: Array<string>;
+    'updated_at': string;
+}
+export interface KnowledgeMarketDomainsGroupOpenAPIResponse {
+    'evaluation'?: Array<string>;
+    'industry'?: Array<string>;
+}
+export interface KnowledgeMarketDomainsOpenAPIResponse {
+    'domains': KnowledgeMarketDomainsGroupOpenAPIResponse;
+}
+export interface KnowledgeMarketInstallOpenAPIResponse {
+    'job_id': string;
+    'state': string;
+}
+export interface KnowledgeMarketInstallsOpenAPIResponse {
+    'items'?: Array<KnowledgeMarketInstallsOpenAPIResponseItem>;
+    'total': number;
+}
+export interface KnowledgeMarketInstallsOpenAPIResponseItem {
+    'active': boolean;
+    'dataset_id': string;
+    'domain': string;
+    'icon': string;
+    'install_state': string;
+    'installed_at'?: string;
+    'market_item_id': string;
+    'name': string;
+    'updated_at': string;
+}
+export interface KnowledgeMarketListItemOpenAPIResponse {
+    'category': string;
+    'created_at': string;
+    'data_source': string;
+    'description': string;
+    'domain': string;
+    'icon': string;
+    'id': string;
+    'name': string;
+    'online_access_url': string;
+    'sort_order': number;
+    'tags'?: Array<string>;
+    'updated_at': string;
+}
+export interface KnowledgeMarketListOpenAPIResponse {
+    'items'?: Array<KnowledgeMarketListItemOpenAPIResponse>;
+    'page': number;
+    'page_size': number;
+    'total': number;
+}
+export interface KnowledgeMarketTaskDetailOpenAPIResponse {
+    'attempt_count': number;
+    'created_at': string;
+    'dataset_id': string;
+    'error_message': string;
+    'finished_at'?: string;
+    'icon': string;
+    'install_state': string;
+    'job_id': string;
+    'job_status': string;
+    'job_type': string;
+    'market_item_id': string;
+    'max_attempts': number;
+    'name': string;
+    'overall_percent': number;
+    'parse': KnowledgeMarketTaskParseOpenAPIResponse;
+    'payload': KnowledgeMarketTaskPayloadOpenAPIResponse;
+    'progress': KnowledgeMarketTaskProgressOpenAPIResponse;
+    'result'?: KnowledgeMarketTaskResultOpenAPIResponse;
+    'stage': string;
+    'started_at'?: string;
+    'updated_at'?: string;
+}
+export interface KnowledgeMarketTaskListItemOpenAPIResponse {
+    'created_at': string;
+    'dataset_id': string;
+    'error_message': string;
+    'finished_at'?: string;
+    'icon': string;
+    'install_state': string;
+    'job_id': string;
+    'job_status': string;
+    'job_type': string;
+    'market_item_id': string;
+    'name': string;
+    'progress': KnowledgeMarketTaskProgressOpenAPIResponse;
+}
+export interface KnowledgeMarketTaskListOpenAPIResponse {
+    'items'?: Array<KnowledgeMarketTaskListItemOpenAPIResponse>;
+    'page': number;
+    'page_size': number;
+    'total': number;
+}
+export interface KnowledgeMarketTaskParseOpenAPIResponse {
+    'done': number;
+    'failed': number;
+    'parsing': number;
+    'pending': number;
+    'state': string;
+    'total': number;
+}
+export interface KnowledgeMarketTaskPayloadOpenAPIResponse {
+    'force'?: boolean;
+    'market_item_id': string;
+    'revision'?: string;
+}
+export interface KnowledgeMarketTaskProgressOpenAPIResponse {
+    'current': number;
+    'total': number;
+}
+export interface KnowledgeMarketTaskResultOpenAPIResponse {
+    'checked'?: number;
+    'dataset_id': string;
+    'reason'?: string;
+    'removed'?: number;
+    'skipped_items'?: Array<string>;
+    'submitted': number;
+    'updated_items'?: Array<string>;
 }
 export interface LatestVersionChangeOpenAPIResponse {
     'change_source': string;
@@ -6772,7 +6904,7 @@ export const DatasetsApiAxiosParamCreator = function (configuration?: Configurat
          * @param {string} [orderBy]
          * @param {string} [keyword]
          * @param {Array<string>} [tags]
-         * @param {ApiCoreDatasetsGetSourceEnum} [source] Filter datasets by creation source.
+         * @param {ApiCoreDatasetsGetSourceEnum} [source] Filter datasets by creation source: manual (local upload), cloud (cloud document sync) or official_installed (installed from the knowledge plaza).
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -6947,7 +7079,7 @@ export const DatasetsApiFp = function(configuration?: Configuration) {
          * @param {string} [orderBy]
          * @param {string} [keyword]
          * @param {Array<string>} [tags]
-         * @param {ApiCoreDatasetsGetSourceEnum} [source] Filter datasets by creation source.
+         * @param {ApiCoreDatasetsGetSourceEnum} [source] Filter datasets by creation source: manual (local upload), cloud (cloud document sync) or official_installed (installed from the knowledge plaza).
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
@@ -7109,7 +7241,7 @@ export interface DatasetsApiApiCoreDatasetsGetRequest {
     readonly tags?: Array<string>
 
     /**
-     * Filter datasets by creation source.
+     * Filter datasets by creation source: manual (local upload), cloud (cloud document sync) or official_installed (installed from the knowledge plaza).
      */
     readonly source?: ApiCoreDatasetsGetSourceEnum
 }
@@ -7207,7 +7339,8 @@ export class DatasetsApi extends BaseAPI {
 
 export const ApiCoreDatasetsGetSourceEnum = {
     Manual: 'manual',
-    Cloud: 'cloud'
+    Cloud: 'cloud',
+    OfficialInstalled: 'official_installed'
 } as const;
 export type ApiCoreDatasetsGetSourceEnum = typeof ApiCoreDatasetsGetSourceEnum[keyof typeof ApiCoreDatasetsGetSourceEnum];
 
@@ -26213,6 +26346,758 @@ export class EvalSetsApi extends BaseAPI {
     }
 }
 
+
+
+/**
+ * KnowledgeMarketApi - axios parameter creator
+ */
+export const KnowledgeMarketApiAxiosParamCreator = function (configuration?: Configuration) {
+    return {
+        /**
+         *
+         * @summary List knowledge market domains grouped by category
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeMarketDomainsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/knowledge-market/domains`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Read-only catalog browsing. Filters combine with AND semantics; only published items are returned.
+         * @summary List published knowledge market items
+         * @param {ApiCoreKnowledgeMarketGetCategoryEnum} [category] Filter by category: industry or evaluation.
+         * @param {string} [domain] Filter by exact domain.
+         * @param {string} [keyword] Case-insensitive match on name, description or domain; tags are not searched.
+         * @param {number} [page]
+         * @param {number} [pageSize]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeMarketGet: async (category?: ApiCoreKnowledgeMarketGetCategoryEnum, domain?: string, keyword?: string, page?: number, pageSize?: number, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/knowledge-market`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (category !== undefined) {
+                localVarQueryParameter['category'] = category;
+            }
+
+            if (domain !== undefined) {
+                localVarQueryParameter['domain'] = domain;
+            }
+
+            if (keyword !== undefined) {
+                localVarQueryParameter['keyword'] = keyword;
+            }
+
+            if (page !== undefined) {
+                localVarQueryParameter['page'] = page;
+            }
+
+            if (pageSize !== undefined) {
+                localVarQueryParameter['page_size'] = pageSize;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Returns the current user\'s install records (all states, no pagination) so plaza cards and the \"my knowledge bases\" tab can map each item to its install state.
+         * @summary List my knowledge market installs
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeMarketInstallsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/knowledge-market/installs`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Returns the full catalog entry including download package URL/revision and sample questions. Version fields are intentionally not exposed. 404 when the item does not exist or is not published.
+         * @summary Get knowledge market item details
+         * @param {string} marketItemId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeMarketItemsMarketItemIdGet: async (marketItemId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'marketItemId' is not null or undefined
+            assertParamExists('apiCoreKnowledgeMarketItemsMarketItemIdGet', 'marketItemId', marketItemId)
+            const localVarPath = `/api/core/knowledge-market/items/{market_item_id}`
+                .replace(`{${"market_item_id"}}`, encodeURIComponent(String(marketItemId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Enqueues a background install job that downloads the package, creates a personal dataset and submits every file to the parsing/vectorizing pipeline. Returns the job id; progress is polled via GET /knowledge-market/tasks/{job_id}. Conflicts with an in-flight install/update of the same item return 409.
+         * @summary Install an official knowledge base
+         * @param {string} marketItemId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeMarketItemsMarketItemIdInstallPost: async (marketItemId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'marketItemId' is not null or undefined
+            assertParamExists('apiCoreKnowledgeMarketItemsMarketItemIdInstallPost', 'marketItemId', marketItemId)
+            const localVarPath = `/api/core/knowledge-market/items/{market_item_id}:install`
+                .replace(`{${"market_item_id"}}`, encodeURIComponent(String(marketItemId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Enqueues a background update job (strategy A: clear old documents then import the new package). No-change updates finish with updated=false and write nothing. Conflicts with an in-flight install/update of the same item return 409; not-installed items return 404.
+         * @summary Update one installed official knowledge base
+         * @param {string} marketItemId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeMarketItemsMarketItemIdUpdatePost: async (marketItemId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'marketItemId' is not null or undefined
+            assertParamExists('apiCoreKnowledgeMarketItemsMarketItemIdUpdatePost', 'marketItemId', marketItemId)
+            const localVarPath = `/api/core/knowledge-market/items/{market_item_id}:update`
+                .replace(`{${"market_item_id"}}`, encodeURIComponent(String(marketItemId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Returns the current user\'s knowledge market tasks (default job type knowledge_market_install; pass job_type for update/update-all) with market item info and install-state enrichment.
+         * @summary List background knowledge market tasks
+         * @param {number} [page]
+         * @param {number} [pageSize]
+         * @param {ApiCoreKnowledgeMarketTasksGetStatusEnum} [status] Filter background tasks by async job status.
+         * @param {string} [jobType] Async job type; defaults to knowledge_market_install.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeMarketTasksGet: async (page?: number, pageSize?: number, status?: ApiCoreKnowledgeMarketTasksGetStatusEnum, jobType?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/knowledge-market/tasks`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            if (page !== undefined) {
+                localVarQueryParameter['page'] = page;
+            }
+
+            if (pageSize !== undefined) {
+                localVarQueryParameter['page_size'] = pageSize;
+            }
+
+            if (status !== undefined) {
+                localVarQueryParameter['status'] = status;
+            }
+
+            if (jobType !== undefined) {
+                localVarQueryParameter['job_type'] = jobType;
+            }
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Returns one knowledge market task (install/update/update-all) with payload, result and the derived stage/overall progress. 404 when the job does not exist or belongs to another user.
+         * @summary Get background knowledge market task detail
+         * @param {string} jobId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeMarketTasksJobIdGet: async (jobId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'jobId' is not null or undefined
+            assertParamExists('apiCoreKnowledgeMarketTasksJobIdGet', 'jobId', jobId)
+            const localVarPath = `/api/core/knowledge-market/tasks/{job_id}`
+                .replace(`{${"job_id"}}`, encodeURIComponent(String(jobId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Enqueues a check-only batch job that compares every installed item and spawns an independent update job per changed item. A second batch for the same user returns 409.
+         * @summary One-click update of all installed official knowledge bases
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeMarketUpdateAllPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/knowledge-market:update-all`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+    }
+};
+
+/**
+ * KnowledgeMarketApi - functional programming interface
+ */
+export const KnowledgeMarketApiFp = function(configuration?: Configuration) {
+    const localVarAxiosParamCreator = KnowledgeMarketApiAxiosParamCreator(configuration)
+    return {
+        /**
+         *
+         * @summary List knowledge market domains grouped by category
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreKnowledgeMarketDomainsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<KnowledgeMarketDomainsOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreKnowledgeMarketDomainsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['KnowledgeMarketApi.apiCoreKnowledgeMarketDomainsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Read-only catalog browsing. Filters combine with AND semantics; only published items are returned.
+         * @summary List published knowledge market items
+         * @param {ApiCoreKnowledgeMarketGetCategoryEnum} [category] Filter by category: industry or evaluation.
+         * @param {string} [domain] Filter by exact domain.
+         * @param {string} [keyword] Case-insensitive match on name, description or domain; tags are not searched.
+         * @param {number} [page]
+         * @param {number} [pageSize]
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreKnowledgeMarketGet(category?: ApiCoreKnowledgeMarketGetCategoryEnum, domain?: string, keyword?: string, page?: number, pageSize?: number, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<KnowledgeMarketListOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreKnowledgeMarketGet(category, domain, keyword, page, pageSize, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['KnowledgeMarketApi.apiCoreKnowledgeMarketGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Returns the current user\'s install records (all states, no pagination) so plaza cards and the \"my knowledge bases\" tab can map each item to its install state.
+         * @summary List my knowledge market installs
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreKnowledgeMarketInstallsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<KnowledgeMarketInstallsOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreKnowledgeMarketInstallsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['KnowledgeMarketApi.apiCoreKnowledgeMarketInstallsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Returns the full catalog entry including download package URL/revision and sample questions. Version fields are intentionally not exposed. 404 when the item does not exist or is not published.
+         * @summary Get knowledge market item details
+         * @param {string} marketItemId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreKnowledgeMarketItemsMarketItemIdGet(marketItemId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<KnowledgeMarketDetailOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreKnowledgeMarketItemsMarketItemIdGet(marketItemId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['KnowledgeMarketApi.apiCoreKnowledgeMarketItemsMarketItemIdGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Enqueues a background install job that downloads the package, creates a personal dataset and submits every file to the parsing/vectorizing pipeline. Returns the job id; progress is polled via GET /knowledge-market/tasks/{job_id}. Conflicts with an in-flight install/update of the same item return 409.
+         * @summary Install an official knowledge base
+         * @param {string} marketItemId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreKnowledgeMarketItemsMarketItemIdInstallPost(marketItemId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<KnowledgeMarketInstallOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreKnowledgeMarketItemsMarketItemIdInstallPost(marketItemId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['KnowledgeMarketApi.apiCoreKnowledgeMarketItemsMarketItemIdInstallPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Enqueues a background update job (strategy A: clear old documents then import the new package). No-change updates finish with updated=false and write nothing. Conflicts with an in-flight install/update of the same item return 409; not-installed items return 404.
+         * @summary Update one installed official knowledge base
+         * @param {string} marketItemId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreKnowledgeMarketItemsMarketItemIdUpdatePost(marketItemId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<KnowledgeMarketInstallOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreKnowledgeMarketItemsMarketItemIdUpdatePost(marketItemId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['KnowledgeMarketApi.apiCoreKnowledgeMarketItemsMarketItemIdUpdatePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Returns the current user\'s knowledge market tasks (default job type knowledge_market_install; pass job_type for update/update-all) with market item info and install-state enrichment.
+         * @summary List background knowledge market tasks
+         * @param {number} [page]
+         * @param {number} [pageSize]
+         * @param {ApiCoreKnowledgeMarketTasksGetStatusEnum} [status] Filter background tasks by async job status.
+         * @param {string} [jobType] Async job type; defaults to knowledge_market_install.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreKnowledgeMarketTasksGet(page?: number, pageSize?: number, status?: ApiCoreKnowledgeMarketTasksGetStatusEnum, jobType?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<KnowledgeMarketTaskListOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreKnowledgeMarketTasksGet(page, pageSize, status, jobType, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['KnowledgeMarketApi.apiCoreKnowledgeMarketTasksGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Returns one knowledge market task (install/update/update-all) with payload, result and the derived stage/overall progress. 404 when the job does not exist or belongs to another user.
+         * @summary Get background knowledge market task detail
+         * @param {string} jobId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreKnowledgeMarketTasksJobIdGet(jobId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<KnowledgeMarketTaskDetailOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreKnowledgeMarketTasksJobIdGet(jobId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['KnowledgeMarketApi.apiCoreKnowledgeMarketTasksJobIdGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Enqueues a check-only batch job that compares every installed item and spawns an independent update job per changed item. A second batch for the same user returns 409.
+         * @summary One-click update of all installed official knowledge bases
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreKnowledgeMarketUpdateAllPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<KnowledgeMarketInstallOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreKnowledgeMarketUpdateAllPost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['KnowledgeMarketApi.apiCoreKnowledgeMarketUpdateAllPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+    }
+};
+
+/**
+ * KnowledgeMarketApi - factory interface
+ */
+export const KnowledgeMarketApiFactory = function (configuration?: Configuration, basePath?: string, axios?: AxiosInstance) {
+    const localVarFp = KnowledgeMarketApiFp(configuration)
+    return {
+        /**
+         *
+         * @summary List knowledge market domains grouped by category
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeMarketDomainsGet(options?: RawAxiosRequestConfig): AxiosPromise<KnowledgeMarketDomainsOpenAPIResponse> {
+            return localVarFp.apiCoreKnowledgeMarketDomainsGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Read-only catalog browsing. Filters combine with AND semantics; only published items are returned.
+         * @summary List published knowledge market items
+         * @param {KnowledgeMarketApiApiCoreKnowledgeMarketGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeMarketGet(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<KnowledgeMarketListOpenAPIResponse> {
+            return localVarFp.apiCoreKnowledgeMarketGet(requestParameters.category, requestParameters.domain, requestParameters.keyword, requestParameters.page, requestParameters.pageSize, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Returns the current user\'s install records (all states, no pagination) so plaza cards and the \"my knowledge bases\" tab can map each item to its install state.
+         * @summary List my knowledge market installs
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeMarketInstallsGet(options?: RawAxiosRequestConfig): AxiosPromise<KnowledgeMarketInstallsOpenAPIResponse> {
+            return localVarFp.apiCoreKnowledgeMarketInstallsGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Returns the full catalog entry including download package URL/revision and sample questions. Version fields are intentionally not exposed. 404 when the item does not exist or is not published.
+         * @summary Get knowledge market item details
+         * @param {KnowledgeMarketApiApiCoreKnowledgeMarketItemsMarketItemIdGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeMarketItemsMarketItemIdGet(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketItemsMarketItemIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<KnowledgeMarketDetailOpenAPIResponse> {
+            return localVarFp.apiCoreKnowledgeMarketItemsMarketItemIdGet(requestParameters.marketItemId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Enqueues a background install job that downloads the package, creates a personal dataset and submits every file to the parsing/vectorizing pipeline. Returns the job id; progress is polled via GET /knowledge-market/tasks/{job_id}. Conflicts with an in-flight install/update of the same item return 409.
+         * @summary Install an official knowledge base
+         * @param {KnowledgeMarketApiApiCoreKnowledgeMarketItemsMarketItemIdInstallPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeMarketItemsMarketItemIdInstallPost(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketItemsMarketItemIdInstallPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<KnowledgeMarketInstallOpenAPIResponse> {
+            return localVarFp.apiCoreKnowledgeMarketItemsMarketItemIdInstallPost(requestParameters.marketItemId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Enqueues a background update job (strategy A: clear old documents then import the new package). No-change updates finish with updated=false and write nothing. Conflicts with an in-flight install/update of the same item return 409; not-installed items return 404.
+         * @summary Update one installed official knowledge base
+         * @param {KnowledgeMarketApiApiCoreKnowledgeMarketItemsMarketItemIdUpdatePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeMarketItemsMarketItemIdUpdatePost(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketItemsMarketItemIdUpdatePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<KnowledgeMarketInstallOpenAPIResponse> {
+            return localVarFp.apiCoreKnowledgeMarketItemsMarketItemIdUpdatePost(requestParameters.marketItemId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Returns the current user\'s knowledge market tasks (default job type knowledge_market_install; pass job_type for update/update-all) with market item info and install-state enrichment.
+         * @summary List background knowledge market tasks
+         * @param {KnowledgeMarketApiApiCoreKnowledgeMarketTasksGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeMarketTasksGet(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketTasksGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<KnowledgeMarketTaskListOpenAPIResponse> {
+            return localVarFp.apiCoreKnowledgeMarketTasksGet(requestParameters.page, requestParameters.pageSize, requestParameters.status, requestParameters.jobType, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Returns one knowledge market task (install/update/update-all) with payload, result and the derived stage/overall progress. 404 when the job does not exist or belongs to another user.
+         * @summary Get background knowledge market task detail
+         * @param {KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeMarketTasksJobIdGet(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<KnowledgeMarketTaskDetailOpenAPIResponse> {
+            return localVarFp.apiCoreKnowledgeMarketTasksJobIdGet(requestParameters.jobId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Enqueues a check-only batch job that compares every installed item and spawns an independent update job per changed item. A second batch for the same user returns 409.
+         * @summary One-click update of all installed official knowledge bases
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreKnowledgeMarketUpdateAllPost(options?: RawAxiosRequestConfig): AxiosPromise<KnowledgeMarketInstallOpenAPIResponse> {
+            return localVarFp.apiCoreKnowledgeMarketUpdateAllPost(options).then((request) => request(axios, basePath));
+        },
+    };
+};
+
+/**
+ * Request parameters for apiCoreKnowledgeMarketGet operation in KnowledgeMarketApi.
+ */
+export interface KnowledgeMarketApiApiCoreKnowledgeMarketGetRequest {
+    /**
+     * Filter by category: industry or evaluation.
+     */
+    readonly category?: ApiCoreKnowledgeMarketGetCategoryEnum
+
+    /**
+     * Filter by exact domain.
+     */
+    readonly domain?: string
+
+    /**
+     * Case-insensitive match on name, description or domain; tags are not searched.
+     */
+    readonly keyword?: string
+
+    readonly page?: number
+
+    readonly pageSize?: number
+}
+
+/**
+ * Request parameters for apiCoreKnowledgeMarketItemsMarketItemIdGet operation in KnowledgeMarketApi.
+ */
+export interface KnowledgeMarketApiApiCoreKnowledgeMarketItemsMarketItemIdGetRequest {
+    readonly marketItemId: string
+}
+
+/**
+ * Request parameters for apiCoreKnowledgeMarketItemsMarketItemIdInstallPost operation in KnowledgeMarketApi.
+ */
+export interface KnowledgeMarketApiApiCoreKnowledgeMarketItemsMarketItemIdInstallPostRequest {
+    readonly marketItemId: string
+}
+
+/**
+ * Request parameters for apiCoreKnowledgeMarketItemsMarketItemIdUpdatePost operation in KnowledgeMarketApi.
+ */
+export interface KnowledgeMarketApiApiCoreKnowledgeMarketItemsMarketItemIdUpdatePostRequest {
+    readonly marketItemId: string
+}
+
+/**
+ * Request parameters for apiCoreKnowledgeMarketTasksGet operation in KnowledgeMarketApi.
+ */
+export interface KnowledgeMarketApiApiCoreKnowledgeMarketTasksGetRequest {
+    readonly page?: number
+
+    readonly pageSize?: number
+
+    /**
+     * Filter background tasks by async job status.
+     */
+    readonly status?: ApiCoreKnowledgeMarketTasksGetStatusEnum
+
+    /**
+     * Async job type; defaults to knowledge_market_install.
+     */
+    readonly jobType?: string
+}
+
+/**
+ * Request parameters for apiCoreKnowledgeMarketTasksJobIdGet operation in KnowledgeMarketApi.
+ */
+export interface KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdGetRequest {
+    readonly jobId: string
+}
+
+/**
+ * KnowledgeMarketApi - object-oriented interface
+ */
+export class KnowledgeMarketApi extends BaseAPI {
+    /**
+     *
+     * @summary List knowledge market domains grouped by category
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreKnowledgeMarketDomainsGet(options?: RawAxiosRequestConfig) {
+        return KnowledgeMarketApiFp(this.configuration).apiCoreKnowledgeMarketDomainsGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Read-only catalog browsing. Filters combine with AND semantics; only published items are returned.
+     * @summary List published knowledge market items
+     * @param {KnowledgeMarketApiApiCoreKnowledgeMarketGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreKnowledgeMarketGet(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketGetRequest = {}, options?: RawAxiosRequestConfig) {
+        return KnowledgeMarketApiFp(this.configuration).apiCoreKnowledgeMarketGet(requestParameters.category, requestParameters.domain, requestParameters.keyword, requestParameters.page, requestParameters.pageSize, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Returns the current user\'s install records (all states, no pagination) so plaza cards and the \"my knowledge bases\" tab can map each item to its install state.
+     * @summary List my knowledge market installs
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreKnowledgeMarketInstallsGet(options?: RawAxiosRequestConfig) {
+        return KnowledgeMarketApiFp(this.configuration).apiCoreKnowledgeMarketInstallsGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Returns the full catalog entry including download package URL/revision and sample questions. Version fields are intentionally not exposed. 404 when the item does not exist or is not published.
+     * @summary Get knowledge market item details
+     * @param {KnowledgeMarketApiApiCoreKnowledgeMarketItemsMarketItemIdGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreKnowledgeMarketItemsMarketItemIdGet(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketItemsMarketItemIdGetRequest, options?: RawAxiosRequestConfig) {
+        return KnowledgeMarketApiFp(this.configuration).apiCoreKnowledgeMarketItemsMarketItemIdGet(requestParameters.marketItemId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Enqueues a background install job that downloads the package, creates a personal dataset and submits every file to the parsing/vectorizing pipeline. Returns the job id; progress is polled via GET /knowledge-market/tasks/{job_id}. Conflicts with an in-flight install/update of the same item return 409.
+     * @summary Install an official knowledge base
+     * @param {KnowledgeMarketApiApiCoreKnowledgeMarketItemsMarketItemIdInstallPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreKnowledgeMarketItemsMarketItemIdInstallPost(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketItemsMarketItemIdInstallPostRequest, options?: RawAxiosRequestConfig) {
+        return KnowledgeMarketApiFp(this.configuration).apiCoreKnowledgeMarketItemsMarketItemIdInstallPost(requestParameters.marketItemId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Enqueues a background update job (strategy A: clear old documents then import the new package). No-change updates finish with updated=false and write nothing. Conflicts with an in-flight install/update of the same item return 409; not-installed items return 404.
+     * @summary Update one installed official knowledge base
+     * @param {KnowledgeMarketApiApiCoreKnowledgeMarketItemsMarketItemIdUpdatePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreKnowledgeMarketItemsMarketItemIdUpdatePost(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketItemsMarketItemIdUpdatePostRequest, options?: RawAxiosRequestConfig) {
+        return KnowledgeMarketApiFp(this.configuration).apiCoreKnowledgeMarketItemsMarketItemIdUpdatePost(requestParameters.marketItemId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Returns the current user\'s knowledge market tasks (default job type knowledge_market_install; pass job_type for update/update-all) with market item info and install-state enrichment.
+     * @summary List background knowledge market tasks
+     * @param {KnowledgeMarketApiApiCoreKnowledgeMarketTasksGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreKnowledgeMarketTasksGet(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketTasksGetRequest = {}, options?: RawAxiosRequestConfig) {
+        return KnowledgeMarketApiFp(this.configuration).apiCoreKnowledgeMarketTasksGet(requestParameters.page, requestParameters.pageSize, requestParameters.status, requestParameters.jobType, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Returns one knowledge market task (install/update/update-all) with payload, result and the derived stage/overall progress. 404 when the job does not exist or belongs to another user.
+     * @summary Get background knowledge market task detail
+     * @param {KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreKnowledgeMarketTasksJobIdGet(requestParameters: KnowledgeMarketApiApiCoreKnowledgeMarketTasksJobIdGetRequest, options?: RawAxiosRequestConfig) {
+        return KnowledgeMarketApiFp(this.configuration).apiCoreKnowledgeMarketTasksJobIdGet(requestParameters.jobId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Enqueues a check-only batch job that compares every installed item and spawns an independent update job per changed item. A second batch for the same user returns 409.
+     * @summary One-click update of all installed official knowledge bases
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreKnowledgeMarketUpdateAllPost(options?: RawAxiosRequestConfig) {
+        return KnowledgeMarketApiFp(this.configuration).apiCoreKnowledgeMarketUpdateAllPost(options).then((request) => request(this.axios, this.basePath));
+    }
+}
+
+export const ApiCoreKnowledgeMarketGetCategoryEnum = {
+    Industry: 'industry',
+    Evaluation: 'evaluation'
+} as const;
+export type ApiCoreKnowledgeMarketGetCategoryEnum = typeof ApiCoreKnowledgeMarketGetCategoryEnum[keyof typeof ApiCoreKnowledgeMarketGetCategoryEnum];
+export const ApiCoreKnowledgeMarketTasksGetStatusEnum = {
+    Pending: 'pending',
+    Running: 'running',
+    Succeeded: 'succeeded',
+    Failed: 'failed',
+    Canceled: 'canceled'
+} as const;
+export type ApiCoreKnowledgeMarketTasksGetStatusEnum = typeof ApiCoreKnowledgeMarketTasksGetStatusEnum[keyof typeof ApiCoreKnowledgeMarketTasksGetStatusEnum];
 
 
 /**
