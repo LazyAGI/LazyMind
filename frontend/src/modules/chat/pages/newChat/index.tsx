@@ -26,6 +26,7 @@ import { RightOutlined, ScheduleOutlined } from "@ant-design/icons";
 import { useChatThinkStore } from "@/modules/chat/store/chatThink";
 import FeaturedCases from "@/modules/showcase/FeaturedCases";
 import { getShowcaseCase, type ShowcaseCase } from "@/modules/showcase/api";
+import { useFeaturedSkillBinding } from "@/modules/showcase/useFeaturedSkillBinding";
 
 function readRunInBackgroundMode() {
   try {
@@ -52,14 +53,9 @@ function getInitialConversationSettings(
 function getShowcasePrompt(
   item: ShowcaseCase,
   taskId: string | null,
-  secondaryId?: string,
 ) {
-  const taskPrompt = item.tasks?.find((task) => task.id === taskId)?.prompt;
-  const secondaryPrompt = item.secondary_options?.find(
-    (option) => option.id === secondaryId,
-  )?.prompt;
-  const basePrompt = taskPrompt || item.prompt;
-  return secondaryPrompt ? `${basePrompt}\n\n${secondaryPrompt}` : basePrompt;
+  return item.tasks?.find((task) => task.id === taskId)?.prompt
+    || item.tasks?.[0]?.prompt;
 }
 
 const NewChatPage = () => {
@@ -89,9 +85,13 @@ const NewChatPage = () => {
 
   const [isDragging, setIsDragging] = useState(false);
   const [showcaseCase, setShowcaseCase] = useState<ShowcaseCase | null>(null);
+  const {
+    mentions: showcaseBoundMentions,
+    retry: retryShowcaseSkillInstall,
+    status: showcaseSkillStatus,
+  } = useFeaturedSkillBinding(showcaseCase?.builtin_skill_uid);
   const showcaseCaseId = searchParams.get("showcase_case");
   const showcaseTaskId = searchParams.get("showcase_task");
-  const [selectedShowcaseSecondaryId, setSelectedShowcaseSecondaryId] = useState<string>();
 
   useEffect(() => {
     useChatThinkStore
@@ -100,7 +100,9 @@ const NewChatPage = () => {
   }, [runInBackground]);
   const dragCounterRef = useRef(0);
   const isChatDisabled = !modelProviderGuard.canChat;
-  const isWelcomeInputDisabled = isChatDisabled;
+  const isShowcaseSkillPreparing = showcaseSkillStatus === "preparing";
+  const showcaseSkillFailed = showcaseSkillStatus === "failed";
+  const isWelcomeInputDisabled = isChatDisabled || isShowcaseSkillPreparing || showcaseSkillFailed;
   const runtimeInitializingReason = runInBackground
     ? t("runtime.aiServiceInitializingWorkflow")
     : t("runtime.aiServiceInitializingMessage");
@@ -149,17 +151,31 @@ const NewChatPage = () => {
     modelProviderGuard.isRuntimeInitializing &&
     !modelProviderGuard.needsModelProviderConfig &&
     modelProviderGuard.status !== "error";
-  const inputDisabledReason = hideSharedNoticeForRuntime
-    ? undefined
-    : chatDisabledReason;
-  const inputDisabledDescription = hideSharedNoticeForRuntime
+  const inputDisabledReason = isShowcaseSkillPreparing
+    ? t("showcase.preparingSkill")
+    : showcaseSkillFailed
+      ? t("showcase.skillInstallFailed")
+      : hideSharedNoticeForRuntime
+        ? undefined
+        : chatDisabledReason;
+  const inputDisabledDescription = isShowcaseSkillPreparing || showcaseSkillFailed || hideSharedNoticeForRuntime
     ? undefined
     : chatDisabledDescriptionContent;
-  const inputDisabledAction = hideSharedNoticeForRuntime
+  const inputDisabledAction = showcaseSkillFailed ? (
+    <Button size="small" onClick={retryShowcaseSkillInstall}>
+      {t("showcase.retrySkillInstall")}
+    </Button>
+  ) : isShowcaseSkillPreparing || hideSharedNoticeForRuntime
     ? undefined
     : chatDisabledAction;
   const hidePreferenceConfigNotice =
     !modelProviderGuard.isConfigurationReady;
+
+  useEffect(() => {
+    if (showcaseSkillStatus === "failed") {
+      message.error(t("showcase.skillInstallFailed"));
+    }
+  }, [showcaseSkillStatus, t]);
 
   useEffect(() => {
     if (!isChatContent) {
@@ -171,39 +187,27 @@ const NewChatPage = () => {
   useEffect(() => {
     if (!showcaseCaseId) {
       setShowcaseCase(null);
-      setSelectedShowcaseSecondaryId(undefined);
       setInputValue("");
       return;
     }
 
     const controller = new AbortController();
     setShowcaseCase(null);
-    setSelectedShowcaseSecondaryId(undefined);
     setInputValue("");
     getShowcaseCase(showcaseCaseId, { signal: controller.signal })
       .then((item) => {
-        const defaultSecondaryId = item.secondary_options?.[0]?.id;
         setShowcaseCase(item);
-        setInputValue(getShowcasePrompt(item, showcaseTaskId, defaultSecondaryId));
-        setSelectedShowcaseSecondaryId(defaultSecondaryId);
+        setInputValue(getShowcasePrompt(item, showcaseTaskId) || "");
       })
       .catch(() => {
         if (!controller.signal.aborted) {
           setShowcaseCase(null);
-          setSelectedShowcaseSecondaryId(undefined);
           setInputValue("");
         }
       });
 
     return () => controller.abort();
   }, [locale, showcaseCaseId, showcaseTaskId]);
-
-  const handleShowcaseSecondaryChange = (secondaryId: string) => {
-    setSelectedShowcaseSecondaryId(secondaryId);
-    if (showcaseCase) {
-      setInputValue(getShowcasePrompt(showcaseCase, showcaseTaskId, secondaryId));
-    }
-  };
 
   const handleSetIsChatContent = (value: boolean) => {
     if (value && !chatLayoutMounted) {
@@ -335,18 +339,9 @@ const NewChatPage = () => {
 
   const showcaseSelection: ShowcaseSelection | undefined = showcaseCase
     ? {
-        primaryValue: showcaseCase.primary_category || showcaseCase.id,
-        primaryLabel: showcaseCase.primary_category || showcaseCase.title,
-        primaryAriaLabel: t("showcase.primaryCategory"),
-        secondaryValue: selectedShowcaseSecondaryId,
-        secondaryOptions: showcaseCase.secondary_options?.map((option) => ({
-          value: option.id,
-          label: option.label,
-          description: option.description,
-          prompt: option.prompt,
-        })),
-        secondaryAriaLabel: t("showcase.secondaryCategory"),
-        onSecondaryChange: handleShowcaseSecondaryChange,
+        value: showcaseCase.id,
+        label: showcaseCase.title,
+        ariaLabel: t("showcase.selectedSkill"),
       }
     : undefined;
   const shouldShowFeaturedCases = inputValue.trim().length === 0;
@@ -513,8 +508,11 @@ const NewChatPage = () => {
                     initialConversationSettings={pendingConversationSettings ?? undefined}
                     runInBackground={runInBackground}
                     showcaseSelection={showcaseSelection}
+                    boundMentions={showcaseBoundMentions}
                   />
-                  {shouldShowFeaturedCases ? <FeaturedCases /> : null}
+                  {shouldShowFeaturedCases ? (
+                    <FeaturedCases type={runInBackground ? "work" : "chat"} />
+                  ) : null}
                 </div>
               </div>
             </div>

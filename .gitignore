@@ -91,6 +91,7 @@ local/.bin/
 local/runtime/
 desktop/build/
 desktop/cache/
+skills/.runtime/
 local/bin/process-compose
 .conda
 

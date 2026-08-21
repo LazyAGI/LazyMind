@@ -1993,32 +1993,62 @@ export interface ShareSkillOpenAPIRequest {
 }
 export interface ShowcaseCase {
     'attachment_hint'?: string;
+    'builtin_skill_uid'?: string;
     'category': string;
     'description': string;
+    'detail_description': string;
+    'detail_title': string;
+    'featured'?: boolean;
+    'featured_order'?: number;
+    'gallery': boolean;
     'id': string;
     'image_url': string;
     'output_label': string;
     'output_type': string;
-    'primary_category'?: string;
     'prompt': string;
     'prompt_short': string;
     'result_highlights'?: Array<string>;
     'result_summary': string;
-    'secondary_options'?: Array<ShowcaseCaseOption>;
     'steps'?: Array<ShowcaseCaseStep>;
+    'tags'?: Array<string>;
     'tasks'?: Array<ShowcaseCaseTask>;
     'title': string;
+    'type': string;
 }
 export interface ShowcaseCaseListResponse {
     'cases'?: Array<ShowcaseCase>;
     'categories'?: Array<string>;
     'total': number;
 }
-export interface ShowcaseCaseOption {
-    'description'?: string;
-    'id': string;
+export interface ShowcaseCaseMetric {
+    'accent'?: boolean;
+    'hint': string;
     'label': string;
-    'prompt'?: string;
+    'value': string;
+}
+export interface ShowcaseCaseProductReport {
+    'deliverables': string;
+    'metrics'?: Array<ShowcaseCaseMetric>;
+    'sections'?: Array<ShowcaseCaseResultSection>;
+}
+export interface ShowcaseCaseResult {
+    'eyebrow': string;
+    'highlights'?: Array<string>;
+    'image_asset'?: string;
+    'image_url'?: string;
+    'product_report'?: ShowcaseCaseProductReport;
+    'summary': string;
+    'template': string;
+    'title': string;
+}
+export interface ShowcaseCaseResultItem {
+    'description': string;
+    'label'?: string;
+}
+export interface ShowcaseCaseResultSection {
+    'items'?: Array<ShowcaseCaseResultItem>;
+    'marker': string;
+    'title': string;
 }
 export interface ShowcaseCaseStep {
     'description': string;
@@ -2027,8 +2057,11 @@ export interface ShowcaseCaseStep {
 export interface ShowcaseCaseTask {
     'description': string;
     'id': string;
-    'output_label'?: string;
-    'prompt'?: string;
+    'output_label': string;
+    'prompt': string;
+    'prompt_short': string;
+    'result': ShowcaseCaseResult;
+    'steps'?: Array<ShowcaseCaseStep>;
     'title': string;
 }
 export interface SkillCategoriesOpenAPIResponse {

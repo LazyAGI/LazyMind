@@ -15,6 +15,7 @@ const electronMainScript = path.join(scriptsDir, "..", "electron", "src", "main.
 const electronBuilderConfig = path.join(scriptsDir, "..", "electron", "electron-builder.config.cjs");
 const electronPackage = path.join(scriptsDir, "..", "electron", "package.json");
 const darwinBuildScript = path.join(scriptsDir, "build-darwin-arm64.sh");
+const windowsBuildScript = path.join(scriptsDir, "build-windows-x64.ps1");
 const installerScript = path.join(scriptsDir, "..", "installer", "installer.nsh");
 const macosWorkflow = path.join(scriptsDir, "..", "..", ".github", "workflows", "macos-installer.yml");
 const macosFinalizeWorkflow = path.join(
@@ -40,6 +41,17 @@ function nsisMacro(source, name) {
   return match[1];
 }
 
+function writeOfflineSkillFixtures(root) {
+  const packages = path.join(root, "builtin-skills", "packages");
+  mkdirSync(packages, { recursive: true });
+  writeFileSync(path.join(root, "builtin-skills", "catalog.json"), '{"schema_version":1,"skills":[]}\n');
+  writeFileSync(path.join(packages, "fixture.zip"), "fixture");
+  const featured = path.join(root, "featured-skills");
+  mkdirSync(featured, { recursive: true });
+  mkdirSync(path.join(featured, "assets"), { recursive: true });
+  writeFileSync(path.join(featured, "catalog.json"), '{"schema_version":1,"cases":[]}\n');
+}
+
 for (const target of [
   { platform: "darwin", arch: "arm64", suffix: "" },
   { platform: "windows", arch: "amd64", suffix: ".exe" },
@@ -52,6 +64,7 @@ for (const target of [
       for (const name of ["process-compose", "local-proxy", "core", "scan-control-plane", "file-watcher", "caddy"]) {
         writeFileSync(path.join(bin, `${name}${target.suffix}`), name);
       }
+      writeOfflineSkillFixtures(root);
       execFileSync(process.execPath, [
         manifestScript,
         root,
@@ -61,9 +74,15 @@ for (const target of [
       const manifest = JSON.parse(readFileSync(path.join(root, "manifest.json"), "utf8"));
       assert.equal(manifest.platform, target.platform);
       assert.equal(manifest.arch, target.arch);
-      assert.deepEqual(manifest.features, { trustedLocalMode: false });
+      assert.deepEqual(manifest.features, {
+        trustedLocalMode: false,
+        offlineBuiltinSkills: true,
+        offlineFeaturedSkills: true,
+      });
       assert.equal(manifest.binaries.core, `bin/core${target.suffix}`);
       assert.ok(manifest.checksums[`bin/core${target.suffix}`]);
+      assert.ok(manifest.checksums["builtin-skills/catalog.json"]);
+      assert.ok(manifest.checksums["featured-skills/catalog.json"]);
       assert.equal(Object.keys(manifest.checksums).some((key) => key.includes("\\")), false);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -74,6 +93,7 @@ for (const target of [
 test("writes trusted local mode into the desktop runtime manifest", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "lazymind-manifest-trusted-"));
   try {
+    writeOfflineSkillFixtures(root);
     execFileSync(process.execPath, [
       manifestScript,
       root,
@@ -82,10 +102,36 @@ test("writes trusted local mode into the desktop runtime manifest", () => {
       "--trusted-local-mode", "true",
     ]);
     const manifest = JSON.parse(readFileSync(path.join(root, "manifest.json"), "utf8"));
-    assert.deepEqual(manifest.features, { trustedLocalMode: true });
+    assert.deepEqual(manifest.features, {
+      trustedLocalMode: true,
+      offlineBuiltinSkills: true,
+      offlineFeaturedSkills: true,
+    });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("macOS and Windows builds materialize builtin Skills before writing the runtime manifest", () => {
+  const darwin = readFileSync(darwinBuildScript, "utf8");
+  const windows = readFileSync(windowsBuildScript, "utf8");
+  for (const source of [darwin, windows]) {
+    const bundle = source.indexOf("builtin-skill-bundle");
+    const manifest = source.indexOf("write-runtime-manifest.mjs");
+    assert.ok(bundle >= 0, "build script must invoke the shared builtin Skill bundler");
+    assert.ok(manifest > bundle, "builtin Skills must be materialized before the runtime manifest is written");
+    assert.match(source, /builtin-sources\.yaml/);
+    assert.match(source, /builtin-skills\.lock\.json/);
+    assert.match(source, /featured-sources/);
+    assert.match(source, /featured-output/);
+  }
+  assert.match(darwin, /--exclude "skills\/\.runtime"/);
+  assert.match(darwin, /remove_generated_path "\$\{app_root\}\/skills\/\.runtime"/);
+  for (const category of ["research", "review", "search"]) {
+    assert.match(darwin, new RegExp(`--exclude "skills/${category}"`));
+    assert.match(windows, new RegExp(`skills\\\\${category}`));
+  }
+  assert.match(windows, /skills\\\.runtime/);
 });
 
 test("generates a multi-resolution Windows ICO from the macOS icon", () => {
