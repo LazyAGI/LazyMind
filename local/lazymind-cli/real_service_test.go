@@ -108,6 +108,48 @@ func TestRealConnectorStdioCallsAllLazyMindTools(t *testing.T) {
 	if stringField(t, detail, "id") != documentID || stringField(t, detail, "knowledge_id") != knowledge.ID {
 		t.Fatal("real knowledge.document.get returned the wrong document")
 	}
+	verifyRealCloudDocuments(t, ctx, session)
+	workflowSessionID := verifyRealWorkflowRuntime(t, ctx, session)
+	verifyInvocationLedger(t, ctx, serverURL, accessToken, workflowSessionID)
+	verifyRejectedTokenRefresh(t, ctx, session)
+	if mode := strings.TrimSpace(os.Getenv("LAZYMIND_REAL_CONNECTOR_CODEX")); mode != "" {
+		codexHome := strings.TrimSpace(os.Getenv("LAZYMIND_REAL_CONNECTOR_CODEX_HOME"))
+		if codexHome == "" {
+			t.Fatal("LAZYMIND_REAL_CONNECTOR_CODEX_HOME is required for isolated real Codex validation")
+		}
+		configureCodex(t, ctx, mode, binary, codexHome)
+		runCodexE2E(t, ctx, codexHome, skillMarker, knowledge)
+		threadID := runCodexThreadBootstrapE2E(t, ctx, codexHome)
+		conversationID := verifyCodexConversationBootstrap(t, ctx, serverURL, accessToken, threadID)
+		resumeCodexWorkflowE2E(t, ctx, codexHome, threadID)
+		resumeCodexThreadE2E(t, ctx, codexHome, threadID)
+		verifyCodexConversationProjection(t, ctx, serverURL, accessToken, threadID, conversationID)
+	}
+}
+
+func TestRealConnectorCloudDocuments(t *testing.T) {
+	if os.Getenv("LAZYMIND_REAL_CONNECTOR_CLOUD_E2E") != "1" {
+		t.Skip("set LAZYMIND_REAL_CONNECTOR_CLOUD_E2E=1 to validate real Feishu cloud documents")
+	}
+	binary := strings.TrimSpace(os.Getenv("LAZYMIND_REAL_CONNECTOR_BIN"))
+	if binary == "" {
+		t.Fatal("LAZYMIND_REAL_CONNECTOR_BIN is required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	command := exec.CommandContext(ctx, binary, "mcp", "proxy")
+	command.Env = os.Environ()
+	session, err := mcp.NewClient(&mcp.Implementation{Name: "lazymind-cloud-document-real-e2e", Version: "1"}, nil).
+		Connect(ctx, &mcp.CommandTransport{Command: command}, nil)
+	if err != nil {
+		t.Fatalf("connect through real stdio bridge: %v", err)
+	}
+	defer session.Close()
+	verifyRealCloudDocuments(t, ctx, session)
+}
+
+func verifyRealCloudDocuments(t *testing.T, ctx context.Context, session *mcp.ClientSession) {
+	t.Helper()
 	cloudList := callTool(t, ctx, session, "cloud_document.list", map[string]any{
 		"page": map[string]any{"page_size": 100},
 	})
@@ -115,7 +157,6 @@ func TestRealConnectorStdioCallsAllLazyMindTools(t *testing.T) {
 	if len(cloudItems) == 0 {
 		t.Fatal("real cloud_document.list returned no chat-enabled Feishu accounts")
 	}
-	cloudVerified := false
 	for _, account := range cloudItems {
 		accountID := stringField(t, account, "id")
 		cloud := callTool(t, ctx, session, "cloud_document.get", map[string]any{
@@ -161,29 +202,10 @@ func TestRealConnectorStdioCallsAllLazyMindTools(t *testing.T) {
 			"page": map[string]any{"page_size": 20},
 		})
 		if hits, ok := search["hits"].([]any); ok && len(hits) > 0 {
-			cloudVerified = true
-			break
+			return
 		}
 	}
-	if !cloudVerified {
-		t.Fatal("real cloud_document.search returned no online Feishu document hits")
-	}
-	workflowSessionID := verifyRealWorkflowRuntime(t, ctx, session)
-	verifyInvocationLedger(t, ctx, serverURL, accessToken, workflowSessionID)
-	verifyRejectedTokenRefresh(t, ctx, session)
-	if mode := strings.TrimSpace(os.Getenv("LAZYMIND_REAL_CONNECTOR_CODEX")); mode != "" {
-		codexHome := strings.TrimSpace(os.Getenv("LAZYMIND_REAL_CONNECTOR_CODEX_HOME"))
-		if codexHome == "" {
-			t.Fatal("LAZYMIND_REAL_CONNECTOR_CODEX_HOME is required for isolated real Codex validation")
-		}
-		configureCodex(t, ctx, mode, binary, codexHome)
-		runCodexE2E(t, ctx, codexHome, skillMarker, knowledge)
-		threadID := runCodexThreadBootstrapE2E(t, ctx, codexHome)
-		conversationID := verifyCodexConversationBootstrap(t, ctx, serverURL, accessToken, threadID)
-		resumeCodexWorkflowE2E(t, ctx, codexHome, threadID)
-		resumeCodexThreadE2E(t, ctx, codexHome, threadID)
-		verifyCodexConversationProjection(t, ctx, serverURL, accessToken, threadID, conversationID)
-	}
+	t.Fatal("real cloud_document.search returned no online Feishu document hits")
 }
 
 func TestRealCodexExternalThreadBinding(t *testing.T) {

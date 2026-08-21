@@ -283,6 +283,30 @@ func createExternalChatTestRun(t *testing.T, app *externalChatApplication, id st
 	}
 }
 
+func TestExternalChatSemanticOutputUsesPersistedMessageEvents(t *testing.T) {
+	app, db := newExternalChatTestApplication(t)
+	createExternalChatTestRun(t, app, "run-semantic-output")
+	now := time.Now().UTC()
+	if err := db.Create(&orm.ExternalChatRunEvent{
+		ID: "lifecycle-event", RunID: "run-semantic-output", Sequence: 1, Type: "thread_started", CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	hasOutput, err := app.hasSemanticOutput(context.Background(), "run-semantic-output")
+	if err != nil || hasOutput {
+		t.Fatalf("lifecycle-only output=%v err=%v, want false/nil", hasOutput, err)
+	}
+	if err := db.Create(&orm.ExternalChatRunEvent{
+		ID: "message-event", RunID: "run-semantic-output", Sequence: 2, Type: "message", Text: "answer", CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	hasOutput, err = app.hasSemanticOutput(context.Background(), "run-semantic-output")
+	if err != nil || !hasOutput {
+		t.Fatalf("message output=%v err=%v, want true/nil", hasOutput, err)
+	}
+}
+
 func TestExternalChatRewritesHostLocalWorkflowArtifactLink(t *testing.T) {
 	t.Setenv("LAZYMIND_UPLOAD_ROOT", t.TempDir())
 	app, db := newExternalChatTestApplication(t)

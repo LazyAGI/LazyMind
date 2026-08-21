@@ -37,7 +37,7 @@ func TestEnrichWriterWriteBackSlots_UsesSourceAndLatestSync(t *testing.T) {
 	seq := 1
 	source := writerRevision("source-rev", "session", "source_document", 1, "ai", nil)
 	source.ArtifactSeq, source.StepID = &seq, "prepare"
-	synced := writerRevision("synced-rev", "session", "draft_document", 1, "ai", nil)
+	synced := writerRevision("synced-rev", "session", "draft_document", 1, "host", nil)
 	synced.Selected, synced.ArtifactSeq = false, &seq
 	human := writerRevision("human-rev", "session", "draft_document", 2, "human", json.RawMessage(`{"data":{"document_id":"draft-1"}}`))
 	for _, revision := range []*orm.WorkflowSlotRevision{&source, &synced, &human} {
@@ -69,6 +69,43 @@ func TestEnrichWriterWriteBackSlots_MarkdownInitialDelivery(t *testing.T) {
 	got := slots[0]
 	if !got.WriteBackReady || !got.WriteBackDirty || got.WriteBackState != writerWriteBackInitialDelivery || got.ProviderDocumentID != "" {
 		t.Fatalf("unexpected initial delivery state: %+v", got)
+	}
+}
+
+func TestEnrichWriterWriteBackSlots_InlineMarkdownInitialDelivery(t *testing.T) {
+	db := newTestDB(t)
+	draft := writerRevision("draft", "session", "draft_document", 1, "human", json.RawMessage(
+		`{"schema":"text/markdown","data":"# Ready for Feishu\n"}`,
+	))
+	mustCreateWriterRecord(t, db.DB.Create(&draft).Error)
+
+	slots := []slotDTO{toSlotDTO(&draft)}
+	enrichSlots(context.Background(), db.DB, "session", slots)
+	got := slots[0]
+	if !got.WriteBackReady || !got.WriteBackDirty || got.WriteBackState != writerWriteBackInitialDelivery {
+		t.Fatalf("unexpected inline Markdown delivery state: %+v", got)
+	}
+}
+
+func TestEnrichWriterWriteBackSlots_LocalIRInitialDelivery(t *testing.T) {
+	db := newTestDB(t)
+	root := t.TempDir()
+	t.Setenv("LAZYMIND_SUBAGENT_WORKSPACE", root)
+	sourcePath := filepath.Join(root, "source_document.lmd")
+	draftPath := filepath.Join(root, "draft_document.lmd")
+	document := `{"data":{"document_id":"local-doc","stage":"final","blocks":[],"provider_binding":{}}}`
+	mustWriteWriterArtifact(t, sourcePath, document)
+	mustWriteWriterArtifact(t, draftPath, document)
+	source := writerRevision("source", "session", "source_document", 1, "ai", writerPathValue(sourcePath))
+	draft := writerRevision("draft", "session", "draft_document", 1, "ai", writerPathValue(draftPath))
+	mustCreateWriterRecord(t, db.DB.Create(&source).Error)
+	mustCreateWriterRecord(t, db.DB.Create(&draft).Error)
+
+	slots := []slotDTO{toSlotDTO(&source), toSlotDTO(&draft)}
+	enrichSlots(context.Background(), db.DB, "session", slots)
+	got := slots[1]
+	if !got.WriteBackReady || !got.WriteBackDirty || got.WriteBackState != writerWriteBackInitialDelivery {
+		t.Fatalf("unexpected local IR delivery state: %+v", got)
 	}
 }
 

@@ -411,17 +411,13 @@ func finalizeExternalChatHistory(tx *gorm.DB, run *orm.ExternalChatRun, now time
 		}
 		result.WriteString(normalized)
 	}
-	if run.Status == "failed" {
-		if result.Len() > 0 {
-			result.WriteString("\n\n")
-		}
-		result.WriteString("External Agent failed: ")
-		result.WriteString(strings.TrimSpace(run.ErrorMessage))
-	}
+	terminalEvent := externalRunTerminalEvent(run.ID, run.Status, result.Len() > 0)
+	terminal, _ := terminalEvent.Terminal()
 	history := orm.ChatHistory{
 		ID: run.HistoryID, Seq: run.Sequence, ConversationID: run.ConversationID,
 		AlgorithmID: "external:" + run.Provider, RawContent: run.Query, Content: run.Query,
-		Result: result.String(), Ext: run.HistoryExt,
+		Result: result.String(), RunID: run.ID, RunStatus: terminal.Status,
+		RunTerminal: terminalJSON(terminal), Ext: run.HistoryExt,
 		TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
 	}
 	if err := tx.Clauses(clause.OnConflict{
@@ -429,7 +425,8 @@ func finalizeExternalChatHistory(tx *gorm.DB, run *orm.ExternalChatRun, now time
 		DoUpdates: clause.Assignments(map[string]any{
 			"seq": history.Seq, "conversation_id": history.ConversationID,
 			"algorithm_id": history.AlgorithmID, "raw_content": history.RawContent,
-			"content": history.Content, "result": history.Result, "ext": history.Ext,
+			"content": history.Content, "result": history.Result, "run_id": history.RunID,
+			"run_status": history.RunStatus, "run_terminal": history.RunTerminal, "ext": history.Ext,
 			"update_time": now,
 		}),
 	}).Create(&history).Error; err != nil {
@@ -574,6 +571,20 @@ func (a *externalChatApplication) eventsAfter(ctx context.Context, owner, runID 
 		return nil, run, err
 	}
 	return events, run, nil
+}
+
+func (a *externalChatApplication) hasSemanticOutput(ctx context.Context, runID string) (bool, error) {
+	var events []orm.ExternalChatRunEvent
+	if err := a.db.WithContext(ctx).Select("text").
+		Where("run_id = ? AND type = ?", runID, "message").Find(&events).Error; err != nil {
+		return false, err
+	}
+	for _, event := range events {
+		if event.Text != "" {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 // executionProjections joins existing authorities into the user-facing read

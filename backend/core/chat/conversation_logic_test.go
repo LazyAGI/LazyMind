@@ -49,6 +49,8 @@ func TestConversationListSeparatesAssistantOwnershipFromExecutionEngine(t *testi
 			BaseModel: orm.BaseModel{CreateUserID: "u1", CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second)}},
 		{ID: "external", DisplayName: "Codex native", ChatExecutor: ChatExecutorCodex,
 			BaseModel: orm.BaseModel{CreateUserID: "u1", CreatedAt: now.Add(2 * time.Second), UpdatedAt: now.Add(2 * time.Second)}},
+		{ID: "archived-external", DisplayName: "Archived Codex native", ChatExecutor: ChatExecutorCodex,
+			ArchivedAt: &now, BaseModel: orm.BaseModel{CreateUserID: "u1", CreatedAt: now.Add(3 * time.Second), UpdatedAt: now.Add(3 * time.Second)}},
 	} {
 		if err := db.Create(&conversation).Error; err != nil {
 			t.Fatal(err)
@@ -61,6 +63,8 @@ func TestConversationListSeparatesAssistantOwnershipFromExecutionEngine(t *testi
 			ProviderThreadID: "external-thread", ManagedByLazyMind: false, CreatedByUserID: "u1", CreatedAt: now, UpdatedAt: now},
 		{ID: "external-cursor-binding", ConversationID: "external", Provider: ChatExecutorCursor,
 			ProviderThreadID: "external-cursor-thread", ManagedByLazyMind: true, CreatedByUserID: "u1", CreatedAt: now, UpdatedAt: now},
+		{ID: "archived-external-binding", ConversationID: "archived-external", Provider: ChatExecutorCodex,
+			ProviderThreadID: "archived-external-thread", ManagedByLazyMind: false, CreatedByUserID: "u1", CreatedAt: now, UpdatedAt: now},
 	} {
 		if err := db.Create(&binding).Error; err != nil {
 			t.Fatal(err)
@@ -101,6 +105,64 @@ func TestConversationListSeparatesAssistantOwnershipFromExecutionEngine(t *testi
 	if len(codex) != 1 || codex[0].ID != "external" || codex[0].Assistant != ChatExecutorCodex ||
 		codex[0].ChatExecutor != ChatExecutorCodex {
 		t.Fatalf("Codex assistant conversations=%#v", codex)
+	}
+}
+
+func TestWorkflowSessionAvailableForRequest(t *testing.T) {
+	tests := []struct {
+		name    string
+		session *orm.WorkflowSession
+		raw     map[string]any
+		want    bool
+	}{
+		{
+			name:    "active session is injected without frontend context",
+			session: &orm.WorkflowSession{ID: "session-1", Status: "active"},
+			raw:     map[string]any{},
+			want:    true,
+		},
+		{
+			name:    "failed session remains available for recovery",
+			session: &orm.WorkflowSession{ID: "session-1", Status: "failed"},
+			raw:     map[string]any{},
+			want:    true,
+		},
+		{
+			name:    "completed session is available when explicitly focused",
+			session: &orm.WorkflowSession{ID: "session-1", Status: "completed"},
+			raw: map[string]any{
+				"workflow_context": map[string]any{"session_id": "session-1"},
+			},
+			want: true,
+		},
+		{
+			name:    "completed session is not sticky without explicit context",
+			session: &orm.WorkflowSession{ID: "session-1", Status: "completed"},
+			raw:     map[string]any{},
+			want:    false,
+		},
+		{
+			name:    "completed session rejects a stale frontend id",
+			session: &orm.WorkflowSession{ID: "session-1", Status: "completed"},
+			raw: map[string]any{
+				"workflow_context": map[string]any{"session_id": "session-old"},
+			},
+			want: false,
+		},
+		{
+			name:    "dismissed failed session is unavailable",
+			session: &orm.WorkflowSession{ID: "session-1", Status: "failed", Dismissed: true},
+			raw:     map[string]any{},
+			want:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := workflowSessionAvailableForRequest(tt.session, tt.raw); got != tt.want {
+				t.Fatalf("workflowSessionAvailableForRequest() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -190,7 +252,7 @@ func TestMergeChunksRetainsConversationIntentUpdate(t *testing.T) {
 	intent := &IntentUpdatedEvent{Scope: "conversation", IntentContext: map[string]any{"goal": "新目标"}}
 	merged := mergeChunksToFirstChunk([]*ChatChunkResponse{
 		{Delta: "前", IntentUpdated: intent},
-		{Delta: "后", FinishReason: "FINISH_REASON_STOP"},
+		{Delta: "后"},
 	})
 	if merged.Delta != "前后" || merged.IntentUpdated != intent {
 		t.Fatalf("intent update was not retained: %#v", merged)

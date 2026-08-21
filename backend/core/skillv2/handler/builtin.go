@@ -95,6 +95,30 @@ func EnableBuiltinSkill(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var trashed orm.SkillV2Skill
+	err = db.WithContext(r.Context()).
+		Where("owner_user_id = ? AND origin_builtin_skill_uid = ? AND deleted_at IS NOT NULL", userID, uid).
+		Order("deleted_at DESC, created_at ASC").
+		Take(&trashed).Error
+	if err == nil {
+		svc := newSkillService(db)
+		if err := svc.RestoreSkill(r.Context(), skillservice.RestoreSkillRequest{SkillID: trashed.ID, UserID: userID}); err != nil {
+			replyServiceError(w, err)
+			return
+		}
+		detail, detailErr := svc.GetSkill(r.Context(), skillservice.GetSkillRequest{SkillID: trashed.ID, UserID: userID})
+		if detailErr != nil {
+			replyServiceError(w, detailErr)
+			return
+		}
+		common.ReplyOK(w, skillDetailDTO(detail))
+		return
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		replyServiceError(w, err)
+		return
+	}
+
 	pkg, found, err := skillbuiltin.PackageByUID(uid)
 	if err != nil {
 		replyServiceError(w, err)

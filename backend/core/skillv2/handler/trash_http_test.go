@@ -36,7 +36,8 @@ func TestSkillTrashWorkflow_HTTP(t *testing.T) {
 	}
 	var listResponse struct {
 		Data struct {
-			Items []struct {
+			Categories []string `json:"categories"`
+			Items      []struct {
 				ID string `json:"id"`
 			} `json:"items"`
 			Total int `json:"total"`
@@ -47,6 +48,9 @@ func TestSkillTrashWorkflow_HTTP(t *testing.T) {
 	}
 	if listResponse.Data.Total != 1 || len(listResponse.Data.Items) != 1 || listResponse.Data.Items[0].ID != "skill1" {
 		t.Fatalf("trash list = %#v, want skill1", listResponse.Data)
+	}
+	if len(listResponse.Data.Categories) != 1 || listResponse.Data.Categories[0] != "research" {
+		t.Fatalf("trash categories = %#v, want research", listResponse.Data.Categories)
 	}
 
 	restoreReq := httptest.NewRequest(http.MethodPost, "/skills/skill1:restore", nil)

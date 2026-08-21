@@ -18,7 +18,9 @@ import (
 	"lazymind/core/episode"
 	"lazymind/core/evalset"
 	"lazymind/core/evolution"
+	"lazymind/core/exporter"
 	"lazymind/core/file"
+	"lazymind/core/knowledge_market"
 	"lazymind/core/mcp"
 	"lazymind/core/modelprovider"
 	"lazymind/core/remotefs"
@@ -129,6 +131,9 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "PUT", "/system-dependencies/ffmpeg", []string{"document.write"}, systemdeps.UpdateFFmpegDependency)
 	handleAPI(r, "POST", "/system-dependencies/ffmpeg:check", []string{"document.read"}, systemdeps.CheckFFmpegDependency)
 	handleAPI(r, "POST", "/system-dependencies/ffmpeg:install", []string{"document.write"}, systemdeps.InstallFFmpegDependency)
+	handleAPI(r, "GET", "/system-dependencies/editable-ppt", []string{"document.read"}, systemdeps.GetEditablePPTDependency)
+	handleAPI(r, "POST", "/system-dependencies/editable-ppt:check", []string{"document.read"}, systemdeps.CheckEditablePPTDependency)
+	handleAPI(r, "POST", "/system-dependencies/editable-ppt:install", []string{"document.write"}, systemdeps.InstallEditablePPTDependency)
 	handleAPI(r, "GET", "/data-sources/database-connections", []string{"document.read"}, datasource.ListDatabaseConnections)
 	handleAPI(r, "POST", "/data-sources/database-connections", []string{"document.write"}, datasource.CreateDatabaseConnection)
 	handleAPI(r, "POST", "/data-sources/database-connections/{connection}:check", []string{"document.write"}, datasource.CheckDatabaseConnection)
@@ -310,9 +315,14 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/workflows/{workflow_id}", []string{"qa.read"}, func(w http.ResponseWriter, req *http.Request) {
 		workflow.GetWorkflowInfo(w, req)
 	})
+	// Export providers are independent from workflow installation and slot names.
+	handleAPI(r, "GET", "/exporters/{provider_id}:capabilities", []string{"qa.read"}, exporter.Capabilities)
+	handleAPI(r, "POST", "/exporters/{provider_id}:export", []string{"qa.write"}, exporter.Export)
 	// ----- Workflow Drafts (user-created workflow authoring) -----
 	handleAPI(r, "GET", "/workflow-drafts", []string{"qa.read"}, workflow.ListWorkflowDrafts)
 	handleAPI(r, "POST", "/workflow-drafts", []string{"qa.write"}, workflow.CreateWorkflowDraft)
+	handleAPI(r, "GET", "/workflow-drafts:trash", []string{"qa.read"}, workflow.ListWorkflowDraftTrash)
+	handleAPI(r, "DELETE", "/workflow-drafts:trash", []string{"qa.write"}, workflow.EmptyWorkflowDraftTrash)
 	handleAPI(r, "POST", "/workflow-drafts:polish-info", []string{"qa.write"}, workflow.PolishWorkflowDraftInfo)
 	handleAPI(r, "GET", "/workflow-drafts/{draft_id}", []string{"qa.read"}, workflow.GetWorkflowDraft)
 	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:save", []string{"qa.write"}, workflow.SaveWorkflowDraft)
@@ -324,6 +334,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/workflow-drafts/{draft_id}/repair-runs/{repair_id}", []string{"qa.read"}, workflow.GetWorkflowRepairRun)
 	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:repair-preview", []string{"qa.read"}, workflow.PreviewWorkflowRepair)
 	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:publish", []string{"qa.write"}, workflow.PublishWorkflowDraft)
+	handleAPI(r, "POST", "/workflow-drafts/{draft_id}:restore", []string{"qa.write"}, workflow.RestoreWorkflowDraft)
+	handleAPI(r, "DELETE", "/workflow-drafts/{draft_id}:purge", []string{"qa.write"}, workflow.PurgeWorkflowDraft)
 	handleAPI(r, "DELETE", "/workflow-drafts/{draft_id}", []string{"qa.write"}, workflow.DeleteWorkflowDraft)
 	handleAPI(r, "GET", "/chat/settings/workflows", []string{"qa.read"}, workflow.ListUserWorkflowSettings)
 	handleAPI(r, "PATCH", "/chat/settings/workflows/{workflow_ref:.+}", []string{"qa.write"}, workflow.PatchUserWorkflowSetting)
@@ -394,6 +406,9 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/input-bindings", []string{"qa.write"}, workflowFacade.BindInput)
 	handleAPI(r, "GET", "/workflow-sessions/{session_id}/input-bindings", []string{"qa.read"}, workflowFacade.ListInputs)
 	handleAPI(r, "GET", "/workflow-sessions/{session_id}/artifacts", []string{"qa.read"}, workflowFacade.ListArtifacts)
+	handleAPI(r, "GET", "/writer-download-conversions/{source_hash}/{target_format}", []string{"qa.read"}, workflow.GetWriterDownloadConversion)
+	handleAPI(r, "PUT", "/writer-download-conversions/{source_hash}/{target_format}", []string{"qa.write"}, workflow.PutWriterDownloadConversion)
+	handleAPI(r, "POST", "/writer-download-conversions:convert", []string{"qa.write"}, workflow.ConvertWriterDownload)
 	handleAPI(r, "GET", "/workflow-artifacts/{artifact_id}", []string{"qa.read"}, workflowFacade.ReadArtifact)
 	handleAPI(r, "PATCH", "/workflow-artifacts/{artifact_id}", []string{"qa.write"}, workflowFacade.PatchArtifact)
 	handleAPI(r, "DELETE", "/workflow-artifacts/{artifact_id}", []string{"qa.write"}, workflowFacade.DeleteArtifact)
@@ -434,6 +449,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/internal/workflow-transition-commands/{command_id}", nil, workflow.GetTransitionCommand)
 	handleAPI(r, "PATCH", "/workflow-sessions/{session_id}/slots/{slot_id}", []string{"qa.write"}, workflow.PatchSessionSlot)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-preview", []string{"qa.write"}, workflow.PreviewArtifactAction)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-execute", []string{"qa.write"}, workflow.ExecuteArtifactAction)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}:sync-search-config", []string{"qa.write"}, workflow.SyncSessionSearchConfig)
 	// Phase 3: slot item management.
 	// Stable list_index-based routes (preferred).
@@ -441,6 +457,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "PATCH", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}", []string{"qa.write"}, workflow.PatchSlotItemByIndex)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:sync-writer-document", []string{"qa.write"}, chat.SyncWriterDocument)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/writer-document:write-back", []string{"qa.write"}, chat.WriteBackWriterDocument)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/writer-document:render", []string{"qa.read"}, chat.RenderWriterDocument)
+	handleAPI(r, "POST", "/workflow-sessions/{session_id}/writer-document:save", []string{"qa.write"}, chat.SaveWriterDocument)
 	handleAPI(r, "GET", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions", []string{"qa.read"}, workflow.GetSlotItemVersionsByIndex)
 	handleAPI(r, "POST", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/rollback", []string{"qa.write"}, workflow.RollbackSlotItemByIndex)
 	handleAPI(r, "PATCH", "/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption", []string{"qa.write"}, workflow.PatchSlotCaptionByIndex)
@@ -547,6 +565,16 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "PATCH", "/skill-market/admin/items/{market_item_id}", []string{"user.admin"}, skillv2handler.MarketEdit)
 	handleAPI(r, "DELETE", "/skill-market/admin/items/{market_item_id}", []string{"user.admin"}, skillv2handler.MarketDelete)
 	handleAPI(r, "POST", "/skill-market/admin/items/{market_item_id}:unpublish", []string{"user.admin"}, skillv2handler.MarketUnpublish)
+	// ----- Knowledge market (read-only) -----
+	handleAPI(r, "GET", "/knowledge-market", []string{"qa.read"}, knowledge_market.MarketList)
+	handleAPI(r, "GET", "/knowledge-market/domains", []string{"qa.read"}, knowledge_market.MarketDomains)
+	handleAPI(r, "GET", "/knowledge-market/items/{market_item_id}", []string{"qa.read"}, knowledge_market.MarketGet)
+	handleAPI(r, "POST", "/knowledge-market/items/{market_item_id}:install", []string{"qa.write"}, knowledge_market.MarketInstall)
+	handleAPI(r, "POST", "/knowledge-market/items/{market_item_id}:update", []string{"qa.write"}, knowledge_market.MarketUpdate)
+	handleAPI(r, "POST", "/knowledge-market:update-all", []string{"qa.write"}, knowledge_market.MarketUpdateAll)
+	handleAPI(r, "GET", "/knowledge-market/tasks", []string{"qa.read"}, knowledge_market.MarketListInstallTasks)
+	handleAPI(r, "GET", "/knowledge-market/tasks/{job_id}", []string{"qa.read"}, knowledge_market.MarketGetInstallTask)
+	handleAPI(r, "GET", "/knowledge-market/installs", []string{"qa.read"}, knowledge_market.MarketListInstalls)
 	handleAPI(r, "GET", "/skill-review:summary", []string{"qa.read"}, resourceupdate.GetSkillReviewSummary)
 	handleAPI(r, "POST", "/skill-review:run", []string{"qa.write"}, resourceupdate.RunSkillReview)
 	handleAPI(r, "GET", "/skill-review/tasks", []string{"qa.read"}, resourceupdate.ListSkillReviewTasks)
@@ -555,6 +583,17 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/conversations/{name}:detail", []string{"qa.read"}, chat.GetConversationDetail)
 	handleAPI(r, "GET", "/conversations/{name}:history", []string{"qa.read"}, chat.GetConversationHistory)
 	handleAPI(r, "GET", "/conversations/{name}:trail", []string{"qa.read"}, chat.GetConversationTrail)
+	handleAPI(r, "GET", "/conversation-archive-folders", []string{"qa.read"}, chat.ListConversationArchiveFolders)
+	handleAPI(r, "POST", "/conversation-archive-folders", []string{"qa.write"}, chat.CreateConversationArchiveFolder)
+	handleAPI(r, "PATCH", "/conversation-archive-folders/{folder_id}", []string{"qa.write"}, chat.UpdateConversationArchiveFolder)
+	handleAPI(r, "DELETE", "/conversation-archive-folders/{folder_id}", []string{"qa.write"}, chat.DeleteConversationArchiveFolder)
+	handleAPI(r, "GET", "/conversations:archived", []string{"qa.read"}, chat.ListArchivedConversations)
+	handleAPI(r, "GET", "/conversations:trash", []string{"qa.read"}, chat.ListTrashedConversations)
+	handleAPI(r, "DELETE", "/conversations:trash", []string{"qa.write"}, chat.EmptyConversationTrash)
+	handleAPI(r, "POST", "/conversations/{conversation_id}:archive", []string{"qa.write"}, chat.ArchiveConversation)
+	handleAPI(r, "POST", "/conversations/{conversation_id}:unarchive", []string{"qa.write"}, chat.UnarchiveConversation)
+	handleAPI(r, "POST", "/conversations/{conversation_id}:restore", []string{"qa.write"}, chat.RestoreConversation)
+	handleAPI(r, "DELETE", "/conversations/{conversation_id}:purge", []string{"qa.write"}, chat.PurgeConversation)
 	handleAPI(r, "GET", "/conversations/{name}", []string{"qa.read"}, chat.GetConversation)
 	handleAPI(r, "DELETE", "/conversations/{name}", []string{"qa.write"}, chat.DeleteConversation)
 	handleAPI(r, "POST", "/conversations:batchDelete", []string{"qa.write"}, chat.BatchDeleteConversations)

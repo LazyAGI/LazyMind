@@ -1,33 +1,34 @@
 package workflow
 
 import (
-	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
 	"lazymind/core/common/orm"
 )
 
-func TestEnrichSessionHeadRevisionNosKeepsPinnedRevision(t *testing.T) {
-	db := newTestDB(t)
-	if err := db.DB.AutoMigrate(&orm.WorkflowResource{}, &orm.WorkflowRevision{}); err != nil {
-		t.Fatalf("migrate plugin versions: %v", err)
-	}
+func TestSessionDTOOmitsMisleadingRevisionNumbers(t *testing.T) {
 	now := time.Now().UTC()
-	resource := orm.WorkflowResource{ID: "resource-1", WorkflowRef: "user:writer", WorkflowID: "writer-workflow", Version: 15, CreatedAt: now, UpdatedAt: now}
-	pinned := orm.WorkflowRevision{ID: "revision-12", WorkflowResourceID: resource.ID, RevisionNo: 12, TreeHash: "tree-12", CreatedAt: now}
-	if err := db.DB.Create(&resource).Error; err != nil {
-		t.Fatalf("create resource: %v", err)
+	dto := toSessionDTO(&orm.WorkflowSession{
+		ID: "session-1", WorkflowID: "writer-workflow",
+		WorkflowRevisionID: "revision-12", WorkflowRevisionNo: 12,
+		CreatedAt: now, UpdatedAt: now,
+	})
+	body, err := json.Marshal(dto)
+	if err != nil {
+		t.Fatalf("marshal session dto: %v", err)
 	}
-	if err := db.DB.Create(&pinned).Error; err != nil {
-		t.Fatalf("create revision: %v", err)
+	var payload map[string]any
+	if err := json.Unmarshal(body, &payload); err != nil {
+		t.Fatalf("unmarshal session dto: %v", err)
 	}
-	session := toSessionDTO(&orm.WorkflowSession{ID: "session-1", WorkflowID: "writer-workflow", WorkflowRevisionID: pinned.ID, WorkflowRevisionNo: pinned.RevisionNo})
-	got := enrichSessionHeadRevisionNos(context.Background(), db.DB, []sessionDTO{session})[0]
-	if got.PinnedRevisionID != pinned.ID || got.PinnedRevisionNo != 12 {
-		t.Fatalf("pinned revision changed: id=%q no=%d", got.PinnedRevisionID, got.PinnedRevisionNo)
+	if payload["pinned_revision_id"] != "revision-12" {
+		t.Fatalf("pinned revision identity missing: %s", body)
 	}
-	if got.HeadRevisionNo == nil || *got.HeadRevisionNo != 15 {
-		t.Fatalf("head_revision_no = %v, want 15", got.HeadRevisionNo)
+	for _, key := range []string{"pinned_revision_no", "head_revision_no"} {
+		if _, ok := payload[key]; ok {
+			t.Fatalf("misleading UI version field %q leaked: %s", key, body)
+		}
 	}
 }

@@ -226,6 +226,21 @@ func TestPrepareHTTPRejectsUnknownPublicWorkflow(t *testing.T) {
 	}
 }
 
+func TestMissingExternalInputsSkipsOptionalExternalMaterials(t *testing.T) {
+	graph := preparationGraph{MaterialProducers: map[string]struct {
+		Kind     string `json:"kind"`
+		Optional bool   `json:"optional"`
+	}{
+		"required_source":    {Kind: "external"},
+		"uploaded_materials": {Kind: "external", Optional: true},
+		"generated":          {Kind: "step"},
+	}}
+	missing := missingExternalInputs(graph, map[string]any{})
+	if len(missing) != 1 || missing[0] != "required_source" {
+		t.Fatalf("missing inputs = %#v", missing)
+	}
+}
+
 func TestPrepareHTTPReturnsFlatPublicContractOnCreateAndReplay(t *testing.T) {
 	h, _ := testHandler(t)
 	body := []byte(`{"workflow_id":"writer","idempotency_key":"same","input_bindings":{}}`)

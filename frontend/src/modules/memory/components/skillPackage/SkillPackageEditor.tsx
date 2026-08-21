@@ -5,7 +5,6 @@ import {
   Empty,
   Input,
   Modal,
-  Select,
   Space,
   Spin,
   Tag,
@@ -74,7 +73,7 @@ import {
   flattenSkillTree,
   isMarkdownSkillFile,
   pickDefaultFilePath,
-  resolveParentPathFromSelection,
+  resolveCreateParentPath,
 } from "./skillTreeUtils";
 
 const SKILL_UPLOAD_ACCEPT_EXTS = new Set([
@@ -221,25 +220,16 @@ export default function SkillPackageEditor({
       !reviewMutationBusy,
   );
 
-  const directoryOptions = useMemo(() => {
-    const directories = treeRoot ? collectSkillTreeDirectories(treeRoot) : [];
-    const optionMap = new Map<string, { value: string; label: string }>();
-    optionMap.set("", { value: "", label: t("admin.memorySkillPackageRootPath") });
-    directories.forEach((path) => {
-      optionMap.set(path, { value: path, label: path });
-    });
-    const selectedParent = resolveParentPathFromSelection(selectedPath);
-    if (selectedParent && !optionMap.has(selectedParent)) {
-      optionMap.set(selectedParent, { value: selectedParent, label: selectedParent });
-    }
-    return Array.from(optionMap.values());
-  }, [selectedPath, t, treeRoot]);
+  const directoryPaths = useMemo(
+    () => new Set(treeRoot ? collectSkillTreeDirectories(treeRoot) : []),
+    [treeRoot],
+  );
 
   const renderPathLabel = (value: string) =>
     value === "" ? t("admin.memorySkillPackageRootPath") : value;
 
   const openCreateModal = (mode: "file" | "dir") => {
-    setNewParentPath(resolveParentPathFromSelection(selectedPath));
+    setNewParentPath(resolveCreateParentPath(selectedPath, directoryPaths));
     setNewItemName("");
     if (mode === "file") {
       setCreateFileOpen(true);
@@ -292,9 +282,12 @@ export default function SkillPackageEditor({
       }
 
       const files = flattenSkillTree(tree);
+      const directories = new Set(collectSkillTreeDirectories(tree));
       const defaultPath = pickDefaultFilePath(files);
       setSelectedPath((previous) =>
-        files.some((file) => file.path === previous) ? previous : defaultPath,
+        files.some((file) => file.path === previous) || directories.has(previous)
+          ? previous
+          : defaultPath,
       );
 
       if (agentReview && nextDiffFiles.length) {
@@ -987,8 +980,8 @@ export default function SkillPackageEditor({
           content: "",
           binary: false,
         });
-        setSelectedPath(trimmedPath);
       }
+      setSelectedPath(trimmedPath);
       message.success(t("common.saveSuccess"));
     } catch (error) {
       console.error("Create skill path failed:", error);
@@ -996,28 +989,24 @@ export default function SkillPackageEditor({
   };
 
   const renderCreatePathForm = (isDirectory: boolean) => (
-    <Space.Compact block className="memory-skill-package-create-form">
-      <Select
-        value={newParentPath}
-        options={directoryOptions}
-        popupMatchSelectWidth
-        popupClassName="memory-skill-package-path-dropdown"
-        labelRender={({ value }) => (
-          <EllipsisText
-            text={renderPathLabel(String(value ?? ""))}
-            className="memory-skill-package-path-option"
-          />
-        )}
-        optionRender={(option) => (
-          <EllipsisText
-            text={renderPathLabel(String(option.value ?? ""))}
-            className="memory-skill-package-path-option"
-          />
-        )}
-        onChange={setNewParentPath}
-      />
+    <div className="memory-skill-package-create-form">
+      <Text
+        type="secondary"
+        className="memory-skill-package-create-target"
+        title={renderPathLabel(newParentPath)}
+      >
+        {t("admin.memorySkillPackageCreateTarget", {
+          path: renderPathLabel(newParentPath),
+        })}
+      </Text>
       <Input
+        autoFocus
         value={newItemName}
+        aria-label={
+          isDirectory
+            ? t("admin.memorySkillPackageNewFolder")
+            : t("admin.memorySkillPackageNewFile")
+        }
         placeholder={
           isDirectory
             ? t("admin.memorySkillPackageNewFolderNamePlaceholder")
@@ -1026,7 +1015,7 @@ export default function SkillPackageEditor({
         onChange={(event) => setNewItemName(event.target.value)}
         onPressEnter={() => void handleCreatePath(isDirectory)}
       />
-    </Space.Compact>
+    </div>
   );
 
   const handleUploadFile = async (file: File) => {
@@ -1366,7 +1355,20 @@ export default function SkillPackageEditor({
       </div>
 
       <div className="memory-skill-package-body">
-        <aside className="memory-skill-package-tree">
+        <aside
+          className="memory-skill-package-tree"
+          onClick={(event) => {
+            const target = event.target as HTMLElement;
+            if (
+              target.closest(
+                ".ant-tree-treenode, .memory-skill-package-tree-head",
+              )
+            ) {
+              return;
+            }
+            setSelectedPath("");
+          }}
+        >
           <div className="memory-skill-package-tree-head">{t("admin.memorySkillPackageTreeTitle")}</div>
           {treeData.length ? (
             <Tree

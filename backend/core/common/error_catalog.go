@@ -398,9 +398,9 @@ var errorCatalog = map[string]*AppError{
 	"unmarshal response":                              NewAppError(http.StatusBadGateway, 2001224, "unmarshal response"),
 	"upstream returned empty error body":              NewAppError(http.StatusBadGateway, 2001225, "upstream returned empty error body"),
 	"upstream returned error payload without message": NewAppError(http.StatusBadGateway, 2001226, "upstream returned error payload without message"),
-	"invalid external agent source":                   NewAppError(http.StatusBadRequest, 2002098, "Invalid external Agent source"),
+	"invalid external agent source":                   NewAppError(http.StatusBadRequest, 2002292, "Invalid external Agent source"),
 	"external agent thread belongs to another user or conversation": NewAppError(
-		http.StatusConflict, 2002099, "External Agent thread belongs to another user or conversation",
+		http.StatusConflict, 2002293, "External Agent thread belongs to another user or conversation",
 	),
 }
 

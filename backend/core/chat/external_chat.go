@@ -340,7 +340,7 @@ func streamExternalChat(
 		if err := db.WithContext(ctx).
 			Where("id = ? AND actor_user_id = ? AND provider = ?", existingRunID, owner, provider).
 			Take(&existing).Error; err == nil {
-			return streamExistingExternalChat(ctx, db, owner, existing.ID), "external:" + provider, nil
+			return streamExistingExternalChat(ctx, db, owner, existing.ID, existing.ID), "external:" + provider, nil
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, "", err
 		}
@@ -374,6 +374,9 @@ func streamExternalChat(
 	)
 	runID, _ := externalChatIdentity(requestKey)
 	if runID == "" {
+		runID, _ = reqBody["run_id"].(string)
+	}
+	if runID == "" {
 		runID = newID("ecr_")
 	}
 	if requestKey == "" {
@@ -398,7 +401,7 @@ func streamExternalChat(
 		}
 		runID = existing.ID
 	}
-	return streamExistingExternalChat(ctx, db, owner, runID), "external:" + provider, nil
+	return streamExistingExternalChat(ctx, db, owner, runID, runID), "external:" + provider, nil
 }
 
 func externalConversationThread(
@@ -437,7 +440,7 @@ func externalConversationThread(
 func streamExistingExternalChat(
 	ctx context.Context,
 	db *gorm.DB,
-	owner, runID string,
+	owner, externalRunID, runtimeRunID string,
 ) <-chan UpstreamStreamChunk {
 	out := make(chan UpstreamStreamChunk, 16)
 	app := newExternalChatApplication(db)
@@ -446,9 +449,10 @@ func streamExistingExternalChat(
 		ticker := time.NewTicker(200 * time.Millisecond)
 		defer ticker.Stop()
 		var cursor int64
+		hasSemanticOutput := false
 		lastHeartbeat := time.Time{}
 		for {
-			events, current, err := app.eventsAfter(ctx, owner, runID, cursor)
+			events, current, err := app.eventsAfter(ctx, owner, externalRunID, cursor)
 			if err != nil {
 				select {
 				case out <- UpstreamStreamChunk{Err: fmt.Errorf("read external chat events: %w", err)}:
@@ -462,27 +466,47 @@ func streamExistingExternalChat(
 				switch event.Type {
 				case "message":
 					if event.Text != "" {
+						hasSemanticOutput = true
 						select {
 						case out <- UpstreamStreamChunk{Text: event.Text, ExternalEventSequence: event.Sequence, Execution: &projection}:
 						case <-ctx.Done():
 							return
 						}
 					}
-				case "completed", "stopped":
+				case "completed":
+					select {
+					case out <- UpstreamStreamChunk{RuntimeEvent: completedRunEvent(runtimeRunID, hasSemanticOutput)}:
+					case <-ctx.Done():
+					}
+					return
+				case "stopped":
+					select {
+					case out <- UpstreamStreamChunk{RuntimeEvent: cancelledRunEvent(runtimeRunID, hasSemanticOutput)}:
+					case <-ctx.Done():
+					}
 					return
 				case "failed":
-					message := strings.TrimSpace(event.ErrorMessage)
-					if message == "" {
-						message = "external Agent failed"
-					}
 					select {
-					case out <- UpstreamStreamChunk{Text: "External Agent failed: " + message, Err: fmt.Errorf("external Agent failed: %s", message), ExternalEventSequence: event.Sequence, Execution: &projection}:
+					case out <- UpstreamStreamChunk{RuntimeEvent: failedRunEvent(runtimeRunID, "external_agent_failed", hasSemanticOutput), ExternalEventSequence: event.Sequence, Execution: &projection}:
 					case <-ctx.Done():
 					}
 					return
 				}
 			}
 			if externalRunTerminal(current.Status) {
+				var event *ChatRuntimeEvent
+				switch current.Status {
+				case "completed":
+					event = completedRunEvent(runtimeRunID, hasSemanticOutput)
+				case "stopped":
+					event = cancelledRunEvent(runtimeRunID, hasSemanticOutput)
+				default:
+					event = failedRunEvent(runtimeRunID, "external_agent_failed", hasSemanticOutput)
+				}
+				select {
+				case out <- UpstreamStreamChunk{RuntimeEvent: event}:
+				case <-ctx.Done():
+				}
 				return
 			}
 			now := time.Now()

@@ -768,6 +768,114 @@ def _task_status(status: str) -> tuple[str, str]:
     }.get(normalized, (status or '已创建', 'blue'))
 
 
+def _workflow_title(task_title: str) -> str:
+    workflow = task_title.split(':', 1)[0].strip().lower()
+    return {
+        'writer-workflow': 'AI Writer 写作工作流',
+        'image-workflow': 'AI 绘图工作流',
+        'ppt-workflow': 'AI PPT 工作流',
+    }.get(
+        workflow,
+        (
+            f'{workflow.removesuffix("-workflow")} 工作流'
+            if workflow
+            else '工作流'
+        ),
+    )
+
+
+def _workflow_step_line(
+    index: int,
+    task: dict[str, Any],
+    *,
+    attempt: int,
+) -> str:
+    status = str(task.get('status') or 'pending').lower()
+    icon = {
+        'completed': '✅',
+        'succeeded': '✅',
+        'success': '✅',
+        'failed': '❌',
+        'cancelled': '⏹️',
+        'canceled': '⏹️',
+        'stopped': '⏹️',
+        'interrupted': '⏸️',
+        'running': '🔄',
+    }.get(status, '⏳')
+    step = _workflow_step_key(task)
+    label = {
+        'prepare': '准备素材与上下文',
+        'outline': '生成大纲',
+        'write_document': '撰写正文',
+        'write-document': '撰写正文',
+        'deliver': '交付结果',
+        'generate': '生成内容',
+        'analyze_subject': '分析主题',
+        'collect_materials': '收集素材',
+        'optimize_prompt': '优化提示词',
+        'generate_image': '生成图片',
+        'enhance_image': '编辑图片',
+        'video_to_gif': '转换为动图',
+    }.get(step.lower(), step.replace('_', ' ') or f'步骤 {index}')
+    if attempt > 1:
+        label = f'{label}（重试 {attempt - 1}）'
+    status_label, _template = _task_status(status)
+    return f'{icon} **{index}. {label}**　{status_label}'
+
+
+def _workflow_step_key(task: dict[str, Any]) -> str:
+    raw_title = str(task.get('title') or '')
+    return raw_title.split(':', 1)[-1].strip().lower()[:200]
+
+
+def _workflow_progress(
+    tasks: list[dict[str, Any]],
+) -> int | None:
+    if not tasks:
+        return None
+    return _optional_percent(
+        tasks[-1].get(
+            'progress_pct',
+            tasks[-1].get('progress'),
+        )
+    )
+
+
+def workflow_progress_text(tasks: list[dict[str, Any]]) -> str:
+    """Compact live Workflow state for the in-flight answer card."""
+    ordered = sorted(
+        tasks[-20:],
+        key=lambda task: int(task.get('seq_in_conversation') or 0),
+    )
+    if not ordered:
+        return ''
+    attempts: dict[str, int] = {}
+    lines = ['**Workflow 进度**']
+    for index, task in enumerate(ordered, start=1):
+        step = _workflow_step_key(task)
+        attempts[step] = attempts.get(step, 0) + 1
+        lines.append(
+            _workflow_step_line(
+                index,
+                task,
+                attempt=attempts[step],
+            )
+        )
+    current = ordered[-1]
+    progress = _workflow_progress(ordered)
+    phase = presentable_feishu_text(
+        str(current.get('current_phase') or '')
+    )
+    detail = []
+    if progress is not None:
+        detail.append(f'{progress}%')
+    if phase and phase not in {'执行中...', '执行中…'}:
+        detail.append(phase[:200])
+    if detail:
+        lines.append(f'<font color="grey">当前：{" · ".join(detail)}</font>')
+    return '\n'.join(lines)[:3500]
+
+
 def task_progress_text(task: dict[str, Any] | None) -> str:
     """Compact live projection of the task state reported by Core."""
     if task is None:
@@ -806,6 +914,7 @@ def _presentable_task_summary(value: str) -> str:
     for marker in (
         '\n执行路径：',
         '\n执行路径:',
+        '\n[assistant]',
         '\n[tool:',
     ):
         summary = summary.split(marker, 1)[0]

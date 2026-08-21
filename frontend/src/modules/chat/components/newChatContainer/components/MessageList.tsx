@@ -41,7 +41,7 @@ function mentionHref(mention: ChatMention) {
         ? `/memory-management/workflows/builtin/${encodeURIComponent(mention.resource_id.slice(8))}`
         : `/memory-management/workflows/${id}`;
     case "tool":
-      return "/model-providers/tools";
+      return "/settings?section=system_tools";
     case "conversation":
       return `/agent/chat?conversation_id=${id}`;
     default:
@@ -99,6 +99,7 @@ interface MessageListProps {
   initialCard?: React.ReactNode;
   sendMessage: (text: string, clearInput?: boolean, extras?: Record<string, unknown>) => void;
   regenerate: () => void;
+  regenerateDisabled?: boolean;
   stopGeneration: () => void;
   renderText: (item: any) => React.ReactNode;
   updateAssistantMessage: (data: any, id?: string, index?: number) => void;
@@ -248,6 +249,7 @@ const MessageList: React.FC<MessageListProps> = ({
   initialCard,
   sendMessage,
   regenerate,
+  regenerateDisabled = false,
   stopGeneration,
   renderText,
   updateAssistantMessage,
@@ -489,6 +491,7 @@ const MessageList: React.FC<MessageListProps> = ({
                   length={messageList.length}
                   sendMessage={sendMessage}
                   regenerate={regenerate}
+                  regenerateDisabled={regenerateDisabled}
                   stopGeneration={stopGeneration}
                   renderText={renderText}
                   updateMessage={(msg: any) =>

@@ -1,4 +1,34 @@
 -- +migrate Dialect postgres
+CREATE TABLE IF NOT EXISTS plugin_step_intents (
+    id VARCHAR(36) PRIMARY KEY,
+    session_id VARCHAR(36) NOT NULL,
+    step_id VARCHAR(64) NOT NULL,
+    intent_context TEXT NOT NULL DEFAULT '{}',
+    updated_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_plugin_step_intent
+    ON plugin_step_intents (session_id, step_id);
+
+ALTER TABLE chat_histories ADD COLUMN IF NOT EXISTS run_id VARCHAR(64);
+ALTER TABLE chat_histories ADD COLUMN IF NOT EXISTS run_status VARCHAR(32);
+ALTER TABLE chat_histories ADD COLUMN IF NOT EXISTS run_terminal JSONB;
+CREATE INDEX IF NOT EXISTS idx_chat_histories_run_id ON chat_histories(run_id);
+ALTER TABLE multi_answers_chat_histories ADD COLUMN IF NOT EXISTS run_id VARCHAR(64);
+ALTER TABLE multi_answers_chat_histories ADD COLUMN IF NOT EXISTS run_status VARCHAR(32);
+ALTER TABLE multi_answers_chat_histories ADD COLUMN IF NOT EXISTS run_terminal JSONB;
+CREATE INDEX IF NOT EXISTS idx_multi_answers_chat_histories_run_id ON multi_answers_chat_histories(run_id);
+
+-- +migrate Dialect sqlite
+ALTER TABLE chat_histories ADD COLUMN run_id TEXT;
+ALTER TABLE chat_histories ADD COLUMN run_status TEXT;
+ALTER TABLE chat_histories ADD COLUMN run_terminal TEXT;
+CREATE INDEX IF NOT EXISTS idx_chat_histories_run_id ON chat_histories(run_id);
+ALTER TABLE multi_answers_chat_histories ADD COLUMN run_id TEXT;
+ALTER TABLE multi_answers_chat_histories ADD COLUMN run_status TEXT;
+ALTER TABLE multi_answers_chat_histories ADD COLUMN run_terminal TEXT;
+CREATE INDEX IF NOT EXISTS idx_multi_answers_chat_histories_run_id ON multi_answers_chat_histories(run_id);
+
+-- +migrate Dialect postgres
 ALTER TABLE user_ui_preferences
     ADD COLUMN IF NOT EXISTS task_center_enabled BOOLEAN NOT NULL DEFAULT TRUE;
 ALTER TABLE user_ui_preferences
@@ -14,6 +44,16 @@ ALTER TABLE sub_agent_tasks
     ADD COLUMN IF NOT EXISTS sources JSONB NOT NULL DEFAULT '[]'::jsonb;
 
 -- +migrate Dialect sqlite
+CREATE TABLE IF NOT EXISTS plugin_step_intents (
+    id VARCHAR(36) PRIMARY KEY,
+    session_id VARCHAR(36) NOT NULL,
+    step_id VARCHAR(64) NOT NULL,
+    intent_context TEXT NOT NULL DEFAULT '{}',
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_plugin_step_intent
+    ON plugin_step_intents (session_id, step_id);
+
 ALTER TABLE user_ui_preferences ADD COLUMN task_center_enabled BOOLEAN NOT NULL DEFAULT TRUE;
 ALTER TABLE user_ui_preferences ADD COLUMN skills_enabled BOOLEAN NOT NULL DEFAULT TRUE;
 ALTER TABLE user_ui_preferences ADD COLUMN mcp_enabled BOOLEAN NOT NULL DEFAULT TRUE;
@@ -286,6 +326,74 @@ ALTER TABLE plugin_drafts ADD COLUMN IF NOT EXISTS driver_content TEXT NOT NULL 
 ALTER TABLE plugin_drafts ADD COLUMN driver_content TEXT NOT NULL DEFAULT '';
 
 -- +migrate Dialect postgres
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS archived_at TIMESTAMP NULL;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS archive_folder_id VARCHAR(36) NULL;
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS trash_expires_at TIMESTAMP NULL;
+CREATE TABLE IF NOT EXISTS conversation_archive_folders (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(255) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    normalized_name VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    CONSTRAINT uk_conversation_archive_folders_user_name
+        UNIQUE (user_id, normalized_name)
+);
+CREATE INDEX IF NOT EXISTS idx_conversations_user_lifecycle
+    ON conversations(create_user_id, deleted_at, archived_at, is_task_conv, updated_at);
+CREATE INDEX IF NOT EXISTS idx_conversations_user_archive_folder
+    ON conversations(create_user_id, archive_folder_id, archived_at);
+ALTER TABLE plugin_drafts ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMP NULL;
+ALTER TABLE plugin_drafts ADD COLUMN IF NOT EXISTS trash_expires_at TIMESTAMP NULL;
+ALTER TABLE plugin_drafts ADD COLUMN IF NOT EXISTS published_status_before_trash VARCHAR(16) NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_plugin_drafts_user_trash
+    ON plugin_drafts(created_by, deleted_at, trash_expires_at);
+ALTER TABLE skills ADD COLUMN IF NOT EXISTS trash_expires_at TIMESTAMP NULL;
+ALTER TABLE task_center_tasks ADD COLUMN IF NOT EXISTS archived_reason VARCHAR(32) NOT NULL DEFAULT '';
+UPDATE conversations SET trash_expires_at = CURRENT_TIMESTAMP + INTERVAL '30 days'
+    WHERE deleted_at IS NOT NULL AND trash_expires_at IS NULL;
+UPDATE skills SET trash_expires_at = CURRENT_TIMESTAMP + INTERVAL '30 days'
+    WHERE deleted_at IS NOT NULL AND trash_expires_at IS NULL;
+DROP INDEX IF EXISTS idx_plugin_drafts_user_plugin_id;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_plugin_drafts_user_plugin_id
+    ON plugin_drafts(created_by, plugin_id)
+    WHERE plugin_id != '' AND deleted_at IS NULL;
+
+-- +migrate Dialect sqlite
+ALTER TABLE conversations ADD COLUMN archived_at DATETIME NULL;
+ALTER TABLE conversations ADD COLUMN archive_folder_id VARCHAR(36) NULL;
+ALTER TABLE conversations ADD COLUMN trash_expires_at DATETIME NULL;
+CREATE TABLE IF NOT EXISTS conversation_archive_folders (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(255) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    normalized_name VARCHAR(255) NOT NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    CONSTRAINT uk_conversation_archive_folders_user_name
+        UNIQUE (user_id, normalized_name)
+);
+CREATE INDEX IF NOT EXISTS idx_conversations_user_lifecycle
+    ON conversations(create_user_id, deleted_at, archived_at, is_task_conv, updated_at);
+CREATE INDEX IF NOT EXISTS idx_conversations_user_archive_folder
+    ON conversations(create_user_id, archive_folder_id, archived_at);
+ALTER TABLE plugin_drafts ADD COLUMN deleted_at DATETIME NULL;
+ALTER TABLE plugin_drafts ADD COLUMN trash_expires_at DATETIME NULL;
+ALTER TABLE plugin_drafts ADD COLUMN published_status_before_trash VARCHAR(16) NOT NULL DEFAULT '';
+CREATE INDEX IF NOT EXISTS idx_plugin_drafts_user_trash
+    ON plugin_drafts(created_by, deleted_at, trash_expires_at);
+ALTER TABLE skills ADD COLUMN trash_expires_at DATETIME NULL;
+ALTER TABLE task_center_tasks ADD COLUMN archived_reason VARCHAR(32) NOT NULL DEFAULT '';
+UPDATE conversations SET trash_expires_at = datetime('now', '+30 days')
+    WHERE deleted_at IS NOT NULL AND trash_expires_at IS NULL;
+UPDATE skills SET trash_expires_at = datetime('now', '+30 days')
+    WHERE deleted_at IS NOT NULL AND trash_expires_at IS NULL;
+DROP INDEX IF EXISTS idx_plugin_drafts_user_plugin_id;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_plugin_drafts_user_plugin_id
+    ON plugin_drafts(created_by, plugin_id)
+    WHERE plugin_id != '' AND deleted_at IS NULL;
+
+-- +migrate Dialect postgres
 ALTER TABLE public.chat_histories
     ADD COLUMN IF NOT EXISTS algorithm_id VARCHAR(64);
 CREATE INDEX IF NOT EXISTS idx_chat_histories_algorithm_create_time
@@ -471,6 +579,42 @@ WHERE id IN (
     JOIN plugin_sessions AS session ON session.id = attempt.session_id
     WHERE session.controller_host = 'external-agent'
 );
+
+-- +migrate Dialect postgres
+CREATE TABLE IF NOT EXISTS writer_download_conversions (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(255) NOT NULL,
+    source_hash VARCHAR(64) NOT NULL,
+    target_format VARCHAR(16) NOT NULL,
+    filename VARCHAR(255) NOT NULL,
+    mime_type VARCHAR(128) NOT NULL,
+    storage_path VARCHAR(1024) NOT NULL,
+    size BIGINT NOT NULL,
+    content_hash VARCHAR(64) NOT NULL,
+    created_at TIMESTAMP NOT NULL,
+    updated_at TIMESTAMP NOT NULL,
+    CONSTRAINT uk_writer_download_conversion UNIQUE (user_id, source_hash, target_format)
+);
+CREATE INDEX IF NOT EXISTS idx_writer_download_conversions_user_updated
+    ON writer_download_conversions(user_id, updated_at);
+
+-- +migrate Dialect sqlite
+CREATE TABLE IF NOT EXISTS writer_download_conversions (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    source_hash TEXT NOT NULL,
+    target_format TEXT NOT NULL,
+    filename TEXT NOT NULL,
+    mime_type TEXT NOT NULL,
+    storage_path TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    content_hash TEXT NOT NULL,
+    created_at DATETIME NOT NULL,
+    updated_at DATETIME NOT NULL,
+    UNIQUE(user_id, source_hash, target_format)
+);
+CREATE INDEX IF NOT EXISTS idx_writer_download_conversions_user_updated
+    ON writer_download_conversions(user_id, updated_at);
 
 -- +migrate Dialect postgres
 CREATE TABLE IF NOT EXISTS agent_invocations (
@@ -727,3 +871,92 @@ WHERE id IN (
     JOIN plugin_sessions AS session ON session.id = attempt.session_id
     WHERE session.controller_host = 'external-agent'
 );
+
+-- +migrate Dialect postgres
+CREATE TABLE IF NOT EXISTS public.knowledge_market_items (
+    id VARCHAR(64) PRIMARY KEY,
+    category VARCHAR(32) NOT NULL,
+    name VARCHAR(255) NOT NULL,
+    description TEXT NOT NULL DEFAULT '',
+    icon TEXT NOT NULL DEFAULT '',
+    domain VARCHAR(64) NOT NULL DEFAULT '',
+    tags JSONB NOT NULL DEFAULT '[]'::jsonb,
+    version VARCHAR(32) NOT NULL DEFAULT '',
+    version_date VARCHAR(10) NOT NULL DEFAULT '',
+    version_note TEXT NOT NULL DEFAULT '',
+    package_url TEXT NOT NULL DEFAULT '',
+    package_revision VARCHAR(64) NOT NULL DEFAULT '',
+    online_access_url VARCHAR(1024) NOT NULL DEFAULT '',
+    data_source TEXT NOT NULL DEFAULT '',
+    source_adapter VARCHAR(64) NOT NULL DEFAULT '',
+    source_options JSONB NOT NULL DEFAULT '{}'::jsonb,
+    sample_questions JSONB NOT NULL DEFAULT '[]'::jsonb,
+    status VARCHAR(32) NOT NULL DEFAULT 'published',
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+    updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_market_items_category_status
+    ON public.knowledge_market_items(status, category, sort_order);
+
+CREATE TABLE IF NOT EXISTS public.knowledge_market_installs (
+    market_item_id VARCHAR(64) NOT NULL,
+    user_id VARCHAR(255) NOT NULL,
+    installed_version VARCHAR(32) NOT NULL DEFAULT '',
+    dataset_id VARCHAR(64) NOT NULL DEFAULT '',
+    install_state VARCHAR(32) NOT NULL DEFAULT 'pending',
+    installed_at TIMESTAMP WITHOUT TIME ZONE NULL,
+    config JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+    updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+    PRIMARY KEY (market_item_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_knowledge_market_installs_user
+    ON public.knowledge_market_installs(user_id, market_item_id);
+
+-- +migrate Dialect sqlite
+CREATE TABLE IF NOT EXISTS `knowledge_market_items` (
+    `id` varchar(64) NOT NULL,
+    `category` varchar(32) NOT NULL,
+    `name` varchar(255) NOT NULL,
+    `description` text NOT NULL DEFAULT "",
+    `icon` text NOT NULL DEFAULT "",
+    `domain` varchar(64) NOT NULL DEFAULT "",
+    `tags` json NOT NULL DEFAULT '[]',
+    `version` varchar(32) NOT NULL DEFAULT "",
+    `version_date` varchar(10) NOT NULL DEFAULT "",
+    `version_note` text NOT NULL DEFAULT "",
+    `package_url` text NOT NULL DEFAULT "",
+    `package_revision` varchar(64) NOT NULL DEFAULT "",
+    `online_access_url` varchar(1024) NOT NULL DEFAULT "",
+    `data_source` text NOT NULL DEFAULT "",
+    `source_adapter` varchar(64) NOT NULL DEFAULT "",
+    `source_options` json NOT NULL DEFAULT '{}',
+    `sample_questions` json NOT NULL DEFAULT '[]',
+    `status` varchar(32) NOT NULL DEFAULT "published",
+    `sort_order` integer NOT NULL DEFAULT 0,
+    `created_at` datetime NOT NULL,
+    `updated_at` datetime NOT NULL,
+    PRIMARY KEY (`id`)
+);
+
+CREATE INDEX IF NOT EXISTS `idx_knowledge_market_items_category_status`
+    ON `knowledge_market_items`(`status`, `category`, `sort_order`);
+
+CREATE TABLE IF NOT EXISTS `knowledge_market_installs` (
+    `market_item_id` varchar(64) NOT NULL,
+    `user_id` varchar(255) NOT NULL,
+    `installed_version` varchar(32) NOT NULL DEFAULT "",
+    `dataset_id` varchar(64) NOT NULL DEFAULT "",
+    `install_state` varchar(32) NOT NULL DEFAULT "pending",
+    `installed_at` datetime NULL,
+    `config` json NOT NULL DEFAULT '{}',
+    `created_at` datetime NOT NULL,
+    `updated_at` datetime NOT NULL,
+    PRIMARY KEY (`market_item_id`, `user_id`)
+);
+
+CREATE INDEX IF NOT EXISTS `idx_knowledge_market_installs_user`
+    ON `knowledge_market_installs`(`user_id`, `market_item_id`);

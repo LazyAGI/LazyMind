@@ -132,6 +132,24 @@ def review_memory(
     )
     lazyllm.globals._init_sid(sid=task_id)
     lazyllm.locals._init_sid(sid=task_id)
+    lazyllm.set_trace_context({
+        'trace_id': conversation_id, 'session_id': conversation_id, 'user_id': user_id,
+        'sampled': True, 'request_tags': ['memory_review'],
+        'module_trace': {
+            'by_class': {
+                'FunctionCall': False, 'ToolManager': False,
+                'Pipeline': False, 'Diverter': False,
+            },
+            'by_name': {
+                '_build_history': False, '_post_action': False,
+                '_safe_call': False, '_indexed_call': False,
+            },
+        },
+        'trace_metadata': {
+            'task_id': task_id, 'conversation_id': conversation_id,
+            'trigger': 'conversation_idle', 'history_len': len(history),
+        },
+    })
     inject_model_config(llm_config)
     LOG.info(
         f'[MemoryReview] review started: user_id={user_id} '

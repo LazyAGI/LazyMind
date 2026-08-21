@@ -439,9 +439,10 @@ export const handleError = async (error: AxiosError): Promise<any> => {
 
 axiosInstance.interceptors.request.use(
   (config) => {
+    const userInfo = AgentAppsAuth.getUserInfo();
     if (
       isLocalSessionEnabled() &&
-      (!AgentAppsAuth.getUserInfo()?.token || !localSessionInitialized)
+      (!userInfo?.token || !userInfo?.userId || !localSessionInitialized)
     ) {
       return ensureLocalSession().then(() => applyOptionalAuthHeader(config));
     }
