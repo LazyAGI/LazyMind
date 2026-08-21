@@ -36,7 +36,7 @@ describe('Workflow Panel live update surface', () => {
     expect(chatLayout).toContain('unsubscribeConvEvents(sessionId)');
   });
 
-  it('retains workflow tasks for live artifact streams without showing them as subtasks', () => {
+  it('retains workflow tasks for live artifact streams and delegates their presentation', () => {
     const taskStore = read('frontend/src/modules/chat/store/taskCenter.ts');
     const taskPanel = read('frontend/src/modules/chat/components/TaskCenter/index.tsx');
     const chatLayout = read('frontend/src/modules/chat/pages/chatLayout/index.tsx');
@@ -47,6 +47,7 @@ describe('Workflow Panel live update surface', () => {
     );
     expect(taskStore).toContain('get().upsertTask(conversationId');
     expect(taskPanel).toContain('tasks.filter(isTaskCenterVisibleTask)');
-    expect(chatLayout).toContain('tasks.filter(isTaskCenterVisibleTask)');
+    expect(taskPanel).toContain('buildOrdinaryTaskTimeline(tasks, workflowSteps)');
+    expect(chatLayout).toContain('taskCenterDisplayCount(');
   });
 });
