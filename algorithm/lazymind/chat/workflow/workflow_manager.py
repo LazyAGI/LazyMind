@@ -511,13 +511,23 @@ def _workflow_trigger_tools(
             continue
         used_names.add(name)
 
+        package_hint: Dict[str, Any] = {}
+        input_types_hint: Dict[str, str] = {}
+        if allowed_refs:
+            try:
+                package_hint = _client().get_workflow(workflow_id, revision_id).result
+                input_types_hint = workflow_package_input_types(package_hint)
+            except Exception as exc:
+                LOG.debug('Could not preload Workflow %s input contract: %s', workflow_id, exc)
+
         def make_trigger(
             bound_id: str, bound_ref: str, bound_revision: str, bound_query: str,
+            bound_package: Optional[Dict[str, Any]] = None,
         ) -> Any:
             def run_trigger(input_bindings: Optional[Dict[str, str]] = None) -> Dict[str, Any]:
                 effective_context = bound_query
                 client = _client()
-                package = client.get_workflow(bound_id, bound_revision).result
+                package = bound_package or client.get_workflow(bound_id, bound_revision).result
                 input_types = workflow_package_input_types(package)
                 resolved_bindings: Dict[str, Any] = {}
                 for material_id, attachment_ref in (input_bindings or {}).items():
@@ -625,22 +635,30 @@ def _workflow_trigger_tools(
                         ),
                     },
                 }
-            if attachments_available:
-                def bound_trigger(
-                    input_bindings: Optional[Dict[str, str]] = None,
-                ) -> Dict[str, Any]:
-                    """Initialize the selected Workflow with optional user attachments."""
-                    return run_trigger(input_bindings)
-            else:
-                def bound_trigger() -> Dict[str, Any]:
-                    """Initialize the selected Workflow without attachment bindings."""
-                    return run_trigger()
+
+            def bound_trigger(
+                input_bindings: Optional[Dict[str, str]] = None,
+            ) -> Dict[str, Any]:
+                """Initialize the selected Workflow with optional external input bindings."""
+                return run_trigger(input_bindings)
+
             return bound_trigger
 
-        trigger_workflow = make_trigger(workflow_id, workflow_ref, revision_id, current_query)
+        trigger_workflow = make_trigger(
+            workflow_id, workflow_ref, revision_id, current_query, package_hint,
+        )
 
         trigger_workflow.__name__ = name
         description = str(item.get('tool_description') or '').strip()
+        input_contract = (
+            ' Exact external material IDs and types: '
+            + ', '.join(
+                f'{material_id} ({material_type})'
+                for material_id, material_type in sorted(input_types_hint.items())
+            )
+            + '. Use these exact IDs as input_bindings keys.'
+            if input_types_hint else ''
+        )
         attachment_guidance = (
             ' input_bindings maps file material IDs to exact filenames listed in the '
             'conversation attachments, and scalar text/json material IDs to their literal '
@@ -649,7 +667,7 @@ def _workflow_trigger_tools(
             ' No user attachments are available: do not bind file materials, but pass '
             'literal values for required scalar text/json materials.'
         )
-        trigger_workflow.__doc__ = description + attachment_guidance
+        trigger_workflow.__doc__ = description + input_contract + attachment_guidance
         tools.append(trigger_workflow)
     return tools
 

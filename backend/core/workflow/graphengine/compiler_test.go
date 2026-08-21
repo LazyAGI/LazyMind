@@ -104,6 +104,10 @@ transitions:
 		compiled.Graph.MaterialCardinalities["images"] != "list" {
 		t.Fatalf("cardinalities=%v", compiled.Graph.MaterialCardinalities)
 	}
+	if compiled.Graph.MaterialTypes["source"] != "text" ||
+		compiled.Graph.MaterialTypes["images"] != "image" {
+		t.Fatalf("types=%v", compiled.Graph.MaterialTypes)
+	}
 }
 
 func TestCompileRejectsMultipleProducerAndSelfOverwrite(t *testing.T) {
@@ -421,7 +425,14 @@ steps:
 }
 
 func TestBundledWorkflowsCompile(t *testing.T) {
-	for _, workflowID := range []string{"writer-workflow", "image-workflow", "test-workflow", "bid_tech_proposal_writer"} {
+	for _, workflowID := range []string{
+		"writer-workflow",
+		"image-workflow",
+		"test-workflow",
+		"bid_tech_proposal_writer",
+		"academic_research_pipeline",
+		"product_solution_delivery",
+	} {
 		root := filepath.Join("..", "..", "..", "..", "workflows", workflowID)
 		workflowYAML, err := os.ReadFile(filepath.Join(root, "workflow.yaml"))
 		if err != nil {

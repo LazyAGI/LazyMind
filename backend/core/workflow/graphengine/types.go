@@ -83,6 +83,7 @@ type CompiledStateGraph struct {
 	Nodes                 map[string]CompiledNode  `json:"nodes"`
 	ControlEdges          []CompiledEdge           `json:"control_edges"`
 	MaterialProducers     map[string]ProducerRef   `json:"material_producers"`
+	MaterialTypes         map[string]string        `json:"material_types,omitempty"`
 	MaterialCardinalities map[string]string        `json:"material_cardinalities,omitempty"`
 	InputExpressions      map[string]Expression    `json:"input_expressions"`
 	OptionalInputs        map[string][]MaterialRef `json:"optional_inputs"`

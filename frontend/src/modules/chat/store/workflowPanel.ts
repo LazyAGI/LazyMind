@@ -324,6 +324,21 @@ export interface TabDef {
    * WorkflowPanel must not special-case workflow IDs; it only executes these rules.
    */
   composite_behavior?: CompositeBehavior;
+  /** Hide this tab once the named material has a selected revision. */
+  hide_when_material?: string;
+}
+
+/** Apply opt-in material-driven tab visibility without workflow-specific frontend logic. */
+export function filterWorkflowTabs(
+  tabs: TabDef[] = [],
+  slots: SlotRevision[] = [],
+): TabDef[] {
+  const present = new Set(
+    slots.filter((slot) => slot.selected).map((slot) => slot.slot),
+  );
+  return tabs.filter((tab) => (
+    !tab.hide_when_material || !present.has(tab.hide_when_material)
+  ));
 }
 
 /** Mutually exclusive column group: keep the first preferred slot that has data. */

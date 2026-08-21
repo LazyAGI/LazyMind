@@ -213,6 +213,45 @@ func TestPrepareHTTPRejectsUnknownPublicWorkflow(t *testing.T) {
 	}
 }
 
+func TestMissingPreparationInputsIgnoresOptionalOnlyExternalMaterials(t *testing.T) {
+	var graph preparationGraph
+	if err := json.Unmarshal([]byte(`{
+		"material_producers": {
+			"research_topic": {"kind": "external"},
+			"word_target": {"kind": "external"},
+			"reference_file": {"kind": "external"}
+		},
+		"input_expressions": {
+			"generate_outline": {"all": [
+				{"material": "research_topic"},
+				{"material": "word_target"}
+			]}
+		}
+	}`), &graph); err != nil {
+		t.Fatal(err)
+	}
+	missing := missingPreparationInputs(graph, map[string]any{"research_topic": "bound"})
+	if len(missing) != 1 || missing[0] != "word_target" {
+		t.Fatalf("optional reference_file must not block preparation: %#v", missing)
+	}
+}
+
+func TestMissingPreparationInputsKeepsLegacyGraphBehavior(t *testing.T) {
+	var graph preparationGraph
+	if err := json.Unmarshal([]byte(`{
+		"material_producers": {
+			"source": {"kind": "external"},
+			"style": {"kind": "external"}
+		}
+	}`), &graph); err != nil {
+		t.Fatal(err)
+	}
+	missing := missingPreparationInputs(graph, map[string]any{"source": "bound"})
+	if len(missing) != 1 || missing[0] != "style" {
+		t.Fatalf("legacy graph inputs changed unexpectedly: %#v", missing)
+	}
+}
+
 func TestPrepareHTTPReturnsFlatPublicContractOnCreateAndReplay(t *testing.T) {
 	h, _ := testHandler(t)
 	body := []byte(`{"workflow_id":"writer","idempotency_key":"same","input_bindings":{}}`)

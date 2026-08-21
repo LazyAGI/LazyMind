@@ -55,6 +55,7 @@ func TestDBContextLoaderBuildsNeutralPinnedAttempt(t *testing.T) {
 		Nodes: map[string]graphengine.CompiledNode{"write": {ID: "write", Prompt: "write report",
 			Acceptance: []string{"clear"}, Outputs: []string{"report", "notes"},
 			RequiredOutputs: []string{"report"}, Capabilities: []string{"web"}}},
+		MaterialTypes:         map[string]string{"brief": "text", "images": "image"},
 		MaterialCardinalities: map[string]string{"report": "single", "notes": "list", "images": "list"}}
 	if err := db.Create(&orm.WorkflowRevision{ID: "revision-1", WorkflowResourceID: "resource-1", RevisionNo: 1,
 		CompiledGraph: graph.JSON(), GraphSchemaVersion: graph.SchemaVersion, CreatedAt: now}).Error; err != nil {
@@ -113,7 +114,8 @@ func TestDBContextLoaderBuildsNeutralPinnedAttempt(t *testing.T) {
 	if value.AttemptID != "attempt-1" || value.AttemptNo != 2 || value.Operation != "retry" ||
 		value.Prompt != "write report" || !reflect.DeepEqual(value.DeclaredOutputs, []string{"report", "notes"}) ||
 		!reflect.DeepEqual(value.RequiredOutputs, []string{"report"}) || value.OutputCardinality["report"] != "single" ||
-		value.OutputCardinality["notes"] != "list" {
+		value.OutputCardinality["notes"] != "list" || value.DeclaredInputTypes["brief"] != "text" ||
+		value.DeclaredInputTypes["images"] != "image" {
 		t.Fatalf("context=%#v", value)
 	}
 	if value.Metadata["task_id"] != "task-1" || value.Metadata["controller_host"] != "lazymind" {

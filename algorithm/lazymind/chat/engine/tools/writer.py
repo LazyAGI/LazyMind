@@ -1,6 +1,7 @@
 """Common writer tools with string/JSON inputs and outputs."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -45,6 +46,12 @@ _FEISHU_URL_RE = re.compile(
     r"[^\s<>\"'，。；！？、（）【】《》「」『』]+",
     re.IGNORECASE,
 )
+_MARKDOWN_ATX_HEADING_RE = re.compile(
+    r'^(?P<indent> {0,3})(?P<marks>#{1,6})[ \t]+'
+    r'(?P<title>.*?)(?:[ \t]+#+)?[ \t]*$',
+)
+_MARKDOWN_FENCE_RE = re.compile(r'^ {0,3}(?P<marks>`{3,}|~{3,})')
+_MARKDOWN_DRAFT_ROOT_ERROR = 'Markdown draft section must contain exactly one H2 root heading.'
 
 
 class DraftMarkdownStreamEventEmitter:
@@ -180,6 +187,112 @@ def _primary_data(result: dict) -> Any:
     if not artifact_path:
         raise ValueError(f'Writer tool did not return artifact_path: {result!r}')
     return _read_artifact_data(artifact_path)
+
+
+def _markdown_heading_key(value: str) -> str:
+    text = re.sub(r'^\s*\d+(?:\.\d+)*[、.．\s　]+', '', str(value or ''))
+    return re.sub(r'[\s\W_]+', '', text, flags=re.UNICODE).lower()
+
+
+def _markdown_heading_rows(lines: list[str]) -> list[tuple[int, int, str]]:
+    rows: list[tuple[int, int, str]] = []
+    fence_mark = ''
+    for index, line in enumerate(lines):
+        fence = _MARKDOWN_FENCE_RE.match(line)
+        if fence:
+            mark = fence.group('marks')
+            if not fence_mark:
+                fence_mark = mark
+            elif mark[0] == fence_mark[0] and len(mark) >= len(fence_mark):
+                fence_mark = ''
+            continue
+        if fence_mark:
+            continue
+        heading = _MARKDOWN_ATX_HEADING_RE.match(line)
+        if heading:
+            rows.append((index, len(heading.group('marks')), heading.group('title').strip()))
+    return rows
+
+
+def _normalize_streamed_markdown_section(
+    markdown: str,
+    instruction: SectionInstruction,
+) -> str:
+    """Recover one Writer section using a relative Markdown heading hierarchy.
+
+    The streaming API owns the H2 section root. Models occasionally repeat that
+    root at another level or start child headings at an arbitrary level. Preserve
+    the prose, remove repeated roots, and shift remaining headings together so the
+    shallowest child is H3. No second model call is needed.
+    """
+    title = instruction.section_title.strip()
+    if not title:
+        raise ValueError('Markdown draft section title must not be empty.')
+    lines = str(markdown or '').replace('\r\n', '\n').replace('\r', '\n').strip().split('\n')
+    rows = _markdown_heading_rows(lines)
+    title_key = _markdown_heading_key(title)
+    root_index = next(
+        (index for index, _, heading_title in rows
+         if _markdown_heading_key(heading_title) == title_key),
+        -1,
+    )
+
+    removed: set[int] = set()
+    if root_index >= 0:
+        lines[root_index] = f'## {title}'
+        removed.update(
+            index for index, _, heading_title in rows
+            if index != root_index and _markdown_heading_key(heading_title) == title_key
+        )
+    else:
+        lines = [f'## {title}', '', *lines]
+        root_index = 0
+        rows = [(index + 2, level, heading_title) for index, level, heading_title in rows]
+
+    child_rows = [
+        (index, level, heading_title)
+        for index, level, heading_title in rows
+        if index != root_index and index not in removed
+    ]
+    if child_rows:
+        shift = 3 - min(level for _, level, _ in child_rows)
+        for index, level, heading_title in child_rows:
+            normalized_level = min(6, max(3, level + shift))
+            lines[index] = f"{'#' * normalized_level} {heading_title}"
+
+    result = '\n'.join(
+        line for index, line in enumerate(lines) if index not in removed
+    ).strip()
+    top_rows = [row for row in _markdown_heading_rows(result.splitlines()) if row[1] <= 2]
+    if len(top_rows) != 1 or top_rows[0][1] != 2:
+        raise ValueError(_MARKDOWN_DRAFT_ROOT_ERROR)
+    if _markdown_heading_key(top_rows[0][2]) != title_key:
+        raise ValueError('Markdown draft section heading does not match its content_ref.')
+    return result
+
+
+def _draft_checkpoint_root(
+    checkpoint_dir: str,
+    writing_task_json: str,
+    section_instructions_json: str,
+    writing_context_json: str,
+) -> Path | None:
+    if not str(checkpoint_dir or '').strip():
+        return None
+    fingerprint = hashlib.sha256('\0'.join((
+        writing_task_json,
+        section_instructions_json,
+        writing_context_json,
+    )).encode('utf-8')).hexdigest()[:20]
+    root = Path(checkpoint_dir).expanduser().resolve() / fingerprint
+    root.mkdir(parents=True, exist_ok=True)
+    return root
+
+
+def _write_text_atomic(path: Path, content: str) -> None:
+    temporary = path.with_name(f'.{path.name}.{uuid.uuid4().hex}.tmp')
+    temporary.write_text(content, encoding='utf-8')
+    os.replace(temporary, path)
 
 
 def _result_data(result: dict, key: str) -> Any:
@@ -930,8 +1043,9 @@ class WriterToolkitBase:
         writing_context_json: str,
         on_delta: Callable[[str], None],
         on_section_end: Callable[[], None] | None = None,
+        checkpoint_dir: str = '',
     ) -> str:
-        """Generate Markdown sections through LazyLLM's non-tool streaming API."""
+        """Generate Markdown sections with deterministic repair and optional checkpoints."""
         return self._stream_draft_blocks(
             writing_task_json=writing_task_json,
             section_instructions_json=section_instructions_json,
@@ -939,6 +1053,7 @@ class WriterToolkitBase:
             representation='markdown',
             on_delta=on_delta,
             on_section_end=on_section_end,
+            checkpoint_dir=checkpoint_dir,
         )
 
     def stream_draft_blocks_ir(
@@ -974,6 +1089,7 @@ class WriterToolkitBase:
         on_section_end: Callable[[], None] | None,
         visual_plan_json: str = '',
         media_assets_json: str = '',
+        checkpoint_dir: str = '',
     ) -> str:
         instructions_data = _json_loads(section_instructions_json, {})
         instructions = (
@@ -1011,9 +1127,38 @@ class WriterToolkitBase:
         drafting = WriterDraftingTools(
             llm=AutoModel(model='llm'), artifact_store=str(root),
         )
+        checkpoint_root = _draft_checkpoint_root(
+            checkpoint_dir,
+            writing_task_json,
+            section_instructions_json,
+            writing_context_json,
+        ) if representation == 'markdown' else None
         sections: list[Any] = []
-        for instruction_data in instructions:
+        for section_index, instruction_data in enumerate(instructions, start=1):
             instruction = SectionInstruction.model_validate(instruction_data)
+            checkpoint_path = (
+                checkpoint_root / f'section_{section_index:04d}.md'
+                if checkpoint_root is not None else None
+            )
+            if checkpoint_path is not None and checkpoint_path.is_file():
+                checkpoint = _normalize_streamed_markdown_section(
+                    checkpoint_path.read_text(encoding='utf-8'), instruction,
+                )
+                sections.append(checkpoint)
+                try:
+                    on_delta(checkpoint + '\n\n')
+                except Exception as exc:  # noqa: BLE001 - preview forwarding is best effort.
+                    LOG.warning('[Writer] Draft checkpoint delta callback failed: %s', exc)
+                if on_section_end is not None:
+                    try:
+                        on_section_end()
+                    except Exception as exc:  # noqa: BLE001 - preview forwarding is best effort.
+                        LOG.warning('[Writer] Draft checkpoint section callback failed: %s', exc)
+                LOG.info(
+                    '[Writer] reused Draft Markdown checkpoint section=%s path=%s',
+                    section_index, checkpoint_path,
+                )
+                continue
             stream_factory = (
                 drafting.stream_draft_section
                 if representation == 'markdown'
@@ -1030,25 +1175,42 @@ class WriterToolkitBase:
                     stream_kwargs['visual_plan'] = visual_plan_path
                 if media_assets_path is not None:
                     stream_kwargs['media_assets'] = media_assets_path
-            with stream_factory(
-                **stream_kwargs,
-            ) as stream:
-                for delta in stream:
-                    try:
-                        on_delta(delta)
-                    except Exception as exc:  # noqa: BLE001 - preview forwarding is best effort.
-                        LOG.warning(
-                            '[Writer] Draft %s delta callback failed: %s',
-                            representation, exc,
-                        )
-                result = stream.result()
-            section = _primary_data(result)
+            section_deltas: list[str] = []
+            try:
+                with stream_factory(**stream_kwargs) as stream:
+                    for delta in stream:
+                        section_deltas.append(delta)
+                        try:
+                            on_delta(delta)
+                        except Exception as exc:  # noqa: BLE001 - preview forwarding is best effort.
+                            LOG.warning(
+                                '[Writer] Draft %s delta callback failed: %s',
+                                representation, exc,
+                            )
+                    result = stream.result()
+            except ValueError as exc:
+                if representation != 'markdown' or str(exc) != _MARKDOWN_DRAFT_ROOT_ERROR:
+                    raise
+                section = _normalize_streamed_markdown_section(
+                    ''.join(section_deltas), instruction,
+                )
+                LOG.warning(
+                    '[Writer] recovered Draft Markdown heading contract without regeneration '
+                    'section=%s title=%r',
+                    section_index, instruction.section_title,
+                )
+            else:
+                section = _primary_data(result)
             if representation == 'markdown' and not isinstance(section, str):
                 raise TypeError(
                     'Markdown Draft stream returned a non-Markdown artifact.',
                 )
             if representation == 'ir' and not isinstance(section, dict):
                 raise TypeError('IR Draft stream returned a non-WriterBlock artifact.')
+            if representation == 'markdown':
+                section = _normalize_streamed_markdown_section(section, instruction)
+                if checkpoint_path is not None:
+                    _write_text_atomic(checkpoint_path, section + '\n')
             sections.append(section)
             if on_section_end is not None:
                 try:

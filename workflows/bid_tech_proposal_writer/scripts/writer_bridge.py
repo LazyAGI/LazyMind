@@ -493,7 +493,11 @@ def bid_writer_write_sections(
     writing_context_path: str,
     effective_outline_path: str,
 ) -> list[str]:
-    """Stream and persist one Markdown artifact per planned proposal section."""
+    """Write or resume proposal sections using the shared Writer checkpoints.
+
+    Reinvoke with the same inputs after interruption; completed sections are reused
+    without model regeneration. Revision tools must not replace initial drafting.
+    """
     events = DraftMarkdownStreamEventEmitter(require_context().emit)
     try:
         sections = _json_value(WriterCreateToolkit().stream_draft_blocks_markdown(
@@ -502,6 +506,7 @@ def bid_writer_write_sections(
             writing_context_json=_read_json(writing_context_path),
             on_delta=events.feed,
             on_section_end=events.flush,
+            checkpoint_dir=str(_workspace_root() / 'bid-writer' / 'draft-checkpoints'),
         ), [])
         if not isinstance(sections, list) or not sections:
             raise ValueError('Shared Writer returned no draft sections.')
@@ -553,8 +558,16 @@ def bid_writer_revise_markdown(
     """Apply LazyMind's structured Markdown revision pipeline to a bid artifact."""
     if document_slot not in {'outline_document', 'draft_document'}:
         raise ValueError('document_slot must be outline_document or draft_document.')
-    toolkit = WriterRevisionToolkit()
     document = _read_text(base_document_path)
+    if document_slot == 'draft_document' and not any(
+        line.strip() and not re.match(r'^#{1,6}\s+', line.strip())
+        for line in document.splitlines()
+    ):
+        raise ValueError(
+            'Initial bid drafting cannot be replaced by revising an outline; '
+            'call bid_writer_write_sections with the same inputs to resume checkpoints.'
+        )
+    toolkit = WriterRevisionToolkit()
     context_json = _read_json(writing_context_path)
     revision_task = toolkit.build_revision_task(
         query=str(instruction or '').strip(),

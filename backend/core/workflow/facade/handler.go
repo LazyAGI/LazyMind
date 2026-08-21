@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/workflow/artifactfile"
 	workflowexecutor "lazymind/core/workflow/executor"
+	"lazymind/core/workflow/graphengine"
 	workflowstore "lazymind/core/workflow/store"
 )
 
@@ -184,6 +186,60 @@ type prepareRequest struct {
 	ConversationID string         `json:"conversation_id"`
 	ControllerHost string         `json:"controller_host"`
 	RequestContext string         `json:"request_context"`
+}
+
+type preparationGraph struct {
+	Nodes map[string]struct {
+		Capabilities []string `json:"capabilities"`
+		LegacyTools  []string `json:"legacy_tools"`
+	} `json:"nodes"`
+	MaterialProducers map[string]struct {
+		Kind string `json:"kind"`
+	} `json:"material_producers"`
+	InputExpressions map[string]graphengine.Expression `json:"input_expressions"`
+}
+
+func collectInputMaterials(expression graphengine.Expression, materials map[string]struct{}) {
+	if expression.Material != "" {
+		materials[expression.Material] = struct{}{}
+	}
+	for _, nested := range expression.All {
+		collectInputMaterials(nested, materials)
+	}
+	for _, nested := range expression.Any {
+		// Preparation keeps the existing conservative behavior for alternatives:
+		// all candidate external inputs are requested. Optional-only materials are
+		// absent from InputExpressions and therefore do not block Session creation.
+		collectInputMaterials(nested, materials)
+	}
+}
+
+func missingPreparationInputs(graph preparationGraph, bindings map[string]any) []string {
+	required := map[string]struct{}{}
+	if graph.InputExpressions == nil {
+		// Older compiled graphs did not expose typed input expressions. Preserve
+		// their previous behavior instead of silently weakening their contract.
+		for materialID, producer := range graph.MaterialProducers {
+			if producer.Kind == "external" {
+				required[materialID] = struct{}{}
+			}
+		}
+	} else {
+		for _, expression := range graph.InputExpressions {
+			collectInputMaterials(expression, required)
+		}
+	}
+	missing := make([]string, 0)
+	for materialID := range required {
+		if producer, exists := graph.MaterialProducers[materialID]; !exists || producer.Kind != "external" {
+			continue
+		}
+		if _, exists := bindings[materialID]; !exists {
+			missing = append(missing, materialID)
+		}
+	}
+	sort.Strings(missing)
+	return missing
 }
 
 type toolCommandRequest struct {
@@ -611,15 +667,7 @@ func (h Handler) Prepare(w http.ResponseWriter, r *http.Request) {
 			controllerHost = "lazymind"
 		}
 		if h.Hosts != nil {
-			var graph struct {
-				Nodes map[string]struct {
-					Capabilities []string `json:"capabilities"`
-					LegacyTools  []string `json:"legacy_tools"`
-				} `json:"nodes"`
-				MaterialProducers map[string]struct {
-					Kind string `json:"kind"`
-				} `json:"material_producers"`
-			}
+			var graph preparationGraph
 			_ = json.Unmarshal(workflow.CompiledGraph, &graph)
 			capabilities, legacyTools := []string{}, []string{}
 			for _, node := range graph.Nodes {
@@ -635,14 +683,7 @@ func (h Handler) Prepare(w http.ResponseWriter, r *http.Request) {
 					strings.Join(missing, ", "), false)
 				return
 			}
-			missingInputs := []string{}
-			for materialID, producer := range graph.MaterialProducers {
-				if producer.Kind == "external" {
-					if _, exists := req.InputBindings[materialID]; !exists {
-						missingInputs = append(missingInputs, materialID)
-					}
-				}
-			}
+			missingInputs := missingPreparationInputs(graph, req.InputBindings)
 			if len(missingInputs) > 0 {
 				plan, _ = json.Marshal(map[string]any{"status": "needs_input", "workflow_ref": workflow.WorkflowRef,
 					"workflow_id": workflow.WorkflowID, "workflow_revision": workflow.RevisionID,

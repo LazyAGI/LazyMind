@@ -3,6 +3,8 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
+
 
 def _stub_module(name, **attributes):
     module = types.ModuleType(name)
@@ -116,3 +118,14 @@ def test_draft_contract_adds_missing_leaf_trace_line():
     result = bridge._enforce_draft_contract([section], outline)[0]
 
     assert '追溯：PERF-001、PERF-002、D-001、D-007。' in result
+
+
+def test_outline_cannot_be_used_as_initial_bid_draft_revision(tmp_path):
+    bridge = _load_writer_bridge()
+    outline = tmp_path / 'outline_document.md'
+    outline.write_text('# 方案\n\n## 总体响应\n\n### 响应范围\n', encoding='utf-8')
+
+    with pytest.raises(ValueError, match='cannot be replaced'):
+        bridge.bid_writer_revise_markdown(
+            str(outline), 'unused-context.json', '生成全文', 'draft_document',
+        )

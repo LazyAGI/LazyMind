@@ -55,6 +55,10 @@ func (loader DBContextLoader) LoadAttemptContext(ctx context.Context, id string)
 				for materialID, cardinality := range graph.MaterialCardinalities {
 					listMaterials[materialID] = cardinality == "list"
 				}
+				value.DeclaredInputTypes = make(map[string]string, len(graph.MaterialTypes))
+				for materialID, materialType := range graph.MaterialTypes {
+					value.DeclaredInputTypes[materialID] = materialType
+				}
 				if node, ok := graph.Nodes[row.StepID]; ok {
 					value.Prompt, value.Acceptance = node.Prompt, node.Acceptance
 					value.DeclaredOutputs, value.RequiredOutputs = node.Outputs, node.RequiredOutputs

@@ -97,6 +97,11 @@ ATTACHED_FILES_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
         '# Attached file rules\n'
         'Attachments are listed for reference only — do NOT parse or read them automatically.\n'
+        'Only filenames explicitly listed under User Attachments are attachments. Typed Workflow '
+        'material values, Workflow material paths, and paths returned by tools are not attachments. '
+        'Pass scalar values as values and file paths only to file/path arguments; save returned '
+        'paths as artifacts or use `get_artifact` when available. Never pass Workflow materials to '
+        '`read_user_attachment`, `find_user_attachment`, or attachment editing tools.\n'
         '- `find_user_attachment(filename, turn=N)`: get path/url to pass to image tools, '
         '`vision_extractor`, or a Host attachment importer. Prefer this for images when the task is '
         'visual (edit, generate, workflow) or you only need the file location.\n'

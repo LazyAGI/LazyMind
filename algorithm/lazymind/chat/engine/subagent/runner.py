@@ -242,6 +242,9 @@ _STRUCTURED_PARAM_KEYS = {
     # task parameters supplied by workflow and ordinary SubAgent callers.
     'history_files_per_turn',
     SUBAGENT_ATTACHMENT_CONTEXT_KEY,
+    'remote_inputs',
+    'remote_input_types',
+    'remote_input_value_slots',
     'partial_indices',
     'required_output_artifact_keys',
     # Framework-owned Workflow routing/concurrency metadata. The effective
@@ -263,6 +266,39 @@ def _attachment_context(params: Dict[str, Any]) -> Dict[str, Any]:
 def _history_files_per_turn(params: Dict[str, Any]) -> Dict[str, List[str]]:
     context = _attachment_context(params)
     return context.get('history_files_per_turn') or params.get('history_files_per_turn') or {}
+
+
+def _workflow_material_files_section(params: Dict[str, Any]) -> str:
+    remote_inputs = params.get('remote_inputs')
+    if not isinstance(remote_inputs, dict) or not remote_inputs:
+        return ''
+    input_types = params.get('remote_input_types') or {}
+    value_slots = set(params.get('remote_input_value_slots') or [])
+    bindings: Dict[str, Any] = {}
+    for slot, value in remote_inputs.items():
+        kind = 'value' if slot in value_slots else 'path'
+        bindings[str(slot)] = {
+            'type': str(input_types.get(str(slot)) or ''),
+            'kind': kind,
+            kind: value,
+        }
+    return '\n'.join((
+        'These are typed Workflow material bindings, not user-uploaded attachments.',
+        'For kind=value, pass the exact value to ordinary scalar tool arguments. For kind=path, '
+        'pass the exact path only to file/path arguments or to tools that explicitly consume '
+        'Workflow artifact paths. Do not substitute a path for a scalar value.',
+        'Never call read_user_attachment, find_user_attachment, or attachment editing tools for '
+        'a path listed here or for a path returned by another tool. Those attachment tools are '
+        'only for actual filenames explicitly listed under User Attachments.',
+        json.dumps(bindings, ensure_ascii=False, default=str),
+    ))
+
+
+def _has_user_attachments(agentic_config: Dict[str, Any]) -> bool:
+    return bool(
+        agentic_config.get('files')
+        or agentic_config.get('history_files_per_turn')
+    )
 
 
 def _build_agentic_config(
@@ -392,6 +428,12 @@ def _build_subagent_plan(
                 authoritative=True,
                 content_kind='instruction',
             )
+    workflow_materials = _workflow_material_files_section(ctx.params)
+    if workflow_materials:
+        builder.runtime(
+            'subagent_workflow_materials', 'Workflow Material Bindings', workflow_materials,
+            'workflow.inputs', priority=35, authoritative=True, content_kind='instruction',
+        )
     # Inject user attachment context so the SubAgent knows which files were uploaded.
     history_files_per_turn = _history_files_per_turn(ctx.params)
     attachment_section = render_attachment_content(
@@ -726,15 +768,12 @@ async def run_subagent_stream(
 
         llm = AutoModel(model='llm')
         runtime_tools = _resolve_runtime_tools(tools, params)
-        # Workflow steps often need find_user_attachment even when the current synthetic
-        # chat turn has no files; keep the tools available and let the tool report empty.
+        # Attachment tools are capability-scoped to genuine current or historical
+        # user uploads. Workflow material values/paths use remote_inputs/get_artifact
+        # and must not make attachment-only tools visible.
         attachment_configs = (
             [*USER_ATTACHMENT_TOOL_CONFIGS, ATTACHMENT_EDIT_TOOL_CONFIG]
-            if (
-                agentic_config.get('files')
-                or agentic_config.get('history_files_per_turn')
-                or effective_agent_type == 'workflow_step'
-            )
+            if _has_user_attachments(agentic_config)
             else []
         )
         subagent_tools_all = _build_subagent_tools(runtime_tools, attachment_configs)
@@ -961,8 +1000,8 @@ async def run_subagent_stream(
 def _auto_flush_drafts(ctx: 'SubAgentContext', db: 'SubAgentDB') -> None:
     """Commit any pending draft files as new artifact revisions before the step ends.
 
-    This is a safety net: if the model called patch_artifact but forgot to call
-    save_artifacts, the edits are not lost — they are committed here at step boundary.
+    ``patch_artifact`` edits remain local drafts during the step so multiple targeted patches
+    compose safely. They are committed here only after normal step execution reaches a boundary.
     Only drafts for required keys or keys already saved in this run are flushed.
     """
     from . import tools as subagent_tools

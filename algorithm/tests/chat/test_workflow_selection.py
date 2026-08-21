@@ -1,3 +1,4 @@
+import base64
 import inspect
 from unittest.mock import MagicMock, patch
 
@@ -59,7 +60,7 @@ def test_mentioned_workflow_is_injected_as_authoritative_selection():
     )
     assert list(inspect.signature(
         _tool(contribution, 'trigger_image_workflow'),
-    ).parameters) == []
+    ).parameters) == ['input_bindings']
     assert 'prepare_workflow' not in _tool_names(contribution)
     assert 'list_workflow_attachments' not in _tool_names(contribution)
     assert 'bind_workflow_input' not in _tool_names(contribution)
@@ -173,6 +174,61 @@ def test_dynamic_trigger_imports_literal_scalar_binding():
     assert result['status'] == 'waiting'
     assert result['outcome'] == 'waiting_for_input'
     assert 'literal values' in _tool(contribution, 'trigger_report_workflow').__doc__
+
+
+def test_dynamic_trigger_imports_scalar_binding_without_conversation_attachments():
+    toolkit = MagicMock()
+    toolkit.prepare_workflow.return_value = {
+        'session_id': 'session-1', 'state_version': 1, 'ready_steps': ['draft'],
+    }
+    with patch('lazymind.chat.workflow.workflow_manager._client') as client_factory, patch(
+        'lazymind.chat.workflow.workflow_manager.HostWorkflowToolkit', return_value=toolkit,
+    ), patch('lazymind.chat.workflow.workflow_manager._import_text_binding', return_value={
+        'resource_id': 'text-resource', 'revision': 1, 'content_hash': 'sha256:text',
+    }) as import_text:
+        client_factory.return_value.get_workflow.return_value.result = {
+            'workflow_id': 'report', 'revision_id': 'revision-1',
+            'files': {'workflow.yaml': base64.b64encode(b'''\
+slots:
+  - id: target_length
+    type: text
+    external: true
+''').decode()},
+        }
+        client_factory.return_value.get_state.return_value = {
+            'session_id': 'session-1', 'state_version': 1,
+            'projection': {'reachable': ['draft'], 'ready': ['draft'], 'blocked': []},
+        }
+        contribution = resolve_workflow_injection(
+            None, current_query='write about 3000 words',
+            workflow_catalog=[{
+                'workflow_ref': 'builtin:report', 'workflow_id': 'report',
+                'revision_id': 'revision-1',
+            }],
+            allowed_workflow_refs=['builtin:report'],
+            workflow_activations=[{
+                'workflow_ref': 'builtin:report', 'workflow_id': 'report',
+                'revision_id': 'revision-1', 'tool_name': 'trigger_report_workflow',
+            }],
+        )
+
+        result = _tool(contribution, 'trigger_report_workflow')({
+            'target_length': '3000',
+        })
+
+    import_text.assert_called_once_with('target_length', '3000')
+    assert result['session_id'] == 'session-1'
+    assert 'target_length (text)' in _tool(
+        contribution, 'trigger_report_workflow',
+    ).__doc__
+    toolkit.prepare_workflow.assert_called_once_with(
+        'report', input_bindings={
+            'target_length': {
+                'resource_id': 'text-resource', 'revision': 1,
+                'content_hash': 'sha256:text',
+            },
+        }, request_context='write about 3000 words',
+    )
 
 
 def test_dynamic_trigger_activates_advance_step_in_the_same_agent_turn():
