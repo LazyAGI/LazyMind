@@ -395,6 +395,15 @@ func init() {
 	registerAdditionalError("archive folder is not empty; choose a move target", http.StatusConflict, 2002120)
 	registerAdditionalError("archive folder move target must differ from source", http.StatusBadRequest, 2002121)
 	registerAdditionalError("delete archive folder failed", http.StatusInternalServerError, 2002122)
+	registerAdditionalError("codex tcp bridge token is required", http.StatusServiceUnavailable, 2002284)
+	registerAdditionalError("writer download conversion is too large", http.StatusRequestEntityTooLarge, 2002285)
+	registerAdditionalError("slot must be source_document, outline_document, or draft_document", http.StatusBadRequest, 2002286)
+	registerAdditionalError("active", http.StatusNotFound, 2002287)
+	registerAdditionalError("slot must be outline_document or draft_document", http.StatusBadRequest, 2002288)
+	registerAdditionalError("invalid document", http.StatusBadRequest, 2002289)
+	registerAdditionalError("decode attempt result", http.StatusInternalServerError, 2002290)
+	registerAdditionalErrorPattern("control.next_step %q is not a reachable choice from %q", "Workflow next step is not reachable", http.StatusInternalServerError, 2002291)
+
 	// Chat attachment, editable PPTX, and Workflow artifact errors.
 	registerAdditionalErrorPattern("resolve turn %q", "Failed to resolve chat turn attachments", http.StatusInternalServerError, 2002123)
 	registerAdditionalError("invalid editable pptx bundle manifest", http.StatusBadRequest, 2002124)

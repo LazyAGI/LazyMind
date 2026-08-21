@@ -906,6 +906,7 @@ func (h Handler) Command(delegate http.Handler) http.HandlerFunc {
 							value["ready_steps"] = projection["ready"]
 							value["retryable_steps"] = projection["retryable"]
 							value["rewindable_steps"] = projection["rewindable"]
+							value["continue_steps"] = projection["continue"]
 						}
 					}
 				}

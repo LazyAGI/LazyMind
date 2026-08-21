@@ -10,6 +10,7 @@ import (
 
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
+	"lazymind/core/workflow"
 )
 
 type uiPreferencesAPITestResponse struct {
@@ -161,7 +162,7 @@ func TestPatchUIPreferencesBulkControlsSkillsAndWorkflowsIndependently(t *testin
 	if err := db.Create(&workflows).Error; err != nil {
 		t.Fatalf("seed workflows: %v", err)
 	}
-	if err := db.Create(&orm.UserWorkflowSetting{UserID: "u1", WorkflowRef: "user:u1", Enabled: true, UpdatedAt: now}).Error; err != nil {
+	if err := db.Create(&orm.UserWorkflowSetting{UserID: "u1", WorkflowRef: "user:u1", Enabled: true, CallMode: workflow.WorkflowCallModeAuto, UpdatedAt: now}).Error; err != nil {
 		t.Fatalf("seed workflow setting: %v", err)
 	}
 
@@ -194,6 +195,10 @@ func TestPatchUIPreferencesBulkControlsSkillsAndWorkflowsIndependently(t *testin
 	}
 	assertWorkflows := func(enabled bool, expectedCount int) {
 		t.Helper()
+		expectedCallMode := workflow.WorkflowCallModeDisabled
+		if enabled {
+			expectedCallMode = workflow.WorkflowCallModeAuto
+		}
 		var settings []orm.UserWorkflowSetting
 		if err := db.Where("user_id = ?", "u1").Order("plugin_ref").Find(&settings).Error; err != nil {
 			t.Fatalf("load workflow settings: %v", err)
@@ -202,8 +207,8 @@ func TestPatchUIPreferencesBulkControlsSkillsAndWorkflowsIndependently(t *testin
 			t.Fatalf("expected %d workflow settings, got %#v", expectedCount, settings)
 		}
 		for _, setting := range settings {
-			if setting.Enabled != enabled {
-				t.Fatalf("workflow %s should be enabled=%v", setting.WorkflowRef, enabled)
+			if setting.Enabled != enabled || setting.CallMode != expectedCallMode {
+				t.Fatalf("workflow %s should be enabled=%v call_mode=%s, got %#v", setting.WorkflowRef, enabled, expectedCallMode, setting)
 			}
 		}
 	}

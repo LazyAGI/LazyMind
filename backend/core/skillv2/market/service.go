@@ -156,6 +156,17 @@ func (s *Service) Install(ctx context.Context, req InstallRequest) (InstallRespo
 			out.SkillID = installedSkillID
 			return nil
 		}
+		restoredSkillID, err := restoreTrashedInstalledSkill(ctx, tx, item, req.UserID, now)
+		if err != nil {
+			return err
+		}
+		if restoredSkillID != "" {
+			if err := recordMarketInstall(ctx, tx, item.ID, req.UserID, restoredSkillID, now); err != nil {
+				return err
+			}
+			out.SkillID = restoredSkillID
+			return nil
+		}
 		if err := detachLegacyPublisherSource(ctx, tx, item, req.UserID, now); err != nil {
 			return err
 		}
@@ -196,6 +207,57 @@ func existingInstalledSkillID(ctx context.Context, tx *gorm.DB, marketItemID, us
 		return "", nil
 	}
 	return row.SkillID, nil
+}
+
+func restoreTrashedInstalledSkill(ctx context.Context, tx *gorm.DB, item skillMarketItemRow, userID string, now time.Time) (string, error) {
+	var candidate struct {
+		ID           string `gorm:"column:id"`
+		RelativeRoot string `gorm:"column:relative_root"`
+	}
+	result := tx.WithContext(ctx).
+		Table("skills AS skills").
+		Select("skills.id, skills.relative_root").
+		Where("skills.owner_user_id = ? AND skills.deleted_at IS NOT NULL", userID).
+		Where(`EXISTS (
+			SELECT 1 FROM skill_revisions AS revisions
+			WHERE revisions.skill_id = skills.id
+				AND revisions.change_source = ?
+				AND revisions.source_ref_type = ?
+				AND revisions.source_ref_id = ?
+		)`, "market_install", "skill", item.SourceSkillID).
+		Order("skills.deleted_at DESC, skills.updated_at DESC, skills.id ASC").
+		Limit(1).
+		Scan(&candidate)
+	if result.Error != nil {
+		return "", result.Error
+	}
+	if result.RowsAffected == 0 {
+		return "", nil
+	}
+
+	var conflicts int64
+	if err := tx.WithContext(ctx).Model(&skillRow{}).
+		Where("owner_user_id = ? AND relative_root = ? AND deleted_at IS NULL AND id <> ?", userID, candidate.RelativeRoot, candidate.ID).
+		Count(&conflicts).Error; err != nil {
+		return "", err
+	}
+	if conflicts > 0 {
+		return "", fmt.Errorf("skill name conflict")
+	}
+	if err := tx.WithContext(ctx).Model(&skillRow{}).
+		Where("id = ? AND owner_user_id = ? AND deleted_at IS NOT NULL", candidate.ID, userID).
+		Updates(map[string]any{
+			"deleted_at":       nil,
+			"trash_expires_at": nil,
+			"deleted_by":       nil,
+			"updated_at":       now,
+		}).Error; err != nil {
+		return "", err
+	}
+	if err := skillsearch.RebuildSkillTx(ctx, tx, candidate.ID, now); err != nil {
+		return "", err
+	}
+	return candidate.ID, nil
 }
 
 func detachLegacyPublisherSource(ctx context.Context, tx *gorm.DB, item skillMarketItemRow, userID string, now time.Time) error {

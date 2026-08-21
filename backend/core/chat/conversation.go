@@ -698,6 +698,7 @@ func resumeFromDBOnly(db *gorm.DB, convID string, flusher http.Flusher, w http.R
 		"seq":                 last.Seq,
 		"message":             stripThinkTags(stripToolTags(last.Result)),
 		"delta":               stripThinkTags(stripToolTags(last.Result)),
+		"delta_mode":          ChatDeltaModeReplace,
 		"history_id":          last.ID,
 		"sources":             retrievalSources(last.RetrievalResult),
 		"tool_call_turns":     last.ToolCallTurns,
@@ -714,6 +715,7 @@ func resumeCompletedFromDB(db *gorm.DB, convID string, flusher http.Flusher, w h
 			"seq":                 last.Seq,
 			"message":             stripThinkTags(stripToolTags(last.Result)),
 			"delta":               stripThinkTags(stripToolTags(last.Result)),
+			"delta_mode":          ChatDeltaModeReplace,
 			"history_id":          last.ID,
 			"sources":             retrievalSources(last.RetrievalResult),
 			"tool_call_turns":     last.ToolCallTurns,
@@ -734,6 +736,7 @@ func resumeCompletedFromDB(db *gorm.DB, convID string, flusher http.Flusher, w h
 			"seq":                 h.Seq,
 			"message":             stripThinkTags(stripToolTags(h.Result)),
 			"delta":               stripThinkTags(stripToolTags(h.Result)),
+			"delta_mode":          ChatDeltaModeReplace,
 			"history_id":          h.ID,
 			"sources":             retrievalSources(h.RetrievalResult),
 			"tool_call_turns":     h.ToolCallTurns,
@@ -775,6 +778,7 @@ func mergeChunksToFirstChunk(chunks []*ChatChunkResponse) *ChatChunkResponse {
 		Seq:              last.Seq,
 		HistoryID:        last.HistoryID,
 		Delta:            fullDelta,
+		DeltaMode:        ChatDeltaModeReplace,
 		ReasoningContent: fullReasoning,
 		Sources:          sources,
 		IntentUpdated:    intentUpdated,
@@ -796,6 +800,12 @@ func resumeSingleAnswerChat(ctx context.Context, stateStore state.Store, convID,
 	first := mergeChunksToFirstChunk(chunks)
 	if first != nil {
 		sendChunk(w, flusher, first)
+	} else {
+		sendChunk(w, flusher, &ChatChunkResponse{
+			ConversationID: convID,
+			HistoryID:      historyID,
+			DeltaMode:      ChatDeltaModeReplace,
+		})
 	}
 	for _, chunk := range chunks {
 		if chunk == nil || chunk.RuntimeEvent == nil || chunk.RuntimeEvent.Type != RuntimeEventRunFinished || terminalSent {
@@ -855,6 +865,7 @@ func resumeSingleAnswerChat(ctx context.Context, stateStore state.Store, convID,
 					Seq:            seq,
 					HistoryID:      historyID,
 					Delta:          full[len(current):],
+					DeltaMode:      ChatDeltaModeAppend,
 					Sources:        sources,
 				})
 			}
@@ -898,8 +909,14 @@ func resumeMultiAnswerChat(ctx context.Context, stateStore state.Store, convID s
 	// Announce both branches before replaying either terminal. Otherwise a
 	// terminal-only primary branch could make the browser close before it has
 	// observed the secondary branch.
-	sendChunk(w, flusher, &ChatChunkResponse{ConversationID: convID, Seq: int32(info.Seq), HistoryID: info.PrimaryHistoryID})
-	sendChunk(w, flusher, &ChatChunkResponse{ConversationID: convID, Seq: int32(info.Seq), HistoryID: info.SecondaryHistoryID})
+	sendChunk(w, flusher, &ChatChunkResponse{
+		ConversationID: convID, Seq: int32(info.Seq), HistoryID: info.PrimaryHistoryID,
+		DeltaMode: ChatDeltaModeReplace,
+	})
+	sendChunk(w, flusher, &ChatChunkResponse{
+		ConversationID: convID, Seq: int32(info.Seq), HistoryID: info.SecondaryHistoryID,
+		DeltaMode: ChatDeltaModeReplace,
+	})
 
 	for _, ch := range primaryChunks {
 		if ch != nil {

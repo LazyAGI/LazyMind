@@ -55,6 +55,8 @@ func (loader DBContextLoader) LoadAttemptContext(ctx context.Context, id string)
 					value.Prompt, value.Acceptance = node.Prompt, node.Acceptance
 					value.DeclaredOutputs, value.RequiredOutputs = node.Outputs, node.RequiredOutputs
 					value.Capabilities, value.LegacyTools = node.Capabilities, node.LegacyTools
+					value.TerminalTools = node.TerminalTools
+					value.ToolsOnly = node.ToolsOnly
 				}
 			}
 			cardinality, err := loader.loadOutputCardinality(ctx, revision.ID, value.DeclaredOutputs)

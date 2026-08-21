@@ -129,7 +129,7 @@ interface KnowledgePageProps {
 }
 
 const KnowledgePage: FC<KnowledgePageProps> = ({
-  modelSettingsPath = "/model-providers",
+  modelSettingsPath = "/settings?section=models",
 }) => {
   const [form] = Form.useForm();
   const navigate = useNavigate();
@@ -185,7 +185,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         ? t("knowledge.embeddingNotReadyBannerAdmin")
         : t("knowledge.multimodalEmbeddingNotReadyBannerAdmin")}
       <a
-        href="/model-providers"
+        href={modelSettingsPath}
         style={{ marginLeft: 8, color: "#fff", textDecoration: "underline" }}
         onClick={(e: MouseEvent<HTMLAnchorElement>) => {
           e.preventDefault();

@@ -390,6 +390,7 @@ const AssistantMessage = (props: any) => {
     length,
     sendMessage,
     regenerate,
+    regenerateDisabled,
     stopGeneration,
     renderText,
     updateMessage,
@@ -896,7 +897,9 @@ const AssistantMessage = (props: any) => {
               <Tooltip title={t("chat.regenerate")}>
                 <Button
                   className="tool-btn"
-                  icon={<ReloadOutlined />}
+                  aria-label={t("chat.regenerate")}
+                  disabled={regenerateDisabled}
+                  icon={<ReloadOutlined aria-hidden="true" />}
                   onClick={regenerate}
                 />
               </Tooltip>
@@ -969,7 +972,9 @@ const AssistantMessage = (props: any) => {
               <Tooltip title={t("chat.regenerate")}>
                 <Button
                   className="tool-btn"
-                  icon={<ReloadOutlined />}
+                  aria-label={t("chat.regenerate")}
+                  disabled={regenerateDisabled}
+                  icon={<ReloadOutlined aria-hidden="true" />}
                   onClick={regenerate}
                 />
               </Tooltip>
@@ -1102,7 +1107,11 @@ const AssistantMessage = (props: any) => {
     // Show error + regenerate on unknown/failed finish.
     if (runFailed) {
       return (
-        <Button className="stop-btn" onClick={regenerate}>
+        <Button
+          className="stop-btn"
+          disabled={regenerateDisabled}
+          onClick={regenerate}
+        >
           {t("chat.regenerate")}
         </Button>
       );
@@ -1117,6 +1126,7 @@ const AssistantMessage = (props: any) => {
           <Button
             className="stop-btn"
             style={{ marginLeft: 10 }}
+            disabled={regenerateDisabled}
             onClick={regenerate}
           >
             {t("chat.regenerate")}

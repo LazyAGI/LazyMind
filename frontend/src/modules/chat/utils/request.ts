@@ -236,6 +236,20 @@ export interface WriteBackWriterDocumentRequest {
   revised_document: Record<string, unknown>;
 }
 
+export type WriterDocumentSlot = 'outline_document' | 'draft_document';
+export type WriterDocumentRepresentation = 'markdown' | 'ir';
+export type RenderedWriterDocument = string | Record<string, unknown>;
+
+export interface RenderWriterDocumentResult {
+  title: string;
+  representation: WriterDocumentRepresentation;
+  document: RenderedWriterDocument;
+}
+
+export interface SaveWriterDocumentResult extends RenderWriterDocumentResult {
+  revision: number;
+}
+
 export type RewriteSelection =
   | { type: 'ir'; node_id: string }
   | { type: 'markdown'; selected_text: string }
@@ -443,6 +457,43 @@ export function WorkflowSessionApi() {
         data: SyncWriterDocumentResult;
       }>(
         `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}:sync-writer-document`,
+        payload,
+        options,
+      );
+    },
+    renderWriterDocument(
+      sessionId: string,
+      slot: WriterDocumentSlot,
+      options?: RawAxiosRequestConfig,
+    ) {
+      return axiosInstance.post<{
+        code: number;
+        message: string;
+        data: RenderWriterDocumentResult;
+      }>(
+        `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/writer-document:render`,
+        { slot },
+        options,
+      );
+    },
+    saveWriterDocument(
+      sessionId: string,
+      baseRevision: number,
+      document: RenderedWriterDocument,
+      slot: WriterDocumentSlot,
+      options?: RawAxiosRequestConfig,
+    ) {
+      const payload: Record<string, unknown> = {
+        base_revision: baseRevision,
+        document,
+      };
+      if (slot !== 'draft_document') payload.slot = slot;
+      return axiosInstance.post<{
+        code: number;
+        message: string;
+        data: SaveWriterDocumentResult;
+      }>(
+        `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/writer-document:save`,
         payload,
         options,
       );

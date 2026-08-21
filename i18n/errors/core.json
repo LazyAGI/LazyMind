@@ -1418,5 +1418,13 @@
   "2002280": { "en-US": "At least two internal skills are required", "zh-CN": "至少需要选择两个内部技能" },
   "2002281": { "en-US": "The ZIP downloader is not configured", "zh-CN": "未配置 ZIP 下载器" },
   "2002282": { "en-US": "Unsupported market skill source type", "zh-CN": "不支持的技能市场来源类型" },
-  "2002283": { "en-US": "The skill package storage path is required", "zh-CN": "缺少技能包存储路径" }
+  "2002283": { "en-US": "The skill package storage path is required", "zh-CN": "缺少技能包存储路径" },
+  "2002284": { "en-US": "Codex TCP bridge token is required", "zh-CN": "缺少 Codex TCP 桥接令牌" },
+  "2002285": { "en-US": "The converted Writer download is too large", "zh-CN": "转换后的 Writer 下载文件过大" },
+  "2002286": { "en-US": "Writer document slot is invalid", "zh-CN": "Writer 文档插槽无效" },
+  "2002287": { "en-US": "Active Writer artifact was not found", "zh-CN": "未找到活跃 Writer 制品" },
+  "2002288": { "en-US": "Writer editable document slot is invalid", "zh-CN": "Writer 可编辑文档插槽无效" },
+  "2002289": { "en-US": "Writer document is invalid", "zh-CN": "Writer 文档无效" },
+  "2002290": { "en-US": "Failed to decode the attempt result", "zh-CN": "解析执行结果失败" },
+  "2002291": { "en-US": "Workflow next step is not reachable", "zh-CN": "工作流下一步骤不可达" }
 }

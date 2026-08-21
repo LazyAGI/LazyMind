@@ -51,6 +51,9 @@ type rawStep struct {
 	Acceptance      any
 	Capabilities    any
 	Tools           any
+	TerminalTools   any
+	ToolsOnly       bool
+	StreamHeartbeat bool
 	Mode            string
 }
 
@@ -135,7 +138,8 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 		}
 		node := CompiledNode{ID: id, Label: step.Label, Route: step.Route, Prompt: step.Prompt,
 			Acceptance: stringList(step.Acceptance), Capabilities: stringList(step.Capabilities),
-			LegacyTools: stringList(step.Tools), Mode: step.Mode}
+			LegacyTools: stringList(step.Tools), TerminalTools: stringList(step.TerminalTools),
+			ToolsOnly: step.ToolsOnly, StreamHeartbeat: step.StreamHeartbeat, Mode: step.Mode}
 		if definition := workflowSteps[id]; definition != nil {
 			if len(node.Acceptance) == 0 {
 				node.Acceptance = stringList(definition["acceptance_criteria"])
@@ -201,6 +205,16 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 			result.Diagnostics = append(result.Diagnostics, nodeDiag(
 				"E_RUNTIME_EDIT_STEP_UNKNOWN", "error", "workflow.yaml.runtime.completed_edit_step",
 				stepID, "runtime completed edit step is not declared: "+stepID,
+			))
+		}
+	}
+	for i, stepID := range graph.Runtime.CompletedContinueSteps {
+		stepID = strings.TrimSpace(stepID)
+		graph.Runtime.CompletedContinueSteps[i] = stepID
+		if _, ok := workflowSteps[stepID]; !ok {
+			result.Diagnostics = append(result.Diagnostics, nodeDiag(
+				"E_RUNTIME_CONTINUE_STEP_UNKNOWN", "error", fmt.Sprintf("workflow.yaml.runtime.completed_continue_steps[%d]", i),
+				stepID, "runtime completed continue step is not declared: "+stepID,
 			))
 		}
 	}
@@ -524,7 +538,8 @@ func decodeRawStep(id string, raw map[string]any) rawStep {
 		Inputs: raw["inputs"], InputExpression: raw["input_expression"], OptionalInputs: raw["optional_inputs"],
 		Outputs: raw["outputs"], SkipIf: firstNonNil(raw["skip_if"], raw["skipif"]),
 		Prompt: scalar(raw["prompt"]), Acceptance: raw["acceptance_criteria"],
-		Capabilities: raw["capabilities"], Tools: raw["tools"], Mode: scalar(raw["mode"])}
+		Capabilities: raw["capabilities"], Tools: raw["tools"], TerminalTools: raw["terminal_tools"],
+		ToolsOnly: boolValue(raw["tools_only"]), StreamHeartbeat: boolValue(raw["stream_heartbeat"]), Mode: scalar(raw["mode"])}
 }
 
 func stringList(value any) []string {

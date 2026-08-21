@@ -28,6 +28,8 @@ type AttemptContext struct {
 	OutputCardinality   map[string]string `json:"output_cardinality,omitempty"`
 	Capabilities        []string          `json:"capabilities,omitempty"`
 	LegacyTools         []string          `json:"legacy_tools,omitempty"`
+	TerminalTools       []string          `json:"terminal_tools,omitempty"`
+	ToolsOnly           bool              `json:"tools_only,omitempty"`
 	Metadata            map[string]string `json:"metadata,omitempty"`
 }
 
@@ -38,10 +40,15 @@ type Artifact struct {
 	Seq         int             `json:"seq"`
 }
 
+type Control struct {
+	NextStep string `json:"next_step,omitempty"`
+}
+
 type Result struct {
 	Summary     string         `json:"summary,omitempty"`
 	ExecutorRef string         `json:"executor_ref,omitempty"`
 	Artifacts   []Artifact     `json:"artifacts,omitempty"`
+	Control     *Control       `json:"control,omitempty"`
 	Projection  map[string]any `json:"projection,omitempty"`
 }
 

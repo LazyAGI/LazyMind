@@ -281,6 +281,17 @@
     }
   }
 
+  .right-box.right-box--ordinary {
+    background-color: #fff;
+  }
+
+  @media (min-width: 961px) {
+    .right-box.right-box--ordinary {
+      width: clamp(380px, 28vw, 440px);
+      min-width: 380px;
+    }
+  }
+
   // Keep this after the base .right-box rule: equal-specificity declarations in
   // that rule otherwise reset the expanded tab back to relative positioning.
   &--workflow-expanded > .right-box.right-box--expanded-tab {

@@ -13,6 +13,7 @@ import (
 
 	"lazymind/core/common/orm"
 	"lazymind/core/subagent"
+	"lazymind/core/workflow/graphengine"
 )
 
 // ──────────────────────────────────────────────
@@ -53,6 +54,39 @@ func seedSessionAndTask(t *testing.T, ctx context.Context, gdb interface {
 	CreateSession(context.Context, CreateSessionInput) error
 }, sessionID, convID, workflowID, stepID, taskID string) {
 	t.Helper()
+}
+
+func seedEventLoopRevision(t *testing.T, db *orm.DB, revisionID string) (string, string) {
+	t.Helper()
+	if err := db.AutoMigrate(
+		&orm.WorkflowRevision{},
+		&orm.WorkflowRouteDecision{},
+		&orm.WorkflowInputBinding{},
+		&orm.WorkflowAttemptInputBinding{},
+	); err != nil {
+		t.Fatalf("migrate workflow runtime tables: %v", err)
+	}
+	graph := graphengine.CompiledStateGraph{
+		SchemaVersion: graphengine.SchemaVersion,
+		GraphHash:     revisionID + "-graph",
+		StartRoute:    "analyze_subject",
+		Nodes: map[string]graphengine.CompiledNode{
+			"analyze_subject": {ID: "analyze_subject"},
+			"generate_image":  {ID: "generate_image"},
+		},
+		ControlEdges: []graphengine.CompiledEdge{
+			{From: "__start__", To: "analyze_subject"},
+			{From: "analyze_subject", To: "generate_image"},
+		},
+	}
+	if err := db.Create(&orm.WorkflowRevision{
+		ID: revisionID, WorkflowResourceID: revisionID + "-resource", RevisionNo: 1,
+		CompiledGraph: graph.JSON(), GraphHash: graph.GraphHash,
+		GraphSchemaVersion: graph.SchemaVersion, CreatedAt: time.Now().UTC(),
+	}).Error; err != nil {
+		t.Fatalf("create workflow revision: %v", err)
+	}
+	return graph.GraphHash, graph.SchemaVersion
 }
 
 // ──────────────────────────────────────────────
@@ -106,9 +140,11 @@ func TestConversationPreflightMustBeReadyAndIsConsumed(t *testing.T) {
 func TestOnSubAgentDone_SucceededManualMode(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
+	graphHash, graphSchemaVersion := seedEventLoopRevision(t, db, "revision-manual")
 
 	if _, err := CreateSession(ctx, db.DB, CreateSessionInput{
 		SessionID: "ps-1", ConversationID: "conv-1", WorkflowID: "image-workflow",
+		WorkflowRevisionID: "revision-manual", GraphHash: graphHash, GraphSchemaVersion: graphSchemaVersion,
 	}); err != nil {
 		t.Fatalf("session: %v", err)
 	}
@@ -291,8 +327,10 @@ func TestAppendHandoffHistorySummary_SkipsInlineExecution(t *testing.T) {
 func TestOnSubAgentDone_ExplicitNoHandOffWaitsForChatAgent(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
+	graphHash, graphSchemaVersion := seedEventLoopRevision(t, db, "revision-inline")
 	if _, err := CreateSession(ctx, db.DB, CreateSessionInput{
 		SessionID: "ps-inline", ConversationID: "conv-inline", WorkflowID: "image-workflow",
+		WorkflowRevisionID: "revision-inline", GraphHash: graphHash, GraphSchemaVersion: graphSchemaVersion,
 	}); err != nil {
 		t.Fatalf("session: %v", err)
 	}

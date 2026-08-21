@@ -86,6 +86,8 @@ runtime:
   publisher_owned_slots: [final]
   collects_knowledge: true
   completed_edit_step: f
+  completed_continue_steps: [f]
+  exclusive_tool_capabilities: [writer.create]
   clarification_fields:
     - id: topic
       label: Topic
@@ -101,7 +103,7 @@ runtime:
 		t.Fatalf("expected valid runtime policy, diagnostics=%#v", result.Diagnostics)
 	}
 	policy := result.Graph.Runtime
-	if !policy.CollectsKnowledge || policy.CompletedEditStep != "f" || len(policy.PublisherOwnedSlots) != 1 || policy.PublisherOwnedSlots[0] != "final" {
+	if !policy.CollectsKnowledge || policy.CompletedEditStep != "f" || len(policy.CompletedContinueSteps) != 1 || policy.CompletedContinueSteps[0] != "f" || len(policy.ExclusiveToolCapabilities) != 1 || policy.ExclusiveToolCapabilities[0] != "writer.create" || len(policy.PublisherOwnedSlots) != 1 || policy.PublisherOwnedSlots[0] != "final" {
 		t.Fatalf("runtime policy was not compiled: %#v", policy)
 	}
 	if len(policy.ClarificationFields) != 2 || policy.ClarificationFields[0].ID != "topic" || policy.ClarificationFields[1].Choices[1] != "Minimal" {

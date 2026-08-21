@@ -194,6 +194,15 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err := m.killStaleRuntimeProcesses(ctx, stateCfg, paths); err != nil {
 		return err
 	}
+	pythonPreparationStartedAt := m.now()
+	m.progressf("checking bundled Python runtime payload")
+	m.startupEvent("phase.started", "python-payload", pythonPreparationStartedAt, nil)
+	if err := prepareBundledPythonRuntime(paths); err != nil {
+		m.startupEvent("phase.failed", "python-payload", pythonPreparationStartedAt, err)
+		return fmt.Errorf("prepare bundled Python runtime after %s: %w", m.now().Sub(pythonPreparationStartedAt).Round(time.Millisecond), err)
+	}
+	m.startupEvent("phase.completed", "python-payload", pythonPreparationStartedAt, nil)
+	m.progressf("bundled Python runtime check completed in %s", m.now().Sub(pythonPreparationStartedAt).Round(time.Millisecond))
 	freshCfg, paths, err = NewRuntimeConfigWithOptions(RuntimeConfigOptions{
 		Profile:         cfg.Profile,
 		MaintenanceMode: cfg.MaintenanceMode,

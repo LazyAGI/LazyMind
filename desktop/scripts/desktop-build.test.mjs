@@ -133,10 +133,13 @@ test("Windows installer accepts development and release package versions", () =>
     "1.2.3-alpha.2",
     "1.2.3-beta.4",
     "1.2.3-rc.1",
+    "1.2.3-preview",
+    "1.2.3-preview.1+build.7",
   ]) {
     assert.match(version, versionPattern);
   }
-  assert.doesNotMatch("1.2.3-preview", versionPattern);
+  assert.doesNotMatch("v1.2.3", versionPattern);
+  assert.doesNotMatch("1.2", versionPattern);
 });
 
 test("Windows installer force-stops LazyMind before invoking an old uninstaller", () => {
@@ -188,7 +191,7 @@ test("Windows installer diagnoses paths and does not roll back when warmup fails
   );
   assert.match(
     install,
-    /ExecWait[^\n]+--installer-warmup --timeout-seconds 360[^\n]+\$3[\s\S]*LMWarmupCheckStopped:[\s\S]*check-stopped --install-dir "\$INSTDIR"/,
+    /\$InstallTypeChoice == "full"[\s\S]*ExecWait[^\n]+--installer-warmup --timeout-seconds 360[^\n]+\$3[\s\S]*LMWarmupCheckStopped:[\s\S]*check-stopped --install-dir "\$INSTDIR"/,
   );
   assert.match(install, /Starting Electron installer warmup \(timeout=360s\)/);
   assert.match(install, /installer-nsis\.log[\s\S]*Starting Electron installer warmup/);
@@ -200,6 +203,24 @@ test("Windows installer diagnoses paths and does not roll back when warmup fails
   assert.match(install, /\$4 == 1[\s\S]*StrCpy \$3 4[\s\S]*\$3 != 0/);
   assert.doesNotMatch(install, /MB_ABORTRETRYIGNORE|SetErrorLevel 4/);
   assert.match(install, /installation will continue/);
+});
+
+test("Windows installer offers simple and full installation modes", () => {
+  const source = readFileSync(installerScript, "utf8");
+  const init = nsisMacro(source, "customInit");
+  const pages = nsisMacro(source, "customPageAfterChangeDir");
+  const install = nsisMacro(source, "customInstall");
+
+  assert.match(source, /LangString LMSimpleInstall[^\n]+"Simple installation \(recommended\)"/);
+  assert.match(source, /LangString LMSimpleInstall[^\n]+"简易安装（推荐）"/);
+  assert.match(source, /LangString LMFullInstall[^\n]+"Full installation"/);
+  assert.match(source, /LangString LMFullInstall[^\n]+"完整安装"/);
+  assert.match(init, /StrCpy \$InstallTypeChoice "simple"/);
+  assert.match(init, /--full-install[\s\S]*StrCpy \$InstallTypeChoice "full"/);
+  assert.match(init, /--simple-install[\s\S]*StrCpy \$InstallTypeChoice "simple"/);
+  assert.match(pages, /PageCallbacks LMInstallTypePageCreate LMInstallTypePageLeave/);
+  assert.match(install, /\$InstallTypeChoice == "full"[\s\S]*--installer-warmup/);
+  assert.match(install, /Simple installation selected; bundled Python will be prepared on first launch/);
 });
 
 test("Windows CI treats branches as non-tags without leaking git probe failures", () => {
@@ -223,7 +244,7 @@ test("Windows CI treats branches as non-tags without leaking git probe failures"
     source,
     /test-windows-installer:[\s\S]*name: Checkout smoke test scripts[\s\S]*ref: \$\{\{ inputs\.git_ref \|\| github\.ref \}\}[\s\S]*name: Download the exact installer built above/,
   );
-  assert.match(source, /Start-Process -FilePath \$env:INSTALLER_PATH -ArgumentList "\/S" -Wait/);
+  assert.match(source, /Start-Process -FilePath \$env:INSTALLER_PATH -ArgumentList "\/S --full-install" -Wait/);
   assert.match(source, /DisplayVersion -ne \$env:EXPECTED_VERSION/);
   assert.match(source, /expectedProductVersion = "\$\(\$Matches\[1\]\)\.\$\(\$Matches\[2\]\)\.\$\(\$Matches\[3\]\)\.0"/);
   assert.match(source, /Start-Process -FilePath \$uninstaller -ArgumentList "\/S" -Wait/);
@@ -245,13 +266,22 @@ test("Windows NSIS installer uses electron-builder's default LZMA payload", () =
   assert.match(packageJson.scripts["pack:win:x64"], /--publish never$/);
   assert.match(packageJson.scripts["pack:win:x64:installer"], /--publish never$/);
   assert.match(buildScript, /function Invoke-WindowsPackagingWithRetry/);
+  assert.match(buildScript, /\[0-9A-Za-z-\]\+/, "development SemVer identifiers such as 0.3.0-dev must be accepted");
   assert.match(buildScript, /function Invoke-NativeWithRetry/);
   assert.match(buildScript, /maximumAttempts = 3/);
   assert.match(buildScript, /ELECTRON_CACHE/);
   assert.match(buildScript, /ELECTRON_BUILDER_CACHE/);
   assert.match(buildScript, /LAZYMIND_TRUSTED_LOCAL_MODE/);
   assert.match(buildScript, /--trusted-local-mode', \$trustedLocalMode/);
+  assert.match(buildScript, /function New-DeferredPythonRuntimeStage/);
+  assert.match(buildScript, /python-runtime\.zip/);
+  assert.match(buildScript, /Add-Type -AssemblyName System\.IO\.Compression\s/);
+  assert.match(buildScript, /robocopy\.exe \$runtimeRoot \$packagedRuntimeRoot[^\n]+\| Out-Null/);
+  assert.match(buildScript, /CompressionLevel\]::NoCompression/);
+  assert.match(buildScript, /LAZYMIND_DESKTOP_RUNTIME_STAGE = New-DeferredPythonRuntimeStage/);
+  assert.match(buildScript, /'resume-installer' \{ Invoke-Doctor; Finalize-Desktop 'installer' \}/);
   assert.match(workflow, /Cache Electron and electron-builder downloads/);
+  assert.match(workflow, /ArgumentList "\/S --full-install"/);
   assert.match(workflow, /Submodule checkout attempt \$attempt\/3 failed/);
   assert.match(workflow, /pnpm activation attempt \$attempt\/3 failed/);
 });

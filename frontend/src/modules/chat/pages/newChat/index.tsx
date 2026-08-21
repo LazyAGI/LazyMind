@@ -129,7 +129,7 @@ const NewChatPage = () => {
       {t("chat.retryCheckModelProvider")}
     </Button>
   ) : (
-    <Button type="primary" size="small" onClick={() => navigate("/model-providers/default-services")}>
+    <Button type="primary" size="small" onClick={() => navigate("/settings?section=models")}>
       {t("chat.goConfigureModelProvider")}
     </Button>
   );
@@ -459,7 +459,7 @@ const NewChatPage = () => {
                         type="primary"
                         size="small"
                         className="model-provider-warning-action"
-                        onClick={() => navigate("/model-providers/default-services")}
+                        onClick={() => navigate("/settings?section=models")}
                       >
                         {t("knowledge.goToConfig")}
                       </Button>
