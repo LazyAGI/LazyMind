@@ -120,6 +120,25 @@ test("normalizes shared desktop release tags to standard SemVer", async () => {
   assert.throws(() => normalizeReleaseTag("release-1.2"), /Unsupported release tag/);
 });
 
+test("Windows installer accepts development and release package versions", () => {
+  const source = readFileSync(path.join(scriptsDir, "build-windows-x64.ps1"), "utf8");
+  const packageJson = JSON.parse(readFileSync(electronPackage, "utf8"));
+  const match = source.match(/\[string\]\$package\.version -notmatch '([^']+)'/);
+  assert.ok(match, "missing Windows installer package version validation");
+
+  const versionPattern = new RegExp(match[1]);
+  for (const version of [
+    packageJson.version,
+    "1.2.3",
+    "1.2.3-alpha.2",
+    "1.2.3-beta.4",
+    "1.2.3-rc.1",
+  ]) {
+    assert.match(version, versionPattern);
+  }
+  assert.doesNotMatch("1.2.3-preview", versionPattern);
+});
+
 test("Windows installer force-stops LazyMind before invoking an old uninstaller", () => {
   const source = readFileSync(installerScript, "utf8");
   const check = nsisMacro(source, "customCheckAppRunning");
@@ -169,9 +188,9 @@ test("Windows installer diagnoses paths and does not roll back when warmup fails
   );
   assert.match(
     install,
-    /ExecWait[^\n]+--installer-warmup --timeout-seconds 240[^\n]+\$3[\s\S]*LMWarmupCheckStopped:[\s\S]*check-stopped --install-dir "\$INSTDIR"/,
+    /ExecWait[^\n]+--installer-warmup --timeout-seconds 360[^\n]+\$3[\s\S]*LMWarmupCheckStopped:[\s\S]*check-stopped --install-dir "\$INSTDIR"/,
   );
-  assert.match(install, /Starting Electron installer warmup \(timeout=240s\)/);
+  assert.match(install, /Starting Electron installer warmup \(timeout=360s\)/);
   assert.match(install, /installer-nsis\.log[\s\S]*Starting Electron installer warmup/);
   assert.match(install, /Electron installer warmup returned exit code \$3/);
   assert.match(
