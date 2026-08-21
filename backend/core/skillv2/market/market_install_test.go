@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	skillservice "lazymind/core/skillv2/service"
 	"lazymind/core/skillv2/testutil"
 )
 
@@ -70,6 +71,57 @@ func TestMarketInstall_CopiesSkillTreeForUser(t *testing.T) {
 	}
 	if got := testutil.CountRows(t, db, "skill_market_installs", "market_item_id = ? AND user_id = ?", "market_item1", "user_002"); got != 1 {
 		t.Fatalf("market install row count after reinstall = %d, want 1", got)
+	}
+}
+
+func TestMarketInstall_RestoresTrashedInstalledSkill(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "market_skill", "market_rev1")
+	testutil.MustCreate(t, db, &testutil.SkillMarketItemRow{
+		ID:            "market_item1",
+		SourceSkillID: "market_skill",
+		Status:        "published",
+		CreatedAt:     testutil.TimeFixture(),
+		UpdatedAt:     testutil.TimeFixture(),
+	})
+	marketService := NewService(ServiceDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
+
+	installed, err := marketService.Install(context.Background(), InstallRequest{
+		MarketItemID: "market_item1",
+		UserID:       "user_002",
+		UserName:     "李四",
+	})
+	if err != nil {
+		t.Fatalf("initial Install returned error: %v", err)
+	}
+
+	skillService := skillservice.NewSkillService(skillservice.SkillServiceDeps{DB: db.DB})
+	if err := skillService.DeleteSkill(context.Background(), skillservice.DeleteSkillRequest{
+		SkillID: installed.SkillID,
+		UserID:  "user_002",
+	}); err != nil {
+		t.Fatalf("DeleteSkill returned error: %v", err)
+	}
+
+	reinstalled, err := marketService.Install(context.Background(), InstallRequest{
+		MarketItemID: "market_item1",
+		UserID:       "user_002",
+		UserName:     "李四",
+	})
+	if err != nil {
+		t.Fatalf("reinstall returned error: %v", err)
+	}
+	if reinstalled.SkillID != installed.SkillID {
+		t.Fatalf("reinstall returned skill %q, want restored skill %q", reinstalled.SkillID, installed.SkillID)
+	}
+	if got := testutil.CountRows(t, db, "skills", "id = ? AND deleted_at IS NOT NULL", installed.SkillID); got != 0 {
+		t.Fatalf("trashed installed skill count after reinstall = %d, want 0", got)
+	}
+	if got := testutil.CountRows(t, db, "skills", "id = ? AND deleted_at IS NULL", installed.SkillID); got != 1 {
+		t.Fatalf("restored installed skill count after reinstall = %d, want 1", got)
+	}
+	if got := testutil.CountRows(t, db, "skill_market_installs", "market_item_id = ? AND user_id = ? AND skill_id = ?", "market_item1", "user_002", installed.SkillID); got != 1 {
+		t.Fatalf("market install record count after restore = %d, want 1", got)
 	}
 }
 
