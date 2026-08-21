@@ -1,7 +1,8 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Button, Empty, Input, Popconfirm, Radio, Switch, Table, Tag, Tooltip, message } from 'antd';
+import { Button, Empty, Input, Popconfirm, Radio, Select, Table, Tag, Tooltip, message } from 'antd';
 import { DeleteOutlined, EditOutlined, EyeOutlined, PlusOutlined } from '@ant-design/icons';
 import type { ColumnsType } from 'antd/es/table';
+import type { SelectProps } from 'antd';
 import { useNavigate } from 'react-router-dom';
 import { getLocalizedTablePagination } from '@/components/ui/pagination';
 import {
@@ -10,9 +11,9 @@ import {
   updateWorkflowDraftContent,
   listBuiltinWorkflows,
   listUserWorkflowSettings,
-  setUserWorkflowEnabled,
+  setUserWorkflowCallMode,
 } from '@/modules/workflow/workflowDraftApi';
-import type { WorkflowDraftRecord, BuiltinWorkflow } from '@/modules/workflow/workflowDraftApi';
+import type { WorkflowDraftRecord, BuiltinWorkflow, WorkflowCallMode } from '@/modules/workflow/workflowDraftApi';
 import WorkflowInfoModal from '@/modules/workflow/components/StateGraphEditor/WorkflowInfoModal';
 import { parseWorkflowYaml } from '@/modules/workflow/components/StateGraphEditor/core/workflowParser';
 import { serializeWorkflowModel } from '@/modules/workflow/components/StateGraphEditor/core/workflowSerializer';
@@ -35,6 +36,7 @@ type WorkflowRow =
   | ({ _type: 'builtin' } & BuiltinWorkflow & { updated_at?: never; generate_status?: never });
 
 type TypeFilter = 'all' | 'builtin' | 'draft';
+type CallModeOption = { value: WorkflowCallMode; label: string; title: string };
 
 const PAGE_SIZE = 10;
 
@@ -47,7 +49,8 @@ export default function WorkflowInstalledView({
   const navigate = useNavigate();
   const [draftRecords, setDraftRecords] = useState<WorkflowDraftRecord[]>([]);
   const [builtinWorkflows, setBuiltinWorkflows] = useState<BuiltinWorkflow[]>([]);
-  const [enabledByRef, setEnabledByRef] = useState<Record<string, boolean>>({});
+  const [callModeByRef, setCallModeByRef] = useState<Record<string, WorkflowCallMode>>({});
+  const [callModePendingByRef, setCallModePendingByRef] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(false);
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState('');
@@ -67,7 +70,10 @@ export default function WorkflowInstalledView({
       ]);
       setDraftRecords(draftsResp.records ?? []);
       setBuiltinWorkflows(builtins);
-      setEnabledByRef(Object.fromEntries(workflowSettings.map((item) => [item.workflow_ref, item.enabled])));
+      setCallModeByRef(Object.fromEntries(workflowSettings.map((item) => [
+        item.workflow_ref,
+        item.call_mode ?? (item.enabled ? 'auto' : 'disabled'),
+      ])));
     } catch {
     } finally {
       setLoading(false);
@@ -99,11 +105,19 @@ export default function WorkflowInstalledView({
     setPage(1);
   };
 
-  const handleEnabledChange = async (workflowRef: string, enabled: boolean) => {
-    const previous = enabledByRef[workflowRef] ?? false;
-    setEnabledByRef((current) => ({ ...current, [workflowRef]: enabled }));
-    try { await setUserWorkflowEnabled(workflowRef, enabled); message.success(enabled ? 'Workflow 已默认启用' : 'Workflow 已默认关闭'); }
-    catch { setEnabledByRef((current) => ({ ...current, [workflowRef]: previous })); }
+  const handleCallModeChange = async (workflowRef: string, callMode: WorkflowCallMode) => {
+    const previous = callModeByRef[workflowRef] ?? 'disabled';
+    setCallModeByRef((current) => ({ ...current, [workflowRef]: callMode }));
+    setCallModePendingByRef((current) => ({ ...current, [workflowRef]: true }));
+    try {
+      await setUserWorkflowCallMode(workflowRef, callMode);
+      message.success(t('admin.memoryWorkflowCallModeUpdated'));
+    } catch {
+      setCallModeByRef((current) => ({ ...current, [workflowRef]: previous }));
+      message.error(t('admin.memoryWorkflowCallModeUpdateFailed'));
+    } finally {
+      setCallModePendingByRef((current) => ({ ...current, [workflowRef]: false }));
+    }
   };
 
   const openInfoModal = (record: WorkflowDraftRecord) => {
@@ -255,14 +269,42 @@ export default function WorkflowInstalledView({
       },
     },
     {
-      title: '默认启用',
-      key: 'default_enabled',
-      width: 110,
+      title: t('admin.memoryWorkflowColCallMode'),
+      key: 'call_mode',
+      width: 180,
       align: 'center',
       render: (_: unknown, row: WorkflowRow) => {
         const workflowRef = row._type === 'builtin' ? `builtin:${row.id}` : row.published_workflow_ref;
-        if (!workflowRef) return <Tooltip title="发布后才可启用"><Switch size="small" disabled /></Tooltip>;
-        return <Switch size="small" checked={enabledByRef[workflowRef] ?? (row._type === 'builtin')} onChange={(enabled) => void handleEnabledChange(workflowRef, enabled)} />;
+        const callMode = callModeByRef[workflowRef] ?? (row._type === 'builtin' ? 'auto' : 'disabled');
+        const options: CallModeOption[] = [
+          { value: 'auto', label: t('admin.memoryWorkflowCallModeAuto'), title: t('admin.memoryWorkflowCallModeAutoDesc') },
+          { value: 'manual', label: t('admin.memoryWorkflowCallModeManual'), title: t('admin.memoryWorkflowCallModeManualDesc') },
+          { value: 'disabled', label: t('admin.memoryWorkflowCallModeDisabled'), title: t('admin.memoryWorkflowCallModeDisabledDesc') },
+        ];
+        const renderOption: NonNullable<SelectProps<WorkflowCallMode, CallModeOption>['optionRender']> = (option) => (
+          <div className="memory-skill-call-mode-option">
+            <div className="memory-skill-call-mode-option__label">{option.data.label}</div>
+            <div className="memory-skill-call-mode-option__description">{option.data.title}</div>
+          </div>
+        );
+        const select = (
+          <Select<WorkflowCallMode, CallModeOption>
+            size="small"
+            value={callMode}
+            options={options}
+            className={`memory-skill-call-mode-select is-${callMode}`}
+            variant="borderless"
+            popupMatchSelectWidth={300}
+            classNames={{ popup: { root: 'memory-skill-call-mode-dropdown' } }}
+            loading={Boolean(callModePendingByRef[workflowRef])}
+            disabled={!workflowRef || Boolean(callModePendingByRef[workflowRef])}
+            aria-label={`${t('admin.memoryWorkflowColCallMode')}: ${row.name}`}
+            style={{ width: 160, textAlign: 'left' }}
+            optionRender={renderOption}
+            onChange={(value: WorkflowCallMode) => void handleCallModeChange(workflowRef, value)}
+          />
+        );
+        return workflowRef ? select : <Tooltip title={t('admin.memoryWorkflowCallModePublishHint')}>{select}</Tooltip>;
       },
     },
     {
