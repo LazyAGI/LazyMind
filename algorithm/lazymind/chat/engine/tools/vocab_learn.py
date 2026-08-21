@@ -4,7 +4,7 @@ from typing import Any, Dict, List
 import lazyllm
 import requests
 from lazyllm import LOG
-from lazyllm.tools.agent import ToolInvalidArgumentsError, ToolTransientError
+from lazyllm.tools.agent import ToolExecutionError
 
 from lazymind.chat.engine.tools.infra import (
     VocabSuggestion,
@@ -57,12 +57,12 @@ def vocab_learn(suggestions: List[VocabSuggestion]) -> Dict[str, Any]:
 
     if not suggestions:
         LOG.warning("[VocabTool] rejected reason='suggestions' must be a non-empty list.")
-        raise ToolInvalidArgumentsError("'suggestions' must be a non-empty list.")
+        raise ToolExecutionError("'suggestions' must be a non-empty list.")
     if len(suggestions) > MAX_VOCAB_SUGGESTIONS_PER_CALL:
         LOG.warning(
             f'[VocabTool] rejected reason=too_many_suggestions count={len(suggestions)}'
         )
-        raise ToolInvalidArgumentsError(
+        raise ToolExecutionError(
             f'At most {MAX_VOCAB_SUGGESTIONS_PER_CALL} suggestions are allowed per call; '
             f'got {len(suggestions)}.',
         )
@@ -71,12 +71,12 @@ def vocab_learn(suggestions: List[VocabSuggestion]) -> Dict[str, Any]:
     session_id = str(agentic_config.get('session_id') or '').strip()
     if not session_id:
         LOG.warning("[VocabTool] rejected reason='session_id' is required in agentic_config.")
-        raise ToolInvalidArgumentsError("'session_id' is required in agentic_config.")
+        raise ToolExecutionError("'session_id' is required in agentic_config.")
 
     user_id = resolve_vocab_user_id(agentic_config)
     if not user_id:
         LOG.warning("[VocabTool] rejected reason='user_id' is required in agentic_config.")
-        raise ToolInvalidArgumentsError('user_id is required in agentic_config.')
+        raise ToolExecutionError('user_id is required in agentic_config.')
 
     suggestion_log = json.dumps(
         [summarize_vocab_suggestion_for_log(item) for item in suggestions],
@@ -165,7 +165,7 @@ def vocab_learn(suggestions: List[VocabSuggestion]) -> Dict[str, Any]:
         result.update(post_core_api(_WORD_GROUP_APPLY_INTERNAL_PATH, payload))
     except (requests.RequestException, RuntimeError) as exc:
         LOG.error(f'[VocabTool] failed to submit vocab suggestions user_id={user_id!r}: {exc}')
-        raise ToolTransientError(
+        raise ToolExecutionError(
             f'Failed to submit vocab suggestions: {exc}',
         ) from exc
 

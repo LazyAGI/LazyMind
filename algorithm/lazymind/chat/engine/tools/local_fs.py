@@ -25,12 +25,7 @@ import subprocess
 from typing import Any, Dict, List, Optional
 
 import lazyllm
-from lazyllm.tools.agent import (
-    ToolDomainError,
-    ToolInvalidArgumentsError,
-    ToolPermissionError,
-    ToolTransientError,
-)
+from lazyllm.tools.agent import ToolExecutionError
 
 from lazymind.chat.engine.tools.text_edit import replace_exact_text_file
 
@@ -86,7 +81,7 @@ class LocalFileToolkit:
         """
         scopes = self._get_scopes()
         if not scopes:
-            raise ToolPermissionError('No local filesystem paths are configured')
+            raise ToolExecutionError('No local filesystem paths are configured')
         target = os.path.realpath(target)
         for scope in scopes:
             for root in scope.roots:
@@ -97,18 +92,18 @@ class LocalFileToolkit:
                 except ValueError:
                     continue
         roots = [root for scope in scopes for root in scope.roots]
-        raise ToolPermissionError(f'Path {target} is not within allowed paths: {roots}')
+        raise ToolExecutionError(f'Path {target} is not within allowed paths: {roots}')
 
     def _resolve_dir(self, path: str) -> tuple[str, LocalFSScope]:
         resolved, scope = self._resolve_with_scope(path)
         if not os.path.isdir(resolved):
-            raise ToolInvalidArgumentsError(f'Path is not a directory: {path}')
+            raise ToolExecutionError(f'Path is not a directory: {path}')
         return resolved, scope
 
     def _iter_roots(self, path: Optional[str]) -> list[tuple[str, LocalFSScope]]:
         scopes = self._get_scopes()
         if not scopes:
-            raise ToolPermissionError('No local filesystem paths are configured')
+            raise ToolExecutionError('No local filesystem paths are configured')
         if path is None or str(path).strip() in ('', '.'):
             roots: list[tuple[str, LocalFSScope]] = []
             for scope in scopes:
@@ -128,7 +123,7 @@ class LocalFileToolkit:
 
     def _ensure_visible_file(self, scope: LocalFSScope, path: str) -> None:
         if not self._is_visible_file(scope, path):
-            raise ToolPermissionError(f'File extension is not allowed: {path}')
+            raise ToolExecutionError(f'File extension is not allowed: {path}')
 
     def _resolve_visible_file(self, path: str) -> Optional[tuple[str, LocalFSScope]]:
         try:
@@ -206,7 +201,7 @@ class LocalFileToolkit:
                         entries.append(self._entry(entry_path, entry_scope))
                     elif entry.is_file(follow_symlinks=True) and self._is_visible_file(entry_scope, entry_path):
                         entries.append(self._entry(entry_path, entry_scope))
-                except (OSError, ToolPermissionError):
+                except (OSError, ToolExecutionError):
                     continue
                 if len(entries) >= limit:
                     break
@@ -236,7 +231,7 @@ class LocalFileToolkit:
             if self._has_rg():
                 proc = self._run_rg(['--files', '--no-ignore', '--hidden', '--glob', pattern], cwd=safe_dir)
                 if proc.returncode > 1:
-                    raise ToolDomainError(
+                    raise ToolExecutionError(
                         f'ripgrep glob failed: {proc.stderr.strip() or "unknown error"}'
                     )
                 raw = [os.path.join(safe_dir, p) for p in proc.stdout.splitlines() if p.strip()]
@@ -299,13 +294,12 @@ class LocalFileToolkit:
         try:
             proc = self._run_rg(args, cwd=safe_dir)
         except subprocess.TimeoutExpired:
-            raise ToolTransientError(
-                f'Search timed out (>{_RG_TIMEOUT}s)',
-                code='SEARCH_TIMEOUT', details={'error_type': 'Timeout'},
+            raise ToolExecutionError(
+                f'Search timed out after {_RG_TIMEOUT} seconds.'
             )
 
         if proc.returncode > 1:
-            raise ToolDomainError(
+            raise ToolExecutionError(
                 f'ripgrep search failed: {proc.stderr.strip() or "unknown error"}'
             )
 
@@ -350,7 +344,7 @@ class LocalFileToolkit:
         try:
             regex = re.compile(pattern)
         except re.error as exc:
-            raise ToolInvalidArgumentsError(f'Invalid regex: {exc}') from exc
+            raise ToolExecutionError(f'Invalid regex: {exc}') from exc
 
         matches: List[Dict[str, Any]] = []
         for root, _dirs, files in os.walk(safe_dir):
@@ -405,10 +399,7 @@ class LocalFileToolkit:
         """
         safe_path, scope = self._resolve_with_scope(filepath)
         if not os.path.isfile(safe_path):
-            raise ToolDomainError(
-                f'File not found: {filepath}', code='RESOURCE_NOT_FOUND',
-                details={'resource_type': 'file'},
-            )
+            raise ToolExecutionError(f'File not found: {filepath}')
         self._ensure_visible_file(scope, safe_path)
 
         try:
@@ -420,7 +411,7 @@ class LocalFileToolkit:
                     if start_line <= index < start_line + max_lines:
                         chunk.append(line)
         except OSError as exc:
-            raise ToolDomainError(f'Cannot read file: {exc}') from exc
+            raise ToolExecutionError(f'Cannot read file: {exc}') from exc
 
         return {
             'filepath': safe_path,
@@ -458,10 +449,7 @@ class LocalFileToolkit:
         """
         safe_path, scope = self._resolve_with_scope(filepath)
         if not os.path.isfile(safe_path):
-            raise ToolDomainError(
-                f'File not found: {filepath}', code='RESOURCE_NOT_FOUND',
-                details={'resource_type': 'file'},
-            )
+            raise ToolExecutionError(f'File not found: {filepath}')
         self._ensure_visible_file(scope, safe_path)
 
         try:
@@ -473,7 +461,7 @@ class LocalFileToolkit:
                 encoding=encoding,
             )
         except ValueError as exc:
-            raise ToolInvalidArgumentsError(str(exc)) from exc
+            raise ToolExecutionError(str(exc)) from exc
 
         return {
             'filepath': safe_path,
@@ -504,7 +492,7 @@ class LocalFileToolkit:
         try:
             st = os.stat(safe_path)
         except OSError as exc:
-            raise ToolDomainError(f'Cannot get file info: {exc}') from exc
+            raise ToolExecutionError(f'Cannot get file info: {exc}') from exc
 
         return {
             'path': safe_path,

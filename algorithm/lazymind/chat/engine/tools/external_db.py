@@ -5,7 +5,7 @@ import re
 from typing import Any, Dict, List, Optional
 from urllib.parse import urlencode
 
-from lazyllm.tools.agent import ToolInvalidArgumentsError
+from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools.sql.sql_manager import SqlManager
 
 from lazymind.chat.engine.tools.infra import get_core_api
@@ -95,7 +95,7 @@ class ExternalDatabaseToolkit:
     def _connection(self, connection_id: str) -> Dict[str, Any]:
         connection_id = str(connection_id or '').strip()
         if not connection_id:
-            raise ToolInvalidArgumentsError('connection_id is required')
+            raise ToolExecutionError('connection_id is required')
         return get_core_api(f'/data-sources/database-connections/{connection_id}:secret')
 
     def _manager(self, connection_id: str) -> ReadOnlySqlManager:
@@ -126,9 +126,8 @@ class ExternalDatabaseToolkit:
         """Execute one Agent-generated read-only SELECT/WITH SQL statement on a configured external database."""
         readonly_sql = _validate_readonly_sql(sql)
         if not readonly_sql:
-            raise ToolInvalidArgumentsError(
-                'Only one read-only SELECT/WITH SQL statement is allowed.',
-                details={'error_type': 'ReadOnlySQLRejected'},
+            raise ToolExecutionError(
+                'Only one read-only SELECT/WITH SQL statement is allowed.'
             )
         manager = self._manager(connection_id)
         try:

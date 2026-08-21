@@ -1,7 +1,7 @@
 import importlib
 
 import pytest
-from lazyllm.tools.agent import ToolDomainError, ToolInvalidArgumentsError
+from lazyllm.tools.agent import ToolExecutionError
 
 skill_editor_mod = importlib.import_module('lazymind.chat.engine.tools.skill_editor')
 
@@ -227,9 +227,9 @@ def test_skill_editor_create_accepts_missing_category_and_rejects_multilevel_nam
     toolkit = skill_editor_mod.SkillManagementToolkit(store=store)
 
     created = toolkit.create_skill('category-free', content=content)
-    with pytest.raises(ToolInvalidArgumentsError):
+    with pytest.raises(ToolExecutionError):
         toolkit.create_skill('internal/category-free', content=content)
-    with pytest.raises(ToolInvalidArgumentsError):
+    with pytest.raises(ToolExecutionError):
         toolkit.create_skill(r'internal\category-free', content=content)
 
     assert created['status'] == 'created'
@@ -289,7 +289,7 @@ def test_skill_editor_patch_resolves_unique_name_and_requires_full_key_when_ambi
         old_text='Before unique.',
         new_text='After unique.',
     )
-    with pytest.raises(ToolDomainError, match="Ambiguous skill name 'shared'"):
+    with pytest.raises(ToolExecutionError, match="Ambiguous skill name 'shared'"):
         toolkit.patch_file(
             'shared',
             path='SKILL.md',

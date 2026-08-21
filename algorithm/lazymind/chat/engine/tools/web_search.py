@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
-from lazyllm.tools.agent import ToolInvalidArgumentsError
+from lazyllm.tools.agent import ToolExecutionError
 
 from lazymind.chat.engine.tools.infra import fetch_url_content
 
@@ -26,8 +26,8 @@ def url_fetch(url: str) -> Dict[str, Any]:
         text plus target_url.
     """
     if not str(url or '').strip():
-        raise ToolInvalidArgumentsError('url is required')
+        raise ToolExecutionError('url is required')
     try:
         return fetch_url_content(url)
     except ValueError as exc:
-        raise ToolInvalidArgumentsError(str(exc)) from exc
+        raise ToolExecutionError(str(exc)) from exc

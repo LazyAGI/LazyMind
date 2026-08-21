@@ -7,27 +7,8 @@ def _call(name, arguments):
     return {'function': {'name': name, 'arguments': arguments}}
 
 
-def _failure(category, tool='search'):
-    actions = {
-        'UNKNOWN_TOOL': 'choose_tool',
-        'INVALID_ARGS': 'fix_arguments',
-        'TRANSIENT_ERROR': 'retry_later',
-        'PERMISSION_ERROR': 'request_authorization',
-        'DOMAIN_FAILURE': 'change_plan',
-        'POLICY_ERROR': 'change_plan',
-    }
-    return {
-        'ok': False,
-        'value': None,
-        'error': {
-            'category': category,
-            'code': f'{category}_CODE',
-            'tool': tool,
-            'message': 'tool failed',
-            'recovery_action': actions[category],
-            'details': {},
-        },
-    }
+def _failure(tool='search'):
+    return {'ok': False, 'message': f'{tool} failed'}
 
 
 class _RecordingToolManager:
@@ -91,25 +72,25 @@ def test_allowed_tool_names_are_forwarded_to_pending_calls():
     assert manager.allowed_tool_names == [allowed]
 
 
-def test_repeated_exact_failure_is_blocked_without_reexecution():
+def test_repeated_exact_failure_respects_consecutive_failure_limit():
     manager = _RecordingToolManager(
-        lambda _: {'ok': False, 'value': None, 'msg': 'network error'},
+        lambda _: _failure('url_fetch'),
     )
     guard = ToolCallGuard(manager, {'url_fetch': 2})
 
     guard([_call('url_fetch', {'url': 'https://one.example'})])
+    guard([_call('url_fetch', {'url': 'https://one.example'})])
     blocked = guard([_call('url_fetch', {'url': 'https://one.example'})])
 
-    assert len(manager.calls) == 1
+    assert len(manager.calls) == 2
     assert blocked[0]['ok'] is False
-    assert '[Repeated Tool Failure]' in blocked[0]['msg']
-    assert blocked[0]['error']['category'] == 'POLICY_ERROR'
-    assert blocked[0]['error']['code'] == 'REPEATED_TOOL_FAILURE'
+    assert '[Repeated Tool Failure]' in blocked[0]['message']
+    assert set(blocked[0]) == {'ok', 'message'}
 
 
 def test_different_parameter_guesses_are_blocked_after_consecutive_failures():
     manager = _RecordingToolManager(
-        lambda _: {'ok': False, 'value': None, 'msg': 'network error'},
+        lambda _: _failure('url_fetch'),
     )
     guard = ToolCallGuard(manager, {'url_fetch': 2})
 
@@ -118,9 +99,7 @@ def test_different_parameter_guesses_are_blocked_after_consecutive_failures():
     blocked = guard([_call('url_fetch', {'url': 'https://three.example'})])
 
     assert len(manager.calls) == 2
-    assert '[Repeated Tool Failure]' in blocked[0]['msg']
-    assert blocked[0]['error']['category'] == 'POLICY_ERROR'
-    assert blocked[0]['error']['code'] == 'REPEATED_TOOL_FAILURE'
+    assert '[Repeated Tool Failure]' in blocked[0]['message']
 
 
 def test_success_resets_consecutive_failure_count():
@@ -136,10 +115,10 @@ def test_success_resets_consecutive_failure_count():
     assert len(manager.calls) == 4
 
 
-def test_success_for_other_arguments_does_not_clear_failed_signature():
+def test_success_for_other_arguments_resets_consecutive_failure_count():
     def result(call):
         if call['function']['arguments']['url'].endswith('/failed'):
-            return _failure('DOMAIN_FAILURE', 'url_fetch')
+            return _failure('url_fetch')
         return {'ok': True, 'value': 'loaded'}
 
     manager = _RecordingToolManager(result)
@@ -148,43 +127,48 @@ def test_success_for_other_arguments_does_not_clear_failed_signature():
 
     guard([failed_call])
     guard([_call('url_fetch', {'url': 'https://example.com/success'})])
-    blocked = guard([failed_call])
+    result = guard([failed_call])
 
-    assert len(manager.calls) == 2
-    assert blocked[0]['error']['code'] == 'REPEATED_TOOL_FAILURE'
+    assert len(manager.calls) == 3
+    assert result == [_failure('url_fetch')]
 
 
-def test_transient_failure_can_be_retried_by_agent_but_is_not_auto_retried():
-    transient = _failure('TRANSIENT_ERROR', 'url_fetch')
-    manager = _RecordingToolManager(lambda _: transient)
+def test_failure_can_be_retried_by_agent_until_failure_limit():
+    failure = _failure('url_fetch')
+    manager = _RecordingToolManager(lambda _: failure)
     guard = ToolCallGuard(manager, {'url_fetch': 2})
     call = _call('url_fetch', {'url': 'https://example.com'})
 
     first = guard([call])
 
-    assert first == [transient]
+    assert first == [failure]
     assert len(manager.calls) == 1
 
     second = guard([call])
 
-    assert second == [transient]
+    assert second == [failure]
+    assert len(manager.calls) == 2
+
+    blocked = guard([call])
+
+    assert '[Repeated Tool Failure]' in blocked[0]['message']
     assert len(manager.calls) == 2
 
 
-def test_guard_preserves_agent_recovery_action():
+def test_guard_preserves_failure_message():
     cases = (
-        ('INVALID_ARGS', _call('search', {'limit': 'many'}), _call('search', {'limit': []})),
-        ('UNKNOWN_TOOL', _call('seach', {}), _call('serch', {})),
+        (_call('search', {'limit': 'many'}), _call('search', {'limit': []})),
+        (_call('seach', {}), _call('serch', {})),
     )
-    for category, first_call, second_call in cases:
-        manager = _RecordingToolManager(lambda _, category=category: _failure(category))
+    for first_call, second_call in cases:
+        manager = _RecordingToolManager(lambda _: _failure())
         guard = ToolCallGuard(manager)
 
         first = guard([first_call])[0]
         second = guard([second_call])[0]
 
-        assert first['error']['recovery_action'] == _failure(category)['error']['recovery_action']
-        assert second['error']['recovery_action'] == _failure(category)['error']['recovery_action']
+        assert first == _failure()
+        assert second == _failure()
 
 
 def test_unconfigured_stateful_tool_is_not_deduplicated():

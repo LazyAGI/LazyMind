@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Literal, Optional
 
-from lazyllm.tools.agent import ToolInvalidArgumentsError
+from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools.agent.base import _write_agent_data
 
 
@@ -109,28 +109,28 @@ def build_intentwrite_tool(
     ) -> str:
         evidence_source = config['current_query']
         if not operations:
-            raise ToolInvalidArgumentsError('operations must not be empty.')
+            raise ToolExecutionError('operations must not be empty.')
         clean: List[Dict[str, str]] = []
         for raw in operations:
             if not isinstance(raw, dict):
-                raise ToolInvalidArgumentsError('each operation must be an object.')
+                raise ToolExecutionError('each operation must be an object.')
             op = str(raw.get('op') or '').strip()
             field = str(raw.get('field') or '').strip()
             field = FIELD_ALIASES.get(field, field)
             value = str(raw.get('value') or '').strip()
             evidence = str(raw.get('evidence') or '').strip()
             if op not in VALID_OPERATIONS or field not in INTENT_FIELDS or not value:
-                raise ToolInvalidArgumentsError(f'invalid intent operation: {raw!r}.')
+                raise ToolExecutionError(f'invalid intent operation: {raw!r}.')
             if op == 'set' and field not in SCALAR_FIELDS:
-                raise ToolInvalidArgumentsError(
+                raise ToolExecutionError(
                     f'set is not valid for list field {field!r}.'
                 )
             if op != 'set' and field not in LIST_FIELDS:
-                raise ToolInvalidArgumentsError(
+                raise ToolExecutionError(
                     f'{op} is not valid for scalar field {field!r}.'
                 )
             if not evidence or evidence not in evidence_source:
-                raise ToolInvalidArgumentsError(
+                raise ToolExecutionError(
                     'operation evidence must be copied from the current user request.'
                 )
             clean.append({'op': op, 'field': field, 'value': value, 'evidence': evidence})
@@ -139,14 +139,14 @@ def build_intentwrite_tool(
         if config['workflow_session_id']:
             allowed.update({'workflow_session', 'workflow_step'})
         if scope not in allowed:
-            raise ToolInvalidArgumentsError(
+            raise ToolExecutionError(
                 f'unknown scope {scope!r}; available scopes: {sorted(allowed)}.'
             )
         if scope == 'workflow_step':
             if not step_id:
-                raise ToolInvalidArgumentsError('step_id is required for workflow_step.')
+                raise ToolExecutionError('step_id is required for workflow_step.')
             if step_id not in config['valid_step_ids']:
-                raise ToolInvalidArgumentsError(
+                raise ToolExecutionError(
                     f'unknown step_id {step_id!r} for the active workflow.'
                 )
 

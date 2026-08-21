@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from lazyllm.tools.agent import ToolInvalidArgumentsError
+from lazyllm.tools.agent import ToolExecutionError
 
 from lazymind.chat.engine.tools.calculator import calculator
 from lazymind.chat.engine.tools.infra import safe_evaluate_expression
@@ -31,11 +31,11 @@ class TestSafeCalculator:
             'lambda: 1',
             '[x for x in (1,)]',
         ):
-            with pytest.raises(ToolInvalidArgumentsError):
+            with pytest.raises(ToolExecutionError):
                 calculator(expression)
 
     def test_rejects_empty_expression(self):
-        with pytest.raises(ToolInvalidArgumentsError, match='expression is required'):
+        with pytest.raises(ToolExecutionError, match='expression is required'):
             calculator('   ')
 
 

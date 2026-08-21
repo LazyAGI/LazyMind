@@ -227,18 +227,28 @@ def test_workflow_failure_template_handles_canonical_failure():
             'name': 'trigger_test_workflow',
             'result': {
                 'ok': False,
-                'error': {
-                    'category': 'DOMAIN_FAILURE',
-                    'code': 'WORKFLOW_NOT_FOUND',
-                    'tool': 'trigger_test_workflow',
-                    'message': 'workflow or revision was not found',
-                    'recovery_action': 'change_plan',
-                    'details': {},
-                },
+                'message': 'workflow or revision was not found',
             },
         },
         'zh',
     )
 
-    assert '工作流初始化失败，结果是 **DOMAIN_FAILURE**' in result_text
+    assert '工作流初始化失败，结果是 **failed**' in result_text
     assert 'workflow or revision was not found' in result_text
+
+
+def test_permission_failure_uses_canonical_failure_rendering():
+    result_text = _tool_result_frame_text(
+        {
+            'id': 'call-delete',
+            'name': 'delete_file',
+            'result': {
+                'ok': False,
+                'message': 'Deleting /workspace/a.txt requires approval.',
+                'needs_approval': True,
+            },
+        },
+        'en',
+    )
+
+    assert 'Please review the confirmation note' in result_text

@@ -40,7 +40,6 @@ class ToolCallGuard:
     ):
         self._manager = manager
         self._failure_limits = dict(failure_limits or {})
-        self._failed_signatures: set[str] = set()
         self._consecutive_failures: dict[str, int] = {}
         self._expanded_round_limit = expanded_round_limit
         self._repeated_call_limit = max(2, int(repeated_call_limit))
@@ -72,24 +71,14 @@ class ToolCallGuard:
         return isinstance(result, dict) and result.get('ok') is False
 
     @staticmethod
-    def _error(result: Any) -> dict[str, Any]:
-        if isinstance(result, dict) and isinstance(result.get('error'), dict):
-            return result['error']
-        return {}
-
-    @staticmethod
     def _blocked(name: str, message: str) -> dict[str, Any]:
         message = f'[Repeated Tool Failure] {name}: {message}'
-        return tool_failure(
-            'POLICY_ERROR', 'REPEATED_TOOL_FAILURE', name, message,
-        )
+        return tool_failure(message)
 
     @staticmethod
     def _loop_blocked(name: str, message: str) -> dict[str, Any]:
         message = f'[Repeated Tool Call] {name}: {message}'
-        return tool_failure(
-            'POLICY_ERROR', 'REPEATED_TOOL_CALL', name, message,
-        )
+        return tool_failure(message)
 
     def __call__(self, tools: Any, verbose: bool = False,
                  allowed_tool_names: set[str] | None = None) -> Any:
@@ -118,12 +107,6 @@ class ToolCallGuard:
                     )
             signature = self._signature(tool_call)
             guarded = name in self._failure_limits
-            if guarded and signature in self._failed_signatures:
-                results[index] = self._blocked(
-                    name, 'this exact call already failed; do not retry it with the same arguments.',
-                )
-                lazyllm.LOG.info(f'[ToolCallGuard] blocked repeated failed call: {name}')
-                continue
             if guarded and signature in pending_signatures:
                 duplicate_indices[index] = pending_signatures[signature]
                 lazyllm.LOG.info(f'[ToolCallGuard] merged duplicate tool call: {name}')
@@ -167,9 +150,6 @@ class ToolCallGuard:
                         self._consecutive_failures[name] = (
                             self._consecutive_failures.get(name, 0) + 1
                         )
-                        error = self._error(result)
-                        if error.get('recovery_action') != 'retry_later':
-                            self._failed_signatures.add(self._signature(tool_call))
                     else:
                         self._consecutive_failures[name] = 0
         for duplicate_index, original_index in duplicate_indices.items():

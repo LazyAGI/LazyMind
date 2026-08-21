@@ -2,7 +2,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 import lazyllm
 from lazyllm import AutoModel, LOG
-from lazyllm.tools.agent import ToolDomainError, ToolInvalidArgumentsError
+from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools.rag import Reranker, Retriever, TempDocRetriever
 from lazyllm.tools.rag.doc_impl import NodeGroupType
 
@@ -404,16 +404,14 @@ class KBToolkit:
         selected = explicit if explicit else (config.get('filters') or {}).get('kb_id')
         ids = [str(item).strip() for item in iter_lookup_ids(selected, field_name='kb_ids') if item]
         if not ids:
-            raise ToolInvalidArgumentsError(
+            raise ToolExecutionError(
                 'kb_ids is required when no knowledge base is selected in the request'
             )
         if explicit:
             accessible = KBToolkit._accessible_kb_ids()
             if any(kb_id not in accessible for kb_id in ids):
-                raise ToolDomainError(
-                    'One or more requested knowledge bases are unavailable.',
-                    code='RESOURCE_NOT_FOUND',
-                    details={'resource_type': 'knowledge_base'},
+                raise ToolExecutionError(
+                    'One or more requested knowledge bases are unavailable.'
                 )
         return ids
 
@@ -550,9 +548,9 @@ class KBToolkit:
         before = int(before)
         after = int(after)
         if before < 0 or after < 0:
-            raise ToolInvalidArgumentsError('before and after must be non-negative')
+            raise ToolExecutionError('before and after must be non-negative')
         if before + after + 1 > _MAX_RESULT_ITEMS:
-            raise ToolInvalidArgumentsError(f'window cannot exceed {_MAX_RESULT_ITEMS} nodes')
+            raise ToolExecutionError(f'window cannot exceed {_MAX_RESULT_ITEMS} nodes')
         doc = DOCUMENT
         seed_nodes = doc.get_nodes(uids=[node_id])
         seed_nodes = seed_nodes if isinstance(seed_nodes, list) else []
@@ -618,9 +616,9 @@ class KBToolkit:
         docid = target if target_type == 'docid' else ''
         file_name = target if target_type == 'file_name' else None
         if not keyword:
-            raise ToolInvalidArgumentsError('keyword is required')
+            raise ToolExecutionError('keyword is required')
         if not (target and str(target).strip()):
-            raise ToolInvalidArgumentsError('target is required')
+            raise ToolExecutionError('target is required')
         LOG.info(f'[kb_keyword_search] store={_cfg["segment_store_type"]!r} keyword={keyword!r} docid={docid!r} '
                  f'file_name={file_name!r} group={group!r} phrase={phrase} sort_by={sort_by!r} size={size}')
 

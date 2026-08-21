@@ -2,7 +2,7 @@ import pytest
 from types import SimpleNamespace
 import lazyllm
 from lazyllm import init_session, locals as lazyllm_locals
-from lazyllm.tools.agent import ToolDomainError, ToolInvalidArgumentsError
+from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools.agent.toolsManager import ToolManager
 from lazyllm.tools.tools.search import SearchBase
 from lazymind.chat.engine.tools.kb import KBToolkit
@@ -20,7 +20,7 @@ def test_kb_toolkit_is_available_without_selected_kb():
     lazyllm.globals['agentic_config'] = {'filters': {}}
     toolkit = KBToolkit()
     assert 'list_knowledge_bases' in toolkit.__public_apis__
-    with pytest.raises(ToolInvalidArgumentsError, match='kb_ids is required'):
+    with pytest.raises(ToolExecutionError, match='kb_ids is required'):
         toolkit._kb_ids()
 
 
@@ -218,7 +218,7 @@ def test_kb_ids_reject_unavailable_id(monkeypatch):
     )
     lazyllm.globals['agentic_config'] = {'filters': {}}
 
-    with pytest.raises(ToolDomainError, match='requested knowledge bases are unavailable'):
+    with pytest.raises(ToolExecutionError, match='requested knowledge bases are unavailable'):
         KBToolkit._kb_ids(['unreadable-kb'])
 
 

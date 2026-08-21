@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from lazyllm.tools.agent import ToolPermissionError
+from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools.fs import client as fs_client
 from lazymind.chat.engine.tools import chat_artifact
 
@@ -103,7 +103,7 @@ def test_chat_file_tools_reject_outside_workspace_by_default(tmp_path, monkeypat
         chat_artifact, '_current_artifact_scope', lambda: ('windows-user', 'windows-conversation'),
     )
 
-    with pytest.raises(ToolPermissionError, match='inside the current main-Agent workspace'):
+    with pytest.raises(ToolExecutionError, match='inside the current main-Agent workspace'):
         chat_artifact.write_file(str(outside), 'blocked')
 
 

@@ -11,6 +11,7 @@ from urllib.parse import urlsplit
 import lazyllm
 import pytest
 
+from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools.agent.toolsManager import ToolManager
 
 import lazymind.chat.engine.tools.memory as memory_tool_module
@@ -493,3 +494,31 @@ def test_episode_create_uses_runtime_context_and_keeps_fingerprint_internal(monk
     assert ledger_result['status'] == 'created'
     assert ledger['retry_fingerprint'].startswith('episode_retry_')
     assert 'retry_fingerprint' not in result
+
+
+def test_episode_create_keeps_missing_context_code_in_internal_ledger():
+    config = _episode_runtime_config()
+    config['user_id'] = ''
+    lazyllm.globals['agentic_config'] = config
+
+    with pytest.raises(ToolExecutionError, match='user_id is required'):
+        MemoryTools().episode_create('用户明确要求保存此事件', 'event')
+
+    assert config['memory_operation_ledger'][0]['error_code'] == 'missing_context'
+
+
+def test_episode_create_keeps_storage_timeout_code_in_internal_ledger(monkeypatch):
+    class TimeoutStore:
+        def create(self, _user_id, _item):
+            raise TimeoutError('write timed out')
+
+    config = _episode_runtime_config()
+    lazyllm.globals['agentic_config'] = config
+    _patch_episode_store(monkeypatch, TimeoutStore())
+
+    with pytest.raises(ToolExecutionError, match='completion is unknown'):
+        MemoryTools().episode_create('用户明确要求保存此事件', 'event')
+
+    ledger = config['memory_operation_ledger'][0]
+    assert ledger['error_code'] == 'storage_timeout'
+    assert ledger['retryable'] is True

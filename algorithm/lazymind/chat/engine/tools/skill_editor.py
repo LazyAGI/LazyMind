@@ -1,7 +1,7 @@
 from typing import Any, Callable, Dict, NoReturn, Optional
 
 import lazyllm
-from lazyllm.tools.agent import ToolDomainError, ToolInvalidArgumentsError
+from lazyllm.tools.agent import ToolExecutionError
 
 from lazymind.chat.engine.tools.infra import GitHubSkillInstaller
 from lazymind.chat.engine.tools.infra.skill_operations import (
@@ -33,8 +33,8 @@ _PENDING_SKILL_CHANGE_MESSAGE = (
 def _skill_editor_error(prefix: str, exc: Exception) -> NoReturn:
     message = str(exc)
     if _DRAFT_BELONGS_TO_ANOTHER_TASK_ERROR in message:
-        raise ToolDomainError(_PENDING_SKILL_CHANGE_MESSAGE) from exc
-    raise ToolDomainError(f'{prefix}: {message}') from exc
+        raise ToolExecutionError(_PENDING_SKILL_CHANGE_MESSAGE) from exc
+    raise ToolExecutionError(f'{prefix}: {message}') from exc
 
 
 class SkillManagementToolkit:
@@ -75,16 +75,16 @@ class SkillManagementToolkit:
         try:
             package = self.installer.prepare(github_url)
         except Exception as exc:
-            raise ToolDomainError(str(exc)) from exc
+            raise ToolExecutionError(str(exc)) from exc
 
         category = EXTERNAL_SKILL_CATEGORY
         skill_key = f'{category}/{package.name}'
         try:
             if self.store.package_exists(category, package.name):
-                raise ToolDomainError(f'Skill {skill_key!r} already exists.')
+                raise ToolExecutionError(f'Skill {skill_key!r} already exists.')
             duplicate_key = self._find_installed_github_source(package.source.identity)
             if duplicate_key:
-                raise ToolDomainError(
+                raise ToolExecutionError(
                     f'GitHub source is already installed as {duplicate_key!r}.',
                 )
             self.store.install_package(category, package.name, package.files)
@@ -144,7 +144,7 @@ class SkillManagementToolkit:
             document = require_valid_skill_document(content, expected_name=name)
         except SkillDocumentError as exc:
             lazyllm.LOG.warning(f'[create_skill] fail reason={str(exc)!r}')
-            raise ToolInvalidArgumentsError(str(exc)) from exc
+            raise ToolExecutionError(str(exc)) from exc
         lazyllm.LOG.info(
             f'[create_skill] lookup category={INTERNAL_SKILL_CATEGORY} name={name!r}'
         )
@@ -171,7 +171,7 @@ class SkillManagementToolkit:
     ) -> Dict[str, Any]:
         resolved = self.store.resolve_existing_identity(name)
         if resolved.get('error'):
-            raise ToolDomainError(resolved['error'])
+            raise ToolExecutionError(resolved['error'])
         normalized_category = resolved['category']
         name = resolved['name']
         try:
@@ -181,8 +181,8 @@ class SkillManagementToolkit:
             change_set = self.store.replace_files(normalized_category, name, current_files, edited_files)
         except ValueError as exc:
             if _DRAFT_BELONGS_TO_ANOTHER_TASK_ERROR in str(exc):
-                raise ToolDomainError(_PENDING_SKILL_CHANGE_MESSAGE) from exc
-            raise ToolInvalidArgumentsError(str(exc)) from exc
+                raise ToolExecutionError(_PENDING_SKILL_CHANGE_MESSAGE) from exc
+            raise ToolExecutionError(str(exc)) from exc
         except Exception as exc:
             _skill_editor_error('Failed to load or edit skill package', exc)
         result['written_files'] = change_set['written']
@@ -339,7 +339,7 @@ class SkillManagementToolkit:
         )
         resolved = self.store.resolve_existing_identity(name)
         if resolved.get('error'):
-            raise ToolDomainError(resolved['error'])
+            raise ToolExecutionError(resolved['error'])
         normalized_category = resolved['category']
         name = resolved['name']
         lazyllm.LOG.info(f'[rename_skill] lookup category={normalized_category!r} name={name!r}')
@@ -347,9 +347,9 @@ class SkillManagementToolkit:
         try:
             target_name = require_skill_name(new_name)
         except SkillDocumentError as exc:
-            raise ToolInvalidArgumentsError(f'new_name is invalid: {exc}') from exc
+            raise ToolExecutionError(f'new_name is invalid: {exc}') from exc
         if target_name == name:
-            raise ToolInvalidArgumentsError('rename_skill requires a different new_name.')
+            raise ToolExecutionError('rename_skill requires a different new_name.')
 
         try:
             current_files = self.store.list_files(normalized_category, name)
@@ -399,7 +399,7 @@ class SkillManagementToolkit:
         try:
             normalized_category, name = parse_skill_key(name)
         except ValueError as exc:
-            raise ToolInvalidArgumentsError(str(exc)) from exc
+            raise ToolExecutionError(str(exc)) from exc
         lazyllm.LOG.info(f'[remove_skill] lookup category={normalized_category!r} name={name!r}')
 
         try:

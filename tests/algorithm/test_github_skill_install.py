@@ -3,7 +3,7 @@ import zipfile
 from unittest.mock import patch
 
 import pytest
-from lazyllm.tools.agent import ToolDomainError
+from lazyllm.tools.agent import ToolExecutionError
 
 from lazymind.chat.engine.tools.infra.github_skill_installer import (
     GitHubSkillInstaller,
@@ -227,7 +227,7 @@ def test_install_still_rejects_duplicate_external_github_source():
         },
     )
 
-    with pytest.raises(ToolDomainError, match="GitHub source is already installed as 'external/existing'"):
+    with pytest.raises(ToolExecutionError, match="GitHub source is already installed as 'external/existing'"):
         SkillManagementToolkit(store=store, installer=_PreparedInstaller()).install_skill(
             'https://github.com/owner/example'
         )
@@ -249,7 +249,7 @@ def test_install_finds_duplicate_external_source_after_unreadable_package():
         read_errors={('external', 'broken'): RuntimeError('not found')},
     )
 
-    with pytest.raises(ToolDomainError, match="GitHub source is already installed as 'external/existing'"):
+    with pytest.raises(ToolExecutionError, match="GitHub source is already installed as 'external/existing'"):
         SkillManagementToolkit(store=store, installer=_PreparedInstaller()).install_skill(
             'https://github.com/owner/example'
         )

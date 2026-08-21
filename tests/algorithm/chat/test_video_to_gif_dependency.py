@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 import pytest
-from lazyllm.tools.agent import ToolDomainError
+from lazyllm.tools.agent import ToolExecutionError
 from lazymind.chat.engine.tools import multimodal
 from lazymind.common import ffmpeg_deps
 
@@ -21,12 +21,11 @@ def test_windows_ffmpeg_binary_names_can_be_checked_cross_platform(monkeypatch):
 def test_video_to_gif_returns_dependency_error_when_ffmpeg_is_missing(monkeypatch):
     monkeypatch.setattr(multimodal, 'resolve_ffmpeg_binaries', lambda: (None, None))
 
-    with pytest.raises(ToolDomainError, match='FFMPEG_DEPENDENCY_MISSING') as captured:
+    with pytest.raises(ToolExecutionError, match='Animated GIF output requires FFmpeg') as captured:
         multimodal.video_to_gif('/tmp/generated-video.mp4')
 
-    assert captured.value.details['error_type'] == 'MissingDependency'
-    assert captured.value.details['dependency'] == 'ffmpeg'
-    assert captured.value.details['fallback'] == 'video'
+    assert '/model-providers/tools#ffmpeg-dependency' in str(captured.value)
+    assert 'generated video remains available' in str(captured.value)
 
 
 def test_resolve_ffmpeg_binaries_reads_bundled_install_without_path(monkeypatch, tmp_path):

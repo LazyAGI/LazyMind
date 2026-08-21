@@ -6,7 +6,7 @@ from unittest.mock import patch
 import lazyllm
 import pytest
 import yaml
-from lazyllm.tools.agent import ToolDomainError
+from lazyllm.tools.agent import ToolExecutionError
 
 from lazymind.chat.engine.tools.memory import MemoryTools
 from lazymind.common.memory.paths import (
@@ -180,12 +180,13 @@ def test_soul_editor_rejects_missing_field():
     })
     tools, store = _tools_with_store(fs)
     with patch('lazymind.chat.engine.tools.memory.MemoryStore', lambda *args, **kwargs: store):
-        with pytest.raises(ToolDomainError, match='unsupported soul operation path'):
+        with pytest.raises(ToolExecutionError, match='unsupported soul operation path'):
             tools.soul_editor([
                 {'op': 'set', 'path': 'identity.email', 'value': 'x@y.com'},
             ])
     assert ledger[-1]['status'] == 'failed'
     assert ledger[-1]['mutation'] == 'none'
+    assert ledger[-1]['error_code'] == 'invalid_arguments'
 
 
 def test_profile_editor_updates_list_field():
@@ -340,12 +341,12 @@ def test_profile_editor_preserves_loaded_field_types():
             {'op': 'set', 'path': 'schema_version', 'value': '3'},
             {'op': 'set', 'path': 'schema_version.nested', 'value': '3'},
         ):
-            with pytest.raises(ToolDomainError) as captured:
+            with pytest.raises(ToolExecutionError) as captured:
                 tools.profile_editor([operation])
             assert 'schema_version' not in str(captured.value)
             assert fs.files[PROFILE_PATH] == unchanged
 
-        with pytest.raises(ToolDomainError):
+        with pytest.raises(ToolExecutionError):
             tools.profile_editor([
                 {'op': 'set', 'path': 'personal.nickname', 'value': 'Morpheus'},
                 {'op': 'add', 'path': 'personal.headline', 'value': 'Invalid'},
@@ -397,7 +398,7 @@ def test_preference_editor_add_and_delete():
 def test_preference_editor_requires_hidden_source_context_for_add():
     ledger: list[dict[str, Any]] = []
     lazyllm.globals['agentic_config'] = {'memory_operation_ledger': ledger}
-    with pytest.raises(ToolDomainError, match='memory_source_kind'):
+    with pytest.raises(ToolExecutionError, match='memory_source_kind'):
         MemoryTools().preference_editor(
             'add',
             name='pref.response.concise',
@@ -408,3 +409,4 @@ def test_preference_editor_requires_hidden_source_context_for_add():
         )
 
     assert ledger[-1]['mutation'] == 'none'
+    assert ledger[-1]['error_code'] == 'missing_context'

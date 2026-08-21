@@ -4,7 +4,7 @@ import os
 import subprocess
 
 import pytest
-from lazyllm.tools.agent import ToolInvalidArgumentsError, ToolPermissionError
+from lazyllm.tools.agent import ToolExecutionError
 import lazymind.chat.engine.tools.local_fs as local_fs_mod
 from lazymind.chat.engine.tools.local_fs import LocalFileToolkit
 
@@ -59,7 +59,7 @@ def test_local_fs_read_checks_source_extension(monkeypatch, tmp_path):
     _set_local_fs_sources(monkeypatch, [_source('source-a', [allowed], ['pdf'])])
 
     ok = LocalFileToolkit().read(str(visible), start_line=1, max_lines=1)
-    with pytest.raises(ToolPermissionError):
+    with pytest.raises(ToolExecutionError):
         LocalFileToolkit().read(str(hidden))
 
     assert ok['content'] == 'b\n'
@@ -94,7 +94,7 @@ def test_local_fs_string_replace_requires_expected_match_count(monkeypatch, tmp_
     target.write_text(original, encoding='utf-8')
     _set_local_fs_sources(monkeypatch, [_source('source-a', [allowed], ['txt'])])
 
-    with pytest.raises(ToolInvalidArgumentsError, match='found at least 2'):
+    with pytest.raises(ToolExecutionError, match='found at least 2'):
         LocalFileToolkit().string_replace(str(target), 'same', 'changed')
 
     assert target.read_text(encoding='utf-8') == original
@@ -115,9 +115,9 @@ def test_local_fs_string_replace_rejects_non_text_content_and_disallowed_files(m
     hidden.write_text('before', encoding='utf-8')
     _set_local_fs_sources(monkeypatch, [_source('source-a', [allowed], ['txt'])])
 
-    with pytest.raises(ToolInvalidArgumentsError):
+    with pytest.raises(ToolExecutionError):
         LocalFileToolkit().string_replace(str(binary), 'before', 'changed')
-    with pytest.raises(ToolPermissionError):
+    with pytest.raises(ToolExecutionError):
         LocalFileToolkit().string_replace(str(hidden), 'before', 'changed')
 
     assert binary.read_bytes() == b'before\x00after'
@@ -135,7 +135,7 @@ def test_local_fs_rejects_symlink_escape(monkeypatch, tmp_path):
     link.symlink_to(secret)
     _set_local_fs_sources(monkeypatch, [_source('source-a', [allowed], ['pdf'])])
 
-    with pytest.raises(ToolPermissionError):
+    with pytest.raises(ToolExecutionError):
         LocalFileToolkit().read(str(link))
     listing = LocalFileToolkit().ls(str(allowed))
 

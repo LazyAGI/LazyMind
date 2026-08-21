@@ -5,12 +5,7 @@ import os
 from typing import Any, Dict, List, Literal, Optional
 from urllib.parse import urlparse
 
-from lazyllm.tools.agent import (
-    ToolDomainError,
-    ToolInvalidArgumentsError,
-    ToolPermissionError,
-    ToolTransientError,
-)
+from lazyllm.tools.agent import ToolExecutionError
 from lazymind.chat.engine.attachment_reader import (
     is_chat_attachment_file,
     is_chat_image_file,
@@ -146,7 +141,7 @@ def _build_artifact_value(value: Any, content_type: str):
         if not src.lower().startswith(('http://', 'https://')):
             src = _materialize_local_path(src)
         if not _is_valid_image_ref(src):
-            raise ToolInvalidArgumentsError(
+            raise ToolExecutionError(
                 f'Invalid image reference {src!r}: expected http(s) URL, /static-files/ path, '
                 'or an existing absolute file path — placeholder text is not allowed.'
             )
@@ -163,28 +158,22 @@ def _build_artifact_value(value: Any, content_type: str):
     if content_type == 'file':
         source = str(value.get('path') if isinstance(value, dict) else value).strip()
         if not source:
-            raise ToolInvalidArgumentsError('File artifact path must not be empty.')
+            raise ToolExecutionError('File artifact path must not be empty.')
         if os.path.isabs(source):
             source = os.path.realpath(source)
             if not os.path.isfile(source):
-                raise ToolDomainError(
-                    f'File artifact does not exist: {source}',
-                    code='RESOURCE_NOT_FOUND', details={'resource_type': 'file'},
-                )
+                raise ToolExecutionError(f'File artifact does not exist: {source}')
             rel = ctx.copy_into_workspace(source)
             full = os.path.realpath(os.path.join(ctx.workspace_path, rel))
         else:
             full = os.path.realpath(os.path.join(ctx.workspace_path, source))
             workspace = os.path.realpath(ctx.workspace_path)
             if os.path.commonpath([workspace, full]) != workspace:
-                raise ToolPermissionError(
+                raise ToolExecutionError(
                     'Relative file artifact path must stay inside the task workspace.'
                 )
             if not os.path.isfile(full):
-                raise ToolDomainError(
-                    f'File artifact does not exist in task workspace: {source}',
-                    code='RESOURCE_NOT_FOUND', details={'resource_type': 'file'},
-                )
+                raise ToolExecutionError(f'File artifact does not exist in task workspace: {source}')
         size = os.path.getsize(full)
         return {'filename': os.path.basename(full), 'path': full, 'size': size}, 'file'
     if content_type == 'file_list':
@@ -197,27 +186,21 @@ def _build_artifact_value(value: Any, content_type: str):
             if os.path.isabs(p):
                 source = os.path.realpath(p)
                 if not os.path.isfile(source):
-                    raise ToolDomainError(
-                        f'File-list artifact does not exist: {source}',
-                        code='RESOURCE_NOT_FOUND', details={'resource_type': 'file'},
-                    )
+                    raise ToolExecutionError(f'File-list artifact does not exist: {source}')
                 rel = ctx.copy_into_workspace(source)
                 paths.append(os.path.realpath(os.path.join(ctx.workspace_path, rel)))
                 continue
             resolved = os.path.realpath(os.path.join(ctx.workspace_path, p))
             workspace = os.path.realpath(ctx.workspace_path)
             if os.path.commonpath([workspace, resolved]) != workspace:
-                raise ToolPermissionError(
+                raise ToolExecutionError(
                     'Relative file-list artifact path must stay inside the task workspace.'
                 )
             if not os.path.isfile(resolved):
-                raise ToolDomainError(
-                    f'File-list artifact does not exist in task workspace: {p}',
-                    code='RESOURCE_NOT_FOUND', details={'resource_type': 'file'},
-                )
+                raise ToolExecutionError(f'File-list artifact does not exist in task workspace: {p}')
             paths.append(resolved)
         if not paths:
-            raise ToolInvalidArgumentsError(
+            raise ToolExecutionError(
                 'File-list artifact must contain at least one existing file.'
             )
         return {'paths': paths}, 'file_list'
@@ -296,18 +279,18 @@ def _save_artifact(key: str, value: Any, content_type: str = 'text',
     """
     ctx = require_context()
     if ctx.output_slots and key not in ctx.output_slots:
-        raise ToolInvalidArgumentsError(
+        raise ToolExecutionError(
             f'Artifact key {key!r} is not declared for this step. '
             f'Allowed keys: {", ".join(ctx.output_slots)}',
         )
     if content_type not in _CONTENT_TYPES:
-        raise ToolInvalidArgumentsError(
+        raise ToolExecutionError(
             f'Unsupported content_type {content_type!r}; choose from {sorted(_CONTENT_TYPES)}.'
         )
     ct = content_type
     contract_error = _validate_declared_artifact_type(ctx, key, ct)
     if contract_error:
-        raise ToolInvalidArgumentsError(contract_error)
+        raise ToolExecutionError(contract_error)
     built, actual_ct = _build_artifact_value(value, ct)
     if source_tool:
         built['_source_tool'] = str(source_tool)
@@ -348,16 +331,16 @@ def save_artifacts(artifacts: List[Dict[str, Any]]) -> Dict[str, Any]:
     ReAct tool-turn budget.
     """
     if not isinstance(artifacts, list) or not artifacts:
-        raise ToolInvalidArgumentsError('artifacts must be a non-empty list.')
+        raise ToolExecutionError('artifacts must be a non-empty list.')
     if len(artifacts) > 50:
-        raise ToolInvalidArgumentsError('At most 50 artifacts may be saved at once.')
+        raise ToolExecutionError('At most 50 artifacts may be saved at once.')
 
     results: List[Dict[str, Any]] = []
     for index, item in enumerate(artifacts):
         if not isinstance(item, dict):
-            raise ToolInvalidArgumentsError(f'artifacts[{index}] must be an object.')
+            raise ToolExecutionError(f'artifacts[{index}] must be an object.')
         if 'key' not in item or 'value' not in item:
-            raise ToolInvalidArgumentsError(f'artifacts[{index}] requires key and value.')
+            raise ToolExecutionError(f'artifacts[{index}] requires key and value.')
         saved = _save_artifact(
             key=str(item['key']),
             value=item['value'],
@@ -736,10 +719,7 @@ def patch_artifact(
     if sort_order is not None:
         list_index, resolve_err = _resolve_list_index_from_sort_order(key, sort_order)
         if resolve_err:
-            raise ToolInvalidArgumentsError(
-                resolve_err, code='INVALID_SORT_ORDER',
-                details={'violations': [{'path': 'sort_order', 'type': 'validation_error'}]},
-            )
+            raise ToolExecutionError(f'Invalid sort_order: {resolve_err}')
 
     # Load draft or initialize from latest committed content.
     draft_result = ctx.read_draft(key, list_index)
@@ -748,12 +728,11 @@ def patch_artifact(
         # Workflow sessions: this path also checks workflow_human_artifacts (human edits).
         text, original_type = _resolve_artifact_text(ctx, key, sort_order)
         if text is None:
-            raise ToolDomainError(
+            raise ToolExecutionError(
                 (
                     f"No committed content found for artifact '{key}'. "
                     'Call save_artifacts first to create the artifact before patching.'
-                ),
-                code='RESOURCE_NOT_FOUND', details={'resource_type': 'artifact'},
+                )
             )
         ctx.write_draft(key, original_type, text, list_index, pending_commit=False)
         draft_result = (text, original_type)
@@ -767,18 +746,12 @@ def patch_artifact(
     elif patch_type == 'json_patch':
         new_content, err = _apply_json_patch(content, patch)
     else:
-        raise ToolInvalidArgumentsError(
-            f"Unknown patch_type '{patch_type}'. Use str_replace, json_merge, or json_patch.",
-            code='INVALID_PATCH_TYPE',
-            details={'violations': [{
-                'path': 'patch_type', 'type': 'enum_error',
-                'expected': {'enum': ['str_replace', 'json_merge', 'json_patch']},
-                'actual': 'string',
-            }]},
+        raise ToolExecutionError(
+            f"Unknown patch_type '{patch_type}'. Use str_replace, json_merge, or json_patch."
         )
 
     if err:
-        raise ToolInvalidArgumentsError(err, code='PATCH_REJECTED')
+        raise ToolExecutionError(f'Patch was rejected: {err}')
 
     ctx.write_draft(key, original_type, new_content, list_index)
     lines_changed = abs(new_content.count('\n') - content.count('\n'))
@@ -974,10 +947,7 @@ def discard_draft(key: str, sort_order: Optional[int] = None) -> Dict[str, Any]:
     if sort_order is not None:
         list_index, resolve_err = _resolve_list_index_from_sort_order(key, sort_order)
         if resolve_err:
-            raise ToolInvalidArgumentsError(
-                resolve_err, code='INVALID_SORT_ORDER',
-                details={'violations': [{'path': 'sort_order', 'type': 'validation_error'}]},
-            )
+            raise ToolExecutionError(f'Invalid sort_order: {resolve_err}')
     existed = ctx.read_draft(key, list_index) is not None
     ctx.delete_draft(key, list_index)
     msg = (
@@ -1033,14 +1003,8 @@ def list_knowledge_bases() -> Dict[str, Any]:
         headers['X-User-Id'] = user_id
     resp = httpx.get(f'{core_url}/kb/list', headers=headers, timeout=5.0)
     if resp.status_code != 200:
-        error_class = ToolPermissionError if resp.status_code in {401, 403} else (
-            ToolTransientError if resp.status_code in {408, 429, 502, 503, 504}
-            else ToolDomainError
-        )
-        raise error_class(
-            f'Failed to list knowledge bases: HTTP {resp.status_code}',
-            code='UPSTREAM_HTTP_ERROR',
-            details={'status_code': resp.status_code, 'resource_type': 'knowledge_base'},
+        raise ToolExecutionError(
+            f'Failed to list knowledge bases: HTTP {resp.status_code}.'
         )
     # Go /kb/list returns {"code":0,"data":{"total":N,"list":[{id,name,visibility,...}]}}
     data = resp.json().get('data') or {}
@@ -1185,25 +1149,20 @@ def read_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
     """
     matched, err = _resolve_attachment(filename, turn)
     if err:
-        raise ToolDomainError(
-            err, code='RESOURCE_NOT_FOUND',
-            details={'resource_type': 'attachment'},
-        )
+        raise ToolExecutionError(f'Attachment not found: {err}')
     is_remote = str(matched or '').lower().startswith(('http://', 'https://'))
     if not is_remote:
         matched = _materialize_local_path(matched)
     if not is_remote and not os.path.exists(matched):
-        raise ToolDomainError(
-            f"File '{os.path.basename(matched)}' was found in the index but is no longer on disk.",
-            code='RESOURCE_NOT_FOUND', details={'resource_type': 'attachment'},
+        raise ToolExecutionError(
+            f"Attachment '{os.path.basename(matched)}' was found in the index but is no longer on disk."
         )
     if not is_chat_attachment_file(matched):
-        raise ToolDomainError(
+        raise ToolExecutionError(
             (
                 f"Unsupported file type '{os.path.splitext(matched)[1].lower() or '(no extension)'}'. "
                 'Supported: images, Office/PDF documents, and common plain-text files.'
-            ),
-            code='UNSUPPORTED_CONTENT_TYPE', details={'resource_type': 'attachment'},
+            )
         )
 
     try:
@@ -1213,10 +1172,8 @@ def read_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
         read_path = effective_attachment_path(matched) if is_chat_text_file(matched) else matched
         content = parse_attachment_content(read_path, priority=priority)
     except Exception as exc:
-        raise ToolDomainError(
-            f"Could not parse '{os.path.basename(matched)}': {exc}",
-            code='ATTACHMENT_PARSE_FAILED',
-            details={'resource_type': 'attachment', 'error_type': type(exc).__name__},
+        raise ToolExecutionError(
+            f"Could not parse attachment '{os.path.basename(matched)}': {type(exc).__name__}: {exc}"
         ) from exc
 
     kind = 'image' if is_chat_image_file(matched) else (
@@ -1286,29 +1243,23 @@ def string_replace(
     """
     matched, err = _resolve_attachment(filename, turn)
     if err:
-        raise ToolDomainError(
-            err, code='RESOURCE_NOT_FOUND', details={'resource_type': 'attachment'},
-        )
+        raise ToolExecutionError(f'Attachment not found: {err}')
     if not os.path.isfile(matched):
-        raise ToolDomainError(
-            f"File '{os.path.basename(matched)}' was found in the index but is no longer on disk.",
-            code='RESOURCE_NOT_FOUND', details={'resource_type': 'attachment'},
+        raise ToolExecutionError(
+            f"Attachment '{os.path.basename(matched)}' was found in the index but is no longer on disk."
         )
     if not is_chat_text_file(matched):
-        raise ToolInvalidArgumentsError(
+        raise ToolExecutionError(
             'string_replace supports uploaded plain-text/code/config files only'
         )
     normalized_action = str(action or 'preview').strip().lower()
     try:
         draft = AttachmentEditDraft.for_current_conversation(matched)
     except RuntimeError as exc:
-        raise ToolDomainError(
-            str(exc), code='PRECONDITION_FAILED',
-            details={'required_capability': 'conversation_context'},
-        ) from exc
+        raise ToolExecutionError(f'Conversation context is required: {exc}') from exc
     if normalized_action == 'preview':
         if old_string is None or new_string is None:
-            raise ToolInvalidArgumentsError('old_string and new_string are required for preview')
+            raise ToolExecutionError('old_string and new_string are required for preview')
         try:
             preview = draft.create_preview(
                 old_string,
@@ -1318,7 +1269,7 @@ def string_replace(
                 regex_flags,
             )
         except ValueError as exc:
-            raise ToolInvalidArgumentsError(str(exc)) from exc
+            raise ToolExecutionError(str(exc)) from exc
         return {
             'status': 'preview',
             'action': 'preview',
@@ -1332,12 +1283,12 @@ def string_replace(
         }
     if normalized_action == 'apply':
         if not preview_id:
-            raise ToolInvalidArgumentsError('preview_id is required for apply; run preview first')
+            raise ToolExecutionError('preview_id is required for apply; run preview first')
         had_previous_edit = os.path.isfile(draft.draft_path)
         try:
             preview, content, revision = draft.apply_preview(preview_id)
         except ValueError as exc:
-            raise ToolInvalidArgumentsError(str(exc)) from exc
+            raise ToolExecutionError(str(exc)) from exc
         artifact = _publish_attachment_edit(draft)
         return {
             'status': 'ok',
@@ -1358,7 +1309,7 @@ def string_replace(
         try:
             content, diff, revision = draft.undo()
         except ValueError as exc:
-            raise ToolInvalidArgumentsError(str(exc)) from exc
+            raise ToolExecutionError(str(exc)) from exc
         artifact = _publish_attachment_edit(draft)
         return {
             'status': 'ok',
@@ -1372,7 +1323,7 @@ def string_replace(
             'original_unchanged': True,
             'message': 'Reverted the most recent applied edit and updated the download artifact.',
         }
-    raise ToolInvalidArgumentsError("action must be 'preview', 'apply', or 'undo'")
+    raise ToolExecutionError("action must be 'preview', 'apply', or 'undo'")
 
 
 def find_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str, Any]:
@@ -1395,17 +1346,13 @@ def find_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
     """
     matched, err = _resolve_attachment(filename, turn)
     if err:
-        raise ToolDomainError(
-            err, code='RESOURCE_NOT_FOUND',
-            details={'resource_type': 'attachment'},
-        )
+        raise ToolExecutionError(f'Attachment not found: {err}')
     is_remote = str(matched or '').lower().startswith(('http://', 'https://'))
     if not is_remote:
         matched = _materialize_local_path(matched)
     if not is_remote and not os.path.exists(matched):
-        raise ToolDomainError(
-            f"File '{os.path.basename(matched)}' was found in the index but is no longer on disk.",
-            code='RESOURCE_NOT_FOUND', details={'resource_type': 'attachment'},
+        raise ToolExecutionError(
+            f"Attachment '{os.path.basename(matched)}' was found in the index but is no longer on disk."
         )
 
     signed_url = None if is_remote else _sign_static_file_url(matched)
@@ -1448,16 +1395,14 @@ def find_artifact(slot: str, sort_order: Optional[int] = None) -> Dict[str, Any]
 
     session_id: str = cfg.get('workflow_session_id', '')
     if not session_id:
-        raise ToolDomainError(
-            'No active workflow session found in agentic_config.',
-            code='PRECONDITION_FAILED', details={'required_capability': 'workflow_session'},
+        raise ToolExecutionError(
+            'No active workflow session was found in agentic_config; workflow_session is required.'
         )
 
     ctx = get_context()
     if ctx is None:
-        raise ToolDomainError(
-            'find_artifact requires an active SubAgent context.',
-            code='PRECONDITION_FAILED', details={'required_capability': 'subagent_context'},
+        raise ToolExecutionError(
+            'find_artifact requires an active SubAgent context.'
         )
     result_dict = get_artifact(slot, sort_order=sort_order)
 
@@ -1466,10 +1411,7 @@ def find_artifact(slot: str, sort_order: Optional[int] = None) -> Dict[str, Any]
 
     artifacts = result_dict.get('artifacts') or []
     if not artifacts:
-        raise ToolDomainError(
-            f"No artifact found for slot '{slot}'.",
-            code='RESOURCE_NOT_FOUND', details={'resource_type': 'artifact'},
-        )
+        raise ToolExecutionError(f"No artifact found for slot '{slot}'.")
 
     # Use the first (or only) artifact to resolve the path.
     artifact = artifacts[0]
@@ -1487,10 +1429,7 @@ def find_artifact(slot: str, sort_order: Optional[int] = None) -> Dict[str, Any]
 
     path: Optional[str] = value.get('path') or value.get('url') or value.get('text')
     if not path or not isinstance(path, str):
-        raise ToolDomainError(
-            f"Artifact '{slot}' has no resolvable path.",
-            code='RESOURCE_NOT_FOUND', details={'resource_type': 'artifact'},
-        )
+        raise ToolExecutionError(f"Artifact '{slot}' has no resolvable path.")
 
     if not path.lower().startswith(('http://', 'https://', '/static-files/')):
         path = _materialize_local_path(path)

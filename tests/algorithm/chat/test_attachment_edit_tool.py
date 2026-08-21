@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from lazyllm.tools.agent import ToolInvalidArgumentsError
+from lazyllm.tools.agent import ToolExecutionError
 import lazymind.chat.engine.subagent.tools as attachment_tools
 import lazymind.chat.engine.tools.attachment_edit as attachment_edit
 import lazymind.chat.service.chat_service as chat_service
@@ -83,7 +83,7 @@ def test_string_replace_does_not_publish_when_match_count_is_ambiguous(monkeypat
         lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError('must not publish')),
     )
 
-    with pytest.raises(ToolInvalidArgumentsError, match='found at least 2'):
+    with pytest.raises(ToolExecutionError, match='found at least 2'):
         attachment_tools.string_replace('duplicate.txt', 'same', 'changed')
 
     assert source.read_text(encoding='utf-8') == 'same\nsame\n'
@@ -158,7 +158,7 @@ def test_regex_preview_is_bounded_by_expected_count(monkeypatch, tmp_path):
         b'BEGIN\nalpha\nEND\nBEGIN\nbeta\nEND\n',
     )
 
-    with pytest.raises(ToolInvalidArgumentsError, match='found at least 2'):
+    with pytest.raises(ToolExecutionError, match='found at least 2'):
         attachment_tools.string_replace(
             'regex.txt', r'BEGIN.*?END', 'block', mode='regex', regex_flags='MULTILINE,DOTALL',
         )
@@ -187,7 +187,7 @@ def test_apply_rejects_stale_preview(monkeypatch, tmp_path):
     attachment_tools.string_replace(
         'stale.txt', action='apply', preview_id=current['preview_id'],
     )
-    with pytest.raises(ToolInvalidArgumentsError, match='stale'):
+    with pytest.raises(ToolExecutionError, match='stale'):
         attachment_tools.string_replace(
             'stale.txt', action='apply', preview_id=stale['preview_id'],
         )

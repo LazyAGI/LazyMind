@@ -4,7 +4,7 @@ import pytest
 
 from lazymind.chat.engine.tools import kb
 from lazymind.chat.engine.tools.writer import WriterCreateToolkit
-from lazyllm.tools.agent import ToolInvalidArgumentsError
+from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools.agent.toolsManager import MethodModuleTool
 
 skill_editor_mod = importlib.import_module('lazymind.chat.engine.tools.skill_editor')
@@ -44,7 +44,7 @@ def test_kb_keyword_search_maps_target_by_type(monkeypatch):
 
 
 def test_writer_classifies_explicit_argument_failure():
-    with pytest.raises(ToolInvalidArgumentsError, match='JSON array'):
+    with pytest.raises(ToolExecutionError, match='JSON array'):
         WriterCreateToolkit().build_resources(file_paths_json='{}')
 
 

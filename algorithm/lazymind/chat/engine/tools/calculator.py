@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from typing import Any, Dict
 
-from lazyllm.tools.agent import ToolInvalidArgumentsError
+from lazyllm.tools.agent import ToolExecutionError
 
 from lazymind.chat.engine.tools.infra import (
     safe_evaluate_expression,
@@ -48,7 +48,7 @@ def calculator(expression: str) -> Dict[str, Any]:
         if isinstance(value, float) and (math.isnan(value) or math.isinf(value)):
             raise ValueError('expression result is not a finite number')
     except ValueError as exc:
-        raise ToolInvalidArgumentsError(str(exc)) from exc
+        raise ToolExecutionError(str(exc)) from exc
 
     formatted = format_calculation_result(value)
     return {

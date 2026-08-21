@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional, Union
 import lazyllm
 from lazyllm import AutoModel
 from lazyllm.components.formatter import encode_query_with_filepaths
-from lazyllm.tools.agent import ToolDomainError, ToolInvalidArgumentsError
+from lazyllm.tools.agent import ToolExecutionError
 
 from lazymind.chat.engine.tools.infra.image_generation_support import (
     _DEFAULT_BATCH_SIZE,
@@ -81,21 +81,15 @@ def vision_extractor(url: str, instruction: Optional[str] = None) -> Dict[str, A
     """
     raw = str(url or '').strip()
     if not raw:
-        raise ToolInvalidArgumentsError('url is required')
+        raise ToolExecutionError('url is required')
     if Path(raw.split('?', 1)[0]).suffix.lower() == '.pdf':
-        raise ToolDomainError(
-            'vision_extractor only supports image files; use kb_tmp_search to read PDF content',
-            code='UNSUPPORTED_CONTENT_TYPE',
-            details={'resource_type': 'image', 'error_type': 'UnsupportedFileType'},
+        raise ToolExecutionError(
+            'vision_extractor only supports image files; use kb_tmp_search to read PDF content.'
         )
 
     local_path = resolve_tool_image_path(raw)
     if not local_path:
-        raise ToolDomainError(
-            f'Image file not found: {raw}',
-            code='RESOURCE_NOT_FOUND',
-            details={'resource_type': 'image'},
-        )
+        raise ToolExecutionError(f'Image file not found: {raw}')
 
     prompt_instruction = (
         str(instruction).strip() if instruction else _VISION_EXTRACT_DEFAULT_INSTRUCTION
@@ -261,30 +255,18 @@ def video_to_gif(
     """
     raw = str(url or '').strip()
     if not raw:
-        raise ToolInvalidArgumentsError('url is required')
+        raise ToolExecutionError('url is required')
     ffmpeg_path, ffprobe_path = resolve_ffmpeg_binaries()
     if not ffmpeg_path or not ffprobe_path:
-        raise ToolDomainError(
+        raise ToolExecutionError(
             (
-                'FFMPEG_DEPENDENCY_MISSING: Animated GIF output requires FFmpeg. '
-                'The generated video remains available.'
-            ),
-            code='DEPENDENCY_MISSING',
-            details={
-                'required_capability': 'ffmpeg',
-                'error_type': 'MissingDependency',
-                'dependency': 'ffmpeg',
-                'settings_path': '/model-providers/tools#ffmpeg-dependency',
-                'fallback': 'video',
-            },
+                'Animated GIF output requires FFmpeg. Configure it at '
+                '/model-providers/tools#ffmpeg-dependency; the generated video remains available.'
+            )
         )
     local_path = resolve_tool_video_path(raw)
     if not local_path:
-        raise ToolDomainError(
-            f'Video file not found: {raw}',
-            code='RESOURCE_NOT_FOUND',
-            details={'resource_type': 'video'},
-        )
+        raise ToolExecutionError(f'Video file not found: {raw}')
     return run_video_to_gif(
         local_path,
         fps=fps,

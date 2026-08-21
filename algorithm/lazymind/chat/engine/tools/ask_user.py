@@ -19,7 +19,7 @@ from __future__ import annotations
 import uuid
 from typing import Any, Dict, List, Optional, Union
 
-from lazyllm.tools.agent import ToolInvalidArgumentsError
+from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools.agent.base import _write_agent_data
 
 
@@ -46,21 +46,21 @@ def _normalise_questions(raw: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     normalised = []
     for i, q in enumerate(raw):
         if not isinstance(q, dict):
-            raise ToolInvalidArgumentsError(
+            raise ToolExecutionError(
                 f'Question {i} must be a dict, got {type(q).__name__}'
             )
         text = str(q.get('text', '')).strip()
         if not text:
-            raise ToolInvalidArgumentsError(f'Question {i} is missing required field "text"')
+            raise ToolExecutionError(f'Question {i} is missing required field "text"')
         q_type = str(q.get('type', 'text')).strip().lower()
         if q_type not in _VALID_TYPES:
-            raise ToolInvalidArgumentsError(
+            raise ToolExecutionError(
                 f'Question {i} has invalid type {q_type!r}. '
                 f'Must be one of: {", ".join(sorted(_VALID_TYPES))}'
             )
         raw_choices = q.get('choices') or []
         if not isinstance(raw_choices, (list, tuple)):
-            raise ToolInvalidArgumentsError(
+            raise ToolExecutionError(
                 f'Question {i} field "choices" must be a list of strings.'
             )
         choices = list(raw_choices)
@@ -71,13 +71,13 @@ def _normalise_questions(raw: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
             # Clean and validate each choice; discard blank entries.
             choices = [choice for item in choices if (choice := _normalise_choice(item))]
             if not choices:
-                raise ToolInvalidArgumentsError(
+                raise ToolExecutionError(
                     f'Question {i} of type {q_type!r} requires at least one non-empty'
                     ' choice.'
                 )
             allow_other = q.get('allow_other', True)
             if not isinstance(allow_other, bool):
-                raise ToolInvalidArgumentsError(
+                raise ToolExecutionError(
                     f'Question {i} field "allow_other" must be a boolean.'
                 )
             choices = [choice for choice in choices if choice != _OTHER_OPTION]
@@ -115,7 +115,7 @@ def ask_user(
         description: Optional subtitle.
     """
     if not isinstance(questions, list) or len(questions) == 0:
-        raise ToolInvalidArgumentsError('"questions" must be a non-empty list of question dicts.')
+        raise ToolExecutionError('"questions" must be a non-empty list of question dicts.')
 
     normalised = _normalise_questions(questions)
     ask_id = str(uuid.uuid4())

@@ -295,20 +295,27 @@ def test_skill_reference_rendering_does_not_treat_content_error_words_as_failure
     assert '已成功加载 **reference.md** 技能的参考资料。' in result_text
 
 
+def test_tool_rendering_preserves_explicit_approval_signal():
+    result_text = _tool_result_frame_text({
+        'id': 'call-reference',
+        'name': 'read_reference',
+        'result': {
+            'ok': False,
+            'message': 'Reading reference.md requires approval.',
+            'needs_approval': True,
+        },
+    }, language='zh', preview_value='reference.md')
+
+    assert '此操作需要确认后才能继续。' in result_text
+
+
 def test_skill_reference_rendering_preserves_explicit_tool_failure():
     result_text = _tool_result_frame_text({
         'id': 'call-reference',
         'name': 'read_reference',
         'result': {
             'ok': False,
-            'error': {
-                'category': 'DOMAIN_FAILURE',
-                'code': 'RESOURCE_NOT_FOUND',
-                'tool': 'read_reference',
-                'message': 'reference.md not found',
-                'recovery_action': 'change_plan',
-                'details': {'resource_type': 'skill_reference'},
-            },
+            'message': 'reference.md not found',
         },
     }, language='zh', preview_value='reference.md')
 
@@ -329,19 +336,12 @@ def test_workflow_rendering_normalizes_canonical_success_and_failure():
         'name': 'trigger_writer_workflow',
         'result': {
             'ok': False,
-            'error': {
-                'category': 'TRANSIENT_ERROR',
-                'code': 'WORKFLOW_UNAVAILABLE',
-                'tool': 'trigger_writer_workflow',
-                'message': 'Workflow service is unavailable',
-                'recovery_action': 'retry_later',
-                'details': {},
-            },
+            'message': 'Workflow service is unavailable',
         },
     })
 
     assert 'Result: **queued**. Reason: **accepted**.' in success_text
-    assert 'Result: **TRANSIENT_ERROR**. Reason: **Workflow service is unavailable**.' in failure_text
+    assert 'Result: **failed**. Reason: **Workflow service is unavailable**.' in failure_text
     assert '{result.' not in success_text
     assert '{result.' not in failure_text
 
@@ -366,14 +366,7 @@ def test_create_skill_rendering_uses_single_segment_name_and_preserves_failure()
         'name': 'SkillManagementToolkit_create_skill',
         'result': {
             'ok': False,
-            'error': {
-                'category': 'INVALID_ARGS',
-                'code': 'INVALID_TOOL_ARGUMENTS',
-                'tool': 'SkillManagementToolkit_create_skill',
-                'message': "Skill name 'internal2/skill' is invalid.",
-                'recovery_action': 'fix_arguments',
-                'details': {},
-            },
+            'message': "Skill name 'internal2/skill' is invalid.",
         },
     }, language='zh', preview_value='internal2/skill')
 

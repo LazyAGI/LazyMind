@@ -1,5 +1,5 @@
 import pytest
-from lazyllm.tools.agent import ToolDomainError
+from lazyllm.tools.agent import ToolExecutionError
 
 from lazymind.chat.engine.tools import multimodal
 from lazymind.chat.engine.tools.infra import image_generation_support as image_support
@@ -14,7 +14,7 @@ def test_vision_extractor_rejects_pdf_before_vlm(monkeypatch, tmp_path):
 
     monkeypatch.setattr(multimodal, 'AutoModel', fail_automodel)
 
-    with pytest.raises(ToolDomainError, match='only supports image files') as captured:
+    with pytest.raises(ToolExecutionError, match='only supports image files') as captured:
         multimodal.vision_extractor(str(pdf))
 
     assert 'kb_tmp_search' in str(captured.value)

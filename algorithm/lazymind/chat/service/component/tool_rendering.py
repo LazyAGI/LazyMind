@@ -737,7 +737,6 @@ _ZH_TOOL_RESULT_APPROVAL_TEMPLATES.update({
     'NotionFS_move': '移动这个 Notion 页面前，请先确认提示“{value}”。',
     'NotionFS_write': '写入这个 Notion 页面前，请先确认提示“{value}”。',
 })
-
 _TOOL_RESULT_FALLBACK_TEMPLATE = '{tool_name} has finished.'
 _TOOL_RESULT_FAILURE_FALLBACK_TEMPLATE = '{tool_name} could not be completed.'
 _TOOL_RESULT_APPROVAL_FALLBACK_TEMPLATE = 'This operation needs confirmation before continuing.'
@@ -1070,24 +1069,17 @@ def _truncate_tool_result_preview(value: Any) -> str:
 
 
 def _tool_result_status(result: Any) -> str:
-    if isinstance(result, dict) and result.get('ok') is False and isinstance(result.get('error'), dict):
-        return 'failed'
-    payload = _normalized_success_business_value(result)
-    if isinstance(payload, dict):
-        status = str(payload.get('status') or '').strip().lower()
-        if status == 'needs_approval':
+    if isinstance(result, dict):
+        if result.get('ok') is False and result.get('needs_approval') is True:
             return 'needs_approval'
+        if result.get('ok') is False:
+            return 'failed'
     return 'ok'
 
 
 def _tool_result_failure_detail(result: Any) -> str:
-    if isinstance(result, dict) and result.get('ok') is False:
-        error = result.get('error')
-        if isinstance(error, dict):
-            for key in ('message', 'code'):
-                value = error.get(key)
-                if value:
-                    return _truncate_tool_result_preview(value)
+    if isinstance(result, dict) and result.get('ok') is False and result.get('message'):
+        return _truncate_tool_result_preview(result['message'])
     return _truncate_tool_result_preview(result)
 
 
@@ -1217,14 +1209,12 @@ def _normalized_success_business_value(value: Any, depth: int = 0) -> Any:
 
 def _tool_result_mapping(value: Any) -> dict[str, Any] | None:
     """Build the stable mapping consumed by dotted result templates."""
-    if isinstance(value, dict):
-        error = value.get('error')
-        if value.get('ok') is False and isinstance(error, dict):
-            mapping = dict(value)
-            mapping.setdefault('outcome', error.get('category') or error.get('code') or 'failed')
-            mapping.setdefault('reason', error.get('message') or error.get('code') or 'Tool call failed')
-            mapping.setdefault('details', error.get('details') or {})
-            return mapping
+    if isinstance(value, dict) and value.get('ok') is False:
+        return {
+            **value,
+            'outcome': 'failed',
+            'reason': value.get('message') or 'Tool call failed',
+        }
     payload = _normalized_success_business_value(value)
     return payload if isinstance(payload, dict) else None
 
