@@ -20,6 +20,8 @@ import {
   BookOutlined,
   CloudOutlined,
   LinkOutlined,
+  LoginOutlined,
+  LogoutOutlined,
 } from "@ant-design/icons";
 import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import type { UserDetailResponse } from "@/api/generated/auth-client";
@@ -159,19 +161,28 @@ export default function MainLayout() {
     {
       key: "/settings?section=overview",
       label: t("layout.settings"),
-      icon: <SettingOutlined className="settings-popover-icon" />,
+      icon: (
+        <SettingOutlined className="settings-popover-icon" aria-hidden="true" />
+      ),
     },
     {
       key: "/settings?section=models",
       label: t("layout.modelProviderManagement"),
-      icon: <ApiOutlined className="settings-popover-icon" />,
+      icon: (
+        <ApiOutlined className="settings-popover-icon" aria-hidden="true" />
+      ),
     },
     ...(isAdminUser && !runtimeFeatures.hideEvo
       ? [
           {
             key: "/settings?section=developer",
             label: t("layout.developer"),
-            icon: <CodeOutlined className="settings-popover-icon" />,
+            icon: (
+              <CodeOutlined
+                className="settings-popover-icon"
+                aria-hidden="true"
+              />
+            ),
           },
         ]
       : []),
@@ -934,34 +945,58 @@ export default function MainLayout() {
                             "/settings?section=models",
                             "/settings?section=developer",
                           ].includes(item.key) && (
-                            <RightOutlined className="settings-popover-accessory" />
+                            <RightOutlined
+                              className="settings-popover-accessory"
+                              aria-hidden="true"
+                            />
                           )}
                         </Button>
                       );
                       return btn;
                     })}
                     <div className="settings-popover-language">
-                      <GlobalOutlined className="settings-popover-icon" />
+                      <GlobalOutlined
+                        className="settings-popover-icon"
+                        aria-hidden="true"
+                      />
                       <LanguageSwitcher />
                     </div>
+                    {!hideLocalUserControls && (
+                      <div
+                        className="settings-popover-separator"
+                        role="separator"
+                      />
+                    )}
                     {!hideLocalUserControls && (
                       isLoggedIn ? (
                         <Button
                           type="text"
                           role="menuitem"
-                          className="settings-popover-button"
+                          className="settings-popover-button settings-popover-button--session"
                           onClick={handleLogout}
                         >
-                          <span>{t("layout.logout")}</span>
+                          <LogoutOutlined
+                            className="settings-popover-icon"
+                            aria-hidden="true"
+                          />
+                          <span className="settings-popover-label">
+                            {t("layout.logout")}
+                          </span>
                         </Button>
                       ) : (
                         <Button
                           type="text"
                           role="menuitem"
-                          className="settings-popover-button"
+                          className="settings-popover-button settings-popover-button--session"
                           onClick={handleGoLogin}
                         >
-                          <span>{t("layout.goLogin")}</span>
+                          <LoginOutlined
+                            className="settings-popover-icon"
+                            aria-hidden="true"
+                          />
+                          <span className="settings-popover-label">
+                            {t("layout.goLogin")}
+                          </span>
                         </Button>
                       )
                     )}
