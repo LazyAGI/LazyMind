@@ -68,6 +68,24 @@ _MARKDOWN_ATX_HEADING_RE = re.compile(
 )
 _MARKDOWN_FENCE_RE = re.compile(r'^ {0,3}(?P<marks>`{3,}|~{3,})')
 _MARKDOWN_DRAFT_ROOT_ERROR = 'Markdown draft section must contain exactly one H2 root heading.'
+_SECTION_STREAM_IDLE_ERROR_RE = re.compile(
+    r'(?:^|:\s)Draft (?:Markdown|IR) stream was idle for '
+    r'\d+(?:\.\d+)? seconds\.$',
+)
+
+
+def _is_retryable_section_error(exc: Exception) -> bool:
+    """Recognize recoverable section failures after LazyLLM tool wrapping."""
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, TimeoutError):
+            return True
+        if _SECTION_STREAM_IDLE_ERROR_RE.search(str(current)):
+            return True
+        current = current.__cause__ or current.__context__
+    return is_retryable_transport_error(exc)
 
 
 def _extract_length_constraints(query: str) -> dict[str, int]:
@@ -1390,7 +1408,7 @@ class WriterToolkitBase:
         )
         first_section_idle_timeout = max(
             section_stream_idle_timeout,
-            float(os.getenv('LAZYMIND_WRITER_FIRST_SECTION_IDLE_TIMEOUT', '360')),
+            float(os.getenv('LAZYMIND_WRITER_FIRST_SECTION_IDLE_TIMEOUT', '180')),
         )
         section_started_at: list[float | None] = [None] * len(instructions)
         forward_progress(
@@ -1588,10 +1606,7 @@ class WriterToolkitBase:
                         mark_completed(index)
                         return
                     except Exception as exc:
-                        retryable = (
-                            isinstance(exc, TimeoutError)
-                            or is_retryable_transport_error(exc)
-                        )
+                        retryable = _is_retryable_section_error(exc)
                         preview_can_restart = not body_started or on_preview_restart is not None
                         if (
                             attempt >= max_attempts

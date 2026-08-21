@@ -1695,6 +1695,51 @@ def _fill_markdown_media_placeholders(markdown: str, resolved_media_assets: Any)
     return filled
 
 
+def _drop_unregistered_markdown_images(
+    markdown: str,
+    resolved_media_assets: Any,
+) -> str:
+    assets = (resolved_media_assets or {}).get('assets') or {}
+    allowed = {
+        str(path).strip()
+        for asset in assets.values()
+        if isinstance(asset, Mapping)
+        for path in (asset.get('uri'), asset.get('local_path'))
+        if str(path or '').strip()
+    }
+    image_pattern = re.compile(r'!\[([^\]]*)\]\(([^)\n]+)\)')
+    fence: str | None = None
+    dropped: list[str] = []
+    output: list[str] = []
+
+    def replace_image(match: re.Match) -> str:
+        destination = match.group(2).strip()
+        if destination.startswith('<') and '>' in destination:
+            target = destination[1:destination.index('>')]
+        else:
+            target = destination.split(maxsplit=1)[0]
+        if target in allowed:
+            return match.group(0)
+        dropped.append(target)
+        return ''
+
+    for line in (markdown or '').splitlines(keepends=True):
+        fence_match = re.match(r'^\s*(```+|~~~+)', line)
+        if fence_match:
+            marker = fence_match.group(1)[0]
+            fence = marker if fence is None else None if fence == marker else fence
+            output.append(line)
+            continue
+        output.append(image_pattern.sub(replace_image, line) if fence is None else line)
+
+    if dropped:
+        LOG.warning(
+            '[Writer] Dropped %d unregistered Markdown image reference(s): %s',
+            len(dropped), ', '.join(sorted(set(dropped))),
+        )
+    return ''.join(output)
+
+
 def _assemble_draft_document_markdown(
     draft_sections_anchor_path: str,
     writing_context_path: str,
@@ -1732,11 +1777,18 @@ def _assemble_draft_document_markdown(
         title=document_title,
     ), {})
     markdown = payload.get('draft_document') or ''
+    resolved_media_assets = (
+        _read_json_file(resolved_media_assets_path)
+        if resolved_media_assets_path else {}
+    )
     if resolved_media_assets_path:
         markdown = _fill_markdown_media_placeholders(
             markdown,
-            _read_json_file(resolved_media_assets_path),
+            resolved_media_assets,
         )
+    markdown = _drop_unregistered_markdown_images(
+        markdown, resolved_media_assets,
+    )
     if 'media-placeholder://' in markdown:
         raise ValueError(
             'Markdown draft contains unresolved media placeholders; '
