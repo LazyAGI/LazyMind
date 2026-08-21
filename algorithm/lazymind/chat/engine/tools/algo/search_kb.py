@@ -66,8 +66,11 @@ def search_kb(
 
     def _kb_retrieve(expanded: str):
         filters = payload.get('filters') or {}
+        retrieval_kwargs = {'filters': filters, 'topk': retriever_topk}
+        if payload.get('llm_config'):
+            retrieval_kwargs['llm_config'] = payload['llm_config']
         results = parallel(*retrievers)(
-            expanded, filters=filters, topk=retriever_topk
+            expanded, **retrieval_kwargs
         )
         return _fuse_retriever_results(results)
 
@@ -76,5 +79,8 @@ def search_kb(
     if image_retriever is None:
         return text_nodes
 
-    image_nodes = list(image_retriever(query, filters=payload.get('filters') or {}, topk=image_topk) or [])
+    image_kwargs = {'filters': payload.get('filters') or {}, 'topk': image_topk}
+    if payload.get('llm_config'):
+        image_kwargs['llm_config'] = payload['llm_config']
+    image_nodes = list(image_retriever(query, **image_kwargs) or [])
     return list(text_nodes or []) + image_nodes[:image_topk]

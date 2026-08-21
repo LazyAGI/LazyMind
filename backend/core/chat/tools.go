@@ -248,7 +248,11 @@ func applyMCPRuntimeConfig(ctx context.Context, db *gorm.DB, userID string, body
 	if err != nil {
 		fmt.Printf("[Core] [MCP_CONFIG] failed to load for user %s: %v\n", userID, err)
 	} else if len(mcpConfig) > 0 {
-		body["mcp_config"] = mcpConfig
+		values := make([]any, len(mcpConfig))
+		for i := range mcpConfig {
+			values[i] = mcpConfig[i]
+		}
+		body["mcp_config"] = values
 	}
 }
 

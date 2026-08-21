@@ -15,6 +15,7 @@ export interface Task {
   id: string;
   user_id: string;
   conversation_id: string;
+  conversation_state: 'active' | 'archived' | 'trash' | 'missing';
   conversation_title?: string;
   workflow_session_id?: string;
   task_type: string;
@@ -96,7 +97,7 @@ export interface CreateScheduleRequest {
   cron_expr: string;
   prompt_template: string;
   timezone: string;
-  name?: string;
+  name: string;
   remark?: string;
   kb_ids?: string[];
   file_ids?: string[];

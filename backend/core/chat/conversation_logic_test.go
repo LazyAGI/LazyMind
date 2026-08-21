@@ -14,6 +14,7 @@ import (
 
 	"lazymind/core/common/orm"
 	"lazymind/core/evolution"
+	"lazymind/core/state"
 	"lazymind/core/store"
 )
 
@@ -32,6 +33,64 @@ func TestBuildChatRequestBodyUsesConversationIDDerivedSessionID(t *testing.T) {
 	}
 	if _, err := strconv.ParseInt(suffix, 10, 64); err != nil {
 		t.Fatalf("expected millisecond timestamp suffix, got %q: %v", suffix, err)
+	}
+}
+
+func TestWorkflowSessionAvailableForRequest(t *testing.T) {
+	tests := []struct {
+		name    string
+		session *orm.WorkflowSession
+		raw     map[string]any
+		want    bool
+	}{
+		{
+			name:    "active session is injected without frontend context",
+			session: &orm.WorkflowSession{ID: "session-1", Status: "active"},
+			raw:     map[string]any{},
+			want:    true,
+		},
+		{
+			name:    "failed session remains available for recovery",
+			session: &orm.WorkflowSession{ID: "session-1", Status: "failed"},
+			raw:     map[string]any{},
+			want:    true,
+		},
+		{
+			name:    "completed session is available when explicitly focused",
+			session: &orm.WorkflowSession{ID: "session-1", Status: "completed"},
+			raw: map[string]any{
+				"workflow_context": map[string]any{"session_id": "session-1"},
+			},
+			want: true,
+		},
+		{
+			name:    "completed session is not sticky without explicit context",
+			session: &orm.WorkflowSession{ID: "session-1", Status: "completed"},
+			raw:     map[string]any{},
+			want:    false,
+		},
+		{
+			name:    "completed session rejects a stale frontend id",
+			session: &orm.WorkflowSession{ID: "session-1", Status: "completed"},
+			raw: map[string]any{
+				"workflow_context": map[string]any{"session_id": "session-old"},
+			},
+			want: false,
+		},
+		{
+			name:    "dismissed failed session is unavailable",
+			session: &orm.WorkflowSession{ID: "session-1", Status: "failed", Dismissed: true},
+			raw:     map[string]any{},
+			want:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := workflowSessionAvailableForRequest(tt.session, tt.raw); got != tt.want {
+				t.Fatalf("workflowSessionAvailableForRequest() = %v, want %v", got, tt.want)
+			}
+		})
 	}
 }
 
@@ -121,7 +180,7 @@ func TestMergeChunksRetainsConversationIntentUpdate(t *testing.T) {
 	intent := &IntentUpdatedEvent{Scope: "conversation", IntentContext: map[string]any{"goal": "新目标"}}
 	merged := mergeChunksToFirstChunk([]*ChatChunkResponse{
 		{Delta: "前", IntentUpdated: intent},
-		{Delta: "后", FinishReason: "FINISH_REASON_STOP"},
+		{Delta: "后"},
 	})
 	if merged.Delta != "前后" || merged.IntentUpdated != intent {
 		t.Fatalf("intent update was not retained: %#v", merged)
@@ -782,6 +841,94 @@ func TestGetConversationHistoryReturnsStoredMultimodalInput(t *testing.T) {
 	}
 	if got := resp.History[0].ToolCallTurns; got != 8 {
 		t.Fatalf("expected tool_call_turns 8, got %d", got)
+	}
+}
+
+func TestLoadConversationHistoryPageUsesDatabasePaging(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.ChatHistory{})
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	now := time.Now()
+	histories := make([]orm.ChatHistory, 0, 55)
+	for seq := 1; seq <= 55; seq++ {
+		histories = append(histories, orm.ChatHistory{
+			ID: "h_" + strconv.Itoa(seq), Seq: seq, ConversationID: "conv-page",
+			RawContent: "question", Result: "answer",
+			TimeMixin: orm.TimeMixin{CreateTime: now.Add(time.Duration(seq) * time.Second), UpdateTime: now},
+		})
+	}
+	if err := db.Create(&histories).Error; err != nil {
+		t.Fatalf("create histories: %v", err)
+	}
+
+	page, total, err := loadConversationHistoryPage(t.Context(), "conv-page", 10, 20)
+	if err != nil {
+		t.Fatalf("load page: %v", err)
+	}
+	if total != 55 || len(page) != 10 {
+		t.Fatalf("total=%d page=%d, want 55/10", total, len(page))
+	}
+	if page[0].Seq != 35 || page[9].Seq != 26 {
+		t.Fatalf("unexpected page bounds: first=%d last=%d", page[0].Seq, page[9].Seq)
+	}
+
+	if !db.Migrator().HasIndex(&orm.ChatHistory{}, "idx_chat_histories_conversation_seq") {
+		t.Fatal("chat history pagination index was not created")
+	}
+}
+
+func TestLoadConversationHistoryPageMergesGeneratingHistoryWithoutDuplicates(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.ChatHistory{})
+	stateStore, err := state.NewSQLiteStore(t.TempDir() + "/state.db")
+	if err != nil {
+		t.Fatalf("open state store: %v", err)
+	}
+	t.Cleanup(func() { _ = stateStore.Close() })
+	store.Init(db.DB, nil, stateStore)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	now := time.Now()
+	for seq := 1; seq <= 4; seq++ {
+		history := orm.ChatHistory{
+			ID: "h_" + strconv.Itoa(seq), Seq: seq, ConversationID: "conv-live",
+			RawContent: "question", Result: "answer",
+			TimeMixin: orm.TimeMixin{CreateTime: now.Add(time.Duration(seq) * time.Second), UpdateTime: now},
+		}
+		if err := db.Create(&history).Error; err != nil {
+			t.Fatalf("create history %d: %v", seq, err)
+		}
+	}
+	if err := setChatInput(t.Context(), stateStore, "conv-live", "h_5", "generating", 5, nil); err != nil {
+		t.Fatalf("set generating input: %v", err)
+	}
+	if err := setChatStatus(t.Context(), stateStore, "conv-live", "h_5", "generating", ""); err != nil {
+		t.Fatalf("set generating status: %v", err)
+	}
+	if err := setChatInput(t.Context(), stateStore, "conv-live", "h_4", "persisted", 4, nil); err != nil {
+		t.Fatalf("set duplicate input: %v", err)
+	}
+	if err := setChatStatus(t.Context(), stateStore, "conv-live", "h_4", "generating", ""); err != nil {
+		t.Fatalf("set duplicate status: %v", err)
+	}
+
+	page, total, err := loadConversationHistoryPage(t.Context(), "conv-live", 3, 0)
+	if err != nil {
+		t.Fatalf("load first page: %v", err)
+	}
+	if total != 5 || len(page) != 3 {
+		t.Fatalf("total=%d page=%d, want 5/3", total, len(page))
+	}
+	if page[0].ID != "h_5" || page[1].ID != "h_4" || page[2].ID != "h_3" {
+		t.Fatalf("unexpected merged order: %#v", []string{page[0].ID, page[1].ID, page[2].ID})
+	}
+
+	page, total, err = loadConversationHistoryPage(t.Context(), "conv-live", 3, 3)
+	if err != nil {
+		t.Fatalf("load second page: %v", err)
+	}
+	if total != 5 || len(page) != 2 || page[0].ID != "h_2" || page[1].ID != "h_1" {
+		t.Fatalf("unexpected second page: total=%d page=%#v", total, page)
 	}
 }
 

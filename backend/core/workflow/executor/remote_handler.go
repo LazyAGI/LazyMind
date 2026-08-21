@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"context"
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
@@ -31,6 +32,15 @@ func safeArtifactPathPart(value string) string {
 		return "unknown"
 	}
 	return value
+}
+
+func isPublicArtifactReference(value string) bool {
+	value = strings.TrimSpace(value)
+	return strings.HasPrefix(value, "http://") ||
+		strings.HasPrefix(value, "https://") ||
+		strings.HasPrefix(value, "data:") ||
+		strings.HasPrefix(value, "/static-files/") ||
+		strings.HasPrefix(value, "/api/core/static-files/")
 }
 
 // RemoteHandler is the wire boundary used by out-of-process Host Executors.
@@ -137,6 +147,18 @@ func (h RemoteHandler) Input(w http.ResponseWriter, r *http.Request) {
 			}
 			if json.Unmarshal(artifact.Value, &file) != nil || file.Path == "" {
 				remoteReply(w, 404, nil, "ATTEMPT_INPUT_NOT_FOUND", "artifact file path was not found")
+				return
+			}
+			// Web-found images and public static-file references are durable artifact
+			// values, not paths in Core's filesystem. Return their metadata unchanged
+			// so the Host can use the public URL without Core performing an unsafe
+			// server-side download. Core-owned uploaded files still take the binary
+			// materialization path below.
+			if isPublicArtifactReference(file.Path) {
+				remoteReply(w, 200, map[string]any{"material_id": mux.Vars(r)["material_id"],
+					"resource_id": revision.ID, "revision": revision.Revision, "name": revision.Slot + ".json",
+					"mime_type": "application/json", "size": len(artifact.Value),
+					"content_base64": base64.StdEncoding.EncodeToString(artifact.Value)}, "", "")
 				return
 			}
 			content, readErr := os.ReadFile(file.Path)
@@ -324,21 +346,5 @@ func (h RemoteHandler) Complete(w http.ResponseWriter, r *http.Request) {
 // ValidateCompletion is called by the terminal handler before accepting a
 // remote success. Runtime, not the worker, is authoritative for required output.
 func (h RemoteHandler) ValidateCompletion(ctx AttemptContext) error {
-	if len(ctx.RequiredOutputs) == 0 {
-		return nil
-	}
-	var rows []orm.WorkflowSlotRevision
-	if err := h.DB.Where("producer_attempt_id = ? AND validity = 'effective'", ctx.AttemptID).Find(&rows).Error; err != nil {
-		return err
-	}
-	seen := map[string]bool{}
-	for _, row := range rows {
-		seen[row.SlotID] = true
-	}
-	for _, slot := range ctx.RequiredOutputs {
-		if !seen[slot] {
-			return errors.New("required output missing: " + slot)
-		}
-	}
-	return nil
+	return ValidateRequiredOutputs(context.Background(), h.DB, ctx)
 }

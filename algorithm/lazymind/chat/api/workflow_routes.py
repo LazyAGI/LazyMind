@@ -8,7 +8,14 @@ from __future__ import annotations
 
 import base64
 import inspect
+import json
 import logging
+import os
+import platform
+import shutil
+import sys
+import tempfile
+from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
 import httpx
@@ -26,6 +33,80 @@ from lazymind.workflow_toolkit import load_workflow_package_tools
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _env_flag_enabled(*names: str) -> bool:
+    return any((os.environ.get(name) or '').strip().lower() == 'true' for name in names)
+
+
+def _resolve_executable(command: str) -> Optional[str]:
+    command = (command or '').strip()
+    if not command:
+        return None
+    candidate = Path(command)
+    return str(candidate) if candidate.is_file() else shutil.which(command)
+
+
+def _local_platform_target() -> tuple[str, str]:
+    target_platform = (
+        'windows'
+        if sys.platform == 'win32'
+        else ('darwin' if sys.platform == 'darwin' else 'linux')
+    )
+    machine = platform.machine().strip().lower()
+    target_arch = 'x64' if machine in {'amd64', 'x86_64'} else ('arm64' if machine in {'arm64', 'aarch64'} else machine)
+    return target_platform, target_arch
+
+
+def _local_editable_ppt_deps_dir(export_cli: Path) -> Path:
+    deps_env = (os.environ.get('LAZYMIND_PPT_EXPORT_DEPS') or '').strip()
+    return Path(deps_env) if deps_env else export_cli.parent
+
+
+def _local_editable_pptx_installed() -> bool:
+    export_cli = Path((os.environ.get('LAZYMIND_PPT_EXPORT_CLI') or '').strip())
+    if not export_cli.is_file():
+        return False
+    install_dir = _local_editable_ppt_deps_dir(export_cli)
+    node_modules = export_cli.parent / 'node_modules'
+    if not (node_modules / 'pptxgenjs').is_dir() and (install_dir / 'node_modules' / 'pptxgenjs').is_dir():
+        node_modules = install_dir / 'node_modules'
+    manifest_path = install_dir / 'bundle-manifest.json'
+    if (
+        not manifest_path.is_file()
+        or not (node_modules / 'pptxgenjs').is_dir()
+        or not (node_modules / 'playwright').is_dir()
+    ):
+        return False
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding='utf-8'))
+    except (OSError, json.JSONDecodeError):
+        return False
+    target_platform, target_arch = _local_platform_target()
+    if manifest.get('platform') != target_platform or manifest.get('arch') != target_arch:
+        return False
+    if not _resolve_executable(os.environ.get('LAZYMIND_PPT_EXPORT_NODE') or 'node'):
+        return False
+    browsers_dir = Path(
+        (os.environ.get('PLAYWRIGHT_BROWSERS_PATH') or '').strip() or str(install_dir / 'browsers')
+    )
+    patterns = (
+        'chromium_headless_shell-*/**/chrome-headless-shell',
+        'chromium_headless_shell-*/**/chrome-headless-shell.exe',
+        'chromium_headless_shell-*/**/headless_shell',
+        'chromium-*/**/chrome',
+        'chromium-*/**/chrome.exe',
+        'chromium-*/**/Chromium',
+    )
+    return browsers_dir.is_dir() and any(
+        candidate.is_file() for pattern in patterns for candidate in browsers_dir.glob(pattern)
+    )
+
+
+def editable_pptx_enabled() -> bool:
+    if (os.environ.get('LAZYMIND_RUNTIME_MODE') or '').strip().lower() == 'local':
+        return _local_editable_pptx_installed()
+    return _env_flag_enabled('LAZYMIND_OUTPUT_EDITABLE_PPT', 'OUTPUT_EDITABLE_PPT')
 
 
 class TaskCancelRequest(BaseModel):
@@ -57,6 +138,25 @@ class WriterDocumentSyncRequest(BaseModel):
     source_document: WriterDocument
     revised_document: WriterDocument
     tool_config: Dict[str, Any] = Field(default_factory=dict)
+
+
+class PptExportPage(BaseModel):
+    html: str
+    notes: str = ''
+
+
+class PptExportRequest(BaseModel):
+    pages: List[PptExportPage]
+    filename: Optional[str] = None
+
+
+def _writer_artifact(result: dict, key: Optional[str] = None) -> str:
+    path = result.get('artifact_path') if key is None else (
+        (result.get('metadata') or {}).get('artifact_paths') or {}
+    ).get(key)
+    if not path:
+        raise ValueError(f'Writer tool did not return artifact {key or "primary"!r}.')
+    return path
 
 
 class WorkflowActionInvokeRequest(BaseModel):
@@ -216,3 +316,148 @@ async def task_cancel(req: TaskCancelRequest) -> TaskCancelResponse:
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))
     return TaskCancelResponse(ok=True)
+
+
+@router.get('/api/workflow/ppt/capabilities', summary='PPT export capability flags')
+async def ppt_export_capabilities() -> dict:
+    enabled = editable_pptx_enabled()
+    return {
+        'editable_pptx': enabled,
+        'mode': 'editable' if enabled else 'raster',
+        'dependency_missing': not enabled,
+    }
+
+
+@router.post('/api/workflow/ppt/export', summary='Convert HTML slides to editable PPTX on demand')
+async def export_ppt_from_html(req: PptExportRequest):
+    """Write preview HTML into a temporary deck and invoke the configured exporter."""
+    import asyncio
+    import re
+    import subprocess
+    import urllib.error
+    import urllib.request
+    import uuid
+
+    from fastapi.responses import FileResponse
+    from starlette.background import BackgroundTask
+
+    if not editable_pptx_enabled():
+        local = (os.environ.get('LAZYMIND_RUNTIME_MODE') or '').strip().lower() == 'local'
+        detail = (
+            'Editable PPTX export dependency is not installed in the local runtime.'
+            if local else
+            'Editable PPTX export is disabled. Deploy with LAZYMIND_OUTPUT_EDITABLE_PPT=true, '
+            'or use browser raster export.'
+        )
+        raise HTTPException(status_code=501, detail=detail)
+
+    pages = [page for page in (req.pages or []) if (page.html or '').strip()]
+    if not pages:
+        raise HTTPException(status_code=400, detail='pages with html are required')
+    if len(pages) > 30:
+        raise HTTPException(status_code=400, detail='too many pages (max 30)')
+
+    def sanitize_html(raw: str) -> str:
+        value = (raw or '').strip()
+        value = re.sub(r'(?is)<think\b[^>]*>[\s\S]*?</think>', '', value).strip()
+        value = re.sub(r'(?is)^<think\b[^>]*>[\s\S]*?(?=<!doctype|<html\b|```)', '', value).strip()
+        fence = re.search(r'(?is)```(?:html)?\s*\n([\s\S]*?)```', value)
+        if fence:
+            value = fence.group(1).strip()
+        document = re.search(r'(?is)(<!doctype\s+html\b[\s\S]*?</html>|<html\b[\s\S]*?</html>)', value)
+        return document.group(1).strip() if document else value
+
+    workspace = Path(os.environ.get('LAZYMIND_SUBAGENT_WORKSPACE') or '/data/subagent')
+    job_id = f'ppt_export_{uuid.uuid4().hex[:12]}'
+    deck_dir = workspace / '.ppt_on_demand' / job_id
+    pages_dir = deck_dir / 'pages'
+    pages_dir.mkdir(parents=True, exist_ok=True)
+    for index, page in enumerate(pages, start=1):
+        (pages_dir / f'page_{index:03d}.html').write_text(sanitize_html(page.html), encoding='utf-8')
+        if page.notes.strip():
+            (pages_dir / f'page_{index:03d}.notes.txt').write_text(page.notes.strip(), encoding='utf-8')
+    (deck_dir / 'task_pack.json').write_text(
+        json.dumps({'deck_id': job_id, 'deck_dir': str(deck_dir)}, ensure_ascii=False), encoding='utf-8'
+    )
+    (deck_dir / 'review.md').write_text('# on-demand export\n', encoding='utf-8')
+
+    export_cli = (os.environ.get('LAZYMIND_PPT_EXPORT_CLI') or '').strip()
+    export_node = _resolve_executable(os.environ.get('LAZYMIND_PPT_EXPORT_NODE') or 'node')
+    if export_cli and export_node and Path(export_cli).is_file():
+        options: Dict[str, Any] = {}
+        if os.name == 'nt':
+            options['creationflags'] = subprocess.CREATE_NO_WINDOW
+        export_env = os.environ.copy()
+        if export_env.get('LAZYMIND_NODE_RUN_AS_NODE', '').strip().lower() == 'true':
+            export_env['ELECTRON_RUN_AS_NODE'] = '1'
+        process = await asyncio.create_subprocess_exec(
+            export_node, export_cli, '--deck-dir', str(deck_dir), '--force',
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            env=export_env, **options,
+        )
+        stdout, stderr = await process.communicate()
+        raw = stdout.decode('utf-8', errors='replace')
+        if process.returncode != 0:
+            detail = stderr.decode('utf-8', errors='replace') or raw
+            shutil.rmtree(deck_dir, ignore_errors=True)
+            raise HTTPException(status_code=502, detail=f'ppt-export failed: {detail[-1500:]}')
+    else:
+        export_base = (
+            os.environ.get('LAZYMIND_PPT_EXPORT_URL') or os.environ.get('PPT_EXPORT_URL')
+            or 'http://ppt-export:8099'
+        ).rstrip('/')
+        url = f'{export_base}/export'
+        request = urllib.request.Request(
+            url, data=json.dumps({'deck_dir': str(deck_dir)}).encode('utf-8'),
+            headers={'Content-Type': 'application/json'}, method='POST',
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=1200) as response:
+                raw = response.read().decode('utf-8', errors='replace')
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode('utf-8', errors='replace') if exc.fp else str(exc)
+            shutil.rmtree(deck_dir, ignore_errors=True)
+            raise HTTPException(status_code=502, detail=f'ppt-export failed: {detail[:1500]}') from exc
+        except Exception as exc:
+            shutil.rmtree(deck_dir, ignore_errors=True)
+            raise HTTPException(status_code=503, detail=f'ppt-export unreachable at {url}: {exc}') from exc
+
+    try:
+        payload = json.loads(raw) if raw else {}
+    except json.JSONDecodeError:
+        payload = {}
+    ok = isinstance(payload, dict) and (payload.get('status') == 'ok' or payload.get('success') is True)
+    pptx_path = deck_dir / f'{job_id}.pptx'
+    if not pptx_path.exists():
+        candidates = list(deck_dir.glob('*.pptx'))
+        pptx_path = candidates[0] if candidates else pptx_path
+    if not ok or not pptx_path.exists():
+        detail = (
+            str(payload.get('error') or payload.get('detail') or payload.get('reason') or '')
+            if isinstance(payload, dict)
+            else ''
+        )
+        shutil.rmtree(deck_dir, ignore_errors=True)
+        raise HTTPException(status_code=502, detail=detail or 'PPTX not produced')
+
+    filename = (req.filename or f'{job_id}.pptx').strip()
+    if not filename.lower().endswith('.pptx'):
+        filename += '.pptx'
+    temp_file = tempfile.NamedTemporaryFile(suffix='.pptx', delete=False)
+    temp_path = Path(temp_file.name)
+    temp_file.close()
+    shutil.copy2(pptx_path, temp_path)
+    shutil.rmtree(deck_dir, ignore_errors=True)
+
+    def cleanup(path: str) -> None:
+        try:
+            Path(path).unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    return FileResponse(
+        path=str(temp_path),
+        media_type='application/vnd.openxmlformats-officedocument.presentationml.presentation',
+        filename=filename,
+        background=BackgroundTask(cleanup, str(temp_path)),
+    )

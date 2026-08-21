@@ -20,6 +20,7 @@ import {
   notifyToolAvailabilityChanged,
 } from "@/modules/memory/toolApi";
 import type { StructuredAsset } from "@/modules/memory/shared";
+import ExternalServicesPage from "@/modules/modelProvider/pages/ExternalServicesPage";
 
 interface KnowledgeDataSettingsProps {
   documentParsingEnabled: boolean;
@@ -110,7 +111,7 @@ export default function KnowledgeDataSettings({
       title: t("settingsPage.knowledge.groups.recognition.title"),
       description: t("settingsPage.knowledge.groups.recognition.description"),
       icon: <FileSearchOutlined />,
-      destination: "/model-providers/default-services",
+      destination: "/settings?section=models",
       tools: [
         { id: "multimodal", name: t("settingsPage.knowledge.groups.recognition.multimodal.name"), description: t("settingsPage.knowledge.groups.recognition.multimodal.description") },
       ],
@@ -240,18 +241,8 @@ export default function KnowledgeDataSettings({
             <h2>{t("settingsPage.knowledge.documentParsing")}</h2>
             <p>{t("settingsPage.knowledge.documentParsingGroupDesc")}</p>
           </div>
-          <Tag>{documentParsingEnabled ? t("settingsPage.knowledge.parsingEnabledCount") : t("settingsPage.knowledge.parsingDisabledCount")}</Tag>
-        </header>
-        <div className="settings-knowledge-tool-list">
-          <div className="settings-knowledge-tool-row">
-            <span className="settings-knowledge-tool-icon" aria-hidden="true"><ApiOutlined /></span>
-            <div className="settings-knowledge-tool-copy">
-              <strong>{t("settingsPage.knowledge.documentParsing")}</strong>
-              <p>{t("settingsPage.knowledge.documentParsingDesc")}</p>
-            </div>
-            <Tag className={`settings-knowledge-state ${documentParsingEnabled ? "is-enabled" : "is-disabled"}`}>
-              {documentParsingEnabled ? t("settingsPage.enabled") : t("settingsPage.paused")}
-            </Tag>
+          <div className="settings-knowledge-parser-controls">
+            <Tag>{documentParsingEnabled ? t("settingsPage.knowledge.parsingEnabledCount") : t("settingsPage.knowledge.parsingDisabledCount")}</Tag>
             <Switch
               aria-label={t("settingsPage.knowledge.documentParsingAria")}
               checked={documentParsingEnabled}
@@ -260,14 +251,15 @@ export default function KnowledgeDataSettings({
               loading={documentParsingSaving}
               onChange={onDocumentParsingChange}
             />
-            <Button
-              aria-label={t("settingsPage.knowledge.openParsingAria")}
-              className="settings-knowledge-detail-button"
-              icon={<RightOutlined />}
-              onClick={() => navigate("/model-providers/tools")}
-              type="text"
-            />
           </div>
+        </header>
+        <div className="settings-knowledge-parser-services">
+          <ExternalServicesPage
+            includeBuiltinTools={false}
+            includeDependencies={false}
+            includeMcp={false}
+            visibleCategories={["parsing"]}
+          />
         </div>
       </section>
     </div>

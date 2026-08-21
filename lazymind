@@ -1,10 +1,35 @@
 #!/usr/bin/env bash
-# LazyMind CLI wrapper — delegates to cli/ Python package.
+# LazyMind CLI wrapper — routes Agent integration to Go and legacy commands to Python.
 set -euo pipefail
 
 # Use BASH_SOURCE so the script resolves its own directory even if $0 is
 # empty (e.g. when sourced in unusual ways).
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+# External Agents use the shared Go MCP bridge. Desktop invokes the packaged
+# Go binary directly for its private Adapter commands.
+if [ "${1:-}" = "mcp" ] || [ "${1:-}" = "agent" ]; then
+    GO_SOURCE_DIR="${SCRIPT_DIR}/local/lazymind-cli"
+    GO_CLI="${LAZYMIND_CLI_BIN:-${SCRIPT_DIR}/local/build/bin/lazymind}"
+    NEEDS_BUILD=false
+    if [ -z "${LAZYMIND_CLI_BIN:-}" ]; then
+        if [ ! -x "${GO_CLI}" ] || [ -n "$(find "${GO_SOURCE_DIR}" -type f \( -name '*.go' -o -name 'go.mod' -o -name 'go.sum' \) -newer "${GO_CLI}" -print -quit 2>/dev/null)" ]; then
+            NEEDS_BUILD=true
+        fi
+    fi
+    if [ "${NEEDS_BUILD}" = true ]; then
+        if ! command -v go &>/dev/null; then
+            echo "error: Go is required to build the LazyMind Agent connector" >&2
+            exit 1
+        fi
+        mkdir -p "$(dirname "${GO_CLI}")"
+        (cd "${GO_SOURCE_DIR}" && go build -buildvcs=false -o "${GO_CLI}" ./cmd/lazymind)
+    elif [ ! -x "${GO_CLI}" ]; then
+        echo "error: LazyMind Agent connector is not executable: ${GO_CLI}" >&2
+        exit 1
+    fi
+    exec "${GO_CLI}" "$@"
+fi
 
 # The CLI uses Python 3-only APIs (e.g. Path.unlink(missing_ok=...)), so
 # fail fast with a clear message if python3 is missing rather than falling

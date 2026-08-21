@@ -302,7 +302,7 @@ func StartWorkflowSession(w http.ResponseWriter, r *http.Request) {
 		req.TaskID = uuid.NewString()
 	}
 	handOff := req.HandOff
-	params := WorkflowStepParams{WorkflowID: req.WorkflowID, WorkflowRef: req.WorkflowRef, RevisionID: req.WorkflowRevisionID, RevisionNo: req.WorkflowRevisionNo, TreeHash: req.WorkflowTreeHash, RemoteRoot: req.WorkflowRemoteRoot, StepID: req.TargetStepID, UserInput: req.UserInput, IsColdStart: true, HandOff: &handOff, PreflightID: req.PreflightID, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, UserID: req.UserID, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, RequiredOutputs: graph.Nodes[req.TargetStepID].RequiredOutputs, LegacyTools: graph.Nodes[req.TargetStepID].LegacyTools}
+	params := WorkflowStepParams{WorkflowID: req.WorkflowID, WorkflowRef: req.WorkflowRef, RevisionID: req.WorkflowRevisionID, RevisionNo: req.WorkflowRevisionNo, TreeHash: req.WorkflowTreeHash, RemoteRoot: req.WorkflowRemoteRoot, StepID: req.TargetStepID, UserInput: req.UserInput, IsColdStart: true, HandOff: &handOff, PreflightID: req.PreflightID, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, UserID: req.UserID, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, RequiredOutputs: graph.Nodes[req.TargetStepID].RequiredOutputs, LegacyTools: graph.Nodes[req.TargetStepID].LegacyTools, Runtime: graph.Runtime}
 	nodeDef := graph.Nodes[req.TargetStepID]
 	inputKeys := graphengine.Materials(nodeDef.Input)
 	for _, optional := range nodeDef.OptionalInputs {
@@ -643,17 +643,17 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 		for _, target := range targets {
 			handOff := req.HandOff
 			nodeDef := graph.Nodes[target.TargetStepID]
-			inputKeys := graphengine.Materials(nodeDef.Input)
-			for _, optional := range nodeDef.OptionalInputs {
-				inputKeys = append(inputKeys, optional.Material)
-			}
 			taskID := target.TaskID
-			if session.ConversationID == "" {
-				if err := queueHostAttempt(r.Context(), tx, session, target, nodeDef, inputKeys, req.WorkflowMode, now); err != nil {
+			if session.ControllerHost == "external-agent" {
+				if err := queueHostAttempt(r.Context(), tx, session, target, nodeDef, now); err != nil {
 					return err
 				}
 			} else {
-				params := WorkflowStepParams{WorkflowID: session.WorkflowID, WorkflowRef: session.WorkflowRef, RevisionID: session.WorkflowRevisionID, RevisionNo: session.WorkflowRevisionNo, TreeHash: session.WorkflowTreeHash, RemoteRoot: session.WorkflowRemoteRoot, StepID: target.TargetStepID, SessionID: session.ID, UserInput: target.UserInput, HandOff: &handOff, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, RetryHint: target.RuntimeInstruction, PartialIndices: target.PartialIndices, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, UserID: session.CreateUserID, RequiredOutputs: nodeDef.RequiredOutputs, LegacyTools: nodeDef.LegacyTools}
+				inputKeys := graphengine.Materials(nodeDef.Input)
+				for _, optional := range nodeDef.OptionalInputs {
+					inputKeys = append(inputKeys, optional.Material)
+				}
+				params := WorkflowStepParams{WorkflowID: session.WorkflowID, WorkflowRef: session.WorkflowRef, RevisionID: session.WorkflowRevisionID, RevisionNo: session.WorkflowRevisionNo, TreeHash: session.WorkflowTreeHash, RemoteRoot: session.WorkflowRemoteRoot, StepID: target.TargetStepID, SessionID: session.ID, UserInput: target.UserInput, HandOff: &handOff, ChatSessionID: req.ChatSessionID, TraceID: req.TraceID, ParentSpanID: req.ParentSpanID, WorkflowMode: req.WorkflowMode, RetryHint: target.RuntimeInstruction, PartialIndices: target.PartialIndices, HistoryFilesPerTurn: req.HistoryFilesPerTurn, Filters: req.Filters, ParentAgenticConfig: req.ParentAgenticConfig, UserID: session.CreateUserID, RequiredOutputs: nodeDef.RequiredOutputs, LegacyTools: nodeDef.LegacyTools, Runtime: graph.Runtime}
 				var launchErr error
 				stepObjective := workflowStepObjective(nodeDef.Prompt, target.Objective, target.UserInput)
 				_, taskID, _, launchErr = launchWorkflowAttempt(r.Context(), tx, store.State(), session.ConversationID, session.TriggerHistoryID, session.CreateUserID, target.TaskID, session.WorkflowID+":"+target.TargetStepID, stepObjective, params, inputKeys, nodeDef.Outputs, req.LLMConfig, req.ToolConfig, false, false)
@@ -694,6 +694,10 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for _, taskID := range taskIDs {
+		if session.ControllerHost == "external-agent" {
+			NotifyWorkflowRuntimeUpdated(r.Context(), store.DB(), session.ID, taskID, "queued")
+			continue
+		}
 		emitTaskCreatedConvEvent(r.Context(), taskID, session.ID, session.ConversationID)
 	}
 	writeTransitionResponse(w, response, http.StatusOK)
@@ -710,7 +714,7 @@ func sessionIntentText(value string) string {
 }
 
 func queueHostAttempt(ctx context.Context, tx *gorm.DB, session orm.WorkflowSession, target transitionTarget,
-	node graphengine.CompiledNode, inputKeys []string, workflowMode string, now time.Time) error {
+	node graphengine.CompiledNode, now time.Time) error {
 	objective := workflowStepObjective(node.Prompt, target.Objective, target.UserInput)
 	refOrID := session.WorkflowRef
 	if refOrID == "" {
@@ -735,25 +739,6 @@ func queueHostAttempt(ctx context.Context, tx *gorm.DB, session orm.WorkflowSess
 		Attempt: value.AttemptNo, TaskID: target.TaskID, Status: "queued", Validity: "effective",
 		ProgressJSON: `{}`, ResultJSON: `{}`, CreatedAt: now, UpdatedAt: now}
 	if err := tx.Create(&row).Error; err != nil {
-		return err
-	}
-	params, _ := json.Marshal(map[string]any{
-		"workflow_id": session.WorkflowID, "step_id": target.TargetStepID, "session_id": session.ID,
-		"user_input": target.UserInput, "workflow_mode": workflowMode,
-		"retry_hint": target.RuntimeInstruction, "partial_indices": target.PartialIndices,
-		"required_output_artifact_keys": node.RequiredOutputs, "user_id": session.CreateUserID,
-		"output_slot_types": outputTypes,
-	})
-	inputs, _ := json.Marshal(inputKeys)
-	outputs, _ := json.Marshal(node.Outputs)
-	if _, err := subagent.CreateTask(ctx, tx, subagent.CreateTaskInput{
-		TaskID: target.TaskID, ConversationID: session.ConversationID,
-		TriggerHistoryID: session.TriggerHistoryID, AgentType: "workflow_step",
-		Title: session.WorkflowID + ":" + target.TargetStepID, Objective: objective,
-		Mode: "manual", Params: params, InputSlots: inputs, OutputSlots: outputs,
-		WorkspacePath: subagent.WorkspacePath(session.CreateUserID, target.TaskID),
-		CreateUserID:  session.CreateUserID,
-	}); err != nil {
 		return err
 	}
 	return tx.Create(&orm.WorkflowOutbox{ID: uuid.NewString(), AttemptID: row.ID, SessionID: session.ID,
@@ -945,10 +930,8 @@ func GetTransitionCommand(w http.ResponseWriter, r *http.Request) {
 	common.ReplyErr(w, "transition command not found", http.StatusNotFound)
 }
 
-// emitTaskCreatedConvEvent pushes a task_created event to the conversation-level
-// events channel so that the frontend TaskCenter panel receives the notification
-// and subscribes to the task's SSE stream for real-time status updates.
-// This is the graph-engine equivalent of the legacy handleWorkflowStepCreated path.
+// emitTaskCreatedConvEvent announces a native LazyMind SubAgent task. Hosted
+// Workflow attempts are announced through workflow_runtime_updated instead.
 func emitTaskCreatedConvEvent(ctx context.Context, taskID, sessionID, conversationID string) {
 	if subagent.EventHooks == nil || conversationID == "" || taskID == "" {
 		return

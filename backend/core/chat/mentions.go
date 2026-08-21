@@ -526,7 +526,7 @@ func mentionedConversationContext(ctx context.Context, db *gorm.DB, userID, curr
 	var chunks []string
 	for _, id := range ids {
 		var conversation orm.Conversation
-		if err := db.WithContext(ctx).Where("id = ? AND create_user_id = ?", id, userID).Take(&conversation).Error; err != nil {
+		if err := db.WithContext(ctx).Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", id, userID).Take(&conversation).Error; err != nil {
 			return "", fmt.Errorf("conversation mention is not readable: %s", id)
 		}
 		if id == currentID {
@@ -668,6 +668,12 @@ func applyWorkflowSelection(
 				"workflow_ref": mentionedRefs[0],
 				"workflow_id":  strings.TrimPrefix(mentionedRefs[0], "builtin:"),
 			}
+			if runtimePolicy, ok := workflow.RuntimePolicyForRevision(
+				ctx, db, userID, mentionedRefs[0], "",
+			); ok {
+				selected["runtime"] = runtimePolicy
+			}
+			catalog = append(catalog, selected)
 		}
 		if activation := buildWorkflowActivation(selected, mentionedRefs[0]); activation != nil {
 			reqBody["workflow_activations"] = []map[string]any{activation}
@@ -716,7 +722,7 @@ func buildWorkflowActivation(item map[string]any, workflowRef string) map[string
 	if name == "" {
 		name = workflowID
 	}
-	return map[string]any{
+	activation := map[string]any{
 		"workflow_ref": workflowRef,
 		"workflow_id":  workflowID,
 		"revision_id":  optionalActivationString(item["revision_id"]),
@@ -725,8 +731,12 @@ func buildWorkflowActivation(item map[string]any, workflowRef string) map[string
 			"Start the exact executable Workflow %q explicitly selected by the user and return its Ready frontier. This is execution, not resource lookup. %s %s",
 			name, fmt.Sprint(item["description"]), fmt.Sprint(item["when_to_use"]),
 		)),
-		"prompt": "The user explicitly selected an executable Workflow with @workflow. Call its bound trigger directly in this turn. Do not search for the Workflow as an artifact, do not merely explain it, and do not call list_workflows or select another Workflow.",
+		"prompt": "The user explicitly selected an executable Workflow with @workflow. Apply its declared Runtime startup clarification policy first; ask only for missing declared fields. When no declared field is missing, call its bound trigger directly. Do not search for the Workflow as an artifact, do not merely explain it, and do not call list_workflows or select another Workflow.",
 	}
+	if runtimePolicy, ok := item["runtime"]; ok && runtimePolicy != nil {
+		activation["runtime"] = runtimePolicy
+	}
+	return activation
 }
 
 func optionalActivationString(value any) string {

@@ -543,6 +543,11 @@ func ensureLazyLLMSource(ctx context.Context, runner CommandRunner, repoRoot str
 }
 
 func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) []string {
+	exportSrc := filepath.Join(paths.RepoRoot, "workflows", "ppt-workflow", "runtime", "scripts", "export_pptx")
+	exportDeps := filepath.Join(paths.RuntimeRoot, "deps", "editable-ppt")
+	if err := ensureEditablePPTNodeModulesLink(exportSrc, exportDeps); err != nil {
+		fmt.Fprintf(os.Stderr, "editable-ppt node_modules link skipped: %v\n", err)
+	}
 	pythonPaths := []string{filepath.Join(paths.RepoRoot, "algorithm"), paths.RepoRoot}
 	lazyLLMSource := filepath.Join(paths.RepoRoot, "algorithm", "lazyllm")
 	if info, err := os.Stat(filepath.Join(lazyLLMSource, "lazyllm")); err == nil && info.IsDir() {
@@ -659,6 +664,11 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 		"LAZYMIND_ROUTER_DEFAULT_ALGO_PATH=" + filepath.Join(paths.RepoRoot, "algorithm", "lazymind", "chat"),
 		"LAZYMIND_ROUTER_DEFAULT_INSTANCE_COUNT=1",
 		"LAZYMIND_WORKFLOWS_DIR=" + filepath.Join(paths.RepoRoot, "workflows"),
+		"LAZYMIND_PPT_EXPORT_CLI=" + filepath.Join(paths.RepoRoot, "workflows", "ppt-workflow", "runtime", "scripts", "export_pptx", "html_to_pptx.mjs"),
+		"LAZYMIND_PPT_EXPORT_DEPS=" + filepath.Join(paths.RuntimeRoot, "deps", "editable-ppt"),
+		"LAZYMIND_PPT_EXPORT_NODE=" + envText("LAZYMIND_NODE_EXECUTABLE", "node"),
+		"LAZYMIND_NODE_RUN_AS_NODE=" + envText("LAZYMIND_NODE_RUN_AS_NODE", "false"),
+		"PLAYWRIGHT_BROWSERS_PATH=" + filepath.Join(paths.RuntimeRoot, "deps", "editable-ppt", "browsers"),
 		"LAZYMIND_AGENTIC_WORKSPACE=" + filepath.Join(paths.AlgorithmHome, "agent_workspace"),
 		"LAZYMIND_SUBAGENT_WORKSPACE=" + paths.SubagentDataDir,
 		"LAZYMIND_EVO_API_PORT=" + strconv.Itoa(cfg.Algorithm.EvoPort),
@@ -680,7 +690,57 @@ func algorithmServiceEnv(cfg RuntimeConfig, paths RuntimePaths, service string) 
 	if service == docServerProcessName {
 		env = append(env, "LAZYMIND_DOCUMENT_SERVICE_CALLBACK_URL=http://127.0.0.1:"+strconv.Itoa(cfg.Algorithm.DocPort)+"/v1/internal/callbacks/tasks")
 	}
+	if libPath := editablePPTLibraryPath(exportDeps); libPath != "" {
+		env = append(env, "LD_LIBRARY_PATH="+joinPathList(libPath, os.Getenv("LD_LIBRARY_PATH")))
+	}
 	return env
+}
+
+func ensureEditablePPTNodeModulesLink(exportSrc, exportDeps string) error {
+	target := filepath.Join(exportDeps, "node_modules")
+	link := filepath.Join(exportSrc, "node_modules")
+	if _, err := os.Stat(target); err != nil {
+		return err
+	}
+	if current, ok := directoryLinkTarget(link); ok {
+		if filepath.Clean(current) == filepath.Clean(target) {
+			return nil
+		}
+		_ = os.Remove(link)
+	} else if info, err := os.Lstat(link); err == nil {
+		if info.IsDir() {
+			return nil
+		}
+		_ = os.Remove(link)
+	}
+	return createDirectoryLink(target, link)
+}
+
+func editablePPTLibraryPath(exportDeps string) string {
+	if runtime.GOOS != "linux" {
+		return ""
+	}
+	candidates := []string{
+		filepath.Join(exportDeps, "linux-sysroot", "usr", "lib", "x86_64-linux-gnu"),
+		filepath.Join(exportDeps, "linux-sysroot", "lib", "x86_64-linux-gnu"),
+	}
+	existing := make([]string, 0, len(candidates))
+	for _, path := range candidates {
+		if info, err := os.Stat(path); err == nil && info.IsDir() {
+			existing = append(existing, path)
+		}
+	}
+	return strings.Join(existing, string(os.PathListSeparator))
+}
+
+func joinPathList(parts ...string) string {
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		if part = strings.TrimSpace(part); part != "" {
+			out = append(out, part)
+		}
+	}
+	return strings.Join(out, string(os.PathListSeparator))
 }
 
 func algorithmRegisterPolicy(cfg RuntimeConfig, paths RuntimePaths) string {

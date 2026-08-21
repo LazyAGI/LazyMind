@@ -12,10 +12,11 @@ import (
 )
 
 type rawWorkflow struct {
-	ID    string           `yaml:"id"`
-	Slots []map[string]any `yaml:"slots"`
-	Steps []map[string]any `yaml:"steps"`
-	UI    map[string]any   `yaml:"ui"`
+	ID      string           `yaml:"id"`
+	Runtime RuntimePolicy    `yaml:"runtime"`
+	Slots   []map[string]any `yaml:"slots"`
+	Steps   []map[string]any `yaml:"steps"`
+	UI      map[string]any   `yaml:"ui"`
 }
 
 type rawState struct {
@@ -29,6 +30,12 @@ type rawTransition struct {
 	To        string `yaml:"to"`
 	When      string `yaml:"when"`
 	Condition any    `yaml:"condition"`
+}
+
+type uiMaterialSpec struct {
+	Type        string
+	Cardinality string
+	Ordered     bool
 }
 
 type rawStep struct {
@@ -62,6 +69,7 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 	graph := &CompiledStateGraph{
 		SchemaVersion: SchemaVersion, StartRoute: state.StartRoute, Nodes: map[string]CompiledNode{}, MaterialProducers: map[string]ProducerRef{},
 		InputExpressions: map[string]Expression{}, OptionalInputs: map[string][]MaterialRef{},
+		Runtime: plugin.Runtime,
 	}
 	if graph.StartRoute == "" {
 		graph.StartRoute = "all"
@@ -71,7 +79,9 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 		graph.StartRoute = "all"
 	}
 	knownMaterials := map[string]bool{}
+	materialSpecs := map[string]uiMaterialSpec{}
 	external := map[string]bool{}
+	optionalExternal := map[string]bool{}
 	exposed := map[string]bool{}
 	for i, slot := range plugin.Slots {
 		id := scalar(slot["id"])
@@ -83,7 +93,15 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 			result.Diagnostics = append(result.Diagnostics, materialDiag("E_MATERIAL_DUPLICATE", "error", fmt.Sprintf("workflow.yaml.slots[%d].id", i), id, "material id is duplicated: "+id))
 		}
 		knownMaterials[id] = true
+		materialSpecs[id] = uiMaterialSpec{
+			Type:        strings.ToLower(scalar(slot["type"])),
+			Cardinality: strings.ToLower(scalar(slot["cardinality"])),
+			Ordered:     boolValue(slot["ordered"]),
+		}
 		external[id] = boolValue(slot["external"]) || scalar(slot["producer"]) == "external"
+		if required, declared := slot["required"]; declared {
+			optionalExternal[id] = !boolValue(required)
+		}
 		exposed[id] = boolValue(slot["exposed"])
 	}
 
@@ -168,12 +186,90 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 		}
 		graph.OptionalInputs[id] = node.OptionalInputs
 	}
+	for i, slotID := range graph.Runtime.PublisherOwnedSlots {
+		if !knownMaterials[slotID] {
+			result.Diagnostics = append(result.Diagnostics, materialDiag(
+				"E_RUNTIME_PUBLISHER_SLOT_UNKNOWN", "error",
+				fmt.Sprintf("workflow.yaml.runtime.publisher_owned_slots[%d]", i), slotID,
+				"runtime publisher-owned slot is not declared: "+slotID,
+			))
+		}
+	}
+	if stepID := strings.TrimSpace(graph.Runtime.CompletedEditStep); stepID != "" {
+		graph.Runtime.CompletedEditStep = stepID
+		if _, ok := workflowSteps[stepID]; !ok {
+			result.Diagnostics = append(result.Diagnostics, nodeDiag(
+				"E_RUNTIME_EDIT_STEP_UNKNOWN", "error", "workflow.yaml.runtime.completed_edit_step",
+				stepID, "runtime completed edit step is not declared: "+stepID,
+			))
+		}
+	}
+	clarificationIDs := map[string]bool{}
+	for i := range graph.Runtime.ClarificationFields {
+		field := &graph.Runtime.ClarificationFields[i]
+		path := fmt.Sprintf("workflow.yaml.runtime.clarification_fields[%d]", i)
+		field.ID = strings.TrimSpace(field.ID)
+		field.Label = strings.TrimSpace(field.Label)
+		field.Question = strings.TrimSpace(field.Question)
+		field.Type = strings.ToLower(strings.TrimSpace(field.Type))
+		if field.Type == "" {
+			field.Type = "text"
+		}
+		if field.ID == "" {
+			result.Diagnostics = append(result.Diagnostics, diag(
+				"E_RUNTIME_CLARIFICATION_ID_REQUIRED", "error", path+".id",
+				"runtime clarification field id is required",
+			))
+		} else if clarificationIDs[field.ID] {
+			result.Diagnostics = append(result.Diagnostics, diag(
+				"E_RUNTIME_CLARIFICATION_ID_DUPLICATE", "error", path+".id",
+				"runtime clarification field id is duplicated: "+field.ID,
+			))
+		} else {
+			clarificationIDs[field.ID] = true
+		}
+		if field.Label == "" {
+			field.Label = field.ID
+		}
+		if field.Question == "" {
+			result.Diagnostics = append(result.Diagnostics, diag(
+				"E_RUNTIME_CLARIFICATION_QUESTION_REQUIRED", "error", path+".question",
+				"runtime clarification field question is required",
+			))
+		}
+		switch field.Type {
+		case "text", "boolean", "single", "multiple":
+		default:
+			result.Diagnostics = append(result.Diagnostics, diag(
+				"E_RUNTIME_CLARIFICATION_TYPE_INVALID", "error", path+".type",
+				"runtime clarification field type must be text, boolean, single, or multiple",
+			))
+		}
+		choices := make([]string, 0, len(field.Choices))
+		seenChoices := map[string]bool{}
+		for _, rawChoice := range field.Choices {
+			choice := strings.TrimSpace(rawChoice)
+			if choice != "" && !seenChoices[choice] {
+				seenChoices[choice] = true
+				choices = append(choices, choice)
+			}
+		}
+		field.Choices = choices
+		if (field.Type == "single" || field.Type == "multiple") && len(field.Choices) == 0 {
+			result.Diagnostics = append(result.Diagnostics, diag(
+				"E_RUNTIME_CLARIFICATION_CHOICES_REQUIRED", "error", path+".choices",
+				"single and multiple runtime clarification fields require choices",
+			))
+		}
+	}
 
 	// Material producer table. External is explicit; implicit unproduced slots are
 	// diagnosed instead of silently treated as user input.
 	for id := range external {
 		if external[id] {
-			graph.MaterialProducers[id] = ProducerRef{Kind: "external"}
+			graph.MaterialProducers[id] = ProducerRef{
+				Kind: "external", Optional: optionalExternal[id],
+			}
 		}
 	}
 	for id, node := range graph.Nodes {
@@ -314,7 +410,7 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 			graph.SkipExpansions = append(graph.SkipExpansions, CompiledBypass{NodeID: id, From: reverse[id], To: adj[id]})
 		}
 	}
-	result.Diagnostics = append(result.Diagnostics, validateUI(plugin.UI, knownMaterials, exposed, profile)...)
+	result.Diagnostics = append(result.Diagnostics, validateUI(plugin.UI, knownMaterials, exposed, materialSpecs, profile)...)
 	if scenario != "" {
 		for id := range graph.Nodes {
 			if !strings.Contains(scenario, id) {
@@ -733,7 +829,12 @@ func topoOrder(nodes map[string]bool, adj map[string][]string) []string {
 	}
 	return out
 }
-func validateUI(ui map[string]any, known, exposed map[string]bool, profile Profile) []Diagnostic {
+func validateUI(
+	ui map[string]any,
+	known, exposed map[string]bool,
+	specs map[string]uiMaterialSpec,
+	profile Profile,
+) []Diagnostic {
 	if ui == nil {
 		return nil
 	}
@@ -744,16 +845,89 @@ func validateUI(ui map[string]any, known, exposed map[string]bool, profile Profi
 	}
 	placed := map[string]int{}
 	var out []Diagnostic
+	widgets := map[string]map[string]any{}
+	if rawWidgets, exists := ui["slots"]; exists {
+		widgetBytes, _ := yaml.Marshal(rawWidgets)
+		if yaml.Unmarshal(widgetBytes, &widgets) != nil {
+			out = append(out, diag("E_UI_WIDGETS_INVALID", "error", "workflow.yaml.ui.slots", "ui slots must be a mapping"))
+		}
+	}
+	for materialID, widget := range widgets {
+		path := "workflow.yaml.ui.slots." + materialID
+		if !known[materialID] {
+			out = append(out, materialDiag("E_UI_WIDGET_MATERIAL_UNKNOWN", "error", path, materialID, "UI widget references an unknown material"))
+			continue
+		}
+		if scalar(widget["widgetType"]) == "html-slide" && specs[materialID].Type != "text" {
+			out = append(out, materialDiag("E_UI_WIDGET_INCOMPATIBLE", "error", path+".widgetType", materialID, "html-slide requires a text material"))
+		}
+	}
 	for i, tab := range tabs {
 		refs := parseMaterialRefs(tab["slots"])
+		tabMaterials := map[string]bool{}
 		if len(refs) == 0 {
 			out = append(out, diag("E_UI_TAB_EMPTY", "error", fmt.Sprintf("workflow.yaml.ui.tabs[%d].slots", i), "UI tab has no materials"))
 		}
 		for _, ref := range refs {
+			tabMaterials[ref.Material] = true
 			if !known[ref.Material] {
 				out = append(out, materialDiag("E_UI_MATERIAL_UNKNOWN", "error", fmt.Sprintf("workflow.yaml.ui.tabs[%d].slots", i), ref.Material, "UI references an unknown material"))
 			}
 			placed[ref.Material]++
+		}
+
+		actionsBytes, _ := yaml.Marshal(tab["actions"])
+		var actions []map[string]any
+		if tab["actions"] != nil && yaml.Unmarshal(actionsBytes, &actions) != nil {
+			out = append(out, diag("E_UI_ACTIONS_INVALID", "error", fmt.Sprintf("workflow.yaml.ui.tabs[%d].actions", i), "tab actions must be a list"))
+			continue
+		}
+		actionIDs := map[string]bool{}
+		for j, action := range actions {
+			path := fmt.Sprintf("workflow.yaml.ui.tabs[%d].actions[%d]", i, j)
+			actionID := scalar(action["id"])
+			if actionID == "" {
+				out = append(out, diag("E_UI_ACTION_ID_REQUIRED", "error", path+".id", "tab action id is required"))
+			} else if actionIDs[actionID] {
+				out = append(out, diag("E_UI_ACTION_ID_DUPLICATE", "error", path+".id", "tab action id is duplicated: "+actionID))
+			}
+			actionIDs[actionID] = true
+			if scalar(action["type"]) != "export" {
+				out = append(out, diag("E_UI_ACTION_TYPE_INVALID", "error", path+".type", "tab action type must be export"))
+			}
+			if scalar(action["provider"]) == "" {
+				out = append(out, diag("E_UI_ACTION_PROVIDER_REQUIRED", "error", path+".provider", "export action provider is required"))
+			}
+
+			inputs := map[string]string{}
+			inputBytes, _ := yaml.Marshal(action["inputs"])
+			if action["inputs"] == nil || yaml.Unmarshal(inputBytes, &inputs) != nil || len(inputs) == 0 {
+				out = append(out, diag("E_UI_ACTION_INPUTS_REQUIRED", "error", path+".inputs", "export action inputs must map provider input names to material ids"))
+				continue
+			}
+			for inputName, materialID := range inputs {
+				inputPath := path + ".inputs." + inputName
+				materialID = strings.TrimSpace(materialID)
+				if !known[materialID] {
+					out = append(out, materialDiag("E_UI_ACTION_INPUT_UNKNOWN", "error", inputPath, materialID, "export action input references an unknown material"))
+					continue
+				}
+				if !tabMaterials[materialID] {
+					out = append(out, materialDiag("E_UI_ACTION_INPUT_OUTSIDE_TAB", "error", inputPath, materialID, "export action input must be placed in the same tab"))
+				}
+				if scalar(action["alignment"]) == "sort_order" {
+					spec := specs[materialID]
+					if spec.Cardinality != "list" || !spec.Ordered {
+						out = append(out, materialDiag("E_UI_ACTION_ALIGNMENT_INCOMPATIBLE", "error", inputPath, materialID, "sort_order aligned export inputs must be ordered list materials"))
+					}
+				}
+			}
+			if alignment := scalar(action["alignment"]); alignment != "" && alignment != "sort_order" {
+				out = append(out, diag("E_UI_ACTION_ALIGNMENT_INVALID", "error", path+".alignment", "export action alignment must be sort_order"))
+			}
+			if len(stringList(action["formats"])) == 0 {
+				out = append(out, diag("E_UI_ACTION_FORMATS_REQUIRED", "error", path+".formats", "export action formats are required"))
+			}
 		}
 	}
 	for id := range exposed {

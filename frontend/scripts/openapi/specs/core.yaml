@@ -423,8 +423,8 @@ components:
                     type: string
                 delta:
                     type: string
-                finish_reason:
-                    type: string
+                execution:
+                    $ref: '#/components/schemas/ExternalExecutionProjection'
                 history_id:
                     type: string
                 message:
@@ -435,6 +435,8 @@ components:
                     type: array
                 reasoning_content:
                     type: string
+                runtime_event:
+                    $ref: '#/components/schemas/ChatRuntimeEvent'
                 seq:
                     type: integer
                 sources:
@@ -445,6 +447,20 @@ components:
                 thinking_duration_s:
                     format: int64
                     type: integer
+            type: object
+        ChatRuntimeEvent:
+            properties:
+                data:
+                    properties: {}
+                    type: object
+                event_id:
+                    type: string
+                run_id:
+                    type: string
+                schema_version:
+                    type: integer
+                type:
+                    type: string
             type: object
         CheckDatabaseConnectionResponse:
             properties:
@@ -563,6 +579,85 @@ components:
                 - stored_path
                 - upload_id
             type: object
+        ConversationArchiveFolder:
+            properties:
+                created_at:
+                    format: date-time
+                    type: string
+                dialog_count:
+                    format: int64
+                    type: integer
+                id:
+                    type: string
+                name:
+                    type: string
+                task_count:
+                    format: int64
+                    type: integer
+                total_count:
+                    format: int64
+                    type: integer
+                updated_at:
+                    format: date-time
+                    type: string
+            required:
+                - id
+                - name
+                - dialog_count
+                - task_count
+                - total_count
+                - created_at
+                - updated_at
+            type: object
+        ConversationArchiveFolderCreateResponse:
+            properties:
+                folder:
+                    $ref: '#/components/schemas/ConversationArchiveFolder'
+            required:
+                - folder
+            type: object
+        ConversationArchiveFolderDeleteResponse:
+            properties:
+                moved_count:
+                    format: int64
+                    type: integer
+            required:
+                - moved_count
+            type: object
+        ConversationArchiveFolderListResponse:
+            properties:
+                folders:
+                    items:
+                        $ref: '#/components/schemas/ConversationArchiveFolder'
+                    type: array
+                unfiled_dialog_count:
+                    format: int64
+                    type: integer
+                unfiled_task_count:
+                    format: int64
+                    type: integer
+                unfiled_total_count:
+                    format: int64
+                    type: integer
+            required:
+                - folders
+                - unfiled_dialog_count
+                - unfiled_task_count
+                - unfiled_total_count
+            type: object
+        ConversationArchiveFolderRequest:
+            properties:
+                name:
+                    type: string
+            required:
+                - name
+            type: object
+        ConversationArchiveRequest:
+            properties:
+                folder_id:
+                    nullable: true
+                    type: string
+            type: object
         ConversationBatchDeleteRequest:
             properties:
                 conversation_ids:
@@ -620,6 +715,8 @@ components:
             properties:
                 create_time:
                     type: string
+                execution:
+                    $ref: '#/components/schemas/ExternalExecutionProjection'
                 expected_answer:
                     type: string
                 feed_back:
@@ -639,6 +736,12 @@ components:
                     type: string
                 result:
                     type: string
+                run_id:
+                    type: string
+                run_status:
+                    type: string
+                run_terminal:
+                    $ref: '#/components/schemas/RunTerminal'
                 seq:
                     type: integer
                 sources:
@@ -708,6 +811,63 @@ components:
                 total_size:
                     format: int64
                     type: integer
+            type: object
+        ConversationRecoveryItem:
+            properties:
+                archive_folder_name:
+                    type: string
+                archived_at:
+                    format: date-time
+                    type: string
+                conversation_id:
+                    type: string
+                create_time:
+                    format: date-time
+                    type: string
+                deleted_at:
+                    format: date-time
+                    type: string
+                display_name:
+                    type: string
+                folder_id:
+                    nullable: true
+                    type: string
+                kind:
+                    enum:
+                        - dialog
+                        - task
+                    type: string
+                trash_expires_at:
+                    format: date-time
+                    type: string
+                update_time:
+                    format: date-time
+                    type: string
+            required:
+                - conversation_id
+                - display_name
+                - kind
+                - create_time
+                - update_time
+            type: object
+        ConversationRecoveryListResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/ConversationRecoveryItem'
+                    type: array
+                page:
+                    type: integer
+                page_size:
+                    type: integer
+                total:
+                    format: int64
+                    type: integer
+            required:
+                - items
+                - total
+                - page
+                - page_size
             type: object
         ConversationResumeRequest:
             properties:
@@ -783,6 +943,16 @@ components:
                 total_size:
                     format: int64
                     type: integer
+            type: object
+        CoreEmptyResponse:
+            properties:
+                code:
+                    type: integer
+                message:
+                    type: string
+            required:
+                - code
+                - message
             type: object
         CreateEvalSetByImportRequest:
             properties:
@@ -2104,6 +2274,100 @@ components:
                         type: string
                     type: array
             type: object
+        ExternalExecutionInvocation:
+            properties:
+                failed:
+                    type: integer
+                interrupted:
+                    type: integer
+                running:
+                    type: integer
+                succeeded:
+                    type: integer
+                tools:
+                    items:
+                        type: string
+                    type: array
+                total:
+                    type: integer
+            type: object
+        ExternalExecutionProjection:
+            properties:
+                artifact_count:
+                    format: int64
+                    type: integer
+                artifact_revision_count:
+                    format: int64
+                    type: integer
+                claim_count:
+                    type: integer
+                claimed_at:
+                    format: date-time
+                    type: string
+                completed_at:
+                    format: date-time
+                    type: string
+                created_at:
+                    format: date-time
+                    type: string
+                error_message:
+                    type: string
+                event_count:
+                    format: int64
+                    type: integer
+                history_id:
+                    type: string
+                host_id:
+                    type: string
+                host_online:
+                    type: boolean
+                invocation:
+                    $ref: '#/components/schemas/ExternalExecutionInvocation'
+                last_heartbeat_at:
+                    format: date-time
+                    type: string
+                provider:
+                    type: string
+                recovery_count:
+                    type: integer
+                run_id:
+                    type: string
+                status:
+                    enum:
+                        - pending
+                        - running
+                        - completed
+                        - failed
+                        - stopped
+                    type: string
+                updated_at:
+                    format: date-time
+                    type: string
+                workflows:
+                    items:
+                        $ref: '#/components/schemas/ExternalExecutionWorkflow'
+                    type: array
+            type: object
+        ExternalExecutionWorkflow:
+            properties:
+                artifact_count:
+                    format: int64
+                    type: integer
+                artifact_revision_count:
+                    format: int64
+                    type: integer
+                current_step_id:
+                    type: string
+                session_id:
+                    type: string
+                state_version:
+                    format: int64
+                    type: integer
+                status:
+                    type: string
+                workflow_id:
+                    type: string
+            type: object
         GetKBAuthorizationResponse:
             properties:
                 grants:
@@ -2718,6 +2982,11 @@ components:
                         $ref: '#/components/schemas/QuestionTypeOption'
                     type: array
             type: object
+        RecoveryDeleteCountResponse:
+            properties:
+                deleted_count:
+                    type: integer
+            type: object
         ResumeTaskRequest:
             properties:
                 task_id:
@@ -2854,6 +3123,37 @@ components:
                 - feedback_count
                 - feedback_rate
                 - user_count
+            type: object
+        RunTerminal:
+            properties:
+                code:
+                    type: string
+                diagnostic_id:
+                    type: string
+                model_call_id:
+                    type: string
+                partial_output:
+                    type: boolean
+                reason:
+                    enum:
+                        - normal
+                        - awaiting_user_input
+                        - model_incomplete
+                        - model_failure
+                        - runtime_failure
+                        - user_cancelled
+                    type: string
+                status:
+                    enum:
+                        - completed
+                        - interrupted
+                        - failed
+                        - cancelled
+                    type: string
+            required:
+                - status
+                - reason
+                - partial_output
             type: object
         SearchDatasetMemberRequest:
             properties:
@@ -3157,6 +3457,130 @@ components:
             properties:
                 task_id:
                     type: string
+            type: object
+        TaskCenterStatusCounts:
+            properties:
+                all:
+                    format: int64
+                    type: integer
+                canceled:
+                    format: int64
+                    type: integer
+                failed:
+                    format: int64
+                    type: integer
+                pending:
+                    format: int64
+                    type: integer
+                running:
+                    format: int64
+                    type: integer
+                succeeded:
+                    format: int64
+                    type: integer
+                waiting:
+                    format: int64
+                    type: integer
+                waiting_inputs:
+                    format: int64
+                    type: integer
+            type: object
+        TaskCenterStepInfo:
+            properties:
+                artifact:
+                    type: string
+                current_phase:
+                    type: string
+                status:
+                    type: string
+                step_id:
+                    type: string
+                summary:
+                    type: string
+                title:
+                    type: string
+            required:
+                - step_id
+                - status
+            type: object
+        TaskCenterTaskListResponse:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/TaskCenterTaskResponse'
+                    type: array
+                page:
+                    type: integer
+                page_size:
+                    type: integer
+                status_counts:
+                    $ref: '#/components/schemas/TaskCenterStatusCounts'
+                total:
+                    format: int64
+                    type: integer
+            required:
+                - items
+                - total
+                - page
+                - page_size
+            type: object
+        TaskCenterTaskResponse:
+            properties:
+                conversation_id:
+                    type: string
+                conversation_state:
+                    enum:
+                        - active
+                        - archived
+                        - trash
+                        - missing
+                    type: string
+                conversation_title:
+                    type: string
+                created_at:
+                    format: date-time
+                    type: string
+                finished_at:
+                    format: date-time
+                    type: string
+                id:
+                    type: string
+                progress:
+                    properties: {}
+                    type: object
+                schedule_id:
+                    type: string
+                schedule_name:
+                    type: string
+                status:
+                    type: string
+                steps:
+                    items:
+                        $ref: '#/components/schemas/TaskCenterStepInfo'
+                    type: array
+                task_type:
+                    type: string
+                title:
+                    type: string
+                updated_at:
+                    format: date-time
+                    type: string
+                user_id:
+                    type: string
+                waiting_reason:
+                    type: string
+                workflow_session_id:
+                    type: string
+            required:
+                - id
+                - user_id
+                - conversation_id
+                - conversation_state
+                - task_type
+                - status
+                - steps
+                - created_at
+                - updated_at
             type: object
         TaskDocumentInfo:
             properties:
@@ -3622,6 +4046,84 @@ components:
                 - updated_at
                 - word
             type: object
+        WorkflowTrashEmptyData:
+            properties:
+                purged:
+                    type: integer
+            type: object
+        WorkflowTrashEmptyResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/WorkflowTrashEmptyData'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
+        WorkflowTrashItem:
+            properties:
+                deleted_at:
+                    format: date-time
+                    type: string
+                id:
+                    type: string
+                name:
+                    type: string
+                published_status_before_trash:
+                    type: string
+                published_workflow_ref:
+                    type: string
+                trash_expires_at:
+                    format: date-time
+                    type: string
+                updated_at:
+                    format: date-time
+                    type: string
+                workflow_id:
+                    type: string
+            required:
+                - id
+                - name
+                - deleted_at
+                - trash_expires_at
+                - updated_at
+            type: object
+        WorkflowTrashListData:
+            properties:
+                page:
+                    type: integer
+                page_size:
+                    type: integer
+                records:
+                    items:
+                        $ref: '#/components/schemas/WorkflowTrashItem'
+                    type: array
+                total:
+                    format: int64
+                    type: integer
+            required:
+                - records
+                - total
+                - page
+                - page_size
+            type: object
+        WorkflowTrashListResponse:
+            properties:
+                code:
+                    type: integer
+                data:
+                    $ref: '#/components/schemas/WorkflowTrashListData'
+                message:
+                    type: string
+            required:
+                - code
+                - message
+                - data
+            type: object
         addModelProviderGroupModelOpenAPIRequest:
             properties:
                 model_type:
@@ -4017,6 +4519,21 @@ components:
                 - status
                 - thread_id
                 - updated_at
+            type: object
+        artifactActionPreviewOpenAPIRequest:
+            properties:
+                action:
+                    type: string
+                base_revision:
+                    type: integer
+                input:
+                    additionalProperties:
+                        properties: {}
+                        type: object
+                    type: object
+            required:
+                - action
+                - base_revision
             type: object
         builtinSkillListOpenAPIResponse:
             properties:
@@ -6175,6 +6692,13 @@ components:
             required:
                 - base_revision
             type: object
+        writerDocumentWriteBackOpenAPIRequest:
+            properties:
+                base_revision:
+                    type: integer
+            required:
+                - base_revision
+            type: object
 info:
     description: LazyMind Go backend core API - proxies to algorithm services. text Kong text /api/core。
     title: Backend Core API
@@ -6270,6 +6794,36 @@ paths:
             summary: Unpublish market skill item
             tags:
                 - skill-market
+    /api/core/agent-invocations:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /agent-invocations
+    /api/core/agent-invocations/{invocation_id}:finish:
+        post:
+            parameters:
+                - in: path
+                  name: invocation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /agent-invocations/{invocation_id}:finish
+    /api/core/agent-invocations/{invocation_id}:start:
+        post:
+            parameters:
+                - in: path
+                  name: invocation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /agent-invocations/{invocation_id}:start
     /api/core/agent/candidates:
         get:
             description: Proxies Evo GET /candidates for a current-user thread. The thread_id query parameter is required by Core for ownership enforcement.
@@ -7210,6 +7764,12 @@ paths:
                 "200":
                     description: OK
             summary: POST /chat
+    /api/core/chat/executors:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /chat/executors
     /api/core/chat/settings/workflows:
         get:
             responses:
@@ -7228,6 +7788,73 @@ paths:
                 "200":
                     description: OK
             summary: PATCH /chat/settings/workflows/{workflow_ref:.+}
+    /api/core/conversation-archive-folders:
+        get:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ConversationArchiveFolderListResponse'
+                    description: Archive folders
+            summary: List conversation archive folders
+        post:
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ConversationArchiveFolderRequest'
+                required: true
+            responses:
+                "201":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ConversationArchiveFolderCreateResponse'
+                    description: Archive folder created
+            summary: Create a conversation archive folder
+    /api/core/conversation-archive-folders/{folder_id}:
+        delete:
+            parameters:
+                - in: path
+                  name: folder_id
+                  required: true
+                  schema:
+                    type: string
+                - in: query
+                  name: move_to_folder_id
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ConversationArchiveFolderDeleteResponse'
+                    description: Archive folder deleted
+            summary: Delete a conversation archive folder
+        patch:
+            parameters:
+                - in: path
+                  name: folder_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ConversationArchiveFolderRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EmptyObject'
+                    description: Archive folder renamed
+            summary: Rename a conversation archive folder
     /api/core/conversation:export:
         post:
             requestBody:
@@ -7352,6 +7979,18 @@ paths:
                 "200":
                     description: OK
             summary: GET /conversations/{conversation_id}/events
+    /api/core/conversations/{conversation_id}/settings:
+        patch:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PATCH /conversations/{conversation_id}/settings
     /api/core/conversations/{conversation_id}/tasks:
         get:
             parameters:
@@ -7412,6 +8051,60 @@ paths:
                 "200":
                     description: OK
             summary: PATCH /conversations/{conversation_id}/workflow-settings
+    /api/core/conversations/{conversation_id}:archive:
+        post:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/ConversationArchiveRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EmptyObject'
+                    description: Conversation archived
+            summary: Archive or move a conversation
+    /api/core/conversations/{conversation_id}:purge:
+        delete:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EmptyObject'
+                    description: Conversation permanently deleted
+            summary: Permanently delete a trashed conversation
+    /api/core/conversations/{conversation_id}:restore:
+        post:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EmptyObject'
+                    description: Conversation restored
+            summary: Restore a trashed conversation
     /api/core/conversations/{conversation_id}:status:
         get:
             parameters:
@@ -7456,6 +8149,22 @@ paths:
                                 $ref: '#/components/schemas/EmptyObject'
                     description: Decision forwarded
             summary: Choose whether to continue after the tool-round limit
+    /api/core/conversations/{conversation_id}:unarchive:
+        post:
+            parameters:
+                - in: path
+                  name: conversation_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/EmptyObject'
+                    description: Conversation unarchived
+            summary: Unarchive a conversation
     /api/core/conversations/{name}:
         delete:
             parameters:
@@ -7598,6 +8307,45 @@ paths:
                                 $ref: '#/components/schemas/ConversationTrailListResponse'
                     description: Conversation navigation metadata ordered by seq ascending
             summary: List conversation trail metadata (paginated)
+    /api/core/conversations:archived:
+        get:
+            parameters:
+                - in: query
+                  name: keyword
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: kind
+                  required: true
+                  schema:
+                    enum:
+                        - dialog
+                        - task
+                    type: string
+                - in: query
+                  name: folder_id
+                  required: false
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ConversationRecoveryListResponse'
+                    description: Archived conversation page
+            summary: List archived conversations
     /api/core/conversations:batchDelete:
         post:
             requestBody:
@@ -7696,6 +8444,58 @@ paths:
                                 $ref: '#/components/schemas/EmptyObject'
                     description: Stopped successfully
             summary: Stop conversation generation
+    /api/core/conversations:trash:
+        delete:
+            parameters:
+                - in: query
+                  name: kind
+                  required: true
+                  schema:
+                    enum:
+                        - dialog
+                        - task
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/RecoveryDeleteCountResponse'
+                    description: Conversation trash emptied
+            summary: Empty conversation trash for one kind
+        get:
+            parameters:
+                - in: query
+                  name: keyword
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: kind
+                  required: true
+                  schema:
+                    enum:
+                        - dialog
+                        - task
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/ConversationRecoveryListResponse'
+                    description: Conversation trash page
+            summary: List trashed conversations
     /api/core/data-sources/database-connections:
         get:
             responses:
@@ -9504,55 +10304,7 @@ paths:
             summary: Create eval set by import
             tags:
                 - eval-set-imports
-    /api/core/external-agent-conversations/{conversation_id}:interrupt:
-        post:
-            parameters:
-                - in: path
-                  name: conversation_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /external-agent-conversations/{conversation_id}:interrupt
-    /api/core/external-agent-conversations/{conversation_id}:release:
-        post:
-            parameters:
-                - in: path
-                  name: conversation_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /external-agent-conversations/{conversation_id}:release
-    /api/core/external-agent-conversations/{conversation_id}:run:
-        post:
-            parameters:
-                - in: path
-                  name: conversation_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /external-agent-conversations/{conversation_id}:run
-    /api/core/external-agent-requests/{request_id}:respond:
-        post:
-            parameters:
-                - in: path
-                  name: request_id
-                  required: true
-                  schema:
-                    type: string
-            responses:
-                "200":
-                    description: OK
-            summary: POST /external-agent-requests/{request_id}:respond
-    /api/core/external-agents/{provider}/bindings:
+    /api/core/external-chat/hosts/{provider}:claim:
         post:
             parameters:
                 - in: path
@@ -9563,8 +10315,8 @@ paths:
             responses:
                 "200":
                     description: OK
-            summary: POST /external-agents/{provider}/bindings
-    /api/core/external-agents/{provider}/projects:
+            summary: POST /external-chat/hosts/{provider}:claim
+    /api/core/external-chat/hosts/{provider}:status:
         get:
             parameters:
                 - in: path
@@ -9575,36 +10327,37 @@ paths:
             responses:
                 "200":
                     description: OK
-            summary: GET /external-agents/{provider}/projects
-    /api/core/external-agents/{provider}/threads:
+            summary: GET /external-chat/hosts/{provider}:status
+    /api/core/external-chat/runs:
         get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /external-chat/runs
+    /api/core/external-chat/runs/{run_id}:event:
+        post:
             parameters:
                 - in: path
-                  name: provider
+                  name: run_id
                   required: true
                   schema:
                     type: string
             responses:
                 "200":
                     description: OK
-            summary: GET /external-agents/{provider}/threads
-    /api/core/external-agents/{provider}/threads/{thread_id}:
-        get:
+            summary: POST /external-chat/runs/{run_id}:event
+    /api/core/external-chat/runs/{run_id}:heartbeat:
+        post:
             parameters:
                 - in: path
-                  name: provider
-                  required: true
-                  schema:
-                    type: string
-                - in: path
-                  name: thread_id
+                  name: run_id
                   required: true
                   schema:
                     type: string
             responses:
                 "200":
                     description: OK
-            summary: GET /external-agents/{provider}/threads/{thread_id}
+            summary: POST /external-chat/runs/{run_id}:heartbeat
     /api/core/health:
         get:
             responses:
@@ -13124,16 +13877,60 @@ paths:
                   required: true
                   schema:
                     type: string
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    type: integer
             responses:
                 "200":
-                    description: OK
-            summary: GET /task-center/schedules/{schedule_id}/tasks
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/TaskCenterTaskListResponse'
+                    description: Schedule task page
+            summary: List tasks for a schedule
     /api/core/task-center/tasks:
         get:
+            parameters:
+                - in: query
+                  name: status
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: task_type
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: keyword
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    type: integer
             responses:
                 "200":
-                    description: OK
-            summary: GET /task-center/tasks
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/TaskCenterTaskListResponse'
+                    description: Task-center task page
+            summary: List task-center tasks
     /api/core/task-center/tasks/{task_id}:
         get:
             parameters:
@@ -13144,8 +13941,12 @@ paths:
                     type: string
             responses:
                 "200":
-                    description: OK
-            summary: GET /task-center/tasks/{task_id}
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/TaskCenterTaskResponse'
+                    description: Task-center task
+            summary: Get a task-center task
     /api/core/task-center/tasks/{task_id}:cancel:
         post:
             parameters:
@@ -13913,6 +14714,22 @@ paths:
                 "200":
                     description: OK
             summary: POST /workflow-drafts/{draft_id}:publish
+    /api/core/workflow-drafts/{draft_id}:purge:
+        delete:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CoreEmptyResponse'
+                    description: Workflow permanently deleted
+            summary: Permanently delete a workflow draft
     /api/core/workflow-drafts/{draft_id}:repair-preview:
         post:
             parameters:
@@ -13925,6 +14742,22 @@ paths:
                 "200":
                     description: OK
             summary: POST /workflow-drafts/{draft_id}:repair-preview
+    /api/core/workflow-drafts/{draft_id}:restore:
+        post:
+            parameters:
+                - in: path
+                  name: draft_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/CoreEmptyResponse'
+                    description: Workflow restored
+            summary: Restore a workflow draft
     /api/core/workflow-drafts/{draft_id}:save:
         post:
             parameters:
@@ -13955,6 +14788,41 @@ paths:
                 "200":
                     description: OK
             summary: POST /workflow-drafts:polish-info
+    /api/core/workflow-drafts:trash:
+        delete:
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/WorkflowTrashEmptyResponse'
+                    description: Workflow trash emptied
+            summary: Empty workflow draft trash
+        get:
+            parameters:
+                - in: query
+                  name: keyword
+                  required: false
+                  schema:
+                    type: string
+                - in: query
+                  name: page
+                  required: false
+                  schema:
+                    type: integer
+                - in: query
+                  name: page_size
+                  required: false
+                  schema:
+                    type: integer
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/WorkflowTrashListResponse'
+                    description: Workflow trash page
+            summary: List workflow draft trash
     /api/core/workflow-input-resources:
         post:
             responses:
@@ -14009,6 +14877,12 @@ paths:
                 "200":
                     description: OK
             summary: GET /workflow-runtime/v1/workflows/{workflow_id}
+    /api/core/workflow-sessions:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /workflow-sessions
     /api/core/workflow-sessions/{session_id}:
         get:
             parameters:
@@ -14056,6 +14930,57 @@ paths:
                 "200":
                     description: OK
             summary: GET /workflow-sessions/{session_id}/events
+    /api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:begin:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: attempt_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:begin
+    /api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:resume:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: attempt_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:resume
+    /api/core/workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:submit:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: attempt_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}/hosted-attempts/{attempt_id}:submit
     /api/core/workflow-sessions/{session_id}/input-bindings:
         get:
             parameters:
@@ -14246,6 +15171,41 @@ paths:
                 "200":
                     description: OK
             summary: GET /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions
+    /api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-preview:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: list_index
+                  required: true
+                  schema:
+                    type: integer
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/artifactActionPreviewOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: Artifact action preview
+            summary: Preview a Workflow-owned artifact action
+            tags:
+                - workflow
     /api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:sync-writer-document:
         post:
             parameters:
@@ -14280,6 +15240,7 @@ paths:
                     description: WriterDocument sync result
             summary: Sync an edited WriterDocument to Feishu
             tags:
+                - workflow
                 - writer
     /api/core/workflow-sessions/{session_id}/slots/{slot_id}/order:
         get:
@@ -14338,6 +15299,32 @@ paths:
                 "200":
                     description: OK
             summary: GET /workflow-sessions/{session_id}/steps
+    /api/core/workflow-sessions/{session_id}/writer-document:write-back:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/writerDocumentWriteBackOpenAPIRequest'
+                required: true
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                additionalProperties: true
+                                type: object
+                    description: WriterDocument write-back result
+            summary: Write the active WriterDocument back to Feishu
+            tags:
+                - workflow
+                - writer
     /api/core/workflow-sessions/{session_id}:advance-step:
         post:
             parameters:

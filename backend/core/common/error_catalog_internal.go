@@ -516,6 +516,8 @@ func init() {
 		"built-in workflow package directory not found", "workflow.yaml missing from revision",
 		"pin legacy workflow session revision", "resolve conversation plugin binding failed",
 		"decode conversation ext",
+		"load artifact action head revision", "parse artifact action policy",
+		"artifact action head revision is incomplete",
 		"decode sync_document action response", "artifact sync state save failed",
 		"task unavailable",
 		"query task center settings failed", "query settings controls failed",
@@ -548,4 +550,38 @@ func init() {
 	registerAdditionalErrorPattern("seed builtin workflow %s", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("lazymind host execution failed: %s", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorAlias("lazymind host execution failed", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorPattern("save sources task=%s", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorPattern("invalid sources snapshot", "Internal server error", http.StatusInternalServerError, 2000000)
+	for _, source := range []string{
+		"chat service returned no run terminal",
+		"invalid algorithm stream frame",
+		"read algorithm stream",
+		"algorithm emitted payload after run_finished",
+		"algorithm combined run_finished with business payload",
+		"algorithm emitted duplicate run_finished",
+		"algorithm stream ended without run_finished",
+		"runtime event is nil",
+		"invalid runtime event envelope",
+		"runtime event run_id mismatch",
+		"unsupported runtime event type",
+		"invalid model_retry_scheduled data",
+		"model_retry_scheduled fields are required",
+		"invalid model_retry_scheduled values",
+		"invalid model_call_finished data",
+		"model_call_finished fields are required",
+		"model_call_finished finish outcome is invalid",
+		"unsupported model finish",
+		"model_call_finished failure outcome is invalid",
+		"unsupported model failure origin",
+		"unsupported model failure code",
+		"unsupported model_call_finished kind",
+		"runtime event is not run_finished",
+		"invalid run_finished data",
+		"run_finished partial_output is required",
+		"run_finished partial_output must be boolean",
+		"run_finished code must be a string",
+		"invalid run status/reason combination",
+	} {
+		registerAdditionalErrorAlias(source, "algorithm chat stream failed", http.StatusBadGateway, 2002077)
+	}
 }

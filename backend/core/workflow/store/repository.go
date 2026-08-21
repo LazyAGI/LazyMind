@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"net/http"
 	"sort"
 	"sync"
 	"time"
@@ -409,44 +410,61 @@ func (r *Repository) UpdateCommandResponse(ctx context.Context, owner, commandID
 }
 
 func (r *Repository) SetSessionStopped(ctx context.Context, owner, sessionID, commandID string, stop bool) (int64, error) {
-	if err := r.AuthorizeSession(ctx, sessionID, owner); err != nil {
-		return 0, err
-	}
-	var version int64
-	err := r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	request, _ := json.Marshal(map[string]any{"session_id": sessionID, "stopped": stop})
+	command, _, err := r.Command(ctx, owner, sessionID, commandID, "workflow.v1", request, func(tx *gorm.DB) (int, json.RawMessage, error) {
 		var session orm.WorkflowSession
-		if err := tx.Where("id = ? AND create_user_id = ?", sessionID, owner).First(&session).Error; err != nil {
-			return err
+		if err := tx.Where("id = ?", sessionID).First(&session).Error; err != nil {
+			if errors.Is(err, gorm.ErrRecordNotFound) {
+				return 0, nil, ErrNotFound
+			}
+			return 0, nil, err
+		}
+		if session.CreateUserID != owner {
+			return 0, nil, ErrPermissionDenied
 		}
 		status := "active"
 		if stop {
 			status = "stopped"
+			if session.Status == "completed" || session.Status == "failed" {
+				return 0, nil, repositoryError("WORKFLOW_TERMINAL")
+			}
+			if session.Status == status {
+				response, _ := json.Marshal(map[string]any{"session_id": sessionID, "status": status, "state_version": session.StateVersion})
+				return http.StatusOK, response, nil
+			}
 			if err := tx.Model(&orm.WorkflowSessionStep{}).Where("session_id = ? AND status IN ?", sessionID,
 				[]string{"queued", "claimed", "running", "pending"}).Updates(map[string]any{
 				"status": "interrupted", "terminal_code": "WORKFLOW_STOPPED", "lease_expires_at": nil,
 				"updated_at": time.Now().UTC(),
 			}).Error; err != nil {
-				return err
+				return 0, nil, err
 			}
 			if err := tx.Model(&orm.WorkflowOutbox{}).Where("session_id = ? AND status IN ?", sessionID,
 				[]string{"pending", "claimed"}).Updates(map[string]any{"status": "cancelled", "updated_at": time.Now().UTC()}).Error; err != nil {
-				return err
+				return 0, nil, err
 			}
 		} else if session.Status != "stopped" {
-			return repositoryError("WORKFLOW_NOT_STOPPED")
+			return 0, nil, repositoryError("WORKFLOW_NOT_STOPPED")
 		}
-		version = session.StateVersion + 1
+		version := session.StateVersion + 1
 		if err := tx.Model(&orm.WorkflowSession{}).Where("id = ?", sessionID).Updates(map[string]any{
 			"status": status, "state_version": version, "updated_at": time.Now().UTC(),
 		}).Error; err != nil {
-			return err
+			return 0, nil, err
 		}
-		payload, _ := json.Marshal(map[string]any{"session_id": sessionID, "status": status, "state_version": version})
-		return tx.Create(&orm.WorkflowEvent{SessionID: sessionID, OwnerUserID: owner, ContractVersion: "workflow.v1",
-			EventType: "workflow.patch", EntityID: sessionID, StateVersion: version, CommandID: commandID,
-			PayloadJSON: payload, CreatedAt: time.Now().UTC()}).Error
+		response, _ := json.Marshal(map[string]any{"session_id": sessionID, "status": status, "state_version": version})
+		return http.StatusOK, response, nil
 	})
-	return version, err
+	if err != nil {
+		return 0, err
+	}
+	var response struct {
+		StateVersion int64 `json:"state_version"`
+	}
+	if json.Unmarshal(command.ResponseJSON, &response) != nil {
+		return 0, repositoryError("STORED_LIFECYCLE_RESPONSE_INVALID")
+	}
+	return response.StateVersion, nil
 }
 
 func (r *Repository) CreateHostSession(ctx context.Context, owner, sessionID, conversationID, originHost,

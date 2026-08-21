@@ -99,6 +99,8 @@ class CitationResultMiddleware:
         tool_call: dict[str, Any],
         result: Any,
         state: dict[str, Any],
+        *,
+        collect_only: bool = False,
     ) -> Any:
         if not isinstance(result, dict) or result.get('ok') is not True:
             return result
@@ -120,6 +122,8 @@ class CitationResultMiddleware:
             annotate_citations(payload, state, roles={'searched'})
         else:
             processed = _annotate_page_results(value, state)
+        if collect_only:
+            return result
         return {**result, 'value': processed}
 
     def __call__(self, tools: Any, verbose: bool = False) -> Any:
@@ -128,7 +132,11 @@ class CitationResultMiddleware:
         state = _citation_state()
         if not state:
             return results
+        agentic_config = lazyllm.globals.get('agentic_config') or {}
+        collect_only = agentic_config.get('citation_mode') == 'collect_only'
         return [
-            self._process_result(tool_call, result, state)
+            self._process_result(
+                tool_call, result, state, collect_only=collect_only,
+            )
             for tool_call, result in zip(tool_calls, results)
         ]

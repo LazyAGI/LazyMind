@@ -143,7 +143,16 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
     handleSearchLocalPathOptions,
     handleLoadLocalPathChildren,
     resetLocalPathBrowseOptions,
-  } = useLocalPathTree({ t, form, getPreferredLocalAgentId });
+    localPathRecommendations,
+    localPathRecommendationsLoading,
+    localPathRecommendationsError,
+    loadLocalPathRecommendations,
+  } = useLocalPathTree({
+    t,
+    form,
+    getPreferredLocalAgentId,
+    recommendationsEnabled: wizardOpen && selectedType === "local",
+  });
 
   const getActiveFeishuAuthConnectionId = () => {
     const fromOauth = `${oauthConnection?.connectionId || ""}`.trim();
@@ -400,6 +409,10 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
     handleSearchLocalPathOptions,
     handleLoadLocalPathChildren,
     resetLocalPathBrowseOptions,
+    localPathRecommendations,
+    localPathRecommendationsLoading,
+    localPathRecommendationsError,
+    loadLocalPathRecommendations,
     feishuTargetTreeData,
     feishuTargetLoading,
     loadFeishuTargetOptions,

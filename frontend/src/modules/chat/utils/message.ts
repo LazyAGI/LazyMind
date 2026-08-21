@@ -12,14 +12,16 @@ import { splitThinkingContent } from "@/modules/chat/utils/thinking";
 import type { ChatMention } from "@/modules/chat/components/ChatInput/MentionEditor";
 import type { ChatSourceCollection } from "@/modules/chat/utils/sourceAdapter";
 
-const CITE_MESSAGE_PATTERN =
-  /<cite_message>([\s\S]*?)<\/cite_message>\s*/i;
+const CITE_MESSAGE_PATTERN = /<cite_message>([\s\S]*?)<\/cite_message>\s*/i;
 const CITE_MESSAGE_GLOBAL_PATTERN =
   /<cite_message>([\s\S]*?)<\/cite_message>\s*/gi;
 const ASK_USER_RECEIPT_PATTERN =
   /^Question sent to user \(ask_id=[^)]+\)\.\s*Waiting for answer on next turn\.?$/i;
 
-export function stripAskUserReceipt(text: string | undefined, hasAskPending: boolean) {
+export function stripAskUserReceipt(
+  text: string | undefined,
+  hasAskPending: boolean,
+) {
   const content = text || "";
   return hasAskPending && ASK_USER_RECEIPT_PATTERN.test(content.trim())
     ? ""
@@ -57,7 +59,48 @@ export type ConversationHistoryRecord = Omit<
     second_thinking_time_s?: number | string;
     tool_call_turns?: number | string;
     mentions?: ChatMention[] | null;
+    execution?: ExternalExecutionProjection;
+    run_id?: string;
+    run_status?: "completed" | "interrupted" | "failed" | "cancelled";
+    run_terminal?: Record<string, unknown>;
   };
+
+export interface ExternalExecutionProjection {
+  run_id: string;
+  history_id: string;
+  provider: string;
+  status: "pending" | "running" | "completed" | "failed" | "stopped";
+  host_id?: string;
+  host_online: boolean;
+  claim_count: number;
+  recovery_count: number;
+  event_count: number;
+  invocation: {
+    total: number;
+    running: number;
+    succeeded: number;
+    failed: number;
+    interrupted: number;
+    tools: string[];
+  };
+  workflows: Array<{
+    session_id: string;
+    workflow_id: string;
+    status: string;
+    current_step_id?: string;
+    state_version: number;
+    artifact_count: number;
+    artifact_revision_count: number;
+  }>;
+  artifact_count: number;
+  artifact_revision_count: number;
+  error_message?: string;
+  claimed_at?: string;
+  last_heartbeat_at?: string;
+  completed_at?: string;
+  created_at: string;
+  updated_at: string;
+}
 
 export type ConversationTrailRecord = ConversationTrailItem & {
   history_id?: string;
@@ -183,9 +226,9 @@ export function buildChatMessageListFromHistory(
       inputs: normalizedInputs,
       create_time: record.create_time || fallbackCreateTime,
       mentions: Array.isArray(record.mentions) ? record.mentions : [],
-		collected_inputs: Array.isArray((record as any).collected_inputs)
-			? (record as any).collected_inputs
-			: [],
+      collected_inputs: Array.isArray((record as any).collected_inputs)
+        ? (record as any).collected_inputs
+        : [],
     });
 
     const isLastRecord = record === lastRecord;
@@ -213,6 +256,10 @@ export function buildChatMessageListFromHistory(
       thinking_time_s: record.thinking_time_s,
       tool_call_turns: record.tool_call_turns,
       intent_updated: (record as any).intent_updated,
+      execution: record.execution,
+      run_id: record.run_id,
+      run_status: isActuallyGenerating ? undefined : record.run_status,
+      run_terminal: isActuallyGenerating ? undefined : record.run_terminal,
     };
 
     // Restore ask_pending from persisted ext so the AskCard is visible after page reload.
@@ -318,7 +365,10 @@ export function mergeConversationTrailIntoMessageList(
  * client-side state (including edits and truncations), whereas the API list
  * may lag behind or contain messages that were already truncated by the user.
  * Fall back to the API list only when the cache is empty. */
-export function mergeChatMessageLists(apiList: any[] = [], cachedList?: any[] | null) {
+export function mergeChatMessageLists(
+  apiList: any[] = [],
+  cachedList?: any[] | null,
+) {
   const api = Array.isArray(apiList) ? apiList : [];
   const cached = Array.isArray(cachedList) ? cachedList : [];
   if (cached.length === 0) {
@@ -330,7 +380,9 @@ export function mergeChatMessageLists(apiList: any[] = [], cachedList?: any[] | 
 
   const messageKey = (item: any) => item?.history_id || item?.id || "";
   const apiKeys = new Set(api.map(messageKey).filter(Boolean));
-  const hasPersistedOverlap = cached.some((item) => apiKeys.has(messageKey(item)));
+  const hasPersistedOverlap = cached.some((item) =>
+    apiKeys.has(messageKey(item)),
+  );
   if (!hasPersistedOverlap) {
     return cached;
   }
@@ -347,14 +399,18 @@ export function mergeChatMessageLists(apiList: any[] = [], cachedList?: any[] | 
       .map((item) => String(item?.raw_delta || item?.delta || "").trim())
       .filter(Boolean),
   );
-  const apiHasAskPending = api.some((item) => item?.role === RoleTypes.ASSISTANT && item?.ask_pending);
+  const apiHasAskPending = api.some(
+    (item) => item?.role === RoleTypes.ASSISTANT && item?.ask_pending,
+  );
 
   const unpersistedTail = cached.filter((item) => {
     const key = messageKey(item);
     if (key) {
       return !apiKeys.has(key);
     }
-    const text = String(item?.display_delta || item?.raw_delta || item?.delta || "").trim();
+    const text = String(
+      item?.display_delta || item?.raw_delta || item?.delta || "",
+    ).trim();
     if (item?.role === RoleTypes.USER && text && apiUserTexts.has(text)) {
       return false;
     }

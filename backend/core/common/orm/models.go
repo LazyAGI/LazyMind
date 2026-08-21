@@ -132,18 +132,37 @@ type Conversation struct {
 	EnableWorkflow *bool   `gorm:"column:enable_plugin"`
 	WorkflowMode   *string `gorm:"column:plugin_mode;type:varchar(16)"`
 	EnableSubagent *bool   `gorm:"column:enable_subagent"`
+	// ChatExecutor selects the upstream Agent while the existing Chat application
+	// remains responsible for persistence, Workflow, artifacts and SSE delivery.
+	ChatExecutor string `gorm:"column:chat_executor;type:varchar(32);not null;default:'lazymind'"`
 	// IsTaskConv marks conversations created by the scheduler or task center (not user-initiated).
-	IsTaskConv bool `gorm:"column:is_task_conv;not null;default:false"`
+	IsTaskConv      bool       `gorm:"column:is_task_conv;not null;default:false"`
+	ArchivedAt      *time.Time `gorm:"column:archived_at"`
+	ArchiveFolderID *string    `gorm:"column:archive_folder_id;type:varchar(36)"`
+	TrashExpiresAt  *time.Time `gorm:"column:trash_expires_at"`
 
 	BaseModel
 }
 
 func (Conversation) TableName() string { return "conversations" }
 
+// ConversationArchiveFolder groups archived conversations for a single user.
+// A nil Conversation.ArchiveFolderID represents the virtual "unfiled" group.
+type ConversationArchiveFolder struct {
+	ID             string    `gorm:"column:id;type:varchar(36);primaryKey"`
+	UserID         string    `gorm:"column:user_id;type:varchar(255);not null;uniqueIndex:uk_conversation_archive_folders_user_name,priority:1"`
+	Name           string    `gorm:"column:name;type:varchar(255);not null"`
+	NormalizedName string    `gorm:"column:normalized_name;type:varchar(255);not null;uniqueIndex:uk_conversation_archive_folders_user_name,priority:2"`
+	CreatedAt      time.Time `gorm:"column:created_at;not null"`
+	UpdatedAt      time.Time `gorm:"column:updated_at;not null"`
+}
+
+func (ConversationArchiveFolder) TableName() string { return "conversation_archive_folders" }
+
 type ChatHistory struct {
 	ID                string          `gorm:"column:id;type:varchar(36);primaryKey"`
-	Seq               int             `gorm:"column:seq;not null"`
-	ConversationID    string          `gorm:"column:conversation_id;type:varchar(36);index;not null"`
+	Seq               int             `gorm:"column:seq;not null;index:idx_chat_histories_conversation_seq,priority:2,sort:desc"`
+	ConversationID    string          `gorm:"column:conversation_id;type:varchar(36);index;index:idx_chat_histories_conversation_seq,priority:1;not null"`
 	RawContent        string          `gorm:"column:raw_content;type:text"`
 	RetrievalResult   json.RawMessage `gorm:"column:retrieval_result;type:json"`
 	Content           string          `gorm:"column:content;type:text"`
@@ -152,6 +171,9 @@ type ChatHistory struct {
 	Reason            string          `gorm:"column:reason;type:varchar(255)"`
 	ExpectedAnswer    string          `gorm:"column:expected_answer;type:text"`
 	AlgorithmID       string          `gorm:"column:algorithm_id;type:varchar(64)"`
+	RunID             string          `gorm:"column:run_id;type:varchar(64);index"`
+	RunStatus         string          `gorm:"column:run_status;type:varchar(32)"`
+	RunTerminal       json.RawMessage `gorm:"column:run_terminal;type:json"`
 	Ext               json.RawMessage `gorm:"column:ext;type:json"`
 	Version           string          `gorm:"column:version;type:varchar(128);default:2.3"`
 	ToolCallTurns     int             `gorm:"column:tool_call_turns;not null;default:0;check:chk_chat_histories_tool_call_turns_non_negative,tool_call_turns >= 0"`
@@ -176,6 +198,9 @@ type MultiAnswersChatHistory struct {
 	Reason            string          `gorm:"column:reason;type:varchar(255)"`
 	Ext               json.RawMessage `gorm:"column:ext;type:json"`
 	Endpoint          string          `gorm:"column:endpoint;type:varchar(512)"`
+	RunID             string          `gorm:"column:run_id;type:varchar(64);index"`
+	RunStatus         string          `gorm:"column:run_status;type:varchar(32)"`
+	RunTerminal       json.RawMessage `gorm:"column:run_terminal;type:json"`
 
 	TimeMixin
 }

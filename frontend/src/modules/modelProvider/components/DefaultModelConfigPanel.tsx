@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Modal, Select, Switch, Tag, Tooltip, message } from "antd";
+import { Alert, Button, Modal, Select, Skeleton, Switch, Tag, Tooltip, message } from "antd";
 import {
+  ApiOutlined,
   CheckCircleOutlined,
   CloudServerOutlined,
   CompassOutlined,
@@ -9,13 +10,13 @@ import {
   GoogleOutlined,
   MinusCircleOutlined,
   QuestionCircleOutlined,
+  ReloadOutlined,
   ScanOutlined,
   SearchOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { AgentAppsAuth } from "@/components/auth";
 import { useModelFeatures } from "@/hooks/useModelFeatures";
-import { runtimeFeatures } from "@/runtime/features";
 import {
   modelProvidersApi,
   modelProvidersDefaultApi,
@@ -24,6 +25,16 @@ import {
 } from "../api";
 
 const SENSENOVA_LOGO_URL = "https://www.sensenova.ai/images/logo.png";
+
+export type SetupAvailabilityState = "loading" | "ready" | "empty" | "error";
+
+interface DefaultModelConfigPanelProps {
+  cloudServiceSetupStates: Record<CloudServiceSlotKey, SetupAvailabilityState>;
+  modelProviderSetupState: SetupAvailabilityState;
+  onConfigureCloudService: (service: CloudServiceSlotKey) => void;
+  onConfigureProviders: () => void;
+  onRetrySetup: () => void;
+}
 
 type ModelCapability =
   | "llm"
@@ -113,7 +124,7 @@ type SelectedModelMaxInputTokens = Partial<
   Record<ModelCapability, string>
 >;
 
-type CloudServiceSlotKey = "cloudParsing" | "searchEngine";
+export type CloudServiceSlotKey = "cloudParsing" | "searchEngine";
 type CloudServiceCategory = "ocr" | "search";
 
 type SelectedCloudServices = Partial<Record<CloudServiceSlotKey, string>>;
@@ -132,6 +143,9 @@ type ModelOptionItem = {
 };
 
 interface CloudServiceConfig {
+  setupActionKey: string;
+  setupDescriptionKey: string;
+  setupEmptyKey: string;
   key: CloudServiceSlotKey;
   titleKey: string;
   subtitleKey: string;
@@ -249,12 +263,18 @@ const moduleConfigs: ModuleConfig[] = [
 const cloudServiceConfigs: CloudServiceConfig[] = [
   {
     key: "cloudParsing",
+    setupActionKey: "modelProvider.cloudParsingSetupAction",
+    setupDescriptionKey: "modelProvider.cloudParsingSetupDescription",
+    setupEmptyKey: "modelProvider.cloudParsingSetupEmpty",
     titleKey: "modelProvider.module.cloudParsingServiceTitle",
     subtitleKey: "modelProvider.module.cloudParsingServiceSubtitle",
     category: "ocr",
   },
   {
     key: "searchEngine",
+    setupActionKey: "modelProvider.searchEngineSetupAction",
+    setupDescriptionKey: "modelProvider.searchEngineSetupDescription",
+    setupEmptyKey: "modelProvider.searchEngineSetupEmpty",
     titleKey: "modelProvider.module.searchEngineServiceTitle",
     subtitleKey: "modelProvider.module.searchEngineServiceSubtitle",
     category: "search",
@@ -305,7 +325,7 @@ function getProviderLogoUrl(name: string) {
     [/claude|anthropic/, "anthropic.com"],
     [/deepseek/, "deepseek.com"],
     [/doubao|volc|ark/, "volcengine.com"],
-    [/glm|bigmodel|zhipu/, "bigmodel.cn"],
+    [/glm|bigmodel|zhipu/, "zhipuai.cn"],
     [/kimi|moonshot/, "moonshot.cn"],
     [/minimax/, "minimaxi.com"],
     [/openai/, "openai.com"],
@@ -578,7 +598,13 @@ function ProviderLogo({
   );
 }
 
-export default function DefaultModelConfigPanel() {
+export default function DefaultModelConfigPanel({
+  cloudServiceSetupStates,
+  modelProviderSetupState,
+  onConfigureCloudService,
+  onConfigureProviders,
+  onRetrySetup,
+}: DefaultModelConfigPanelProps) {
   const { t, i18n } = useTranslation();
   const currentLanguage = i18n.resolvedLanguage || i18n.language || "zh-CN";
   const [providerOptions, setProviderOptions] = useState<ProviderOption[]>([]);
@@ -1291,7 +1317,39 @@ export default function DefaultModelConfigPanel() {
       </div>
 
       <div className="model-provider-default-list">
-        {visibleModuleConfigs.map((module) => {
+        {modelProviderSetupState === "loading" && (
+          <div className="model-provider-setup-state is-loading" role="status" aria-live="polite">
+            <span>{t("modelProvider.providerSetupLoading")}</span>
+            <Skeleton active title={false} paragraph={{ rows: 3 }} />
+          </div>
+        )}
+        {modelProviderSetupState === "error" && (
+          <div className="model-provider-setup-state is-error" role="alert" aria-label={t("modelProvider.providerSetupLoadFailed")}>
+            <Alert
+              type="error"
+              showIcon
+              message={t("modelProvider.providerSetupLoadFailed")}
+              action={(
+                <Button icon={<ReloadOutlined />} onClick={onRetrySetup}>
+                  {t("common.retry")}
+                </Button>
+              )}
+            />
+          </div>
+        )}
+        {modelProviderSetupState === "empty" && (
+          <div className="model-provider-setup-state is-empty" role="region" aria-labelledby="model-provider-setup-empty-title">
+            <span className="model-provider-setup-icon" aria-hidden="true"><ApiOutlined /></span>
+            <div className="model-provider-setup-copy">
+              <h3 id="model-provider-setup-empty-title">{t("modelProvider.providerSetupEmptyTitle")}</h3>
+              <p>{t("modelProvider.providerSetupEmptyDescription")}</p>
+            </div>
+            <Button type="primary" onClick={onConfigureProviders}>
+              {t("modelProvider.providerSetupAction")}
+            </Button>
+          </div>
+        )}
+        {modelProviderSetupState === "ready" && visibleModuleConfigs.map((module) => {
           const options = moduleModelOptions[module.key] || [];
           const optionLoading = Boolean(moduleModelLoading[module.key]);
           const moduleTitle = t(module.titleKey);
@@ -1348,7 +1406,7 @@ export default function DefaultModelConfigPanel() {
                     </span>
                   </Tooltip>
                 ) : null}
-                {isAdmin && !runtimeFeatures.hideUserGroupSurfaces ? (
+                {isAdmin ? (
                   <Tooltip
                     title={
                       shareStatus[module.key]
@@ -1481,6 +1539,7 @@ export default function DefaultModelConfigPanel() {
         {cloudServiceConfigs.map((service) => {
           const serviceTitle = t(service.titleKey);
           const serviceSubtitle = t(service.subtitleKey);
+          const setupState = cloudServiceSetupStates[service.key];
           const options = cloudServiceOptions[service.key] || [];
           const optionLoading = Boolean(cloudServiceLoading[service.key]);
           const cloudReady = cloudServiceReadyStatus[service.key];
@@ -1508,7 +1567,7 @@ export default function DefaultModelConfigPanel() {
                     <QuestionCircleOutlined />
                   </button>
                 </Tooltip>
-                {isAdmin && !runtimeFeatures.hideUserGroupSurfaces ? (
+                {setupState === "ready" && isAdmin && !runtimeFeatures.hideUserGroupSurfaces ? (
                   <Tooltip
                     title={
                       cloudServiceShareStatus[service.key]
@@ -1531,7 +1590,7 @@ export default function DefaultModelConfigPanel() {
                     />
                   </Tooltip>
                 ) : null}
-                {!isAdmin ? (
+                {setupState === "ready" && !isAdmin ? (
                   <Tooltip
                     title={getCloudServiceReadyTooltip(t, cloudReady)}
                   >
@@ -1551,7 +1610,33 @@ export default function DefaultModelConfigPanel() {
                 ) : null}
               </div>
 
-              <Select
+              {setupState === "loading" && (
+                <div className="model-provider-cloud-service-setup is-loading" role="status" aria-live="polite">
+                  <Skeleton.Input active block size="small" />
+                </div>
+              )}
+              {setupState === "error" && (
+                <div className="model-provider-cloud-service-setup is-error" role="alert">
+                  <Alert
+                    type="error"
+                    showIcon
+                    message={t("modelProvider.cloudServiceSetupLoadFailed")}
+                    action={(
+                      <Button size="small" onClick={onRetrySetup}>{t("common.retry")}</Button>
+                    )}
+                  />
+                </div>
+              )}
+              {setupState === "empty" && (
+                <div className="model-provider-cloud-service-setup is-empty" role="region" aria-label={t(service.setupEmptyKey)}>
+                  <strong>{t(service.setupEmptyKey)}</strong>
+                  <p>{t(service.setupDescriptionKey)}</p>
+                  <Button size="small" type="primary" onClick={() => onConfigureCloudService(service.key)}>
+                    {t(service.setupActionKey)}
+                  </Button>
+                </div>
+              )}
+              {setupState === "ready" && <Select
                 allowClear
                 className="model-provider-model-select"
                 filterOption={false}
@@ -1619,7 +1704,7 @@ export default function DefaultModelConfigPanel() {
                     </span>
                   </Select.Option>
                 ))}
-              </Select>
+              </Select>}
             </div>
           );
         })}

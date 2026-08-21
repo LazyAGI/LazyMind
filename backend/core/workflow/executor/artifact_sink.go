@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -14,6 +15,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/workflow/artifactfile"
 )
 
 // DBArtifactSink is the shared executor output writer. Host implementations
@@ -25,7 +27,20 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 		return errors.New("artifact sink requires a database, attempt and slot")
 	}
 	now := time.Now().UTC()
-	return sink.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	valueID := uuid.NewString()
+	storedValue, cleanupDirectory, err := artifactfile.Materialize(attempt.SessionID, valueID, artifact.Value)
+	if err != nil {
+		return err
+	}
+	var caption *string
+	var metadata map[string]any
+	if json.Unmarshal(storedValue, &metadata) == nil {
+		if text := strings.TrimSpace(stringValue(metadata["caption"])); text != "" {
+			caption = &text
+		}
+	}
+	persisted := false
+	err = sink.DB.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var existing orm.WorkflowSlotRevision
 		err := tx.Where("producer_attempt_id = ? AND slot = ? AND artifact_seq = ?", attempt.AttemptID, artifact.Slot, artifact.Seq).First(&existing).Error
 		if err == nil {
@@ -38,25 +53,37 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 		if err := tx.Where("id = ?", attempt.SessionID).First(&session).Error; err != nil {
 			return err
 		}
-		seq := artifact.Seq
-		valueID := uuid.NewString()
-		var caption *string
-		var metadata map[string]any
-		if json.Unmarshal(artifact.Value, &metadata) == nil {
-			if text := strings.TrimSpace(stringValue(metadata["caption"])); text != "" {
-				caption = &text
+		cardinality := strings.TrimSpace(attempt.OutputCardinality[artifact.Slot])
+		if cardinality == "" {
+			var loadErr error
+			cardinality, loadErr = loadSlotCardinality(tx, session.WorkflowRevisionID, artifact.Slot)
+			if loadErr != nil {
+				return loadErr
 			}
 		}
-		cardinality, err := loadSlotCardinality(tx, session.WorkflowRevisionID, artifact.Slot)
+		if cardinality != "list" {
+			cardinality = "single"
+		}
+		listIndex, appendList, err := artifactListIndex(tx, attempt, artifact, cardinality)
 		if err != nil {
 			return err
 		}
-		revision, listIndex, err := prepareSlotRevision(tx, attempt.SessionID, artifact.Slot, cardinality, metadata)
+		revision, err := nextArtifactRevision(tx, attempt.SessionID, artifact.Slot, cardinality, listIndex)
 		if err != nil {
 			return err
 		}
+		selected := tx.Model(&orm.WorkflowSlotRevision{}).Where(
+			"session_id = ? AND slot_id = ? AND selected = ?", attempt.SessionID, artifact.Slot, true,
+		)
+		if cardinality == "list" {
+			selected = selected.Where("list_index = ?", *listIndex)
+		}
+		if err := selected.Update("selected", false).Error; err != nil {
+			return err
+		}
+		seq := artifact.Seq
 		if err := tx.Create(&orm.WorkflowHumanArtifact{ID: valueID, SessionID: attempt.SessionID,
-			Slot: artifact.Slot, ContentType: artifact.ContentType, Value: append(json.RawMessage(nil), artifact.Value...),
+			Slot: artifact.Slot, ContentType: artifact.ContentType, Value: storedValue,
 			Caption: caption, CreatedAt: now}).Error; err != nil {
 			return err
 		}
@@ -67,8 +94,8 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 		if err := tx.Create(&row).Error; err != nil {
 			return err
 		}
-		if cardinality == "list" && listIndex != nil && metadataListIndex(metadata) == nil {
-			if err := appendSlotOrder(tx, attempt.SessionID, artifact.Slot, *listIndex, now); err != nil {
+		if appendList {
+			if err := appendArtifactListOrder(tx, attempt.SessionID, artifact.Slot, *listIndex, now); err != nil {
 				return err
 			}
 		}
@@ -78,10 +105,86 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 		}
 		payload, _ := json.Marshal(map[string]any{"artifact_id": row.ID, "attempt_id": attempt.AttemptID,
 			"slot": artifact.Slot, "revision": revision, "list_index": listIndex, "state_version": stateVersion})
-		return tx.Create(&orm.WorkflowEvent{SessionID: attempt.SessionID, OwnerUserID: session.CreateUserID,
+		if err := tx.Create(&orm.WorkflowEvent{SessionID: attempt.SessionID, OwnerUserID: session.CreateUserID,
 			ContractVersion: "workflow.v1", EventType: "artifact.upsert", EntityID: row.ID,
-			StateVersion: stateVersion, PayloadJSON: payload, CreatedAt: now}).Error
+			StateVersion: stateVersion, PayloadJSON: payload, CreatedAt: now}).Error; err != nil {
+			return err
+		}
+		persisted = true
+		return nil
 	})
+	if (err != nil || !persisted) && cleanupDirectory != "" {
+		_ = os.RemoveAll(cleanupDirectory)
+	}
+	return err
+}
+
+func artifactListIndex(tx *gorm.DB, attempt AttemptContext, artifact Artifact, cardinality string) (*int, bool, error) {
+	if cardinality != "list" {
+		return nil, false, nil
+	}
+	if selected := attempt.PartialSelector[artifact.Slot]; len(selected) > 0 {
+		position := artifact.Seq - 1
+		if position < 0 || position >= len(selected) {
+			return nil, false, gorm.ErrInvalidData
+		}
+		index := selected[position]
+		return &index, false, nil
+	}
+	var metadata map[string]any
+	if json.Unmarshal(artifact.Value, &metadata) == nil {
+		if index := metadataListIndex(metadata); index != nil {
+			return index, false, nil
+		}
+	}
+	var maxIndex int
+	if err := tx.Model(&orm.WorkflowSlotRevision{}).Select("COALESCE(MAX(list_index), -1)").
+		Where("session_id = ? AND slot_id = ?", attempt.SessionID, artifact.Slot).Scan(&maxIndex).Error; err != nil {
+		return nil, false, err
+	}
+	index := maxIndex + 1
+	return &index, true, nil
+}
+
+func nextArtifactRevision(tx *gorm.DB, sessionID, slot, cardinality string, listIndex *int) (int, error) {
+	query := tx.Model(&orm.WorkflowSlotRevision{}).Select("COALESCE(MAX(revision), 0)").
+		Where("session_id = ? AND slot_id = ?", sessionID, slot)
+	if cardinality == "list" {
+		query = query.Where("list_index = ?", *listIndex)
+	} else {
+		query = query.Where("list_index IS NULL")
+	}
+	var revision int
+	if err := query.Scan(&revision).Error; err != nil {
+		return 0, err
+	}
+	return revision + 1, nil
+}
+
+func appendArtifactListOrder(tx *gorm.DB, sessionID, slot string, listIndex int, now time.Time) error {
+	var order orm.WorkflowSlotOrder
+	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("session_id = ? AND slot_id = ?", sessionID, slot).First(&order).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		encoded, _ := json.Marshal([]int{listIndex})
+		return tx.Create(&orm.WorkflowSlotOrder{SessionID: sessionID, SlotID: slot,
+			OrderList: encoded, UpdatedAt: now}).Error
+	}
+	if err != nil {
+		return err
+	}
+	var current []int
+	if err := json.Unmarshal(order.OrderList, &current); err != nil {
+		return err
+	}
+	for _, index := range current {
+		if index == listIndex {
+			return nil
+		}
+	}
+	encoded, _ := json.Marshal(append(current, listIndex))
+	return tx.Model(&orm.WorkflowSlotOrder{}).Where("session_id = ? AND slot_id = ?", sessionID, slot).
+		Updates(map[string]any{"order_list": encoded, "order_version": order.OrderVersion + 1, "updated_at": now}).Error
 }
 
 type workflowSlotManifest struct {
@@ -91,14 +194,24 @@ type workflowSlotManifest struct {
 	} `yaml:"slots"`
 }
 
+// loadSlotCardinality keeps compatibility with attempt payloads produced before
+// OutputCardinality was embedded in the neutral executor contract.
 func loadSlotCardinality(tx *gorm.DB, revisionID, slot string) (string, error) {
 	if strings.TrimSpace(revisionID) == "" {
 		return "single", nil
 	}
 	var blob orm.WorkflowBlob
-	err := tx.Table("plugin_blobs b").Select("b.*").
+	err := tx.Table("plugin_blobs b").
+		Select("b.*").
 		Joins("JOIN plugin_revision_entries e ON e.blob_hash = b.hash").
-		Where("e.revision_id = ? AND e.path = ?", revisionID, "workflow.yaml").First(&blob).Error
+		Where("e.revision_id = ? AND e.path = ?", revisionID, "workflow.yaml").
+		First(&blob).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		// Older hosted attempts can reference revisions whose compiled graph was
+		// persisted without the source manifest. They predate OutputCardinality,
+		// so retain the historical single-value default when no manifest exists.
+		return "single", nil
+	}
 	if err != nil {
 		return "", fmt.Errorf("load workflow slot manifest: %w", err)
 	}
@@ -143,77 +256,31 @@ func metadataListIndex(metadata map[string]any) *int {
 	return &value
 }
 
-func prepareSlotRevision(tx *gorm.DB, sessionID, slot, cardinality string, metadata map[string]any) (int, *int, error) {
-	if cardinality != "list" {
-		var current orm.WorkflowSlotRevision
-		revision := 1
-		err := tx.Where("session_id = ? AND slot_id = ? AND selected = ?", sessionID, slot, true).
-			Order("revision DESC").First(&current).Error
-		if err == nil {
-			revision = current.Revision + 1
-			if err := tx.Model(&orm.WorkflowSlotRevision{}).Where("id = ?", current.ID).
-				Update("selected", false).Error; err != nil {
-				return 0, nil, err
-			}
-		} else if err != gorm.ErrRecordNotFound {
-			return 0, nil, err
-		}
-		return revision, nil, nil
-	}
-
-	listIndex := metadataListIndex(metadata)
-	if listIndex == nil {
-		var maxIndex int
-		if err := tx.Model(&orm.WorkflowSlotRevision{}).Select("COALESCE(MAX(list_index), -1)").
-			Where("session_id = ? AND slot_id = ?", sessionID, slot).Scan(&maxIndex).Error; err != nil {
-			return 0, nil, err
-		}
-		next := maxIndex + 1
-		return 1, &next, nil
-	}
-
-	var maxRevision int
-	if err := tx.Model(&orm.WorkflowSlotRevision{}).Select("COALESCE(MAX(revision), 0)").
-		Where("session_id = ? AND slot_id = ? AND list_index = ?", sessionID, slot, *listIndex).
-		Scan(&maxRevision).Error; err != nil {
-		return 0, nil, err
-	}
-	if err := tx.Model(&orm.WorkflowSlotRevision{}).
-		Where("session_id = ? AND slot_id = ? AND list_index = ? AND selected = ?", sessionID, slot, *listIndex, true).
-		Update("selected", false).Error; err != nil {
-		return 0, nil, err
-	}
-	return maxRevision + 1, listIndex, nil
-}
-
-func appendSlotOrder(tx *gorm.DB, sessionID, slot string, listIndex int, now time.Time) error {
-	var order orm.WorkflowSlotOrder
-	err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-		Where("session_id = ? AND slot_id = ?", sessionID, slot).First(&order).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		value, _ := json.Marshal([]int{listIndex})
-		return tx.Create(&orm.WorkflowSlotOrder{SessionID: sessionID, SlotID: slot,
-			OrderList: value, UpdatedAt: now}).Error
-	}
-	if err != nil {
-		return err
-	}
-	var values []int
-	_ = json.Unmarshal(order.OrderList, &values)
-	for _, value := range values {
-		if value == listIndex {
-			return nil
-		}
-	}
-	values = append(values, listIndex)
-	encoded, _ := json.Marshal(values)
-	return tx.Model(&orm.WorkflowSlotOrder{}).
-		Where("session_id = ? AND slot_id = ?", sessionID, slot).
-		Updates(map[string]any{"order_list": encoded, "order_version": order.OrderVersion + 1,
-			"updated_at": now}).Error
-}
-
 func stringValue(value any) string {
 	text, _ := value.(string)
 	return text
+}
+
+// ValidateRequiredOutputs keeps completion policy shared by managed, remote,
+// and externally hosted execution paths.
+func ValidateRequiredOutputs(ctx context.Context, db *gorm.DB, attempt AttemptContext) error {
+	if len(attempt.RequiredOutputs) == 0 {
+		return nil
+	}
+	var rows []orm.WorkflowSlotRevision
+	if err := db.WithContext(ctx).Where(
+		"producer_attempt_id = ? AND validity = 'effective'", attempt.AttemptID,
+	).Find(&rows).Error; err != nil {
+		return err
+	}
+	seen := make(map[string]bool, len(rows))
+	for _, row := range rows {
+		seen[row.SlotID] = true
+	}
+	for _, slot := range attempt.RequiredOutputs {
+		if !seen[slot] {
+			return errors.New("required output missing: " + slot)
+		}
+	}
+	return nil
 }

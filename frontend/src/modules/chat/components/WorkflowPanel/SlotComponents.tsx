@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useEffect, useMemo, createContext, useContext } from "react";
 import ReactDOM from "react-dom";
-import type { SlotRevision, SlotVersionEntry } from "@/modules/chat/store/workflowPanel";
+import type { SlotRevision, SlotVersionEntry, SlotWidgetConfig } from "@/modules/chat/store/workflowPanel";
 import { useWorkflowStore, draftStore } from "@/modules/chat/store/workflowPanel";
 import { resolveCoreAssetUrl, resolveMarkdownImageUrlAsync, isExpiredSignedUrl } from "@/modules/knowledge/utils/imageUrl";
 import { buildDiffLinesWithInline } from "@/modules/memory/shared";
@@ -34,6 +34,9 @@ import MarkdownViewer from '@/modules/chat/components/MarkdownViewer';
 import i18n from '@/i18n';
 import { useTranslation } from 'react-i18next';
 import { localizeErrorCode } from '@/components/request';
+import { SlotHtmlSlide } from './ppt/SlotHtmlSlide';
+import { SlotJsonSlide } from './ppt/SlotJsonSlide';
+import { isSlideSpecArtifact } from './ppt/slideSchema';
 import type { TaskArtifactStream } from '@/modules/chat/store/taskCenter';
 
 export { SlotEditingContext } from './slotEditingContext';
@@ -1290,6 +1293,7 @@ export function SlotImage({
 }: SlotImageProps) {
   const raw = slot.artifact_value;
   const { displayUrl: url, pending, hasSource } = useSlotImageUrl(raw);
+  const downloadEnabled = useContext(SlotDownloadContext);
   const alt: string = slot.caption ?? raw?.alt ?? '';
   const { deleteSlotItem, patchSlotCaption, patchSlotItemValue } = useWorkflowStore();
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -1378,6 +1382,18 @@ export function SlotImage({
 
   const hasActions = Boolean(sessionId && slotId && slot.list_index !== undefined) && !readOnly;
   const showMutationActions = hasActions && !hideMutationActions;
+  const downloadName = String(raw?.name ?? raw?.filename ?? 'workflow-image.png');
+  const downloadUrl = url ? `${url}${url.includes('?') ? '&' : '?'}download=1` : '';
+  const downloadControl = downloadEnabled && downloadUrl ? (
+    <a
+      className='workflow-slot__download-btn--overlay'
+      href={downloadUrl}
+      download={downloadName}
+      title={tr('chat.slots.download')}
+      aria-label={tr('chat.slots.download')}
+      onClick={(event) => event.stopPropagation()}
+    >↓</a>
+  ) : null;
 
   // Overlays rendered directly on top of the image (no separate action bar)
   const overlays = hasActions ? (
@@ -1458,6 +1474,7 @@ export function SlotImage({
           <img src={url} alt={alt} className='workflow-slot__image-card-img' loading='lazy' />
           {alt && <div className='workflow-slot__image-card-caption'>{alt}</div>}
           {overlays}
+          {downloadControl}
         </div>
         {/* Hidden file input */}
         {showMutationActions && (
@@ -1504,6 +1521,7 @@ export function SlotImage({
     <div className='workflow-slot workflow-slot--image'>
       <img src={url} alt={alt} className='workflow-slot__image' loading='lazy' />
       {overlays}
+      {downloadControl}
       {hasActions && (
         <div className='workflow-slot__caption'>
           {captionEditing ? (
@@ -1541,6 +1559,7 @@ export function SlotImage({
 
 interface SlotTextProps {
   slot: SlotRevision;
+  widget?: SlotWidgetConfig;
   sessionId?: string;
   slotId?: string;
   revisionCount?: number;
@@ -1548,7 +1567,7 @@ interface SlotTextProps {
   readOnly?: boolean;
 }
 
-export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh, readOnly }: SlotTextProps) {
+export function SlotText({ slot, widget, sessionId, slotId, revisionCount, onRefresh, readOnly }: SlotTextProps) {
   const raw = slot.artifact_value;
   const { patchSlotCaption } = useWorkflowStore();
   const { setEditing: notifyEditing } = useContext(SlotEditingContext);
@@ -1769,6 +1788,17 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh, re
     return <SlotPending type='text' />;
   }
 
+  const textDisplayProps = {
+    onClick: canEdit ? handleEdit : undefined,
+    title: canEdit ? tr('chat.slots.clickToEdit') : undefined,
+    role: canEdit ? 'button' as const : undefined,
+    tabIndex: canEdit ? 0 : undefined,
+    onKeyDown: canEdit ? (e: React.KeyboardEvent<HTMLElement>) => e.key === 'Enter' && handleEdit() : undefined,
+    style: typeof widget?.maxHeight === 'number'
+      ? { maxHeight: widget.maxHeight, overflowY: 'auto' as const }
+      : undefined,
+  };
+
   return (
     <div className='workflow-slot workflow-slot--text'>
       {editing ? (
@@ -1784,14 +1814,19 @@ export function SlotText({ slot, sessionId, slotId, revisionCount, onRefresh, re
         />
       ) : (
         <>
-          <p
-            className={`workflow-slot__text${canEdit ? ' workflow-slot__text--editable' : ''}`}
-            onClick={canEdit ? handleEdit : undefined}
-            title={canEdit ? tr('chat.slots.clickToEdit') : undefined}
-            role={canEdit ? 'button' : undefined}
-            tabIndex={canEdit ? 0 : undefined}
-            onKeyDown={canEdit ? (e) => e.key === 'Enter' && handleEdit() : undefined}
-          >{displayText}</p>
+          {widget?.widgetType === 'text-markdown' ? (
+            <div
+              className={`workflow-slot__text workflow-slot__text--markdown${canEdit ? ' workflow-slot__text--editable' : ''}`}
+              {...textDisplayProps}
+            >
+              <MarkdownViewer>{displayText}</MarkdownViewer>
+            </div>
+          ) : (
+            <p
+              className={`workflow-slot__text${canEdit ? ' workflow-slot__text--editable' : ''}`}
+              {...textDisplayProps}
+            >{displayText}</p>
+          )}
           <div className='workflow-slot__text-meta'>
             {revisionCount !== undefined && revisionCount > 0 && sessionId && slotId && (
               <SlotVersionPopover
@@ -3653,6 +3688,7 @@ export function SlotFile({ slot, sessionId, slotId, revisionCount, onRefresh, re
  */
 export function SlotRenderer({
   slot,
+  widget,
   originalFileSlot,
   cardMode = false,
   expectedType,
@@ -3666,6 +3702,7 @@ export function SlotRenderer({
   hideImageMutationActions,
 }: {
   slot: SlotRevision;
+  widget?: SlotWidgetConfig;
   originalFileSlot?: SlotRevision;
   cardMode?: boolean;
   expectedType?: 'image' | 'file' | 'text';
@@ -3684,6 +3721,22 @@ export function SlotRenderer({
   }
 
   const normalized = normalizeContentType(slot.content_type ?? 'text');
+  const artifactSlotKey = slotId || slot.slot;
+  if (widget?.widgetType === 'html-slide') {
+    if (isSlideSpecArtifact(slot.artifact_value)) {
+      return <SlotJsonSlide slot={slot} compact={cardMode} />;
+    }
+    return (
+      <SlotHtmlSlide
+        slot={slot}
+        compact={cardMode}
+        sessionId={sessionId}
+        slotId={artifactSlotKey}
+        readOnly={readOnly}
+        onRefresh={onRefresh}
+      />
+    );
+  }
   if (normalized === 'image') {
     return (
       <SlotImage
@@ -3741,6 +3794,7 @@ export function SlotRenderer({
   return (
     <SlotText
       slot={slot}
+      widget={widget}
       sessionId={sessionId}
       slotId={slotId}
       revisionCount={revisionCount}

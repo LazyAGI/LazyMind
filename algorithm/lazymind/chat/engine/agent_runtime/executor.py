@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import time
 from typing import Any, AsyncIterator, Tuple
+import uuid
+from typing import Any, AsyncIterator, Optional, Tuple
 
 import lazyllm
 import lazyllm.module.stream_helper as _sh
@@ -380,16 +382,51 @@ class AgentExecutor:
         history = plan.history if plan.history else None
         helper = _sh.StreamCallHelper(agent, init_sid=False)
         kwargs = {'llm_chat_history': history} if history is not None else {}
+        finished_model_calls: set[str] = set()
         async for item in helper.astream(plan.prompt.current_input, **kwargs):
+            self._record_finished_model_call(item, finished_model_calls)
             yield 'event', item
         try:
             result = helper.future.result()
         except Exception as exc:
+            terminal = self._find_model_terminal(exc)
+            model_call_id = str((terminal or {}).get('model_call_id') or '')
+            if terminal and model_call_id not in finished_model_calls:
+                yield 'event', {
+                    'tag': 'runtime_event',
+                    'runtime_event': {
+                        'schema_version': 1,
+                        'event_id': uuid.uuid4().hex,
+                        'type': 'model_call_finished',
+                        'data': terminal,
+                    },
+                }
             lazyllm.LOG.exception(
                 f'[AgentExecutor] agent future raised: {type(exc).__name__}: {exc}'
             )
             raise
         yield 'final', result
+
+    @staticmethod
+    def _record_finished_model_call(item: Any, seen: set[str]) -> None:
+        if not isinstance(item, dict) or item.get('tag') != 'runtime_event': return
+        event = item.get('runtime_event')
+        if not isinstance(event, dict) or event.get('type') != 'model_call_finished': return
+        data = event.get('data')
+        if isinstance(data, dict) and data.get('model_call_id'):
+            seen.add(str(data['model_call_id']))
+
+    @staticmethod
+    def _find_model_terminal(exc: Exception) -> Optional[dict[str, Any]]:
+        seen = set()
+        while exc is not None and id(exc) not in seen:
+            seen.add(id(exc))
+            terminal = getattr(exc, 'terminal', None)
+            if terminal is not None:
+                public_dict = getattr(terminal, 'public_dict', None)
+                return public_dict() if callable(public_dict) else terminal
+            exc = exc.__cause__ or exc.__context__
+        return None
 
     def run(self, llm: Any, plan: AgentRunPlan) -> Any:
         """Run a one-shot agent while preserving ReactAgent's synchronous API."""

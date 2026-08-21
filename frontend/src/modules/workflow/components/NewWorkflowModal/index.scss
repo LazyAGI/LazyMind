@@ -86,7 +86,7 @@
 
   .npm-field-row {
     display: grid;
-    grid-template-columns: 76px 1fr;
+    grid-template-columns: 112px minmax(0, 1fr);
     align-items: flex-start;
     gap: 6px 10px;
   }

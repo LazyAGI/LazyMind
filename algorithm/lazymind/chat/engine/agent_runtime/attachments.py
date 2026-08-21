@@ -89,6 +89,13 @@ def render_attachment_content(
             if not str(item.path).split('?', 1)[0].lower().endswith('.pdf')
         ]
     if not attachments:
+        if role == AgentRole.SUBAGENT:
+            return (
+                'No user attachments are available in this conversation. '
+                'Do not call attachment lookup tools, guess filenames, or search Workflow artifacts '
+                'for uploads. Treat an image or file as optional unless the authoritative step '
+                'objective or input contract explicitly declares it required.'
+            )
         return ''
     by_turn: dict[int, list[AttachmentRef]] = {}
     for attachment in attachments:

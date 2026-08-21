@@ -3,11 +3,13 @@ package executor
 import (
 	"context"
 	"encoding/json"
+	"errors"
 
 	"lazymind/core/common/orm"
 	"lazymind/core/workflow/attempt"
 	"lazymind/core/workflow/graphengine"
 
+	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 )
 
@@ -55,6 +57,11 @@ func (loader DBContextLoader) LoadAttemptContext(ctx context.Context, id string)
 					value.Capabilities, value.LegacyTools = node.Capabilities, node.LegacyTools
 				}
 			}
+			cardinality, err := loader.loadOutputCardinality(ctx, revision.ID, value.DeclaredOutputs)
+			if err != nil {
+				return AttemptContext{}, err
+			}
+			value.OutputCardinality = cardinality
 		}
 	}
 	var bindings []orm.WorkflowAttemptInputBinding
@@ -70,4 +77,47 @@ func (loader DBContextLoader) LoadAttemptContext(ctx context.Context, id string)
 		}
 	}
 	return value, nil
+}
+
+func (loader DBContextLoader) loadOutputCardinality(ctx context.Context, revisionID string, outputs []string) (map[string]string, error) {
+	var entry orm.WorkflowRevisionEntry
+	err := loader.DB.WithContext(ctx).Where("revision_id = ? AND path = ?", revisionID, "workflow.yaml").First(&entry).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	if entry.BlobHash == nil {
+		return nil, gorm.ErrInvalidData
+	}
+	var blob orm.WorkflowBlob
+	if err := loader.DB.WithContext(ctx).Where("hash = ?", *entry.BlobHash).First(&blob).Error; err != nil {
+		return nil, err
+	}
+	var schema struct {
+		Slots []struct {
+			ID          string `yaml:"id"`
+			Cardinality string `yaml:"cardinality"`
+		} `yaml:"slots"`
+	}
+	if err := yaml.Unmarshal(blob.Content, &schema); err != nil {
+		return nil, err
+	}
+	declared := make(map[string]bool, len(outputs))
+	for _, output := range outputs {
+		declared[output] = true
+	}
+	result := make(map[string]string, len(outputs))
+	for _, slot := range schema.Slots {
+		if !declared[slot.ID] {
+			continue
+		}
+		if slot.Cardinality == "list" {
+			result[slot.ID] = "list"
+		} else {
+			result[slot.ID] = "single"
+		}
+	}
+	return result, nil
 }

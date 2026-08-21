@@ -65,6 +65,71 @@ func TestInputResourceImportAndBindingPinsStableRevision(t *testing.T) {
 	}
 }
 
+func TestGetProjectionAuthorizesBeforeCallingRuntimeProjection(t *testing.T) {
+	h, db := testHandler(t)
+	if err := db.Exec(`INSERT INTO plugin_sessions(id, create_user_id) VALUES ('s1','owner')`).Error; err != nil {
+		t.Fatal(err)
+	}
+	var calls atomic.Int32
+	h.Projection = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"status":"active"}`))
+	})
+	call := func(owner, sessionID string) *httptest.ResponseRecorder {
+		r := mux.SetURLVars(request(http.MethodGet, "/workflow-sessions/"+sessionID+"/projection", owner, nil),
+			map[string]string{"session_id": sessionID})
+		w := httptest.NewRecorder()
+		h.GetProjection(w, r)
+		return w
+	}
+	if got := call("other", "s1"); got.Code != http.StatusForbidden || decodeEnvelope(t, got).Error.Code != "PERMISSION_DENIED" {
+		t.Fatalf("wrong owner=%d %s", got.Code, got.Body.String())
+	}
+	if got := call("owner", "missing"); got.Code != http.StatusNotFound || decodeEnvelope(t, got).Error.Code != "WORKFLOW_SESSION_NOT_FOUND" {
+		t.Fatalf("missing=%d %s", got.Code, got.Body.String())
+	}
+	if calls.Load() != 0 {
+		t.Fatalf("unauthorized requests reached projection: calls=%d", calls.Load())
+	}
+	if got := call("owner", "s1"); got.Code != http.StatusOK || got.Body.String() != `{"status":"active"}` {
+		t.Fatalf("authorized=%d %s", got.Code, got.Body.String())
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("projection calls=%d", calls.Load())
+	}
+}
+
+func TestListSessionsReturnsOnlyExternalAgentSessions(t *testing.T) {
+	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	repo := workflowstore.New(db)
+	if err := repo.AutoMigrate(); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.AutoMigrate(&orm.WorkflowSession{}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := db.Create(&[]orm.WorkflowSession{
+		{ID: "external", OriginHost: "external-agent", ControllerHost: "external-agent", WorkflowID: "writer", Status: "active", CreateUserID: "owner", CreatedAt: now, UpdatedAt: now},
+		{ID: "internal", OriginHost: "lazymind", ControllerHost: "lazymind", WorkflowID: "writer", Status: "active", CreateUserID: "owner", CreatedAt: now, UpdatedAt: now},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	w := httptest.NewRecorder()
+	Handler{Store: repo}.ListSessions(w, request(http.MethodGet, "/workflow-sessions?status=active&page_size=10", "owner", nil))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", w.Code, w.Body.String())
+	}
+	encoded, _ := json.Marshal(decodeEnvelope(t, w).Data)
+	if !bytes.Contains(encoded, []byte(`"session_id":"external"`)) || bytes.Contains(encoded, []byte(`"session_id":"internal"`)) {
+		t.Fatalf("session scope leaked: %s", encoded)
+	}
+}
+
 func TestAdvanceStepWaitsForTerminalAttemptFromLegacyEnvelope(t *testing.T) {
 	h, db := testHandler(t)
 	if err := db.AutoMigrate(&orm.WorkflowSessionStep{}, &orm.WorkflowTransitionCommand{}); err != nil {
@@ -145,6 +210,21 @@ func TestPrepareHTTPRejectsUnknownPublicWorkflow(t *testing.T) {
 	h.Prepare(recorder, request(http.MethodPost, "/workflow-preparations", "owner", body))
 	if recorder.Code != http.StatusNotFound || decodeEnvelope(t, recorder).Error.Code != "WORKFLOW_NOT_FOUND" {
 		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestMissingExternalInputsSkipsOptionalExternalMaterials(t *testing.T) {
+	graph := preparationGraph{MaterialProducers: map[string]struct {
+		Kind     string `json:"kind"`
+		Optional bool   `json:"optional"`
+	}{
+		"required_source":    {Kind: "external"},
+		"uploaded_materials": {Kind: "external", Optional: true},
+		"generated":          {Kind: "step"},
+	}}
+	missing := missingExternalInputs(graph, map[string]any{})
+	if len(missing) != 1 || missing[0] != "required_source" {
+		t.Fatalf("missing inputs = %#v", missing)
 	}
 }
 

@@ -25,6 +25,7 @@ import { ChatSourcePanel } from "../AssistantMessage";
 import ChatMessageContent from "./components/ChatMessageContent";
 import ScrollToBottomButton from "./components/ScrollToBottomButton";
 import ConversationTrail from "./components/ConversationTrail";
+import StreamRecoveryBanner from "./components/StreamRecoveryBanner";
 import { useChatConversation } from "./hooks/useChatConversation";
 import { useCiteMessagesInput } from "./hooks/useCiteMessagesInput";
 import { useThinkingCollapse } from "./hooks/useThinkingCollapse";
@@ -94,7 +95,6 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       onOpenSSE,
       onOpenResumeSSE,
       onConversationIdChange,
-      parseErrorData,
       setShowHistoryList,
       showHistoryList,
       showHistoryButton = true,
@@ -109,8 +109,8 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       disabledReason,
       disabledDescription,
       disabledAction,
-      onWorkflowSettingsChange,
-      initialWorkflowSettings,
+      onConversationSettingsChange,
+      initialConversationSettings,
       hasWorkflowSession,
     } = props;
 
@@ -147,7 +147,6 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       onOpenSSE,
       onOpenResumeSSE,
       onConversationIdChange,
-      parseErrorData,
       setIsChatContent,
       clearStorePendingMessage,
       clearCiteMessages,
@@ -232,8 +231,9 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       );
       return Boolean(
         lastAssistantMessage &&
-          lastAssistantMessage.finish_reason !==
-            ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified,
+          (lastAssistantMessage.run_status ||
+            lastAssistantMessage.finish_reason !==
+              ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified),
       );
     }, [conversation.messageList]);
     const shouldRemindSkillDeposit =
@@ -369,6 +369,11 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               />
             )}
 
+            <StreamRecoveryBanner
+              recovery={conversation.streamRecovery}
+              onReconnect={conversation.retryStreamRecovery}
+            />
+
             <ChatInput
               value={conversation.content}
               onChange={conversation.setContent}
@@ -408,8 +413,8 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
                   : undefined
               }
               onSkillDeposit={handleSkillDeposit}
-              onWorkflowSettingsChange={onWorkflowSettingsChange}
-              initialWorkflowSettings={initialWorkflowSettings}
+              onConversationSettingsChange={onConversationSettingsChange}
+              initialConversationSettings={initialConversationSettings}
               hasWorkflowSession={hasWorkflowSession}
             />
           </div>

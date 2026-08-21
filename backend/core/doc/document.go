@@ -314,6 +314,23 @@ func StaticFileURLFromAnyStoragePath(pathOrURL string) string {
 	return staticFileURLFromFullPath(raw)
 }
 
+// StaticFileReferenceFromAnyStoragePath returns a stable unsigned reference.
+// Browser clients must exchange it through static-files:sign before reading.
+func StaticFileReferenceFromAnyStoragePath(pathOrURL string) string {
+	raw := strings.TrimSpace(pathOrURL)
+	if raw == "" {
+		return ""
+	}
+	rel := relFromStaticFilesURL(raw)
+	if rel == "" {
+		rel = fileRelativePath(raw)
+	}
+	if rel == "" || rel == "." || strings.HasPrefix(rel, "../") {
+		return ""
+	}
+	return "/static-files/" + encodeStaticFilePath(filepath.ToSlash(rel))
+}
+
 func encodeStaticFilePath(rel string) string {
 	parts := strings.Split(rel, "/")
 	for i, part := range parts {

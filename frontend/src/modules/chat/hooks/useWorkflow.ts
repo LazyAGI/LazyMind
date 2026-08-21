@@ -1,25 +1,15 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback } from 'react';
 import { useWorkflowStore, type SlotRevision } from '@/modules/chat/store/workflowPanel';
 
 /**
  * useWorkflowSession returns the active workflow session and helpers for the given conversationId.
- * It loads the session on mount and keeps slots refreshed.
+ * ChatLayout owns initial loading and live refresh for the active conversation.
  */
 export function useWorkflowSession(conversationId: string) {
   const session = useWorkflowStore((s) => s.sessionByConversation[conversationId] ?? null);
   const loading = useWorkflowStore((s) => s.loadingByConversation[conversationId] ?? false);
   const loadActiveSession = useWorkflowStore((s) => s.loadActiveSession);
   const patchSlot = useWorkflowStore((s) => s.patchSlot);
-  const subscribeWorkflowSession = useWorkflowStore((s) => s.subscribeWorkflowSession);
-
-  useEffect(() => {
-    loadActiveSession(conversationId);
-  }, [conversationId, loadActiveSession]);
-
-  useEffect(() => {
-    if (!session?.session_id) return;
-    return subscribeWorkflowSession(conversationId, session.session_id);
-  }, [conversationId, session?.session_id, subscribeWorkflowSession]);
 
   // Use loadActiveSession so we always get the latest session status (not just slots).
   // This is important for detecting when the session transitions from 'active' to

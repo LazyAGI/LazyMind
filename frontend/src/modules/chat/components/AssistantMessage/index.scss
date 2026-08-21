@@ -155,6 +155,79 @@
   gap: 10px;
 }
 
+.external-execution {
+  margin-bottom: 12px;
+  border: 1px solid #dfe7f1;
+  border-radius: 8px;
+  padding: 8px 10px;
+  background: #f7f9fc;
+  color: #526174;
+  font-size: 12px;
+
+  summary {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    cursor: pointer;
+    font-weight: 600;
+    list-style: none;
+  }
+
+  summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .external-execution-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: #8d9ab2;
+  }
+
+  .external-execution-status {
+    color: #7a8799;
+    font-weight: 400;
+  }
+
+  .external-execution-details {
+    display: grid;
+    gap: 4px;
+    margin-top: 8px;
+    padding-left: 14px;
+    line-height: 18px;
+    word-break: break-word;
+  }
+
+  .external-execution-error {
+    color: #c43c3c;
+  }
+}
+
+.external-execution-running,
+.external-execution-pending {
+  border-color: #c9ddf7;
+  background: #f3f8ff;
+
+  .external-execution-dot {
+    background: #1677ff;
+    box-shadow: 0 0 0 3px rgb(22 119 255 / 12%);
+  }
+}
+
+.external-execution-completed .external-execution-dot {
+  background: #36a269;
+}
+
+.external-execution-failed,
+.external-execution-stopped {
+  border-color: #f1d0d0;
+  background: #fff7f7;
+
+  .external-execution-dot {
+    background: #d84a4a;
+  }
+}
+
 @media (max-width: 720px) {
   .chat-avatar {
     --identity-avatar-size: 28px !important;
