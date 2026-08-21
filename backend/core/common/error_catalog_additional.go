@@ -368,6 +368,8 @@ func init() {
 	registerAdditionalError("create managed artifact", http.StatusInternalServerError, 2002095)
 	registerAdditionalError("write managed artifact", http.StatusInternalServerError, 2002096)
 	registerAdditionalError("commit managed artifact", http.StatusInternalServerError, 2002097)
+	registerAdditionalErrorPattern("skill name cannot exceed %d characters", "Skill name cannot exceed 50 characters", http.StatusBadRequest, 2002098)
+	registerAdditionalErrorPattern("skill description cannot exceed %d characters", "Skill description cannot exceed 1024 characters", http.StatusBadRequest, 2002099)
 
 }
 

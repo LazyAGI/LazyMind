@@ -66,9 +66,9 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 		if err := validateSkillPackageMetadata(req.Name, req.Category, req.Description, files); err != nil {
 			return CreateSkillResponse{}, err
 		}
-	}
-	if err := validateSkillIdentity(req.Name, req.Category); err != nil {
-		return CreateSkillResponse{}, err
+		if err := validateSkillIdentity(req.Name, req.Category); err != nil {
+			return CreateSkillResponse{}, err
+		}
 	}
 
 	skillID := newID()
@@ -145,7 +145,7 @@ func isExternalImportSource(sourceType string) bool {
 func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (PatchSkillResponse, error) {
 	if req.Name != nil {
 		name := strings.TrimSpace(*req.Name)
-		if err := validatePathSegment(name); err != nil {
+		if err := validateSkillName(name); err != nil {
 			return PatchSkillResponse{}, err
 		}
 		req.Name = &name
@@ -159,6 +159,9 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 	}
 	if req.Description != nil {
 		description := strings.TrimSpace(*req.Description)
+		if err := validateSkillDescription(description); err != nil {
+			return PatchSkillResponse{}, err
+		}
 		req.Description = &description
 	}
 	var out PatchSkillResponse
@@ -1085,13 +1088,30 @@ func validatePathSegment(segment string) error {
 }
 
 func validateSkillIdentity(name, category string) error {
-	if err := validatePathSegment(name); err != nil {
+	if err := validateSkillName(name); err != nil {
+		if skillmetadata.IsNameLengthError(err) {
+			return err
+		}
 		return fmt.Errorf("invalid skill name: %w", err)
 	}
 	if err := validatePathSegment(category); err != nil {
 		return fmt.Errorf("invalid category: %w", err)
 	}
 	return nil
+}
+
+func validateSkillName(name string) error {
+	if err := validatePathSegment(name); err != nil {
+		return err
+	}
+	return skillmetadata.ValidateNameLength(name)
+}
+
+func validateSkillDescription(description string) error {
+	if strings.TrimSpace(description) == "" {
+		return fmt.Errorf("description required")
+	}
+	return skillmetadata.ValidateDescriptionLength(description)
 }
 
 func validateSkillFiles(files map[string][]byte) error {
@@ -1113,6 +1133,9 @@ type skillMDMetadata struct {
 }
 
 func validateSkillPackageMetadata(name, category, description string, files map[string][]byte) error {
+	if err := validateSkillDescription(description); err != nil {
+		return err
+	}
 	content := string(files["SKILL.md"])
 	meta, ok, err := parseSkillMDMetadata(content)
 	if err != nil {

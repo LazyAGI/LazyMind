@@ -1,6 +1,7 @@
 package metadata
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -31,5 +32,51 @@ func TestParseRequiredRejectsMissingFields(t *testing.T) {
 				t.Fatalf("ParseRequired error = %q", err)
 			}
 		})
+	}
+}
+
+func TestParseRequiredRejectsTooLongFields(t *testing.T) {
+	cases := []struct {
+		name    string
+		content string
+		field   string
+	}{
+		{
+			name:    "name",
+			content: "---\nname: " + strings.Repeat("a", MaxSkillNameLength+1) + "\ndescription: description\n---\n# Skill\n",
+			field:   "name",
+		},
+		{
+			name: "description",
+			content: "---\nname: skill\ndescription: " +
+				strings.Repeat("a", MaxSkillDescriptionLength+1) + "\n---\n# Skill\n",
+			field: "description",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := ParseRequired([]byte(tc.content))
+			if err == nil {
+				t.Fatal("ParseRequired succeeded")
+			}
+			var lengthErr *LengthError
+			if !errors.As(err, &lengthErr) || lengthErr.Field != tc.field {
+				t.Fatalf("ParseRequired error = %v, want LengthError field %q", err, tc.field)
+			}
+		})
+	}
+}
+
+func TestIsNameLengthError(t *testing.T) {
+	nameErr := ValidateNameLength(strings.Repeat("a", MaxSkillNameLength+1))
+	if !IsNameLengthError(nameErr) {
+		t.Fatalf("IsNameLengthError(%v) = false, want true", nameErr)
+	}
+	descErr := ValidateDescriptionLength(strings.Repeat("a", MaxSkillDescriptionLength+1))
+	if IsNameLengthError(descErr) {
+		t.Fatalf("IsNameLengthError(%v) = true, want false", descErr)
+	}
+	if IsNameLengthError(nil) {
+		t.Fatal("IsNameLengthError(nil) = true, want false")
 	}
 }

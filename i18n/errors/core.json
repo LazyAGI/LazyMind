@@ -1174,6 +1174,8 @@
   "2002095": { "en-US": "Failed to create the managed artifact", "zh-CN": "创建托管产物失败" },
   "2002096": { "en-US": "Failed to write the managed artifact", "zh-CN": "写入托管产物失败" },
   "2002097": { "en-US": "Failed to commit the managed artifact", "zh-CN": "提交托管产物失败" },
+  "2002098": { "en-US": "Skill name cannot exceed 50 characters", "zh-CN": "技能名称不能超过 50 个字符" },
+  "2002099": { "en-US": "Skill description cannot exceed 1024 characters", "zh-CN": "技能描述不能超过 1024 个字符" },
   "active_task_not_found": { "en-US": "Active task not found", "zh-CN": "活跃任务不存在" },
   "algo_failed": { "en-US": "Algorithm service operation failed", "zh-CN": "算法服务操作失败" },
   "auto_apply_failed": { "en-US": "Automatic apply failed", "zh-CN": "自动应用失败" },

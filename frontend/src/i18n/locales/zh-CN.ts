@@ -4313,6 +4313,8 @@ const zhCN = {
     memoryGlossaryTermMaxLength: "词组长度不能超过{{count}}个字符",
     memoryGlossaryAliasMaxLength: "单个词长度不能超过{{count}}个字符",
     memoryGlossaryContentMaxLength: "内容长度不能超过{{count}}个字符",
+    memorySkillNameMaxLength: "技能名称不能超过 {{count}} 个字符",
+    memorySkillDescriptionMaxLength: "技能描述不能超过 {{count}} 个字符",
     memorySkillTagMaxCount: "技能标签最多只能设置 {{count}} 个",
     memoryGlossaryTermAliasExactDuplicate: "词组不能和该词组下的词完全相同：{{word}}。请修改后再保存。",
     memoryGlossaryWordsAlreadyExist: "词组或词已存在：{{words}}。将继续保存，请留意是否需要合并或编辑已有词表。",

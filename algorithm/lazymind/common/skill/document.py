@@ -10,6 +10,7 @@ import yaml  # type: ignore
 
 
 _PATH_SEGMENT_RE = re.compile(r'^[A-Za-z0-9._-]+$')
+_MAX_NAME_LENGTH = 50
 _MAX_DESCRIPTION_LENGTH = 1024
 
 
@@ -143,6 +144,12 @@ def require_skill_name(value: Any) -> str:
             ),
             field='name',
         )
+    if len(cleaned) > _MAX_NAME_LENGTH:
+        raise SkillDocumentError(
+            'name_too_long',
+            f'Skill name cannot exceed {_MAX_NAME_LENGTH} characters',
+            field='name',
+        )
     return cleaned
 
 
@@ -195,7 +202,10 @@ def require_valid_skill_document(
     if len(description) > _MAX_DESCRIPTION_LENGTH:
         raise SkillDocumentError(
             'description_too_long',
-            f'Description exceeds {_MAX_DESCRIPTION_LENGTH} characters.',
+            (
+                f'Skill description cannot exceed '
+                f'{_MAX_DESCRIPTION_LENGTH} characters'
+            ),
             field='description',
         )
     if not document.body.strip():
