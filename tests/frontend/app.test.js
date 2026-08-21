@@ -39,9 +39,21 @@ describe('router contract', () => {
     expect(routePaths).toContain('lib/knowledge');
     expect(routePaths).toContain('databases');
     expect(routePaths).toContain('cloud-documents');
-    expect(routePaths).toContain('model-providers');
     expect(routePaths).toContain('memory-management');
     expect(routePaths).toContain('self-evolution');
+  });
+
+  it('keeps legacy model provider URLs as Settings redirects only', () => {
+    expect(routerSource).not.toContain('ModelProviderPage');
+    expect(routerSource).toContain(
+      '<Route path="model-providers/default-services" element={<Navigate to="/settings?section=models" replace />} />',
+    );
+    expect(routerSource).toContain(
+      '<Route path="model-providers/models" element={<Navigate to="/settings?section=models&view=providers" replace />} />',
+    );
+    expect(routerSource).toContain(
+      '<Route path="model-providers/tools" element={<Navigate to="/settings?section=system_tools" replace />} />',
+    );
   });
 
   it('keeps admin routes available', () => {

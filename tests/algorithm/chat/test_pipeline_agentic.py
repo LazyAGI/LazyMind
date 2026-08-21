@@ -187,7 +187,7 @@ def test_task_profile_review_emits_ephemeral_pseudo_stream(monkeypatch):
     original_history = list(request.message.history)
     sensitive_checks = []
 
-    def fake_resolve(inputs):
+    def fake_resolve(inputs, **_kwargs):
         return chat_service.resolve_task_profile(
             inputs['query'], enable_llm_fallback=False,
         )
@@ -231,7 +231,7 @@ def test_context_usage_preview_only_uses_model_when_explicitly_requested(monkeyp
     model_calls = []
     sensitive_checks = []
 
-    def fake_model_resolve(inputs):
+    def fake_model_resolve(inputs, **_kwargs):
         model_calls.append(inputs)
         return chat_service.resolve_task_profile(
             inputs['query'], enable_llm_fallback=False,

@@ -202,10 +202,10 @@ jobs:
         with:
           go-version: '1.25.11'
 
-      - name: Verify migration paths
+      - name: Verify migration and target-upgrade paths
         env:
           MIGRATION_TEST_POSTGRES_DSN: postgres://root:test-password@127.0.0.1:5432/postgres?sslmode=disable
-        run: cd backend/core && go test ./migrate -v
+        run: bash scripts/test_migration_upgrade.sh
 
       - name: Test backend core (SQLite)
         run: cd backend/core && go test ./... -v

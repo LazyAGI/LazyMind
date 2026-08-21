@@ -51,6 +51,7 @@ def _client() -> WorkflowClient:
         str(cfg.get('user_id') or ''),
         host='lazymind',
         transport=httpx,
+        trace_context=lazyllm.get_trace_context,
     )
 
 
@@ -102,6 +103,7 @@ def _handoff_tool(
             allowed = set(frontier.get('ready_steps') or [])
             allowed.update(frontier.get('retryable_steps') or [])
             allowed.update(frontier.get('rewindable_steps') or [])
+            allowed.update(frontier.get('continue_steps') or [])
             if step_id not in allowed:
                 if state_refreshed:
                     return _result_text(_state_changed_result(frontier, [step_id]))
@@ -183,6 +185,30 @@ def _artifact_by_handle(toolkit: HostWorkflowToolkit, session_id: str,
     return matches[0]
 
 
+def _with_terminal_agent_control(result: Dict[str, Any]) -> Dict[str, Any]:
+    workflow_state = result.get('workflow_state')
+    workflow_state = workflow_state if isinstance(workflow_state, dict) else {}
+    projection = result.get('projection')
+    if not isinstance(projection, dict):
+        projection = workflow_state.get('projection')
+    projection = projection if isinstance(projection, dict) else {}
+    completed = (
+        projection.get('completed') is True
+        or workflow_state.get('status') == 'completed'
+        or result.get('status') == 'completed'
+    )
+    if not completed:
+        return result
+    return {
+        **result,
+        '_agent_control': {
+            'stop': True,
+            'reason': 'workflow_completed',
+            'final_text': '工作流已完成，最终产物已生成。',
+        },
+    }
+
+
 def _safe_session_tools(
     toolkit: HostWorkflowToolkit,
     session: Union[str, Callable[[], str]],
@@ -228,6 +254,7 @@ def _safe_session_tools(
             allowed = set(frontier.get('ready_steps') or [])
             allowed.update(frontier.get('retryable_steps') or [])
             allowed.update(frontier.get('rewindable_steps') or [])
+            allowed.update(frontier.get('continue_steps') or [])
             if not requested or any(value not in allowed for value in requested):
                 if state_refreshed:
                     return _state_changed_result(frontier, requested)
@@ -278,8 +305,8 @@ def _safe_session_tools(
                     ),
                 )
                 if state_refreshed:
-                    return {**result, **_state_refresh_notice()}
-                return result
+                    result = {**result, **_state_refresh_notice()}
+                return _with_terminal_agent_control(result)
             except WorkflowClientError as exc:
                 if exc.code != 'STATE_VERSION_CONFLICT' or attempt > 0:
                     raise
@@ -333,6 +360,7 @@ def _state_changed_result(frontier: Dict[str, Any], requested: List[str]) -> Dic
         'ready_steps': frontier.get('ready_steps') or [],
         'retryable_steps': frontier.get('retryable_steps') or [],
         'rewindable_steps': frontier.get('rewindable_steps') or [],
+        'continue_steps': frontier.get('continue_steps') or [],
         'user_notice': (
             '工作流状态已被其他执行或后台更新改变，本次没有继续提交步骤。'
             '系统已读取最新状态；请根据当前可执行步骤重新确认下一步。'
@@ -908,6 +936,9 @@ def _workflow_trigger_tools(
                 rewindable_steps = step_ids(
                     projection.get('rewindable') or projection.get('rewindable_steps')
                 )
+                continue_steps = step_ids(
+                    projection.get('continue') or projection.get('continue_steps')
+                )
                 return {
                     **prepared,
                     'status': 'prepared',
@@ -930,11 +961,12 @@ def _workflow_trigger_tools(
                     'blocked_steps': blocked_steps,
                     'retryable_steps': retryable_steps,
                     'rewindable_steps': rewindable_steps,
+                    'continue_steps': continue_steps,
                     'next_action': {
                         'tool': 'advance_step',
                         'instruction': (
                             'Call advance_step using only exact members of ready_steps, '
-                            'retryable_steps, or rewindable_steps; Runtime resolves the operation.'
+                            'retryable_steps, rewindable_steps, or continue_steps; Runtime resolves the operation.'
                         ),
                     },
                 }
@@ -1185,7 +1217,7 @@ def resolve_workflow_injection(
                 'A completed Session is not immutable. When the current user query asks to '
                 'revise, delete, fix, or regenerate an existing Workflow output, do not '
                 'write replacement content in chat and do not use generic file/artifact '
-                'tools. Call get_ready_steps, select the matching exact rewindable_steps '
+                'tools. Call get_ready_steps, select the matching exact rewindable_steps or continue_steps '
                 'target, and call advance_step so Runtime starts a new step attempt and '
                 'publishes a new Workflow artifact revision. '
             )
@@ -1274,7 +1306,7 @@ def resolve_workflow_injection(
             + 'Workflow step requires human approval, execute it with advance_step_and_hand_off so '
             + 'the Host stops after execution for output review. Do not ask whether to execute it, '
             + 'and do not merely announce that later steps will run. For recovery, '
-            + 'use only exact retryable_steps or rewindable_steps returned by Runtime.\n'
+            + 'use only exact retryable_steps, rewindable_steps, or continue_steps returned by Runtime.\n'
             + json.dumps({
                 'current_query': current_query,
                 'allowed_workflow_refs': sorted(allowed_refs),

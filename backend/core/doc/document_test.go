@@ -165,6 +165,7 @@ func newDocumentTestDB(t *testing.T) *orm.DB {
 		&orm.Task{},
 		&orm.UploadedFile{},
 		&orm.DefaultDataset{},
+		&orm.KnowledgeMarketInstall{},
 		&orm.EvalSet{},
 		&readonlyorm.LazyLLMDocRow{},
 		&readonlyorm.LazyLLMDocServiceTaskRow{},

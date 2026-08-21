@@ -11,6 +11,19 @@ vi.mock("react-i18next", () => ({
 }));
 
 describe("RunStatusCard", () => {
+  it("renders cancellation as a compact status alert", () => {
+    render(<RunStatusCard terminal={{
+      status: "cancelled",
+      reason: "user_cancelled",
+      partial_output: true,
+    }} />);
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveClass("chat-run-status-card--cancelled");
+    expect(screen.getByText("chat.runStatus.cancelled")).toBeInTheDocument();
+    expect(screen.getByText("chat.runStatus.partialOutput")).toBeInTheDocument();
+  });
+
   it.each([
     "usage_limit_exceeded",
     "concurrency_limited",

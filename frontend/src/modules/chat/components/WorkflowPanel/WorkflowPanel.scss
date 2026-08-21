@@ -94,10 +94,30 @@
       max-height: none;
     }
 
+    .writer-markdown-editor__document-layout {
+      flex: 1 1 0;
+      min-height: 0;
+      overflow: hidden;
+      align-items: stretch;
+    }
+
+    .writer-markdown-editor__main {
+      display: flex;
+      flex-direction: column;
+      min-height: 0;
+      overflow: hidden;
+    }
+
     .writer-markdown-editor__surface {
       flex: 1 1 0;
       min-height: 0;
       max-height: none;
+      overflow-y: auto;
+    }
+
+    .writer-markdown-editor__outline-rail,
+    .writer-markdown-editor__outline {
+      max-height: 100%;
     }
 
   }

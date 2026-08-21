@@ -270,7 +270,7 @@ def video_to_gif(
             error_type='MissingDependency',
             meta={
                 'dependency': 'ffmpeg',
-                'settings_path': '/model-providers/tools#ffmpeg-dependency',
+                'settings_path': '/settings?section=system_tools#ffmpeg-dependency',
                 'fallback': 'video',
             },
         )

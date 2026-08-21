@@ -147,6 +147,18 @@ def test_memory_tools_are_registered_as_one_eager_group():
     assert 'preference_editor' in memory_policy
 
 
+def test_writer_tools_publish_stable_capability_ids():
+    capabilities = {
+        config.name: config.capability_id
+        for config in DEFAULT_TOOLS
+        if config.name in {'writer_create', 'writer_revision'}
+    }
+    assert capabilities == {
+        'writer_create': 'writer.create',
+        'writer_revision': 'writer.revise',
+    }
+
+
 def test_shared_prompt_appendix_is_reused_and_deduplicated():
     configs = [
         cfg for cfg in DEFAULT_TOOLS

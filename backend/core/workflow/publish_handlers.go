@@ -223,7 +223,7 @@ func PublishWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 			return err
 		}
 		if next == 1 {
-			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&orm.UserWorkflowSetting{UserID: userID, WorkflowRef: ref, Enabled: false, UpdatedAt: now}).Error; err != nil {
+			if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&orm.UserWorkflowSetting{UserID: userID, WorkflowRef: ref, Enabled: false, CallMode: WorkflowCallModeDisabled, UpdatedAt: now}).Error; err != nil {
 				return err
 			}
 		}

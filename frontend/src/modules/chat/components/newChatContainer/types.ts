@@ -70,6 +70,7 @@ export interface ChatMessage {
   role?: string;
   delta?: string;
   raw_delta?: string;
+  delta_mode?: "append" | "replace";
   images?: {
     base64?: string;
     uid?: string;

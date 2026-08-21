@@ -29,7 +29,10 @@ const (
 	chatStopExpireTime   = 15 * time.Minute
 	chatCancelPollTime   = 500 * time.Millisecond
 	convEventsExpireTime = time.Hour * 24
-	convEventsMaxLen     = int64(1000)
+	// Writer previews can emit more than 1,000 deltas in one draft. Keep a
+	// complete live-workflow window so index-based conversation tailing never
+	// loses the end of an active artifact stream to list trimming.
+	convEventsMaxLen = int64(10000)
 )
 
 type ChatStatus struct {
@@ -55,11 +58,19 @@ type MultiAnswerInfo struct {
 	CreatedAt          int64  `json:"created_at"`
 }
 
+type ChatDeltaMode string
+
+const (
+	ChatDeltaModeAppend  ChatDeltaMode = "append"
+	ChatDeltaModeReplace ChatDeltaMode = "replace"
+)
+
 type ChatChunkResponse struct {
 	ConversationID        string                       `json:"conversation_id"`
 	Seq                   int32                        `json:"seq"`
 	Message               string                       `json:"message"`
 	Delta                 string                       `json:"delta"`
+	DeltaMode             ChatDeltaMode                `json:"delta_mode,omitempty"`
 	HistoryID             string                       `json:"history_id"`
 	Sources               []any                        `json:"sources,omitempty"`
 	PromptQuestions       []string                     `json:"prompt_questions,omitempty"`

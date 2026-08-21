@@ -121,6 +121,7 @@ class RemoteWorkflowExecutor:
         heartbeat_thread.start()
         artifacts: list[Dict[str, Any]] = []
         summary = ''
+        control: Dict[str, Any] = {}
         failure: Optional[str] = None
         terminal_event: Optional[Dict[str, Any]] = None
         try:
@@ -179,6 +180,9 @@ class RemoteWorkflowExecutor:
                 elif kind == 'done':
                     terminal_event = event
                     summary = str(event.get('summary') or '')
+                    event_control = event.get('control')
+                    if isinstance(event_control, dict):
+                        control = dict(event_control)
                     if event.get('status') not in {None, '', 'succeeded'}:
                         failure = summary or str(event.get('status'))
                 elif kind == 'error':
@@ -197,7 +201,9 @@ class RemoteWorkflowExecutor:
                 await self.runtime.fail(client, attempt_id, lease, failure)
             else:
                 await self.runtime.complete(client, attempt_id, lease, {
-                    'summary': summary, 'executor_ref': task_id, 'artifacts': artifacts})
+                    'summary': summary, 'executor_ref': task_id, 'artifacts': artifacts,
+                    **({'control': control} if control else {}),
+                })
         except httpx.HTTPStatusError as exc:
             # A Runtime completion validation error is a terminal execution
             # failure, not a reason to leave the Attempt running until expiry.

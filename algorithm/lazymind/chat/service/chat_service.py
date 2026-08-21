@@ -506,7 +506,18 @@ def _task_profile_inputs(request: ChatRequest) -> dict[str, Any]:
     }
 
 
-def _resolve_task_profile_with_model(inputs: dict[str, Any]) -> Any:
+def _resolve_task_profile_with_model(
+    inputs: dict[str, Any],
+    *,
+    trace_id: str = '',
+    session_id: str = '',
+) -> Any:
+    set_trace_context({
+        'trace_id': trace_id,
+        'session_id': session_id or trace_id,
+        'sampled': True,
+    })
+
     def classify(prompt: str) -> Any:
         router_llm = AutoModel(model='llm')
         return router_llm(
@@ -562,7 +573,12 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         classifier=None,
         enable_llm_fallback=False,
     )
-    if not provisional.routing_review_required:
+    has_explicit_workflow = bool(
+        request.explicit_resource_bindings.workflow_refs
+        or request.workflow.allowed_workflow_refs
+        or str((request.workflow.workflow_context or {}).get('workflow_ref') or '').strip()
+    )
+    if has_explicit_workflow or not provisional.routing_review_required:
         return await _handle_chat_impl(request, task_profile_override=provisional)
 
     raw_query = str(request.message.query or '')
@@ -591,6 +607,12 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         started = time.time()
         routing_task = asyncio.create_task(asyncio.to_thread(
             _resolve_task_profile_with_model, inputs,
+            trace_id=(
+                request.conversation.conversation_id
+                or request.conversation.session_id
+                or ''
+            ).strip(),
+            session_id=request.conversation.session_id,
         ))
         for status_delta in ('正在', '分析', '用户意图', '，请稍后'):
             yield log_and_emit_frame(
@@ -616,7 +638,15 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
     if request.runtime.context_usage_preview or request.runtime.context_prompt_export:
         profile = provisional
         if request.runtime.context_preview_allow_llm_routing:
-            profile = await asyncio.to_thread(_resolve_task_profile_with_model, inputs)
+            profile = await asyncio.to_thread(
+                _resolve_task_profile_with_model, inputs,
+                trace_id=(
+                    request.conversation.conversation_id
+                    or request.conversation.session_id
+                    or ''
+                ).strip(),
+                session_id=request.conversation.session_id,
+            )
         return await _handle_chat_impl(
             request,
             task_profile_override=profile,
@@ -954,6 +984,18 @@ async def _handle_chat_impl(
         [cfg for cfg in DEFAULT_TOOLS if cfg.name not in disabled],
         user_query=language_query,
     )
+    exclusive_capabilities = {
+        str(capability).strip()
+        for item in effective_workflow_catalog
+        if isinstance(item, dict) and isinstance(item.get('runtime'), dict)
+        for capability in item['runtime'].get('exclusive_tool_capabilities', [])
+        if str(capability).strip()
+    }
+    if exclusive_capabilities:
+        active_configs = [
+            cfg for cfg in active_configs
+            if not cfg.capability_id or cfg.capability_id not in exclusive_capabilities
+        ]
     if _workflow_collects_knowledge_internally(
         effective_workflow_context,
         explicit_resource_payload.get('workflow_refs'),
@@ -1084,14 +1126,16 @@ async def _handle_chat_impl(
         skill_config = selected_skills
         workflow_skill_dir = workflow_skills_dir()
     set_trace_context({
-        'trace_id': conversation.session_id, 'session_id': conversation.session_id, 'sampled': True,
+        'trace_id': conversation_id or conversation.session_id,
+        'session_id': conversation.session_id, 'sampled': True,
         'module_trace': {
             'by_class': {
                 'FunctionCall': False, 'ToolManager': False,
                 'Pipeline': False, 'Diverter': False,
             },
             'by_name': {
-                '_build_history': False, '_post_action': False, '_safe_call': False,
+                '_build_history': False, '_post_action': False,
+                '_safe_call': False, '_indexed_call': False,
             },
         },
         'request_tags': ['handle_chat'],

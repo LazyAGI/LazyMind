@@ -1,6 +1,10 @@
 package chat
 
-import "testing"
+import (
+	"testing"
+
+	"lazymind/core/common/orm"
+)
 
 func TestApplyCatalogWindowIfMissingKeepsPythonBudget(t *testing.T) {
 	pythonBudget := int64(64000)
@@ -58,9 +62,10 @@ func TestPreviewQueryReadsTextInput(t *testing.T) {
 }
 
 func TestMentionedBuiltinWorkflowReplacesDefaultCatalog(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.UserWorkflowSetting{})
 	catalog := []map[string]any{{"workflow_ref": "plugin:default", "workflow_id": "default"}}
 	selected, builtins, err := mergeMentionedWorkflows(
-		t.Context(), nil, "user-1", []string{"builtin:image-workflow"}, catalog,
+		t.Context(), db.DB, "user-1", []string{"builtin:image-workflow"}, catalog,
 	)
 	if err != nil {
 		t.Fatal(err)

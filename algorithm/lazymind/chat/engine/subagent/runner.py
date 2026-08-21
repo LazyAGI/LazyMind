@@ -55,6 +55,7 @@ DRAFT_STREAM_EVENT_TYPES = frozenset({
     'artifact_stream',
     'artifact_stream_end',
     'artifact_stream_abort',
+    'progress',
 })
 
 
@@ -321,6 +322,7 @@ def _build_subagent_tools(
     extra_tools: Optional[List[Any]],
     attachment_configs: Optional[List[Any]] = None,
     *,
+    tools_only: bool = False,
     include_artifact_writes: bool = True,
 ) -> List[Any]:
     """Combine mandatory SubAgent infra tools with optional domain tools.
@@ -331,6 +333,9 @@ def _build_subagent_tools(
     Attachment tools are included as one group when the parent task carries attachment
     context, so the runtime tool list and its system prompt stay consistent.
     """
+    if tools_only:
+        return list(extra_tools or [])
+
     base = [
         subagent_tools.get_artifact,
         subagent_tools.list_artifacts,
@@ -350,6 +355,19 @@ def _build_subagent_tools(
     if extra_tools:
         base.extend(extra_tools)
     return base
+
+
+def _resolve_attachment_configs(
+    agentic_config: Dict[str, Any], agent_type: str, params: Dict[str, Any],
+) -> List[Any]:
+    configs = [*USER_ATTACHMENT_TOOL_CONFIGS, ATTACHMENT_EDIT_TOOL_CONFIG]
+    if agent_type == 'workflow_step':
+        declared = params.get('legacy_tools') or params.get('tools') or []
+        declared_names = {str(name).strip() for name in declared}
+        return [config for config in configs if config.name in declared_names]
+    if agentic_config.get('files') or agentic_config.get('history_files_per_turn'):
+        return configs
+    return []
 
 
 def _tool_configs_for_runtime_tools(runtime_tools: List[Any]) -> list:
@@ -667,11 +685,16 @@ def _build_subagent_plan(
         source='task.objective',
     )
     history = []
+    terminal_tool_names = set(_coerce_str_list(ctx.params.get('terminal_tools')))
+    available_tool_names = {
+        str(getattr(tool, '__name__', '') or '') for tool in tools
+    }
     return AgentRunPlan(
         role=AgentRole.SUBAGENT,
         prompt=builder.build(),
         history=history,
         tools=tools,
+        stop_tools=sorted(terminal_tool_names & available_tool_names),
         force_summarize_context=ctx.objective,
         execution_options=AgentExecutionOptions(
             extra_stop_condition=make_cancel_stop_condition(),
@@ -774,6 +797,68 @@ def _persist_step(ctx: SubAgentContext, seq: int, event: Dict[str, Any]) -> None
         ctx.db.append_step(ctx.task_id, seq, 'tool', {'tool_results': results})
 
 
+def _workflow_control_from_tool_results(
+    event: Dict[str, Any], declared_tool_names: set[str],
+) -> Dict[str, str]:
+    """Extract a control envelope returned by a declared Workflow tool."""
+    if event.get('tag') != 'tool_results':
+        return {}
+    selected: Dict[str, str] = {}
+    for result in event.get('tool_results') or []:
+        if not isinstance(result, dict):
+            continue
+        if str(result.get('name') or '') not in declared_tool_names:
+            continue
+        payload = result.get('result', result.get('content'))
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                continue
+        if not isinstance(payload, dict) or not isinstance(payload.get('control'), dict):
+            continue
+        next_step = str(payload['control'].get('next_step') or '').strip()
+        if not next_step:
+            continue
+        if selected and selected.get('next_step') != next_step:
+            raise ValueError('Workflow tools returned conflicting control.next_step values.')
+        selected = {'next_step': next_step}
+    return selected
+
+
+def _terminal_tool_failure(event: Dict[str, Any], terminal_tool_names: set[str]) -> str:
+    """Return an error when a terminal tool lacks a structured success result."""
+    if event.get('tag') != 'tool_results' or not terminal_tool_names:
+        return ''
+    for result in event.get('tool_results') or []:
+        if not isinstance(result, dict):
+            continue
+        name = str(result.get('name') or '')
+        if name not in terminal_tool_names:
+            continue
+        payload = result.get('result', result.get('content'))
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                return f'{name} failed: {payload}'
+        if not isinstance(payload, dict):
+            return f'{name} failed without a structured result: {payload!r}'
+    return ''
+
+
+def _signal_task_cancel(task_id: str) -> bool:
+    """Signal the sid-scoped worker Agent without masking the original failure."""
+    try:
+        from lazyllm.common.queue import FileSystemQueue
+        lazyllm.globals._init_sid(sid=task_id)
+        FileSystemQueue(klass='cancel').enqueue(json.dumps({'tag': 'cancel'}))
+        return True
+    except Exception:
+        LOG.exception('failed to stop terminal workflow tool task %s', task_id)
+        return False
+
+
 async def run_subagent_stream(
     task_id: str,
     db_dsn: str = '',
@@ -796,6 +881,7 @@ async def run_subagent_stream(
     emitted: List[Dict[str, Any]] = []
     stream_events: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
     loop = asyncio.get_running_loop()
+    clear_cancel_queue = True
     source_state: Dict[str, Any] = {}
     reset_citation_state(source_state)
     last_sources_snapshot = '[]'
@@ -905,7 +991,8 @@ async def run_subagent_stream(
                     'Pipeline': False, 'Diverter': False,
                 },
                 'by_name': {
-                    '_build_history': False, '_post_action': False, '_safe_call': False,
+                    '_build_history': False, '_post_action': False,
+                    '_safe_call': False, '_indexed_call': False,
                 },
             }
         })
@@ -924,20 +1011,13 @@ async def run_subagent_stream(
 
         llm = AutoModel(model='llm')
         runtime_tools = _resolve_runtime_tools(tools, params)
-        # Workflow steps often need find_user_attachment even when the current synthetic
-        # chat turn has no files; keep the tools available and let the tool report empty.
-        attachment_configs = (
-            [*USER_ATTACHMENT_TOOL_CONFIGS, ATTACHMENT_EDIT_TOOL_CONFIG]
-            if (
-                agentic_config.get('files')
-                or agentic_config.get('history_files_per_turn')
-                or effective_agent_type == 'workflow_step'
-            )
-            else []
+        attachment_configs = _resolve_attachment_configs(
+            agentic_config, effective_agent_type, params,
         )
         subagent_tools_all = _build_subagent_tools(
             runtime_tools,
             attachment_configs,
+            tools_only=bool(ctx.params.get('tools_only')),
             include_artifact_writes=not _publisher_owns_outputs(ctx),
         )
         runtime_configs = _tool_configs_for_runtime_tools(runtime_tools)
@@ -968,6 +1048,9 @@ async def run_subagent_stream(
         # translator unifies text/think output with ChatAgent frame semantics.
         translator = AgentEventFrameTranslator(query=ctx.objective)
         final_result: Any = None
+        workflow_control: Dict[str, str] = {}
+        declared_workflow_tools = set(_coerce_str_list(ctx.params.get('legacy_tools')))
+        terminal_workflow_tools = set(_coerce_str_list(ctx.params.get('terminal_tools')))
         # Accumulate streaming text/think chunks; flush to DB when a tool step follows or at end.
         _pending_text: str = ''
         _pending_think: str = ''
@@ -980,6 +1063,9 @@ async def run_subagent_stream(
             if source == 'stream':
                 stream_event = dict(merged_payload)
                 stream_event['task_id'] = task_id
+                if stream_event.get('type') == 'progress':
+                    progress = max(progress, int(stream_event.get('progress') or 0))
+                    stream_event['progress'] = progress
                 yield _sse(stream_event)
                 continue
 
@@ -1000,6 +1086,25 @@ async def run_subagent_stream(
                         _pending_text = ''
                     _persist_step(ctx, step_seq, item)
                     step_seq += 1
+                    if effective_agent_type == 'workflow_step' and tag == 'tool_results':
+                        terminal_error = _terminal_tool_failure(
+                            item, terminal_workflow_tools,
+                        )
+                        if terminal_error:
+                            # Agent execution runs in a worker thread. Cancelling this
+                            # async iterator alone does not stop subsequent React rounds.
+                            if _signal_task_cancel(task_id):
+                                clear_cancel_queue = False
+                            raise RuntimeError(terminal_error)
+                        candidate_control = _workflow_control_from_tool_results(
+                            item, declared_workflow_tools,
+                        )
+                        if candidate_control:
+                            if workflow_control and workflow_control != candidate_control:
+                                raise ValueError(
+                                    'Workflow attempt returned conflicting route decisions.'
+                                )
+                            workflow_control = candidate_control
                     # Forward tool steps as SSE events so the frontend can render them.
                     if tag == 'tool_calls':
                         calls = [
@@ -1131,8 +1236,11 @@ async def run_subagent_stream(
             ev = emitted.pop(0)
             ev['task_id'] = task_id
             yield _sse(ev)
-        yield _sse({'type': 'done', 'task_id': task_id, 'status': 'succeeded',
-                    'summary': summary, 'cost': cost})
+        yield _sse({
+            'type': 'done', 'task_id': task_id, 'status': 'succeeded',
+            'summary': summary, 'cost': cost,
+            **({'control': workflow_control} if workflow_control else {}),
+        })
         yield 'data: [DONE]\n\n'
     except Exception as exc:  # noqa: BLE001
         LOG.exception('[SubAgent] run failed')
@@ -1151,11 +1259,12 @@ async def run_subagent_stream(
                     'summary': exc_summary, 'message': exc_summary})
         yield 'data: [DONE]\n\n'
     finally:
-        try:
-            from lazyllm.common.queue import FileSystemQueue
-            FileSystemQueue(klass='cancel').clear()
-        except Exception:
-            pass
+        if clear_cancel_queue:
+            try:
+                from lazyllm.common.queue import FileSystemQueue
+                FileSystemQueue(klass='cancel').clear()
+            except Exception:
+                pass
         if db is not None:
             db.dispose()
 

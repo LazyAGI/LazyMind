@@ -697,6 +697,7 @@ def _workflow_client() -> Any:
     return WorkflowClient(
         str(config['core_api_url']).rstrip('/'), str(cfg.get('user_id') or ''),
         host='lazymind', transport=httpx,
+        trace_context=lazyllm.get_trace_context,
     )
 
 

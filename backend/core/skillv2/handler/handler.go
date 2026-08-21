@@ -1144,7 +1144,6 @@ func MarketPublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Name     string             `json:"name"`
 		Tags     []string           `json:"tags"`
 		Category string             `json:"category"`
 		Source   skillSourceRequest `json:"source"`
@@ -1152,7 +1151,11 @@ func MarketPublish(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	source := skillmarket.SourceInput{Type: strings.TrimSpace(req.Source.Type), UploadID: strings.TrimSpace(req.Source.UploadID)}
+	source := skillmarket.SourceInput{
+		Type:     strings.TrimSpace(req.Source.Type),
+		UploadID: strings.TrimSpace(req.Source.UploadID),
+		URL:      strings.TrimSpace(req.Source.URL),
+	}
 	if source.UploadID != "" {
 		session, err := dbUploadStore{db: db}.Get(r.Context(), source.UploadID)
 		if err != nil {
@@ -1172,7 +1175,6 @@ func MarketPublish(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := newMarketService(db).Publish(r.Context(), skillmarket.PublishRequest{
 		AdminUserID: userID,
-		Name:        strings.TrimSpace(req.Name),
 		Tags:        marketRequestTags(req.Tags, req.Category),
 		Source:      source,
 	})
@@ -1820,7 +1822,11 @@ func remoteRequestWithHeaderUser(r *http.Request) *http.Request {
 }
 
 func newMarketService(db *gorm.DB) *skillmarket.Service {
-	return skillmarket.NewService(skillmarket.ServiceDeps{DB: db, BlobStore: skillmarket.NewBlobStore(db, skillmarket.NewLocalObjectStore(skillObjectRoot()))})
+	return skillmarket.NewService(skillmarket.ServiceDeps{
+		DB:         db,
+		BlobStore:  skillmarket.NewBlobStore(db, skillmarket.NewLocalObjectStore(skillObjectRoot())),
+		Downloader: httpZipDownloader{},
+	})
 }
 
 func newShareService(db *gorm.DB) *skillshare.Service {

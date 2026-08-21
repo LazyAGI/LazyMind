@@ -1,4 +1,5 @@
 -- +migrate Dialect postgres
+DROP TABLE IF EXISTS writer_download_conversions;
 DROP INDEX IF EXISTS idx_multi_answers_chat_histories_run_id;
 ALTER TABLE multi_answers_chat_histories DROP COLUMN IF EXISTS run_terminal;
 ALTER TABLE multi_answers_chat_histories DROP COLUMN IF EXISTS run_status;
@@ -98,6 +99,7 @@ BEGIN
 END $$;
 
 -- +migrate Dialect sqlite
+DROP TABLE IF EXISTS writer_download_conversions;
 DROP INDEX IF EXISTS idx_multi_answers_chat_histories_run_id;
 ALTER TABLE multi_answers_chat_histories DROP COLUMN run_terminal;
 ALTER TABLE multi_answers_chat_histories DROP COLUMN run_status;
@@ -177,3 +179,15 @@ DELETE FROM user_chat_settings_next;
 INSERT INTO user_chat_settings_next SELECT * FROM user_chat_settings;
 DROP TABLE user_chat_settings;
 ALTER TABLE user_chat_settings_next RENAME TO user_chat_settings;
+
+-- +migrate Dialect postgres
+DROP INDEX IF EXISTS public.idx_knowledge_market_installs_user;
+DROP TABLE IF EXISTS public.knowledge_market_installs;
+DROP INDEX IF EXISTS public.idx_knowledge_market_items_category_status;
+DROP TABLE IF EXISTS public.knowledge_market_items;
+
+-- +migrate Dialect sqlite
+DROP INDEX IF EXISTS `idx_knowledge_market_installs_user`;
+DROP TABLE IF EXISTS `knowledge_market_installs`;
+DROP INDEX IF EXISTS `idx_knowledge_market_items_category_status`;
+DROP TABLE IF EXISTS `knowledge_market_items`;

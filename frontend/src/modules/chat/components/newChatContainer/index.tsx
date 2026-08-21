@@ -340,6 +340,12 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
                 sendMessage({ text, clearInput, ...(extras ?? {}) });
               }}
               regenerate={conversation.regenerate}
+              regenerateDisabled={
+                !canChat ||
+                conversation.loading ||
+                conversation.isStreaming ||
+                conversation.runtimeWaiting
+              }
               stopGeneration={conversation.stopGeneration}
               renderText={renderText}
               updateAssistantMessage={conversation.updateAssistantMessage}

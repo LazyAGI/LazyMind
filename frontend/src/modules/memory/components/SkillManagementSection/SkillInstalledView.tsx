@@ -3,6 +3,11 @@ import { ApartmentOutlined } from "@ant-design/icons";
 import { getLocalizedTablePagination } from "@/components/ui/pagination";
 import type { ColumnsType } from "antd/es/table";
 import type { SkillTreeNode, StructuredAsset } from "../../shared";
+import {
+  canSubmitSkillOrganize,
+  isSkillOrganizeEligible,
+  MAX_SKILL_ORGANIZE_SELECTION,
+} from "./skillOrganizeRules";
 
 interface SkillInstalledViewProps {
   t: (key: string, options?: Record<string, unknown>) => string;
@@ -77,6 +82,9 @@ export default function SkillInstalledView({
     t,
   );
   const visibleColumns = columns.filter((column) => column.key !== "tags");
+  const canSubmitOrganize = canSubmitSkillOrganize(
+    selectedOrganizeSkillIds.length,
+  );
 
   return (
     <div className="memory-skill-installed">
@@ -122,7 +130,7 @@ export default function SkillInstalledView({
                   count: selectedOrganizeSkillIds.length,
                 })}
               </strong>
-              <span>{t("admin.memorySkillOrganizeLimit")}</span>
+              <span>{t("admin.memorySkillOrganizeRequirement")}</span>
             </span>
           </div>
           <div className="memory-skill-organize-bar__actions">
@@ -136,9 +144,7 @@ export default function SkillInstalledView({
               description={t("admin.memorySkillOrganizeConfirmContent")}
               okText={t("admin.memorySkillOrganizeConfirmSubmit")}
               cancelText={t("common.cancel")}
-              disabled={
-                selectedOrganizeSkillIds.length === 0 || organizeLoading
-              }
+              disabled={!canSubmitOrganize || organizeLoading}
               onConfirm={() => {
                 void onOrganizeSubmit();
               }}
@@ -147,7 +153,7 @@ export default function SkillInstalledView({
                 type="primary"
                 icon={<ApartmentOutlined />}
                 loading={organizeLoading}
-                disabled={selectedOrganizeSkillIds.length === 0}
+                disabled={!canSubmitOrganize}
               >
                 {t("admin.memorySkillOrganizeSubmit")}
               </Button>
@@ -177,14 +183,22 @@ export default function SkillInstalledView({
                     changedRows: StructuredAsset[],
                   ) =>
                     onOrganizeSelectionChange(changedRows, selected),
-                  getCheckboxProps: (record: StructuredAsset) => ({
-                    disabled:
-                      selectedOrganizeSkillIds.length >= 20 &&
-                      !selectedOrganizeSkillIds.includes(record.id),
-                    "aria-label": t("admin.memorySkillOrganizeSelectRow", {
-                      name: record.name,
-                    }),
-                  }),
+                  getCheckboxProps: (record: StructuredAsset) => {
+                    const eligible = isSkillOrganizeEligible(record);
+                    return {
+                      disabled:
+                        !eligible ||
+                        (selectedOrganizeSkillIds.length >=
+                          MAX_SKILL_ORGANIZE_SELECTION &&
+                          !selectedOrganizeSkillIds.includes(record.id)),
+                      "aria-label": t(
+                        eligible
+                          ? "admin.memorySkillOrganizeSelectRow"
+                          : "admin.memorySkillOrganizeInternalOnlyRow",
+                        { name: record.name },
+                      ),
+                    };
+                  },
                 }
               : undefined
           }

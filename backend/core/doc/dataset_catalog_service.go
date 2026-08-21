@@ -103,7 +103,7 @@ func (s *DatasetCatalogService) ListDatasets(ctx context.Context, req DatasetLis
 	keyword := strings.TrimSpace(req.Keyword)
 	wantTags := uniqueNonEmptyStrings(req.Tags)
 	sourceFilter := strings.ToLower(strings.TrimSpace(req.SourceFilter))
-	if sourceFilter != "cloud" && sourceFilter != "manual" {
+	if sourceFilter != "cloud" && sourceFilter != "manual" && sourceFilter != "official_installed" {
 		sourceFilter = ""
 	}
 	caller := req.Caller
@@ -125,6 +125,7 @@ func (s *DatasetCatalogService) ListDatasets(ctx context.Context, req DatasetLis
 	hasMoreRows := true
 	candidates := make([]orm.Dataset, 0, pageSize)
 	pageSourceMap := make(map[string]bool, pageSize)
+	pageSourceTypeMap := make(map[string]string, pageSize)
 
 	for hasMoreRows {
 		var rows []orm.Dataset
@@ -164,17 +165,17 @@ func (s *DatasetCatalogService) ListDatasets(ctx context.Context, req DatasetLis
 				candidateIDs[i] = c.ID
 			}
 			sourceMap := batchCheckDatasetsHaveSource(ctx, candidateIDs)
+			installedMap := batchCheckInstalledMarketDatasets(ctx, userID, candidateIDs)
+			sourceTypeMap := buildDatasetSourceTypeMap(candidateIDs, sourceMap, installedMap)
 
 			for _, c := range candidates {
-				if sourceFilter == "cloud" && !sourceMap[c.ID] {
-					continue
-				}
-				if sourceFilter == "manual" && sourceMap[c.ID] {
+				if !datasetMatchesSourceFilter(sourceFilter, sourceTypeMap[c.ID]) {
 					continue
 				}
 				if total >= offset && len(page) < pageSize {
 					page = append(page, c)
 					pageSourceMap[c.ID] = sourceMap[c.ID]
+					pageSourceTypeMap[c.ID] = sourceTypeMap[c.ID]
 				}
 				total++
 			}
@@ -183,7 +184,7 @@ func (s *DatasetCatalogService) ListDatasets(ctx context.Context, req DatasetLis
 		}
 	}
 
-	out := s.datasetsFromRows(ctx, page, userID, groupIDs, pageSourceMap)
+	out := s.datasetsFromRows(ctx, page, userID, groupIDs, pageSourceMap, pageSourceTypeMap)
 	end := offset + len(page)
 	return DatasetListResult{
 		Datasets:   out,
@@ -224,10 +225,13 @@ func (s *DatasetCatalogService) GetDataset(ctx context.Context, req DatasetGetRe
 	}
 
 	createdByDataSource := isDatasetCreatedByDataSource(ctx, ds.ID)
-	return s.datasetFromRow(ctx, ds, userID, datasetACL, calcDatasetStatsWithDB(ctx, s.db, ds.ID), createdByDataSource, nil), nil
+	installedMap := batchCheckInstalledMarketDatasets(ctx, userID, []string{ds.ID})
+	cloudMap := map[string]bool{ds.ID: createdByDataSource}
+	sourceTypeMap := buildDatasetSourceTypeMap([]string{ds.ID}, cloudMap, installedMap)
+	return s.datasetFromRow(ctx, ds, userID, datasetACL, calcDatasetStatsWithDB(ctx, s.db, ds.ID), createdByDataSource, sourceTypeMap[ds.ID], nil), nil
 }
 
-func (s *DatasetCatalogService) datasetsFromRows(ctx context.Context, rows []orm.Dataset, userID string, groupIDs []string, sourceMap map[string]bool) []Dataset {
+func (s *DatasetCatalogService) datasetsFromRows(ctx context.Context, rows []orm.Dataset, userID string, groupIDs []string, sourceMap map[string]bool, sourceTypeMap map[string]string) []Dataset {
 	out := make([]Dataset, 0, len(rows))
 	dsIDs := make([]string, 0, len(rows))
 	for _, ds := range rows {
@@ -243,12 +247,12 @@ func (s *DatasetCatalogService) datasetsFromRows(ctx context.Context, rows []orm
 			liveParsers = fetchParsersByAlgoID(ctx, algo.AlgoID)
 			parserCache[algo.AlgoID] = liveParsers
 		}
-		out = append(out, s.datasetFromRow(ctx, ds, userID, datasetACL, statsMap[ds.ID], sourceMap[ds.ID], liveParsers))
+		out = append(out, s.datasetFromRow(ctx, ds, userID, datasetACL, statsMap[ds.ID], sourceMap[ds.ID], sourceTypeMap[ds.ID], liveParsers))
 	}
 	return out
 }
 
-func (s *DatasetCatalogService) datasetFromRow(ctx context.Context, ds orm.Dataset, userID string, datasetACL []string, stats datasetStats, createdByDataSource bool, liveParsers []ParserConfig) Dataset {
+func (s *DatasetCatalogService) datasetFromRow(ctx context.Context, ds orm.Dataset, userID string, datasetACL []string, stats datasetStats, createdByDataSource bool, sourceType string, liveParsers []ParserConfig) Dataset {
 	algo := parseDatasetAlgo(ds.Ext)
 	if liveParsers == nil {
 		liveParsers = fetchParsersByAlgoID(ctx, algo.AlgoID)
@@ -278,6 +282,7 @@ func (s *DatasetCatalogService) datasetFromRow(ctx context.Context, ds orm.Datas
 		Tags:                parseDatasetTags(ds.Ext),
 		DefaultDataset:      isDefaultDatasetForUserWithDB(ctx, s.db, userID, ds.ID),
 		CreatedByDataSource: &createdByDataSource,
+		SourceType:          sourceType,
 	}
 }
 

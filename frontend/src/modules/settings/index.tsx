@@ -207,7 +207,7 @@ export default function SettingsPage() {
     dependencyMessage: hasLocalDependencies ? t("settingsPage.diagnostics.readingDeps") : t("settingsPage.diagnostics.cloudDeps"),
   });
   const [keyword, setKeyword] = useState("");
-  const [modelView, setModelView] = useState<"defaults" | "providers">("defaults");
+  const modelView = searchParams.get("view") === "providers" ? "providers" : "defaults";
   const [organizationView, setOrganizationView] = useState<"users" | "groups">("users");
   const [mcpRefreshToken, setMcpRefreshToken] = useState(0);
 
@@ -241,6 +241,11 @@ export default function SettingsPage() {
   }, [keyword, navigationGroups]);
 
   const selectSection = (next: SectionID) => setSearchParams({ section: next });
+  const selectModelView = (next: "defaults" | "providers") => {
+    setSearchParams(next === "providers"
+      ? { section: "models", view: "providers" }
+      : { section: "models" });
+  };
   const selectedSection = overview?.sections.find((item) => item.id === section) || sectionFallback(section, t);
 
   const syncOverview = useCallback(async () => {
@@ -651,8 +656,8 @@ export default function SettingsPage() {
       content = <>
         {integratedHeader(t("settingsPage.models.title"), selectedSection.detail)}
         <nav className="settings-model-tabs" aria-label={t("settingsPage.models.tabsAria")} role="tablist">
-          <button className={modelView === "defaults" ? "is-active" : ""} type="button" role="tab" aria-selected={modelView === "defaults"} onClick={() => setModelView("defaults")}>{t("settingsPage.models.defaultSettings")}</button>
-          <button ref={modelProviderTabRef} className={modelView === "providers" ? "is-active" : ""} type="button" role="tab" aria-selected={modelView === "providers"} onClick={() => setModelView("providers")}>{t("settingsPage.models.providers")}</button>
+          <button className={modelView === "defaults" ? "is-active" : ""} type="button" role="tab" aria-selected={modelView === "defaults"} onClick={() => selectModelView("defaults")}>{t("settingsPage.models.defaultSettings")}</button>
+          <button ref={modelProviderTabRef} className={modelView === "providers" ? "is-active" : ""} type="button" role="tab" aria-selected={modelView === "providers"} onClick={() => selectModelView("providers")}>{t("settingsPage.models.providers")}</button>
         </nav>
         {integratedSurface(modelView === "defaults" ? (
           <DefaultServicesPage
@@ -662,7 +667,7 @@ export default function SettingsPage() {
                 : "/settings?section=knowledge&tool=web-search",
             )}
             onConfigureProviders={() => {
-              setModelView("providers");
+              selectModelView("providers");
               requestAnimationFrame(() => modelProviderTabRef.current?.focus());
             }}
           />
