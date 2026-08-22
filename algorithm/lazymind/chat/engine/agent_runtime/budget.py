@@ -35,15 +35,6 @@ def _role_max_input_tokens(role_cfg: Any) -> Optional[int]:
     return parse_token_limit(role_cfg.get('max_input_tokens'))
 
 
-def runtime_yaml_max_input_tokens(role: str = 'llm') -> Optional[int]:
-    try:
-        from lazymind.model_config import _role_entry, load_model_config
-        entry = _role_entry(load_model_config().get(role))
-    except Exception:
-        return None
-    return _role_max_input_tokens(entry)
-
-
 def _llm_config_max_input_tokens(llm_config: Optional[dict[str, Any]]) -> Optional[int]:
     if not isinstance(llm_config, dict):
         return None
@@ -61,9 +52,6 @@ def resolve_max_input_tokens(
     parsed = parse_token_limit(max_input_tokens)
     if parsed:
         return parsed
-    parsed = runtime_yaml_max_input_tokens('llm')
-    if parsed:
-        return parsed
     parsed = _llm_config_max_input_tokens(llm_config)
     if parsed:
         return parsed
@@ -76,8 +64,6 @@ def _budget_source(
 ) -> str:
     if parse_token_limit(max_input_tokens):
         return 'explicit'
-    if runtime_yaml_max_input_tokens('llm'):
-        return 'runtime_models'
     if _llm_config_max_input_tokens(llm_config):
         return 'llm_config'
     return 'fallback'

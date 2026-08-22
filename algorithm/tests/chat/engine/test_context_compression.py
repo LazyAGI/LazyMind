@@ -15,7 +15,16 @@ from lazymind.chat.engine.agent_runtime.compactors import (
     compact_shell_result,
     compact_tool_result,
 )
+from lazymind.chat.engine.agent_runtime.context_estimator import estimate_non_history_tokens
+from lazymind.chat.engine.agent_runtime.executor import AgentExecutor
+from lazymind.chat.engine.agent_runtime.models import (
+    AgentExecutionOptions,
+    AgentRole,
+    AgentRunPlan,
+    PromptBundle,
+)
 from lazymind.chat.engine.agent_runtime.pruner import (
+    estimate_history_tokens,
     make_history_compactor,
     prune_tool_results,
 )
@@ -54,28 +63,38 @@ def test_build_context_budget_caps_reserved_on_small_windows() -> None:
     assert budget.trigger_tokens == 2_800
 
 
-def test_resolve_max_input_tokens_reads_llm_config(monkeypatch) -> None:
-    monkeypatch.setattr(
-        'lazymind.chat.engine.agent_runtime.budget.runtime_yaml_max_input_tokens',
-        lambda role='llm': None,
-    )
+def test_resolve_max_input_tokens_reads_llm_config() -> None:
     assert resolve_max_input_tokens(llm_config={'llm': {'max_input_tokens': '32K'}}) == 32_000
 
 
-def test_resolve_max_input_tokens_prefers_runtime_yaml_over_catalog(monkeypatch) -> None:
-    monkeypatch.setattr(
-        'lazymind.chat.engine.agent_runtime.budget.runtime_yaml_max_input_tokens',
-        lambda role='llm': 64_000,
-    )
-    assert resolve_max_input_tokens(llm_config={'llm': {'max_input_tokens': '128K'}}) == 64_000
+def test_resolve_max_input_tokens_prefers_catalog() -> None:
+    assert resolve_max_input_tokens(llm_config={'llm': {'max_input_tokens': '128K'}}) == 128_000
 
 
-def test_resolve_max_input_tokens_explicit_arg_beats_runtime_yaml(monkeypatch) -> None:
-    monkeypatch.setattr(
-        'lazymind.chat.engine.agent_runtime.budget.runtime_yaml_max_input_tokens',
-        lambda role='llm': 64_000,
-    )
+def test_resolve_max_input_tokens_explicit_arg_beats_catalog() -> None:
     assert resolve_max_input_tokens('8K', llm_config={'llm': {'max_input_tokens': '128K'}}) == 8_000
+
+
+def test_resolve_max_input_tokens_uses_64k_fallback() -> None:
+    from lazymind.config import config
+
+    with config.temp('context_compression_default_max_input_tokens', 64_000):
+        budget = build_context_budget(llm_config={'llm': {'max_input_tokens': None}})
+    assert budget.max_input_tokens == 64_000
+    assert budget.source == 'fallback'
+
+
+def test_enrich_role_types_preserves_catalog_window(monkeypatch) -> None:
+    from lazymind.model_config import _enrich_role_types
+
+    monkeypatch.setattr(
+        'lazymind.model_config.load_model_config',
+        lambda: {'llm': {'type': 'llm', 'max_input_tokens': '64K'}},
+    )
+    enriched = _enrich_role_types({'llm': {'model': 'selected', 'max_input_tokens': '128K'}})
+    assert enriched['llm']['max_input_tokens'] == '128K'
+    enriched_null = _enrich_role_types({'llm': {'model': 'custom', 'max_input_tokens': None}})
+    assert enriched_null['llm']['max_input_tokens'] is None
 
 
 def test_shell_compactor_keeps_command_and_errors() -> None:
@@ -194,8 +213,10 @@ def test_mid_turn_compactor_callback_compacts_old_tools() -> None:
         },
         {'role': 'tool', 'name': 'url_fetch', 'content': 'keep me'},
     ]
-    with config.temp('context_compression_enabled', True):
-        compact = make_history_compactor(max_input_tokens=4_000, keep_recent=1, trigger='mid_turn')
+    with config.temp('context_compression_enabled', True), \
+            config.temp('context_summary_compression_enabled', False), \
+            config.temp('context_compression_min_reclaim_tokens', 1):
+        compact = make_history_compactor(max_input_tokens=3_000, keep_recent=1, trigger='mid_turn')
         projected = compact(history, keep_full_turns=1)
     assert projected[1]['content'] == 'keep me'
     assert isinstance(projected[0]['content'], str)
@@ -229,6 +250,250 @@ def test_mid_turn_compactor_does_not_force_below_trigger() -> None:
         projected = compact(history, keep_full_turns=2)
 
     assert projected == history
+
+
+def test_mid_turn_compactor_counts_live_prefix_and_keeps_zero(monkeypatch) -> None:
+    from lazymind.config import config
+
+    history = [{'role': 'tool', 'name': 'url_fetch', 'content': 'old result'}]
+    prefix = {
+        'system_prompt': 'system',
+        'tool_definitions': [{'type': 'function', 'function': {'name': 'search'}}],
+        'skills_prompt': 'skills',
+    }
+    captured = {}
+
+    def fake_prune(items, **kwargs):
+        captured.update(kwargs)
+        return list(items), None
+
+    monkeypatch.setattr(
+        'lazymind.chat.engine.agent_runtime.pruner.prune_tool_results',
+        fake_prune,
+    )
+    with config.temp('context_compression_enabled', True), \
+            config.temp('context_summary_compression_enabled', False):
+        compact = make_history_compactor(max_input_tokens=64_000, keep_recent=2)
+        compact(history, keep_full_turns=0, prefix=prefix, current_input='new request')
+
+    expected = estimate_history_tokens(history) + estimate_non_history_tokens(prefix, 'new request')
+    assert captured['estimated_total_tokens'] == expected
+    assert captured['keep_recent'] == 0
+
+
+def test_mid_turn_compactor_triggers_from_prefix_plus_history() -> None:
+    from lazymind.config import config
+
+    history = [{
+        'role': 'tool',
+        'name': 'url_fetch',
+        'content': {
+            'query': 'x',
+            'result': {'final_url': 'https://example.com', 'text': 'body\n' * 1200},
+        },
+    }]
+    prefix = {'system_prompt': 'S' * 33_000, 'tool_definitions': [], 'skills_prompt': ''}
+    with config.temp('context_compression_enabled', True), \
+            config.temp('context_summary_compression_enabled', False), \
+            config.temp('context_compression_reserved_output_tokens', 0), \
+            config.temp('context_compression_min_reclaim_tokens', 1):
+        compact = make_history_compactor(max_input_tokens=10_000, keep_recent=0)
+        projected = compact(history, keep_full_turns=0, prefix=prefix, current_input='')
+
+    assert isinstance(projected[0]['content'], str)
+    assert len(projected[0]['content']) < len(str(history[0]['content']))
+
+
+def test_mid_turn_compactor_counts_tool_continuation_once(monkeypatch) -> None:
+    from lazymind.config import config
+
+    history = [{'role': 'tool', 'name': 'search', 'content': 'current tool result'}]
+    captured = {}
+
+    def fake_prune(items, **kwargs):
+        captured.update(kwargs)
+        return list(items), None
+
+    monkeypatch.setattr(
+        'lazymind.chat.engine.agent_runtime.pruner.prune_tool_results',
+        fake_prune,
+    )
+    with config.temp('context_compression_enabled', True), \
+            config.temp('context_summary_compression_enabled', False):
+        compact = make_history_compactor(max_input_tokens=64_000)
+        compact(history, keep_full_turns=0, prefix={}, current_input='')
+
+    assert captured['estimated_total_tokens'] == (
+        estimate_history_tokens(history) + estimate_non_history_tokens({}, '')
+    )
+
+
+def test_describe_context_is_inspect_only() -> None:
+    from lazyllm.tools.agent.reactAgent import ReactAgent
+
+    class InspectAgent:
+        _workspace = '/tmp/workspace'
+
+        def _prepare_tool_context(self, current_input, history):
+            self.prepared = (current_input, history)
+
+        def _model_facing_prefix(self):
+            return {
+                'system_prompt': 'system',
+                'tool_definitions': [],
+                'skills_prompt': '',
+                'skill_prompt_parts': [],
+            }
+
+    agent = InspectAgent()
+    history = [{'role': 'tool', 'content': 'raw result'}]
+    description = ReactAgent.describe_context(agent, history, 'inspect')
+
+    assert description['history'] == history
+    assert description['history'] is not history
+    assert agent.prepared == ('inspect', history)
+
+
+def test_function_call_passes_live_prefix_and_current_input() -> None:
+    from lazyllm.tools.agent.functionCall import FunctionCall
+
+    captured = {}
+
+    def compactor(history, keep, **kwargs):
+        captured['keep'] = keep
+        captured.update(kwargs)
+        return list(history)
+
+    class ToolManager:
+        tools_description = [{'type': 'function', 'function': {'name': 'search'}}]
+
+    class FunctionCallState:
+        _history_compactor = staticmethod(compactor)
+        _keep_full_turns = 0
+        _system_prompt = 'live system'
+        _tools_manager = ToolManager()
+        _skill_manager = None
+
+    history = [{'role': 'user', 'content': 'old'}]
+    projected = FunctionCall._compact_history(
+        FunctionCallState(),
+        history,
+        current_input='new user message',
+    )
+
+    assert projected == history
+    assert captured['keep'] == 0
+    assert captured['current_input'] == 'new user message'
+    assert captured['prefix']['system_prompt'] == 'live system'
+    assert captured['prefix']['tool_definitions'] == ToolManager.tools_description
+
+
+def _test_plan(history: list[dict[str, object]]) -> AgentRunPlan:
+    return AgentRunPlan(
+        role=AgentRole.CHAT,
+        prompt=PromptBundle(
+            sections=(),
+            system_prompt='system',
+            current_input='request',
+            input_title='Request',
+            input_content='request',
+        ),
+        history=history,
+        execution_options=AgentExecutionOptions(keep_full_turns=2),
+    )
+
+
+class _FakeToolManager:
+    def __call__(self, tools, verbose=False):
+        return []
+
+
+class _FakeReactAgent:
+    last_kwargs = {}
+
+    def __init__(self, **kwargs):
+        self.last_kwargs = kwargs
+        type(self).last_kwargs = kwargs
+        self._tools_manager = _FakeToolManager()
+
+    def _prepare_tool_context(self, current_input, history):
+        return None
+
+    def _model_facing_prefix(self):
+        return {
+            'system_prompt': 'system',
+            'tool_definitions': [],
+            'skills_prompt': '',
+            'skill_prompt_parts': [],
+        }
+
+    def set_stop_tools(self, stop_tools):
+        return None
+
+
+def test_executor_master_off_attaches_identity_compactor(monkeypatch) -> None:
+    from lazymind.config import config
+
+    monkeypatch.setattr(
+        'lazymind.chat.engine.agent_runtime.executor._agent_mod.ReactAgent',
+        _FakeReactAgent,
+    )
+    history = [{'role': 'tool', 'content': 'x' * 1000}]
+    with config.temp('context_compression_enabled', False):
+        AgentExecutor().create_agent(object(), _test_plan(history))
+
+    compactor = _FakeReactAgent.last_kwargs['history_compactor']
+    assert compactor(history, 2) == history
+
+
+def test_executor_inspection_skips_pre_turn_pruning(monkeypatch) -> None:
+    from lazymind.config import config
+
+    monkeypatch.setattr(
+        'lazymind.chat.engine.agent_runtime.executor._agent_mod.ReactAgent',
+        _FakeReactAgent,
+    )
+
+    def fail_pruning(*args, **kwargs):
+        raise AssertionError('inspection must not prune')
+
+    monkeypatch.setattr(
+        'lazymind.chat.engine.agent_runtime.executor.apply_pre_turn_pruning',
+        fail_pruning,
+    )
+    with config.temp('context_compression_enabled', True):
+        AgentExecutor().create_agent(
+            object(),
+            _test_plan([{'role': 'tool', 'content': 'x' * 1000}]),
+            inspect=True,
+        )
+
+
+def test_executor_pre_turn_pruning_uses_full_payload_total(monkeypatch) -> None:
+    from lazymind.config import config
+
+    monkeypatch.setattr(
+        'lazymind.chat.engine.agent_runtime.executor._agent_mod.ReactAgent',
+        _FakeReactAgent,
+    )
+    captured = {}
+
+    def capture_pruning(history, **kwargs):
+        captured.update(kwargs)
+        return list(history), None
+
+    monkeypatch.setattr(
+        'lazymind.chat.engine.agent_runtime.executor.apply_pre_turn_pruning',
+        capture_pruning,
+    )
+    history = [{'role': 'tool', 'content': 'history'}]
+    with config.temp('context_compression_enabled', True):
+        AgentExecutor().create_agent(object(), _test_plan(history))
+
+    prefix = _FakeReactAgent()._model_facing_prefix()
+    assert captured['estimated_tokens'] == (
+        estimate_history_tokens(history) + estimate_non_history_tokens(prefix, 'request')
+    )
 
 
 def test_compact_tool_result_routes_by_tool_name() -> None:

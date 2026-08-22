@@ -5,9 +5,6 @@ llm:
   source: dynamic
   dynamic_auth: true
   type: llm
-  # Same key/format as backend/core/config/model_catalog.yaml (64K, 128K, 1M).
-  # Wins over catalog max_input_tokens when assembling the chat context budget.
-  max_input_tokens: 64K
 
 evo_llm:
   source: dynamic

@@ -1385,7 +1385,7 @@ async def _handle_chat_impl(
         ),
     )
     executor = AgentExecutor()
-    react_agent = executor.create_agent(llm, plan)
+    react_agent = executor.create_agent(llm, plan, inspect=is_context_inspection)
     if is_context_inspection:
         try:
             agent_context = await asyncio.to_thread(

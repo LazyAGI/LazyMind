@@ -168,11 +168,7 @@ def test_context_report_uses_final_agent_history_description() -> None:
     assert conversation.items[0].title == 'Tool result · search'
 
 
-def test_attach_window_budget_uses_resolved_max_input_tokens(monkeypatch) -> None:
-    monkeypatch.setattr(
-        'lazymind.chat.engine.agent_runtime.context_estimator.resolve_max_input_tokens',
-        lambda llm_config=None: 64_000,
-    )
+def test_attach_window_budget_uses_resolved_max_input_tokens() -> None:
     payload = attach_window_budget({'estimated_tokens': 6_400}, llm_config={'llm': {'max_input_tokens': '128K'}})
-    assert payload['max_input_tokens'] == 64_000
-    assert abs(payload['estimated_ratio'] - 0.1) < 1e-9
+    assert payload['max_input_tokens'] == 128_000
+    assert abs(payload['estimated_ratio'] - 0.05) < 1e-9

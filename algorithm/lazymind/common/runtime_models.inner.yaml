@@ -7,7 +7,6 @@ llm:
     name: minimax-m27
     url: http://106.75.235.251:9000/v1/
     api_key: ${LAZYLLM_MINIMAX_API_KEY}
-    max_input_tokens: 64K
 
 evo_llm:
   - source: openai

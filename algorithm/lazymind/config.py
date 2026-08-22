@@ -263,7 +263,7 @@ config.add('agentic_workspace', str, './workspace', 'AGENTIC_WORKSPACE',
 config.add('trusted_local_mode', bool, False, 'TRUSTED_LOCAL_MODE',
            description='Allow agents to access host paths outside their workspace and use local command tools.')
 config.add('agentic_keep_full_turns', int, 2, 'AGENTIC_KEEP_FULL_TURNS',
-           description='Number of recent tool results kept intact during context compression; 0 disables it.')
+           description='Number of recent tool results kept intact during context compression.')
 # Context compression knobs (process-level via LAZYMIND_*). Master switch gates all
 # strategies. Code defaults are ON; local .env may set them false until validated.
 # Summary strategy gates with context_compression_enabled AND
@@ -279,11 +279,10 @@ config.add(
         '(deterministic tool-result prune/compact and summary).'
     ),
 )
-config.add('context_compression_default_max_input_tokens', int, 128000,
+config.add('context_compression_default_max_input_tokens', int, 64000,
            'CONTEXT_COMPRESSION_DEFAULT_MAX_INPUT_TOKENS',
            description=(
-               'Fallback max input tokens when runtime_models.yaml llm.max_input_tokens '
-               'and llm_config/catalog do not provide one.'
+               'Fallback max input tokens when llm_config/catalog does not provide one.'
            ))
 config.add('context_compression_trigger_ratio', float, 0.9, 'CONTEXT_COMPRESSION_TRIGGER_RATIO',
            description='Compress when estimated tokens reach this fraction of the effective input budget.')

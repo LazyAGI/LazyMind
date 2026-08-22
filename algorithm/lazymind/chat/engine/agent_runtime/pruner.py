@@ -10,7 +10,7 @@ from lazymind.config import config
 
 from .budget import build_context_budget, needs_compression, usage_ratio
 from .compactors import compact_or_spill_tool_result, is_oversized_tool_result
-from .context_estimator import estimate_tokens
+from .context_estimator import estimate_non_history_tokens, estimate_tokens
 from .models import (
     ContextBudget,
     CompressionTrigger,
@@ -217,7 +217,7 @@ def make_history_compactor(
     llm: Any = None,
     summarizer: Optional[Callable[[str, str], str]] = None,
     workspace: Optional[str] = None,
-) -> Callable[[list[dict[str, Any]], int], list[dict[str, Any]]]:
+) -> Callable[..., list[dict[str, Any]]]:
     """Build a mid-turn history projector compatible with ReactAgent/FunctionCall."""
 
     budget = build_context_budget(max_input_tokens, llm_config=llm_config)
@@ -225,21 +225,33 @@ def make_history_compactor(
         keep_recent if keep_recent is not None else int(config['agentic_keep_full_turns'])
     )
 
-    def _compact(history: list[dict[str, Any]], keep_full_turns: int = 0) -> list[dict[str, Any]]:
+    def _compact(
+        history: list[dict[str, Any]],
+        keep_full_turns: Optional[int] = None,
+        **kwargs: Any,
+    ) -> list[dict[str, Any]]:
         if not config['context_compression_enabled']:
             return list(history)
-        effective_keep = keep_full_turns if keep_full_turns > 0 else default_keep
+        effective_keep = default_keep if keep_full_turns is None else keep_full_turns
+        non_history_tokens = estimate_non_history_tokens(
+            kwargs.get('prefix') or {},
+            kwargs.get('current_input'),
+        )
+        estimated_total = non_history_tokens + estimate_history_tokens(history)
         projected, _event = prune_tool_results(
             history,
             keep_recent=effective_keep,
             budget=budget,
             trigger=trigger,
+            estimated_total_tokens=estimated_total,
             force=False,
             workspace=workspace,
         )
+        projected_total = non_history_tokens + estimate_history_tokens(projected)
         if (
             config['context_summary_compression_enabled']
-            and estimate_history_tokens(projected) > budget.target_tokens
+            and needs_compression(estimated_total, budget)
+            and projected_total > budget.target_tokens
         ):
             from .summarizer import apply_summary_compression, strip_lazymind_meta
             projected, _summary_event = apply_summary_compression(
@@ -248,7 +260,7 @@ def make_history_compactor(
                 trigger=trigger,
                 llm=llm,
                 summarizer=summarizer,
-                force=False,
+                force=True,
             )
             return strip_lazymind_meta(projected)
         from .summarizer import strip_lazymind_meta
@@ -281,9 +293,15 @@ def apply_pre_turn_pruning(
         force=False,
         workspace=workspace,
     )
+    projected_total = (
+        estimated_tokens
+        - estimate_history_tokens(history)
+        + estimate_history_tokens(projected)
+    )
     if (
         config['context_summary_compression_enabled']
-        and estimate_history_tokens(projected) > budget.target_tokens
+        and needs_compression(estimated_tokens, budget)
+        and projected_total > budget.target_tokens
     ):
         from .summarizer import apply_summary_compression
         projected, _summary_event = apply_summary_compression(
@@ -292,6 +310,6 @@ def apply_pre_turn_pruning(
             trigger='pre_turn',
             llm=llm,
             summarizer=summarizer,
-            force=False,
+            force=True,
         )
     return projected, event

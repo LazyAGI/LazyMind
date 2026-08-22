@@ -227,7 +227,7 @@ def _enrich_role_types(model_config: Dict[str, Any]) -> Dict[str, Any]:
             if not merged.get('type'):
                 merged['type'] = entry.get('type')
             yaml_tokens = entry.get('max_input_tokens')
-            if yaml_tokens is not None:
+            if yaml_tokens is not None and 'max_input_tokens' not in merged:
                 merged['max_input_tokens'] = yaml_tokens
         enriched[role] = merged
     return enriched

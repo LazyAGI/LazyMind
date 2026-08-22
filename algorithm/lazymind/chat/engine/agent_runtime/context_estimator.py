@@ -46,6 +46,24 @@ def estimate_tokens(text: str) -> int:
     return math.ceil(weight) if weight else 0
 
 
+def estimate_non_history_tokens(
+    prefix: dict[str, Any],
+    current_input: Any = None,
+) -> int:
+    total = estimate_tokens(str(prefix.get('system_prompt') or ''))
+    for tool in prefix.get('tool_definitions') or []:
+        rendered = json.dumps(tool, ensure_ascii=False, separators=(',', ':'), default=str)
+        total += estimate_tokens(rendered) + 2
+    skill_parts = prefix.get('skill_prompt_parts') or []
+    if skill_parts:
+        total += sum(estimate_tokens(str(part.get('content') or '')) for part in skill_parts)
+    else:
+        total += estimate_tokens(str(prefix.get('skills_prompt') or ''))
+    if current_input is not None:
+        total += estimate_tokens(str(current_input)) + 4
+    return total
+
+
 def _item(
     item_id: str,
     category: str,

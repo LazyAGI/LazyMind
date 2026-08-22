@@ -12,6 +12,7 @@ import lazyllm.tools.agent as _agent_mod
 from lazymind.config import config as _cfg
 from lazymind.chat.engine.tools.infra import CitationResultMiddleware
 
+from .context_estimator import estimate_non_history_tokens
 from .models import AgentRole, AgentRunPlan
 from .pruner import apply_pre_turn_pruning, estimate_history_tokens, make_history_compactor
 from .telemetry import (
@@ -37,6 +38,10 @@ _RESULT_LOG_KEYS = (
     'total_lines', 'eof', 'next_offset', 'limit', 'pattern', 'total',
     'truncated', 'status', 'filename',
 )
+
+
+def _identity_history_compactor(history: list[dict[str, Any]], *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
+    return list(history)
 
 
 def _requires_expanded_budget(tool_name: str) -> bool:
@@ -366,7 +371,7 @@ def _deduplicate_tools(tools: list[Any]) -> list[Any]:
 class AgentExecutor:
     """Create and drive ReactAgent instances from a fully assembled run plan."""
 
-    def create_agent(self, llm: Any, plan: AgentRunPlan) -> Any:
+    def create_agent(self, llm: Any, plan: AgentRunPlan, *, inspect: bool = False) -> Any:
         from lazymind.chat.lazyllm_tool_docs import ensure_lazyllm_tool_docs
 
         options = plan.execution_options
@@ -374,7 +379,9 @@ class AgentExecutor:
         if keep_full_turns is None:
             keep_full_turns = int(_cfg['agentic_keep_full_turns'])
         history_compactor = options.history_compactor
-        if history_compactor is None and _cfg['context_compression_enabled']:
+        if not _cfg['context_compression_enabled']:
+            history_compactor = _identity_history_compactor
+        elif history_compactor is None:
             history_compactor = make_history_compactor(
                 max_input_tokens=options.max_input_tokens,
                 llm_config=options.llm_config,
@@ -383,27 +390,6 @@ class AgentExecutor:
                 llm=llm,
                 workspace=options.workspace,
             )
-        estimated = estimate_history_tokens(plan.history) if plan.history else 0
-        if telemetry_enabled():
-            append_event(
-                'run_prepare',
-                role=getattr(plan.role, 'value', str(plan.role)),
-                compression_enabled=bool(_cfg['context_compression_enabled']),
-                history_len=len(plan.history or []),
-                estimated_tokens=estimated,
-                sid=sid(),
-            )
-        if _cfg['context_compression_enabled'] and plan.history:
-            projected, _event = apply_pre_turn_pruning(
-                plan.history,
-                estimated_tokens=estimated,
-                max_input_tokens=options.max_input_tokens,
-                llm_config=options.llm_config,
-                keep_recent=keep_full_turns,
-                llm=llm,
-                workspace=options.workspace,
-            )
-            plan.history = projected
         run_id = uuid.uuid4().hex[:12]
         observer = (
             make_runtime_observer(
@@ -453,6 +439,31 @@ class AgentExecutor:
         # Relying only on ReactAgent._pre_process makes restoration dependent on
         # llm_chat_history surviving the helper/framework call path.
         agent._prepare_tool_context(plan.prompt.current_input, plan.history)
+        prefix = agent._model_facing_prefix()
+        estimated = (
+            estimate_non_history_tokens(prefix, plan.prompt.current_input)
+            + estimate_history_tokens(plan.history or [])
+        )
+        if telemetry_enabled():
+            append_event(
+                'run_prepare',
+                role=getattr(plan.role, 'value', str(plan.role)),
+                compression_enabled=bool(_cfg['context_compression_enabled']),
+                history_len=len(plan.history or []),
+                estimated_tokens=estimated,
+                sid=sid(),
+            )
+        if _cfg['context_compression_enabled'] and not inspect and plan.history:
+            projected, _event = apply_pre_turn_pruning(
+                plan.history,
+                estimated_tokens=estimated,
+                max_input_tokens=options.max_input_tokens,
+                llm_config=options.llm_config,
+                keep_recent=keep_full_turns,
+                llm=llm,
+                workspace=options.workspace,
+            )
+            plan.history = projected
         agent.set_stop_tools(plan.stop_tools)
         return agent
 
