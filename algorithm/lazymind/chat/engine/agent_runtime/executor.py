@@ -14,7 +14,7 @@ from lazymind.chat.engine.tools.infra import CitationResultMiddleware
 
 from .context_estimator import estimate_non_history_tokens
 from .models import AgentRole, AgentRunPlan
-from .pruner import apply_pre_turn_pruning, estimate_history_tokens, make_history_compactor
+from .pruner import estimate_history_tokens, make_history_compactor
 from .telemetry import (
     append_event,
     emit_tool_call,
@@ -453,17 +453,6 @@ class AgentExecutor:
                 estimated_tokens=estimated,
                 sid=sid(),
             )
-        if _cfg['context_compression_enabled'] and not inspect and plan.history:
-            projected, _event = apply_pre_turn_pruning(
-                plan.history,
-                estimated_tokens=estimated,
-                max_input_tokens=options.max_input_tokens,
-                llm_config=options.llm_config,
-                keep_recent=keep_full_turns,
-                llm=llm,
-                workspace=options.workspace,
-            )
-            plan.history = projected
         agent.set_stop_tools(plan.stop_tools)
         return agent
 

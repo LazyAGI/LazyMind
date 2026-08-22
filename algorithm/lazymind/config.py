@@ -291,9 +291,20 @@ config.add('context_compression_target_ratio', float, 0.45, 'CONTEXT_COMPRESSION
 config.add('context_compression_reserved_output_tokens', int, 8192,
            'CONTEXT_COMPRESSION_RESERVED_OUTPUT_TOKENS',
            description='Tokens reserved for model output when computing the effective input budget.')
-config.add('context_compression_min_reclaim_tokens', int, 10000,
-           'CONTEXT_COMPRESSION_MIN_RECLAIM_TOKENS',
-           description='Abandon compression when reclaimed tokens fall below this threshold.')
+config.add(
+    'context_prune_cache_amortization_calls',
+    int,
+    2,
+    'CONTEXT_PRUNE_CACHE_AMORTIZATION_CALLS',
+    description='Maximum future model calls used to amortize deterministic prune cache disruption.',
+)
+config.add(
+    'context_prune_cached_token_cost_ratio',
+    float,
+    0.25,
+    'CONTEXT_PRUNE_CACHED_TOKEN_COST_RATIO',
+    description='Estimated relative cost of invalidating one previously cached prompt token.',
+)
 config.add(
     'context_compression_spill_bytes',
     int,
@@ -327,6 +338,20 @@ config.add(
     1,
     'CONTEXT_SUMMARY_MIN_RECENT_USER_TURNS',
     description='Minimum recent user turns (1-3) kept intact in the Tail.',
+)
+config.add(
+    'context_summary_required_overshoot_reclaim_ratio',
+    float,
+    0.80,
+    'CONTEXT_SUMMARY_REQUIRED_OVERSHOOT_RECLAIM_RATIO',
+    description='Required fraction of target overshoot reclaimed when fixed context makes target unreachable.',
+)
+config.add(
+    'context_summary_max_output_to_replaced_ratio',
+    float,
+    0.30,
+    'CONTEXT_SUMMARY_MAX_OUTPUT_TO_REPLACED_RATIO',
+    description='Maximum summary output tokens as a fraction of the replaced history span.',
 )
 config.add(
     'context_compression_event_path',

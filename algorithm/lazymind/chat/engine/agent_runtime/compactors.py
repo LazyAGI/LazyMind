@@ -6,6 +6,7 @@ import json
 import os
 import re
 import tempfile
+from dataclasses import dataclass
 from typing import Any, Callable, Optional
 
 from lazymind.config import config
@@ -18,6 +19,18 @@ _ERROR_LINE = re.compile(
 )
 _EXIT_CODE = re.compile(r'(?:exit(?:\s*code)?|return(?:ed)?\s*code|status)\s*[:=]?\s*(-?\d+)', re.I)
 _URL = re.compile(r'https?://[^\s\'"<>]+', re.IGNORECASE)
+
+
+@dataclass(frozen=True)
+class ToolCompactionPlan:
+    content: str
+    compactor: str
+    before_tokens: int
+    after_tokens: int
+    spill_path: str = ''
+    spill_bytes: int = 0
+    tool_name: str = ''
+    original_content: Any = None
 
 
 def _as_text(content: Any) -> str:
@@ -410,3 +423,83 @@ def compact_or_spill_tool_result(
             return notice, 'spill', before, estimate_tokens(notice), rel_path, size_bytes
     compacted, compactor, before_tokens, after_tokens = compact_tool_result(tool_name, content)
     return compacted, compactor, before_tokens, after_tokens, '', 0
+
+
+def plan_tool_result_compaction(
+    tool_name: str,
+    content: Any,
+    *,
+    workspace: Optional[str] = None,
+    threshold: Optional[int] = None,
+) -> ToolCompactionPlan:
+    text = _as_text(content)
+    before = estimate_tokens(text)
+    size_bytes = tool_result_utf8_size(content)
+    limit = spill_threshold_bytes() if threshold is None else max(1, int(threshold))
+    if _file_result_details(tool_name, content):
+        compacted, compactor, before_tokens, after_tokens = compact_tool_result(tool_name, content)
+        return ToolCompactionPlan(
+            compacted, compactor, before_tokens, after_tokens,
+            tool_name=tool_name, original_content=content,
+        )
+    if workspace and size_bytes > limit:
+        rel_path = os.path.join('tool_spills', _spill_filename(tool_name, text))
+        notice = format_spilled_tool_notice(tool_name, content, rel_path, size_bytes)
+        after = estimate_tokens(notice)
+        if after < before:
+            return ToolCompactionPlan(
+                notice,
+                'spill',
+                before,
+                after,
+                spill_path=rel_path,
+                spill_bytes=size_bytes,
+                tool_name=tool_name,
+                original_content=content,
+            )
+    compacted, compactor, before_tokens, after_tokens = compact_tool_result(tool_name, content)
+    return ToolCompactionPlan(
+        compacted, compactor, before_tokens, after_tokens,
+        tool_name=tool_name, original_content=content,
+    )
+
+
+def commit_tool_result_plan(
+    plan: ToolCompactionPlan,
+    *,
+    workspace: Optional[str] = None,
+) -> ToolCompactionPlan:
+    if plan.compactor != 'spill' or not plan.spill_path or not workspace:
+        return plan
+    rel_path = spill_tool_result_to_workspace(
+        workspace,
+        plan.tool_name,
+        plan.original_content,
+    )
+    if not rel_path:
+        return ToolCompactionPlan(
+            _as_text(plan.original_content),
+            'noop',
+            plan.before_tokens,
+            plan.before_tokens,
+            tool_name=plan.tool_name,
+            original_content=plan.original_content,
+        )
+    if rel_path == plan.spill_path:
+        return plan
+    notice = format_spilled_tool_notice(
+        plan.tool_name,
+        plan.original_content,
+        rel_path,
+        plan.spill_bytes,
+    )
+    return ToolCompactionPlan(
+        notice,
+        'spill',
+        plan.before_tokens,
+        estimate_tokens(notice),
+        spill_path=rel_path,
+        spill_bytes=plan.spill_bytes,
+        tool_name=plan.tool_name,
+        original_content=plan.original_content,
+    )

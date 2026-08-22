@@ -87,7 +87,10 @@ def _validate_summary(
     replaced_span: list[dict[str, Any]],
     projected: list[dict[str, Any]],
     expected_tail: list[dict[str, Any]],
-    min_reclaim_tokens: int,
+    budget: ContextBudget,
+    before_total: int,
+    after_total: int,
+    non_history_tokens: int,
 ) -> tuple[bool, str, int, int]:
     if not (summary_markdown or '').strip():
         return False, 'empty_summary', 0, 0
@@ -100,10 +103,6 @@ def _validate_summary(
     if summary_tokens >= replaced_tokens:
         return False, 'summary_not_shorter', summary_tokens, replaced_tokens
 
-    reclaimed = replaced_tokens - summary_tokens
-    if reclaimed < min_reclaim_tokens:
-        return False, 'reclaim_below_threshold', summary_tokens, replaced_tokens
-
     if expected_tail:
         actual_tail = projected[len(projected) - len(expected_tail):]
         if actual_tail != expected_tail:
@@ -114,6 +113,23 @@ def _validate_summary(
     ok, reason = validate_tool_pairing(projected)
     if not ok:
         return False, f'tool_pairing_{reason}', summary_tokens, replaced_tokens
+
+    if after_total <= budget.target_tokens:
+        return True, 'ok', summary_tokens, replaced_tokens
+
+    tail_tokens = _estimate_history_tokens(expected_tail)
+    target_unreachable = non_history_tokens + tail_tokens >= budget.target_tokens
+    if not target_unreachable:
+        return False, 'target_not_reached', summary_tokens, replaced_tokens
+
+    overshoot = max(1, before_total - budget.target_tokens)
+    reclaimed = max(0, before_total - after_total)
+    required_recovery = float(config['context_summary_required_overshoot_reclaim_ratio'])
+    if reclaimed < overshoot * required_recovery:
+        return False, 'insufficient_overshoot_recovery', summary_tokens, replaced_tokens
+    max_output_ratio = float(config['context_summary_max_output_to_replaced_ratio'])
+    if replaced_tokens <= 0 or summary_tokens / replaced_tokens > max_output_ratio:
+        return False, 'summary_compression_ratio_too_weak', summary_tokens, replaced_tokens
 
     return True, 'ok', summary_tokens, replaced_tokens
 
@@ -126,6 +142,7 @@ def apply_summary_compression(
     llm: Any = None,
     summarizer: Optional[Callable[[str, str], str]] = None,
     force: bool = False,
+    estimated_total_tokens: Optional[int] = None,
 ) -> tuple[list[dict[str, Any]], SummaryEvent]:
     """Replace older turns with a rolling runtime summary when over target.
 
@@ -133,7 +150,13 @@ def apply_summary_compression(
     is returned (Stage-1 projection remains authoritative for this attempt).
     """
     original = list(history)
-    before_total = _estimate_history_tokens(original)
+    before_history = _estimate_history_tokens(original)
+    before_total = (
+        int(estimated_total_tokens)
+        if estimated_total_tokens is not None
+        else before_history
+    )
+    non_history_tokens = max(0, before_total - before_history)
     ratio_before = usage_ratio(before_total, budget)
 
     if not config['context_compression_enabled']:
@@ -146,8 +169,6 @@ def apply_summary_compression(
 
     keep_ratio = float(config['context_summary_keep_recent_ratio'])
     min_turns = int(config['context_summary_min_recent_user_turns'])
-    min_reclaim = int(config['context_compression_min_reclaim_tokens'])
-
     selected = select_summary_range(
         original,
         effective_input_budget=budget.effective_input_budget,
@@ -186,12 +207,16 @@ def apply_summary_compression(
     tail = copy.deepcopy(selected.tail)
     projected = prefix + [summary_message] + tail
 
+    after_total = non_history_tokens + _estimate_history_tokens(projected)
     ok, reason, summary_tokens, _replaced_tokens = _validate_summary(
         summary_markdown,
         replaced_span=replaced_span,
         projected=projected,
         expected_tail=tail,
-        min_reclaim_tokens=min_reclaim,
+        budget=budget,
+        before_total=before_total,
+        after_total=after_total,
+        non_history_tokens=non_history_tokens,
     )
     if not ok:
         return _abandon(
@@ -204,7 +229,6 @@ def apply_summary_compression(
     # Strip internal meta for tool-pairing already validated with meta present;
     # keep meta in projected history so mid-turn rolling can detect it. Upstream
     # senders that reject unknown fields should strip via strip_lazymind_meta.
-    after_total = _estimate_history_tokens(projected)
     reclaimed = max(0, before_total - after_total)
     ratio_after = usage_ratio(after_total, budget)
     event = SummaryEvent(

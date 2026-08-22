@@ -113,6 +113,31 @@ def _user_turn_starts(history: list[dict[str, Any]]) -> list[int]:
     return starts
 
 
+def _legal_tail_boundaries(history: list[dict[str, Any]]) -> list[int]:
+    boundaries = []
+    for candidate in range(1, len(history)):
+        if history[candidate].get('role') == 'tool':
+            continue
+        prefix_ok, _ = validate_tool_pairing(history[:candidate])
+        tail_ok, _ = validate_tool_pairing(history[candidate:])
+        if prefix_ok and tail_ok:
+            boundaries.append(candidate)
+    return boundaries
+
+
+def _tail_boundary_within_cap(
+    history: list[dict[str, Any]],
+    *,
+    token_cap: int,
+) -> Optional[int]:
+    legal_boundaries = _legal_tail_boundaries(history)
+    for candidate in legal_boundaries:
+        tail_tokens = sum(_message_tokens(message) for message in history[candidate:])
+        if tail_tokens <= token_cap:
+            return candidate
+    return legal_boundaries[-1] if legal_boundaries else None
+
+
 def _select_tail_start_by_turns(
     history: list[dict[str, Any]],
     *,
@@ -126,21 +151,18 @@ def _select_tail_start_by_turns(
     """
     starts = _user_turn_starts(history)
     if not starts:
-        # No user turns: keep trailing messages by token budget only.
-        tail_start = len(history)
-        tokens = 0
-        for index in range(len(history) - 1, -1, -1):
-            next_tokens = tokens + _message_tokens(history[index])
-            if tokens > 0 and next_tokens > token_cap:
-                break
-            tokens = next_tokens
-            tail_start = index
-        return None if tail_start <= 0 else tail_start
+        return _tail_boundary_within_cap(history, token_cap=token_cap)
 
     min_turns = max(1, min(3, int(min_recent_user_turns)))
     protected_idx = max(0, len(starts) - min_turns)
     tail_start = starts[protected_idx]
     tokens = sum(_message_tokens(message) for message in history[tail_start:])
+    if (
+        tail_start == 0
+        and len(starts) == 1
+        and tokens > token_cap
+    ):
+        return _tail_boundary_within_cap(history, token_cap=token_cap)
 
     for turn_idx in range(protected_idx - 1, -1, -1):
         candidate = starts[turn_idx]

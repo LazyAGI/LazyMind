@@ -133,6 +133,38 @@ def test_select_summary_range_does_not_split_tool_pairs() -> None:
     assert ok
 
 
+def test_select_summary_range_handles_one_long_react_user_turn() -> None:
+    history = [{'role': 'user', 'content': 'single long task'}]
+    for index in range(6):
+        history.extend([
+            {
+                'role': 'assistant',
+                'content': '',
+                'tool_calls': [{'id': str(index), 'function': {'name': 'run_script'}}],
+            },
+            {
+                'role': 'tool',
+                'name': 'run_script',
+                'tool_call_id': str(index),
+                'content': _long(f'tool result {index}', 40),
+            },
+        ])
+
+    selected = select_summary_range(
+        history,
+        effective_input_budget=2_000,
+        keep_recent_ratio=0.10,
+        min_recent_user_turns=1,
+    )
+
+    assert selected is not None
+    assert selected.summary_messages[0]['role'] == 'user'
+    assert selected.tail[0]['role'] == 'assistant'
+    assert selected.tail[1]['role'] == 'tool'
+    assert validate_tool_pairing(selected.summary_messages)[0]
+    assert validate_tool_pairing(selected.tail)[0]
+
+
 def test_select_summary_range_rolls_prior_summary() -> None:
     prior = {
         'role': 'user',
@@ -156,6 +188,42 @@ def test_select_summary_range_rolls_prior_summary() -> None:
     assert is_runtime_summary_message(selected.summary_messages[0])
     assert selected.replace_start == 0
     assert selected.tail[0]['content'] == 'fresh tail'
+
+
+def test_select_summary_range_rolls_summary_without_new_user_turn() -> None:
+    prior = {
+        'role': 'user',
+        'content': f'{RUNTIME_SUMMARY_DISCLAIMER_PREFIX}\n\n{VALID_SUMMARY}',
+        '_lazymind_meta': {'kind': 'runtime_summary', 'version': 1},
+    }
+    history = [prior]
+    for index in range(4):
+        history.extend([
+            {
+                'role': 'assistant',
+                'content': '',
+                'tool_calls': [{'id': str(index), 'function': {'name': 'run_script'}}],
+            },
+            {
+                'role': 'tool',
+                'name': 'run_script',
+                'tool_call_id': str(index),
+                'content': _long(f'delta {index}', 30),
+            },
+        ])
+
+    selected = select_summary_range(
+        history,
+        effective_input_budget=1_000,
+        keep_recent_ratio=0.10,
+        min_recent_user_turns=1,
+    )
+
+    assert selected is not None
+    assert selected.summary_messages[0] == prior
+    assert selected.tail[0]['role'] == 'assistant'
+    assert validate_tool_pairing(selected.summary_messages)[0]
+    assert validate_tool_pairing(selected.tail)[0]
 
 
 def test_apply_summary_skips_when_strategy_disabled() -> None:
@@ -194,8 +262,7 @@ def test_apply_summary_projection_is_immutable_and_commits() -> None:
     with config.temp('context_compression_enabled', True), \
             config.temp('context_summary_compression_enabled', True), \
             config.temp('context_summary_keep_recent_ratio', 0.10), \
-            config.temp('context_summary_min_recent_user_turns', 1), \
-            config.temp('context_compression_min_reclaim_tokens', 1):
+            config.temp('context_summary_min_recent_user_turns', 1):
         projected, event = apply_summary_compression(
             history,
             budget=budget,
@@ -217,8 +284,7 @@ def test_apply_summary_abandons_on_missing_sections() -> None:
     with config.temp('context_compression_enabled', True), \
             config.temp('context_summary_compression_enabled', True), \
             config.temp('context_summary_keep_recent_ratio', 0.10), \
-            config.temp('context_summary_min_recent_user_turns', 1), \
-            config.temp('context_compression_min_reclaim_tokens', 1):
+            config.temp('context_summary_min_recent_user_turns', 1):
         projected, event = apply_summary_compression(
             history,
             budget=budget,
@@ -265,7 +331,6 @@ def test_make_history_compactor_runs_stage2_after_prune() -> None:
             config.temp('context_summary_compression_enabled', True), \
             config.temp('context_summary_keep_recent_ratio', 0.10), \
             config.temp('context_summary_min_recent_user_turns', 1), \
-            config.temp('context_compression_min_reclaim_tokens', 1), \
             config.temp('agentic_keep_full_turns', 1):
         compact = make_history_compactor(
             max_input_tokens=4_000,
@@ -306,12 +371,11 @@ def test_apply_summary_emits_covered_through_seq(monkeypatch) -> None:
     import lazymind.chat.engine.agent_runtime.summarizer as summarizer_mod
     monkeypatch.setattr(summarizer_mod, '_write_agent_data', fake_write)
 
-    budget = build_context_budget(500, reserved_output_tokens=0, target_ratio=0.01)
+    budget = build_context_budget(500, reserved_output_tokens=0, target_ratio=0.40)
     with config.temp('context_compression_enabled', True), \
             config.temp('context_summary_compression_enabled', True), \
             config.temp('context_summary_keep_recent_ratio', 0.05), \
-            config.temp('context_summary_min_recent_user_turns', 1), \
-            config.temp('context_compression_min_reclaim_tokens', 1):
+            config.temp('context_summary_min_recent_user_turns', 1):
         projected, event = apply_summary_compression(
             history,
             budget=budget,

@@ -15,7 +15,6 @@ from lazymind.chat.engine.agent_runtime.compactors import (
     compact_shell_result,
     compact_tool_result,
 )
-from lazymind.chat.engine.agent_runtime.context_estimator import estimate_non_history_tokens
 from lazymind.chat.engine.agent_runtime.executor import AgentExecutor
 from lazymind.chat.engine.agent_runtime.models import (
     AgentExecutionOptions,
@@ -24,7 +23,6 @@ from lazymind.chat.engine.agent_runtime.models import (
     PromptBundle,
 )
 from lazymind.chat.engine.agent_runtime.pruner import (
-    estimate_history_tokens,
     make_history_compactor,
     prune_tool_results,
 )
@@ -214,8 +212,7 @@ def test_mid_turn_compactor_callback_compacts_old_tools() -> None:
         {'role': 'tool', 'name': 'url_fetch', 'content': 'keep me'},
     ]
     with config.temp('context_compression_enabled', True), \
-            config.temp('context_summary_compression_enabled', False), \
-            config.temp('context_compression_min_reclaim_tokens', 1):
+            config.temp('context_summary_compression_enabled', False):
         compact = make_history_compactor(max_input_tokens=3_000, keep_recent=1, trigger='mid_turn')
         projected = compact(history, keep_full_turns=1)
     assert projected[1]['content'] == 'keep me'
@@ -252,7 +249,7 @@ def test_mid_turn_compactor_does_not_force_below_trigger() -> None:
     assert projected == history
 
 
-def test_mid_turn_compactor_counts_live_prefix_and_keeps_zero(monkeypatch) -> None:
+def test_mid_turn_compactor_accepts_live_prefix_and_keeps_zero() -> None:
     from lazymind.config import config
 
     history = [{'role': 'tool', 'name': 'url_fetch', 'content': 'old result'}]
@@ -261,24 +258,20 @@ def test_mid_turn_compactor_counts_live_prefix_and_keeps_zero(monkeypatch) -> No
         'tool_definitions': [{'type': 'function', 'function': {'name': 'search'}}],
         'skills_prompt': 'skills',
     }
-    captured = {}
-
-    def fake_prune(items, **kwargs):
-        captured.update(kwargs)
-        return list(items), None
-
-    monkeypatch.setattr(
-        'lazymind.chat.engine.agent_runtime.pruner.prune_tool_results',
-        fake_prune,
-    )
+    state = {}
     with config.temp('context_compression_enabled', True), \
             config.temp('context_summary_compression_enabled', False):
         compact = make_history_compactor(max_input_tokens=64_000, keep_recent=2)
-        compact(history, keep_full_turns=0, prefix=prefix, current_input='new request')
+        projected = compact(
+            history,
+            keep_full_turns=0,
+            prefix=prefix,
+            current_input='new request',
+            runtime_state=state,
+        )
 
-    expected = estimate_history_tokens(history) + estimate_non_history_tokens(prefix, 'new request')
-    assert captured['estimated_total_tokens'] == expected
-    assert captured['keep_recent'] == 0
+    assert projected == history
+    assert len(state['source_fingerprints']) == 1
 
 
 def test_mid_turn_compactor_triggers_from_prefix_plus_history() -> None:
@@ -295,8 +288,7 @@ def test_mid_turn_compactor_triggers_from_prefix_plus_history() -> None:
     prefix = {'system_prompt': 'S' * 33_000, 'tool_definitions': [], 'skills_prompt': ''}
     with config.temp('context_compression_enabled', True), \
             config.temp('context_summary_compression_enabled', False), \
-            config.temp('context_compression_reserved_output_tokens', 0), \
-            config.temp('context_compression_min_reclaim_tokens', 1):
+            config.temp('context_compression_reserved_output_tokens', 0):
         compact = make_history_compactor(max_input_tokens=10_000, keep_recent=0)
         projected = compact(history, keep_full_turns=0, prefix=prefix, current_input='')
 
@@ -304,28 +296,24 @@ def test_mid_turn_compactor_triggers_from_prefix_plus_history() -> None:
     assert len(projected[0]['content']) < len(str(history[0]['content']))
 
 
-def test_mid_turn_compactor_counts_tool_continuation_once(monkeypatch) -> None:
+def test_mid_turn_compactor_reconciles_tool_continuation_once() -> None:
     from lazymind.config import config
 
     history = [{'role': 'tool', 'name': 'search', 'content': 'current tool result'}]
-    captured = {}
-
-    def fake_prune(items, **kwargs):
-        captured.update(kwargs)
-        return list(items), None
-
-    monkeypatch.setattr(
-        'lazymind.chat.engine.agent_runtime.pruner.prune_tool_results',
-        fake_prune,
-    )
+    state = {}
     with config.temp('context_compression_enabled', True), \
             config.temp('context_summary_compression_enabled', False):
         compact = make_history_compactor(max_input_tokens=64_000)
-        compact(history, keep_full_turns=0, prefix={}, current_input='')
+        projected = compact(
+            history,
+            keep_full_turns=0,
+            prefix={},
+            current_input='',
+            runtime_state=state,
+        )
 
-    assert captured['estimated_total_tokens'] == (
-        estimate_history_tokens(history) + estimate_non_history_tokens({}, '')
-    )
+    assert projected == history
+    assert len(state['entries']) == 1
 
 
 def test_describe_context_is_inspect_only() -> None:
@@ -375,10 +363,13 @@ def test_function_call_passes_live_prefix_and_current_input() -> None:
         _skill_manager = None
 
     history = [{'role': 'user', 'content': 'old'}]
+    workspace = {}
     projected = FunctionCall._compact_history(
         FunctionCallState(),
         history,
         current_input='new user message',
+        workspace=workspace,
+        remaining_rounds=7,
     )
 
     assert projected == history
@@ -386,6 +377,8 @@ def test_function_call_passes_live_prefix_and_current_input() -> None:
     assert captured['current_input'] == 'new user message'
     assert captured['prefix']['system_prompt'] == 'live system'
     assert captured['prefix']['tool_definitions'] == ToolManager.tools_description
+    assert captured['runtime_state'] is workspace['_history_projection_state']
+    assert captured['remaining_rounds'] == 7
 
 
 def _test_plan(history: list[dict[str, object]]) -> AgentRunPlan:
@@ -446,7 +439,7 @@ def test_executor_master_off_attaches_identity_compactor(monkeypatch) -> None:
     assert compactor(history, 2) == history
 
 
-def test_executor_inspection_skips_pre_turn_pruning(monkeypatch) -> None:
+def test_executor_inspection_preserves_authoritative_history(monkeypatch) -> None:
     from lazymind.config import config
 
     monkeypatch.setattr(
@@ -454,46 +447,27 @@ def test_executor_inspection_skips_pre_turn_pruning(monkeypatch) -> None:
         _FakeReactAgent,
     )
 
-    def fail_pruning(*args, **kwargs):
-        raise AssertionError('inspection must not prune')
-
-    monkeypatch.setattr(
-        'lazymind.chat.engine.agent_runtime.executor.apply_pre_turn_pruning',
-        fail_pruning,
-    )
+    history = [{'role': 'tool', 'content': 'x' * 1000}]
+    plan = _test_plan(history)
     with config.temp('context_compression_enabled', True):
-        AgentExecutor().create_agent(
-            object(),
-            _test_plan([{'role': 'tool', 'content': 'x' * 1000}]),
-            inspect=True,
-        )
+        AgentExecutor().create_agent(object(), plan, inspect=True)
+    assert plan.history is history
+    assert plan.history[0]['content'] == 'x' * 1000
 
 
-def test_executor_pre_turn_pruning_uses_full_payload_total(monkeypatch) -> None:
+def test_executor_does_not_replace_authoritative_history_with_projection(monkeypatch) -> None:
     from lazymind.config import config
 
     monkeypatch.setattr(
         'lazymind.chat.engine.agent_runtime.executor._agent_mod.ReactAgent',
         _FakeReactAgent,
-    )
-    captured = {}
-
-    def capture_pruning(history, **kwargs):
-        captured.update(kwargs)
-        return list(history), None
-
-    monkeypatch.setattr(
-        'lazymind.chat.engine.agent_runtime.executor.apply_pre_turn_pruning',
-        capture_pruning,
     )
     history = [{'role': 'tool', 'content': 'history'}]
+    plan = _test_plan(history)
     with config.temp('context_compression_enabled', True):
-        AgentExecutor().create_agent(object(), _test_plan(history))
-
-    prefix = _FakeReactAgent()._model_facing_prefix()
-    assert captured['estimated_tokens'] == (
-        estimate_history_tokens(history) + estimate_non_history_tokens(prefix, 'request')
-    )
+        AgentExecutor().create_agent(object(), plan)
+    assert plan.history is history
+    assert plan.history == [{'role': 'tool', 'content': 'history'}]
 
 
 def test_compact_tool_result_routes_by_tool_name() -> None:

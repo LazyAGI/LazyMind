@@ -91,6 +91,10 @@ class PruneEvent:
     usage_ratio_before: float = 0.0
     usage_ratio_after: float = 0.0
     details: Tuple[ToolPruneDetail, ...] = ()
+    first_changed_projection_index: Optional[int] = None
+    cache_disruption_tokens: int = 0
+    changed_messages: int = 0
+    changed_model_visible: Tuple[bool, ...] = ()
 
 
 SummaryDecision = Literal['summarized', 'skipped', 'abandoned']
@@ -110,6 +114,10 @@ class SummaryEvent:
     summary_tokens: int = 0
     usage_ratio_before: float = 0.0
     usage_ratio_after: float = 0.0
+    first_changed_projection_index: Optional[int] = None
+    cache_disruption_tokens: int = 0
+    changed_messages: int = 0
+    changed_model_visible: Tuple[bool, ...] = ()
 
 
 @dataclass
