@@ -1,5 +1,5 @@
 # Code style: Python (flake8) + Go (gofmt). Mirrors algorithm/lazyllm Makefile pattern.
-.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary lint-workflow-naming lint-migration-immutability test test-hermetic test-hermetic-setup test-hermetic-check build up up-build local-runtime-manager-build lazymind-cli-build assistant-bridge-start assistant-bridge-stop local-up local-up-lan local-down local-clean local-reset local-win-doctor local-win-build local-win-up local-win-up-lan local-win-down local-win-status local-win-clean local-win-reset down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-darwin-arm64 desktop-darwin-arm64-dmg desktop-darwin-arm64-clean desktop-windows-x64 desktop-windows-x64-installer desktop-windows-x64-clean desktop-cache-clean desktop-clean
+.PHONY: help lint install-flake8 install-golangci-lint lint-python lint-go lint-state-backend-boundary lint-workflow-naming lint-migration-immutability test test-hermetic test-hermetic-setup test-hermetic-check featured-check skills-build skills-materialize build up up-build local-runtime-manager-build lazymind-cli-build assistant-bridge-start assistant-bridge-stop local-up local-up-lan local-down local-clean local-reset local-win-doctor local-win-build local-win-up local-win-up-lan local-win-down local-win-status local-win-clean local-win-reset down clear reset-kb reset-all fresh-start compose-host-permissions file-watcher-dirs file-watcher-build file-watcher-run file-watcher-start file-watcher-stop desktop-darwin-arm64 desktop-darwin-arm64-dmg desktop-darwin-arm64-clean desktop-windows-x64 desktop-windows-x64-installer desktop-windows-x64-clean desktop-cache-clean desktop-clean
 .DEFAULT_GOAL := help
 
 LOCAL_CONFIG_ENV ?= local/config.env
@@ -229,6 +229,8 @@ help:
 	@echo "  make test-hermetic - Prepare an isolated host test env and run the same scope as make test"
 	@echo "  make test-hermetic-setup - Prepare the uv-managed Python test env and check Node/Go"
 	@echo "  make test-hermetic-check - Check uv, fnm/nvm, Node 20, Go 1.24.0, and the test venv"
+	@echo "  make featured-check - Strictly validate featured Skill content, locales, and assets"
+	@echo "  make skills-build - Package platform Skills, download linked Skills, and build runtime catalogs/assets"
 	@echo "  make clear      - Stop services, remove volumes, clear Python cache"
 	@echo "  make reset-kb   - Stop services, wipe KB data (Milvus, OpenSearch, uploads, lazyllm DB tables)"
 	@echo "                    Set LAZYMIND_RESET_ALGO_ON_STARTUP=true to also clear algo state on next startup"
@@ -305,6 +307,30 @@ test-hermetic-check:
 test-hermetic:
 	@./tests/test-hermetic-run.sh
 
+featured-check:
+	@cd backend/core && $(GO) run ./cmd/builtin-skill-bundle \
+		--check-featured \
+		--featured-sources "$(CURDIR)/skills/featured"
+
+skills-build:
+	@cd backend/core && $(GO) run ./cmd/builtin-skill-bundle \
+		--sources "$(CURDIR)/skills/builtin-sources.yaml" \
+		--lock "$(CURDIR)/skills/builtin-skills.lock.json" \
+		--cache "$(CURDIR)/skills/.runtime/cache" \
+		--output "$(CURDIR)/skills/.runtime/builtin-skills" \
+		--featured-sources "$(CURDIR)/skills/featured" \
+		--featured-output "$(CURDIR)/skills/.runtime/featured-skills"
+
+skills-materialize:
+	@cd backend/core && $(GO) run ./cmd/builtin-skill-bundle \
+		--sources "$(CURDIR)/skills/builtin-sources.yaml" \
+		--lock "$(CURDIR)/skills/builtin-skills.lock.json" \
+		--cache "$(CURDIR)/skills/.runtime/cache" \
+		--output "$(CURDIR)/skills/.runtime/builtin-skills" \
+		--featured-sources "$(CURDIR)/skills/featured" \
+		--featured-output "$(CURDIR)/skills/.runtime/featured-skills" \
+		--frozen-lockfile
+
 # Only mineru has build:; paddleocr/milvus/opensearch use image: only, so only needed for up.
 _need_mineru := $(filter 1 true TRUE yes YES on ON,$(LAZYMIND_DEPLOY_MINERU))
 # _need_paddleocr := $(filter 1 true TRUE yes YES on ON,$(LAZYMIND_DEPLOY_PADDLEOCR))  # needs GPU
@@ -343,7 +369,7 @@ _COMPOSE_BIND_BEST_EFFORT_READ_PATHS := \
 # Only init submodules when not yet cloned; if already present (even with different commit), do nothing. Never recursive.
 _SUBMODULE_INIT = @git submodule status | grep -q '^-' && git submodule update --init || true
 
-build:
+build: skills-materialize
 	$(_SUBMODULE_INIT)
 	@$(MAKE) --no-print-directory compose-host-permissions
 	@$(_COMPOSE) $(strip $(if $(_need_mineru),--profile mineru)) build \
@@ -417,7 +443,7 @@ file-watcher-run: file-watcher-stop file-watcher-dirs
 file-watcher-start: file-watcher-build
 	@$(MAKE) --no-print-directory file-watcher-run
 
-up:
+up: skills-materialize
 	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" = "container" ]; then \
 		$(MAKE) --no-print-directory file-watcher-stop; \
 		$(MAKE) --no-print-directory file-watcher-dirs; \
@@ -441,7 +467,7 @@ down:
 	@COMPOSE_PROFILES="$(_CLEANUP_COMPOSE_PROFILE_NAMES)" $(_COMPOSE_DEFAULT) $(_COMPOSE_DOWN_ACTION) \
 		$(_COMPOSE_DOWN_SERVICES) || true
 
-up-build:
+up-build: skills-materialize
 	@if [ "$(LAZYMIND_FILE_WATCHER_MODE)" = "container" ]; then \
 		$(MAKE) --no-print-directory file-watcher-stop; \
 		$(MAKE) --no-print-directory file-watcher-dirs; \
@@ -552,11 +578,11 @@ desktop-clean:
 	done
 endif
 
-local-up: local-runtime-manager-build lazymind-cli-build
+local-up: skills-materialize local-runtime-manager-build lazymind-cli-build
 	@"$(LOCAL_RUNTIME_MANAGER_BIN)" up
 	@$(MAKE) --no-print-directory assistant-bridge-start
 
-local-up-lan: local-runtime-manager-build lazymind-cli-build
+local-up-lan: skills-materialize local-runtime-manager-build lazymind-cli-build
 	@LAZYMIND_LOCAL_NETWORK_PROFILE=lan LAZYMIND_LOCAL_AUTO_LOGIN_ALLOW_LAN=true "$(LOCAL_RUNTIME_MANAGER_BIN)" up
 	@$(MAKE) --no-print-directory assistant-bridge-start
 

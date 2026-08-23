@@ -1428,5 +1428,6 @@
   "2002290": { "en-US": "Failed to decode the attempt result", "zh-CN": "解析执行结果失败" },
   "2002291": { "en-US": "Workflow next step is not reachable", "zh-CN": "工作流下一步骤不可达" },
   "2002292": { "en-US": "Invalid external Agent source", "zh-CN": "外部 Agent 来源无效" },
-  "2002293": { "en-US": "External Agent thread belongs to another user or conversation", "zh-CN": "外部 Agent 会话已属于其他用户或对话" }
+  "2002293": { "en-US": "External Agent thread belongs to another user or conversation", "zh-CN": "外部 Agent 会话已属于其他用户或对话" },
+  "2002294": { "en-US": "Invalid skill package", "zh-CN": "技能包无效" }
 }

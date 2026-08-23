@@ -132,7 +132,7 @@
 .showcase-featured-grid .showcase-card {
   position: relative;
   box-sizing: border-box;
-  height: 137px;
+  height: 154px;
   border-color: #e8edf4;
   background: #fff;
   box-shadow: 0 4px 14px rgba(45, 63, 90, 0.045);
@@ -172,7 +172,7 @@
 
 .showcase-featured-grid .showcase-card h3 {
   margin: 0;
-  padding-right: 62px;
+  padding-right: 82px;
   color: #263244;
   font-size: 13px;
   font-weight: 650;
@@ -181,8 +181,8 @@
 
 .showcase-featured-grid .showcase-card-image-wrap {
   order: 2;
-  height: 94px;
-  flex: 0 0 94px;
+  height: 111px;
+  flex: 0 0 111px;
   aspect-ratio: auto;
   background: #f2f6fb;
 }
@@ -190,11 +190,15 @@
 .showcase-featured-grid .showcase-card-image-stage {
   position: absolute;
   display: flex;
-  inset: 0 34px;
-  width: auto;
+  top: 50%;
+  left: 50%;
+  width: 166.5px;
+  max-width: 100%;
   height: auto;
+  aspect-ratio: 3 / 2;
   flex-direction: column;
   overflow: hidden;
+  transform: translate(-50%, -50%);
   background: #fff;
   box-shadow: 0 8px 26px rgba(39, 61, 91, 0.16);
 }
@@ -218,21 +222,15 @@
   padding: 0;
 }
 
-.showcase-featured-grid .showcase-try-button {
+.showcase-featured-grid .showcase-detail-link {
   display: inline-flex;
   align-items: center;
   gap: 4px;
   padding: 4px 5px;
   border-radius: 5px;
-  opacity: 0;
   background: rgba(255, 255, 255, 0.92);
   color: #006ae6;
-  transition: opacity 0.18s ease;
-}
-
-.showcase-featured-grid .showcase-card:hover .showcase-try-button,
-.showcase-featured-grid .showcase-card:focus-within .showcase-try-button {
-  opacity: 1;
+  text-decoration: none;
 }
 
 .showcase-card {
@@ -328,7 +326,7 @@
   white-space: nowrap;
 }
 
-.showcase-try-button,
+.showcase-detail-link,
 .showcase-primary-button,
 .showcase-secondary-button,
 .showcase-inline-action {
@@ -338,15 +336,19 @@
   font: inherit;
 }
 
-.showcase-try-button {
+.showcase-detail-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   flex: 0 0 auto;
   padding: 6px 10px;
   background: #edf4ff;
   color: #3972df;
   font-size: 12px;
+  text-decoration: none;
 }
 
-.showcase-try-button:hover,
+.showcase-detail-link:hover,
 .showcase-secondary-button:hover,
 .showcase-inline-action:hover {
   background: #dfeaff;
@@ -492,6 +494,7 @@
 }
 
 .showcase-gallery-grid .showcase-card {
+  position: relative;
   border-color: #e8edf4;
   background: #fff;
   box-shadow: 0 4px 14px rgba(45, 63, 90, 0.045);
@@ -550,11 +553,15 @@
 .showcase-gallery-grid .showcase-card-image-stage {
   position: absolute;
   display: flex;
-  inset: 0 20px;
-  width: auto;
+  top: 50%;
+  left: 50%;
+  width: 219px;
+  max-width: 100%;
   height: auto;
+  aspect-ratio: 3 / 2;
   flex-direction: column;
   overflow: hidden;
+  transform: translate(-50%, -50%);
   background: #fff;
   box-shadow: 0 8px 26px rgba(39, 61, 91, 0.16);
 }
@@ -586,6 +593,7 @@
 
 .showcase-gallery-grid .showcase-card h3 {
   margin: 0;
+  padding-right: 86px;
   color: #263244;
   font-size: 15px;
   font-weight: 650;
@@ -600,12 +608,15 @@
 }
 
 .showcase-gallery-grid .showcase-card-footer {
-  height: 38px;
-  justify-content: flex-end;
-  padding: 0 15px 13px;
+  position: absolute;
+  z-index: 2;
+  top: 10px;
+  right: 11px;
+  height: auto;
+  padding: 0;
 }
 
-.showcase-gallery-grid .showcase-try-button {
+.showcase-gallery-grid .showcase-detail-link {
   display: inline-flex;
   align-items: center;
   gap: 4px;
@@ -618,12 +629,12 @@
   font-weight: 600;
 }
 
-.showcase-gallery-grid .showcase-try-button:hover {
+.showcase-gallery-grid .showcase-detail-link:hover {
   color: #4689ff;
   background: transparent;
 }
 
-.showcase-gallery-grid .showcase-try-button svg {
+.showcase-gallery-grid .showcase-detail-link svg {
   width: 11px;
   height: 11px;
 }
@@ -1258,6 +1269,15 @@
   color: #98a6b9;
   font-size: 12px;
   line-height: 1.45;
+}
+
+.showcase-document-preview-image {
+  display: block;
+  width: 100%;
+  max-height: 260px;
+  margin: 18px 0;
+  border-radius: 12px;
+  object-fit: cover;
 }
 
 .showcase-document-metrics {
