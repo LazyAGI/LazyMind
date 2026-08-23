@@ -380,8 +380,10 @@ def make_history_compactor(
         keep_full_turns: Optional[int] = None,
         **kwargs: Any,
     ) -> list[dict[str, Any]]:
+        current_round_messages = list(kwargs.get('current_round_messages') or [])
+        combined = list(history) + current_round_messages
         if not config['context_compression_enabled']:
-            return list(history)
+            return combined
         effective_keep = max(
             0,
             int(default_keep if keep_full_turns is None else keep_full_turns),
@@ -390,7 +392,7 @@ def make_history_compactor(
             kwargs.get('prefix') or {},
             kwargs.get('current_input'),
         )
-        state, _rebuilt = reconcile_projection(history, kwargs.get('runtime_state'))
+        state, _rebuilt = reconcile_projection(combined, kwargs.get('runtime_state'))
         stable = state['entries']
         before_total = non_history_tokens + projection_tokens(stable)
 

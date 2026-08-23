@@ -451,7 +451,7 @@ def test_function_call_passes_live_prefix_and_current_input() -> None:
 
     history = [{'role': 'user', 'content': 'old'}]
     workspace = {}
-    projected = FunctionCall._compact_history(
+    projected, current = FunctionCall._compact_history(
         FunctionCallState(),
         history,
         current_input='new user message',
@@ -460,6 +460,8 @@ def test_function_call_passes_live_prefix_and_current_input() -> None:
     )
 
     assert projected == history
+    assert current == []
+    assert captured['current_round_messages'] == []
     assert captured['keep'] == 0
     assert captured['current_input'] == 'new user message'
     assert captured['prefix']['system_prompt'] == 'live system'
@@ -511,7 +513,7 @@ class _FakeReactAgent:
         return None
 
 
-def test_executor_master_off_attaches_identity_compactor(monkeypatch) -> None:
+def test_executor_master_off_does_not_attach_compactor(monkeypatch) -> None:
     from lazymind.config import config
 
     monkeypatch.setattr(
@@ -522,8 +524,7 @@ def test_executor_master_off_attaches_identity_compactor(monkeypatch) -> None:
     with config.temp('context_compression_enabled', False):
         AgentExecutor().create_agent(object(), _test_plan(history))
 
-    compactor = _FakeReactAgent.last_kwargs['history_compactor']
-    assert compactor(history, 2) == history
+    assert 'history_compactor' not in _FakeReactAgent.last_kwargs
 
 
 def test_executor_does_not_replace_authoritative_history_with_projection(monkeypatch) -> None:
@@ -551,21 +552,16 @@ def test_compact_tool_result_routes_by_tool_name() -> None:
     assert 'https://x' in content
 
 
-def test_split_current_tool_input_avoids_duplicate_tools() -> None:
-    from lazyllm.tools.agent.functionCall import _split_current_tool_input
-
-    originals = [
-        {'role': 'tool', 'tool_call_id': 'a', 'name': 'TavilySearch_get_content', 'content': 'HUGE-A'},
-        {'role': 'tool', 'tool_call_id': 'b', 'name': 'TavilySearch_get_content', 'content': 'HUGE-B'},
-    ]
-    compacted_history = [
-        {'role': 'assistant', 'content': '', 'tool_calls': []},
+def test_prior_and_current_round_split_by_length() -> None:
+    prior = [{'role': 'assistant', 'content': '', 'tool_calls': []}]
+    current = [
         {'role': 'tool', 'tool_call_id': 'a', 'name': 'TavilySearch_get_content', 'content': 'short-a'},
         {'role': 'tool', 'tool_call_id': 'b', 'name': 'TavilySearch_get_content', 'content': 'short-b'},
     ]
-    remainder, current = _split_current_tool_input(compacted_history, originals)
-    assert remainder == [{'role': 'assistant', 'content': '', 'tool_calls': []}]
-    assert [item['content'] for item in current] == ['short-a', 'short-b']
+    compacted = prior + current
+    remainder, llm_input = compacted[:len(prior)], compacted[len(prior):]
+    assert remainder == prior
+    assert [item['content'] for item in llm_input] == ['short-a', 'short-b']
 
 
 def test_keep_recent_still_spills_oversized_tool_results(tmp_path) -> None:
@@ -683,31 +679,33 @@ def test_spill_stays_internal_and_uses_stable_content_path(tmp_path, monkeypatch
 
 
 def test_current_round_projection_is_what_llm_input_would_see(tmp_path) -> None:
-    from lazyllm.tools.agent.functionCall import _split_current_tool_input
     from lazymind.config import config
 
     huge = 'X' * 25_000
     originals = [
         {'role': 'tool', 'tool_call_id': 'pdf1', 'name': 'TavilySearch_get_content', 'content': huge},
     ]
-    history = [
+    prior = [
         {'role': 'user', 'content': 'survey papers'},
         {'role': 'assistant', 'content': '', 'tool_calls': [{'id': 'pdf1'}]},
-        originals[0],
     ]
-    budget = build_context_budget(8_000, reserved_output_tokens=0, trigger_ratio=0.1, target_ratio=0.05)
-    with config.temp('context_compression_spill_bytes', 1024):
-        projected, event = prune_tool_results(
-            history,
-            keep_recent=2,
-            budget=budget,
-            trigger='mid_turn',
-            force=True,
-            min_reclaim_tokens=1,
-            workspace=str(tmp_path),
+    compact = make_history_compactor(
+        max_input_tokens=8_000,
+        keep_recent=2,
+        trigger='mid_turn',
+        workspace=str(tmp_path),
+    )
+    with config.temp('context_compression_spill_bytes', 1024), config.temp(
+        'context_compression_enabled', True,
+    ):
+        projected = compact(
+            prior,
+            2,
+            prefix={},
+            current_input='',
+            current_round_messages=originals,
         )
-    remainder, llm_input = _split_current_tool_input(projected, originals)
-    assert event.decision == 'spilled'
+    remainder, llm_input = projected[:len(prior)], projected[len(prior):]
     assert huge not in llm_input[0]['content']
     assert len(llm_input[0]['content']) < 4_000
     assert remainder[-1]['role'] == 'assistant'

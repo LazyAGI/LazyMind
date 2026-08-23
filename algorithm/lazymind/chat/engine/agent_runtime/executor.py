@@ -40,10 +40,6 @@ _RESULT_LOG_KEYS = (
 )
 
 
-def _identity_history_compactor(history: list[dict[str, Any]], *args: Any, **kwargs: Any) -> list[dict[str, Any]]:
-    return list(history)
-
-
 def _requires_expanded_budget(tool_name: str) -> bool:
     """Return whether invoking this tool starts workflow or SubAgent work."""
     return tool_name in _EXPANDED_BUDGET_TOOLS or tool_name.startswith('trigger_')
@@ -380,8 +376,7 @@ class AgentExecutor:
             keep_full_turns = int(_cfg['agentic_keep_full_turns'])
         history_compactor = options.history_compactor
         if not _cfg['context_compression_enabled']:
-            # Identity blocks LazyLLM's built-in _compact_chat_history truncation.
-            history_compactor = _identity_history_compactor
+            history_compactor = None
         elif history_compactor is None:
             history_compactor = make_history_compactor(
                 max_input_tokens=options.max_input_tokens,
