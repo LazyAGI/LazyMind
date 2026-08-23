@@ -52,7 +52,7 @@ func InternalGetExecutionSpec(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(task.Params) > 0 {
 		if err := json.Unmarshal(task.Params, &runtimeParams); err != nil {
-			common.ReplyErr(w, "task tool allowlist is invalid", http.StatusInternalServerError)
+			common.ReplyErr(w, "tool config unavailable", http.StatusServiceUnavailable)
 			return
 		}
 	}

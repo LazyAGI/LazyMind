@@ -215,7 +215,6 @@ def _safe_session_tools(
     session: Union[str, Callable[[], str]],
     initialize_session: Optional[Callable[[], Any]] = None,
     user_input: Optional[Union[str, Callable[[], str]]] = None,
-    session_status: str = '',
 ) -> List[Any]:
     """Model tools whose protocol and concurrency parameters are Host-injected."""
     def session_id() -> str:
@@ -337,16 +336,10 @@ def _safe_session_tools(
             artifact_id, int(artifact.get('revision') or 0), value, content_type, caption,
         )
 
-    tools = [
+    return [
         get_workflow_state, get_ready_steps, advance_step, list_workflow_inputs,
         list_artifacts, read_artifact, patch_artifact,
     ]
-    if str(session_status or '').strip().lower() == 'stopped':
-        def resume_workflow() -> Dict[str, Any]:
-            """Resume this stopped Session; Host injects the Session and command IDs."""
-            return toolkit.resume_workflow(session_id())
-        tools.append(resume_workflow)
-    return tools
 
 
 def _state_refresh_notice() -> Dict[str, Any]:
@@ -926,7 +919,7 @@ def _workflow_trigger_tools(
                             'WORKFLOW_INPUT_EMPTY', f'Input {material_id} is empty.',
                         )
                     material_type = input_types.get(str(material_id), '')
-                    if material_type and material_type != 'file':
+                    if material_type in {'text', 'json'}:
                         resolved_bindings[material_id] = _import_text_binding(
                             str(material_id), binding,
                         )
@@ -936,14 +929,14 @@ def _workflow_trigger_tools(
                     # those optional dependencies and load it only for a file
                     # (or legacy untyped) material.
                     path, error = _resolve_workflow_attachment(binding)
-                    if material_type == 'file' and (error or not path):
+                    if material_type in {'file', 'image'} and (error or not path):
                         raise WorkflowClientError(
                             'ATTACHMENT_NOT_SELECTED',
                             error or 'The referenced conversation attachment was not found.',
                         )
                     resolved_bindings[material_id] = (
                         _import_attachment(path)
-                        if path and not error and material_type in {'', 'file'}
+                        if path and not error and material_type in {'', 'file', 'image'}
                         else _import_text_binding(str(material_id), binding)
                     )
                 toolkit = HostWorkflowToolkit(
@@ -1065,7 +1058,7 @@ def _workflow_trigger_tools(
             trigger_query,
             trigger_query != str(current_query or '').strip(),
             package_hint,
-            any(kind != 'file' for kind in input_types_hint.values()),
+            any(kind in {'text', 'json'} for kind in input_types_hint.values()),
         )
 
         trigger_workflow.__name__ = name
@@ -1080,7 +1073,7 @@ def _workflow_trigger_tools(
             if input_types_hint else ''
         )
         attachment_guidance = (
-            ' File input_bindings use exact filenames listed in conversation attachments; '
+            ' File/image input_bindings use exact filenames listed in conversation attachments; '
             'text/json input_bindings use literal values, never filesystem paths.'
             if attachments_available else
             ' No user attachments are available: do not bind file materials, but pass literal '
@@ -1277,10 +1270,7 @@ def resolve_workflow_injection(
         else:
             tools = [authoring_group]
     if session_id:
-        tools = _safe_session_tools(
-            toolkit, session_id,
-            session_status=str(projection.get('status') or context.get('status') or ''),
-        )
+        tools = _safe_session_tools(toolkit, session_id)
         patch.update({
             'workflow_id': workflow_id,
             'workflow_session_id': session_id,

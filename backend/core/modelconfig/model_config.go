@@ -293,7 +293,7 @@ func LoadAcademicSearchToolConfig(ctx context.Context, db *gorm.DB, userID strin
 			return nil, err
 		}
 	}
-	if row == nil || normalizeAcademicSearchToolName(row.ProviderName) == "" {
+	if row == nil || normalizeSearchToolName(row.ProviderName) != "sciverse" {
 		return nil, nil
 	}
 	value := normalizeOCRAuthValue(row.APIKey)
@@ -407,22 +407,6 @@ func loadConfiguredSciverseDatasource(
 	return &row, nil
 }
 
-func normalizeAcademicSearchToolName(providerName string) string {
-	normalized := strings.Map(func(r rune) rune {
-		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
-			return r
-		}
-		if r >= 'A' && r <= 'Z' {
-			return r + ('a' - 'A')
-		}
-		return -1
-	}, providerName)
-	if normalized == "sciverse" || normalized == "sciversesearch" {
-		return "sciverse"
-	}
-	return ""
-}
-
 func normalizeSearchToolName(providerName string) string {
 	normalized := strings.Map(func(r rune) rune {
 		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
@@ -442,6 +426,8 @@ func normalizeSearchToolName(providerName string) string {
 		return "bing"
 	case "tavily":
 		return "tavily"
+	case "sciverse", "sciversesearch":
+		return "sciverse"
 	default:
 		return ""
 	}

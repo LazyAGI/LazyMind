@@ -34,25 +34,20 @@ def _workflow_document(files: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def workflow_package_input_types(package: Dict[str, Any]) -> Dict[str, str]:
-    """Return external material types declared by a published package."""
+    """Project external material types from a published Workflow package."""
     graph = package.get('compiled_graph') if isinstance(package.get('compiled_graph'), dict) else {}
-    compiled_types = graph.get('material_types') if isinstance(graph, dict) else None
-    if isinstance(compiled_types, dict) and compiled_types:
-        producers = graph.get('material_producers')
-        external_ids = {
-            str(material_id)
-            for material_id, producer in (producers or {}).items()
-            if isinstance(producer, dict) and producer.get('kind') == 'external'
-        }
-        # Older compiled revisions did not carry material producer metadata in
-        # every Host response. In that case preserve the type-only fallback;
-        # current revisions expose only true external inputs to the trigger.
-        candidates = external_ids or {str(material_id) for material_id in compiled_types}
+    material_types = graph.get('material_types')
+    producers = graph.get('material_producers')
+    if isinstance(material_types, dict) and isinstance(producers, dict):
         return {
             str(material_id): str(material_type or 'text').strip().lower()
-            for material_id, material_type in compiled_types.items()
-            if str(material_id) in candidates
+            for material_id, material_type in material_types.items()
+            if isinstance(producers.get(str(material_id)), dict)
+            and producers[str(material_id)].get('kind') == 'external'
         }
+
+    # Revisions published before typed compiled contracts remain readable from
+    # their immutable package source. New revisions always use the graph above.
     files = package.get('files') if isinstance(package.get('files'), dict) else {}
     result: Dict[str, str] = {}
     for slot in _workflow_document(files).get('slots') or []:

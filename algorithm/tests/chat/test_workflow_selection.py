@@ -160,7 +160,10 @@ def test_dynamic_trigger_imports_scalar_binding_without_conversation_attachments
     }) as import_text:
         client_factory.return_value.get_workflow.return_value.result = {
             'workflow_id': 'report', 'revision_id': 'revision-1',
-            'compiled_graph': {'material_types': {'target_length': 'text'}},
+            'compiled_graph': {
+                'material_types': {'target_length': 'text'},
+                'material_producers': {'target_length': {'kind': 'external'}},
+            },
         }
         client_factory.return_value.get_state.return_value = {
             'session_id': 'session-1', 'state_version': 1,
@@ -660,13 +663,8 @@ def test_model_tool_projection_hides_controller_lifecycle_tools_without_session(
     assert 'resume_workflow' not in names
 
 
-@pytest.mark.parametrize(
-    ('status', 'expects_resume'),
-    [('active', False), ('waiting', False), ('failed', False),
-     ('completed', False), ('stopped', True)],
-)
-def test_existing_session_hides_creation_and_only_stopped_session_exposes_resume(
-        status, expects_resume):
+@pytest.mark.parametrize('status', ['active', 'waiting', 'failed', 'completed', 'stopped'])
+def test_existing_session_hides_controller_lifecycle_tools(status):
     with patch('lazymind.chat.workflow.workflow_manager._client') as client_factory:
         client_factory.return_value.get_state.return_value = {
             'session_id': 'session-1', 'status': status, 'state_version': 3,
@@ -692,7 +690,7 @@ def test_existing_session_hides_creation_and_only_stopped_session_exposes_resume
     assert 'prepare_workflow' not in names
     assert 'start_workflow' not in names
     assert 'stop_workflow' not in names
-    assert ('resume_workflow' in names) is expects_resume
+    assert 'resume_workflow' not in names
 
 
 def test_existing_session_tools_inject_protocol_and_concurrency_fields():

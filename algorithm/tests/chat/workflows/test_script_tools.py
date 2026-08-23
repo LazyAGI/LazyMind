@@ -78,7 +78,24 @@ tool_scripts:
         load_workflow_package_tools(package, ['run'], 'workflow-1', 'revision-1')
 
 
-def test_reads_external_input_types_from_published_package():
+def test_reads_external_input_types_from_compiled_contract():
+    package = {'compiled_graph': {
+        'material_types': {
+            'source': 'file', 'word_target': 'text', 'result': 'text',
+        },
+        'material_producers': {
+            'source': {'kind': 'external'},
+            'word_target': {'kind': 'external'},
+            'result': {'kind': 'step', 'step_id': 'write'},
+        },
+    }}
+
+    assert workflow_package_input_types(package) == {
+        'source': 'file', 'word_target': 'text',
+    }
+
+
+def test_reads_external_input_types_from_legacy_package_source():
     package = {'files': {'workflow.yaml': _encoded('''
 slots:
   - {id: source, type: file, external: true}
