@@ -366,7 +366,6 @@ services:
       <<: *core-env
       MIGRATIONS_DIR: /migrations
       LAZYMIND_ALGO_SERVICE_URL: http://lazyllm-doc-server:8000
-      LAZYMIND_AGENTIC_WORKSPACE: /data/subagent/agent_workspace
       LAZYMIND_SUBAGENT_WORKSPACE: /data/subagent
       LAZYMIND_SUBAGENT_DB_DSN: ${ACL_DB_DSN}
       LAZYMIND_READONLY_VALIDATE: "0"
@@ -759,7 +758,6 @@ services:
     volumes:
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/traces:/var/lib/lazymind/traces
-      - ./agent-lab/runtime:/var/lib/lazymind/agent-lab/runtime
       - evo-data:/var/lib/lazymind/evo:ro
       - ./data/subagent:/data/subagent
       - *algorithm-src-mount
@@ -788,7 +786,9 @@ services:
       LAZYMIND_SEGMENT_STORE_PASSWORD: ${LAZYMIND_SEGMENT_STORE_PASSWORD:-LazyRAG_OpenSearch123!}
       LAZYMIND_SHARED_UPLOAD_DIR: /var/lib/lazymind/uploads
       LAZYMIND_MOUNT_BASE_DIR: /var/lib/lazymind/uploads
-      LAZYMIND_AGENTIC_WORKSPACE: /data/subagent/agent_workspace
+      # Same root as SUBAGENT_WORKSPACE. chat_agent_workspace() adds chat-artifacts/<user>/<conv>/,
+      # so unpublished working files and tool_spills persist next to published artifacts.
+      LAZYMIND_AGENTIC_WORKSPACE: /data/subagent
       LAZYMIND_SUBAGENT_WORKSPACE: /data/subagent
       LAZYMIND_USE_INNER_MODEL: "true"
       LAZYMIND_MAX_CONCURRENCY: ${LAZYMIND_MAX_CONCURRENCY:-10}

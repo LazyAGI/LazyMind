@@ -3,9 +3,13 @@ from __future__ import annotations
 import copy
 import json
 
+from lazyllm.tools.agent.base import TOOL_OBSERVATION_KEY
+
 from lazymind.chat.engine.agent_runtime.pruner import make_history_compactor
 from lazymind.chat.engine.agent_runtime.projection_state import (
     clone_entries,
+    fingerprint_message,
+    message_tokens,
     reconcile_projection,
     render_projection,
     transition_metrics,
@@ -61,17 +65,45 @@ def test_projection_prefix_mutation_and_shorter_view_rebuild_safely() -> None:
     assert len(state['entries']) == 1
 
 
-def test_projection_render_strips_internal_summary_metadata_only_upstream() -> None:
+def test_projection_render_strips_internal_message_fields_upstream() -> None:
     state: dict[str, object] = {}
-    reconcile_projection([{'role': 'user', 'content': 'raw', 'history_seq': 3}], state)
+    reconcile_projection([{
+        'role': 'user',
+        'content': 'raw',
+        'history_seq': 3,
+        TOOL_OBSERVATION_KEY: {
+            'version': 1,
+            'ok': True,
+            'value': {'secret': 'large observation' * 100},
+            'error': '',
+        },
+    }], state)
     state['entries'][0]['message']['_lazymind_meta'] = {'kind': 'runtime_summary'}
 
     rendered = render_projection(state['entries'])
 
     assert '_lazymind_meta' in state['entries'][0]['message']
     assert 'history_seq' in state['entries'][0]['message']
+    assert TOOL_OBSERVATION_KEY in state['entries'][0]['message']
     assert '_lazymind_meta' not in rendered[0]
     assert 'history_seq' not in rendered[0]
+    assert TOOL_OBSERVATION_KEY not in rendered[0]
+
+
+def test_observation_sidecar_does_not_change_model_tokens_or_fingerprint() -> None:
+    message = {'role': 'tool', 'name': 'read_file', 'content': 'visible result'}
+    with_observation = {
+        **message,
+        TOOL_OBSERVATION_KEY: {
+            'version': 1,
+            'ok': True,
+            'value': {'secret': 'large observation' * 1_000},
+            'error': '',
+        },
+    }
+
+    assert message_tokens(with_observation) == message_tokens(message)
+    assert fingerprint_message(with_observation) == fingerprint_message(message)
 
 
 def test_cache_disruption_excludes_newly_appended_unseen_entries() -> None:

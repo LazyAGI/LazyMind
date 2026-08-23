@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any, Optional
 
+from .message_fields import model_facing_message
+
 # Required Markdown section headers for a valid runtime summary.
 REQUIRED_SUMMARY_SECTIONS = (
     '## Current task',
@@ -103,7 +105,7 @@ def get_summary_system_prompt(profile: Optional[str] = None) -> str:
 
 def _message_for_transcript(message: dict[str, Any]) -> dict[str, Any]:
     """Strip internal meta before sending transcript to the summarizer."""
-    return {key: value for key, value in message.items() if key != '_lazymind_meta'}
+    return model_facing_message(message)
 
 
 def build_summary_user_prompt(messages: list[dict[str, Any]]) -> str:

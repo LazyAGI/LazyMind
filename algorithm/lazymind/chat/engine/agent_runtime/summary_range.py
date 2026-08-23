@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 from .context_estimator import estimate_tokens
+from .message_fields import model_facing_message
 
 RUNTIME_SUMMARY_KIND = 'runtime_summary'
 RUNTIME_SUMMARY_DISCLAIMER_PREFIX = (
@@ -13,7 +14,7 @@ RUNTIME_SUMMARY_DISCLAIMER_PREFIX = (
 
 
 def _message_tokens(message: dict[str, Any]) -> int:
-    return estimate_tokens(json.dumps(message, ensure_ascii=False, default=str))
+    return estimate_tokens(json.dumps(model_facing_message(message), ensure_ascii=False, default=str))
 
 
 def is_runtime_summary_message(message: dict[str, Any]) -> bool:

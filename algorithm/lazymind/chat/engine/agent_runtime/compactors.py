@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ast
 import hashlib
 import json
 import os
@@ -54,17 +53,28 @@ def _as_text(content: Any) -> str:
     return str(content)
 
 
-def _try_parse_mapping(text: str) -> Any:
+def _observation_value(observation: Any) -> Any:
+    if not isinstance(observation, dict) or observation.get('version') != 1:
+        return None
+    if observation.get('ok') is False:
+        return None
+    return observation.get('value')
+
+
+def _structured_payload(content: Any, observation: Any = None) -> Any:
+    observed = _observation_value(observation)
+    if isinstance(observed, (dict, list)):
+        return observed
+    if isinstance(content, (dict, list)):
+        return content
+    text = _as_text(content)
     stripped = text.strip()
     if not stripped or stripped[0] not in '{[':
         return None
     try:
         return json.loads(stripped)
     except (TypeError, ValueError):
-        try:
-            return ast.literal_eval(stripped)
-        except (SyntaxError, ValueError):
-            return None
+        return None
 
 
 def _result_payload(parsed: Any) -> dict[str, Any]:
@@ -77,10 +87,10 @@ def _result_payload(parsed: Any) -> dict[str, Any]:
     return result if isinstance(result, dict) else current
 
 
-def _file_result_details(tool_name: str, content: Any) -> dict[str, Any]:
+def _file_result_details(tool_name: str, content: Any, observation: Any = None) -> dict[str, Any]:
     if _classify(tool_name) != 'file':
         return {}
-    parsed = _try_parse_mapping(_as_text(content))
+    parsed = _structured_payload(content, observation)
     payload = _result_payload(parsed)
     if not payload:
         return {}
@@ -150,9 +160,9 @@ def _classify(tool_name: str) -> str:
     return 'generic'
 
 
-def compact_shell_result(tool_name: str, content: Any) -> tuple[str, str]:
+def compact_shell_result(tool_name: str, content: Any, observation: Any = None) -> tuple[str, str]:
     text = _as_text(content)
-    parsed = _try_parse_mapping(text)
+    parsed = _structured_payload(content, observation)
     command = ''
     exit_code = ''
     body = text
@@ -199,9 +209,9 @@ def compact_shell_result(tool_name: str, content: Any) -> tuple[str, str]:
     return '\n'.join(lines), 'shell'
 
 
-def compact_file_result(tool_name: str, content: Any) -> tuple[str, str]:
+def compact_file_result(tool_name: str, content: Any, observation: Any = None) -> tuple[str, str]:
     text = _as_text(content)
-    details = _file_result_details(tool_name, content)
+    details = _file_result_details(tool_name, content, observation)
     locator = details.get('locator', '')
     offset = details.get('offset')
     end_line = details.get('end_line')
@@ -230,9 +240,9 @@ def compact_file_result(tool_name: str, content: Any) -> tuple[str, str]:
     return '\n'.join(lines), 'file_locator' if locator else 'file'
 
 
-def compact_search_result(tool_name: str, content: Any) -> tuple[str, str]:
+def compact_search_result(tool_name: str, content: Any, observation: Any = None) -> tuple[str, str]:
     text = _as_text(content)
-    parsed = _try_parse_mapping(text)
+    parsed = _structured_payload(content, observation)
     query = ''
     urls: list[str] = []
     snippets: list[str] = []
@@ -295,7 +305,8 @@ def compact_search_result(tool_name: str, content: Any) -> tuple[str, str]:
     return '\n'.join(lines), 'search'
 
 
-def compact_generic_result(tool_name: str, content: Any) -> tuple[str, str]:
+def compact_generic_result(tool_name: str, content: Any, observation: Any = None) -> tuple[str, str]:
+    _ = observation
     text = _as_text(content)
     if len(text) <= 1200:
         return text, 'generic'
@@ -309,7 +320,7 @@ def compact_generic_result(tool_name: str, content: Any) -> tuple[str, str]:
     return '\n'.join(lines), 'generic'
 
 
-_COMPACTORS: dict[str, Callable[[str, Any], tuple[str, str]]] = {
+_COMPACTORS: dict[str, Callable[[str, Any, Any], tuple[str, str]]] = {
     'shell': compact_shell_result,
     'file': compact_file_result,
     'search': compact_search_result,
@@ -317,11 +328,15 @@ _COMPACTORS: dict[str, Callable[[str, Any], tuple[str, str]]] = {
 }
 
 
-def compact_tool_result(tool_name: str, content: Any) -> tuple[str, str, int, int]:
+def compact_tool_result(
+    tool_name: str,
+    content: Any,
+    observation: Any = None,
+) -> tuple[str, str, int, int]:
     """Return compacted content, compactor id, before tokens, after tokens."""
     before = estimate_tokens(_as_text(content))
     kind = _classify(tool_name)
-    compacted, compactor = _COMPACTORS[kind](tool_name, content)
+    compacted, compactor = _COMPACTORS[kind](tool_name, content, observation)
     after = estimate_tokens(compacted)
     if after >= before:
         # Keep original when compaction does not help.
@@ -403,6 +418,7 @@ def compact_or_spill_tool_result(
     tool_name: str,
     content: Any,
     *,
+    observation: Any = None,
     workspace: Optional[str] = None,
     threshold: Optional[int] = None,
 ) -> tuple[str, str, int, int, str, int]:
@@ -410,8 +426,12 @@ def compact_or_spill_tool_result(
     before = estimate_tokens(text)
     size_bytes = tool_result_utf8_size(content)
     limit = spill_threshold_bytes() if threshold is None else max(1, int(threshold))
-    if _file_result_details(tool_name, content):
-        compacted, compactor, before_tokens, after_tokens = compact_tool_result(tool_name, content)
+    if _file_result_details(tool_name, content, observation):
+        compacted, compactor, before_tokens, after_tokens = compact_tool_result(
+            tool_name,
+            content,
+            observation,
+        )
         return compacted, compactor, before_tokens, after_tokens, '', 0
     if workspace and size_bytes > limit:
         try:
@@ -421,7 +441,11 @@ def compact_or_spill_tool_result(
         if rel_path:
             notice = format_spilled_tool_notice(tool_name, content, rel_path, size_bytes)
             return notice, 'spill', before, estimate_tokens(notice), rel_path, size_bytes
-    compacted, compactor, before_tokens, after_tokens = compact_tool_result(tool_name, content)
+    compacted, compactor, before_tokens, after_tokens = compact_tool_result(
+        tool_name,
+        content,
+        observation,
+    )
     return compacted, compactor, before_tokens, after_tokens, '', 0
 
 
@@ -429,6 +453,7 @@ def plan_tool_result_compaction(
     tool_name: str,
     content: Any,
     *,
+    observation: Any = None,
     workspace: Optional[str] = None,
     threshold: Optional[int] = None,
 ) -> ToolCompactionPlan:
@@ -436,8 +461,12 @@ def plan_tool_result_compaction(
     before = estimate_tokens(text)
     size_bytes = tool_result_utf8_size(content)
     limit = spill_threshold_bytes() if threshold is None else max(1, int(threshold))
-    if _file_result_details(tool_name, content):
-        compacted, compactor, before_tokens, after_tokens = compact_tool_result(tool_name, content)
+    if _file_result_details(tool_name, content, observation):
+        compacted, compactor, before_tokens, after_tokens = compact_tool_result(
+            tool_name,
+            content,
+            observation,
+        )
         return ToolCompactionPlan(
             compacted, compactor, before_tokens, after_tokens,
             tool_name=tool_name, original_content=content,
@@ -457,7 +486,11 @@ def plan_tool_result_compaction(
                 tool_name=tool_name,
                 original_content=content,
             )
-    compacted, compactor, before_tokens, after_tokens = compact_tool_result(tool_name, content)
+    compacted, compactor, before_tokens, after_tokens = compact_tool_result(
+        tool_name,
+        content,
+        observation,
+    )
     return ToolCompactionPlan(
         compacted, compactor, before_tokens, after_tokens,
         tool_name=tool_name, original_content=content,

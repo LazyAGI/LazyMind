@@ -17,6 +17,7 @@ from .compactors import (
     plan_tool_result_compaction,
 )
 from .context_estimator import estimate_non_history_tokens, estimate_tokens
+from .message_fields import TOOL_OBSERVATION_KEY, model_facing_message
 from .models import (
     ContextBudget,
     CompressionTrigger,
@@ -36,7 +37,7 @@ from .projection_state import (
 
 
 def _message_tokens(message: dict[str, Any]) -> int:
-    return estimate_tokens(json.dumps(message, ensure_ascii=False, default=str))
+    return estimate_tokens(json.dumps(model_facing_message(message), ensure_ascii=False, default=str))
 
 
 def estimate_history_tokens(history: list[dict[str, Any]]) -> int:
@@ -121,6 +122,7 @@ def prune_tool_results(
             compact_or_spill_tool_result(
                 tool_name,
                 message.get('content'),
+                observation=message.get(TOOL_OBSERVATION_KEY),
                 workspace=workspace,
             )
         )
@@ -235,6 +237,7 @@ def _plan_entry(
     return plan_tool_result_compaction(
         str(message.get('name') or ''),
         message.get('content'),
+        observation=message.get(TOOL_OBSERVATION_KEY),
         workspace=workspace,
     )
 
@@ -641,49 +644,3 @@ def make_history_compactor(
         return render_projection(state['entries'])
 
     return _compact
-
-
-def apply_pre_turn_pruning(
-    history: list[dict[str, Any]],
-    *,
-    estimated_tokens: int,
-    max_input_tokens: Any = None,
-    llm_config: Optional[dict[str, Any]] = None,
-    keep_recent: Optional[int] = None,
-    llm: Any = None,
-    summarizer: Optional[Callable[[str, str], str]] = None,
-    workspace: Optional[str] = None,
-) -> tuple[list[dict[str, Any]], Optional[PruneEvent]]:
-    if not config['context_compression_enabled']:
-        return list(history), None
-    budget = build_context_budget(max_input_tokens, llm_config=llm_config)
-    keep = keep_recent if keep_recent is not None else int(config['agentic_keep_full_turns'])
-    projected, event = prune_tool_results(
-        history,
-        keep_recent=keep,
-        budget=budget,
-        trigger='pre_turn',
-        estimated_total_tokens=estimated_tokens,
-        force=False,
-        workspace=workspace,
-    )
-    projected_total = (
-        estimated_tokens
-        - estimate_history_tokens(history)
-        + estimate_history_tokens(projected)
-    )
-    if (
-        config['context_summary_compression_enabled']
-        and needs_compression(estimated_tokens, budget)
-        and projected_total > budget.target_tokens
-    ):
-        from .summarizer import apply_summary_compression
-        projected, _summary_event = apply_summary_compression(
-            projected,
-            budget=budget,
-            trigger='pre_turn',
-            llm=llm,
-            summarizer=summarizer,
-            force=True,
-        )
-    return projected, event

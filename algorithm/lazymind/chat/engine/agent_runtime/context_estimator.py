@@ -13,6 +13,7 @@ from .models import (
     ContextUsageItem,
     ContextUsageReport,
 )
+from .message_fields import model_facing_message
 
 
 _CATEGORY_TITLES = {
@@ -132,8 +133,9 @@ def _estimate(plan: AgentRunPlan, agent_context: dict[str, Any]) -> ContextUsage
 
     model_history = agent_context.get('history', plan.history)
     for index, message in enumerate(model_history):
-        compact = json.dumps(message, ensure_ascii=False, separators=(',', ':'), default=str)
-        rendered = json.dumps(message, ensure_ascii=False, indent=2, default=str)
+        model_message = model_facing_message(message)
+        compact = json.dumps(model_message, ensure_ascii=False, separators=(',', ':'), default=str)
+        rendered = json.dumps(model_message, ensure_ascii=False, indent=2, default=str)
         grouped['conversation'].append(_item(
             f'history_{index}', 'conversation', _history_title(message, index),
             f"history.{message.get('role', 'unknown')}", compact,

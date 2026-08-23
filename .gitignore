@@ -48,9 +48,6 @@ lazyllm_chroma/
 docs/en/assets
 docs/zh/assets
 docs/superpowers/
-# Local design notes for chat file resources; keep out of review PRs.
-docs/plan/chat-file-resource-*.md
-docs/engineering/file-upload-algorithm-toolchain.md
 
 # Prerequisites
 *.d
@@ -125,8 +122,3 @@ backend/core/openapi.json
 backend/core/swagger.json
 backend/core/docs/swagger.json
 openapi-export/
-
-# local experiment / work notes
-agent-lab/
-ch-workstate/
-.online_env

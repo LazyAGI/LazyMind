@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+from lazyllm.tools.agent.base import TOOL_OBSERVATION_KEY
+
 from lazymind.chat.engine.agent_runtime.budget import (
     build_context_budget,
     needs_compression,
@@ -125,7 +127,7 @@ def test_file_compactor_keeps_path_and_excerpt() -> None:
     assert 'total_lines=400' in compacted
 
 
-def test_file_compactor_treats_runtime_repr_and_persisted_json_equally() -> None:
+def test_file_compactor_keeps_json_fallback_without_python_repr_protocol() -> None:
     payload = {
         'success': True,
         'tool': 'read_file',
@@ -142,10 +144,95 @@ def test_file_compactor_treats_runtime_repr_and_persisted_json_equally() -> None
     from_repr, repr_kind = compact_file_result('read_file', str(payload))
     from_json, json_kind = compact_file_result('read_file', json.dumps(payload))
 
-    assert repr_kind == json_kind == 'file_locator'
+    assert repr_kind == 'file'
+    assert json_kind == 'file_locator'
+    assert 'Target: paper.pdf' not in from_repr
     for expected in ('Target: paper.pdf', 'offset=21', 'end=40', 'offset=41'):
-        assert expected in from_repr
         assert expected in from_json
+
+
+def test_semantic_compactors_prefer_structured_observation() -> None:
+    shell, shell_kind = compact_shell_result(
+        'run_script',
+        'unparseable display\n' * 200,
+        {'version': 1, 'ok': True, 'value': {
+            'command': 'pytest -q',
+            'exit_code': 2,
+            'stdout': 'AssertionError: failed\n' * 100,
+        }, 'error': ''},
+    )
+    file_text, file_kind = compact_file_result(
+        'read_file',
+        'unparseable display\n' * 200,
+        {'version': 1, 'ok': True, 'value': {
+            'result': {
+                'path': '/tmp/report.txt',
+                'offset': 10,
+                'next_offset': 30,
+                'content': 'body\n' * 200,
+            },
+        }, 'error': ''},
+    )
+    search, search_kind = compact_search_result(
+        'web_search',
+        'unparseable display\n' * 200,
+        {'version': 1, 'ok': True, 'value': {
+            'query': 'structured observations',
+            'hits': [{
+                'title': 'Protocol',
+                'url': 'https://example.com/protocol',
+                'snippet': 'Stable machine data',
+            }],
+        }, 'error': ''},
+    )
+
+    assert shell_kind == 'shell'
+    assert 'pytest -q' in shell
+    assert 'exit code 2' in shell
+    assert file_kind == 'file_locator'
+    assert '/tmp/report.txt' in file_text
+    assert 'offset=30' in file_text
+    assert search_kind == 'search'
+    assert 'structured observations' in search
+    assert 'https://example.com/protocol' in search
+
+
+def test_pruner_passes_structured_observation_to_compactor() -> None:
+    content = 'unparseable display\n' * 300
+    history = [{
+        'role': 'tool',
+        'name': 'read_file',
+        'tool_call_id': 'call-read',
+        'content': content,
+        TOOL_OBSERVATION_KEY: {
+            'version': 1,
+            'ok': True,
+            'value': {
+                'path': '/tmp/structured.txt',
+                'content': 'important body\n' * 300,
+            },
+            'error': '',
+        },
+    }]
+    budget = build_context_budget(
+        8_000,
+        reserved_output_tokens=0,
+        trigger_ratio=0.1,
+        target_ratio=0.05,
+    )
+
+    projected, event = prune_tool_results(
+        history,
+        keep_recent=0,
+        budget=budget,
+        trigger='pre_turn',
+        force=True,
+    )
+
+    assert event.decision == 'pruned'
+    assert 'Target: /tmp/structured.txt' in projected[0]['content']
+    assert projected[0][TOOL_OBSERVATION_KEY] == history[0][TOOL_OBSERVATION_KEY]
+    assert history[0]['content'] == content
 
 
 def test_search_compactor_keeps_query_and_sources() -> None:
@@ -439,22 +526,6 @@ def test_executor_master_off_attaches_identity_compactor(monkeypatch) -> None:
     assert compactor(history, 2) == history
 
 
-def test_executor_inspection_preserves_authoritative_history(monkeypatch) -> None:
-    from lazymind.config import config
-
-    monkeypatch.setattr(
-        'lazymind.chat.engine.agent_runtime.executor._agent_mod.ReactAgent',
-        _FakeReactAgent,
-    )
-
-    history = [{'role': 'tool', 'content': 'x' * 1000}]
-    plan = _test_plan(history)
-    with config.temp('context_compression_enabled', True):
-        AgentExecutor().create_agent(object(), plan, inspect=True)
-    assert plan.history is history
-    assert plan.history[0]['content'] == 'x' * 1000
-
-
 def test_executor_does_not_replace_authoritative_history_with_projection(monkeypatch) -> None:
     from lazymind.config import config
 
@@ -543,9 +614,18 @@ def test_oversized_replayable_file_result_uses_locator_instead_of_spill(tmp_path
             'text': 'document line\n' * 2000,
         },
     }
-    history = [
-        {'role': 'tool', 'name': 'read_file', 'tool_call_id': 'read-1', 'content': str(payload)},
-    ]
+    history = [{
+        'role': 'tool',
+        'name': 'read_file',
+        'tool_call_id': 'read-1',
+        'content': str(payload),
+        TOOL_OBSERVATION_KEY: {
+            'version': 1,
+            'ok': True,
+            'value': payload,
+            'error': '',
+        },
+    }]
     budget = build_context_budget(100_000, reserved_output_tokens=0, trigger_ratio=0.99, target_ratio=0.9)
 
     projected, event = prune_tool_results(

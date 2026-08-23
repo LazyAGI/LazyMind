@@ -259,7 +259,12 @@ config.add('agentic_tool_limit_wait_timeout', float, 120, 'AGENTIC_TOOL_LIMIT_WA
 config.add('agentic_expanded_max_rounds', int, 200, 'AGENTIC_EXPANDED_MAX_ROUNDS',
            description='Maximum ReAct rounds for one ChatAgent invocation after the user continues.')
 config.add('agentic_workspace', str, './workspace', 'AGENTIC_WORKSPACE',
-           description='Workspace directory for agentic tools.')
+           description=(
+               'Root for the main-agent conversation workspace '
+               '(chat-artifacts/<user>/<conv>/). Deployments should set this to the same '
+               'value as LAZYMIND_SUBAGENT_WORKSPACE so unpublished working files and '
+               'tool spills persist next to published artifacts.'
+           ))
 config.add('trusted_local_mode', bool, False, 'TRUSTED_LOCAL_MODE',
            description='Allow agents to access host paths outside their workspace and use local command tools.')
 config.add('agentic_keep_full_turns', int, 2, 'AGENTIC_KEEP_FULL_TURNS',

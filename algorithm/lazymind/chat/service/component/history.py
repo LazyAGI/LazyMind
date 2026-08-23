@@ -4,6 +4,11 @@ import json
 import re
 from typing import Any
 
+from lazyllm.tools.agent.base import (
+    TOOL_OBSERVATION_KEY,
+    attachable_tool_observation,
+)
+
 from lazymind.chat.service.utils.citations import (
     SOURCE_LINK_PATTERN,
     SOURCE_REF_PATTERN,
@@ -266,20 +271,24 @@ def normalize_history_for_agent(
                         saw_structured_segments,
                         history_seq=history_seq,
                     )
+                    sanitized_result = _sanitize_history_tool_result(seg['result'])
                     tool_msg = {
                         'role': 'tool',
                         'tool_call_id': seg['id'],
                         'name': seg['name'],
                         'content': (
-                            _sanitize_history_tool_result(seg['result'])
-                            if isinstance(seg['result'], str)
+                            sanitized_result
+                            if isinstance(sanitized_result, str)
                             else json.dumps(
-                                _sanitize_history_tool_result(seg['result']),
+                                sanitized_result,
                                 ensure_ascii=False,
                                 separators=(',', ':'),
                             )
                         ),
                     }
+                    observation = attachable_tool_observation(sanitized_result)
+                    if observation is not None:
+                        tool_msg[TOOL_OBSERVATION_KEY] = observation
                     if history_seq is not None:
                         tool_msg['history_seq'] = history_seq
                     normalized.append(tool_msg)

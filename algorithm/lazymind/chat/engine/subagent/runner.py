@@ -14,6 +14,10 @@ from typing import Any, Dict, List, Optional
 
 import lazyllm
 from lazyllm import LOG, AutoModel
+from lazyllm.tools.agent.base import (
+    TOOL_OBSERVATION_KEY,
+    attachable_tool_observation,
+)
 from lazyllm.tools.tool_config_inject import inject_tool_config
 
 from lazymind.chat.engine.agent_runtime import (
@@ -1517,11 +1521,16 @@ def _rebuild_history_from_steps(db: SubAgentDB, task_id: str) -> List[Dict[str, 
                     history.pop()
                 break
             for r in valid:
-                history.append({
+                result = r.get('result', '')
+                tool_msg = {
                     'role': 'tool',
                     'tool_call_id': r.get('tool_call_id'),
                     'name': r.get('name', ''),
-                    'content': str(r.get('result', '')),
-                })
+                    'content': str(result),
+                }
+                observation = attachable_tool_observation(result)
+                if observation is not None:
+                    tool_msg[TOOL_OBSERVATION_KEY] = observation
+                history.append(tool_msg)
             pending_ids = set()
     return history

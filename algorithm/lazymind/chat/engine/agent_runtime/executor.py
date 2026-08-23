@@ -371,7 +371,7 @@ def _deduplicate_tools(tools: list[Any]) -> list[Any]:
 class AgentExecutor:
     """Create and drive ReactAgent instances from a fully assembled run plan."""
 
-    def create_agent(self, llm: Any, plan: AgentRunPlan, *, inspect: bool = False) -> Any:
+    def create_agent(self, llm: Any, plan: AgentRunPlan) -> Any:
         from lazymind.chat.lazyllm_tool_docs import ensure_lazyllm_tool_docs
 
         options = plan.execution_options
@@ -380,6 +380,7 @@ class AgentExecutor:
             keep_full_turns = int(_cfg['agentic_keep_full_turns'])
         history_compactor = options.history_compactor
         if not _cfg['context_compression_enabled']:
+            # Identity blocks LazyLLM's built-in _compact_chat_history truncation.
             history_compactor = _identity_history_compactor
         elif history_compactor is None:
             history_compactor = make_history_compactor(

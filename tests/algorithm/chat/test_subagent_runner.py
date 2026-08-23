@@ -449,13 +449,40 @@ def test_rebuild_history_valid_pairs():
         {'task_id': 't1', 'seq': 0, 'role': 'assistant',
          'content': {'text': '', 'tool_calls': [{'id': 'c1', 'name': 'tool_a', 'args': {}}]}},
         {'task_id': 't1', 'seq': 1, 'role': 'tool',
-         'content': {'tool_results': [{'tool_call_id': 'c1', 'name': 'tool_a', 'result': 'res'}]}},
+         'content': {'tool_results': [{
+             'tool_call_id': 'c1',
+             'name': 'tool_a',
+             'result': {'path': '/tmp/result.txt', 'offset': 4},
+         }]}},
     ]
     history = runner_mod._rebuild_history_from_steps(db, 't1')
     assert len(history) == 2
     assert history[0]['role'] == 'assistant'
     assert history[1]['role'] == 'tool'
     assert history[1]['tool_call_id'] == 'c1'
+    assert history[1][runner_mod.TOOL_OBSERVATION_KEY] == {
+        'version': 1,
+        'ok': None,
+        'value': {'path': '/tmp/result.txt', 'offset': 4},
+        'error': '',
+    }
+
+
+def test_rebuild_history_skips_observation_for_string_tool_results():
+    db = FakeDB()
+    db.steps = [
+        {'task_id': 't1', 'seq': 0, 'role': 'assistant',
+         'content': {'text': '', 'tool_calls': [{'id': 'c1', 'name': 'tool_a', 'args': {}}]}},
+        {'task_id': 't1', 'seq': 1, 'role': 'tool',
+         'content': {'tool_results': [{
+             'tool_call_id': 'c1',
+             'name': 'tool_a',
+             'result': 'plain tool output',
+         }]}},
+    ]
+    history = runner_mod._rebuild_history_from_steps(db, 't1')
+    assert history[1]['content'] == 'plain tool output'
+    assert runner_mod.TOOL_OBSERVATION_KEY not in history[1]
 
 
 def test_rebuild_history_orphan_tool_result_dropped():

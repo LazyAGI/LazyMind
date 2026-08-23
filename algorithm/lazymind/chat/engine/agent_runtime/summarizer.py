@@ -9,8 +9,9 @@ import lazyllm
 
 from lazymind.config import config
 
-from .budget import build_context_budget, usage_ratio
+from .budget import usage_ratio
 from .context_estimator import estimate_tokens
+from .message_fields import model_facing_history, model_facing_message
 from .models import ContextBudget, CompressionTrigger, SummaryEvent
 from .summary_prompt import (
     build_summary_user_prompt,
@@ -34,7 +35,7 @@ except Exception:  # pragma: no cover - optional at import time in unit tests
 
 def _estimate_history_tokens(history: list[dict[str, Any]]) -> int:
     return sum(
-        estimate_tokens(json.dumps(message, ensure_ascii=False, default=str))
+        estimate_tokens(json.dumps(model_facing_message(message), ensure_ascii=False, default=str))
         for message in history
     )
 
@@ -254,14 +255,7 @@ def apply_summary_compression(
 
 def strip_lazymind_meta(history: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Return a shallow-copied history without internal fields for upstream LLMs."""
-    drop = {'_lazymind_meta', 'history_seq'}
-    cleaned: list[dict[str, Any]] = []
-    for message in history:
-        if not any(key in message for key in drop):
-            cleaned.append(message)
-            continue
-        cleaned.append({key: value for key, value in message.items() if key not in drop})
-    return cleaned
+    return model_facing_history(history)
 
 
 def _max_history_seq(messages: list[dict[str, Any]]) -> int:
@@ -309,29 +303,6 @@ def _emit_model_context_updated(summary_markdown: str, covered_through_seq: int)
             }
     except Exception as exc:  # noqa: BLE001
         lazyllm.LOG.warning(f'[ContextCompression] model_context_emit_failed err={exc}')
-
-
-def apply_pre_turn_summary(
-    history: list[dict[str, Any]],
-    *,
-    max_input_tokens: Any = None,
-    llm_config: Optional[dict[str, Any]] = None,
-    llm: Any = None,
-    summarizer: Optional[Callable[[str, str], str]] = None,
-) -> tuple[list[dict[str, Any]], Optional[SummaryEvent]]:
-    if not config['context_compression_enabled']:
-        return list(history), None
-    if not config['context_summary_compression_enabled']:
-        return list(history), None
-    budget = build_context_budget(max_input_tokens, llm_config=llm_config)
-    return apply_summary_compression(
-        history,
-        budget=budget,
-        trigger='pre_turn',
-        llm=llm,
-        summarizer=summarizer,
-        force=False,
-    )
 
 
 def _skip(

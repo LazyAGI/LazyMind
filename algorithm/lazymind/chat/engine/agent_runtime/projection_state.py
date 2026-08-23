@@ -6,15 +6,15 @@ import json
 from typing import Any, Optional
 
 from .context_estimator import estimate_tokens
+from .message_fields import model_facing_message
 
 
 PROJECTION_STATE_VERSION = 1
-_INTERNAL_MESSAGE_FIELDS = {'_lazymind_meta', 'history_seq'}
 
 
 def fingerprint_message(message: dict[str, Any]) -> str:
     payload = json.dumps(
-        message,
+        model_facing_message(message),
         ensure_ascii=False,
         sort_keys=True,
         separators=(',', ':'),
@@ -24,7 +24,7 @@ def fingerprint_message(message: dict[str, Any]) -> str:
 
 
 def message_tokens(message: dict[str, Any]) -> int:
-    return estimate_tokens(json.dumps(message, ensure_ascii=False, default=str))
+    return estimate_tokens(json.dumps(model_facing_message(message), ensure_ascii=False, default=str))
 
 
 def projection_tokens(entries: list[dict[str, Any]]) -> int:
@@ -104,13 +104,11 @@ def render_projection(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rendered: list[dict[str, Any]] = []
     for entry in entries:
         message = entry['message']
-        if any(key in message for key in _INTERNAL_MESSAGE_FIELDS):
-            rendered.append(copy.deepcopy({
-                key: value for key, value in message.items()
-                if key not in _INTERNAL_MESSAGE_FIELDS
-            }))
-        else:
+        model_message = model_facing_message(message)
+        if len(model_message) == len(message):
             rendered.append(copy.deepcopy(message))
+        else:
+            rendered.append(copy.deepcopy(model_message))
     return rendered
 
 

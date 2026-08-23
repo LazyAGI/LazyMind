@@ -2,10 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
+from lazyllm.tools.agent.base import TOOL_OBSERVATION_KEY
+
 from lazymind.chat.engine.agent_runtime.budget import build_context_budget
 from lazymind.chat.engine.agent_runtime.pruner import make_history_compactor
 from lazymind.chat.engine.agent_runtime.summary_prompt import (
     REQUIRED_SUMMARY_SECTIONS,
+    build_summary_user_prompt,
     has_required_summary_sections,
 )
 from lazymind.chat.engine.agent_runtime.summary_range import (
@@ -79,6 +82,24 @@ def _history_with_turns() -> list[dict[str, Any]]:
             'content': 'latest tool keep me',
         },
     ]
+
+
+def test_summary_prompt_excludes_structured_observation_sidecar() -> None:
+    prompt = build_summary_user_prompt([{
+        'role': 'tool',
+        'name': 'read_file',
+        'content': 'visible result',
+        TOOL_OBSERVATION_KEY: {
+            'version': 1,
+            'ok': True,
+            'value': {'secret': 'must-not-enter-summary'},
+            'error': '',
+        },
+    }])
+
+    assert 'visible result' in prompt
+    assert TOOL_OBSERVATION_KEY not in prompt
+    assert 'must-not-enter-summary' not in prompt
 
 
 def test_required_summary_sections_helper() -> None:
