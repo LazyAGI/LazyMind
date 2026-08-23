@@ -512,7 +512,7 @@ func (r *Repository) CreateHostSession(ctx context.Context, owner, sessionID, co
 				return err
 			}
 			if len(current) > 0 {
-				if originHost != "external-agent" || controllerHost != "external-agent" || !allTerminalSessions(current) {
+				if !allTerminalSessions(current) {
 					return ErrSessionConflict
 				}
 				ids := make([]string, 0, len(current))

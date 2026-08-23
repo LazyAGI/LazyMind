@@ -49,7 +49,7 @@ func TestCloudReaderUsesAuthorizedAccountAndOnlineConnector(t *testing.T) {
 	}))
 	defer server.Close()
 
-	reader, err := NewCloudDocumentReader(server.URL, server.URL+"/api/authservice", "internal", server.Client(), 0)
+	reader, err := NewCloudDocumentReader(server.URL, server.URL+"/api/authservice", "internal", 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestCloudReaderRejectsConnectionOutsideChatEnabledOwnerScope(t *testing.T) 
 		_, _ = io.WriteString(w, `{"data":{"items":[]}}`)
 	}))
 	defer server.Close()
-	reader, err := NewCloudDocumentReader(server.URL, server.URL, "internal", server.Client(), 0)
+	reader, err := NewCloudDocumentReader(server.URL, server.URL, "internal", 0)
 	if err != nil {
 		t.Fatal(err)
 	}

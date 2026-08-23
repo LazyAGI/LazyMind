@@ -768,22 +768,6 @@ def _task_status(status: str) -> tuple[str, str]:
     }.get(normalized, (status or '已创建', 'blue'))
 
 
-def _workflow_title(task_title: str) -> str:
-    workflow = task_title.split(':', 1)[0].strip().lower()
-    return {
-        'writer-workflow': 'AI Writer 写作工作流',
-        'image-workflow': 'AI 绘图工作流',
-        'ppt-workflow': 'AI PPT 工作流',
-    }.get(
-        workflow,
-        (
-            f'{workflow.removesuffix("-workflow")} 工作流'
-            if workflow
-            else '工作流'
-        ),
-    )
-
-
 def _workflow_step_line(
     index: int,
     task: dict[str, Any],

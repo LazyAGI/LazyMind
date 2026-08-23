@@ -20,9 +20,12 @@ type InvocationMetadata struct {
 
 type InvocationSource struct {
 	Provider     string `json:"provider"`
+	HostID       string `json:"host_id"`
 	ThreadID     string `json:"thread_id"`
 	TurnID       string `json:"turn_id,omitempty"`
 	ThreadSource string `json:"thread_source,omitempty"`
+	ProjectKey   string `json:"project_key,omitempty"`
+	ProjectName  string `json:"project_name,omitempty"`
 	Message      string `json:"message,omitempty"`
 }
 
@@ -30,9 +33,6 @@ type InvocationSourceLink struct {
 	ConversationID string `json:"conversation_id"`
 	ExternalRef    string `json:"external_ref"`
 	HistoryID      string `json:"history_id"`
-	Provider       string `json:"provider"`
-	ThreadID       string `json:"thread_id"`
-	TurnID         string `json:"turn_id"`
 }
 
 type InvocationStart struct {
@@ -53,11 +53,6 @@ type InvocationStart struct {
 type InvocationStartResult struct {
 	Created bool                  `json:"created"`
 	Source  *InvocationSourceLink `json:"source,omitempty"`
-}
-
-type ExternalTurnSync struct {
-	Source InvocationSource `json:"source"`
-	Answer string           `json:"answer"`
 }
 
 type InvocationFinish struct {
@@ -92,8 +87,4 @@ func (c *Client) StartInvocation(ctx context.Context, id string, input Invocatio
 
 func (c *Client) FinishInvocation(ctx context.Context, id string, input InvocationFinish) error {
 	return c.DoJSON(ctx, http.MethodPost, "/agent-invocations/"+url.PathEscape(id)+":finish", input, nil)
-}
-
-func (c *Client) SyncExternalTurn(ctx context.Context, input ExternalTurnSync) error {
-	return c.DoJSON(ctx, http.MethodPost, "/external-agent/turns:sync", input, nil)
 }

@@ -7,10 +7,13 @@ from dataclasses import replace
 from typing import Callable
 
 from channel_gateway.common.application.messages import ChannelMessageService
+from channel_gateway.common.application.task_artifacts import (
+    TASK_ARTIFACT_MONITOR_VERSION,
+)
 from channel_gateway.common.domain.channel import (
     ClaimedInbound,
     OutboundMessage,
-    WELCOME_MESSAGE,
+    welcome_message,
 )
 from channel_gateway.common.domain.chat import retainable_provider_context
 from channel_gateway.common.errors import (
@@ -35,8 +38,7 @@ _MAX_PROVIDER_SIDE_EFFECT_ATTEMPTS = 5
 _MAX_OUTBOUND_ATTEMPTS = 5
 
 
-def _failure_message(provider_context: dict, exc: Exception) -> str:
-    del provider_context, exc
+def _failure_message() -> str:
     return 'LazyMind 暂时无法处理这条消息，请稍后重试。'
 
 
@@ -183,10 +185,6 @@ class MessageWorker:
                     owner_user_id=inbound.owner_user_id,
                     text=inbound.text,
                     request_id=f'channel_{inbound.message_key}',
-                    surface=str(
-                        inbound.provider_context.get('surface')
-                        or 'direct'
-                    ),
                     provider_context=inbound.provider_context,
                     on_stream=(
                         stream.update
@@ -201,6 +199,10 @@ class MessageWorker:
                 )
                 stream = None
                 lease.ensure_owned()
+                has_task = any(
+                    presentation.kind == 'task'
+                    for presentation in result.presentations
+                )
                 outbound = [
                     replace(
                         fallback,
@@ -214,9 +216,11 @@ class MessageWorker:
                                 for presentation
                                 in result.presentations
                             ],
-                            'task_monitor': any(
-                                presentation.kind == 'task'
-                                for presentation in result.presentations
+                            'task_monitor': has_task,
+                            'task_artifact_monitor_version': (
+                                TASK_ARTIFACT_MONITOR_VERSION
+                                if has_task
+                                else 0
                             ),
                             'streamed_text': streamed_text,
                         },
@@ -226,7 +230,7 @@ class MessageWorker:
                     outbound.append(
                         replace(
                             outbound[0],
-                            text=WELCOME_MESSAGE,
+                            text=welcome_message(inbound.provider),
                             intent_kind='welcome',
                             purpose='welcome',
                             metadata={},
@@ -277,7 +281,7 @@ class MessageWorker:
                 stream.abort()
             fallback = replace(
                 fallback,
-                text=_failure_message(inbound.provider_context, exc),
+                text=_failure_message(),
             )
             _logger.exception(
                 'channel_inbound_processing_failed inbox_id=%s attempt=%s',

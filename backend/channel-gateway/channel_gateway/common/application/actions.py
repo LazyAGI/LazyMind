@@ -7,17 +7,10 @@ from channel_gateway.common.application.capabilities import (
     ActionMessage,
     CapabilityActions,
 )
-from channel_gateway.common.application.cloud_documents import (
-    CloudDocumentActions,
-)
 from channel_gateway.common.domain.commands import (
     CapabilityConfigureCommand,
     CapabilityListCommand,
     ChatCommand,
-    ClarifyCommand,
-    CloudDocumentGetCommand,
-    CloudDocumentListCommand,
-    CloudDocumentSearchCommand,
     CommandEnvelope,
     ConversationCurrentCommand,
     ConversationListCommand,
@@ -39,9 +32,7 @@ from channel_gateway.common.application.replies import (
 from channel_gateway.common.ports.core import LazyMindCore
 from channel_gateway.common.ports.repository import NavigationRepository
 from channel_gateway.common.domain.chat import (
-    BASIC_CHAT_FEATURES,
     ChannelExecutionContext,
-    ChannelFeatureProfile,
     CoreStreamUpdate,
 )
 from channel_gateway.common.domain.outbound import ReplyPresentation
@@ -55,28 +46,21 @@ class ChannelActionExecutor:
         *,
         store: NavigationRepository,
         client: LazyMindCore,
-        feature_resolver: (
-            Callable[[str], ChannelFeatureProfile] | None
-        ) = None,
     ):
         self._store = store
         self._client = client
         self._capabilities = CapabilityActions(store=store, client=client)
-        self._cloud_documents = CloudDocumentActions(client)
         self._conversations = ConversationActions(
             store=store,
             client=client,
             capabilities=self._capabilities,
         )
         self._replies = ChannelReplyBuilder(store)
-        self._feature_resolver = (
-            feature_resolver
-            or (lambda _provider: BASIC_CHAT_FEATURES)
-        )
 
     def execute(
         self,
         *,
+        provider: str = '',
         command: CommandEnvelope,
         account_id: str,
         external_address_hash: str,
@@ -84,11 +68,9 @@ class ChannelActionExecutor:
         request_id: str,
         grounding_messages: Sequence[str],
         catalog: dict[str, Any],
-        provider: str = '',
         provider_context: dict[str, Any] | None = None,
         on_stream: Callable[[CoreStreamUpdate], None] | None = None,
     ) -> ChannelReply:
-        features = self._feature_resolver(provider)
         execution = ChannelExecutionContext.from_provider_context(
             provider_context
         )
@@ -103,12 +85,12 @@ class ChannelActionExecutor:
             if isinstance(command, ChatCommand):
                 parameters = command.parameters
                 text = self._conversations.chat(
+                    chat_only=provider == 'wechat',
                     message=parameters.message,
                     changes=parameters.resource_changes,
                     source_command=command,
                     source_messages=grounding_messages,
                     catalog=catalog,
-                    features=features,
                     ask_answers_structured=(
                         execution.ask_answers_structured
                     ),
@@ -127,7 +109,6 @@ class ChannelActionExecutor:
                     source_command=command,
                     source_messages=grounding_messages,
                     catalog=catalog,
-                    features=features,
                     on_stream=on_stream,
                     **context,
                 )
@@ -149,46 +130,15 @@ class ChannelActionExecutor:
                     source_messages=grounding_messages,
                     selection_external_address_hash=external_address_hash,
                     catalog=catalog,
-                    features=features,
                     on_stream=on_stream,
                     **context,
                 )
             elif isinstance(command, ConversationCurrentCommand):
                 text = self._conversations.current(
-                    features=features,
                     **context,
                 )
             elif isinstance(command, ConversationStopCommand):
                 text = self._conversations.stop(**context)
-            elif isinstance(command, CloudDocumentListCommand):
-                text, presentation = self._cloud_documents.list_accounts(
-                    keyword=command.parameters.keyword,
-                    status=command.parameters.status,
-                    page_token=command.parameters.page_token,
-                    owner_user_id=owner_user_id,
-                    request_id=request_id,
-                )
-                presentations = (presentation,)
-            elif isinstance(command, CloudDocumentGetCommand):
-                text, presentation = self._cloud_documents.browse(
-                    source_id=command.parameters.source_id,
-                    node_ref=command.parameters.node_ref,
-                    target_type=command.parameters.target_type,
-                    target_ref=command.parameters.target_ref,
-                    page_token=command.parameters.page_token,
-                    owner_user_id=owner_user_id,
-                    request_id=request_id,
-                )
-                presentations = (presentation,)
-            elif isinstance(command, CloudDocumentSearchCommand):
-                text, presentation = self._cloud_documents.search(
-                    source_id=command.parameters.source_id,
-                    query=command.parameters.query,
-                    page_token=command.parameters.page_token,
-                    owner_user_id=owner_user_id,
-                    request_id=request_id,
-                )
-                presentations = (presentation,)
             elif isinstance(command, HistoryMoreCommand):
                 text = self._conversations.more_history(**context)
             elif isinstance(command, CapabilityListCommand):
@@ -198,7 +148,6 @@ class ChannelActionExecutor:
                         catalog=catalog,
                         account_id=account_id,
                         external_address_hash=external_address_hash,
-                        features=features,
                         save_selection=(
                             str(
                                 (provider_context or {}).get(
@@ -274,7 +223,6 @@ class ChannelActionExecutor:
                         catalog=catalog,
                         account_id=account_id,
                         external_address_hash=external_address_hash,
-                        features=features,
                     )
                 )
                 presentations = (capability_presentation,)
@@ -283,8 +231,6 @@ class ChannelActionExecutor:
                         capability_presentation,
                         settings_presentation,
                     )
-            elif isinstance(command, ClarifyCommand):
-                text = command.parameters.clarification_question
             elif isinstance(command, SelectionChooseCommand):
                 raise RuntimeError(
                     'selection.choose must be resolved before execution'

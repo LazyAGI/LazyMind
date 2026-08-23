@@ -4,31 +4,25 @@
 package scanadapter
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"io"
+	"errors"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
 	"lazymind/core/capability"
+	"lazymind/core/common"
 )
-
-type HTTPClient interface {
-	Do(*http.Request) (*http.Response, error)
-}
 
 type CloudDocumentReader struct {
 	scanBase      *url.URL
 	authBase      *url.URL
 	internalToken string
-	client        HTTPClient
 	timeout       time.Duration
 }
 
-func NewCloudDocumentReader(scanBaseURL, authBaseURL, internalToken string, client HTTPClient, timeout time.Duration) (*CloudDocumentReader, error) {
+func NewCloudDocumentReader(scanBaseURL, authBaseURL, internalToken string, timeout time.Duration) (*CloudDocumentReader, error) {
 	scanBase, err := parseBaseURL(scanBaseURL)
 	if err != nil {
 		return nil, capability.NewError(capability.InvalidArgument, "cloud_document.adapter.new", "scan base_url is invalid", false, err)
@@ -37,15 +31,12 @@ func NewCloudDocumentReader(scanBaseURL, authBaseURL, internalToken string, clie
 	if err != nil {
 		return nil, capability.NewError(capability.InvalidArgument, "cloud_document.adapter.new", "auth base_url is invalid", false, err)
 	}
-	if client == nil {
-		client = http.DefaultClient
-	}
 	if timeout <= 0 {
 		timeout = 10 * time.Second
 	}
 	return &CloudDocumentReader{
 		scanBase: scanBase, authBase: authBase, internalToken: strings.TrimSpace(internalToken),
-		client: client, timeout: timeout,
+		timeout: timeout,
 	}, nil
 }
 
@@ -102,7 +93,7 @@ func (a *CloudDocumentReader) GetCloudDocument(ctx context.Context, call capabil
 		"node_ref":           in.NodeRef,
 	}
 	var page treePage
-	if err := a.request(ctx, call, "cloud_document.get", a.scanBase, "/api/scan/binding-targets/tree/children", http.MethodPost, body, false, &page); err != nil {
+	if err := a.request(ctx, call, "cloud_document.get", a.scanBase, "/api/scan/binding-targets/tree/children", body, false, &page); err != nil {
 		return capability.GetCloudDocumentResult{}, err
 	}
 	result.Documents = make([]capability.CloudDocumentMetadata, 0, len(page.Items))
@@ -133,7 +124,7 @@ func (a *CloudDocumentReader) SearchCloudDocuments(ctx context.Context, call cap
 		"node_ref":           in.NodeRef,
 	}
 	var page treePage
-	if err := a.request(ctx, call, "cloud_document.search", a.scanBase, "/api/scan/binding-targets/tree/search", http.MethodPost, body, false, &page); err != nil {
+	if err := a.request(ctx, call, "cloud_document.search", a.scanBase, "/api/scan/binding-targets/tree/search", body, false, &page); err != nil {
 		return capability.SearchCloudDocumentsResult{}, err
 	}
 	hits := make([]capability.CloudDocumentSearchHit, 0, len(page.Items))
@@ -176,62 +167,49 @@ func (a *CloudDocumentReader) accounts(ctx context.Context, call capability.Invo
 	query.Set("owner_user_id", call.Principal.UserID)
 	var envelope cloudAccountEnvelope
 	path := "/v1/cloud/connections/internal/chat-enabled?" + query.Encode()
-	if err := a.request(ctx, call, op, a.authBase, path, http.MethodGet, nil, true, &envelope); err != nil {
+	if err := a.request(ctx, call, op, a.authBase, path, nil, true, &envelope); err != nil {
 		return nil, err
 	}
 	return envelope.Data.Items, nil
 }
 
-func (a *CloudDocumentReader) request(ctx context.Context, call capability.InvocationContext, op string, base *url.URL, path, method string, body any, internal bool, out any) error {
-	var reader io.Reader
-	if body != nil {
-		raw, err := json.Marshal(body)
-		if err != nil {
-			return capability.NewError(capability.Internal, op, "request encoding failed", false, err)
-		}
-		reader = bytes.NewReader(raw)
-	}
-	c, cancel := context.WithTimeout(ctx, a.timeout)
-	defer cancel()
-	u := endpoint(base, path)
-	req, err := http.NewRequestWithContext(c, method, u.String(), reader)
-	if err != nil {
-		return capability.NewError(capability.Internal, op, "request creation failed", false, err)
-	}
-	req.Header.Set("Accept", "application/json")
-	req.Header.Set("X-User-ID", call.Principal.UserID)
+func (a *CloudDocumentReader) request(ctx context.Context, call capability.InvocationContext, op string, base *url.URL, path string, body any, internal bool, out any) error {
+	headers := map[string]string{"X-User-ID": call.Principal.UserID}
 	if call.Principal.TenantID != "" {
-		req.Header.Set("X-Tenant-ID", call.Principal.TenantID)
-	}
-	if body != nil {
-		req.Header.Set("Content-Type", "application/json")
+		headers["X-Tenant-ID"] = call.Principal.TenantID
 	}
 	if internal && a.internalToken != "" {
-		req.Header.Set("X-LazyMind-Internal-Token", a.internalToken)
+		headers["X-LazyMind-Internal-Token"] = a.internalToken
 	}
-	resp, err := a.client.Do(req)
-	if err != nil {
-		return capability.NewError(capability.Unavailable, op, "cloud document backend unavailable", true, err)
+	var err error
+	if body == nil {
+		err = common.ApiGet(ctx, endpoint(base, path).String(), headers, out, a.timeout)
+	} else {
+		err = common.ApiPost(ctx, endpoint(base, path).String(), body, headers, out, a.timeout)
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		code := capability.Internal
+	if err == nil {
+		return nil
+	}
+	code := capability.Unavailable
+	retryable := true
+	var httpErr *common.HTTPError
+	if errors.As(err, &httpErr) {
+		retryable = false
 		switch {
-		case resp.StatusCode == http.StatusBadRequest:
+		case httpErr.StatusCode == http.StatusBadRequest:
 			code = capability.InvalidArgument
-		case resp.StatusCode == http.StatusUnauthorized || resp.StatusCode == http.StatusForbidden:
+		case httpErr.StatusCode == http.StatusUnauthorized || httpErr.StatusCode == http.StatusForbidden:
 			code = capability.PermissionDenied
-		case resp.StatusCode == http.StatusNotFound:
+		case httpErr.StatusCode == http.StatusNotFound:
 			code = capability.NotFound
-		case resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500:
+		case httpErr.StatusCode == http.StatusTooManyRequests || httpErr.StatusCode >= 500:
 			code = capability.Unavailable
+			retryable = true
+		default:
+			code = capability.Internal
 		}
-		return capability.NewError(code, op, "cloud document request failed", code == capability.Unavailable, nil)
 	}
-	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
-		return capability.NewError(capability.Unavailable, op, "cloud document response is invalid", true, err)
-	}
-	return nil
+	return capability.NewError(code, op, "cloud document request failed", retryable, err)
 }
 
 func endpoint(base *url.URL, path string) *url.URL {

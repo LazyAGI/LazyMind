@@ -27,7 +27,9 @@ func TestInvocationMiddlewareRecordsRealMCPCall(t *testing.T) {
 				"execution_id": "attempt-1", "step_contract": map[string]any{"session_id": "session-1", "step_id": "draft"},
 			}}, nil
 		})
-	server.AddReceivingMiddleware(invocationMiddleware(recorder, "connector-1", map[string]bool{"workflow.step.begin": false}))
+	server.AddReceivingMiddleware(invocationMiddleware(
+		recorder, "connector-1", "codex", map[string]bool{"workflow.step.begin": false},
+	))
 	serverSession, err := server.Connect(ctx, serverTransport, nil)
 	if err != nil {
 		t.Fatalf("connect server: %v", err)
@@ -43,9 +45,12 @@ func TestInvocationMiddlewareRecordsRealMCPCall(t *testing.T) {
 	result, err := clientSession.CallTool(ctx, &mcp.CallToolParams{Name: "workflow.step.begin", Arguments: map[string]any{
 		"session_id": "session-1", "step_id": "draft", "objective": "do not persist this prompt",
 	}, Meta: mcp.Meta{
-		"threadId":              "codex-thread-1",
-		"callId":                "tool-call-must-not-replace-turn",
-		"x-codex-turn-metadata": map[string]any{"turn_id": "codex-turn-1", "thread_source": "user"},
+		"threadId": "codex-thread-1",
+		"callId":   "tool-call-must-not-replace-turn",
+		"x-codex-turn-metadata": map[string]any{
+			"turn_id": "codex-turn-1", "thread_source": "user",
+			"cwd": "/Users/example/DataAnnotation",
+		},
 	}})
 	if err != nil || result.IsError {
 		t.Fatalf("call tool: result=%+v err=%v", result, err)
@@ -62,7 +67,8 @@ func TestInvocationMiddlewareRecordsRealMCPCall(t *testing.T) {
 		t.Fatalf("start evidence: %+v", starts[0])
 	}
 	if starts[0].Source == nil || starts[0].Source.Provider != "codex" ||
-		starts[0].Source.ThreadID != "codex-thread-1" || starts[0].Source.TurnID != "codex-turn-1" {
+		starts[0].Source.ThreadID != "codex-thread-1" || starts[0].Source.TurnID != "codex-turn-1" ||
+		starts[0].Source.ProjectKey == "" || starts[0].Source.ProjectName != "DataAnnotation" {
 		t.Fatalf("source context: %+v", starts[0].Source)
 	}
 	if strings.Contains(string(starts[0].RequestSummary), "do not persist") ||
@@ -78,7 +84,7 @@ func TestInvocationMiddlewareRecordsRealMCPCall(t *testing.T) {
 func TestInvocationMiddlewareFailsClosedBeforeToolSideEffect(t *testing.T) {
 	recorder := &recordingInvocationRecorder{startErr: errors.New("ledger unavailable")}
 	called := false
-	middleware := invocationMiddleware(recorder, "connector-1", nil)
+	middleware := invocationMiddleware(recorder, "connector-1", "codex", nil)
 	request := &mcp.CallToolRequest{Params: &mcp.CallToolParamsRaw{Name: "knowledge.list"}}
 	_, err := middleware(func(context.Context, string, mcp.Request) (mcp.Result, error) {
 		called = true

@@ -6,16 +6,22 @@ import logging
 import threading
 import uuid
 from typing import Any
-from urllib.parse import urlsplit
 
+from channel_gateway.common.application.task_artifacts import (
+    artifact_manifest_hash,
+    find_task,
+    task_artifact_manifest,
+    task_terminal,
+)
 from channel_gateway.common.domain.channel import ClaimedOutbound
-from channel_gateway.common.domain.outbound import is_image_content_type
 from channel_gateway.common.ports.core import TaskClient
+from channel_gateway.common.ports.messaging import (
+    TaskArtifactOutboxRepository,
+)
 from channel_gateway.common.ports.providers import RuntimeCredentialStore
 from channel_gateway.feishu.domain import workspace_card_expired
 from channel_gateway.feishu.ports import (
     FeishuOutboundFactory,
-    FeishuTaskOutboxRepository,
 )
 from channel_gateway.feishu.presentation import (
     FeishuPresentationRenderer,
@@ -27,16 +33,6 @@ _POLL_SECONDS = 5
 _TASK_OUTBOX_LIMIT = 100
 _MAX_TASK_IMAGES = 20
 _MONITOR_STATE_VERSION = 5
-_TERMINAL_STATUSES = {
-    'completed',
-    'succeeded',
-    'success',
-    'failed',
-    'cancelled',
-    'canceled',
-    'stopped',
-    'interrupted',
-}
 
 
 class FeishuTaskCardMonitor:
@@ -45,7 +41,7 @@ class FeishuTaskCardMonitor:
     def __init__(
         self,
         *,
-        store: FeishuTaskOutboxRepository,
+        store: TaskArtifactOutboxRepository,
         credentials: RuntimeCredentialStore,
         channels: FeishuOutboundFactory,
         tasks: TaskClient,
@@ -139,11 +135,13 @@ class FeishuTaskCardMonitor:
             task = find_task(tasks, anchor_task_id)
             if task is None:
                 continue
-            terminal = _task_terminal(task)
-            artifacts, omitted_artifacts = _task_artifact_manifest(
-                outbound,
-                part_index,
-                task,
+            terminal = task_terminal(task)
+            artifacts, omitted_artifacts = task_artifact_manifest(
+                parent_outbox_id=outbound.outbox_id,
+                part_index=part_index,
+                tasks=[task],
+                allowed_kinds={'image'},
+                limit=_MAX_TASK_IMAGES,
             )
             delivery = self._store.sync_task_artifact_outbounds(
                 parent=outbound,
@@ -193,7 +191,7 @@ class FeishuTaskCardMonitor:
                     'artifacts_complete': artifacts_complete,
                     'failed_count': delivery['dead'],
                     'omitted_count': omitted_artifacts,
-                    'manifest_hash': _artifact_manifest_hash(artifacts),
+                    'manifest_hash': artifact_manifest_hash(artifacts),
                     'latest_status': str(task.get('status') or '').lower(),
                 },
             }
@@ -301,103 +299,6 @@ def _task_bindings(
         if str(part.get('task_id') or '')
         and str(part.get('conversation_id') or '')
     ]
-
-
-def _task_image_projection(
-    task: dict[str, Any],
-) -> tuple[list[tuple[str, str, str]], int]:
-    task_id = str(task.get('task_id') or '')
-    if not task_id:
-        return [], 0
-    images: dict[str, tuple[str, str, str]] = {}
-    for artifact in (
-        task.get('artifacts')
-        if isinstance(task.get('artifacts'), list)
-        else []
-    ):
-        if (
-            not isinstance(artifact, dict)
-            or not is_image_content_type(artifact.get('content_type'))
-        ):
-            continue
-        value = artifact.get('value')
-        if not isinstance(value, dict):
-            continue
-        source = str(value.get('url') or '').strip()
-        if not _is_lazymind_static_file(source):
-            continue
-        slot = str(artifact.get('slot') or 'image')
-        sequence = str(artifact.get('seq') or 0)
-        artifact_key = hashlib.sha256(
-            f'{task_id}\0{slot}\0{sequence}'.encode()
-        ).hexdigest()
-        images.pop(artifact_key, None)
-        images[artifact_key] = (
-            artifact_key,
-            source,
-            str(value.get('caption') or '').strip()[:300],
-        )
-    values = list(images.values())
-    return (
-        values[-_MAX_TASK_IMAGES:],
-        max(0, len(values) - _MAX_TASK_IMAGES),
-    )
-
-
-def _task_artifact_manifest(
-    outbound: ClaimedOutbound,
-    part_index: int,
-    task: dict[str, Any],
-) -> tuple[list[dict[str, str]], int]:
-    artifacts: list[dict[str, str]] = []
-    images, omitted = _task_image_projection(task)
-    for artifact_key, source, caption in images:
-        artifacts.append({
-            'artifact_key': artifact_key,
-            'source': source,
-            'caption': caption,
-            'delivery_id': str(
-                uuid.uuid5(
-                    uuid.NAMESPACE_URL,
-                    (
-                        f'lazymind:{outbound.outbox_id}:'
-                        f'task-artifact:{part_index}:{artifact_key}'
-                    ),
-                )
-            ),
-        })
-    return artifacts, omitted
-
-
-def _artifact_manifest_hash(artifacts: list[dict[str, str]]) -> str:
-    return hashlib.sha256(
-        '\0'.join(
-            str(artifact.get('artifact_key') or '')
-            for artifact in artifacts
-        ).encode()
-    ).hexdigest()
-
-
-def _is_lazymind_static_file(source: str) -> bool:
-    return urlsplit(source).path.startswith('/static-files/')
-
-
-def find_task(
-    tasks: list[dict[str, Any]],
-    task_id: str,
-) -> dict[str, Any] | None:
-    return next(
-        (
-            task
-            for task in tasks
-            if str(task.get('task_id') or '') == task_id
-        ),
-        None,
-    )
-
-
-def _task_terminal(task: dict[str, Any]) -> bool:
-    return str(task.get('status') or '').lower() in _TERMINAL_STATUSES
 
 
 def _task_signature(

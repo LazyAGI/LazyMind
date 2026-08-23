@@ -11,12 +11,29 @@ import (
 type retryingCoreClient struct {
 	mu     sync.Mutex
 	inputs []map[string]any
+	paths  []string
 	fail   int
 }
 
 type countingRunner struct{ calls int }
 
+type catalogRunner struct{ countingRunner }
+
+func (catalogRunner) Sessions(context.Context) ([]NativeSession, error) {
+	return []NativeSession{{
+		ThreadID: "thread-1", ProjectKey: "project-1", ProjectName: "LazyRAG",
+		DisplayName: "真实会话",
+		Turns:       []NativeTurn{{ID: "turn-1", User: "问题", Assistant: "回答"}},
+	}}, nil
+}
+
 type blockingCoreClient struct{}
+
+type pendingMirrorCoreClient struct {
+	paths  []string
+	inputs []map[string]any
+	reject int
+}
 
 func (r *countingRunner) Run(context.Context, Run, func(Event) error) error {
 	r.calls++
@@ -28,7 +45,18 @@ func (blockingCoreClient) DoJSON(ctx context.Context, _, _ string, _, _ any) err
 	return ctx.Err()
 }
 
-func (c *retryingCoreClient) DoJSON(_ context.Context, _, _ string, input, _ any) error {
+func (c *pendingMirrorCoreClient) DoJSON(_ context.Context, _, path string, input, output any) error {
+	c.paths = append(c.paths, path)
+	request := input.(map[string]any)
+	c.inputs = append(c.inputs, request)
+	if response, ok := output.(*syncSessionCatalogResponse); ok {
+		response.Updated = len(request["sessions"].([]NativeSession)) - c.reject
+		response.Rejected = c.reject
+	}
+	return nil
+}
+
+func (c *retryingCoreClient) DoJSON(_ context.Context, _, path string, input, output any) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	copyInput := make(map[string]any, len(input.(map[string]any)))
@@ -36,10 +64,40 @@ func (c *retryingCoreClient) DoJSON(_ context.Context, _, _ string, input, _ any
 		copyInput[key] = value
 	}
 	c.inputs = append(c.inputs, copyInput)
+	c.paths = append(c.paths, path)
 	if len(c.inputs) <= c.fail {
 		return errors.New("response was lost")
 	}
+	if response, ok := output.(*syncSessionCatalogResponse); ok {
+		response.Updated = len(copyInput["sessions"].([]NativeSession))
+	}
 	return nil
+}
+
+func TestHostSynchronizesProviderNativeSessions(t *testing.T) {
+	client := &retryingCoreClient{}
+	host := &Host{api: client, runner: &catalogRunner{}, provider: "codex", id: "host-1"}
+	if !host.syncSessionCatalog(context.Background()) {
+		t.Fatal("session catalog sync failed")
+	}
+	if len(client.paths) != 1 || client.paths[0] != "/external-chat/providers/codex/sessions:sync" {
+		t.Fatalf("paths=%#v", client.paths)
+	}
+	sessions, ok := client.inputs[0]["sessions"].([]NativeSession)
+	if !ok || len(sessions) != 1 || sessions[0].ProjectName != "LazyRAG" || len(sessions[0].Turns) != 1 {
+		t.Fatalf("sessions=%#v", client.inputs[0]["sessions"])
+	}
+	if client.inputs[0]["host_id"] != "host-1" {
+		t.Fatalf("host identity=%#v", client.inputs[0])
+	}
+}
+
+func TestHostDoesNotAcceptPartialNativeCatalogImport(t *testing.T) {
+	client := &pendingMirrorCoreClient{reject: 1}
+	host := &Host{api: client, runner: &catalogRunner{}, provider: "cursor", id: "host-1"}
+	if host.syncSessionCatalog(context.Background()) {
+		t.Fatal("partial native catalog import was accepted")
+	}
 }
 
 func TestHostEventRetryKeepsIdempotencyAndLeaseTokens(t *testing.T) {

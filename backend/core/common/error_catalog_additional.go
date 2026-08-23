@@ -324,6 +324,7 @@ func init() {
 	registerAdditionalError("conversation has an unsupported chat executor", http.StatusConflict, 2002051)
 	registerAdditionalError("external chat executors require streaming", http.StatusConflict, 2002052)
 	registerAdditionalError("unsupported external chat provider", http.StatusBadRequest, 2002053)
+	registerAdditionalErrorAlias("invalid external Agent session catalog", "Invalid request", http.StatusBadRequest, 2000103)
 	registerAdditionalError("valid provider and host_id are required", http.StatusBadRequest, 2002054)
 	registerAdditionalError("host_id and lease_token are required", http.StatusBadRequest, 2002055)
 	registerAdditionalError("host_id, lease_token and event_id are required", http.StatusBadRequest, 2002056)

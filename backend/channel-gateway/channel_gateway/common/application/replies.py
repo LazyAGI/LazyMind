@@ -11,6 +11,8 @@ from channel_gateway.common.domain.commands import (
     command_kind,
 )
 from channel_gateway.common.domain.outbound import (
+    ConversationCatalogItemPresentation,
+    ConversationCatalogPresentation,
     AskPresentation,
     AskQuestionPresentation,
     ExecutionPresentation,
@@ -338,7 +340,7 @@ class ChannelReplyBuilder:
         self,
         account_id: str,
         external_address_hash: str,
-    ) -> SelectionPresentation | None:
+    ) -> ReplyPresentation | None:
         selection = self._store.get_selection_context(
             account_id,
             external_address_hash,
@@ -348,6 +350,40 @@ class ChannelReplyBuilder:
         raw_items = selection.get('items')
         if not isinstance(raw_items, list):
             return None
+        kind = str(selection.get('kind') or '')
+        if kind == 'conversation':
+            items = tuple(
+                ConversationCatalogItemPresentation(
+                    index=index,
+                    conversation_id=str(item.get('conversation_id') or ''),
+                    provider_thread_id=str(item.get('provider_thread_id') or ''),
+                    display_name=self._selection_label(item, index),
+                    update_time=str(item.get('update_time') or ''),
+                    project_key=str(item.get('project_key') or ''),
+                    project_name=str(item.get('project_name') or ''),
+                )
+                for index, item in enumerate(raw_items, start=1)
+                if isinstance(item, dict)
+                and (
+                    str(item.get('conversation_id') or '')
+                    or str(item.get('provider_thread_id') or '')
+                )
+            )
+            if not items:
+                return None
+            assistant = next(
+                (
+                    str(item.get('assistant') or 'lazymind')
+                    for item in raw_items if isinstance(item, dict)
+                ),
+                'lazymind',
+            )
+            return ConversationCatalogPresentation(
+                kind='conversation_catalog',
+                selection_id=str(selection.get('id') or ''),
+                assistant=assistant,
+                items=items,
+            )
         options = tuple(
             SelectionOption(
                 label=self._selection_label(item, index),
@@ -365,7 +401,6 @@ class ChannelReplyBuilder:
             'tool': '选择工具',
             'personalization': '选择个人习惯',
         }
-        kind = str(selection.get('kind') or '')
         return SelectionPresentation(
             kind='selection',
             selection_id=str(selection.get('id') or ''),

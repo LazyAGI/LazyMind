@@ -58,15 +58,27 @@ func TestConversationListSeparatesAssistantOwnershipFromExecutionEngine(t *testi
 	}
 	for _, binding := range []orm.ExternalAgentBinding{
 		{ID: "managed-binding", ConversationID: "managed", Provider: ChatExecutorCodex,
-			ProviderThreadID: "managed-thread", ManagedByLazyMind: true, CreatedByUserID: "u1", CreatedAt: now, UpdatedAt: now},
+			HostID: "host-1", ProviderThreadID: "managed-thread", CreatedByUserID: "u1", CreatedAt: now, UpdatedAt: now},
 		{ID: "external-binding", ConversationID: "external", Provider: ChatExecutorCodex,
-			ProviderThreadID: "external-thread", ManagedByLazyMind: false, CreatedByUserID: "u1", CreatedAt: now, UpdatedAt: now},
-		{ID: "external-cursor-binding", ConversationID: "external", Provider: ChatExecutorCursor,
-			ProviderThreadID: "external-cursor-thread", ManagedByLazyMind: true, CreatedByUserID: "u1", CreatedAt: now, UpdatedAt: now},
+			HostID: "host-1", ProviderThreadID: "external-thread",
+			CreatedByUserID: "u1", CreatedAt: now, UpdatedAt: now},
 		{ID: "archived-external-binding", ConversationID: "archived-external", Provider: ChatExecutorCodex,
-			ProviderThreadID: "archived-external-thread", ManagedByLazyMind: false, CreatedByUserID: "u1", CreatedAt: now, UpdatedAt: now},
+			HostID: "host-1", ProviderThreadID: "archived-external-thread", CreatedByUserID: "u1", CreatedAt: now, UpdatedAt: now},
 	} {
 		if err := db.Create(&binding).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, session := range []orm.ExternalAgentSession{
+		{ID: "managed-session", OwnerUserID: "u1", Provider: ChatExecutorCodex, HostID: "host-1",
+			ProviderThreadID: "managed-thread", ProjectKey: "codex-project-1", ProjectName: "DataAnnotation",
+			DisplayName: "Managed Codex", Active: true, LastSeenAt: now, CreatedAt: now, UpdatedAt: now},
+		{ID: "external-session", OwnerUserID: "u1", Provider: ChatExecutorCodex, HostID: "host-1",
+			ProviderThreadID: "external-thread", ProjectKey: "codex-project-1", ProjectName: "DataAnnotation",
+			DisplayName: "Codex native", TurnCount: 1,
+			Active: true, LastSeenAt: now, CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := db.Create(&session).Error; err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -75,6 +87,8 @@ func TestConversationListSeparatesAssistantOwnershipFromExecutionEngine(t *testi
 		ID           string `json:"conversation_id"`
 		Assistant    string `json:"assistant"`
 		ChatExecutor string `json:"chat_executor"`
+		ProjectKey   string `json:"project_key"`
+		ProjectName  string `json:"project_name"`
 	} {
 		req := httptest.NewRequest(http.MethodGet, "/api/core/conversations?assistant="+assistant, nil)
 		req.Header.Set("X-User-Id", "u1")
@@ -88,6 +102,8 @@ func TestConversationListSeparatesAssistantOwnershipFromExecutionEngine(t *testi
 				ID           string `json:"conversation_id"`
 				Assistant    string `json:"assistant"`
 				ChatExecutor string `json:"chat_executor"`
+				ProjectKey   string `json:"project_key"`
+				ProjectName  string `json:"project_name"`
 			} `json:"conversations"`
 		}
 		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
@@ -97,13 +113,13 @@ func TestConversationListSeparatesAssistantOwnershipFromExecutionEngine(t *testi
 	}
 
 	lazyMind := list(ChatExecutorLazyMind)
-	if len(lazyMind) != 2 || lazyMind[0].ID != "managed" || lazyMind[0].Assistant != ChatExecutorLazyMind ||
-		lazyMind[0].ChatExecutor != ChatExecutorCodex || lazyMind[1].ID != "native" {
+	if len(lazyMind) != 1 || lazyMind[0].ID != "native" || lazyMind[0].Assistant != ChatExecutorLazyMind {
 		t.Fatalf("LazyMind assistant conversations=%#v", lazyMind)
 	}
 	codex := list(ChatExecutorCodex)
-	if len(codex) != 1 || codex[0].ID != "external" || codex[0].Assistant != ChatExecutorCodex ||
-		codex[0].ChatExecutor != ChatExecutorCodex {
+	if len(codex) != 2 || codex[0].ID != "external" || codex[0].Assistant != ChatExecutorCodex ||
+		codex[0].ChatExecutor != ChatExecutorCodex || codex[0].ProjectKey != "codex-project-1" ||
+		codex[0].ProjectName != "DataAnnotation" || codex[1].ID != "managed" {
 		t.Fatalf("Codex assistant conversations=%#v", codex)
 	}
 }

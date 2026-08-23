@@ -62,11 +62,6 @@ type StartResult struct {
 	Source     *externalcontext.Link `json:"source,omitempty"`
 }
 
-type TurnSyncInput struct {
-	Source externalcontext.Source `json:"source"`
-	Answer string                 `json:"answer"`
-}
-
 type FinishInput struct {
 	Status        string          `json:"status"`
 	ResultSummary json.RawMessage `json:"result_summary,omitempty"`
@@ -105,17 +100,6 @@ type pageCursor struct {
 
 func New(db *gorm.DB) *Service { return &Service{db: db} }
 
-func (s *Service) SyncTurn(ctx context.Context, owner string, input TurnSyncInput) error {
-	if s == nil || s.db == nil {
-		return ErrInvalidInput
-	}
-	if err := externalcontext.New(s.db).SyncTurnAnswer(ctx, owner, input.Source, input.Answer); errors.Is(err, externalcontext.ErrInvalidSource) {
-		return ErrInvalidInput
-	} else {
-		return err
-	}
-}
-
 func (s *Service) Start(ctx context.Context, owner string, input StartInput) (orm.AgentInvocation, bool, error) {
 	result, err := s.StartLinked(ctx, owner, input)
 	return result.Invocation, result.Created, err
@@ -128,7 +112,7 @@ func (s *Service) StartLinked(ctx context.Context, owner string, input StartInpu
 	var output StartResult
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if input.Source != nil && strings.TrimSpace(input.ExternalRef) == "" && strings.TrimSpace(input.ConversationID) == "" {
-			link, err := externalcontext.New(tx).ResolveInvocation(ctx, owner, input.ID, input.ToolName, *input.Source)
+			link, err := externalcontext.New(tx).ResolveInvocation(ctx, owner, input.ID, *input.Source)
 			if errors.Is(err, externalcontext.ErrInvalidSource) {
 				return ErrInvalidInput
 			}
@@ -214,10 +198,6 @@ func (s *Service) Finish(ctx context.Context, owner, id string, input FinishInpu
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		record, err := (&Service{db: tx}).finishRecord(ctx, owner, id, input)
 		if err != nil {
-			return err
-		}
-		source := externalcontext.New(tx)
-		if err := source.CompleteObservedTurn(ctx, owner, record.ExternalRef); err != nil {
 			return err
 		}
 		output = record

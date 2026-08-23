@@ -4,62 +4,13 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 
-@dataclass(frozen=True, slots=True)
-class ChannelFeatureProfile:
-    enable_ask: bool = False
-    enable_workflow: bool = False
-    enable_skill: bool = False
-    enable_subagent: bool = False
-    enable_tasks: bool = False
-
-    @property
-    def basic_chat_only(self) -> bool:
-        return not (
-            self.enable_ask
-            or self.enable_workflow
-            or self.enable_skill
-            or self.enable_subagent
-            or self.enable_tasks
-        )
-
-    @property
-    def enabled_feature_labels(self) -> tuple[str, ...]:
-        labels: list[str] = []
-        if self.enable_skill:
-            labels.append('Skill')
-        if self.enable_workflow:
-            labels.append('Workflow')
-        if self.enable_subagent:
-            labels.append('SubAgent')
-        if self.enable_ask:
-            labels.append('Ask')
-        if self.enable_tasks:
-            labels.append('Task')
-        return tuple(labels)
-
-    @property
-    def disabled_tools(self) -> tuple[str, ...]:
-        tools: list[str] = []
-        if not self.enable_ask:
-            tools.append('ask_user')
-        if not self.enable_subagent:
-            tools.append('subagent')
-        if not self.enable_tasks:
-            tools.extend(('schedule', 'task', 'task_center'))
-        if not self.enable_skill:
-            tools.append('skill')
-        return tuple(tools)
-
-
-BASIC_CHAT_FEATURES = ChannelFeatureProfile()
-
-
 def retainable_provider_context(
     provider_context: dict[str, Any] | None,
 ) -> dict[str, Any]:
     """Return delivery state without one-turn Core inputs or answers."""
     retained = dict(provider_context or {})
     retained.pop('channel_execution', None)
+    retained.pop('channel_error', None)
     return retained
 
 
@@ -168,7 +119,101 @@ class ChatOptions:
     ask_answers_structured: dict[str, Any] | None = None
     thinking_depth: Literal['low', 'medium', 'high', 'max'] | None = None
     enable_workflow: bool | None = None
-    features: ChannelFeatureProfile = BASIC_CHAT_FEATURES
+
+    @classmethod
+    def from_dict(cls, value: dict[str, Any]) -> 'ChatOptions':
+        search_config = value.get('search_config')
+        mentions = value.get('mentions')
+        disabled_tools = value.get('disabled_tools')
+        filters = value.get('filters')
+        workflow_mode = value.get('workflow_mode')
+        return cls(
+            search_config=(
+                search_config if isinstance(search_config, dict) else None
+            ),
+            mentions=(
+                [dict(item) for item in mentions if isinstance(item, dict)]
+                if isinstance(mentions, list)
+                else []
+            ),
+            workflow_mode=(
+                workflow_mode
+                if workflow_mode in {'auto', 'dynamic'}
+                else None
+            ),
+            enable_workflow=(
+                value.get('enable_workflow')
+                if isinstance(value.get('enable_workflow'), bool)
+                else None
+            ),
+            use_memory=(
+                value.get('use_memory')
+                if isinstance(value.get('use_memory'), bool)
+                else None
+            ),
+            disabled_tools=(
+                [str(item) for item in disabled_tools if str(item)]
+                if isinstance(disabled_tools, list)
+                else []
+            ),
+            filters=filters if isinstance(filters, dict) else None,
+        )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'search_config': self.search_config,
+            'mentions': self.mentions,
+            'workflow_mode': self.workflow_mode,
+            'enable_workflow': self.enable_workflow,
+            'use_memory': self.use_memory,
+            'disabled_tools': self.disabled_tools,
+            'filters': self.filters,
+        }
+
+    def merged(self, override: 'ChatOptions') -> 'ChatOptions':
+        mentions = {
+            (
+                str(mention.get('type') or ''),
+                str(mention.get('resource_id') or ''),
+            ): mention
+            for mention in [*self.mentions, *override.mentions]
+        }
+        disabled_tools = set(self.disabled_tools)
+        for mention in override.mentions:
+            if mention.get('type') == 'tool':
+                disabled_tools.discard(str(mention.get('resource_id') or ''))
+        for tool_id in override.disabled_tools:
+            disabled_tools.add(tool_id)
+            mentions.pop(('tool', tool_id), None)
+        return ChatOptions(
+            search_config=(
+                override.search_config
+                if override.search_config is not None
+                else self.search_config
+            ),
+            mentions=list(mentions.values()),
+            workflow_mode=(
+                override.workflow_mode
+                if override.workflow_mode is not None
+                else self.workflow_mode
+            ),
+            enable_workflow=(
+                override.enable_workflow
+                if override.enable_workflow is not None
+                else self.enable_workflow
+            ),
+            use_memory=(
+                override.use_memory
+                if override.use_memory is not None
+                else self.use_memory
+            ),
+            disabled_tools=list(disabled_tools),
+            filters=(
+                override.filters
+                if override.filters is not None
+                else self.filters
+            ),
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,10 +244,18 @@ class CoreStreamUpdate:
 
 
 @dataclass(frozen=True, slots=True)
+class CoreRunTerminal:
+    status: Literal['completed', 'interrupted', 'failed', 'cancelled']
+    reason: str
+    code: str = ''
+    partial_output: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class CoreTurnResult:
     conversation_id: str
     history_id: str
     answer: str
-    finish_reason: str
+    run_terminal: CoreRunTerminal
     sources: tuple[Any, ...] = ()
     events: tuple[CoreEvent, ...] = ()

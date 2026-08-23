@@ -19,6 +19,9 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"lazymind/agentconnector/internal/agentcatalog"
+	"lazymind/agentconnector/internal/chatagent"
 )
 
 func TestRealConnectorStdioCallsAllLazyMindTools(t *testing.T) {
@@ -108,7 +111,11 @@ func TestRealConnectorStdioCallsAllLazyMindTools(t *testing.T) {
 	if stringField(t, detail, "id") != documentID || stringField(t, detail, "knowledge_id") != knowledge.ID {
 		t.Fatal("real knowledge.document.get returned the wrong document")
 	}
-	verifyRealCloudDocuments(t, ctx, session)
+	if os.Getenv("LAZYMIND_REAL_CONNECTOR_CLOUD_E2E") == "1" {
+		verifyRealCloudDocuments(t, ctx, session)
+	} else {
+		t.Log("cloud document calls skipped: no authorized cloud account was requested for this run")
+	}
 	workflowSessionID := verifyRealWorkflowRuntime(t, ctx, session)
 	verifyInvocationLedger(t, ctx, serverURL, accessToken, workflowSessionID)
 	verifyRejectedTokenRefresh(t, ctx, session)
@@ -261,6 +268,83 @@ func TestRealCodexWorkflowSessionScope(t *testing.T) {
 	current, ok := rawSessions[0].(map[string]any)
 	if !ok || stringField(t, current, "conversation_id") == "" || stringField(t, current, "session_id") == "" {
 		t.Fatalf("scoped Workflow session is incomplete: %#v", rawSessions[0])
+	}
+}
+
+func TestRealNativeAgentSessionCatalogs(t *testing.T) {
+	if os.Getenv("LAZYMIND_REAL_NATIVE_SESSION_CATALOG_E2E") != "1" {
+		t.Skip("set LAZYMIND_REAL_NATIVE_SESSION_CATALOG_E2E=1 to inspect native Agent catalogs")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	tests := []struct {
+		name string
+		load func(context.Context) ([]chatagent.NativeSession, error)
+	}{
+		{name: "codex", load: agentcatalog.CodexSessions},
+		{name: "cursor", load: agentcatalog.CursorSessions},
+		{name: "workbuddy", load: agentcatalog.WorkBuddySessions},
+	}
+	resumableThreads := make(map[string]map[string]struct{}, len(tests))
+	nativeSessions := make(map[string]map[string]chatagent.NativeSession, len(tests))
+	for _, test := range tests {
+		sessions, err := test.load(ctx)
+		if err != nil {
+			t.Fatalf("%s catalog: %v", test.name, err)
+		}
+		used, importedTurns := 0, 0
+		projects := map[string]struct{}{}
+		resumableThreads[test.name] = map[string]struct{}{}
+		nativeSessions[test.name] = map[string]chatagent.NativeSession{}
+		for _, session := range sessions {
+			resumableThreads[test.name][session.ThreadID] = struct{}{}
+			nativeSessions[test.name][session.ThreadID] = session
+			if len(session.Turns) > 0 {
+				used++
+				importedTurns += len(session.Turns)
+				projects[session.ProjectKey] = struct{}{}
+			}
+		}
+		if test.name == "codex" && (len(sessions) == 0 || used == 0 || importedTurns == 0 || len(projects) == 0) {
+			t.Fatalf("%s catalog has sessions=%d used=%d turns=%d projects=%d", test.name, len(sessions), used, importedTurns, len(projects))
+		}
+		t.Logf("%s sessions=%d used=%d turns=%d projects=%d", test.name, len(sessions), used, importedTurns, len(projects))
+	}
+	if os.Getenv("LAZYMIND_REAL_NATIVE_SESSION_CORE_E2E") != "1" {
+		return
+	}
+	serverURL, accessToken := realCredentials(t)
+	for provider, expected := range resumableThreads {
+		var projection struct {
+			Sessions []struct {
+				ThreadID string `json:"provider_thread_id"`
+			} `json:"sessions"`
+			Total int `json:"total_size"`
+		}
+		realAPI(t, ctx, http.MethodGet, serverURL+"/api/core/external-chat/providers/"+provider+"/sessions?page_size=100", accessToken, nil, &projection)
+		actual := make(map[string]struct{}, len(projection.Sessions))
+		for _, session := range projection.Sessions {
+			actual[session.ThreadID] = struct{}{}
+		}
+		missing := make([]string, 0)
+		for threadID := range expected {
+			if _, ok := actual[threadID]; !ok {
+				missing = append(missing, threadID)
+			}
+		}
+		if projection.Total != len(expected) || len(actual) != len(expected) || len(missing) > 0 {
+			details := make([]string, 0, len(missing))
+			for _, threadID := range missing {
+				session := nativeSessions[provider][threadID]
+				encoded, _ := json.Marshal(session)
+				details = append(details, fmt.Sprintf(
+					"%s(project=%d/%d display=%d turns=%d bytes=%d)", threadID,
+					len([]rune(session.ProjectKey)), len([]rune(session.ProjectName)),
+					len([]rune(session.DisplayName)), len(session.Turns), len(encoded),
+				))
+			}
+			t.Fatalf("%s Core projection total=%d actual=%d native=%d missing=%v", provider, projection.Total, len(actual), len(expected), details)
+		}
 	}
 }
 

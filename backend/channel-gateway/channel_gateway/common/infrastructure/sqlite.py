@@ -17,6 +17,7 @@ from channel_gateway.common.domain.channel import (
 from channel_gateway.common.infrastructure.postgres import (
     GatewayStore,
     PostgresRuntimeLease,
+    decode_snapshot,
 )
 from channel_gateway.common.ports.providers import PayloadCipher
 
@@ -208,22 +209,6 @@ class _SQLiteConnection:
         if 'pg_advisory_xact_lock' in statement:
             parameters = ()
         return self._connection.execute(_translate(statement), parameters)
-
-
-def _snapshot(value: Any) -> dict[str, Any]:
-    if isinstance(value, str):
-        try:
-            value = json.loads(value)
-        except json.JSONDecodeError:
-            return {}
-    if isinstance(value, list):
-        return {
-            'selection': {
-                'kind': 'conversation',
-                'items': list(value),
-            }
-        }
-    return dict(value) if isinstance(value, dict) else {}
 
 
 class SQLiteGatewayStore(GatewayStore):
@@ -857,7 +842,7 @@ class SQLiteGatewayStore(GatewayStore):
                     ),
                 )
                 return inserted.rowcount == 1
-            value = _snapshot(row.get('snapshot_json')) if row else {}
+            value = decode_snapshot(row.get('snapshot_json')) if row else {}
             workspace = value.get('feishu_workspace')
             if not isinstance(workspace, dict):
                 workspace = {}
@@ -901,7 +886,7 @@ class SQLiteGatewayStore(GatewayStore):
                 """,
                 (account_id, external_address_hash),
             ).fetchone()
-            value = _snapshot(row.get('snapshot_json')) if row else {}
+            value = decode_snapshot(row.get('snapshot_json')) if row else {}
             workspace = value.get('feishu_workspace')
             if not isinstance(workspace, dict):
                 workspace = {}
@@ -953,7 +938,7 @@ class SQLiteGatewayStore(GatewayStore):
                 """,
                 (account_id, external_address_hash),
             ).fetchone()
-            value = _snapshot(row.get('snapshot_json')) if row else {}
+            value = decode_snapshot(row.get('snapshot_json')) if row else {}
             workspace = value.get('feishu_workspace')
             if not isinstance(workspace, dict):
                 workspace = {}
@@ -1003,7 +988,7 @@ class SQLiteGatewayStore(GatewayStore):
                 """,
                 (account_id, external_address_hash),
             ).fetchone()
-            current = _snapshot(row.get('snapshot_json')) if row else {}
+            current = decode_snapshot(row.get('snapshot_json')) if row else {}
             value = dict(current)
             value.pop('selection', None)
             value['new_conversation'] = draft or {}
@@ -1056,7 +1041,7 @@ class SQLiteGatewayStore(GatewayStore):
                 """,
                 (account_id, external_address_hash),
             ).fetchone()
-            value = _snapshot(row.get('snapshot_json')) if row else {}
+            value = decode_snapshot(row.get('snapshot_json')) if row else {}
             if not preserve_selection:
                 value.pop('selection', None)
             value.pop('new_conversation', None)
@@ -1177,7 +1162,7 @@ class SQLiteGatewayStore(GatewayStore):
                 """,
                 (account_id, external_address_hash),
             ).fetchone()
-            value = _snapshot(row.get('snapshot_json')) if row else {}
+            value = decode_snapshot(row.get('snapshot_json')) if row else {}
             value.pop('selection', None)
             connection.execute(
                 """

@@ -15,6 +15,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"lazymind/agentconnector/internal/agentcatalog"
 	"lazymind/agentconnector/internal/coreapi"
 )
 
@@ -29,7 +30,11 @@ type invocationRecorder interface {
 	FinishInvocation(context.Context, string, coreapi.InvocationFinish) error
 }
 
-func invocationMiddleware(recorder invocationRecorder, connectorInstanceID string, readOnlyTools map[string]bool) mcp.Middleware {
+func invocationMiddleware(
+	recorder invocationRecorder,
+	connectorInstanceID, sourceProvider string,
+	readOnlyTools map[string]bool,
+) mcp.Middleware {
 	return func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, request mcp.Request) (mcp.Result, error) {
 			if method != "tools/call" {
@@ -60,7 +65,10 @@ func invocationMiddleware(recorder invocationRecorder, connectorInstanceID strin
 			}
 			if strings.TrimSpace(os.Getenv("LAZYMIND_CONVERSATION_ID")) == "" &&
 				strings.TrimSpace(os.Getenv("LAZYMIND_EXTERNAL_REF")) == "" {
-				start.Source = invocationSource(clientName, call.Params.Meta, call.Params.Name, call.Params.Arguments)
+				start.Source = invocationSource(
+					sourceProvider, call.Params.Meta, call.Params.Name,
+					call.Params.Arguments,
+				)
 			}
 			started, err := recorder.StartInvocation(ctx, invocationID, start)
 			if err != nil {
@@ -85,7 +93,6 @@ func invocationMiddleware(recorder invocationRecorder, connectorInstanceID strin
 			finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), finishTimeout)
 			finishErr := recorder.FinishInvocation(finishCtx, invocationID, finish)
 			cancel()
-			scheduleCodexTurnSync(recorder, start.Source)
 			if finishErr != nil && result == nil && callErr == nil {
 				return nil, fmt.Errorf("record LazyMind invocation result: %w", finishErr)
 			}
@@ -94,8 +101,22 @@ func invocationMiddleware(recorder invocationRecorder, connectorInstanceID strin
 	}
 }
 
-func invocationSource(clientName string, metadata mcp.Meta, toolName string, arguments json.RawMessage) *coreapi.InvocationSource {
-	provider := providerForClient(clientName)
+func invocationSource(
+	provider string,
+	metadata mcp.Meta,
+	toolName string,
+	arguments json.RawMessage,
+) *coreapi.InvocationSource {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if provider == "cursor" || provider == "workbuddy" {
+		if source, ok := agentcatalog.ResolveInvocation(provider, toolName, time.Now().UTC()); ok {
+			return &coreapi.InvocationSource{
+				Provider: source.Provider, HostID: strings.TrimSpace(os.Getenv("LAZYMIND_AGENT_HOST_ID")),
+				ThreadID: source.ThreadID, TurnID: source.TurnID,
+				ProjectKey: source.ProjectKey, ProjectName: source.ProjectName, Message: source.Message,
+			}
+		}
+	}
 	if provider == "" || len(metadata) == 0 {
 		return nil
 	}
@@ -107,16 +128,38 @@ func invocationSource(clientName string, metadata mcp.Meta, toolName string, arg
 	}
 	turnID := firstMetadataString(metadata, nested, "turnId", "turn_id", "callId", "call_id")
 	threadSource := firstMetadataString(metadata, nested, "threadSource", "thread_source")
+	projectReference := firstMetadataString(metadata, nested, "projectId", "project_id")
+	projectName := firstMetadataString(metadata, nested, "projectName", "project_name")
+	projectPath := firstMetadataString(metadata, nested, "cwd", "workspace", "workspaceRoot", "workspace_root")
+	if projectName == "" && projectPath != "" {
+		projectName = filepath.Base(filepath.Clean(projectPath))
+	}
+	projectKey := ""
+	if projectReference != "" {
+		projectKey, projectName = agentcatalog.Project(
+			provider, projectReference, projectName,
+		)
+	} else if projectPath != "" {
+		projectKey, projectName = agentcatalog.ProjectPath(
+			provider, projectPath, projectName,
+		)
+	}
+	if provider == "codex" && projectKey == "" {
+		projectKey, projectName = agentcatalog.CodexProject(threadID)
+	}
 	message := ""
 	if provider == "codex" {
-		message = codexTurnUserMessage(threadID, turnID)
+		if messageID, userMessage := agentcatalog.CodexTurnSource(threadID, turnID); messageID != "" {
+			turnID, message = messageID, userMessage
+		}
 	}
 	if message == "" {
 		message = invocationSourceMessage(toolName, arguments)
 	}
 	return &coreapi.InvocationSource{
-		Provider: provider, ThreadID: threadID, TurnID: turnID, ThreadSource: threadSource,
-		Message: message,
+		Provider: provider, HostID: strings.TrimSpace(os.Getenv("LAZYMIND_AGENT_HOST_ID")),
+		ThreadID: threadID, TurnID: turnID, ThreadSource: threadSource,
+		ProjectKey: projectKey, ProjectName: projectName, Message: message,
 	}
 }
 
@@ -142,24 +185,6 @@ func invocationSourceMessage(toolName string, arguments json.RawMessage) string 
 		}
 	}
 	return ""
-}
-
-func providerForClient(clientName string) string {
-	value := strings.ToLower(strings.TrimSpace(clientName))
-	switch {
-	case strings.Contains(value, "codex"):
-		return "codex"
-	case strings.Contains(value, "cursor"):
-		return "cursor"
-	case strings.Contains(value, "workbuddy"):
-		return "workbuddy"
-	case strings.Contains(value, "trae"):
-		return "trae-work"
-	case strings.Contains(value, "deepseek"), strings.Contains(value, "dsh"):
-		return "deepseek-harness"
-	default:
-		return ""
-	}
 }
 
 func firstMetadataString(primary, secondary map[string]any, keys ...string) string {

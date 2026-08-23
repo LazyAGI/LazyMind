@@ -53,23 +53,6 @@ func (h Handler) Finish(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, map[string]any{"invocation": record})
 }
 
-func (h Handler) SyncTurn(w http.ResponseWriter, r *http.Request) {
-	owner, ok := requestOwner(w, r)
-	if !ok {
-		return
-	}
-	var input TurnSyncInput
-	if json.NewDecoder(http.MaxBytesReader(w, r.Body, 2<<20)).Decode(&input) != nil {
-		common.ReplyErr(w, ErrInvalidInput.Error(), http.StatusBadRequest)
-		return
-	}
-	if err := h.Service.SyncTurn(r.Context(), owner, input); err != nil {
-		writeError(w, err)
-		return
-	}
-	common.ReplyOK(w, map[string]any{"synced": true})
-}
-
 func (h Handler) List(w http.ResponseWriter, r *http.Request) {
 	owner, ok := requestOwner(w, r)
 	if !ok {

@@ -83,7 +83,6 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/agent-invocations/{invocation_id}:start", []string{"qa.write"}, invocationHandler.Start)
 	handleAPI(r, "POST", "/agent-invocations/{invocation_id}:finish", []string{"qa.write"}, invocationHandler.Finish)
 	handleAPI(r, "GET", "/agent-invocations", []string{"qa.read"}, invocationHandler.List)
-	handleAPI(r, "POST", "/external-agent/turns:sync", []string{"qa.write"}, invocationHandler.SyncTurn)
 
 	attemptHandler := workflowattempt.Handler{Service: workflowattempt.New(corestore.DB(), workflowattempt.Config{})}
 	remoteExecutorHandler := workflowexecutor.RemoteHandler{
@@ -231,7 +230,6 @@ func registerAllRoutes(r *mux.Router) {
 
 	// ----- text -----
 	handleAPI(r, "POST", "/chat", []string{"qa.write"}, chat.Chat)
-	handleAPI(r, "POST", "/channel-intents:classify", []string{"qa.write"}, chat.ClassifyChannelIntent)
 	handleAPI(r, "GET", "/tools", []string{"qa.read"}, chat.ListTools)
 	handleAPI(r, "POST", "/tools/{tool_name}:disable", []string{"qa.read"}, chat.DisableTool)
 	handleAPI(r, "POST", "/tools/{tool_name}:enable", []string{"qa.read"}, chat.EnableTool)
@@ -288,9 +286,12 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/conversations/{conversation_id}:toolLimitDecision", []string{"qa.write"}, chat.DecideToolLimit)
 	handleAPI(r, "GET", "/conversations/{conversation_id}:status", []string{"qa.read"}, chat.GetChatStatus)
 	handleAPI(r, "GET", "/chat/executors", []string{"qa.read"}, chat.ListChatExecutors)
-	handleAPI(r, "GET", "/external-chat/hosts/{provider}:status", []string{"qa.read"}, chat.ExternalChatHostStatus)
+	handleAPI(r, "GET", "/external-chat/hosts/{provider}/status", []string{"qa.read"}, chat.ExternalChatHostStatus)
+	handleAPI(r, "GET", "/external-chat/providers/{provider}/sessions", []string{"qa.read"}, chat.ListExternalAgentSessions)
+	handleAPI(r, "POST", "/external-chat/providers/{provider}/sessions/{thread_id}/binding", []string{"qa.write"}, chat.BindExternalAgentSession)
+	handleAPI(r, "POST", "/external-chat/providers/{provider}/sessions:sync", []string{"qa.write"}, chat.SyncExternalAgentSessions)
 	handleAPI(r, "GET", "/external-chat/runs", []string{"qa.read"}, chat.ListExternalChatRuns)
-	handleAPI(r, "POST", "/external-chat/hosts/{provider}:claim", []string{"qa.write"}, chat.ClaimExternalChatRun)
+	handleAPI(r, "POST", "/external-chat/hosts/{provider}/claim", []string{"qa.write"}, chat.ClaimExternalChatRun)
 	handleAPI(r, "POST", "/external-chat/runs/{run_id}:heartbeat", []string{"qa.write"}, chat.HeartbeatExternalChatRun)
 	handleAPI(r, "POST", "/external-chat/runs/{run_id}:event", []string{"qa.write"}, chat.PublishExternalChatEvent)
 

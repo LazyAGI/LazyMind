@@ -139,6 +139,39 @@ class OutboxWorkRepository(Protocol):
         ...
 
 
+class TaskArtifactOutboxRepository(Protocol):
+    def list_sent_task_artifact_outbounds(
+        self,
+        *,
+        provider: str,
+        limit: int,
+        after_sequence: int = 0,
+        monitor_version: int,
+    ) -> list[ClaimedOutbound]:
+        ...
+
+    def sync_task_artifact_outbounds(
+        self,
+        *,
+        parent: ClaimedOutbound,
+        part_index: int,
+        artifacts: list[dict[str, str]],
+        provider_context: dict[str, Any] | None = None,
+    ) -> dict[str, int]:
+        ...
+
+    def compare_and_save_sent_task_monitor_state(
+        self,
+        *,
+        outbox_id: str,
+        part_index: int,
+        expected_revision: int,
+        state: dict[str, Any],
+        complete: bool,
+    ) -> dict[str, Any] | None:
+        ...
+
+
 class DeliveryProvider(Protocol):
     def render(self, message: ClaimedOutbound) -> list[dict[str, Any]]:
         ...

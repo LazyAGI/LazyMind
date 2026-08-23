@@ -1,9 +1,10 @@
 import base64
+import binascii
 import hashlib
 import hmac
 import os
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 import httpx
 from cryptography.hazmat.primitives import padding
@@ -16,6 +17,7 @@ ILINK_CLIENT_VERSION = (2 << 16) | (4 << 8) | 6
 QR_BOT_TYPE = '3'
 BOT_AGENT = 'lazymind-channel-gateway'
 ILINK_CDN_BASE_URL = 'https://novac2c.cdn.weixin.qq.com/c2c'
+_MAX_MEDIA_BYTES = 100 * 1024 * 1024
 
 
 class WeChatClient:
@@ -139,6 +141,54 @@ class WeChatClient:
             raise WeChatError('Cannot notify WeChat adapter start') from exc
         self._decode_response(response)
 
+    def download_media(
+        self,
+        *,
+        media: dict[str, Any],
+        aes_key_hint: str = '',
+        max_bytes: int = _MAX_MEDIA_BYTES,
+    ) -> bytes:
+        full_url = str(media.get('full_url') or '').strip()
+        encrypted_query = str(
+            media.get('encrypt_query_param') or ''
+        ).strip()
+        url = full_url or (
+            f'{ILINK_CDN_BASE_URL}/download'
+            f'?encrypted_query_param={quote(encrypted_query, safe="")}'
+        )
+        if not (full_url or encrypted_query) or not self._valid_media_url(url):
+            raise WeChatError('WeChat media URL is invalid')
+        try:
+            with httpx.stream('GET', url, timeout=60.0) as response:
+                if response.status_code != 200:
+                    raise WeChatError(
+                        f'WeChat CDN returned HTTP {response.status_code}'
+                    )
+                content = bytearray()
+                for chunk in response.iter_bytes():
+                    content.extend(chunk)
+                    if len(content) > max_bytes + algorithms.AES.block_size:
+                        raise WeChatError('WeChat media exceeds the size limit')
+        except httpx.HTTPError as exc:
+            raise WeChatError('Cannot download WeChat media') from exc
+        if not content:
+            raise WeChatError('WeChat media is empty')
+        key = self._decode_aes_key(
+            aes_key_hint or str(media.get('aes_key') or '')
+        )
+        if key is None:
+            return bytes(content)
+        try:
+            decryptor = Cipher(algorithms.AES(key), modes.ECB()).decryptor()
+            padded = decryptor.update(bytes(content)) + decryptor.finalize()
+            unpadder = padding.PKCS7(algorithms.AES.block_size).unpadder()
+            plaintext = unpadder.update(padded) + unpadder.finalize()
+        except ValueError as exc:
+            raise WeChatError('Cannot decrypt WeChat media') from exc
+        if not plaintext or len(plaintext) > max_bytes:
+            raise WeChatError('WeChat media is empty or exceeds the size limit')
+        return plaintext
+
     def send_text(
         self,
         *,
@@ -183,58 +233,14 @@ class WeChatClient:
         token: str,
         to_user_id: str,
         image: bytes,
-        idempotency_key: str,
     ) -> dict[str, Any]:
-        if not image:
-            raise WeChatError('Cannot send an empty image')
-        key_material = hmac.new(
-            token.encode('utf-8'),
-            (
-                b'lazymind-wechat-image-v1\x00'
-                + idempotency_key.encode('utf-8')
-                + b'\x00'
-                + hashlib.sha256(image).digest()
-            ),
-            hashlib.sha256,
-        ).digest()
-        file_key = key_material[:16].hex()
-        aes_key = key_material[16:]
-        ciphertext = self._encrypt_media(image, aes_key)
-        upload = self._get_upload_url(
+        return self._upload_item(
             base_url=base_url,
             token=token,
             to_user_id=to_user_id,
-            file_key=file_key,
-            aes_key=aes_key,
-            media_type=1,
             content=image,
-            encrypted_size=len(ciphertext),
+            kind='image',
         )
-        upload_url = str(upload.get('upload_full_url') or '').strip()
-        if not upload_url:
-            upload_param = str(upload.get('upload_param') or '').strip()
-            if not upload_param:
-                raise WeChatError('WeChat did not return an image upload URL')
-            upload_url = (
-                f'{ILINK_CDN_BASE_URL}/upload'
-                f'?encrypted_query_param={quote(upload_param, safe="")}'
-                f'&filekey={quote(file_key, safe="")}'
-            )
-        download_param = self._upload_media(upload_url, ciphertext)
-        aes_key_base64 = base64.b64encode(
-            aes_key.hex().encode('ascii')
-        ).decode('ascii')
-        return {
-            'type': 2,
-            'image_item': {
-                'media': {
-                    'encrypt_query_param': download_param,
-                    'aes_key': aes_key_base64,
-                    'encrypt_type': 1,
-                },
-                'mid_size': len(ciphertext),
-            },
-        }
 
     def upload_file(
         self,
@@ -244,19 +250,33 @@ class WeChatClient:
         to_user_id: str,
         content: bytes,
         filename: str,
-        idempotency_key: str,
+    ) -> dict[str, Any]:
+        return self._upload_item(
+            base_url=base_url,
+            token=token,
+            to_user_id=to_user_id,
+            content=content,
+            kind='file',
+            filename=filename,
+        )
+
+    def _upload_item(
+        self,
+        *,
+        base_url: str,
+        token: str,
+        to_user_id: str,
+        content: bytes,
+        kind: str,
+        filename: str = '',
     ) -> dict[str, Any]:
         if not content:
-            raise WeChatError('Cannot send an empty file')
-        normalized_filename = filename.strip() or 'lazymind-output'
+            raise WeChatError(f'Cannot send an empty {kind}')
+        media_type = 1 if kind == 'image' else 3
         key_material = hmac.new(
             token.encode('utf-8'),
-            (
-                b'lazymind-wechat-file-v1\x00'
-                + idempotency_key.encode('utf-8')
-                + b'\x00'
-                + hashlib.sha256(content).digest()
-            ),
+            f'lazymind-wechat-{kind}-v1\0'.encode()
+            + hashlib.sha256(content).digest(),
             hashlib.sha256,
         ).digest()
         file_key = key_material[:16].hex()
@@ -268,7 +288,7 @@ class WeChatClient:
             to_user_id=to_user_id,
             file_key=file_key,
             aes_key=aes_key,
-            media_type=3,
+            media_type=media_type,
             content=content,
             encrypted_size=len(ciphertext),
         )
@@ -276,24 +296,39 @@ class WeChatClient:
         if not upload_url:
             upload_param = str(upload.get('upload_param') or '').strip()
             if not upload_param:
-                raise WeChatError('WeChat did not return a file upload URL')
+                raise WeChatError(f'WeChat did not return a {kind} upload URL')
             upload_url = (
                 f'{ILINK_CDN_BASE_URL}/upload'
                 f'?encrypted_query_param={quote(upload_param, safe="")}'
                 f'&filekey={quote(file_key, safe="")}'
             )
+        if not self._valid_media_url(upload_url):
+            raise WeChatError(f'WeChat {kind} upload URL is invalid')
         download_param = self._upload_media(upload_url, ciphertext)
+        media = {
+            'encrypt_query_param': download_param,
+            # iLink's current sender serializes the hexadecimal key string as
+            # the protobuf bytes field.  Encoding the raw 16 bytes produces a
+            # valid-looking message that the official WeChat client cannot
+            # decrypt.
+            'aes_key': base64.b64encode(
+                aes_key.hex().encode('ascii')
+            ).decode('ascii'),
+            'encrypt_type': 1,
+        }
+        if kind == 'image':
+            return {
+                'type': 2,
+                'image_item': {
+                    'media': media,
+                    'mid_size': len(ciphertext),
+                },
+            }
         return {
             'type': 4,
             'file_item': {
-                'media': {
-                    'encrypt_query_param': download_param,
-                    'aes_key': base64.b64encode(
-                        aes_key.hex().encode('ascii')
-                    ).decode('ascii'),
-                    'encrypt_type': 1,
-                },
-                'file_name': normalized_filename,
+                'media': media,
+                'file_name': filename.strip() or 'lazymind-output',
                 'md5': hashlib.md5(
                     content,
                     usedforsecurity=False,
@@ -302,14 +337,14 @@ class WeChatClient:
             },
         }
 
-    def send_image(
+    def send_media(
         self,
         *,
         base_url: str,
         token: str,
         to_user_id: str,
         context_token: str,
-        image_item: dict[str, Any],
+        item: dict[str, Any],
         client_id: str,
         run_id: str,
     ) -> None:
@@ -318,28 +353,7 @@ class WeChatClient:
             token=token,
             to_user_id=to_user_id,
             context_token=context_token,
-            item=image_item,
-            client_id=client_id,
-            run_id=run_id,
-        )
-
-    def send_file(
-        self,
-        *,
-        base_url: str,
-        token: str,
-        to_user_id: str,
-        context_token: str,
-        file_item: dict[str, Any],
-        client_id: str,
-        run_id: str,
-    ) -> None:
-        self._send_item(
-            base_url=base_url,
-            token=token,
-            to_user_id=to_user_id,
-            context_token=context_token,
-            item=file_item,
+            item=item,
             client_id=client_id,
             run_id=run_id,
         )
@@ -407,6 +421,17 @@ class WeChatClient:
             response.headers.get('x-encrypted-param') or ''
         ).strip()
         if not download_param:
+            try:
+                payload = response.json()
+            except ValueError:
+                payload = {}
+            if isinstance(payload, dict):
+                download_param = str(
+                    payload.get('encrypt_query_param')
+                    or payload.get('download_param')
+                    or ''
+                ).strip()
+        if not download_param:
             raise WeChatError('WeChat CDN returned no media download token')
         return download_param
 
@@ -456,3 +481,40 @@ class WeChatClient:
             modes.ECB(),
         ).encryptor()
         return encryptor.update(padded) + encryptor.finalize()
+
+    @staticmethod
+    def _decode_aes_key(value: str) -> bytes | None:
+        value = value.strip()
+        if not value:
+            return None
+        if len(value) == 32 and all(
+            character in '0123456789abcdefABCDEF'
+            for character in value
+        ):
+            return bytes.fromhex(value)
+        try:
+            decoded = base64.b64decode(value, validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise WeChatError('WeChat media AES key is invalid') from exc
+        if len(decoded) == 16:
+            return decoded
+        if len(decoded) == 32:
+            hex_value = decoded.decode('ascii', errors='ignore')
+            if all(
+                character in '0123456789abcdefABCDEF'
+                for character in hex_value
+            ):
+                return bytes.fromhex(hex_value)
+        raise WeChatError('WeChat media AES key is invalid')
+
+    @staticmethod
+    def _valid_media_url(value: str) -> bool:
+        parsed = urlparse(value)
+        hostname = (parsed.hostname or '').lower().rstrip('.')
+        return bool(
+            parsed.scheme == 'https'
+            and (
+                hostname == 'weixin.qq.com'
+                or hostname.endswith('.weixin.qq.com')
+            )
+        )

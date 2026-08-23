@@ -55,30 +55,6 @@ class CapabilityPresentation:
 
 
 @dataclass(frozen=True, slots=True)
-class CloudDocumentPresentation:
-    kind: Literal['cloud_document']
-    mode: Literal['sources', 'documents', 'search']
-    source: dict[str, Any] | None = None
-    items: tuple[dict[str, Any], ...] = ()
-    query: str = ''
-    next_page_token: str = ''
-    total: int | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        value: dict[str, Any] = {
-            'kind': self.kind,
-            'mode': self.mode,
-            'source': dict(self.source) if self.source else None,
-            'items': [dict(item) for item in self.items],
-            'query': self.query,
-            'next_page_token': self.next_page_token,
-        }
-        if self.total is not None:
-            value['total'] = self.total
-        return value
-
-
-@dataclass(frozen=True, slots=True)
 class ConversationExecutorPresentation:
     id: str
     display_name: str
@@ -278,16 +254,54 @@ class ConversationPresentation:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class ConversationCatalogItemPresentation:
+    index: int
+    conversation_id: str
+    provider_thread_id: str
+    display_name: str
+    update_time: str
+    project_key: str
+    project_name: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'index': self.index,
+            'conversation_id': self.conversation_id,
+            'provider_thread_id': self.provider_thread_id,
+            'display_name': self.display_name,
+            'update_time': self.update_time,
+            'project_key': self.project_key,
+            'project_name': self.project_name,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ConversationCatalogPresentation:
+    kind: Literal['conversation_catalog']
+    selection_id: str
+    assistant: str
+    items: tuple[ConversationCatalogItemPresentation, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'kind': self.kind,
+            'selection_id': self.selection_id,
+            'assistant': self.assistant,
+            'items': [item.to_dict() for item in self.items],
+        }
+
+
 ReplyPresentation: TypeAlias = (
     SelectionPresentation
     | CapabilityPresentation
-    | CloudDocumentPresentation
     | AssistantCatalogPresentation
     | ConversationSettingsPresentation
     | AskPresentation
     | TaskPresentation
     | ExecutionPresentation
     | ConversationPresentation
+    | ConversationCatalogPresentation
 )
 
 

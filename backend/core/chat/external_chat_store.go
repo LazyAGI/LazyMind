@@ -167,8 +167,8 @@ func (a *externalChatApplication) claim(
 		now := a.now()
 		var run orm.ExternalChatRun
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
-			Where("actor_user_id = ? AND provider = ? AND action <> ? AND stop_requested = ? AND (status = ? OR (status = ? AND (lease_expires_at IS NULL OR lease_expires_at < ?)))",
-				owner, provider, externalcontext.ObservedAction, false, "pending", "running", now).
+			Where("actor_user_id = ? AND provider = ? AND (host_id = '' OR host_id = ?) AND stop_requested = ? AND (status = ? OR (status = ? AND (lease_expires_at IS NULL OR lease_expires_at < ?)))",
+				owner, provider, hostID, false, "pending", "running", now).
 			Order("created_at ASC").Take(&run).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil
@@ -182,8 +182,8 @@ func (a *externalChatApplication) claim(
 		}
 		expires := now.Add(a.leaseTTL)
 		claimed := tx.Model(&orm.ExternalChatRun{}).
-			Where("id = ? AND action <> ? AND stop_requested = ? AND (status = ? OR (status = ? AND (lease_expires_at IS NULL OR lease_expires_at < ?)))",
-				run.ID, externalcontext.ObservedAction, false, "pending", "running", now).
+			Where("id = ? AND (host_id = '' OR host_id = ?) AND stop_requested = ? AND (status = ? OR (status = ? AND (lease_expires_at IS NULL OR lease_expires_at < ?)))",
+				run.ID, hostID, false, "pending", "running", now).
 			Updates(map[string]any{
 				"status": "running", "host_id": hostID, "lease_token": token,
 				"lease_expires_at": expires, "claimed_at": now, "last_heartbeat_at": now,
@@ -223,7 +223,7 @@ func (a *externalChatApplication) claim(
 		job = &externalChatJob{
 			RunID: run.ID, ConversationID: run.ConversationID, HistoryID: run.HistoryID,
 			Provider: run.Provider, ProviderThreadID: run.ProviderThreadID,
-			Action: action, Prompt: run.Prompt, LeaseToken: token, HostID: hostID,
+			Action: action, Prompt: run.Prompt, Query: run.Query, LeaseToken: token, HostID: hostID,
 		}
 		return nil
 	})
@@ -318,7 +318,7 @@ func (a *externalChatApplication) appendEvent(
 		case "thread_started":
 			if strings.TrimSpace(event.ProviderThreadID) != "" {
 				if err := externalcontext.New(tx).BindManagedThread(
-					ctx, owner, run.Provider, event.ProviderThreadID, run.ConversationID,
+					ctx, owner, run.Provider, run.HostID, event.ProviderThreadID, run.ConversationID,
 				); err != nil {
 					return err
 				}
@@ -359,7 +359,7 @@ func sameExternalChatEvent(existing orm.ExternalChatRunEvent, runID string, even
 func (a *externalChatApplication) requestStop(ctx context.Context, owner, conversationID, historyID string) error {
 	return a.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		query := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("actor_user_id = ? AND conversation_id = ? AND action <> ? AND status IN ?", owner, conversationID, externalcontext.ObservedAction, []string{"pending", "running"})
+			Where("actor_user_id = ? AND conversation_id = ? AND status IN ?", owner, conversationID, []string{"pending", "running"})
 		if historyID != "" {
 			query = query.Where("history_id = ?", historyID)
 		}
@@ -601,7 +601,7 @@ func (a *externalChatApplication) executionProjections(
 
 	var runs []orm.ExternalChatRun
 	if err := a.db.WithContext(ctx).
-		Where("actor_user_id = ? AND history_id IN ? AND action <> ?", owner, historyIDs, externalcontext.ObservedAction).
+		Where("actor_user_id = ? AND history_id IN ?", owner, historyIDs).
 		Order("created_at DESC").Find(&runs).Error; err != nil {
 		return nil, err
 	}

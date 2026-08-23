@@ -33,7 +33,6 @@ _CAPABILITY_OVERVIEW_TYPES = (
     'tool',
 )
 _CAPABILITY_CATEGORIES = (
-    'cloud_document',
     'knowledge_base',
     'skill',
     'workflow',
@@ -43,20 +42,22 @@ _CAPABILITY_CATEGORIES = (
 _MAX_WORKSPACE_IMAGES = 6
 _MAX_CAPABILITY_ITEMS_PER_GROUP = 6
 _CAPABILITY_PAGE_SIZE = 10
+_CONVERSATION_PAGE_SIZE = 8
 _CAPABILITY_LABELS = {
-    'cloud_document': '云文档',
     'knowledge_base': '知识库',
     'skill': 'Skill',
     'workflow': 'Workflow',
     'tool': 'Tool',
     'prompt': 'Prompt',
 }
+
+
 def _assistant_display_name(assistant: str) -> str:
     return {
         'lazymind': 'LazyMind',
-        'codex': 'Codex',
-        'cursor': 'Cursor',
-        'workbuddy': 'WorkBuddy',
+        'codex': 'Codex Desktop',
+        'cursor': 'Cursor CLI',
+        'workbuddy': 'WorkBuddy / CodeBuddy CLI',
     }.get(assistant, 'LazyMind')
 
 
@@ -69,60 +70,6 @@ def _capability_command(
         'command': 'capability.list',
         'parameters': {
             'capabilities': list(capabilities),
-            'evidence': [evidence],
-        },
-    }
-
-
-def _cloud_document_list_command(
-    evidence: str,
-    page_token: str = '',
-) -> dict[str, Any]:
-    return {
-        'schema_version': '1',
-        'command': 'cloud_document.list',
-        'parameters': {
-            'page_token': page_token,
-            'evidence': [evidence],
-        },
-    }
-
-
-def _cloud_document_get_command(
-    evidence: str,
-    source_id: str,
-    page_token: str = '',
-    node_ref: str = '',
-    target_type: str = '',
-    target_ref: str = '',
-) -> dict[str, Any]:
-    return {
-        'schema_version': '1',
-        'command': 'cloud_document.get',
-        'parameters': {
-            'source_id': source_id,
-            'page_token': page_token,
-            'node_ref': node_ref,
-            'target_type': target_type,
-            'target_ref': target_ref,
-            'evidence': [evidence],
-        },
-    }
-
-
-def _cloud_document_search_command(
-    evidence: str,
-    source_id: str,
-    query: str,
-    page_token: str = '',
-) -> dict[str, Any]:
-    return {
-        'schema_version': '1',
-        'command': 'cloud_document.search',
-        'parameters': {
-            'source_id': source_id,
-            'query': query,
-            'page_token': page_token,
             'evidence': [evidence],
         },
     }
@@ -178,29 +125,16 @@ def menu_command(
     return None
 
 
-def stale_workspace_card(language: str = 'zh') -> dict[str, Any]:
-    return {
-        'schema': '2.0',
-        'config': {'wide_screen_mode': True},
-        'header': {
-            'title': {'tag': 'plain_text', 'content': 'LazyMind'},
-            'template': 'grey',
-        },
-        'body': {
-            'elements': [{
-                'tag': 'markdown',
-                'content': (
-                    'This card has expired. Use the latest LazyMind card.'
-                    if language == 'en'
-                    else '这张卡片已过期，请使用会话中最新的 LazyMind 卡片。'
-                ),
-            }],
-        },
-    }
-
-
 def _localized(state: FeishuWorkspaceState, zh: str, en: str) -> str:
     return en if state.output_language == 'en' else zh
+
+
+def stale_card_notice(language: str = 'zh') -> str:
+    return (
+        'This card has expired. Use the latest LazyMind card.'
+        if language == 'en'
+        else '这张卡片已过期，请使用会话中最新的 LazyMind 卡片。'
+    )
 
 
 def is_feishu_image_key(value: Any) -> bool:
@@ -223,6 +157,7 @@ class FeishuWorkspaceState:
     revision: int = 0
     capability_category: str = ''
     capability_page: int = 0
+    conversation_page: int = 0
     assistant: str = 'lazymind'
     thinking_depth: str = 'medium'
     output_language: str = 'zh'
@@ -246,6 +181,7 @@ class FeishuWorkspaceState:
                 else ''
             ),
             capability_page=max(0, _integer(raw.get('capability_page'))),
+            conversation_page=max(0, _integer(raw.get('conversation_page'))),
             assistant=(
                 str(raw.get('assistant'))
                 if str(raw.get('assistant')) in ASSISTANT_PROVIDERS
@@ -275,6 +211,7 @@ class FeishuWorkspaceState:
             'revision': self.revision,
             'capability_category': self.capability_category,
             'capability_page': self.capability_page,
+            'conversation_page': self.conversation_page,
             'assistant': self.assistant,
             'thinking_depth': self.thinking_depth,
             'output_language': self.output_language,
@@ -313,6 +250,8 @@ class FeishuWorkspaceState:
         if view == 'capabilities':
             self.capability_category = ''
             self.capability_page = 0
+        if view in {'assistant', 'conversations'}:
+            self.conversation_page = 0
 
     def open_new_session(self) -> None:
         self.view = 'conversations'
@@ -427,10 +366,6 @@ class FeishuWorkspaceRenderer:
                     state,
                     presentations,
                     chat_id,
-                    conversation_id=str(
-                        provider_context.get('workspace_conversation_id')
-                        or ''
-                    ),
                     result_complete=result_complete,
                 )
             )
@@ -945,7 +880,6 @@ class FeishuWorkspaceRenderer:
         presentations: list[dict[str, Any]],
         chat_id: str,
         *,
-        conversation_id: str,
         result_complete: bool,
     ) -> list[dict[str, Any]]:
         refresh_text = '刷新助理与会话'
@@ -955,7 +889,9 @@ class FeishuWorkspaceRenderer:
                 description=_localized(
                     state,
                     '选择会话来源，再进入该助理已有会话继续任务；不会修改执行引擎。',
-                    'Choose a conversation source, then continue one of that assistant’s existing conversations. This does not change the execution engine.',
+                    'Choose a conversation source, then continue one of '
+                    'that assistant’s existing conversations. This does '
+                    'not change the execution engine.',
                 ),
                 button={
                     'label': _localized(state, '刷新列表', 'Refresh'),
@@ -1043,52 +979,18 @@ class FeishuWorkspaceRenderer:
         if unavailable:
             elements.append({
                 'tag': 'markdown',
-                'content': '<font color="grey">' + '<br>'.join(unavailable) + '</font>',
+                'content': '<font color="grey">' + '\n'.join(unavailable) + '</font>',
             })
-        conversation = next(
-            (
-                item
-                for item in presentations
-                if item.get('kind') == 'conversation'
+        elements.append({
+            'tag': 'markdown',
+            'content': _localized(
+                state,
+                '<font color="grey">选择助理后，将在新卡片中按项目展示其全部已有会话。</font>',
+                '<font color="grey">Choose an assistant to open a new '
+                'card with all existing conversations grouped by '
+                'project.</font>',
             ),
-            {},
-        )
-        if conversation.get('state') == 'switched':
-            elements.append({
-                'tag': 'markdown',
-                'content': _localized(
-                    state,
-                    f'✅ 已进入 **{str(conversation.get("title") or "所选会话")}**，可以直接发送消息继续。',
-                    f'✅ Opened **{str(conversation.get("title") or "the selected conversation")}**. Send a message to continue.',
-                ),
-            })
-        elif conversation_id:
-            elements.append({
-                'tag': 'markdown',
-                'content': _localized(
-                    state,
-                    '<font color="grey">选择下方会话后，当前飞书聊天会切换到对应上下文。</font>',
-                    '<font color="grey">Choose a conversation below to switch this Feishu chat to that context.</font>',
-                ),
-            })
-        elements.extend(
-            FeishuWorkspaceRenderer._selection(
-                presentations,
-                chat_id,
-                workspace_action={
-                    'kind': 'history.switch',
-                    'view': 'assistant',
-                    'expected_view': state.view,
-                    'expected_revision': state.revision,
-                    'expected_operation_id': state.active_operation_id,
-                },
-                empty=_localized(
-                    state,
-                    f'<font color="grey">{_assistant_display_name(state.assistant)} 暂无可继续的历史会话。</font>',
-                    f'<font color="grey">No existing {_assistant_display_name(state.assistant)} conversations are available.</font>',
-                ),
-            )
-        )
+        })
         return elements
 
     @staticmethod
@@ -1137,7 +1039,9 @@ class FeishuWorkspaceRenderer:
                 description=_localized(
                     state,
                     '会话列表跟随当前助理；选择后继续原上下文，不会新建或合并会话。',
-                    'The list follows the selected assistant. Choosing one resumes its original context without creating or merging conversations.',
+                    'The list follows the selected assistant. Choosing '
+                    'one resumes its original context without creating '
+                    'or merging conversations.',
                 ),
                 button=(
                     {
@@ -1277,16 +1181,10 @@ class FeishuWorkspaceRenderer:
                 )
             )
         panel_elements.extend(
-            FeishuWorkspaceRenderer._selection(
+            FeishuWorkspaceRenderer._conversation_catalog(
+                state,
                 presentations,
                 chat_id,
-                workspace_action={
-                    'kind': 'history.switch',
-                    'view': 'conversations',
-                    'expected_view': state.view,
-                    'expected_revision': state.revision,
-                    'expected_operation_id': state.active_operation_id,
-                },
                 selected_value=switch_index,
                 loading=switching,
                 empty=(
@@ -1305,6 +1203,136 @@ class FeishuWorkspaceRenderer:
             )
         )
         return panel_elements
+
+    @staticmethod
+    def _conversation_catalog(
+        state: FeishuWorkspaceState,
+        presentations: list[dict[str, Any]],
+        chat_id: str,
+        *,
+        selected_value: str,
+        loading: bool,
+        empty: str,
+    ) -> list[dict[str, Any]]:
+        catalog = next(
+            (
+                item for item in presentations
+                if item.get('kind') == 'conversation_catalog'
+            ),
+            {},
+        )
+        raw_items = catalog.get('items')
+        items = [
+            item for item in (raw_items if isinstance(raw_items, list) else [])
+            if isinstance(item, dict)
+            and _integer(item.get('index')) > 0
+            and (
+                str(item.get('conversation_id') or '')
+                or str(item.get('provider_thread_id') or '')
+            )
+        ]
+        if not items:
+            return [{'tag': 'markdown', 'content': empty}] if empty else []
+
+        projects: dict[str, list[dict[str, Any]]] = {}
+        for item in items:
+            project_key = str(item.get('project_key') or 'unassigned')
+            projects.setdefault(project_key, []).append(item)
+        ordered_items = [
+            item for project_items in projects.values() for item in project_items
+        ]
+        page_count = max(
+            1,
+            (len(ordered_items) + _CONVERSATION_PAGE_SIZE - 1)
+            // _CONVERSATION_PAGE_SIZE,
+        )
+        page = min(state.conversation_page, page_count - 1)
+        page_items = ordered_items[
+            page * _CONVERSATION_PAGE_SIZE:
+            (page + 1) * _CONVERSATION_PAGE_SIZE
+        ]
+        page_projects: dict[str, list[dict[str, Any]]] = {}
+        for item in page_items:
+            project_key = str(item.get('project_key') or 'unassigned')
+            page_projects.setdefault(project_key, []).append(item)
+
+        elements: list[dict[str, Any]] = []
+        selection_id = str(catalog.get('selection_id') or '')
+        for project_key, project_items in page_projects.items():
+            project_name = str(
+                project_items[0].get('project_name') or ''
+            ).strip()
+            if not project_name:
+                project_name = _localized(state, '未识别项目', 'Unassigned project')
+            if state.assistant != 'lazymind':
+                elements.append({
+                    'tag': 'markdown',
+                    'content': (
+                        f'**{project_name}**　<font color="grey">'
+                        f'{len(projects[project_key])} 个会话</font>'
+                    ),
+                })
+            for start in range(0, len(project_items), 2):
+                buttons: list[dict[str, Any]] = []
+                for item in project_items[start:start + 2]:
+                    index = _integer(item.get('index'))
+                    label = str(item.get('display_name') or '')
+                    marker = (
+                        '⏳' if loading and str(index) == selected_value
+                        else '✓' if str(index) == selected_value
+                        else f'{index}.'
+                    )
+                    buttons.append({
+                        'label': f'{marker} {label}'[:40],
+                        'style': 'primary' if str(index) == selected_value else 'default',
+                        'disabled': loading,
+                        'action': {
+                            'lazymind_action': 'select',
+                            'selection_id': selection_id,
+                            'selection': str(index),
+                            'text': str(index),
+                            'intended_chat_id': chat_id,
+                            'workspace_action': {
+                                'kind': 'history.switch',
+                                'view': 'conversations',
+                                'target_conversation_id': str(
+                                    item.get('conversation_id') or ''
+                                )[:512],
+                                'provider_thread_id': str(
+                                    item.get('provider_thread_id') or ''
+                                )[:512],
+                                'host_id': str(item.get('host_id') or '')[:512],
+                                'expected_view': state.view,
+                                'expected_revision': state.revision,
+                                'expected_operation_id': state.active_operation_id,
+                            },
+                        },
+                    })
+                elements.append(_button_row(buttons))
+        elements.append({
+            'tag': 'markdown',
+            'content': _localized(
+                state,
+                f'<font color="grey">第 {page + 1}/{page_count} 页 · 共 {len(items)} 个会话</font>',
+                f'<font color="grey">Page {page + 1}/{page_count} · {len(items)} conversations</font>',
+            ),
+        })
+        if page_count > 1:
+            buttons: list[dict[str, Any]] = []
+            if page > 0:
+                buttons.append({
+                    'label': _localized(state, '上一页', 'Previous'),
+                    'style': 'default',
+                    'action': _conversation_page_action(chat_id, state, page - 1),
+                })
+            if page + 1 < page_count:
+                buttons.append({
+                    'label': _localized(state, '下一页', 'Next'),
+                    'style': 'default',
+                    'action': _conversation_page_action(chat_id, state, page + 1),
+                })
+            elements.append(_button_row(buttons))
+        return elements
 
     @staticmethod
     def _settings(
@@ -1382,7 +1410,9 @@ class FeishuWorkspaceRenderer:
                     'content': _localized(
                         state,
                         '<font color="grey">当前没有会话；发送消息或切换会话后可选择执行引擎。</font>',
-                        '<font color="grey">There is no current conversation. Send a message or switch conversations before choosing an execution engine.</font>',
+                        '<font color="grey">There is no current conversation. '
+                        'Send a message or switch conversations before '
+                        'choosing an execution engine.</font>',
                     ),
                 },
             ])
@@ -1597,7 +1627,6 @@ class FeishuWorkspaceRenderer:
                     state,
                     label,
                     {
-                        'cloud_document': 'Cloud documents',
                         'knowledge_base': 'Knowledge bases',
                         'skill': 'Skills',
                         'workflow': 'Workflows',
@@ -1630,15 +1659,6 @@ class FeishuWorkspaceRenderer:
                     ]
                 )
             )
-        if state.capability_category == 'cloud_document':
-            elements.extend(
-                _cloud_document_elements(
-                    state,
-                    presentations,
-                    chat_id,
-                )
-            )
-            return elements
         group = next(
             (
                 group
@@ -2089,7 +2109,28 @@ def _assistant_select_action(
         workspace_action={
             'kind': 'assistant.select',
             'assistant': assistant_id,
-            'view': 'assistant',
+            'view': 'conversations',
+            'new_card': True,
+            'expected_view': state.view,
+            'expected_revision': state.revision,
+            'expected_operation_id': state.active_operation_id,
+        },
+    )
+
+
+def _conversation_page_action(
+    chat_id: str,
+    state: FeishuWorkspaceState,
+    page: int,
+) -> dict[str, Any]:
+    return _command_action(
+        chat_id=chat_id,
+        text='翻页查看会话',
+        command=_history_command('翻页查看会话', state.assistant),
+        workspace_action={
+            'kind': 'conversation.page',
+            'page': max(0, page),
+            'view': 'conversations',
             'expected_view': state.view,
             'expected_revision': state.revision,
             'expected_operation_id': state.active_operation_id,
@@ -2115,15 +2156,10 @@ def _capability_catalog_action(
     if page is not None:
         workspace_action['page'] = max(0, page)
     text = f'查看{_CAPABILITY_LABELS.get(category, "知识库")}'
-    command = (
-        _cloud_document_list_command(text)
-        if category == 'cloud_document'
-        else _capability_command(text, (category,))
-    )
     return _command_action(
         chat_id=chat_id,
         text=text,
-        command=command,
+        command=_capability_command(text, (category,)),
         workspace_action=workspace_action,
     )
 
@@ -2352,7 +2388,9 @@ def _executor_setting_elements(
             'content': _localized(
                 state,
                 '**执行引擎**　<font color="grey">决定当前会话下一轮由谁完成任务；各 Agent 保留各自的一对一会话映射</font>',
-                '**Execution engine**　<font color="grey">Choose who executes the next turn; every Agent keeps its own one-to-one conversation mapping</font>',
+                '**Execution engine**　<font color="grey">Choose who '
+                'executes the next turn; every Agent keeps its own '
+                'one-to-one conversation mapping</font>',
             ),
         },
     ]
@@ -2448,211 +2486,6 @@ def _setting_action(
             'expected_conversation_id': expected_conversation_id,
         },
     )
-
-
-def _cloud_document_elements(
-    state: FeishuWorkspaceState,
-    presentations: list[dict[str, Any]],
-    chat_id: str,
-) -> list[dict[str, Any]]:
-    presentation = next(
-        (
-            item
-            for item in presentations
-            if item.get('kind') == 'cloud_document'
-        ),
-        {},
-    )
-    if not presentation:
-        return [{
-            'tag': 'markdown',
-            'content': _localized(
-                state,
-                '<font color="grey">正在读取 LazyMind 已授权云文档账号…</font>',
-                '<font color="grey">Loading cloud accounts connected to LazyMind…</font>',
-            ),
-        }]
-    mode = str(presentation.get('mode') or 'sources')
-    raw_items = presentation.get('items')
-    items = [
-        dict(item)
-        for item in (raw_items if isinstance(raw_items, list) else [])
-        if isinstance(item, dict)
-    ]
-    source = (
-        dict(presentation['source'])
-        if isinstance(presentation.get('source'), dict)
-        else {}
-    )
-    if mode == 'sources':
-        elements = _cloud_source_elements(state, chat_id, items)
-    else:
-        elements = _cloud_document_page_elements(
-            state,
-            chat_id,
-            mode,
-            source,
-            items,
-        )
-    next_page_token = str(presentation.get('next_page_token') or '')
-    if next_page_token:
-        elements.append(_cloud_next_page_element(
-            state,
-            chat_id,
-            mode,
-            source,
-            str(presentation.get('query') or ''),
-            next_page_token,
-        ))
-    return elements
-
-
-def _cloud_source_elements(
-    state: FeishuWorkspaceState,
-    chat_id: str,
-    items: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    elements: list[dict[str, Any]] = [{
-        'tag': 'markdown',
-        'content': _localized(
-            state,
-            '**已授权云文档账号**　<font color="grey">在线只读，不扫盘、不建索引</font>',
-            '**Connected cloud accounts**　<font color="grey">Online read-only; no scan or index</font>',
-        ),
-    }]
-    if not items:
-        elements.append({
-            'tag': 'markdown',
-            'content': _localized(
-                state,
-                '<font color="grey">暂无已授权并启用对话的云文档账号。</font>',
-                '<font color="grey">No authorized cloud account is enabled for chat.</font>',
-            ),
-        })
-    for item in items:
-        source_id = str(item.get('id') or '')
-        if not source_id:
-            continue
-        name = str(item.get('name') or source_id)[:80]
-        text = f'浏览云文档账号 {name}'
-        elements.append(_button_row([{
-            'label': name,
-            'action': _command_action(
-                chat_id=chat_id,
-                text=text,
-                command=_cloud_document_get_command(text, source_id),
-                workspace_action=_cloud_workspace_action(state),
-            ),
-        }]))
-    return elements
-
-
-def _cloud_document_page_elements(
-    state: FeishuWorkspaceState,
-    chat_id: str,
-    mode: str,
-    source: dict[str, Any],
-    items: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    source_id = str(source.get('id') or '')
-    source_name = str(source.get('name') or source_id or '云文档')[:100]
-    suffix = '在线搜索结果' if mode == 'search' else '在线文档'
-    elements: list[dict[str, Any]] = [
-        {'tag': 'markdown', 'content': f'**{source_name} · {suffix}**'}
-    ]
-    for index, item in enumerate(items, start=1):
-        name = str(
-            item.get('display_name')
-            or item.get('name')
-            or item.get('key')
-            or item.get('id')
-            or '未命名'
-        )[:160]
-        kind = '目录' if item.get('has_children') else '文档'
-        elements.append({
-            'tag': 'markdown',
-            'content': f'{index}. **{name}**　<font color="grey">{kind}</font>',
-        })
-        if item.get('has_children'):
-            text = f'打开云文档目录 {name}'
-            elements.append(_button_row([{
-                'label': _localized(state, '打开', 'Open'),
-                'action': _command_action(
-                    chat_id=chat_id,
-                    text=text,
-                    command=_cloud_document_get_command(
-                        text,
-                        source_id,
-                        node_ref=str(item.get('node_ref') or ''),
-                        target_type=str(item.get('target_type') or ''),
-                        target_ref=str(item.get('target_ref') or ''),
-                    ),
-                    workspace_action=_cloud_workspace_action(state),
-                ),
-            }]))
-    back_text = '返回云文档账号'
-    elements.append(_button_row([{
-        'label': back_text,
-        'action': _command_action(
-            chat_id=chat_id,
-            text=back_text,
-            command=_cloud_document_list_command(back_text),
-            workspace_action=_cloud_workspace_action(state),
-        ),
-    }]))
-    return elements
-
-
-def _cloud_next_page_element(
-    state: FeishuWorkspaceState,
-    chat_id: str,
-    mode: str,
-    source: dict[str, Any],
-    query: str,
-    page_token: str,
-) -> dict[str, Any]:
-    text = '下一页云文档'
-    source_id = str(source.get('id') or '')
-    if mode == 'documents':
-        command = _cloud_document_get_command(
-            text,
-            source_id,
-            page_token,
-            node_ref=str(source.get('node_ref') or ''),
-            target_type=str(source.get('target_type') or ''),
-            target_ref=str(source.get('target_ref') or ''),
-        )
-    elif mode == 'search':
-        command = _cloud_document_search_command(
-            text,
-            source_id,
-            query,
-            page_token,
-        )
-    else:
-        command = _cloud_document_list_command(text, page_token)
-    return _button_row([{
-        'label': _localized(state, '下一页', 'Next page'),
-        'style': 'primary',
-        'action': _command_action(
-            chat_id=chat_id,
-            text=text,
-            command=command,
-            workspace_action=_cloud_workspace_action(state),
-        ),
-    }])
-
-
-def _cloud_workspace_action(
-    state: FeishuWorkspaceState,
-) -> dict[str, Any]:
-    return {
-        'kind': 'capability.open',
-        'category': 'cloud_document',
-        'expected_view': state.view,
-        'expected_revision': state.revision,
-        'expected_operation_id': state.active_operation_id,
-    }
 
 
 def _capability_groups(

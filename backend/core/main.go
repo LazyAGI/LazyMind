@@ -19,7 +19,6 @@ import (
 	"lazymind/core/acl"
 	"lazymind/core/asyncjob"
 	capabilitybootstrap "lazymind/core/capability/bootstrap"
-	capabilityhttp "lazymind/core/capability/httpadapter"
 	"lazymind/core/chat"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
@@ -76,7 +75,6 @@ func buildCapabilityRuntime() (*capabilitybootstrap.Runtime, error) {
 		InternalServiceToken:      os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN"),
 		KnowledgeSearchHTTPClient: &http.Client{Timeout: 60 * time.Second},
 		ScanBaseURL:               common.ScanControlPlaneEndpoint(),
-		ScanHTTPClient:            &http.Client{Timeout: 10 * time.Second},
 	})
 }
 
@@ -202,15 +200,6 @@ func registerCoreRoutes(r *mux.Router) {
 func registerCapabilityMCPRoute(r *mux.Router, handler http.Handler) {
 	handleAPI(r, "POST", "/mcp/capabilities/v1", []string{"qa.read"}, handler.ServeHTTP)
 	r.Handle("/mcp/capabilities/v1", handler).Methods(http.MethodGet, http.MethodDelete)
-}
-
-func registerCapabilityChannelRoutes(
-	r *mux.Router,
-	handler *capabilityhttp.Handler,
-) {
-	handleAPI(r, "POST", "/channel-capabilities/cloud-documents:list", []string{"qa.read"}, handler.ListCloudDocuments)
-	handleAPI(r, "POST", "/channel-capabilities/cloud-documents:get", []string{"qa.read"}, handler.GetCloudDocument)
-	handleAPI(r, "POST", "/channel-capabilities/cloud-documents:search", []string{"qa.read"}, handler.SearchCloudDocuments)
 }
 
 func coreListenAddr() string {
@@ -589,11 +578,6 @@ func run(ctx context.Context) error {
 		return &startupError{msg: "initialize capability MCP", err: err}
 	}
 	registerCapabilityMCPRoute(r, capabilityRuntime.MCP)
-	channelHandler, err := capabilityhttp.New(capabilityRuntime.Service)
-	if err != nil {
-		log.Logger.Fatal().Err(err).Msg("initialize channel capability HTTP failed")
-	}
-	registerCapabilityChannelRoutes(r, channelHandler)
 	log.Logger.Info().Str("path", "/mcp/capabilities/v1").Msg("capability MCP enabled")
 
 	listenAddr := coreListenAddr()

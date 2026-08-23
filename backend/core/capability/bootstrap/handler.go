@@ -20,12 +20,10 @@ type Config struct {
 	InternalServiceToken      string
 	KnowledgeSearchHTTPClient *http.Client
 	ScanBaseURL               string
-	ScanHTTPClient            *http.Client
 }
 
 type Runtime struct {
-	Service *capability.Service
-	MCP     http.Handler
+	MCP http.Handler
 }
 
 func NewHandler(config Config) (http.Handler, error) {
@@ -66,7 +64,6 @@ func NewRuntime(config Config) (*Runtime, error) {
 		config.ScanBaseURL,
 		config.AuthServiceBaseURL,
 		config.InternalServiceToken,
-		config.ScanHTTPClient,
 		0,
 	)
 	if err != nil {
@@ -88,5 +85,5 @@ func NewRuntime(config Config) (*Runtime, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Runtime{Service: service, MCP: handler}, nil
+	return &Runtime{MCP: handler}, nil
 }

@@ -78,13 +78,13 @@ func TestServiceLinksCodexThreadTurnsToOneConversation(t *testing.T) {
 	service := newTestService(t)
 	first := testStartInput("inv-source-1", "knowledge.list")
 	first.Source = &externalcontext.Source{
-		Provider: "codex", ThreadID: "codex-thread-1", TurnID: "codex-turn-1", ThreadSource: "user", Message: "第一轮用户消息",
+		Provider: "codex", HostID: "host-1", ThreadID: "codex-thread-1", TurnID: "codex-turn-1", ThreadSource: "user", Message: "第一轮用户消息",
 	}
 	started, err := service.StartLinked(context.Background(), "user-1", first)
 	if err != nil || started.Source == nil {
 		t.Fatalf("start linked: result=%+v err=%v", started, err)
 	}
-	if started.Source.ConversationID == "" || started.Source.ExternalRef == "" || started.Source.HistoryID == "" {
+	if started.Source.ConversationID == "" || started.Source.ExternalRef != "" || started.Source.HistoryID != "" {
 		t.Fatalf("incomplete source link: %+v", started.Source)
 	}
 
@@ -97,28 +97,21 @@ func TestServiceLinksCodexThreadTurnsToOneConversation(t *testing.T) {
 	if _, err := service.Finish(context.Background(), "user-1", first.ID, FinishInput{Status: StatusSucceeded}); err != nil {
 		t.Fatal(err)
 	}
-	var run orm.ExternalChatRun
-	if err := service.db.First(&run, "id = ?", started.Source.ExternalRef).Error; err != nil || run.Status != "running" {
-		t.Fatalf("parallel turn completed early: run=%+v err=%v", run, err)
-	}
 	if _, err := service.Finish(context.Background(), "user-1", parallel.ID, FinishInput{
 		Status: StatusSucceeded,
 	}); err != nil {
 		t.Fatal(err)
 	}
-	if err := service.db.First(&run, "id = ?", started.Source.ExternalRef).Error; err != nil || run.Status != "completed" {
-		t.Fatalf("turn was not completed: run=%+v err=%v", run, err)
-	}
 	nextTurn := testStartInput("inv-source-3", "workflow.start")
-	nextTurn.Source = &externalcontext.Source{Provider: "codex", ThreadID: "codex-thread-1", TurnID: "codex-turn-2", Message: "第二轮用户消息"}
+	nextTurn.Source = &externalcontext.Source{Provider: "codex", HostID: "host-1", ThreadID: "codex-thread-1", TurnID: "codex-turn-2", Message: "第二轮用户消息"}
 	third, err := service.StartLinked(context.Background(), "user-1", nextTurn)
 	if err != nil || third.Source == nil || third.Source.ConversationID != started.Source.ConversationID ||
-		third.Source.ExternalRef == started.Source.ExternalRef || third.Source.HistoryID == started.Source.HistoryID {
+		third.Source.ExternalRef != "" || third.Source.HistoryID != "" {
 		t.Fatalf("next turn mapping: first=%+v third=%+v err=%v", started.Source, third.Source, err)
 	}
 	var histories int64
 	if err := service.db.Model(&orm.ChatHistory{}).
-		Where("conversation_id = ?", started.Source.ConversationID).Count(&histories).Error; err != nil || histories != 2 {
+		Where("conversation_id = ?", started.Source.ConversationID).Count(&histories).Error; err != nil || histories != 0 {
 		t.Fatalf("history count=%d err=%v", histories, err)
 	}
 
@@ -142,7 +135,7 @@ func TestServiceFinishDoesNotAdoptWorkflowSessionEvidence(t *testing.T) {
 	}
 	input := testStartInput("inv-legacy-read", "workflow.state")
 	input.Source = &externalcontext.Source{
-		Provider: "codex", ThreadID: "current-thread", TurnID: "current-turn", Message: "读取当前工作流",
+		Provider: "codex", HostID: "host-1", ThreadID: "current-thread", TurnID: "current-turn", Message: "读取当前工作流",
 	}
 	if _, err := service.StartLinked(context.Background(), "user-1", input); err != nil {
 		t.Fatal(err)

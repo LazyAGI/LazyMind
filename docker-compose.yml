@@ -308,6 +308,7 @@ services:
       <<: *proxy-env
     volumes:
       - channel-gateway-data:/var/lib/lazymind/channel-gateway
+      - ./data/core/uploads:/var/lib/lazymind/uploads
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8085/readyz')\" || exit 1"]
       interval: 10s

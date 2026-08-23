@@ -241,7 +241,7 @@ func TestPatchConversationSettings_AllowsExternalAssistantToChangeExecutor(t *te
 		t.Fatal(err)
 	}
 	if err := db.Create(&orm.ExternalAgentBinding{ID: "external-binding", ConversationID: "external-conversation",
-		Provider: ChatExecutorCodex, ProviderThreadID: "codex-thread", ManagedByLazyMind: false,
+		Provider: ChatExecutorCodex, HostID: "host-1", ProviderThreadID: "codex-thread",
 		CreatedByUserID: "user-1", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +274,7 @@ func TestPatchConversationSettings_AllowsOneBindingPerAgent(t *testing.T) {
 	if err := db.Create(&orm.ExternalAgentBinding{
 		ID: "managed-binding", ConversationID: "managed-conversation",
 		Provider: ChatExecutorCodex, ProviderThreadID: "managed-codex-thread",
-		ManagedByLazyMind: true, CreatedByUserID: "user-1",
+		HostID: "host-1", CreatedByUserID: "user-1",
 		CreatedAt: now, UpdatedAt: now,
 	}).Error; err != nil {
 		t.Fatal(err)

@@ -1527,7 +1527,7 @@ func GetConversationDetail(w http.ResponseWriter, r *http.Request) {
 	var likeCnt, unlikeCnt int64
 	db.Model(&orm.ChatHistory{}).Where("conversation_id = ? AND feed_back = ?", c.ID, 1).Count(&likeCnt)
 	db.Model(&orm.ChatHistory{}).Where("conversation_id = ? AND feed_back = ?", c.ID, 2).Count(&unlikeCnt)
-	assistant, err := conversationAssistant(r.Context(), db, userID, c.ID)
+	source, err := conversationSourceFor(r.Context(), db, userID, c.ID)
 	if err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1550,7 +1550,9 @@ func GetConversationDetail(w http.ResponseWriter, r *http.Request) {
 			"workflow_mode":         c.WorkflowMode,
 			"enable_subagent":       c.EnableSubagent,
 			"chat_executor":         c.ChatExecutor,
-			"assistant":             assistant,
+			"assistant":             source.Assistant,
+			"project_key":           source.ProjectKey,
+			"project_name":          source.ProjectName,
 		},
 	})
 }
@@ -1761,20 +1763,25 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 
 	db := store.DB()
 	q := db.Model(&orm.Conversation{}).Where("create_user_id = ? AND deleted_at IS NULL AND archived_at IS NULL", userID)
+	externalBinding := db.Model(&orm.ExternalAgentBinding{}).Select("1").
+		Where("external_agent_bindings.conversation_id = conversations.id").
+		Where("external_agent_bindings.created_by_user_id = ?", userID)
+	validatedExternalBinding := db.Table("external_agent_bindings AS validated_bindings").Select("1").
+		Joins("JOIN external_agent_sessions AS validated_sessions ON validated_sessions.owner_user_id = validated_bindings.created_by_user_id AND validated_sessions.provider = validated_bindings.provider AND validated_sessions.host_id = validated_bindings.host_id AND validated_sessions.provider_thread_id = validated_bindings.provider_thread_id").
+		Where("validated_bindings.conversation_id = conversations.id").
+		Where("validated_bindings.created_by_user_id = ?", userID).
+		Where("validated_sessions.active = ?", true)
+	q = q.Where("NOT EXISTS (?) OR EXISTS (?)", externalBinding, validatedExternalBinding)
 	assistantFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("assistant")))
 	if assistantFilter != "" {
 		if normalized, valid := normalizeChatExecutor(assistantFilter); !valid || normalized != assistantFilter {
 			common.ReplyErr(w, "assistant must be 'lazymind', 'codex', 'cursor', or 'workbuddy'", http.StatusBadRequest)
 			return
 		}
-		unmanagedBinding := db.Model(&orm.ExternalAgentBinding{}).Select("1").
-			Where("external_agent_bindings.conversation_id = conversations.id").
-			Where("external_agent_bindings.created_by_user_id = ?", userID).
-			Where("external_agent_bindings.managed_by_lazymind = ?", false)
 		if assistantFilter == ChatExecutorLazyMind {
-			q = q.Where("NOT EXISTS (?)", unmanagedBinding)
+			q = q.Where("NOT EXISTS (?)", externalBinding)
 		} else {
-			q = q.Where("EXISTS (?)", unmanagedBinding.Where("external_agent_bindings.provider = ?", assistantFilter))
+			q = q.Where("EXISTS (?)", validatedExternalBinding.Where("validated_bindings.provider = ?", assistantFilter))
 		}
 	}
 	if keyword != "" {
@@ -1802,7 +1809,7 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 	for _, conversation := range list {
 		conversationIDs = append(conversationIDs, conversation.ID)
 	}
-	assistants, err := conversationAssistants(r.Context(), db, userID, conversationIDs)
+	sources, err := conversationSources(r.Context(), db, userID, conversationIDs)
 	if err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1841,7 +1848,9 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 			"models":                models,
 			"is_task_conv":          c.IsTaskConv,
 			"chat_executor":         c.ChatExecutor,
-			"assistant":             assistants[c.ID],
+			"assistant":             sources[c.ID].Assistant,
+			"project_key":           sources[c.ID].ProjectKey,
+			"project_name":          sources[c.ID].ProjectName,
 		})
 	}
 	nextToken := ""
@@ -1855,32 +1864,54 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func conversationAssistant(ctx context.Context, db *gorm.DB, owner, conversationID string) (string, error) {
-	values, err := conversationAssistants(ctx, db, owner, []string{conversationID})
+type conversationSource struct {
+	Assistant   string
+	ProjectKey  string
+	ProjectName string
+}
+
+func conversationSourceFor(ctx context.Context, db *gorm.DB, owner, conversationID string) (conversationSource, error) {
+	values, err := conversationSources(ctx, db, owner, []string{conversationID})
 	return values[conversationID], err
 }
 
-func conversationAssistants(ctx context.Context, db *gorm.DB, owner string, conversationIDs []string) (map[string]string, error) {
-	values := make(map[string]string, len(conversationIDs))
+func conversationSources(ctx context.Context, db *gorm.DB, owner string, conversationIDs []string) (map[string]conversationSource, error) {
+	values := make(map[string]conversationSource, len(conversationIDs))
 	for _, conversationID := range conversationIDs {
-		values[conversationID] = ChatExecutorLazyMind
+		values[conversationID] = conversationSource{Assistant: ChatExecutorLazyMind}
 	}
 	if len(conversationIDs) == 0 {
 		return values, nil
 	}
-	var bindings []orm.ExternalAgentBinding
-	if err := db.WithContext(ctx).
-		Where("created_by_user_id = ? AND conversation_id IN ?", owner, conversationIDs).
-		Order("created_at ASC, id ASC").
-		Find(&bindings).Error; err != nil {
+	// During a rolling migration, the catalog table may not exist yet. Until
+	// it does, no external binding is validated and conversations keep their
+	// LazyMind presentation instead of failing unrelated conversation reads.
+	if !db.Migrator().HasTable(&orm.ExternalAgentSession{}) {
+		return values, nil
+	}
+	type sourceRow struct {
+		ConversationID string `gorm:"column:conversation_id"`
+		Provider       string `gorm:"column:provider"`
+		ProjectKey     string `gorm:"column:project_key"`
+		ProjectName    string `gorm:"column:project_name"`
+	}
+	var rows []sourceRow
+	if err := db.WithContext(ctx).Table("external_agent_bindings AS bindings").
+		Select("bindings.conversation_id, bindings.provider, sessions.project_key, sessions.project_name").
+		Joins("LEFT JOIN external_agent_sessions AS sessions ON sessions.owner_user_id = bindings.created_by_user_id AND sessions.provider = bindings.provider AND sessions.host_id = bindings.host_id AND sessions.provider_thread_id = bindings.provider_thread_id AND sessions.active = ?", true).
+		Where("bindings.created_by_user_id = ? AND bindings.conversation_id IN ?", owner, conversationIDs).
+		Order("bindings.created_at ASC, bindings.id ASC").
+		Scan(&rows).Error; err != nil {
 		return nil, err
 	}
-	for _, binding := range bindings {
-		if binding.ManagedByLazyMind || !isExternalChatProvider(binding.Provider) {
+	for _, row := range rows {
+		if !isExternalChatProvider(row.Provider) {
 			continue
 		}
-		if values[binding.ConversationID] == ChatExecutorLazyMind {
-			values[binding.ConversationID] = binding.Provider
+		if values[row.ConversationID].Assistant == ChatExecutorLazyMind {
+			values[row.ConversationID] = conversationSource{
+				Assistant: row.Provider, ProjectKey: row.ProjectKey, ProjectName: row.ProjectName,
+			}
 		}
 	}
 	return values, nil

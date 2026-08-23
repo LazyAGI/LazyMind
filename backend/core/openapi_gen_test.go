@@ -690,6 +690,32 @@ func TestOpenAPISpecIncludesAgentEvoContracts(t *testing.T) {
 	}
 }
 
+func TestOpenAPISpecUsesGatewaySafeExternalChatProviderRoutes(t *testing.T) {
+	r := mux.NewRouter()
+	registerCoreRoutes(r)
+
+	specJSON, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+	for _, route := range []struct {
+		method string
+		path   string
+	}{
+		{"get", "/api/core/external-chat/hosts/{provider}/status"},
+		{"post", "/api/core/external-chat/hosts/{provider}/claim"},
+		{"get", "/api/core/external-chat/providers/{provider}/sessions"},
+		{"post", "/api/core/external-chat/providers/{provider}/sessions/{thread_id}/binding"},
+		{"post", "/api/core/external-chat/providers/{provider}/sessions:sync"},
+	} {
+		openAPIOperationForTest(t, spec, route.method, route.path)
+	}
+}
+
 func TestOpenAPISpecDocumentsFeedbackCancellation(t *testing.T) {
 	r := mux.NewRouter()
 	registerCoreRoutes(r)

@@ -8,20 +8,18 @@ from channel_gateway.common.application.providers import (
 )
 from channel_gateway.common.application.actions import ChannelActionExecutor
 from channel_gateway.common.application.intents import (
-    ChannelIntentClassifier,
     ExactShortcutParser,
 )
 from channel_gateway.common.application.messages import (
     ChannelMessageService,
 )
 from channel_gateway.common.application.routing import ChannelCommandRouter
+from channel_gateway.common.application.task_artifacts import (
+    TaskArtifactMonitor,
+)
 from channel_gateway.common.application.workers import (
     DeliveryWorker,
     MessageWorker,
-)
-from channel_gateway.common.domain.chat import (
-    BASIC_CHAT_FEATURES,
-    ChannelFeatureProfile,
 )
 from channel_gateway.common.domain.outbound import OutboundRenderer
 from channel_gateway.common.infrastructure.lazymind import LazyMindClient
@@ -58,7 +56,6 @@ from channel_gateway.wechat.delivery import WeChatDeliveryProvider
 from channel_gateway.wechat.runtime import WeChatRuntime
 from channel_gateway.wechat.service import (
     WeChatConnectionService,
-    WeChatRuntimeSupervisor,
 )
 
 
@@ -82,6 +79,11 @@ class Settings:
     wechat_poll_timeout_seconds: int = 40
     wechat_max_consecutive_errors: int = 3
     wechat_text_chunk_size: int = 1800
+    wechat_upload_root: str = field(default_factory=lambda: _environment(
+        'LAZYMIND_CHANNEL_GATEWAY_UPLOAD_ROOT',
+        '/var/lib/lazymind/uploads',
+    ))
+    wechat_max_inbound_media_bytes: int = 100 * 1024 * 1024
     feishu_text_chunk_size: int = 3000
 
 
@@ -94,7 +96,6 @@ class ProviderComponents:
     connection: InteractiveConnectionAdapter
     accounts: AccountAdapter
     delivery: DeliveryProvider
-    features: ChannelFeatureProfile = BASIC_CHAT_FEATURES
     streaming: ReplyStreamProvider | None = None
 
 
@@ -130,10 +131,6 @@ class ProviderRegistry:
     def delivery(self, name: str) -> DeliveryProvider | None:
         provider = self._provider(name)
         return provider.delivery if provider else None
-
-    def features(self, name: str) -> ChannelFeatureProfile:
-        provider = self._provider(name)
-        return provider.features if provider else BASIC_CHAT_FEATURES
 
     def streaming(self, name: str) -> ReplyStreamProvider | None:
         provider = self._provider(name)
@@ -180,6 +177,10 @@ def build_components(settings: Settings | None = None) -> GatewayComponents:
             resolved_settings.wechat_max_consecutive_errors
         ),
         text_chunk_size=resolved_settings.wechat_text_chunk_size,
+        upload_root=resolved_settings.wechat_upload_root,
+        max_inbound_media_bytes=(
+            resolved_settings.wechat_max_inbound_media_bytes
+        ),
     )
     cipher = JsonCipher(resolved_settings.credential_key_path)
     payload_cipher = JsonCipher(
@@ -267,6 +268,12 @@ def build_components(settings: Settings | None = None) -> GatewayComponents:
         channels=feishu_channels,
         tasks=lazymind,
     )
+    wechat_task_monitor = TaskArtifactMonitor(
+        provider='wechat',
+        store=store,
+        credentials=wechat_credentials,
+        tasks=lazymind,
+    )
     providers = ProviderRegistry()
     providers.register(
         'wechat',
@@ -274,7 +281,6 @@ def build_components(settings: Settings | None = None) -> GatewayComponents:
             connection=wechat_connections,
             accounts=wechat_connections,
             delivery=wechat_delivery,
-            features=BASIC_CHAT_FEATURES,
         ),
     )
     providers.register(
@@ -284,26 +290,17 @@ def build_components(settings: Settings | None = None) -> GatewayComponents:
             accounts=feishu_accounts,
             delivery=feishu_delivery,
             streaming=feishu_delivery,
-            features=ChannelFeatureProfile(
-                enable_ask=True,
-                enable_workflow=True,
-                enable_skill=True,
-                enable_subagent=True,
-                enable_tasks=True,
-            ),
         ),
     )
     executor = ChannelActionExecutor(
         store=store,
-        feature_resolver=providers.features,
         client=lazymind,
     )
     messages = ChannelMessageService(
         router=ChannelCommandRouter(
             store=store,
             shortcuts=ExactShortcutParser(store),
-            classifier=ChannelIntentClassifier(lazymind),
-            feature_resolver=providers.features,
+            catalog=lazymind,
         ),
         executor=executor,
     )
@@ -339,10 +336,9 @@ def build_components(settings: Settings | None = None) -> GatewayComponents:
         message_worker=message_worker,
         delivery_worker=delivery_worker,
         runtime_supervisors=(
-            WeChatRuntimeSupervisor(
-                connections=wechat_connections,
-                accounts=wechat_accounts,
-            ),
+            wechat_accounts,
+            wechat_connections,
+            wechat_task_monitor,
             feishu_accounts_runtime,
             feishu_connections,
             feishu_task_monitor,

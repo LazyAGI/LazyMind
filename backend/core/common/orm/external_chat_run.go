@@ -5,24 +5,42 @@ import (
 	"time"
 )
 
-// ExternalAgentBinding is the durable per-provider one-to-one correspondence
-// between a provider-native thread and a LazyMind conversation. A LazyMind
-// conversation may have one binding for each provider. ManagedByLazyMind records
-// the immutable thread origin, not which side initiated the latest turn.
-// Provider transcript content remains provider-owned; LazyMind stores only
-// activity projections.
+// ExternalAgentBinding is the durable one-to-one correspondence between one
+// provider-native thread and one LazyMind conversation.
 type ExternalAgentBinding struct {
-	ID                string    `gorm:"column:id;type:varchar(36);primaryKey" json:"binding_id"`
-	ConversationID    string    `gorm:"column:conversation_id;type:varchar(36);not null;uniqueIndex:uk_external_agent_binding_conversation_provider,priority:1" json:"conversation_id"`
-	Provider          string    `gorm:"column:provider;type:varchar(32);not null;uniqueIndex:uk_external_agent_binding_thread,priority:1;uniqueIndex:uk_external_agent_binding_conversation_provider,priority:2" json:"provider"`
-	ProviderThreadID  string    `gorm:"column:provider_thread_id;type:varchar(128);not null;uniqueIndex:uk_external_agent_binding_thread,priority:2" json:"provider_thread_id"`
-	ManagedByLazyMind bool      `gorm:"column:managed_by_lazymind;not null;default:false" json:"managed_by_lazymind"`
-	CreatedByUserID   string    `gorm:"column:created_by_user_id;type:varchar(255);not null" json:"-"`
-	CreatedAt         time.Time `gorm:"column:created_at;not null" json:"created_at"`
-	UpdatedAt         time.Time `gorm:"column:updated_at;not null" json:"updated_at"`
+	ID               string    `gorm:"column:id;type:varchar(36);primaryKey" json:"binding_id"`
+	ConversationID   string    `gorm:"column:conversation_id;type:varchar(36);not null;uniqueIndex:uk_external_agent_binding_conversation" json:"conversation_id"`
+	Provider         string    `gorm:"column:provider;type:varchar(32);not null;uniqueIndex:uk_external_agent_binding_thread,priority:1" json:"provider"`
+	HostID           string    `gorm:"column:host_id;type:varchar(128);not null;uniqueIndex:uk_external_agent_binding_thread,priority:2" json:"host_id"`
+	ProviderThreadID string    `gorm:"column:provider_thread_id;type:varchar(128);not null;uniqueIndex:uk_external_agent_binding_thread,priority:3" json:"provider_thread_id"`
+	CreatedByUserID  string    `gorm:"column:created_by_user_id;type:varchar(255);not null" json:"-"`
+	CreatedAt        time.Time `gorm:"column:created_at;not null" json:"created_at"`
+	UpdatedAt        time.Time `gorm:"column:updated_at;not null" json:"updated_at"`
 }
 
 func (ExternalAgentBinding) TableName() string { return "external_agent_bindings" }
+
+// ExternalAgentSession is the provider-native catalog projection. It proves a
+// session exists in the local provider store, independently of whether that
+// session has a LazyMind Conversation binding.
+type ExternalAgentSession struct {
+	ID               string     `gorm:"column:id;type:varchar(36);primaryKey" json:"session_id"`
+	OwnerUserID      string     `gorm:"column:owner_user_id;type:varchar(255);not null;uniqueIndex:uk_external_agent_session,priority:1;index" json:"-"`
+	Provider         string     `gorm:"column:provider;type:varchar(32);not null;uniqueIndex:uk_external_agent_session,priority:2;index" json:"provider"`
+	HostID           string     `gorm:"column:host_id;type:varchar(128);not null;uniqueIndex:uk_external_agent_session,priority:3;index" json:"host_id"`
+	ProviderThreadID string     `gorm:"column:provider_thread_id;type:varchar(128);not null;uniqueIndex:uk_external_agent_session,priority:4" json:"provider_thread_id"`
+	ProjectKey       string     `gorm:"column:project_key;type:varchar(128);not null;default:''" json:"project_key"`
+	ProjectName      string     `gorm:"column:project_name;type:varchar(200);not null;default:''" json:"project_name"`
+	DisplayName      string     `gorm:"column:display_name;type:varchar(255);not null;default:''" json:"display_name"`
+	TurnCount        int        `gorm:"column:turn_count;not null;default:0" json:"turn_count"`
+	Active           bool       `gorm:"column:active;not null;default:true;index" json:"active"`
+	NativeUpdatedAt  *time.Time `gorm:"column:native_updated_at" json:"native_updated_at,omitempty"`
+	LastSeenAt       time.Time  `gorm:"column:last_seen_at;not null;index" json:"last_seen_at"`
+	CreatedAt        time.Time  `gorm:"column:created_at;not null" json:"created_at"`
+	UpdatedAt        time.Time  `gorm:"column:updated_at;not null" json:"updated_at"`
+}
+
+func (ExternalAgentSession) TableName() string { return "external_agent_sessions" }
 
 // ExternalChatRun is the operational record for one external Agent turn. The
 // same read model covers LazyMind-managed turns and observed MCP activity.
