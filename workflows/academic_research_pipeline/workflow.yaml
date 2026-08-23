@@ -159,11 +159,11 @@ ui:
     search_log: {widgetType: text-markdown, readOnly: true}
     annotated_bibliography: {widgetType: text-markdown, readOnly: true, maxHeight: 680}
     research_synthesis: {widgetType: text-markdown, readOnly: true, maxHeight: 680}
-    outline_document: {widgetType: writer-document, readOnly: false}
+    outline_document: {widgetType: file-card, readOnly: false}
     outline_check_report: {widgetType: text-markdown, readOnly: true}
     effective_outline_check_report: {widgetType: text-markdown, readOnly: true}
     chapter_drafts: {widgetType: file-card, readOnly: true}
-    draft_document: {widgetType: writer-document, readOnly: false}
+    draft_document: {widgetType: file-card, readOnly: false}
     pre_integrity_report: {widgetType: text-markdown, readOnly: true}
     pre_integrity_summary: {widgetType: json-block, readOnly: true, collapsed: false}
     reviewer_configuration: {widgetType: text-markdown, readOnly: true}

@@ -178,6 +178,9 @@ slots:
   - {id: delivery_summary, label: 产品交付摘要, type: text, cardinality: single, exposed: true}
 
 ui:
+  # The first step derives all skip_* materials from the launch parameters.
+  # Keep conditional tabs out of the initial paint until that plan is available.
+  tab_visibility_ready_material: execution_plan
   slots:
     execution_plan: {widgetType: json-block, readOnly: true, collapsed: false}
     research_evidence: {widgetType: text-markdown, readOnly: true, maxHeight: 680}
@@ -187,7 +190,7 @@ ui:
     direction_outline_report: {widgetType: text-markdown, readOnly: true}
     direction_chapters: {widgetType: file-card, readOnly: true}
     direction_document: {widgetType: file-card, readOnly: false}
-    competitive_analysis: {widgetType: file-card, readOnly: true}
+    competitive_analysis: {widgetType: html-preview, readOnly: true}
     design_outline: {widgetType: file-card, readOnly: false}
     design_outline_report: {widgetType: text-markdown, readOnly: true}
     design_chapters: {widgetType: file-card, readOnly: true}
@@ -196,7 +199,7 @@ ui:
     prd_outline_report: {widgetType: text-markdown, readOnly: true}
     prd_chapters: {widgetType: file-card, readOnly: true}
     prd_document: {widgetType: file-card, readOnly: false}
-    prototype: {widgetType: file-card, readOnly: true}
+    prototype: {widgetType: html-preview, readOnly: true}
     review_outline: {widgetType: file-card, readOnly: false}
     review_outline_report: {widgetType: text-markdown, readOnly: true}
     review_chapters: {widgetType: file-card, readOnly: true}

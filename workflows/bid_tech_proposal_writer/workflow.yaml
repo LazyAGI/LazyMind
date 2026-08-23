@@ -309,11 +309,11 @@ ui:
     technical_requirements: {widgetType: text-markdown, readOnly: true}
     disqualification_items: {widgetType: text-markdown, readOnly: true}
     knowledge_evidence: {widgetType: text-markdown, readOnly: true}
-    outline_document: {widgetType: writer-document, readOnly: false}
+    outline_document: {widgetType: file-card, readOnly: false}
     outline_check_report: {widgetType: text-markdown, readOnly: true}
     effective_outline_check_report: {widgetType: text-markdown, readOnly: true}
     chapter_contents: {widgetType: file-card, readOnly: true}
-    draft_document: {widgetType: writer-document, readOnly: false}
+    draft_document: {widgetType: file-card, readOnly: false}
     architecture_image: {widgetType: image-gallery, readOnly: true, itemWidth: 720, itemHeight: 405}
     effect_images: {widgetType: image-gallery, readOnly: true, itemLayout: grid, gridMaxCols: 2, itemWidth: 520, itemHeight: 292}
     image_manifest: {widgetType: json-block, readOnly: true, collapsed: true}
@@ -372,21 +372,18 @@ ui:
       step_id: compose_proposal_docx
       label: 方案交付
       layout: list
-      slots: [{id: final_proposal_markdown}]
+      allow_download: true
+      slots: [{id: final_proposal_markdown}, {id: final_proposal}]
     - id: validation
       step_id: validate_proposal
       label: 结果校验
       layout: composite
-      slots: [{id: final_proposal}, {id: validation_report}, {id: validation_summary}]
+      slots: [{id: validation_report}, {id: validation_summary}]
       composite_layout:
         direction: row
         children:
-          - {slot: final_proposal, weight: 1}
-          - direction: column
-            weight: 2
-            children:
-              - {slot: validation_report, weight: 2}
-              - {slot: validation_summary, weight: 1}
+          - {slot: validation_report, weight: 2}
+          - {slot: validation_summary, weight: 1}
 
 i18n:
   zh-CN:

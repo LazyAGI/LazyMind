@@ -884,8 +884,23 @@ func validateUI(
 		if scalar(widget["widgetType"]) == "html-slide" && specs[materialID].Type != "text" {
 			out = append(out, materialDiag("E_UI_WIDGET_INCOMPATIBLE", "error", path+".widgetType", materialID, "html-slide requires a text material"))
 		}
+		if scalar(widget["widgetType"]) == "html-preview" && specs[materialID].Type != "text" && specs[materialID].Type != "file" {
+			out = append(out, materialDiag("E_UI_WIDGET_INCOMPATIBLE", "error", path+".widgetType", materialID, "html-preview requires a text or file material"))
+		}
+	}
+	if materialID := scalar(ui["tab_visibility_ready_material"]); materialID != "" && !known[materialID] {
+		out = append(out, materialDiag(
+			"E_UI_MATERIAL_UNKNOWN", "error", "workflow.yaml.ui.tab_visibility_ready_material",
+			materialID, "tab visibility readiness references an unknown material",
+		))
 	}
 	for i, tab := range tabs {
+		if materialID := scalar(tab["hide_when_material"]); materialID != "" && !known[materialID] {
+			out = append(out, materialDiag(
+				"E_UI_MATERIAL_UNKNOWN", "error", fmt.Sprintf("workflow.yaml.ui.tabs[%d].hide_when_material", i),
+				materialID, "tab visibility references an unknown material",
+			))
+		}
 		refs := parseMaterialRefs(tab["slots"])
 		tabMaterials := map[string]bool{}
 		if len(refs) == 0 {

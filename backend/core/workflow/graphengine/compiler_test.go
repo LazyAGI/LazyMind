@@ -712,6 +712,42 @@ func TestValidateUIDeclarativeHTMLSlideExport(t *testing.T) {
 	}
 }
 
+func TestValidateUITabVisibilityAndHTMLPreview(t *testing.T) {
+	known := map[string]bool{"plan": true, "skip_prototype": true, "prototype": true}
+	specs := map[string]uiMaterialSpec{
+		"plan":           {Type: "json", Cardinality: "single"},
+		"skip_prototype": {Type: "text", Cardinality: "single"},
+		"prototype":      {Type: "file", Cardinality: "single"},
+	}
+	ui := map[string]any{
+		"tab_visibility_ready_material": "plan",
+		"slots": map[string]any{
+			"prototype": map[string]any{"widgetType": "html-preview"},
+		},
+		"tabs": []map[string]any{{
+			"id": "prototype", "hide_when_material": "skip_prototype",
+			"slots": []map[string]any{{"id": "prototype"}},
+		}},
+	}
+
+	if diagnostics := validateUI(ui, known, map[string]bool{}, specs, ProfilePublish); len(diagnostics) != 0 {
+		t.Fatalf("declarative tab visibility and HTML preview should be valid: %#v", diagnostics)
+	}
+
+	ui["tab_visibility_ready_material"] = "missing_plan"
+	ui["tabs"].([]map[string]any)[0]["hide_when_material"] = "missing_skip"
+	diagnostics := validateUI(ui, known, map[string]bool{}, specs, ProfilePublish)
+	unknownCount := 0
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == "E_UI_MATERIAL_UNKNOWN" {
+			unknownCount++
+		}
+	}
+	if unknownCount != 2 {
+		t.Fatalf("expected both unknown visibility materials to be rejected: %#v", diagnostics)
+	}
+}
+
 func TestValidateUIRejectsInvalidExportMappings(t *testing.T) {
 	known := map[string]bool{"page": true, "notes": true}
 	specs := map[string]uiMaterialSpec{

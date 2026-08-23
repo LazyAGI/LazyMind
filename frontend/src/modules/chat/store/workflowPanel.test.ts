@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { filterWorkflowTabs, hydrateWorkflowUI } from './workflowPanel';
+import {
+  filterWorkflowTabs,
+  hydrateWorkflowUI,
+  workflowTabAllowsDownload,
+} from './workflowPanel';
 
 describe('hydrateWorkflowUI', () => {
   it('hydrates tab slot references with root slot list metadata', () => {
@@ -65,6 +69,31 @@ describe('hydrateWorkflowUI', () => {
 });
 
 describe('filterWorkflowTabs', () => {
+  it('defers conditional tabs until the declared planning material is ready', () => {
+    const tabs = [
+      { id: 'planning', label: 'Planning', slots: [] },
+      {
+        id: 'direction', label: 'Direction', slots: [],
+        hide_when_material: 'skip_direction',
+      },
+    ];
+
+    expect(filterWorkflowTabs(tabs, [], 'execution_plan').map((tab) => tab.id)).toEqual([
+      'planning',
+    ]);
+
+    const slots = [{
+      slot_id: 'plan-id',
+      revision: 1,
+      selected: true,
+      slot: 'execution_plan',
+      created_at: '2026-08-22T00:00:00Z',
+    }];
+    expect(filterWorkflowTabs(tabs, slots, 'execution_plan').map((tab) => tab.id)).toEqual([
+      'planning', 'direction',
+    ]);
+  });
+
   it('hides only tabs whose opt-in material has a selected revision', () => {
     const tabs = [
       { id: 'always', label: 'Always', slots: [] },
@@ -104,5 +133,19 @@ describe('filterWorkflowTabs', () => {
     }];
 
     expect(filterWorkflowTabs(tabs, slots)).toEqual(tabs);
+  });
+});
+
+describe('workflowTabAllowsDownload', () => {
+  it('uses the explicit tab policy before the last-tab fallback', () => {
+    const tab = { id: 'delivery', label: 'Delivery', slots: [], allow_download: true };
+    expect(workflowTabAllowsDownload(tab, 1, 3)).toBe(true);
+    expect(workflowTabAllowsDownload({ ...tab, allow_download: false }, 2, 3)).toBe(false);
+  });
+
+  it('keeps downloads on the final tab for existing workflow packages', () => {
+    const tab = { id: 'result', label: 'Result', slots: [] };
+    expect(workflowTabAllowsDownload(tab, 0, 2)).toBe(false);
+    expect(workflowTabAllowsDownload(tab, 1, 2)).toBe(true);
   });
 });

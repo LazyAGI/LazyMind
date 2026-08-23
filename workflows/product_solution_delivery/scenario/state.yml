@@ -27,7 +27,10 @@ steps:
       infer defaults. First call normalize_product_parameters with the exact external product_goal,
       stage_chain, execution_depth, word_target and reference_sample_choice values. Save its
       execution_plan JSON and every returned top-level skip_* value to the matching optional output;
-      do not create a skip material absent from the tool result.
+      do not create a skip material absent from the tool result. Persist these small planning outputs
+      together immediately before profiling files or starting any search; do not defer or batch them
+      with the later evidence outputs. The UI uses this first artifact update to reveal only the
+      planned stage tabs.
 
       Then perform one shared evidence pass for all stages in execution_plan.stage_chain. Load only the
       child contracts needed to understand stage-specific evidence boundaries. If product_materials

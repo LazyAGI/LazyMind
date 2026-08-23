@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import base64
 import json
+import mimetypes
 import re
 import uuid
 from pathlib import Path
@@ -14,10 +16,17 @@ HEADING = re.compile(r'^(#{1,6})\s+(.+?)\s*$')
 BULLET = re.compile(r'^\s*[-*+]\s+(.+)$')
 NUMBERED = re.compile(r'^\s*\d+[.)、]\s+(.+)$')
 INLINE_IMAGE = re.compile(r'^!\[([^]]*)\]\(([^)]+)\)\s*$')
+WRITER_IMAGE_PLACEHOLDER = re.compile(r'^media-placeholder://IMAGE-(\d+)$', re.IGNORECASE)
+EMPTY_HTML_ANCHOR = re.compile(r'^<a\b[^>]*>\s*</a>$', re.IGNORECASE)
+MARKDOWN_IMAGE_PLACEHOLDER = re.compile(
+    r'!\[([^]]*)\]\(media-placeholder://IMAGE-(\d+)\)',
+    re.IGNORECASE,
+)
 
 
 def _clean_inline(text: str) -> str:
-    value = re.sub(r'!\[([^]]*)\]\([^)]+\)', r'\1', str(text or ''))
+    value = re.sub(r'<a\b[^>]*>\s*</a>', '', str(text or ''), flags=re.IGNORECASE)
+    value = re.sub(r'!\[([^]]*)\]\([^)]+\)', r'\1', value)
     value = re.sub(r'\[([^]]+)\]\([^)]+\)', r'\1', value)
     value = re.sub(r'(\*\*|__|~~|`)', '', value)
     return value.strip()
@@ -105,6 +114,104 @@ def _canonical_output_format(value: Any) -> str:
     if raw in {'docx', 'word', '.docx'}:
         return 'docx'
     raise ValueError('generation_parameters.output_format must be md or docx.')
+
+
+def _place_workflow_images(markdown_text: str, images: list[dict[str, str]]) -> str:
+    """Add Writer image placeholders to their source chapters before DOCX rendering."""
+    lines = str(markdown_text or '').replace('\r\n', '\n').replace('\r', '\n').split('\n')
+    headings: list[tuple[int, int, str]] = []
+    existing: set[int] = set()
+    for line_index, line in enumerate(lines):
+        heading = HEADING.match(line.strip())
+        if heading:
+            headings.append((line_index, len(heading.group(1)), _strip_heading_number(heading.group(2))))
+        inline_image = INLINE_IMAGE.match(line.strip())
+        if inline_image:
+            placeholder = WRITER_IMAGE_PLACEHOLDER.match(inline_image.group(2).strip())
+            if placeholder:
+                existing.add(int(placeholder.group(1)) - 1)
+
+    insertions: dict[int, list[tuple[int, str]]] = {}
+    unresolved: list[tuple[int, str]] = []
+    for image_index, image in enumerate(images):
+        if image_index in existing:
+            continue
+        title = re.sub(
+            r'[\[\]\r\n]+', ' ',
+            str(image.get('title') or f'方案配图 {image_index + 1}'),
+        ).strip()
+        placeholder_line = f'![{title}](media-placeholder://IMAGE-{image_index + 1})'
+        source_chapter = str(image.get('source_chapter') or '').strip()
+        candidates = [
+            (source_chapter.find(title_text), -len(title_text), heading_index, level)
+            for heading_index, level, title_text in headings
+            if title_text and title_text in source_chapter
+        ]
+        if not candidates:
+            unresolved.append((image_index, placeholder_line))
+            continue
+        _, _, heading_index, level = min(candidates)
+        boundary = len(lines)
+        for next_index, next_level, _ in headings:
+            if next_index > heading_index and next_level <= level:
+                boundary = next_index
+                break
+        while boundary > heading_index + 1 and not lines[boundary - 1].strip():
+            boundary -= 1
+        insertions.setdefault(boundary, []).append((image_index, placeholder_line))
+
+    marker_index = next((index for index, line in enumerate(lines) if line.strip() == IMAGE_MARKER), None)
+    skipped: set[int] = set()
+    if marker_index is not None:
+        skipped.add(marker_index)
+        if unresolved:
+            insertions.setdefault(marker_index, []).extend(unresolved)
+        else:
+            previous = marker_index - 1
+            while previous >= 0 and not lines[previous].strip():
+                previous -= 1
+            heading = HEADING.match(lines[previous].strip()) if previous >= 0 else None
+            if heading and _strip_heading_number(heading.group(2)) in {
+                '系统架构与功能效果', '系统架构与效果',
+            }:
+                skipped.add(previous)
+    elif unresolved:
+        lines.extend(['', '## 系统架构与功能效果'])
+        insertions.setdefault(len(lines), []).extend(unresolved)
+
+    output: list[str] = []
+    for line_index in range(len(lines) + 1):
+        pending = sorted(insertions.get(line_index, []))
+        if pending:
+            if output and output[-1].strip():
+                output.append('')
+            output.extend(line for _, line in pending)
+            output.append('')
+        if line_index < len(lines) and line_index not in skipped:
+            output.append(lines[line_index])
+    return '\n'.join(output).strip()
+
+
+def _embed_workflow_images(markdown_text: str, images: list[dict[str, str]]) -> str:
+    """Make the delivered Markdown self-contained while DOCX keeps local file inputs."""
+    encoded: dict[int, str] = {}
+
+    def replace_image(match: re.Match) -> str:
+        image_index = int(match.group(2)) - 1
+        if not 0 <= image_index < len(images):
+            return ''
+        if image_index not in encoded:
+            path = Path(str(images[image_index].get('path') or '')).expanduser().resolve()
+            if not path.is_file():
+                return ''
+            mime_type = mimetypes.guess_type(path.name)[0] or 'image/png'
+            if not mime_type.startswith('image/'):
+                mime_type = 'image/png'
+            payload = base64.b64encode(path.read_bytes()).decode('ascii')
+            encoded[image_index] = f'data:{mime_type};base64,{payload}'
+        return f'![{match.group(1)}]({encoded[image_index]})'
+
+    return MARKDOWN_IMAGE_PLACEHOLDER.sub(replace_image, str(markdown_text or ''))
 
 
 def _image_paths(value: Any) -> list[dict[str, str]]:
@@ -334,6 +441,7 @@ def _render_markdown(document: Any, markdown_text: str, images: list[dict[str, s
     heading_count = 0
     embedded = 0
     image_marker_seen = False
+    consumed_images: set[int] = set()
     in_code = False
     while index < len(lines):
         line = lines[index].rstrip()
@@ -345,8 +453,16 @@ def _render_markdown(document: Any, markdown_text: str, images: list[dict[str, s
         if not stripped:
             index += 1
             continue
+        if EMPTY_HTML_ANCHOR.match(stripped):
+            index += 1
+            continue
         if stripped == IMAGE_MARKER:
-            embedded += _add_images(document, images)
+            remaining = [
+                image for image_index, image in enumerate(images)
+                if image_index not in consumed_images
+            ]
+            embedded += _add_images(document, remaining)
+            consumed_images.update(range(len(images)))
             image_marker_seen = True
             index += 1
             continue
@@ -367,7 +483,14 @@ def _render_markdown(document: Any, markdown_text: str, images: list[dict[str, s
             heading_count += 1
             index += 1
             continue
-        if INLINE_IMAGE.match(stripped):
+        inline_image = INLINE_IMAGE.match(stripped)
+        if inline_image:
+            placeholder = WRITER_IMAGE_PLACEHOLDER.match(inline_image.group(2).strip())
+            if placeholder:
+                image_index = int(placeholder.group(1)) - 1
+                if 0 <= image_index < len(images) and image_index not in consumed_images:
+                    embedded += _add_images(document, [images[image_index]])
+                    consumed_images.add(image_index)
             index += 1
             continue
         bullet = BULLET.match(line)
@@ -383,9 +506,13 @@ def _render_markdown(document: Any, markdown_text: str, images: list[dict[str, s
             _set_run_font(run, east_asia='等线', latin='Courier New', size=10.5)
         paragraph_count += 1
         index += 1
-    if images and not image_marker_seen:
+    remaining = [
+        image for image_index, image in enumerate(images)
+        if image_index not in consumed_images
+    ]
+    if remaining and not image_marker_seen:
         document.add_heading('系统架构与效果', level=1)
-        embedded += _add_images(document, images)
+        embedded += _add_images(document, remaining)
     return paragraph_count, heading_count, embedded
 
 
@@ -530,6 +657,7 @@ def compose_proposal_from_inputs(output_name: str = '') -> dict[str, Any]:
         'path': architecture_path,
         'title': str(architecture.get('title') or architecture.get('caption') or '系统总体架构图'),
         'type': 'architecture',
+        'source_chapter': str(architecture.get('source_chapter') or ''),
     }]
     for index, path in enumerate(effect_paths):
         metadata = effects[index] if index < len(effects) and isinstance(effects[index], dict) else {}
@@ -537,12 +665,15 @@ def compose_proposal_from_inputs(output_name: str = '') -> dict[str, Any]:
             'path': path,
             'title': str(metadata.get('title') or metadata.get('caption') or f'功能效果图 {index + 1}'),
             'type': str(metadata.get('type') or metadata.get('image_type') or 'effect'),
+            'source_chapter': str(metadata.get('source_chapter') or ''),
         })
+
+    draft = _place_workflow_images(draft, images)
 
     title = str(outline.get('project_full_name') or outline.get('project_name') or '投标技术方案').strip()
     title = re.sub(r'[\s\\/:*?"<>|]+', '_', title).strip('._') or '投标技术方案'
     markdown_name = title + ('_技术方案.md' if not title.endswith('技术方案') else '.md')
-    markdown_file = export_proposal_markdown(draft, markdown_name)
+    markdown_file = export_proposal_markdown(_embed_workflow_images(draft, images), markdown_name)
     output_format = _canonical_output_format(parameters.get('output_format'))
     if output_format == 'md':
         delivery = dict(markdown_file)

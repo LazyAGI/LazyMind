@@ -99,7 +99,7 @@ const RenderWord = (props: WordViewerProps) => {
   }, []);
 
   return (
-    <div style={{ maxWidth: 800, margin: "0 auto", height: "100%" }}>
+    <div className="file-viewer-word-scroll">
       {loading && (
         <div
           style={{
@@ -116,6 +116,7 @@ const RenderWord = (props: WordViewerProps) => {
       )}
       <div
         ref={containerRef}
+        className="file-viewer-word-document"
         style={{
           border: "1px solid #ddd",
           backgroundColor: "#fff",

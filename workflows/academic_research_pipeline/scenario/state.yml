@@ -33,7 +33,8 @@ steps:
 
       Call normalize_academic_parameters with the exact external values for research_topic,
       word_target, paper_type, paper_language, citation_style, and output_format. Save the
-      returned object as generation_parameters with content_type="json".
+      returned object immediately as generation_parameters with content_type="json" in its
+      own save_artifacts call.
 
       Then formulate a Research Question Brief grounded only in the confirmed topic:
       - one precise primary research question and 2–4 sub-questions;
@@ -41,13 +42,19 @@ steps:
         PASS/WARN/UNKNOWN rather than invented scores;
       - in-scope/out-of-scope boundaries, key concepts and operational definitions;
       - candidate contribution stated as a question or hypothesis, not as a proven result.
-      Save it as research_question_brief with content_type="text".
+      Save it as research_question_brief with content_type="text" in a separate
+      save_artifacts call.
 
       Produce a Methodology Blueprint matched to the question and paper type: paradigm,
       research design, data strategy, inclusion/exclusion logic, analysis framework,
       validity/reliability checks, ethics and reproducibility plan. Never claim that data,
       ethics approval, preregistration or experiments already exist. Save it as
-      methodology_blueprint with content_type="text" in the same save_artifacts call.
+      methodology_blueprint with content_type="text" in a third save_artifacts call.
+
+      Do not batch long Markdown values into one tool call and do not copy a previously saved
+      artifact into a later save call. Prefer typographic quotation marks such as “...” in
+      generated prose; every tool call must remain valid JSON with any literal ASCII double
+      quote escaped.
     tools: [normalize_academic_parameters]
     inputs:
       - {material: research_topic, required: true}
