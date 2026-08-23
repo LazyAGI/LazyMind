@@ -276,7 +276,6 @@ class ChannelCommandRouter:
         return kinds
 
 
-
 def _control_command(text: str) -> CommandEnvelope | None:
     normalized = ''.join(text.lower().split())
     if normalized in {'新建会话', '创建会话', '新会话', 'newchat'}:

@@ -163,6 +163,7 @@ class KnowledgeBaseResourceChange(_ClearableResourceChangeBase):
         )
     )
 
+
 class SkillResourceChange(_NamedResourceChangeBase):
     resource_type: Literal['skill']
     operation: Literal['use'] = Field(
@@ -179,6 +180,7 @@ class ToolResourceChange(_ClearableResourceChangeBase):
     scope: Literal['turn', 'global'] = Field(
         description='Tool changes apply to one turn or to the user global default.'
     )
+
 
 class PersonalizationResourceChange(_ResourceChangeBase):
     resource_type: Literal['personalization']
@@ -504,6 +506,7 @@ _CommandUnion = reduce(or_, COMMAND_TYPES)
 CommandEnvelope: TypeAlias = Annotated[_CommandUnion, Field(discriminator='command')]
 
 COMMAND_ADAPTER = TypeAdapter(CommandEnvelope)
+
 
 class PreparedResourceItem(_StrictModel):
     id: str = Field(min_length=1, max_length=512)

@@ -1,5 +1,4 @@
 import base64
-import binascii
 import hashlib
 import hmac
 import os
@@ -494,7 +493,7 @@ class WeChatClient:
             return bytes.fromhex(value)
         try:
             decoded = base64.b64decode(value, validate=True)
-        except (ValueError, binascii.Error) as exc:
+        except ValueError as exc:
             raise WeChatError('WeChat media AES key is invalid') from exc
         if len(decoded) == 16:
             return decoded

@@ -32,6 +32,7 @@ WECHAT_WELCOME_MESSAGE = '我是 LazyMind，你可以在这里继续对话。支
 def welcome_message(provider: str) -> str:
     return WECHAT_WELCOME_MESSAGE if provider == 'wechat' else WELCOME_MESSAGE
 
+
 _HIDDEN_PROTOCOL_TAGS = re.compile(
     r'(?s)<(?:think|tool_call|tool_result|tp|trp)\b[^>]*>'
     r'.*?</(?:think|tool_call|tool_result|tp|trp)>'
