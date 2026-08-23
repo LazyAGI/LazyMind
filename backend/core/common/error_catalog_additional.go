@@ -368,6 +368,11 @@ func init() {
 	registerAdditionalError("create managed artifact", http.StatusInternalServerError, 2002095)
 	registerAdditionalError("write managed artifact", http.StatusInternalServerError, 2002096)
 	registerAdditionalError("commit managed artifact", http.StatusInternalServerError, 2002097)
+	registerAdditionalErrorAlias("skill package contains too many entries", "Invalid skill package", http.StatusBadRequest, 2002294)
+	registerAdditionalErrorPattern("skill package cannot contain symlink %q", "Invalid skill package", http.StatusBadRequest, 2002294)
+	registerAdditionalErrorPattern("skill package contains duplicate path %q", "Invalid skill package", http.StatusBadRequest, 2002294)
+	registerAdditionalErrorPattern("skill package file %q exceeds %d bytes", "Invalid skill package", http.StatusBadRequest, 2002294)
+	registerAdditionalErrorPattern("skill package exceeds %d uncompressed bytes", "Invalid skill package", http.StatusBadRequest, 2002294)
 
 	// Personal recovery and archive lifecycle errors.
 	registerAdditionalError("query archive folders failed", http.StatusInternalServerError, 2002098)

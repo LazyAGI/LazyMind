@@ -99,6 +99,26 @@ function Build-Manager {
     }
 }
 
+function Materialize-OfflineSkills {
+    $arguments = @(
+        'run', './cmd/builtin-skill-bundle',
+        '--sources', (Join-Path $repoRoot 'skills\builtin-sources.yaml'),
+        '--lock', (Join-Path $repoRoot 'skills\builtin-skills.lock.json'),
+        '--cache', (Join-Path $repoRoot 'skills\.runtime\cache'),
+        '--output', (Join-Path $repoRoot 'skills\.runtime\builtin-skills'),
+        '--featured-sources', (Join-Path $repoRoot 'skills\featured'),
+        '--featured-output', (Join-Path $repoRoot 'skills\.runtime\featured-skills'),
+        '--frozen-lockfile'
+    )
+    Push-Location (Join-Path $repoRoot 'backend\core')
+    try {
+        & go.exe @arguments
+        if ($LASTEXITCODE -ne 0) { throw "offline Skill materialization failed with exit code $LASTEXITCODE" }
+    } finally {
+        Pop-Location
+    }
+}
+
 function Invoke-Manager([string[]]$Arguments) {
     if (-not (Test-Path -LiteralPath $managerBin -PathType Leaf)) {
         throw "Local runtime manager was not built: $managerBin"
@@ -121,11 +141,12 @@ Initialize-Environment
 switch ($Action) {
     'doctor' { Invoke-Doctor }
     'build' { Build-Manager }
-    'up' { Build-Manager; Invoke-Manager @('up') }
+    'up' { Build-Manager; Materialize-OfflineSkills; Invoke-Manager @('up') }
     'up-lan' {
         $env:LAZYMIND_LOCAL_NETWORK_PROFILE = 'lan'
         $env:LAZYMIND_LOCAL_AUTO_LOGIN_ALLOW_LAN = 'true'
         Build-Manager
+        Materialize-OfflineSkills
         Invoke-Manager @('up')
     }
     'down' {

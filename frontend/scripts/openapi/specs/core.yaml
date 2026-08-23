@@ -3306,10 +3306,22 @@ components:
             properties:
                 attachment_hint:
                     type: string
+                builtin_skill_uid:
+                    type: string
                 category:
                     type: string
                 description:
                     type: string
+                detail_description:
+                    type: string
+                detail_title:
+                    type: string
+                featured:
+                    type: boolean
+                featured_order:
+                    type: integer
+                gallery:
+                    type: boolean
                 id:
                     type: string
                 image_url:
@@ -3317,8 +3329,6 @@ components:
                 output_label:
                     type: string
                 output_type:
-                    type: string
-                primary_category:
                     type: string
                 prompt:
                     type: string
@@ -3330,13 +3340,13 @@ components:
                     type: array
                 result_summary:
                     type: string
-                secondary_options:
-                    items:
-                        $ref: '#/components/schemas/ShowcaseCaseOption'
-                    type: array
                 steps:
                     items:
                         $ref: '#/components/schemas/ShowcaseCaseStep'
+                    type: array
+                tags:
+                    items:
+                        type: string
                     type: array
                 tasks:
                     items:
@@ -3344,9 +3354,17 @@ components:
                     type: array
                 title:
                     type: string
+                type:
+                    type: string
             required:
+                - builtin_skill_uid
                 - category
                 - description
+                - detail_description
+                - detail_title
+                - featured
+                - featured_order
+                - gallery
                 - id
                 - image_url
                 - output_label
@@ -3355,6 +3373,7 @@ components:
                 - prompt_short
                 - result_summary
                 - title
+                - type
             type: object
         ShowcaseCaseListResponse:
             properties:
@@ -3371,19 +3390,84 @@ components:
             required:
                 - total
             type: object
-        ShowcaseCaseOption:
+        ShowcaseCaseMetric:
             properties:
-                description:
-                    type: string
-                id:
+                accent:
+                    type: boolean
+                hint:
                     type: string
                 label:
                     type: string
-                prompt:
+                value:
                     type: string
             required:
-                - id
+                - hint
                 - label
+                - value
+            type: object
+        ShowcaseCaseProductReport:
+            properties:
+                deliverables:
+                    type: string
+                metrics:
+                    items:
+                        $ref: '#/components/schemas/ShowcaseCaseMetric'
+                    type: array
+                sections:
+                    items:
+                        $ref: '#/components/schemas/ShowcaseCaseResultSection'
+                    type: array
+            required:
+                - deliverables
+            type: object
+        ShowcaseCaseResult:
+            properties:
+                eyebrow:
+                    type: string
+                highlights:
+                    items:
+                        type: string
+                    type: array
+                image_asset:
+                    type: string
+                image_url:
+                    type: string
+                product_report:
+                    $ref: '#/components/schemas/ShowcaseCaseProductReport'
+                summary:
+                    type: string
+                template:
+                    type: string
+                title:
+                    type: string
+            required:
+                - eyebrow
+                - summary
+                - template
+                - title
+            type: object
+        ShowcaseCaseResultItem:
+            properties:
+                description:
+                    type: string
+                label:
+                    type: string
+            required:
+                - description
+            type: object
+        ShowcaseCaseResultSection:
+            properties:
+                items:
+                    items:
+                        $ref: '#/components/schemas/ShowcaseCaseResultItem'
+                    type: array
+                marker:
+                    type: string
+                title:
+                    type: string
+            required:
+                - marker
+                - title
             type: object
         ShowcaseCaseStep:
             properties:
@@ -3405,11 +3489,23 @@ components:
                     type: string
                 prompt:
                     type: string
+                prompt_short:
+                    type: string
+                result:
+                    $ref: '#/components/schemas/ShowcaseCaseResult'
+                steps:
+                    items:
+                        $ref: '#/components/schemas/ShowcaseCaseStep'
+                    type: array
                 title:
                     type: string
             required:
                 - description
                 - id
+                - output_label
+                - prompt
+                - prompt_short
+                - result
                 - title
             type: object
         StartTaskRequest:

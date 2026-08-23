@@ -1,30 +1,21 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeftOutlined, SearchOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import CaseCard from "./CaseCard";
 import { listShowcaseCases, type ShowcaseCase } from "./api";
-import { SHOWCASE_ALL_CATEGORY, translateShowcaseCategory } from "./i18n";
 import "./index.scss";
-
-const SHOWCASE_FEATURED_ORDER = [
-  "aiProduct",
-  "knowledgeQa",
-  "paper",
-  "ppt",
-  "stickers",
-  "industry",
-  "sales",
-  "meeting",
-];
 
 export default function GalleryPage() {
   const { i18n, t } = useTranslation();
   const locale = i18n.resolvedLanguage || i18n.language;
+  const [searchParams] = useSearchParams();
+  const requestedType = searchParams.get("type");
+  const type = requestedType === "chat" || requestedType === "work" ? requestedType : "";
   const [items, setItems] = useState<ShowcaseCase[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [keyword, setKeyword] = useState("");
-  const [category, setCategory] = useState(SHOWCASE_ALL_CATEGORY);
+  const [category, setCategory] = useState("");
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
 
@@ -32,12 +23,12 @@ export default function GalleryPage() {
     const controller = new AbortController();
     listShowcaseCases({}, { signal: controller.signal })
       .then((response) => {
-        setItems(response.cases);
+        setItems((response.cases || []).filter((item) => item.gallery && (!type || item.type === type)));
         setCategories(response.categories);
         setCategory((current) =>
           response.categories.includes(current)
             ? current
-            : response.categories[0] || SHOWCASE_ALL_CATEGORY,
+            : response.categories[0] || "",
         );
       })
       .catch(() => {
@@ -51,34 +42,27 @@ export default function GalleryPage() {
         }
       });
     return () => controller.abort();
-  }, [locale]);
+  }, [locale, type]);
 
   const filteredItems = useMemo(() => {
     const normalizedKeyword = keyword.trim().toLowerCase();
-    return items
-      .filter((item) => {
-        const matchesCategory =
-          category === SHOWCASE_ALL_CATEGORY ||
-          category === categories[0] ||
-          item.category === category;
-        const searchable = [
-          item.title,
-          item.description,
-          translateShowcaseCategory(t, item.category),
-          item.prompt_short,
-        ]
-          .join(" ")
-          .toLowerCase();
-        return matchesCategory && (!normalizedKeyword || searchable.includes(normalizedKeyword));
-      })
-      .sort((first, second) => {
-        const firstIndex = SHOWCASE_FEATURED_ORDER.indexOf(first.id);
-        const secondIndex = SHOWCASE_FEATURED_ORDER.indexOf(second.id);
-        const firstOrder = firstIndex === -1 ? Number.MAX_SAFE_INTEGER : firstIndex;
-        const secondOrder = secondIndex === -1 ? Number.MAX_SAFE_INTEGER : secondIndex;
-        return firstOrder - secondOrder;
-      });
-  }, [category, categories, items, keyword, t]);
+    return items.filter((item) => {
+      const matchesCategory =
+        category === "" ||
+        category === categories[0] ||
+        item.category === category;
+      const searchable = [
+        item.title,
+        item.description,
+        item.category,
+        item.prompt_short,
+      ]
+        .join(" ")
+        .toLowerCase();
+      return matchesCategory
+        && (!normalizedKeyword || searchable.includes(normalizedKeyword));
+    });
+  }, [category, categories, items, keyword]);
 
   return (
     <main className="showcase-page showcase-gallery-page">
@@ -110,7 +94,7 @@ export default function GalleryPage() {
               aria-pressed={item === category}
               onClick={() => setCategory(item)}
             >
-              {translateShowcaseCategory(t, item)}
+              {item}
             </button>
           ))}
         </div>
