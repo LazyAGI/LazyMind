@@ -1,15 +1,25 @@
 # Source and adaptation record
 
-This built-in Workflow is adapted from the local Academic Research Skills package:
+This built-in Workflow is a modified adaptation of the following upstream work:
 
-- Primary orchestrator: `/home/sensetime/sunxiaoye/safe_home/Docker/LazyMind/tmp/Paper/academic-research-skills/academic-pipeline/SKILL.md`
-- Source name/version: `academic-pipeline` v3.21.0 (2026-08-18)
+- Upstream project: [Academic Research Skills](https://github.com/Imbad0202/academic-research-skills)
+- Primary orchestrator: [`academic-pipeline/SKILL.md` at v3.21.0](https://github.com/Imbad0202/academic-research-skills/blob/v3.21.0/academic-pipeline/SKILL.md)
+- Source release: [`v3.21.0` (2026-08-18)](https://github.com/Imbad0202/academic-research-skills/releases/tag/v3.21.0), commit `2b639c1`
+- Upstream copyright: Copyright (c) 2026 Cheng-I Wu
+- Upstream license: [Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)](https://github.com/Imbad0202/academic-research-skills/blob/v3.21.0/LICENSE)
 - Dependent contracts reviewed:
-  - `deep-research` v2.12.1
-  - `academic-paper` v3.3.1
-  - `academic-paper-reviewer` v1.11.1
+  - [`deep-research`](https://github.com/Imbad0202/academic-research-skills/tree/v3.21.0/deep-research) v2.12.1
+  - [`academic-paper`](https://github.com/Imbad0202/academic-research-skills/tree/v3.21.0/academic-paper) v3.3.1
+  - [`academic-paper-reviewer`](https://github.com/Imbad0202/academic-research-skills/tree/v3.21.0/academic-paper-reviewer) v1.11.1
 
-The source path is documentation only. Runtime code never reads or executes files from that directory.
+This adaptation changes the upstream execution model, prompts, state transitions, runtime
+interfaces, retrieval integration, Writer integration, validation, and document export so that it
+runs as a LazyMind built-in Workflow. It does not read or execute an upstream checkout at runtime.
+
+The upstream license requires attribution, a link to the license, and an indication that changes
+were made. It also limits licensed use and distribution to non-commercial purposes. This notice
+does not remove that restriction; commercial use of adapted upstream material requires separate
+permission from the upstream rights holder or another applicable legal basis.
 
 ## Stage mapping
 

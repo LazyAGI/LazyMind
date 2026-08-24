@@ -1,8 +1,8 @@
 # Source and adaptation record
 
-This built-in Workflow is adapted from the local `product-solution-delivery` Skill package:
+This built-in Workflow is adapted from an internally assembled `product-solution-delivery` Skill
+package. No private filesystem location is part of the Workflow package or runtime contract.
 
-- Source package: `/home/sensetime/sunxiaoye/safe_home/Docker/LazyMind/tmp/product-solution-delivery`
 - Source release: `psd-2026-08-11-portable-lazymind-competitive-analysis-v1`
 - Parent contract: `SKILL.md`
 - Atomic child contracts:
@@ -14,9 +14,27 @@ This built-in Workflow is adapted from the local `product-solution-delivery` Ski
   - `review-product-artifact`
   - `prepare-development-handoff`
 
-The absolute source path is documentation only. Runtime code does not read or execute that
-directory. The immutable compressed business contracts shipped in `scripts/tools.py` were built by
-the source package's LazyMind Adapter and are loaded deterministically at runtime.
+The Workflow-local business contracts in `scripts/tools.py` were produced by the internal
+LazyMind adaptation and are loaded deterministically at runtime. Runtime code does not read or
+execute the original Skill package.
+
+## Open-source design references
+
+The internal Skill and this Workflow do **not** copy the following Skills verbatim. They were
+consulted as design references for competitive research scope, evidence collection, competitor
+discovery, positioning, profiling, and consulting-analysis structure:
+
+| Referenced Skill | Upstream repository license |
+|---|---|
+| [Anthropic `competitive-brief`](https://github.com/anthropics/knowledge-work-plugins/blob/main/marketing/skills/competitive-brief/SKILL.md) | [Apache License 2.0](https://github.com/anthropics/knowledge-work-plugins/blob/main/LICENSE) |
+| [Bright Data `competitive-intel`](https://github.com/brightdata/skills/blob/main/skills/competitive-intel/SKILL.md) | [MIT License](https://github.com/brightdata/skills/blob/main/LICENSE) |
+| [Anysite `competitor-discovery`](https://github.com/anysiteio/agent-skills/blob/main/skills/competitor-discovery/SKILL.md) | [MIT License](https://github.com/anysiteio/agent-skills/blob/main/LICENSE) |
+| [Anysite `positioning-map`](https://github.com/anysiteio/agent-skills/blob/main/skills/positioning-map/SKILL.md) | [MIT License](https://github.com/anysiteio/agent-skills/blob/main/LICENSE) |
+| [Corey Haines `competitor-profiling`](https://github.com/coreyhaines31/marketingskills/blob/main/skills/competitor-profiling/SKILL.md) | [MIT License](https://github.com/coreyhaines31/marketingskills/blob/main/LICENSE) |
+| [ByteDance DeerFlow `consulting-analysis`](https://github.com/bytedance/deer-flow/blob/main/skills/public/consulting-analysis/SKILL.md) | [MIT License](https://github.com/bytedance/deer-flow/blob/main/LICENSE) |
+
+The license labels above describe the respective upstream repositories; they do not change the
+license of this repository or imply endorsement by the upstream authors.
 
 ## Source-to-Workflow mapping
 
