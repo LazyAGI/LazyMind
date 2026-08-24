@@ -1,4 +1,4 @@
-import { Button, message, Tag, Tooltip, Row, Col } from "antd";
+import { Button, message, Tag, Tooltip, Row, Col, Tabs } from "antd";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
@@ -25,7 +25,9 @@ import {
   DEVELOPER_ACTIVE_EVENT,
   isDeveloperModeActive,
 } from "@/utils/developerMode";
-import { DetailPageHeader } from "@/components/ui";
+import { DetailPageHeader, type PdfTextSelection } from "@/components/ui";
+import type { DocumentChatSelection } from "@/modules/knowledge/components/PdfTemporaryChat/types";
+import PdfTemporaryChat from "@/modules/knowledge/components/PdfTemporaryChat";
 import { localizeErrorCode } from "@/components/request";
 import "./index.scss";
 
@@ -83,6 +85,43 @@ const Detail = () => {
   const fileViewerRef = useRef<FileViewerRef>(null);
   const [canExportImagePdf, setCanExportImagePdf] = useState(false);
   const [exportingImagePdf, setExportingImagePdf] = useState(false);
+  const [documentChatSelection, setDocumentChatSelection] =
+    useState<DocumentChatSelection | null>(null);
+  const [previewSideTab, setPreviewSideTab] = useState("segments");
+
+  const askPdfSelection = useCallback((selection: PdfTextSelection) => {
+    setDocumentChatSelection({ source: "pdf", ...selection });
+    setPreviewSideTab("chat");
+  }, []);
+
+  const askSegment = useCallback((
+    segment: Segment,
+    selectedText?: string,
+    segmentGroup?: string,
+  ) => {
+    let metadata: Record<string, unknown> = {};
+    if (segment.meta) {
+      try {
+        metadata = JSON.parse(segment.meta) as Record<string, unknown>;
+      } catch {
+        metadata = {};
+      }
+    }
+    const rawPage = Number(metadata.page);
+    const rawBbox = metadata.bbox;
+    setDocumentChatSelection({
+      source: "segment",
+      text: selectedText || segment.display_content || segment.content || "",
+      page: Number.isFinite(rawPage) ? rawPage + 1 : undefined,
+      bbox: Array.isArray(rawBbox) && rawBbox.length === 4
+        ? rawBbox.map(Number) as [number, number, number, number]
+        : undefined,
+      segmentId: segment.segment_id,
+      segmentNumber: segment.number,
+      group: segmentGroup,
+    });
+    setPreviewSideTab("chat");
+  }, []);
 
   const {
     getDatasetDetail: getKbDetail,
@@ -348,6 +387,7 @@ const Detail = () => {
             fileName={knowledgeDetail?.display_name || ""}
             segment={segmentDetail}
             onExportReadyChange={setCanExportImagePdf}
+            onPdfSelection={askPdfSelection}
           />
         </Col>
         <Col span={9} className="min-h-0">
@@ -360,14 +400,45 @@ const Detail = () => {
               paddingBottom: "4px",
             }}
           >
-            {knowledgeDetail && (
-              <KnowledgeTabs
-                knowledgeDetail={knowledgeDetail}
-                onGetItemInfo={(data) => {
-                  setSegmentDetail(data);
-                }}
-              />
-            )}
+            {knowledgeDetail ? (
+              <div className="knowledge-preview-side">
+                <Tabs
+                  className="knowledge-preview-mode-tabs"
+                  type="card"
+                  activeKey={previewSideTab}
+                  onChange={setPreviewSideTab}
+                  items={[
+                    {
+                      key: "segments",
+                      label: t("knowledge.segmentPreviewTab"),
+                      children: (
+                        <KnowledgeTabs
+                          knowledgeDetail={knowledgeDetail}
+                          onGetItemInfo={(data) => setSegmentDetail(data)}
+                          onAskSegment={askSegment}
+                        />
+                      ),
+                    },
+                    {
+                      key: "chat",
+                      label: t("knowledge.pdfChatTab"),
+                      children: (
+                        <PdfTemporaryChat
+                          datasetId={knowledgeBaseId}
+                          documentId={knowledgeId}
+                          fileName={knowledgeDetail.display_name || ""}
+                          selection={documentChatSelection || undefined}
+                          onClose={() => {
+                            setDocumentChatSelection(null);
+                            setPreviewSideTab("segments");
+                          }}
+                        />
+                      ),
+                    },
+                  ]}
+                />
+              </div>
+            ) : null}
           </div>
         </Col>
       </Row>

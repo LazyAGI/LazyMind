@@ -285,6 +285,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/conversations/{conversation_id}:stop", []string{"qa.write"}, chat.StopChatGeneration)
 	handleAPI(r, "POST", "/conversations/{conversation_id}:toolLimitDecision", []string{"qa.write"}, chat.DecideToolLimit)
 	handleAPI(r, "GET", "/conversations/{conversation_id}:status", []string{"qa.read"}, chat.GetChatStatus)
+	handleAPI(r, "POST", "/conversations/{conversation_id}:promote", []string{"qa.write"}, chat.PromoteConversation)
 	handleAPI(r, "GET", "/chat/executors", []string{"qa.read"}, chat.ListChatExecutors)
 	handleAPI(r, "GET", "/external-chat/hosts/{provider}/status", []string{"qa.read"}, chat.ExternalChatHostStatus)
 	handleAPI(r, "GET", "/external-chat/providers/{provider}/sessions", []string{"qa.read"}, chat.ListExternalAgentSessions)

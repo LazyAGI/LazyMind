@@ -24,3 +24,26 @@
     }
   }
 }
+
+.knowledge-preview-side {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.knowledge-preview-mode-tabs {
+  height: 100%;
+
+  > .ant-tabs-content-holder,
+  > .ant-tabs-content-holder > .ant-tabs-content,
+  > .ant-tabs-content-holder > .ant-tabs-content > .ant-tabs-tabpane {
+    min-height: 0;
+    height: 100%;
+  }
+
+  > .ant-tabs-content-holder > .ant-tabs-content > .ant-tabs-tabpane {
+    overflow: hidden;
+  }
+}

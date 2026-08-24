@@ -22,11 +22,12 @@ interface SegmentTabProps {
   editable?: boolean;
   type?: string;
   onGetItemInfo?: (info: Segment) => void;
+  onAskSegment?: (segment: Segment, selectedText?: string, group?: string) => void;
 }
 
 const SegmentTab = (props: SegmentTabProps) => {
   const { t } = useTranslation();
-  const { detail, names = [], editable = false, type, onGetItemInfo } = props;
+  const { detail, names = [], editable = false, type, onGetItemInfo, onAskSegment } = props;
 
   const [currentType, setCurrentType] = useState(type || names[0] || "");
   const [segments, setSegments] = useImmer<Segment[]>([]);
@@ -377,6 +378,7 @@ const SegmentTab = (props: SegmentTabProps) => {
         loading={loading}
         scrollToId={segmentId}
         showNumber={showSequence}
+        onAskSegment={onAskSegment}
       />
     </div>
   );

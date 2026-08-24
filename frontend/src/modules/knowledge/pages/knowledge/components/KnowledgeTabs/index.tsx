@@ -32,8 +32,9 @@ const IMAGE_GROUP = "image";
 const KnowledgeTabs = (props: {
   knowledgeDetail: Doc;
   onGetItemInfo?: (data: Segment) => void;
+  onAskSegment?: (segment: Segment, selectedText?: string, group?: string) => void;
 }) => {
-  const { knowledgeDetail, onGetItemInfo } = props;
+  const { knowledgeDetail, onGetItemInfo, onAskSegment } = props;
   const { t } = useTranslation();
 
   const [activeKey, setActiveKey] = useState("");
@@ -115,6 +116,7 @@ const KnowledgeTabs = (props: {
                   names={[splitName || ""]}
                   editable={true}
                   onGetItemInfo={onGetItemInfo}
+                  onAskSegment={onAskSegment}
                 />
               ),
               key: `${TAB_KEYS.document}${splitName || ""}`,
@@ -132,6 +134,7 @@ const KnowledgeTabs = (props: {
                   group === parser.name ? group : parser.name || "summary"
                 }
                 onGetItemInfo={onGetItemInfo}
+                onAskSegment={onAskSegment}
               />
             ),
             key: TAB_KEYS.summary,
@@ -160,6 +163,7 @@ const KnowledgeTabs = (props: {
                 names={[parser.name as string]}
                 type={group === parser.name ? group : parser.name || "hybrid"}
                 editable={false}
+                onAskSegment={onAskSegment}
               />
             ),
             key: TAB_KEYS.imageCaption,
@@ -182,6 +186,7 @@ const KnowledgeTabs = (props: {
           type={IMAGE_GROUP}
           editable={false}
           onGetItemInfo={onGetItemInfo}
+          onAskSegment={onAskSegment}
         />
       ),
       key: TAB_KEYS.imageList,

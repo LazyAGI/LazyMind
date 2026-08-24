@@ -1639,6 +1639,39 @@ func DeleteConversation(w http.ResponseWriter, r *http.Request) {
 	writeConversationJSON(w, http.StatusOK, map[string]any{})
 }
 
+// PromoteConversation makes a preview-only conversation visible in normal chat history.
+func PromoteConversation(w http.ResponseWriter, r *http.Request) {
+	convID := strings.TrimSpace(mux.Vars(r)["conversation_id"])
+	if convID == "" {
+		common.ReplyErr(w, "invalid conversation id", http.StatusBadRequest)
+		return
+	}
+	userID := store.UserID(r)
+	if userID == "" {
+		userID = "0"
+	}
+	db := store.DB()
+	var conversation orm.Conversation
+	if err := db.Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", convID, userID).First(&conversation).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+		common.ReplyErr(w, "conversation not found", http.StatusNotFound)
+		return
+	} else if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := db.Model(&orm.Conversation{}).
+		Where("id = ? AND create_user_id = ?", convID, userID).
+		Updates(map[string]any{
+			"is_ephemeral":         false,
+			"ephemeral_expires_at": nil,
+			"updated_at":           time.Now().UTC(),
+		}).Error; err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeConversationJSON(w, http.StatusOK, map[string]any{"conversation_id": convID})
+}
+
 func archiveConversation(
 	ctx context.Context,
 	db *gorm.DB,
@@ -1767,6 +1800,9 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 
 	db := store.DB()
 	q := db.Model(&orm.Conversation{}).Where("create_user_id = ? AND deleted_at IS NULL AND archived_at IS NULL", userID)
+	if !strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_ephemeral")), "true") {
+		q = q.Where("is_ephemeral = ?", false)
+	}
 	externalBinding := db.Model(&orm.ExternalAgentBinding{}).Select("1").
 		Where("external_agent_bindings.conversation_id = conversations.id").
 		Where("external_agent_bindings.created_by_user_id = ?", userID)
@@ -1789,7 +1825,14 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	if keyword != "" {
-		q = q.Where("display_name LIKE ?", "%"+keyword+"%")
+		pattern := "%" + keyword + "%"
+		q = q.Where("display_name LIKE ? OR source_display_name LIKE ? OR source_document_id LIKE ?", pattern, pattern, pattern)
+	}
+	if sourceType := strings.TrimSpace(r.URL.Query().Get("source_type")); sourceType != "" {
+		q = q.Where("source_type = ?", sourceType)
+	}
+	if sourceDocumentID := strings.TrimSpace(r.URL.Query().Get("source_document_id")); sourceDocumentID != "" {
+		q = q.Where("source_document_id = ?", sourceDocumentID)
 	}
 	// Filter by is_task_conv when the caller passes the query param.
 	// Accepted values: "true" → only task conversations, "false" → only regular conversations.
@@ -1842,6 +1885,11 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 			"name":                  "conversations/" + c.ID,
 			"conversation_id":       c.ID,
 			"display_name":          c.DisplayName,
+			"source_type":           c.SourceType,
+			"source_dataset_id":     c.SourceDatasetID,
+			"source_document_id":    c.SourceDocumentID,
+			"source_display_name":   c.SourceDisplayName,
+			"is_ephemeral":          c.IsEphemeral,
 			"search_config":         searchCfg,
 			"user":                  c.CreateUserName,
 			"chat_times":            c.ChatTimes,

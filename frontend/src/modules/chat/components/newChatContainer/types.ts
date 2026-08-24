@@ -12,6 +12,7 @@ export interface ChatImperativeProps {
   replaceMessageList: (id: string, data: any[]) => void;
   createNewChat: () => void;
   sendMessage: (params: SendMessageParams) => void;
+  prepareMessage: (params: Pick<SendMessageParams, "text" | "citeMessage" | "citeMessages">) => void;
   disconnectConversationStream?: (
     conversationId: string,
     options?: { persistResumeKey?: boolean },
@@ -64,6 +65,7 @@ export interface ChatContainerProps {
   ) => void;
   initialConversationSettings?: import("@/modules/chat/utils/request").ConversationRuntimeSettings;
   hasWorkflowSession?: boolean;
+  conversationTrailEnabled?: boolean;
 }
 
 export interface ChatMessage {

@@ -2479,6 +2479,18 @@ const enUS = {
   // Knowledge Base
   knowledge: {
     list: "Knowledge Base List",
+    askPdfSelection: "Ask LazyMind",
+    askWholeSegment: "Ask about this segment",
+    askSelectedSegmentText: "Ask about selection",
+    pdfChatPanelLabel: "Temporary document chat",
+    pdfChatTab: "Ask document",
+    segmentPreviewTab: "Segments",
+    pdfChatTemporaryHint: "Cleared when the preview closes and hidden from Chat history",
+    pdfChatNew: "New temporary chat",
+    pdfChatSave: "Save to Chat",
+    pdfChatSaved: "Saved to Chat history",
+    pdfChatSavedSource: "From a PDF preview",
+    pdfChatTitle: "PDF chat: {{fileName}}",
     backToKnowledgeSettings: "Back to Knowledge & Data settings",
     create: "Create Knowledge Base",
     detail: "Knowledge Base Detail",
