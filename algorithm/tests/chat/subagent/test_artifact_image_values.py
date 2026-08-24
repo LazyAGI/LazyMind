@@ -1,6 +1,8 @@
 import json
 
 import lazyllm
+import pytest
+from lazyllm.tools.agent import ToolExecutionError
 
 from lazymind.chat.engine.subagent import tools as subagent_tools
 from lazymind.chat.engine.subagent.context import SubAgentContext, set_context
@@ -93,10 +95,10 @@ def test_get_artifact_preserves_remote_list_input_order(tmp_path):
     set_context(ctx)
     lazyllm.globals['agentic_config'] = {'workflow_session_id': 'session-1'}
 
-    all_items = get_artifact('effect_images')['result']['artifacts']
-    second = get_artifact('effect_images', sort_order=2)['result']['artifacts']
+    all_items = get_artifact('effect_images')['artifacts']
+    second = get_artifact('effect_images', sort_order=2)['artifacts']
     ctx.params['remote_inputs']['empty_images'] = []
-    empty = get_artifact('empty_images')['result']
+    empty = get_artifact('empty_images')
 
     assert [item['value']['path'] for item in all_items] == paths
     assert [item['value']['path'] for item in second] == paths[1:]
@@ -113,8 +115,8 @@ def test_get_artifact_returns_external_workflow_scalar_as_text(tmp_path):
     set_context(ctx)
     lazyllm.globals['agentic_config'] = {'workflow_session_id': 'session-1'}
 
-    topic = get_artifact('topic')['result']['artifacts'][0]
-    target = get_artifact('word_target')['result']['artifacts'][0]
+    topic = get_artifact('topic')['artifacts'][0]
+    target = get_artifact('word_target')['artifacts'][0]
 
     assert topic == {
         'slot': 'topic', 'content_type': 'text',
@@ -129,20 +131,14 @@ def test_find_artifact_does_not_treat_plain_text_as_a_path(monkeypatch, tmp_path
         subagent_tools,
         'get_artifact',
         lambda slot, sort_order=None: {
-            'success': True,
-            'result': {
-                'status': 'ok',
-                'artifacts': [{'value': {'text': 'ordinary artifact content'}}],
-            },
+            'status': 'ok',
+            'artifacts': [{'value': {'text': 'ordinary artifact content'}}],
         },
     )
     lazyllm.globals['agentic_config'] = {'workflow_session_id': 'session-1'}
 
-    result = subagent_tools.find_artifact('report')
-
-    assert result['success'] is True
-    assert result['result']['status'] == 'error'
-    assert 'no resolvable path' in result['result']['message']
+    with pytest.raises(ToolExecutionError, match='no resolvable path'):
+        subagent_tools.find_artifact('report')
 
 
 def test_patch_artifact_decodes_model_facing_json_string(tmp_path):
@@ -154,7 +150,7 @@ def test_patch_artifact_decodes_model_facing_json_string(tmp_path):
         'metadata', '{"status":"new"}', patch_type='json_merge',
     )
 
-    assert result['result']['status'] == 'ok'
+    assert result['status'] == 'ok'
     content, original_type = ctx.read_draft('metadata')
     assert original_type == 'json'
     assert json.loads(content) == {'status': 'new'}
@@ -163,14 +159,14 @@ def test_patch_artifact_decodes_model_facing_json_string(tmp_path):
         'metadata', '[{"op":"replace","path":"/status","value":"final"}]',
         patch_type='json_patch',
     )
-    assert result['result']['status'] == 'ok'
+    assert result['status'] == 'ok'
     assert json.loads(ctx.read_draft('metadata')[0]) == {'status': 'final'}
 
     ctx.write_draft('report', 'text', 'before', pending_commit=False)
     result = patch_artifact(
         'report', '{"old_str":"before","new_str":"after"}', patch_type='str_replace',
     )
-    assert result['result']['status'] == 'ok'
+    assert result['status'] == 'ok'
     assert ctx.read_draft('report')[0] == 'after'
 
 
@@ -179,8 +175,8 @@ def test_patch_artifact_rejects_invalid_json_string_without_dirtying_draft(tmp_p
     set_context(ctx)
     ctx.write_draft('report', 'text', 'before', pending_commit=False)
 
-    result = patch_artifact('report', 'not-json', patch_type='str_replace')
+    with pytest.raises(ToolExecutionError, match='Invalid patch payload'):
+        patch_artifact('report', 'not-json', patch_type='str_replace')
 
-    assert result['result']['status'] == 'error'
     assert ctx.list_pending_drafts() == []
     assert ctx.read_draft('report')[0] == 'before'

@@ -792,7 +792,7 @@ def patch_artifact(
 
     decoded_patch, decode_error = _decode_patch_payload(patch)
     if decode_error:
-        return tool_success('patch_artifact', {'status': 'error', 'message': decode_error})
+        raise ToolExecutionError(f'Invalid patch payload: {decode_error}')
 
     # Resolve list_index from sort_order when provided.
     list_index: Optional[int] = None
