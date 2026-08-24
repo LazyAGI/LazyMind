@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import secrets
 import shutil
 import time
 from pathlib import Path
@@ -8,11 +9,12 @@ from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 from lazyllm import LOG
 
-from .store import PARSED_NAME, FileResourceStore, new_file_id, sha256_file, workspace_for_request
+from .store import PARSED_NAME, FileResourceStore, merge_turn_seqs, new_file_id, sha256_file, workspace_for_request
 
 _PAGE_MARKER = '<!-- page:{page} -->'
 _PENDING_WAIT_SECONDS = 60.0
 _PENDING_POLL_SECONDS = 0.2
+_LEASE_SECONDS = 60.0
 
 
 def _link_or_copy(src: str, dest: Path) -> None:
@@ -97,6 +99,34 @@ def _ocr_type_from_runtime() -> Optional[str]:
     return None
 
 
+def _new_parser_lease() -> Tuple[str, float]:
+    return secrets.token_hex(8), time.time() + _LEASE_SECONDS
+
+
+def _lease_active(manifest: Optional[Dict[str, Any]]) -> bool:
+    if not manifest or manifest.get('parse_status') != 'pending':
+        return False
+    if not str(manifest.get('parser_id') or '').strip():
+        return False
+    try:
+        expires = float(manifest.get('parser_expires_at') or 0)
+    except (TypeError, ValueError):
+        return False
+    return time.time() < expires
+
+
+def _apply_parser_lease(manifest: Dict[str, Any], lease_id: str, expires_at: float) -> None:
+    manifest['parse_status'] = 'pending'
+    manifest['parse_error'] = None
+    manifest['parser_id'] = lease_id
+    manifest['parser_expires_at'] = expires_at
+
+
+def _clear_parser_lease(manifest: Dict[str, Any]) -> None:
+    manifest['parser_id'] = None
+    manifest['parser_expires_at'] = None
+
+
 def _refresh_occurrence(
     store: FileResourceStore,
     manifest: Dict[str, Any],
@@ -113,7 +143,7 @@ def _refresh_occurrence(
     updated['source'] = source
     updated['source_url'] = source_url
     updated['source_path'] = source_path
-    updated['turn_seq'] = turn_seq
+    merge_turn_seqs(updated, turn_seq)
     return store.write_manifest(updated, _locked=_locked)
 
 
@@ -125,8 +155,49 @@ def _wait_for_parse(store: FileResourceStore, file_id: str) -> Optional[Dict[str
             return None
         if manifest.get('parse_status') in ('ready', 'failed'):
             return manifest
+        if not _lease_active(manifest):
+            return manifest
         time.sleep(_PENDING_POLL_SECONDS)
     return store.load_manifest(file_id)
+
+
+def _reserve_pending(
+    store: FileResourceStore,
+    *,
+    existing: Optional[Dict[str, Any]],
+    src: str,
+    digest: str,
+    name: str,
+    source: str,
+    source_url: Optional[str],
+    turn_seq: Optional[int],
+) -> Tuple[str, str]:
+    file_id = str(existing['file_id']) if existing else new_file_id()
+    directory = store.resource_dir(file_id)
+    original = directory / 'original.pdf'
+    _link_or_copy(src, original)
+    lease_id, expires_at = _new_parser_lease()
+    manifest = dict(existing) if existing else store.empty_manifest(
+        file_id=file_id,
+        display_name=name,
+        source=source,
+        source_url=source_url,
+        source_path=src,
+        original_path=str(original),
+        content_sha256=digest,
+        bytes_count=os.path.getsize(src),
+        turn_seq=turn_seq,
+        parse_status='pending',
+    )
+    manifest['display_name'] = name
+    manifest['source'] = source
+    manifest['source_url'] = source_url
+    manifest['source_path'] = src
+    manifest['original_path'] = str(original)
+    merge_turn_seqs(manifest, turn_seq)
+    _apply_parser_lease(manifest, lease_id, expires_at)
+    store.write_manifest(manifest, _locked=True)
+    return file_id, lease_id
 
 
 def ingest_pdf_file(
@@ -146,6 +217,7 @@ def ingest_pdf_file(
     name = display_name or os.path.basename(src)
     owner = False
     file_id = ''
+    lease_id = ''
 
     with store.index_lock():
         existing = store.find_by_sha256(digest)
@@ -155,49 +227,47 @@ def ingest_pdf_file(
                 display_name=name, source=source, source_url=source_url,
                 source_path=src, turn_seq=turn_seq, _locked=True,
             )
-        if existing and existing.get('parse_status') == 'pending':
+        if existing and _lease_active(existing):
             file_id = str(existing['file_id'])
         else:
-            file_id = str(existing['file_id']) if existing else new_file_id()
-            directory = store.resource_dir(file_id)
-            original = directory / 'original.pdf'
-            _link_or_copy(src, original)
-            manifest = store.empty_manifest(
-                file_id=file_id,
-                display_name=name,
+            file_id, lease_id = _reserve_pending(
+                store,
+                existing=existing,
+                src=src,
+                digest=digest,
+                name=name,
                 source=source,
                 source_url=source_url,
-                source_path=src,
-                original_path=str(original),
-                content_sha256=digest,
-                bytes_count=os.path.getsize(src),
                 turn_seq=turn_seq,
-                parse_status='pending',
             )
-            store.write_manifest(manifest, _locked=True)
             owner = True
 
     if not owner:
         waited = _wait_for_parse(store, file_id)
-        if waited and waited.get('parse_status') == 'ready':
-            with store.index_lock():
-                current = store.load_manifest(file_id) or waited
-                return _refresh_occurrence(
-                    store, current,
-                    display_name=name, source=source, source_url=source_url,
-                    source_path=src, turn_seq=turn_seq, _locked=True,
-                )
         with store.index_lock():
-            current = store.find_by_sha256(digest)
+            current = store.load_manifest(file_id) or waited or store.find_by_sha256(digest)
             if current and current.get('parse_status') == 'ready':
                 return _refresh_occurrence(
                     store, current,
                     display_name=name, source=source, source_url=source_url,
                     source_path=src, turn_seq=turn_seq, _locked=True,
                 )
-            if current and current.get('file_id') != file_id:
-                file_id = str(current['file_id'])
-            owner = True
+            if current and _lease_active(current):
+                return _refresh_occurrence(
+                    store, current,
+                    display_name=name, source=source, source_url=source_url,
+                    source_path=src, turn_seq=turn_seq, _locked=True,
+                )
+            file_id, lease_id = _reserve_pending(
+                store,
+                existing=current,
+                src=src,
+                digest=digest,
+                name=name,
+                source=source,
+                source_url=source_url,
+                turn_seq=turn_seq,
+            )
 
     directory = store.resource_dir(file_id)
     original = directory / 'original.pdf'
@@ -220,11 +290,8 @@ def ingest_pdf_file(
         'source_url': source_url,
         'source_path': src,
         'original_path': str(original),
-        'turn_seq': turn_seq,
-        'parse_status': 'pending',
-        'parse_error': None,
     })
-    store.write_manifest(manifest)
+    merge_turn_seqs(manifest, turn_seq)
 
     try:
         pages = parse_pdf_pages(str(original))
@@ -238,6 +305,7 @@ def ingest_pdf_file(
         manifest['parse_status'] = 'ready'
         manifest['parse_error'] = None
         manifest['ocr_type'] = _ocr_type_from_runtime()
+        _clear_parser_lease(manifest)
         LOG.info(
             f'[FileResource] ingest ready file_id={file_id} pages={manifest["pages"]} '
             f'lines={line_count} source={source} name={name}'
@@ -245,20 +313,28 @@ def ingest_pdf_file(
     except Exception as exc:
         manifest['parse_status'] = 'failed'
         manifest['parse_error'] = str(exc)
+        _clear_parser_lease(manifest)
         LOG.warning(f'[FileResource] ingest failed file_id={file_id} name={name} error={exc}')
 
     with store.index_lock():
-        current = store.find_by_sha256(digest)
-        if (
-            current
-            and current.get('parse_status') == 'ready'
-            and current.get('file_id') != file_id
-        ):
+        current = store.load_manifest(file_id) or store.find_by_sha256(digest)
+        if current and current.get('parse_status') == 'ready':
             return _refresh_occurrence(
                 store, current,
                 display_name=name, source=source, source_url=source_url,
                 source_path=src, turn_seq=turn_seq, _locked=True,
             )
+        if (
+            manifest.get('parse_status') == 'failed'
+            and current
+            and _lease_active(current)
+            and current.get('parser_id') != lease_id
+        ):
+            return current
+        if current:
+            for seq in list(current.get('turn_seqs') or []) + [current.get('turn_seq')]:
+                merge_turn_seqs(manifest, seq)
+            merge_turn_seqs(manifest, turn_seq)
         return store.write_manifest(manifest, _locked=True)
 
 

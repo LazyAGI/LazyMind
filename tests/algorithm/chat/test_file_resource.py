@@ -353,8 +353,9 @@ def test_reupload_ready_pdf_refreshes_turn_seq(monkeypatch, tmp_path):
 
     assert first['file_id'] == second['file_id']
     assert second['turn_seq'] == 3
+    assert second['turn_seqs'] == [1, 3]
     assert '[CURRENT]' in catalog
-    assert 'Turn 3' in catalog
+    assert 'Turn 1,3' in catalog
 
 
 def test_concurrent_same_pdf_ingest_shares_file_id(monkeypatch, tmp_path):
@@ -398,4 +399,61 @@ def test_concurrent_same_pdf_ingest_shares_file_id(monkeypatch, tmp_path):
     assert results[0]['file_id'] == results[1]['file_id']
     assert results[0]['parse_status'] == 'ready'
     assert results[1]['parse_status'] == 'ready'
+    assert sorted(store.load_manifest(results[0]['file_id'])['turn_seqs']) == [1, 2]
     assert len(store.load_index()) == 1
+
+
+def test_expired_lease_takeover_does_not_clobber_ready_with_failed(monkeypatch, tmp_path):
+    import threading
+    import time
+
+    store = FileResourceStore(str(tmp_path))
+    src = _write_pdf(tmp_path / 'paper.pdf', b'%PDF lease')
+    started = threading.Event()
+    release = threading.Event()
+    calls = {'n': 0}
+
+    def parse(_path):
+        calls['n'] += 1
+        if calls['n'] == 1:
+            started.set()
+            assert release.wait(timeout=5)
+            raise RuntimeError('late fail')
+        return [(1, 'takeover body')]
+
+    monkeypatch.setattr(
+        'lazymind.chat.engine.tools.local_file.ingest._LEASE_SECONDS',
+        0.2,
+    )
+    monkeypatch.setattr(
+        'lazymind.chat.engine.tools.local_file.ingest.parse_pdf_pages',
+        parse,
+    )
+    results = [None, None]
+    errors = []
+
+    def run(index):
+        try:
+            results[index] = ingest_pdf_file(
+                str(src), display_name='paper.pdf', turn_seq=index + 1, store=store,
+            )
+        except Exception as exc:
+            errors.append(exc)
+
+    first = threading.Thread(target=run, args=(0,))
+    second = threading.Thread(target=run, args=(1,))
+    first.start()
+    assert started.wait(timeout=5)
+    second.start()
+    time.sleep(0.35)
+    release.set()
+    first.join(timeout=10)
+    second.join(timeout=10)
+
+    loaded = store.load_manifest(results[0]['file_id'] or results[1]['file_id'])
+    assert errors == []
+    assert results[0]['parse_status'] == 'ready'
+    assert results[1]['parse_status'] == 'ready'
+    assert loaded['parse_status'] == 'ready'
+    assert loaded.get('parse_error') is None
+    assert 'takeover body' in (tmp_path / 'file-resources' / loaded['file_id'] / 'parsed.md').read_text()

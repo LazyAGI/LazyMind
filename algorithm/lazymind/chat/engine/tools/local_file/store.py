@@ -41,6 +41,28 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def merge_turn_seqs(manifest: Dict[str, Any], turn_seq: Optional[int]) -> Dict[str, Any]:
+    seqs: List[int] = []
+    for value in list(manifest.get('turn_seqs') or []) + [manifest.get('turn_seq'), turn_seq]:
+        if value is None:
+            continue
+        try:
+            number = int(value)
+        except (TypeError, ValueError):
+            continue
+        if number not in seqs:
+            seqs.append(number)
+    manifest['turn_seqs'] = seqs
+    if turn_seq is not None:
+        try:
+            manifest['turn_seq'] = int(turn_seq)
+        except (TypeError, ValueError):
+            manifest['turn_seq'] = seqs[-1] if seqs else manifest.get('turn_seq')
+    elif seqs:
+        manifest['turn_seq'] = seqs[-1]
+    return manifest
+
+
 def workspace_for_request(user_id: str | None = None, conversation_id: str | None = None) -> str:
     import lazyllm
     from .workspace import chat_agent_workspace
@@ -133,6 +155,7 @@ class FileResourceStore:
             'source_path': manifest.get('source_path'),
             'content_sha256': manifest.get('content_sha256'),
             'turn_seq': manifest.get('turn_seq'),
+            'turn_seqs': list(manifest.get('turn_seqs') or []),
         }
         replaced = False
         for i, item in enumerate(items):
@@ -152,12 +175,18 @@ class FileResourceStore:
         digest = str(digest or '').strip()
         if not digest:
             return None
+        fallback = None
         for item in self.load_index():
-            if item.get('content_sha256') == digest:
-                manifest = self.load_manifest(item['file_id'])
-                if manifest:
-                    return manifest
-        return None
+            if item.get('content_sha256') != digest:
+                continue
+            manifest = self.load_manifest(item['file_id'])
+            if not manifest:
+                continue
+            if manifest.get('parse_status') == 'ready':
+                return manifest
+            if fallback is None:
+                fallback = manifest
+        return fallback
 
     def find_by_source_path(self, source_path: str) -> Optional[Dict[str, Any]]:
         want = os.path.realpath(source_path) if source_path else ''
@@ -237,6 +266,9 @@ class FileResourceStore:
             'ocr_type': None,
             'created_at': _utc_now(),
             'turn_seq': turn_seq,
+            'turn_seqs': [int(turn_seq)] if turn_seq is not None else [],
+            'parser_id': None,
+            'parser_expires_at': None,
         }
 
 
@@ -252,11 +284,21 @@ def render_file_resource_catalog(
         return ''
     catalog_lines = ['# File resources']
     for item in items:
-        turn = item.get('turn_seq')
+        seqs: List[int] = []
+        for value in item.get('turn_seqs') or []:
+            try:
+                seqs.append(int(value))
+            except (TypeError, ValueError):
+                continue
+        if not seqs and item.get('turn_seq') is not None:
+            try:
+                seqs = [int(item['turn_seq'])]
+            except (TypeError, ValueError):
+                seqs = []
         marker = ''
-        if current_turn_seq is not None and turn == current_turn_seq:
+        if current_turn_seq is not None and current_turn_seq in seqs:
             marker = ' [CURRENT]'
-        turn_label = f'Turn {turn}{marker}: ' if turn is not None else ''
+        turn_label = f'Turn {",".join(str(seq) for seq in seqs)}{marker}: ' if seqs else ''
         pages = item.get('pages')
         line_count = item.get('line_count')
         pages_bit = f'  pages={pages}' if pages else ''

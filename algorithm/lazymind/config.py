@@ -318,7 +318,9 @@ config.add(
     description=(
         'Minimum tokens a non-spill prune must reclaim, as a fraction of the '
         'effective input budget. Ignored when the result is already at or below '
-        'target_tokens. 0 disables the proportional floor.'
+        'target_tokens. Otherwise the required floor is min(ratio * budget, '
+        'remaining gap to target, context_prune_min_reclaim_tokens_cap). '
+        '0 disables the proportional floor.'
     ),
 )
 config.add(
@@ -326,7 +328,10 @@ config.add(
     int,
     20000,
     'CONTEXT_PRUNE_MIN_RECLAIM_TOKENS_CAP',
-    description='Upper bound on the proportional min-reclaim floor.',
+    description=(
+        'Upper bound on the proportional min-reclaim floor, applied before the '
+        'remaining-target-gap cap.'
+    ),
 )
 config.add(
     'context_compression_spill_bytes',

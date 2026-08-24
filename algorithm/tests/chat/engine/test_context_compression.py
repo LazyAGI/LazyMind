@@ -25,6 +25,8 @@ from lazymind.chat.engine.agent_runtime.models import (
     PromptBundle,
 )
 from lazymind.chat.engine.agent_runtime.pruner import (
+    _effective_min_reclaim,
+    _resolved_min_reclaim,
     make_history_compactor,
     prune_tool_results,
 )
@@ -333,6 +335,19 @@ def test_proportional_min_reclaim_abandons_when_still_over_target(monkeypatch) -
     assert event.decision == 'abandoned'
     assert event.reason == 'reclaim_below_threshold'
     assert projected == history
+
+
+def test_min_reclaim_floor_is_capped_by_remaining_target_gap() -> None:
+    budget = build_context_budget(
+        128_000, reserved_output_tokens=0, trigger_ratio=0.9, target_ratio=0.45,
+    )
+    gap = 2_000
+    after = budget.target_tokens + gap
+    floor = _resolved_min_reclaim(budget, None)
+    assert floor > gap
+    assert _effective_min_reclaim(budget, after, None) == gap
+    assert _effective_min_reclaim(budget, budget.target_tokens, None) == 0
+    assert _effective_min_reclaim(budget, budget.target_tokens + 50_000, None) == floor
 
 
 def test_mid_turn_compactor_callback_compacts_old_tools() -> None:

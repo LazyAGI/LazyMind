@@ -66,7 +66,6 @@ def prune_tool_results(
     Oversized tool results are spilled even when they sit in the keep_recent window.
     """
     keep_recent = max(0, int(keep_recent))
-    min_reclaim = _resolved_min_reclaim(budget, min_reclaim_tokens)
     before_total = (
         int(estimated_total_tokens)
         if estimated_total_tokens is not None
@@ -147,6 +146,7 @@ def prune_tool_results(
     after_total = after_history + overhead
     reclaimed = max(0, before_total - after_total)
     ratio_after = usage_ratio(after_total, budget)
+    min_reclaim = _effective_min_reclaim(budget, after_total, min_reclaim_tokens)
 
     if not details:
         event = PruneEvent(
@@ -326,6 +326,18 @@ def _resolved_min_reclaim(
     return min(cap, max(0, round(budget.effective_input_budget * ratio)))
 
 
+def _effective_min_reclaim(
+    budget: ContextBudget,
+    after_total: int,
+    min_reclaim_tokens: Optional[int],
+) -> int:
+    floor = _resolved_min_reclaim(budget, min_reclaim_tokens)
+    gap = max(0, int(after_total) - int(budget.target_tokens))
+    if gap <= 0:
+        return 0
+    return min(floor, gap)
+
+
 def _pressure_rearm_tokens(after_total: int, budget: ContextBudget) -> int:
     hysteresis = max(1, budget.trigger_tokens - budget.target_tokens)
     return max(budget.trigger_tokens, after_total + hysteresis)
@@ -345,7 +357,7 @@ def _candidate_acceptance(
         return False, 'context_safety_more_reclaim_needed'
     if after_total <= budget.target_tokens:
         return True, 'target_reached'
-    min_reclaim = _resolved_min_reclaim(budget, None)
+    min_reclaim = _effective_min_reclaim(budget, after_total, None)
     if metrics['reclaimed_tokens'] < min_reclaim:
         return False, 'reclaim_below_threshold'
     configured_horizon = max(1, int(config['context_prune_cache_amortization_calls']))
