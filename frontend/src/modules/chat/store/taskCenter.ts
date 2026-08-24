@@ -126,8 +126,8 @@ export interface SubAgentTask {
   execution_log: TaskLogEntry[];
 }
 
-export function isTaskCenterVisibleTask(task: Pick<SubAgentTask, 'agent_type'>): boolean {
-  return task.agent_type !== 'workflow_step';
+export function isTaskCenterVisibleTask(_task: Pick<SubAgentTask, 'agent_type'>): boolean {
+  return true;
 }
 
 function artifactKey(a: TaskArtifact): string {
@@ -797,8 +797,8 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             if (payload.agent_type === 'workflow_step') {
               scheduleWorkflowSessionRefresh(conversationId);
             }
-            // Workflow steps stay out of TaskCenter UI, but their live events
-            // still drive Writer outline and draft previews in WorkflowPanel.
+            // Workflow steps stay visible in TaskCenter. Their dedicated task
+            // stream supplies detailed logs and also drives Writer previews.
             get().upsertTask(conversationId, {
               task_id: payload.task_id,
               trigger_history_id: payload.trigger_history_id,

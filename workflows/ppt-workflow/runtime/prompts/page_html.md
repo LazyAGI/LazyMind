@@ -90,6 +90,7 @@ Use ECharts only when no such diagram image is available for the data on this pa
 | 元素 | `data-el` |
 |---|---|
 | 主标题 / 副标题 | `title` / `subtitle` |
+| 主标题上方的眉题、英文标签或页面标签 | `eyebrow`（多个时用 `eyebrow-i`） |
 | 叙事段落 | `narrative` |
 | 第 i 个要点卡片 / 列表项 | `bullet-i` |
 | 第 i 个指标 / KPI 卡片 | `kpi-i` |
@@ -100,6 +101,8 @@ Use ECharts only when no such diagram image is available for the data on this pa
 
 - **每个 id 在同一页里必须唯一。** 小节标签用 `section-i`，不要跟它下面第一个条目共用 `bullet-1` 这类 id ——
   重复 id 会让"只删这一项"的编辑同时命中两个无关元素，工具会直接拒绝执行。
+- `title` **只能给页面主标题使用一次**。主标题上方的英文名、分类名、章节名、眉题或 kicker
+  必须用 `eyebrow` / `eyebrow-i`，即使它看起来也像标题，也绝不能再次使用 `title`。
 - 表里没有对应类型时，另起一个语义清楚的新名字（如 `quote`、`timeline-2`），**不要复用别的类型的 id**。
 - `data-el` 放在**这一项的最外层容器**上（例如整张 `.stat-card`，不是里面的数字 `<div>`），这样删除该元素就等于删掉这一项。
 - 若一个语义块由标题 + 内容两部分组成（例如"美食"小标题 + 对应正文），两者都再加同一个 `data-group`（例如 `data-group="kpi-3"`），使它们能作为一组被整体删除。

@@ -103,6 +103,23 @@ func seedRemoteSearchProvider(t *testing.T, db *orm.DB) {
 	}
 }
 
+func seedRemoteAcademicProvider(t *testing.T, db *orm.DB) {
+	t.Helper()
+	now := time.Now()
+	base := orm.BaseModel{CreateUserID: "user-1", CreateUserName: "user-1", CreatedAt: now, UpdatedAt: now}
+	provider := orm.UserModelProvider{ID: "provider-sciverse", DefaultModelProviderID: "default-sciverse",
+		Name: "Sciverse", Category: "datasource", BaseModel: base}
+	group := orm.UserModelProviderGroup{ID: "group-sciverse", UserModelProviderID: provider.ID,
+		Name: "Sciverse", APIKey: "workflow-academic-token", IsVerified: true, BaseModel: base}
+	selected := orm.UserSelectedProvider{UserID: "user-1", UserName: "user-1", Category: "datasource",
+		UserModelProviderGroupID: group.ID, CreatedAt: now, UpdatedAt: now}
+	for _, value := range []any{&provider, &group, &selected} {
+		if err := db.Create(value).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestRemoteTaskEventsRequireBoundAttemptLease(t *testing.T) {
 	remoteSubagentFixture(t)
 	for _, lease := range []string{"", "stale"} {
@@ -130,7 +147,7 @@ func TestRemoteExecutionSpecReturnsTaskParamsAndDurableSteps(t *testing.T) {
 	t.Setenv("LAZYMIND_AUTH_SERVICE_URL", authService.URL)
 	seedRemoteSearchProvider(t, db)
 	if err := db.Model(&orm.SubAgentTask{}).Where("id = ?", "task-remote").Update("params",
-		json.RawMessage(`{"operation":"execute"}`)).Error; err != nil {
+		json.RawMessage(`{"operation":"execute","legacy_tools":["web_search","cloud_files"]}`)).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := AppendRemoteStep(context.Background(), db.DB, "task-remote", "text",
@@ -161,6 +178,32 @@ func TestRemoteExecutionSpecReturnsTaskParamsAndDurableSteps(t *testing.T) {
 	}
 	if data["workspace_path"] != "/core/path/must-not-be-used" {
 		t.Fatalf("workspace_path=%#v", data["workspace_path"])
+	}
+}
+
+func TestRemoteExecutionSpecLoadsOnlyDeclaredAcademicSearchConfig(t *testing.T) {
+	db := remoteSubagentFixture(t)
+	seedRemoteSearchProvider(t, db)
+	seedRemoteAcademicProvider(t, db)
+	if err := db.Model(&orm.SubAgentTask{}).Where("id = ?", "task-remote").Update("params",
+		json.RawMessage(`{"operation":"execute","legacy_tools":["academic_search","kb"]}`)).Error; err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/internal/subagent/tasks/task-remote/execution-spec", nil)
+	req = mux.SetURLVars(req, map[string]string{"task_id": "task-remote"})
+	req.Header.Set("Authorization", "Bearer executor-secret")
+	req.Header.Set("X-Workflow-Lease-Token", "lease-live")
+	rec := httptest.NewRecorder()
+	InternalGetExecutionSpec(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	toolConfig := getData(rec.Body.Bytes())["tool_config"].(map[string]any)
+	if toolConfig["sciverse"] != "workflow-academic-token" {
+		t.Fatalf("tool_config=%#v", toolConfig)
+	}
+	if _, ok := toolConfig["tavily"]; ok {
+		t.Fatalf("undeclared web search credential leaked into academic step: %#v", toolConfig)
 	}
 }
 

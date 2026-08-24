@@ -37,8 +37,7 @@
       overflow: hidden;
     }
 
-    .workflow-panel__body > [role='tabpanel']:not([hidden]),
-    .workflow-panel__tab-content {
+    .workflow-panel__body > [role='tabpanel']:not([hidden]) {
       display: flex;
       flex: 1 1 0;
       flex-direction: column;
@@ -46,13 +45,29 @@
       overflow: hidden;
     }
 
-    .workflow-panel__tab-content--list > .workflow-panel__named-slot {
+    // Multi-artifact tabs scroll as a whole. Giving every named slot
+    // flex-basis: 0 squeezes persisted Markdown documents and file lists down
+    // to a single line.
+    .workflow-panel__tab-content {
       flex: 1 1 0;
+      min-height: 0;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+    }
+
+    .workflow-panel__tab-content--list > .workflow-panel__named-slot {
+      flex: 0 0 auto;
       min-height: 0;
     }
 
+    // A single-document tab can use the complete expanded workspace.
     .workflow-panel__tab-content--list
-      > .workflow-panel__named-slot
+      > .workflow-panel__named-slot:only-child {
+      flex: 1 1 0;
+    }
+
+    .workflow-panel__tab-content--list
+      > .workflow-panel__named-slot:only-child
       > [role='button'] {
       display: flex;
       flex: 1 1 0;
@@ -60,7 +75,7 @@
     }
 
     .workflow-panel__tab-content--list
-      > .workflow-panel__named-slot
+      > .workflow-panel__named-slot:only-child
       > [role='button']
       > .workflow-slot--artifact:not(.workflow-slot--pending):not(.workflow-slot--error) {
       flex: 1 1 0;
@@ -71,14 +86,14 @@
     // through SlotRenderer's clickable wrapper, so they need the same height
     // contract as a persisted artifact.
     .workflow-panel__tab-content--list
-      > .workflow-panel__named-slot
+      > .workflow-panel__named-slot:only-child
       > .workflow-slot--artifact-stream {
       flex: 1 1 0;
       min-height: 0;
     }
 
     .workflow-panel__tab-content--list
-      > .workflow-panel__named-slot
+      > .workflow-panel__named-slot:only-child
       .workflow-slot__artifact-body {
       flex: 1 1 0;
       min-height: 0;
@@ -88,38 +103,59 @@
       overscroll-behavior: contain;
     }
 
-    .writer-markdown-editor {
+    .workflow-panel__tab-content--list
+      > .workflow-panel__named-slot:only-child
+      .writer-markdown-editor {
       flex: 1 1 0;
       min-height: 0;
       max-height: none;
     }
 
-    .writer-markdown-editor__document-layout {
+    .workflow-panel__tab-content--list
+      > .workflow-panel__named-slot:only-child
+      .writer-markdown-editor__document-layout {
       flex: 1 1 0;
       min-height: 0;
       overflow: hidden;
       align-items: stretch;
     }
 
-    .writer-markdown-editor__main {
+    .workflow-panel__tab-content--list
+      > .workflow-panel__named-slot:only-child
+      .writer-markdown-editor__main {
       display: flex;
       flex-direction: column;
       min-height: 0;
       overflow: hidden;
     }
 
-    .writer-markdown-editor__surface {
+    .workflow-panel__tab-content--list
+      > .workflow-panel__named-slot:only-child
+      .writer-markdown-editor__surface {
       flex: 1 1 0;
       min-height: 0;
       max-height: none;
       overflow-y: auto;
     }
 
-    .writer-markdown-editor__outline-rail,
-    .writer-markdown-editor__outline {
+    .workflow-panel__tab-content--list
+      > .workflow-panel__named-slot:only-child
+      .writer-markdown-editor__outline-rail,
+    .workflow-panel__tab-content--list
+      > .workflow-panel__named-slot:only-child
+      .writer-markdown-editor__outline {
       max-height: 100%;
     }
 
+    // Composite cells size themselves from their content. Let the grid own
+    // scrolling instead of assigning flex-basis: 0 to the editor inside an
+    // auto-height cell, which collapses persisted Markdown to one line.
+    .composite-grid:not(.composite-grid--paged) {
+      flex: 1 1 0;
+      min-height: 0;
+      overflow-y: auto;
+      overscroll-behavior: contain;
+    }
   }
 
   &--active  { border-color: #d0e4ff; }

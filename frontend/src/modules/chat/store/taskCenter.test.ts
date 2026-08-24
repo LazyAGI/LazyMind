@@ -57,8 +57,8 @@ vi.mock("@/components/StateGraphModal", () => ({
 import { isTaskCenterVisibleTask, useTaskCenterStore } from "./taskCenter";
 
 describe("isTaskCenterVisibleTask", () => {
-  it("hides workflow execution tasks from the standalone developer task list", () => {
-    expect(isTaskCenterVisibleTask({ agent_type: "workflow_step" })).toBe(false);
+  it("keeps workflow execution tasks visible for detailed progress", () => {
+    expect(isTaskCenterVisibleTask({ agent_type: "workflow_step" })).toBe(true);
   });
 
   it("keeps ordinary subagent tasks visible", () => {

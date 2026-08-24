@@ -344,10 +344,47 @@ export interface TabDef {
    * WorkflowPanel must not special-case workflow IDs; it only executes these rules.
    */
   composite_behavior?: CompositeBehavior;
+  /** Hide this tab once the named material has a selected revision. */
+  hide_when_material?: string;
+  /** Explicitly enable or disable artifact downloads for this tab. */
+  allow_download?: boolean;
   /** Actions are rendered through provider modules; the composite stays domain-neutral. */
   actions?: WorkflowTabAction[];
   /** Optional next step exposed after this tab completes; declared by the workflow package. */
   completed_continue_step?: string;
+}
+
+export function workflowTabAllowsDownload(
+  tab: TabDef,
+  index: number,
+  total: number,
+): boolean {
+  return typeof tab.allow_download === 'boolean'
+    ? tab.allow_download
+    : index === total - 1;
+}
+
+/**
+ * Apply workflow-declared tab visibility without workflow-specific frontend logic.
+ *
+ * When readyMaterial is configured, conditional tabs stay hidden until that
+ * material exists. This avoids flashing the complete graph while an initial
+ * planning step is still deriving skip materials from the launch parameters.
+ */
+export function filterWorkflowTabs(
+  tabs: TabDef[] = [],
+  slots: SlotRevision[] = [],
+  readyMaterial?: string,
+): TabDef[] {
+  const present = new Set(
+    slots.filter((slot) => slot.selected).map((slot) => slot.slot),
+  );
+  const visibilityReady = !readyMaterial || present.has(readyMaterial);
+  return tabs.filter((tab) => {
+    if (!tab.hide_when_material) return true;
+    if (!visibilityReady) return false;
+    return !present.has(tab.hide_when_material);
+  });
 }
 
 /** Mutually exclusive column group: keep the first preferred slot that has data. */
@@ -372,6 +409,8 @@ export interface CompositeBehavior {
 export interface WorkflowUI {
   name?: string;
   tabs?: TabDef[];
+  /** Defer tabs with hide_when_material until this planning material exists. */
+  tab_visibility_ready_material?: string;
   /** Global widget config keyed by slot id. */
   slots?: Record<string, Record<string, unknown>>;
 }

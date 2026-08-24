@@ -262,6 +262,8 @@ export type RewriteSelection =
     type: 'ppt_html';
     page: number;
     el: string;
+    /** 1-based occurrence among elements carrying the same data-el. */
+    index?: number;
     group?: string;
     selected_text?: string;
     computed_style?: {
@@ -294,6 +296,7 @@ export interface RewriteSelectionPreview {
     block_type: string;
     node_id?: string;
     el?: string;
+    index?: number;
     group?: string;
     page?: number;
   };
