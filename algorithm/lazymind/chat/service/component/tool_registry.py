@@ -39,7 +39,7 @@ from lazymind.chat.engine.tools import (
     vocab_learn,
 )
 from lazymind.chat.engine.tools.memory import MemoryTools
-from lazymind.chat.engine.tools.lazy_kb import KBToolkit
+from lazymind.chat.engine.tools.lazy_kb import KBToolkit, kb_tmp_search
 from lazymind.model_config import is_model_role_available
 from lazymind.chat.engine.tools.ask_user import ask_user
 from lazymind.chat.engine.subagent.tools import (
@@ -117,8 +117,8 @@ ATTACHED_FILES_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         'Supported uploads: images, pdf/doc/docx/pptx, and common plain-text/code/config files.\n'
         '- Default to the current turn (marked 当前轮次) when the user says '
         '"this image / 这张图 / 这个文件" without naming a turn.\n'
-        '- For knowledge-base questions about indexed documents, you may also use '
-        '`kb_*` tools when appropriate.',
+        '- For uploaded whitelist documents, prefer `kb_tmp_search` then `read_file`. '
+        'For knowledge-base questions about indexed documents, use `kb_*` tools.',
     ),
 }
 ATTACHMENT_EDIT_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
@@ -354,6 +354,11 @@ _CLOUD_FILE_TOOLKIT = {
 }
 
 
+def _temp_kb_key_source() -> Any:
+    agentic_config = lazyllm.globals.get('agentic_config') or {}
+    return agentic_config.get('files')
+
+
 def _kb_prompt_appendix() -> SystemPromptAppendix:
     appendix: SystemPromptAppendix = {
         'output_contract': (
@@ -429,6 +434,20 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         capability_id='knowledge_base_search',
         input_schema={'query': 'string'}, output_schema={'results': 'list'}, required_config=['knowledge_base'],
         appendix_system_prompt=_kb_prompt_appendix,
+    ),
+    ToolConfig(
+        name='temp_kb',
+        label='临时文件检索',
+        description='从用户上传的临时文件中搜索相关内容',
+        tool=(
+            kb_tmp_search,
+            _temp_kb_key_source,
+        ), module='retrieval',
+        label_en='Temporary File Search',
+        description_en='Search relevant content in temporary files uploaded by the user.',
+        appendix_system_prompt={
+            'output_contract': RETRIEVAL_CITATION_OUTPUT_APPENDIX['output_contract'],
+        },
     ),
     ToolConfig(
         name='data_sources', label='数据源查询',

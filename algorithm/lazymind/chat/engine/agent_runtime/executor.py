@@ -37,7 +37,7 @@ _MAX_TOOL_LOG_CHARS = 800
 _RESULT_LOG_KEYS = (
     'target', 'display_name', 'kind', 'file_id', 'offset', 'end_line',
     'total_lines', 'eof', 'next_offset', 'limit', 'pattern', 'total',
-    'truncated', 'status', 'filename',
+    'truncated', 'status', 'filename', 'corpus', 'skipped', 'channels',
 )
 
 

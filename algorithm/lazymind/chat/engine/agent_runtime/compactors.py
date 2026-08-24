@@ -6,6 +6,7 @@ import os
 import re
 import tempfile
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Optional
 
 from lazymind.config import config
@@ -363,18 +364,46 @@ def _spill_filename(tool_name: str, content: str) -> str:
     return f'{safe or "tool"}_{digest}.txt'
 
 
+def _spill_text_and_name(
+    workspace: str,
+    tool_name: str,
+    content: Any,
+    observation: Any = None,
+) -> tuple[str, str]:
+    """One invocation writes one file; file-resources reuse the full parsed.md."""
+    text = _as_text(content)
+    details = _file_result_details(tool_name, content, observation)
+    payload = _result_payload(_structured_payload(content, observation))
+    file_id = str(payload.get('file_id') or '')
+    if not file_id.startswith('fr_'):
+        locator = str(details.get('locator') or '')
+        if locator.startswith('fr_'):
+            file_id = locator
+    if file_id.startswith('fr_') and workspace:
+        parsed = os.path.join(workspace, 'file-resources', file_id, 'parsed.md')
+        if os.path.isfile(parsed):
+            try:
+                full = Path(parsed).read_text(encoding='utf-8', errors='replace')
+            except OSError:
+                full = ''
+            if full:
+                return full, f'{file_id}.txt'
+    return text, _spill_filename(tool_name, text)
+
+
 def spill_tool_result_to_workspace(
     workspace: str,
     tool_name: str,
     content: Any,
+    observation: Any = None,
 ) -> Optional[str]:
     root = os.path.realpath(str(workspace or ''))
     if not root:
         return None
-    text = _as_text(content)
+    text, filename = _spill_text_and_name(root, tool_name, content, observation)
     spill_dir = os.path.join(root, 'tool_spills')
     os.makedirs(spill_dir, exist_ok=True)
-    path = os.path.join(spill_dir, _spill_filename(tool_name, text))
+    path = os.path.join(spill_dir, filename)
     temporary = ''
     try:
         with tempfile.NamedTemporaryFile(
@@ -426,6 +455,16 @@ def compact_or_spill_tool_result(
     before = estimate_tokens(text)
     size_bytes = tool_result_utf8_size(content)
     limit = spill_threshold_bytes() if threshold is None else max(1, int(threshold))
+    if workspace and size_bytes > limit:
+        try:
+            rel_path = spill_tool_result_to_workspace(
+                workspace, tool_name, content, observation,
+            )
+        except Exception:
+            rel_path = None
+        if rel_path:
+            notice = format_spilled_tool_notice(tool_name, content, rel_path, size_bytes)
+            return notice, 'spill', before, estimate_tokens(notice), rel_path, size_bytes
     if _file_result_details(tool_name, content, observation):
         compacted, compactor, before_tokens, after_tokens = compact_tool_result(
             tool_name,
@@ -433,14 +472,6 @@ def compact_or_spill_tool_result(
             observation,
         )
         return compacted, compactor, before_tokens, after_tokens, '', 0
-    if workspace and size_bytes > limit:
-        try:
-            rel_path = spill_tool_result_to_workspace(workspace, tool_name, content)
-        except Exception:
-            rel_path = None
-        if rel_path:
-            notice = format_spilled_tool_notice(tool_name, content, rel_path, size_bytes)
-            return notice, 'spill', before, estimate_tokens(notice), rel_path, size_bytes
     compacted, compactor, before_tokens, after_tokens = compact_tool_result(
         tool_name,
         content,
@@ -461,6 +492,25 @@ def plan_tool_result_compaction(
     before = estimate_tokens(text)
     size_bytes = tool_result_utf8_size(content)
     limit = spill_threshold_bytes() if threshold is None else max(1, int(threshold))
+    if workspace and size_bytes > limit:
+        spill_text, filename = _spill_text_and_name(
+            workspace, tool_name, content, observation,
+        )
+        rel_path = os.path.join('tool_spills', filename)
+        spill_bytes = len(spill_text.encode('utf-8', errors='replace'))
+        notice = format_spilled_tool_notice(tool_name, content, rel_path, spill_bytes)
+        after = estimate_tokens(notice)
+        if after < before:
+            return ToolCompactionPlan(
+                notice,
+                'spill',
+                before,
+                after,
+                spill_path=rel_path,
+                spill_bytes=spill_bytes,
+                tool_name=tool_name,
+                original_content=content,
+            )
     if _file_result_details(tool_name, content, observation):
         compacted, compactor, before_tokens, after_tokens = compact_tool_result(
             tool_name,
@@ -471,21 +521,6 @@ def plan_tool_result_compaction(
             compacted, compactor, before_tokens, after_tokens,
             tool_name=tool_name, original_content=content,
         )
-    if workspace and size_bytes > limit:
-        rel_path = os.path.join('tool_spills', _spill_filename(tool_name, text))
-        notice = format_spilled_tool_notice(tool_name, content, rel_path, size_bytes)
-        after = estimate_tokens(notice)
-        if after < before:
-            return ToolCompactionPlan(
-                notice,
-                'spill',
-                before,
-                after,
-                spill_path=rel_path,
-                spill_bytes=size_bytes,
-                tool_name=tool_name,
-                original_content=content,
-            )
     compacted, compactor, before_tokens, after_tokens = compact_tool_result(
         tool_name,
         content,

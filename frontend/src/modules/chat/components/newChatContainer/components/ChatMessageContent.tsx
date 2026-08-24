@@ -10,7 +10,7 @@ import { ChatConversationsResponseFinishReasonEnum } from "@/api/generated/chatb
 import MarkdownViewer from "@/modules/chat/components/MarkdownViewer";
 import { getCitationSources } from "@/modules/chat/utils/sourceAdapter";
 import { RoleTypes } from "@/modules/chat/constants/common";
-import { formatThinkingForDisplay } from "@/modules/chat/utils/thinking";
+import { formatThinkingForDisplay, summarizeSearchToolsFromText } from "@/modules/chat/utils/thinking";
 import { useTranslation } from "react-i18next";
 import ChatImages from "../../ChatImages";
 import ChatFiles from "../../ChatFiles";
@@ -72,6 +72,9 @@ export default function ChatMessageContent({
     item.finish_reason !==
       ChatConversationsResponseFinishReasonEnum.FinishReasonStop;
   const isCollapsed = isThinkingCollapsed(thinkingKey, !isStreaming);
+  const searchSummary = summarizeSearchToolsFromText(
+    item.raw_delta || item.reasoning_content,
+  );
   const conversationIntent =
     item.intent_updated?.scope === "conversation"
       ? item.intent_updated.intent_context
@@ -136,6 +139,7 @@ export default function ChatMessageContent({
             <img src={ThinkIcon} className="chat-think-icon" alt="" />
             <span className="chat-think-title">
               {item.delta ? t("chat.thinkingDone") : t("chat.thinking")}
+              {searchSummary ? ` · ${searchSummary}` : ""}
               {(item.thinking_duration_s || item.thinking_time_s) &&
                 item.thinking_duration_s !== "0" &&
                 item.thinking_time_s !== "0" &&

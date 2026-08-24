@@ -61,6 +61,7 @@ def test_ingest_catalog_hides_internal_parsed_path(monkeypatch, tmp_path):
     assert manifest['file_id'] in catalog
     assert 'parsed.md' not in catalog
     assert 'grep' in catalog
+    assert 'kb_tmp_search' in catalog
     assert 'read_file' in catalog
 
 

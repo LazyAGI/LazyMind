@@ -596,7 +596,7 @@ def test_keep_recent_still_spills_oversized_tool_results(tmp_path) -> None:
     assert history[1]['content'] == huge
 
 
-def test_oversized_replayable_file_result_uses_locator_instead_of_spill(tmp_path) -> None:
+def test_oversized_file_result_spills_as_one_file(tmp_path) -> None:
     payload = {
         'success': True,
         'tool': 'read_file',
@@ -634,11 +634,12 @@ def test_oversized_replayable_file_result_uses_locator_instead_of_spill(tmp_path
         workspace=str(tmp_path),
     )
 
-    assert event.decision == 'pruned'
-    assert event.details[0].compactor == 'file_locator'
-    assert 'Target: paper.pdf' in projected[0]['content']
-    assert 'offset=201' in projected[0]['content']
-    assert not (tmp_path / 'tool_spills').exists()
+    assert event.decision == 'spilled'
+    assert event.details[0].compactor == 'spill'
+    assert 'offloaded to workspace' in projected[0]['content']
+    spilled = list((tmp_path / 'tool_spills').glob('*.txt'))
+    assert len(spilled) == 1
+    assert spilled[0].read_text(encoding='utf-8') == str(payload)
 
 
 def test_spill_stays_internal_and_uses_stable_content_path(tmp_path, monkeypatch) -> None:

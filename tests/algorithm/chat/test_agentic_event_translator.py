@@ -391,7 +391,7 @@ def test_unified_grep_rendering_uses_target_and_distinguishes_zero_hits():
         },
     }, language='zh', preview_value=preview)
 
-    assert '正在文件 **papers.pdf** 中检索' in call_text
-    assert '实验' not in call_text.split('</tp>', 1)[0]
+    assert '正在用 grep 搜索 **实验**' in call_text
+    assert 'papers.pdf' not in call_text.split('</tp>', 1)[0]
     assert '文件中没有找到匹配行' in result_text
-    assert '已找到文件' not in result_text
+    assert '已找到' not in result_text

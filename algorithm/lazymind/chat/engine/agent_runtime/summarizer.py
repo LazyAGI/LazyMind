@@ -188,7 +188,7 @@ def apply_summary_compression(
         else:
             summary_markdown = _call_summarizer_llm(llm, system_prompt, user_prompt)
     except Exception as exc:  # noqa: BLE001 - never fail the agent path
-        lazyllm.LOG.warning(f'[ContextCompression] summary_llm_failed err={exc}')
+        lazyllm.LOG.warning(f'[ContextSummary] summary_llm_failed err={exc}')
         return _abandon(
             original, budget, trigger, before_total, ratio_before, 'llm_failed',
             replaced_message_count=len(selected.summary_messages),
@@ -302,7 +302,7 @@ def _emit_model_context_updated(summary_markdown: str, covered_through_seq: int)
                 'version': 1,
             }
     except Exception as exc:  # noqa: BLE001
-        lazyllm.LOG.warning(f'[ContextCompression] model_context_emit_failed err={exc}')
+        lazyllm.LOG.warning(f'[ContextSummary] model_context_emit_failed err={exc}')
 
 
 def _skip(
@@ -360,7 +360,7 @@ def _abandon(
 
 def _log_summary_event(event: SummaryEvent) -> None:
     lazyllm.LOG.info(
-        '[ContextCompression] '
+        '[ContextSummary] '
         f'trigger={event.trigger} decision={event.decision} reason={event.reason} '
         f'before={event.estimated_before} after={event.estimated_after} '
         f'reclaimed={event.reclaimed_tokens} '

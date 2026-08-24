@@ -81,6 +81,32 @@ def test_wikipedia_remains_available_without_web_provider():
     assert 'wikipedia' in _active_tool_names()
 
 
+def test_temp_kb_activates_when_files_are_present():
+    from lazyllm.tools.agent.toolsManager import ToolManager
+
+    assert 'temp_kb' not in _active_tool_names()
+    assert _tool_group('temp_kb')['active'] is False
+
+    temp_kb_cfg = next(cfg for cfg in DEFAULT_TOOLS if cfg.name == 'temp_kb')
+    manager = ToolManager([temp_kb_cfg.tool])
+    assert manager.tools_description == []
+
+    lazyllm.globals['agentic_config'] = {'files': ['tmp-a.md']}
+
+    configs = filter_tools(DEFAULT_TOOLS)
+    assert 'temp_kb' in {cfg.name for cfg in configs}
+    manager = ToolManager([temp_kb_cfg.tool])
+    assert [d['function']['name'] for d in manager.tools_description] == ['kb_tmp_search']
+    group = _tool_group('temp_kb')
+    assert group['active'] is True
+    assert group['methods'] == [
+        {
+            'name': 'kb_tmp_search',
+            'summary': 'Locate passages in this conversation\'s uploaded documents.',
+        }
+    ]
+
+
 def test_registry_key_source_activates_function_tool():
     def gated_tool() -> None:
         return None

@@ -199,8 +199,9 @@ def _log_event(event: PruneEvent) -> None:
     source_counts: dict[str, int] = {}
     for detail in event.details:
         source_counts[detail.compactor] = source_counts.get(detail.compactor, 0) + 1
+    log_tag = '[ToolSpill]' if event.decision == 'spilled' else '[ContextPrune]'
     lazyllm.LOG.info(
-        '[ContextCompression] '
+        f'{log_tag} '
         f'trigger={event.trigger} decision={event.decision} reason={event.reason} '
         f'before={event.estimated_before} after={event.estimated_after} '
         f'reclaimed={event.reclaimed_tokens} '
@@ -209,11 +210,11 @@ def _log_event(event: PruneEvent) -> None:
         f'budget={event.budget.effective_input_budget} sources={source_counts}'
     )
     spill_bits = [
-        f'path={detail.spill_path} bytes={detail.spill_bytes}'
+        f'tool={detail.tool_name or "-"} path={detail.spill_path} bytes={detail.spill_bytes}'
         for detail in event.details if detail.spill_path
     ]
     if spill_bits:
-        lazyllm.LOG.info('[ContextCompression] spilled ' + '; '.join(spill_bits))
+        lazyllm.LOG.info('[ToolSpill] ' + '; '.join(spill_bits))
     append_event('prune', **prune_event_to_dict(event))
 
 
