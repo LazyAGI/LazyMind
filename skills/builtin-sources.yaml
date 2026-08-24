@@ -20,4 +20,9 @@ bundled_skills:
     path: search/sciverse-paper-search
     category: search
     version: 1.0.0
-skills: []
+  - uid: bsk_01K3G4HUMANIZERCHAT001A2B3C
+    path: chat/humanizer
+    category: chat
+    version: 1.0.0
+skills:
+  - https://skillhub.cn/skills/user_290ac21c/find-skill-skillhub
