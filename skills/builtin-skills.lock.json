@@ -77,6 +77,26 @@
       "package_file": "packages/bsk_01K0M8SCV7PAPERSEARCH9Q2X3A4B.zip"
     },
     {
+      "key": "c14a2be347251fe4a497d265e1863d958c5dd832",
+      "uid": "bsk_EB1580D5EDF4CCFDC18F4EB05E58",
+      "source_url": "https://github.com/xiaoyanZzz/LazyRAG/archive/c14a2be347251fe4a497d265e1863d958c5dd832.zip",
+      "resolved_url": "https://github.com/xiaoyanZzz/LazyRAG/archive/c14a2be347251fe4a497d265e1863d958c5dd832.zip",
+      "version": "1.0.0",
+      "name": "structured-longform-writing",
+      "description": "Use for structured long-form writing, including blogs, reports, proposals, plans, PRDs, competitive analyses, research summaries, technical design docs, internal briefings, and decision documents. Trigger when the user asks to write, draft, expand, organize, polish into, or turn rough notes, attachments, webpages, knowledge-base results, or gathered materials into a complete long-form document. Do not use for simple rewriting, one-paragraph summaries, title brainstorming, short messages, translation-only tasks, or purely creative fiction.",
+      "category": "writing",
+      "tags": [
+        "long-form-writing",
+        "report",
+        "proposal"
+      ],
+      "market_visible": true,
+      "archive_sha256": "020e5f08f6cc21813bd8742ed4c56ba2df9d6713448eac1675526ac0d474d5bc",
+      "tree_sha256": "d7e814564b16bec7a83dcaa1ee70646ed06a73d1151abe788a2c21667e83f7af",
+      "archive_size": 30742,
+      "package_file": "packages/bsk_EB1580D5EDF4CCFDC18F4EB05E58.zip"
+    },
+    {
       "key": "user_7c4df347/gaokao-volunteer-advisor",
       "uid": "bsk_C8C501AEDCEC9283F2C9F9F59AD8",
       "source_url": "https://skillhub.cn/skills/user_7c4df347/gaokao-volunteer-advisor",
@@ -112,26 +132,6 @@
       "tree_sha256": "1aef731597db76401e1732845581c241068ecd6e30e458ad5343767f67158af5",
       "archive_size": 49861,
       "package_file": "packages/bsk_8540F063D5202C3CE7D9B6F93366.zip"
-    },
-    {
-      "key": "c14a2be347251fe4a497d265e1863d958c5dd832",
-      "uid": "bsk_EB1580D5EDF4CCFDC18F4EB05E58",
-      "source_url": "https://github.com/xiaoyanZzz/LazyRAG/archive/c14a2be347251fe4a497d265e1863d958c5dd832.zip",
-      "resolved_url": "https://github.com/xiaoyanZzz/LazyRAG/archive/c14a2be347251fe4a497d265e1863d958c5dd832.zip",
-      "version": "1.0.0",
-      "name": "structured-longform-writing",
-      "description": "Use for structured long-form writing, including blogs, reports, proposals, plans, PRDs, competitive analyses, research summaries, technical design docs, internal briefings, and decision documents. Trigger when the user asks to write, draft, expand, organize, polish into, or turn rough notes, attachments, webpages, knowledge-base results, or gathered materials into a complete long-form document. Do not use for simple rewriting, one-paragraph summaries, title brainstorming, short messages, translation-only tasks, or purely creative fiction.",
-      "category": "writing",
-      "tags": [
-        "long-form-writing",
-        "report",
-        "proposal"
-      ],
-      "market_visible": false,
-      "archive_sha256": "020e5f08f6cc21813bd8742ed4c56ba2df9d6713448eac1675526ac0d474d5bc",
-      "tree_sha256": "d7e814564b16bec7a83dcaa1ee70646ed06a73d1151abe788a2c21667e83f7af",
-      "archive_size": 30742,
-      "package_file": "packages/bsk_EB1580D5EDF4CCFDC18F4EB05E58.zip"
     }
   ]
 }
