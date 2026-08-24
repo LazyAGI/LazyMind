@@ -103,14 +103,6 @@ func PatchUIPreferences(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "query settings controls failed", http.StatusInternalServerError)
 		return
 	}
-	targetTaskCenterEnabled := currentControls.TaskCenterEnabled
-	if req.TaskCenterEnabled != nil {
-		targetTaskCenterEnabled = *req.TaskCenterEnabled
-	}
-	if !targetTaskCenterEnabled {
-		workflowsDisabled := false
-		req.WorkflowsEnabled = &workflowsDisabled
-	}
 	var row orm.UserUIPreferences
 	err = db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		var upsertErr error

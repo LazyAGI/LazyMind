@@ -44,6 +44,7 @@ import KnowledgeToolSettings, { isKnowledgeToolView } from "./KnowledgeToolSetti
 import QuickModelSettings from "./QuickModelSettings";
 import RecoverySettings from "./RecoverySettings";
 import UserSkillWorkflowSettings, { type ResourceTab } from "./UserSkillWorkflowSettings";
+import { resolveModelNavigationStatus } from "./modelNavigationStatus";
 import {
   fetchSettingsOverview,
   runSettingsChecks,
@@ -114,7 +115,7 @@ function baseNavigation(isAdmin: boolean, t: Translate): NavigationGroup[] {
     {
       title: t("settingsPage.navGroups.gettingStarted"),
       items: [
-        { id: "models", label: t("settingsPage.sections.models"), keywords: t("settingsPage.sectionKeywords.models"), icon: <ApiOutlined />, status: t("settingsPage.sectionStatus.ready") },
+        { id: "models", label: t("settingsPage.sections.models"), keywords: t("settingsPage.sectionKeywords.models"), icon: <ApiOutlined /> },
         { id: "overview", label: t("settingsPage.sections.overview"), keywords: t("settingsPage.sectionKeywords.overview"), icon: <SettingOutlined />, status: t("settingsPage.sectionStatus.synced") },
       ],
     },
@@ -142,7 +143,7 @@ function baseNavigation(isAdmin: boolean, t: Translate): NavigationGroup[] {
         ...(isAdmin ? [{ id: "organization" as const, label: t("settingsPage.sections.organization"), keywords: t("settingsPage.sectionKeywords.organization"), icon: <TeamOutlined /> }] : []),
         { id: "recovery", label: t("settingsPage.sections.recovery"), keywords: t("settingsPage.sectionKeywords.recovery"), icon: <DeleteOutlined /> },
         { id: "diagnostics", label: t("settingsPage.sections.diagnostics"), keywords: t("settingsPage.sectionKeywords.diagnostics"), icon: <CheckCircleFilled /> },
-        ...(isAdmin ? [{ id: "developer" as const, label: t("settingsPage.sections.developer"), keywords: t("settingsPage.sectionKeywords.developer"), icon: <CodeOutlined />, status: t("settingsPage.sectionStatus.activated") }] : []),
+        { id: "developer", label: t("settingsPage.sections.developer"), keywords: t("settingsPage.sectionKeywords.developer"), icon: <CodeOutlined />, status: t("settingsPage.sectionStatus.activated") },
       ],
     },
   ];
@@ -211,6 +212,24 @@ export default function SettingsPage() {
   const [organizationView, setOrganizationView] = useState<"users" | "groups">("users");
   const [mcpRefreshToken, setMcpRefreshToken] = useState(0);
 
+  const modelSection = overview?.sections.find((item) => item.id === "models");
+  const modelNavigationStatus = resolveModelNavigationStatus(
+    loading || loadError ? undefined : modelSection?.effective_enabled,
+  );
+  const navigationGroupsWithStatus = useMemo(() => navigationGroups.map((group) => ({
+    ...group,
+    items: group.items.map((item) => item.id === "models"
+      ? {
+          ...item,
+          status: modelNavigationStatus === "ready"
+            ? t("settingsPage.sectionStatus.ready")
+            : modelNavigationStatus === "pending"
+              ? t("settingsPage.counts.pendingConfig")
+              : undefined,
+        }
+      : item),
+  })), [modelNavigationStatus, navigationGroups, t]);
+
   const refresh = useCallback(async () => {
     const requestID = ++latestRequest.current;
     setLoading(true);
@@ -233,12 +252,12 @@ export default function SettingsPage() {
 
   const filteredGroups = useMemo(() => {
     const query = keyword.trim().toLowerCase();
-    if (!query) return navigationGroups;
-    return navigationGroups.map((group) => ({
+    if (!query) return navigationGroupsWithStatus;
+    return navigationGroupsWithStatus.map((group) => ({
       ...group,
       items: group.items.filter((item) => `${item.label} ${item.keywords}`.toLowerCase().includes(query)),
     })).filter((group) => group.items.length > 0);
-  }, [keyword, navigationGroups]);
+  }, [keyword, navigationGroupsWithStatus]);
 
   const selectSection = (next: SectionID) => setSearchParams({ section: next });
   const selectModelView = (next: "defaults" | "providers") => {
@@ -409,17 +428,15 @@ export default function SettingsPage() {
   };
 
   const switchControl = (key: MasterSetting) => {
-    const workflowControlBlocked = key === "workflows_enabled" && !overview?.controls.task_center_enabled;
-    const dependencyMessage = t("settingsPage.skills.taskCenterRequiredNotice");
     return (
-      <span title={workflowControlBlocked ? dependencyMessage : undefined}>
+      <span>
         <Switch
           className="settings-ref-switch"
-          checked={workflowControlBlocked ? false : Boolean(overview?.controls[key])}
+          checked={Boolean(overview?.controls[key])}
           loading={saving === key}
-          disabled={saving !== null || workflowControlBlocked}
+          disabled={saving !== null}
           onChange={(checked: boolean) => requestMasterChange(key, checked)}
-          aria-label={workflowControlBlocked ? t("settingsPage.skills.taskCenterRequiredAria") : controls[key].title}
+          aria-label={controls[key].title}
         />
       </span>
     );
@@ -495,9 +512,9 @@ export default function SettingsPage() {
           dashboardRow(t("settingsPage.sections.diagnostics"), t("settingsPage.checkAll"), t("settingsPage.overview.checkAllDesc"), <Button size="small" loading={checking} onClick={handleCheckAll}>{t("settingsPage.check")}</Button>),
           dashboardRow(t("settingsPage.sections.diagnostics"), t("settingsPage.overview.recentResults"), checks ? t("settingsPage.overview.recentResultsReady", { count: checks.length }) : t("settingsPage.overview.recentResultsEmpty"), <Tag className="settings-status-tag">{t("settingsPage.viewable")}</Tag>),
         ])}
-        {isAdmin && dashboardCard("developer", <CodeOutlined />, t("settingsPage.sections.developer"), t("settingsPage.overview.developerDesc"), [
+        {dashboardCard("developer", <CodeOutlined />, t("settingsPage.sections.developer"), t("settingsPage.overview.developerDesc"), [
           dashboardRow(t("settingsPage.sections.developer"), t("settingsPage.overview.enableDeveloper"), t("settingsPage.overview.enableDeveloperDesc"), <Switch className="settings-ref-switch" checked={developerActive} loading={saving === "developer"} disabled={saving !== null} onChange={requestDeveloperChange} aria-label={t("settingsPage.overview.enableDeveloper")} />),
-          dashboardRow(t("settingsPage.sections.developer"), t("settingsPage.overview.internalDebug"), t("settingsPage.overview.internalDebugDesc"), <Tag className="settings-status-tag">{t("settingsPage.admin")}</Tag>),
+          dashboardRow(t("settingsPage.sections.developer"), t("settingsPage.overview.internalDebug"), t("settingsPage.overview.internalDebugDesc"), <Tag className="settings-status-tag">{developerActive ? t("settingsPage.sectionStatus.activated") : t("settingsPage.sectionStatus.notActivated")}</Tag>),
         ])}
       </div>
       {checks ? <CheckResults checks={checks} onLocate={selectSection} /> : null}
@@ -669,6 +686,7 @@ export default function SettingsPage() {
         </nav>
         {integratedSurface(modelView === "defaults" ? (
           <DefaultServicesPage
+            onModelSelectionChanged={syncOverview}
             onConfigureCloudService={(service) => navigate(
               service === "cloudParsing"
                 ? "/settings?section=knowledge&tool=document-parsing"
@@ -679,7 +697,7 @@ export default function SettingsPage() {
               requestAnimationFrame(() => modelProviderTabRef.current?.focus());
             }}
           />
-        ) : <ModelProvidersPage />, "is-models")}
+        ) : <ModelProvidersPage onConfigurationChanged={syncOverview} />, "is-models")}
       </>;
     } else if (section === "tasks") {
       const taskCenterEnabled = Boolean(overview?.controls.task_center_enabled);
@@ -708,7 +726,6 @@ export default function SettingsPage() {
       content = <MemoryCapabilitySettings headingRef={headingRef} />;
     } else if (section === "skills") {
       content = <UserSkillWorkflowSettings
-        taskCenterEnabled={Boolean(overview?.controls.task_center_enabled)}
         skillsEnabled={Boolean(overview?.controls.skills_enabled)}
         workflowsEnabled={Boolean(overview?.controls.workflows_enabled)}
         groupSaving={saving === "skills_enabled" ? "skills" : saving === "workflows_enabled" ? "workflows" : null}
@@ -757,7 +774,7 @@ export default function SettingsPage() {
       content = renderDiagnostics();
     } else {
       content = <>
-        {integratedHeader(t("settingsPage.sections.developer"), selectedSection.detail, <Tag className="settings-admin-tag">{t("settingsPage.adminOnly")}</Tag>)}
+        {integratedHeader(t("settingsPage.sections.developer"), selectedSection.detail)}
         <div className="settings-detail-group">
           <div className="settings-detail-row">
             <div>

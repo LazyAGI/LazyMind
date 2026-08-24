@@ -20,7 +20,7 @@ func TestLoadFeatureControlsDefaultsWhenPreferencesTableIsMissing(t *testing.T) 
 	}
 }
 
-func TestLoadFeatureControlsDisablesWorkflowsWhenTaskCenterIsOff(t *testing.T) {
+func TestLoadFeatureControlsKeepsWorkflowsEnabledWhenTaskCenterIsOff(t *testing.T) {
 	db := orm.MigrateTestDB(t, &orm.UserUIPreferences{})
 	now := time.Now().UTC()
 	if err := db.Model(&orm.UserUIPreferences{}).Create(map[string]any{
@@ -40,7 +40,7 @@ func TestLoadFeatureControlsDisablesWorkflowsWhenTaskCenterIsOff(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if controls.WorkflowsEnabled {
-		t.Fatalf("workflows must be unavailable while task center is off: %#v", controls)
+	if controls.TaskCenterEnabled || !controls.WorkflowsEnabled {
+		t.Fatalf("task center and workflows must remain independent: %#v", controls)
 	}
 }

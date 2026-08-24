@@ -105,7 +105,7 @@ func TestPatchUIPreferencesPreservesOtherFeatureControls(t *testing.T) {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	resp := decodeUIPreferencesResponse(t, rec)
-	if resp.Data.TaskCenterEnabled || resp.Data.MCPEnabled || !resp.Data.SkillsEnabled || resp.Data.WorkflowsEnabled ||
+	if resp.Data.TaskCenterEnabled || resp.Data.MCPEnabled || !resp.Data.SkillsEnabled || !resp.Data.WorkflowsEnabled ||
 		!resp.Data.DocumentParsingEnabled {
 		t.Fatalf("unexpected controls after patch: %#v", resp.Data)
 	}
@@ -117,7 +117,7 @@ func TestPatchUIPreferencesPreservesOtherFeatureControls(t *testing.T) {
 	PatchUIPreferences(secondRec, secondReq)
 	secondResp := decodeUIPreferencesResponse(t, secondRec)
 	if secondRec.Code != http.StatusOK || secondResp.Data.TaskCenterEnabled || secondResp.Data.MCPEnabled || secondResp.Data.SkillsEnabled ||
-		secondResp.Data.WorkflowsEnabled || !secondResp.Data.DocumentParsingEnabled {
+		!secondResp.Data.WorkflowsEnabled || !secondResp.Data.DocumentParsingEnabled {
 		t.Fatalf("feature controls should patch independently, got %#v status=%d", secondResp.Data, secondRec.Code)
 	}
 
@@ -128,12 +128,12 @@ func TestPatchUIPreferencesPreservesOtherFeatureControls(t *testing.T) {
 	PatchUIPreferences(thirdRec, thirdReq)
 	thirdResp := decodeUIPreferencesResponse(t, thirdRec)
 	if thirdRec.Code != http.StatusOK || thirdResp.Data.TaskCenterEnabled || thirdResp.Data.MCPEnabled || thirdResp.Data.SkillsEnabled ||
-		thirdResp.Data.WorkflowsEnabled || thirdResp.Data.DocumentParsingEnabled {
+		!thirdResp.Data.WorkflowsEnabled || thirdResp.Data.DocumentParsingEnabled {
 		t.Fatalf("document parsing control should patch independently, got %#v status=%d", thirdResp.Data, thirdRec.Code)
 	}
 }
 
-func TestPatchUIPreferencesTaskCenterControlsWorkflowAvailability(t *testing.T) {
+func TestPatchUIPreferencesTaskCenterAndWorkflowsAreIndependent(t *testing.T) {
 	db := newUIPreferencesTestDB(t)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
@@ -159,7 +159,7 @@ func TestPatchUIPreferencesTaskCenterControlsWorkflowAvailability(t *testing.T) 
 		}
 		return decodeUIPreferencesResponse(t, rec)
 	}
-	assertWorkflowsDisabled := func() {
+	assertWorkflowSettings := func(enabled bool) {
 		t.Helper()
 		var settings []orm.UserWorkflowSetting
 		if err := db.Where("user_id = ?", "u1").Order("plugin_ref").Find(&settings).Error; err != nil {
@@ -169,29 +169,51 @@ func TestPatchUIPreferencesTaskCenterControlsWorkflowAvailability(t *testing.T) 
 			t.Fatalf("expected both available workflows to be synchronized, got %#v", settings)
 		}
 		for _, setting := range settings {
-			if setting.Enabled || setting.CallMode != workflow.WorkflowCallModeDisabled {
-				t.Fatalf("workflow should be disabled with task center off, got %#v", setting)
+			expectedCallMode := workflow.WorkflowCallModeDisabled
+			if enabled {
+				expectedCallMode = workflow.WorkflowCallModeAuto
+			}
+			if setting.Enabled != enabled || setting.CallMode != expectedCallMode {
+				t.Fatalf("workflow should be enabled=%v with call mode %s, got %#v", enabled, expectedCallMode, setting)
 			}
 		}
 	}
 
-	resp := patch(`{"task_center_enabled":false}`)
-	if resp.Data.TaskCenterEnabled || resp.Data.WorkflowsEnabled {
-		t.Fatalf("disabling task center must also disable workflows, got %#v", resp.Data)
+	resp := patch(`{"workflows_enabled":true}`)
+	if !resp.Data.TaskCenterEnabled || !resp.Data.WorkflowsEnabled {
+		t.Fatalf("enabling workflows must preserve task center, got %#v", resp.Data)
 	}
-	assertWorkflowsDisabled()
+	assertWorkflowSettings(true)
+
+	resp = patch(`{"task_center_enabled":false}`)
+	if resp.Data.TaskCenterEnabled || !resp.Data.WorkflowsEnabled {
+		t.Fatalf("disabling task center must preserve workflows, got %#v", resp.Data)
+	}
+	assertWorkflowSettings(true)
+
+	resp = patch(`{"workflows_enabled":false}`)
+	if resp.Data.TaskCenterEnabled || resp.Data.WorkflowsEnabled {
+		t.Fatalf("disabling workflows must preserve task center, got %#v", resp.Data)
+	}
+	assertWorkflowSettings(false)
 
 	resp = patch(`{"workflows_enabled":true}`)
-	if resp.Data.WorkflowsEnabled {
-		t.Fatalf("workflows cannot be enabled while task center is disabled, got %#v", resp.Data)
+	if resp.Data.TaskCenterEnabled || !resp.Data.WorkflowsEnabled {
+		t.Fatalf("workflows must be independently enabled while task center is off, got %#v", resp.Data)
 	}
-	assertWorkflowsDisabled()
+	assertWorkflowSettings(true)
 
 	resp = patch(`{"task_center_enabled":true}`)
-	if !resp.Data.TaskCenterEnabled || resp.Data.WorkflowsEnabled {
-		t.Fatalf("re-enabling task center must not re-enable workflows automatically, got %#v", resp.Data)
+	if !resp.Data.TaskCenterEnabled || !resp.Data.WorkflowsEnabled {
+		t.Fatalf("re-enabling task center must preserve workflows, got %#v", resp.Data)
 	}
-	assertWorkflowsDisabled()
+	assertWorkflowSettings(true)
+
+	resp = patch(`{"workflows_enabled":false}`)
+	if !resp.Data.TaskCenterEnabled || resp.Data.WorkflowsEnabled {
+		t.Fatalf("disabling workflows must not disable task center, got %#v", resp.Data)
+	}
+	assertWorkflowSettings(false)
 }
 
 func TestPatchUIPreferencesBulkControlsSkillsAndWorkflowsIndependently(t *testing.T) {

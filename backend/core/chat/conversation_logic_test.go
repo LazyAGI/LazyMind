@@ -272,7 +272,7 @@ func TestPromoteAgentRuntimeFlagsPrefersExplicitRequest(t *testing.T) {
 	}
 }
 
-func TestApplyChatFeatureControlsOverridesConversationRuntimeFlags(t *testing.T) {
+func TestApplyChatFeatureControlsKeepsWorkflowsIndependentFromTaskCenter(t *testing.T) {
 	db := newPromptTestDB(t)
 	now := time.Now().UTC()
 	if err := db.Model(&orm.UserUIPreferences{}).Create(map[string]any{
@@ -294,15 +294,49 @@ func TestApplyChatFeatureControlsOverridesConversationRuntimeFlags(t *testing.T)
 	if err := applyChatFeatureControls(t.Context(), db.DB, "user-1", body); err != nil {
 		t.Fatal(err)
 	}
-	if enabled, _ := body["enable_workflow"].(bool); enabled {
-		t.Fatalf("workflow must be disabled by the task center master control: %#v", body)
+	if enabled, _ := body["enable_workflow"].(bool); !enabled {
+		t.Fatalf("workflow must remain enabled when only the task center is off: %#v", body)
 	}
 	if enabled, _ := body["enable_subagent"].(bool); enabled {
 		t.Fatalf("subagents must be disabled by the task center master control: %#v", body)
 	}
 	agentConfig := body["agentic_config"].(map[string]any)
-	if agentConfig["enable_workflow"] != false || agentConfig["enable_subagent"] != false {
-		t.Fatalf("agentic config must use the same effective controls: %#v", agentConfig)
+	if agentConfig["enable_workflow"] != true || agentConfig["enable_subagent"] != false {
+		t.Fatalf("agentic config must keep workflow and subagent controls independent: %#v", agentConfig)
+	}
+}
+
+func TestApplyChatFeatureControlsKeepsSubagentsIndependentFromWorkflows(t *testing.T) {
+	db := newPromptTestDB(t)
+	now := time.Now().UTC()
+	if err := db.Model(&orm.UserUIPreferences{}).Create(map[string]any{
+		"user_id": "user-1", "task_center_enabled": true, "skills_enabled": true,
+		"workflows_enabled": false, "mcp_enabled": true, "document_parsing_enabled": true,
+		"created_at": now, "updated_at": now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	body := map[string]any{
+		"enable_workflow": true,
+		"enable_subagent": true,
+		"agentic_config": map[string]any{
+			"enable_workflow": true,
+			"enable_subagent": true,
+		},
+	}
+
+	if err := applyChatFeatureControls(t.Context(), db.DB, "user-1", body); err != nil {
+		t.Fatal(err)
+	}
+	if enabled, _ := body["enable_workflow"].(bool); enabled {
+		t.Fatalf("workflow must be disabled by its own control: %#v", body)
+	}
+	if enabled, _ := body["enable_subagent"].(bool); !enabled {
+		t.Fatalf("subagents must remain enabled when only workflows are off: %#v", body)
+	}
+	agentConfig := body["agentic_config"].(map[string]any)
+	if agentConfig["enable_workflow"] != false || agentConfig["enable_subagent"] != true {
+		t.Fatalf("agentic config must keep workflow and subagent controls independent: %#v", agentConfig)
 	}
 }
 

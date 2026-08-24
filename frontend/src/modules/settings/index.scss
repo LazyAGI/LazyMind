@@ -151,7 +151,6 @@
 .settings-detail-header p { max-width: 720px; margin: 0; color: var(--settings-muted); font-size: 14px; line-height: 1.6; }
 .settings-sync-tag.ant-tag,
 .settings-status-tag.ant-tag,
-.settings-admin-tag.ant-tag,
 .settings-check-warning.ant-tag {
   min-height: 24px;
   margin: 0;
@@ -166,7 +165,6 @@
   white-space: nowrap;
 }
 .settings-status-tag.ant-tag { border-radius: 6px; color: #2563eb; background: #eef6ff; font-size: 11px; }
-.settings-admin-tag.ant-tag { color: #9a3412; background: #fff7ed; }
 .settings-check-warning.ant-tag { color: #b46b08; background: #fff7e8; }
 .settings-ref-issues { display: grid; gap: 10px; margin: -4px 0 14px; }
 .settings-ref-issues .ant-alert { border-radius: 9px; }
@@ -847,8 +845,7 @@
 .recovery-toolbar.is-trash-conversations { grid-template-columns: auto minmax(220px, 1fr) auto; }
 .recovery-toolbar.is-trash-workflows { grid-template-columns: minmax(220px, 1fr) auto; }
 .recovery-toolbar > .ant-input-affix-wrapper,
-.recovery-toolbar > .ant-select .ant-select-selector,
-.recovery-move-form .ant-select-selector { min-height: 34px; border-color: #d3dfed; border-radius: 8px; box-shadow: none; }
+.recovery-toolbar > .ant-select .ant-select-selector { min-height: 34px; border-color: #d3dfed; border-radius: 8px; box-shadow: none; }
 .recovery-toolbar > .ant-select { width: 100%; }
 .recovery-toolbar > .ant-btn,
 .recovery-folder-toolbar-actions .ant-btn,
@@ -885,8 +882,6 @@
 .recovery-actions { justify-self: end; }
 .recovery-actions-mobile { display: none; }
 .recovery-surface > .ant-pagination { display: flex; justify-content: flex-end; margin-top: 14px; }
-.recovery-move-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; }
-.recovery-move-form .ant-select { width: 100%; }
 .recovery-folder-manager { display: grid; gap: 8px; }
 .recovery-folder-manager-row { display: grid; min-height: 56px; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid #e0e8f2; border-radius: 9px; background: #fff; }
 .recovery-folder-manager-row strong,
