@@ -1,0 +1,153 @@
+schema_version: 2
+id: novel-generator
+type: chat
+version: 1.0.0
+status: published
+default_locale: zh-CN
+
+skill:
+  source_url: https://github.com/xiaoyanZzz/LazyRAG/archive/2aa921444b631956f9dbc4a9ad463a47a00b5ad1.zip
+  required_version: 1.0.0
+
+placement:
+  home: true
+  gallery: true
+  order: 12
+
+classification:
+  category: 写作创作
+  tags:
+    - 小说创作
+    - 网文连载
+    - 大纲与设定
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+
+presentation:
+  card:
+    title: 小说连载创作助手
+    description: 为作者完成创意扩展、人物设定、故事大纲、章节写作与连载一致性管理
+    output_type: document
+    output_label: 小说创作稿
+    cover_asset: cover
+    result_summary: 从一句话灵感到可持续连载，形成设定、大纲、章节与连续性记录
+  detail:
+    title: 小说连载创作助手
+    description: 面向网文和长篇小说作者，协助完成创意孵化、世界与人物设定、全局大纲、章节创作、续写修订和连续性检查。
+    attachment_hint: 已有灵感、人物设定、大纲、前文章节或连载状态（可选）
+
+tasks:
+  - id: idea-development
+    selector:
+      title: 创意与设定
+      description: 从一句话灵感搭建题材、主角、冲突、世界规则和开篇钩子
+      output_label: 小说创作企划
+    launch:
+      prompt_short: 把我的一句话小说灵感扩展成一份可执行的创作方案。
+      prompt: 请根据我提供的一句话灵感、题材方向或关键词，完成一份面向作者的小说创作企划。请明确题材与目标读者、核心卖点、主角起点和欲望、主要冲突、世界或力量规则、关键配角、前三章钩子以及主要创作风险。不要机械堆叠流行元素；只有缺失信息会显著改变方向时，集中询问不超过三个关键问题。
+    replay:
+      steps:
+        - title: 拆解创作方向
+          description: 识别题材、目标读者、作品基调和差异化卖点
+        - title: 设计人物与冲突
+          description: 建立主角欲望、缺陷、对手、阻力和失败代价
+        - title: 建立世界规则
+          description: 明确社会结构、能力边界、资源和不可违反的设定
+        - title: 形成开篇方案
+          description: 输出一句话梗概、前三章钩子和首个阶段回报
+    result:
+      template: generic_report_v1
+      eyebrow: 小说创作企划
+      title: 一句话灵感的可执行创作方案
+      summary: 将初始灵感扩展为人物、冲突、世界规则和开篇节奏完整的创作起点
+      highlights:
+        - 书名、梗概与差异化卖点
+        - 主角弧光、核心冲突与世界规则
+        - 前三章钩子与首个阶段回报
+
+  - id: outline-planning
+    selector:
+      title: 全局大纲
+      description: 规划全书主线、分卷目标、关键转折、节奏和伏笔回收
+      output_label: 故事大纲
+    launch:
+      prompt_short: 根据我的小说设定规划全局大纲和分卷节奏。
+      prompt: 请根据我提供的题材、人物、世界设定和目标篇幅，设计一份可执行的小说全局大纲。请包含全书主线、主角成长弧、中点不可逆变化、终局目标、分卷目标与冲突、关键转折、阶段回报与代价、伏笔埋设和回收窗口；保持因果关系和节奏变化，不要把大纲写成重复桥段清单。
+    replay:
+      steps:
+        - title: 核对核心设定
+          description: 确认主角、目标、世界规则、篇幅和不可改变的边界
+        - title: 规划全书主线
+          description: 设计起点、中点变化、终局目标和人物成长弧
+        - title: 设计分卷节奏
+          description: 拆分卷级目标、冲突升级、阶段高潮与代价
+        - title: 检查伏笔与因果
+          description: 安排关键转折、伏笔回收窗口和前后依赖
+    result:
+      template: generic_report_v1
+      eyebrow: 故事大纲
+      title: 全局主线与分卷节奏大纲
+      summary: 形成从全书主线到卷级目标、关键转折和伏笔回收的连载路线
+      highlights:
+        - 全书主线与主角成长弧
+        - 分卷目标、冲突升级和阶段高潮
+        - 关键转折、伏笔与回收窗口
+
+  - id: chapter-writing
+    selector:
+      title: 章节创作
+      description: 根据设定与前文创作开篇、新章节，或重写指定场景
+      output_label: 章节正文
+    launch:
+      prompt_short: 根据我的设定和前文写一章节奏自然、前后连贯的小说正文。
+      prompt: 请根据我提供的小说设定、大纲、前文章节和本章目标完成章节创作。正文应有明确的场景目标、阻力、状态变化和章末推动力；情绪回报必须有铺垫，对话体现人物差异，不让角色无故降智或获得未知信息。若是续写，请先核对最近剧情与角色状态；除非我要求编辑说明，最终正文不要混入概要、检查清单或内部创作备注。
+    replay:
+      steps:
+        - title: 读取创作上下文
+          description: 核对人物状态、世界规则、前文事件和本章约束
+        - title: 制定章节任务
+          description: 明确场景目标、主要阻力、变化、回报与结尾钩子
+        - title: 完成场景写作
+          description: 用行动、对话和因果推进正文，保持节奏与空间清晰
+        - title: 执行质量检查
+          description: 检查人物、时空、规则、重复桥段和连续性冲突
+    result:
+      template: generic_report_v1
+      eyebrow: 章节正文
+      title: 可继续连载的小说章节
+      summary: 交付目标明确、冲突有效、人物连续并自然留下后续动力的章节正文
+      highlights:
+        - 清晰的场景目标、阻力与状态变化
+        - 有铺垫的情绪回报和人物化对话
+        - 章末钩子与连续性检查
+
+  - id: continuation-review
+    selector:
+      title: 续写与一致性
+      description: 梳理角色、时间线、伏笔和世界规则，诊断穿帮并规划后续
+      output_label: 连载诊断与续写方案
+    launch:
+      prompt_short: 检查我的小说连载是否存在穿帮，并给出下一步续写方案。
+      prompt: 请根据我提供的项目设定、大纲、章节正文或连载状态，检查角色存亡与位置、能力和资源来源、时间线、世界规则、人物已知信息、开放伏笔及重复桥段。请列出可定位的冲突、影响和修订建议，并给出下一章目标与钩子；如果我同时要求续写，请在完成检查后创作下一章。当前环境无法维护项目文件时，请输出一份可供下次继续使用的精简连载状态卡，不要声称已经持久保存。
+    replay:
+      steps:
+        - title: 整理项目状态
+          description: 汇总当前卷、最近事件、活跃人物、规则和开放伏笔
+        - title: 核对连续性
+          description: 检查角色、时空、能力、资源、信息边界和剧情因果
+        - title: 形成修订建议
+          description: 定位冲突证据，说明影响并给出最小修复方案
+        - title: 规划后续章节
+          description: 明确下一章目标、推进线索、状态变化和结尾钩子
+    result:
+      template: generic_report_v1
+      eyebrow: 连载诊断
+      title: 连载一致性诊断与续写方案
+      summary: 整理可复用的项目状态，修复关键穿帮并明确下一章推进方向
+      highlights:
+        - 角色、时间线、规则与伏笔状态
+        - 可定位的连续性冲突和修订建议
+        - 下一章目标、推进线索与连载状态卡
