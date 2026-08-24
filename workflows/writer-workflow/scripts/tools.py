@@ -13,7 +13,7 @@ import re
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Any, Callable, Literal, Mapping
+from typing import Any, Callable, Iterator, Literal, Mapping
 
 from lazyllm import AutoModel
 from pydantic import BaseModel, ConfigDict
@@ -43,6 +43,12 @@ from lazyllm.tools.writer.utils import (
     load_artifact_json,
     parse_document_markdown,
     save_artifact_json,
+)
+from lazyllm.tools.tools.search import (
+    BingSearch,
+    BochaSearch,
+    GoogleSearch,
+    TavilySearch,
 )
 from lazymind.chat.engine.subagent.context import require_context
 from lazymind.chat.engine.tools.writer import (
@@ -1322,11 +1328,134 @@ def writer_generate_section_instructions(
     }
 
 
+_IMAGE_URL_KEYS = (
+    'contentUrl', 'content_url', 'imageUrl', 'image_url',
+    'thumbnailUrl', 'thumbnail_url', 'src', 'url',
+)
+
+
+def _is_image_url(value: str) -> bool:
+    lower = value.lower()
+    if not (lower.startswith('http://') or lower.startswith('https://')):
+        return False
+    for extension in ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'):
+        if extension in lower:
+            return True
+    return any(token in lower for token in ('image', 'img', 'photo', 'pic'))
+
+
+def _collect_image_urls(node: Any, urls: list[str], seen: set[str]) -> None:
+    if isinstance(node, dict):
+        for key in _IMAGE_URL_KEYS:
+            value = node.get(key)
+            if isinstance(value, str) and _is_image_url(value) and value not in seen:
+                seen.add(value)
+                urls.append(value)
+        for value in node.values():
+            _collect_image_urls(value, urls, seen)
+    elif isinstance(node, list):
+        for value in node:
+            _collect_image_urls(value, urls, seen)
+
+
+def _tavily_image_urls(query: str, count: int) -> list[str]:
+    engine = TavilySearch()
+    if not engine.__key_source__():
+        return []
+    try:
+        results = engine.search(query, include_images=True, max_results=count)
+    except Exception as exc:
+        LOG.warning('[Writer] Tavily image search failed: %s', type(exc).__name__)
+        return []
+    urls: list[str] = []
+    seen: set[str] = set()
+    for item in results or []:
+        images = (item.get('extra') or {}).get('images') or []
+        for image in images:
+            if isinstance(image, str) and _is_image_url(image) and image not in seen:
+                seen.add(image)
+                urls.append(image)
+    return urls[:count]
+
+
+def _bocha_image_urls(query: str, count: int) -> list[str]:
+    engine = BochaSearch()
+    if not engine.__key_source__():
+        return []
+    try:
+        response = engine._request(
+            'POST',
+            f'{engine._base_url}/v1/web-search',
+            headers={'Content-Type': 'application/json'},
+            json={'query': query, 'count': min(max(count, 1), 20)},
+            timeout=engine._timeout,
+        )
+        payload = response.json()
+    except Exception as exc:
+        LOG.warning('[Writer] Bocha image search failed: %s', type(exc).__name__)
+        return []
+    urls: list[str] = []
+    _collect_image_urls(payload, urls, set())
+    return urls[:count]
+
+
+def _pick_search_engine() -> Any | None:
+    for search_type in (GoogleSearch, BingSearch, BochaSearch, TavilySearch):
+        try:
+            engine = search_type()
+            if engine.__key_source__():
+                return engine
+        except Exception:
+            continue
+    return None
+
+
+def _fallback_image_urls(query: str, count: int) -> list[str]:
+    engine = _pick_search_engine()
+    if engine is None:
+        return []
+    try:
+        results = engine.search(f'{query} reference image illustration')
+    except Exception as exc:
+        LOG.warning('[Writer] %s image search failed: %s', type(engine).__name__, type(exc).__name__)
+        return []
+    return [
+        str(item.get('url') or '').strip()
+        for item in results or []
+        if _is_image_url(str(item.get('url') or '').strip())
+    ][:count]
+
+
+def _acquire_web_search_resources(request: Mapping[str, Any]) -> list[dict]:
+    purpose = str(request.get('purpose') or '').strip()
+    query = ' '.join(part for part in (str(request.get('visual_type') or '').strip(), purpose) if part)
+    urls = _tavily_image_urls(query, count=5)
+    if not urls:
+        urls = _bocha_image_urls(query, count=5)
+    if not urls:
+        urls = _fallback_image_urls(query, count=5)
+    instruction_id = str(request.get('instruction_id') or uuid.uuid4().hex)
+    return [
+        {
+            'resource_id': f'web-search-{instruction_id}-{index}',
+            'resource_type': 'image',
+            'uri': url,
+            'title': purpose or url,
+            'summary': purpose,
+            'meta': {
+                'source_type': 'web_search',
+                'semantic_status': 'unverified',
+            },
+        }
+        for index, url in enumerate(urls, start=1)
+    ]
+
+
 def _acquire_generated_image(
     request: Mapping[str, Any],
     *,
     generator: Callable[..., dict] | None = None,
-) -> dict:
+) -> list[dict]:
     visual_type = str(request.get('visual_type') or '')
     prompt = WRITER_IMAGE_ACQUISITION_PROMPT.format(
         visual_type=visual_type,
@@ -1344,7 +1473,7 @@ def _acquire_generated_image(
             local_path = str(images[0].get('local_path') or '').strip()
     if not local_path:
         raise ValueError('image_generator returned no local image path')
-    return {
+    return [{
         'resource_id': f"acquired-{request.get('instruction_id') or uuid.uuid4().hex}",
         'resource_type': 'image',
         'uri': local_path,
@@ -1356,29 +1485,36 @@ def _acquire_generated_image(
             'summary_source': 'generation_prompt',
             'semantic_status': 'unverified',
         },
-    }
+    }]
 
 
 def _acquire_visual_media(
     request: Mapping[str, Any],
-    acquirers: Mapping[str, Callable[[Mapping[str, Any]], dict]],
-) -> dict:
-    strategies = request['strategies']
+    acquirers: Mapping[str, Callable[[Mapping[str, Any]], list[dict]]],
+) -> Iterator[dict]:
+    strategies = list(request['strategies'])
     for strategy in strategies:
         acquirer = acquirers.get(strategy)
         if acquirer is None:
             continue
-        resource = dict(acquirer(request))
-        resource['meta'] = {
-            **dict(resource.get('meta') or {}),
-            'requested_strategy': strategies[0],
-            'acquisition_strategy': strategy,
-        }
-        return resource
-    raise ValueError(
-        f"no media acquirer is available for visual instruction {request.get('instruction_id')!r} "
-        f"({request.get('visual_type')}, strategies={strategies})",
-    )
+        try:
+            resources = acquirer(request)
+        except Exception as exc:
+            LOG.warning(
+                '[Writer] Failed to acquire %s for visual instruction %r: %s',
+                strategy,
+                request.get('instruction_id'),
+                type(exc).__name__,
+            )
+            continue
+        for candidate in resources:
+            resource = dict(candidate)
+            resource['meta'] = {
+                **dict(resource.get('meta') or {}),
+                'requested_strategy': strategies[0],
+                'acquisition_strategy': strategy,
+            }
+            yield resource
 
 
 def writer_resolve_visual_media(
@@ -1389,8 +1525,7 @@ def writer_resolve_visual_media(
 ) -> dict:
     """Resolve visual needs and materialize missing media through registered acquirers.
 
-    allowed_strategies_json: optional JSON list restricting acquisition strategies
-    (image_generation is the only strategy currently registered).
+    allowed_strategies_json: optional JSON list restricting acquisition strategies.
     """
     root = _run_root('resolve-media')
     media_root = root / 'media'
@@ -1400,7 +1535,9 @@ def writer_resolve_visual_media(
     media_assets_value = _json_loads(media_assets_json, {})
     visual_policy = (media_assets_value.get('meta') or {}).get('visual_policy') or {}
     allow_image_generation = visual_policy.get('allow_image_generation') is not False
-    acquirers = {}
+    acquirers = {
+        'web_search': _acquire_web_search_resources,
+    }
     if allow_image_generation and is_model_role_available('image_generator'):
         acquirers['image_generation'] = _acquire_generated_image
     visual_plan_json = _read_json_string(visual_plan_path)
@@ -1421,8 +1558,8 @@ def writer_resolve_visual_media(
             ],
         }
     warnings = list(matched.get('warnings') or [])
-    acquired_resources = {}
-    acquired_by_purpose = {}
+    resolved_library = matched.get('media_assets') or {}
+    acquired_by_purpose: dict[tuple[str, str, tuple[str, ...]], dict] = {}
     for request in matched.get('acquisition_requests') or []:
         strategies = list(request.get('strategies') or [])
         if allow_image_generation \
@@ -1433,46 +1570,59 @@ def writer_resolve_visual_media(
         key = (
             str(request.get('visual_type') or ''),
             ' '.join(str(request.get('purpose') or '').split()).casefold(),
+            tuple(request['strategies']),
         )
-        try:
-            resource = acquired_by_purpose.get(key)
-            if resource is None:
-                resource = _acquire_visual_media(request, acquirers)
+        cached_resource = acquired_by_purpose.get(key)
+        candidate_groups: list[tuple[bool, Iterator[dict]]] = []
+        if cached_resource is not None:
+            candidate_groups.append((True, iter((cached_resource,))))
+        candidate_groups.append((False, _acquire_visual_media(request, acquirers)))
+        resolved = False
+        for from_cache, candidates in candidate_groups:
+            for resource in candidates:
+                try:
+                    outcome = _json_loads(toolkit.materialize_acquired_media(
+                        visual_plan_json=visual_plan_json,
+                        media_assets_json=json.dumps(resolved_library, ensure_ascii=False),
+                        acquired_resources_json=json.dumps({instruction_id: resource}, ensure_ascii=False),
+                        media_store=str(media_root),
+                    ), {})
+                except Exception as exc:
+                    LOG.warning(
+                        '[Writer] Failed to materialize visual instruction %r: %s',
+                        instruction_id,
+                        type(exc).__name__,
+                    )
+                    continue
+                candidate_library = outcome.get('media_assets') or {}
+                candidate_assets = candidate_library.get('assets') or {}
+                candidate_bindings = candidate_library.get('visual_need_asset_ids') or {}
+                if not any(
+                    asset_id in candidate_assets
+                    and Path(str(candidate_assets[asset_id].get('local_path') or '')).is_file()
+                    for asset_id in candidate_bindings.get(instruction_id, [])
+                ):
+                    continue
+                resolved_library = candidate_library
                 acquired_by_purpose[key] = resource
-            acquired_resources[instruction_id] = resource
-        except Exception as exc:
-            if strict_required and request.get('required'):
-                raise RuntimeError(
-                    f'Failed to acquire required visual media for {instruction_id!r}: '
-                    f'{request.get("purpose") or "current visual requirement"}: '
-                    f'{type(exc).__name__}: {exc}'
-                ) from exc
+                resolved = True
+                break
+            if resolved:
+                break
+            if from_cache:
+                acquired_by_purpose.pop(key, None)
+        if not resolved:
             message = (
                 f'Failed to acquire visual instruction {instruction_id!r}: '
-                f'{type(exc).__name__}: {exc}'
+                'no candidate could be materialized'
             )
+            if strict_required and request.get('required'):
+                raise RuntimeError(
+                    f'{message}: {request.get("purpose") or "current visual requirement"}'
+                )
             warnings.append(f'{message} (required={request.get("required", False)}).')
-
-    try:
-        outcome = _json_loads(toolkit.materialize_acquired_media(
-            visual_plan_json=visual_plan_json,
-            media_assets_json=json.dumps(matched.get('media_assets') or {}, ensure_ascii=False),
-            acquired_resources_json=json.dumps(acquired_resources, ensure_ascii=False),
-            media_store=str(media_root),
-        ), {})
-    except Exception as exc:
-        if strict_required:
-            raise
-        outcome = {
-            'media_assets': matched.get('media_assets') or {},
-            'warnings': [
-                f'Acquired media materialization failed: {type(exc).__name__}: {exc}',
-            ],
-        }
-    warnings.extend(outcome.get('warnings') or [])
     plan_value = _json_loads(visual_plan_json, {})
     plan_data = plan_value.get('data', plan_value) if isinstance(plan_value, dict) else plan_value
-    resolved_library = outcome.get('media_assets') or {}
     resolved_assets = resolved_library.get('assets') or {}
     resolved_bindings = resolved_library.get('visual_need_asset_ids') or {}
     unresolved_required = [
@@ -1489,7 +1639,7 @@ def writer_resolve_visual_media(
             'Failed to resolve required visual media for: ' + ', '.join(unresolved_required)
         )
     resolved_path = save_artifact_json(
-        outcome.get('media_assets') or {},
+        resolved_library,
         str(root / 'resolved_media_assets.json'),
         schema_name=writer_schema('multimodal.MediaAssetLibrary'),
         created_by='writer-workflow-wrapper',
@@ -1519,7 +1669,7 @@ def writer_resolve_revision_media(
         visual_plan_path=visual_plan_path,
         media_assets_path=media_assets_path,
         strict_required=True,
-        allowed_strategies_json=json.dumps(['image_generation']),
+        allowed_strategies_json=json.dumps(['web_search', 'image_generation']),
     )
 
 
@@ -1670,7 +1820,7 @@ def _fill_markdown_media_placeholders(markdown: str, resolved_media_assets: Any)
         asset_ids = need_asset_ids.get(need_id) or []
         if asset_ids:
             asset = assets.get(asset_ids[0]) or {}
-            path = str(asset.get('uri') or asset.get('local_path') or '')
+            path = str(asset.get('local_path') or asset.get('uri') or '')
             if path:
                 return f'![{caption}]({path})'
         dropped.append(need_id)

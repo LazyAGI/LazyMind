@@ -246,8 +246,8 @@ def test_markdown_assembly_drops_unregistered_images(monkeypatch, tmp_path):
     )
     filled = Path(result_path).read_text(encoding='utf-8')
 
-    assert '![Resolved](https://example.com/generated-1.png)' in filled
-    assert '![Legacy](https://example.com/generated-1.png)' in filled
+    assert '![Resolved](/data/subagent/assets/generated-1.png)' in filled
+    assert '![Legacy](/data/subagent/assets/generated-1.png)' in filled
     assert '![Unresolved](https://example.com/unmaterialized.png)' in filled
     assert 'media-placeholder://' not in filled
     assert 'media-asset://' not in filled

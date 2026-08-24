@@ -1958,9 +1958,9 @@ class WriterToolkitBase:
                 raise ToolExecutionError(
                     'visual_instruction is only valid for create instructions.'
                 )
-            if visual.visual_type != 'image':
+            if visual.visual_type not in {'image', 'diagram', 'chart', 'table'}:
                 raise ToolExecutionError(
-                    'revision visual_instruction.visual_type must be "image".'
+                    'revision visual_instruction.visual_type must be image, diagram, chart, or table.'
                 )
             if visual.need_id != instruction.instruction_id:
                 raise ToolExecutionError(
@@ -1974,9 +1974,12 @@ class WriterToolkitBase:
                 raise ToolExecutionError(
                     'revision image visual_instruction must be required and non-empty.'
                 )
-            if visual.preferred_strategy not in {None, 'image_generation'}:
+            allowed_strategies = {None, 'image_generation'}
+            if visual.visual_type in {'image', 'diagram'}:
+                allowed_strategies.add('web_search')
+            if visual.preferred_strategy not in allowed_strategies:
                 raise ToolExecutionError(
-                    'revision image preferred_strategy must be null or image_generation.'
+                    'revision visual preferred_strategy is not supported for its visual_type.'
                 )
             instructions.append(visual)
         return _json_dumps(VisualPlan(instructions=instructions).model_dump(exclude_defaults=True))
