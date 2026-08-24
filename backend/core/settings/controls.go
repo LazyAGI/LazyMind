@@ -55,7 +55,7 @@ func LoadFeatureControls(ctx context.Context, db *gorm.DB, userID string) (Featu
 	return FeatureControls{
 		TaskCenterEnabled:      preferences.TaskCenterEnabled,
 		SkillsEnabled:          preferences.SkillsEnabled,
-		WorkflowsEnabled:       preferences.WorkflowsEnabled,
+		WorkflowsEnabled:       preferences.TaskCenterEnabled && preferences.WorkflowsEnabled,
 		MCPEnabled:             preferences.MCPEnabled,
 		DocumentParsingEnabled: preferences.DocumentParsingEnabled,
 	}, nil

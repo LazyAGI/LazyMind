@@ -408,16 +408,22 @@ export default function SettingsPage() {
     }
   };
 
-  const switchControl = (key: MasterSetting) => (
-    <Switch
-      className="settings-ref-switch"
-      checked={Boolean(overview?.controls[key])}
-      loading={saving === key}
-      disabled={saving !== null}
-      onChange={(checked: boolean) => requestMasterChange(key, checked)}
-      aria-label={controls[key].title}
-    />
-  );
+  const switchControl = (key: MasterSetting) => {
+    const workflowControlBlocked = key === "workflows_enabled" && !overview?.controls.task_center_enabled;
+    const dependencyMessage = t("settingsPage.skills.taskCenterRequiredNotice");
+    return (
+      <span title={workflowControlBlocked ? dependencyMessage : undefined}>
+        <Switch
+          className="settings-ref-switch"
+          checked={workflowControlBlocked ? false : Boolean(overview?.controls[key])}
+          loading={saving === key}
+          disabled={saving !== null || workflowControlBlocked}
+          onChange={(checked: boolean) => requestMasterChange(key, checked)}
+          aria-label={workflowControlBlocked ? t("settingsPage.skills.taskCenterRequiredAria") : controls[key].title}
+        />
+      </span>
+    );
+  };
 
   const dashboardRow = (module: string, title: string, description: string, control: ReactNode) => (
     <div className="settings-dashboard-config-row" key={`${module}-${title}`}>
@@ -516,7 +522,9 @@ export default function SettingsPage() {
           : t("settingsPage.master.waitChild");
     const consequence = key === "mcp_enabled"
       ? t("settingsPage.master.mcpConsequence")
-      : t("settingsPage.master.keepChildConsequence");
+      : key === "task_center_enabled"
+        ? t("settingsPage.master.taskCenterConsequence")
+        : t("settingsPage.master.keepChildConsequence");
     return <section className="settings-integrated-master" aria-label={title}>
       <div><strong>{title}</strong><p>{t("settingsPage.master.summaryWithConsequence", { summary: controls[key].summary, consequence })}</p></div>
       <div className="settings-integrated-master-action"><Tag className="settings-status-tag">{statusText}</Tag>{switchControl(key)}</div>
@@ -700,6 +708,7 @@ export default function SettingsPage() {
       content = <MemoryCapabilitySettings headingRef={headingRef} />;
     } else if (section === "skills") {
       content = <UserSkillWorkflowSettings
+        taskCenterEnabled={Boolean(overview?.controls.task_center_enabled)}
         skillsEnabled={Boolean(overview?.controls.skills_enabled)}
         workflowsEnabled={Boolean(overview?.controls.workflows_enabled)}
         groupSaving={saving === "skills_enabled" ? "skills" : saving === "workflows_enabled" ? "workflows" : null}

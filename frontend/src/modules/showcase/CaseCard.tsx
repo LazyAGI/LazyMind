@@ -1,10 +1,11 @@
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowRightOutlined } from "@ant-design/icons";
 import type { ShowcaseCase } from "./api";
 
 interface CaseCardProps {
   item: ShowcaseCase;
+  onTry?: (item: ShowcaseCase) => void;
 }
 
 const COVER_CLASS_BY_OUTPUT_TYPE: Record<string, string> = {
@@ -18,15 +19,16 @@ const COVER_CLASS_BY_OUTPUT_TYPE: Record<string, string> = {
   table: "table",
 };
 
-export default function CaseCard({ item }: CaseCardProps) {
+export default function CaseCard({ item, onTry }: CaseCardProps) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const coverClass = COVER_CLASS_BY_OUTPUT_TYPE[item.output_type] || "report";
 
   return (
     <article className="showcase-card">
       <Link
         className="showcase-card-link"
-        to={`/agent/chat/home?showcase_case=${encodeURIComponent(item.id)}`}
+        to={`/agent/chat/cases/${encodeURIComponent(item.id)}`}
       >
         <div className={`showcase-card-image-wrap showcase-card-cover-${coverClass}`}>
           <div className="showcase-card-image-stage">
@@ -47,13 +49,22 @@ export default function CaseCard({ item }: CaseCardProps) {
       </Link>
       <div className="showcase-card-footer">
         <span className="showcase-card-result">{item.result_summary}</span>
-        <Link
+        <button
+          type="button"
           className="showcase-detail-link"
-          to={`/agent/chat/cases/${encodeURIComponent(item.id)}`}
+          onClick={() => {
+            if (onTry) {
+              onTry(item);
+              return;
+            }
+            navigate(
+              `/agent/chat/home?showcase_case=${encodeURIComponent(item.id)}`,
+            );
+          }}
         >
-          {t("showcase.viewDetail")}
+          {t("showcase.try")}
           <ArrowRightOutlined aria-hidden="true" />
-        </Link>
+        </button>
       </div>
     </article>
   );
