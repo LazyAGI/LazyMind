@@ -361,8 +361,10 @@ func StartWorkflowSession(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Where("task_id = ?", taskID).First(&attempt).Error; err != nil {
 			return err
 		}
-		witnesses := append([]graphengine.Witness{}, node.Evaluation.Witnesses...)
-		witnesses = append(witnesses, graphengine.EvaluateOptional(nodeDef.OptionalInputs, materialFacts).Witnesses...)
+		witnesses := mergeAttemptWitnesses(
+			node.Evaluation.Witnesses,
+			graphengine.EvaluateOptional(nodeDef.OptionalInputs, materialFacts).Witnesses,
+		)
 		for _, witness := range witnesses {
 			revisionID := revisionIDs[witness.MaterialID]
 			if revisionID == "" {
@@ -631,7 +633,10 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 			}
-			evaluation.Witnesses = append(evaluation.Witnesses, graphengine.EvaluateOptional(nodeDef.OptionalInputs, snapshot.Materials).Witnesses...)
+			evaluation.Witnesses = mergeAttemptWitnesses(
+				evaluation.Witnesses,
+				graphengine.EvaluateOptional(nodeDef.OptionalInputs, snapshot.Materials).Witnesses,
+			)
 			evaluations[target.TargetStepID] = evaluation
 		}
 		if len(invalidTargets) > 0 {
@@ -802,6 +807,30 @@ func attemptInputBindingFromWitness(tx *gorm.DB, sessionID, attemptID string,
 		value.ContentHash = input.ContentHash
 	}
 	return value
+}
+
+// mergeAttemptWitnesses preserves distinct revisions and aliases while ensuring
+// one Attempt never persists the same frozen input binding twice. A material may
+// legitimately be both a readiness alternative and an optional input.
+func mergeAttemptWitnesses(groups ...[]graphengine.Witness) []graphengine.Witness {
+	type witnessKey struct {
+		materialID string
+		revisionID string
+		bindAs     string
+	}
+	seen := map[witnessKey]struct{}{}
+	merged := make([]graphengine.Witness, 0)
+	for _, group := range groups {
+		for _, witness := range group {
+			key := witnessKey{materialID: witness.MaterialID, revisionID: witness.RevisionID, bindAs: witness.BindAs}
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			merged = append(merged, witness)
+		}
+	}
+	return merged
 }
 
 // resolveAdvanceOperation keeps lifecycle vocabulary out of the model-facing

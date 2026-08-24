@@ -2703,7 +2703,7 @@ def _save_draft_workspace_artifacts(result: Mapping[str, Any]) -> list[str]:
     if not entries:
         raise RuntimeError('Draft workspace produced no saveable artifacts.')
     saved = save_artifacts(entries)
-    if not saved.get('success'):
+    if saved.get('status') != 'ok':
         raise RuntimeError(f'Failed to save draft workspace artifacts: {saved!r}')
     return list(dict.fromkeys(saved_keys))
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -91,6 +92,11 @@ func TestDBContextLoaderBuildsNeutralPinnedAttempt(t *testing.T) {
 		SourceRevision: "3", ContentHash: "sha256:value", CreatedAt: now}).Error; err != nil {
 		t.Fatal(err)
 	}
+	if err := db.Create(&orm.WorkflowAttemptInputBinding{ID: "binding-1-duplicate", SessionID: "session-1", AttemptID: "attempt-1",
+		MaterialID: "brief", MaterialRevisionID: "resource-binding-1", SourceType: "input_resource", SourceID: "input-1",
+		SourceRevision: "3", ContentHash: "sha256:value", CreatedAt: now.Add(time.Millisecond)}).Error; err != nil {
+		t.Fatal(err)
+	}
 	for index, revisionID := range []string{"image-revision-1", "image-revision-2"} {
 		listIndex := index
 		if err := db.Create(&orm.WorkflowSlotRevision{ID: revisionID, SessionID: "session-1",
@@ -135,6 +141,15 @@ func TestDBContextLoaderBuildsNeutralPinnedAttempt(t *testing.T) {
 		if bytes.Contains(raw, []byte(forbidden)) {
 			t.Fatalf("private field leaked: %s", raw)
 		}
+	}
+	if err := db.Create(&orm.WorkflowAttemptInputBinding{ID: "binding-1-conflict", SessionID: "session-1", AttemptID: "attempt-1",
+		MaterialID: "brief", MaterialRevisionID: "resource-binding-2", SourceType: "input_resource", SourceID: "input-2",
+		SourceRevision: "4", ContentHash: "sha256:other", CreatedAt: now.Add(2 * time.Millisecond)}).Error; err != nil {
+		t.Fatal(err)
+	}
+	_, err = (DBContextLoader{DB: db}).LoadAttemptContext(context.Background(), "attempt-1")
+	if err == nil || !strings.Contains(err.Error(), "single-cardinality material \"brief\"") {
+		t.Fatalf("distinct single-cardinality bindings must fail clearly, got %v", err)
 	}
 }
 
