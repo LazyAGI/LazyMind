@@ -77,6 +77,26 @@
       "package_file": "packages/bsk_01K0M8SCV7PAPERSEARCH9Q2X3A4B.zip"
     },
     {
+      "key": "2aa921444b631956f9dbc4a9ad463a47a00b5ad1",
+      "uid": "bsk_6544CBC69BB28FD40EB68D334AA2",
+      "source_url": "https://github.com/xiaoyanZzz/LazyRAG/archive/2aa921444b631956f9dbc4a9ad463a47a00b5ad1.zip",
+      "resolved_url": "https://github.com/xiaoyanZzz/LazyRAG/archive/2aa921444b631956f9dbc4a9ad463a47a00b5ad1.zip",
+      "version": "1.0.0",
+      "name": "novel-generator",
+      "description": "作为一个完整的中文网络小说与爽文连载专家，把一句话灵感扩展为创作设定、全局大纲、分卷节奏和连续章节，并通过 LazyMind 对话工作区维护角色、地点、时间线、伏笔和世界规则的一致性。用于用户要求写小说、续写章节、生成网文或爽文、设计修仙/玄幻/都市/重生/系统流/末世/网游故事、扩展创意、制作大纲、检查剧情穿帮、修订章节或继续长期连载时；短篇一次性创作可直接回答，长篇项目必须建立并更新结构化创作记忆。",
+      "category": "writing",
+      "tags": [
+        "novel-writing",
+        "serialized-fiction",
+        "creative-writing"
+      ],
+      "market_visible": true,
+      "archive_sha256": "e1b90b24c20870c48d836f0a9cf0ef7fd270fe028939fe2b532ce9b4fd29a74a",
+      "tree_sha256": "907d850c6f5e9d0debb6e96def01c4281c9727c5ec8cd695fb6b91345a4df6ef",
+      "archive_size": 12978,
+      "package_file": "packages/bsk_6544CBC69BB28FD40EB68D334AA2.zip"
+    },
+    {
       "key": "user_7c4df347/gaokao-volunteer-advisor",
       "uid": "bsk_C8C501AEDCEC9283F2C9F9F59AD8",
       "source_url": "https://skillhub.cn/skills/user_7c4df347/gaokao-volunteer-advisor",
