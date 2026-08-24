@@ -26,6 +26,13 @@ WELCOME_MESSAGE = """我是 LazyMind，你的个人 AI 助手。这里与 LazyMi
 
 直接发送消息即可继续。"""
 
+WECHAT_WELCOME_MESSAGE = '我是 LazyMind，你可以在这里继续对话。支持发送文字、图片和文档。'
+
+
+def welcome_message(provider: str) -> str:
+    return WECHAT_WELCOME_MESSAGE if provider == 'wechat' else WELCOME_MESSAGE
+
+
 _HIDDEN_PROTOCOL_TAGS = re.compile(
     r'(?s)<(?:think|tool_call|tool_result|tp|trp)\b[^>]*>'
     r'.*?</(?:think|tool_call|tool_result|tp|trp)>'
@@ -83,6 +90,7 @@ class InboundEnvelope:
     recipient_id: str
     text: str
     provider_context: dict[str, Any] = field(default_factory=dict)
+    sensitive_context: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,6 +137,7 @@ class OutboundMessage:
 @dataclass(frozen=True, slots=True)
 class ClaimedOutbound:
     outbox_id: str
+    created_sequence: int
     provider: str
     account_id: str
     order_key: str

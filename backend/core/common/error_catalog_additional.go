@@ -320,9 +320,11 @@ func init() {
 	registerAdditionalError("agent invocation conflicts with an existing record", http.StatusConflict, 2002027)
 	registerAdditionalError("task is terminal", http.StatusConflict, 2002049)
 	registerAdditionalError("chat_executor must be 'lazymind', 'codex', 'cursor', or 'workbuddy'", http.StatusBadRequest, 2002050)
+	registerAdditionalErrorAlias("assistant must be 'lazymind', 'codex', 'cursor', or 'workbuddy'", "chat_executor must be 'lazymind', 'codex', 'cursor', or 'workbuddy'", http.StatusBadRequest, 2002050)
 	registerAdditionalError("conversation has an unsupported chat executor", http.StatusConflict, 2002051)
 	registerAdditionalError("external chat executors require streaming", http.StatusConflict, 2002052)
 	registerAdditionalError("unsupported external chat provider", http.StatusBadRequest, 2002053)
+	registerAdditionalErrorAlias("invalid external Agent session catalog", "Invalid request", http.StatusBadRequest, 2000103)
 	registerAdditionalError("valid provider and host_id are required", http.StatusBadRequest, 2002054)
 	registerAdditionalError("host_id and lease_token are required", http.StatusBadRequest, 2002055)
 	registerAdditionalError("host_id, lease_token and event_id are required", http.StatusBadRequest, 2002056)
@@ -368,6 +370,11 @@ func init() {
 	registerAdditionalError("create managed artifact", http.StatusInternalServerError, 2002095)
 	registerAdditionalError("write managed artifact", http.StatusInternalServerError, 2002096)
 	registerAdditionalError("commit managed artifact", http.StatusInternalServerError, 2002097)
+	registerAdditionalErrorAlias("skill package contains too many entries", "Invalid skill package", http.StatusBadRequest, 2002294)
+	registerAdditionalErrorPattern("skill package cannot contain symlink %q", "Invalid skill package", http.StatusBadRequest, 2002294)
+	registerAdditionalErrorPattern("skill package contains duplicate path %q", "Invalid skill package", http.StatusBadRequest, 2002294)
+	registerAdditionalErrorPattern("skill package file %q exceeds %d bytes", "Invalid skill package", http.StatusBadRequest, 2002294)
+	registerAdditionalErrorPattern("skill package exceeds %d uncompressed bytes", "Invalid skill package", http.StatusBadRequest, 2002294)
 
 	// Personal recovery and archive lifecycle errors.
 	registerAdditionalError("query archive folders failed", http.StatusInternalServerError, 2002098)

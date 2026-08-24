@@ -36,6 +36,94 @@ func TestBuildChatRequestBodyUsesConversationIDDerivedSessionID(t *testing.T) {
 	}
 }
 
+func TestConversationListSeparatesAssistantOwnershipFromExecutionEngine(t *testing.T) {
+	database := newPromptTestDB(t)
+	db := database.DB
+	store.Init(db, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	now := time.Now().UTC()
+	for _, conversation := range []orm.Conversation{
+		{ID: "native", DisplayName: "LazyMind native", ChatExecutor: ChatExecutorLazyMind,
+			BaseModel: orm.BaseModel{CreateUserID: "u1", CreatedAt: now, UpdatedAt: now}},
+		{ID: "managed", DisplayName: "LazyMind managed Codex", ChatExecutor: ChatExecutorCodex,
+			BaseModel: orm.BaseModel{CreateUserID: "u1", CreatedAt: now.Add(time.Second), UpdatedAt: now.Add(time.Second)}},
+		{ID: "external", DisplayName: "Codex native", ChatExecutor: ChatExecutorCodex,
+			BaseModel: orm.BaseModel{CreateUserID: "u1", CreatedAt: now.Add(2 * time.Second), UpdatedAt: now.Add(2 * time.Second)}},
+		{ID: "archived-external", DisplayName: "Archived Codex native", ChatExecutor: ChatExecutorCodex,
+			ArchivedAt: &now, BaseModel: orm.BaseModel{CreateUserID: "u1", CreatedAt: now.Add(3 * time.Second), UpdatedAt: now.Add(3 * time.Second)}},
+	} {
+		if err := db.Create(&conversation).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, binding := range []orm.ExternalAgentBinding{
+		{ID: "managed-binding", ConversationID: "managed", Provider: ChatExecutorCodex,
+			HostID: "host-1", ProviderThreadID: "managed-thread", CreatedByUserID: "u1", CreatedAt: now, UpdatedAt: now},
+		{ID: "external-binding", ConversationID: "external", Provider: ChatExecutorCodex,
+			HostID: "host-1", ProviderThreadID: "external-thread",
+			CreatedByUserID: "u1", CreatedAt: now, UpdatedAt: now},
+		{ID: "archived-external-binding", ConversationID: "archived-external", Provider: ChatExecutorCodex,
+			HostID: "host-1", ProviderThreadID: "archived-external-thread", CreatedByUserID: "u1", CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := db.Create(&binding).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, session := range []orm.ExternalAgentSession{
+		{ID: "managed-session", OwnerUserID: "u1", Provider: ChatExecutorCodex, HostID: "host-1",
+			ProviderThreadID: "managed-thread", ProjectKey: "codex-project-1", ProjectName: "DataAnnotation",
+			DisplayName: "Managed Codex", Active: true, LastSeenAt: now, CreatedAt: now, UpdatedAt: now},
+		{ID: "external-session", OwnerUserID: "u1", Provider: ChatExecutorCodex, HostID: "host-1",
+			ProviderThreadID: "external-thread", ProjectKey: "codex-project-1", ProjectName: "DataAnnotation",
+			DisplayName: "Codex native", TurnCount: 1,
+			Active: true, LastSeenAt: now, CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := db.Create(&session).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	list := func(assistant string) []struct {
+		ID           string `json:"conversation_id"`
+		Assistant    string `json:"assistant"`
+		ChatExecutor string `json:"chat_executor"`
+		ProjectKey   string `json:"project_key"`
+		ProjectName  string `json:"project_name"`
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/api/core/conversations?assistant="+assistant, nil)
+		req.Header.Set("X-User-Id", "u1")
+		rec := httptest.NewRecorder()
+		ListConversations(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("assistant=%s status=%d body=%s", assistant, rec.Code, rec.Body.String())
+		}
+		var response struct {
+			Conversations []struct {
+				ID           string `json:"conversation_id"`
+				Assistant    string `json:"assistant"`
+				ChatExecutor string `json:"chat_executor"`
+				ProjectKey   string `json:"project_key"`
+				ProjectName  string `json:"project_name"`
+			} `json:"conversations"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		return response.Conversations
+	}
+
+	lazyMind := list(ChatExecutorLazyMind)
+	if len(lazyMind) != 1 || lazyMind[0].ID != "native" || lazyMind[0].Assistant != ChatExecutorLazyMind {
+		t.Fatalf("LazyMind assistant conversations=%#v", lazyMind)
+	}
+	codex := list(ChatExecutorCodex)
+	if len(codex) != 2 || codex[0].ID != "external" || codex[0].Assistant != ChatExecutorCodex ||
+		codex[0].ChatExecutor != ChatExecutorCodex || codex[0].ProjectKey != "codex-project-1" ||
+		codex[0].ProjectName != "DataAnnotation" || codex[1].ID != "managed" {
+		t.Fatalf("Codex assistant conversations=%#v", codex)
+	}
+}
+
 func TestWorkflowSessionAvailableForRequest(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -548,7 +636,7 @@ func TestCollectedInputsForConversationReturnsSnapshotAndSummary(t *testing.T) {
 }
 
 func TestGetConversationDetailReturnsStoredMultimodalInput(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{})
+	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{}, &orm.ExternalAgentBinding{})
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 
@@ -676,7 +764,7 @@ func TestElapsedThinkingSecondsRoundsUp(t *testing.T) {
 }
 
 func TestGetConversationDetailFiltersMissingDatasets(t *testing.T) {
-	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{}, &orm.Dataset{})
+	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.ChatHistory{}, &orm.Dataset{}, &orm.ExternalAgentBinding{})
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 

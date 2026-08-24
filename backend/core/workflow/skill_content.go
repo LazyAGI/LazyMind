@@ -5,25 +5,16 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
-	"fmt"
-	"os"
-	"path/filepath"
 	"sort"
 	"strings"
 
-	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
+	skillbuiltin "lazymind/core/skillv2/builtin"
 )
 
 const builtinSkillIDPrefix = "builtin:"
 
 var errWorkflowSourceSkillNotFound = errors.New("plugin source skill not found")
-
-type workflowBuiltinSkillManifest struct {
-	UID      string
-	Category string
-	DirName  string
-}
 
 type skillPackageFile struct {
 	Path     string `json:"path"`
@@ -53,21 +44,12 @@ func (s workflowSourceSkillSnapshot) skillMD() string {
 	return ""
 }
 
-var workflowBuiltinSkillManifests = []workflowBuiltinSkillManifest{
-	{UID: "bsk_01JZ7Q3YF6Q2Z4HM9V8K7D1R3P", Category: "research", DirName: "deep-research"},
-	{UID: "bsk_01JZ7Q4AJ1X9N5B2C8M6T0W3EY", Category: "review", DirName: "single-document-review"},
-	{UID: "bsk_01JZ7Q4RPN6K3Y8V1D5H2A9S0B", Category: "review", DirName: "systematic-document-and-literature-review"},
-	{UID: "bsk_01JZ7Q58M4E7C2N9X6P1D3V0KA", Category: "search", DirName: "paper-search"},
-	{UID: "bsk_01K0M8SCV7PAPERSEARCH9Q2X3A4B", Category: "search", DirName: "sciverse-paper-search"},
-}
-
 func isWorkflowSourceSkillNotFound(err error) bool {
 	return errors.Is(err, errWorkflowSourceSkillNotFound) || errors.Is(err, gorm.ErrRecordNotFound)
 }
 
-// loadWorkflowSourceSkill reads normal skills from the v2 revision store. Legacy
-// builtin template IDs are resolved locally because skillv2 does not expose a
-// function-level reader for templates that have not been installed yet.
+// loadWorkflowSourceSkill reads normal skills from the v2 revision store and
+// resolves immutable templates through the shared builtin package catalog.
 func loadWorkflowSourceSkill(ctx context.Context, db *gorm.DB, userID, skillID string) (workflowSourceSkillSnapshot, error) {
 	if strings.HasPrefix(skillID, builtinSkillIDPrefix) {
 		return loadWorkflowBuiltinSkillPackage(skillID)
@@ -134,41 +116,18 @@ func loadWorkflowSourceSkillRevision(ctx context.Context, db *gorm.DB, userID, s
 }
 
 func loadWorkflowBuiltinSkillPackage(templateID string) (workflowSourceSkillSnapshot, error) {
-	content, name, err := loadWorkflowBuiltinSkill(templateID)
-	if err != nil {
-		return workflowSourceSkillSnapshot{}, err
-	}
 	id := strings.TrimPrefix(templateID, builtinSkillIDPrefix)
 	uid := strings.SplitN(id, ":", 2)[0]
-	manifest, ok := workflowBuiltinManifest(uid)
-	if !ok {
-		return workflowSourceSkillSnapshot{}, errWorkflowSourceSkillNotFound
-	}
-	base := filepath.Join(workflowBuiltinSkillsRoot(), manifest.Category, manifest.DirName)
-	snapshot := workflowSourceSkillSnapshot{SkillID: templateID, Name: name, RevisionID: "builtin:" + uid}
-	err = filepath.Walk(base, func(path string, info os.FileInfo, walkErr error) error {
-		if walkErr != nil {
-			return walkErr
-		}
-		if info.IsDir() {
-			return nil
-		}
-		rel, relErr := filepath.Rel(base, path)
-		if relErr != nil {
-			return relErr
-		}
-		data, readErr := os.ReadFile(path)
-		if readErr != nil {
-			return readErr
-		}
-		snapshot.Files = append(snapshot.Files, skillPackageFile{Path: filepath.ToSlash(rel), Size: info.Size(), Content: string(data)})
-		return nil
-	})
+	pkg, found, err := skillbuiltin.PackageByUID(uid)
 	if err != nil {
 		return workflowSourceSkillSnapshot{}, err
 	}
-	if len(snapshot.Files) == 0 {
-		snapshot.Files = []skillPackageFile{{Path: "SKILL.md", Content: content, Size: int64(len(content))}}
+	if !found {
+		return workflowSourceSkillSnapshot{}, errWorkflowSourceSkillNotFound
+	}
+	snapshot := workflowSourceSkillSnapshot{SkillID: templateID, Name: pkg.Name, RevisionID: "builtin:" + uid}
+	for filePath, data := range pkg.Files {
+		snapshot.Files = append(snapshot.Files, skillPackageFile{Path: filePath, Size: int64(len(data)), Content: string(data)})
 	}
 	sort.Slice(snapshot.Files, func(i, j int) bool { return snapshot.Files[i].Path < snapshot.Files[j].Path })
 	var treeLines []string
@@ -183,85 +142,12 @@ func loadWorkflowBuiltinSkillPackage(templateID string) (workflowSourceSkillSnap
 }
 
 func loadWorkflowBuiltinSkill(templateID string) (string, string, error) {
-	id := strings.TrimPrefix(templateID, builtinSkillIDPrefix)
-	uid, relativePath := id, "SKILL.md"
-	if index := strings.IndexByte(id, ':'); index >= 0 {
-		uid, relativePath = id[:index], id[index+1:]
-	}
-	manifest, ok := workflowBuiltinManifest(uid)
-	if !ok || relativePath == "" {
-		return "", "", errWorkflowSourceSkillNotFound
-	}
-	root := workflowBuiltinSkillsRoot()
-	if root == "" {
-		return "", "", fmt.Errorf("builtin skills root not found")
-	}
-	base := filepath.Join(root, manifest.Category, manifest.DirName)
-	target := filepath.Clean(filepath.Join(base, filepath.FromSlash(relativePath)))
-	rel, err := filepath.Rel(base, target)
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return "", "", errWorkflowSourceSkillNotFound
-	}
-	data, err := os.ReadFile(target)
-	if errors.Is(err, os.ErrNotExist) {
-		return "", "", errWorkflowSourceSkillNotFound
-	}
+	content, name, found, err := skillbuiltin.SkillContent(templateID)
 	if err != nil {
 		return "", "", err
 	}
-	name := strings.TrimSuffix(filepath.ToSlash(relativePath), filepath.Ext(relativePath))
-	if relativePath == "SKILL.md" {
-		name = builtinSkillName(data, manifest.DirName)
+	if !found {
+		return "", "", errWorkflowSourceSkillNotFound
 	}
-	return string(data), name, nil
-}
-
-func workflowBuiltinManifest(uid string) (workflowBuiltinSkillManifest, bool) {
-	for _, manifest := range workflowBuiltinSkillManifests {
-		if manifest.UID == uid {
-			return manifest, true
-		}
-	}
-	return workflowBuiltinSkillManifest{}, false
-}
-
-func workflowBuiltinSkillsRoot() string {
-	if value := strings.TrimSpace(os.Getenv("LAZYMIND_BUILTIN_SKILLS_DIR")); value != "" {
-		return value
-	}
-	if info, err := os.Stat("/skills"); err == nil && info.IsDir() {
-		return "/skills"
-	}
-	wd, err := os.Getwd()
-	if err != nil {
-		return ""
-	}
-	for _, candidate := range []string{
-		filepath.Join(wd, "skills"), filepath.Join(wd, "..", "skills"),
-		filepath.Join(wd, "..", "..", "skills"), filepath.Join(wd, "..", "..", "..", "skills"),
-	} {
-		if info, statErr := os.Stat(candidate); statErr == nil && info.IsDir() {
-			return candidate
-		}
-	}
-	return ""
-}
-
-func builtinSkillName(content []byte, fallback string) string {
-	text := strings.ReplaceAll(string(content), "\r\n", "\n")
-	if !strings.HasPrefix(text, "---\n") {
-		return fallback
-	}
-	rest := strings.TrimPrefix(text, "---\n")
-	end := strings.Index(rest, "\n---\n")
-	if end < 0 {
-		return fallback
-	}
-	var metadata struct {
-		Name string `yaml:"name"`
-	}
-	if yaml.Unmarshal([]byte(rest[:end]), &metadata) != nil || strings.TrimSpace(metadata.Name) == "" {
-		return fallback
-	}
-	return strings.TrimSpace(metadata.Name)
+	return content, name, nil
 }

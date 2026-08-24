@@ -16,12 +16,13 @@ from channel_gateway.common.domain.channel import (
     ReceiverCheckpoint,
     RuntimeFence,
 )
+from channel_gateway.common.ports.providers import PayloadCipher
 
 
 _JSON_NUL_ESCAPE = re.compile(r'(?<!\\)((?:\\\\)*)\\u0000')
 
 
-def _snapshot(value: Any) -> dict[str, Any]:
+def decode_snapshot(value: Any) -> dict[str, Any]:
     if isinstance(value, str):
         try:
             value = json.loads(value)
@@ -77,8 +78,13 @@ class PostgresRuntimeLease:
 
 
 class GatewayStore:
-    def __init__(self, dsn: str):
+    def __init__(
+        self,
+        dsn: str,
+        payload_cipher: PayloadCipher | None = None,
+    ):
         self._dsn = dsn
+        self._payload_cipher = payload_cipher
 
     def _connect(self):
         return psycopg.connect(self._dsn, row_factory=dict_row)
@@ -280,6 +286,7 @@ class GatewayStore:
                 recipient_id TEXT NOT NULL,
                 text TEXT NOT NULL,
                 provider_context JSONB NOT NULL DEFAULT '{}'::jsonb,
+                sensitive_payload_ciphertext TEXT,
                 status VARCHAR(32) NOT NULL DEFAULT 'pending',
                 attempt_count INTEGER NOT NULL DEFAULT 0,
                 lease_owner TEXT,
@@ -290,6 +297,10 @@ class GatewayStore:
                 updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
                 UNIQUE(account_id, message_key)
             )
+            """,
+            """
+            ALTER TABLE channel_inbox
+            ADD COLUMN IF NOT EXISTS sensitive_payload_ciphertext TEXT
             """,
             """
             CREATE INDEX IF NOT EXISTS channel_inbox_claim_idx
@@ -339,6 +350,10 @@ class GatewayStore:
             """
             CREATE INDEX IF NOT EXISTS channel_outbox_order_idx
             ON channel_outbox(account_id, order_key, created_sequence)
+            """,
+            """
+            CREATE INDEX IF NOT EXISTS channel_outbox_monitor_idx
+            ON channel_outbox(provider, status, created_sequence)
             """,
             """
             INSERT INTO channel_outbox(
@@ -1498,11 +1513,11 @@ class GatewayStore:
                     INSERT INTO channel_inbox(
                         id, account_id, provider, message_key, order_key,
                         external_address_hash, owner_user_id, recipient_id,
-                        text, provider_context
+                        text, provider_context, sensitive_payload_ciphertext
                     )
                     VALUES(
                         %s, %s, %s, %s, %s,
-                        %s, %s, %s, %s, %s::jsonb
+                        %s, %s, %s, %s, %s::jsonb, %s
                     )
                     ON CONFLICT(account_id, message_key) DO NOTHING
                     RETURNING id
@@ -1518,24 +1533,10 @@ class GatewayStore:
                         envelope.recipient_id,
                         envelope.text,
                         self._json(envelope.provider_context),
+                        self._sensitive_ciphertext(envelope),
                     ),
                 ).fetchone()
                 inserted += int(row is not None)
-                connection.execute(
-                    """
-                    UPDATE channel_outbox
-                    SET provider_context = provider_context || %s::jsonb,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE account_id = %s
-                      AND order_key = %s
-                      AND status IN ('pending', 'retry_wait')
-                    """,
-                    (
-                        self._json(envelope.provider_context),
-                        envelope.account_id,
-                        envelope.order_key,
-                    ),
-                )
             if checkpoint is not None:
                 timeout_ms = int(
                     checkpoint.metadata.get('longpoll_timeout_ms') or 35000
@@ -1556,9 +1557,7 @@ class GatewayStore:
             connection.execute(
                 """
                 UPDATE channel_accounts
-                SET runtime_status = 'running',
-                    last_poll_at = CURRENT_TIMESTAMP,
-                    last_error = NULL,
+                SET last_poll_at = CURRENT_TIMESTAMP,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = %s
                 """,
@@ -1684,6 +1683,7 @@ class GatewayStore:
         inbox_id: str,
         claim_owner: str,
         outbound: list[OutboundMessage],
+        retained_provider_context: dict[str, Any],
     ) -> bool:
         with self._connect() as connection:
             owned = connection.execute(
@@ -1705,13 +1705,15 @@ class GatewayStore:
                 """
                 UPDATE channel_inbox
                 SET status = 'completed',
+                    provider_context = %s::jsonb,
+                    sensitive_payload_ciphertext = NULL,
                     lease_owner = NULL,
                     lease_until = NULL,
                     last_error = NULL,
                     updated_at = CURRENT_TIMESTAMP
                 WHERE id = %s
                 """,
-                (inbox_id,),
+                (self._json(retained_provider_context), inbox_id),
             )
             connection.execute(
                 """
@@ -1732,6 +1734,7 @@ class GatewayStore:
         error: str,
         fallback: OutboundMessage,
         max_attempts: int,
+        retained_provider_context: dict[str, Any],
     ) -> bool:
         with self._connect() as connection:
             row = connection.execute(
@@ -1753,6 +1756,15 @@ class GatewayStore:
                 self._insert_outbound(connection, inbox_id, [fallback])
                 status = 'dead'
                 next_attempt_at = None
+                connection.execute(
+                    """
+                    UPDATE channel_inbox
+                    SET provider_context = %s::jsonb,
+                        sensitive_payload_ciphertext = NULL
+                    WHERE id = %s
+                    """,
+                    (self._json(retained_provider_context), inbox_id),
+                )
             else:
                 status = 'retry_wait'
                 delay_seconds = min(
@@ -1916,6 +1928,7 @@ class GatewayStore:
         *,
         provider: str,
         limit: int,
+        after_sequence: int = 0,
     ) -> list[ClaimedOutbound]:
         with self._connect() as connection:
             rows = connection.execute(
@@ -1924,16 +1937,56 @@ class GatewayStore:
                 FROM channel_outbox
                 WHERE provider = %s
                   AND status = 'sent'
-                  AND created_at >= CURRENT_TIMESTAMP - INTERVAL '1 day'
+                  AND created_sequence > %s
                   AND metadata @> %s::jsonb
-                ORDER BY created_sequence DESC
+                ORDER BY created_sequence
                 LIMIT %s
                 """,
                 (
                     provider,
+                    max(0, after_sequence),
                     self._json(
                         {'task_monitor': True}
                     ),
+                    max(1, limit),
+                ),
+            ).fetchall()
+        return [
+            outbound
+            for outbound in (
+                self._claimed_outbound(row)
+                for row in rows
+            )
+            if outbound is not None
+        ]
+
+    def list_sent_task_artifact_outbounds(
+        self,
+        *,
+        provider: str,
+        limit: int,
+        after_sequence: int = 0,
+        monitor_version: int,
+    ) -> list[ClaimedOutbound]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT *
+                FROM channel_outbox
+                WHERE provider = %s
+                  AND status = 'sent'
+                  AND created_sequence > %s
+                  AND metadata @> %s::jsonb
+                ORDER BY created_sequence
+                LIMIT %s
+                """,
+                (
+                    provider,
+                    max(0, after_sequence),
+                    self._json({
+                        'task_monitor': True,
+                        'task_artifact_monitor_version': monitor_version,
+                    }),
                     max(1, limit),
                 ),
             ).fetchall()
@@ -1952,6 +2005,7 @@ class GatewayStore:
         parent: ClaimedOutbound,
         part_index: int,
         artifacts: list[dict[str, str]],
+        provider_context: dict[str, Any] | None = None,
     ) -> dict[str, int]:
         prefix = f'task-artifact:{parent.outbox_id}:{part_index}:'
         order_key = f'task-artifact:{parent.outbox_id}:{part_index}'
@@ -1959,19 +2013,40 @@ class GatewayStore:
             parent.provider_context.get('chat_id')
             or parent.recipient_id
         )
+        child_provider_context = (
+            dict(provider_context)
+            if provider_context is not None
+            else {'chat_id': chat_id}
+        )
+        child_provider_context.setdefault('chat_id', chat_id)
         with self._connect() as connection:
             for sequence, artifact in enumerate(artifacts):
                 artifact_key = str(artifact.get('artifact_key') or '')
                 source = str(artifact.get('source') or '')
                 delivery_id = str(artifact.get('delivery_id') or '')
+                kind = str(artifact.get('kind') or 'image')
                 if (
                     len(artifact_key) != 64
                     or not source
                     or len(source) > 2048
                     or not delivery_id
                     or len(delivery_id) > 512
+                    or kind not in {'image', 'file'}
                 ):
                     continue
+                rendered_part = {
+                    'kind': kind,
+                    'source': source,
+                    'delivery_id': delivery_id,
+                }
+                if kind == 'image':
+                    rendered_part['alt'] = str(
+                        artifact.get('caption') or ''
+                    )[:300]
+                else:
+                    rendered_part['filename'] = str(
+                        artifact.get('filename') or 'lazymind-output'
+                    )[:255]
                 connection.execute(
                     """
                     INSERT INTO channel_outbox(
@@ -1986,7 +2061,10 @@ class GatewayStore:
                         %s, %s::jsonb, '', 'task_artifact',
                         'task_artifact', %s::jsonb, %s::jsonb, 'pending'
                     )
-                    ON CONFLICT(account_id, dedupe_key) DO NOTHING
+                    ON CONFLICT(account_id, dedupe_key) DO UPDATE
+                    SET rendered_parts = EXCLUDED.rendered_parts,
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE channel_outbox.status = 'pending'
                     """,
                     (
                         f'co_{uuid.uuid4().hex}',
@@ -1996,20 +2074,13 @@ class GatewayStore:
                         order_key,
                         sequence,
                         parent.recipient_id,
-                        self._json({'chat_id': chat_id}),
+                        self._json(child_provider_context),
                         self._json({
                             'task_artifact': True,
                             'parent_outbox_id': parent.outbox_id,
                             'parent_part_index': part_index,
                         }),
-                        self._json([{
-                            'kind': 'image',
-                            'source': source,
-                            'alt': str(
-                                artifact.get('caption') or ''
-                            )[:300],
-                            'delivery_id': delivery_id,
-                        }]),
+                        self._json([rendered_part]),
                     ),
                 )
             rows = connection.execute(
@@ -2275,12 +2346,28 @@ class GatewayStore:
         ).fetchone()
         return existing is None
 
-    @staticmethod
     def _claimed_inbound(
+        self,
         row: dict[str, Any] | None,
     ) -> ClaimedInbound | None:
         if not row:
             return None
+        provider_context = self._dict(row['provider_context'])
+        ciphertext = str(
+            row.get('sensitive_payload_ciphertext') or ''
+        )
+        if ciphertext:
+            if self._payload_cipher is None:
+                raise RuntimeError(
+                    'Channel inbox contains an encrypted payload but no '
+                    'payload cipher is configured'
+                )
+            provider_context.update(
+                self._payload_cipher.decrypt(
+                    str(row['owner_user_id']),
+                    ciphertext,
+                )
+            )
         return ClaimedInbound(
             inbox_id=str(row['id']),
             provider=str(row['provider']),
@@ -2291,8 +2378,20 @@ class GatewayStore:
             owner_user_id=str(row['owner_user_id']),
             recipient_id=str(row['recipient_id']),
             text=str(row['text']),
-            provider_context=GatewayStore._dict(row['provider_context']),
+            provider_context=provider_context,
             attempt_count=int(row['attempt_count']),
+        )
+
+    def _sensitive_ciphertext(self, envelope: InboundEnvelope) -> str | None:
+        if not envelope.sensitive_context:
+            return None
+        if self._payload_cipher is None:
+            raise RuntimeError(
+                'Sensitive channel input requires a payload cipher'
+            )
+        return self._payload_cipher.encrypt(
+            envelope.owner_user_id,
+            envelope.sensitive_context,
         )
 
     @staticmethod
@@ -2304,6 +2403,7 @@ class GatewayStore:
         rendered_parts = GatewayStore._list(row['rendered_parts'])
         return ClaimedOutbound(
             outbox_id=str(row['id']),
+            created_sequence=int(row['created_sequence']),
             provider=str(row['provider']),
             account_id=str(row['account_id']),
             order_key=str(row['order_key']),
@@ -2533,7 +2633,7 @@ class GatewayStore:
                 """,
                 (account_id, external_address_hash),
             ).fetchone()
-            snapshot = _snapshot(row.get('snapshot_json')) if row else {}
+            snapshot = decode_snapshot(row.get('snapshot_json')) if row else {}
             current = snapshot.get('feishu_workspace')
             if not isinstance(current, dict):
                 current = {}
@@ -2565,11 +2665,11 @@ class GatewayStore:
                 INSERT INTO channel_inbox(
                     id, account_id, provider, message_key, order_key,
                     external_address_hash, owner_user_id, recipient_id,
-                    text, provider_context
+                    text, provider_context, sensitive_payload_ciphertext
                 )
                 VALUES(
                     %s, %s, %s, %s, %s,
-                    %s, %s, %s, %s, %s::jsonb
+                    %s, %s, %s, %s, %s::jsonb, %s
                 )
                 ON CONFLICT(account_id, message_key) DO NOTHING
                 RETURNING id
@@ -2585,6 +2685,7 @@ class GatewayStore:
                     envelope.recipient_id,
                     envelope.text,
                     self._json(envelope.provider_context),
+                    self._sensitive_ciphertext(envelope),
                 ),
             ).fetchone()
             if not inserted:
@@ -2637,7 +2738,7 @@ class GatewayStore:
                 """,
                 (account_id, external_address_hash),
             ).fetchone()
-            snapshot = _snapshot(row.get('snapshot_json')) if row else {}
+            snapshot = decode_snapshot(row.get('snapshot_json')) if row else {}
             workspace = snapshot.get('feishu_workspace')
             if not isinstance(workspace, dict):
                 workspace = {}
@@ -2686,7 +2787,7 @@ class GatewayStore:
                 """,
                 (account_id, external_address_hash),
             ).fetchone()
-            snapshot = _snapshot(row.get('snapshot_json')) if row else {}
+            snapshot = decode_snapshot(row.get('snapshot_json')) if row else {}
             workspace = snapshot.get('feishu_workspace')
             if not isinstance(workspace, dict):
                 workspace = {}

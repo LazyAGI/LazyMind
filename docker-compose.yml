@@ -308,6 +308,7 @@ services:
       <<: *proxy-env
     volumes:
       - channel-gateway-data:/var/lib/lazymind/channel-gateway
+      - ./data/core/uploads:/var/lib/lazymind/uploads
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8085/readyz')\" || exit 1"]
       interval: 10s
@@ -357,7 +358,7 @@ services:
       - ./data/evo:/var/lib/lazymind/evo
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/subagent:/data/subagent
-      - ./skills:/skills:ro
+      - ./skills/.runtime:/skills/.runtime:ro
     expose:
       - "8000"
     extra_hosts:
@@ -403,7 +404,7 @@ services:
     volumes:
       - ./backend/core:/app
       - ./data/core/uploads:/var/lib/lazymind/uploads
-      - ./skills:/skills:ro
+      - ./skills/.runtime:/skills/.runtime:ro
     environment:
       <<: *core-env
     depends_on:
@@ -430,6 +431,7 @@ services:
       - "80"
     volumes:
       - ./workflows:/usr/share/nginx/html/workflows:ro
+      - ./skills/.runtime:/skills/.runtime:ro
     depends_on:
       kong:
         condition: service_started

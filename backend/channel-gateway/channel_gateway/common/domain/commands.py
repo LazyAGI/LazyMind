@@ -3,7 +3,7 @@ from __future__ import annotations
 from enum import Enum
 from functools import reduce
 from operator import or_
-from typing import Annotated, Any, ClassVar, Literal, TypeAlias
+from typing import Annotated, Any, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, model_validator
 
@@ -19,13 +19,13 @@ class ActionKind(str, Enum):
     LIST = 'conversation.list'
     SWITCH = 'conversation.switch'
     CURRENT = 'conversation.current'
+    STOP = 'conversation.stop'
     HISTORY_MORE = 'history.more'
     SELECTION_CHOOSE = 'selection.choose'
     CAPABILITY_LIST = 'capability.list'
     CAPABILITY_CONFIGURE = 'capability.configure'
     CONVERSATION_SETTINGS = 'conversation.settings'
     CONVERSATION_SETTINGS_UPDATE = 'conversation.settings.update'
-    CLARIFY = 'clarify'
 
 
 ResourceType = Literal[
@@ -37,6 +37,18 @@ ResourceType = Literal[
     'conversation',
     'personalization',
 ]
+AssistantProvider: TypeAlias = Literal[
+    'lazymind',
+    'codex',
+    'cursor',
+    'workbuddy',
+]
+ASSISTANT_PROVIDERS: tuple[AssistantProvider, ...] = (
+    'lazymind',
+    'codex',
+    'cursor',
+    'workbuddy',
+)
 Evidence: TypeAlias = Annotated[str, Field(min_length=1, max_length=300)]
 GroundingMessage: TypeAlias = Annotated[str, Field(min_length=1, max_length=4000)]
 PreparedResourcePosition: TypeAlias = Annotated[
@@ -126,15 +138,23 @@ _CLEAR_SELECTOR_SCHEMA = {
 }
 
 
-class KnowledgeBaseResourceChange(_ResourceChangeBase):
+class _ClearableResourceChangeBase(_ResourceChangeBase):
     model_config = ConfigDict(
         extra='forbid',
         frozen=True,
         json_schema_extra=_CLEAR_SELECTOR_SCHEMA,
     )
 
-    resource_type: Literal['knowledge_base']
     selector: ResourceSelector | None = None
+
+    @model_validator(mode='after')
+    def validate_selector(self) -> '_ClearableResourceChangeBase':
+        _validate_clear_selector(self.operation, self.selector)
+        return self
+
+
+class KnowledgeBaseResourceChange(_ClearableResourceChangeBase):
+    resource_type: Literal['knowledge_base']
     operation: Literal['use', 'disable', 'clear']
     scope: Literal['turn', 'conversation', 'global'] = Field(
         description=(
@@ -142,11 +162,6 @@ class KnowledgeBaseResourceChange(_ResourceChangeBase):
             'global changes the user default.'
         )
     )
-
-    @model_validator(mode='after')
-    def validate_selector(self) -> 'KnowledgeBaseResourceChange':
-        _validate_clear_selector(self.operation, self.selector)
-        return self
 
 
 class SkillResourceChange(_NamedResourceChangeBase):
@@ -159,24 +174,12 @@ class SkillResourceChange(_NamedResourceChangeBase):
     )
 
 
-class ToolResourceChange(_ResourceChangeBase):
-    model_config = ConfigDict(
-        extra='forbid',
-        frozen=True,
-        json_schema_extra=_CLEAR_SELECTOR_SCHEMA,
-    )
-
+class ToolResourceChange(_ClearableResourceChangeBase):
     resource_type: Literal['tool']
-    selector: ResourceSelector | None = None
     operation: Literal['use', 'disable', 'clear']
     scope: Literal['turn', 'global'] = Field(
         description='Tool changes apply to one turn or to the user global default.'
     )
-
-    @model_validator(mode='after')
-    def validate_selector(self) -> 'ToolResourceChange':
-        _validate_clear_selector(self.operation, self.selector)
-        return self
 
 
 class PersonalizationResourceChange(_ResourceChangeBase):
@@ -241,6 +244,7 @@ class ConversationNewParameters(_StrictModel):
 
 
 class ConversationListParameters(_StrictModel):
+    assistant: AssistantProvider = 'lazymind'
     evidence: list[Evidence] = Field(
         min_length=1,
         max_length=8,
@@ -412,11 +416,11 @@ class ConversationSettingsUpdateParameters(_StrictModel):
     )
 
 
-class ClarifyParameters(_StrictModel):
-    clarification_question: str = Field(
+class ConversationStopParameters(_StrictModel):
+    evidence: list[Evidence] = Field(
         min_length=1,
-        max_length=300,
-        description='Short question needed before a command can be executed safely.',
+        max_length=2,
+        description='Verbatim substring requesting the active generation to stop.',
     )
 
 
@@ -424,147 +428,64 @@ class _CommandBase(_StrictModel):
     schema_version: Literal['1']
 
 
-_CHAT_DESCRIPTION = (
-    'Answer a question or perform work in the current conversation. This includes questions '
-    'about contents, documents, files, records, topics, or information inside the active or '
-    'default knowledge base, questions explaining channel controls, and negated or hypothetical '
-    'control statements; it does not list configurable resource names or enabled status.'
-)
-_NEW_DESCRIPTION = (
-    'Start a new conversation only when explicitly requested. An optional task in the same '
-    'message is executed immediately in that new conversation.'
-)
-_LIST_DESCRIPTION = 'List the user conversations so the user can inspect or select one.'
-_SWITCH_DESCRIPTION = (
-    'Switch to a previously displayed conversation by index or to a uniquely named '
-    'conversation. Return the complete command when the input also contains a task or resource '
-    'change, or when state.latest_selection has no suspended continuation.'
-)
-_CURRENT_DESCRIPTION = 'Report which conversation is currently selected on this channel.'
-_HISTORY_DESCRIPTION = 'Load older history from the currently selected conversation.'
-_SELECTION_CHOOSE_DESCRIPTION = (
-    'Choose one numbered item only when state.latest_selection.has_continuation is true and '
-    'the entire input solely answers that pending selection. The Gateway resumes the suspended '
-    'command. If there is no continuation, or the input adds a task, operation, scope, or other '
-    'change, return the complete conversation.switch or capability.configure command instead.'
-)
-_CAPABILITY_LIST_DESCRIPTION = (
-    'List names or enabled status of configurable knowledge bases, Skills, tools, or '
-    'personalization. Never use this to answer what content is stored inside a knowledge base.'
-)
-_CAPABILITY_CONFIGURE_DESCRIPTION = (
-    'Select, enable, disable, or clear an explicitly named configurable resource for a '
-    'supported turn, conversation, or global scope. Return the complete command for a new '
-    'request, including a numeric selector from a displayed list. Use selection.choose only '
-    'for a pure answer to state.latest_selection.has_continuation.'
-)
-_CONVERSATION_SETTINGS_DESCRIPTION = (
-    'Show persistent settings for the current conversation and account: knowledge bases, '
-    'Chat executor, Workflow execution mode, SubAgent, Skills, tools, personalization, and workflows. '
-    'This never selects a resource for only the next turn.'
-)
-_CONVERSATION_SETTINGS_UPDATE_DESCRIPTION = (
-    'Persistently update one setting for the current conversation or account. '
-    'This never performs one-turn capability invocation.'
-)
-_CLARIFY_DESCRIPTION = (
-    'Ask one clarification question when no command and required parameters can be selected '
-    'safely. It performs no other action.'
-)
-
-
 class ChatCommand(_CommandBase):
-    name: ClassVar[ActionKind] = ActionKind.CHAT
-    description: ClassVar[str] = _CHAT_DESCRIPTION
-    command: Literal[ActionKind.CHAT] = Field(description=_CHAT_DESCRIPTION)
+    command: Literal[ActionKind.CHAT]
     parameters: ChatParameters
 
 
 class ConversationNewCommand(_CommandBase):
-    name: ClassVar[ActionKind] = ActionKind.NEW
-    description: ClassVar[str] = _NEW_DESCRIPTION
-    command: Literal[ActionKind.NEW] = Field(description=_NEW_DESCRIPTION)
+    command: Literal[ActionKind.NEW]
     parameters: ConversationNewParameters
 
 
 class ConversationListCommand(_CommandBase):
-    name: ClassVar[ActionKind] = ActionKind.LIST
-    description: ClassVar[str] = _LIST_DESCRIPTION
-    command: Literal[ActionKind.LIST] = Field(description=_LIST_DESCRIPTION)
+    command: Literal[ActionKind.LIST]
     parameters: ConversationListParameters
 
 
 class ConversationSwitchCommand(_CommandBase):
-    name: ClassVar[ActionKind] = ActionKind.SWITCH
-    description: ClassVar[str] = _SWITCH_DESCRIPTION
-    command: Literal[ActionKind.SWITCH] = Field(description=_SWITCH_DESCRIPTION)
+    command: Literal[ActionKind.SWITCH]
     parameters: ConversationSwitchParameters
 
 
 class ConversationCurrentCommand(_CommandBase):
-    name: ClassVar[ActionKind] = ActionKind.CURRENT
-    description: ClassVar[str] = _CURRENT_DESCRIPTION
-    command: Literal[ActionKind.CURRENT] = Field(description=_CURRENT_DESCRIPTION)
+    command: Literal[ActionKind.CURRENT]
     parameters: ConversationCurrentParameters
 
 
+class ConversationStopCommand(_CommandBase):
+    command: Literal[ActionKind.STOP]
+    parameters: ConversationStopParameters
+
+
 class HistoryMoreCommand(_CommandBase):
-    name: ClassVar[ActionKind] = ActionKind.HISTORY_MORE
-    description: ClassVar[str] = _HISTORY_DESCRIPTION
-    command: Literal[ActionKind.HISTORY_MORE] = Field(description=_HISTORY_DESCRIPTION)
+    command: Literal[ActionKind.HISTORY_MORE]
     parameters: HistoryMoreParameters
 
 
 class SelectionChooseCommand(_CommandBase):
-    name: ClassVar[ActionKind] = ActionKind.SELECTION_CHOOSE
-    description: ClassVar[str] = _SELECTION_CHOOSE_DESCRIPTION
-    command: Literal[ActionKind.SELECTION_CHOOSE] = Field(
-        description=_SELECTION_CHOOSE_DESCRIPTION
-    )
+    command: Literal[ActionKind.SELECTION_CHOOSE]
     parameters: SelectionChooseParameters
 
 
 class CapabilityListCommand(_CommandBase):
-    name: ClassVar[ActionKind] = ActionKind.CAPABILITY_LIST
-    description: ClassVar[str] = _CAPABILITY_LIST_DESCRIPTION
-    command: Literal[ActionKind.CAPABILITY_LIST] = Field(
-        description=_CAPABILITY_LIST_DESCRIPTION
-    )
+    command: Literal[ActionKind.CAPABILITY_LIST]
     parameters: CapabilityListParameters
 
 
 class CapabilityConfigureCommand(_CommandBase):
-    name: ClassVar[ActionKind] = ActionKind.CAPABILITY_CONFIGURE
-    description: ClassVar[str] = _CAPABILITY_CONFIGURE_DESCRIPTION
-    command: Literal[ActionKind.CAPABILITY_CONFIGURE] = Field(
-        description=_CAPABILITY_CONFIGURE_DESCRIPTION
-    )
+    command: Literal[ActionKind.CAPABILITY_CONFIGURE]
     parameters: CapabilityConfigureParameters
 
 
 class ConversationSettingsCommand(_CommandBase):
-    name: ClassVar[ActionKind] = ActionKind.CONVERSATION_SETTINGS
-    description: ClassVar[str] = _CONVERSATION_SETTINGS_DESCRIPTION
-    command: Literal[ActionKind.CONVERSATION_SETTINGS] = Field(
-        description=_CONVERSATION_SETTINGS_DESCRIPTION
-    )
+    command: Literal[ActionKind.CONVERSATION_SETTINGS]
     parameters: ConversationSettingsParameters
 
 
 class ConversationSettingsUpdateCommand(_CommandBase):
-    name: ClassVar[ActionKind] = ActionKind.CONVERSATION_SETTINGS_UPDATE
-    description: ClassVar[str] = _CONVERSATION_SETTINGS_UPDATE_DESCRIPTION
-    command: Literal[ActionKind.CONVERSATION_SETTINGS_UPDATE] = Field(
-        description=_CONVERSATION_SETTINGS_UPDATE_DESCRIPTION
-    )
+    command: Literal[ActionKind.CONVERSATION_SETTINGS_UPDATE]
     parameters: ConversationSettingsUpdateParameters
-
-
-class ClarifyCommand(_CommandBase):
-    name: ClassVar[ActionKind] = ActionKind.CLARIFY
-    description: ClassVar[str] = _CLARIFY_DESCRIPTION
-    command: Literal[ActionKind.CLARIFY] = Field(description=_CLARIFY_DESCRIPTION)
-    parameters: ClarifyParameters
 
 
 COMMAND_TYPES = (
@@ -573,32 +494,18 @@ COMMAND_TYPES = (
     ConversationListCommand,
     ConversationSwitchCommand,
     ConversationCurrentCommand,
+    ConversationStopCommand,
     HistoryMoreCommand,
     SelectionChooseCommand,
     CapabilityListCommand,
     CapabilityConfigureCommand,
     ConversationSettingsCommand,
     ConversationSettingsUpdateCommand,
-    ClarifyCommand,
 )
 _CommandUnion = reduce(or_, COMMAND_TYPES)
 CommandEnvelope: TypeAlias = Annotated[_CommandUnion, Field(discriminator='command')]
 
 COMMAND_ADAPTER = TypeAdapter(CommandEnvelope)
-
-COMMAND_SELECTION_RULES = (
-    'Classify the whole input and preserve every requested operation and parameter.',
-    'Use conversation.settings or conversation.settings.update for persistent settings of the '
-    'current conversation. Never translate those requests into a one-turn resource change.',
-    'Use capability.configure when the entire input only changes resource settings. Use '
-    'chat with resource_changes only when an independent question or task must also run.',
-    'A conversation.new or conversation.switch input that also requests work must include '
-    'that verbatim work in parameters.message.',
-    'Use capability.list only to enumerate configurable resource names or enabled state; '
-    'questions about information stored inside a resource are chat.',
-    'Use selection.choose only for a pure numbered answer when '
-    'state.latest_selection.has_continuation is true.',
-)
 
 
 class PreparedResourceItem(_StrictModel):
@@ -659,40 +566,6 @@ class SelectionContinuation(_StrictModel):
             ):
                 raise ValueError('switch resource continuation requires resolved target')
         return self
-
-
-def command_registry(
-    allowed_commands: set[ActionKind] | None = None,
-) -> dict[str, Any]:
-    command_types = tuple(
-        command_type
-        for command_type in COMMAND_TYPES
-        if (
-            allowed_commands is None
-            or command_type.name in allowed_commands
-        )
-    )
-    if not command_types:
-        raise ValueError('command registry must contain at least one command')
-    adapter = (
-        COMMAND_ADAPTER
-        if command_types == COMMAND_TYPES
-        else TypeAdapter(
-            Annotated[
-                reduce(or_, command_types),
-                Field(discriminator='command'),
-            ]
-        )
-    )
-    return {
-        'schema_version': SCHEMA_VERSION,
-        'commands': [
-            {'name': command_type.name.value, 'description': command_type.description}
-            for command_type in command_types
-        ],
-        'selection_rules': list(COMMAND_SELECTION_RULES),
-        'output_schema': adapter.json_schema(),
-    }
 
 
 def command_kind(command: CommandEnvelope) -> ActionKind:

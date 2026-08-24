@@ -5,10 +5,10 @@ import re
 from typing import Any, Literal, Sequence
 
 from channel_gateway.common.domain.chat import (
-    ChannelFeatureProfile,
     ChatOptions,
 )
 from channel_gateway.common.domain.commands import (
+    ASSISTANT_PROVIDERS,
     CommandEnvelope,
     ConversationSettingChange,
     PreparedConversationTarget,
@@ -17,6 +17,8 @@ from channel_gateway.common.domain.commands import (
     SelectionContinuation,
 )
 from channel_gateway.common.domain.outbound import (
+    AssistantCatalogPresentation,
+    AssistantPresentation,
     CapabilityPresentation,
     ConversationExecutorPresentation,
     ConversationSettingsPresentation,
@@ -95,28 +97,9 @@ class CapabilityActions:
             conversation_id=conversation_id,
             request_id=f'{request_id}_conversation_settings',
         )
-        executors = tuple(
-            ConversationExecutorPresentation(
-                id=str(item.get('id') or '')[:64],
-                display_name=str(item.get('display_name') or '')[:100],
-                kind=(
-                    'external'
-                    if str(item.get('kind') or '') == 'external'
-                    else 'internal'
-                ),
-                installed=bool(item.get('installed')),
-                host_online=bool(item.get('host_online')),
-                available=bool(item.get('available')),
-                unavailable_reason=str(
-                    item.get('unavailable_reason') or ''
-                )[:512],
-            )
-            for item in self._client.list_chat_executors(
-                owner_user_id=owner_user_id,
-                request_id=f'{request_id}_executor_catalog',
-            )
-            if str(item.get('id') or '')
-            and str(item.get('display_name') or '')
+        executors = self._executor_catalog(
+            owner_user_id=owner_user_id,
+            request_id=f'{request_id}_executor_catalog',
         )
         workflow_enabled = bool(
             detail.get('enable_workflow')
@@ -135,6 +118,7 @@ class CapabilityActions:
             else True
         )
         chat_executor = str(detail.get('chat_executor') or '')[:64]
+        assistant = str(detail.get('assistant') or 'lazymind')[:64]
         if not chat_executor:
             chat_executor = next(
                 (
@@ -173,7 +157,67 @@ class CapabilityActions:
                 subagent_enabled=subagent_enabled,
                 chat_executor=chat_executor,
                 executors=executors,
+                assistant=assistant,
             ),
+        )
+
+    def assistant_catalog(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+    ) -> AssistantCatalogPresentation:
+        executors = {
+            executor.id: executor
+            for executor in self._executor_catalog(
+                owner_user_id=owner_user_id,
+                request_id=request_id,
+            )
+        }
+        return AssistantCatalogPresentation(
+            kind='assistant_catalog',
+            assistants=tuple(
+                AssistantPresentation(
+                    id=provider,
+                    display_name=executors[provider].display_name,
+                    available=executors[provider].available,
+                    unavailable_reason=(
+                        executors[provider].unavailable_reason
+                    ),
+                )
+                for provider in ASSISTANT_PROVIDERS
+                if provider in executors
+            ),
+        )
+
+    def _executor_catalog(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+    ) -> tuple[ConversationExecutorPresentation, ...]:
+        return tuple(
+            ConversationExecutorPresentation(
+                id=str(item.get('id') or '')[:64],
+                display_name=str(item.get('display_name') or '')[:100],
+                kind=(
+                    'external'
+                    if str(item.get('kind') or '') == 'external'
+                    else 'internal'
+                ),
+                installed=bool(item.get('installed')),
+                host_online=bool(item.get('host_online')),
+                available=bool(item.get('available')),
+                unavailable_reason=str(
+                    item.get('unavailable_reason') or ''
+                )[:512],
+            )
+            for item in self._client.list_chat_executors(
+                owner_user_id=owner_user_id,
+                request_id=request_id,
+            )
+            if str(item.get('id') or '')
+            and str(item.get('display_name') or '')
         )
 
     def _pending_conversation_settings(
@@ -191,7 +235,7 @@ class CapabilityActions:
             raise ActionMessage(
                 '当前还没有可设置的会话，请先新建或切换到一个会话。'
             )
-        draft = self.options_from_dict(
+        draft = ChatOptions.from_dict(
             self._store.get_new_conversation_draft(
                 account_id,
                 external_address_hash,
@@ -224,6 +268,7 @@ class CapabilityActions:
                 subagent_enabled=True,
                 chat_executor='',
                 executors=(),
+                assistant='lazymind',
             ),
         )
 
@@ -293,7 +338,7 @@ class CapabilityActions:
                     request_id=f'{request_id}_existing_kb',
                 )
             elif pending_conversation:
-                draft = self.options_from_dict(
+                draft = ChatOptions.from_dict(
                     self._store.get_new_conversation_draft(
                         account_id,
                         external_address_hash,
@@ -335,7 +380,7 @@ class CapabilityActions:
                 self._store.begin_new_conversation(
                     account_id,
                     external_address_hash,
-                    self.options_to_dict(draft),
+                    draft.to_dict(),
                 )
             else:
                 dataset = datasets[0]
@@ -367,7 +412,7 @@ class CapabilityActions:
                         raise ActionMessage(
                             '请先创建新会话，再设置 Workflow 运行方式。'
                         )
-                    draft = self.options_from_dict(
+                    draft = ChatOptions.from_dict(
                         self._store.get_new_conversation_draft(
                             account_id,
                             external_address_hash,
@@ -378,7 +423,7 @@ class CapabilityActions:
                     self._store.begin_new_conversation(
                         account_id,
                         external_address_hash,
-                        self.options_to_dict(draft),
+                        draft.to_dict(),
                     )
                     settings = {}
                 else:
@@ -546,7 +591,6 @@ class CapabilityActions:
         catalog: dict[str, Any],
         account_id: str,
         external_address_hash: str,
-        features: ChannelFeatureProfile,
         save_selection: bool = True,
     ) -> tuple[str, CapabilityPresentation]:
         kinds = list(dict.fromkeys(kinds))
@@ -628,20 +672,10 @@ class CapabilityActions:
         lines.extend(
             (
                 '',
-                '你可以直接说“这轮使用哪个知识库”或“以后关闭哪个工具”。',
+                '请从能力卡片中选择；纯文本渠道可回复列表编号。',
             )
         )
-        enabled_features = features.enabled_feature_labels
-        if not enabled_features:
-            lines.append(
-                '当前渠道不提供 Workflow、SubAgent、后台 Task 和结构化 Ask。'
-            )
-        else:
-            lines.append(
-                '当前渠道已开放 Core 能力：'
-                f'{"、".join(enabled_features)}。'
-                '实际可用项取决于你的账号与会话配置。'
-            )
+        lines.append('实际可用能力由 LazyMind 账号和当前会话设置决定。')
         return (
             '\n'.join(lines),
             CapabilityPresentation(
@@ -717,56 +751,49 @@ class CapabilityActions:
             )
             turn_options = self.turn_options(turn_pairs, base_ids)
             if state.get('mode') == 'new_pending':
-                draft = self.merge_options(
-                    self.options_from_dict(
-                        self._store.get_new_conversation_draft(
-                            account_id,
-                            external_address_hash,
-                        )
-                    ),
-                    turn_options,
-                )
+                draft = ChatOptions.from_dict(
+                    self._store.get_new_conversation_draft(
+                        account_id,
+                        external_address_hash,
+                    )
+                ).merged(turn_options)
                 self._store.begin_new_conversation(
                     account_id,
                     external_address_hash,
-                    self.options_to_dict(draft),
+                    draft.to_dict(),
                 )
             else:
-                turn_options = self.merge_options(
-                    self.options_from_dict(
-                        self._store.get_pending_turn(
-                            account_id,
-                            external_address_hash,
-                        )
-                    ),
-                    turn_options,
-                )
+                turn_options = ChatOptions.from_dict(
+                    self._store.get_pending_turn(
+                        account_id,
+                        external_address_hash,
+                    )
+                ).merged(turn_options)
                 self._store.save_pending_turn(
                     account_id,
                     external_address_hash,
-                    self.options_to_dict(turn_options),
+                    turn_options.to_dict(),
                 )
         if not conversation_id and state.get('mode') == 'new_pending':
             conversation_pairs = [
                 pair for pair in resolved if pair[0].scope == 'conversation'
             ]
             if conversation_pairs:
-                draft = self.merge_options(
-                    self.options_from_dict(
-                        self._store.get_new_conversation_draft(
-                            account_id,
-                            external_address_hash,
-                        )
-                    ),
+                draft = ChatOptions.from_dict(
+                    self._store.get_new_conversation_draft(
+                        account_id,
+                        external_address_hash,
+                    )
+                ).merged(
                     self.new_conversation_options(
                         conversation_pairs,
                         self.default_dataset_ids(catalog),
-                    ),
+                    )
                 )
                 self._store.begin_new_conversation(
                     account_id,
                     external_address_hash,
-                    self.options_to_dict(draft),
+                    draft.to_dict(),
                 )
         self._store.clear_selection_snapshot(account_id, external_address_hash)
         lines = ['配置已更新：']
@@ -1181,98 +1208,6 @@ class CapabilityActions:
             'top_k': 3,
             'confidence': 0.5,
         }
-
-    @staticmethod
-    def merge_options(base: ChatOptions, override: ChatOptions) -> ChatOptions:
-        mentions: dict[tuple[str, str], dict[str, str]] = {}
-        for mention in [*base.mentions, *override.mentions]:
-            key = (
-                str(mention.get('type') or ''),
-                str(mention.get('resource_id') or ''),
-            )
-            mentions[key] = mention
-        disabled_tools = set(base.disabled_tools)
-        for mention in override.mentions:
-            if mention.get('type') == 'tool':
-                disabled_tools.discard(str(mention.get('resource_id') or ''))
-        for tool_id in override.disabled_tools:
-            disabled_tools.add(tool_id)
-            mentions.pop(('tool', tool_id), None)
-        search_config = (
-            override.search_config
-            if override.search_config is not None
-            else base.search_config
-        )
-        return ChatOptions(
-            search_config=search_config,
-            mentions=list(mentions.values()),
-            workflow_mode=(
-                override.workflow_mode
-                if override.workflow_mode is not None
-                else base.workflow_mode
-            ),
-            enable_workflow=(
-                override.enable_workflow
-                if override.enable_workflow is not None
-                else base.enable_workflow
-            ),
-            use_memory=(
-                override.use_memory
-                if override.use_memory is not None
-                else base.use_memory
-            ),
-            disabled_tools=list(disabled_tools),
-            filters=override.filters if override.filters is not None else base.filters,
-        )
-
-    @staticmethod
-    def options_to_dict(options: ChatOptions) -> dict[str, Any]:
-        return {
-            'search_config': options.search_config,
-            'mentions': options.mentions,
-            'workflow_mode': options.workflow_mode,
-            'enable_workflow': options.enable_workflow,
-            'use_memory': options.use_memory,
-            'disabled_tools': options.disabled_tools,
-            'filters': options.filters,
-        }
-
-    @staticmethod
-    def options_from_dict(value: dict[str, Any]) -> ChatOptions:
-        search_config = value.get('search_config')
-        mentions = value.get('mentions')
-        disabled_tools = value.get('disabled_tools')
-        filters = value.get('filters')
-        workflow_mode = value.get('workflow_mode')
-        return ChatOptions(
-            search_config=search_config if isinstance(search_config, dict) else None,
-            mentions=(
-                [dict(item) for item in mentions if isinstance(item, dict)]
-                if isinstance(mentions, list)
-                else []
-            ),
-            workflow_mode=(
-                workflow_mode
-                if workflow_mode in {'auto', 'dynamic'}
-                else None
-            ),
-            enable_workflow=(
-                value.get('enable_workflow')
-                if isinstance(value.get('enable_workflow'), bool)
-                else None
-            ),
-            use_memory=(
-                value.get('use_memory')
-                if isinstance(value.get('use_memory'), bool)
-                else None
-            ),
-            disabled_tools=(
-                [str(item) for item in disabled_tools if str(item)]
-                if isinstance(disabled_tools, list)
-                else []
-            ),
-            filters=filters if isinstance(filters, dict) else None,
-        )
 
     @staticmethod
     def dataset_names(value: Any, catalog: dict[str, Any]) -> list[str]:
