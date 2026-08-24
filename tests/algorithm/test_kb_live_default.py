@@ -69,10 +69,8 @@ def test_kb_search_core_flow(monkeypatch):
         'retrievers': ['retriever'],
         'image_retriever': 'image-retriever',
     }
-    assert result['success'] is True
-    assert result['tool'] == 'kb_search'
-    assert result['result']['total'] == 1
-    assert result['result']['items'][0]['docid'] == 'doc_be9d0c894bf623ffc82aa3f9a073fb96'
+    assert result['total'] == 1
+    assert result['items'][0]['docid'] == 'doc_be9d0c894bf623ffc82aa3f9a073fb96'
 
 
 def test_kb_tmp_search_core_flow(monkeypatch):
@@ -115,8 +113,8 @@ def test_kb_tmp_search_core_flow(monkeypatch):
         },
         'tmp_retriever': 'tmp-retriever',
     }
-    assert result['success'] is True
-    assert result['tool'] == 'kb_tmp_search'
+    assert result['total'] == 0
+    assert result['items'] == []
 
 
 def test_temp_kb_runtime_registers_block_group(monkeypatch):

@@ -9,6 +9,7 @@ import lazyllm
 import requests
 from lazyllm import AutoModel
 from lazyllm.components.formatter import decode_query_with_filepaths
+from lazyllm.tools.agent import ToolExecutionError
 
 from lazymind.chat.service.utils import register_image_url, resolve_local_image_path
 from lazymind.chat.service.utils.static_file_url import (
@@ -97,7 +98,7 @@ def _download_remote_image_to_upload(url: str) -> str:
     """
     raw = str(url or '').strip()
     if not raw.startswith(('http://', 'https://')):
-        raise ValueError(f'not a remote image url: {raw!r}')
+        raise ToolExecutionError(f'Not a remote image URL: {raw!r}')
     headers = {'User-Agent': _REMOTE_IMAGE_UA}
     resp = requests.get(
         raw,
@@ -109,7 +110,9 @@ def _download_remote_image_to_upload(url: str) -> str:
     resp.raise_for_status()
     content_type = str(resp.headers.get('Content-Type') or '').lower()
     if content_type and not content_type.startswith('image/'):
-        raise ValueError(f'remote url is not an image: content-type={content_type}')
+        raise ToolExecutionError(
+            f'Remote URL is not an image: content-type={content_type}.'
+        )
     dest_dir = Path(_upload_root()).resolve() / _UPLOAD_SUBDIR
     dest_dir.mkdir(parents=True, exist_ok=True)
     suffix = '.jpg'
@@ -130,7 +133,9 @@ def _download_remote_image_to_upload(url: str) -> str:
 def _resolve_source_image_paths(urls: List[str]) -> List[str]:
     candidates = [str(item).strip() for item in urls if str(item or '').strip()]
     if not candidates:
-        raise ValueError('at least one source image url is required for image editing')
+        raise ToolExecutionError(
+            'At least one source image URL is required for image editing.'
+        )
 
     resolved: List[str] = []
     seen: set[str] = set()
@@ -144,7 +149,9 @@ def _resolve_source_image_paths(urls: List[str]) -> List[str]:
             seen.add(local_path)
             resolved.append(local_path)
     if not resolved:
-        raise ValueError('no valid source image files resolved')
+        raise ToolExecutionError(
+            'No valid source image files could be resolved.'
+        )
     return resolved
 
 
@@ -158,12 +165,12 @@ def run_image_model(
 ) -> Dict[str, Any]:
     text = str(prompt or '').strip()
     if not text:
-        raise ValueError('prompt is required')
+        raise ToolExecutionError('prompt is required')
 
     size = str(image_size or _DEFAULT_IMAGE_SIZE).strip() or _DEFAULT_IMAGE_SIZE
     count = int(batch_size or _DEFAULT_BATCH_SIZE)
     if count < 1:
-        raise ValueError('batch_size must be at least 1')
+        raise ToolExecutionError('batch_size must be at least 1')
 
     call_kwargs: Dict[str, Any] = {
         'image_size': size,
@@ -177,13 +184,14 @@ def run_image_model(
     raw = model(text, stream_output=False, **call_kwargs)
     temp_paths = _parse_generated_files(raw)
     if not temp_paths:
-        raise ValueError('model returned no generated image files')
+        raise ToolExecutionError(
+            'Model returned no generated image files.'
+        )
     paths = _relocate_generated_images(temp_paths)
     _register_generated_image_paths(paths)
     images = [_build_image_payload(path, label=basename_from_path(path)) for path in paths]
     primary = images[0]
     return {
-        'success': True,
         'prompt': text,
         'image_size': size,
         'batch_size': count,
