@@ -1,0 +1,134 @@
+locale: en-US
+
+classification:
+  category: Writing and creation
+  tags:
+    - Long-form writing
+    - Reports and proposals
+    - Professional documents
+
+presentation:
+  card:
+    title: Structured long-form writing
+    description: Turn scattered material and ideas into clear, evidence-aware, ready-to-use professional documents
+    output_type: document
+    output_label: Professional document
+    cover_asset: cover
+    result_summary: Move from goals, sources, and audience to an outline, complete draft, quality review, and actionable conclusions
+  detail:
+    title: Structured long-form writing
+    description: Create reports, proposals, PRDs, technical documents, and professional articles by clarifying the goal and audience, organizing evidence, planning the structure, drafting section by section, and reviewing quality.
+    attachment_hint: Reference material, webpages, meeting notes, data, or an existing draft (optional)
+
+tasks:
+  - id: report-writing
+    selector:
+      title: Analytical report
+      description: Turn source material into a report with a framework, findings, conclusions, and recommendations
+      output_label: Analytical report
+    launch:
+      prompt_short: Use my source material to write a rigorous analytical report with clear conclusions.
+      prompt: Write a professional analytical report from the topic, source material, and target audience I provide. Identify the analytical question, scope, and evidence gaps before outlining and drafting the report. Distinguish facts, judgments, and assumptions, and include key findings, conclusions, recommendations, and missing information. Ask one focused set of questions if essential information could materially change the direction.
+    replay:
+      steps:
+        - title: Define the question and audience
+          description: Confirm the report goal, readers, scope, and decision it should support
+        - title: Organize sources and evidence
+          description: Separate facts, judgments, assumptions, and information still needed
+        - title: Design the analytical structure
+          description: Build an analytical framework and outline that serve the central question
+        - title: Draft and review quality
+          description: Complete the report, conclusions, and recommendations, then review logic, evidence, and readability
+    result:
+      template: generic_report_v1
+      eyebrow: Analytical report
+      title: Structured analytical report
+      summary: Produce a complete report with a defined scope, evidence, key findings, conclusions, and actions
+      highlights:
+        - Clear analytical question and scope
+        - Traceable facts, judgments, and assumptions
+        - Decision-oriented conclusions and recommendations
+
+  - id: proposal-planning
+    selector:
+      title: Proposal and plan
+      description: Turn goals and constraints into an actionable proposal, implementation plan, or improvement roadmap
+      output_label: Implementation proposal
+    launch:
+      prompt_short: Write an actionable and testable implementation proposal around my goals and constraints.
+      prompt: Write an actionable proposal or plan from the background, goals, constraints, and material I provide. Explain the problem and objectives, scope, core design, phased implementation, dependencies, risk responses, and acceptance criteria. Do not replace concrete actions with vague value statements. Ask one focused set of questions if essential constraints are missing.
+    replay:
+      steps:
+        - title: Define goals and boundaries
+          description: Clarify the problem, success criteria, scope, and constraints
+        - title: Design the core proposal
+          description: Describe the key components, mechanisms, tradeoffs, and dependencies
+        - title: Plan the implementation
+          description: Break the work into phases, milestones, responsibilities, and deliverables
+        - title: Complete risks and acceptance
+          description: Check risks, mitigations, and verifiable completion criteria
+    result:
+      template: generic_report_v1
+      eyebrow: Implementation proposal
+      title: Actionable implementation proposal
+      summary: Produce a proposal with clear goals, boundaries, an executable path, and acceptance criteria
+      highlights:
+        - Explicit goals, scope, and tradeoffs
+        - Phased implementation and dependencies
+        - Risk responses and acceptance criteria
+
+  - id: product-technical-document
+    selector:
+      title: PRD and technical document
+      description: Create a requirements or technical design document that product, engineering, and QA can execute together
+      output_label: Product or technical document
+    launch:
+      prompt_short: Use my requirements and constraints to write a complete PRD or technical design document.
+      prompt: Write a PRD or technical design document for review and execution using the user problem, business goals, requirements, technical context, and constraints I provide. Define goals, non-goals, scenarios, flows, features or modules, exception boundaries, metrics, risks, and acceptance. Choose the structure that fits the task instead of mechanically applying a template.
+    replay:
+      steps:
+        - title: Clarify requirements and constraints
+          description: Identify the user problem, business goals, technical conditions, and non-goals
+        - title: Design the document structure
+          description: Organize flows, features, and modules for a PRD or technical design
+        - title: Complete boundaries and metrics
+          description: Define exceptions, quality requirements, metrics, and dependencies
+        - title: Deliver a review-ready draft
+          description: Produce a complete document for product, engineering, and QA review
+    result:
+      template: generic_report_v1
+      eyebrow: Product or technical document
+      title: Review-ready PRD or technical design
+      summary: Turn requirements and constraints into a document with aligned goals, flows, functions, boundaries, and acceptance
+      highlights:
+        - Goals, non-goals, and user scenarios
+        - Process, feature, or technical module design
+        - Exception boundaries, metrics, and acceptance
+
+  - id: professional-article
+    selector:
+      title: Professional article
+      description: Turn an argument and source material into a natural, well-supported blog post or article
+      output_label: Professional article
+    launch:
+      prompt_short: Write a natural and insightful professional article around my topic and point of view.
+      prompt: Write a professional blog post or article from the topic, central argument, audience, and source material I provide. Open with a clear problem, support the argument with sources, explanations, and examples, and avoid formulaic language. End by resolving the central point and leaving readers with useful or transferable insight.
+    replay:
+      steps:
+        - title: Distill the central argument
+          description: Define the question, audience, and main judgment the article should deliver
+        - title: Design the reasoning path
+          description: Organize sources, explanations, examples, and section-to-section progression
+        - title: Draft natural prose
+          description: Write section by section while reducing clichés, repetition, and manual-like language
+        - title: Review and resolve
+          description: Check reasoning, facts, pacing, and the value delivered by the conclusion
+    result:
+      template: generic_report_v1
+      eyebrow: Professional article
+      title: A professional article with a clear argument
+      summary: Produce an audience-aware article with a clear argument, complete reasoning, and natural prose
+      highlights:
+        - A clear problem and central argument
+        - Reasoning built from sources, explanations, and examples
+        - Natural prose and a useful conclusion
