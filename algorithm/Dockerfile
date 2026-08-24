@@ -32,7 +32,7 @@ RUN set -eu; \
         "$f"; \
     done; \
     apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates curl git ffmpeg build-essential gcc fonts-wqy-zenhei \
+        ca-certificates curl git ffmpeg fonts-noto-cjk build-essential gcc fonts-wqy-zenhei \
         libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 libxcb1 \
         python3-dev ripgrep \
     && update-ca-certificates \

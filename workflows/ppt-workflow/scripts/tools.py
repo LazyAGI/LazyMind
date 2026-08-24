@@ -1873,6 +1873,15 @@ def _apply_html_ops(html: str, ops: list[dict]) -> tuple[str, list[str], list[st
                 body_end = inner.rfind('</')
                 body = inner[:body_end] if body_end >= 0 else inner
                 if '<' in body.strip():
+                    if op.get('scope') == 'element':
+                        old_value = _strip_tags(body).strip()
+                        start = node['open_end']
+                        html = html[:start] + escaped_value + html[start + len(body):]
+                        if old_value:
+                            removed_texts.append(old_value)
+                        applied.append(f'retexted el="{el}" contents -> {value!r}')
+                        html = _sync_doc_title(html, old_value, escaped_value, applied)
+                        continue
                     if not needle:
                         raise ValueError(
                             f'el="{el}" wraps nested markup; pass match as well to say which '
@@ -4159,7 +4168,11 @@ def _selection_edit_ops(
     el = _coerce_str(selection.get('el'))
     if not el:
         raise ValueError("PPT HTML selection requires a data-el target")
-    target = _resolve_el(tree, el, {})[0]
+    target_ref: dict[str, Any] = {'el': el}
+    raw_index = _coerce_str(selection.get('index'))
+    if raw_index:
+        target_ref['index'] = _coerce_int(raw_index, 0, lo=1)
+    target = _resolve_el(tree, el, target_ref)[0]
     node = tree.nodes[target]
     selected_text = _coerce_str(selection.get('selected_text')).strip()
     if selected_text:
@@ -4180,14 +4193,14 @@ def _selection_edit_ops(
 
     styles = _deterministic_selection_styles(command, selection)
     if styles:
-        return [{'op': 'set_style', 'el': el, 'styles': styles}], old_text, old_text
+        return [{'op': 'set_style', **target_ref, 'styles': styles}], old_text, old_text
 
     if re.search(r'(?:删除|删掉|移除|去掉|delete|remove)', command, re.I):
         use_group = bool(group and re.search(r'(?:整组|整个组|整个模块|整块|all|group)', command, re.I))
         if use_group:
             op = {'op': 'delete_node', 'group': group}
         else:
-            op = {'op': 'delete_node', 'el': el, 'scope': 'item'}
+            op = {'op': 'delete_node', **target_ref, 'scope': 'item'}
             old_text = tree.node_text(tree.find_repeated_item(target)).strip()
         return [op], old_text, ''
 
@@ -4199,16 +4212,30 @@ def _selection_edit_ops(
         value = replacement.group(1).strip().strip('“”\"\'')
         if not value:
             raise ValueError('replacement text must not be empty')
-        op: dict[str, Any] = {'op': 'replace_text', 'el': el, 'value': value}
+        op: dict[str, Any] = {'op': 'replace_text', **target_ref, 'value': value}
         inner = tree.html[node['open_end']:node['end']]
-        if '<' in inner[:inner.rfind('</') if '</' in inner else len(inner)].strip() and old_text:
-            op['match'] = old_text
+        has_nested_markup = '<' in inner[
+            :inner.rfind('</') if '</' in inner else len(inner)
+        ].strip()
+        if has_nested_markup and selected_text:
+            # Only use a leaf-text match when that exact text was verified in
+            # the source. Rendered text may span styling tags (for example
+            # <span>赛博朋克</span>2077) and cannot be matched as one HTML slice.
+            op['match'] = selected_text
+        elif has_nested_markup and node['tag'] in {
+            'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'li', 'td', 'th',
+            'figcaption', 'label', 'button',
+        }:
+            # Child tags only style portions of this semantic text element.
+            # The exact data-el occurrence keeps whole-content replacement local.
+            op['scope'] = 'element'
         return [op], old_text, value
 
     prompt = json.dumps({
         'instruction': command,
         'selected_element': {
             'el': el,
+            'index': target_ref.get('index'),
             'group': group or None,
             'tag': node['tag'],
             'classes': node['classes'],
@@ -4234,18 +4261,28 @@ def _selection_edit_ops(
         value = _coerce_str(planned.get('value'))
         if not value:
             raise ValueError('AI edit planner returned empty replacement text')
-        op = {'op': name, 'el': el, 'value': value}
+        op = {'op': name, **target_ref, 'value': value}
         inner = tree.html[node['open_end']:node['end']]
-        if '<' in inner[:inner.rfind('</') if '</' in inner else len(inner)].strip() and old_text:
-            op['match'] = old_text
+        has_nested_markup = '<' in inner[
+            :inner.rfind('</') if '</' in inner else len(inner)
+        ].strip()
+        if has_nested_markup and selected_text:
+            op['match'] = selected_text
+        elif has_nested_markup and node['tag'] in {
+            'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'p', 'li', 'td', 'th',
+            'figcaption', 'label', 'button',
+        }:
+            op['scope'] = 'element'
         return [op], old_text, value
     if name == 'delete_node':
         delete_target = tree.find_repeated_item(target)
         return [
-            {'op': name, 'el': el, 'scope': 'item'},
+            {'op': name, **target_ref, 'scope': 'item'},
         ], tree.node_text(delete_target).strip(), ''
     if name == 'set_style':
-        return [{'op': name, 'el': el, 'styles': planned.get('styles')}], old_text, old_text
+        return [{
+            'op': name, **target_ref, 'styles': planned.get('styles'),
+        }], old_text, old_text
     raise ValueError('AI edit planner returned an unsupported operation')
 
 
@@ -4308,8 +4345,15 @@ def ppt_preview_selection_edit(
         'representation': 'ppt_html',
         'target': {
             'type': 'block',
-            'block_type': tree.nodes[_resolve_el(tree, _coerce_str(selection.get('el')), {})[0]]['tag'],
+            'block_type': tree.nodes[_resolve_el(
+                tree,
+                _coerce_str(selection.get('el')),
+                {'index': selection.get('index')}
+                if _coerce_str(selection.get('index')) else {},
+            )[0]]['tag'],
             'el': _coerce_str(selection.get('el')),
+            'index': _coerce_int(selection.get('index'), 0, lo=1)
+            if _coerce_str(selection.get('index')) else None,
             'group': _coerce_str(selection.get('group')) or None,
             'page': source_page,
         },

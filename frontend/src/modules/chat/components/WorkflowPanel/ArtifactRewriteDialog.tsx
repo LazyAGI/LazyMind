@@ -226,6 +226,7 @@ export function ArtifactRewriteDialog({
                   type: 'ppt_html',
                   page: selection.page,
                   el: selection.el,
+                  ...(selection.index ? { index: selection.index } : {}),
                   ...(selection.group ? { group: selection.group } : {}),
                   ...(selection.selectedText
                     ? { selected_text: selection.selectedText }

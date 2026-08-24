@@ -55,6 +55,30 @@ export function fitSlideFrame(containerW: number, containerH: number): FittedFra
   };
 }
 
+/** Return the clicked element's stable 1-based occurrence for duplicate data-el ids. */
+export function dataElOccurrenceIndex(target: HTMLElement): number {
+  const el = target.dataset.el;
+  if (!el) return 1;
+  const matches = Array.from(
+    target.ownerDocument.querySelectorAll<HTMLElement>('[data-el]'),
+  ).filter((candidate) => candidate.dataset.el === el);
+  const offset = matches.indexOf(target);
+  return offset >= 0 ? offset + 1 : 1;
+}
+
+/**
+ * A styled heading often contains spans only for color/layout. Clicking one of
+ * those spans still means editing the whole heading. For a larger addressable
+ * card/section, keep the exact nested node text so local edits stay bounded.
+ */
+export function pptClickedText(target: HTMLElement, clicked: HTMLElement): string {
+  const targetOwnsText = /^(H[1-6]|P|LI|TD|TH|FIGCAPTION|LABEL|BUTTON)$/i.test(
+    target.tagName,
+  );
+  const source = targetOwnsText ? target : clicked;
+  return (source.innerText || source.textContent || target.innerText || target.textContent || '').trim();
+}
+
 function scaleFromViewport(): number {
   if (typeof window === 'undefined') return 0.8;
   return Math.max(0.25, Math.min(
@@ -202,6 +226,7 @@ export function SlotHtmlSlide({
       type: 'ppt_html',
       page,
       el: target.dataset.el || '',
+      index: dataElOccurrenceIndex(target),
       ...(target.dataset.group ? { group: target.dataset.group } : {}),
       ...(computed ? {
         computed_style: {
@@ -218,13 +243,7 @@ export function SlotHtmlSlide({
       // actually clicked a nested heading/span. Preserve that exact visible
       // text so the Workflow action changes the intended leaf instead of
       // trying to replace every label inside the outer container.
-      selectedText: (
-        clicked.innerText
-        || clicked.textContent
-        || target.innerText
-        || target.textContent
-        || ''
-      ).trim(),
+      selectedText: pptClickedText(target, clicked),
       anchor: {
         left,
         top: below ? bottomEdge : topEdge,
