@@ -7,7 +7,12 @@ import "./index.scss";
 
 type FeaturedSkillType = "chat" | "work";
 
-export default function FeaturedCases({ type }: { type: FeaturedSkillType }) {
+interface FeaturedCasesProps {
+  type: FeaturedSkillType;
+  onTry?: (item: ShowcaseCase) => void;
+}
+
+export default function FeaturedCases({ type, onTry }: FeaturedCasesProps) {
   const { i18n, t } = useTranslation();
   const locale = i18n.resolvedLanguage || i18n.language;
   const [items, setItems] = useState<ShowcaseCase[]>([]);
@@ -53,7 +58,7 @@ export default function FeaturedCases({ type }: { type: FeaturedSkillType }) {
       ) : (
         <div className="showcase-grid showcase-featured-grid">
           {featuredItems.map((item) => (
-            <CaseCard key={item.id} item={item} />
+            <CaseCard key={item.id} item={item} onTry={onTry} />
           ))}
         </div>
       )}

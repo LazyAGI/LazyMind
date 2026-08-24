@@ -778,7 +778,7 @@ const enUS = {
     preparingSkill: "Preparing the featured capability. You can send when it is ready.",
     skillInstallFailed: "The featured capability could not be installed. Go back and try again.",
     retrySkillInstall: "Retry install",
-    clearCase: "Clear case",
+    clearCase: "Clear template",
     chooseTask: "Choose the task you want to complete",
     taskSelectionHint: "Choose a task before starting the conversation",
     selectedSkill: "Selected featured Skill",

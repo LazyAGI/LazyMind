@@ -752,7 +752,7 @@ const zhCN = {
     preparingSkill: "正在准备精选能力，完成后即可发送消息",
     skillInstallFailed: "精选能力安装失败，请返回后重试",
     retrySkillInstall: "重新安装",
-    clearCase: "清除案例",
+    clearCase: "清除模板",
     chooseTask: "选择你想完成的任务",
     taskSelectionHint: "选择任务后开始对话",
     selectedSkill: "已选择的精选能力",
