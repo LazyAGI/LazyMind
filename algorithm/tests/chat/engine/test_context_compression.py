@@ -284,6 +284,57 @@ def test_prune_preserves_original_history_and_recent_tool_results() -> None:
     assert projected[2]['tool_call_id'] == '1'
 
 
+def test_prune_accepts_target_hit_even_when_min_reclaim_is_unmet() -> None:
+    old = 'ERROR boom\n' + ('shell log line\n' * 800)
+    history = [
+        {'role': 'assistant', 'content': '', 'tool_calls': [{'id': '1', 'function': {'name': 'run_script'}}]},
+        {'role': 'tool', 'name': 'run_script', 'tool_call_id': '1', 'content': old},
+    ]
+    budget = build_context_budget(8_000, reserved_output_tokens=0, trigger_ratio=0.1, target_ratio=0.9)
+    projected, event = prune_tool_results(
+        history,
+        keep_recent=0,
+        budget=budget,
+        trigger='pre_turn',
+        min_reclaim_tokens=10 ** 9,
+    )
+    assert event.decision == 'pruned'
+    assert event.estimated_after <= budget.target_tokens
+    assert projected[1]['content'] != old
+
+
+def test_proportional_min_reclaim_abandons_when_still_over_target(monkeypatch) -> None:
+    from lazymind.config import config
+
+    history = [
+        {'role': 'assistant', 'content': '', 'tool_calls': [{'id': '1'}]},
+        {'role': 'tool', 'name': 'url_fetch', 'tool_call_id': '1', 'content': 'body ' * 2000},
+        {'role': 'assistant', 'content': '', 'tool_calls': [{'id': '2'}]},
+        {'role': 'tool', 'name': 'url_fetch', 'tool_call_id': '2', 'content': 'keep-recent'},
+    ]
+
+    def fake_compact(tool_name, content, **_kwargs):
+        text = str(content)
+        compacted = text[:-80] if len(text) > 80 else text
+        return compacted, 'generic', 400, 380, '', 0
+
+    monkeypatch.setattr(
+        'lazymind.chat.engine.agent_runtime.pruner.compact_or_spill_tool_result',
+        fake_compact,
+    )
+    budget = build_context_budget(2_000, reserved_output_tokens=0, trigger_ratio=0.05, target_ratio=0.01)
+    with config.temp('context_prune_min_reclaim_ratio', 0.9):
+        projected, event = prune_tool_results(
+            history,
+            keep_recent=1,
+            budget=budget,
+            trigger='pre_turn',
+        )
+    assert event.decision == 'abandoned'
+    assert event.reason == 'reclaim_below_threshold'
+    assert projected == history
+
+
 def test_mid_turn_compactor_callback_compacts_old_tools() -> None:
     from lazymind.config import config
 

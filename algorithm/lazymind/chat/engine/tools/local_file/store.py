@@ -4,14 +4,20 @@ import hashlib
 import json
 import os
 import secrets
+import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Iterator, List, Optional
+
+from filelock import SoftFileLock, Timeout
 
 INDEX_NAME = 'index.json'
 MANIFEST_NAME = 'manifest.json'
 PARSED_NAME = 'parsed.md'
 RESOURCES_DIR = 'file-resources'
+INDEX_LOCK_NAME = 'index.lock'
+_LOCK_TIMEOUT_SECONDS = 60.0
 
 
 def new_file_id() -> str:
@@ -50,12 +56,44 @@ def workspace_for_request(user_id: str | None = None, conversation_id: str | Non
     return chat_agent_workspace(uid, cid)
 
 
+def _atomic_write_text(path: Path, text: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f'{path.name}.{os.getpid()}.{secrets.token_hex(4)}.tmp')
+    try:
+        tmp.write_text(text, encoding='utf-8')
+        os.replace(tmp, path)
+    finally:
+        if tmp.exists():
+            try:
+                tmp.unlink()
+            except OSError:
+                pass
+
+
 class FileResourceStore:
     def __init__(self, workspace: str):
         self.workspace = os.path.realpath(workspace)
         self.root = Path(self.workspace) / RESOURCES_DIR
         self.root.mkdir(parents=True, exist_ok=True)
         self.index_path = self.root / INDEX_NAME
+        self._thread_lock = threading.Lock()
+        self._file_lock = SoftFileLock(str(self.root / INDEX_LOCK_NAME))
+
+    @contextmanager
+    def index_lock(self) -> Iterator[None]:
+        self._thread_lock.acquire()
+        try:
+            self._file_lock.acquire(timeout=_LOCK_TIMEOUT_SECONDS)
+            try:
+                yield
+            finally:
+                self._file_lock.release()
+        except Timeout as exc:
+            raise TimeoutError(
+                f'timed out waiting for file-resource index lock in {self.root}'
+            ) from exc
+        finally:
+            self._thread_lock.release()
 
     def resource_dir(self, file_id: str) -> Path:
         if not str(file_id or '').startswith('fr_') or '/' in file_id or '\\' in file_id:
@@ -77,11 +115,12 @@ class FileResourceStore:
 
     def _write_index(self, items: List[Dict[str, Any]]) -> None:
         payload = {'items': items}
-        tmp = self.index_path.with_suffix('.tmp')
-        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
-        os.replace(tmp, self.index_path)
+        _atomic_write_text(
+            self.index_path,
+            json.dumps(payload, ensure_ascii=False, indent=2),
+        )
 
-    def upsert_index(self, manifest: Dict[str, Any]) -> None:
+    def _upsert_index_unlocked(self, manifest: Dict[str, Any]) -> None:
         items = self.load_index()
         file_id = manifest['file_id']
         summary = {
@@ -104,6 +143,10 @@ class FileResourceStore:
         if not replaced:
             items.append(summary)
         self._write_index(items)
+
+    def upsert_index(self, manifest: Dict[str, Any]) -> None:
+        with self.index_lock():
+            self._upsert_index_unlocked(manifest)
 
     def find_by_sha256(self, digest: str) -> Optional[Dict[str, Any]]:
         digest = str(digest or '').strip()
@@ -145,17 +188,21 @@ class FileResourceStore:
             return None
         return data if isinstance(data, dict) else None
 
-    def write_manifest(self, manifest: Dict[str, Any]) -> Dict[str, Any]:
-        file_id = manifest['file_id']
-        directory = self.resource_dir(file_id)
-        directory.mkdir(parents=True, exist_ok=True)
-        manifest.setdefault('created_at', _utc_now())
-        path = directory / MANIFEST_NAME
-        tmp = path.with_suffix('.tmp')
-        tmp.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding='utf-8')
-        os.replace(tmp, path)
-        self.upsert_index(manifest)
-        return manifest
+    def write_manifest(self, manifest: Dict[str, Any], *, _locked: bool = False) -> Dict[str, Any]:
+        def _write() -> Dict[str, Any]:
+            file_id = manifest['file_id']
+            directory = self.resource_dir(file_id)
+            directory.mkdir(parents=True, exist_ok=True)
+            manifest.setdefault('created_at', _utc_now())
+            path = directory / MANIFEST_NAME
+            _atomic_write_text(path, json.dumps(manifest, ensure_ascii=False, indent=2))
+            self._upsert_index_unlocked(manifest)
+            return manifest
+
+        if _locked:
+            return _write()
+        with self.index_lock():
+            return _write()
 
     def empty_manifest(
         self,

@@ -299,3 +299,103 @@ def test_read_user_attachment_honors_turn(monkeypatch, tmp_path):
     assert selected['result']['status'] == 'ok'
     assert 'first-turn-body' in selected['result']['content']
     assert 'second-turn-body' not in selected['result']['content']
+
+
+def test_concurrent_index_upserts_keep_both_entries(tmp_path):
+    import threading
+
+    store = FileResourceStore(str(tmp_path))
+    barrier = threading.Barrier(2)
+    errors = []
+
+    def upsert(name):
+        try:
+            barrier.wait(timeout=5)
+            store.write_manifest(store.empty_manifest(
+                file_id=f'fr_{name}',
+                display_name=f'{name}.pdf',
+                source='upload',
+                source_url=None,
+                source_path=str(tmp_path / f'{name}.pdf'),
+                original_path=str(tmp_path / f'{name}.pdf'),
+                content_sha256=name,
+                bytes_count=1,
+                turn_seq=1,
+                parse_status='ready',
+            ))
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [
+        threading.Thread(target=upsert, args=('aaaaaa',)),
+        threading.Thread(target=upsert, args=('bbbbbb',)),
+    ]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+
+    ids = {item['file_id'] for item in store.load_index()}
+    assert errors == []
+    assert ids == {'fr_aaaaaa', 'fr_bbbbbb'}
+
+
+def test_reupload_ready_pdf_refreshes_turn_seq(monkeypatch, tmp_path):
+    store = FileResourceStore(str(tmp_path))
+    src = _write_pdf(tmp_path / 'paper.pdf', b'%PDF same-bytes')
+    monkeypatch.setattr(
+        'lazymind.chat.engine.tools.local_file.ingest.parse_pdf_pages',
+        lambda path: [(1, 'body')],
+    )
+    first = ingest_pdf_file(str(src), display_name='paper.pdf', turn_seq=1, store=store)
+    second = ingest_pdf_file(str(src), display_name='paper.pdf', turn_seq=3, store=store)
+    catalog = render_file_resource_catalog(store, current_turn_seq=3)
+
+    assert first['file_id'] == second['file_id']
+    assert second['turn_seq'] == 3
+    assert '[CURRENT]' in catalog
+    assert 'Turn 3' in catalog
+
+
+def test_concurrent_same_pdf_ingest_shares_file_id(monkeypatch, tmp_path):
+    import threading
+
+    store = FileResourceStore(str(tmp_path))
+    src = _write_pdf(tmp_path / 'paper.pdf', b'%PDF concurrent')
+    started = threading.Event()
+    release = threading.Event()
+
+    def slow_parse(_path):
+        started.set()
+        assert release.wait(timeout=5)
+        return [(1, 'shared body')]
+
+    monkeypatch.setattr(
+        'lazymind.chat.engine.tools.local_file.ingest.parse_pdf_pages',
+        slow_parse,
+    )
+    results = [None, None]
+    errors = []
+
+    def run(index):
+        try:
+            results[index] = ingest_pdf_file(
+                str(src), display_name='paper.pdf', turn_seq=index + 1, store=store,
+            )
+        except Exception as exc:
+            errors.append(exc)
+
+    first = threading.Thread(target=run, args=(0,))
+    second = threading.Thread(target=run, args=(1,))
+    first.start()
+    assert started.wait(timeout=5)
+    second.start()
+    release.set()
+    first.join(timeout=10)
+    second.join(timeout=10)
+
+    assert errors == []
+    assert results[0]['file_id'] == results[1]['file_id']
+    assert results[0]['parse_status'] == 'ready'
+    assert results[1]['parse_status'] == 'ready'
+    assert len(store.load_index()) == 1

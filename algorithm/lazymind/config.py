@@ -311,6 +311,24 @@ config.add(
     description='Estimated relative cost of invalidating one previously cached prompt token.',
 )
 config.add(
+    'context_prune_min_reclaim_ratio',
+    float,
+    0.05,
+    'CONTEXT_PRUNE_MIN_RECLAIM_RATIO',
+    description=(
+        'Minimum tokens a non-spill prune must reclaim, as a fraction of the '
+        'effective input budget. Ignored when the result is already at or below '
+        'target_tokens. 0 disables the proportional floor.'
+    ),
+)
+config.add(
+    'context_prune_min_reclaim_tokens_cap',
+    int,
+    20000,
+    'CONTEXT_PRUNE_MIN_RECLAIM_TOKENS_CAP',
+    description='Upper bound on the proportional min-reclaim floor.',
+)
+config.add(
     'context_compression_spill_bytes',
     int,
     16384,

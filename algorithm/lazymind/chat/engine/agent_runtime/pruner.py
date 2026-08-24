@@ -66,7 +66,7 @@ def prune_tool_results(
     Oversized tool results are spilled even when they sit in the keep_recent window.
     """
     keep_recent = max(0, int(keep_recent))
-    min_reclaim = max(0, int(min_reclaim_tokens or 0))
+    min_reclaim = _resolved_min_reclaim(budget, min_reclaim_tokens)
     before_total = (
         int(estimated_total_tokens)
         if estimated_total_tokens is not None
@@ -163,7 +163,12 @@ def prune_tool_results(
         _log_event(event)
         return list(history), event
 
-    if not spilled and not force and reclaimed < min_reclaim:
+    if (
+        not spilled
+        and not force
+        and after_total > budget.target_tokens
+        and reclaimed < min_reclaim
+    ):
         event = PruneEvent(
             trigger=trigger,
             decision='abandoned',
@@ -308,6 +313,19 @@ def _event_with_metrics(
     )
 
 
+def _resolved_min_reclaim(
+    budget: ContextBudget,
+    min_reclaim_tokens: Optional[int],
+) -> int:
+    if min_reclaim_tokens is not None:
+        return max(0, int(min_reclaim_tokens))
+    ratio = max(0.0, float(config['context_prune_min_reclaim_ratio']))
+    cap = max(0, int(config['context_prune_min_reclaim_tokens_cap']))
+    if ratio <= 0 or cap <= 0:
+        return 0
+    return min(cap, max(0, round(budget.effective_input_budget * ratio)))
+
+
 def _pressure_rearm_tokens(after_total: int, budget: ContextBudget) -> int:
     hysteresis = max(1, budget.trigger_tokens - budget.target_tokens)
     return max(budget.trigger_tokens, after_total + hysteresis)
@@ -327,6 +345,9 @@ def _candidate_acceptance(
         return False, 'context_safety_more_reclaim_needed'
     if after_total <= budget.target_tokens:
         return True, 'target_reached'
+    min_reclaim = _resolved_min_reclaim(budget, None)
+    if metrics['reclaimed_tokens'] < min_reclaim:
+        return False, 'reclaim_below_threshold'
     configured_horizon = max(1, int(config['context_prune_cache_amortization_calls']))
     horizon = configured_horizon
     if remaining_rounds is not None:
