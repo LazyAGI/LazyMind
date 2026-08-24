@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { AgentAppsAuth } from "@/components/auth";
 import { axiosInstance, localizeErrorCode } from "@/components/request";
 import { Method, SSE } from "@/modules/chat/utils/sse";
-import { TaskServiceApi, convEventsUrl } from "@/modules/chat/utils/request";
+import { TaskServiceApi, convEventsUrl, taskStreamUrl } from "@/modules/chat/utils/request";
 import { resolveCoreAssetUrl } from "@/modules/knowledge/utils/imageUrl";
 import UIUtils from "@/modules/chat/utils/ui";
 import { WORKFLOW_GRAPH_REFRESH_EVENT } from "@/components/StateGraphModal";
@@ -15,6 +15,7 @@ import type { ChatSource } from "@/modules/chat/utils/sourceAdapter";
 
 let convReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let workflowRefreshTimer: ReturnType<typeof setTimeout> | null = null;
+const taskReconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
 
 function scheduleWorkflowSessionRefresh(conversationId: string, delayMs = 100): void {
   if (workflowRefreshTimer) clearTimeout(workflowRefreshTimer);
@@ -38,6 +39,13 @@ export type TaskStatus =
   | "failed"
   | "interrupted"
   | "canceled";
+
+const TERMINAL_TASK_STATUSES = new Set<TaskStatus>([
+  "succeeded",
+  "failed",
+  "interrupted",
+  "canceled",
+]);
 
 export interface TaskArtifact {
   slot: string;
@@ -118,8 +126,8 @@ export interface SubAgentTask {
   execution_log: TaskLogEntry[];
 }
 
-export function isTaskCenterVisibleTask(task: Pick<SubAgentTask, 'agent_type'>): boolean {
-  return task.agent_type !== 'workflow_step';
+export function isTaskCenterVisibleTask(_task: Pick<SubAgentTask, 'agent_type'>): boolean {
+  return true;
 }
 
 function artifactKey(a: TaskArtifact): string {
@@ -147,12 +155,15 @@ interface TaskCenterStore {
   _loadingTasks: Record<string, boolean>;
   _taskLoadErrors: Record<string, boolean>;
   _loadingArtifacts: Record<string, boolean>;
-  // The only background execution stream: one connection for the active conversation.
+  // Conversation lifecycle stream plus granular execution streams keyed by task ID.
   _convStream: SSE | null;
+  _taskStreams: Record<string, SSE>;
 
   getTasks: (conversationId: string) => SubAgentTask[];
   upsertTask: (conversationId: string, task: Partial<SubAgentTask> & { task_id: string }) => void;
   applyTaskEvent: (conversationId: string, taskId: string, event: any) => void;
+  subscribeTask: (conversationId: string, taskId: string) => void;
+  unsubscribeTask: (taskId: string) => void;
   loadArtifactStreamContent: (conversationId: string, taskId: string, artifact: TaskArtifact) => Promise<void>;
   loadConversationTasks: (conversationId: string) => Promise<void>;
   loadConversationArtifacts: (conversationId: string) => Promise<void>;
@@ -205,6 +216,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
   _taskLoadErrors: {},
   _loadingArtifacts: {},
   _convStream: null,
+  _taskStreams: {},
 
   getTasks: (conversationId) => {
     return get().tasksByConversation[conversationId] ?? [];
@@ -487,6 +499,89 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
     });
   },
 
+  subscribeTask: (conversationId, taskId) => {
+    if (!conversationId || !taskId || get()._taskStreams[taskId]) return;
+    const task = get().getTasks(conversationId).find((item) => item.task_id === taskId);
+    if (task && TERMINAL_TASK_STATUSES.has(task.status)) return;
+
+    const sse = new SSE(taskStreamUrl(taskId), {
+      method: Method.GET,
+      headers: {
+        Accept: "text/event-stream",
+        ...AgentAppsAuth.getAuthHeaders(),
+      },
+      timeout: 3600000,
+      callbacks: {
+        message: (e: CustomEvent) => {
+          if (get().activeConversationId !== conversationId) return;
+          const raw = (e as any).data;
+          if (!raw || raw === "[DONE]") return;
+          const event = UIUtils.jsonParser(raw);
+          if (!event?.type) return;
+
+          get().applyTaskEvent(conversationId, taskId, event);
+          if (event.type === "artifact") {
+            const artifact: TaskArtifact = {
+              slot: event.slot,
+              content_type: event.content_type,
+              seq: event.seq ?? 1,
+              value: event.value,
+            };
+            void get().loadArtifactStreamContent(conversationId, taskId, artifact);
+          }
+          if (event.type === "done" || event.type === "error") {
+            get().unsubscribeTask(taskId);
+            void get().loadConversationTasks(conversationId);
+            void get().loadConversationArtifacts(conversationId);
+          }
+        },
+        error: () => {
+          if (get().activeConversationId !== conversationId) return;
+          const stream = get()._taskStreams[taskId];
+          try { stream?.close(); } catch { /* ignore */ }
+          set((state) => {
+            const nextStreams = { ...state._taskStreams };
+            delete nextStreams[taskId];
+            const tasks = state.tasksByConversation[conversationId] ?? [];
+            return {
+              _taskStreams: nextStreams,
+              tasksByConversation: {
+                ...state.tasksByConversation,
+                [conversationId]: tasks.map((item) => item.task_id === taskId
+                  ? { ...item, execution_log: [], artifacts: [] }
+                  : item),
+              },
+            };
+          });
+          void get().loadConversationTasks(conversationId);
+          if (!taskReconnectTimers.has(taskId)) {
+            taskReconnectTimers.set(taskId, setTimeout(() => {
+              taskReconnectTimers.delete(taskId);
+              if (get().activeConversationId === conversationId) {
+                get().subscribeTask(conversationId, taskId);
+              }
+            }, 1000));
+          }
+        },
+      },
+    });
+    set((state) => ({
+      _taskStreams: { ...state._taskStreams, [taskId]: sse },
+    }));
+  },
+
+  unsubscribeTask: (taskId) => {
+    const retryTimer = taskReconnectTimers.get(taskId);
+    if (retryTimer) clearTimeout(retryTimer);
+    taskReconnectTimers.delete(taskId);
+    try { get()._taskStreams[taskId]?.close(); } catch { /* ignore */ }
+    set((state) => {
+      const nextStreams = { ...state._taskStreams };
+      delete nextStreams[taskId];
+      return { _taskStreams: nextStreams };
+    });
+  },
+
   loadArtifactStreamContent: async (conversationId, taskId, artifact) => {
     if (artifact.content_type !== "file") return;
     if (isWriterIRArtifact(artifact)) return;
@@ -580,7 +675,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
     try {
       const res = await TaskServiceApi().listConversationTasks(conversationId);
       const tasks = res?.data?.data?.tasks ?? res?.data?.tasks ?? [];
-      const normalized = tasks.map((t: any): SubAgentTask => ({
+      const normalized: SubAgentTask[] = tasks.map((t: any): SubAgentTask => ({
           task_id: t.task_id,
           conversation_id: conversationId,
           trigger_history_id: t.trigger_history_id,
@@ -608,6 +703,11 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           [conversationId]: normalized,
         },
       }));
+      normalized.forEach((task) => {
+        if (!TERMINAL_TASK_STATUSES.has(task.status)) {
+          get().subscribeTask(conversationId, task.task_id);
+        }
+      });
     } catch {
       set((s) => ({
         _taskLoadErrors: { ...s._taskLoadErrors, [conversationId]: true },
@@ -648,6 +748,8 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
   },
 
   reset: (conversationId) => {
+    const taskIds = get().getTasks(conversationId).map((task) => task.task_id);
+    taskIds.forEach((taskId) => get().unsubscribeTask(taskId));
     get().unsubscribeConvEvents(conversationId);
     set((state) => ({
       tasksByConversation: {
@@ -695,8 +797,8 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             if (payload.agent_type === 'workflow_step') {
               scheduleWorkflowSessionRefresh(conversationId);
             }
-            // Workflow steps stay out of TaskCenter UI, but their live events
-            // still drive Writer outline and draft previews in WorkflowPanel.
+            // Workflow steps stay visible in TaskCenter. Their dedicated task
+            // stream supplies detailed logs and also drives Writer previews.
             get().upsertTask(conversationId, {
               task_id: payload.task_id,
               trigger_history_id: payload.trigger_history_id,
@@ -708,6 +810,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
               created_at: payload.created_at,
               updated_at: payload.updated_at,
             });
+            get().subscribeTask(conversationId, payload.task_id);
           } else if (type === 'task_updated' && payload?.task_id && payload?.event) {
             if (replayed) return;
             const taskEvent = payload.event;
@@ -821,6 +924,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
     if (convReconnectTimer) clearTimeout(convReconnectTimer);
     convReconnectTimer = null;
     cancelWorkflowSessionRefresh();
+    get().getTasks(conversationId).forEach((task) => get().unsubscribeTask(task.task_id));
     try { get()._convStream?.close(); } catch { /* ignore */ }
     set({ activeConversationId: '', _convStream: null });
   },

@@ -136,6 +136,11 @@ export function exportContextPrompt(payload: Record<string, unknown>) {
     .then((response) => response.data as Blob);
 }
 
+// SubAgent task SSE endpoint. Granular execution events are streamed here so
+// they cannot crowd lifecycle events out of the conversation event channel.
+export const taskStreamUrl = (taskId: string) =>
+  `${coreApiBaseUrl}/tasks/${encodeURIComponent(taskId)}:stream`;
+
 // Conversation-level events SSE endpoint.
 export const convEventsUrl = (conversationId: string) =>
   `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/events`;

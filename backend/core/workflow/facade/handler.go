@@ -19,6 +19,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/workflow/artifactfile"
 	workflowexecutor "lazymind/core/workflow/executor"
+	"lazymind/core/workflow/graphengine"
 	workflowstore "lazymind/core/workflow/store"
 )
 
@@ -196,15 +197,45 @@ type preparationGraph struct {
 		Kind     string `json:"kind"`
 		Optional bool   `json:"optional"`
 	} `json:"material_producers"`
+	InputExpressions map[string]graphengine.Expression `json:"input_expressions"`
+}
+
+func collectRequiredInputMaterials(expression graphengine.Expression, materials map[string]struct{}) {
+	if expression.Material != "" {
+		materials[expression.Material] = struct{}{}
+	}
+	for _, nested := range expression.All {
+		collectRequiredInputMaterials(nested, materials)
+	}
+	for _, nested := range expression.Any {
+		// Keep the existing conservative preparation contract for alternatives:
+		// every candidate branch input must be available before the Session starts.
+		collectRequiredInputMaterials(nested, materials)
+	}
 }
 
 func missingExternalInputs(graph preparationGraph, inputBindings map[string]any) []string {
-	missing := []string{}
-	for materialID, producer := range graph.MaterialProducers {
-		if producer.Kind == "external" && !producer.Optional {
-			if _, exists := inputBindings[materialID]; !exists {
-				missing = append(missing, materialID)
+	required := map[string]struct{}{}
+	if graph.InputExpressions == nil {
+		// Backward compatibility for compiled graphs without expression metadata.
+		for materialID, producer := range graph.MaterialProducers {
+			if producer.Kind == "external" && !producer.Optional {
+				required[materialID] = struct{}{}
 			}
+		}
+	} else {
+		for _, expression := range graph.InputExpressions {
+			collectRequiredInputMaterials(expression, required)
+		}
+	}
+	missing := make([]string, 0)
+	for materialID := range required {
+		producer, exists := graph.MaterialProducers[materialID]
+		if !exists || producer.Kind != "external" || producer.Optional {
+			continue
+		}
+		if _, exists := inputBindings[materialID]; !exists {
+			missing = append(missing, materialID)
 		}
 	}
 	sort.Strings(missing)

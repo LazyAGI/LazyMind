@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import pathlib
+import re
 import threading
 from typing import Any, Dict, Optional
 
@@ -85,7 +86,7 @@ class RemoteWorkflowExecutor:
             task = dict(spec.get('task') or {})
             workspace = str(spec['workspace_path'])
             pathlib.Path(workspace).mkdir(parents=True, exist_ok=True)
-            inputs = await self._materialize_inputs(client, attempt_id, lease, context, workspace)
+            inputs = await self._resolve_inputs(client, attempt_id, lease, context, workspace)
         except Exception as exc:
             # A claimed Attempt must never remain stuck merely because Host setup
             # failed before the SubAgent stream started.
@@ -130,10 +131,14 @@ class RemoteWorkflowExecutor:
             output_types = dict(context.get('declared_output_types') or {})
             if output_types:
                 params['output_slot_types'] = output_types
-            attachment_context = dict(params.get('_attachment_context') or {})
-            attachment_context['files'] = list(inputs.values())
-            params['_attachment_context'] = attachment_context
+            input_types = dict(context.get('declared_input_types') or {})
+            direct_value_slots = sorted(self._direct_input_value_slots(context))
+            # Workflow bindings are typed execution inputs, not user uploads. External
+            # scalar parameters stay as values; files and durable upstream artifacts use
+            # fenced local paths. Keep both forms out of attachment-only tools.
             params['remote_inputs'] = inputs
+            params['remote_input_types'] = input_types
+            params['remote_input_value_slots'] = direct_value_slots
             task.update({
                 'id': task_id,
                 'params': params,
@@ -217,17 +222,74 @@ class RemoteWorkflowExecutor:
             # then persisted and invokes existing Chat handoff/synthetic hooks.
             await self.runtime.task_event(client, task_id, lease, terminal_event)
 
-    async def _materialize_inputs(self, client: httpx.AsyncClient, attempt: str, lease: str,
-                                  context: Dict[str, Any], workspace: str) -> Dict[str, str]:
-        result: Dict[str, str] = {}
+    @staticmethod
+    def _input_resource_binding(value: Any) -> bool:
+        if isinstance(value, dict):
+            return value.get('source_type') == 'input_resource'
+        if isinstance(value, list) and value:
+            return all(
+                isinstance(item, dict) and item.get('source_type') == 'input_resource'
+                for item in value
+            )
+        return False
+
+    @classmethod
+    def _direct_input_value_slots(cls, context: Dict[str, Any]) -> set[str]:
+        input_types = context.get('declared_input_types') or {}
+        bindings = context.get('inputs') or {}
+        if not isinstance(input_types, dict) or not isinstance(bindings, dict):
+            return set()
+        return {
+            str(material) for material, binding in bindings.items()
+            if str(input_types.get(str(material)) or '').strip().lower() in {'text', 'json'}
+            and cls._input_resource_binding(binding)
+        }
+
+    @staticmethod
+    def _decode_input_value(item: Dict[str, Any], material_type: str) -> Any:
+        content = base64.b64decode(str(item.get('content_base64') or ''))
+        try:
+            text = content.decode('utf-8')
+        except UnicodeDecodeError as exc:
+            raise ValueError('scalar Workflow input must be valid UTF-8') from exc
+        if material_type == 'json':
+            try:
+                return json.loads(text)
+            except json.JSONDecodeError as exc:
+                raise ValueError('json Workflow input must contain valid JSON') from exc
+        return text
+
+    async def _resolve_inputs(self, client: httpx.AsyncClient, attempt: str, lease: str,
+                              context: Dict[str, Any], workspace: str) -> Dict[str, Any]:
+        result: Dict[str, Any] = {}
         root = pathlib.Path(workspace) / 'inputs'
-        root.mkdir(parents=True, exist_ok=True)
+        direct_slots = self._direct_input_value_slots(context)
+        input_types = context.get('declared_input_types') or {}
         for material in (context.get('inputs') or {}):
             value = await self.runtime.input(client, attempt, lease, str(material))
-            name = pathlib.Path(str(value.get('name') or material)).name or str(material)
-            target = root / name
-            target.write_bytes(base64.b64decode(str(value.get('content_base64') or '')))
-            result[str(material)] = str(target)
+            is_list = isinstance(value.get('items'), list)
+            items = value.get('items') if is_list else [value]
+            if str(material) in direct_slots:
+                material_type = str(input_types.get(str(material)) or 'text').strip().lower()
+                values = [self._decode_input_value(item, material_type) for item in items]
+                result[str(material)] = values if is_list else values[0]
+                continue
+            paths = []
+            list_root = root
+            if is_list:
+                safe_material = re.sub(r'[^0-9A-Za-z_.-]+', '_', str(material)).strip('._') or 'input'
+                list_root = root / safe_material
+                list_root.mkdir(parents=True, exist_ok=True)
+            else:
+                list_root.mkdir(parents=True, exist_ok=True)
+            for index, item in enumerate(items, start=1):
+                name = pathlib.Path(str(item.get('name') or material)).name or str(material)
+                if is_list:
+                    name = f'{index:04d}_{name}'
+                target = list_root / name
+                target.write_bytes(base64.b64decode(str(item.get('content_base64') or '')))
+                paths.append(str(target))
+            result[str(material)] = paths if is_list else paths[0]
         return result
 
     async def _persist_files(self, client: httpx.AsyncClient, attempt: str, lease: str,

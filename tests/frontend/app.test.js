@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  defaultModelConfigPanelSource,
   formRulesSource,
   frontendDockerfileSource,
   indexHtml,
@@ -86,6 +87,12 @@ describe('runtime facade contract', () => {
     expect(routerSource).toContain('runtimeFeatures.hideEvo');
     expect(mainLayoutSource).toContain('runtimeFeatures.hideEvo');
     expect(loginSource).toContain('runtimeFeatures.hideRegister');
+    expect(defaultModelConfigPanelSource).toContain(
+      'import { runtimeFeatures } from "@/runtime/features";',
+    );
+    expect(defaultModelConfigPanelSource).toContain(
+      'runtimeFeatures.hideUserGroupSurfaces',
+    );
     expect(mainLayoutSource).not.toContain('VITE_HIDE_EVO');
     expect(routerSource).not.toContain('VITE_HIDE_EVO');
     expect(loginSource).not.toContain('VITE_HIDE_EVO');

@@ -60,7 +60,7 @@ def test_url_fetch_registers_sources_and_follows_exact_target_url(monkeypatch, r
             'function': {'name': 'url_fetch', 'arguments': {'url': url}},
         })[0]
         assert result['ok'] is True
-        return result['value']['result']
+        return result['value']
 
     root = fetch(url='https://example.test/root')
     child = fetch(url=root['links'][0]['target_url'])
@@ -102,8 +102,8 @@ def test_parallel_url_fetch_calls_register_in_original_tool_call_order(
 
     results = manager(calls)
 
-    assert results[0]['value']['result']['ref'] == '[[1.1]]'
-    assert results[1]['value']['result']['ref'] == '[[2.1]]'
+    assert results[0]['value']['ref'] == '[[1.1]]'
+    assert results[1]['value']['ref'] == '[[2.1]]'
     assert [source['url'] for source in materialize_source_views(reset_web_tool_state)] == [
         'https://example.test/slow',
         'https://example.test/fast',

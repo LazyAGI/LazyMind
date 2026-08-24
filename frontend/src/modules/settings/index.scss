@@ -352,6 +352,7 @@
   background: #fff;
 }
 .settings-knowledge-tool-row {
+  position: relative;
   display: grid;
   min-height: 92px;
   grid-template-columns: 46px minmax(0, 1fr) auto auto 32px;
@@ -359,6 +360,23 @@
   gap: 14px;
   padding: 14px 18px;
 }
+.settings-knowledge-tool-row.is-navigable {
+  transition: background-color .16s ease, box-shadow .16s ease;
+}
+.settings-knowledge-tool-row.is-navigable:hover { background: #f7faff; }
+.settings-knowledge-row-link {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  border-radius: inherit;
+  cursor: pointer;
+}
+.settings-knowledge-row-link:focus-visible {
+  z-index: 1;
+  outline: 2px solid #2f6bff;
+  outline-offset: -2px;
+}
+.settings-knowledge-tool-row > .ant-switch { position: relative; z-index: 2; }
 .settings-knowledge-tool-row + .settings-knowledge-tool-row { border-top: 1px solid #e8eef6; }
 .settings-knowledge-tool-icon {
   display: inline-grid;
@@ -380,9 +398,7 @@
 .settings-knowledge-state.is-attention { color: #a66308; background: #fff6df; }
 .settings-knowledge-state.is-fixed { color: #2563eb; background: #edf5ff; }
 .settings-knowledge-state.is-unavailable { color: #a14242; background: #fff0f0; }
-.settings-knowledge-detail-button.ant-btn { width: 32px; min-width: 32px; height: 32px; padding: 0; color: #4c5e76; }
-.settings-knowledge-detail-button.ant-btn:hover { color: var(--settings-blue-strong); background: #edf5ff; }
-.settings-knowledge-detail-button.ant-btn:focus-visible { outline: 2px solid rgba(47, 109, 246, .42); outline-offset: 2px; }
+.settings-knowledge-detail-icon { justify-self: center; color: #4c5e76; pointer-events: none; }
 .settings-skill-resources { overflow: hidden; border: 1px solid rgba(205, 219, 238, .96); border-radius: 12px; background: rgba(255, 255, 255, .95); box-shadow: 0 12px 30px rgba(44, 81, 132, .06); }
 .settings-skill-resources-head { display: grid; grid-template-columns: 48px minmax(0, 1fr) auto; align-items: center; gap: 14px; padding: 18px 20px; }
 .settings-skill-resources-title-icon,
@@ -1008,7 +1024,7 @@
   .settings-knowledge-tool-icon { width: 40px; height: 40px; grid-column: 1; grid-row: 1 / span 2; }
   .settings-knowledge-tool-copy { grid-column: 2; }
   .settings-knowledge-tool-row > .ant-switch { grid-column: 3; grid-row: 1 / span 2; }
-  .settings-knowledge-detail-button.ant-btn { grid-column: 4; grid-row: 1 / span 2; }
+  .settings-knowledge-detail-icon { grid-column: 4; grid-row: 1 / span 2; }
   .settings-knowledge-state.ant-tag { grid-column: 2; grid-row: 2; justify-self: start; }
   .settings-schedule-row { grid-template-columns: 40px minmax(0, 1fr) auto; gap: 12px; padding: 13px 14px; }
   .settings-schedule-icon { width: 38px; height: 38px; }

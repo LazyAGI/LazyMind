@@ -97,6 +97,9 @@ ATTACHED_FILES_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
         '# Attached file rules\n'
         'Attachments are listed for reference only — do NOT parse or read them automatically.\n'
+        '- Typed Workflow material values, Workflow material paths, and paths returned by tools '
+        'are not attachments. Pass scalar values as values and paths only to file/path arguments; '
+        'never pass them to attachment tools.\n'
         '- Only call an attachment tool for an exact filename listed in the User Attachments '
         'section. If that section says no attachments are available, do not call attachment tools, '
         'guess common filenames, or retry with invented names.\n'

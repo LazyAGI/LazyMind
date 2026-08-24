@@ -145,8 +145,9 @@ func ListTasksByConversation(ctx context.Context, db *gorm.DB, convID string) ([
 	return tasks, nil
 }
 
-// ListTasksByConversationForUser returns all conversation tasks owned by the user,
-// including workflow_step attempts used by the chat-side SubAgent task panel.
+// ListTasksByConversationForUser returns all Task Center tasks owned by the user.
+// Workflow attempts remain tasks too: Workflow Runtime renders their business
+// artifacts, while the Task Center exposes their detailed execution stream.
 func ListTasksByConversationForUser(
 	ctx context.Context, db *gorm.DB, convID, userID string,
 ) ([]orm.SubAgentTask, error) {

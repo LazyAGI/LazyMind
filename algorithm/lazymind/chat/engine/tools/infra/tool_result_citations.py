@@ -59,15 +59,8 @@ def _annotate_external_results(value: Any, state: dict[str, Any]) -> Any:
 
 def _annotate_page_results(value: Any, state: dict[str, Any]) -> Any:
     annotated = copy.deepcopy(value)
-    page = (
-        annotated.get('result')
-        if isinstance(annotated, dict)
-        and annotated.get('success') is True
-        and isinstance(annotated.get('result'), dict)
-        else annotated
-    )
-    if isinstance(page, dict):
-        upsert_external_source(page, state, roles={'searched'})
+    if isinstance(annotated, dict):
+        upsert_external_source(annotated, state, roles={'searched'})
     return annotated
 
 
@@ -114,21 +107,21 @@ class CitationResultMiddleware:
             processed = _annotate_external_results(value, state)
         elif kind == 'knowledge_base':
             processed = copy.deepcopy(value)
-            payload = (
-                processed.get('result')
-                if isinstance(processed, dict) and processed.get('success') is True
-                else processed
-            )
-            annotate_citations(payload, state, roles={'searched'})
+            annotate_citations(processed, state, roles={'searched'})
         else:
             processed = _annotate_page_results(value, state)
         if collect_only:
             return result
         return {**result, 'value': processed}
 
-    def __call__(self, tools: Any, verbose: bool = False) -> Any:
+    def __call__(self, tools: Any, verbose: bool = False,
+                 allowed_tool_names: set[str] | None = None) -> Any:
         tool_calls = [tools] if isinstance(tools, dict) else list(tools or [])
-        results = list(self._manager(tools, verbose=verbose))
+        results = list(self._manager(
+            tools,
+            verbose=verbose,
+            allowed_tool_names=allowed_tool_names,
+        ))
         state = _citation_state()
         if not state:
             return results

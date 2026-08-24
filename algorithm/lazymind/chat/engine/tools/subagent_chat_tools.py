@@ -8,7 +8,6 @@ import lazyllm
 
 from lazymind.chat.engine.subagent import SUBAGENT_ATTACHMENT_CONTEXT_KEY
 from lazymind.chat.engine.subagent.db import TaskQueryDB
-from lazymind.chat.engine.tools.infra import tool_success
 from lazyllm.tools.agent.base import _write_agent_data
 
 # How often to emit a heartbeat while polling in auto mode (seconds).
@@ -224,11 +223,11 @@ def create_subagent(
             else:
                 msg = f"Task '{title}' failed: {phase or status_row.get('status')}. {resume_hint}"
             result = {'status': 'failed', 'message': msg, 'summary': summary}
-        return tool_success('create_subagent', result)
+        return result
 
     # manual: return immediately; Go runs the SubAgent in the background.
     msg = f"Task '{title}' started in the background. Use get_subagent_status('{title}') to check progress."
-    return tool_success('create_subagent', {'status': 'ok', 'message': msg})
+    return {'status': 'ok', 'message': msg}
 
 
 def _describe_artifact(a: Dict[str, Any]) -> str:
@@ -342,7 +341,7 @@ def list_subagents(status: Optional[str] = None) -> Dict[str, Any]:
         line += ')'
         lines.append(line)
     msg = '\n'.join(lines) if lines else 'No SubAgent tasks in the current conversation.'
-    return tool_success('list_subagents', {'status': 'ok', 'message': msg, 'tasks': tasks})
+    return {'status': 'ok', 'message': msg, 'tasks': tasks}
 
 
 def get_subagent_status(task_ref: str) -> Dict[str, Any]:
@@ -354,7 +353,7 @@ def get_subagent_status(task_ref: str) -> Dict[str, Any]:
     tasks = _list_conversation_tasks()
     task = _resolve_task(task_ref, tasks)
     if not task:
-        return tool_success('get_subagent_status', {'status': 'empty', 'message': f'Task not found: {task_ref}'})
+        return {'status': 'empty', 'message': f'Task not found: {task_ref}'}
     msg = (
         f"{task.get('title')} ({task.get('status')}): {task.get('progress_pct', 0)}% complete"
     )
@@ -364,7 +363,7 @@ def get_subagent_status(task_ref: str) -> Dict[str, Any]:
     eta = task.get('estimated_sec')
     if eta:
         msg += f', estimated {eta}s remaining.'
-    return tool_success('get_subagent_status', {'status': 'ok', 'message': msg, 'task': task})
+    return {'status': 'ok', 'message': msg, 'task': task}
 
 
 def list_subagent_artifacts(task_ref: str) -> Dict[str, Any]:
@@ -379,14 +378,14 @@ def list_subagent_artifacts(task_ref: str) -> Dict[str, Any]:
     tasks = _list_conversation_tasks()
     task = _resolve_task(task_ref, tasks)
     if not task:
-        return tool_success('list_subagent_artifacts', {'status': 'empty', 'message': f'Task not found: {task_ref}'})
+        return {'status': 'empty', 'message': f'Task not found: {task_ref}'}
     arts = task.get('artifacts') or []
     summary: Dict[str, str] = {}
     for a in arts:
         summary[a.get('slot') or a.get('artifact_key')] = a.get('content_type')
     parts = [f'{k} ({v})' for k, v in summary.items()]
     msg = f"Task '{task.get('title')}' has {len(summary)} artifact(s): " + (', '.join(parts) if parts else '(none)')
-    return tool_success('list_subagent_artifacts', {'status': 'ok', 'message': msg, 'keys': summary})
+    return {'status': 'ok', 'message': msg, 'keys': summary}
 
 
 def get_subagent_artifacts(task_ref: str, keys: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -402,9 +401,9 @@ def get_subagent_artifacts(task_ref: str, keys: Optional[List[str]] = None) -> D
     tasks = _list_conversation_tasks()
     task = _resolve_task(task_ref, tasks)
     if not task:
-        return tool_success('get_subagent_artifacts', {'status': 'empty', 'message': f'Task not found: {task_ref}'})
+        return {'status': 'empty', 'message': f'Task not found: {task_ref}'}
     arts = task.get('artifacts') or []
     if keys:
         keyset = set(keys)
         arts = [a for a in arts if a.get('slot') or a.get('artifact_key') in keyset]
-    return tool_success('get_subagent_artifacts', {'status': 'ok', 'artifacts': arts, 'task_title': task.get('title')})
+    return {'status': 'ok', 'artifacts': arts, 'task_title': task.get('title')}

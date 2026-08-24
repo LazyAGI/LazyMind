@@ -46,6 +46,7 @@ from lazymind.chat.service.utils import (
     register_existing_sources,
     reset_citation_state,
 )
+from lazymind.chat.workflow.artifacts import build_artifact_context_section
 from lazymind.config import config as _cfg
 from lazymind.model_config import inject_model_config
 
@@ -125,45 +126,6 @@ async def merge_agent_and_stream_events(
         for pending in (agent_task, stream_task):
             if pending is not None and not pending.done():
                 pending.cancel()
-
-
-def _build_artifact_context_section(
-    ctx: 'SubAgentContext', db: 'SubAgentDB'
-) -> List[str]:
-    """Build a multi-line artifact summary block to inject into the objective prompt.
-
-    Returns an empty list when there are no input artifacts.
-
-    Workflow scenario (params contains session_id):
-      Reads the public Artifact projection supplied by the Workflow runtime.
-
-    Ordinary SubAgents receive their attachment context through params and do not
-    participate in Workflow resource resolution.
-    """
-    params = ctx.params
-    session_id: str = params.get('session_id', '')
-
-    if session_id:
-        try:
-            import httpx
-            from lazymind.config import config
-            from lazymind.workflow_sdk import WorkflowClient
-            response = WorkflowClient(
-                str(config['core_api_url']).rstrip('/'),
-                str(params.get('user_id') or ''), host='lazymind', transport=httpx,
-            ).list_artifacts(session_id).result
-            artifacts = response.get('artifacts') if isinstance(response, dict) else []
-            if not artifacts:
-                return []
-            return [
-                '## Workflow inputs and artifacts [AUTHORITATIVE public runtime]',
-                json.dumps(artifacts, ensure_ascii=False, default=str),
-            ]
-        except Exception as exc:
-            LOG.warning('[SubAgent] public Workflow Artifact read failed: %s', exc)
-            return []
-
-    return []
 
 
 def _resolve_workflow_step_tools(params: Dict[str, Any]) -> Optional[List[str]]:
@@ -414,6 +376,9 @@ _STRUCTURED_PARAM_KEYS = {
     # task parameters supplied by workflow and ordinary SubAgent callers.
     'history_files_per_turn',
     SUBAGENT_ATTACHMENT_CONTEXT_KEY,
+    'remote_inputs',
+    'remote_input_types',
+    'remote_input_value_slots',
     'partial_indices',
     'required_output_artifact_keys',
     # Framework-owned Workflow routing/concurrency metadata. The effective
@@ -435,6 +400,32 @@ def _attachment_context(params: Dict[str, Any]) -> Dict[str, Any]:
 def _history_files_per_turn(params: Dict[str, Any]) -> Dict[str, List[str]]:
     context = _attachment_context(params)
     return context.get('history_files_per_turn') or params.get('history_files_per_turn') or {}
+
+
+def _workflow_material_bindings_section(params: Dict[str, Any]) -> str:
+    """Describe typed Workflow bindings without presenting them as user uploads."""
+    remote_inputs = params.get('remote_inputs')
+    if not isinstance(remote_inputs, dict) or not remote_inputs:
+        return ''
+    input_types = params.get('remote_input_types') or {}
+    value_slots = set(params.get('remote_input_value_slots') or [])
+    bindings: Dict[str, Any] = {}
+    for slot, value in remote_inputs.items():
+        kind = 'value' if slot in value_slots else 'path'
+        bindings[str(slot)] = {
+            'type': str(input_types.get(str(slot)) or ''),
+            'kind': kind,
+            kind: value,
+        }
+    return '\n'.join((
+        'These are typed Workflow material bindings, not user-uploaded attachments.',
+        'For kind=value, pass the exact value to scalar tool arguments. For kind=path, '
+        'pass the exact path only to file/path arguments or package tools that consume '
+        'Workflow artifacts. Never substitute a path for a scalar value.',
+        'Never call read_user_attachment, find_user_attachment, or attachment editing tools '
+        'for these bindings or for paths returned by another tool.',
+        json.dumps(bindings, ensure_ascii=False, default=str),
+    ))
 
 
 def _build_agentic_config(
@@ -538,7 +529,7 @@ def _build_subagent_plan(
     # ordinary SubAgent reads from sub_agent_artifacts of prior succeeded steps.
     session_id: str = ctx.params.get('session_id', '')
     if session_id or ctx.input_slots:
-        artifact_section = _build_artifact_context_section(ctx, db) if db else []
+        artifact_section = build_artifact_context_section(ctx.params) if db else []
         if artifact_section:
             builder.runtime(
                 'subagent_artifacts', 'Existing Artifacts', '\n'.join(artifact_section),
@@ -553,6 +544,12 @@ def _build_subagent_plan(
                 priority=20,
                 content_kind='reference',
             )
+    workflow_materials = _workflow_material_bindings_section(ctx.params)
+    if workflow_materials:
+        builder.runtime(
+            'subagent_workflow_materials', 'Workflow Material Bindings', workflow_materials,
+            'workflow.inputs', priority=25, authoritative=True, content_kind='instruction',
+        )
     # Inject intent/constraints from the workflow session so SubAgent respects user preferences.
     if db:
         intent_lines = _build_intent_context_section(ctx.params)

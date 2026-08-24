@@ -198,7 +198,9 @@ func cloneRequest(request *http.Request, body []byte, token string) *http.Reques
 	clone := request.Clone(request.Context())
 	clone.Header = request.Header.Clone()
 	clone.Header.Set("Authorization", "Bearer "+token)
-	if externalRef := strings.TrimSpace(os.Getenv("LAZYMIND_EXTERNAL_REF")); externalRef != "" {
+	externalRef := strings.TrimSpace(os.Getenv("LAZYMIND_EXTERNAL_REF"))
+	conversationID := strings.TrimSpace(os.Getenv("LAZYMIND_CONVERSATION_ID"))
+	if externalRef != "" {
 		clone.Header.Set("X-LazyMind-External-Ref", externalRef)
 	}
 	if lease := strings.TrimSpace(os.Getenv("LAZYMIND_EXTERNAL_LEASE")); lease != "" {
@@ -207,13 +209,16 @@ func cloneRequest(request *http.Request, body []byte, token string) *http.Reques
 	if hostID := strings.TrimSpace(os.Getenv("LAZYMIND_EXTERNAL_HOST")); hostID != "" {
 		clone.Header.Set("X-LazyMind-External-Host", hostID)
 	}
-	if conversationID := strings.TrimSpace(os.Getenv("LAZYMIND_CONVERSATION_ID")); conversationID != "" {
+	if conversationID != "" {
 		clone.Header.Set("X-LazyMind-Conversation-Id", conversationID)
 	}
 	if invocation, ok := InvocationFromContext(request.Context()); ok {
 		clone.Header.Set("X-LazyMind-Invocation-Id", invocation.ID)
 		clone.Header.Set("X-LazyMind-Invocation-Client", invocation.ClientName)
 		clone.Header.Set("X-LazyMind-Connector-Instance-Id", invocation.ConnectorInstanceID)
+		if conversationID := strings.TrimSpace(invocation.ConversationID); conversationID != "" {
+			clone.Header.Set("X-LazyMind-Invocation-Conversation-Id", conversationID)
+		}
 	}
 	if body != nil {
 		clone.Body = io.NopCloser(bytes.NewReader(body))

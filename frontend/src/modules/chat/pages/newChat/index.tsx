@@ -56,7 +56,8 @@ function getShowcasePrompt(
   taskId: string | null,
 ) {
   return item.tasks?.find((task) => task.id === taskId)?.prompt
-    || item.tasks?.[0]?.prompt;
+    || item.tasks?.[0]?.prompt
+    || item.prompt;
 }
 
 const NewChatPage = () => {
@@ -235,6 +236,15 @@ const NewChatPage = () => {
     return () => controller.abort();
   }, [locale, officialKnowledgeId, showcaseCaseId, t]);
 
+  const handleFeaturedCaseTry = (item: ShowcaseCase) => {
+    setShowcaseCase(item);
+    setInputValue(getShowcasePrompt(item, null));
+  };
+
+  const handleWelcomeInputChange = (value: string) => {
+    setInputValue(value);
+  };
+
   const handleSetIsChatContent = (value: boolean) => {
     if (value && !chatLayoutMounted) {
       setChatLayoutMounted(true);
@@ -370,7 +380,8 @@ const NewChatPage = () => {
         ariaLabel: t("showcase.selectedSkill"),
       }
     : undefined;
-  const shouldShowFeaturedCases = inputValue.trim().length === 0;
+  const shouldShowFeaturedCases =
+    inputValue.trim().length === 0 || Boolean(showcaseCase);
 
   return (
     <div className="new-chat-page">
@@ -499,7 +510,7 @@ const NewChatPage = () => {
                   <ChatInput
                     ref={newChatInputRef}
                     value={inputValue}
-                    onChange={setInputValue}
+                    onChange={handleWelcomeInputChange}
                     openHistory={() => handleSetIsChatContent(true)}
                     openNewChat={() => handleSetIsChatContent(false)}
                     isChatContent={isChatContent}
@@ -535,9 +546,13 @@ const NewChatPage = () => {
                     runInBackground={runInBackground}
                     showcaseSelection={showcaseSelection}
                     boundMentions={showcaseBoundMentions}
+                    showPromptSuggestions={!showcaseCase}
                   />
                   {shouldShowFeaturedCases ? (
-                    <FeaturedCases type={runInBackground ? "work" : "chat"} />
+                    <FeaturedCases
+                      type={runInBackground ? "work" : "chat"}
+                      onTry={handleFeaturedCaseTry}
+                    />
                   ) : null}
                 </div>
               </div>

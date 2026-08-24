@@ -259,10 +259,10 @@ func routeError(ctx context.Context, db *gorm.DB, stateStore state.Store, taskID
 	routeWorkflowStepStatus(ctx, db, stateStore, taskID, StatusFailed, message)
 }
 
-// PublishConversationTaskEvent multiplexes task changes onto the one active
-// conversation stream. Workflow steps invalidate the Workflow view; independent
-// tasks carry their live event. Artifact bodies are reloaded from the signed
-// conversation-artifact endpoint instead of being copied into the event log.
+// PublishConversationTaskEvent keeps the conversation stream limited to bounded
+// lifecycle changes. Granular text/think/tool events stay on the per-task SSE
+// stream; copying token deltas here can exhaust the conversation event transport
+// and prevent later task_created events from reaching the frontend.
 func PublishConversationTaskEvent(
 	ctx context.Context,
 	db *gorm.DB,
@@ -290,10 +290,11 @@ func PublishConversationTaskEvent(
 			// Tool and reasoning events for workflow steps are not shown in the
 			// standalone task panel and do not affect WorkflowPanel projections.
 		}
-		return
 	}
-	if ev.Type == "artifact" {
-		ev.Value = nil
+	switch ev.Type {
+	case "task_start", "progress", "sources", "done", "error":
+	default:
+		return
 	}
 	EventHooks.CallConversationEvent(ctx, stateStore, task.ConversationID, "", "task_updated",
 		map[string]any{"task_id": ev.TaskID, "event": ev})

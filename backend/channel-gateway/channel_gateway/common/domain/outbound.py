@@ -12,6 +12,11 @@ from channel_gateway.common.domain.channel import ClaimedOutbound
 _MARKDOWN_IMAGE = re.compile(r'!\[([^\]]*)\]\(([^)\s]+)\)')
 
 
+def is_image_content_type(value: Any) -> bool:
+    content_type = str(value or '').strip().lower()
+    return content_type == 'image' or content_type.startswith('image/')
+
+
 @dataclass(frozen=True, slots=True)
 class SelectionOption:
     label: str
@@ -72,6 +77,34 @@ class ConversationExecutorPresentation:
 
 
 @dataclass(frozen=True, slots=True)
+class AssistantPresentation:
+    id: str
+    display_name: str
+    available: bool
+    unavailable_reason: str = ''
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'id': self.id,
+            'display_name': self.display_name,
+            'available': self.available,
+            'unavailable_reason': self.unavailable_reason,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AssistantCatalogPresentation:
+    kind: Literal['assistant_catalog']
+    assistants: tuple[AssistantPresentation, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'kind': self.kind,
+            'assistants': [assistant.to_dict() for assistant in self.assistants],
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class ConversationSettingsPresentation:
     kind: Literal['conversation_settings']
     dataset_ids: tuple[str, ...]
@@ -80,6 +113,7 @@ class ConversationSettingsPresentation:
     subagent_enabled: bool
     chat_executor: str
     executors: tuple[ConversationExecutorPresentation, ...]
+    assistant: str = 'lazymind'
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -90,6 +124,7 @@ class ConversationSettingsPresentation:
             'subagent_enabled': self.subagent_enabled,
             'chat_executor': self.chat_executor,
             'executors': [executor.to_dict() for executor in self.executors],
+            'assistant': self.assistant,
         }
 
 
@@ -219,14 +254,54 @@ class ConversationPresentation:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class ConversationCatalogItemPresentation:
+    index: int
+    conversation_id: str
+    provider_thread_id: str
+    display_name: str
+    update_time: str
+    project_key: str
+    project_name: str
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'index': self.index,
+            'conversation_id': self.conversation_id,
+            'provider_thread_id': self.provider_thread_id,
+            'display_name': self.display_name,
+            'update_time': self.update_time,
+            'project_key': self.project_key,
+            'project_name': self.project_name,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ConversationCatalogPresentation:
+    kind: Literal['conversation_catalog']
+    selection_id: str
+    assistant: str
+    items: tuple[ConversationCatalogItemPresentation, ...]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            'kind': self.kind,
+            'selection_id': self.selection_id,
+            'assistant': self.assistant,
+            'items': [item.to_dict() for item in self.items],
+        }
+
+
 ReplyPresentation: TypeAlias = (
     SelectionPresentation
     | CapabilityPresentation
+    | AssistantCatalogPresentation
     | ConversationSettingsPresentation
     | AskPresentation
     | TaskPresentation
     | ExecutionPresentation
     | ConversationPresentation
+    | ConversationCatalogPresentation
 )
 
 
@@ -426,8 +501,7 @@ class OutboundRenderer:
                 continue
             kind = (
                 'image'
-                if content_type == 'image'
-                or content_type.startswith('image/')
+                if is_image_content_type(content_type)
                 else 'file'
                 if content_type == 'file'
                 else ''

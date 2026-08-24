@@ -270,7 +270,7 @@ def _run_review_with_tool_results(monkeypatch, tool_results, *, response='Review
 
         def __call__(self, prompt, llm_chat_history=None):
             config = fake_lazyllm.globals['agentic_config']
-            config['memory_tool_results'].extend(tool_results)
+            config['memory_operation_ledger'].extend(tool_results)
             return response
 
     fake_lazyllm = SimpleNamespace(
@@ -312,11 +312,12 @@ def _episode_success(
     mutation: bool = True,
 ) -> dict[str, Any]:
     return {
-        'tool': 'episode_create',
-        'success': True,
-        'mutation': mutation,
-        'result': {'status': status, 'retry_fingerprint': key},
+        'operation': 'episode_create',
+        'status': 'succeeded',
+        'mutation': 'applied' if mutation else 'none',
+        'result': {'status': status},
         'retryable': False,
+        'retry_fingerprint': key,
     }
 
 
@@ -327,21 +328,16 @@ def _tool_failure(
     mutation: bool | None = False,
     retryable: bool = True,
     code: str = 'storage_unavailable',
-    message: str = 'Episode storage is unavailable.',
 ) -> dict[str, Any]:
     entry: dict[str, Any] = {
-        'tool': tool,
-        'success': False,
-        'mutation': mutation,
+        'operation': tool,
+        'status': 'failed',
+        'mutation': 'unknown' if mutation is None else ('applied' if mutation else 'none'),
         'retryable': retryable,
-        'error': {
-            'code': code,
-            'message': message,
-            'detail': {'internal_context': 'must not reach the response'},
-        },
+        'error_code': code,
     }
     if key is not None:
-        entry['result'] = {'retry_fingerprint': key}
+        entry['retry_fingerprint'] = key
     return entry
 
 
@@ -451,16 +447,14 @@ def test_review_memory_runs_agent_with_all_memory_tools(monkeypatch):
             calls['prompt'] = prompt
             calls['history'] = llm_chat_history
             config = fake_lazyllm.globals['agentic_config']
-            calls['initial_tool_results'] = list(config['memory_tool_results'])
-            config['memory_tool_results'].append({
-                'tool': 'episode_create',
-                'success': True,
-                'mutation': True,
-                'result': {
-                    'status': 'created',
-                    'retry_fingerprint': 'episode-decision',
-                },
+            calls['initial_tool_results'] = list(config['memory_operation_ledger'])
+            config['memory_operation_ledger'].append({
+                'operation': 'episode_create',
+                'status': 'succeeded',
+                'mutation': 'applied',
+                'result': {'status': 'created'},
                 'retryable': False,
+                'retry_fingerprint': 'episode-decision',
             })
             return '已保存。'
 

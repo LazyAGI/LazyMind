@@ -10,7 +10,11 @@ import {
   FullscreenExitOutlined,
 } from '@ant-design/icons';
 import { useWorkflowSession } from '@/modules/chat/hooks/useWorkflow';
-import { useWorkflowStore } from '@/modules/chat/store/workflowPanel';
+import {
+  filterWorkflowTabs,
+  workflowTabAllowsDownload,
+  useWorkflowStore,
+} from '@/modules/chat/store/workflowPanel';
 import { useTaskCenterStore, type SubAgentTask, type TaskArtifactStream } from '@/modules/chat/store/taskCenter';
 import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
 import { WorkflowSessionApi } from '@/modules/chat/utils/request';
@@ -1684,11 +1688,43 @@ export function WorkflowPanel({
 
   // Restore the previously focused tab when UI loads.
   useEffect(() => {
-    const tabs: TabDef[] = ui.tabs ?? [];
+    const tabs = filterWorkflowTabs(
+      ui.tabs ?? [],
+      session?.slots ?? [],
+      ui.tab_visibility_ready_material,
+    );
     if (!tabs.length || !persistedFocusedTab) return;
     const idx = tabs.findIndex((t) => t.id === persistedFocusedTab);
     if (idx !== -1) setActiveTabIdx(idx);
-  }, [ui.tabs, persistedFocusedTab]);
+  }, [ui.tabs, ui.tab_visibility_ready_material, persistedFocusedTab, session?.slots]);
+
+  // Until the user explicitly chooses a visible tab, follow the runtime
+  // frontier. This also moves focus immediately when a skip material removes
+  // the previously selected tab.
+  useEffect(() => {
+    const tabs = filterWorkflowTabs(
+      ui.tabs ?? [],
+      session?.slots ?? [],
+      ui.tab_visibility_ready_material,
+    );
+    const focusedTabVisible = Boolean(
+      persistedFocusedTab && tabs.some((tab) => tab.id === persistedFocusedTab),
+    );
+    if (!tabs.length || focusedTabVisible || !session) return;
+    let idx = tabs.findIndex((tab) => getTabStepId(tab) === session.current_step_id);
+    if (idx === -1 && (session.status === 'completed' || session.status === 'failed')) {
+      idx = tabs.length - 1;
+    }
+    if (idx !== -1) setActiveTabIdx(idx);
+  }, [
+    ui.tabs,
+    ui.tab_visibility_ready_material,
+    persistedFocusedTab,
+    session?.current_step_id,
+    session?.session_id,
+    session?.slots,
+    session?.status,
+  ]);
 
   // Track focused tab changes.
   const handleTabChange = useCallback((idx: number, tabId: string) => {
@@ -1713,8 +1749,15 @@ export function WorkflowPanel({
 
   if (!session) return null;
 
-  const tabs: TabDef[] = ui.tabs ?? [];
+  const tabs = filterWorkflowTabs(
+    ui.tabs ?? [],
+    session.slots ?? [],
+    ui.tab_visibility_ready_material,
+  );
   const hasTabs = tabs.length > 0;
+  const visibleActiveTabIdx = hasTabs
+    ? Math.min(activeTabIdx, tabs.length - 1)
+    : 0;
   const hasIntent = true;
   const sessionReadOnly = isWorkflowSessionReadOnly(session, autoRunning);
 
@@ -1736,7 +1779,7 @@ export function WorkflowPanel({
   const collapseDisabled = (anySlotEditing || actionPending) && !collapsed;
   const completedContinueStepId = resolveCompletedContinueStep(
     session,
-    tabs[activeTabIdx],
+    tabs[visibleActiveTabIdx],
   );
   // Workflow packages may expose a follow-on action from a completed tab.
   const showContinue = displayStatus === 'waiting'
@@ -1944,9 +1987,9 @@ export function WorkflowPanel({
               <React.Fragment key={tab.id}>
                 <button
                   role='tab'
-                  aria-selected={idx === activeTabIdx}
+                  aria-selected={idx === visibleActiveTabIdx}
                   aria-controls={`workflow-tab-panel-${tab.id}`}
-                  className={`workflow-panel__tab${idx === activeTabIdx ? ' workflow-panel__tab--active' : ''}${idx < activeTabIdx ? ' workflow-panel__tab--done' : ''}`}
+                  className={`workflow-panel__tab${idx === visibleActiveTabIdx ? ' workflow-panel__tab--active' : ''}${idx < visibleActiveTabIdx ? ' workflow-panel__tab--done' : ''}`}
                   onClick={() => handleTabChange(idx, tab.id)}
                   type='button'
                 >
@@ -1961,7 +2004,7 @@ export function WorkflowPanel({
                   )}
                 </button>
                 {idx < tabs.length - 1 && (
-                  <span className={`workflow-panel__tab-connector${idx < activeTabIdx ? ' workflow-panel__tab-connector--done' : ''}`} aria-hidden='true' />
+                  <span className={`workflow-panel__tab-connector${idx < visibleActiveTabIdx ? ' workflow-panel__tab-connector--done' : ''}`} aria-hidden='true' />
                 )}
               </React.Fragment>
             );
@@ -1978,10 +2021,10 @@ export function WorkflowPanel({
                 key={tab.id}
                 id={`workflow-tab-panel-${tab.id}`}
                 role='tabpanel'
-                hidden={idx !== activeTabIdx}
+                hidden={idx !== visibleActiveTabIdx}
               >
-                <WorkflowPanelTabActiveContext.Provider value={idx === activeTabIdx}>
-                <SlotDownloadContext.Provider value={idx === tabs.length - 1}>
+                <WorkflowPanelTabActiveContext.Provider value={idx === visibleActiveTabIdx}>
+                <SlotDownloadContext.Provider value={workflowTabAllowsDownload(tab, idx, tabs.length)}>
                   <TabSlotGrid
                     tab={tab}
                     session={session}

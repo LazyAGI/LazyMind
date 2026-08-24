@@ -60,7 +60,6 @@ class WeChatDeliveryProvider:
                 token=credentials['token'],
                 to_user_id=message.recipient_id,
                 image=content,
-                idempotency_key=f'{message.outbox_id}:{part_index}',
             )
         else:
             if artifact_index:
@@ -85,7 +84,6 @@ class WeChatDeliveryProvider:
                 filename=str(
                     part.get('filename') or 'lazymind-output'
                 ),
-                idempotency_key=f'{message.outbox_id}:{part_index}',
             )
         return {
             'source': state_key,
@@ -132,7 +130,7 @@ class WeChatDeliveryProvider:
             raise WeChatError('Unsupported WeChat outbound part')
         ciphertext = str(saved_state.get('ciphertext') or '')
         if not ciphertext:
-            raise WeChatError('Prepared WeChat image state is missing')
+            raise WeChatError('Prepared WeChat media state is missing')
         state = self._credentials.decrypt_delivery_state(
             message.account_id,
             ciphertext,
@@ -140,23 +138,12 @@ class WeChatDeliveryProvider:
         item = state.get('item')
         if not isinstance(item, dict):
             raise WeChatError('Prepared WeChat media is invalid')
-        if part.get('kind') == 'image':
-            self._client.send_image(
-                base_url=credentials['base_url'],
-                token=credentials['token'],
-                to_user_id=message.recipient_id,
-                context_token=context_token,
-                image_item=item,
-                client_id=idempotency_key,
-                run_id=run_id,
-            )
-        else:
-            self._client.send_file(
-                base_url=credentials['base_url'],
-                token=credentials['token'],
-                to_user_id=message.recipient_id,
-                context_token=context_token,
-                file_item=item,
-                client_id=idempotency_key,
-                run_id=run_id,
-            )
+        self._client.send_media(
+            base_url=credentials['base_url'],
+            token=credentials['token'],
+            to_user_id=message.recipient_id,
+            context_token=context_token,
+            item=item,
+            client_id=idempotency_key,
+            run_id=run_id,
+        )

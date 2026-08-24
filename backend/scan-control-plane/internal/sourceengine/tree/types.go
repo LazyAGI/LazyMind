@@ -89,6 +89,7 @@ type TargetTreeSearchRequest struct {
 	AuthConnectionID string                  `json:"auth_connection_id,omitempty"`
 	ProviderOptions  map[string]any          `json:"provider_options,omitempty"`
 	IncludeFiles     bool                    `json:"include_files,omitempty"`
+	Direct           bool                    `json:"direct,omitempty"`
 	ListMode         string                  `json:"list_mode,omitempty"`
 	PageSize         int                     `json:"page_size,omitempty"`
 	Cursor           string                  `json:"cursor,omitempty"`

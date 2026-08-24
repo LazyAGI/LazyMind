@@ -1,8 +1,8 @@
 """Common writer tools with string/JSON inputs and outputs."""
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import os
 import re
 import tempfile
@@ -16,6 +16,7 @@ from threading import Event, RLock
 from typing import Any, ClassVar
 
 from lazyllm import LOG, AutoModel, ThreadPoolExecutor
+from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools.writer.data_models import (
     InputResource,
     MediaAssetLibrary,
@@ -58,6 +59,12 @@ _CHINESE_CHAR_LIMIT_RE = re.compile(
     r'(?P<value>\d+(?:\.\d+)?)\s*(?P<unit>万|千)?\s*字'
     r'(?P<suffix>左右|上下|以内|以下)?'
 )
+_MARKDOWN_ATX_HEADING_RE = re.compile(
+    r'^(?P<indent> {0,3})(?P<marks>#{1,6})[ \t]+'
+    r'(?P<title>.*?)(?:[ \t]+#+)?[ \t]*$',
+)
+_MARKDOWN_FENCE_RE = re.compile(r'^ {0,3}(?P<marks>`{3,}|~{3,})')
+_MARKDOWN_DRAFT_ROOT_ERROR = 'Markdown draft section must contain exactly one H2 root heading.'
 
 
 def _extract_length_constraints(query: str) -> dict[str, int]:
@@ -277,14 +284,93 @@ def _write_document_input(root: Path, name: str, value: str) -> str:
 def _primary_data(result: dict) -> Any:
     artifact_path = result.get('artifact_path')
     if not artifact_path:
-        raise ValueError(f'Writer tool did not return artifact_path: {result!r}')
+        raise ToolExecutionError(
+            'Writer tool did not return its primary artifact.'
+        )
     return _read_artifact_data(artifact_path)
+
+
+def _markdown_heading_key(value: str) -> str:
+    text = re.sub(r'^\s*\d+(?:\.\d+)*[、.．\s　]+', '', str(value or ''))
+    return re.sub(r'[\s\W_]+', '', text, flags=re.UNICODE).lower()
+
+
+def _markdown_heading_rows(lines: list[str]) -> list[tuple[int, int, str]]:
+    rows: list[tuple[int, int, str]] = []
+    fence_mark = ''
+    for index, line in enumerate(lines):
+        fence = _MARKDOWN_FENCE_RE.match(line)
+        if fence:
+            mark = fence.group('marks')
+            if not fence_mark:
+                fence_mark = mark
+            elif mark[0] == fence_mark[0] and len(mark) >= len(fence_mark):
+                fence_mark = ''
+            continue
+        if fence_mark:
+            continue
+        heading = _MARKDOWN_ATX_HEADING_RE.match(line)
+        if heading:
+            rows.append((index, len(heading.group('marks')), heading.group('title').strip()))
+    return rows
+
+
+def _normalize_streamed_markdown_section(
+    markdown: str,
+    instruction: SectionInstruction,
+) -> str:
+    """Repair relative Markdown headings without spending another model call."""
+    title = instruction.section_title.strip()
+    if not title:
+        raise ValueError('Markdown draft section title must not be empty.')
+    lines = str(markdown or '').replace('\r\n', '\n').replace('\r', '\n').strip().split('\n')
+    rows = _markdown_heading_rows(lines)
+    title_key = _markdown_heading_key(title)
+    root_index = next(
+        (index for index, _, heading_title in rows
+         if _markdown_heading_key(heading_title) == title_key),
+        -1,
+    )
+
+    removed: set[int] = set()
+    if root_index >= 0:
+        lines[root_index] = f'## {title}'
+        removed.update(
+            index for index, _, heading_title in rows
+            if index != root_index and _markdown_heading_key(heading_title) == title_key
+        )
+    else:
+        lines = [f'## {title}', '', *lines]
+        root_index = 0
+        rows = [(index + 2, level, heading_title) for index, level, heading_title in rows]
+
+    child_rows = [
+        (index, level, heading_title)
+        for index, level, heading_title in rows
+        if index != root_index and index not in removed
+    ]
+    if child_rows:
+        shift = 3 - min(level for _, level, _ in child_rows)
+        for index, level, heading_title in child_rows:
+            lines[index] = f"{'#' * min(6, max(3, level + shift))} {heading_title}"
+
+    result = '\n'.join(
+        line for index, line in enumerate(lines) if index not in removed
+    ).strip()
+    top_rows = [row for row in _markdown_heading_rows(result.splitlines()) if row[1] <= 2]
+    if len(top_rows) != 1 or top_rows[0][1] != 2:
+        raise ValueError(_MARKDOWN_DRAFT_ROOT_ERROR)
+    if _markdown_heading_key(top_rows[0][2]) != title_key:
+        raise ValueError('Markdown draft section heading does not match its content_ref.')
+    return result
 
 
 def _result_data(result: dict, key: str) -> Any:
     path = ((result.get('metadata') or {}).get('artifact_paths') or {}).get(key)
     if not path:
-        raise ValueError(f'Writer tool did not return artifact {key!r}: {result!r}')
+        raise ToolExecutionError(
+            f'Writer tool did not return artifact {key!r}.'
+        )
     return _read_artifact_data(path)
 
 
@@ -298,10 +384,10 @@ def sync_writer_documents(
     source = WriterDocument.model_validate(source_value)
     revised = WriterDocument.model_validate(revised_value)
     if source.document_id != revised.document_id:
-        raise ValueError('WriterDocument document_id values must match.')
+        raise ToolExecutionError('WriterDocument document_id values must match.')
     for field in ('stage', 'revision', 'provider_binding'):
         if getattr(source, field) != getattr(revised, field):
-            raise ValueError(f'WriterDocument {field} values must match.')
+            raise ToolExecutionError(f'WriterDocument {field} values must match.')
     for source_block in source.iter_blocks():
         revised_block = revised.block_by_id(source_block.node_id)
         if revised_block is None:
@@ -350,7 +436,7 @@ def sync_writer_documents(
 def _feishu_url(user_input: str) -> str:
     match = _FEISHU_URL_RE.search(user_input or '')
     if not match:
-        raise ValueError('A Feishu/Lark document URL is required.')
+        raise ToolExecutionError('A Feishu/Lark document URL is required.')
     return match.group(0).rstrip(').,;!?]}，。；！？】》」』')
 
 
@@ -424,7 +510,9 @@ def _published_link(target: TargetDocument) -> str:
         or (target.uri if target.uri.startswith(('http://', 'https://')) else '')
     ).strip()
     if not link:
-        raise ValueError('Provider write succeeded but no browser URL was returned.')
+        raise ToolExecutionError(
+            'Provider write succeeded but no browser URL was returned.'
+        )
     return link
 
 
@@ -469,7 +557,7 @@ class WriterToolkitBase:
         """Build normalized InputResource data from workflow runtime inputs."""
         file_paths = _json_loads(file_paths_json, [])
         if not isinstance(file_paths, list):
-            raise TypeError('file_paths_json must be a JSON array.')
+            raise ToolExecutionError('file_paths_json must be a JSON array.')
         resources = [{
             'resource_id': os.path.basename(path),
             'resource_type': 'file',
@@ -572,7 +660,7 @@ class WriterToolkitBase:
         )
         allowed_strategies = _json_loads(allowed_strategies_json, None)
         if allowed_strategies is not None and not isinstance(allowed_strategies, list):
-            raise TypeError('allowed_strategies_json must contain a JSON list.')
+            raise ToolExecutionError('allowed_strategies_json must contain a JSON list.')
         result = WriterMultimodalTools(
             llm=AutoModel(model='llm'),
         ).resolve_visual_needs(
@@ -634,7 +722,7 @@ class WriterToolkitBase:
         if resources is None:
             resources = []
         if not isinstance(resources, list):
-            raise TypeError('resources_json must be a JSON array.')
+            raise ToolExecutionError('resources_json must be a JSON array.')
         has_feishu_resource = any(
             isinstance(item, dict)
             and isinstance(item.get('meta'), dict)
@@ -679,7 +767,7 @@ class WriterToolkitBase:
         source = _document_value(writer_document_json)
         document = WriterDocument.model_validate(source) if isinstance(source, dict) else None
         if document and document.stage == 'outline' and not allow_outline:
-            raise ValueError(
+            raise ToolExecutionError(
                 'A full-document revision cannot use an outline-stage document.',
             )
         target = _target_from_document(document) if document else None
@@ -1085,7 +1173,9 @@ class WriterToolkitBase:
             if isinstance(instructions_data, dict) else None
         )
         if not isinstance(instructions, list):
-            raise TypeError('section_instructions_json must contain instructions.')
+            raise ToolExecutionError(
+                'section_instructions_json must contain instructions.'
+            )
         _bind_document_cross_reference_targets(instructions)
 
         blocks: list[Any] = []
@@ -1291,13 +1381,13 @@ class WriterToolkitBase:
             suffix = '.md' if representation == 'markdown' else '.json'
             return checkpoint_root / f'section-{index + 1:04d}-{digest}{suffix}'
 
-        def load_checkpoint(path: Path) -> Any:
+        def load_checkpoint(path: Path, instruction: SectionInstruction) -> Any:
             if not path.is_file():
                 return None
             try:
                 if representation == 'markdown':
                     value = path.read_text(encoding='utf-8')
-                    return value if value.strip() else None
+                    return _normalize_streamed_markdown_section(value, instruction)
                 value = json.loads(path.read_text(encoding='utf-8'))
                 return WriterBlock.model_validate(value).model_dump(exclude_defaults=True)
             except (OSError, ValueError, TypeError, json.JSONDecodeError):
@@ -1360,16 +1450,17 @@ class WriterToolkitBase:
             path = checkpoint_path(index, instruction_data)
             section_started_at[index] = time.monotonic()
             try:
-                cached = load_checkpoint(path)
+                instruction = SectionInstruction.model_validate(instruction_data)
+                cached = load_checkpoint(path, instruction)
                 if cached is not None:
                     if not stop_event.is_set():
                         events.put(('delta', cached_preview(cached)))
                         events.put(('done', cached))
                         mark_completed(index, cached=True)
                     return
-                instruction = SectionInstruction.model_validate(instruction_data)
                 for attempt in range(1, max_attempts + 1):
                     buffered: list[str] = []
+                    section_deltas: list[str] = []
                     body_started = False
                     try:
                         forward_progress(
@@ -1404,34 +1495,53 @@ class WriterToolkitBase:
                             first_section_idle_timeout if index == 0 and attempt == 1
                             else section_stream_idle_timeout
                         )
-                        with stream_factory(**stream_kwargs) as stream:
-                            for delta in stream:
-                                if stop_event.is_set():
-                                    return
-                                if body_started:
-                                    events.put(('delta', delta))
-                                    continue
-                                buffered.append(delta)
-                                if preview_has_body(''.join(buffered)):
-                                    body_started = True
-                                    for pending in buffered:
-                                        events.put(('delta', pending))
-                                    buffered.clear()
-                                    forward_progress(
-                                        progress=5,
-                                        current_phase=f'第 {index + 1} 章正在输出正文',
-                                        section_index=index + 1,
-                                        section_total=len(instructions),
-                                        section_completed=completed_count,
-                                        section_state='streaming',
-                                        section_attempt=attempt,
-                                    )
-                            result = stream.result()
-                        section = _primary_data(result)
+                        try:
+                            with stream_factory(**stream_kwargs) as stream:
+                                for delta in stream:
+                                    if stop_event.is_set():
+                                        return
+                                    section_deltas.append(delta)
+                                    if body_started:
+                                        events.put(('delta', delta))
+                                        continue
+                                    buffered.append(delta)
+                                    if preview_has_body(''.join(buffered)):
+                                        body_started = True
+                                        for pending in buffered:
+                                            events.put(('delta', pending))
+                                        buffered.clear()
+                                        forward_progress(
+                                            progress=5,
+                                            current_phase=f'第 {index + 1} 章正在输出正文',
+                                            section_index=index + 1,
+                                            section_total=len(instructions),
+                                            section_completed=completed_count,
+                                            section_state='streaming',
+                                            section_attempt=attempt,
+                                        )
+                                result = stream.result()
+                            section = _primary_data(result)
+                        except ValueError as exc:
+                            if (
+                                representation != 'markdown'
+                                or str(exc) != _MARKDOWN_DRAFT_ROOT_ERROR
+                                or not section_deltas
+                            ):
+                                raise
+                            section = _normalize_streamed_markdown_section(
+                                ''.join(section_deltas), instruction,
+                            )
+                            LOG.warning(
+                                '[Writer] repaired Draft Markdown heading contract without '
+                                'regeneration section=%s title=%r',
+                                index + 1, instruction.section_title,
+                            )
                         if representation == 'markdown' and not isinstance(section, str):
                             raise TypeError('Markdown Draft stream returned a non-Markdown artifact.')
                         if representation == 'ir' and not isinstance(section, dict):
                             raise TypeError('IR Draft stream returned a non-WriterBlock artifact.')
+                        if representation == 'markdown':
+                            section = _normalize_streamed_markdown_section(section, instruction)
                         if not body_started and preview_has_body(cached_preview(section)):
                             for pending in buffered:
                                 events.put(('delta', pending))
@@ -1600,7 +1710,9 @@ class WriterToolkitBase:
         root = _temp_root()
         blocks_data = _json_loads(draft_blocks_json, [])
         if not isinstance(blocks_data, list) or not blocks_data:
-            raise ValueError('draft_blocks_json must be a non-empty JSON array.')
+            raise ToolExecutionError(
+                'draft_blocks_json must be a non-empty JSON array.'
+            )
         context_path = _write_input_artifact(
             root, 'writing_context.json', _json_loads(writing_context_json, {}),
             writer_schema('context.WritingContext'),
@@ -1772,20 +1884,28 @@ class WriterToolkitBase:
             if visual is None:
                 continue
             if instruction.modify_type != 'create':
-                raise ValueError('visual_instruction is only valid for create instructions.')
+                raise ToolExecutionError(
+                    'visual_instruction is only valid for create instructions.'
+                )
             if visual.visual_type != 'image':
-                raise ValueError('revision visual_instruction.visual_type must be "image".')
+                raise ToolExecutionError(
+                    'revision visual_instruction.visual_type must be "image".'
+                )
             if visual.need_id != instruction.instruction_id:
-                raise ValueError('visual_instruction.need_id must equal instruction_id.')
+                raise ToolExecutionError(
+                    'visual_instruction.need_id must equal instruction_id.'
+                )
             if visual.content_ref != instruction.content_ref:
-                raise ValueError(
+                raise ToolExecutionError(
                     'visual_instruction.content_ref must equal content_ref.'
                 )
             if not visual.purpose.strip() or not visual.required:
-                raise ValueError('revision image visual_instruction must be required and non-empty.')
+                raise ToolExecutionError(
+                    'revision image visual_instruction must be required and non-empty.'
+                )
             if visual.preferred_strategy not in {None, 'image_generation'}:
-                raise ValueError(
-                    'revision image preferred_strategy must be null or image_generation.',
+                raise ToolExecutionError(
+                    'revision image preferred_strategy must be null or image_generation.'
                 )
             instructions.append(visual)
         return _json_dumps(VisualPlan(instructions=instructions).model_dump(exclude_defaults=True))
@@ -1975,7 +2095,7 @@ class WriterToolkitBase:
             _json_loads(writer_document_json, {}),
         )
         if source.stage == 'outline' and not allow_outline:
-            raise ValueError(
+            raise ToolExecutionError(
                 'A full-document revision cannot use an outline-stage document.',
             )
         applied = _json_loads(self.apply_patch(
@@ -2004,7 +2124,7 @@ class WriterToolkitBase:
     def load_document(self, user_input: str, stage: str = 'final') -> str:
         """Load a Feishu/Lark document and return its IR and target binding."""
         if stage not in {'outline', 'draft', 'final'}:
-            raise ValueError('stage must be outline, draft, or final.')
+            raise ToolExecutionError('stage must be outline, draft, or final.')
         root = _temp_root()
         target = TargetDocument(
             uri=_feishu_url(user_input),
@@ -2044,7 +2164,9 @@ class WriterToolkitBase:
         )
         target = _target_from_document(source)
         if target is None:
-            raise ValueError('source document must contain a cloud target binding.')
+            raise ToolExecutionError(
+                'source document must contain a cloud target binding.'
+            )
         result = WriterResourceTools(
             llm=None, artifact_store=str(root),
         ).apply_patch_to_document(
@@ -2091,7 +2213,7 @@ class WriterToolkitBase:
         """Append a WriterDocument to a provider target."""
         document = WriterDocument.model_validate(_json_loads(content_json, {}))
         if document.stage == 'outline' and not publish_outline:
-            raise ValueError(
+            raise ToolExecutionError(
                 'Refusing to publish outline IR as the final document. '
                 'Set publish_outline=true only for an explicit outline publish.',
             )
@@ -2122,7 +2244,7 @@ class WriterToolkitBase:
         )
         target = _resolve_target(source, target_document_json, target_uri)
         if target is None:
-            raise ValueError('A target provider document is required.')
+            raise ToolExecutionError('A target provider document is required.')
         publish_document = _set_document_editable(document, stage='final')
         resource = WriterResourceTools(llm=None, artifact_store=str(root))
         media_assets = (

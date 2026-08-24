@@ -2,23 +2,24 @@ from typing import Any, Dict, List, Literal, Optional
 
 import lazyllm
 from lazyllm import AutoModel, LOG
-from lazyllm.tools.rag import Reranker, Retriever
+from lazyllm.tools.agent import ToolExecutionError
+from lazyllm.tools.rag import Reranker, Retriever, TempDocRetriever
+from lazyllm.tools.rag.doc_impl import NodeGroupType
 
 from lazymind.chat.engine.tools.infra import (
     get_core_api,
-    handle_tool_errors,
     post_core_api,
-    tool_success,
 )
 from lazymind.chat.engine.tools._utils import (
     iter_lookup_ids,
     parse_json_dict,
     truncate_text,
 )
-from lazymind.chat.engine.tools.algo import DOCUMENT, search_kb
+from lazymind.chat.engine.tools.algo import DOCUMENT, search_kb, search_temp_files
 from lazymind.chat.engine.tools.infra import (
     resolve_index,
 )
+from lazymind.parsing.engine.transform import GeneralParser
 from lazymind.chat.service.utils import (
     basename_from_path,
     local_path_from_static_file_url,
@@ -44,10 +45,16 @@ _KB_IMAGE_RETRIEVER_CONFIG = {
     'group_name': 'image',
     'embed_keys': [EMBED_IMAGE],
 }
+_TEMP_NODE_GROUP_NAME = 'block'
+_TEMP_NODE_GROUP_DISPLAY_NAME = 'paragraph slice'
+_TEMP_NODE_GROUP_MAX_LENGTH = 2048
+_TEMP_NODE_GROUP_SPLIT_BY = '\n'
 
 _kb_retrievers = None
 _kb_reranker = None
 _kb_image_retriever = None
+_tmp_retriever = None
+_tmp_reranker = None
 
 
 def _is_reranker_enabled() -> bool:
@@ -80,6 +87,24 @@ def _ensure_kb_search_runtime() -> tuple[List[Retriever], Optional[Reranker], Re
     _kb_reranker = _build_reranker()
     _kb_image_retriever = Retriever(DOCUMENT, **_KB_IMAGE_RETRIEVER_CONFIG)
     return _kb_retrievers, _kb_reranker, _kb_image_retriever
+
+
+def _ensure_temp_search_runtime() -> tuple[TempDocRetriever, Optional[Reranker]]:
+    global _tmp_retriever, _tmp_reranker
+    if _tmp_retriever is None:
+        _tmp_retriever = TempDocRetriever(embed=AutoModel(model=EMBED_MAIN))
+        _tmp_retriever.create_node_group(
+            name=_TEMP_NODE_GROUP_NAME,
+            display_name=_TEMP_NODE_GROUP_DISPLAY_NAME,
+            group_type=NodeGroupType.CHUNK,
+            transform=GeneralParser(
+                max_length=_TEMP_NODE_GROUP_MAX_LENGTH,
+                split_by=_TEMP_NODE_GROUP_SPLIT_BY,
+            ),
+        )
+        _tmp_retriever.add_subretriever(_TEMP_NODE_GROUP_NAME)
+        _tmp_reranker = _build_reranker()
+    return _tmp_retriever, _tmp_reranker
 
 
 def _serialize_doc_node_like(node: Any) -> Dict[str, Any]:
@@ -286,7 +311,6 @@ class KBToolkit:
         agentic_config = lazyllm.globals.get('agentic_config') or {}
         return not bool((agentic_config.get('filters') or {}).get('kb_id'))
 
-    @handle_tool_errors
     def list_knowledge_bases(
         self,
         keyword: str = '',
@@ -300,9 +324,8 @@ class KBToolkit:
         tag_values = _string_list(tags)
         if tag_values:
             params['tags'] = ','.join(tag_values)
-        return tool_success('list_knowledge_bases', get_core_api('/datasets', params=params))
+        return get_core_api('/datasets', params=params)
 
-    @handle_tool_errors
     def list_knowledge_base_documents(
         self,
         knowledge_base_ids: List[str],
@@ -316,12 +339,8 @@ class KBToolkit:
         }
         if keyword:
             payload['keyword'] = keyword
-        return tool_success(
-            'list_knowledge_base_documents',
-            post_core_api('/documents:listByDatasets', payload)['response'],
-        )
+        return post_core_api('/documents:listByDatasets', payload)['response']
 
-    @handle_tool_errors
     def aggregate_knowledge_base_documents(
         self,
         knowledge_base_ids: Optional[List[str]] = None,
@@ -342,10 +361,7 @@ class KBToolkit:
             'tags': _string_list(tags),
             'group_by': _string_list(group_by),
         }
-        return tool_success(
-            'aggregate_knowledge_base_documents',
-            post_core_api('/system-query/documents:aggregate', payload),
-        )
+        return post_core_api('/system-query/documents:aggregate', payload)
 
     @staticmethod
     def _accessible_kb_ids() -> set[str]:
@@ -388,11 +404,15 @@ class KBToolkit:
         selected = explicit if explicit else (config.get('filters') or {}).get('kb_id')
         ids = [str(item).strip() for item in iter_lookup_ids(selected, field_name='kb_ids') if item]
         if not ids:
-            raise ValueError('kb_ids is required when no knowledge base is selected in the request')
+            raise ToolExecutionError(
+                'kb_ids is required when no knowledge base is selected in the request'
+            )
         if explicit:
             accessible = KBToolkit._accessible_kb_ids()
             if any(kb_id not in accessible for kb_id in ids):
-                raise ValueError('one or more requested knowledge bases are unavailable')
+                raise ToolExecutionError(
+                    'One or more requested knowledge bases are unavailable.'
+                )
         return ids
 
     def kb_search(
@@ -457,10 +477,7 @@ class KBToolkit:
             image_topk=image_topk or _DEFAULT_IMAGE_TOPK,
         )
         serialized = _serialize_kb_result(result)
-        return tool_success(
-            'kb_search',
-            serialized,
-        )
+        return serialized
 
     def kb_get_parent_node(self, node_id: str) -> Dict[str, Any]:
         """Get the parent node of a target document node.
@@ -498,7 +515,7 @@ class KBToolkit:
                 'total': 1 if parent else 0,
                 'items': [parent] if parent else [],
             }
-            return tool_success('kb_get_parent_node', result)
+            return result
 
         result = {
             'node_id': node_id,
@@ -507,7 +524,7 @@ class KBToolkit:
             'total': 0,
             'items': [],
         }
-        return tool_success('kb_get_parent_node', result)
+        return result
 
     def kb_get_window_nodes(
         self,
@@ -531,9 +548,9 @@ class KBToolkit:
         before = int(before)
         after = int(after)
         if before < 0 or after < 0:
-            raise ValueError('before and after must be non-negative')
+            raise ToolExecutionError('before and after must be non-negative')
         if before + after + 1 > _MAX_RESULT_ITEMS:
-            raise ValueError(f'window cannot exceed {_MAX_RESULT_ITEMS} nodes')
+            raise ToolExecutionError(f'window cannot exceed {_MAX_RESULT_ITEMS} nodes')
         doc = DOCUMENT
         seed_nodes = doc.get_nodes(uids=[node_id])
         seed_nodes = seed_nodes if isinstance(seed_nodes, list) else []
@@ -544,13 +561,13 @@ class KBToolkit:
                 'total': len(nodes),
                 'items': [_serialize_doc_node_like(n) for n in nodes],
             }
-            return tool_success('kb_get_window_nodes', result)
+            return result
 
         result = {
             'total': 0,
             'items': [],
         }
-        return tool_success('kb_get_window_nodes', result)
+        return result
 
     def kb_keyword_search(
         self,
@@ -599,9 +616,9 @@ class KBToolkit:
         docid = target if target_type == 'docid' else ''
         file_name = target if target_type == 'file_name' else None
         if not keyword:
-            raise ValueError('keyword is required')
+            raise ToolExecutionError('keyword is required')
         if not (target and str(target).strip()):
-            raise ValueError('target is required')
+            raise ToolExecutionError('target is required')
         LOG.info(f'[kb_keyword_search] store={_cfg["segment_store_type"]!r} keyword={keyword!r} docid={docid!r} '
                  f'file_name={file_name!r} group={group!r} phrase={phrase} sort_by={sort_by!r} size={size}')
 
@@ -624,9 +641,59 @@ class KBToolkit:
                 'total': len(nodes),
                 'items': [_store_dict_to_result(n) for n in nodes],
             }
-            return tool_success('kb_keyword_search', result)
+            return result
 
-        return tool_success('kb_keyword_search', {
+        return {
             'index': index_name, 'group': group, 'docid': docid,
             'file_name': file_name, 'keyword': keyword, 'total': 0, 'items': [],
-        })
+        }
+
+
+def kb_tmp_search(
+    query: str,
+    retriever_topk: Optional[int] = None,
+    rerank_topk: Optional[int] = None,
+    k_max: Optional[int] = None,
+    files: Optional[List[str]] = None,
+) -> Any:
+    """Search attached temporary uploaded files with the temporary document retriever.
+
+    Use this tool before answering questions that depend on attached temporary
+    uploaded files that require text or document retrieval, such as PDFs, text
+    files, office documents, and data files. Scope retrieval to the current
+    uploaded files by default, or pass explicit temporary file IDs in ``files``
+    when needed.
+
+    Each call handles exactly one search intent. If the user asks about
+    multiple unrelated keywords or topics, call this tool separately for each
+    keyword/topic. Do not combine unrelated terms into one query with spaces,
+    commas, or list-like text.
+
+    Args:
+        query: A single natural language query for retrieval.
+        retriever_topk: Candidate count used by the temporary retriever before
+            reranking. Defaults to 20.
+        rerank_topk: Number of nodes the reranker keeps before adaptive-k
+            trimming. Defaults to 20.
+        k_max: Hard upper bound on the adaptive-k stage. Defaults to 10.
+        files: Optional list of temporary file IDs. Defaults to the current
+            request's agentic_config.files.
+    """
+    agentic_config = lazyllm.globals['agentic_config']
+    tmp_retriever, reranker = _ensure_temp_search_runtime()
+    payload = {
+        'query': query.strip(),
+        'filters': {},
+        'files': files,
+        'user_id': agentic_config.get('user_id', ''),
+    }
+    result = search_temp_files(
+        payload,
+        tmp_retriever=tmp_retriever,
+        reranker=reranker,
+        retriever_topk=retriever_topk or _DEFAULT_RETRIEVER_TOPK,
+        rerank_topk=rerank_topk or _DEFAULT_RERANK_TOPK,
+        k_max=k_max or _DEFAULT_K_MAX,
+    )
+    serialized = _serialize_kb_result(result)
+    return serialized

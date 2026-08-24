@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { message } from "antd";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import { AgentAppsAuth } from "@/components/auth";
 import type {
   BindingChatSettingEntry,
@@ -10,6 +11,8 @@ import { dataSourceScanApi } from "@/modules/dataSource/api/clients";
 import type { ScanV2Source } from "@/modules/dataSource/utils/scanAccessors";
 import { inferSourceKind } from "@/modules/dataSource/utils/scanAccessors";
 import { isAdminRole } from "@/modules/dataSource/utils/role";
+import { CLOUD_DOCUMENTS_PATH } from "../utils/cloudDocumentUrls";
+import { markCloudDocumentConnectionSuccess } from "../utils/cloudDocumentOnboarding";
 
 export type LocalChatSettingSource = SourceChatSettingEntry & {
   bindings: BindingChatSettingEntry[];
@@ -28,6 +31,7 @@ const getEnabledBindingIds = (sources: LocalChatSettingSource[]) =>
 
 export function useLocalDataSourceSettings() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [localSourceCount, setLocalSourceCount] = useState(0);
   const [localChatSources, setLocalChatSources] = useState<LocalChatSettingSource[]>([]);
@@ -148,6 +152,10 @@ export function useLocalDataSourceSettings() {
       }
       setChatSettingsModalOpen(false);
       message.success(t("modelProvider.cloudDocuments.localChatDirectoriesSaveSuccess"));
+      if (selectedIds.size > 0) {
+        markCloudDocumentConnectionSuccess("local");
+        navigate(CLOUD_DOCUMENTS_PATH);
+      }
     } catch {
       const sources = await refreshBindingChatSettings();
       if (sources) {

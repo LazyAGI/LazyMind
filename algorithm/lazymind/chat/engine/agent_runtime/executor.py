@@ -9,6 +9,7 @@ from typing import Any, AsyncIterator, Optional, Tuple
 import lazyllm
 import lazyllm.module.stream_helper as _sh
 import lazyllm.tools.agent as _agent_mod
+from lazyllm.tools.agent.toolError import tool_failure
 from lazymind.config import config as _cfg
 from lazymind.chat.engine.tools.infra import CitationResultMiddleware
 
@@ -170,11 +171,11 @@ class ToolCallGuard:
     ):
         self._manager = manager
         self._failure_limits = dict(failure_limits or {})
-        self._failed_signatures: set[str] = set()
         self._consecutive_failures: dict[str, int] = {}
         self._expanded_round_limit = expanded_round_limit
         self._repeated_call_limit = max(2, int(repeated_call_limit))
         self._signature_calls: dict[str, int] = {}
+        self._failed_signatures: set[str] = set()
         self._cancel_check = cancel_check
 
     def __getattr__(self, name: str) -> Any:
@@ -199,39 +200,20 @@ class ToolCallGuard:
 
     @staticmethod
     def _failed(result: Any) -> bool:
-        if not isinstance(result, dict):
-            return False
-        if result.get('ok') is False:
-            return True
-        value = result.get('value')
-        if isinstance(value, dict):
-            if value.get('success') is False:
-                return True
-            payload = value.get('result')
-            if isinstance(payload, dict):
-                total = payload.get('total')
-                succeeded = payload.get('succeeded')
-                if isinstance(total, int) and total > 0 and succeeded == 0:
-                    return True
-        return False
+        return isinstance(result, dict) and result.get('ok') is False
 
     @staticmethod
     def _blocked(name: str, message: str) -> dict[str, Any]:
-        return {
-            'ok': False,
-            'value': None,
-            'msg': f'[Repeated Tool Failure] {name}: {message}',
-        }
+        message = f'[Repeated Tool Failure] {name}: {message}'
+        return tool_failure(message)
 
     @staticmethod
     def _loop_blocked(name: str, message: str) -> dict[str, Any]:
-        return {
-            'ok': False,
-            'value': None,
-            'msg': f'[Repeated Tool Call] {name}: {message}',
-        }
+        message = f'[Repeated Tool Call] {name}: {message}'
+        return tool_failure(message)
 
-    def __call__(self, tools: Any, verbose: bool = False) -> Any:
+    def __call__(self, tools: Any, verbose: bool = False,
+                 allowed_tool_names: set[str] | None = None) -> Any:
         if self._cancel_check is not None:
             self._cancel_check(None)
         tool_calls = [tools] if isinstance(tools, dict) else list(tools or [])
@@ -256,10 +238,9 @@ class ToolCallGuard:
                         f'tool round limit to {self._expanded_round_limit}.'
                     )
             signature = self._signature(tool_call)
-            signature_calls = self._signature_calls.get(signature, 0) + 1
-            self._signature_calls[signature] = signature_calls
             arguments = _parse_tool_arguments(function)
-            if signature_calls > self._repeated_call_limit:
+            signature_calls = self._signature_calls.get(signature, 0)
+            if signature_calls >= self._repeated_call_limit:
                 results[index] = self._loop_blocked(
                     name,
                     f'the exact same call was already made {self._repeated_call_limit} times; '
@@ -303,6 +284,7 @@ class ToolCallGuard:
                 )
                 continue
             emit_tool_call(tool_call)
+            self._signature_calls[signature] = signature_calls + 1
             pending.append(tool_call)
             pending_indices.append(index)
             if guarded:
@@ -316,7 +298,11 @@ class ToolCallGuard:
                     args=_parse_tool_arguments(function),
                 )
             started_at = time.perf_counter()
-            pending_results = self._manager(pending, verbose=verbose)
+            pending_results = self._manager(
+                pending,
+                verbose=verbose,
+                allowed_tool_names=allowed_tool_names,
+            )
             elapsed = time.perf_counter() - started_at
             for index, tool_call, result in zip(pending_indices, pending, pending_results):
                 results[index] = result
