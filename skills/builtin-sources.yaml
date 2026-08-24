@@ -21,4 +21,5 @@ bundled_skills:
     path: search/sciverse-paper-search
     category: search
     version: 1.0.0
-skills: []
+skills:
+  - https://github.com/xiaoyanZzz/LazyRAG/archive/d74c8c466cf5bc7a5e3b13e43df59bfbf6a83c61.zip
