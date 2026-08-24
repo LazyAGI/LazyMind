@@ -35,8 +35,8 @@ x-proxy-env: &proxy-env
   https_proxy: ${https_proxy:-}
   HTTP_PROXY: ${HTTP_PROXY:-}
   HTTPS_PROXY: ${HTTPS_PROXY:-}
-  no_proxy: 127.0.0.1,localhost,::1,core,chat,evo-api,doc-server,lazyllm-algo,parsing,milvus,opensearch,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
-  NO_PROXY: 127.0.0.1,localhost,::1,core,chat,evo-api,doc-server,lazyllm-algo,parsing,milvus,opensearch,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+  no_proxy: 127.0.0.1,localhost,::1,host.docker.internal,core,chat,evo-api,doc-server,lazyllm-algo,parsing,milvus,opensearch,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
+  NO_PROXY: 127.0.0.1,localhost,::1,host.docker.internal,core,chat,evo-api,doc-server,lazyllm-algo,parsing,milvus,opensearch,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16
 
 x-core-env: &core-env
   ACL_DB_DRIVER: postgres
@@ -669,6 +669,8 @@ services:
       target: algorithm
       args:
         <<: *mirror-args
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     expose:
       - "8000"
     working_dir: /app
@@ -754,6 +756,8 @@ services:
       target: algorithm
       args:
         <<: *mirror-args
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     expose:
       - "8046"
     volumes:
@@ -849,6 +853,8 @@ services:
       args:
         <<: *mirror-args
         OPENCODE_VERSION: 1.14.28
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     expose:
       - "8047"
     environment:

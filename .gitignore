@@ -105,6 +105,7 @@ data/evo/
 .DS_Store
 
 AGENTS.md
+!frontend/AGENTS.md
 algorithm/.agentic_rag/
 version.*
 algorithm/Dockerfile.chat-rebase

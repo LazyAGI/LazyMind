@@ -421,6 +421,10 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		// Explicit per-request flags (for example a Feishu workspace selection)
 		// take precedence over persisted conversation defaults.
 		promoteAgentRuntimeFlags(raw, reqBody)
+		if err := applyChatFeatureControls(r.Context(), db, userID, reqBody); err != nil {
+			common.ReplyErr(w, "load chat feature controls failed", http.StatusInternalServerError)
+			return
+		}
 		workflowEnabled, _ := reqBody["enable_workflow"].(bool)
 		effectiveWorkflowRefs, bindingErr := resolveConversationWorkflowBinding(
 			r.Context(), db, convID, mentionedResources.WorkflowRefs,

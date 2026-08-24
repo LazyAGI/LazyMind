@@ -170,14 +170,14 @@ func TestRemoteTaskEventsPersistStreamStateAndInvalidatePanel(t *testing.T) {
 	EventHooks = &eventHooks{}
 	t.Cleanup(func() { EventHooks = previousHooks })
 	updates := []string{}
-	streamUpdates := []TaskEvent{}
+	taskUpdates := []TaskEvent{}
 	EventHooks.RegisterConversationEventHook(func(_ context.Context, _ state.Store, convID, _ string,
 		eventType string, payload map[string]any) {
 		if convID == "conversation-1" && eventType == "workflow_runtime_updated" {
 			updates = append(updates, payload["change"].(string))
 		}
 		if convID == "conversation-1" && eventType == "task_updated" {
-			streamUpdates = append(streamUpdates, payload["event"].(TaskEvent))
+			taskUpdates = append(taskUpdates, payload["event"].(TaskEvent))
 		}
 	})
 
@@ -226,16 +226,21 @@ func TestRemoteTaskEventsPersistStreamStateAndInvalidatePanel(t *testing.T) {
 	if !reflect.DeepEqual(updates, wantUpdates) {
 		t.Fatalf("updates=%v want=%v", updates, wantUpdates)
 	}
-	wantStreamTypes := []string{"artifact_stream_start", "artifact_stream", "artifact_stream_end", "artifact_stream_abort"}
-	gotStreamTypes := make([]string, 0, len(streamUpdates))
-	for _, event := range streamUpdates {
-		gotStreamTypes = append(gotStreamTypes, event.Type)
+	// Token/tool deltas remain on the dedicated task stream. Only bounded
+	// lifecycle and Writer preview events are mirrored to the conversation stream.
+	wantTaskUpdates := []string{
+		"task_start", "progress", "artifact_stream_start", "artifact_stream",
+		"artifact_stream_end", "artifact_stream_abort",
 	}
-	if !reflect.DeepEqual(gotStreamTypes, wantStreamTypes) {
-		t.Fatalf("stream updates=%v want=%v", gotStreamTypes, wantStreamTypes)
+	gotTaskUpdates := make([]string, 0, len(taskUpdates))
+	for _, event := range taskUpdates {
+		gotTaskUpdates = append(gotTaskUpdates, event.Type)
 	}
-	if streamUpdates[1].Delta != "hello" || streamUpdates[1].StreamID != "stream-1" || streamUpdates[1].ChunkIndex != 2 {
-		t.Fatalf("stream delta=%#v", streamUpdates[1])
+	if !reflect.DeepEqual(gotTaskUpdates, wantTaskUpdates) {
+		t.Fatalf("task updates=%v want=%v", gotTaskUpdates, wantTaskUpdates)
+	}
+	if taskUpdates[3].Delta != "hello" || taskUpdates[3].StreamID != "stream-1" || taskUpdates[3].ChunkIndex != 2 {
+		t.Fatalf("stream delta=%#v", taskUpdates[3])
 	}
 }
 

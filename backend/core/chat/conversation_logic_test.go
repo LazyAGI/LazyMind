@@ -200,6 +200,40 @@ func TestPromoteAgentRuntimeFlagsPrefersExplicitRequest(t *testing.T) {
 	}
 }
 
+func TestApplyChatFeatureControlsOverridesConversationRuntimeFlags(t *testing.T) {
+	db := newPromptTestDB(t)
+	now := time.Now().UTC()
+	if err := db.Model(&orm.UserUIPreferences{}).Create(map[string]any{
+		"user_id": "user-1", "task_center_enabled": false, "skills_enabled": true,
+		"workflows_enabled": true, "mcp_enabled": true, "document_parsing_enabled": true,
+		"created_at": now, "updated_at": now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	body := map[string]any{
+		"enable_workflow": true,
+		"enable_subagent": true,
+		"agentic_config": map[string]any{
+			"enable_workflow": true,
+			"enable_subagent": true,
+		},
+	}
+
+	if err := applyChatFeatureControls(t.Context(), db.DB, "user-1", body); err != nil {
+		t.Fatal(err)
+	}
+	if enabled, _ := body["enable_workflow"].(bool); enabled {
+		t.Fatalf("workflow must be disabled by the task center master control: %#v", body)
+	}
+	if enabled, _ := body["enable_subagent"].(bool); enabled {
+		t.Fatalf("subagents must be disabled by the task center master control: %#v", body)
+	}
+	agentConfig := body["agentic_config"].(map[string]any)
+	if agentConfig["enable_workflow"] != false || agentConfig["enable_subagent"] != false {
+		t.Fatalf("agentic config must use the same effective controls: %#v", agentConfig)
+	}
+}
+
 func TestBuildChatRequestBodyPropagatesSensitiveFilterBypass(t *testing.T) {
 	body := buildChatRequestBody(context.TODO(), nil, "conv-1", "", "hello", nil, map[string]any{"skip_sensitive_filter": true}, nil, "", 1)
 	if skip, _ := body["skip_sensitive_filter"].(bool); !skip {

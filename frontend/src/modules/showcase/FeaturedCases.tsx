@@ -21,7 +21,7 @@ export default function FeaturedCases({ type, onTry }: FeaturedCasesProps) {
   useEffect(() => {
     const controller = new AbortController();
     listShowcaseCases({}, { signal: controller.signal })
-      .then((response) => setItems(response.cases))
+      .then((response) => setItems(response.cases ?? []))
       .catch(() => {
         if (!controller.signal.aborted) {
           setItems([]);
