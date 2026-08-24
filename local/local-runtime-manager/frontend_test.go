@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -35,6 +36,24 @@ func TestWriteCaddyfileProxiesLocalEndpoints(t *testing.T) {
 	}
 	if !strings.Contains(content, "reverse_proxy http://127.0.0.1:"+strconv.Itoa(cfg.LocalProxy.Port)) {
 		t.Fatalf("Caddyfile missing local-proxy reverse proxy:\n%s", content)
+	}
+	expectedAssets := filepath.Join(paths.RepoRoot, "skills", ".runtime", "featured-skills", "assets")
+	if !strings.Contains(content, "handle_path /showcase-assets/*") || !strings.Contains(content, filepath.ToSlash(expectedAssets)) {
+		t.Fatalf("Caddyfile missing featured asset route:\n%s", content)
+	}
+
+	cfg.Profile = "desktop"
+	paths.ResourcesRoot = t.TempDir()
+	if err := writeCaddyfile(paths, cfg); err != nil {
+		t.Fatalf("write desktop Caddyfile: %v", err)
+	}
+	raw, err = os.ReadFile(paths.CaddyConfig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	desktopAssets := filepath.Join(paths.ResourcesRoot, "featured-skills", "assets")
+	if !strings.Contains(string(raw), filepath.ToSlash(desktopAssets)) {
+		t.Fatalf("desktop Caddyfile missing default featured assets path:\n%s", raw)
 	}
 }
 

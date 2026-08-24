@@ -457,8 +457,7 @@ func init() {
 	registerAdditionalErrorPattern("call_mode must be '%s', '%s' or '%s'", "Invalid request", http.StatusBadRequest, 2000103)
 	registerAdditionalErrorAlias("workflow is paused", "Conflict", http.StatusConflict, 2000107)
 	for _, source := range []string{
-		"invalid channel intent request", "invalid channel intent state", "invalid channel command registry",
-		"invalid channel intent response", "basic chat does not support background execution",
+		"basic chat does not support background execution",
 		"basic chat does not support ask answers", "basic chat does not support plugin mentions",
 		"conversation_id, decision_id and a valid action are required", "conversation and x-user-id are required",
 		"invalid search config patch", "at most 20 knowledge bases are allowed",
@@ -535,7 +534,7 @@ func init() {
 		registerAdditionalErrorAlias(source, "Internal server error", http.StatusInternalServerError, 2000000)
 	}
 	for _, source := range []string{
-		"channel intent classification failed", "writer document sync failed", "sensitive-word check unavailable",
+		"writer document sync failed", "sensitive-word check unavailable",
 		"sensitive-word check failed",
 		"workflow artifact action failed",
 		"writer document write-back failed",

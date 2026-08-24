@@ -27,6 +27,19 @@ func testRepo(t *testing.T) *Repository {
 	return repo
 }
 
+func createTestConversation(t *testing.T, repo *Repository, id, owner string) {
+	t.Helper()
+	if err := repo.db.AutoMigrate(&orm.Conversation{}, &orm.WorkflowSession{}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := repo.db.Create(&orm.Conversation{ID: id, BaseModel: orm.BaseModel{
+		CreateUserID: owner, CreatedAt: now, UpdatedAt: now,
+	}}).Error; err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestAuthorizeConversationScopesWorkflowBindingToOwner(t *testing.T) {
 	repo := testRepo(t)
 	if err := repo.db.AutoMigrate(&orm.Conversation{}); err != nil {
@@ -110,26 +123,35 @@ func TestPreparationIsOwnerScopedAndConsumedOnce(t *testing.T) {
 	}
 }
 
-func TestCreateHostSessionRejectsAnyExistingNonDismissedConversationSession(t *testing.T) {
+func TestCreateHostSessionReplacesOnlyTerminalExternalSessions(t *testing.T) {
 	repo := testRepo(t)
 	ctx := context.Background()
-	if err := repo.db.AutoMigrate(&orm.WorkflowSession{}); err != nil {
-		t.Fatal(err)
-	}
 	workflow := WorkflowPackage{WorkflowID: "wf", WorkflowRef: "builtin:wf", RevisionID: "rev-1"}
 	for _, status := range []string{"active", "waiting", "stopped", "failed", "completed"} {
 		t.Run(status, func(t *testing.T) {
 			conversationID := "conversation-" + status
+			createTestConversation(t, repo, conversationID, "u1")
 			now := time.Now().UTC()
 			existing := orm.WorkflowSession{ID: "existing-" + status, ConversationID: conversationID,
+				OriginHost: "external-agent", ControllerHost: "external-agent",
 				WorkflowID: "wf", Status: status, CreateUserID: "u1", CreatedAt: now, UpdatedAt: now}
 			if err := repo.db.Create(&existing).Error; err != nil {
 				t.Fatal(err)
 			}
-			_, _, err := repo.CreateHostSession(ctx, "u1", "new-"+status, conversationID,
-				"lazymind", conversationID, "lazymind", workflow)
-			if !errors.Is(err, ErrSessionConflict) {
-				t.Fatalf("status %q must block a second non-dismissed session: %v", status, err)
+			created, ok, err := repo.CreateHostSession(ctx, "u1", "new-"+status, conversationID,
+				"external-agent", conversationID, "external-agent", workflow)
+			if status == "active" || status == "waiting" {
+				if !errors.Is(err, ErrSessionConflict) || ok {
+					t.Fatalf("status %q must block replacement: created=%#v ok=%v err=%v", status, created, ok, err)
+				}
+				return
+			}
+			if err != nil || !ok || created.ID != "new-"+status {
+				t.Fatalf("status %q must be replaced: created=%#v ok=%v err=%v", status, created, ok, err)
+			}
+			var archived orm.WorkflowSession
+			if err := repo.db.First(&archived, "id = ?", existing.ID).Error; err != nil || !archived.Dismissed {
+				t.Fatalf("terminal session was not archived: %#v err=%v", archived, err)
 			}
 		})
 	}
@@ -138,9 +160,7 @@ func TestCreateHostSessionRejectsAnyExistingNonDismissedConversationSession(t *t
 func TestCreateHostSessionAllowsReplacementAfterDismiss(t *testing.T) {
 	repo := testRepo(t)
 	ctx := context.Background()
-	if err := repo.db.AutoMigrate(&orm.WorkflowSession{}); err != nil {
-		t.Fatal(err)
-	}
+	createTestConversation(t, repo, "conversation", "u1")
 	now := time.Now().UTC()
 	if err := repo.db.Create(&orm.WorkflowSession{ID: "dismissed", ConversationID: "conversation",
 		WorkflowID: "wf", Status: "stopped", Dismissed: true, CreateUserID: "u1",
@@ -155,13 +175,57 @@ func TestCreateHostSessionAllowsReplacementAfterDismiss(t *testing.T) {
 	}
 }
 
+func TestCreateHostSessionArchivesDuplicateTerminalHistoryAtomically(t *testing.T) {
+	repo := testRepo(t)
+	createTestConversation(t, repo, "conversation", "u1")
+	now := time.Now().UTC()
+	for _, session := range []orm.WorkflowSession{
+		{ID: "completed", ConversationID: "conversation", OriginHost: "external-agent", ControllerHost: "external-agent",
+			WorkflowID: "image", Status: "completed", CreateUserID: "u1", CreatedAt: now, UpdatedAt: now},
+		{ID: "stopped", ConversationID: "conversation", OriginHost: "external-agent", ControllerHost: "external-agent",
+			WorkflowID: "writer", Status: "stopped", CreateUserID: "u1", CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := repo.db.Create(&session).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	created, ok, err := repo.CreateHostSession(t.Context(), "u1", "replacement", "conversation",
+		"external-agent", "run", "external-agent",
+		WorkflowPackage{WorkflowID: "writer", WorkflowRef: "builtin:writer", RevisionID: "rev-1"})
+	if err != nil || !ok || created.ID != "replacement" {
+		t.Fatalf("replacement failed: created=%#v ok=%v err=%v", created, ok, err)
+	}
+	var current, archived int64
+	if err := repo.db.Model(&orm.WorkflowSession{}).Where("conversation_id = ? AND dismissed = false", "conversation").Count(&current).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.db.Model(&orm.WorkflowSession{}).Where("conversation_id = ? AND dismissed = true", "conversation").Count(&archived).Error; err != nil {
+		t.Fatal(err)
+	}
+	if current != 1 || archived != 2 {
+		t.Fatalf("conversation aggregate is inconsistent: current=%d archived=%d", current, archived)
+	}
+}
+
+func TestCreateHostSessionRejectsInvocationConversationMismatch(t *testing.T) {
+	repo := testRepo(t)
+	createTestConversation(t, repo, "conversation-1", "u1")
+	ctx := WithConversationScope(t.Context(), "conversation-2")
+	_, created, err := repo.CreateHostSession(ctx, "u1", "session", "conversation-1",
+		"external-agent", "run", "external-agent",
+		WorkflowPackage{WorkflowID: "writer", WorkflowRef: "builtin:writer", RevisionID: "rev-1"})
+	if !errors.Is(err, ErrPermissionDenied) || created {
+		t.Fatalf("mismatched invocation scope created a session: created=%v err=%v", created, err)
+	}
+}
+
 func TestAuthorizeSessionDistinguishesMissingFromWrongOwner(t *testing.T) {
 	repo := testRepo(t)
 	ctx := context.Background()
-	if err := repo.db.Exec(`CREATE TABLE plugin_sessions (id TEXT PRIMARY KEY, create_user_id TEXT NOT NULL)`).Error; err != nil {
+	if err := repo.db.Exec(`CREATE TABLE plugin_sessions (id TEXT PRIMARY KEY, create_user_id TEXT NOT NULL, conversation_id TEXT NOT NULL DEFAULT '')`).Error; err != nil {
 		t.Fatal(err)
 	}
-	if err := repo.db.Exec(`INSERT INTO plugin_sessions(id, create_user_id) VALUES ('s1','u1')`).Error; err != nil {
+	if err := repo.db.Exec(`INSERT INTO plugin_sessions(id, create_user_id, conversation_id) VALUES ('s1','u1','conversation-1')`).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.AuthorizeSession(ctx, "missing", "u1"); !errors.Is(err, ErrNotFound) {
@@ -172,6 +236,12 @@ func TestAuthorizeSessionDistinguishesMissingFromWrongOwner(t *testing.T) {
 	}
 	if err := repo.AuthorizeSession(ctx, "s1", "u1"); err != nil {
 		t.Fatalf("owner authorization error=%v", err)
+	}
+	if err := repo.AuthorizeSession(WithConversationScope(ctx, "conversation-2"), "s1", "u1"); !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("cross-conversation authorization error=%v", err)
+	}
+	if err := repo.AuthorizeSession(WithConversationScope(ctx, "conversation-1"), "s1", "u1"); err != nil {
+		t.Fatalf("conversation authorization error=%v", err)
 	}
 }
 

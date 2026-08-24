@@ -4,7 +4,6 @@ from collections.abc import Callable
 from typing import Any, Protocol
 
 from channel_gateway.common.domain.channel import (
-    ClaimedOutbound,
     InboundEnvelope,
     RuntimeFence,
 )
@@ -457,34 +456,4 @@ class FeishuOutboundFactory(Protocol):
         self,
         credentials: FeishuAppCredentials,
     ) -> FeishuOutboundClient:
-        ...
-
-
-class FeishuTaskOutboxRepository(Protocol):
-    def list_sent_task_outbounds(
-        self,
-        *,
-        provider: str,
-        limit: int,
-    ) -> list[ClaimedOutbound]:
-        ...
-
-    def sync_task_artifact_outbounds(
-        self,
-        *,
-        parent: ClaimedOutbound,
-        part_index: int,
-        artifacts: list[dict[str, str]],
-    ) -> dict[str, int]:
-        ...
-
-    def compare_and_save_sent_task_monitor_state(
-        self,
-        *,
-        outbox_id: str,
-        part_index: int,
-        expected_revision: int,
-        state: dict[str, Any],
-        complete: bool,
-    ) -> dict[str, Any] | None:
         ...

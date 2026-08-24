@@ -12,7 +12,7 @@ import {
   RightOutlined,
 } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import {
   disableTool,
   enableTool,
@@ -54,7 +54,6 @@ export default function KnowledgeDataSettings({
   onDocumentParsingChange,
 }: KnowledgeDataSettingsProps) {
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const [tools, setTools] = useState<StructuredAsset[]>([]);
   const [toolsLoading, setToolsLoading] = useState(true);
   const [toolsError, setToolsError] = useState(false);
@@ -67,7 +66,7 @@ export default function KnowledgeDataSettings({
       title: t("settingsPage.knowledge.groups.retrieval.title"),
       description: t("settingsPage.knowledge.groups.retrieval.description"),
       icon: <ReadOutlined />,
-      destination: "/lib/knowledge/list",
+      destination: "/lib/knowledge/list?from=settings-knowledge",
       tools: [
         { id: "kb", name: t("settingsPage.knowledge.groups.retrieval.kb.name"), description: t("settingsPage.knowledge.groups.retrieval.kb.description") },
         { id: "temp_kb", name: t("settingsPage.knowledge.groups.retrieval.tempKb.name"), description: t("settingsPage.knowledge.groups.retrieval.tempKb.description") },
@@ -186,7 +185,17 @@ export default function KnowledgeDataSettings({
           ? { label: t("settingsPage.enabled"), className: "is-enabled" }
           : { label: t("settingsPage.disabled"), className: "is-disabled" };
 
-    return <div className="settings-knowledge-tool-row" key={definition.id}>
+    return <div
+      className={`settings-knowledge-tool-row${destination ? " is-navigable" : ""}`}
+      key={definition.id}
+    >
+      {destination ? (
+        <Link
+          aria-label={t("settingsPage.knowledge.openConfigAria", { name: displayName })}
+          className="settings-knowledge-row-link"
+          to={destination}
+        />
+      ) : null}
       <span className="settings-knowledge-tool-icon" aria-hidden="true">{group.icon}</span>
       <div className="settings-knowledge-tool-copy">
         <strong>{displayName}</strong>
@@ -201,13 +210,7 @@ export default function KnowledgeDataSettings({
         loading={pending}
         onChange={(enabled: boolean) => { if (tool) void toggleTool(tool, enabled); }}
       />
-      {destination ? <Button
-        aria-label={t("settingsPage.knowledge.openConfigAria", { name: displayName })}
-        className="settings-knowledge-detail-button"
-        icon={<RightOutlined />}
-        onClick={() => navigate(destination)}
-        type="text"
-      /> : null}
+      {destination ? <RightOutlined aria-hidden="true" className="settings-knowledge-detail-icon" /> : null}
     </div>;
   };
 

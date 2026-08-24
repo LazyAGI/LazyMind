@@ -25,8 +25,8 @@ import subprocess
 from typing import Any, Dict, List, Optional
 
 import lazyllm
+from lazyllm.tools.agent import ToolExecutionError
 
-from lazymind.chat.engine.tools.infra import handle_tool_errors, tool_error, tool_success
 from lazymind.chat.engine.tools.text_edit import replace_exact_text_file
 
 _RG_BINARY = shutil.which('rg') or ''
@@ -81,7 +81,7 @@ class LocalFileToolkit:
         """
         scopes = self._get_scopes()
         if not scopes:
-            raise PermissionError('No local filesystem paths are configured')
+            raise ToolExecutionError('No local filesystem paths are configured')
         target = os.path.realpath(target)
         for scope in scopes:
             for root in scope.roots:
@@ -92,18 +92,18 @@ class LocalFileToolkit:
                 except ValueError:
                     continue
         roots = [root for scope in scopes for root in scope.roots]
-        raise PermissionError(f'Path {target} is not within allowed paths: {roots}')
+        raise ToolExecutionError(f'Path {target} is not within allowed paths: {roots}')
 
     def _resolve_dir(self, path: str) -> tuple[str, LocalFSScope]:
         resolved, scope = self._resolve_with_scope(path)
         if not os.path.isdir(resolved):
-            raise ValueError(f'Path is not a directory: {path}')
+            raise ToolExecutionError(f'Path is not a directory: {path}')
         return resolved, scope
 
     def _iter_roots(self, path: Optional[str]) -> list[tuple[str, LocalFSScope]]:
         scopes = self._get_scopes()
         if not scopes:
-            raise PermissionError('No local filesystem paths are configured')
+            raise ToolExecutionError('No local filesystem paths are configured')
         if path is None or str(path).strip() in ('', '.'):
             roots: list[tuple[str, LocalFSScope]] = []
             for scope in scopes:
@@ -123,7 +123,7 @@ class LocalFileToolkit:
 
     def _ensure_visible_file(self, scope: LocalFSScope, path: str) -> None:
         if not self._is_visible_file(scope, path):
-            raise PermissionError(f'File extension is not allowed: {path}')
+            raise ToolExecutionError(f'File extension is not allowed: {path}')
 
     def _resolve_visible_file(self, path: str) -> Optional[tuple[str, LocalFSScope]]:
         try:
@@ -165,7 +165,6 @@ class LocalFileToolkit:
             capture_output=True, text=True, timeout=_RG_TIMEOUT, cwd=cwd,
         )
 
-    @handle_tool_errors
     def ls(self, path: Optional[str] = None, max_entries: int = 200) -> Dict[str, Any]:
         """List available local directories or one directory level.
 
@@ -185,13 +184,13 @@ class LocalFileToolkit:
                 entries.append(self._entry(root, scope))
                 if len(entries) >= limit:
                     break
-            return tool_success('ls', {
+            return {
                 'path': None,
                 'entry_count': len(entries),
                 'truncated': len(entries) >= limit,
                 'max_entries': limit,
                 'entries': entries,
-            })
+            }
 
         safe_dir, scope = self._resolve_dir(str(path))
         with os.scandir(safe_dir) as iterator:
@@ -202,21 +201,20 @@ class LocalFileToolkit:
                         entries.append(self._entry(entry_path, entry_scope))
                     elif entry.is_file(follow_symlinks=True) and self._is_visible_file(entry_scope, entry_path):
                         entries.append(self._entry(entry_path, entry_scope))
-                except OSError:
+                except (OSError, ToolExecutionError):
                     continue
                 if len(entries) >= limit:
                     break
 
-        return tool_success('ls', {
+        return {
             'path': safe_dir,
             'source_id': scope.source_id,
             'entry_count': len(entries),
             'truncated': len(entries) >= limit,
             'max_entries': limit,
             'entries': entries,
-        })
+        }
 
-    @handle_tool_errors
     def glob(self, pattern: str, path: Optional[str] = None) -> Dict[str, Any]:
         """Find local files whose names match a glob pattern.
 
@@ -233,7 +231,9 @@ class LocalFileToolkit:
             if self._has_rg():
                 proc = self._run_rg(['--files', '--no-ignore', '--hidden', '--glob', pattern], cwd=safe_dir)
                 if proc.returncode > 1:
-                    return tool_error('glob', f'ripgrep glob failed: {proc.stderr.strip() or "unknown error"}')
+                    raise ToolExecutionError(
+                        f'ripgrep glob failed: {proc.stderr.strip() or "unknown error"}'
+                    )
                 raw = [os.path.join(safe_dir, p) for p in proc.stdout.splitlines() if p.strip()]
             else:
                 py_pattern = pattern if '**' in pattern else f'**/{pattern}'
@@ -243,14 +243,13 @@ class LocalFileToolkit:
                 if resolved:
                     matches.append(resolved)
         matches.sort()
-        return tool_success('glob', {
+        return {
             'pattern': pattern,
             'path': path,
             'match_count': len(matches),
             'matches': matches[:200],
-        })
+        }
 
-    @handle_tool_errors
     def grep(
         self,
         pattern: str,
@@ -276,31 +275,33 @@ class LocalFileToolkit:
                 result = self._grep_rg(pattern, safe_dir, scope, glob, max_results - len(matches))
             else:
                 result = self._grep_py(pattern, safe_dir, scope, glob, max_results - len(matches))
-            if not result.get('success'):
-                return result
-            matches.extend(result.get('result', {}).get('matches', []))
+            matches.extend(result.get('matches', []))
             if len(matches) >= max_results:
                 break
-        return tool_success('grep', {
+        return {
             'pattern': pattern,
             'path': path,
             'match_count': len(matches),
             'matches': matches,
-        })
+        }
 
     def _grep_rg(
         self, pattern: str, safe_dir: str, scope: LocalFSScope, glob_filter: str, max_results: int,
     ) -> Dict[str, Any]:
         if max_results <= 0:
-            return tool_success('grep', {'matches': []})
+            return {'matches': []}
         args = ['--json', '--no-heading', '--no-ignore', '--hidden', '-g', glob_filter, '--', pattern]
         try:
             proc = self._run_rg(args, cwd=safe_dir)
         except subprocess.TimeoutExpired:
-            return tool_error('grep', f'Search timed out (>{_RG_TIMEOUT}s)', error_type='Timeout')
+            raise ToolExecutionError(
+                f'Search timed out after {_RG_TIMEOUT} seconds.'
+            )
 
         if proc.returncode > 1:
-            return tool_error('grep', f'ripgrep search failed: {proc.stderr.strip() or "unknown error"}')
+            raise ToolExecutionError(
+                f'ripgrep search failed: {proc.stderr.strip() or "unknown error"}'
+            )
 
         matches: List[Dict[str, Any]] = []
         for line in proc.stdout.splitlines():
@@ -328,22 +329,22 @@ class LocalFileToolkit:
             if len(matches) >= max_results:
                 break
 
-        return tool_success('grep', {
+        return {
             'pattern': pattern,
             'path': safe_dir,
             'match_count': len(matches),
             'matches': matches,
-        })
+        }
 
     def _grep_py(
         self, pattern: str, safe_dir: str, scope: LocalFSScope, glob_filter: str, max_results: int,
     ) -> Dict[str, Any]:
         if max_results <= 0:
-            return tool_success('grep', {'matches': []})
+            return {'matches': []}
         try:
             regex = re.compile(pattern)
         except re.error as exc:
-            return tool_error('grep', f'Invalid regex: {exc}')
+            raise ToolExecutionError(f'Invalid regex: {exc}') from exc
 
         matches: List[Dict[str, Any]] = []
         for root, _dirs, files in os.walk(safe_dir):
@@ -373,14 +374,13 @@ class LocalFileToolkit:
             if len(matches) >= max_results:
                 break
 
-        return tool_success('grep', {
+        return {
             'pattern': pattern,
             'path': safe_dir,
             'match_count': len(matches),
             'matches': matches,
-        })
+        }
 
-    @handle_tool_errors
     def read(
         self,
         filepath: str,
@@ -399,7 +399,7 @@ class LocalFileToolkit:
         """
         safe_path, scope = self._resolve_with_scope(filepath)
         if not os.path.isfile(safe_path):
-            return tool_error('read', f'File not found: {filepath}')
+            raise ToolExecutionError(f'File not found: {filepath}')
         self._ensure_visible_file(scope, safe_path)
 
         try:
@@ -411,18 +411,17 @@ class LocalFileToolkit:
                     if start_line <= index < start_line + max_lines:
                         chunk.append(line)
         except OSError as exc:
-            return tool_error('read', f'Cannot read file: {exc}')
+            raise ToolExecutionError(f'Cannot read file: {exc}') from exc
 
-        return tool_success('read', {
+        return {
             'filepath': safe_path,
             'source_id': scope.source_id,
             'total_lines': total,
             'start_line': start_line,
             'end_line': start_line + len(chunk),
             'content': ''.join(chunk),
-        })
+        }
 
-    @handle_tool_errors
     def string_replace(
         self,
         filepath: str,
@@ -450,24 +449,27 @@ class LocalFileToolkit:
         """
         safe_path, scope = self._resolve_with_scope(filepath)
         if not os.path.isfile(safe_path):
-            raise FileNotFoundError(f'File not found: {filepath}')
+            raise ToolExecutionError(f'File not found: {filepath}')
         self._ensure_visible_file(scope, safe_path)
 
-        replacement = replace_exact_text_file(
-            safe_path,
-            old_string,
-            new_string,
-            expected_replacements=expected_replacements,
-            encoding=encoding,
-        )
+        try:
+            replacement = replace_exact_text_file(
+                safe_path,
+                old_string,
+                new_string,
+                expected_replacements=expected_replacements,
+                encoding=encoding,
+            )
+        except ValueError as exc:
+            raise ToolExecutionError(str(exc)) from exc
 
-        return tool_success('string_replace', {
+        return {
             'filepath': safe_path,
             'source_id': scope.source_id,
             'replacements': replacement.replacements,
             'encoding': replacement.encoding,
             'bytes': len(replacement.content),
-        })
+        }
 
     def info(self, path: Optional[str] = None) -> Dict[str, Any]:
         """Get metadata for an available local file or directory.
@@ -481,7 +483,7 @@ class LocalFileToolkit:
         """
         if path is None or str(path).strip() in ('', '.'):
             entries = [self._entry(root, scope) for root, scope in self._iter_roots(None)]
-            return tool_success('info', {'path': None, 'entries': entries})
+            return {'path': None, 'entries': entries}
         else:
             safe_path, scope = self._resolve_with_scope(str(path))
             if os.path.isfile(safe_path):
@@ -490,12 +492,12 @@ class LocalFileToolkit:
         try:
             st = os.stat(safe_path)
         except OSError as exc:
-            return tool_error('info', f'Cannot get file info: {exc}')
+            raise ToolExecutionError(f'Cannot get file info: {exc}') from exc
 
-        return tool_success('info', {
+        return {
             'path': safe_path,
             'type': 'directory' if os.path.isdir(safe_path) else 'file',
             'source_id': scope.source_id,
             'size': st.st_size,
             'mtime': datetime.datetime.fromtimestamp(st.st_mtime).isoformat(),
-        })
+        }

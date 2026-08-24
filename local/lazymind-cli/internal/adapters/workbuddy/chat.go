@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"strings"
 
+	"lazymind/agentconnector/internal/agentcatalog"
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/chatagent"
 )
@@ -20,6 +21,10 @@ type ChatRunner struct {
 	binary string
 	self   string
 	home   string
+}
+
+func (r *ChatRunner) Sessions(ctx context.Context) ([]chatagent.NativeSession, error) {
+	return agentcatalog.WorkBuddySessions(ctx)
 }
 
 func NewChatRunner(binary string) (*ChatRunner, error) {
@@ -63,19 +68,34 @@ func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chata
 	if r == nil || strings.TrimSpace(r.binary) == "" {
 		return errors.New("CodeBuddy Code CLI is unavailable")
 	}
-	workspace, err := agentexec.EnsureConversationWorkspace(run.ConversationID)
-	if err != nil {
-		return err
+	resume := (run.Action == "resume" || run.Action == "regenerate") && strings.TrimSpace(run.ProviderThreadID) != ""
+	workspace := ""
+	var err error
+	if resume {
+		var found bool
+		workspace, found, err = agentcatalog.Workspace(ctx, "workbuddy", run.ProviderThreadID)
+		if err != nil {
+			return err
+		}
+		if !found {
+			return errors.New("CodeBuddy CLI session workspace is unavailable")
+		}
+	} else {
+		workspace, err = agentexec.EnsureConversationWorkspace(run.ConversationID)
+		if err != nil {
+			return err
+		}
 	}
 	mcpConfig, err := r.invocationMCPConfig(run)
 	if err != nil {
 		return err
 	}
 	arguments := []string{
-		"-p", "--output-format", "stream-json", "--permission-mode", "dontAsk",
-		"--tools", "Read,Write,Edit,Glob,Grep", "--strict-mcp-config", "--mcp-config", mcpConfig,
+		"-p", "--output-format", "stream-json", "--permission-mode", "bypassPermissions",
+		"--tools", "Read,Write,Edit,Glob,Grep,ToolSearch,DeferExecuteTool",
+		"--strict-mcp-config", "--mcp-config", mcpConfig,
 	}
-	if run.Action == "resume" && strings.TrimSpace(run.ProviderThreadID) != "" {
+	if resume {
 		arguments = append(arguments, "--resume", run.ProviderThreadID)
 	}
 	arguments = append(arguments, run.Prompt)

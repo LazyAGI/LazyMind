@@ -5,18 +5,14 @@ import CaseCard from "./CaseCard";
 import { listShowcaseCases, type ShowcaseCase } from "./api";
 import "./index.scss";
 
-const FEATURED_IDS = [
-  "aiProduct",
-  "knowledgeQa",
-  "paper",
-  "ppt",
-  "stickers",
-  "industry",
-  "sales",
-  "meeting",
-];
+type FeaturedSkillType = "chat" | "work";
 
-export default function FeaturedCases() {
+interface FeaturedCasesProps {
+  type: FeaturedSkillType;
+  onTry?: (item: ShowcaseCase) => void;
+}
+
+export default function FeaturedCases({ type, onTry }: FeaturedCasesProps) {
   const { i18n, t } = useTranslation();
   const locale = i18n.resolvedLanguage || i18n.language;
   const [items, setItems] = useState<ShowcaseCase[]>([]);
@@ -25,7 +21,7 @@ export default function FeaturedCases() {
   useEffect(() => {
     const controller = new AbortController();
     listShowcaseCases({}, { signal: controller.signal })
-      .then((response) => setItems(response.cases))
+      .then((response) => setItems(response.cases ?? []))
       .catch(() => {
         if (!controller.signal.aborted) {
           setItems([]);
@@ -40,11 +36,8 @@ export default function FeaturedCases() {
   }, [locale]);
 
   const featuredItems = useMemo(() => {
-    const byId = new Map(items.map((item) => [item.id, item]));
-    return FEATURED_IDS.map((id) => byId.get(id)).filter(
-      (item): item is ShowcaseCase => Boolean(item),
-    );
-  }, [items]);
+    return items.filter((item) => item.featured && item.type === type);
+  }, [items, type]);
 
   if (!isLoading && featuredItems.length === 0) {
     return null;
@@ -54,7 +47,7 @@ export default function FeaturedCases() {
     <section className="showcase-featured" aria-labelledby="showcase-featured-title">
       <div className="showcase-featured-heading">
         <h2 id="showcase-featured-title">{t("showcase.featuredTitle")}</h2>
-        <Link className="showcase-more-link" to="/agent/chat/cases">
+        <Link className="showcase-more-link" to={`/agent/chat/cases?type=${type}`}>
           {t("showcase.viewMore")} <span aria-hidden="true">→</span>
         </Link>
       </div>
@@ -65,7 +58,7 @@ export default function FeaturedCases() {
       ) : (
         <div className="showcase-grid showcase-featured-grid">
           {featuredItems.map((item) => (
-            <CaseCard key={item.id} item={item} />
+            <CaseCard key={item.id} item={item} onTry={onTry} />
           ))}
         </div>
       )}

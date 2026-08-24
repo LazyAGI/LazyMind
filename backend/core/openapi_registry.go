@@ -450,31 +450,6 @@ type conversationPathParams struct {
 	Name string `path:"name"`
 }
 
-type channelCommandOpenAPI struct {
-	Name        string `json:"name"`
-	Description string `json:"description"`
-}
-
-type channelCommandRegistryOpenAPI struct {
-	SchemaVersion  string                  `json:"schema_version"`
-	Commands       []channelCommandOpenAPI `json:"commands"`
-	SelectionRules []string                `json:"selection_rules"`
-	OutputSchema   map[string]any          `json:"output_schema"`
-}
-
-type channelIntentOpenAPIRequest struct {
-	Provider        string                        `json:"provider"`
-	Message         string                        `json:"message"`
-	State           map[string]any                `json:"state"`
-	CommandRegistry channelCommandRegistryOpenAPI `json:"command_registry"`
-}
-
-type channelIntentOpenAPIResponse struct {
-	SchemaVersion string         `json:"schema_version"`
-	Command       string         `json:"command"`
-	Parameters    map[string]any `json:"parameters"`
-}
-
 type conversationSearchConfigOpenAPIRequest struct {
 	DatasetIDs []string `json:"dataset_ids"`
 }
@@ -3929,15 +3904,6 @@ func registeredCoreOperations() []openAPIOperation {
 			PathParams:  mcpServerPathParams{},
 			RequestBody: jsonBodyOf(mcp.UpdateToolsRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Updated MCP server tools", mcp.ServerResponse{})},
-		},
-		{
-			Method:      "POST",
-			Path:        "/channel-intents:classify",
-			Summary:     "Classify a channel message",
-			Description: "Classifies an external-channel message against the caller-provided command registry and parameter schemas.",
-			Tags:        []string{"channels"},
-			RequestBody: jsonBodyOf(channelIntentOpenAPIRequest{}, true),
-			Responses:   map[int]openAPIResponse{200: resp("Classified channel command", channelIntentOpenAPIResponse{})},
 		},
 		{
 			Method:      "PATCH",

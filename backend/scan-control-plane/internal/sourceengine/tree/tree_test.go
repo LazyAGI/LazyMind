@@ -34,10 +34,10 @@ func TestTargetTreeListChildrenUsesConnectorAndDoesNotUseFallbackOrStore(t *test
 	if len(spy.listRequests) != 1 || len(spy.mapObjects) != 2 {
 		t.Fatalf("expected connector list and map calls, list=%d map=%d", len(spy.listRequests), len(spy.mapObjects))
 	}
-	if len(page.Items) != 1 {
-		t.Fatalf("expected target directory tree to hide files, got %+v", page.Items)
+	if len(page.Items) != 2 {
+		t.Fatalf("expected include_files to preserve documents, got %+v", page.Items)
 	}
-	if page.Items[0].ObjectKey != "folder-1" {
+	if page.Items[0].ObjectKey != "folder-1" || page.Items[1].ObjectKey != "doc-1" {
 		t.Fatalf("unexpected target tree nodes: %+v", page.Items)
 	}
 	if fallback.called {
@@ -70,11 +70,11 @@ func TestTargetTreeAllCurrentLevelPullsPagesWithoutWritingBusinessTables(t *test
 	if len(spy.listRequests) != 2 {
 		t.Fatalf("expected connector pagination, got %d requests", len(spy.listRequests))
 	}
-	if !page.ListComplete || page.HasMore || len(page.Items) != 2 {
+	if !page.ListComplete || page.HasMore || len(page.Items) != 3 {
 		t.Fatalf("expected complete current-level directory page, got %+v", page)
 	}
-	if page.Items[0].ObjectKey != "folder-1" || page.Items[1].ObjectKey != "page-1" {
-		t.Fatalf("target directory tree should keep containers and hide files, got %+v", page.Items)
+	if page.Items[0].ObjectKey != "folder-1" || page.Items[1].ObjectKey != "doc-1" || page.Items[2].ObjectKey != "page-1" {
+		t.Fatalf("target tree should keep containers and requested files, got %+v", page.Items)
 	}
 }
 
@@ -193,6 +193,34 @@ func TestTargetTreeSearchRespectsIncludeFiles(t *testing.T) {
 	}
 	if len(spy.searchRequests) != 0 || len(spy.listRequests) != 2 {
 		t.Fatalf("target search should continue using normal list results, searches=%d lists=%d", len(spy.searchRequests), len(spy.listRequests))
+	}
+}
+
+func TestTargetTreeDirectSearchUsesOnlineConnector(t *testing.T) {
+	t.Parallel()
+
+	spy := &treeConnectorSpy{supportsSearch: true}
+	registry, err := connector.NewDefaultConnectorRegistry(spy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	engine := NewDefaultTargetTreeEngine(registry)
+	page, err := engine.Search(context.Background(), TargetTreeSearchRequest{
+		ConnectorType: treeTestConnectorType,
+		Keyword:       "welcome", Direct: true, IncludeFiles: true, PageSize: 10,
+		AuthConnectionID: "connection-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(spy.searchRequests) != 1 || len(spy.listRequests) != 0 {
+		t.Fatalf("direct search calls=%d list calls=%d", len(spy.searchRequests), len(spy.listRequests))
+	}
+	if spy.searchRequests[0].Keyword != "welcome" || spy.searchRequests[0].AuthConnectionID != "connection-1" {
+		t.Fatalf("search request=%#v", spy.searchRequests[0])
+	}
+	if len(page.Items) != 1 || page.Items[0].ObjectKey != "doc-1" || page.SearchMode != SearchModeConnector {
+		t.Fatalf("page=%#v", page)
 	}
 }
 

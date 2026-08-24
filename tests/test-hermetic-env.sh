@@ -35,6 +35,7 @@ test_hermetic_hash_inputs() {
   local files=(
     "$ROOT/tests/test-hermetic.txt"
     "$ROOT/backend/auth-service/requirements.txt"
+    "$ROOT/backend/channel-gateway/requirements.txt"
     "$ROOT/tests/backend/auth-service/requirements-test.txt"
     "$ROOT/tests/algorithm/requirements-test.txt"
     "$ROOT/algorithm/requirements.txt"
@@ -152,7 +153,7 @@ test_hermetic_prepare() {
   test_hermetic_create_or_sync_python
 
   export LAZYMIND_TEST_PYTHON="$PYTHON_BIN"
-  export PYTHONPATH="$ROOT:$ROOT/algorithm:$ROOT/backend/auth-service${PYTHONPATH:+:$PYTHONPATH}"
+  export PYTHONPATH="$ROOT:$ROOT/algorithm:$ROOT/backend/auth-service:$ROOT/backend/channel-gateway${PYTHONPATH:+:$PYTHONPATH}"
 }
 
 test_hermetic_check() {

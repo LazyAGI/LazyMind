@@ -4,7 +4,9 @@ from typing import Any, Dict, List, Optional
 from unittest.mock import patch
 
 import lazyllm
+import pytest
 import yaml
+from lazyllm.tools.agent import ToolExecutionError
 
 from lazymind.chat.engine.tools.memory import MemoryTools
 from lazymind.common.memory.paths import (
@@ -141,7 +143,7 @@ def _tools_with_store(fs: FakeRemoteFS):
 def _reset_ledger() -> list[dict[str, Any]]:
     ledger: list[dict[str, Any]] = []
     lazyllm.globals['agentic_config'] = {
-        'memory_tool_results': ledger,
+        'memory_operation_ledger': ledger,
         'memory_source_kind': 'chat_explicit',
         'conversation_id': 'conversation-1',
     }
@@ -161,11 +163,11 @@ def test_soul_editor_updates_supported_field():
             {'op': 'set', 'path': 'identity.description', 'value': '更直接的助手'},
         ])
 
-    assert payload['success'] is True
-    assert payload['result']['status'] == 'applied'
+    assert payload['status'] == 'applied'
     assert '更直接的助手' in fs.files[SOUL_PATH]
-    assert ledger[-1]['tool'] == 'soul_editor'
-    assert ledger[-1]['mutation'] is True
+    assert ledger[-1]['operation'] == 'soul_editor'
+    assert ledger[-1]['mutation'] == 'applied'
+    assert ledger[-1]['status'] == 'succeeded'
     assert ledger[-1]['result']['status'] == 'applied'
 
 
@@ -178,14 +180,13 @@ def test_soul_editor_rejects_missing_field():
     })
     tools, store = _tools_with_store(fs)
     with patch('lazymind.chat.engine.tools.memory.MemoryStore', lambda *args, **kwargs: store):
-        payload = tools.soul_editor([
-            {'op': 'set', 'path': 'identity.email', 'value': 'x@y.com'},
-        ])
-    assert payload['success'] is False
-    assert payload['error']['type'] == 'validation'
-    assert 'unsupported soul operation path' in payload['error']['reason']
-    assert ledger[-1]['success'] is False
-    assert ledger[-1]['mutation'] is False
+        with pytest.raises(ToolExecutionError, match='unsupported soul operation path'):
+            tools.soul_editor([
+                {'op': 'set', 'path': 'identity.email', 'value': 'x@y.com'},
+            ])
+    assert ledger[-1]['status'] == 'failed'
+    assert ledger[-1]['mutation'] == 'none'
+    assert ledger[-1]['error_code'] == 'invalid_arguments'
 
 
 def test_profile_editor_updates_list_field():
@@ -204,14 +205,13 @@ def test_profile_editor_updates_list_field():
             {'op': 'add', 'path': 'professional.industries', 'value': 'software'},
         ])
 
-    assert payload['success'] is True
-    assert payload['result']['status'] == 'applied'
-    assert payload['result']['change_count'] == 4
+    assert payload['status'] == 'applied'
+    assert payload['change_count'] == 4
     assert fs.files[PROFILE_PATH].count('en-US') == 1
     assert 'residence:' in fs.files[PROFILE_PATH]
     assert '中国' in fs.files[PROFILE_PATH]
     assert 'software' in fs.files[PROFILE_PATH]
-    assert ledger[-1]['mutation'] is True
+    assert ledger[-1]['mutation'] == 'applied'
 
 
 def test_profile_editor_discovers_fields_from_loaded_document():
@@ -237,7 +237,7 @@ def test_profile_editor_discovers_fields_from_loaded_document():
             {'op': 'set', 'path': 'personal.headline', 'value': 'Engineer'},
         ])
 
-    assert payload['success'] is True
+    assert payload['status'] == 'applied'
     stored = fs.files[PROFILE_PATH]
     assert 'nickname: Trinity' in stored
     assert 'interests:' in stored
@@ -269,14 +269,13 @@ def test_soul_editor_uses_the_same_dynamic_field_contract():
             {'op': 'set', 'path': 'custom.note', 'value': 'Direct'},
         ])
 
-    assert payload['success'] is True
     stored = yaml.safe_load(fs.files[SOUL_PATH])
     assert stored['custom'] == {
         'title': '',
         'capabilities': ['Research', 'Planning'],
         'note': 'Direct',
     }
-    assert 'schema_version' not in payload['result']['content']
+    assert 'schema_version' not in payload['content']
     assert 'schema_version' not in str(ledger)
 
 
@@ -292,9 +291,8 @@ def test_read_memory_returns_only_visible_document_content():
     with patch('lazymind.chat.engine.tools.memory.MemoryStore', lambda *args, **kwargs: store):
         payload = tools.read_memory('soul')
 
-    assert payload['success'] is True
-    assert 'schema_version' not in payload['result']['content']
-    assert 'identity:' in payload['result']['content']
+    assert 'schema_version' not in payload['content']
+    assert 'identity:' in payload['content']
     assert 'schema_version' not in str(ledger)
 
 
@@ -324,7 +322,7 @@ def test_profile_editor_preserves_loaded_field_types():
             {'op': 'clear', 'path': 'personal.secondary_headline'},
         ])
 
-        assert applied['success'] is True
+        assert applied['status'] == 'applied'
         document = yaml.safe_load(fs.files[PROFILE_PATH])
         assert document['personal'] == {
             'nickname': '',
@@ -343,17 +341,16 @@ def test_profile_editor_preserves_loaded_field_types():
             {'op': 'set', 'path': 'schema_version', 'value': '3'},
             {'op': 'set', 'path': 'schema_version.nested', 'value': '3'},
         ):
-            rejected = tools.profile_editor([operation])
-            assert rejected['success'] is False
-            assert rejected['error']['type'] == 'validation'
-            assert 'schema_version' not in str(rejected)
+            with pytest.raises(ToolExecutionError) as captured:
+                tools.profile_editor([operation])
+            assert 'schema_version' not in str(captured.value)
             assert fs.files[PROFILE_PATH] == unchanged
 
-        rejected_batch = tools.profile_editor([
-            {'op': 'set', 'path': 'personal.nickname', 'value': 'Morpheus'},
-            {'op': 'add', 'path': 'personal.headline', 'value': 'Invalid'},
-        ])
-        assert rejected_batch['success'] is False
+        with pytest.raises(ToolExecutionError):
+            tools.profile_editor([
+                {'op': 'set', 'path': 'personal.nickname', 'value': 'Morpheus'},
+                {'op': 'add', 'path': 'personal.headline', 'value': 'Invalid'},
+            ])
         assert fs.files[PROFILE_PATH] == unchanged
 
 
@@ -374,8 +371,7 @@ def test_preference_editor_add_and_delete():
             details='先给结论，再按需补充背景。',
             reason='用户明确要求简洁回答',
         )
-        assert added['success'] is True
-        assert added['result']['status'] == 'applied'
+        assert added['status'] == 'applied'
         assert 'pref.response.concise' in fs.files[PREFERENCE_PATH]
         reference_path = build_reference_path('response-concise')
         assert reference_path in fs.files
@@ -389,28 +385,28 @@ def test_preference_editor_add_and_delete():
         assert '## Reason' in reference
 
         deleted = tools.preference_editor('delete', name='pref.response.concise')
-        assert deleted['success'] is True
+        assert deleted['status'] == 'applied'
         assert 'pref.response.concise' not in fs.files[PREFERENCE_PATH]
         assert build_reference_path('response-concise') not in fs.files
-    assert [entry['tool'] for entry in ledger] == [
+    assert [entry['operation'] for entry in ledger] == [
         'preference_editor',
         'preference_editor',
     ]
-    assert all(entry['mutation'] is True for entry in ledger)
+    assert all(entry['mutation'] == 'applied' for entry in ledger)
 
 
 def test_preference_editor_requires_hidden_source_context_for_add():
     ledger: list[dict[str, Any]] = []
-    lazyllm.globals['agentic_config'] = {'memory_tool_results': ledger}
-    payload = MemoryTools().preference_editor(
-        'add',
-        name='pref.response.concise',
-        summary='回答要简洁',
-        scenario='日常问答',
-        details='先给结论，再按需补充背景。',
-        reason='用户明确要求简洁回答',
-    )
+    lazyllm.globals['agentic_config'] = {'memory_operation_ledger': ledger}
+    with pytest.raises(ToolExecutionError, match='memory_source_kind'):
+        MemoryTools().preference_editor(
+            'add',
+            name='pref.response.concise',
+            summary='回答要简洁',
+            scenario='日常问答',
+            details='先给结论，再按需补充背景。',
+            reason='用户明确要求简洁回答',
+        )
 
-    assert payload['success'] is False
-    assert payload['error']['type'] == 'missing_context'
-    assert ledger[-1]['mutation'] is False
+    assert ledger[-1]['mutation'] == 'none'
+    assert ledger[-1]['error_code'] == 'missing_context'

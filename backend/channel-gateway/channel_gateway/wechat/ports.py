@@ -31,6 +31,15 @@ class WeChatReceiverClient(Protocol):
     def notify_start(self, *, base_url: str, token: str) -> None:
         ...
 
+    def download_media(
+        self,
+        *,
+        media: dict[str, Any],
+        aes_key_hint: str = '',
+        max_bytes: int,
+    ) -> bytes:
+        ...
+
 
 class WeChatDeliveryClient(Protocol):
     def send_text(
@@ -53,7 +62,6 @@ class WeChatDeliveryClient(Protocol):
         token: str,
         to_user_id: str,
         image: bytes,
-        idempotency_key: str,
     ) -> dict[str, Any]:
         ...
 
@@ -65,31 +73,17 @@ class WeChatDeliveryClient(Protocol):
         to_user_id: str,
         content: bytes,
         filename: str,
-        idempotency_key: str,
     ) -> dict[str, Any]:
         ...
 
-    def send_image(
+    def send_media(
         self,
         *,
         base_url: str,
         token: str,
         to_user_id: str,
         context_token: str,
-        image_item: dict[str, Any],
-        client_id: str,
-        run_id: str,
-    ) -> None:
-        ...
-
-    def send_file(
-        self,
-        *,
-        base_url: str,
-        token: str,
-        to_user_id: str,
-        context_token: str,
-        file_item: dict[str, Any],
+        item: dict[str, Any],
         client_id: str,
         run_id: str,
     ) -> None:

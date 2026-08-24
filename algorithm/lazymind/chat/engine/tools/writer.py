@@ -16,6 +16,7 @@ from threading import Event, RLock
 from typing import Any, ClassVar
 
 from lazyllm import LOG, AutoModel, ThreadPoolExecutor
+from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools.writer.data_models import (
     InputResource,
     MediaAssetLibrary,
@@ -283,7 +284,9 @@ def _write_document_input(root: Path, name: str, value: str) -> str:
 def _primary_data(result: dict) -> Any:
     artifact_path = result.get('artifact_path')
     if not artifact_path:
-        raise ValueError(f'Writer tool did not return artifact_path: {result!r}')
+        raise ToolExecutionError(
+            'Writer tool did not return its primary artifact.'
+        )
     return _read_artifact_data(artifact_path)
 
 
@@ -365,7 +368,9 @@ def _normalize_streamed_markdown_section(
 def _result_data(result: dict, key: str) -> Any:
     path = ((result.get('metadata') or {}).get('artifact_paths') or {}).get(key)
     if not path:
-        raise ValueError(f'Writer tool did not return artifact {key!r}: {result!r}')
+        raise ToolExecutionError(
+            f'Writer tool did not return artifact {key!r}.'
+        )
     return _read_artifact_data(path)
 
 
@@ -379,10 +384,10 @@ def sync_writer_documents(
     source = WriterDocument.model_validate(source_value)
     revised = WriterDocument.model_validate(revised_value)
     if source.document_id != revised.document_id:
-        raise ValueError('WriterDocument document_id values must match.')
+        raise ToolExecutionError('WriterDocument document_id values must match.')
     for field in ('stage', 'revision', 'provider_binding'):
         if getattr(source, field) != getattr(revised, field):
-            raise ValueError(f'WriterDocument {field} values must match.')
+            raise ToolExecutionError(f'WriterDocument {field} values must match.')
     for source_block in source.iter_blocks():
         revised_block = revised.block_by_id(source_block.node_id)
         if revised_block is None:
@@ -431,7 +436,7 @@ def sync_writer_documents(
 def _feishu_url(user_input: str) -> str:
     match = _FEISHU_URL_RE.search(user_input or '')
     if not match:
-        raise ValueError('A Feishu/Lark document URL is required.')
+        raise ToolExecutionError('A Feishu/Lark document URL is required.')
     return match.group(0).rstrip(').,;!?]}，。；！？】》」』')
 
 
@@ -505,7 +510,9 @@ def _published_link(target: TargetDocument) -> str:
         or (target.uri if target.uri.startswith(('http://', 'https://')) else '')
     ).strip()
     if not link:
-        raise ValueError('Provider write succeeded but no browser URL was returned.')
+        raise ToolExecutionError(
+            'Provider write succeeded but no browser URL was returned.'
+        )
     return link
 
 
@@ -550,7 +557,7 @@ class WriterToolkitBase:
         """Build normalized InputResource data from workflow runtime inputs."""
         file_paths = _json_loads(file_paths_json, [])
         if not isinstance(file_paths, list):
-            raise TypeError('file_paths_json must be a JSON array.')
+            raise ToolExecutionError('file_paths_json must be a JSON array.')
         resources = [{
             'resource_id': os.path.basename(path),
             'resource_type': 'file',
@@ -653,7 +660,7 @@ class WriterToolkitBase:
         )
         allowed_strategies = _json_loads(allowed_strategies_json, None)
         if allowed_strategies is not None and not isinstance(allowed_strategies, list):
-            raise TypeError('allowed_strategies_json must contain a JSON list.')
+            raise ToolExecutionError('allowed_strategies_json must contain a JSON list.')
         result = WriterMultimodalTools(
             llm=AutoModel(model='llm'),
         ).resolve_visual_needs(
@@ -715,7 +722,7 @@ class WriterToolkitBase:
         if resources is None:
             resources = []
         if not isinstance(resources, list):
-            raise TypeError('resources_json must be a JSON array.')
+            raise ToolExecutionError('resources_json must be a JSON array.')
         has_feishu_resource = any(
             isinstance(item, dict)
             and isinstance(item.get('meta'), dict)
@@ -760,7 +767,7 @@ class WriterToolkitBase:
         source = _document_value(writer_document_json)
         document = WriterDocument.model_validate(source) if isinstance(source, dict) else None
         if document and document.stage == 'outline' and not allow_outline:
-            raise ValueError(
+            raise ToolExecutionError(
                 'A full-document revision cannot use an outline-stage document.',
             )
         target = _target_from_document(document) if document else None
@@ -1166,7 +1173,9 @@ class WriterToolkitBase:
             if isinstance(instructions_data, dict) else None
         )
         if not isinstance(instructions, list):
-            raise TypeError('section_instructions_json must contain instructions.')
+            raise ToolExecutionError(
+                'section_instructions_json must contain instructions.'
+            )
         _bind_document_cross_reference_targets(instructions)
 
         blocks: list[Any] = []
@@ -1701,7 +1710,9 @@ class WriterToolkitBase:
         root = _temp_root()
         blocks_data = _json_loads(draft_blocks_json, [])
         if not isinstance(blocks_data, list) or not blocks_data:
-            raise ValueError('draft_blocks_json must be a non-empty JSON array.')
+            raise ToolExecutionError(
+                'draft_blocks_json must be a non-empty JSON array.'
+            )
         context_path = _write_input_artifact(
             root, 'writing_context.json', _json_loads(writing_context_json, {}),
             writer_schema('context.WritingContext'),
@@ -1873,20 +1884,28 @@ class WriterToolkitBase:
             if visual is None:
                 continue
             if instruction.modify_type != 'create':
-                raise ValueError('visual_instruction is only valid for create instructions.')
+                raise ToolExecutionError(
+                    'visual_instruction is only valid for create instructions.'
+                )
             if visual.visual_type != 'image':
-                raise ValueError('revision visual_instruction.visual_type must be "image".')
+                raise ToolExecutionError(
+                    'revision visual_instruction.visual_type must be "image".'
+                )
             if visual.need_id != instruction.instruction_id:
-                raise ValueError('visual_instruction.need_id must equal instruction_id.')
+                raise ToolExecutionError(
+                    'visual_instruction.need_id must equal instruction_id.'
+                )
             if visual.content_ref != instruction.content_ref:
-                raise ValueError(
+                raise ToolExecutionError(
                     'visual_instruction.content_ref must equal content_ref.'
                 )
             if not visual.purpose.strip() or not visual.required:
-                raise ValueError('revision image visual_instruction must be required and non-empty.')
+                raise ToolExecutionError(
+                    'revision image visual_instruction must be required and non-empty.'
+                )
             if visual.preferred_strategy not in {None, 'image_generation'}:
-                raise ValueError(
-                    'revision image preferred_strategy must be null or image_generation.',
+                raise ToolExecutionError(
+                    'revision image preferred_strategy must be null or image_generation.'
                 )
             instructions.append(visual)
         return _json_dumps(VisualPlan(instructions=instructions).model_dump(exclude_defaults=True))
@@ -2076,7 +2095,7 @@ class WriterToolkitBase:
             _json_loads(writer_document_json, {}),
         )
         if source.stage == 'outline' and not allow_outline:
-            raise ValueError(
+            raise ToolExecutionError(
                 'A full-document revision cannot use an outline-stage document.',
             )
         applied = _json_loads(self.apply_patch(
@@ -2105,7 +2124,7 @@ class WriterToolkitBase:
     def load_document(self, user_input: str, stage: str = 'final') -> str:
         """Load a Feishu/Lark document and return its IR and target binding."""
         if stage not in {'outline', 'draft', 'final'}:
-            raise ValueError('stage must be outline, draft, or final.')
+            raise ToolExecutionError('stage must be outline, draft, or final.')
         root = _temp_root()
         target = TargetDocument(
             uri=_feishu_url(user_input),
@@ -2145,7 +2164,9 @@ class WriterToolkitBase:
         )
         target = _target_from_document(source)
         if target is None:
-            raise ValueError('source document must contain a cloud target binding.')
+            raise ToolExecutionError(
+                'source document must contain a cloud target binding.'
+            )
         result = WriterResourceTools(
             llm=None, artifact_store=str(root),
         ).apply_patch_to_document(
@@ -2192,7 +2213,7 @@ class WriterToolkitBase:
         """Append a WriterDocument to a provider target."""
         document = WriterDocument.model_validate(_json_loads(content_json, {}))
         if document.stage == 'outline' and not publish_outline:
-            raise ValueError(
+            raise ToolExecutionError(
                 'Refusing to publish outline IR as the final document. '
                 'Set publish_outline=true only for an explicit outline publish.',
             )
@@ -2223,7 +2244,7 @@ class WriterToolkitBase:
         )
         target = _resolve_target(source, target_document_json, target_uri)
         if target is None:
-            raise ValueError('A target provider document is required.')
+            raise ToolExecutionError('A target provider document is required.')
         publish_document = _set_document_editable(document, stage='final')
         resource = WriterResourceTools(llm=None, artifact_store=str(root))
         media_assets = (

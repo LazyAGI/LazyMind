@@ -12,7 +12,6 @@ from channel_gateway.common.domain.commands import (
     RESOLVED_CONVERSATION_TARGET_KEY,
     RESOLVED_RESOURCE_SELECTIONS_KEY,
     SCHEMA_VERSION,
-    ActionKind,
     CapabilityConfigureCommand,
     CapabilityConfigureParameters,
     ChatCommand,
@@ -24,10 +23,8 @@ from channel_gateway.common.domain.commands import (
     ResourceIndexSelector,
     SelectionContinuation,
     SelectionChooseCommand,
-    command_registry,
 )
 from channel_gateway.common.errors import LazyMindError
-from channel_gateway.common.ports.core import IntentClient
 from channel_gateway.common.ports.repository import IntentRepository
 
 
@@ -264,62 +261,6 @@ def resolve_pending_selection(
     if resumed is not None:
         return resumed
     raise LazyMindError('Saved channel selection has no continuation')
-
-
-class ChannelIntentClassifier:
-    """Calls the stateless classifier with the Gateway-owned command registry."""
-
-    def __init__(self, client: IntentClient):
-        self._client = client
-
-    def classify(
-        self,
-        *,
-        provider: str,
-        owner_user_id: str,
-        message: str,
-        request_id: str,
-        state: dict[str, Any],
-    ) -> CommandEnvelope:
-        payload = self._client.classify_intent(
-            owner_user_id=owner_user_id,
-            request_id=request_id,
-            provider=provider,
-            message=message,
-            state=state,
-            command_registry=command_registry(
-                self._allowed_commands(state)
-            ),
-        )
-        try:
-            return COMMAND_ADAPTER.validate_python(payload)
-        except ValidationError as exc:
-            raise LazyMindError('Core returned an invalid channel command') from exc
-
-    @staticmethod
-    def _allowed_commands(state: dict[str, Any]) -> set[ActionKind]:
-        allowed = set(ActionKind)
-        allowed.discard(ActionKind.CONVERSATION_SETTINGS_UPDATE)
-        latest_selection = state.get('latest_selection')
-        if (
-            not isinstance(latest_selection, dict)
-            or not latest_selection.get('has_continuation')
-        ):
-            allowed.discard(ActionKind.SELECTION_CHOOSE)
-        return allowed
-
-    def catalog(
-        self,
-        *,
-        owner_user_id: str,
-        request_id: str,
-        kinds: set[str],
-    ) -> dict[str, Any]:
-        return self._client.get_capability_catalog(
-            owner_user_id=owner_user_id,
-            request_id=f'{request_id}_catalog',
-            kinds=kinds,
-        )
 
 
 def canonicalize_command(
