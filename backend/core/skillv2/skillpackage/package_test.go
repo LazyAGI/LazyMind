@@ -2,6 +2,7 @@ package skillpackage
 
 import (
 	"archive/zip"
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -45,6 +46,46 @@ func TestReadZipRejectsUnsafeAndOversizedEntries(t *testing.T) {
 				t.Fatalf("error = %v, want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestWriteZipIsDeterministicAndReadable(t *testing.T) {
+	files := map[string][]byte{
+		"SKILL.md":       []byte("---\nname: demo\ndescription: demo\n---\n"),
+		"scripts/run.py": []byte("print('ok')\n"),
+	}
+	first, err := WriteZip(files, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := WriteZip(files, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstBody, err := os.ReadFile(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondBody, err := os.ReadFile(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(firstBody, secondBody) {
+		t.Fatal("deterministic archives differ")
+	}
+	read, err := ReadZip(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(read["scripts/run.py"], files["scripts/run.py"]) {
+		t.Fatalf("archive content = %q", read["scripts/run.py"])
+	}
+}
+
+func TestWriteZipRejectsUnsafePath(t *testing.T) {
+	_, err := WriteZip(map[string][]byte{"../SKILL.md": []byte("x")}, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "unsafe path") {
+		t.Fatalf("error = %v", err)
 	}
 }
 

@@ -1,4 +1,12 @@
 -- +migrate Dialect postgres
+DROP INDEX IF EXISTS public.idx_skill_revision_distributions_archive;
+DROP TABLE IF EXISTS public.skill_revision_distributions;
+DROP INDEX IF EXISTS public.idx_skill_distribution_bindings_uid;
+DROP TABLE IF EXISTS public.skill_distribution_bindings;
+DROP INDEX IF EXISTS public.idx_skill_distribution_entries_blob;
+DROP TABLE IF EXISTS public.skill_distribution_entries;
+DROP INDEX IF EXISTS public.idx_skill_distribution_artifacts_uid_version;
+DROP TABLE IF EXISTS public.skill_distribution_artifacts;
 DROP TABLE IF EXISTS writer_download_conversions;
 DROP INDEX IF EXISTS idx_multi_answers_chat_histories_run_id;
 ALTER TABLE multi_answers_chat_histories DROP COLUMN IF EXISTS run_terminal;
@@ -100,6 +108,14 @@ BEGIN
 END $$;
 
 -- +migrate Dialect sqlite
+DROP INDEX IF EXISTS `idx_skill_revision_distributions_archive`;
+DROP TABLE IF EXISTS `skill_revision_distributions`;
+DROP INDEX IF EXISTS `idx_skill_distribution_bindings_uid`;
+DROP TABLE IF EXISTS `skill_distribution_bindings`;
+DROP INDEX IF EXISTS `idx_skill_distribution_entries_blob`;
+DROP TABLE IF EXISTS `skill_distribution_entries`;
+DROP INDEX IF EXISTS `idx_skill_distribution_artifacts_uid_version`;
+DROP TABLE IF EXISTS `skill_distribution_artifacts`;
 DROP TABLE IF EXISTS writer_download_conversions;
 DROP INDEX IF EXISTS idx_multi_answers_chat_histories_run_id;
 ALTER TABLE multi_answers_chat_histories DROP COLUMN run_terminal;

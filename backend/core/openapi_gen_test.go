@@ -1563,6 +1563,32 @@ func TestOpenAPISpecIncludesLocaleHeaderForLocalizedCatalogs(t *testing.T) {
 	}
 }
 
+func TestOpenAPIShowcaseCaseIncludesSkillSourceURL(t *testing.T) {
+	r := mux.NewRouter()
+	registerAllRoutes(r)
+	specJSON, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+	schema := schemas["ShowcaseCase"].(map[string]any)
+	properties := schema["properties"].(map[string]any)
+	if sourceURL, ok := properties["source_url"].(map[string]any); !ok || sourceURL["type"] != "string" {
+		t.Fatalf("ShowcaseCase source_url = %#v, want required string", properties["source_url"])
+	}
+	required := schema["required"].([]any)
+	for _, field := range required {
+		if field == "source_url" {
+			return
+		}
+	}
+	t.Fatal("ShowcaseCase source_url is not required")
+}
+
 func TestOpenAPISpecIncludesMCPOperations(t *testing.T) {
 	r := mux.NewRouter()
 	registerAllRoutes(r)

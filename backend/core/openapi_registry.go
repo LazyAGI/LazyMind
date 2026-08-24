@@ -1397,6 +1397,31 @@ type builtinSkillListOpenAPIResponse struct {
 	Total int                           `json:"total"`
 }
 
+type skillDistributionConflictOpenAPIResponse struct {
+	Path string `json:"path"`
+	Kind string `json:"kind"`
+}
+
+type skillDistributionUpgradeStatusOpenAPIResponse struct {
+	Managed              bool                                       `json:"managed"`
+	UpdateAvailable      bool                                       `json:"update_available"`
+	Pending              bool                                       `json:"pending"`
+	CurrentVersion       string                                     `json:"current_version,omitempty"`
+	CurrentArchiveSHA256 string                                     `json:"current_archive_sha256,omitempty"`
+	PendingVersion       string                                     `json:"pending_version,omitempty"`
+	PendingArchiveSHA256 string                                     `json:"pending_archive_sha256,omitempty"`
+	LatestVersion        string                                     `json:"latest_version,omitempty"`
+	LatestArchiveSHA256  string                                     `json:"latest_archive_sha256,omitempty"`
+	Conflicts            []skillDistributionConflictOpenAPIResponse `json:"conflicts"`
+}
+
+type skillDistributionUpgradePrepareOpenAPIResponse struct {
+	DraftVersion int64                                         `json:"draft_version"`
+	AutoMerged   bool                                          `json:"auto_merged"`
+	Conflicts    []skillDistributionConflictOpenAPIResponse    `json:"conflicts"`
+	Status       skillDistributionUpgradeStatusOpenAPIResponse `json:"status"`
+}
+
 type skillTreeNodeOpenAPIResponse struct {
 	Name     string                         `json:"name"`
 	Path     string                         `json:"path"`
@@ -2870,6 +2895,23 @@ func registeredCoreOperations() []openAPIOperation {
 			Tags:       []string{"skills"},
 			PathParams: builtinSkillPathParams{},
 			Responses:  map[int]openAPIResponse{200: resp("Enabled builtin skill", skillDetailOpenAPIResponse{})},
+		},
+		{
+			Method:     "GET",
+			Path:       "/skills/{skill_id}/distribution-upgrade",
+			Summary:    "Get builtin Skill distribution upgrade status",
+			Tags:       []string{"skills"},
+			PathParams: skillPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Distribution upgrade status", skillDistributionUpgradeStatusOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/skills/{skill_id}/distribution-upgrade:prepare",
+			Summary:     "Prepare a three-way builtin Skill distribution upgrade draft",
+			Description: "Merges the installed distribution base, current user Head, and latest builtin package. The candidate is staged in the existing Skill draft/review workflow.",
+			Tags:        []string{"skills"},
+			PathParams:  skillPathParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Prepared distribution upgrade", skillDistributionUpgradePrepareOpenAPIResponse{})},
 		},
 		{
 			Method:     "GET",

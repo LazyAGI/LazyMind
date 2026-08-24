@@ -16,6 +16,7 @@ type Package struct {
 	Description   string
 	Version       string
 	SHA256        string
+	TreeSHA256    string
 	SourceURL     string
 	ArchivePath   string
 	Tags          []string

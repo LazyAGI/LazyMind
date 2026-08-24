@@ -1,7 +1,6 @@
 package main
 
 import (
-	"archive/zip"
 	"bytes"
 	"context"
 	"crypto/sha256"
@@ -15,7 +14,6 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
-	"sort"
 	"strings"
 	"time"
 
@@ -25,6 +23,7 @@ import (
 	skillbuiltin "lazymind/core/skillv2/builtin"
 	skillmetadata "lazymind/core/skillv2/metadata"
 	skillpackage "lazymind/core/skillv2/skillpackage"
+	skillpatch "lazymind/core/skillv2/skillpatch"
 )
 
 const maxArchiveBytes = 64 << 20
@@ -42,6 +41,7 @@ type options struct {
 
 type sourceList struct {
 	SchemaVersion int             `yaml:"schema_version"`
+	PatchCatalog  string          `yaml:"patch_catalog,omitempty"`
 	Skills        []string        `yaml:"skills"`
 	BundledSkills []bundledSource `yaml:"bundled_skills,omitempty"`
 }
@@ -122,6 +122,14 @@ func run(ctx context.Context, opts options, client *http.Client) error {
 	if err != nil {
 		return err
 	}
+	var patchCatalog skillpatch.Catalog
+	if ordinarySources.PatchCatalog != "" {
+		patchCatalogPath := filepath.Join(filepath.Dir(opts.Sources), filepath.FromSlash(ordinarySources.PatchCatalog))
+		patchCatalog, err = skillpatch.LoadCatalog(patchCatalogPath)
+		if err != nil {
+			return bundleFailure("load Skill patches: %v", err)
+		}
+	}
 	sources := make([]sourceInput, 0, len(ordinarySources.Skills)+len(ordinarySources.BundledSkills))
 	seenSources := make(map[string]struct{}, len(ordinarySources.Skills))
 	for index := range ordinarySources.BundledSkills {
@@ -179,6 +187,7 @@ func run(ctx context.Context, opts options, client *http.Client) error {
 	catalog := skillbuiltin.Catalog{SchemaVersion: skillbuiltin.CatalogSchemaVersion}
 	seenUIDs := make(map[string]struct{}, len(sources))
 	entriesBySource := make(map[string]skillbuiltin.CatalogSkill, len(sources))
+	appliedPatchCounts := make(map[string]int)
 	for _, source := range sources {
 		spec, err := resolveSourceInput(source, filepath.Dir(opts.Sources))
 		if err != nil {
@@ -186,6 +195,7 @@ func run(ctx context.Context, opts options, client *http.Client) error {
 		}
 		var entry skillbuiltin.CatalogSkill
 		var archivePath string
+		var appliedPatches []skillpatch.AppliedPatch
 		if opts.FrozenLockfile {
 			locked, ok := lockedBySource[spec.SourceURL]
 			if !ok {
@@ -198,7 +208,7 @@ func run(ctx context.Context, opts options, client *http.Client) error {
 				return bundleFailure("distribution changed for %s", spec.SourceURL)
 			}
 			entry = locked
-			archivePath, err = materializeFrozen(ctx, client, spec, locked, opts.Cache)
+			archivePath, appliedPatches, err = materializeFrozen(ctx, client, spec, locked, opts.Cache, patchCatalog)
 			if err == nil {
 				files, readErr := skillpackage.ReadZip(archivePath)
 				if readErr != nil {
@@ -208,7 +218,7 @@ func run(ctx context.Context, opts options, client *http.Client) error {
 				}
 			}
 		} else {
-			entry, archivePath, err = resolveEntry(ctx, client, spec, opts.Cache)
+			entry, archivePath, appliedPatches, err = resolveEntry(ctx, client, spec, opts.Cache, patchCatalog)
 		}
 		if err != nil {
 			return bundleFailure("%s: %v", spec.SourceURL, err)
@@ -219,6 +229,9 @@ func run(ctx context.Context, opts options, client *http.Client) error {
 			return bundleFailure("duplicate builtin skill uid %s", entry.UID)
 		}
 		seenUIDs[entry.UID] = struct{}{}
+		for _, patch := range appliedPatches {
+			appliedPatchCounts[patch.ID]++
+		}
 		entry.PackageFile = filepath.ToSlash(filepath.Join("packages", entry.UID+".zip"))
 		destination := filepath.Join(opts.Output, filepath.FromSlash(entry.PackageFile))
 		if err := copyFile(archivePath, destination); err != nil {
@@ -226,6 +239,9 @@ func run(ctx context.Context, opts options, client *http.Client) error {
 		}
 		catalog.Skills = append(catalog.Skills, entry)
 		entriesBySource[entry.SourceURL] = entry
+	}
+	if err := patchCatalog.ValidateApplied(appliedPatchCounts); err != nil {
+		return err
 	}
 	if err := writeJSONAtomic(filepath.Join(opts.Output, "catalog.json"), catalog); err != nil {
 		return err
@@ -288,6 +304,14 @@ func loadSources(path string) (sourceList, error) {
 	}
 	if raw.SchemaVersion != 1 {
 		return sourceList{}, bundleFailure("unsupported source schema %d", raw.SchemaVersion)
+	}
+	raw.PatchCatalog = filepath.ToSlash(strings.TrimSpace(raw.PatchCatalog))
+	if raw.PatchCatalog != "" {
+		cleaned, err := skillpackage.CleanPath(raw.PatchCatalog)
+		if err != nil {
+			return sourceList{}, bundleFailure("invalid patch_catalog: %v", err)
+		}
+		raw.PatchCatalog = cleaned
 	}
 	seenSources := make(map[string]struct{}, len(raw.Skills)+len(raw.BundledSkills))
 	for index, value := range raw.Skills {
@@ -382,25 +406,107 @@ func resolveSource(raw string) (sourceSpec, error) {
 	return spec, nil
 }
 
-func resolveEntry(ctx context.Context, client *http.Client, spec sourceSpec, cacheDir string) (skillbuiltin.CatalogSkill, string, error) {
+type originPackage struct {
+	ArchivePath string
+	Files       map[string][]byte
+	ArchiveHash string
+	TreeHash    string
+	ArchiveSize int64
+}
+
+func resolveEntry(ctx context.Context, client *http.Client, spec sourceSpec, cacheDir string, patchCatalog skillpatch.Catalog) (skillbuiltin.CatalogSkill, string, []skillpatch.AppliedPatch, error) {
 	if spec.LocalPath != "" {
-		return resolveBundledEntry(spec, cacheDir)
+		return resolveBundledEntry(spec, cacheDir, patchCatalog)
 	}
 	tempPath, err := download(ctx, client, spec.ResolvedURL, cacheDir)
 	if err != nil {
-		return skillbuiltin.CatalogSkill{}, "", err
+		return skillbuiltin.CatalogSkill{}, "", nil, err
 	}
 	defer os.Remove(tempPath)
 	hash, _, err := fileDigest(tempPath)
 	if err != nil {
-		return skillbuiltin.CatalogSkill{}, "", err
+		return skillbuiltin.CatalogSkill{}, "", nil, err
 	}
 	cachePath := filepath.Join(cacheDir, hash+".zip")
 	if err := copyFile(tempPath, cachePath); err != nil {
-		return skillbuiltin.CatalogSkill{}, "", err
+		return skillbuiltin.CatalogSkill{}, "", nil, err
+	}
+	origin, err := inspectOrigin(cachePath)
+	if err != nil {
+		return skillbuiltin.CatalogSkill{}, "", nil, err
+	}
+	return finalizeEntry(spec, origin, cacheDir, patchCatalog)
+}
+
+func inspectOrigin(archivePath string) (originPackage, error) {
+	hash, size, err := fileDigest(archivePath)
+	if err != nil {
+		return originPackage{}, err
+	}
+	files, err := skillpackage.ReadZip(archivePath)
+	if err != nil {
+		return originPackage{}, err
+	}
+	return originPackage{
+		ArchivePath: archivePath,
+		Files:       files,
+		ArchiveHash: hash,
+		TreeHash:    skillpackage.TreeHash(files),
+		ArchiveSize: size,
+	}, nil
+}
+
+func finalizeEntry(spec sourceSpec, origin originPackage, cacheDir string, patchCatalog skillpatch.Catalog) (skillbuiltin.CatalogSkill, string, []skillpatch.AppliedPatch, error) {
+	target := skillpatch.Target{
+		UID:            resolvedSkillUID(spec),
+		Version:        originSkillVersion(spec, origin.Files, origin.TreeHash),
+		OriginTreeHash: origin.TreeHash,
+	}
+	patched, err := skillpatch.Apply(target, origin.Files, patchCatalog)
+	if err != nil {
+		return skillbuiltin.CatalogSkill{}, "", nil, err
+	}
+	if len(patched.AppliedPatches) == 0 {
+		entry, err := inspectEntry(spec, origin.ArchivePath)
+		return entry, origin.ArchivePath, nil, err
+	}
+
+	tempPath, err := skillpackage.WriteZip(patched.Files, cacheDir)
+	if err != nil {
+		return skillbuiltin.CatalogSkill{}, "", nil, err
+	}
+	defer os.Remove(tempPath)
+	hash, size, err := fileDigest(tempPath)
+	if err != nil {
+		return skillbuiltin.CatalogSkill{}, "", nil, err
+	}
+	if size > maxArchiveBytes {
+		return skillbuiltin.CatalogSkill{}, "", nil, bundleFailure("archive exceeds %d bytes", maxArchiveBytes)
+	}
+	cachePath := filepath.Join(cacheDir, hash+".zip")
+	if err := copyFile(tempPath, cachePath); err != nil {
+		return skillbuiltin.CatalogSkill{}, "", nil, err
 	}
 	entry, err := inspectEntry(spec, cachePath)
-	return entry, cachePath, err
+	if err != nil {
+		return skillbuiltin.CatalogSkill{}, "", nil, err
+	}
+	entry.OriginArchiveSHA256 = origin.ArchiveHash
+	entry.OriginTreeSHA256 = origin.TreeHash
+	entry.OriginArchiveSize = origin.ArchiveSize
+	entry.PatchSetSHA256 = patched.PatchSetSHA256
+	entry.AppliedPatches = catalogPatches(patched.AppliedPatches)
+	return entry, cachePath, patched.AppliedPatches, nil
+}
+
+func originSkillVersion(spec sourceSpec, files map[string][]byte, treeHash string) string {
+	metadataVersion := ""
+	if content, ok := files["SKILL.md"]; ok {
+		if meta, err := skillmetadata.ParseRequired(content); err == nil {
+			metadataVersion = meta.Version
+		}
+	}
+	return resolvedSkillVersion(spec, metadataVersion, files, treeHash)
 }
 
 func inspectEntry(spec sourceSpec, archivePath string) (skillbuiltin.CatalogSkill, error) {
@@ -421,18 +527,7 @@ func inspectEntry(spec sourceSpec, archivePath string) (skillbuiltin.CatalogSkil
 		return skillbuiltin.CatalogSkill{}, err
 	}
 	treeHash := skillpackage.TreeHash(files)
-	version := spec.Version
-	if version == "" {
-		version = meta.Version
-	}
-	if version == "" {
-		var raw packageMeta
-		_ = json.Unmarshal(files["_meta.json"], &raw)
-		version = strings.TrimSpace(raw.Version)
-	}
-	if version == "" {
-		version = "0.0.0+" + treeHash[:12]
-	}
+	version := resolvedSkillVersion(spec, meta.Version, files, treeHash)
 	category := spec.Category
 	if category == "" {
 		category = meta.Category
@@ -440,11 +535,7 @@ func inspectEntry(spec sourceSpec, archivePath string) (skillbuiltin.CatalogSkil
 	if category == "" {
 		category = "external"
 	}
-	uid := spec.UID
-	if uid == "" {
-		identityHash := sha256.Sum256([]byte(spec.Identity))
-		uid = "bsk_" + strings.ToUpper(hex.EncodeToString(identityHash[:14]))
-	}
+	uid := resolvedSkillUID(spec)
 	return skillbuiltin.CatalogSkill{
 		Key:           spec.Key,
 		UID:           uid,
@@ -462,29 +553,67 @@ func inspectEntry(spec sourceSpec, archivePath string) (skillbuiltin.CatalogSkil
 	}, nil
 }
 
-func resolveBundledEntry(spec sourceSpec, cacheDir string) (skillbuiltin.CatalogSkill, string, error) {
+func resolvedSkillVersion(spec sourceSpec, metadataVersion string, files map[string][]byte, treeHash string) string {
+	version := strings.TrimSpace(spec.Version)
+	if version == "" {
+		version = strings.TrimSpace(metadataVersion)
+	}
+	if version == "" {
+		var raw packageMeta
+		_ = json.Unmarshal(files["_meta.json"], &raw)
+		version = strings.TrimSpace(raw.Version)
+	}
+	if version == "" {
+		version = "0.0.0+" + treeHash[:12]
+	}
+	return version
+}
+
+func resolvedSkillUID(spec sourceSpec) string {
+	if spec.UID != "" {
+		return spec.UID
+	}
+	identityHash := sha256.Sum256([]byte(spec.Identity))
+	return "bsk_" + strings.ToUpper(hex.EncodeToString(identityHash[:14]))
+}
+
+func catalogPatches(patches []skillpatch.AppliedPatch) []skillbuiltin.CatalogPatch {
+	out := make([]skillbuiltin.CatalogPatch, 0, len(patches))
+	for _, patch := range patches {
+		out = append(out, skillbuiltin.CatalogPatch{ID: patch.ID, SHA256: patch.SHA256})
+	}
+	return out
+}
+
+func resolveBundledEntry(spec sourceSpec, cacheDir string, patchCatalog skillpatch.Catalog) (skillbuiltin.CatalogSkill, string, []skillpatch.AppliedPatch, error) {
 	files, err := readBundledFiles(spec.LocalPath)
 	if err != nil {
-		return skillbuiltin.CatalogSkill{}, "", err
+		return skillbuiltin.CatalogSkill{}, "", nil, err
 	}
-	tempPath, err := writeBundledArchive(files, cacheDir)
+	tempPath, err := skillpackage.WriteZip(files, cacheDir)
 	if err != nil {
-		return skillbuiltin.CatalogSkill{}, "", err
+		return skillbuiltin.CatalogSkill{}, "", nil, err
 	}
 	defer os.Remove(tempPath)
 	hash, size, err := fileDigest(tempPath)
 	if err != nil {
-		return skillbuiltin.CatalogSkill{}, "", err
+		return skillbuiltin.CatalogSkill{}, "", nil, err
 	}
 	if size > maxArchiveBytes {
-		return skillbuiltin.CatalogSkill{}, "", bundleFailure("archive exceeds %d bytes", maxArchiveBytes)
+		return skillbuiltin.CatalogSkill{}, "", nil, bundleFailure("archive exceeds %d bytes", maxArchiveBytes)
 	}
 	cachePath := filepath.Join(cacheDir, hash+".zip")
 	if err := copyFile(tempPath, cachePath); err != nil {
-		return skillbuiltin.CatalogSkill{}, "", err
+		return skillbuiltin.CatalogSkill{}, "", nil, err
 	}
-	entry, err := inspectEntry(spec, cachePath)
-	return entry, cachePath, err
+	origin := originPackage{
+		ArchivePath: cachePath,
+		Files:       files,
+		ArchiveHash: hash,
+		TreeHash:    skillpackage.TreeHash(files),
+		ArchiveSize: size,
+	}
+	return finalizeEntry(spec, origin, cacheDir, patchCatalog)
 }
 
 func readBundledFiles(root string) (map[string][]byte, error) {
@@ -541,86 +670,79 @@ func readBundledFiles(root string) (map[string][]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	if _, ok := files["SKILL.md"]; !ok {
-		return nil, bundleFailure("bundled skill must contain SKILL.md")
-	}
 	return files, nil
 }
 
-func writeBundledArchive(files map[string][]byte, cacheDir string) (string, error) {
-	file, err := os.CreateTemp(cacheDir, ".bundled-*.zip")
-	if err != nil {
-		return "", err
-	}
-	path := file.Name()
-	keep := false
-	defer func() {
-		_ = file.Close()
-		if !keep {
-			_ = os.Remove(path)
-		}
-	}()
-	writer := zip.NewWriter(file)
-	paths := make([]string, 0, len(files))
-	for filePath := range files {
-		paths = append(paths, filePath)
-	}
-	sort.Strings(paths)
-	for _, filePath := range paths {
-		header := &zip.FileHeader{Name: filePath, Method: zip.Deflate}
-		header.SetMode(0o644)
-		header.Modified = time.Date(1980, time.January, 1, 0, 0, 0, 0, time.UTC)
-		entry, err := writer.CreateHeader(header)
+func materializeFrozen(ctx context.Context, client *http.Client, spec sourceSpec, locked skillbuiltin.CatalogSkill, cacheDir string, patchCatalog skillpatch.Catalog) (string, []skillpatch.AppliedPatch, error) {
+	if spec.LocalPath != "" {
+		current, archivePath, appliedPatches, err := resolveBundledEntry(spec, cacheDir, patchCatalog)
 		if err != nil {
-			_ = writer.Close()
-			return "", err
+			return "", nil, err
 		}
-		if _, err := entry.Write(files[filePath]); err != nil {
-			_ = writer.Close()
-			return "", err
+		if err := validateFrozenEntry(current, locked); err != nil {
+			return "", nil, bundleFailure("bundled skill does not match frozen lock: %v", err)
+		}
+		return archivePath, appliedPatches, validateLockedArchive(archivePath, locked)
+	}
+	expectedOriginHash := locked.ArchiveSHA256
+	expectedOriginSize := locked.ArchiveSize
+	expectedOriginTree := locked.TreeSHA256
+	if len(locked.AppliedPatches) > 0 {
+		expectedOriginHash = locked.OriginArchiveSHA256
+		expectedOriginSize = locked.OriginArchiveSize
+		expectedOriginTree = locked.OriginTreeSHA256
+	}
+	originPath := filepath.Join(cacheDir, expectedOriginHash+".zip")
+	if hash, size, err := fileDigest(originPath); err != nil || hash != expectedOriginHash || expectedOriginSize > 0 && size != expectedOriginSize {
+		tempPath, err := download(ctx, client, spec.ResolvedURL, cacheDir)
+		if err != nil {
+			return "", nil, err
+		}
+		defer os.Remove(tempPath)
+		hash, size, err := fileDigest(tempPath)
+		if err != nil {
+			return "", nil, err
+		}
+		if hash != expectedOriginHash || expectedOriginSize > 0 && size != expectedOriginSize {
+			return "", nil, bundleFailure("download does not match frozen lock origin")
+		}
+		if err := copyFile(tempPath, originPath); err != nil {
+			return "", nil, err
 		}
 	}
-	if err := writer.Close(); err != nil {
-		return "", err
+	origin, err := inspectOrigin(originPath)
+	if err != nil {
+		return "", nil, err
 	}
-	if err := file.Close(); err != nil {
-		return "", err
+	if origin.TreeHash != expectedOriginTree {
+		return "", nil, bundleFailure("origin package tree does not match frozen lock")
 	}
-	keep = true
-	return path, nil
+	current, archivePath, appliedPatches, err := finalizeEntry(spec, origin, cacheDir, patchCatalog)
+	if err != nil {
+		return "", nil, err
+	}
+	if err := validateFrozenEntry(current, locked); err != nil {
+		return "", nil, err
+	}
+	return archivePath, appliedPatches, validateLockedArchive(archivePath, locked)
 }
 
-func materializeFrozen(ctx context.Context, client *http.Client, spec sourceSpec, locked skillbuiltin.CatalogSkill, cacheDir string) (string, error) {
-	if spec.LocalPath != "" {
-		current, archivePath, err := resolveBundledEntry(spec, cacheDir)
-		if err != nil {
-			return "", err
+func validateFrozenEntry(current, locked skillbuiltin.CatalogSkill) error {
+	if current.UID != locked.UID || current.Version != locked.Version || current.ArchiveSHA256 != locked.ArchiveSHA256 || current.TreeSHA256 != locked.TreeSHA256 || current.ArchiveSize != locked.ArchiveSize {
+		return bundleFailure("final package metadata changed")
+	}
+	if current.OriginArchiveSHA256 != locked.OriginArchiveSHA256 || current.OriginTreeSHA256 != locked.OriginTreeSHA256 || current.OriginArchiveSize != locked.OriginArchiveSize || current.PatchSetSHA256 != locked.PatchSetSHA256 {
+		return bundleFailure("patch provenance changed")
+	}
+	if len(current.AppliedPatches) != len(locked.AppliedPatches) {
+		return bundleFailure("applied patch count changed")
+	}
+	for index := range current.AppliedPatches {
+		if current.AppliedPatches[index] != locked.AppliedPatches[index] {
+			return bundleFailure("applied patch provenance changed")
 		}
-		if current.UID != locked.UID || current.Version != locked.Version || current.ArchiveSHA256 != locked.ArchiveSHA256 || current.TreeSHA256 != locked.TreeSHA256 || current.ArchiveSize != locked.ArchiveSize {
-			return "", bundleFailure("bundled skill does not match frozen lock")
-		}
-		return archivePath, validateLockedArchive(archivePath, locked)
 	}
-	cachePath := filepath.Join(cacheDir, locked.ArchiveSHA256+".zip")
-	if hash, size, err := fileDigest(cachePath); err == nil && hash == locked.ArchiveSHA256 && (locked.ArchiveSize <= 0 || size == locked.ArchiveSize) {
-		return cachePath, validateLockedArchive(cachePath, locked)
-	}
-	tempPath, err := download(ctx, client, spec.ResolvedURL, cacheDir)
-	if err != nil {
-		return "", err
-	}
-	defer os.Remove(tempPath)
-	hash, size, err := fileDigest(tempPath)
-	if err != nil {
-		return "", err
-	}
-	if hash != locked.ArchiveSHA256 || locked.ArchiveSize > 0 && size != locked.ArchiveSize {
-		return "", bundleFailure("download does not match frozen lock")
-	}
-	if err := copyFile(tempPath, cachePath); err != nil {
-		return "", err
-	}
-	return cachePath, validateLockedArchive(cachePath, locked)
+	return nil
 }
 
 func validateLockedArchive(path string, locked skillbuiltin.CatalogSkill) error {

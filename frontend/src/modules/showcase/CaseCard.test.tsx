@@ -4,13 +4,17 @@ import { describe, expect, it, vi } from "vitest";
 import CaseCard from "./CaseCard";
 
 vi.mock("react-i18next", () => ({
-  useTranslation: () => ({
-    t: (key: string) => key === "showcase.viewDetail" ? "查看详情" : key,
-  }),
+  useTranslation: () => {
+    const labels: Record<string, string> = {
+      "showcase.viewDetail": "查看详情",
+      "showcase.try": "试一试",
+    };
+    return { t: (key: string) => labels[key] || key };
+  },
 }));
 
 describe("CaseCard", () => {
-  it("uses the card for try and the corner action for details", () => {
+  it("uses the card for try and keeps the corner action as details in every build", () => {
     render(
       <MemoryRouter>
         <CaseCard item={{
@@ -34,5 +38,6 @@ describe("CaseCard", () => {
       "href",
       "/agent/chat/cases/advisor",
     );
+    expect(screen.queryByText("试一试")).not.toBeInTheDocument();
   });
 });
