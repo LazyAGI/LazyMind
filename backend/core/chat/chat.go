@@ -53,16 +53,16 @@ type DatasetFilters struct {
 }
 
 type LazyChatRequest struct {
-	Message           ChatMessageOptions         `json:"message"`
-	Conversation      ChatConversationOptions    `json:"conversation"`
-	Retrieval         ChatRetrievalOptions       `json:"retrieval,omitempty"`
-	Runtime           ChatRuntimeOptions         `json:"runtime,omitempty"`
-	Personalization   ChatPersonalizationOptions `json:"personalization,omitempty"`
-	Agent             ChatAgentOptions           `json:"agent,omitempty"`
-	Workflow          ChatWorkflowOptions        `json:"workflow,omitempty"`
-	ModelContext      map[string]any             `json:"model_context,omitempty"`
+	Message         ChatMessageOptions         `json:"message"`
+	Conversation    ChatConversationOptions    `json:"conversation"`
+	Retrieval       ChatRetrievalOptions       `json:"retrieval,omitempty"`
+	Runtime         ChatRuntimeOptions         `json:"runtime,omitempty"`
+	Personalization ChatPersonalizationOptions `json:"personalization,omitempty"`
+	Agent           ChatAgentOptions           `json:"agent,omitempty"`
+	Workflow        ChatWorkflowOptions        `json:"workflow,omitempty"`
+	ModelContext    map[string]any             `json:"model_context,omitempty"`
 
-	ExplicitResources ExplicitResourceBindings   `json:"explicit_resource_bindings,omitempty"`
+	ExplicitResources ExplicitResourceBindings `json:"explicit_resource_bindings,omitempty"`
 }
 
 type ExplicitResourceBindings struct {
@@ -387,7 +387,6 @@ type UpstreamStreamChunk struct {
 	Execution                *externalExecutionProjection   `json:"execution,omitempty"`
 	RuntimeEvent             *ChatRuntimeEvent              `json:"runtime_event,omitempty"`
 	Err                      error                          `json:"-"`
-
 }
 
 type upstreamStreamLine struct {

@@ -9,9 +9,9 @@ import (
 func TestApplyCatalogWindowIfMissingKeepsPythonBudget(t *testing.T) {
 	pythonBudget := int64(64000)
 	report := &ContextUsageResponse{
-		EstimatedTokens:               3200,
-		MaxInputTokens:                &pythonBudget,
-		CompressionApplied:            true,
+		EstimatedTokens:              3200,
+		MaxInputTokens:               &pythonBudget,
+		CompressionApplied:           true,
 		CompressionCoveredThroughSeq: 14,
 	}
 	applyCatalogWindowIfMissing(t.Context(), nil, "user-1", report)

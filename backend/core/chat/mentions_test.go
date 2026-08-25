@@ -410,7 +410,6 @@ func TestBuildLazyChatRequestPropagatesModelContext(t *testing.T) {
 	}
 }
 
-
 func TestMergeMentionedDatasetsPreservesDefaultsAndDeduplicates(t *testing.T) {
 	raw := map[string]any{"conversation": map[string]any{"search_config": map[string]any{
 		"dataset_list": []any{map[string]any{"id": "default"}},
