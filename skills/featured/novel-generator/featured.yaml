@@ -6,7 +6,7 @@ status: published
 default_locale: zh-CN
 
 skill:
-  source_url: https://github.com/xiaoyanZzz/LazyRAG/archive/2aa921444b631956f9dbc4a9ad463a47a00b5ad1.zip
+  source_url: https://skillhub.cn/skills/user_141d55f7/novel-generator
   required_version: 1.0.0
 
 placement:
