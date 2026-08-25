@@ -1,42 +1,57 @@
 import { useState } from "react";
-import { Button, Input, Modal, Select, Tabs, Upload, message } from "antd";
+import { Button, Input, Modal, Tabs, Upload, message } from "antd";
 import { DeleteOutlined, InboxOutlined, PaperClipOutlined } from "@ant-design/icons";
 import { publishSkillToMarket } from "../../skillApi";
 import { uploadSkillTempFile } from "../../skillUpload";
-import { SKILL_TAG_MAX_COUNT } from "../../shared";
 
 interface SkillAdminPublishModalProps {
   open: boolean;
   t: (key: string, options?: Record<string, unknown>) => string;
   onClose: () => void;
   onPublished: () => Promise<void>;
-  tagOptions: string[];
-  tagsLoading: boolean;
 }
 
 type PublishMethod = "url" | "file";
 
 const MAX_SKILL_PACKAGE_SIZE = 512 * 1024 * 1024;
 
+const normalizeRepositoryArchiveUrl = (rawUrl: string) => {
+  const value = rawUrl.trim();
+  try {
+    const url = new URL(value);
+    if (url.hostname.toLowerCase() !== "github.com") {
+      return value;
+    }
+    const pathParts = url.pathname.split("/").filter(Boolean);
+    if (pathParts.length !== 2) {
+      return value;
+    }
+    const [owner, rawRepository] = pathParts;
+    const repository = rawRepository.replace(/\.git$/i, "");
+    if (!owner || !repository) {
+      return value;
+    }
+    return `https://github.com/${owner}/${repository}/archive/HEAD.zip`;
+  } catch {
+    return value;
+  }
+};
+
 export default function SkillAdminPublishModal({
   open,
   t,
   onClose,
   onPublished,
-  tagOptions,
-  tagsLoading,
 }: SkillAdminPublishModalProps) {
   const [publishMethod, setPublishMethod] = useState<PublishMethod>("url");
   const [repoUrl, setRepoUrl] = useState("");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
-  const [tags, setTags] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
 
   const resetForm = () => {
     setPublishMethod("url");
     setRepoUrl("");
     setSelectedFile(null);
-    setTags([]);
   };
 
   const handleClose = () => {
@@ -53,7 +68,7 @@ export default function SkillAdminPublishModal({
       return;
     }
 
-    const normalizedRepoUrl = repoUrl.trim();
+    const normalizedRepoUrl = normalizeRepositoryArchiveUrl(repoUrl);
     if (publishMethod === "url" && !normalizedRepoUrl) {
       message.warning(t("admin.memorySkillAdminPublishUrlMissing"));
       return;
@@ -62,22 +77,15 @@ export default function SkillAdminPublishModal({
       message.warning(t("admin.memorySkillAdminPublishFileMissing"));
       return;
     }
-    if (tags.length === 0) {
-      message.warning(t("admin.memorySkillAdminPublishTagsMissing"));
-      return;
-    }
-
     setSubmitting(true);
     try {
       if (publishMethod === "file" && selectedFile) {
         const upload = await uploadSkillTempFile(selectedFile);
         await publishSkillToMarket({
-          tags,
           source: { type: "uploaded_zip", uploadId: upload.uploadId },
         });
       } else {
         await publishSkillToMarket({
-          tags,
           source: { type: "url", url: normalizedRepoUrl },
         });
       }
@@ -193,33 +201,6 @@ export default function SkillAdminPublishModal({
             },
           ]}
         />
-        <div className="memory-skill-field">
-          <label htmlFor="adminSkillTagsInput">{t("admin.memorySkillMarketTags")}</label>
-          <Select
-            id="adminSkillTagsInput"
-            mode="tags"
-            allowClear
-            showSearch
-            loading={tagsLoading}
-            value={tags}
-            options={tagOptions.map((tag) => ({ label: tag, value: tag }))}
-            placeholder={t("admin.memoryTagsPlaceholder")}
-            tokenSeparators={[",", "，"]}
-            onChange={(values: string[]) => {
-              const normalized = [
-                ...new Set(values.map((tag) => tag.trim()).filter(Boolean)),
-              ];
-              if (normalized.length > SKILL_TAG_MAX_COUNT) {
-                message.warning(
-                  t("admin.memorySkillTagMaxCount", {
-                    count: SKILL_TAG_MAX_COUNT,
-                  }),
-                );
-              }
-              setTags(normalized.slice(0, SKILL_TAG_MAX_COUNT));
-            }}
-          />
-        </div>
       </div>
     </Modal>
   );

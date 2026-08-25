@@ -157,23 +157,21 @@ describe("RecoverySettings", () => {
     mocks.deleteArchiveFolder.mockResolvedValue(1);
   });
 
-  it("opens on Archived and renders grouped conversation data", async () => {
+  function openArchiveView() {
+    fireEvent.click(screen.getByRole("tab", { name: /已归档/ }));
+  }
+
+  it("opens on Trash with the skill category selected", async () => {
     render(<RecoverySettings headingRef={createRef<HTMLHeadingElement>()} />);
 
-    expect(screen.getByRole("tab", { name: /已归档/ })).toHaveAttribute("aria-selected", "true");
-    expect(screen.getByRole("tab", { name: /回收站/ })).toHaveAttribute("aria-selected", "false");
-    expect(await screen.findByText("设置页信息架构整理")).toBeInTheDocument();
-    expect(screen.getByText("产品设计")).toBeInTheDocument();
-    expect(mocks.listArchivedConversations).toHaveBeenCalledWith(expect.objectContaining({
-      kind: "dialog",
-      folderId: "all",
-      page: 1,
-    }));
+    expect(screen.getByRole("tab", { name: /回收站/ })).toHaveAttribute("aria-selected", "true");
+    expect(screen.getByRole("tab", { name: /已归档/ })).toHaveAttribute("aria-selected", "false");
+    expect(screen.getByRole("tab", { name: "技能" })).toHaveAttribute("aria-selected", "true");
+    await waitFor(() => expect(mocks.listSkillTrash).toHaveBeenCalled());
   });
 
   it("switches trash categories without losing the page", async () => {
     render(<RecoverySettings headingRef={createRef<HTMLHeadingElement>()} />);
-    fireEvent.click(screen.getByRole("tab", { name: /回收站/ }));
     expect(screen.getByRole("tab", { name: "技能" })).toHaveAttribute("aria-selected", "true");
 
     fireEvent.click(screen.getByRole("tab", { name: "会话" }));
@@ -186,6 +184,7 @@ describe("RecoverySettings", () => {
 
   it("creates a folder from the archive toolbar", async () => {
     render(<RecoverySettings headingRef={createRef<HTMLHeadingElement>()} />);
+    openArchiveView();
     fireEvent.click(screen.getByRole("button", { name: /新建文件夹/ }));
     const dialog = await screen.findByRole("dialog", { name: "新建文件夹" });
     fireEvent.change(within(dialog).getByRole("textbox", { name: "文件夹名称" }), { target: { value: "知识库" } });
@@ -196,6 +195,7 @@ describe("RecoverySettings", () => {
 
   it("renames a custom archive folder from the folder manager", async () => {
     render(<RecoverySettings headingRef={createRef<HTMLHeadingElement>()} />);
+    openArchiveView();
     fireEvent.click(screen.getByRole("button", { name: "管理文件夹" }));
     const dialog = await screen.findByRole("dialog", { name: "管理文件夹" });
 
@@ -210,6 +210,7 @@ describe("RecoverySettings", () => {
 
   it("requires a move target when deleting a non-empty archive folder", async () => {
     render(<RecoverySettings headingRef={createRef<HTMLHeadingElement>()} />);
+    openArchiveView();
     fireEvent.click(screen.getByRole("button", { name: "管理文件夹" }));
     const dialog = await screen.findByRole("dialog", { name: "管理文件夹" });
 
@@ -222,6 +223,7 @@ describe("RecoverySettings", () => {
 
   it("renders the reference move dialog and moves to the selected folder", async () => {
     render(<RecoverySettings headingRef={createRef<HTMLHeadingElement>()} />);
+    openArchiveView();
     const itemName = await screen.findByText("设置页信息架构整理");
     const row = itemName.closest(".recovery-row");
     expect(row).not.toBeNull();
@@ -241,6 +243,7 @@ describe("RecoverySettings", () => {
 
   it("creates a folder inside the move dialog, auto-selects it, and moves there", async () => {
     render(<RecoverySettings headingRef={createRef<HTMLHeadingElement>()} />);
+    openArchiveView();
     const itemName = await screen.findByText("设置页信息架构整理");
     const row = itemName.closest(".recovery-row");
     expect(row).not.toBeNull();
@@ -263,6 +266,7 @@ describe("RecoverySettings", () => {
 
   it("rejects duplicate folder names inside the move dialog", async () => {
     render(<RecoverySettings headingRef={createRef<HTMLHeadingElement>()} />);
+    openArchiveView();
     const itemName = await screen.findByText("设置页信息架构整理");
     const row = itemName.closest(".recovery-row");
     expect(row).not.toBeNull();
@@ -279,6 +283,7 @@ describe("RecoverySettings", () => {
 
   it("closes without a request when the item is already in the selected folder", async () => {
     render(<RecoverySettings headingRef={createRef<HTMLHeadingElement>()} />);
+    openArchiveView();
     const itemName = await screen.findByText("设置页信息架构整理");
     const row = itemName.closest(".recovery-row");
     expect(row).not.toBeNull();
@@ -295,6 +300,7 @@ describe("RecoverySettings", () => {
   it("keeps the move dialog and selected destination available after a failed request", async () => {
     mocks.archiveConversation.mockRejectedValueOnce(new Error("move failed"));
     render(<RecoverySettings headingRef={createRef<HTMLHeadingElement>()} />);
+    openArchiveView();
     const itemName = await screen.findByText("设置页信息架构整理");
     const row = itemName.closest(".recovery-row");
     expect(row).not.toBeNull();

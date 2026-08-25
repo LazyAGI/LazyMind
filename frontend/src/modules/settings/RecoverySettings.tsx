@@ -88,7 +88,7 @@ function ActionSet({ children, menuItems, busy, moreLabel }: { children: ReactNo
 
 export default function RecoverySettings({ headingRef }: RecoverySettingsProps) {
   const { t, i18n } = useTranslation();
-  const [view, setView] = useState<RecoveryView>("archive");
+  const [view, setView] = useState<RecoveryView>("trash");
   const [archiveKind, setArchiveKind] = useState<RecoveryKind>("dialog");
   const [archiveKeyword, setArchiveKeyword] = useState("");
   const debouncedArchiveKeyword = useDebouncedValue(archiveKeyword);
