@@ -223,7 +223,7 @@ def test_searchbase_tool_rendering_extracts_provider_brand():
     })
 
     assert preview_value == 'agent news'
-    assert 'Searching **Tavily** for **agent news**.' in text
+    assert 'Using **Tavily** search for **agent news**.' in text
     assert '"name":"TavilySearch_search"' in text
 
     result_text = _tool_result_frame_text({
@@ -259,9 +259,9 @@ def test_searchbase_tool_rendering_handles_multiword_and_special_brands():
         },
     })
 
-    assert 'Searching **Google Books** for **database internals**.' in google_books_text
-    assert 'Searching **Semantic Scholar** for **retrieval augmented generation**.' in semantic_text
-    assert 'Searching **Arxiv** for **tool use agents**.' in arxiv_text
+    assert 'Using **Google Books** search for **database internals**.' in google_books_text
+    assert 'Using **Semantic Scholar** search for **retrieval augmented generation**.' in semantic_text
+    assert 'Using **Arxiv** search for **tool use agents**.' in arxiv_text
 
 
 def test_searchbase_tool_rendering_supports_zh_and_content_methods():

@@ -128,23 +128,10 @@ def test_get_config_path_alias_dynamic(monkeypatch):
 
 def test_get_config_path_alias_inner(monkeypatch):
     monkeypatch.setenv('LAZYMIND_MODEL_CONFIG_PATH', 'inner')
-    monkeypatch.setattr(
-        'lazymind.config.apply_local_model_config_override',
-        lambda path: path,
-    )
     from lazymind.config import config as _cfg
     _cfg.refresh('model_config_path')
-    path = get_config_path()
-    assert 'inner' in path
-    assert path.endswith('runtime_models.inner.yaml')
-
-
-def test_get_config_path_alias_local(monkeypatch):
-    monkeypatch.setenv('LAZYMIND_MODEL_CONFIG_PATH', 'local')
-    from lazymind.config import config as _cfg
-    _cfg.refresh('model_config_path')
-    path = get_config_path()
-    assert path.endswith('runtime_models.local.yaml')
+    # Alias itself is inner.yaml. Sidecar override is covered separately.
+    assert str(_cfg['model_config_path']).endswith('runtime_models.inner.yaml')
 
 
 def test_get_config_path_prefers_local_override_next_to_inner(monkeypatch, tmp_path):

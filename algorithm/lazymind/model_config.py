@@ -59,12 +59,11 @@ def get_config_path() -> str:
     are accepted in addition to an explicit file path:
 
         inner    → runtime_models.inner.yaml   (intranet / on-prem deployment)
-        local    → runtime_models.local.yaml   (gitignored machine override)
         online   → runtime_models.online.yaml  (public cloud API deployment)
         dynamic  → runtime_models.yaml         (fully dynamic, key injected per request)
 
-    If inner is selected and a sibling runtime_models.local.yaml exists, that
-    file is used instead so local tunnel overrides stay out of git.
+    If inner is selected and a sibling gitignored runtime_models.local.yaml
+    exists, that file is used instead so machine overrides stay out of git.
 
     Alias resolution is handled by algorithm/config.py (Config alias mechanism),
     so config['model_config_path'] always contains the resolved absolute path.
