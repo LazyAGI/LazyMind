@@ -98,6 +98,30 @@ ARTIFACT_TITLES = {
     'handoff': '研发交付文档',
 }
 
+STAGE_ALIASES = {
+    'direction': 'direction',
+    'shape-product-direction': 'direction',
+    'design': 'design',
+    'product-design-full-cycle': 'design',
+    'prd': 'prd',
+    'write-prd': 'prd',
+    'review': 'review',
+    'review-product-artifact': 'review',
+    'handoff': 'handoff',
+    'prepare-development-handoff': 'handoff',
+}
+
+UPSTREAM_SLOTS = {
+    'direction': (),
+    'design': ('direction_document', 'competitive_analysis'),
+    'prd': ('design_document',),
+    'review': (
+        'direction_document', 'competitive_analysis', 'design_document',
+        'prd_document', 'prototype',
+    ),
+    'handoff': ('design_document', 'prd_document', 'prototype', 'review_document'),
+}
+
 
 def _workspace_root() -> Path:
     context = require_context()
@@ -121,18 +145,35 @@ def _read_text(path: str) -> str:
     return source.read_text(encoding='utf-8')
 
 
-def _json_value(value: str, default: Any = None) -> Any:
-    text = str(value or '').strip()
-    if not text:
-        return default
-    parsed = json.loads(text)
-    if isinstance(parsed, dict) and 'data' in parsed:
-        return parsed['data']
-    return parsed
+def _json_value(value: Any, default: Any = None) -> Any:
+    current = value
+    for _ in range(5):
+        if isinstance(current, dict):
+            nested = next((
+                current[key] for key in ('data', 'text') if key in current
+            ), current)
+            if nested is current:
+                return current
+            current = nested
+            continue
+        if isinstance(current, list):
+            return current
+        text = re.sub(
+            r'^```(?:json)?\s*|\s*```$', '', str(current or '').strip(), flags=re.I,
+        )
+        if not text:
+            return default
+        try:
+            current = json.loads(text)
+        except json.JSONDecodeError:
+            return current
+    return current
 
 
-def _json_content_or_path(value: str, default: Any = None) -> Any:
+def _json_content_or_path(value: Any, default: Any = None) -> Any:
     """Accept Workflow JSON content or the path of a JSON artifact."""
+    if isinstance(value, (dict, list)):
+        return _json_value(value, default)
     text = str(value or '').strip()
     if not text:
         return default
@@ -146,17 +187,21 @@ def _json_content_or_path(value: str, default: Any = None) -> Any:
     return _json_value(text, default)
 
 
-def _text_content_or_path(value: str) -> str:
+def _text_content_or_path(value: Any) -> str:
     """Accept inline evidence text or the path returned by an earlier Workflow step."""
     text = str(value or '').strip()
     if '\n' not in text and len(text) < 4096 and ('/' in text or '\\' in text):
         candidate = Path(text).expanduser()
         try:
             if candidate.is_file():
-                return _read_text(str(candidate)).strip()
+                payload = _json_value(_read_text(str(candidate)), '')
+                if isinstance(payload, str):
+                    return payload.strip()
+                return json.dumps(payload, ensure_ascii=False)
         except OSError:
             pass
-    return text
+    payload = _json_value(value, value)
+    return payload if isinstance(payload, str) else json.dumps(payload, ensure_ascii=False)
 
 
 def _read_json(path: str) -> str:
@@ -180,10 +225,59 @@ def _write_markdown(root: Path, name: str, value: str) -> str:
 
 
 def _stage_contract(stage_id: str) -> dict[str, Any]:
-    stage = str(stage_id or '').strip().lower()
+    stage = _normalize_stage_id(stage_id)
     if stage not in TEXT_STAGE_CONTRACTS:
         raise ValueError(f'stage_id must be one of {sorted(TEXT_STAGE_CONTRACTS)}.')
     return TEXT_STAGE_CONTRACTS[stage]
+
+
+def _normalize_stage_id(stage_id: Any) -> str:
+    raw = str(stage_id or '').strip().lower().replace('_', '-')
+    return STAGE_ALIASES.get(raw, raw)
+
+
+def _runtime_stage() -> str:
+    context = require_context()
+    step_id = str((context.params or {}).get('step_id') or '').strip().lower()
+    match = re.match(
+        r'(?:build_(direction|design|prd|review|handoff)_outline|'
+        r'write_(direction|design|prd|review|handoff)_document)$',
+        step_id,
+    )
+    return next((value for value in match.groups() if value), '') if match else ''
+
+
+def _remote_inputs() -> dict[str, Any]:
+    values = (require_context().params or {}).get('remote_inputs') or {}
+    return values if isinstance(values, dict) else {}
+
+
+def _remote_path_set() -> set[Path]:
+    paths: set[Path] = set()
+
+    def collect(value: Any) -> None:
+        if isinstance(value, (list, tuple)):
+            for item in value:
+                collect(item)
+            return
+        if isinstance(value, dict):
+            for key in ('path', 'value', 'data'):
+                if key in value:
+                    collect(value[key])
+            return
+        text = str(value or '').strip()
+        if not text:
+            return
+        try:
+            candidate = Path(text).expanduser().resolve()
+            if candidate.is_file():
+                paths.add(candidate)
+        except OSError:
+            return
+
+    for remote_value in _remote_inputs().values():
+        collect(remote_value)
+    return paths
 
 
 def _target_words(raw: str, default: int) -> int:
@@ -193,22 +287,48 @@ def _target_words(raw: str, default: int) -> int:
     return max(300, int(match.group()))
 
 
-def _source_paths(value: str) -> list[str]:
+def _source_paths(value: Any) -> list[str]:
     parsed = _json_content_or_path(value, [])
+    if isinstance(parsed, dict):
+        parsed = next((
+            parsed[key] for key in ('file_list', 'paths', 'files', 'value')
+            if key in parsed
+        ), [])
     if not isinstance(parsed, list):
         raise ValueError('source_material_paths_json must be a JSON array.')
     workspace = _workspace_root().resolve()
+    remote_paths = _remote_path_set()
     paths: list[str] = []
-    for item in parsed:
-        path = Path(str(item or '')).expanduser().resolve()
-        try:
-            path.relative_to(workspace)
-        except ValueError as exc:
-            raise ValueError('Every source material must stay inside the Workflow workspace.') from exc
+    pending = list(parsed)
+    while pending:
+        item = pending.pop(0)
+        if isinstance(item, (list, tuple)):
+            pending[0:0] = list(item)
+            continue
+        if isinstance(item, dict):
+            pending[0:0] = [
+                item[key] for key in ('path', 'value', 'data', 'file_list', 'paths', 'files')
+                if key in item
+            ]
+            continue
+        raw_path = item
+        text = str(raw_path or '').strip()
+        if text.startswith('file://'):
+            text = text[7:]
+        if not text:
+            continue
+        path = Path(text).expanduser().resolve()
         if not path.is_file():
             raise FileNotFoundError(f'Product source material does not exist: {path}')
+        try:
+            path.relative_to(workspace)
+        except ValueError:
+            if path not in remote_paths:
+                raise ValueError(
+                    'Source material must be in this workspace or an exact bound Workflow input.'
+                )
         paths.append(str(path))
-    return paths
+    return list(dict.fromkeys(paths))
 
 
 def _preserve_business_contract(
@@ -218,6 +338,8 @@ def _preserve_business_contract(
     research_evidence: str,
 ) -> str:
     context = _json_value(writing_context_json, {})
+    if not isinstance(context, dict):
+        context = {}
     facts = [
         fact for fact in list(context.get('facts') or [])
         if not isinstance(fact, dict) or fact.get('fact_id') != 'product-stage-contract'
@@ -263,25 +385,67 @@ def _business_contract(context: Mapping[str, Any]) -> dict[str, Any]:
 def product_writer_prepare_context(
     user_request: str,
     stage_id: str,
-    routing_record_json: str,
-    research_evidence: str,
+    routing_record_json: Any = '',
+    research_evidence: Any = '',
     source_material_paths_json: str = '[]',
     resource_profiles_path: str = '',
     upstream_artifact_paths_json: str = '[]',
     word_target: str = '',
 ) -> dict[str, str]:
-    """Create a shared Writer task for one text-producing product stage."""
-    stage = str(stage_id or '').strip().lower()
+    """Create Writer context from authoritative bindings for one product stage.
+
+    Explicit arguments remain supported for tests and non-Workflow callers. During a
+    Workflow step, omitted or empty values are resolved from immutable ``remote_inputs`` so
+    the SubAgent never needs to read and re-serialize routing JSON or upstream path lists.
+    """
+    remote = _remote_inputs()
+    runtime_stage = _runtime_stage()
+    stage = runtime_stage or _normalize_stage_id(stage_id)
     contract = _stage_contract(stage)
     routing = _json_content_or_path(routing_record_json, {})
+    if not isinstance(routing, dict) or not routing:
+        routing = _json_content_or_path(remote.get('execution_plan'), {})
+    if isinstance(routing, dict):
+        nested_plan = next((
+            routing[key] for key in ('execution_plan', 'plan', 'routing_record')
+            if isinstance(routing.get(key), dict)
+        ), None)
+        if nested_plan is not None:
+            routing = nested_plan
+    if not isinstance(routing, dict):
+        routing = {}
+    if not str(research_evidence or '').strip():
+        research_evidence = remote.get('research_evidence') or ''
     evidence = _text_content_or_path(research_evidence)
     approved_chain = routing.get('stage_chain') if isinstance(routing, dict) else None
     if isinstance(approved_chain, list) and approved_chain:
-        if stage not in {str(item or '').strip().lower() for item in approved_chain}:
+        normalized_chain = {_normalize_stage_id(item) for item in approved_chain}
+        if stage not in normalized_chain:
             raise ValueError('stage_id must belong to execution_plan.stage_chain.')
-    elif routing and str(routing.get('selected_stage') or '').strip().lower() != stage:
+    elif routing and _normalize_stage_id(routing.get('selected_stage')) != stage \
+            and not runtime_stage:
         raise ValueError('stage_id must match the approved execution plan.')
-    target = _target_words(word_target, int(contract['default_target']))
+
+    target_source: Any = word_target
+    parsed_target = _json_content_or_path(word_target, word_target)
+    if isinstance(parsed_target, dict):
+        target_source = parsed_target.get('word_target')
+    if not str(target_source or '').strip():
+        target_source = routing.get('word_target')
+    target = _target_words(str(target_source or ''), int(contract['default_target']))
+
+    if not str(resource_profiles_path or '').strip():
+        resource_profiles_path = remote.get('resource_profiles') or ''
+    if _json_content_or_path(source_material_paths_json, []) in (None, []):
+        bound_sources = [
+            remote[slot] for slot in ('product_materials', 'reference_sample')
+            if remote.get(slot)
+        ]
+        source_material_paths_json = bound_sources
+    if _json_content_or_path(upstream_artifact_paths_json, []) in (None, []):
+        upstream_artifact_paths_json = [
+            remote[slot] for slot in UPSTREAM_SLOTS.get(stage, ()) if remote.get(slot)
+        ]
     sections = '、'.join(str(item) for item in contract['sections'])
     query = f"""{str(user_request or '').strip()}
 
@@ -298,6 +462,8 @@ def product_writer_prepare_context(
         query=query,
         task_id=str(require_context().params.get('session_id') or uuid.uuid4().hex),
     ), {})
+    if not isinstance(task, dict):
+        task = {}
     task['output'] = {**dict(task.get('output') or {}), 'representation': 'markdown'}
     task['product_parameters'] = {
         'stage_id': stage,
@@ -310,8 +476,13 @@ def product_writer_prepare_context(
     profiled_paths: set[str] = set()
     if str(resource_profiles_path or '').strip():
         stored_profiles = _json_content_or_path(resource_profiles_path, [])
+        if isinstance(stored_profiles, dict):
+            stored_profiles = next((
+                stored_profiles[key] for key in ('profiles', 'resource_profiles', 'data')
+                if isinstance(stored_profiles.get(key), list)
+            ), [])
         if not isinstance(stored_profiles, list):
-            raise ValueError('resource_profiles_path must contain a JSON array.')
+            stored_profiles = []
         profiles_value.extend(stored_profiles)
     else:
         paths = _source_paths(source_material_paths_json)
@@ -325,8 +496,10 @@ def product_writer_prepare_context(
             user_input=query,
             resources_json=resources,
         ), [])
+        if isinstance(generated_profiles, dict):
+            generated_profiles = generated_profiles.get('profiles') or []
         if not isinstance(generated_profiles, list):
-            raise ValueError('Shared Writer returned invalid resource profiles.')
+            generated_profiles = []
         profiles_value.extend(generated_profiles)
 
     upstream_paths = [
@@ -345,8 +518,10 @@ def product_writer_prepare_context(
             ),
             resources_json=upstream_resources,
         ), [])
+        if isinstance(upstream_profiles, dict):
+            upstream_profiles = upstream_profiles.get('profiles') or []
         if not isinstance(upstream_profiles, list):
-            raise ValueError('Shared Writer returned invalid upstream artifact profiles.')
+            upstream_profiles = []
         profiles_value.extend(upstream_profiles)
 
     profiles = json.dumps(profiles_value, ensure_ascii=False)
@@ -409,6 +584,8 @@ def product_writer_generate_outline(
     writing_context_path: str,
 ) -> str:
     task = _json_value(_read_text(writing_task_path), {})
+    if not isinstance(task, dict):
+        task = {}
     stage = str((task.get('product_parameters') or {}).get('stage_id') or '')
     try:
         generated = WriterCreateToolkit().generate_outline(
@@ -586,6 +763,68 @@ def product_writer_update_context(content_path: str, writing_context_path: str) 
     return _write_json(_run_root('context'), 'writing_context', updated)
 
 
+def _required_bound_file(slot: str) -> str:
+    """Resolve one immutable Workflow input without asking the SubAgent to read it."""
+    value = _remote_inputs().get(slot)
+    paths = _source_paths([value]) if value not in (None, '', []) else []
+    if not paths:
+        raise ValueError(f"Required Workflow input '{slot}' is missing or is not a file artifact.")
+    return paths[0]
+
+
+def product_writer_generate_outline_from_inputs(
+    user_request: str,
+    stage_id: str,
+) -> dict[str, Any]:
+    """Generate one canonical outline without exposing Workflow file bindings to the Agent."""
+    stage = _runtime_stage() or _normalize_stage_id(stage_id)
+    prepared = product_writer_prepare_context(user_request=user_request, stage_id=stage)
+    outline = product_writer_generate_outline(
+        prepared['writing_task'], prepared['writing_context'],
+    )
+    validation = validate_product_outline(stage, _read_text(outline))
+    if not validation['valid']:
+        raise ValueError(
+            'Generated product outline is structurally invalid after normalization: '
+            + '; '.join(validation['errors'])
+        )
+    approved_context = product_writer_update_context(outline, prepared['writing_context'])
+    return {
+        'writing_task': prepared['writing_task'],
+        'writing_context': prepared['writing_context'],
+        'outline': outline,
+        'outline_report': validation['report'],
+        'approved_context': approved_context,
+        'warnings': list(validation.get('warnings') or []),
+    }
+
+
+def product_writer_generate_document_from_inputs(stage_id: str) -> dict[str, Any]:
+    """Run the shared Writer pipeline directly from authoritative bound artifacts.
+
+    The shared Writer still emits section deltas and resumes its stage checkpoint. This business
+    adapter only removes error-prone file lookup and intermediate-path plumbing from the SubAgent.
+    """
+    stage = _runtime_stage() or _normalize_stage_id(stage_id)
+    _stage_contract(stage)
+    task_path = _required_bound_file(f'{stage}_task')
+    outline_path = _required_bound_file(f'{stage}_outline')
+    context_path = _required_bound_file(f'{stage}_context_approved')
+
+    plan = product_writer_plan_sections(task_path, outline_path, context_path)
+    section_plan = str(plan['section_instructions'])
+    chapters = product_writer_write_sections(task_path, section_plan, context_path)
+    document = product_writer_assemble_draft(chapters[0], context_path, outline_path)
+    final_context = product_writer_update_context(document, context_path)
+    return {
+        'section_plan': section_plan,
+        'chapter_files': chapters,
+        'document': document,
+        'writing_context': final_context,
+        'warnings': list(plan.get('warnings') or []),
+    }
+
+
 def product_writer_plan_sections(
     writing_task_path: str,
     outline_document_path: str,
@@ -593,9 +832,13 @@ def product_writer_plan_sections(
 ) -> dict[str, Any]:
     """Build a stable Writer section contract from the approved Markdown outline."""
     task = _json_value(_read_text(writing_task_path), {})
+    if not isinstance(task, dict):
+        task = {}
     stage = str((task.get('product_parameters') or {}).get('stage_id') or '')
     outline = _normalize_approved_outline(stage, _read_text(outline_document_path))
     context = _json_value(_read_text(writing_context_path), {})
+    if not isinstance(context, dict):
+        context = {}
     validation = validate_product_outline(stage, outline)
     if not validation['valid']:
         raise ValueError('Approved product outline is structurally invalid: ' + '; '.join(validation['errors']))
@@ -667,6 +910,8 @@ def product_writer_write_sections(
     ctx = require_context()
     task_json = _read_json(writing_task_path)
     task = _json_value(task_json, {})
+    if not isinstance(task, dict):
+        task = {}
     stage = str((task.get('product_parameters') or {}).get('stage_id') or 'unknown')
     events = DraftMarkdownStreamEventEmitter(ctx.emit, slot=f'{stage}_document')
     try:
@@ -760,6 +1005,8 @@ def product_writer_assemble_draft(
         raise ValueError('No Writer product section files were found.')
     raw_outline = _read_text(outline_document_path)
     context = _json_value(_read_text(writing_context_path), {})
+    if not isinstance(context, dict):
+        context = {}
     stage = str(_business_contract(context).get('stage_id') or '')
     outline = _normalize_approved_outline(stage, raw_outline)
     section_markdown = [_read_text(str(path)) for path in paths]
