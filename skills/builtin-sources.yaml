@@ -21,4 +21,8 @@ bundled_skills:
     path: search/sciverse-paper-search
     category: search
     version: 1.0.0
+  - uid: bsk_01L0D6G4R4M8V2K7Q9C5X3H0EP
+    path: design/diagram-design
+    category: design
+    version: 4.1.0-lazymind-phase4-motion
 skills: []
