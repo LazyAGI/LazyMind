@@ -1,6 +1,13 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import MentionEditor from "./MentionEditor";
+
+type ScrollablePrototype = typeof HTMLElement.prototype & {
+  scrollTo?: (...args: unknown[]) => void;
+};
+
+const scrollablePrototype = HTMLElement.prototype as ScrollablePrototype;
+const originalScrollTo = scrollablePrototype.scrollTo;
 
 const mocks = vi.hoisted(() => ({
   listSkillAssetsPage: vi.fn(),
@@ -42,6 +49,11 @@ vi.mock("@/modules/chat/utils/request", () => ({
 
 describe("MentionEditor", () => {
   beforeEach(() => {
+    Object.defineProperty(scrollablePrototype, "scrollTo", {
+      configurable: true,
+      value: vi.fn(),
+    });
+
     mocks.listSkillAssetsPage.mockReset();
     mocks.listToolAssetsPage.mockReset();
     mocks.listDatasets.mockReset();
@@ -55,6 +67,19 @@ describe("MentionEditor", () => {
     mocks.listPrompts.mockResolvedValue({ data: { prompts: [] } });
     mocks.listConversations.mockResolvedValue({ data: { conversations: [] } });
     mocks.axiosGet.mockResolvedValue({ data: { workflows: [] } });
+  });
+
+  afterEach(() => {
+    window.getSelection()?.removeAllRanges();
+    if (originalScrollTo) {
+      Object.defineProperty(scrollablePrototype, "scrollTo", {
+        configurable: true,
+        value: originalScrollTo,
+      });
+    } else {
+      Reflect.deleteProperty(scrollablePrototype, "scrollTo");
+    }
+    vi.restoreAllMocks();
   });
 
   it("reloads skills after a previously cached empty list", async () => {
