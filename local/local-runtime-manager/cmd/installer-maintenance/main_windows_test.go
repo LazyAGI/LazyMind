@@ -62,6 +62,7 @@ func TestCheckStoppedValidatesRegistryProcessStartIdentity(t *testing.T) {
 		t.Fatalf("stale reused PID blocked setup: %v", err)
 	}
 	writeRegistry(startID)
+	waitForRegisteredProcess(t, root, cmd.Process.Pid)
 	if err := checkStopped(root); err == nil {
 		t.Fatal("matching live runtime process did not block setup")
 	}
@@ -89,6 +90,7 @@ func TestForceStopTerminatesRegisteredProcess(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(root, "run", "processes.json"), raw, 0o600); err != nil {
 		t.Fatal(err)
 	}
+	waitForRegisteredProcess(t, root, cmd.Process.Pid)
 
 	stopped, err := forceStop(root, "")
 	if err != nil {
@@ -127,6 +129,27 @@ func startInstallerMaintenanceHelperProcess(t *testing.T) *exec.Cmd {
 		_, _ = cmd.Process.Wait()
 	})
 	return cmd
+}
+
+func waitForRegisteredProcess(t *testing.T, root string, pid int) {
+	t.Helper()
+	const timeout = 5 * time.Second
+	const pollInterval = 25 * time.Millisecond
+	deadline := time.Now().Add(timeout)
+	var lastErr error
+	for time.Now().Before(deadline) {
+		processes, err := discoverRunningProcesses(root, "")
+		lastErr = err
+		if err == nil {
+			for _, process := range processes {
+				if process.PID == pid && process.MatchReason == "registered-pid-start-id" {
+					return
+				}
+			}
+		}
+		time.Sleep(pollInterval)
+	}
+	t.Fatalf("registered helper process %d was not discoverable within %s: %v", pid, timeout, lastErr)
 }
 
 func TestParseCommandOptions(t *testing.T) {
