@@ -6,7 +6,7 @@ status: published
 default_locale: zh-CN
 
 skill:
-  source_url: https://github.com/xiaoyanZzz/LazyRAG/archive/de4520e19cdaef81c7d61871e6943c9b6e216fc4.zip
+  source_url: featured/market-researcher/skill
   required_version: 1.0.0
 
 placement:
