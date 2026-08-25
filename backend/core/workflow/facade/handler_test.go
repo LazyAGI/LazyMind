@@ -17,6 +17,7 @@ import (
 	"gorm.io/gorm"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/workflow/graphengine"
 	workflowstore "lazymind/core/workflow/store"
 )
 
@@ -238,6 +239,28 @@ func TestMissingExternalInputsSkipsOptionalExternalMaterials(t *testing.T) {
 	missing := missingExternalInputs(graph, map[string]any{})
 	if len(missing) != 1 || missing[0] != "required_source" {
 		t.Fatalf("missing inputs = %#v", missing)
+	}
+}
+
+func TestMissingExternalInputsUsesRequiredExpressions(t *testing.T) {
+	graph := preparationGraph{
+		MaterialProducers: map[string]struct {
+			Kind     string `json:"kind"`
+			Optional bool   `json:"optional"`
+		}{
+			"research_topic": {Kind: "external"},
+			"word_target":    {Kind: "external"},
+			"reference_file": {Kind: "external"},
+		},
+		InputExpressions: map[string]graphengine.Expression{
+			"generate_outline": {All: []graphengine.Expression{
+				{Material: "research_topic"}, {Material: "word_target"},
+			}},
+		},
+	}
+	missing := missingExternalInputs(graph, map[string]any{"research_topic": "bound"})
+	if len(missing) != 1 || missing[0] != "word_target" {
+		t.Fatalf("optional-only reference_file must not block preparation: %#v", missing)
 	}
 }
 

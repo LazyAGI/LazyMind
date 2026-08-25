@@ -17,6 +17,7 @@ import {
 import { useTranslation } from "react-i18next";
 import { AgentAppsAuth } from "@/components/auth";
 import { useModelFeatures } from "@/hooks/useModelFeatures";
+import { runtimeFeatures } from "@/runtime/features";
 import {
   modelProvidersApi,
   modelProvidersDefaultApi,

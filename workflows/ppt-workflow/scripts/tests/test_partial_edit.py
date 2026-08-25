@@ -42,6 +42,14 @@ NESTED_TITLE_HTML = """<!doctype html>
 </section></main></body></html>
 """
 
+DUPLICATE_TITLE_HTML = """<!doctype html>
+<html><head><title>Game report</title></head><body>
+<main class="slide">
+  <div class="page-label" data-el="title">CYBERPUNK 2077</div>
+  <h1 class="main-title" data-el="title"><span>赛博朋克</span>2077</h1>
+</main></body></html>
+"""
+
 
 def make_deck(root: Path) -> tuple[Path, Path]:
     deck = root / 'deck'
@@ -62,6 +70,70 @@ def make_deck(root: Path) -> tuple[Path, Path]:
 
 
 class PartialEditTests(unittest.TestCase):
+    def test_selection_occurrence_disambiguates_duplicate_data_el(self):
+        selection = {
+            'type': 'ppt_html',
+            'page': 1,
+            'el': 'title',
+            'index': 2,
+            'selected_text': '赛博朋克2077',
+        }
+        with mock.patch.object(TOOLS, '_agent_llm_call') as llm:
+            ops, old_text, new_text = TOOLS._selection_edit_ops(
+                '改为赛博朋克2077游戏介绍',
+                selection,
+                TOOLS._HtmlTree(DUPLICATE_TITLE_HTML),
+            )
+        self.assertEqual(ops, [{
+            'op': 'replace_text',
+            'el': 'title',
+            'index': 2,
+            'value': '赛博朋克2077游戏介绍',
+            'scope': 'element',
+        }])
+        self.assertIn('赛博朋克', old_text)
+        self.assertEqual(new_text, '赛博朋克2077游戏介绍')
+        llm.assert_not_called()
+
+        edited, _applied, _notes, _removed = TOOLS._apply_html_ops(
+            DUPLICATE_TITLE_HTML, ops,
+        )
+        self.assertIn('data-el="title">CYBERPUNK 2077</div>', edited)
+        self.assertIn(
+            'data-el="title">赛博朋克2077游戏介绍</h1>', edited,
+        )
+        self.assertNotIn('赛博朋克2077游戏介绍2077', edited)
+
+    def test_duplicate_data_el_without_occurrence_remains_rejected(self):
+        with self.assertRaisesRegex(ValueError, 'is not unique'):
+            TOOLS._selection_edit_ops(
+                '改为赛博朋克2077游戏介绍',
+                {'type': 'ppt_html', 'page': 1, 'el': 'title'},
+                TOOLS._HtmlTree(DUPLICATE_TITLE_HTML),
+            )
+
+    def test_duplicate_selection_preview_preserves_occurrence_index(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            encoded = TOOLS.base64.b64encode(
+                DUPLICATE_TITLE_HTML.encode('utf-8'),
+            ).decode('ascii')
+            artifact = {'path': f'data:text/plain;base64,{encoded}', 'type': 'text'}
+            preview = TOOLS.ppt_preview_selection_edit(
+                artifact=artifact,
+                instruction='改为赛博朋克2077游戏介绍',
+                selection={
+                    'type': 'ppt_html', 'page': 1, 'el': 'title', 'index': 2,
+                    'selected_text': '赛博朋克2077',
+                },
+                artifact_store=tmp,
+                slot='preview_html',
+            )
+
+        self.assertEqual(preview['target']['index'], 2)
+        self.assertEqual(preview['target']['block_type'], 'h1')
+        self.assertIn('CYBERPUNK 2077', preview['candidate_html'])
+        self.assertIn('赛博朋克2077游戏介绍', preview['candidate_html'])
+
     def test_delete_this_item_removes_legacy_outer_card(self):
         selection = {
             'type': 'ppt_html',

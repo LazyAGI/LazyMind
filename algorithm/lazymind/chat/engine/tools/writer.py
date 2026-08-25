@@ -1,8 +1,8 @@
 """Common writer tools with string/JSON inputs and outputs."""
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import os
 import re
 import tempfile
@@ -59,6 +59,12 @@ _CHINESE_CHAR_LIMIT_RE = re.compile(
     r'(?P<value>\d+(?:\.\d+)?)\s*(?P<unit>万|千)?\s*字'
     r'(?P<suffix>左右|上下|以内|以下)?'
 )
+_MARKDOWN_ATX_HEADING_RE = re.compile(
+    r'^(?P<indent> {0,3})(?P<marks>#{1,6})[ \t]+'
+    r'(?P<title>.*?)(?:[ \t]+#+)?[ \t]*$',
+)
+_MARKDOWN_FENCE_RE = re.compile(r'^ {0,3}(?P<marks>`{3,}|~{3,})')
+_MARKDOWN_DRAFT_ROOT_ERROR = 'Markdown draft section must contain exactly one H2 root heading.'
 
 
 def _extract_length_constraints(query: str) -> dict[str, int]:
@@ -282,6 +288,81 @@ def _primary_data(result: dict) -> Any:
             'Writer tool did not return its primary artifact.'
         )
     return _read_artifact_data(artifact_path)
+
+
+def _markdown_heading_key(value: str) -> str:
+    text = re.sub(r'^\s*\d+(?:\.\d+)*[、.．\s　]+', '', str(value or ''))
+    return re.sub(r'[\s\W_]+', '', text, flags=re.UNICODE).lower()
+
+
+def _markdown_heading_rows(lines: list[str]) -> list[tuple[int, int, str]]:
+    rows: list[tuple[int, int, str]] = []
+    fence_mark = ''
+    for index, line in enumerate(lines):
+        fence = _MARKDOWN_FENCE_RE.match(line)
+        if fence:
+            mark = fence.group('marks')
+            if not fence_mark:
+                fence_mark = mark
+            elif mark[0] == fence_mark[0] and len(mark) >= len(fence_mark):
+                fence_mark = ''
+            continue
+        if fence_mark:
+            continue
+        heading = _MARKDOWN_ATX_HEADING_RE.match(line)
+        if heading:
+            rows.append((index, len(heading.group('marks')), heading.group('title').strip()))
+    return rows
+
+
+def _normalize_streamed_markdown_section(
+    markdown: str,
+    instruction: SectionInstruction,
+) -> str:
+    """Repair relative Markdown headings without spending another model call."""
+    title = instruction.section_title.strip()
+    if not title:
+        raise ValueError('Markdown draft section title must not be empty.')
+    lines = str(markdown or '').replace('\r\n', '\n').replace('\r', '\n').strip().split('\n')
+    rows = _markdown_heading_rows(lines)
+    title_key = _markdown_heading_key(title)
+    root_index = next(
+        (index for index, _, heading_title in rows
+         if _markdown_heading_key(heading_title) == title_key),
+        -1,
+    )
+
+    removed: set[int] = set()
+    if root_index >= 0:
+        lines[root_index] = f'## {title}'
+        removed.update(
+            index for index, _, heading_title in rows
+            if index != root_index and _markdown_heading_key(heading_title) == title_key
+        )
+    else:
+        lines = [f'## {title}', '', *lines]
+        root_index = 0
+        rows = [(index + 2, level, heading_title) for index, level, heading_title in rows]
+
+    child_rows = [
+        (index, level, heading_title)
+        for index, level, heading_title in rows
+        if index != root_index and index not in removed
+    ]
+    if child_rows:
+        shift = 3 - min(level for _, level, _ in child_rows)
+        for index, level, heading_title in child_rows:
+            lines[index] = f"{'#' * min(6, max(3, level + shift))} {heading_title}"
+
+    result = '\n'.join(
+        line for index, line in enumerate(lines) if index not in removed
+    ).strip()
+    top_rows = [row for row in _markdown_heading_rows(result.splitlines()) if row[1] <= 2]
+    if len(top_rows) != 1 or top_rows[0][1] != 2:
+        raise ValueError(_MARKDOWN_DRAFT_ROOT_ERROR)
+    if _markdown_heading_key(top_rows[0][2]) != title_key:
+        raise ValueError('Markdown draft section heading does not match its content_ref.')
+    return result
 
 
 def _result_data(result: dict, key: str) -> Any:
@@ -1300,13 +1381,13 @@ class WriterToolkitBase:
             suffix = '.md' if representation == 'markdown' else '.json'
             return checkpoint_root / f'section-{index + 1:04d}-{digest}{suffix}'
 
-        def load_checkpoint(path: Path) -> Any:
+        def load_checkpoint(path: Path, instruction: SectionInstruction) -> Any:
             if not path.is_file():
                 return None
             try:
                 if representation == 'markdown':
                     value = path.read_text(encoding='utf-8')
-                    return value if value.strip() else None
+                    return _normalize_streamed_markdown_section(value, instruction)
                 value = json.loads(path.read_text(encoding='utf-8'))
                 return WriterBlock.model_validate(value).model_dump(exclude_defaults=True)
             except (OSError, ValueError, TypeError, json.JSONDecodeError):
@@ -1369,16 +1450,17 @@ class WriterToolkitBase:
             path = checkpoint_path(index, instruction_data)
             section_started_at[index] = time.monotonic()
             try:
-                cached = load_checkpoint(path)
+                instruction = SectionInstruction.model_validate(instruction_data)
+                cached = load_checkpoint(path, instruction)
                 if cached is not None:
                     if not stop_event.is_set():
                         events.put(('delta', cached_preview(cached)))
                         events.put(('done', cached))
                         mark_completed(index, cached=True)
                     return
-                instruction = SectionInstruction.model_validate(instruction_data)
                 for attempt in range(1, max_attempts + 1):
                     buffered: list[str] = []
+                    section_deltas: list[str] = []
                     body_started = False
                     try:
                         forward_progress(
@@ -1413,34 +1495,53 @@ class WriterToolkitBase:
                             first_section_idle_timeout if index == 0 and attempt == 1
                             else section_stream_idle_timeout
                         )
-                        with stream_factory(**stream_kwargs) as stream:
-                            for delta in stream:
-                                if stop_event.is_set():
-                                    return
-                                if body_started:
-                                    events.put(('delta', delta))
-                                    continue
-                                buffered.append(delta)
-                                if preview_has_body(''.join(buffered)):
-                                    body_started = True
-                                    for pending in buffered:
-                                        events.put(('delta', pending))
-                                    buffered.clear()
-                                    forward_progress(
-                                        progress=5,
-                                        current_phase=f'第 {index + 1} 章正在输出正文',
-                                        section_index=index + 1,
-                                        section_total=len(instructions),
-                                        section_completed=completed_count,
-                                        section_state='streaming',
-                                        section_attempt=attempt,
-                                    )
-                            result = stream.result()
-                        section = _primary_data(result)
+                        try:
+                            with stream_factory(**stream_kwargs) as stream:
+                                for delta in stream:
+                                    if stop_event.is_set():
+                                        return
+                                    section_deltas.append(delta)
+                                    if body_started:
+                                        events.put(('delta', delta))
+                                        continue
+                                    buffered.append(delta)
+                                    if preview_has_body(''.join(buffered)):
+                                        body_started = True
+                                        for pending in buffered:
+                                            events.put(('delta', pending))
+                                        buffered.clear()
+                                        forward_progress(
+                                            progress=5,
+                                            current_phase=f'第 {index + 1} 章正在输出正文',
+                                            section_index=index + 1,
+                                            section_total=len(instructions),
+                                            section_completed=completed_count,
+                                            section_state='streaming',
+                                            section_attempt=attempt,
+                                        )
+                                result = stream.result()
+                            section = _primary_data(result)
+                        except ValueError as exc:
+                            if (
+                                representation != 'markdown'
+                                or str(exc) != _MARKDOWN_DRAFT_ROOT_ERROR
+                                or not section_deltas
+                            ):
+                                raise
+                            section = _normalize_streamed_markdown_section(
+                                ''.join(section_deltas), instruction,
+                            )
+                            LOG.warning(
+                                '[Writer] repaired Draft Markdown heading contract without '
+                                'regeneration section=%s title=%r',
+                                index + 1, instruction.section_title,
+                            )
                         if representation == 'markdown' and not isinstance(section, str):
                             raise TypeError('Markdown Draft stream returned a non-Markdown artifact.')
                         if representation == 'ir' and not isinstance(section, dict):
                             raise TypeError('IR Draft stream returned a non-WriterBlock artifact.')
+                        if representation == 'markdown':
+                            section = _normalize_streamed_markdown_section(section, instruction)
                         if not body_started and preview_has_body(cached_preview(section)):
                             for pending in buffered:
                                 events.put(('delta', pending))

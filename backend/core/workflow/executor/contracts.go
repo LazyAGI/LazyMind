@@ -22,6 +22,7 @@ type AttemptContext struct {
 	PartialSelector     map[string][]int  `json:"partial_selector,omitempty"`
 	WorkflowRevision    string            `json:"workflow_revision"`
 	Inputs              map[string]any    `json:"inputs,omitempty"`
+	DeclaredInputTypes  map[string]string `json:"declared_input_types,omitempty"`
 	DeclaredOutputs     []string          `json:"declared_outputs,omitempty"`
 	DeclaredOutputTypes map[string]string `json:"declared_output_types,omitempty"`
 	RequiredOutputs     []string          `json:"required_outputs,omitempty"`

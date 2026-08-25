@@ -894,6 +894,12 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       setNewMessage(false);
       const sendParams: SendMessageParams = {
         text: normalizedText,
+        chatConfigSnapshot: {
+          knowledgeBaseId: [...(chatConfig?.knowledgeBaseId ?? [])],
+          creators: [...(chatConfig?.creators ?? [])],
+          tags: [...(chatConfig?.tags ?? [])],
+          databaseBaseId: chatConfig?.databaseBaseId,
+        },
         thinking_depth: thinkingDepth,
         mentions: effectiveMentions,
         citeMessage: normalizedCiteMessages.join("\n\n"),

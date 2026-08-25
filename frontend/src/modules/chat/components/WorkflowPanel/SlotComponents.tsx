@@ -45,6 +45,7 @@ import {
 } from './writerIR';
 import { WorkflowPanelTabActiveContext, SlotEditingContext } from './slotEditingContext';
 import MarkdownViewer from '@/modules/chat/components/MarkdownViewer';
+import HtmlBlock from '@/modules/chat/components/MarkdownViewer/HtmlBlock';
 import i18n from '@/i18n';
 import { useTranslation } from 'react-i18next';
 import { localizeErrorCode } from '@/components/request';
@@ -4310,6 +4311,100 @@ export function SlotFile({ slot, sessionId, slotId, revisionCount, onRefresh, re
   );
 }
 
+function SlotHtmlFilePreview({
+  slot,
+  sessionId,
+  slotId,
+  revisionCount,
+  onRefresh,
+  readOnly,
+}: SlotFileProps) {
+  const raw = slot.artifact_value;
+  const record = raw && typeof raw === 'object'
+    ? raw as Record<string, unknown>
+    : { path: String(raw ?? '') };
+  const inlineHtml = typeof record.text === 'string' ? record.text : '';
+  const { url, resolving, hasSource, sourceKey } = useArtifactFileUrl(record, slot.revision);
+  const [html, setHtml] = useState(inlineHtml);
+  const [loadError, setLoadError] = useState(false);
+
+  useEffect(() => {
+    if (inlineHtml) {
+      setHtml(inlineHtml);
+      setLoadError(false);
+      return;
+    }
+    if (!url) {
+      setHtml('');
+      if (!resolving) setLoadError(hasSource);
+      return;
+    }
+
+    const controller = new AbortController();
+    setHtml('');
+    setLoadError(false);
+    fetch(url, { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error(localizeErrorCode('2000509'));
+        return response.text();
+      })
+      .then((content) => {
+        if (isSpaFallbackHtml(content)) throw new Error(localizeErrorCode('2000509'));
+        setHtml(content);
+      })
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+        setLoadError(true);
+      });
+
+    return () => controller.abort();
+  }, [hasSource, inlineHtml, resolving, sourceKey, url]);
+
+  // Preserve the existing file-card fallback when an old artifact cannot be
+  // fetched as text. Users can still preview/download it instead of seeing a
+  // dead HTML pane.
+  if (loadError) {
+    return (
+      <SlotFile
+        slot={slot}
+        sessionId={sessionId}
+        slotId={slotId}
+        revisionCount={revisionCount}
+        onRefresh={onRefresh}
+        readOnly={readOnly}
+      />
+    );
+  }
+  if (!html) return <SlotPending type='file' />;
+
+  const showVersionBadge = Boolean(
+    sessionId && slotId && revisionCount !== undefined && revisionCount > 0,
+  );
+
+  return (
+    <div className='workflow-slot workflow-slot--html-preview'>
+      <HtmlBlock code={html} />
+      {showVersionBadge && (
+        <div className='workflow-slot__artifact-footer'>
+          <div className='workflow-slot__artifact-footer-left'>
+            <SlotVersionPopover
+              sessionId={sessionId!}
+              slotId={slotId!}
+              listIndex={slot.list_index ?? -1}
+              revisionCount={revisionCount!}
+              currentRevision={slot.revision}
+              currentValue={slot.artifact_value}
+              currentChangeSource={slot.change_source}
+              contentType='file'
+              onRollbackDone={onRefresh}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * SlotRenderer dispatches to the correct slot component based on the artifact
  * content_type returned by the backend.
@@ -4370,6 +4465,18 @@ export function SlotRenderer({
 
   const normalized = normalizeContentType(slot.content_type ?? 'text');
   const artifactSlotKey = slotId || slot.slot;
+  if (widget?.widgetType === 'html-preview') {
+    return (
+      <SlotHtmlFilePreview
+        slot={slot}
+        sessionId={sessionId}
+        slotId={slotId}
+        revisionCount={revisionCount}
+        onRefresh={onRefresh}
+        readOnly={readOnly}
+      />
+    );
+  }
   if (widget?.widgetType === 'html-slide') {
     if (isSlideSpecArtifact(slot.artifact_value)) {
       return <SlotJsonSlide slot={slot} compact={cardMode} />;

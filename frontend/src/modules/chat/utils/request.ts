@@ -134,6 +134,11 @@ export function exportContextPrompt(payload: Record<string, unknown>) {
     .then((response) => response.data as Blob);
 }
 
+// SubAgent task SSE endpoint. Granular execution events are streamed here so
+// they cannot crowd lifecycle events out of the conversation event channel.
+export const taskStreamUrl = (taskId: string) =>
+  `${coreApiBaseUrl}/tasks/${encodeURIComponent(taskId)}:stream`;
+
 // Conversation-level events SSE endpoint.
 export const convEventsUrl = (conversationId: string) =>
   `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/events`;
@@ -257,6 +262,8 @@ export type RewriteSelection =
     type: 'ppt_html';
     page: number;
     el: string;
+    /** 1-based occurrence among elements carrying the same data-el. */
+    index?: number;
     group?: string;
     selected_text?: string;
     computed_style?: {
@@ -289,6 +296,7 @@ export interface RewriteSelectionPreview {
     block_type: string;
     node_id?: string;
     el?: string;
+    index?: number;
     group?: string;
     page?: number;
   };

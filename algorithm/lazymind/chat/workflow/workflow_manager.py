@@ -19,6 +19,7 @@ from lazymind.chat.engine.tools.intent_writer import enable_workflow_intent_scop
 from lazymind.workflow_sdk import AdvanceRequest, StepCommand, WorkflowClient, WorkflowClientError
 from lazymind.workflow_toolkit import (
     AgentWorkflowToolProjection, HostWorkflowToolkit, StepCommandInput,
+    workflow_package_input_types,
 )
 
 LOG = logging.getLogger(__name__)
@@ -452,6 +453,17 @@ def _import_attachment(path: str) -> Dict[str, Any]:
     return asdict(value)
 
 
+def _import_text_binding(material_id: str, value: str) -> Dict[str, Any]:
+    from lazymind.chat.workflow.file_adapter import LazyMindHostFileAdapter
+    from lazymind.config import config
+    cfg = _agentic_config()
+    safe_name = re.sub(r'[^0-9A-Za-z_.-]+', '_', material_id).strip('._') or 'input'
+    resource = LazyMindHostFileAdapter(
+        str(config['core_api_url']).rstrip('/'), str(cfg.get('user_id') or ''), transport=httpx,
+    ).import_text(f'{safe_name}.txt', str(value))
+    return asdict(resource)
+
+
 def _conversation_has_attachments() -> bool:
     cfg = _agentic_config()
     if any(str(value or '').strip() for value in (cfg.get('files') or [])):
@@ -462,6 +474,12 @@ def _conversation_has_attachments() -> bool:
         for values in history.values()
         if isinstance(values, list)
     )
+
+
+def _resolve_workflow_attachment(reference: str) -> tuple[Optional[str], Optional[str]]:
+    """Resolve a file binding without loading attachment tooling for scalar launches."""
+    from lazymind.chat.engine.subagent.tools import _resolve_attachment
+    return _resolve_attachment(reference)
 
 
 def _clean_workflow_text(value: Any) -> str:
@@ -763,6 +781,7 @@ def build_workflow_discovery_context(
         if name in used_names:
             continue
         used_names.add(name)
+
         activations.append(activation)
         items.append({
             'workflow_ref': activation['workflow_ref'],
@@ -826,9 +845,27 @@ def _workflow_trigger_tools(
             continue
         used_names.add(name)
 
+        package_hint: Dict[str, Any] = {}
+        input_types_hint: Dict[str, str] = {
+            str(field['id']): 'text'
+            for field in _runtime_clarification_fields(item.get('runtime'))
+        }
+        # An explicitly selected Workflow can afford one package read before
+        # the model call so its complete typed input contract is visible. In
+        # discovery mode avoid N package reads: declared clarification fields
+        # provide the scalar trigger shape, and the selected package is read
+        # authoritatively only when its trigger is called.
+        if allowed_refs:
+            try:
+                package_hint = _client().get_workflow(workflow_id, revision_id).result
+                input_types_hint = workflow_package_input_types(package_hint)
+            except Exception as exc:
+                LOG.debug('Could not preload Workflow %s input contract: %s', workflow_id, exc)
+
         def make_trigger(
             bound_id: str, bound_ref: str, bound_revision: str, bound_query: str,
-            bound_clarification_answer: bool,
+            bound_clarification_answer: bool, bound_package: Optional[Dict[str, Any]],
+            supports_scalar_bindings: bool,
         ) -> Any:
             def run_trigger(
                 input_bindings: Optional[Dict[str, str]] = None,
@@ -871,18 +908,37 @@ def _workflow_trigger_tools(
                             'instruction': 'Read the current Ready frontier and continue execution.',
                         },
                     }
+                client = _client()
+                package = bound_package or client.get_workflow(bound_id, bound_revision).result
+                input_types = workflow_package_input_types(package)
                 resolved_bindings: Dict[str, Any] = {}
                 for material_id, attachment_ref in (input_bindings or {}).items():
-                    from lazymind.chat.engine.subagent.tools import _resolve_attachment
-                    path, error = _resolve_attachment(attachment_ref)
-                    if error or not path:
+                    binding = str(attachment_ref or '').strip()
+                    if not binding:
+                        raise WorkflowClientError(
+                            'WORKFLOW_INPUT_EMPTY', f'Input {material_id} is empty.',
+                        )
+                    material_type = input_types.get(str(material_id), '')
+                    if material_type in {'text', 'json'}:
+                        resolved_bindings[material_id] = _import_text_binding(
+                            str(material_id), binding,
+                        )
+                        continue
+                    # Attachment resolution pulls in the full attachment/vision
+                    # stack. Keep scalar-only Workflow launches independent of
+                    # those optional dependencies and load it only for a file
+                    # (or legacy untyped) material.
+                    path, error = _resolve_workflow_attachment(binding)
+                    if material_type in {'file', 'image'} and (error or not path):
                         raise WorkflowClientError(
                             'ATTACHMENT_NOT_SELECTED',
                             error or 'The referenced conversation attachment was not found.',
                         )
-                    resolved_bindings[material_id] = _import_attachment(path)
-                client = _client()
-                package = client.get_workflow(bound_id, bound_revision).result
+                    resolved_bindings[material_id] = (
+                        _import_attachment(path)
+                        if path and not error and material_type in {'', 'file', 'image'}
+                        else _import_text_binding(str(material_id), binding)
+                    )
                 toolkit = HostWorkflowToolkit(
                     _client,
                     allowed_workflow_ids=[bound_id],
@@ -977,6 +1033,13 @@ def _workflow_trigger_tools(
                 ) -> Dict[str, Any]:
                     """Initialize with optional attachments and a merged clarified request."""
                     return run_trigger(input_bindings, request_context)
+            elif supports_scalar_bindings:
+                def bound_trigger(
+                    input_bindings: Optional[Dict[str, str]] = None,
+                    request_context: Optional[str] = None,
+                ) -> Dict[str, Any]:
+                    """Initialize with scalar bindings and a merged clarified request."""
+                    return run_trigger(input_bindings, request_context)
             else:
                 def bound_trigger(request_context: Optional[str] = None) -> Dict[str, Any]:
                     """Initialize with the current or merged clarified request context."""
@@ -994,19 +1057,30 @@ def _workflow_trigger_tools(
             revision_id,
             trigger_query,
             trigger_query != str(current_query or '').strip(),
+            package_hint,
+            any(kind in {'text', 'json'} for kind in input_types_hint.values()),
         )
 
         trigger_workflow.__name__ = name
         description = str(item.get('tool_description') or '').strip()
+        input_contract = (
+            ' Exact external material IDs and types: '
+            + ', '.join(
+                f'{material_id} ({material_type})'
+                for material_id, material_type in sorted(input_types_hint.items())
+            )
+            + '. Use these exact IDs as input_bindings keys.'
+            if input_types_hint else ''
+        )
         attachment_guidance = (
-            ' input_bindings may map material IDs only to exact filenames listed in '
-            'the conversation attachments; omit it for generation or web-search flows.'
+            ' File/image input_bindings use exact filenames listed in conversation attachments; '
+            'text/json input_bindings use literal values, never filesystem paths.'
             if attachments_available else
-            ' No user attachments are available; start without input bindings so the '
-            'Workflow can generate from text or collect images itself.'
+            ' No user attachments are available: do not bind file materials, but pass literal '
+            'values for required text/json input_bindings.'
         )
         trigger_workflow.__doc__ = (
-            description + attachment_guidance
+            description + input_contract + attachment_guidance
             + ' If this turn follows startup clarification, request_context must merge the '
             'original request with every clarification answer; otherwise omit it.'
         )

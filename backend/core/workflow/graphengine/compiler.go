@@ -72,7 +72,7 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 	graph := &CompiledStateGraph{
 		SchemaVersion: SchemaVersion, StartRoute: state.StartRoute, Nodes: map[string]CompiledNode{}, MaterialProducers: map[string]ProducerRef{},
 		InputExpressions: map[string]Expression{}, OptionalInputs: map[string][]MaterialRef{},
-		Runtime: plugin.Runtime,
+		MaterialTypes: map[string]string{}, MaterialCardinalities: map[string]string{}, Runtime: plugin.Runtime,
 	}
 	if graph.StartRoute == "" {
 		graph.StartRoute = "all"
@@ -96,6 +96,14 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 			result.Diagnostics = append(result.Diagnostics, materialDiag("E_MATERIAL_DUPLICATE", "error", fmt.Sprintf("workflow.yaml.slots[%d].id", i), id, "material id is duplicated: "+id))
 		}
 		knownMaterials[id] = true
+		if materialType := strings.ToLower(scalar(slot["type"])); materialType != "" {
+			graph.MaterialTypes[id] = materialType
+		}
+		cardinality := strings.ToLower(scalar(slot["cardinality"]))
+		if cardinality != "list" {
+			cardinality = "single"
+		}
+		graph.MaterialCardinalities[id] = cardinality
 		materialSpecs[id] = uiMaterialSpec{
 			Type:        strings.ToLower(scalar(slot["type"])),
 			Cardinality: strings.ToLower(scalar(slot["cardinality"])),
@@ -876,8 +884,23 @@ func validateUI(
 		if scalar(widget["widgetType"]) == "html-slide" && specs[materialID].Type != "text" {
 			out = append(out, materialDiag("E_UI_WIDGET_INCOMPATIBLE", "error", path+".widgetType", materialID, "html-slide requires a text material"))
 		}
+		if scalar(widget["widgetType"]) == "html-preview" && specs[materialID].Type != "text" && specs[materialID].Type != "file" {
+			out = append(out, materialDiag("E_UI_WIDGET_INCOMPATIBLE", "error", path+".widgetType", materialID, "html-preview requires a text or file material"))
+		}
+	}
+	if materialID := scalar(ui["tab_visibility_ready_material"]); materialID != "" && !known[materialID] {
+		out = append(out, materialDiag(
+			"E_UI_MATERIAL_UNKNOWN", "error", "workflow.yaml.ui.tab_visibility_ready_material",
+			materialID, "tab visibility readiness references an unknown material",
+		))
 	}
 	for i, tab := range tabs {
+		if materialID := scalar(tab["hide_when_material"]); materialID != "" && !known[materialID] {
+			out = append(out, materialDiag(
+				"E_UI_MATERIAL_UNKNOWN", "error", fmt.Sprintf("workflow.yaml.ui.tabs[%d].hide_when_material", i),
+				materialID, "tab visibility references an unknown material",
+			))
+		}
 		refs := parseMaterialRefs(tab["slots"])
 		tabMaterials := map[string]bool{}
 		if len(refs) == 0 {

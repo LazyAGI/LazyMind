@@ -5,6 +5,7 @@ import type { ShowcaseCase } from "./api";
 
 interface CaseCardProps {
   item: ShowcaseCase;
+  onTry?: (item: ShowcaseCase) => void;
 }
 
 const COVER_CLASS_BY_OUTPUT_TYPE: Record<string, string> = {
@@ -18,7 +19,7 @@ const COVER_CLASS_BY_OUTPUT_TYPE: Record<string, string> = {
   table: "table",
 };
 
-export default function CaseCard({ item }: CaseCardProps) {
+export default function CaseCard({ item, onTry }: CaseCardProps) {
   const { t } = useTranslation();
   const coverClass = COVER_CLASS_BY_OUTPUT_TYPE[item.output_type] || "report";
 
@@ -27,6 +28,12 @@ export default function CaseCard({ item }: CaseCardProps) {
       <Link
         className="showcase-card-link"
         to={`/agent/chat/home?showcase_case=${encodeURIComponent(item.id)}`}
+        onClick={(event) => {
+          if (onTry) {
+            event.preventDefault();
+            onTry(item);
+          }
+        }}
       >
         <div className={`showcase-card-image-wrap showcase-card-cover-${coverClass}`}>
           <div className="showcase-card-image-stage">

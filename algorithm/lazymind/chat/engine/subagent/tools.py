@@ -115,6 +115,8 @@ def _build_artifact_value(value: Any, content_type: str):
     """
     ctx = require_context()
     if content_type == 'text':
+        if isinstance(value, dict) and 'text' in value:
+            value = value['text']
         text = str(value)
         if len(text.encode('utf-8', errors='replace')) > LARGE_ARTIFACT_THRESHOLD:
             abs_path = ctx.write_large_content(text, hint='artifact_text')
@@ -168,7 +170,13 @@ def _build_artifact_value(value: Any, content_type: str):
             return image_value(dst_abs), 'image'
         return image_value(src), 'image'
     if content_type == 'file':
-        source = str(value.get('path') if isinstance(value, dict) else value).strip()
+        # Models commonly reuse the normalized artifact shape returned by read tools.
+        # Accept that shape as well as the documented plain path so a batch save does
+        # not write earlier text outputs and then fail on ``{"path": ...}``.
+        if isinstance(value, dict):
+            source = str(value.get('path') or '').strip()
+        else:
+            source = str(value).strip()
         if not source:
             raise ToolExecutionError('File artifact path must not be empty.')
         if os.path.isabs(source):
@@ -513,7 +521,11 @@ def get_artifact(key: str, sort_order: Optional[int] = None, task_ref: Optional[
 
     if workflow_session_id:
         local = ctx.local_artifacts(keys=[key])
-        remote_path = (ctx.params.get('remote_inputs') or {}).get(key)
+        remote_inputs = ctx.params.get('remote_inputs') or {}
+        has_remote_input = key in remote_inputs
+        remote_value = remote_inputs.get(key)
+        remote_type = str((ctx.params.get('remote_input_types') or {}).get(key) or '').lower()
+        direct_value = key in set(ctx.params.get('remote_input_value_slots') or [])
         if local:
             artifacts = local
             if sort_order is not None:
@@ -521,12 +533,30 @@ def get_artifact(key: str, sort_order: Optional[int] = None, task_ref: Optional[
             result = {
                 'status': 'ok', 'key': key, 'artifacts': artifacts,
             }
-        elif remote_path:
-            result = {
-                'status': 'ok', 'key': key, 'artifacts': [{
+        elif has_remote_input:
+            remote_values = remote_value if isinstance(remote_value, list) else [remote_value]
+            remote_values = [value for value in remote_values if value is not None and value != '']
+            if sort_order is not None:
+                remote_values = remote_values[sort_order - 1:sort_order] if sort_order > 0 else []
+            if not remote_values:
+                return {
+                    'status': 'empty',
+                    'message': f"No artifact found for key '{key}' at sort_order={sort_order}.",
+                }
+            if direct_value:
+                content_type = 'json' if remote_type == 'json' else 'text'
+                artifacts = [{
+                    'slot': key,
+                    'content_type': content_type,
+                    'value': {'data': value} if content_type == 'json' else {'text': str(value)},
+                } for value in remote_values]
+            else:
+                artifacts = [{
                     'slot': key, 'content_type': 'file',
-                    'value': {'path': str(remote_path), 'filename': os.path.basename(str(remote_path))},
-                }],
+                    'value': {'path': str(path), 'filename': os.path.basename(str(path))},
+                } for path in remote_values]
+            result = {
+                'status': 'ok', 'key': key, 'artifacts': artifacts,
             }
         else:
             result = _get_public_workflow_artifacts(key, workflow_session_id, sort_order)
@@ -729,15 +759,15 @@ def _get_public_workflow_artifacts(
 
 def patch_artifact(
     key: str,
-    patch: Any,
+    patch: str,
     patch_type: str = 'str_replace',
     sort_order: Optional[int] = None,
 ) -> Dict[str, Any]:
     """Apply a local patch to a previously saved artifact without committing a new revision.
 
-    Edits are written to a draft file in the workspace. Call save_artifacts when you are
-    done patching to commit the changes and produce a new revision. If you do not call
-    save_artifacts, the framework will auto-flush all pending drafts when the step ends.
+    Edits are written to a draft file in the workspace and automatically committed as a new
+    revision when normal execution reaches the step boundary. Keep calling patch_artifact for
+    additional targeted edits, or call discard_draft first to abandon all pending edits.
 
     Use patch_artifact for targeted edits (fix a paragraph, update a field). Use
     save_artifacts directly when rewriting the whole artifact from scratch.
@@ -747,9 +777,9 @@ def patch_artifact(
 
     Args:
         key (str): The artifact key to patch.
-        patch (Any): The patch payload — format depends on patch_type:
+        patch (str): A JSON-encoded patch payload whose decoded shape depends on patch_type:
             - str_replace: {"old_str": "exact original text", "new_str": "replacement"}
-            - json_merge:  {"field": "new_value", "obsolete": None}  (RFC 7396; None = delete)
+            - json_merge:  {"field": "new_value", "obsolete": null}  (RFC 7396; null = delete)
             - json_patch:  [{"op": "replace", "path": "/items/0/status", "value": "done"}] (RFC 6902)
         patch_type (str): One of str_replace (default), json_merge, json_patch.
         sort_order (int): 1-based display position for list-cardinality slots.
@@ -759,6 +789,10 @@ def patch_artifact(
         Confirmation of success, or an error with instructions for recovery.
     """
     ctx = require_context()
+
+    decoded_patch, decode_error = _decode_patch_payload(patch)
+    if decode_error:
+        raise ToolExecutionError(f'Invalid patch payload: {decode_error}')
 
     # Resolve list_index from sort_order when provided.
     list_index: Optional[int] = None
@@ -786,11 +820,11 @@ def patch_artifact(
     content, original_type = draft_result
 
     if patch_type == 'str_replace':
-        new_content, err = _apply_str_replace(content, patch)
+        new_content, err = _apply_str_replace(content, decoded_patch)
     elif patch_type == 'json_merge':
-        new_content, err = _apply_json_merge(content, patch)
+        new_content, err = _apply_json_merge(content, decoded_patch)
     elif patch_type == 'json_patch':
-        new_content, err = _apply_json_patch(content, patch)
+        new_content, err = _apply_json_patch(content, decoded_patch)
     else:
         raise ToolExecutionError(
             f"Unknown patch_type '{patch_type}'. Use str_replace, json_merge, or json_patch."
@@ -805,10 +839,23 @@ def patch_artifact(
         'status': 'ok',
         'message': (
             f"Draft for '{key}' updated ({lines_changed} line(s) changed). "
-            'Call save_artifacts to commit, or keep patching. '
-            'The framework will auto-commit on step end if you forget.'
+            'Keep patching, or call discard_draft to abandon the edits. '
+            'The framework will commit them at the normal step boundary.'
         ),
     }
+
+
+def _decode_patch_payload(patch: Any) -> tuple[Any, Optional[str]]:
+    """Normalize the model-facing JSON string while tolerating native internal callers."""
+    if not isinstance(patch, str):
+        return patch, None
+    try:
+        return json.loads(patch), None
+    except json.JSONDecodeError as exc:
+        return None, (
+            'patch must be valid JSON text encoding the object/list documented for patch_type: '
+            f'{exc.msg} at character {exc.pos}.'
+        )
 
 
 def _normalize_text(text: str) -> str:
@@ -1476,7 +1523,7 @@ def find_artifact(slot: str, sort_order: Optional[int] = None) -> Dict[str, Any]
     if isinstance(value.get('url'), str) and value.get('url'):
         signed_url = value['url']
 
-    path: Optional[str] = value.get('path') or value.get('url') or value.get('text')
+    path: Optional[str] = value.get('path') or value.get('url')
     if not path or not isinstance(path, str):
         raise ToolExecutionError(f"Artifact '{slot}' has no resolvable path.")
 
