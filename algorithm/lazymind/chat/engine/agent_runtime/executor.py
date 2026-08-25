@@ -1,11 +1,13 @@
 from __future__ import annotations
 
 import json
-from typing import Any, AsyncIterator, Tuple
+import uuid
+from typing import Any, AsyncIterator, Optional, Tuple
 
 import lazyllm
 import lazyllm.module.stream_helper as _sh
 import lazyllm.tools.agent as _agent_mod
+from lazyllm.tools.agent.toolError import tool_failure
 from lazymind.config import config as _cfg
 from lazymind.chat.engine.tools.infra import CitationResultMiddleware
 
@@ -39,7 +41,6 @@ class ToolCallGuard:
     ):
         self._manager = manager
         self._failure_limits = dict(failure_limits or {})
-        self._failed_signatures: set[str] = set()
         self._consecutive_failures: dict[str, int] = {}
         self._expanded_round_limit = expanded_round_limit
         self._repeated_call_limit = max(2, int(repeated_call_limit))
@@ -68,39 +69,20 @@ class ToolCallGuard:
 
     @staticmethod
     def _failed(result: Any) -> bool:
-        if not isinstance(result, dict):
-            return False
-        if result.get('ok') is False:
-            return True
-        value = result.get('value')
-        if isinstance(value, dict):
-            if value.get('success') is False:
-                return True
-            payload = value.get('result')
-            if isinstance(payload, dict):
-                total = payload.get('total')
-                succeeded = payload.get('succeeded')
-                if isinstance(total, int) and total > 0 and succeeded == 0:
-                    return True
-        return False
+        return isinstance(result, dict) and result.get('ok') is False
 
     @staticmethod
     def _blocked(name: str, message: str) -> dict[str, Any]:
-        return {
-            'ok': False,
-            'value': None,
-            'msg': f'[Repeated Tool Failure] {name}: {message}',
-        }
+        message = f'[Repeated Tool Failure] {name}: {message}'
+        return tool_failure(message)
 
     @staticmethod
     def _loop_blocked(name: str, message: str) -> dict[str, Any]:
-        return {
-            'ok': False,
-            'value': None,
-            'msg': f'[Repeated Tool Call] {name}: {message}',
-        }
+        message = f'[Repeated Tool Call] {name}: {message}'
+        return tool_failure(message)
 
-    def __call__(self, tools: Any, verbose: bool = False) -> Any:
+    def __call__(self, tools: Any, verbose: bool = False,
+                 allowed_tool_names: set[str] | None = None) -> Any:
         if self._cancel_check is not None:
             self._cancel_check(None)
         tool_calls = [tools] if isinstance(tools, dict) else list(tools or [])
@@ -125,25 +107,7 @@ class ToolCallGuard:
                         f'tool round limit to {self._expanded_round_limit}.'
                     )
             signature = self._signature(tool_call)
-            signature_calls = self._signature_calls.get(signature, 0) + 1
-            self._signature_calls[signature] = signature_calls
-            if signature_calls > self._repeated_call_limit:
-                results[index] = self._loop_blocked(
-                    name,
-                    f'the exact same call was already made {self._repeated_call_limit} times; '
-                    'stop retrying it and synthesize from existing results or choose another tool.',
-                )
-                lazyllm.LOG.warning(
-                    f'[ToolCallGuard] blocked no-progress repeated call: {name}'
-                )
-                continue
             guarded = name in self._failure_limits
-            if guarded and signature in self._failed_signatures:
-                results[index] = self._blocked(
-                    name, 'this exact call already failed; do not retry it with the same arguments.',
-                )
-                lazyllm.LOG.info(f'[ToolCallGuard] blocked repeated failed call: {name}')
-                continue
             if guarded and signature in pending_signatures:
                 duplicate_indices[index] = pending_signatures[signature]
                 lazyllm.LOG.info(f'[ToolCallGuard] merged duplicate tool call: {name}')
@@ -157,27 +121,38 @@ class ToolCallGuard:
                     'another grounded source or explain that the evidence is unavailable.',
                 )
                 continue
+            signature_calls = self._signature_calls.get(signature, 0)
+            if signature_calls >= self._repeated_call_limit:
+                results[index] = self._loop_blocked(
+                    name,
+                    f'the exact same call was already made {self._repeated_call_limit} times; '
+                    'stop retrying it and synthesize from existing results or choose another tool.',
+                )
+                lazyllm.LOG.warning(
+                    f'[ToolCallGuard] blocked no-progress repeated call: {name}'
+                )
+                continue
+            self._signature_calls[signature] = signature_calls + 1
             pending.append(tool_call)
             pending_indices.append(index)
             if guarded:
                 pending_signatures[signature] = index
         if pending:
-            pending_results = self._manager(pending, verbose=verbose)
+            pending_results = self._manager(
+                pending,
+                verbose=verbose,
+                allowed_tool_names=allowed_tool_names,
+            )
             for index, tool_call, result in zip(pending_indices, pending, pending_results):
-                results[index] = result
                 name = str((tool_call.get('function') or {}).get('name') or '')
+                results[index] = result
                 if name in self._failure_limits:
                     if self._failed(result):
                         self._consecutive_failures[name] = (
                             self._consecutive_failures.get(name, 0) + 1
                         )
-                        self._failed_signatures.add(self._signature(tool_call))
                     else:
                         self._consecutive_failures[name] = 0
-                        prefix = f'{name}:'
-                        self._failed_signatures = {
-                            item for item in self._failed_signatures if not item.startswith(prefix)
-                        }
         for duplicate_index, original_index in duplicate_indices.items():
             results[duplicate_index] = results[original_index]
         return results
@@ -268,16 +243,51 @@ class AgentExecutor:
         history = plan.history if plan.history else None
         helper = _sh.StreamCallHelper(agent, init_sid=False)
         kwargs = {'llm_chat_history': history} if history is not None else {}
+        finished_model_calls: set[str] = set()
         async for item in helper.astream(plan.prompt.current_input, **kwargs):
+            self._record_finished_model_call(item, finished_model_calls)
             yield 'event', item
         try:
             result = helper.future.result()
         except Exception as exc:
+            terminal = self._find_model_terminal(exc)
+            model_call_id = str((terminal or {}).get('model_call_id') or '')
+            if terminal and model_call_id not in finished_model_calls:
+                yield 'event', {
+                    'tag': 'runtime_event',
+                    'runtime_event': {
+                        'schema_version': 1,
+                        'event_id': uuid.uuid4().hex,
+                        'type': 'model_call_finished',
+                        'data': terminal,
+                    },
+                }
             lazyllm.LOG.exception(
                 f'[AgentExecutor] agent future raised: {type(exc).__name__}: {exc}'
             )
             raise
         yield 'final', result
+
+    @staticmethod
+    def _record_finished_model_call(item: Any, seen: set[str]) -> None:
+        if not isinstance(item, dict) or item.get('tag') != 'runtime_event': return
+        event = item.get('runtime_event')
+        if not isinstance(event, dict) or event.get('type') != 'model_call_finished': return
+        data = event.get('data')
+        if isinstance(data, dict) and data.get('model_call_id'):
+            seen.add(str(data['model_call_id']))
+
+    @staticmethod
+    def _find_model_terminal(exc: Exception) -> Optional[dict[str, Any]]:
+        seen = set()
+        while exc is not None and id(exc) not in seen:
+            seen.add(id(exc))
+            terminal = getattr(exc, 'terminal', None)
+            if terminal is not None:
+                public_dict = getattr(terminal, 'public_dict', None)
+                return public_dict() if callable(public_dict) else terminal
+            exc = exc.__cause__ or exc.__context__
+        return None
 
     def run(self, llm: Any, plan: AgentRunPlan) -> Any:
         """Run a one-shot agent while preserving ReactAgent's synchronous API."""

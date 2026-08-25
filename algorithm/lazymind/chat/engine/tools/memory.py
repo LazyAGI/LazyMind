@@ -4,10 +4,10 @@ from typing import Any, Dict, List, Literal, Union
 
 import lazyllm
 import requests
+from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools import tool_concurrency
 from pydantic import ValidationError
 
-from lazymind.chat.engine.tools.infra import tool_error, tool_success
 from lazymind.common.memory import (
     PREFERENCE_PATH,
     PROFILE_PATH,
@@ -17,6 +17,7 @@ from lazymind.common.memory import (
     EpisodeSource,
     EpisodeType,
     MemoryStore,
+    MemoryOperationRecord,
     get_episode_store,
     preference_name_to_reference_name,
     split_reference_ref,
@@ -105,58 +106,35 @@ def _is_timeout(exc: Exception) -> bool:
     )
 
 
-def _record_tool_result(
-    payload: dict[str, Any],
+def _record_memory_operation(
+    operation: str,
+    value: Any = None,
     *,
     mutation: bool | None,
+    error: ToolExecutionError | None = None,
+    error_code: str | None = None,
+    retryable: bool = False,
+    retry_fingerprint: str | None = None,
     ledger_result: dict[str, Any] | None = None,
-) -> dict[str, Any]:
+) -> Any:
     config = _agentic_config()
-    ledger = config.get('memory_tool_results')
+    ledger = config.get('memory_operation_ledger')
     if not isinstance(ledger, list):
         ledger = []
-        config['memory_tool_results'] = ledger
-    entry: dict[str, Any] = {
-        'tool': str(payload.get('tool') or ''),
-        'success': payload.get('success') is True,
-        'mutation': mutation,
-    }
-    if ledger_result is not None:
-        entry['result'] = ledger_result
-    error = payload.get('error')
-    if isinstance(error, dict):
-        ledger_error = dict(error)
-        if not ledger_error.get('code'):
-            ledger_error['code'] = str(ledger_error.get('type') or 'write_failed')
-        if not ledger_error.get('message'):
-            ledger_error['message'] = str(
-                ledger_error.get('reason') or 'A memory tool operation failed.'
-            )
-        entry['error'] = ledger_error
-    entry['retryable'] = payload.get('retryable') is True
-    ledger.append(entry)
-    return payload
-
-
-def _record_state_memory_result(
-    payload: dict[str, Any],
-    *,
-    mutation: bool,
-    store_result: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    ledger_result = payload.get('result')
-    if not isinstance(ledger_result, dict) and isinstance(store_result, dict):
-        details = {
-            key: value
-            for key, value in store_result.items()
-            if key not in {'ok', 'error', 'type', 'content'}
-        }
-        ledger_result = details or None
-    return _record_tool_result(
-        payload,
-        mutation=mutation,
-        ledger_result=ledger_result if isinstance(ledger_result, dict) else None,
+        config['memory_operation_ledger'] = ledger
+    record = MemoryOperationRecord(
+        operation=operation,
+        status='failed' if error else 'succeeded',
+        mutation='unknown' if mutation is None else ('applied' if mutation else 'none'),
+        error_code=error_code if error else None,
+        retryable=retryable,
+        retry_fingerprint=retry_fingerprint,
+        result=ledger_result,
     )
+    ledger.append(record.model_dump(mode='json', exclude_none=True))
+    if error:
+        raise error
+    return value
 
 
 def _log_tool_exception(tool: str, exc: Exception) -> None:
@@ -166,23 +144,26 @@ def _log_tool_exception(tool: str, exc: Exception) -> None:
     )
 
 
-def _memory_write_error(tool_name: str, message: str) -> Dict[str, Any]:
+def _memory_write_error(message: str) -> ToolExecutionError:
     text = _visible_memory_message(message).strip()
-    return tool_error(tool_name, f'Failed to write via RemoteFS: {text}', error_type='store')
+    return ToolExecutionError(f'Failed to write via RemoteFS: {text}')
 
 
-def _memory_applied(tool_name: str, **result: Any) -> Dict[str, Any]:
-    return tool_success(tool_name, {'status': 'applied', **result})
+def _memory_applied(**result: Any) -> Dict[str, Any]:
+    return {'status': 'applied', **result}
 
 
-def _memory_result_error(tool_name: str, result: Dict[str, Any]) -> Dict[str, Any]:
-    error_type = str(result.get('type') or 'validation')
+def _memory_result_error(tool_name: str, result: Dict[str, Any]) -> ToolExecutionError:
     reason = _visible_memory_message(
         result.get('error') or f'{tool_name} failed.'
     )
-    if error_type == 'store':
-        return _memory_write_error(tool_name, reason)
-    return tool_error(tool_name, reason, error_type=error_type)
+    if str(result.get('type') or 'validation') == 'store':
+        return _memory_write_error(reason)
+    return ToolExecutionError(reason)
+
+
+def _memory_result_error_code(result: Dict[str, Any]) -> str:
+    return 'storage_failed' if str(result.get('type') or 'validation') == 'store' else 'invalid_arguments'
 
 
 MAX_REFERENCE_READ_COUNT = 10
@@ -274,53 +255,54 @@ class MemoryTools:
             'preference': ('read_preference', PREFERENCE_PATH),
         }
         if raw_target not in readers:
-            return _record_state_memory_result(
-                tool_error(
-                    'read_memory',
-                    "target must be 'soul', 'profile', or 'preference'.",
-                    error_type='validation',
-                ),
+            return _record_memory_operation(
+                'read_memory',
                 mutation=False,
+                error=ToolExecutionError(
+                    "target must be 'soul', 'profile', or 'preference'."
+                ),
+                error_code='invalid_arguments',
             )
 
         reader_name, path = readers[raw_target]
         try:
             content = getattr(MemoryStore(), reader_name)()
         except FileNotFoundError:
-            return _record_state_memory_result(
-                tool_error(
-                    'read_memory',
-                    f'{raw_target} document not found.',
-                    error_type='not_found',
-                ),
+            return _record_memory_operation(
+                'read_memory',
                 mutation=False,
+                error=ToolExecutionError(
+                    f'{raw_target} memory document was not found.'
+                ),
+                error_code='storage_read_failed',
             )
         except (RuntimeError, ValueError) as exc:
-            return _record_state_memory_result(
-                tool_error(
-                    'read_memory',
-                    f'Failed to read {raw_target}: {_safe_exception_message(exc)}',
-                    error_type='store',
-                ),
+            return _record_memory_operation(
+                'read_memory',
                 mutation=False,
+                error=ToolExecutionError(
+                    f'Failed to read {raw_target}: {_safe_exception_message(exc)}'
+                ),
+                error_code='storage_read_failed',
             )
         except Exception as exc:
-            return _record_state_memory_result(
-                tool_error(
-                    'read_memory',
-                    f'Failed to read {raw_target}: {_safe_exception_message(exc)}',
-                    error_type='store',
-                ),
+            return _record_memory_operation(
+                'read_memory',
                 mutation=False,
+                error=ToolExecutionError(
+                    f'Failed to read {raw_target}: {_safe_exception_message(exc)}'
+                ),
+                error_code='storage_read_failed',
             )
 
-        payload = tool_success('read_memory', {
+        payload = {
             'target': raw_target,
             'path': path,
             'content': content,
             'content_length': len(content),
-        })
-        return _record_tool_result(
+        }
+        return _record_memory_operation(
+            'read_memory',
             payload,
             mutation=False,
             ledger_result={
@@ -345,19 +327,22 @@ class MemoryTools:
         """
         normalized_refs = _normalize_refs(refs)
         if not normalized_refs:
-            return _record_state_memory_result(
-                tool_error('read_memory_reference', 'refs is required.'),
+            return _record_memory_operation(
+                'read_memory_reference',
                 mutation=False,
+                error=ToolExecutionError('refs is required.'),
+                error_code='invalid_arguments',
             )
 
         if len(normalized_refs) > MAX_REFERENCE_READ_COUNT:
-            return _record_state_memory_result(
-                tool_error(
-                    'read_memory_reference',
+            return _record_memory_operation(
+                'read_memory_reference',
+                mutation=False,
+                error=ToolExecutionError(
                     f'At most {MAX_REFERENCE_READ_COUNT} refs may be read per call; '
                     f'got {len(normalized_refs)}.',
                 ),
-                mutation=False,
+                error_code='invalid_arguments',
             )
 
         store = MemoryStore()
@@ -366,48 +351,50 @@ class MemoryTools:
             try:
                 split_reference_ref(raw_ref)
             except ValueError as exc:
-                return _record_state_memory_result(
-                    tool_error(
-                        'read_memory_reference',
+                return _record_memory_operation(
+                    'read_memory_reference',
+                    mutation=False,
+                    error=ToolExecutionError(
                         f'Invalid ref {raw_ref!r}: {exc}',
                     ),
-                    mutation=False,
+                    error_code='invalid_arguments',
                 )
             try:
                 items.append(_read_single_reference(store, raw_ref))
             except FileNotFoundError:
-                return _record_state_memory_result(
-                    tool_error(
-                        'read_memory_reference',
-                        f'Reference not found for ref={raw_ref!r}.',
-                        error_type='not_found',
-                    ),
+                return _record_memory_operation(
+                    'read_memory_reference',
                     mutation=False,
+                    error=ToolExecutionError(
+                        f'Reference not found for ref={raw_ref!r}.'
+                    ),
+                    error_code='storage_read_failed',
                 )
             except RuntimeError as exc:
-                return _record_state_memory_result(
-                    tool_error(
-                        'read_memory_reference',
-                        f'Failed to read {raw_ref!r}: {exc}',
-                        error_type='store',
-                    ),
+                return _record_memory_operation(
+                    'read_memory_reference',
                     mutation=False,
+                    error=ToolExecutionError(
+                        f'Failed to read {raw_ref!r}: {exc}'
+                    ),
+                    error_code='storage_read_failed',
                 )
             except Exception as exc:
-                return _record_state_memory_result(
-                    tool_error(
-                        'read_memory_reference',
-                        f'Failed to read {raw_ref!r}: {exc}',
-                        error_type='store',
-                    ),
+                return _record_memory_operation(
+                    'read_memory_reference',
                     mutation=False,
+                    error=ToolExecutionError(
+                        f'Failed to read {raw_ref!r}: {exc}'
+                    ),
+                    error_code='storage_read_failed',
                 )
 
-        payload = tool_success('read_memory_reference', {
+        payload = {
             'items': items,
             'ref_count': len(items),
-        })
-        return _record_tool_result(
+        }
+        return _record_memory_operation(
+            'read_memory_reference',
             payload,
             mutation=False,
             ledger_result={
@@ -432,33 +419,39 @@ class MemoryTools:
                 ``path``, and ``value`` when required.
         """
         if not isinstance(operations, list) or not operations:
-            return _record_state_memory_result(
-                tool_error(
-                    'soul_editor',
-                    'operations must be a non-empty list.',
-                    error_type='validation',
-                ),
+            return _record_memory_operation(
+                'soul_editor',
                 mutation=False,
+                error=ToolExecutionError(
+                    'operations must be a non-empty list.'
+                ),
+                error_code='invalid_arguments',
             )
 
         result = MemoryStore().apply_soul_operations(operations)
         if not result.get('ok'):
-            return _record_state_memory_result(
-                _memory_result_error('soul_editor', result),
+            return _record_memory_operation(
+                'soul_editor',
                 mutation=result.get('type') == 'partial',
-                store_result=result,
+                error=_memory_result_error('soul_editor', result),
+                error_code=_memory_result_error_code(result),
+                ledger_result={
+                    key: value for key, value in result.items()
+                    if key not in {'ok', 'error', 'type', 'content'}
+                } or None,
             )
 
-        return _record_state_memory_result(
-            _memory_applied(
-                'soul_editor',
-                operations=list(result.get('operations') or operations),
-                change_count=len(operations),
-                path=SOUL_PATH,
-                content=result['content'],
-                content_length=len(result['content']),
-            ),
+        value = _memory_applied(
+            operations=list(result.get('operations') or operations),
+            change_count=len(operations),
+            path=SOUL_PATH,
+            content=result['content'],
+            content_length=len(result['content']),
+        )
+        return _record_memory_operation(
+            'soul_editor', value,
             mutation=True,
+            ledger_result={'status': 'applied'},
         )
 
     @tool_concurrency(write_keys=('memory', PROFILE_PATH))
@@ -481,33 +474,39 @@ class MemoryTools:
                 ``path``, and ``value`` when required.
         """
         if not isinstance(operations, list) or not operations:
-            return _record_state_memory_result(
-                tool_error(
-                    'profile_editor',
-                    'operations must be a non-empty list.',
-                    error_type='validation',
-                ),
+            return _record_memory_operation(
+                'profile_editor',
                 mutation=False,
+                error=ToolExecutionError(
+                    'operations must be a non-empty list.'
+                ),
+                error_code='invalid_arguments',
             )
 
         result = MemoryStore().apply_profile_operations(operations)
         if not result.get('ok'):
-            return _record_state_memory_result(
-                _memory_result_error('profile_editor', result),
+            return _record_memory_operation(
+                'profile_editor',
                 mutation=result.get('type') == 'partial',
-                store_result=result,
+                error=_memory_result_error('profile_editor', result),
+                error_code=_memory_result_error_code(result),
+                ledger_result={
+                    key: value for key, value in result.items()
+                    if key not in {'ok', 'error', 'type', 'content'}
+                } or None,
             )
 
-        return _record_state_memory_result(
-            _memory_applied(
-                'profile_editor',
-                operations=list(result.get('operations') or operations),
-                change_count=len(operations),
-                path=PROFILE_PATH,
-                content=result['content'],
-                content_length=len(result['content']),
-            ),
+        value = _memory_applied(
+            operations=list(result.get('operations') or operations),
+            change_count=len(operations),
+            path=PROFILE_PATH,
+            content=result['content'],
+            content_length=len(result['content']),
+        )
+        return _record_memory_operation(
+            'profile_editor', value,
             mutation=True,
+            ledger_result={'status': 'applied'},
         )
 
     @tool_concurrency(write_keys=[
@@ -547,18 +546,22 @@ class MemoryTools:
         raw_op = str(op or '').strip().lower()
         raw_name = str(name or '').strip()
         if raw_op not in {'add', 'delete'}:
-            return _record_state_memory_result(
-                tool_error(
-                    'preference_editor',
-                    "op must be 'add' or 'delete'.",
-                    error_type='validation',
-                ),
+            return _record_memory_operation(
+                'preference_editor',
                 mutation=False,
+                error=ToolExecutionError(
+                    "op must be 'add' or 'delete'."
+                ),
+                error_code='invalid_arguments',
             )
         if not raw_name:
-            return _record_state_memory_result(
-                tool_error('preference_editor', 'name is required.', error_type='validation'),
+            return _record_memory_operation(
+                'preference_editor',
                 mutation=False,
+                error=ToolExecutionError(
+                    'name is required.'
+                ),
+                error_code='invalid_arguments',
             )
 
         store = MemoryStore()
@@ -571,25 +574,25 @@ class MemoryTools:
             ).strip()
             conversation_id = str(config.get('conversation_id') or '').strip()
             if source_kind not in {'chat_explicit', 'memory_review'}:
-                return _record_state_memory_result(
-                    tool_error(
-                        'preference_editor',
+                return _record_memory_operation(
+                    'preference_editor',
+                    mutation=False,
+                    error=ToolExecutionError(
                         (
                             'memory_source_kind must be set by runtime to either '
                             "'chat_explicit' or 'memory_review'."
-                        ),
-                        error_type='missing_context',
+                        )
                     ),
-                    mutation=False,
+                    error_code='missing_context',
                 )
             if not conversation_id:
-                return _record_state_memory_result(
-                    tool_error(
-                        'preference_editor',
-                        'conversation_id must be set by runtime.',
-                        error_type='missing_context',
-                    ),
+                return _record_memory_operation(
+                    'preference_editor',
                     mutation=False,
+                    error=ToolExecutionError(
+                        'conversation_id must be set by runtime.'
+                    ),
+                    error_code='missing_context',
                 )
             result = store.add_preference_with_reference(
                 name=raw_name,
@@ -601,43 +604,47 @@ class MemoryTools:
                 conversation_id=conversation_id,
             )
             if not result.get('ok'):
-                return _record_state_memory_result(
-                    _memory_result_error('preference_editor', result),
+                return _record_memory_operation(
+                    'preference_editor',
                     mutation=result.get('type') == 'partial',
-                    store_result=result,
+                    error=_memory_result_error('preference_editor', result),
+                    error_code=_memory_result_error_code(result),
                 )
             item = result['item']
-            return _record_state_memory_result(
-                _memory_applied(
-                    'preference_editor',
-                    op='add',
-                    name=item.name,
-                    summary=item.summary,
-                    ref=item.ref,
-                    path=PREFERENCE_PATH,
-                    reference_name=preference_name_to_reference_name(item.name),
-                ),
+            value = _memory_applied(
+                op='add',
+                name=item.name,
+                summary=item.summary,
+                ref=item.ref,
+                path=PREFERENCE_PATH,
+                reference_name=preference_name_to_reference_name(item.name),
+            )
+            return _record_memory_operation(
+                'preference_editor', value,
                 mutation=True,
+                ledger_result={'status': 'applied'},
             )
 
         result = store.remove_preference_with_reference(raw_name)
         if not result.get('ok'):
-            return _record_state_memory_result(
-                _memory_result_error('preference_editor', result),
+            return _record_memory_operation(
+                'preference_editor',
                 mutation=result.get('type') == 'partial',
-                store_result=result,
+                error=_memory_result_error('preference_editor', result),
+                error_code=_memory_result_error_code(result),
             )
         item = result['item']
-        return _record_state_memory_result(
-            _memory_applied(
-                'preference_editor',
-                op='delete',
-                name=item.name,
-                ref=item.ref,
-                path=PREFERENCE_PATH,
-                reference_name=preference_name_to_reference_name(item.name),
-            ),
+        value = _memory_applied(
+            op='delete',
+            name=item.name,
+            ref=item.ref,
+            path=PREFERENCE_PATH,
+            reference_name=preference_name_to_reference_name(item.name),
+        )
+        return _record_memory_operation(
+            'preference_editor', value,
             mutation=True,
+            ledger_result={'status': 'applied'},
         )
 
     def episode_create(
@@ -664,52 +671,32 @@ class MemoryTools:
         values: dict[str, str] = {}
         for field, value in required_context:
             if not value:
-                return _record_tool_result(
-                    {
-                        'success': False,
-                        'tool': 'episode_create',
-                        'error': {
-                            'code': 'missing_context',
-                            'message': f'{field} is required in agentic_config.',
-                            'detail': {'field': field},
-                        },
-                        'retryable': False,
-                    },
+                return _record_memory_operation(
+                    'episode_create',
                     mutation=False,
+                    error=ToolExecutionError(f'{field} is required in agentic_config.'),
+                    error_code='missing_context',
                 )
             values[field] = value
 
         source_kind = str(config.get('episode_source_kind') or '').strip()
         if not source_kind:
-            return _record_tool_result(
-                {
-                    'success': False,
-                    'tool': 'episode_create',
-                    'error': {
-                        'code': 'missing_context',
-                        'message': 'episode_source_kind is required in agentic_config.',
-                        'detail': {'field': 'episode_source_kind'},
-                    },
-                    'retryable': False,
-                },
+            return _record_memory_operation(
+                'episode_create',
                 mutation=False,
+                error=ToolExecutionError(
+                    'episode_source_kind is required in agentic_config.'
+                ),
+                error_code='missing_context',
             )
         if source_kind not in {'chat_explicit', 'memory_review'}:
-            return _record_tool_result(
-                {
-                    'success': False,
-                    'tool': 'episode_create',
-                    'error': {
-                        'code': 'invalid_arguments',
-                        'message': (
-                            'episode_source_kind must be either '
-                            "'chat_explicit' or 'memory_review'."
-                        ),
-                        'detail': {'field': 'episode_source_kind'},
-                    },
-                    'retryable': False,
-                },
+            return _record_memory_operation(
+                'episode_create',
                 mutation=False,
+                error=ToolExecutionError(
+                    "episode_source_kind must be either 'chat_explicit' or 'memory_review'."
+                ),
+                error_code='invalid_arguments',
             )
 
         timestamp_field = 'episode_occurred_at_ms'
@@ -721,18 +708,13 @@ class MemoryTools:
         except (TypeError, ValueError):
             occurred_at_ms = None
         if not occurred_at_ms or occurred_at_ms <= 0:
-            return _record_tool_result(
-                {
-                    'success': False,
-                    'tool': 'episode_create',
-                    'error': {
-                        'code': 'missing_context',
-                        'message': f'{timestamp_field} is required in agentic_config.',
-                        'detail': {'field': timestamp_field},
-                    },
-                    'retryable': False,
-                },
+            return _record_memory_operation(
+                'episode_create',
                 mutation=False,
+                error=ToolExecutionError(
+                    f'{timestamp_field} is required in agentic_config.'
+                ),
+                error_code='missing_context',
             )
 
         try:
@@ -746,18 +728,14 @@ class MemoryTools:
                 ),
             )
         except (TypeError, ValueError, ValidationError) as exc:
-            return _record_tool_result(
-                {
-                    'success': False,
-                    'tool': 'episode_create',
-                    'error': {
-                        'code': 'invalid_arguments',
-                        'message': f'Invalid Episode arguments: {_safe_exception_message(exc)}',
-                        'detail': {'episode_type': str(episode_type)},
-                    },
-                    'retryable': False,
-                },
+            return _record_memory_operation(
+                'episode_create',
                 mutation=False,
+                error=ToolExecutionError(
+                    f'Invalid Episode arguments for episode_type={episode_type!r}: '
+                    f'{_safe_exception_message(exc)}'
+                ),
+                error_code='invalid_arguments',
             )
 
         retry_fingerprint = build_episode_retry_fingerprint(
@@ -771,26 +749,16 @@ class MemoryTools:
         except Exception as exc:
             _log_tool_exception('episode_create', exc)
             transient = _is_transient(exc)
-            return _record_tool_result(
-                {
-                    'success': False,
-                    'tool': 'episode_create',
-                    'error': {
-                        'code': 'storage_unavailable' if transient else 'storage_failed',
-                        'message': (
-                            'Episode storage is temporarily unavailable.'
-                            if transient
-                            else 'Failed to initialize Episode storage.'
-                        ),
-                        'detail': {'exception_type': type(exc).__name__},
-                    },
-                    'retryable': transient,
-                },
+            return _record_memory_operation(
+                'episode_create',
                 mutation=False,
-                ledger_result={
-                    'status': 'failed',
-                    'retry_fingerprint': retry_fingerprint,
-                },
+                retryable=transient,
+                retry_fingerprint=retry_fingerprint,
+                error=ToolExecutionError(
+                    'Episode storage is temporarily unavailable.'
+                    if transient else 'Failed to initialize Episode storage.'
+                ),
+                error_code='storage_unavailable' if transient else 'storage_failed',
             )
 
         try:
@@ -798,67 +766,39 @@ class MemoryTools:
         except EpisodeReadError as exc:
             root_exc = exc.__cause__ if isinstance(exc.__cause__, Exception) else exc
             _log_tool_exception('episode_create', root_exc)
-            return _record_tool_result(
-                {
-                    'success': False,
-                    'tool': 'episode_create',
-                    'error': {
-                        'code': exc.code,
-                        'message': (
-                            'Episode storage is temporarily unavailable.'
-                            if exc.retryable
-                            else 'Failed to read existing Episodes.'
-                        ),
-                        'detail': {'exception_type': type(root_exc).__name__},
-                    },
-                    'retryable': exc.retryable,
-                },
+            return _record_memory_operation(
+                'episode_create',
                 mutation=False,
-                ledger_result={
-                    'status': 'failed',
-                    'retry_fingerprint': retry_fingerprint,
-                },
+                retryable=exc.retryable,
+                retry_fingerprint=retry_fingerprint,
+                error=ToolExecutionError(
+                    'Episode storage is temporarily unavailable.'
+                    if exc.retryable else 'Failed to read existing Episodes.'
+                ),
+                error_code=exc.code,
             )
         except Exception as exc:
             _log_tool_exception('episode_create', exc)
             safe_message = _safe_exception_message(exc)
             timed_out = _is_timeout(exc)
-            return _record_tool_result(
-                {
-                    'success': False,
-                    'tool': 'episode_create',
-                    'error': {
-                        'code': 'storage_timeout' if timed_out else 'storage_failed',
-                        'message': (
-                            'Episode storage timed out and write completion is unknown: '
-                            f'{safe_message}'
-                            if timed_out
-                            else f'Failed to create Episode: {safe_message}'
-                        ),
-                        'detail': {'exception_type': type(exc).__name__},
-                    },
-                    'retryable': False,
-                },
+            return _record_memory_operation(
+                'episode_create',
                 mutation=None,
-                ledger_result={
-                    'status': 'failed',
-                    'retry_fingerprint': retry_fingerprint,
-                },
+                retryable=timed_out,
+                retry_fingerprint=retry_fingerprint,
+                error=ToolExecutionError(
+                    'Episode storage timed out and write completion is unknown: '
+                    f'{safe_message}' if timed_out else f'Failed to create Episode: {safe_message}'
+                ),
+                error_code='storage_timeout' if timed_out else 'storage_failed',
             )
 
         result = create_result.model_dump(mode='json')
-        return _record_tool_result(
-            {
-                'success': True,
-                'tool': 'episode_create',
-                'result': result,
-                'retryable': False,
-            },
+        return _record_memory_operation(
+            'episode_create', result,
             mutation=create_result.status == 'created',
-            ledger_result={
-                'status': create_result.status,
-                'retry_fingerprint': retry_fingerprint,
-            },
+            retry_fingerprint=retry_fingerprint,
+            ledger_result={'status': create_result.status},
         )
 
 
@@ -874,7 +814,7 @@ class MemoryReviewEpisodeTools:
         return False
 
     @staticmethod
-    def _review_context(tool_name: str) -> tuple[str, Dict[str, Any] | None]:
+    def _review_context() -> tuple[str, ToolExecutionError | None]:
         config = _agentic_config()
         source_kind = str(
             config.get('memory_source_kind')
@@ -882,17 +822,13 @@ class MemoryReviewEpisodeTools:
             or ''
         ).strip()
         if source_kind != 'memory_review':
-            return '', tool_error(
-                tool_name,
-                'This tool is available only during Memory Review.',
-                error_type='missing_context',
+            return '', ToolExecutionError(
+                'This tool is available only during Memory Review.'
             )
         user_id = str(config.get('user_id') or '').strip()
         if not user_id:
-            return '', tool_error(
-                tool_name,
-                'user_id is required in agentic_config.',
-                error_type='missing_context',
+            return '', ToolExecutionError(
+                'user_id is required in agentic_config.'
             )
         return user_id, None
 
@@ -909,30 +845,32 @@ class MemoryReviewEpisodeTools:
             query: Preference summary plus distinctive application-scenario terms.
             limit: Maximum results to return, between 1 and 20.
         """
-        user_id, context_error = self._review_context('episode_search')
+        user_id, context_error = self._review_context()
         if context_error is not None:
-            return _record_tool_result(
-                context_error,
+            return _record_memory_operation(
+                'episode_search',
                 mutation=False,
+                error=context_error,
+                error_code='missing_context',
             )
         normalized_query = str(query or '').strip()
         if not normalized_query:
-            return _record_tool_result(
-                tool_error(
-                    'episode_search',
-                    'query is required.',
-                    error_type='validation',
-                ),
+            return _record_memory_operation(
+                'episode_search',
                 mutation=False,
+                error=ToolExecutionError(
+                    'query is required.'
+                ),
+                error_code='invalid_arguments',
             )
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 20:
-            return _record_tool_result(
-                tool_error(
-                    'episode_search',
-                    'limit must be an integer between 1 and 20.',
-                    error_type='validation',
-                ),
+            return _record_memory_operation(
+                'episode_search',
                 mutation=False,
+                error=ToolExecutionError(
+                    'limit must be an integer between 1 and 20.'
+                ),
+                error_code='invalid_arguments',
             )
 
         try:
@@ -945,22 +883,15 @@ class MemoryReviewEpisodeTools:
             )
             root_exc = exc.__cause__ if isinstance(exc.__cause__, Exception) else raw_exc
             _log_tool_exception('episode_search', root_exc)
-            return _record_tool_result(
-                {
-                    'success': False,
-                    'tool': 'episode_search',
-                    'error': {
-                        'code': exc.code,
-                        'message': (
-                            'Episode storage is temporarily unavailable.'
-                            if exc.retryable
-                            else 'Failed to search Episodes.'
-                        ),
-                        'detail': {'exception_type': type(root_exc).__name__},
-                    },
-                    'retryable': exc.retryable,
-                },
+            return _record_memory_operation(
+                'episode_search',
                 mutation=False,
+                retryable=exc.retryable,
+                error=ToolExecutionError(
+                    'Episode storage is temporarily unavailable.'
+                    if exc.retryable else 'Failed to search Episodes.'
+                ),
+                error_code=exc.code,
             )
 
         items = [
@@ -974,14 +905,9 @@ class MemoryReviewEpisodeTools:
             }
             for result in results
         ]
-        return _record_tool_result(
-            tool_success(
-                'episode_search',
-                {
-                    'items': items,
-                    'candidate_count': len(items),
-                },
-            ),
+        value = {'items': items, 'candidate_count': len(items)}
+        return _record_memory_operation(
+            'episode_search', value,
             mutation=False,
             ledger_result={'candidate_count': len(items)},
         )
@@ -997,21 +923,23 @@ class MemoryReviewEpisodeTools:
         Args:
             episode_id: Exact Episode ID returned by ``episode_search``.
         """
-        user_id, context_error = self._review_context('episode_delete')
+        user_id, context_error = self._review_context()
         if context_error is not None:
-            return _record_tool_result(
-                context_error,
+            return _record_memory_operation(
+                'episode_delete',
                 mutation=False,
+                error=context_error,
+                error_code='missing_context',
             )
         normalized_episode_id = str(episode_id or '').strip()
         if not normalized_episode_id:
-            return _record_tool_result(
-                tool_error(
-                    'episode_delete',
-                    'episode_id is required.',
-                    error_type='validation',
-                ),
+            return _record_memory_operation(
+                'episode_delete',
                 mutation=False,
+                error=ToolExecutionError(
+                    'episode_id is required.'
+                ),
+                error_code='invalid_arguments',
             )
         retry_fingerprint = f'episode_delete:{normalized_episode_id}'
 
@@ -1025,43 +953,22 @@ class MemoryReviewEpisodeTools:
             )
             root_exc = exc.__cause__ if isinstance(exc.__cause__, Exception) else raw_exc
             _log_tool_exception('episode_delete', root_exc)
-            return _record_tool_result(
-                {
-                    'success': False,
-                    'tool': 'episode_delete',
-                    'error': {
-                        'code': (
-                            'storage_unavailable'
-                            if exc.retryable
-                            else 'storage_failed'
-                        ),
-                        'message': (
-                            'Episode storage is temporarily unavailable.'
-                            if exc.retryable
-                            else 'Failed to delete Episode.'
-                        ),
-                        'detail': {'exception_type': type(root_exc).__name__},
-                    },
-                    'retryable': exc.retryable,
-                },
+            return _record_memory_operation(
+                'episode_delete',
                 mutation=False,
-                ledger_result={
-                    'status': 'failed',
-                    'retry_fingerprint': retry_fingerprint,
-                },
+                retryable=exc.retryable,
+                retry_fingerprint=retry_fingerprint,
+                error=ToolExecutionError(
+                    'Episode storage is temporarily unavailable.'
+                    if exc.retryable else 'Failed to delete Episode.'
+                ),
+                error_code='storage_unavailable' if exc.retryable else 'storage_failed',
             )
 
         payload = result.model_dump(mode='json')
-        return _record_tool_result(
-            {
-                'success': True,
-                'tool': 'episode_delete',
-                'result': payload,
-                'retryable': False,
-            },
+        return _record_memory_operation(
+            'episode_delete', payload,
             mutation=result.status == 'deleted',
-            ledger_result={
-                **payload,
-                'retry_fingerprint': retry_fingerprint,
-            },
+            retry_fingerprint=retry_fingerprint,
+            ledger_result=payload,
         )

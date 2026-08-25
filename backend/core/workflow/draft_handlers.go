@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"encoding/json"
+	"errors"
 	"log"
 	"net/http"
 	"regexp"
@@ -169,13 +170,13 @@ func ListWorkflowDrafts(w http.ResponseWriter, r *http.Request) {
 
 	db := store.DB()
 	var total int64
-	if err := db.Model(&orm.WorkflowDraft{}).Where("created_by = ?", userID).Count(&total).Error; err != nil {
+	if err := db.Model(&orm.WorkflowDraft{}).Where("created_by = ? AND deleted_at IS NULL", userID).Count(&total).Error; err != nil {
 		common.ReplyErr(w, "query failed", http.StatusInternalServerError)
 		return
 	}
 
 	var drafts []orm.WorkflowDraft
-	if err := db.Where("created_by = ?", userID).
+	if err := db.Where("created_by = ? AND deleted_at IS NULL", userID).
 		Order("updated_at DESC").
 		Limit(pageSize).
 		Offset(offset).
@@ -252,7 +253,7 @@ func GetWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var draft orm.WorkflowDraft
-	if err := store.DB().Where("id = ? AND created_by = ?", draftID, userID).First(&draft).Error; err != nil {
+	if err := store.DB().Where("id = ? AND created_by = ? AND deleted_at IS NULL", draftID, userID).First(&draft).Error; err != nil {
 		common.ReplyErr(w, "not found", http.StatusNotFound)
 		return
 	}
@@ -303,7 +304,7 @@ func SaveWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 
 	db := store.DB()
 	var draft orm.WorkflowDraft
-	if err := db.Where("id = ? AND created_by = ?", draftID, userID).First(&draft).Error; err != nil {
+	if err := db.Where("id = ? AND created_by = ? AND deleted_at IS NULL", draftID, userID).First(&draft).Error; err != nil {
 		common.ReplyErr(w, "not found", http.StatusNotFound)
 		return
 	}
@@ -345,7 +346,7 @@ func SaveWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 		updates["version"] = gorm.Expr("version + 1")
 	}
 
-	query := db.Model(&orm.WorkflowDraft{}).Where("id = ? AND created_by = ?", draftID, userID)
+	query := db.Model(&orm.WorkflowDraft{}).Where("id = ? AND created_by = ? AND deleted_at IS NULL", draftID, userID)
 	if needsVersionCheck {
 		query = query.Where("version = ?", *body.Version)
 	}
@@ -365,7 +366,7 @@ func SaveWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 		// The version predicate and update execute as one SQL statement, so two
 		// concurrent writers cannot both pass a separate check and overwrite one
 		// another. Return the winner's authoritative state to the stale caller.
-		if err := db.Where("id = ? AND created_by = ?", draftID, userID).First(&draft).Error; err != nil {
+		if err := db.Where("id = ? AND created_by = ? AND deleted_at IS NULL", draftID, userID).First(&draft).Error; err != nil {
 			common.ReplyErr(w, "reload failed", http.StatusInternalServerError)
 			return
 		}
@@ -373,7 +374,7 @@ func SaveWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Reload to return the authoritative post-save state.
-	if err := db.Where("id = ?", draftID).First(&draft).Error; err != nil {
+	if err := db.Where("id = ? AND deleted_at IS NULL", draftID).First(&draft).Error; err != nil {
 		common.ReplyErr(w, "reload failed", http.StatusInternalServerError)
 		return
 	}
@@ -396,7 +397,7 @@ func DeleteWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 
 	db := store.DB()
 	var draft orm.WorkflowDraft
-	if err := db.Select("id").Where("id = ? AND created_by = ?", draftID, userID).First(&draft).Error; err != nil {
+	if err := db.Where("id = ? AND created_by = ? AND deleted_at IS NULL", draftID, userID).First(&draft).Error; err != nil {
 		if err == gorm.ErrRecordNotFound {
 			common.ReplyErr(w, "not found", http.StatusNotFound)
 			return
@@ -405,17 +406,33 @@ func DeleteWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Analyses and repair runs are draft-scoped cached generation state. Remove
-	// them atomically with the draft so a later import of the same Skill cannot
-	// reuse decisions made for a Workflow the user explicitly deleted.
 	if err := db.Transaction(func(tx *gorm.DB) error {
-		if err := tx.Where("draft_id = ? AND user_id = ?", draftID, userID).Delete(&orm.WorkflowRepairRun{}).Error; err != nil {
-			return err
+		publishedStatus := ""
+		if draft.WorkflowID != "" {
+			var resource orm.WorkflowResource
+			if err := tx.Where("owner_user_id = ? AND plugin_id = ?", userID, draft.WorkflowID).First(&resource).Error; err == nil {
+				publishedStatus = resource.Status
+				if err := tx.Model(&resource).Updates(map[string]any{"status": "archived", "updated_at": time.Now().UTC()}).Error; err != nil {
+					return err
+				}
+			} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+				return err
+			}
 		}
-		if err := tx.Where("draft_id = ? AND user_id = ?", draftID, userID).Delete(&orm.WorkflowGenerationAnalysis{}).Error; err != nil {
-			return err
+		now := time.Now().UTC()
+		result := tx.Model(&orm.WorkflowDraft{}).
+			Where("id = ? AND created_by = ? AND deleted_at IS NULL", draftID, userID).
+			Updates(map[string]any{
+				"deleted_at": now, "trash_expires_at": now.Add(30 * 24 * time.Hour),
+				"published_status_before_trash": publishedStatus, "updated_at": now,
+			})
+		if result.Error != nil {
+			return result.Error
 		}
-		return tx.Where("id = ? AND created_by = ?", draftID, userID).Delete(&orm.WorkflowDraft{}).Error
+		if result.RowsAffected == 0 {
+			return gorm.ErrRecordNotFound
+		}
+		return nil
 	}); err != nil {
 		common.ReplyErr(w, "delete failed", http.StatusInternalServerError)
 		return
@@ -464,7 +481,7 @@ func AIGenerateWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 
 	db := store.DB()
 	var draft orm.WorkflowDraft
-	if err := db.Where("id = ? AND created_by = ?", draftID, userID).First(&draft).Error; err != nil {
+	if err := db.Where("id = ? AND created_by = ? AND deleted_at IS NULL", draftID, userID).First(&draft).Error; err != nil {
 		common.ReplyErr(w, "not found", http.StatusNotFound)
 		return
 	}
@@ -684,7 +701,7 @@ func AIRepairWorkflowDraft(w http.ResponseWriter, r *http.Request) {
 
 	db := store.DB()
 	var draft orm.WorkflowDraft
-	if err := db.Where("id = ? AND created_by = ?", draftID, userID).First(&draft).Error; err != nil {
+	if err := db.Where("id = ? AND created_by = ? AND deleted_at IS NULL", draftID, userID).First(&draft).Error; err != nil {
 		common.ReplyErr(w, "not found", http.StatusNotFound)
 		return
 	}

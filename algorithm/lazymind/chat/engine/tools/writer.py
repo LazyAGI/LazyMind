@@ -1,18 +1,22 @@
 """Common writer tools with string/JSON inputs and outputs."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import tempfile
+import time
 import uuid
 from collections.abc import Callable
 from copy import deepcopy
 from pathlib import Path
-from threading import RLock
+from queue import Empty, Queue
+from threading import Event, RLock
 from typing import Any, ClassVar
 
-from lazyllm import LOG, AutoModel
+from lazyllm import LOG, AutoModel, ThreadPoolExecutor
+from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools.writer.data_models import (
     InputResource,
     MediaAssetLibrary,
@@ -37,7 +41,12 @@ from lazyllm.tools.writer.tools import (
     WriterResourceTools,
     WriterRevisionTools,
 )
-from lazyllm.tools.writer.utils import render_document_markdown, save_artifact_json
+from lazyllm.tools.writer.numbering import materialize_markdown
+from lazyllm.tools.writer.utils import (
+    render_block_markdown,
+    save_artifact_json,
+    writer_document_to_markdown,
+)
 
 WRITER_DATA_MODEL_SCHEMA_PREFIX = 'lazyllm.tools.writer.data_models'
 _FEISHU_URL_RE = re.compile(
@@ -45,10 +54,56 @@ _FEISHU_URL_RE = re.compile(
     r"[^\s<>\"'，。；！？、（）【】《》「」『』]+",
     re.IGNORECASE,
 )
+_CHINESE_CHAR_LIMIT_RE = re.compile(
+    r'(?P<prefix>不超过|至多|最多|约|大约|大概)?\s*'
+    r'(?P<value>\d+(?:\.\d+)?)\s*(?P<unit>万|千)?\s*字'
+    r'(?P<suffix>左右|上下|以内|以下)?'
+)
+_MARKDOWN_ATX_HEADING_RE = re.compile(
+    r'^(?P<indent> {0,3})(?P<marks>#{1,6})[ \t]+'
+    r'(?P<title>.*?)(?:[ \t]+#+)?[ \t]*$',
+)
+_MARKDOWN_FENCE_RE = re.compile(r'^ {0,3}(?P<marks>`{3,}|~{3,})')
+_MARKDOWN_DRAFT_ROOT_ERROR = 'Markdown draft section must contain exactly one H2 root heading.'
+
+
+def _extract_length_constraints(query: str) -> dict[str, int]:
+    match = _CHINESE_CHAR_LIMIT_RE.search(query)
+    if match is None:
+        return {}
+    multiplier = {'万': 10000, '千': 1000}.get(match.group('unit'), 1)
+    target_chars = int(float(match.group('value')) * multiplier)
+    approximate = (
+        match.group('prefix') in {'约', '大约', '大概'}
+        or match.group('suffix') in {'左右', '上下'}
+    )
+    return {
+        'target_chars': target_chars,
+        'max_chars': target_chars * 11 // 10 if approximate else target_chars,
+    }
+
+
+_MARKDOWN_NO_MEDIA_PATTERNS = (
+    re.compile(
+        r'(?:不要|不需要|无需|不用|禁止)\s*(?:使用|添加|插入|生成|展示|显示)?\s*'
+        r'(?:任何\s*)?(?:图片|图像|插图|配图|视觉(?:素材|内容)?)'
+        r'|不(?:使用|添加|插入|生成|展示|显示)\s*(?:任何\s*)?'
+        r'(?:图片|图像|插图|配图|视觉(?:素材|内容)?)'
+        r'|不插图|无图',
+    ),
+    re.compile(
+        r'\b(?:no|without)\s+(?:any\s+)?(?:images?|pictures?|illustrations?|visuals?)\b'
+        r"|\b(?:do\s+not|don't)\s+(?:use|include|add|generate|insert|show|display)\s+"
+        r'(?:any\s+)?(?:images?|pictures?|illustrations?|visuals?)\b',
+        re.IGNORECASE,
+    ),
+)
 
 
 class DraftMarkdownStreamEventEmitter:
-    """Publish each Draft Markdown delta in one attempt-scoped event stream."""
+    """Publish one attempt-scoped Markdown preview for a Writer artifact."""
+
+    MAX_DELTA_CHARS: ClassVar[int] = 2
 
     EVENT_TYPES: ClassVar[dict[str, str]] = {
         'start': 'artifact_stream_start',
@@ -60,8 +115,13 @@ class DraftMarkdownStreamEventEmitter:
     def __init__(
         self,
         emit: Callable[[dict[str, Any]], None],
+        *,
+        slot: str = 'draft_document',
     ) -> None:
+        if not slot.strip():
+            raise ValueError('slot must not be empty.')
         self._emit = emit
+        self._slot = slot.strip()
         self._stream_id = uuid.uuid4().hex
         self._chunk_index = 0
         self._closed = False
@@ -79,7 +139,15 @@ class DraftMarkdownStreamEventEmitter:
         with self._lock:
             if self._closed:
                 return
-            self._publish_locked('delta', delta=delta)
+            # Model providers and the IR/Markdown normalizers may deliver a
+            # whole sentence or paragraph in one callback. Keep the artifact
+            # stream's display contract stable by publishing small deltas while
+            # preserving the exact text and order.
+            for start in range(0, len(delta), self.MAX_DELTA_CHARS):
+                self._publish_locked(
+                    'delta',
+                    delta=delta[start:start + self.MAX_DELTA_CHARS],
+                )
 
     def end(self) -> None:
         self._finish('end')
@@ -101,7 +169,7 @@ class DraftMarkdownStreamEventEmitter:
         self._chunk_index += 1
         payload: dict[str, Any] = {
             'type': self.EVENT_TYPES[event],
-            'slot': 'draft_document',
+            'slot': self._slot,
             'content_type': 'text/markdown',
             'stream_id': self._stream_id,
             'chunk_index': self._chunk_index,
@@ -113,7 +181,7 @@ class DraftMarkdownStreamEventEmitter:
         try:
             self._emit(payload)
         except Exception as exc:  # noqa: BLE001 - preview forwarding is best effort.
-            LOG.warning('[Writer] failed to forward Draft Markdown stream event: %s', exc)
+            LOG.warning('[Writer] failed to forward artifact stream event: %s', exc)
 
 
 def writer_schema(name: str) -> str:
@@ -132,6 +200,25 @@ def _json_loads(value: str, default: Any = None) -> Any:
     if isinstance(parsed, dict) and 'data' in parsed:
         return parsed['data']
     return parsed
+
+
+def _bind_document_cross_reference_targets(instructions: list[Any]) -> None:
+    targets = list(dict.fromkeys(
+        str(target)
+        for instruction in instructions if isinstance(instruction, dict)
+        for target in [
+            (instruction.get('meta') or {}).get('outline_node_id'),
+            *[
+                item.get('target')
+                for item in (instruction.get('meta') or {}).get('cross_references') or []
+                if isinstance(item, dict)
+            ],
+        ]
+        if target
+    ))
+    for instruction in instructions:
+        if isinstance(instruction, dict):
+            instruction.setdefault('meta', {})['cross_reference_targets'] = targets
 
 
 def _read_artifact_data(path: str) -> Any:
@@ -166,6 +253,25 @@ def _document_value(value: str) -> Any:
         return value
 
 
+def _markdown_media_is_explicitly_disabled(writing_task: dict[str, Any]) -> bool:
+    """Return whether the structured Writer request policy forbids visual media."""
+    policy = (writing_task.get('constraints') or {}).get('visual_policy') or {}
+    if policy.get('allow_visuals') is False:
+        return True
+    query = str(writing_task.get('query') or '')
+    return any(pattern.search(query) for pattern in _MARKDOWN_NO_MEDIA_PATTERNS)
+
+
+def _requires_input_image_reuse(writing_task: dict[str, Any]) -> bool:
+    visual_policy = (writing_task.get('constraints') or {}).get('visual_policy') or {}
+    return visual_policy.get('require_input_image_reuse') is True
+
+
+def _ensure_required_visual_plan(visual_plan: dict[str, Any], *, required: bool) -> None:
+    if required and not (visual_plan.get('instructions') or []):
+        raise ValueError('Required input image reuse produced no visual plan instructions.')
+
+
 def _write_document_input(root: Path, name: str, value: str) -> str:
     content = _document_value(value)
     if isinstance(content, str):
@@ -178,14 +284,93 @@ def _write_document_input(root: Path, name: str, value: str) -> str:
 def _primary_data(result: dict) -> Any:
     artifact_path = result.get('artifact_path')
     if not artifact_path:
-        raise ValueError(f'Writer tool did not return artifact_path: {result!r}')
+        raise ToolExecutionError(
+            'Writer tool did not return its primary artifact.'
+        )
     return _read_artifact_data(artifact_path)
+
+
+def _markdown_heading_key(value: str) -> str:
+    text = re.sub(r'^\s*\d+(?:\.\d+)*[、.．\s　]+', '', str(value or ''))
+    return re.sub(r'[\s\W_]+', '', text, flags=re.UNICODE).lower()
+
+
+def _markdown_heading_rows(lines: list[str]) -> list[tuple[int, int, str]]:
+    rows: list[tuple[int, int, str]] = []
+    fence_mark = ''
+    for index, line in enumerate(lines):
+        fence = _MARKDOWN_FENCE_RE.match(line)
+        if fence:
+            mark = fence.group('marks')
+            if not fence_mark:
+                fence_mark = mark
+            elif mark[0] == fence_mark[0] and len(mark) >= len(fence_mark):
+                fence_mark = ''
+            continue
+        if fence_mark:
+            continue
+        heading = _MARKDOWN_ATX_HEADING_RE.match(line)
+        if heading:
+            rows.append((index, len(heading.group('marks')), heading.group('title').strip()))
+    return rows
+
+
+def _normalize_streamed_markdown_section(
+    markdown: str,
+    instruction: SectionInstruction,
+) -> str:
+    """Repair relative Markdown headings without spending another model call."""
+    title = instruction.section_title.strip()
+    if not title:
+        raise ValueError('Markdown draft section title must not be empty.')
+    lines = str(markdown or '').replace('\r\n', '\n').replace('\r', '\n').strip().split('\n')
+    rows = _markdown_heading_rows(lines)
+    title_key = _markdown_heading_key(title)
+    root_index = next(
+        (index for index, _, heading_title in rows
+         if _markdown_heading_key(heading_title) == title_key),
+        -1,
+    )
+
+    removed: set[int] = set()
+    if root_index >= 0:
+        lines[root_index] = f'## {title}'
+        removed.update(
+            index for index, _, heading_title in rows
+            if index != root_index and _markdown_heading_key(heading_title) == title_key
+        )
+    else:
+        lines = [f'## {title}', '', *lines]
+        root_index = 0
+        rows = [(index + 2, level, heading_title) for index, level, heading_title in rows]
+
+    child_rows = [
+        (index, level, heading_title)
+        for index, level, heading_title in rows
+        if index != root_index and index not in removed
+    ]
+    if child_rows:
+        shift = 3 - min(level for _, level, _ in child_rows)
+        for index, level, heading_title in child_rows:
+            lines[index] = f"{'#' * min(6, max(3, level + shift))} {heading_title}"
+
+    result = '\n'.join(
+        line for index, line in enumerate(lines) if index not in removed
+    ).strip()
+    top_rows = [row for row in _markdown_heading_rows(result.splitlines()) if row[1] <= 2]
+    if len(top_rows) != 1 or top_rows[0][1] != 2:
+        raise ValueError(_MARKDOWN_DRAFT_ROOT_ERROR)
+    if _markdown_heading_key(top_rows[0][2]) != title_key:
+        raise ValueError('Markdown draft section heading does not match its content_ref.')
+    return result
 
 
 def _result_data(result: dict, key: str) -> Any:
     path = ((result.get('metadata') or {}).get('artifact_paths') or {}).get(key)
     if not path:
-        raise ValueError(f'Writer tool did not return artifact {key!r}: {result!r}')
+        raise ToolExecutionError(
+            f'Writer tool did not return artifact {key!r}.'
+        )
     return _read_artifact_data(path)
 
 
@@ -199,10 +384,10 @@ def sync_writer_documents(
     source = WriterDocument.model_validate(source_value)
     revised = WriterDocument.model_validate(revised_value)
     if source.document_id != revised.document_id:
-        raise ValueError('WriterDocument document_id values must match.')
+        raise ToolExecutionError('WriterDocument document_id values must match.')
     for field in ('stage', 'revision', 'provider_binding'):
         if getattr(source, field) != getattr(revised, field):
-            raise ValueError(f'WriterDocument {field} values must match.')
+            raise ToolExecutionError(f'WriterDocument {field} values must match.')
     for source_block in source.iter_blocks():
         revised_block = revised.block_by_id(source_block.node_id)
         if revised_block is None:
@@ -251,7 +436,7 @@ def sync_writer_documents(
 def _feishu_url(user_input: str) -> str:
     match = _FEISHU_URL_RE.search(user_input or '')
     if not match:
-        raise ValueError('A Feishu/Lark document URL is required.')
+        raise ToolExecutionError('A Feishu/Lark document URL is required.')
     return match.group(0).rstrip(').,;!?]}，。；！？】》」』')
 
 
@@ -325,7 +510,9 @@ def _published_link(target: TargetDocument) -> str:
         or (target.uri if target.uri.startswith(('http://', 'https://')) else '')
     ).strip()
     if not link:
-        raise ValueError('Provider write succeeded but no browser URL was returned.')
+        raise ToolExecutionError(
+            'Provider write succeeded but no browser URL was returned.'
+        )
     return link
 
 
@@ -352,8 +539,13 @@ class WriterToolkitBase:
     __public_apis__: list[str] = []
 
     def build_writing_task(self, query: str, task_id: str = '') -> str:
-        """Build a writing task from the user's original request."""
-        task = WritingTask(task_id=task_id.strip() or None, query=query, task_type='write')
+        """Build a provider-neutral writing task from the user's request."""
+        task = WritingTask(
+            task_id=task_id.strip() or None,
+            query=query,
+            task_type='write',
+            constraints=_extract_length_constraints(query),
+        )
         return _json_dumps(task.model_dump(exclude_defaults=True))
 
     def build_resources(
@@ -365,7 +557,7 @@ class WriterToolkitBase:
         """Build normalized InputResource data from workflow runtime inputs."""
         file_paths = _json_loads(file_paths_json, [])
         if not isinstance(file_paths, list):
-            raise TypeError('file_paths_json must be a JSON array.')
+            raise ToolExecutionError('file_paths_json must be a JSON array.')
         resources = [{
             'resource_id': os.path.basename(path),
             'resource_type': 'file',
@@ -410,6 +602,7 @@ class WriterToolkitBase:
         input_resources_json: str = '[]',
         media_store: str = '',
         use_vision_model: bool = False,
+        source_document_json: str = '',
     ) -> str:
         """Collect available images through LazyLLM's multimodal writer tools."""
         root = _temp_root()
@@ -425,12 +618,20 @@ class WriterToolkitBase:
             _json_loads(input_resources_json, []),
             writer_schema('task.InputResource'),
         )
+        source_document_path = (
+            _write_document_input(root, 'source_document', source_document_json)
+            if source_document_json else None
+        )
         artifact_store = Path(media_store.strip()) if media_store.strip() else root
         artifact_store.mkdir(parents=True, exist_ok=True)
         result = WriterMultimodalTools(
             llm=AutoModel(model='vlm') if use_vision_model else None,
             artifact_store=str(artifact_store),
-        ).collect_available_media(task=task_path, input_resources=resources_path)
+        ).collect_available_media(
+            task=task_path,
+            input_resources=resources_path,
+            source_document=source_document_path,
+        )
         return _json_dumps({
             'media_assets': _result_data(result, 'media_assets'),
             'profile_input_resources': _result_data(result, 'profile_input_resources'),
@@ -459,7 +660,7 @@ class WriterToolkitBase:
         )
         allowed_strategies = _json_loads(allowed_strategies_json, None)
         if allowed_strategies is not None and not isinstance(allowed_strategies, list):
-            raise TypeError('allowed_strategies_json must contain a JSON list.')
+            raise ToolExecutionError('allowed_strategies_json must contain a JSON list.')
         result = WriterMultimodalTools(
             llm=AutoModel(model='llm'),
         ).resolve_visual_needs(
@@ -521,7 +722,7 @@ class WriterToolkitBase:
         if resources is None:
             resources = []
         if not isinstance(resources, list):
-            raise TypeError('resources_json must be a JSON array.')
+            raise ToolExecutionError('resources_json must be a JSON array.')
         has_feishu_resource = any(
             isinstance(item, dict)
             and isinstance(item.get('meta'), dict)
@@ -566,7 +767,7 @@ class WriterToolkitBase:
         source = _document_value(writer_document_json)
         document = WriterDocument.model_validate(source) if isinstance(source, dict) else None
         if document and document.stage == 'outline' and not allow_outline:
-            raise ValueError(
+            raise ToolExecutionError(
                 'A full-document revision cannot use an outline-stage document.',
             )
         target = _target_from_document(document) if document else None
@@ -632,6 +833,17 @@ class WriterToolkitBase:
 
     def generate_outline(self, writing_task_json: str, writing_context_json: str) -> str:
         """Generate an outline in the task's selected representation."""
+        planning, task_path, context_path = self._outline_planning(
+            writing_task_json, writing_context_json,
+        )
+        result = planning.generate_outline(task=task_path, context=context_path)
+        return self._outline_result(result)
+
+    def _outline_planning(
+        self,
+        writing_task_json: str,
+        writing_context_json: str,
+    ) -> tuple[WriterPlanningTools, str, str]:
         root = _temp_root()
         task_path = _write_input_artifact(
             root, 'writing_task.json', _json_loads(writing_task_json, {}), writer_schema('task.WritingTask'),
@@ -640,13 +852,36 @@ class WriterToolkitBase:
             root, 'writing_context.json', _json_loads(writing_context_json, {}),
             writer_schema('context.WritingContext'),
         )
-        result = WriterPlanningTools(
+        planning = WriterPlanningTools(
             llm=AutoModel(model='llm'), artifact_store=str(root),
-        ).generate_outline(task=task_path, context=context_path)
+        )
+        return planning, task_path, context_path
+
+    @staticmethod
+    def _outline_result(result: dict) -> str:
         outline = _primary_data(result)
         if isinstance(outline, str):
             return outline
         return _set_document_editable(outline, stage='outline').model_dump_json(exclude_defaults=True)
+
+    def stream_outline(
+        self,
+        writing_task_json: str,
+        writing_context_json: str,
+        on_delta: Callable[[str], None],
+    ) -> str:
+        """Generate an outline while exposing its Markdown preview deltas."""
+        planning, task_path, context_path = self._outline_planning(
+            writing_task_json, writing_context_json,
+        )
+        with planning.stream_outline(task=task_path, context=context_path) as stream:
+            for delta in stream:
+                try:
+                    on_delta(delta)
+                except Exception as exc:  # noqa: BLE001 - preview forwarding is best effort.
+                    LOG.warning('[Writer] Outline delta callback failed: %s', exc)
+            result = stream.result()
+        return self._outline_result(result)
 
     def generate_rewrite_outline(
         self,
@@ -681,8 +916,10 @@ class WriterToolkitBase:
     ) -> str:
         """Plan a complete IR or Markdown rewrite without generating an outline."""
         root = _temp_root()
+        writing_task = _json_loads(writing_task_json, {})
+        require_input_image_reuse = _requires_input_image_reuse(writing_task)
         task_path = _write_input_artifact(
-            root, 'writing_task.json', _json_loads(writing_task_json, {}), writer_schema('task.WritingTask'),
+            root, 'writing_task.json', writing_task, writer_schema('task.WritingTask'),
         )
         source_path = _write_document_input(root, 'source_document', source_document_json)
         context_path = _write_input_artifact(
@@ -702,6 +939,16 @@ class WriterToolkitBase:
         document_title = str(instructions.meta.get('document_title') or '').strip()
         visual_plan: dict[str, Any] = VisualPlan().model_dump()
         warnings = []
+        if (
+            representation == 'markdown'
+            and _markdown_media_is_explicitly_disabled(_json_loads(writing_task_json, {}))
+        ):
+            return _json_dumps({
+                'section_instructions': instructions.model_dump(exclude_defaults=True),
+                'visual_plan': visual_plan,
+                'document_title': document_title,
+                'warnings': warnings,
+            })
         if representation == 'ir':
             transient_outline = WriterDocument(
                 document_id=f'{instructions.instruction_set_id}-visual-outline',
@@ -724,16 +971,33 @@ class WriterToolkitBase:
                 transient_outline.model_dump(exclude_defaults=True),
                 self.WRITER_IR_SCHEMA,
             )
-            try:
-                visual_result = planning.generate_visual_plan(
-                    task=task_path,
-                    outline=outline_path,
-                    context=context_path,
-                )
-                visual_plan = _primary_data(visual_result)
-                warnings.extend((visual_result.get('metadata') or {}).get('warnings') or [])
-            except Exception as exc:
-                warnings.append(f'Visual planning failed: {type(exc).__name__}: {exc}')
+        else:
+            transient_markdown = f'# {document_title}\n' + '\n'.join(
+                f'## {instruction.section_title}'
+                for instruction in instructions.instructions
+            )
+            outline_path = _write_document_input(
+                root,
+                'rewrite_visual_outline',
+                transient_markdown,
+            )
+        try:
+            visual_result = planning.generate_visual_plan(
+                task=task_path,
+                outline=outline_path,
+                context=context_path,
+            )
+            visual_plan = _primary_data(visual_result)
+            warnings.extend((visual_result.get('metadata') or {}).get('warnings') or [])
+        except Exception as exc:
+            if require_input_image_reuse:
+                raise RuntimeError(
+                    f'Required visual planning failed: {type(exc).__name__}: {exc}'
+                ) from exc
+            warnings.append(f'Visual planning failed: {type(exc).__name__}: {exc}')
+        _ensure_required_visual_plan(
+            visual_plan, required=require_input_image_reuse,
+        )
         return _json_dumps({
             'section_instructions': instructions.model_dump(exclude_defaults=True),
             'visual_plan': visual_plan,
@@ -777,8 +1041,10 @@ class WriterToolkitBase:
     ) -> str:
         """Generate section instructions from an IR or Markdown outline."""
         root = _temp_root()
+        writing_task = _json_loads(writing_task_json, {})
+        require_input_image_reuse = _requires_input_image_reuse(writing_task)
         task_path = _write_input_artifact(
-            root, 'writing_task.json', _json_loads(writing_task_json, {}), writer_schema('task.WritingTask'),
+            root, 'writing_task.json', writing_task, writer_schema('task.WritingTask'),
         )
         outline_path = _write_document_input(root, 'outline', outline_json)
         context_path = _write_input_artifact(
@@ -789,17 +1055,28 @@ class WriterToolkitBase:
             llm=AutoModel(model='llm'), artifact_store=str(root),
         )
         warnings = []
-        try:
-            visual_result = planning.generate_visual_plan(
-                task=task_path,
-                outline=outline_path,
-                context=context_path,
-            )
-            visual_plan = _primary_data(visual_result)
-            warnings.extend((visual_result.get('metadata') or {}).get('warnings') or [])
-        except Exception as exc:
-            visual_plan = VisualPlan().model_dump()
-            warnings.append(f'Visual planning failed: {type(exc).__name__}: {exc}')
+        visual_plan = VisualPlan().model_dump()
+        if not (
+            isinstance(_document_value(outline_json), str)
+            and _markdown_media_is_explicitly_disabled(_json_loads(writing_task_json, {}))
+        ):
+            try:
+                visual_result = planning.generate_visual_plan(
+                    task=task_path,
+                    outline=outline_path,
+                    context=context_path,
+                )
+                visual_plan = _primary_data(visual_result)
+                warnings.extend((visual_result.get('metadata') or {}).get('warnings') or [])
+            except Exception as exc:
+                if require_input_image_reuse:
+                    raise RuntimeError(
+                        f'Required visual planning failed: {type(exc).__name__}: {exc}'
+                    ) from exc
+                warnings.append(f'Visual planning failed: {type(exc).__name__}: {exc}')
+        _ensure_required_visual_plan(
+            visual_plan, required=require_input_image_reuse,
+        )
         visual_plan_path = _write_input_artifact(
             root,
             'visual_plan.json',
@@ -810,6 +1087,7 @@ class WriterToolkitBase:
             outline=outline_path,
             context=context_path,
             visual_plan=visual_plan_path,
+            task=task_path,
         )
         return _json_dumps({
             'section_instructions': _primary_data(result),
@@ -895,7 +1173,10 @@ class WriterToolkitBase:
             if isinstance(instructions_data, dict) else None
         )
         if not isinstance(instructions, list):
-            raise TypeError('section_instructions_json must contain instructions.')
+            raise ToolExecutionError(
+                'section_instructions_json must contain instructions.'
+            )
+        _bind_document_cross_reference_targets(instructions)
 
         blocks: list[Any] = []
         for instruction in instructions:
@@ -903,7 +1184,7 @@ class WriterToolkitBase:
                 writing_task_json=writing_task_json,
                 section_instruction_json=_json_dumps(instruction),
                 writing_context_json=writing_context_json,
-                previous_blocks_json=_json_dumps(blocks),
+                previous_blocks_json='[]',
                 visual_plan_json=visual_plan_json,
                 media_assets_json=media_assets_json,
             ), {})
@@ -915,12 +1196,14 @@ class WriterToolkitBase:
         writing_task_json: str,
         section_instructions_json: str,
         writing_context_json: str,
+        visual_plan_json: str = '',
     ) -> str:
         """Generate every planned draft section in Markdown, in order."""
         return self.generate_draft_blocks(
             writing_task_json=writing_task_json,
             section_instructions_json=section_instructions_json,
             writing_context_json=writing_context_json,
+            visual_plan_json=visual_plan_json,
         )
 
     def stream_draft_blocks_markdown(
@@ -930,6 +1213,9 @@ class WriterToolkitBase:
         writing_context_json: str,
         on_delta: Callable[[str], None],
         on_section_end: Callable[[], None] | None = None,
+        on_progress: Callable[[dict[str, Any]], None] | None = None,
+        visual_plan_json: str = '',
+        checkpoint_dir: str = '',
     ) -> str:
         """Generate Markdown sections through LazyLLM's non-tool streaming API."""
         return self._stream_draft_blocks(
@@ -939,6 +1225,9 @@ class WriterToolkitBase:
             representation='markdown',
             on_delta=on_delta,
             on_section_end=on_section_end,
+            on_progress=on_progress,
+            visual_plan_json=visual_plan_json,
+            checkpoint_dir=checkpoint_dir,
         )
 
     def stream_draft_blocks_ir(
@@ -948,8 +1237,10 @@ class WriterToolkitBase:
         writing_context_json: str,
         on_delta: Callable[[str], None],
         on_section_end: Callable[[], None] | None = None,
+        on_progress: Callable[[dict[str, Any]], None] | None = None,
         visual_plan_json: str = '',
         media_assets_json: str = '',
+        checkpoint_dir: str = '',
     ) -> str:
         """Generate IR sections while exposing their Markdown preview deltas."""
         return self._stream_draft_blocks(
@@ -959,8 +1250,10 @@ class WriterToolkitBase:
             representation='ir',
             on_delta=on_delta,
             on_section_end=on_section_end,
+            on_progress=on_progress,
             visual_plan_json=visual_plan_json,
             media_assets_json=media_assets_json,
+            checkpoint_dir=checkpoint_dir,
         )
 
     def _stream_draft_blocks(
@@ -972,8 +1265,10 @@ class WriterToolkitBase:
         representation: str,
         on_delta: Callable[[str], None],
         on_section_end: Callable[[], None] | None,
+        on_progress: Callable[[dict[str, Any]], None] | None,
         visual_plan_json: str = '',
         media_assets_json: str = '',
+        checkpoint_dir: str = '',
     ) -> str:
         instructions_data = _json_loads(section_instructions_json, {})
         instructions = (
@@ -982,6 +1277,44 @@ class WriterToolkitBase:
         )
         if not isinstance(instructions, list):
             raise TypeError('section_instructions_json must contain instructions.')
+        _bind_document_cross_reference_targets(instructions)
+
+        def forward_delta(delta: str) -> None:
+            try:
+                on_delta(delta)
+            except Exception as exc:  # noqa: BLE001 - preview forwarding is best effort.
+                LOG.warning(
+                    '[Writer] Draft %s delta callback failed: %s',
+                    representation, exc,
+                )
+
+        def forward_progress(**payload: Any) -> None:
+            if on_progress is None:
+                return
+            try:
+                on_progress(payload)
+            except Exception as exc:  # noqa: BLE001 - progress is observability only.
+                LOG.warning('[Writer] Draft progress callback failed: %s', exc)
+
+        instruction_list_meta = instructions_data.get('meta')
+        if not isinstance(instruction_list_meta, dict):
+            instruction_list_meta = {}
+        first_instruction = instructions[0] if instructions and isinstance(instructions[0], dict) else {}
+        first_instruction_meta = first_instruction.get('meta')
+        if not isinstance(first_instruction_meta, dict):
+            first_instruction_meta = {}
+        document_title = ''
+        for candidate in (
+            instruction_list_meta.get('document_title'),
+            instruction_list_meta.get('outline_title'),
+            first_instruction_meta.get('document_title'),
+            first_instruction_meta.get('outline_title'),
+        ):
+            document_title = str(candidate or '').strip()
+            if document_title:
+                break
+        if document_title:
+            forward_delta(f'# {document_title}\n\n')
 
         root = _temp_root()
         task_path = _write_input_artifact(
@@ -1008,56 +1341,362 @@ class WriterToolkitBase:
                 _json_loads(media_assets_json, {}),
                 writer_schema('multimodal.MediaAssetLibrary'),
             )
-        drafting = WriterDraftingTools(
-            llm=AutoModel(model='llm'), artifact_store=str(root),
+        checkpoint_root = Path(checkpoint_dir) if checkpoint_dir else root / 'section-checkpoints'
+        checkpoint_root.mkdir(parents=True, exist_ok=True)
+        sections: list[Any] = [None] * len(instructions)
+        event_queues: list[Queue] = [Queue() for _ in instructions]
+        stop_event = Event()
+        progress_lock = RLock()
+        completed_count = 0
+        max_attempts = max(1, int(os.getenv('LAZYMIND_WRITER_SECTION_MAX_ATTEMPTS', '2')))
+        section_total_timeout = max(
+            1.0, float(os.getenv('LAZYMIND_WRITER_SECTION_TOTAL_TIMEOUT', '600')),
         )
-        sections: list[Any] = []
-        for instruction_data in instructions:
-            instruction = SectionInstruction.model_validate(instruction_data)
-            stream_factory = (
-                drafting.stream_draft_section
-                if representation == 'markdown'
-                else drafting.stream_draft_section_ir
-            )
-            stream_kwargs: dict[str, Any] = {
-                'task': task_path,
-                'section_instruction': instruction,
-                'context': context_path,
-                'previous_blocks': sections,
-            }
-            if representation == 'ir':
-                if visual_plan_path is not None:
-                    stream_kwargs['visual_plan'] = visual_plan_path
-                if media_assets_path is not None:
-                    stream_kwargs['media_assets'] = media_assets_path
-            with stream_factory(
-                **stream_kwargs,
-            ) as stream:
-                for delta in stream:
-                    try:
-                        on_delta(delta)
-                    except Exception as exc:  # noqa: BLE001 - preview forwarding is best effort.
-                        LOG.warning(
-                            '[Writer] Draft %s delta callback failed: %s',
-                            representation, exc,
-                        )
-                result = stream.result()
-            section = _primary_data(result)
-            if representation == 'markdown' and not isinstance(section, str):
-                raise TypeError(
-                    'Markdown Draft stream returned a non-Markdown artifact.',
+        section_stream_idle_timeout = max(
+            1.0, float(os.getenv('LAZYMIND_WRITER_SECTION_STREAM_IDLE_TIMEOUT', '180')),
+        )
+        first_section_idle_timeout = max(
+            section_stream_idle_timeout,
+            float(os.getenv('LAZYMIND_WRITER_FIRST_SECTION_IDLE_TIMEOUT', '360')),
+        )
+        section_started_at: list[float | None] = [None] * len(instructions)
+        forward_progress(
+            progress=5,
+            current_phase='正在优先生成第 1 章',
+            section_total=len(instructions),
+            section_completed=0,
+        )
+
+        def checkpoint_path(index: int, instruction_data: dict[str, Any]) -> Path:
+            payload = json.dumps({
+                'version': 1,
+                'representation': representation,
+                'task': _json_loads(writing_task_json, {}),
+                'instruction': instruction_data,
+                'context': _json_loads(writing_context_json, {}),
+                'visual_plan': _json_loads(visual_plan_json, {}),
+                'media_assets': _json_loads(media_assets_json, {}),
+            }, ensure_ascii=False, sort_keys=True, default=str)
+            digest = hashlib.sha256(payload.encode('utf-8')).hexdigest()[:16]
+            suffix = '.md' if representation == 'markdown' else '.json'
+            return checkpoint_root / f'section-{index + 1:04d}-{digest}{suffix}'
+
+        def load_checkpoint(path: Path, instruction: SectionInstruction) -> Any:
+            if not path.is_file():
+                return None
+            try:
+                if representation == 'markdown':
+                    value = path.read_text(encoding='utf-8')
+                    return _normalize_streamed_markdown_section(value, instruction)
+                value = json.loads(path.read_text(encoding='utf-8'))
+                return WriterBlock.model_validate(value).model_dump(exclude_defaults=True)
+            except (OSError, ValueError, TypeError, json.JSONDecodeError):
+                LOG.warning('[Writer] Ignoring invalid draft section checkpoint %s', path)
+                return None
+
+        def save_checkpoint(path: Path, section: Any) -> None:
+            temporary = path.with_name(f'.{path.name}.{uuid.uuid4().hex}.tmp')
+            if representation == 'markdown':
+                temporary.write_text(str(section), encoding='utf-8')
+            else:
+                temporary.write_text(
+                    json.dumps(section, ensure_ascii=False, indent=2),
+                    encoding='utf-8',
                 )
-            if representation == 'ir' and not isinstance(section, dict):
-                raise TypeError('IR Draft stream returned a non-WriterBlock artifact.')
-            sections.append(section)
-            if on_section_end is not None:
-                try:
-                    on_section_end()
-                except Exception as exc:  # noqa: BLE001 - preview forwarding is best effort.
-                    LOG.warning(
-                        '[Writer] Draft %s section callback failed: %s',
-                        representation, exc,
-                    )
+            temporary.replace(path)
+
+        def cached_preview(section: Any) -> str:
+            if representation == 'markdown':
+                return str(section)
+            return render_block_markdown(
+                WriterBlock.model_validate(section), level=2,
+            ).rstrip() + '\n'
+
+        def preview_has_body(preview: str) -> bool:
+            """A generated section title alone is not effective body progress."""
+            lines = preview.splitlines()
+            while lines and not lines[0].strip():
+                lines.pop(0)
+            if lines and re.match(r'^#{1,6}\s+\S', lines[0].strip()):
+                lines.pop(0)
+            remainder = '\n'.join(lines)
+            # Markdown structure alone (another heading/list prefix, fence,
+            # whitespace) is not document body progress.
+            visible_text = re.sub(r'[\s#>*_`~+\-\[\](){}|.!:;，。！？、]+', '', remainder)
+            return bool(visible_text)
+
+        def mark_completed(index: int, *, cached: bool = False) -> None:
+            nonlocal completed_count
+            with progress_lock:
+                completed_count += 1
+                done = completed_count
+            if done >= len(instructions):
+                phase = f'全部 {len(instructions)} 章已生成，正在按大纲顺序组装'
+            elif cached:
+                phase = f'已复用 {done}/{len(instructions)} 章 checkpoint，其他章节仍在生成'
+            else:
+                phase = f'已完成 {done}/{len(instructions)} 章，其他章节仍在后台生成'
+            forward_progress(
+                progress=5,
+                current_phase=phase,
+                section_index=index + 1,
+                section_total=len(instructions),
+                section_completed=done,
+                section_state='checkpointed',
+            )
+
+        def generate_one(index: int, instruction_data: dict[str, Any]) -> None:
+            events = event_queues[index]
+            path = checkpoint_path(index, instruction_data)
+            section_started_at[index] = time.monotonic()
+            try:
+                instruction = SectionInstruction.model_validate(instruction_data)
+                cached = load_checkpoint(path, instruction)
+                if cached is not None:
+                    if not stop_event.is_set():
+                        events.put(('delta', cached_preview(cached)))
+                        events.put(('done', cached))
+                        mark_completed(index, cached=True)
+                    return
+                for attempt in range(1, max_attempts + 1):
+                    buffered: list[str] = []
+                    section_deltas: list[str] = []
+                    body_started = False
+                    try:
+                        forward_progress(
+                            progress=5,
+                            current_phase=f'第 {index + 1} 章正在生成',
+                            section_index=index + 1,
+                            section_total=len(instructions),
+                            section_completed=completed_count,
+                            section_state='generating',
+                            section_attempt=attempt,
+                        )
+                        section_root = root / f'section-{index + 1:04d}-attempt-{attempt}'
+                        section_root.mkdir(parents=True, exist_ok=True)
+                        drafting = WriterDraftingTools(
+                            llm=AutoModel(model='llm'), artifact_store=str(section_root),
+                        )
+                        stream_factory = (
+                            drafting.stream_draft_section
+                            if representation == 'markdown'
+                            else drafting.stream_draft_section_ir
+                        )
+                        stream_kwargs: dict[str, Any] = {
+                            'task': task_path,
+                            'section_instruction': instruction,
+                            'context': context_path,
+                        }
+                        if visual_plan_path is not None:
+                            stream_kwargs['visual_plan'] = visual_plan_path
+                        if media_assets_path is not None:
+                            stream_kwargs['media_assets'] = media_assets_path
+                        stream_kwargs['idle_timeout'] = (
+                            first_section_idle_timeout if index == 0 and attempt == 1
+                            else section_stream_idle_timeout
+                        )
+                        try:
+                            with stream_factory(**stream_kwargs) as stream:
+                                for delta in stream:
+                                    if stop_event.is_set():
+                                        return
+                                    section_deltas.append(delta)
+                                    if body_started:
+                                        events.put(('delta', delta))
+                                        continue
+                                    buffered.append(delta)
+                                    if preview_has_body(''.join(buffered)):
+                                        body_started = True
+                                        for pending in buffered:
+                                            events.put(('delta', pending))
+                                        buffered.clear()
+                                        forward_progress(
+                                            progress=5,
+                                            current_phase=f'第 {index + 1} 章正在输出正文',
+                                            section_index=index + 1,
+                                            section_total=len(instructions),
+                                            section_completed=completed_count,
+                                            section_state='streaming',
+                                            section_attempt=attempt,
+                                        )
+                                result = stream.result()
+                            section = _primary_data(result)
+                        except ValueError as exc:
+                            if (
+                                representation != 'markdown'
+                                or str(exc) != _MARKDOWN_DRAFT_ROOT_ERROR
+                                or not section_deltas
+                            ):
+                                raise
+                            section = _normalize_streamed_markdown_section(
+                                ''.join(section_deltas), instruction,
+                            )
+                            LOG.warning(
+                                '[Writer] repaired Draft Markdown heading contract without '
+                                'regeneration section=%s title=%r',
+                                index + 1, instruction.section_title,
+                            )
+                        if representation == 'markdown' and not isinstance(section, str):
+                            raise TypeError('Markdown Draft stream returned a non-Markdown artifact.')
+                        if representation == 'ir' and not isinstance(section, dict):
+                            raise TypeError('IR Draft stream returned a non-WriterBlock artifact.')
+                        if representation == 'markdown':
+                            section = _normalize_streamed_markdown_section(section, instruction)
+                        if not body_started and preview_has_body(cached_preview(section)):
+                            for pending in buffered:
+                                events.put(('delta', pending))
+                            body_started = True
+                        if not body_started:
+                            raise TimeoutError('Draft section completed without effective body content.')
+                        if stop_event.is_set():
+                            return
+                        save_checkpoint(path, section)
+                        events.put(('done', section))
+                        mark_completed(index)
+                        return
+                    except Exception as exc:
+                        if attempt >= max_attempts or body_started or stop_event.is_set():
+                            raise
+                        LOG.warning(
+                            '[Writer] Retrying section %d after no effective body output: %s',
+                            index + 1, exc,
+                        )
+                        forward_progress(
+                            progress=5,
+                            current_phase=(
+                                f'第 {index + 1} 章长时间无有效正文，'
+                                f'正在自动重试（{attempt}/{max_attempts - 1}）'
+                            ),
+                            section_index=index + 1,
+                            section_total=len(instructions),
+                            section_completed=completed_count,
+                            section_state='retrying',
+                            section_attempt=attempt + 1,
+                        )
+            except Exception as exc:  # noqa: BLE001 - propagated on the ordered stream.
+                if not stop_event.is_set():
+                    events.put(('error', exc))
+
+        executor = ThreadPoolExecutor(max_workers=min(3, max(1, len(instructions))))
+        futures: list[Any | None] = [None] * len(instructions)
+        futures[0] = executor.submit(generate_one, 0, instructions[0])
+        background_started = len(instructions) == 1
+
+        def start_background_sections() -> None:
+            nonlocal background_started
+            if background_started:
+                return
+            background_started = True
+            for background_index in range(1, len(instructions)):
+                futures[background_index] = executor.submit(
+                    generate_one,
+                    background_index,
+                    instructions[background_index],
+                )
+
+        try:
+            for index, events in enumerate(event_queues):
+                if index > 0:
+                    start_background_sections()
+                future = futures[index]
+                if future is None:
+                    raise RuntimeError(f'Draft section {index + 1} was not started.')
+                wait_started_at = time.monotonic()
+                last_wait_progress_at = wait_started_at
+                last_stream_progress_at = 0.0
+                streamed_chars = 0
+                section_stream_started = False
+                while True:
+                    deadline = (
+                        section_started_at[index] or wait_started_at
+                    ) + section_total_timeout
+                    if time.monotonic() >= deadline and not future.done():
+                        raise TimeoutError(
+                            f'Draft section {index + 1} exceeded total timeout '
+                            f'of {section_total_timeout:g} seconds.'
+                        )
+                    try:
+                        event, payload = events.get(timeout=min(
+                            1.0, max(0.001, deadline - time.monotonic()),
+                        ))
+                    except Empty:
+                        if time.monotonic() >= deadline:
+                            raise TimeoutError(
+                                f'Draft section {index + 1} exceeded total timeout '
+                                f'of {section_total_timeout:g} seconds.'
+                            )
+                        if future.done():
+                            future.result()
+                            raise RuntimeError(
+                                f'Draft section {index + 1} ended without a terminal event.'
+                            )
+                        now = time.monotonic()
+                        if now - last_wait_progress_at >= 10.0:
+                            with progress_lock:
+                                done = completed_count
+                            waiting_for = '后续正文' if section_stream_started else '有效正文'
+                            forward_progress(
+                                progress=5,
+                                current_phase=(
+                                    f'第 {index + 1} 章仍在生成，正在等待{waiting_for}'
+                                    f'（已完成 {done}/{len(instructions)} 章）'
+                                ),
+                                section_index=index + 1,
+                                section_total=len(instructions),
+                                section_completed=done,
+                                section_state='streaming' if section_stream_started else 'waiting_for_body',
+                            )
+                            last_wait_progress_at = now
+                        continue
+                    if event == 'delta':
+                        if index == 0:
+                            # Give the first section exclusive access until its
+                            # first visible body arrives. Then keep streaming it
+                            # while the remaining sections run in the background.
+                            start_background_sections()
+                        section_stream_started = True
+                        streamed_chars += len(str(payload))
+                        now = time.monotonic()
+                        if last_stream_progress_at == 0.0 or now - last_stream_progress_at >= 2.0:
+                            with progress_lock:
+                                done = completed_count
+                            forward_progress(
+                                progress=5,
+                                current_phase=(
+                                    f'正在流式输出第 {index + 1} 章'
+                                    f'（已完成 {done}/{len(instructions)} 章，'
+                                    f'已输出 {streamed_chars} 字）'
+                                ),
+                                section_index=index + 1,
+                                section_total=len(instructions),
+                                section_completed=done,
+                                section_state='streaming',
+                                section_output_chars=streamed_chars,
+                            )
+                            last_stream_progress_at = now
+                            last_wait_progress_at = now
+                        forward_delta(payload)
+                        continue
+                    if event == 'error':
+                        raise payload
+                    if index == 0:
+                        start_background_sections()
+                    sections[index] = payload
+                    if on_section_end is not None:
+                        try:
+                            on_section_end()
+                        except Exception as exc:  # noqa: BLE001 - preview forwarding is best effort.
+                            LOG.warning(
+                                '[Writer] Draft %s section callback failed: %s',
+                                representation, exc,
+                            )
+                    break
+        finally:
+            stop_event.set()
+            for future in futures:
+                if future is not None:
+                    future.cancel()
+            executor.shutdown(wait=False, cancel_futures=True)
         return _json_dumps(sections)
 
     def generate_draft_document(
@@ -1071,7 +1710,9 @@ class WriterToolkitBase:
         root = _temp_root()
         blocks_data = _json_loads(draft_blocks_json, [])
         if not isinstance(blocks_data, list) or not blocks_data:
-            raise ValueError('draft_blocks_json must be a non-empty JSON array.')
+            raise ToolExecutionError(
+                'draft_blocks_json must be a non-empty JSON array.'
+            )
         context_path = _write_input_artifact(
             root, 'writing_context.json', _json_loads(writing_context_json, {}),
             writer_schema('context.WritingContext'),
@@ -1174,12 +1815,12 @@ class WriterToolkitBase:
             title_match = re.search(r'^#\s+(.+)$', value, re.MULTILINE)
             return _json_dumps({
                 'title': title_match.group(1).strip() if title_match else '',
-                'markdown': value,
+                'markdown': materialize_markdown(value),
             })
         document = WriterDocument.model_validate(value)
         return _json_dumps({
             'title': document.title,
-            'markdown': render_document_markdown(document),
+            'markdown': writer_document_to_markdown(document),
         })
 
     def locate_revision_target(
@@ -1243,17 +1884,29 @@ class WriterToolkitBase:
             if visual is None:
                 continue
             if instruction.modify_type != 'create':
-                raise ValueError('visual_instruction is only valid for create instructions.')
+                raise ToolExecutionError(
+                    'visual_instruction is only valid for create instructions.'
+                )
             if visual.visual_type != 'image':
-                raise ValueError('revision visual_instruction.visual_type must be "image".')
+                raise ToolExecutionError(
+                    'revision visual_instruction.visual_type must be "image".'
+                )
             if visual.need_id != instruction.instruction_id:
-                raise ValueError('visual_instruction.need_id must equal instruction_id.')
+                raise ToolExecutionError(
+                    'visual_instruction.need_id must equal instruction_id.'
+                )
             if visual.content_ref != instruction.content_ref:
-                raise ValueError(
+                raise ToolExecutionError(
                     'visual_instruction.content_ref must equal content_ref.'
                 )
             if not visual.purpose.strip() or not visual.required:
-                raise ValueError('revision image visual_instruction must be required and non-empty.')
+                raise ToolExecutionError(
+                    'revision image visual_instruction must be required and non-empty.'
+                )
+            if visual.preferred_strategy not in {None, 'image_generation'}:
+                raise ToolExecutionError(
+                    'revision image preferred_strategy must be null or image_generation.'
+                )
             instructions.append(visual)
         return _json_dumps(VisualPlan(instructions=instructions).model_dump(exclude_defaults=True))
 
@@ -1442,7 +2095,7 @@ class WriterToolkitBase:
             _json_loads(writer_document_json, {}),
         )
         if source.stage == 'outline' and not allow_outline:
-            raise ValueError(
+            raise ToolExecutionError(
                 'A full-document revision cannot use an outline-stage document.',
             )
         applied = _json_loads(self.apply_patch(
@@ -1471,7 +2124,7 @@ class WriterToolkitBase:
     def load_document(self, user_input: str, stage: str = 'final') -> str:
         """Load a Feishu/Lark document and return its IR and target binding."""
         if stage not in {'outline', 'draft', 'final'}:
-            raise ValueError('stage must be outline, draft, or final.')
+            raise ToolExecutionError('stage must be outline, draft, or final.')
         root = _temp_root()
         target = TargetDocument(
             uri=_feishu_url(user_input),
@@ -1511,7 +2164,9 @@ class WriterToolkitBase:
         )
         target = _target_from_document(source)
         if target is None:
-            raise ValueError('source document must contain a cloud target binding.')
+            raise ToolExecutionError(
+                'source document must contain a cloud target binding.'
+            )
         result = WriterResourceTools(
             llm=None, artifact_store=str(root),
         ).apply_patch_to_document(
@@ -1558,7 +2213,7 @@ class WriterToolkitBase:
         """Append a WriterDocument to a provider target."""
         document = WriterDocument.model_validate(_json_loads(content_json, {}))
         if document.stage == 'outline' and not publish_outline:
-            raise ValueError(
+            raise ToolExecutionError(
                 'Refusing to publish outline IR as the final document. '
                 'Set publish_outline=true only for an explicit outline publish.',
             )
@@ -1589,7 +2244,7 @@ class WriterToolkitBase:
         )
         target = _resolve_target(source, target_document_json, target_uri)
         if target is None:
-            raise ValueError('A target provider document is required.')
+            raise ToolExecutionError('A target provider document is required.')
         publish_document = _set_document_editable(document, stage='final')
         resource = WriterResourceTools(llm=None, artifact_store=str(root))
         media_assets = (

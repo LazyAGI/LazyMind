@@ -84,6 +84,36 @@ func TestPreserveExistingWriterImageBlocks(t *testing.T) {
 	}
 }
 
+func TestWriterDocumentIsUnbound(t *testing.T) {
+	if !writerDocumentIsUnbound(json.RawMessage(`{"document_id":"local","blocks":[],"provider_binding":{}}`)) {
+		t.Fatal("local WriterDocument should be unbound")
+	}
+	if writerDocumentIsUnbound(json.RawMessage(`{"document_id":"cloud","blocks":[],"provider_binding":{"provider":"feishu","document_id":"doc-1"}}`)) {
+		t.Fatal("Feishu WriterDocument should not be unbound")
+	}
+}
+
+func TestWriterDocumentRenderSlotIncludesSource(t *testing.T) {
+	if slot, ok := writerDocumentRenderSlot("source_document"); !ok || slot != "source_document" {
+		t.Fatalf("source_document render slot = %q, %v", slot, ok)
+	}
+	if _, ok := writerDocumentSlot("source_document"); ok {
+		t.Fatal("source_document must remain read-only")
+	}
+}
+
+func TestLoadWriterWriteBackArtifact_InlineMarkdown(t *testing.T) {
+	artifact, err := loadWriterWriteBackArtifact(json.RawMessage(
+		`{"schema":"text/markdown","data":"# Draft\n"}`,
+	))
+	if err != nil {
+		t.Fatalf("load inline Markdown: %v", err)
+	}
+	if artifact.Format != "markdown" || artifact.Markdown != "# Draft\n" || artifact.Title != "Draft" {
+		t.Fatalf("unexpected inline Markdown artifact: %+v", artifact)
+	}
+}
+
 func TestLoadWriterWriteBackBaseline_UsesSourceDocumentForInitialSync(t *testing.T) {
 	db := orm.MigrateTestDB(t, &orm.WorkflowSlotRevision{})
 	source := json.RawMessage(`{"data":{"document_id":"feishu-doc","provider_binding":{"provider":"feishu","document_id":"feishu-doc"}}}`)
@@ -106,9 +136,9 @@ func TestLoadWriterWriteBackBaseline_UsesSourceDocumentForInitialSync(t *testing
 func TestLoadWriterWriteBackBaseline_PrefersLatestSyncedDraft(t *testing.T) {
 	db := orm.MigrateTestDB(t, &orm.WorkflowSlotRevision{})
 	source := json.RawMessage(`{"data":{"document_id":"source-doc","provider_binding":{"provider":"feishu","document_id":"source-doc"}}}`)
-	syncedDraft := json.RawMessage(`{"data":{"document_id":"synced-doc","provider_binding":{"provider":"feishu","document_id":"synced-doc"}}}`)
+	syncedDraft := json.RawMessage(`{"data":{"document_id":"synced-doc","provider_binding":{"provider":"feishu","document_id":"synced-doc"}},"meta":{"lazymind_provider_sync":{"confirmed":true}}}`)
 	seedWriterRevision(t, db, "source", "source_document", 1, true, "ai", source)
-	seedWriterRevision(t, db, "draft-1", "draft_document", 1, false, "provider_sync", syncedDraft)
+	seedWriterRevision(t, db, "draft-1", "draft_document", 1, false, "host", syncedDraft)
 	seedWriterRevision(t, db, "draft-2", "draft_document", 2, false, "human", syncedDraft)
 	seedWriterRevision(t, db, "draft-3", "draft_document", 3, true, "human", syncedDraft)
 

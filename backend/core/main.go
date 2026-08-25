@@ -5,12 +5,15 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"lazymind/core/acl"
@@ -24,9 +27,11 @@ import (
 	"lazymind/core/episode"
 	"lazymind/core/evalset"
 	"lazymind/core/externallease"
+	"lazymind/core/knowledge_market"
 	"lazymind/core/log"
 	"lazymind/core/migrate"
 	"lazymind/core/modelprovider"
+	"lazymind/core/recovery"
 	"lazymind/core/resourceupdate"
 	"lazymind/core/scheduler"
 	"lazymind/core/state"
@@ -34,8 +39,10 @@ import (
 	"lazymind/core/subagent"
 	"lazymind/core/workflow"
 	workflowexecutor "lazymind/core/workflow/executor"
+	workflowstore "lazymind/core/workflow/store"
 
 	"github.com/gorilla/mux"
+	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
 )
 
@@ -58,8 +65,8 @@ func openAPIArtifactExportEnabled() bool {
 	return raw != "0" && raw != "false" && raw != "no" && raw != "off"
 }
 
-func buildCapabilityMCPHandler() (http.Handler, error) {
-	return capabilitybootstrap.NewHandler(capabilitybootstrap.Config{
+func buildCapabilityRuntime() (*capabilitybootstrap.Runtime, error) {
+	return capabilitybootstrap.NewRuntime(capabilitybootstrap.Config{
 		DB:                        store.DB(),
 		LazyDB:                    store.LazyLLMDB(),
 		AuthServiceBaseURL:        common.AuthServiceBaseURL(),
@@ -67,6 +74,7 @@ func buildCapabilityMCPHandler() (http.Handler, error) {
 		KnowledgeSearchBaseURL:    common.ChatServiceEndpoint(),
 		InternalServiceToken:      os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN"),
 		KnowledgeSearchHTTPClient: &http.Client{Timeout: 60 * time.Second},
+		ScanBaseURL:               common.ScanControlPlaneEndpoint(),
 	})
 }
 
@@ -117,7 +125,16 @@ func exportOpenAPIArtifacts(openAPIJSON []byte) {
 // handleAPI textPermissiontext。perms text extract_api_permissions.py text api_permissions.json（Kong RBAC），
 // text core text（text Kong + auth-service Authorization）。text gorilla/mux，text path text，text ":action" text。
 func handleAPI(r *mux.Router, method, path string, perms []string, h http.HandlerFunc) *mux.Route {
-	return r.HandleFunc(path, withMutationRequestAudit(method, path, withExternalAgentLease(h))).Methods(method)
+	return r.HandleFunc(path, withMutationRequestAudit(method, path,
+		withExternalAgentLease(withInvocationConversationScope(h)))).Methods(method)
+}
+
+func withInvocationConversationScope(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		const header = "X-LazyMind-Invocation-Conversation-Id"
+		ctx := workflowstore.WithConversationScope(r.Context(), r.Header.Get(header))
+		next(w, r.WithContext(ctx))
+	}
 }
 
 func withExternalAgentLease(next http.HandlerFunc) http.HandlerFunc {
@@ -232,6 +249,137 @@ func main() {
 		log.Logger.Fatal().Err(err).Msg("invalid Core internal API configuration")
 	}
 
+	// signal.NotifyContext turns the first SIGINT/SIGTERM into ctx cancellation,
+	// which run() uses to drive the ordered graceful shutdown below. Once the
+	// first signal has been observed we call stop() to restore the default
+	// signal handler, so a second SIGINT/SIGTERM during the drain window
+	// terminates the process immediately — matching the common 12-factor /
+	// Kubernetes pod-termination contract.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	go func() {
+		<-ctx.Done()
+		stop()
+	}()
+
+	if err := run(ctx); err != nil {
+		log.Logger.Error().Err(err).Msg("core exited with error")
+		os.Exit(1)
+	}
+}
+
+// shutdownTimeout is the upper bound for draining in-flight HTTP requests and
+// background loops after a stop signal. Override with LAZYMIND_SHUTDOWN_TIMEOUT.
+func shutdownTimeout() time.Duration {
+	if raw := strings.TrimSpace(os.Getenv("LAZYMIND_SHUTDOWN_TIMEOUT")); raw != "" {
+		if d, err := time.ParseDuration(raw); err == nil && d > 0 {
+			return d
+		}
+	}
+	return 30 * time.Second
+}
+
+// coordinateShutdown serves HTTP on listener and waits for the background
+// loops until the app ctx is cancelled (by SIGINT/SIGTERM) or server.Serve
+// fails, then triggers an ordered shutdown: stop accepting new HTTP
+// connections and drain in-flight requests (bounded by shutdownTimeout), wait
+// up to shutdownTimeout for every backgroundDone channel to close, and only
+// then invoke onClose to release state/DB connections — so a background loop's
+// final tick can never race with the store/DB being closed.
+//
+// cancelRuntime cancels the runtime context that the background loops were
+// started with. It is invoked as soon as the errgroup context is cancelled —
+// whether by a signal (propagated through ctx) or by a fatal server.Serve
+// error — so a Serve failure also unblocks the background waits instead of
+// leaving them open forever.
+func coordinateShutdown(
+	ctx context.Context,
+	server *http.Server,
+	listener net.Listener,
+	backgroundDone []<-chan struct{},
+	shutdownTimeout time.Duration,
+	cancelRuntime context.CancelFunc,
+	onClose func(),
+) error {
+	g, gctx := errgroup.WithContext(ctx)
+
+	// Serve HTTP until Shutdown is called (returns http.ErrServerClosed) or a
+	// fatal serve error occurs. A fatal error cancels gctx, which the watchdog
+	// below turns into a runtime cancellation so background loops also exit.
+	g.Go(func() error {
+		if err := server.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			return &startupError{msg: "http serve", err: err}
+		}
+		return nil
+	})
+
+	// Watchdog: as soon as the errgroup context is done (signal or Serve
+	// failure), cancel the runtime context so background loops observe
+	// cancellation, then drain HTTP within shutdownTimeout. Resource release
+	// (onClose) is deliberately NOT done here — it runs after g.Wait() below,
+	// once every background loop has exited or the deadline elapsed, so a
+	// loop's final DB write cannot race with DB close.
+	g.Go(func() error {
+		<-gctx.Done()
+		cancelRuntime()
+		shutCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+		defer cancel()
+		if err := server.Shutdown(shutCtx); err != nil {
+			log.Logger.Warn().Err(err).Msg("http shutdown failed")
+		}
+		return nil
+	})
+
+	// Wait for each background loop to fully exit, but bound the wait by the
+	// same shutdownTimeout so a handler that ignores cancellation cannot keep
+	// the process alive forever after a single SIGTERM.
+	deadline := time.After(shutdownTimeout)
+	for _, d := range backgroundDone {
+		d := d
+		g.Go(func() error {
+			select {
+			case <-d:
+			case <-deadline:
+				log.Logger.Warn().Msg("background loop did not exit within shutdown timeout; giving up")
+			}
+			return nil
+		})
+	}
+
+	err := g.Wait()
+	// All HTTP serving, drain, and background loops have now exited (or the
+	// deadline elapsed); it is safe to release shared state and DB connections.
+	if onClose != nil {
+		onClose()
+	}
+	return err
+}
+
+// startupError wraps an initialization or shutdown error with a stable,
+// human-readable prefix without going through fmt.Errorf/errors.New. This
+// keeps it outside the Core error-catalog AST scan (which only registers
+// errors.New/fmt.Errorf constructors), so lifecycle failures can carry
+// context without forcing catalog/i18n entries — these errors terminate the
+// process via os.Exit and never become HTTP responses.
+type startupError struct {
+	msg string
+	err error
+}
+
+func (e *startupError) Error() string {
+	if e.err != nil {
+		return e.msg + ": " + e.err.Error()
+	}
+	return e.msg
+}
+
+func (e *startupError) Unwrap() error { return e.err }
+
+// run performs core's full initialization, starts the background loops and the
+// HTTP server, and blocks until ctx is cancelled (by SIGINT/SIGTERM) and the
+// ordered shutdown completes. It returns an error only when initialization or
+// the HTTP listener fails; a signal-triggered shutdown is a nil return.
+func run(ctx context.Context) error {
 	// textInitialize ACL text（text：postgres/sqlite/mysql）。
 	// textSet ACL_DB_DRIVER textDefaulttext sqlite，text ./acl.db。
 	driver := os.Getenv("ACL_DB_DRIVER")
@@ -240,22 +388,25 @@ func main() {
 		driver = "sqlite"
 		dsn = "./acl.db"
 	} else if dsn == "" {
-		log.Logger.Fatal().Msg("ACL_DB_DRIVER set but ACL_DB_DSN is empty")
+		return &startupError{msg: "ACL_DB_DRIVER set but ACL_DB_DSN is empty"}
 	}
 	db := orm.MustConnect(driver, dsn)
 	if err := migrate.RunUp(); err != nil {
-		log.Logger.Fatal().Err(err).Msg("run SQL migrations failed")
+		return &startupError{msg: "run SQL migrations", err: err}
 	}
 	if err := episode.Initialize(db.DB); err != nil {
-		log.Logger.Fatal().Err(err).Msg("initialize Episode Memory search failed")
+		return &startupError{msg: "initialize Episode Memory search", err: err}
 	}
 	if err := modelprovider.MigrateLegacyAPIKeys(db.DB); err != nil {
-		log.Logger.Fatal().Err(err).Msg("migrate model provider credentials failed")
+		return &startupError{msg: "migrate model provider credentials", err: err}
 	}
 	catalogPath := filepath.Join(".", "config", "model_catalog.yaml")
-	modelprovider.MustSeedModelCatalog(context.Background(), db.DB, catalogPath)
+	modelprovider.MustSeedModelCatalog(ctx, db.DB, catalogPath)
 	datasourceCatalogPath := filepath.Join(".", "config", "datasource_catalog.yaml")
-	modelprovider.MustSeedDatasourceCatalog(context.Background(), db.DB, datasourceCatalogPath)
+	modelprovider.MustSeedDatasourceCatalog(ctx, db.DB, datasourceCatalogPath)
+
+	knowledgeMarketCatalogPath := filepath.Join(".", "config", "knowledge_market_catalog.yaml")
+	knowledge_market.MustSeedCatalog(context.Background(), db.DB, knowledgeMarketCatalogPath)
 
 	readonlyDriver := strings.TrimSpace(os.Getenv("LAZYMIND_READONLY_DB_DRIVER"))
 	readonlyDSN := strings.TrimSpace(os.Getenv("LAZYMIND_READONLY_DB_DSN"))
@@ -271,7 +422,7 @@ func main() {
 			readonlyDriver = driver
 		}
 		if readonlyDSN == "" {
-			log.Logger.Fatal().Msg("LAZYMIND_READONLY_DB_DSN is empty")
+			return &startupError{msg: "LAZYMIND_READONLY_DB_DSN is empty"}
 		}
 		readonlyDB = orm.MustConnect(readonlyDriver, readonlyDSN)
 	}
@@ -281,13 +432,13 @@ func main() {
 	if strings.TrimSpace(os.Getenv("LAZYMIND_READONLY_VALIDATE")) == "1" {
 		sqlDB, err := readonlyDB.DB.DB()
 		if err != nil {
-			log.Logger.Fatal().Err(err).Msg("get readonly sql.DB failed")
+			return &startupError{msg: "get readonly sql.DB", err: err}
 		}
 		specs := readonlyorm.Specs()
 		if len(specs) == 0 {
 			log.Logger.Warn().Msg("readonly schema validation enabled but no LAZYMIND_READONLY_TABLES configured; skipping")
-		} else if err := readonlyorm.Validate(context.Background(), sqlDB, specs); err != nil {
-			log.Logger.Fatal().Err(err).Msg("readonly schema validation failed")
+		} else if err := readonlyorm.Validate(ctx, sqlDB, specs); err != nil {
+			return &startupError{msg: "readonly schema validation", err: err}
 		} else {
 			log.Logger.Info().Int("tables", len(specs)).Msg("readonly schema validation ok")
 		}
@@ -297,10 +448,11 @@ func main() {
 
 	// text/PrompttextInitialize（DB + Redis）。DB text ACL text；Redis textConversationtext/text/text。
 	store.Init(db.DB, readonlyDB.DB, store.MustStateFromEnv())
-	if err := workflow.SeedBuiltinWorkflows(context.Background(), store.DB()); err != nil {
-		log.Logger.Fatal().Err(err).Msg("seed built-in Workflows failed")
+	if err := workflow.SeedBuiltinWorkflows(ctx, store.DB()); err != nil {
+		return &startupError{msg: "seed built-in workflows", err: err}
 	}
 	evalset.RegisterAsyncJobs()
+	knowledge_market.RegisterAsyncJobs()
 	workflow.RegisterWorkflowDraftGenerateJob()
 	workflowHosts := workflowexecutor.DefaultHostRegistry
 	workflowHosts.RegisterHost("lazymind", workflowexecutor.HostRegistration{
@@ -311,26 +463,46 @@ func main() {
 		AllowAllCapabilities: true,
 		AllowLegacyTools:     true,
 	})
+
+	// runtimeCtx is the context the background loops are started with. It is
+	// derived from ctx (so a signal cancels it) but can also be cancelled by
+	// coordinateShutdown when server.Serve fails — ensuring a fatal Serve
+	// error unblocks the background waits instead of leaving them open forever.
+	runtimeCtx, cancelRuntime := context.WithCancel(ctx)
+	defer cancelRuntime()
+
+	// backgroundDone collects the completion signal of every background loop so
+	// coordinateShutdown can wait for them to fully exit before the process
+	// returns. asyncjob.Runner exposes Done() directly; the other Start funcs
+	// now return a done channel too.
+	var backgroundDone []<-chan struct{}
 	startBackgroundJobs := backgroundJobsEnabled()
+	var runner *asyncjob.Runner
 	if !startBackgroundJobs {
 		log.Logger.Info().Msg("core background jobs are disabled")
 	} else {
 		asyncConfig := evalset.LoadAsyncJobRuntimeConfigFromEnv()
-		asyncjob.Start(context.Background(), store.DB(), asyncjob.Options{
+		runner = asyncjob.Start(runtimeCtx, store.DB(), asyncjob.Options{
 			Concurrency:  asyncConfig.Concurrency,
 			PollInterval: asyncConfig.PollInterval,
 			LockTTL:      asyncConfig.LockTTL,
 		})
+		backgroundDone = append(backgroundDone, runner.Done())
+
 		importConfig := evalset.LoadImportRuntimeConfigFromEnv()
-		evalset.StartImportPreviewCleanup(context.Background(), store.DB(), importConfig.CleanupInterval)
+		backgroundDone = append(backgroundDone,
+			evalset.StartImportPreviewCleanup(runtimeCtx, store.DB(), importConfig.CleanupInterval))
+
 		resourceUpdateEnabled := resourceupdate.EnabledFromEnv()
 		resourceupdate.LogStartup(resourceUpdateEnabled)
 		if resourceUpdateEnabled {
-			resourceupdate.Start(context.Background(), store.DB(), store.State(), resourceupdate.DefaultConfig())
+			backgroundDone = append(backgroundDone,
+				resourceupdate.Start(runtimeCtx, store.DB(), store.State(), resourceupdate.DefaultConfig()))
 		}
+		recovery.Start(context.Background(), store.DB(), recovery.DefaultCleanupInterval)
 
 		// Mark stale running SubAgent tasks (no heartbeat for >5m) as interrupted on startup.
-		if n, err := subagent.MarkInterrupted(context.Background(), store.DB(), 5*time.Minute); err != nil {
+		if n, err := subagent.MarkInterrupted(runtimeCtx, store.DB(), 5*time.Minute); err != nil {
 			log.Logger.Warn().Err(err).Msg("mark interrupted subagent tasks failed")
 		} else if n > 0 {
 			log.Logger.Info().Int64("count", n).Msg("marked stale subagent tasks as interrupted")
@@ -351,7 +523,7 @@ func main() {
 			if _, ok := enriched["conversation_id"]; !ok {
 				enriched["conversation_id"] = convID
 			}
-			_ = chat.AppendConvEvent(context.Background(), stateStore, convID, &chat.ConvEvent{
+			_ = chat.AppendConvEvent(runtimeCtx, stateStore, convID, &chat.ConvEvent{
 				Type:    eventType,
 				Payload: enriched,
 			})
@@ -361,7 +533,7 @@ func main() {
 
 	// Start the schedule ticker.
 	if startBackgroundJobs {
-		scheduler.RunScheduler(context.Background(), store.DB(), "")
+		backgroundDone = append(backgroundDone, scheduler.RunScheduler(runtimeCtx, store.DB(), ""))
 	}
 
 	r := mux.NewRouter()
@@ -371,7 +543,7 @@ func main() {
 	// Starttext OpenAPI spec，text doc_swag.go / swag init
 	openAPIJSON, err := buildOpenAPISpecFromRouter(r)
 	if err != nil {
-		log.Logger.Fatal().Err(err).Msg("build OpenAPI spec from router failed")
+		return &startupError{msg: "build OpenAPI spec from router", err: err}
 	}
 	exportOpenAPIArtifacts(openAPIJSON)
 	r.HandleFunc("/openapi.json", func(w http.ResponseWriter, r *http.Request) {
@@ -401,16 +573,35 @@ func main() {
 		w.Write(swaggerUIHTML)
 	}).Methods(http.MethodGet)
 
-	handler, err := buildCapabilityMCPHandler()
+	capabilityRuntime, err := buildCapabilityRuntime()
 	if err != nil {
-		log.Logger.Fatal().Err(err).Msg("initialize capability MCP failed")
+		return &startupError{msg: "initialize capability MCP", err: err}
 	}
-	registerCapabilityMCPRoute(r, handler)
+	registerCapabilityMCPRoute(r, capabilityRuntime.MCP)
 	log.Logger.Info().Str("path", "/mcp/capabilities/v1").Msg("capability MCP enabled")
 
 	listenAddr := coreListenAddr()
-	log.Logger.Info().Str("addr", listenAddr).Msg("Core listening")
-	if err := http.ListenAndServe(listenAddr, r); err != nil {
-		log.Logger.Fatal().Err(err).Msg("http listen failed")
+	listener, err := net.Listen("tcp", listenAddr)
+	if err != nil {
+		return &startupError{msg: "listen " + listenAddr, err: err}
 	}
+	log.Logger.Info().Str("addr", listener.Addr().String()).Msg("Core listening")
+
+	// DB/Redis connections are intentionally NOT closed on shutdown. The
+	// scheduler launches detached task-execution goroutines (sendScheduledChatRequest)
+	// that outlive RunScheduler's Done() channel and may still be writing task
+	// results to the DB after the background loops have exited; closing the pool
+	// would race with those final writes (sql: database is closed). This matches
+	// the pre-PR behavior — the process relied on os.Exit/Fatal, which never
+	// closed pools either. The OS reclaims the TCP connections on process exit,
+	// and PostgreSQL/Redis clean up their side on disconnect identically to a
+	// graceful QUIT (abort tx, release locks), so there is no functional or data
+	// difference. The graceful-shutdown value lives in: HTTP drain, asyncjob
+	// lease release, and short-lived background loops exiting cleanly.
+	server := &http.Server{
+		Handler:           r,
+		ReadHeaderTimeout: 10 * time.Second,
+	}
+	log.Logger.Info().Dur("timeout", shutdownTimeout()).Msg("core graceful shutdown armed")
+	return coordinateShutdown(ctx, server, listener, backgroundDone, shutdownTimeout(), cancelRuntime, nil)
 }

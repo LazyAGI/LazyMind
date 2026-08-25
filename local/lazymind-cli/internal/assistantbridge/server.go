@@ -17,14 +17,16 @@ import (
 
 	"lazymind/agentconnector/internal/adapters/codex"
 	"lazymind/agentconnector/internal/adapters/mcpclient"
+	"lazymind/agentconnector/internal/codexcontrol"
 	"lazymind/agentconnector/internal/mcpbridge"
 )
 
-const DefaultAddress = "127.0.0.1:19091"
+const DefaultAddress = codexcontrol.DefaultAddress
 
 type Server struct {
 	address string
 	bridge  *mcpbridge.Bridge
+	control *codexcontrol.Controller
 	mu      sync.Mutex
 	stop    context.CancelFunc
 }
@@ -45,7 +47,11 @@ func New(address string, bridge *mcpbridge.Bridge) (*Server, error) {
 	if host != "localhost" && (ip == nil || !ip.IsLoopback()) {
 		return nil, errors.New("Assistant Bridge must listen on the loopback interface")
 	}
-	return &Server{address: address, bridge: bridge}, nil
+	control, err := codexcontrol.New()
+	if err != nil {
+		return nil, err
+	}
+	return &Server{address: address, bridge: bridge, control: control}, nil
 }
 
 func Start(ctx context.Context, address string) (map[string]any, error) {
@@ -70,6 +76,7 @@ func Start(ctx context.Context, address string) (map[string]any, error) {
 		return nil, err
 	}
 	command := exec.Command(self, "assistant", "serve", "--listen", address)
+	command.SysProcAttr = detachedProcessAttributes()
 	command.Stdout = logFile
 	command.Stderr = logFile
 	if err := command.Start(); err != nil {
@@ -105,7 +112,20 @@ func Stop(ctx context.Context, address string) error {
 	if response.StatusCode < 200 || response.StatusCode >= 300 {
 		return fmt.Errorf("Assistant Bridge stop returned HTTP %d", response.StatusCode)
 	}
-	return nil
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := Health(ctx, address); err != nil {
+			return nil
+		}
+		timer := time.NewTimer(50 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return errors.New("Assistant Bridge did not stop before the deadline")
 }
 
 func Health(ctx context.Context, address string) (map[string]any, error) {
@@ -182,13 +202,16 @@ func (s *Server) routes() http.Handler {
 		writeJSON(writer, http.StatusOK, map[string]any{"ok": true})
 		go s.stop()
 	})
+	s.control.RegisterRoutes(mux)
 	return s.allowLocalBrowser(mux)
 }
+
+func (s *Server) CodexControl() *codexcontrol.Controller { return s.control }
 
 func (s *Server) handleAgentStatuses(writer http.ResponseWriter, request *http.Request) {
 	probe, probeErr := s.bridge.Probe(request.Context())
 	statuses := make(map[string]any, 5)
-	codexAdapter, err := codex.New("", "", s.bridge)
+	codexAdapter, err := codex.NewWithControl("", "", s.bridge, s.address, s.control)
 	if err != nil {
 		writeError(writer, err)
 		return
@@ -237,7 +260,7 @@ func (s *Server) handleAgentAction(writer http.ResponseWriter, request *http.Req
 func (s *Server) agentStatus(ctx context.Context, agent string) (any, error) {
 	agent = strings.ToLower(strings.TrimSpace(agent))
 	if agent == "codex" {
-		adapter, err := codex.New("", "", s.bridge)
+		adapter, err := codex.NewWithControl("", "", s.bridge, s.address, s.control)
 		if err != nil {
 			return nil, err
 		}
@@ -253,7 +276,7 @@ func (s *Server) agentStatus(ctx context.Context, agent string) (any, error) {
 func (s *Server) agentAction(ctx context.Context, agent, action string) (any, error) {
 	agent = strings.ToLower(strings.TrimSpace(agent))
 	if agent == "codex" {
-		adapter, err := codex.New("", "", s.bridge)
+		adapter, err := codex.NewWithControl("", "", s.bridge, s.address, s.control)
 		if err != nil {
 			return nil, err
 		}

@@ -821,6 +821,7 @@ func treeRequestProps() map[string]any {
 		"auth_connection_id", stringSchema(),
 		"provider_options", objectSchema(),
 		"include_files", boolSchema(),
+		"direct", boolSchema(),
 		"list_mode", schemaRef("ListMode"),
 		"page_size", integerSchema(),
 		"cursor", stringSchema(),

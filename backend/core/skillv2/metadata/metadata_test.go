@@ -7,12 +7,15 @@ import (
 )
 
 func TestParseRequired(t *testing.T) {
-	meta, err := ParseRequired([]byte("---\nname: imported-skill\ndescription: Imported description\ncategory: ignored\n---\n# Skill\n"))
+	meta, err := ParseRequired([]byte("---\nname: imported-skill\ndescription: Imported description\nversion: 1.2.3\ncategory: external\ntags: [test, test, '  verified  ']\n---\n# Skill\n"))
 	if err != nil {
 		t.Fatalf("ParseRequired returned error: %v", err)
 	}
-	if meta.Name != "imported-skill" || meta.Description != "Imported description" {
+	if meta.Name != "imported-skill" || meta.Description != "Imported description" || meta.Version != "1.2.3" || meta.Category != "external" {
 		t.Fatalf("ParseRequired metadata = %#v", meta)
+	}
+	if strings.Join(meta.Tags, ",") != "test,verified" {
+		t.Fatalf("ParseRequired tags = %#v", meta.Tags)
 	}
 }
 

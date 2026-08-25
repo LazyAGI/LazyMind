@@ -29,6 +29,7 @@ class FeishuInboundMessage:
     sender_is_bot: bool
     text: str
     image_key: str = ''
+    message_type: str = ''
 
 
 @dataclass(frozen=True, slots=True)

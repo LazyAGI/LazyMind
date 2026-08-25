@@ -184,7 +184,7 @@ func testRealExternalAgentChat(t *testing.T, provider string) {
 		HostOnline bool   `json:"host_online"`
 		Available  bool   `json:"available"`
 	}
-	realAPI(t, ctx, http.MethodGet, serverURL+"/api/core/external-chat/hosts/"+url.PathEscape(provider)+":status", token, nil, &hostStatus)
+	realAPI(t, ctx, http.MethodGet, serverURL+"/api/core/external-chat/hosts/"+url.PathEscape(provider)+"/status", token, nil, &hostStatus)
 	if !hostStatus.Installed || !hostStatus.HostOnline || !hostStatus.Available {
 		t.Fatalf("real %s Agent host is not ready: %#v", provider, hostStatus)
 	}
@@ -312,6 +312,52 @@ func testRealExternalAgentChat(t *testing.T, provider string) {
 	t.Logf("real external Chat passed: conversation=%s histories=%s,%s,%s workflow=%s thread=%s",
 		conversationID, first.HistoryID, second.HistoryID, third.HistoryID,
 		latestWorkflow.Session.ID, runPage.Runs[0].ProviderThreadID)
+}
+
+func TestRealCodexHostUsesCompleteDistribution(t *testing.T) {
+	if os.Getenv("LAZYMIND_REAL_CODEX_HOST_E2E") != "1" {
+		t.Skip("set LAZYMIND_REAL_CODEX_HOST_E2E=1 with the Assistant Bridge active")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	serverURL, token := realCredentials(t)
+	conversationID := fmt.Sprintf("codex-host-%x", time.Now().UnixNano())
+	result := runExternalChatTurn(t, ctx, serverURL, token, "codex", conversationID,
+		"必须调用 lazymind MCP 的 workflow.list 一次；真实返回后只回复 CODEX_HOST_DISTRIBUTION_OK。", true)
+	if !strings.Contains(result.Message, "CODEX_HOST_DISTRIBUTION_OK") ||
+		strings.Count(result.Message, "CODEX_HOST_DISTRIBUTION_OK") != 1 {
+		t.Fatalf("Codex Host result=%q", result.Message)
+	}
+	projection := realHistoryExecutionProjection(
+		t, ctx, serverURL, token, conversationID, result.HistoryID,
+	)
+	if projection.Provider != "codex" || projection.Status != "completed" ||
+		projection.Invocation.Total == 0 {
+		t.Fatalf("Codex Host execution=%#v", projection)
+	}
+}
+
+func TestRealLazyBoundExternalSessionResume(t *testing.T) {
+	if os.Getenv("LAZYMIND_REAL_BOUND_SESSION_E2E") != "1" {
+		t.Skip("set LAZYMIND_REAL_BOUND_SESSION_E2E=1 with a bound provider session")
+	}
+	provider := strings.TrimSpace(os.Getenv("LAZYMIND_REAL_BOUND_SESSION_PROVIDER"))
+	conversationID := strings.TrimSpace(os.Getenv("LAZYMIND_REAL_BOUND_SESSION_CONVERSATION"))
+	if provider == "" || conversationID == "" {
+		t.Fatal("LAZYMIND_REAL_BOUND_SESSION_PROVIDER and LAZYMIND_REAL_BOUND_SESSION_CONVERSATION are required")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	defer cancel()
+	serverURL, token := realCredentials(t)
+	result := runExternalChatTurn(t, ctx, serverURL, token, provider, conversationID,
+		"调用 lazymind MCP 的 workflow.list 一次；真实返回后回复 LAZY_BOUND_RESUME_OK。", false)
+	if !strings.Contains(result.Message, "LAZY_BOUND_RESUME_OK") {
+		t.Fatalf("lazy-bound %s result=%q", provider, result.Message)
+	}
+	projection := realHistoryExecutionProjection(t, ctx, serverURL, token, conversationID, result.HistoryID)
+	if projection.Provider != provider || projection.Status != "completed" || projection.Invocation.Total == 0 {
+		t.Fatalf("lazy-bound execution=%#v", projection)
+	}
 }
 
 func TestRealExternalAgentChatStop(t *testing.T) {
@@ -683,7 +729,7 @@ func waitForRealCore(t *testing.T, ctx context.Context, serverURL, token string)
 	deadline := time.Now().Add(60 * time.Second)
 	for time.Now().Before(deadline) {
 		request, err := http.NewRequestWithContext(ctx, http.MethodGet,
-			serverURL+"/api/core/external-chat/hosts/codex:status", nil)
+			serverURL+"/api/core/external-chat/hosts/codex/status", nil)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Button, Drawer, Empty, Popconfirm, Progress, Space, Tag, Tooltip } from 'antd';
-import { CheckCircleFilled, ClockCircleOutlined, CloseOutlined, DeleteOutlined } from '@ant-design/icons';
+import { CheckCircleFilled, ClockCircleOutlined, CloseOutlined, DeleteOutlined, FolderOutlined } from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 import type { Task } from './api';
 import { axiosInstance, BASE_URL } from '@/components/request';
@@ -10,6 +10,7 @@ interface TaskDetailProps {
   onClose: () => void;
   onOpenConversation: (conversationId: string) => void;
   onOpenGraph?: (sessionId: string) => void;
+  onArchive?: (task: Task) => void;
   onDelete?: (task: Task) => Promise<void> | void;
 }
 
@@ -17,7 +18,7 @@ const isDone = (status: string) => ['completed', 'succeeded'].includes(status);
 
 type PlannedStep = { step_id: string; status: string };
 
-export default function TaskDetail({ task, onClose, onOpenConversation, onOpenGraph, onDelete }: TaskDetailProps) {
+export default function TaskDetail({ task, onClose, onOpenConversation, onOpenGraph, onArchive, onDelete }: TaskDetailProps) {
   const { t } = useTranslation();
   const [plannedSteps, setPlannedSteps] = useState<PlannedStep[] | null>(null);
   useEffect(() => {
@@ -52,7 +53,8 @@ export default function TaskDetail({ task, onClose, onOpenConversation, onOpenGr
       closeIcon={<CloseOutlined />}
       footer={task ? (
         <Space.Compact block>
-          {onDelete ? <Popconfirm title='删除这条任务记录？' description='等待中或执行中的任务将同时停止。' okText='删除' cancelText='取消' okButtonProps={{ danger: true }} onConfirm={() => onDelete(task)}><Button danger size='large' icon={<DeleteOutlined />}>删除任务</Button></Popconfirm> : null}
+          {onArchive ? <Button size='large' icon={<FolderOutlined />} disabled={!task.conversation_id} onClick={() => onArchive(task)}>{t('settingsPage.recovery.archiveAction')}</Button> : null}
+          {onDelete ? <Popconfirm title={t('taskCenter.trashTaskTitle', { name: task.conversation_title || task.title || t('taskCenter.noTitle') })} description={t('taskCenter.trashTaskDescription')} okText={t('settingsPage.recovery.moveToTrash')} cancelText={t('common.cancel')} okButtonProps={{ danger: true }} onConfirm={() => onDelete(task)}><Button danger size='large' icon={<DeleteOutlined />}>{t('taskCenter.trashTask')}</Button></Popconfirm> : null}
           <Tooltip title={!task.conversation_id ? '尚未创建关联对话，依赖就绪后才可打开' : undefined}>
             <Button type='primary' block size='large' disabled={!task.conversation_id} onClick={() => task.conversation_id && onOpenConversation(task.conversation_id)}>
               {t('taskCenter.openConversation')}
@@ -112,7 +114,7 @@ export function StatusTag({ status, onClick }: { status: string; onClick?: () =>
   const { t } = useTranslation();
   const color = isDone(status) ? 'success' : status === 'failed' ? 'error' : status === 'running' ? 'processing' : 'warning';
   const key = status === 'succeeded' ? 'Completed' : status === 'waiting_inputs' ? 'WaitingInputs' : `${status.charAt(0).toUpperCase()}${status.slice(1)}`;
-  return <Tag className={onClick ? 'clickable-status' : undefined} color={color} onClick={(event) => { event.stopPropagation(); onClick?.(); }}>{t(`taskCenter.status${key}`, { defaultValue: status })}</Tag>;
+  return <Tag className={onClick ? 'clickable-status' : undefined} color={color} onClick={(event: React.MouseEvent<HTMLElement>) => { event.stopPropagation(); onClick?.(); }}>{t(`taskCenter.status${key}`, { defaultValue: status })}</Tag>;
 }
 
 export function formatDate(value?: string) {

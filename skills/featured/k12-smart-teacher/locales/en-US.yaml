@@ -1,0 +1,109 @@
+locale: en-US
+
+classification:
+  category: Education tutoring
+  tags:
+    - K12 education
+    - Homework review
+    - Error analysis
+    - Practice generation
+
+presentation:
+  card:
+    title: K12 smart teacher
+    description: Review homework, explain mistakes, and generate tiered practice across nine K12 subjects
+    output_type: document
+    output_label: Tutoring plan
+    cover_asset: cover
+    result_summary: Turn mistake analysis into printable, adjustable explanations and practice materials
+  detail:
+    title: K12 smart teacher
+    description: Use the student's grade, subject, curriculum, and homework to review answers, explain mistakes, and generate tiered practice.
+    attachment_hint: Clear homework or test images, grade, subject, and curriculum version
+
+tasks:
+  - id: homework-review
+    selector:
+      title: Homework review and tutoring
+      description: Check each answer, diagnose mistakes, and provide explanations and reinforcement
+      output_label: Mistake tutoring report
+    launch:
+      prompt_short: Review my uploaded homework, explain the mistakes, and provide targeted practice.
+      prompt: Review the uploaded homework or test question by question. First confirm the student's grade, subject, and curriculum. For every mistake, explain the cause, correct approach, and key concept in an accessible way, and provide useful video-search keywords. Finish with a small set of transfer exercises and answers. Ask for missing details when the image or context is insufficient.
+    replay:
+      steps:
+        - title: Identify subject and level
+          description: Confirm grade, subject, curriculum, and whether every question is readable
+        - title: Review each answer
+          description: Record correct answers, mistakes, and missing information
+        - title: Diagnose mistakes
+          description: Identify concept gaps, reasoning errors, calculations, or expression issues
+        - title: Explain the lesson
+          description: Use clear steps, relatable analogies, and video-search suggestions
+        - title: Generate reinforcement
+          description: Provide tiered practice, answers, and common-error reminders
+    result:
+      template: generic_report_v1
+      eyebrow: Mistake tutoring report
+      title: Homework review and personalized reinforcement plan
+      summary: Deliver review results, mistake causes, explanations, and follow-up practice
+      highlights:
+        - Question-by-question review and knowledge-gap list
+        - Mistake diagnosis and visual explanations
+        - Transfer practice, answers, and study suggestions
+
+  - id: graded-practice
+    selector:
+      title: Tiered practice generation
+      description: Generate foundation, intermediate, and challenge exercises for a target topic
+      output_label: Tiered exercises
+    launch:
+      prompt_short: Generate tiered practice for the specified grade, subject, and topic.
+      prompt: Use the grade, subject, curriculum, and topic I provide. Begin with a concise worked example, then create foundation, intermediate, and challenge exercises covering typical question types and common mistakes. Include answers, explanations, and error reminders. If the topic is outside the built-in bank, produce a useful general version and state what curriculum details would improve it.
+    replay:
+      steps:
+        - title: Confirm practice scope
+          description: Clarify grade, subject, curriculum, topic, quantity, and difficulty
+        - title: Summarize the method
+          description: Extract core concepts, solution steps, and common mistakes
+        - title: Design the difficulty tiers
+          description: Organize foundation, intermediate, and challenge questions
+        - title: Generate answer explanations
+          description: Provide answers, key steps, and error reminders for every question
+    result:
+      template: generic_report_v1
+      eyebrow: Tiered exercises
+      title: Foundation · intermediate · challenge practice
+      summary: Produce exercises, answers, and explanations matched to the student's stage and gaps
+      highlights:
+        - Three difficulty tiers and representative question types
+        - Standard answers and key-step explanations
+        - Common-error reminders and review suggestions
+
+  - id: printable-paper
+    selector:
+      title: Printable practice paper
+      description: Turn mistakes and learning gaps into structured printable materials
+      output_label: Printable practice paper
+    launch:
+      prompt_short: Turn the mistakes and weak topics into a printable practice paper.
+      prompt: Use the mistakes, grade, subject, and weak topics I provide to create a clear printable practice paper. Include a title, student information area, tiered questions, answer space, reference answers, and explanations. Prefer a Word document. If Word dependencies are unavailable, automatically fall back to Markdown and explain how I can use or convert the file.
+    replay:
+      steps:
+        - title: Collect learning materials
+          description: Organize mistakes, topics, grade, subject, and output requirements
+        - title: Plan the paper structure
+          description: Arrange question types, difficulty, quantity, answer space, and scoring
+        - title: Generate questions and answers
+          description: Produce the paper, reference answers, and key explanations
+        - title: Create the printable file
+          description: Prefer Word and automatically fall back to Markdown when needed
+    result:
+      template: generic_report_v1
+      eyebrow: Printable practice paper
+      title: Personalized mistake-reinforcement paper
+      summary: Create a printable file with exercises, answer space, answers, and explanations
+      highlights:
+        - Complete structure suitable for printing
+        - Tiered questions targeting learning gaps
+        - Word-first output with Markdown fallback

@@ -15,8 +15,19 @@ class JsonCipher:
     _LEGACY_PREFIX = 'u1:'
     _CONTEXT = b'channel-gateway:user:v1\x00'
 
-    def __init__(self, master_key_path: str):
+    def __init__(
+        self,
+        master_key_path: str,
+        *,
+        key_purpose: str = 'credential',
+    ):
+        purpose = key_purpose.strip()
+        if not purpose:
+            raise ValueError('key_purpose is required')
         self._master_key = self._load_or_create_master_key(master_key_path)
+        self._key_info = (
+            f'channel-gateway:{purpose}-key:v2'.encode('utf-8')
+        )
 
     @classmethod
     def _owner_context(cls, owner_user_id: str) -> bytes:
@@ -61,7 +72,7 @@ class JsonCipher:
             algorithm=SHA256(),
             length=32,
             salt=context,
-            info=b'channel-gateway:credential-key:v2',
+            info=self._key_info,
         ).derive(self._master_key)
 
     @staticmethod

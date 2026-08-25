@@ -377,6 +377,8 @@ interface ChatInputProps {
   hasWorkflowSession?: boolean;
   /** Optional case-driven category selectors shown in the welcome composer. */
   showcaseSelection?: ShowcaseSelection;
+  /** Resources bound by a curated experience and included in every send. */
+  boundMentions?: ChatMention[];
   multimodalEmbeddingReady?: boolean | null;
   rerankReady?: boolean | null;
   disabled?: boolean;
@@ -395,21 +397,10 @@ interface ChatInputProps {
   runInBackground?: boolean;
 }
 
-export interface ShowcaseSelectionOption {
+export interface ShowcaseSelection {
   value: string;
   label: string;
-  description?: string;
-  prompt?: string;
-}
-
-export interface ShowcaseSelection {
-  primaryValue: string;
-  primaryLabel: string;
-  primaryAriaLabel: string;
-  secondaryValue?: string;
-  secondaryOptions?: ShowcaseSelectionOption[];
-  secondaryAriaLabel: string;
-  onSecondaryChange?: (value: string) => void;
+  ariaLabel: string;
 }
 
 export interface SkillDepositStats {
@@ -498,6 +489,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       initialConversationSettings,
       hasWorkflowSession,
       showcaseSelection,
+      boundMentions = [],
       runInBackground = false,
     } = props;
     const fileListRef = useRef<ImageUploadImperativeProps | null>(null);
@@ -516,6 +508,13 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const { t } = useTranslation();
     const [text, setText] = useState("");
     const [mentions, setMentions] = useState<ChatMention[]>([]);
+    const effectiveMentions = useMemo(() => {
+      const merged = new Map<string, ChatMention>();
+      for (const mention of [...boundMentions, ...mentions]) {
+        merged.set(`${mention.type}:${mention.resource_id}`, mention);
+      }
+      return [...merged.values()];
+    }, [boundMentions, mentions]);
     const [contextRuntimeSettings, setContextRuntimeSettings] = useState(initialConversationSettings);
     const [contextUsageReset, setContextUsageReset] = useState(0);
     const [addMenuOpen, setAddMenuOpen] = useState(false);
@@ -895,8 +894,14 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       setNewMessage(false);
       const sendParams: SendMessageParams = {
         text: normalizedText,
+        chatConfigSnapshot: {
+          knowledgeBaseId: [...(chatConfig?.knowledgeBaseId ?? [])],
+          creators: [...(chatConfig?.creators ?? [])],
+          tags: [...(chatConfig?.tags ?? [])],
+          databaseBaseId: chatConfig?.databaseBaseId,
+        },
         thinking_depth: thinkingDepth,
-        mentions,
+        mentions: effectiveMentions,
         citeMessage: normalizedCiteMessages.join("\n\n"),
         citeMessages: normalizedCiteMessages,
         citeHistoryIds: citeHistoryIds?.filter(
@@ -1314,42 +1319,19 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                           aria-hidden="true"
                         />
                         <Select
-                          aria-label={showcaseSelection.primaryAriaLabel}
+                          aria-label={showcaseSelection.ariaLabel}
                           className="chat-showcase-category-select"
                           size="small"
-                          value={showcaseSelection.primaryValue}
+                          value={showcaseSelection.value}
                           disabled={disabled || isStreaming}
                           options={[
                             {
-                              value: showcaseSelection.primaryValue,
-                              label: showcaseSelection.primaryLabel,
+                              value: showcaseSelection.value,
+                              label: showcaseSelection.label,
                             },
                           ]}
                         />
                       </span>
-                      {showcaseSelection.secondaryOptions?.length ? (
-                        <span className="chat-showcase-control chat-showcase-scene-control">
-                          <span className="chat-showcase-scene-icon" aria-hidden="true">
-                            <i />
-                            <i />
-                            <i />
-                            <i />
-                          </span>
-                          <Select
-                            aria-label={showcaseSelection.secondaryAriaLabel}
-                            className="chat-showcase-category-select chat-showcase-subcategory-select"
-                            size="small"
-                            value={showcaseSelection.secondaryValue}
-                            disabled={disabled || isStreaming}
-                            onChange={showcaseSelection.onSecondaryChange}
-                            options={showcaseSelection.secondaryOptions.map((option) => ({
-                              value: option.value,
-                              label: option.label,
-                              title: option.description,
-                            }))}
-                          />
-                        </span>
-                      ) : null}
                     </div>
                   ) : null}
                   <Select
@@ -1433,7 +1415,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       resetKey={`${sessionId ?? "new"}:${contextUsageReset}`}
                       staleKey={JSON.stringify({
                         text: value,
-                        mentions: mentions.map((item) => [item.type, item.resource_id]),
+                        mentions: effectiveMentions.map((item) => [item.type, item.resource_id]),
                         files: fileList.map((item) => item.uid),
                         cites: normalizedCiteMessages,
                         knowledge: {
@@ -1464,7 +1446,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                               uri: file.uri,
                             })),
                           ],
-                          mentions,
+                          mentions: effectiveMentions,
                           cite_messages: normalizedCiteMessages,
                           filters: {
                             kb_id: chatConfig?.knowledgeBaseId ?? [],
