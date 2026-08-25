@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
+from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools.agent import skill_manager as skill_manager_mod
 from lazyllm.tools.agent.skill_manager import SkillManager
 
@@ -51,7 +54,7 @@ def test_run_script_uses_fs_materialize_dir_without_source_specific_branch(monke
     assert calls[0]['cwd'] == fs.materialized[0][1]
 
 
-def test_run_script_reports_missing_materialized_script(monkeypatch):
+def test_run_script_rejects_path_outside_scripts():
     fs = MaterializingFS()
     manager = SkillManager(dir='', fs=fs)
     manager._skills_index = {
@@ -62,8 +65,8 @@ def test_run_script_reports_missing_materialized_script(monkeypatch):
         }
     }
 
-    result = manager.run_script('pkg', 'references/check.py')
+    with pytest.raises(ToolExecutionError) as exc_info:
+        manager.run_script('pkg', 'references/check.py')
 
-    assert result['status'] == 'missing'
-    assert result['path'].endswith('/references/check.py')
-    assert fs.materialized[0][0] == 'remote://skills/coding/pkg'
+    assert 'must be under scripts/' in str(exc_info.value)
+    assert fs.materialized == []

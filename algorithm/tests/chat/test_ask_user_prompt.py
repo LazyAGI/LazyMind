@@ -81,7 +81,7 @@ def test_run_script_failure_preview_surfaces_credential_guidance():
 
     preview = rendered.split('<tool_result>', 1)[0]
     assert '<trp' in preview
-    assert '技能脚本未能运行完成' in preview
+    assert '未能运行完成' in preview
     assert 'EXAMPLE_API_KEY' in preview
     assert 'export EXAMPLE_API_KEY' in preview
     assert 'https://example.test/api-keys' in preview

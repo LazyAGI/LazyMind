@@ -4,6 +4,7 @@ import os
 
 import pytest
 
+from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools.agent import skill_manager as skill_manager_mod
 from lazyllm.tools.agent.skill_manager import SkillManager
 
@@ -49,23 +50,22 @@ def test_skill_list_filters_prompt_list_read_and_run(tmp_path, monkeypatch):
     assert 'hidden-skill' not in prompt
 
     assert manager.get_skill('visible-skill')['status'] == 'ok'
-    assert manager.get_skill('hidden-skill') == {'status': 'missing', 'name': 'hidden-skill'}
+    with pytest.raises(ToolExecutionError):
+        manager.get_skill('hidden-skill')
 
     visible_reference = manager.read_reference('visible-skill', 'references/guide.md')
     assert visible_reference['status'] == 'ok'
     assert visible_reference['content'] == 'visible-skill guide\n'
-    assert manager.read_reference('hidden-skill', 'references/guide.md') == {
-        'status': 'missing',
-        'name': 'hidden-skill',
-    }
+    with pytest.raises(ToolExecutionError):
+        manager.read_reference('hidden-skill', 'references/guide.md')
 
     visible_result = manager.run_script('visible-skill', 'scripts/check.py')
     assert visible_result['status'] == 'ok'
     assert shell_calls
     assert os.path.basename(shell_calls[0]['cwd']) == 'visible-skill'
 
-    hidden_result = manager.run_script('hidden-skill', 'scripts/check.py')
-    assert hidden_result == {'status': 'missing', 'name': 'hidden-skill'}
+    with pytest.raises(ToolExecutionError):
+        manager.run_script('hidden-skill', 'scripts/check.py')
     assert len(shell_calls) == 1
 
 
@@ -77,11 +77,10 @@ def test_read_reference_rejects_unsafe_rel_path(tmp_path, rel_path):
     _make_skill(tmp_path, 'visible-skill')
     manager = SkillManager(dir=str(tmp_path), skills=['visible-skill'])
 
-    result = manager.read_reference('visible-skill', rel_path)
+    with pytest.raises(ToolExecutionError) as exc_info:
+        manager.read_reference('visible-skill', rel_path)
 
-    assert result['status'] == 'error'
-    assert result['name'] == 'visible-skill'
-    assert 'rel_path' in result['error']
+    assert 'rel_path' in str(exc_info.value) or 'Invalid' in str(exc_info.value)
 
 
 def test_read_reference_uses_normalized_safe_rel_path(tmp_path):

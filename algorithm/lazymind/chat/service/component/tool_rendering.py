@@ -394,15 +394,29 @@ def _truncate_tool_result_preview(value: Any, max_length: int = _MAX_TOOL_RESULT
 
 
 def _tool_result_status(result: Any) -> str:
-    if isinstance(result, dict):
-        if result.get('ok') is False and result.get('needs_approval') is True:
-            return 'needs_approval'
-        if result.get('ok') is False:
+    if not isinstance(result, dict):
+        return 'ok'
+    if result.get('ok') is False and result.get('needs_approval') is True:
+        return 'needs_approval'
+    if result.get('ok') is False:
+        return 'failed'
+    payload = result.get('value') if result.get('ok') is True and isinstance(result.get('value'), dict) else result
+    if isinstance(payload, dict):
+        if payload is not result:
+            nested = _tool_result_status(payload)
+            if nested != 'ok':
+                return nested
+        status = str(payload.get('status') or '').strip().lower()
+        if status in {'failed', 'error', 'missing'}:
+            return 'failed'
+        if payload.get('missing_env') or payload.get('error_type') == 'MissingCredential':
             return 'failed'
     return 'ok'
 
 
 def _tool_result_failure_detail(result: Any) -> str:
+    if isinstance(result, dict) and result.get('ok') is True and isinstance(result.get('value'), dict):
+        return _tool_result_failure_detail(result['value'])
     if isinstance(result, dict):
         error = result.get('error')
         if isinstance(error, dict):
@@ -612,7 +626,7 @@ def _tool_result_preview(tool_name: str, result: Any, value: str = '', language:
     if status == 'failed':
         return _render_preview_template(
             tool_name,
-            value or _tool_result_failure_detail(result),
+            _tool_result_failure_detail(result) or value,
             _language_templates(language, _TOOL_RESULT_FAILURE_TEMPLATES, _ZH_TOOL_RESULT_FAILURE_TEMPLATES),
             _language_fallback(
                 language,
