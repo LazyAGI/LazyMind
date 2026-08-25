@@ -114,10 +114,10 @@
       "package_file": "packages/bsk_8540F063D5202C3CE7D9B6F93366.zip"
     },
     {
-      "key": "de4520e19cdaef81c7d61871e6943c9b6e216fc4",
-      "uid": "bsk_44DD4EDC51C66168649C831765C0",
-      "source_url": "https://github.com/xiaoyanZzz/LazyRAG/archive/de4520e19cdaef81c7d61871e6943c9b6e216fc4.zip",
-      "resolved_url": "https://github.com/xiaoyanZzz/LazyRAG/archive/de4520e19cdaef81c7d61871e6943c9b6e216fc4.zip",
+      "key": "skill",
+      "uid": "bsk_D9126B2E88201F74F8728E46A1C2",
+      "source_url": "builtin://featured/market-researcher/skill",
+      "resolved_url": "builtin://featured/market-researcher/skill",
       "version": "1.0.0",
       "name": "market-researcher",
       "description": "显式挂载或提及 market-researcher 即表示用户主动选择本 Skill；无论任务是否可直接回答，第一步都必须调用 get_skill(name=\"market-researcher\")，不得套用“简单任务不加载 Skill”规则，也不得仅凭本描述作答。回复及模型自行生成的工具说明必须使用用户主要语言，工具调用前后不得播报过程。在 LazyMind 中，若广泛市场研究只有 WikipediaToolkit、ArxivSearch 和无发现能力的 url_fetch，且用户未给相关 URL，必须直接受限降级：不得调用这些窄域搜索，不得抓通用首页，不得凭记忆猜 URL。本 Skill 是完整的市场与行业研究专家，用于联网或用户资料驱动的行业/赛道研究、产业链、竞争格局、公司横向比较、可比公司估值、候选标的筛选、可复核 Mermaid 图表及研究报告；加载根文档后按路由读取 references，有两家及以上可比数值时运行估值脚本，定量制图时按受控路由直接生成简单 Mermaid 或为复杂图表运行脚本。若用户要求只依据所给数据或禁止检索，只能复述、比较和确定性计算输入，禁止推断相关性、因果、趋势、市场定价逻辑或无依据的综合优劣排名。不用于无依据实时行情预测或个性化买卖建议。",
@@ -128,10 +128,10 @@
         "comparable-companies"
       ],
       "market_visible": false,
-      "archive_sha256": "7465937f0629e71b507fd0d262b45170b8440ea15b6595a5afd4a284b7ef9311",
-      "tree_sha256": "5932640c74b96132c0c658dd638aeb329f9ca1634625e77b18c8b60e0b8b525c",
-      "archive_size": 55633,
-      "package_file": "packages/bsk_44DD4EDC51C66168649C831765C0.zip"
+      "archive_sha256": "b3254edcd0565e3e1898341b711f0350f0a7487b280bd8a3846c13e80adf6452",
+      "tree_sha256": "e62bc2fc61a640b7c9b3eeec5ccd773bdcca162002c762a7e6e6f157aafe5ca3",
+      "archive_size": 55567,
+      "package_file": "packages/bsk_D9126B2E88201F74F8728E46A1C2.zip"
     }
   ]
 }
