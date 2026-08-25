@@ -2,10 +2,12 @@ package metadata
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
@@ -16,12 +18,31 @@ import (
 
 const ExternalCategory = "external"
 
+const (
+	MaxSkillNameLength        = 80
+	MaxSkillDescriptionLength = 1024
+)
+
 type Metadata struct {
 	Name        string
 	Description string
 	Version     string
 	Category    string
 	Tags        []string
+}
+
+type LengthError struct {
+	Field string
+	Max   int
+}
+
+func (e *LengthError) Error() string {
+	return fmt.Sprintf("skill %s cannot exceed %d characters", e.Field, e.Max)
+}
+
+func IsNameLengthError(err error) bool {
+	var lengthErr *LengthError
+	return errors.As(err, &lengthErr) && lengthErr.Field == "name"
 }
 
 type frontmatter struct {
@@ -59,10 +80,30 @@ func ParseRequired(content []byte) (Metadata, error) {
 	if err := validatePathSegment(meta.Name); err != nil {
 		return Metadata{}, fmt.Errorf("invalid SKILL.md frontmatter field \"name\": %w", err)
 	}
+	if err := ValidateNameLength(meta.Name); err != nil {
+		return Metadata{}, err
+	}
 	if meta.Description == "" {
 		return Metadata{}, fmt.Errorf("SKILL.md frontmatter field \"description\" is required")
 	}
+	if err := ValidateDescriptionLength(meta.Description); err != nil {
+		return Metadata{}, err
+	}
 	return meta, nil
+}
+
+func ValidateNameLength(name string) error {
+	if utf8.RuneCountInString(strings.TrimSpace(name)) > MaxSkillNameLength {
+		return &LengthError{Field: "name", Max: MaxSkillNameLength}
+	}
+	return nil
+}
+
+func ValidateDescriptionLength(description string) error {
+	if utf8.RuneCountInString(strings.TrimSpace(description)) > MaxSkillDescriptionLength {
+		return &LengthError{Field: "description", Max: MaxSkillDescriptionLength}
+	}
+	return nil
 }
 
 func compact(values []string) []string {
