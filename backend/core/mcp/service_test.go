@@ -21,14 +21,22 @@ func newTestDB(t *testing.T) *orm.DB {
 	return db
 }
 
-func TestLoadRuntimeConfigHonorsMCPMasterSwitch(t *testing.T) {
+func TestLoadRuntimeConfigHonorsMCPMasterSwitchWithoutHidingSharedServices(t *testing.T) {
 	db := newTestDB(t)
 	now := time.Now().UTC()
-	if err := db.Create(&orm.MCPServer{
-		ID: "msp-master-switch", Name: "Verified", Transport: "http", URL: "https://mcp.example.com",
-		HeadersJSON: []byte("{}"), AllowedToolsJSON: []byte(`["search"]`), Enabled: true, IsVerified: true,
-		BaseModel: orm.BaseModel{CreateUserID: "u1", CreatedAt: now, UpdatedAt: now},
-	}).Error; err != nil {
+	servers := []orm.MCPServer{
+		{
+			ID: "msp-master-switch", Name: "Verified", Transport: "http", URL: "https://mcp.example.com",
+			HeadersJSON: []byte("{}"), AllowedToolsJSON: []byte(`["search"]`), Enabled: true, IsVerified: true, Share: true,
+			BaseModel: orm.BaseModel{CreateUserID: "u1", CreatedAt: now, UpdatedAt: now},
+		},
+		{
+			ID: "shared-server", Name: "Shared", Transport: "http", URL: "https://shared.example.com",
+			HeadersJSON: []byte("{}"), AllowedToolsJSON: []byte(`["lookup"]`), Enabled: true, IsVerified: true, Share: true,
+			BaseModel: orm.BaseModel{CreateUserID: "u2", CreatedAt: now, UpdatedAt: now},
+		},
+	}
+	if err := db.Create(&servers).Error; err != nil {
 		t.Fatalf("seed mcp server: %v", err)
 	}
 	if err := db.Model(&orm.UserUIPreferences{}).Create(map[string]any{"user_id": "u1", "task_center_enabled": true, "skills_enabled": true, "mcp_enabled": false, "created_at": now, "updated_at": now}).Error; err != nil {
@@ -38,14 +46,14 @@ func TestLoadRuntimeConfigHonorsMCPMasterSwitch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("load paused runtime: %v", err)
 	}
-	if len(runtime) != 0 {
-		t.Fatalf("expected no MCP runtime when master switch is off, got %#v", runtime)
+	if len(runtime) != 1 || runtime[0].ID != "shared-server" {
+		t.Fatalf("expected only the shared MCP runtime when the owned-service switch is off, got %#v", runtime)
 	}
 	if err := db.Model(&orm.UserUIPreferences{}).Where("user_id = ?", "u1").Update("mcp_enabled", true).Error; err != nil {
 		t.Fatalf("enable MCP master: %v", err)
 	}
 	runtime, err = LoadRuntimeConfig(context.Background(), db.DB, "u1")
-	if err != nil || len(runtime) != 1 {
+	if err != nil || len(runtime) != 2 {
 		t.Fatalf("expected enabled runtime after restoring master switch, got %#v err=%v", runtime, err)
 	}
 }
@@ -339,17 +347,17 @@ func TestSetOwnedServersEnabledUpdatesOnlyOwnedVerifiedServers(t *testing.T) {
 	rows := []orm.MCPServer{
 		{
 			ID: "owned-verified", Name: "Owned verified", Transport: "http", URL: "https://owned.example.com/mcp",
-			HeadersJSON: []byte("{}"), AllowedToolsJSON: []byte("[]"), Enabled: false, IsVerified: true,
+			HeadersJSON: []byte("{}"), AllowedToolsJSON: []byte(`["search","fetch"]`), Enabled: false, IsVerified: true,
 			BaseModel: orm.BaseModel{CreateUserID: "u1", CreatedAt: now, UpdatedAt: now},
 		},
 		{
 			ID: "owned-unverified", Name: "Owned unverified", Transport: "http", URL: "https://unverified.example.com/mcp",
-			HeadersJSON: []byte("{}"), AllowedToolsJSON: []byte("[]"), Enabled: false, IsVerified: false,
+			HeadersJSON: []byte("{}"), AllowedToolsJSON: []byte(`["unsafe"]`), Enabled: false, IsVerified: false,
 			BaseModel: orm.BaseModel{CreateUserID: "u1", CreatedAt: now, UpdatedAt: now},
 		},
 		{
 			ID: "shared-other-user", Name: "Shared", Transport: "http", URL: "https://shared.example.com/mcp",
-			HeadersJSON: []byte("{}"), AllowedToolsJSON: []byte("[]"), Enabled: false, IsVerified: true, Share: true,
+			HeadersJSON: []byte("{}"), AllowedToolsJSON: []byte(`["shared_lookup"]`), Enabled: false, IsVerified: true, Share: true,
 			BaseModel: orm.BaseModel{CreateUserID: "u2", CreatedAt: now, UpdatedAt: now},
 		},
 	}
@@ -376,11 +384,18 @@ func TestSetOwnedServersEnabledUpdatesOnlyOwnedVerifiedServers(t *testing.T) {
 		t.Fatalf("load mcp servers: %v", err)
 	}
 	states := map[string]bool{}
+	allowedTools := map[string]string{}
 	for _, row := range stored {
 		states[row.ID] = row.Enabled
+		allowedTools[row.ID] = string(row.AllowedToolsJSON)
 	}
 	if !states["owned-verified"] || states["owned-unverified"] || states["shared-other-user"] {
 		t.Fatalf("unexpected enabled states: %#v", states)
+	}
+	if allowedTools["owned-verified"] != `["search","fetch"]` ||
+		allowedTools["owned-unverified"] != `["unsafe"]` ||
+		allowedTools["shared-other-user"] != `["shared_lookup"]` {
+		t.Fatalf("bulk MCP updates must preserve tool grants: %#v", allowedTools)
 	}
 
 	controls, err := settings.LoadFeatureControls(context.Background(), db.DB, "u1")

@@ -1,5 +1,6 @@
-import { Empty, Tabs, TabsProps } from "antd";
-import { useEffect, useMemo, useState } from "react";
+import { Empty, TabsProps } from "antd";
+import { cloneElement, isValidElement, useEffect, useMemo, useState } from "react";
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 
@@ -32,11 +33,24 @@ const IMAGE_GROUP = "image";
 const KnowledgeTabs = (props: {
   knowledgeDetail: Doc;
   onGetItemInfo?: (data: Segment) => void;
+  onAskSegment?: (segment: Segment, selectedText?: string, group?: string) => void;
+  activeKey?: string;
+  onActiveKeyChange?: (key: string) => void;
+  onOptionsChange?: (options: Array<{ label: ReactNode; value: string }>) => void;
+  showSequence?: boolean;
 }) => {
-  const { knowledgeDetail, onGetItemInfo } = props;
+  const {
+    knowledgeDetail,
+    onGetItemInfo,
+    onAskSegment,
+    activeKey: controlledActiveKey,
+    onActiveKeyChange,
+    onOptionsChange,
+    showSequence = true,
+  } = props;
   const { t } = useTranslation();
 
-  const [activeKey, setActiveKey] = useState("");
+  const [internalActiveKey, setInternalActiveKey] = useState("");
   const [tabs, setTabs] = useState<TabsProps["items"]>([]);
   const [searchParams] = useSearchParams();
   const [loading, setLoading] = useState(false);
@@ -52,7 +66,8 @@ const KnowledgeTabs = (props: {
   useEffect(() => {
     if (imageOnly) {
       setTabs([createImageListTab()]);
-      setActiveKey(TAB_KEYS.imageList);
+      setInternalActiveKey(TAB_KEYS.imageList);
+      onActiveKeyChange?.(TAB_KEYS.imageList);
       setLoading(false);
       return;
     }
@@ -64,10 +79,10 @@ const KnowledgeTabs = (props: {
         const result = res.data.parsers || [];
         const currentTabs = generateTabs(result);
         setTabs(currentTabs);
-        setActiveKey(
-          getInitialActiveKey(result, searchParams.get("group_name")) ||
-            (currentTabs.length > 0 ? String(currentTabs[0].key) : ""),
-        );
+        const nextActiveKey = getInitialActiveKey(result, searchParams.get("group_name")) ||
+          (currentTabs.length > 0 ? String(currentTabs[0].key) : "");
+        setInternalActiveKey(nextActiveKey);
+        onActiveKeyChange?.(nextActiveKey);
       })
       .finally(() => {
         setLoading(false);
@@ -115,6 +130,8 @@ const KnowledgeTabs = (props: {
                   names={[splitName || ""]}
                   editable={true}
                   onGetItemInfo={onGetItemInfo}
+                  onAskSegment={onAskSegment}
+                  showSequence={showSequence}
                 />
               ),
               key: `${TAB_KEYS.document}${splitName || ""}`,
@@ -132,6 +149,8 @@ const KnowledgeTabs = (props: {
                   group === parser.name ? group : parser.name || "summary"
                 }
                 onGetItemInfo={onGetItemInfo}
+                onAskSegment={onAskSegment}
+                showSequence={showSequence}
               />
             ),
             key: TAB_KEYS.summary,
@@ -160,6 +179,8 @@ const KnowledgeTabs = (props: {
                 names={[parser.name as string]}
                 type={group === parser.name ? group : parser.name || "hybrid"}
                 editable={false}
+                onAskSegment={onAskSegment}
+                showSequence={showSequence}
               />
             ),
             key: TAB_KEYS.imageCaption,
@@ -182,6 +203,8 @@ const KnowledgeTabs = (props: {
           type={IMAGE_GROUP}
           editable={false}
           onGetItemInfo={onGetItemInfo}
+          onAskSegment={onAskSegment}
+          showSequence={showSequence}
         />
       ),
       key: TAB_KEYS.imageList,
@@ -236,23 +259,25 @@ const KnowledgeTabs = (props: {
     );
   }
 
-  function onChange(newActiveKey: string) {
-    setActiveKey(newActiveKey);
-  }
+  const activeKey = controlledActiveKey || internalActiveKey;
+  const activeTab = tabs?.find((tab) => String(tab.key) === activeKey);
+  const activeContent = isValidElement<{ showSequence?: boolean }>(activeTab?.children)
+    ? cloneElement(activeTab.children, { showSequence })
+    : activeTab?.children;
+
+  useEffect(() => {
+    onOptionsChange?.((tabs || []).map((tab) => ({
+      label: tab.label,
+      value: String(tab.key),
+    })));
+  }, [onOptionsChange, tabs]);
 
   return loading ? (
     <Rendering text={t("common.loading")} />
   ) : !tabs?.length ? (
     <Empty description={t("knowledge.noContent")} style={{ marginTop: 80 }} />
   ) : (
-    <Tabs
-      type="editable-card"
-      className="card-container !h-full"
-      hideAdd
-      onChange={onChange}
-      activeKey={activeKey}
-      items={tabs}
-    />
+    <div className="knowledge-segment-content">{activeContent}</div>
   );
 };
 

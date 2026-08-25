@@ -2,10 +2,109 @@ package migrate
 
 import (
 	"fmt"
+	"os"
 	"sort"
+	"strings"
 
 	"lazymind/core/log"
 )
+
+func (r *Runner) reconcileUnknownOpenDevHistory(
+	catalog migrationCatalog,
+	applied []historyRecord,
+) ([]historyRecord, error) {
+	if !envEnabled(reconcileUnknownDevHistoryEnv) || len(catalog.Modes) == 0 {
+		return applied, nil
+	}
+
+	open := catalog.Modes[len(catalog.Modes)-1]
+	if !open.DevDirectory {
+		return applied, nil
+	}
+
+	known := make(map[uint64]struct{}, len(catalog.All))
+	allowedSuperseded := make(map[uint64]struct{})
+	for _, migration := range catalog.All {
+		known[migration.Version] = struct{}{}
+		for _, version := range migration.Supersedes {
+			allowedSuperseded[version] = struct{}{}
+		}
+	}
+
+	hasKnownOpenDevHistory := false
+	for _, record := range applied {
+		if _, ok := known[record.Version]; ok && isDevVersionForMode(record.Version, open.ModeVersion) {
+			hasKnownOpenDevHistory = true
+			break
+		}
+	}
+	if !hasKnownOpenDevHistory {
+		return applied, nil
+	}
+
+	kept := make([]historyRecord, 0, len(applied))
+	removed := make([]historyRecord, 0)
+	for _, record := range applied {
+		_, isKnown := known[record.Version]
+		_, isSuperseded := allowedSuperseded[record.Version]
+		if !isKnown && !isSuperseded && isDevVersionForMode(record.Version, open.ModeVersion) {
+			removed = append(removed, record)
+			continue
+		}
+		kept = append(kept, record)
+	}
+	if len(removed) == 0 {
+		return applied, nil
+	}
+
+	tx, err := r.db.Begin()
+	if err != nil {
+		return applied, err
+	}
+	for _, record := range removed {
+		if err := r.deleteHistory(tx, record.Version); err != nil {
+			_ = tx.Rollback()
+			return applied, err
+		}
+	}
+	if len(kept) == 0 {
+		err = r.writeState(tx, nil, false)
+	} else {
+		nextVersion := highestAppliedVersion(kept)
+		err = r.writeState(tx, &nextVersion, false)
+	}
+	if err != nil {
+		_ = tx.Rollback()
+		return applied, err
+	}
+	if err := tx.Commit(); err != nil {
+		return applied, err
+	}
+
+	for _, record := range removed {
+		log.Logger.Warn().
+			Uint64("version", record.Version).
+			Str("name", record.Name).
+			Str("mode", open.Name).
+			Msg("removed unknown open-development migration history")
+	}
+	return kept, nil
+}
+
+func isDevVersionForMode(version, modeVersion uint64) bool {
+	return version >= devVersionBase &&
+		version%devVersionBase != 0 &&
+		version/devVersionBase == modeVersion
+}
+
+func envEnabled(name string) bool {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv(name))) {
+	case "1", "true", "yes", "on":
+		return true
+	default:
+		return false
+	}
+}
 
 func validateAppliedHistory(catalog migrationCatalog, applied []historyRecord) error {
 	if err := validateKnownAppliedHistory(catalog, applied); err != nil {

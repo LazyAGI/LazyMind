@@ -574,6 +574,13 @@ func init() {
 	registerAdditionalError("zip downloader is not configured", http.StatusInternalServerError, 2002281)
 	registerAdditionalErrorPattern("unsupported market skill source type %q", "Unsupported market skill source type", http.StatusBadRequest, 2002282)
 	registerAdditionalError("skill package stored path is required", http.StatusBadRequest, 2002283)
+	registerAdditionalError("distribution binding is incomplete", http.StatusInternalServerError, 2002295)
+	registerAdditionalError("distribution upgrade service is not configured", http.StatusInternalServerError, 2002296)
+	registerAdditionalError("latest builtin Skill distribution was not found", http.StatusNotFound, 2002297)
+	registerAdditionalError("cannot prepare distribution upgrade while draft overlay exists", http.StatusConflict, 2002298)
+	registerAdditionalError("installed Skill distribution baseline is unavailable", http.StatusConflict, 2002299)
+	registerAdditionalError("distribution upgrade conflicts require draft review", http.StatusConflict, 2002300)
+	registerAdditionalError("distribution upgrade draft is active", http.StatusConflict, 2002301)
 }
 
 func registerAdditionalError(message string, status, code int) {

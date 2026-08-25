@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import type { WheelEvent as ReactWheelEvent } from "react";
 import { useTranslation } from "react-i18next";
 import i18n from "@/i18n";
 import { message } from "antd";
@@ -85,6 +86,20 @@ function isSkillDepositPromptMessage(item: any, currentPrompt: string) {
   );
 }
 
+function canScrollVertically(element: HTMLElement, deltaY: number) {
+  const style = window.getComputedStyle(element);
+  if (style.overflowY !== "auto" && style.overflowY !== "scroll") {
+    return false;
+  }
+
+  const maxScrollTop = element.scrollHeight - element.clientHeight;
+  if (maxScrollTop <= 1) {
+    return false;
+  }
+
+  return deltaY < 0 ? element.scrollTop > 0 : element.scrollTop < maxScrollTop;
+}
+
 const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProps>(
   (props, ref) => {
     const { t } = useTranslation();
@@ -112,6 +127,11 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       onConversationSettingsChange,
       initialConversationSettings,
       hasWorkflowSession,
+      conversationTrailEnabled = true,
+      showThinkingDepth = true,
+      showSkillDeposit = true,
+      showConversationConfig = true,
+      fixedThinkingDepth,
     } = props;
 
     const { clearPendingMessage: clearStorePendingMessage } =
@@ -156,11 +176,63 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       t,
     });
 
+    const handleRegenerate = useCallback(() => {
+      setSourcePanelSources([]);
+      void conversation.regenerate();
+    }, [conversation.regenerate]);
+
+    const chatContentRef = conversation.scroll.chatContentRef;
+    const handleConversationWheel = useCallback(
+      (event: ReactWheelEvent<HTMLDivElement>) => {
+        if (event.deltaY === 0) {
+          return;
+        }
+
+        const target = event.target;
+        const messageContainer = chatContentRef.current;
+        if (
+          !(target instanceof Node) ||
+          !messageContainer ||
+          !event.currentTarget.contains(target)
+        ) {
+          return;
+        }
+
+        if (messageContainer.contains(target)) {
+          return;
+        }
+
+        const targetElement =
+          target instanceof Element ? target : target.parentElement;
+        if (
+          targetElement?.closest(".chat-source-panel") ||
+          targetElement?.closest(".conversation-trail") ||
+          targetElement?.closest(".writer-markdown-editor")
+        ) {
+          return;
+        }
+
+        let ancestor: HTMLElement | null =
+          targetElement instanceof HTMLElement
+            ? targetElement
+            : targetElement?.parentElement ?? null;
+        while (ancestor && ancestor !== event.currentTarget) {
+          if (canScrollVertically(ancestor, event.deltaY)) {
+            return;
+          }
+          ancestor = ancestor.parentElement;
+        }
+
+        messageContainer.scrollBy({ top: event.deltaY, behavior: "auto" });
+      },
+      [chatContentRef],
+    );
+
     const trailRefreshKey = `${conversation.messageList.length}:${conversation.isStreaming ? "streaming" : "idle"}`;
     const conversationTrail = useConversationTrail({
       conversationId: sessionId,
       refreshKey: trailRefreshKey,
-      enabled: Boolean(sessionId),
+      enabled: Boolean(sessionId) && conversationTrailEnabled,
     });
     useEffect(() => {
       if (conversationTrail.items.length === 0) {
@@ -295,6 +367,20 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       replaceMessageList: conversation.replaceMessageList,
       createNewChat: conversation.createNewChat,
       sendMessage,
+      prepareMessage: ({
+        text,
+        citeMessage,
+        citeMessages: nextCiteMessages,
+        appendCitations = false,
+      }) => {
+        conversation.setContent(text);
+        if (!appendCitations) {
+          clearCiteMessages();
+        }
+        const citations = nextCiteMessages ?? (citeMessage ? [citeMessage] : []);
+        citations.forEach((citation) => handleAddCiteMessage(citation));
+        requestAnimationFrame(() => chatInputRef.current?.focus());
+      },
       disconnectConversationStream: conversation.disconnectConversationStream,
       uploadFiles: (files: File[]) => {
         chatInputRef.current?.uploadFiles(files);
@@ -330,7 +416,10 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
     }, [clearCiteMessages, sendMessage, t]);
 
     return (
-      <div className="chat-chat-container">
+      <div
+        className="chat-chat-container"
+        onWheelCapture={handleConversationWheel}
+      >
         <div className={`chat-box${sourcePanelSources.length ? " has-source-panel" : ""}`}>
           <div className="chat-main-column">
             <MessageList
@@ -339,7 +428,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               sendMessage={(text, clearInput, extras) => {
                 sendMessage({ text, clearInput, ...(extras ?? {}) });
               }}
-              regenerate={conversation.regenerate}
+              regenerate={handleRegenerate}
               regenerateDisabled={
                 !canChat ||
                 conversation.loading ||
@@ -422,6 +511,10 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               onConversationSettingsChange={onConversationSettingsChange}
               initialConversationSettings={initialConversationSettings}
               hasWorkflowSession={hasWorkflowSession}
+              showThinkingDepth={showThinkingDepth}
+              showSkillDeposit={showSkillDeposit}
+              showConversationConfig={showConversationConfig}
+              fixedThinkingDepth={fixedThinkingDepth}
             />
           </div>
           {sourcePanelSources.length > 0 && (

@@ -12,17 +12,18 @@
   position: relative;
 
   .chat-box {
-    width: 80%;
-    min-width: 350px; 
-    max-width: 1400px; 
+    --chat-content-column-width: clamp(350px, 80%, 1400px);
+
+    width: 100%;
+    min-width: 0;
+    max-width: none;
     flex: 1;
     min-height: 0;
     display: flex;
     overflow: hidden;
 
     &.has-source-panel {
-      width: 100%;
-      max-width: none;
+      --chat-content-column-width: 100%;
     }
 
     .chat-main-column {
@@ -37,8 +38,18 @@
     .message-container {
       flex: 1;
       min-height: 0;
-      padding: 16px;
+      padding: 16px max(
+        16px,
+        calc((100% - var(--chat-content-column-width)) / 2 + 16px)
+      );
       margin-bottom: 24px;
+    }
+
+    .chat-main-column > .input-wrapper,
+    .chat-stream-recovery-banner {
+      width: var(--chat-content-column-width);
+      max-width: 100%;
+      margin-inline: auto;
     }
 
     .chat-stream-recovery-banner {
@@ -79,12 +90,23 @@
       gap: 24px;
       overflow-x: hidden;
       overflow-y: auto;
-      scrollbar-width: none;
-      -ms-overflow-style: none;
-      scrollbar-gutter: auto;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(122, 135, 155, 0.38) transparent;
+      scrollbar-gutter: stable;
 
       &::-webkit-scrollbar {
-        display: none;
+        width: 8px;
+      }
+
+      &::-webkit-scrollbar-thumb {
+        border: 2px solid transparent;
+        border-radius: 999px;
+        background: rgba(122, 135, 155, 0.38);
+        background-clip: padding-box;
+      }
+
+      &::-webkit-scrollbar-track {
+        background: transparent;
       }
     }
 
@@ -916,8 +938,11 @@
     justify-content: center;
     align-items: center;
     position: absolute;
-    left: 0;
-    width: 100%;
+    left: max(
+      0px,
+      calc((100% - var(--chat-content-column-width)) / 2)
+    );
+    width: min(100%, var(--chat-content-column-width));
     height: 60px;
     background: linear-gradient(
       to top,

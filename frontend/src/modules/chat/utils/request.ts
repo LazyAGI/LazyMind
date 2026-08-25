@@ -50,6 +50,7 @@ import {
 } from "@/api/generated/knowledge-client";
 import { FileServiceApiFactory } from "@/api/generated/file-client";
 import { axiosInstance, BASE_URL } from "@/components/request";
+import type { ThinkingDepth } from "@/modules/chat/store/chatThink";
 import type { AxiosResponse, RawAxiosRequestConfig } from "axios";
 
 const coreApiBaseUrl = `${BASE_URL}/api/core`;
@@ -262,6 +263,8 @@ export type RewriteSelection =
     type: 'ppt_html';
     page: number;
     el: string;
+    /** 1-based occurrence among elements carrying the same data-el. */
+    index?: number;
     group?: string;
     selected_text?: string;
     computed_style?: {
@@ -294,6 +297,7 @@ export interface RewriteSelectionPreview {
     block_type: string;
     node_id?: string;
     el?: string;
+    index?: number;
     group?: string;
     page?: number;
   };
@@ -1032,6 +1036,148 @@ export interface ConversationRuntimeSettings {
   chat_executor?: ChatExecutor;
 }
 
+export interface ChatEntryConversationSettings {
+  workflow_mode: 'dynamic' | 'auto';
+  enable_subagent: boolean;
+  enable_workflow: boolean;
+  chat_executor: ChatExecutor;
+}
+
+export interface ChatEntryDefault {
+  thinking_depth: ThinkingDepth;
+  conversation_settings: ChatEntryConversationSettings;
+}
+
+export interface ChatEntryDefaults {
+  quick_question: ChatEntryDefault;
+  new_task: ChatEntryDefault;
+}
+
+export interface ChatSettingsResponse extends ConversationRuntimeSettings, ChatEntryDefaults {
+  updated_at?: string;
+}
+
+export type ChatEntryKind = keyof ChatEntryDefaults;
+
+export const FALLBACK_CHAT_ENTRY_DEFAULTS: ChatEntryDefaults = {
+  quick_question: {
+    thinking_depth: 'medium',
+    conversation_settings: {
+      chat_executor: 'lazymind',
+      enable_workflow: false,
+      workflow_mode: 'dynamic',
+      enable_subagent: true,
+    },
+  },
+  new_task: {
+    thinking_depth: 'high',
+    conversation_settings: {
+      chat_executor: 'lazymind',
+      enable_workflow: true,
+      workflow_mode: 'dynamic',
+      enable_subagent: true,
+    },
+  },
+};
+
+const thinkingDepthValues = new Set<ThinkingDepth>(['low', 'medium', 'high', 'max']);
+
+export function parseThinkingDepth(value: unknown): ThinkingDepth | undefined {
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim().toLowerCase() as ThinkingDepth;
+  return thinkingDepthValues.has(normalized) ? normalized : undefined;
+}
+
+export function resolveConversationThinkingDepth(conversation: unknown): ThinkingDepth {
+  const value = conversation && typeof conversation === 'object'
+    ? (conversation as { thinking_depth?: unknown }).thinking_depth
+    : undefined;
+  return parseThinkingDepth(value) ?? 'medium';
+}
+
+function normalizeChatEntryDefault(
+  value: unknown,
+  fallback: ChatEntryDefault,
+): ChatEntryDefault {
+  if (!value || typeof value !== 'object') return fallback;
+  const raw = value as Partial<ChatEntryDefault>;
+  const settings = raw.conversation_settings;
+  if (!settings || typeof settings !== 'object') return fallback;
+  const executor = typeof settings.chat_executor === 'string'
+    ? settings.chat_executor.trim()
+    : '';
+  const workflowMode = settings.workflow_mode;
+  const thinkingDepth = parseThinkingDepth(raw.thinking_depth);
+  if (
+    !thinkingDepth
+    || !executor
+    || (workflowMode !== 'dynamic' && workflowMode !== 'auto')
+    || typeof settings.enable_workflow !== 'boolean'
+    || typeof settings.enable_subagent !== 'boolean'
+  ) {
+    return fallback;
+  }
+  return {
+    thinking_depth: thinkingDepth,
+    conversation_settings: {
+      chat_executor: executor,
+      enable_workflow: settings.enable_workflow,
+      workflow_mode: workflowMode,
+      enable_subagent: settings.enable_subagent,
+    },
+  };
+}
+
+function unwrapChatSettings(payload: unknown): unknown {
+  if (payload && typeof payload === 'object' && 'data' in payload) {
+    return (payload as { data?: unknown }).data;
+  }
+  return payload;
+}
+
+export function parseChatEntryDefaults(payload: unknown): ChatEntryDefaults {
+  const raw = unwrapChatSettings(payload) as Partial<ChatSettingsResponse> | undefined;
+  const legacyWorkflowMode = raw?.workflow_mode === 'auto' || raw?.workflow_mode === 'dynamic'
+    ? raw.workflow_mode
+    : 'dynamic';
+  const legacySubagent = typeof raw?.enable_subagent === 'boolean'
+    ? raw.enable_subagent
+    : true;
+  const legacyWorkflow = typeof raw?.enable_workflow === 'boolean'
+    ? raw.enable_workflow
+    : true;
+  const legacyFallbacks: ChatEntryDefaults = {
+    quick_question: {
+      thinking_depth: 'medium',
+      conversation_settings: {
+        chat_executor: 'lazymind',
+        enable_workflow: false,
+        workflow_mode: legacyWorkflowMode,
+        enable_subagent: legacySubagent,
+      },
+    },
+    new_task: {
+      thinking_depth: 'high',
+      conversation_settings: {
+        chat_executor: 'lazymind',
+        enable_workflow: legacyWorkflow,
+        workflow_mode: legacyWorkflowMode,
+        enable_subagent: legacySubagent,
+      },
+    },
+  };
+  return {
+    quick_question: normalizeChatEntryDefault(
+      raw?.quick_question,
+      legacyFallbacks.quick_question,
+    ),
+    new_task: normalizeChatEntryDefault(
+      raw?.new_task,
+      legacyFallbacks.new_task,
+    ),
+  };
+}
+
 export function parseConversationRuntimeSettings(
   conversation?: {
     enable_workflow?: boolean | null;
@@ -1063,8 +1209,19 @@ export function parseConversationRuntimeSettings(
 export function ConversationSettingsApi() {
   return {
     getChatSettings(options?: RawAxiosRequestConfig) {
-      return axiosInstance.get<ConversationRuntimeSettings>(
+      return axiosInstance.get<ChatSettingsResponse>(
         `${coreApiBaseUrl}/user/chat-settings`,
+        options,
+      );
+    },
+    patchChatEntryDefault(
+      kind: ChatEntryKind,
+      settings: ChatEntryDefault,
+      options?: RawAxiosRequestConfig,
+    ) {
+      return axiosInstance.patch<ChatSettingsResponse>(
+        `${coreApiBaseUrl}/user/chat-settings`,
+        { [kind]: settings },
         options,
       );
     },
