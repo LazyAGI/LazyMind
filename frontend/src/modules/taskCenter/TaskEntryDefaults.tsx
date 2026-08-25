@@ -1,7 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Button, Radio, Skeleton, Switch, Tabs } from 'antd';
+import { Alert, Button, Radio, Select, Skeleton, Switch } from 'antd';
 import type { RadioChangeEvent } from 'antd';
-import { ReloadOutlined } from '@ant-design/icons';
+import {
+  FileDoneOutlined,
+  InfoCircleOutlined,
+  MessageOutlined,
+  ReloadOutlined,
+  SettingOutlined,
+} from '@ant-design/icons';
 import { useTranslation } from 'react-i18next';
 
 import { buildExecutorCatalog } from '@/modules/chat/components/ChatInput/ChatConfigModal';
@@ -19,6 +25,7 @@ import {
 interface TaskEntryDefaultsProps {
   subtasksEnabled: boolean;
   workflowsEnabled: boolean;
+  onConnectExecutors?: () => void;
 }
 
 type LoadState = 'loading' | 'ready' | 'error';
@@ -58,9 +65,9 @@ function entryDefaultEquals(left: ChatEntryDefault, right: ChatEntryDefault): bo
 export default function TaskEntryDefaults({
   subtasksEnabled,
   workflowsEnabled,
+  onConnectExecutors,
 }: TaskEntryDefaultsProps) {
   const { t } = useTranslation();
-  const [activeKind, setActiveKind] = useState<ChatEntryKind>('quick_question');
   const [profiles, setProfiles] = useState<ChatEntryDefaults>(() =>
     cloneDefaults(FALLBACK_CHAT_ENTRY_DEFAULTS),
   );
@@ -163,7 +170,8 @@ export default function TaskEntryDefaults({
     }
   };
 
-  const updateActiveProfile = (
+  const updateProfile = (
+    kind: ChatEntryKind,
     update: (profile: ChatEntryDefault) => ChatEntryDefault,
   ) => {
     if (savedTimerRef.current != null) {
@@ -172,25 +180,26 @@ export default function TaskEntryDefaults({
     }
     setProfiles((current) => ({
       ...current,
-      [activeKind]: update(current[activeKind]),
+      [kind]: update(current[kind]),
     }));
     setSaveState('idle');
   };
 
-  const activeProfile = profiles[activeKind];
-  const settings = activeProfile.conversation_settings;
   const controlsDisabled = loadState !== 'ready' || saveState === 'saving';
-  const workflowValue = settings.enable_workflow ? settings.workflow_mode : 'disabled';
-  const executorCatalog = useMemo(
-    () => buildExecutorCatalog(
+  const hasUnavailableExecutors = executors.some((executor) => !executor.available);
+
+  const renderFields = (kind: ChatEntryKind) => {
+    const profile = profiles[kind];
+    const settings = profile.conversation_settings;
+    const workflowValue = settings.enable_workflow ? settings.workflow_mode : 'disabled';
+    const executorCatalog = buildExecutorCatalog(
       executors,
       settings.chat_executor,
       t('chat.conversationConfigExecutorUnavailable'),
-    ),
-    [executors, settings.chat_executor, t],
-  );
+    );
+    const selectedExecutor = executorCatalog.find((executor) => executor.id === settings.chat_executor);
 
-  const fieldRows = loadState === 'loading' ? (
+    return loadState === 'loading' ? (
     <div className="settings-entry-defaults-loading">
       <Skeleton active paragraph={{ rows: 4 }} />
     </div>
@@ -202,11 +211,11 @@ export default function TaskEntryDefaults({
           className="settings-entry-defaults-choice"
           optionType="button"
           buttonStyle="solid"
-          value={activeProfile.thinking_depth}
+          value={profile.thinking_depth}
           disabled={controlsDisabled}
           aria-label={t('settingsPage.tasks.thinkingDepth')}
-          onChange={(event: RadioChangeEvent) => updateActiveProfile((profile) => ({
-            ...profile,
+          onChange={(event: RadioChangeEvent) => updateProfile(kind, (current) => ({
+            ...current,
             thinking_depth: event.target.value as ThinkingDepth,
           }))}
         >
@@ -218,32 +227,45 @@ export default function TaskEntryDefaults({
 
       <div className="settings-entry-defaults-row">
         <div><strong>{t('chat.conversationConfigExecutor')}</strong><p>{t('settingsPage.tasks.executorDesc')}</p></div>
-        <Radio.Group
-          className="settings-entry-defaults-choice settings-entry-defaults-executors"
-          optionType="button"
-          buttonStyle="solid"
+        <div className="settings-entry-defaults-executor-control">
+        <Select
+          className="settings-entry-defaults-select"
           value={settings.chat_executor}
           disabled={controlsDisabled}
           aria-label={t('chat.conversationConfigExecutor')}
-          onChange={(event: RadioChangeEvent) => updateActiveProfile((profile) => ({
-            ...profile,
+          options={executorCatalog.map((executor) => ({
+            value: executor.id,
+            label: executor.display_name,
+            disabled: !executor.available,
+            title: executor.unavailable_reason,
+          }))}
+          popupRender={(menu) => (
+            <>
+              {menu}
+              {hasUnavailableExecutors && onConnectExecutors ? (
+                <div className="settings-entry-defaults-connect">
+                  <span>{t('settingsPage.tasks.executorConnectHint')}</span>
+                  <Button type="link" size="small" onClick={onConnectExecutors}>
+                    {t('settingsPage.tasks.executorConnectAction')}
+                  </Button>
+                </div>
+              ) : null}
+            </>
+          )}
+          onChange={(value: string) => updateProfile(kind, (current) => ({
+            ...current,
             conversation_settings: {
-              ...profile.conversation_settings,
-              chat_executor: event.target.value,
+              ...current.conversation_settings,
+              chat_executor: value,
             },
           }))}
-        >
-          {executorCatalog.map((executor) => (
-            <Radio.Button
-              key={executor.id}
-              value={executor.id}
-              disabled={!executor.available}
-              title={executor.available ? undefined : executor.unavailable_reason}
-            >
-              {executor.display_name}
-            </Radio.Button>
-          ))}
-        </Radio.Group>
+        />
+        {selectedExecutor && !selectedExecutor.available ? (
+          <button type="button" className="settings-entry-defaults-unavailable" onClick={onConnectExecutors}>
+            <InfoCircleOutlined /> {t('settingsPage.tasks.executorSelectedUnavailable')}
+          </button>
+        ) : null}
+        </div>
       </div>
       {executorLoadFailed ? (
         <Alert
@@ -267,7 +289,7 @@ export default function TaskEntryDefaults({
           value={workflowValue}
           disabled={controlsDisabled || !workflowsEnabled}
           aria-label={t('chat.conversationConfigWorkflowExecution')}
-          onChange={(event: RadioChangeEvent) => updateActiveProfile((profile) => {
+          onChange={(event: RadioChangeEvent) => updateProfile(kind, (profile) => {
             const value = event.target.value as 'auto' | 'dynamic' | 'disabled';
             return {
               ...profile,
@@ -297,7 +319,7 @@ export default function TaskEntryDefaults({
           checked={settings.enable_subagent}
           disabled={controlsDisabled || !subtasksEnabled}
           aria-label={t('chat.conversationConfigEnableSubagent')}
-          onChange={(checked: boolean) => updateActiveProfile((profile) => ({
+          onChange={(checked: boolean) => updateProfile(kind, (profile) => ({
             ...profile,
             conversation_settings: {
               ...profile.conversation_settings,
@@ -307,7 +329,8 @@ export default function TaskEntryDefaults({
         />
       </div>
     </div>
-  );
+    );
+  };
 
   return (
     <section
@@ -336,20 +359,33 @@ export default function TaskEntryDefaults({
         />
       ) : null}
 
-      <div className="settings-entry-defaults-card">
-        <Tabs
-          activeKey={activeKind}
-          onChange={(key: string) => setActiveKind(key as ChatEntryKind)}
-          items={([
-            ['quick_question', t('layout.newChat')],
-            ['new_task', t('layout.newTask')],
-          ] as const).map(([key, label]) => ({
-            key,
-            label,
-            disabled: saveState === 'saving' && key !== activeKind,
-            children: fieldRows,
-          }))}
-        />
+      <div className="settings-entry-defaults-intro">
+        <span className="settings-entry-defaults-intro-icon"><SettingOutlined /></span>
+        <div><strong>{t('settingsPage.tasks.defaultsTitle')}</strong><p>{t('settingsPage.tasks.defaultsIntro')}</p></div>
+        <span className="settings-entry-defaults-intro-note"><InfoCircleOutlined /> {t('settingsPage.tasks.defaultsScope')}</span>
+      </div>
+      {([
+        ['quick_question', 'settingsPage.tasks.quickDefaultsTitle', 'settingsPage.tasks.quickDefaultsDesc', <MessageOutlined />],
+        ['new_task', 'settingsPage.tasks.taskDefaultsTitle', 'settingsPage.tasks.taskDefaultsDesc', <FileDoneOutlined />],
+      ] as const).map(([kind, titleKey, descKey, icon]) => (
+        <article className={`settings-entry-defaults-card is-${kind}`} key={kind}>
+          <header className="settings-entry-defaults-card-header">
+            <span className="settings-entry-defaults-card-icon">{icon}</span>
+            <div><h2>{t(titleKey)}</h2><p>{t(descKey)}</p></div>
+          </header>
+          {renderFields(kind)}
+        </article>
+      ))}
+      <div className="settings-entry-defaults-actions">
+        <Button
+          disabled={controlsDisabled}
+          onClick={() => {
+            setProfiles(cloneDefaults(FALLBACK_CHAT_ENTRY_DEFAULTS));
+            setSaveState('idle');
+          }}
+        >
+          {t('settingsPage.tasks.defaultsRestoreAction')}
+        </Button>
         <footer className="settings-entry-defaults-footer">
           <span className={`settings-entry-defaults-save-state is-${saveState}`} role="status" aria-live="polite">
             {saveState === 'saving'
