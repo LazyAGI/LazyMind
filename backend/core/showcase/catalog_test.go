@@ -53,7 +53,7 @@ func TestCompileCatalogBuildsLocalizedCasesAndHashedAssets(t *testing.T) {
 	if len(cases) != 1 || cases[0].Type != TypeChat || cases[0].Title != "English demo" || cases[0].DetailTitle != "English detail" || cases[0].Category != "Education" || len(cases[0].Tasks) != 2 {
 		t.Fatalf("cases = %#v", cases)
 	}
-	if cases[0].BuiltinSkillUID != "bsk_demo" {
+	if cases[0].BuiltinSkillUID != "bsk_demo" || cases[0].SourceURL != "https://example.test/multi.zip" {
 		t.Fatalf("featured case is not bound to its configured Skill: %#v", cases[0])
 	}
 	if cases[0].Tasks[1].Result.Title != "English result" || cases[0].Tasks[1].Steps[0].Title != "Analyze" {

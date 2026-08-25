@@ -695,7 +695,8 @@
   white-space: nowrap;
 }
 
-.showcase-detail-back-link:hover {
+.showcase-detail-back-link:hover,
+.showcase-detail-source-link:hover {
   color: #3374df;
 }
 
@@ -710,6 +711,16 @@
   font-weight: 650;
   line-height: 1.35;
   letter-spacing: -0.02em;
+}
+
+.showcase-detail-source-link {
+  color: inherit;
+  text-decoration: none;
+}
+
+.showcase-detail-source-link:hover {
+  text-decoration: underline;
+  text-underline-offset: 3px;
 }
 
 .showcase-detail-heading p {
@@ -743,6 +754,7 @@
 }
 
 .showcase-detail-try-button:focus-visible,
+.showcase-detail-source-link:focus-visible,
 .showcase-task-card:focus-visible,
 .showcase-panel-header button:focus-visible {
   outline: 2px solid rgba(47, 112, 230, 0.44);

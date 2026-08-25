@@ -130,6 +130,15 @@
 
     color: #8d9ab2;
 
+    .segment-chat-action {
+      height: auto;
+      padding: 0;
+      font-size: 12px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.15s ease;
+    }
+
     .delete-icon {
       font-size: 20px;
       cursor: pointer;
@@ -138,5 +147,11 @@
         color: #006ae6;
       }
     }
+  }
+
+  &:hover .segment-chat-action,
+  &:focus-within .segment-chat-action {
+    opacity: 1;
+    pointer-events: auto;
   }
 }

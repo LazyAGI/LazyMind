@@ -261,6 +261,17 @@ func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName st
 			UpdatedAt:      now,
 		},
 	}
+	if ephemeral, _ := conversationSettings["ephemeral"].(bool); ephemeral {
+		c.IsEphemeral = true
+		if persistent, _ := conversationSettings["persistent_ephemeral"].(bool); !persistent {
+			expiresAt := now.Add(24 * time.Hour)
+			c.EphemeralExpiresAt = &expiresAt
+		}
+		c.SourceType, _ = conversationSettings["source_type"].(string)
+		c.SourceDatasetID, _ = conversationSettings["source_dataset_id"].(string)
+		c.SourceDocumentID, _ = conversationSettings["source_document_id"].(string)
+		c.SourceDisplayName, _ = conversationSettings["source_display_name"].(string)
+	}
 	// Resolve plugin settings for the new conversation.
 	// Priority: caller-supplied conversation settings > user_chat_settings defaults.
 	// All fields are written once so the conversation owns a stable execution
@@ -597,6 +608,9 @@ func buildChatHistoryExt(raw map[string]any, query string) json.RawMessage {
 	ext := map[string]any{"input": input}
 	if mentions, ok := raw["mentions"].([]any); ok && len(mentions) > 0 {
 		ext["mentions"] = mentions
+	}
+	if documentContext, ok := raw["document_context"].(map[string]any); ok && len(documentContext) > 0 {
+		ext["document_context"] = documentContext
 	}
 	b, err := json.Marshal(ext)
 	if err != nil {
@@ -1052,7 +1066,29 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 			}
 		}
 	}
+	applyDocumentContextFilter(body, raw)
 	return body
+}
+
+// applyDocumentContextFilter scopes preview chat retrieval to the document the
+// user is viewing. The context remains hidden from the visible user message,
+// while doc_id is forwarded as a normal retrieval filter.
+func applyDocumentContextFilter(body, raw map[string]any) {
+	context, _ := raw["document_context"].(map[string]any)
+	documentID, _ := context["document_id"].(string)
+	documentID = strings.TrimSpace(documentID)
+	if documentID == "" {
+		return
+	}
+
+	filters, _ := body["filters"].(map[string]any)
+	if filters == nil {
+		filters = map[string]any{}
+		body["filters"] = filters
+	}
+	if len(stringSlice(filters["doc_id"])) == 0 {
+		filters["doc_id"] = []string{documentID}
+	}
 }
 
 func promoteAgentRuntimeFlags(raw, body map[string]any) {

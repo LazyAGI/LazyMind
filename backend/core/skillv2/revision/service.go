@@ -12,6 +12,7 @@ import (
 
 	"gorm.io/gorm"
 
+	skilldistribution "lazymind/core/skillv2/distribution"
 	"lazymind/core/versionfs"
 )
 
@@ -186,11 +187,25 @@ func NewService(deps ServiceDeps) *Service {
 }
 
 func (s *Service) CommitDraft(ctx context.Context, req CommitDraftRequest) (CommitDraftResponse, error) {
+	changeSource := "draft_commit"
+	sourceRefType, sourceRefID := "", ""
+	if pending, ok, err := skilldistribution.PendingRefTx(ctx, s.db, req.SkillID); err != nil {
+		return CommitDraftResponse{}, err
+	} else if ok {
+		if pending.ConflictCount > 0 {
+			return CommitDraftResponse{}, skilldistribution.ErrConflictsRequireReview
+		}
+		changeSource = "distribution_upgrade"
+		sourceRefType = "builtin_package"
+		sourceRefID = pending.ArchiveSHA256
+	}
 	resp, err := versionfs.NewEngine(versionfs.EngineDeps{DB: s.db, Store: versionStore{service: s}, Clock: s.clock}).CommitDraft(ctx, versionfs.CommitDraftRequest{
 		ResourceID:           req.SkillID,
 		UserID:               req.UserID,
 		ExpectedDraftVersion: req.DraftVersion,
-		ChangeSource:         "draft_commit",
+		ChangeSource:         changeSource,
+		SourceRefType:        sourceRefType,
+		SourceRefID:          sourceRefID,
 	})
 	if err != nil {
 		return CommitDraftResponse{}, err
@@ -839,6 +854,15 @@ func blobReferenced(tx *gorm.DB, hash string) (bool, error) {
 	}
 	if revisionRefs > 0 {
 		return true, nil
+	}
+	if tx.Migrator().HasTable("skill_distribution_entries") {
+		var distributionRefs int64
+		if err := tx.Table("skill_distribution_entries").Where("blob_hash = ?", hash).Count(&distributionRefs).Error; err != nil {
+			return false, err
+		}
+		if distributionRefs > 0 {
+			return true, nil
+		}
 	}
 	var draftRefs int64
 	if err := tx.Model(&skillDraftEntryRow{}).Where("blob_hash = ?", hash).Count(&draftRefs).Error; err != nil {

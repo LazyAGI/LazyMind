@@ -1,4 +1,5 @@
 schema_version: 1
+patch_catalog: patches/catalog.yaml
 bundled_skills:
   - uid: bsk_01JZ7Q3YF6Q2Z4HM9V8K7D1R3P
     path: research/deep-research
