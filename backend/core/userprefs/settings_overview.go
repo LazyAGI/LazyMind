@@ -184,7 +184,10 @@ func buildSettingsOverview(r *http.Request, db *gorm.DB, userID string) (setting
 	}
 
 	modelReady := selectedModels > 0
-	tasksEffective := controls.TaskCenterEnabled && enabledSchedules > 0
+	tasksControlEnabled := controls.TaskCenterEnabled || controls.WorkflowsEnabled || controls.SchedulesEnabled
+	tasksEffective := controls.TaskCenterEnabled ||
+		(controls.WorkflowsEnabled && enabledWorkflows > 0) ||
+		(controls.SchedulesEnabled && enabledSchedules > 0)
 	enabledSkillResources := enabledSkills + enabledWorkflows
 	skillsControlEnabled := controls.SkillsEnabled || controls.WorkflowsEnabled
 	skillsEffective := (controls.SkillsEnabled && enabledSkills > 0) || (controls.WorkflowsEnabled && enabledWorkflows > 0)
@@ -192,7 +195,7 @@ func buildSettingsOverview(r *http.Request, db *gorm.DB, userID string) (setting
 	sections := []settingsOverviewSection{
 		{ID: "overview", Title: "设置概览", Route: "/settings?section=overview", Status: "ready", Detail: "统一查看运行状态和待处理配置"},
 		{ID: "models", Title: "模型与服务", Route: "/model-providers/default-services", EffectiveEnabled: boolPointer(modelReady), Counts: settingsOverviewCounts{Configured: selectedModels}, Status: statusFor(modelReady), Detail: "已选模型决定对话与工具能力"},
-		{ID: "tasks", Title: "对话与任务", Route: "/task-center", RawEnabled: boolPointer(controls.TaskCenterEnabled), EffectiveEnabled: boolPointer(tasksEffective), Counts: settingsOverviewCounts{Total: schedules, Enabled: enabledSchedules}, Status: statusFor(controls.TaskCenterEnabled), Detail: "总开关暂停后续调度和立即执行，不修改定时任务选择"},
+		{ID: "tasks", Title: "对话与任务", Route: "/task-center", RawEnabled: boolPointer(tasksControlEnabled), EffectiveEnabled: boolPointer(tasksEffective), Counts: settingsOverviewCounts{Total: schedules, Enabled: enabledSchedules}, Status: statusFor(tasksControlEnabled), Detail: "子任务、工作流和定时任务分别控制，关闭不会删除已有配置"},
 		{ID: "knowledge", Title: "知识与数据", Route: "/settings?section=knowledge", RawEnabled: boolPointer(controls.DocumentParsingEnabled), EffectiveEnabled: boolPointer(controls.DocumentParsingEnabled), Status: statusFor(controls.DocumentParsingEnabled), Detail: "管理检索工具、解析服务、数据源和文件连接"},
 		{ID: "memory", Title: "记忆与自进化", Route: "/memory-management", Status: "ready", Detail: "管理记忆、经验和术语"},
 		{ID: "skills", Title: "技能与插件", Route: "/memory-management/skills", RawEnabled: boolPointer(skillsControlEnabled), EffectiveEnabled: boolPointer(skillsEffective), Counts: settingsOverviewCounts{Total: totalSkills + totalWorkflows, Enabled: enabledSkillResources}, Status: statusFor(skillsControlEnabled), Detail: "我的技能和我的工作流分别批量启用或停用"},
@@ -208,8 +211,8 @@ func buildSettingsOverview(r *http.Request, db *gorm.DB, userID string) (setting
 	if enabledMCP > runnableMCP {
 		issues = append(issues, settingsOverviewIssue{ID: "mcp-needs-verification", Severity: "warning", Message: "存在已启用但尚未通过验证或工具授权的 MCP 服务", Section: "mcp"})
 	}
-	if !controls.TaskCenterEnabled {
-		issues = append(issues, settingsOverviewIssue{ID: "task-center-paused", Severity: "info", Message: "任务中心已暂停；定时任务原始开关仍被保留", Section: "tasks"})
+	if !controls.SchedulesEnabled && enabledSchedules > 0 {
+		issues = append(issues, settingsOverviewIssue{ID: "scheduled-tasks-paused", Severity: "info", Message: "定时任务已暂停；任务配置和原始开关仍被保留", Section: "tasks"})
 	}
 	if !controls.DocumentParsingEnabled {
 		issues = append(issues, settingsOverviewIssue{ID: "document-parsing-paused", Severity: "info", Message: "文档解析已暂停；已有文档和服务配置仍被保留", Section: "knowledge"})
