@@ -488,6 +488,7 @@ def _build_subagent_plan(
     tools: List[Any],
     tool_prompt_appendices: Dict[str, List[str]],
     resume: bool = False,
+    llm_config: Optional[Dict[str, Any]] = None,
 ) -> AgentRunPlan:
     builder = PromptBuilder.for_role(AgentRole.SUBAGENT)
     add_standard_system_sections(
@@ -704,6 +705,7 @@ def _build_subagent_plan(
         execution_options=AgentExecutionOptions(
             extra_stop_condition=make_cancel_stop_condition(),
             max_retries=max(1, int(_cfg['agentic_expanded_max_rounds']) - 1),
+            llm_config=llm_config or {},
         ),
     )
 
@@ -1034,6 +1036,7 @@ async def run_subagent_stream(
                 runtime_configs + attachment_configs,
             ),
             resume=resume,
+            llm_config=model_config,
         )
 
         step_seq = db.max_step_seq(task_id) + 1 if resume else 0

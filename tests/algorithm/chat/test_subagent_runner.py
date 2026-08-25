@@ -251,6 +251,22 @@ def test_subagent_plan_uses_200_rounds_in_max_mode(tmp_path):
     assert plan.execution_options.max_retries == 199
 
 
+def test_subagent_plan_forwards_llm_config_for_context_budget(tmp_path):
+    from lazymind.chat.engine.subagent.context import SubAgentContext
+
+    ctx = SubAgentContext(
+        task_id='task-budget', conversation_id='conv-1', agent_type='workflow_step',
+        objective='retrieve literature', params={}, workspace_path=str(tmp_path),
+        input_slots=[], output_slots=[], db=None, emit=lambda _event: None,
+    )
+    llm_config = {'llm': {'source': 'deepseek', 'model': 'deepseek-v4-flash', 'max_input_tokens': '1M'}}
+    plan = runner_mod._build_subagent_plan(
+        ctx, None, tools=[], tool_prompt_appendices={}, llm_config=llm_config,
+    )
+
+    assert plan.execution_options.llm_config == llm_config
+
+
 # ---------------------------------------------------------------------------
 # Test: task not found
 # ---------------------------------------------------------------------------
