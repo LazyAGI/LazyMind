@@ -1,0 +1,153 @@
+schema_version: 2
+id: gaokao-volunteer-advisor
+type: chat
+version: 1.0.0
+status: published
+default_locale: zh-CN
+
+skill:
+  source_url: https://skillhub.cn/skills/user_7c4df347/gaokao-volunteer-advisor
+  required_version: 1.0.0
+
+placement:
+  home: true
+  gallery: true
+  order: 9
+
+classification:
+  category: 教育咨询
+  tags:
+    - 高考
+    - 志愿填报
+    - 院校选择
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+
+presentation:
+  card:
+    title: 高考志愿填报顾问
+    description: 根据成绩、位次和个人偏好，辅助完成院校专业选择与冲稳保规划
+    output_type: report
+    output_label: 志愿填报建议
+    cover_asset: cover
+    result_summary: 从位次分析到志愿梯度，形成可继续调整的高考志愿决策参考
+  detail:
+    title: 高考志愿填报顾问
+    description: 根据成绩、位次、选科和个人偏好，完成院校专业筛选、冲稳保规划与录取风险分析。
+    attachment_hint: 成绩、位次、选科和院校专业意向表
+
+tasks:
+  - id: volunteer-plan
+    selector:
+      title: 志愿方案规划
+      description: 综合位次、选科和个人偏好制定冲稳保志愿方案
+      output_label: 志愿填报方案
+    launch:
+      prompt_short: 根据我的高考成绩、位次和个人偏好制定一份冲稳保志愿方案。
+      prompt: 请根据我提供的省份、年份、选科、分数、位次、院校层次、城市和专业偏好，制定一份高考志愿填报方案。请说明冲稳保梯度、院校专业选择依据、主要风险和后续调整建议；信息不足时先向我询问关键资料。
+    replay:
+      steps:
+        - title: 核对考试信息
+          description: 确认省份、年份、选科、分数和位次等基础条件
+        - title: 梳理个人偏好
+          description: 明确城市、院校层次、专业方向和可接受约束
+        - title: 制定冲稳保梯度
+          description: 结合历年录取位次形成分层候选清单
+        - title: 输出志愿方案
+          description: 给出志愿顺序、选择依据、风险和调整建议
+    result:
+      template: generic_report_v1
+      eyebrow: 志愿填报方案
+      title: 冲稳保志愿规划建议
+      summary: 形成包含冲稳保梯度、院校专业依据和风险提示的志愿方案
+      highlights:
+        - 分层院校与专业候选清单
+        - 冲稳保梯度和志愿顺序
+        - 退档、调剂与专业限制风险
+
+  - id: rank-analysis
+    selector:
+      title: 位次与录取概率分析
+      description: 根据分数和位次判断目标院校专业的录取可能性
+      output_label: 位次分析报告
+    launch:
+      prompt_short: 分析我的高考位次能够报考哪些院校和专业。
+      prompt: 请根据我提供的省份、年份、选科、分数和位次进行高考录取位次分析，说明可重点关注的院校层次、专业范围及冲稳保边界；如缺少目标院校或历年数据，请先向我补充询问并明确数据局限。
+    replay:
+      steps:
+        - title: 确认位次口径
+          description: 核对省份、年份、选科类别及一分一段信息
+        - title: 对齐历史数据
+          description: 比较目标院校专业近年最低位次和波动范围
+        - title: 判断录取区间
+          description: 划分冲刺、稳妥和保底的参考边界
+        - title: 输出分析结论
+          description: 总结机会、风险和需要继续核实的数据
+    result:
+      template: generic_report_v1
+      eyebrow: 位次分析报告
+      title: 院校专业录取区间分析
+      summary: 以位次为核心给出目标院校专业的录取区间和风险判断
+      highlights:
+        - 位次口径与历史数据对齐
+        - 目标院校专业录取区间
+        - 数据波动和判断限制
+
+  - id: major-selection
+    selector:
+      title: 专业选择建议
+      description: 结合兴趣、学科优势和发展方向筛选专业
+      output_label: 专业选择建议
+    launch:
+      prompt_short: 根据我的兴趣和学科特点推荐适合的大学专业。
+      prompt: 请根据我的兴趣、学科优势、性格特点、职业倾向、选科限制和城市偏好，帮助我筛选适合的大学专业。请比较专业学习内容、能力要求、就业方向、深造路径和潜在风险，并给出进一步了解专业的方法。
+    replay:
+      steps:
+        - title: 识别个人特征
+          description: 梳理兴趣、优势学科、性格和职业倾向
+        - title: 检查选科限制
+          description: 排除不满足选科和身体条件要求的专业
+        - title: 比较专业方向
+          description: 对比学习内容、培养路径、就业和深造选择
+        - title: 形成推荐清单
+          description: 给出推荐优先级、理由和验证方式
+    result:
+      template: generic_report_v1
+      eyebrow: 专业选择建议
+      title: 大学专业适配与发展建议
+      summary: 形成带有适配理由、学习路径和风险提示的专业推荐清单
+      highlights:
+        - 兴趣与能力适配分析
+        - 专业学习和发展路径比较
+        - 选科、身体条件和就业风险
+
+  - id: admission-rules
+    selector:
+      title: 录取规则解读
+      description: 解读平行志愿、投档、调剂和退档等关键规则
+      output_label: 录取规则说明
+    launch:
+      prompt_short: 解读我所在省份的高考志愿投档和录取规则。
+      prompt: 请解读我所在省份和对应年份的高考志愿投档录取规则，重点说明批次设置、平行志愿、投档比例、专业调剂、退档风险和特殊类型招生。请区分官方规则、一般经验和需要进一步核实的信息，并优先提示可能影响填报结果的关键限制。
+    replay:
+      steps:
+        - title: 确认省份与年份
+          description: 确定适用的招生政策、批次和志愿模式
+        - title: 拆解投档流程
+          description: 说明排序、检索、投档和院校录取的先后关系
+        - title: 分析关键风险
+          description: 识别调剂、退档、专业限制和批次衔接风险
+        - title: 输出规则清单
+          description: 整理填报前需要确认的规则和官方核验入口
+    result:
+      template: generic_report_v1
+      eyebrow: 录取规则说明
+      title: 高考投档录取规则检查清单
+      summary: 将复杂录取政策整理为可执行的填报规则和风险检查清单
+      highlights:
+        - 投档与录取流程
+        - 调剂和退档风险
+        - 需从官方渠道核实的规则

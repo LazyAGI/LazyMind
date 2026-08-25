@@ -20,6 +20,7 @@ from .models import (
     EpisodeSearchResult,
     EpisodeSource,
     EpisodeType,
+    MemoryOperationRecord,
     normalize_episode_summary,
 )
 from .paths import (
@@ -83,6 +84,7 @@ __all__ = [
     'AGENTS_ROOT',
     'MemoryContext',
     'MemoryStore',
+    'MemoryOperationRecord',
     'PREFERENCE_PATH',
     'PROFILE_PATH',
     'PreferenceItem',

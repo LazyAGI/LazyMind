@@ -4,16 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/gorilla/mux"
 	"gorm.io/gorm"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/externalcontext"
 	"lazymind/core/state"
+	"lazymind/core/store"
 	"lazymind/core/workflow/artifactfile"
 )
 
@@ -23,7 +28,7 @@ func newExternalChatTestApplication(t *testing.T) (*externalChatApplication, *go
 	db := database.DB
 	if err := db.AutoMigrate(
 		&orm.Conversation{}, &orm.ChatHistory{}, &orm.TaskCenterTask{},
-		&orm.ExternalChatRun{}, &orm.ExternalChatRunEvent{}, &orm.ExternalChatHost{}, &orm.AgentInvocation{},
+		&orm.ExternalAgentBinding{}, &orm.ExternalAgentSession{}, &orm.ExternalChatRun{}, &orm.ExternalChatRunEvent{}, &orm.ExternalChatHost{}, &orm.AgentInvocation{},
 		&orm.WorkflowSession{}, &orm.WorkflowSlotRevision{}, &orm.WorkflowHumanArtifact{}, &orm.ConversationArtifact{},
 	); err != nil {
 		t.Fatalf("migrate External Chat test store: %v", err)
@@ -36,6 +41,18 @@ func newExternalChatTestApplication(t *testing.T) (*externalChatApplication, *go
 		t.Fatalf("create conversation: %v", err)
 	}
 	return newExternalChatApplication(db), db
+}
+
+func seedExternalConversationPolicy(t *testing.T, db *gorm.DB, userID string, enableWorkflow bool, workflowMode string, enableSubagent bool) {
+	t.Helper()
+	if err := db.Exec(`
+INSERT INTO user_chat_settings (
+  user_id, enable_workflow, plugin_mode, enable_subagent,
+  quick_question_defaults, new_task_defaults, updated_at
+) VALUES (?, ?, ?, ?, '{}', '{}', ?)
+`, userID, enableWorkflow, workflowMode, enableSubagent, time.Now().UTC()).Error; err != nil {
+		t.Fatalf("create user chat settings: %v", err)
+	}
 }
 
 func TestExternalExecutionProjectionJoinsAuthoritiesWithoutOwningState(t *testing.T) {
@@ -53,6 +70,11 @@ func TestExternalExecutionProjectionJoinsAuthoritiesWithoutOwningState(t *testin
 		externalChatEvent{EventID: "projection-thread", Type: "thread_started", ProviderThreadID: "private-thread"}); err != nil {
 		t.Fatal(err)
 	}
+	var binding orm.ExternalAgentBinding
+	if err := db.Where("provider = ? AND provider_thread_id = ?", ChatExecutorCodex, "private-thread").Take(&binding).Error; err != nil ||
+		binding.ConversationID != "conversation-1" || binding.CreatedByUserID != "user-1" {
+		t.Fatalf("managed thread binding: binding=%+v err=%v", binding, err)
+	}
 	now := clock
 	if err := db.Create(&orm.AgentInvocation{
 		ID: "inv-interrupted", OwnerUserID: "user-1", ClientName: "codex", ConnectorName: "lazymind-mcp",
@@ -64,7 +86,7 @@ func TestExternalExecutionProjectionJoinsAuthoritiesWithoutOwningState(t *testin
 		t.Fatal(err)
 	}
 	clock = clock.Add(2 * time.Second)
-	second, err := app.claim(ctx, "user-1", ChatExecutorCodex, "host-2")
+	second, err := app.claim(ctx, "user-1", ChatExecutorCodex, "host-1")
 	if err != nil || second == nil || second.Action != "recover" {
 		t.Fatalf("recovery claim: run=%#v err=%v", second, err)
 	}
@@ -107,11 +129,11 @@ func TestExternalExecutionProjectionJoinsAuthoritiesWithoutOwningState(t *testin
 		{EventID: "projection-message", Type: "message", Text: "answer"},
 		{EventID: "projection-completed", Type: "completed"},
 	} {
-		if _, err := app.appendEvent(ctx, "user-1", second.RunID, "host-2", second.LeaseToken, event); err != nil {
+		if _, err := app.appendEvent(ctx, "user-1", second.RunID, "host-1", second.LeaseToken, event); err != nil {
 			t.Fatal(err)
 		}
 	}
-	if err := app.reportHost(ctx, "user-1", ChatExecutorCodex, "host-2", true, true, ""); err != nil {
+	if err := app.reportHost(ctx, "user-1", ChatExecutorCodex, "host-1", true, true, ""); err != nil {
 		t.Fatal(err)
 	}
 
@@ -143,6 +165,492 @@ func TestExternalExecutionProjectionJoinsAuthoritiesWithoutOwningState(t *testin
 	foreign, err := app.executionProjections(ctx, "user-2", []string{second.HistoryID})
 	if err != nil || len(foreign) != 0 {
 		t.Fatalf("projection crossed owner boundary: %#v err=%v", foreign, err)
+	}
+}
+
+func TestExternalContinuationPreservesProviderOwnedConversation(t *testing.T) {
+	app, db := newExternalChatTestApplication(t)
+	now := time.Now().UTC()
+	if err := db.Create(&orm.ExternalAgentBinding{
+		ID: "external-binding", ConversationID: "conversation-1",
+		Provider: ChatExecutorCodex, HostID: "host-1", ProviderThreadID: "external-thread",
+		CreatedByUserID: "user-1",
+		CreatedAt:       now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := app.createRun(context.Background(), &orm.ExternalChatRun{
+		ID: "external-continuation", RequestID: "external-continuation",
+		ConversationID: "conversation-1", HistoryID: "external-history",
+		Provider: ChatExecutorCodex, HostID: "host-1", ProviderThreadID: "external-thread",
+		ActorUserID: "user-1", Action: "resume", Prompt: "prompt",
+		Query: "continue", Sequence: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	job, err := app.claim(context.Background(), "user-1", ChatExecutorCodex, "host-1")
+	if err != nil || job == nil {
+		t.Fatalf("claim continuation: job=%#v err=%v", job, err)
+	}
+	if job.ProviderThreadID != "external-thread" || job.HostID != "host-1" {
+		t.Fatalf("external Codex continuation=%#v", job)
+	}
+	if _, err := app.appendEvent(
+		context.Background(), "user-1", job.RunID, "host-1", job.LeaseToken,
+		externalChatEvent{EventID: "continued-thread", Type: "thread_started", ProviderThreadID: "external-thread"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	var binding orm.ExternalAgentBinding
+	if err := db.First(&binding, "id = ?", "external-binding").Error; err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestExternalConversationBindsExactlyOneNativeThread(t *testing.T) {
+	_, db := newExternalChatTestApplication(t)
+	service := externalcontext.New(db)
+	ctx := context.Background()
+	if err := service.BindManagedThread(ctx, "user-1", ChatExecutorCodex, "host-1", "codex-thread", "conversation-1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.BindManagedThread(ctx, "user-1", ChatExecutorCursor, "host-1", "cursor-thread", "conversation-1"); !errors.Is(err, externalcontext.ErrThreadOwned) {
+		t.Fatalf("second provider in one conversation err=%v", err)
+	}
+	now := time.Now().UTC()
+	if err := db.Create(&orm.Conversation{ID: "conversation-2", BaseModel: orm.BaseModel{
+		CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now,
+	}}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := service.BindManagedThread(ctx, "user-1", ChatExecutorCursor, "host-1", "cursor-thread", "conversation-2"); err != nil {
+		t.Fatal(err)
+	}
+	if err := service.BindManagedThread(ctx, "user-1", ChatExecutorCodex, "host-1", "another-codex-thread", "conversation-1"); !errors.Is(err, externalcontext.ErrThreadOwned) {
+		t.Fatalf("second Codex thread err=%v, want ErrThreadOwned", err)
+	}
+}
+
+func TestExternalSessionCatalogSyncSeparatesDiscoveryFromImportedBindings(t *testing.T) {
+	_, db := newExternalChatTestApplication(t)
+	now := time.Now().UTC()
+	for _, binding := range []orm.ExternalAgentBinding{
+		{ID: "external", ConversationID: "conversation-1", Provider: ChatExecutorCodex,
+			HostID: "host-1", ProviderThreadID: "external-thread",
+			CreatedByUserID: "user-1", CreatedAt: now, UpdatedAt: now},
+	} {
+		if err := db.Create(&binding).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+	updated, err := externalcontext.New(db).SyncSessionCatalog(
+		context.Background(), "user-1", ChatExecutorCodex, "host-1",
+		[]externalcontext.NativeSession{
+			{ThreadID: "external-thread", ProjectKey: "codex-project", ProjectName: "LazyRAG", DisplayName: "Existing"},
+			{ThreadID: "unknown-thread", ProjectKey: "unknown-project", ProjectName: "Unknown", DisplayName: "Discovered"},
+		}, true,
+	)
+	if err != nil || updated != 2 {
+		t.Fatalf("updated=%d err=%v", updated, err)
+	}
+	var binding orm.ExternalAgentBinding
+	if err := db.First(&binding, "id = ?", "external").Error; err != nil {
+		t.Fatal(err)
+	}
+	var sessions []orm.ExternalAgentSession
+	if err := db.Order("provider_thread_id ASC").Find(&sessions).Error; err != nil || len(sessions) != 2 {
+		t.Fatalf("sessions=%#v err=%v", sessions, err)
+	}
+	if sessions[0].ProjectName != "LazyRAG" {
+		t.Fatalf("unexpected catalog states=%#v", sessions)
+	}
+}
+
+func TestExternalSessionCatalogImportsRealTurnsIdempotently(t *testing.T) {
+	_, db := newExternalChatTestApplication(t)
+	created := time.Date(2026, 8, 21, 10, 0, 0, 0, time.UTC)
+	session := externalcontext.NativeSession{
+		ThreadID: "workbuddy-thread", ProjectKey: "workbuddy-project", ProjectName: "LazyRAG",
+		DisplayName: "修复\n项目", NativeUpdated: created.Add(time.Minute),
+		Turns: []externalcontext.NativeTurn{
+			{ID: "turn-1", User: "检查会话", Assistant: "检查完成", CreatedAt: created},
+			{ID: "turn-2", User: "继续任务", Assistant: "继续完成", CreatedAt: created.Add(time.Minute)},
+		},
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		if updated, err := externalcontext.New(db).SyncSessionCatalog(
+			context.Background(), "user-1", ChatExecutorWorkBuddy, "host-1", []externalcontext.NativeSession{session}, true,
+		); err != nil || updated != 1 {
+			t.Fatalf("attempt=%d updated=%d err=%v", attempt, updated, err)
+		}
+	}
+	var binding orm.ExternalAgentBinding
+	if err := db.First(&binding, "provider = ? AND provider_thread_id = ?", ChatExecutorWorkBuddy, "workbuddy-thread").Error; err != nil {
+		t.Fatal(err)
+	}
+	var conversation orm.Conversation
+	if err := db.First(&conversation, "id = ?", binding.ConversationID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if conversation.ChatTimes != 2 || conversation.DisplayName != "修复 项目" {
+		t.Fatalf("conversation=%#v", conversation)
+	}
+	var histories []orm.ChatHistory
+	if err := db.Order("seq ASC").Find(&histories, "conversation_id = ?", binding.ConversationID).Error; err != nil || len(histories) != 2 {
+		t.Fatalf("histories=%#v err=%v", histories, err)
+	}
+	if histories[0].Content != "检查会话" || histories[0].Result != "检查完成" || histories[1].Seq != 2 {
+		t.Fatalf("histories=%#v", histories)
+	}
+	var catalog orm.ExternalAgentSession
+	if err := db.First(&catalog, "provider = ? AND provider_thread_id = ?", ChatExecutorWorkBuddy, "workbuddy-thread").Error; err != nil {
+		t.Fatal(err)
+	}
+	if catalog.TurnCount != 2 || !catalog.Active || catalog.ProjectName != "LazyRAG" {
+		t.Fatalf("catalog=%#v", catalog)
+	}
+}
+
+func TestExternalSessionCatalogAdoptsLegacyHostWithoutDuplicateTranscript(t *testing.T) {
+	_, db := newExternalChatTestApplication(t)
+	now := time.Now().UTC()
+	if err := db.Create(&orm.ExternalAgentBinding{
+		ID: "legacy-binding", ConversationID: "conversation-1", Provider: ChatExecutorWorkBuddy,
+		HostID: "host-legacy", ProviderThreadID: "legacy-thread", CreatedByUserID: "user-1",
+		CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.ExternalAgentSession{
+		ID: "legacy-session", OwnerUserID: "user-1", Provider: ChatExecutorWorkBuddy,
+		HostID: "host-legacy", ProviderThreadID: "legacy-thread", ProjectKey: "project-1",
+		ProjectName: "LazyRAG", DisplayName: "Legacy", TurnCount: 1, Active: true,
+		LastSeenAt: now, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.ChatHistory{
+		ID: "legacy-history", Seq: 1, ConversationID: "conversation-1",
+		AlgorithmID: "external:" + ChatExecutorWorkBuddy, Content: "旧问题", Result: "旧回答",
+		TimeMixin: orm.TimeMixin{CreateTime: now, UpdateTime: now},
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := externalcontext.New(db).SyncSessionCatalog(
+		context.Background(), "user-1", ChatExecutorWorkBuddy, "host-current",
+		[]externalcontext.NativeSession{{
+			ThreadID: "legacy-thread", ProjectKey: "project-1", ProjectName: "LazyRAG", DisplayName: "Legacy",
+			Turns: []externalcontext.NativeTurn{{ID: "turn-1", User: "旧问题", Assistant: "旧回答", CreatedAt: now}},
+		}}, true,
+	); err != nil {
+		t.Fatal(err)
+	}
+	var binding orm.ExternalAgentBinding
+	if err := db.First(&binding, "id = ?", "legacy-binding").Error; err != nil || binding.HostID != "host-current" {
+		t.Fatalf("binding=%#v err=%v", binding, err)
+	}
+	var histories int64
+	if err := db.Model(&orm.ChatHistory{}).Where("conversation_id = ?", "conversation-1").Count(&histories).Error; err != nil || histories != 1 {
+		t.Fatalf("histories=%d err=%v", histories, err)
+	}
+}
+
+func TestDirectMCPInvocationDoesNotCreateSyntheticConversationTurn(t *testing.T) {
+	_, db := newExternalChatTestApplication(t)
+	service := externalcontext.New(db)
+	source := externalcontext.Source{
+		Provider: ChatExecutorWorkBuddy, HostID: "host-1",
+		ThreadID: "workbuddy-pending-thread", TurnID: "turn-pending",
+		ProjectKey: "workbuddy-project", ProjectName: "LazyRAG", Message: "检查最终回答",
+	}
+	link, err := service.ResolveInvocation(context.Background(), "user-1", "invocation-pending", source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if link.ConversationID == "" || link.ExternalRef != "" || link.HistoryID != "" {
+		t.Fatalf("link=%#v", link)
+	}
+	var histories, runs int64
+	if err := db.Model(&orm.ChatHistory{}).Where("conversation_id = ?", link.ConversationID).Count(&histories).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&orm.ExternalChatRun{}).Where("conversation_id = ?", link.ConversationID).Count(&runs).Error; err != nil {
+		t.Fatal(err)
+	}
+	if histories != 0 || runs != 0 {
+		t.Fatalf("synthetic histories=%d runs=%d", histories, runs)
+	}
+}
+
+func TestExternalConversationSnapshotsUserExecutionPolicy(t *testing.T) {
+	_, db := newExternalChatTestApplication(t)
+	seedExternalConversationPolicy(t, db, "snapshot-user", false, "auto", false)
+	link, err := externalcontext.New(db).ResolveInvocation(
+		context.Background(), "snapshot-user", "snapshot-invocation",
+		externalcontext.Source{
+			Provider: ChatExecutorCursor, HostID: "snapshot-host", ThreadID: "snapshot-thread",
+			TurnID: "snapshot-turn", Message: "snapshot policy",
+		},
+	)
+	if err != nil {
+		t.Fatalf("resolve external invocation: %v", err)
+	}
+	var conversation orm.Conversation
+	if err := db.Where("id = ?", link.ConversationID).Take(&conversation).Error; err != nil {
+		t.Fatalf("load external conversation: %v", err)
+	}
+	if conversation.EnableWorkflow == nil || *conversation.EnableWorkflow ||
+		conversation.WorkflowMode == nil || *conversation.WorkflowMode != "auto" ||
+		conversation.EnableSubagent == nil || *conversation.EnableSubagent {
+		t.Fatalf("external conversation did not snapshot user policy: %#v", conversation)
+	}
+	if err := db.Model(&orm.UserChatSettings{}).Where("user_id = ?", "snapshot-user").Updates(map[string]any{
+		"enable_workflow": true,
+		"plugin_mode":     "dynamic", // workflow-naming: persistence
+		"enable_subagent": true,
+	}).Error; err != nil {
+		t.Fatalf("change user chat settings: %v", err)
+	}
+	config := loadUserAgentConfig(context.Background(), db, "snapshot-user", map[string]any{
+		"conversation_id": link.ConversationID,
+	})
+	if config["enable_workflow"] != false || config["workflow_mode"] != "auto" || config["enable_subagent"] != false {
+		t.Fatalf("external conversation policy changed with user defaults: %#v", config)
+	}
+}
+
+func TestExistingExternalConversationFillsOnlyNullPolicyFields(t *testing.T) {
+	_, db := newExternalChatTestApplication(t)
+	now := time.Now().UTC()
+	seedExternalConversationPolicy(t, db, "user-1", false, "auto", false)
+	if err := db.Model(&orm.Conversation{}).Where("id = ?", "conversation-1").
+		Update("enable_plugin", true).Error; err != nil {
+		t.Fatalf("seed non-NULL conversation policy: %v", err)
+	}
+	if err := db.Create(&orm.ExternalAgentBinding{
+		ID: "existing-policy-binding", ConversationID: "conversation-1",
+		Provider: ChatExecutorCursor, HostID: "existing-policy-host",
+		ProviderThreadID: "existing-policy-thread", CreatedByUserID: "user-1",
+		CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create external binding: %v", err)
+	}
+	if _, err := externalcontext.New(db).ResolveInvocation(
+		context.Background(), "user-1", "existing-policy-invocation",
+		externalcontext.Source{
+			Provider: ChatExecutorCursor, HostID: "existing-policy-host",
+			ThreadID: "existing-policy-thread", TurnID: "existing-policy-turn",
+		},
+	); err != nil {
+		t.Fatalf("resolve existing external conversation: %v", err)
+	}
+	var conversation orm.Conversation
+	if err := db.Where("id = ?", "conversation-1").Take(&conversation).Error; err != nil {
+		t.Fatalf("reload existing conversation: %v", err)
+	}
+	if conversation.EnableWorkflow == nil || !*conversation.EnableWorkflow ||
+		conversation.WorkflowMode == nil || *conversation.WorkflowMode != "auto" ||
+		conversation.EnableSubagent == nil || *conversation.EnableSubagent {
+		t.Fatalf("existing external policy fill overwrote non-NULL data or missed NULL data: %#v", conversation)
+	}
+}
+
+func TestNullConversationPolicyUsesHistoricalHardDefaults(t *testing.T) {
+	_, db := newExternalChatTestApplication(t)
+	seedExternalConversationPolicy(t, db, "user-1", false, "auto", false)
+	config := loadUserAgentConfig(context.Background(), db, "user-1", map[string]any{
+		"conversation_id": "conversation-1",
+	})
+	if config["enable_workflow"] != true || config["workflow_mode"] != "dynamic" || config["enable_subagent"] != true {
+		t.Fatalf("NULL conversation policy followed mutable user defaults: %#v", config)
+	}
+}
+
+func TestNativeSessionSyncBindsImmediatelyAndImportsIncrementally(t *testing.T) {
+	_, db := newExternalChatTestApplication(t)
+	service := externalcontext.New(db)
+	session := externalcontext.NativeSession{
+		ThreadID: "cursor-lazy-bind", ProjectKey: "cursor-project", ProjectName: "LazyRAG",
+		DisplayName: "Cursor CLI 会话",
+	}
+	if _, err := service.SyncSessionCatalog(
+		context.Background(), "user-1", ChatExecutorCursor, "host-1", []externalcontext.NativeSession{session}, true,
+	); err != nil {
+		t.Fatal(err)
+	}
+	var before int64
+	if err := db.Model(&orm.ExternalAgentBinding{}).Where("provider = ?", ChatExecutorCursor).Count(&before).Error; err != nil || before != 1 {
+		t.Fatalf("bindings after sync=%d err=%v", before, err)
+	}
+	binding, err := service.BindNativeSession(context.Background(), "user-1", ChatExecutorCursor, "host-1", session.ThreadID)
+	if err != nil || binding.ConversationID == "" {
+		t.Fatalf("binding=%#v err=%v", binding, err)
+	}
+	session.Turns = []externalcontext.NativeTurn{{
+		ID: "cursor-turn", User: "继续 Cursor 任务", Assistant: "Cursor 任务已恢复",
+	}}
+	if _, err := service.SyncSessionCatalog(
+		context.Background(), "user-1", ChatExecutorCursor, "host-1", []externalcontext.NativeSession{session}, false,
+	); err != nil {
+		t.Fatal(err)
+	}
+	rebound, err := service.BindNativeSession(context.Background(), "user-1", ChatExecutorCursor, "host-1", session.ThreadID)
+	if err != nil || rebound.ConversationID != binding.ConversationID {
+		t.Fatalf("rebound=%#v err=%v", rebound, err)
+	}
+	var history orm.ChatHistory
+	if err := db.Where("conversation_id = ?", binding.ConversationID).Take(&history).Error; err != nil ||
+		history.Content != "继续 Cursor 任务" || history.Result != "Cursor 任务已恢复" {
+		t.Fatalf("history=%#v err=%v", history, err)
+	}
+}
+
+func TestExternalSessionCatalogAPIExposesBoundAndUnboundSessions(t *testing.T) {
+	_, db := newExternalChatTestApplication(t)
+	store.Init(db, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	sessions := []externalcontext.NativeSession{
+		{
+			ThreadID: "real-thread", ProjectKey: "project-real", ProjectName: "LazyRAG",
+			DisplayName: "真实会话",
+			Turns:       []externalcontext.NativeTurn{{ID: "turn-real", User: "真实问题", Assistant: "真实回答"}},
+		},
+		{
+			ThreadID: "empty-thread", ProjectKey: "project-empty", ProjectName: "LazyRAG",
+			DisplayName: "空会话",
+		},
+	}
+	if _, err := externalcontext.New(db).SyncSessionCatalog(
+		context.Background(), "user-1", ChatExecutorCodex, "host-1", sessions, true,
+	); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/external-chat/providers/codex/sessions?page_size=100", nil)
+	req.Header.Set("X-User-Id", "user-1")
+	req = mux.SetURLVars(req, map[string]string{"provider": ChatExecutorCodex})
+	recorder := httptest.NewRecorder()
+	ListExternalAgentSessions(recorder, req)
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+	var response struct {
+		Data struct {
+			Sessions []struct {
+				ThreadID       string `json:"provider_thread_id"`
+				ConversationID string `json:"conversation_id"`
+				Bound          bool   `json:"bound"`
+				TurnCount      int    `json:"turn_count"`
+			} `json:"sessions"`
+			Total int64 `json:"total_size"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(recorder.Body.Bytes(), &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Data.Total != 2 || len(response.Data.Sessions) != 2 {
+		t.Fatalf("response=%#v", response)
+	}
+	byThread := map[string]struct {
+		ConversationID string
+		Bound          bool
+		TurnCount      int
+	}{}
+	for _, session := range response.Data.Sessions {
+		byThread[session.ThreadID] = struct {
+			ConversationID string
+			Bound          bool
+			TurnCount      int
+		}{session.ConversationID, session.Bound, session.TurnCount}
+	}
+	if real := byThread["real-thread"]; !real.Bound || real.ConversationID == "" || real.TurnCount != 1 {
+		t.Fatalf("real session=%#v", real)
+	}
+	if empty := byThread["empty-thread"]; !empty.Bound || empty.ConversationID == "" {
+		t.Fatalf("linked empty session=%#v", empty)
+	}
+}
+
+func TestExternalConversationThreadPrefersBindingOverRunHistory(t *testing.T) {
+	app, db := newExternalChatTestApplication(t)
+	now := time.Now().UTC()
+	if err := db.Create(&orm.ExternalAgentBinding{
+		ID: "authoritative-binding", ConversationID: "conversation-1",
+		Provider: ChatExecutorCodex, HostID: "host-1", ProviderThreadID: "bound-thread",
+		CreatedByUserID: "user-1",
+		CreatedAt:       now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := app.createRun(context.Background(), &orm.ExternalChatRun{
+		ID: "legacy-run", RequestID: "legacy-run", ConversationID: "conversation-1",
+		HistoryID: "legacy-history", Provider: ChatExecutorCodex,
+		ActorUserID: "user-1", Action: "resume", Prompt: "prompt",
+		Query: "query", Sequence: 1,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Model(&orm.ExternalChatRun{}).Where("id = ?", "legacy-run").Updates(map[string]any{
+		"status": "completed", "provider_thread_id": "stale-run-thread",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	threadID, hostID, resume, err := externalConversationThread(
+		context.Background(), db, "user-1", "conversation-1", ChatExecutorCodex,
+	)
+	if err != nil || !resume || threadID != "bound-thread" || hostID != "host-1" {
+		t.Fatalf("binding lookup thread=%q host=%q resume=%v err=%v", threadID, hostID, resume, err)
+	}
+	if err := db.Delete(&orm.ExternalAgentBinding{}, "id = ?", "authoritative-binding").Error; err != nil {
+		t.Fatal(err)
+	}
+	threadID, hostID, resume, err = externalConversationThread(
+		context.Background(), db, "user-1", "conversation-1", ChatExecutorCodex,
+	)
+	if err != nil || !resume || threadID != "stale-run-thread" {
+		t.Fatalf("legacy fallback thread=%q host=%q resume=%v err=%v", threadID, hostID, resume, err)
+	}
+}
+
+func TestExternalAgentFailureTextPreservesBoundedProviderReason(t *testing.T) {
+	message := externalAgentFailureText("429 Credits exhausted")
+	if !strings.Contains(message, "429 Credits exhausted") || !strings.HasPrefix(message, "外部助理执行失败：") {
+		t.Fatalf("message=%q", message)
+	}
+	if len([]rune(externalAgentFailureText(strings.Repeat("x", 600)))) > 510 {
+		t.Fatal("provider failure text was not bounded")
+	}
+}
+
+func TestFailedExternalRunStreamsProviderReasonBeforeTerminal(t *testing.T) {
+	app, db := newExternalChatTestApplication(t)
+	createExternalChatTestRun(t, app, "run-provider-failure")
+	job, err := app.claim(context.Background(), "user-1", ChatExecutorCodex, "host-1")
+	if err != nil || job == nil {
+		t.Fatalf("claim=%#v err=%v", job, err)
+	}
+	if _, err := app.appendEvent(
+		context.Background(), "user-1", job.RunID, job.HostID, job.LeaseToken,
+		externalChatEvent{EventID: "provider-failed", Type: "failed", Error: "429 Credits exhausted"},
+	); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	var text string
+	var terminal *ChatRuntimeEvent
+	for chunk := range streamExistingExternalChat(ctx, db, "user-1", job.RunID, job.RunID) {
+		text += chunk.Text
+		if chunk.RuntimeEvent != nil {
+			terminal = chunk.RuntimeEvent
+		}
+	}
+	var terminalData RunTerminal
+	if terminal != nil {
+		_ = json.Unmarshal(terminal.Data, &terminalData)
+	}
+	if !strings.Contains(text, "429 Credits exhausted") || terminal == nil || terminalData.Status != "failed" {
+		t.Fatalf("text=%q terminal=%#v", text, terminal)
 	}
 }
 
@@ -247,7 +755,7 @@ func TestExternalAgentPromptCarriesOnlySafeLazyMindContext(t *testing.T) {
 		"history":     []map[string]string{{"role": "user", "content": "earlier turn"}},
 		"llm_config":  map[string]any{"api_key": "must-not-leak"},
 		"tool_config": map[string]any{"token": "must-not-leak"},
-	}, "make an image", false)
+	}, "make an image", true)
 
 	for _, required := range []string{
 		"session_id: session-1", "workflow_id: image", "current_step: prompt",
@@ -266,7 +774,7 @@ func TestExternalAgentPromptCarriesOnlySafeLazyMindContext(t *testing.T) {
 	}
 	resumed := externalAgentPrompt(map[string]any{
 		"history": []map[string]string{{"role": "user", "content": "do-not-replay"}},
-	}, "next turn", true)
+	}, "next turn", false)
 	if strings.Contains(resumed, "do-not-replay") {
 		t.Fatalf("resumed provider thread received duplicate history: %s", resumed)
 	}
@@ -437,7 +945,7 @@ func TestExternalChatExpiredLeaseCanBeReclaimedAndFencesOldHost(t *testing.T) {
 		t.Fatalf("create running invocation: %v", err)
 	}
 	clock = clock.Add(2 * time.Second)
-	second, err := app.claim(ctx, "user-1", ChatExecutorCodex, "host-2")
+	second, err := app.claim(ctx, "user-1", ChatExecutorCodex, "host-1")
 	if err != nil || second == nil || second.LeaseToken == first.LeaseToken || second.Action != "recover" || second.ProviderThreadID != "thread-1" {
 		t.Fatalf("reclaim: first=%#v second=%#v err=%v", first, second, err)
 	}
@@ -453,7 +961,7 @@ func TestExternalChatExpiredLeaseCanBeReclaimedAndFencesOldHost(t *testing.T) {
 		externalChatEvent{EventID: "stale", Type: "message", Text: "stale"}); !errors.Is(err, errExternalChatLeaseLost) {
 		t.Fatalf("old event error=%v", err)
 	}
-	if _, err := app.appendEvent(ctx, "user-1", second.RunID, "host-2", second.LeaseToken,
+	if _, err := app.appendEvent(ctx, "user-1", second.RunID, "host-1", second.LeaseToken,
 		externalChatEvent{EventID: "current", Type: "message", Text: "current"}); err != nil {
 		t.Fatalf("new Host event: %v", err)
 	}
@@ -480,11 +988,11 @@ func TestExternalChatCompletedProviderCheckpointFinalizesWithoutRerun(t *testing
 		}
 	}
 	clock = clock.Add(2 * time.Second)
-	second, err := app.claim(ctx, "user-1", ChatExecutorCodex, "host-2")
+	second, err := app.claim(ctx, "user-1", ChatExecutorCodex, "host-1")
 	if err != nil || second == nil || second.Action != "finalize" || second.ProviderThreadID != "thread-final" {
 		t.Fatalf("checkpoint reclaim: run=%#v err=%v", second, err)
 	}
-	if _, err := app.appendEvent(ctx, "user-1", second.RunID, "host-2", second.LeaseToken,
+	if _, err := app.appendEvent(ctx, "user-1", second.RunID, "host-1", second.LeaseToken,
 		externalChatEvent{EventID: "finalize-terminal", Type: "completed"}); err != nil {
 		t.Fatalf("finalize reclaimed run: %v", err)
 	}

@@ -95,7 +95,6 @@ func (e *ChatRuntimeEvent) Validate(expectedRunID string) error {
 	default:
 		return errors.New("unsupported runtime event type")
 	}
-	return nil
 }
 
 func validateModelRetryScheduled(raw json.RawMessage) error {

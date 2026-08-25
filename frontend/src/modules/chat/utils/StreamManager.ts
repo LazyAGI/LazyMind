@@ -12,6 +12,7 @@ export interface StreamState {
   delta: string;
   reasoning_content: string;
   sources?: any[];
+  legacyFinishReason?: string;
   runTerminals: Record<string, RunTerminal>;
   historyRunIds: Record<string, string>;
   activeHistoryIds: string[];
@@ -46,6 +47,7 @@ export class StreamManager {
     conversationId: string,
     sse: SSE,
     callbacks: StreamCallbacks,
+    initialEvent?: CustomEvent,
   ): void {
     this.streams.forEach((existing, existingConversationId) => {
       if (existingConversationId !== conversationId) {
@@ -86,6 +88,7 @@ export class StreamManager {
         delta: "",
         reasoning_content: "",
         sources: undefined,
+        legacyFinishReason: undefined,
         runTerminals: {},
         historyRunIds: {},
         activeHistoryIds: [],
@@ -98,6 +101,7 @@ export class StreamManager {
       if (existingState) {
         existingState.delta = "";
         existingState.reasoning_content = "";
+        existingState.legacyFinishReason = undefined;
         existingState.runTerminals = {};
         existingState.historyRunIds = {};
         existingState.activeHistoryIds = [];
@@ -166,6 +170,9 @@ export class StreamManager {
     if (wrappedCallbacks.timeout) {
       sse.addEventListener("timeout", wrappedCallbacks.timeout);
     }
+    if (initialEvent) {
+      this.updateStreamState(conversationId, initialEvent);
+    }
   }
 
   private updateStreamState(conversationId: string, e: CustomEvent): boolean {
@@ -175,6 +182,7 @@ export class StreamManager {
         delta: "",
         reasoning_content: "",
         sources: undefined,
+        legacyFinishReason: undefined,
         runTerminals: {},
         historyRunIds: {},
         activeHistoryIds: [],
@@ -200,6 +208,9 @@ export class StreamManager {
         if (result) {
           if (result.sources && result.sources.length > 0) {
             state.sources = result.sources;
+          }
+          if (result.finish_reason) {
+            state.legacyFinishReason = result.finish_reason;
           }
           const runtimeEvent = result.runtime_event;
           const hasBusinessPayload = Boolean(
@@ -331,6 +342,12 @@ export class StreamManager {
     const state = this.streamStates.get(conversationId);
     if (!state) {
       return false;
+    }
+    if (
+      state.legacyFinishReason &&
+      state.legacyFinishReason !== "FINISH_REASON_UNSPECIFIED"
+    ) {
+      return true;
     }
     if (state.activeHistoryIds.length === 0) {
       return Object.keys(state.runTerminals).length > 0;

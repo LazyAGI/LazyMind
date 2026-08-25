@@ -457,8 +457,7 @@ func init() {
 	registerAdditionalErrorPattern("call_mode must be '%s', '%s' or '%s'", "Invalid request", http.StatusBadRequest, 2000103)
 	registerAdditionalErrorAlias("workflow is paused", "Conflict", http.StatusConflict, 2000107)
 	for _, source := range []string{
-		"invalid channel intent request", "invalid channel intent state", "invalid channel command registry",
-		"invalid channel intent response", "basic chat does not support background execution",
+		"basic chat does not support background execution",
 		"basic chat does not support ask answers", "basic chat does not support plugin mentions",
 		"conversation_id, decision_id and a valid action are required", "conversation and x-user-id are required",
 		"invalid search config patch", "at most 20 knowledge bases are allowed",
@@ -478,6 +477,9 @@ func init() {
 		"writer artifact path is outside allowed storage", "read writer artifact",
 		"active draft_document markdown is empty",
 		"active draft_document must be an .lmd or .md artifact",
+		"invalid writer download conversion key", "invalid writer download filename",
+		"invalid writer download conversion request", "invalid writer download source format",
+		"invalid writer download target format", "writer download conversion failed",
 	} {
 		registerAdditionalErrorAlias(source, "Invalid request", http.StatusBadRequest, 2000103)
 	}
@@ -492,6 +494,7 @@ func init() {
 		"synchronized baseline is not bound to a feishu document",
 		"current writerdocument feishu binding does not match baseline",
 		"task center is paused in settings",
+		"scheduled tasks are paused in settings",
 		"skills and plugins are paused in settings", "workflows are paused in settings",
 		"document parsing is paused in settings",
 	} {
@@ -502,6 +505,7 @@ func init() {
 	for _, source := range []string{
 		"workflow session not found", "selected artifact not found",
 		"writer session not found", "active draft_document not found",
+		"writer download conversion not found",
 	} {
 		registerAdditionalErrorAlias(source, "Resource not found", http.StatusNotFound, 2000106)
 	}
@@ -519,17 +523,24 @@ func init() {
 		"load artifact action head revision", "parse artifact action policy",
 		"artifact action head revision is incomplete",
 		"decode sync_document action response", "artifact sync state save failed",
+		"invalid render response",
 		"task unavailable",
 		"query task center settings failed", "query settings controls failed",
 		"query document parsing settings failed",
+		"query writer download conversion failed", "writer download conversion path is invalid",
+		"open writer download conversion failed", "read writer download conversion failed",
+		"save writer download conversion failed", "index writer download conversion failed",
+		"encode writer download conversion request failed",
 	} {
 		registerAdditionalErrorAlias(source, "Internal server error", http.StatusInternalServerError, 2000000)
 	}
 	for _, source := range []string{
-		"channel intent classification failed", "writer document sync failed", "sensitive-word check unavailable",
+		"writer document sync failed", "sensitive-word check unavailable",
 		"sensitive-word check failed",
 		"workflow artifact action failed",
 		"writer document write-back failed",
+		"render writer document failed",
+		"writer download conversion service unavailable",
 	} {
 		registerAdditionalErrorAlias(source, "Upstream service error", http.StatusBadGateway, 2000110)
 	}

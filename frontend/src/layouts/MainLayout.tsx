@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { ReactNode, WheelEvent as ReactWheelEvent } from "react";
+import type { ReactNode } from "react";
 import { Button, Form, Input, Layout, Modal, Popover, Spin, message } from "antd";
 import {
   CodeOutlined,
@@ -20,6 +20,8 @@ import {
   BookOutlined,
   CloudOutlined,
   LinkOutlined,
+  LoginOutlined,
+  LogoutOutlined,
 } from "@ant-design/icons";
 import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import type { UserDetailResponse } from "@/api/generated/auth-client";
@@ -38,11 +40,13 @@ import LanguageSwitcher from "@/components/LanguageSwitcher";
 import {
 	DEVELOPER_ACTIVE_EVENT,
   isDeveloperModeActive,
-  persistDeveloperModeActive,
   syncDeveloperModeFromServer,
 } from "@/utils/developerMode";
 import RecordList from "@/modules/chat/components/RecordList";
 import {
+  CHAT_CONVERSATION_FILTER_EVENT,
+  CHAT_CONVERSATION_FILTER_KEY,
+  type ChatConversationFilter,
   CHAT_NEW_RUN_IN_BACKGROUND_KEY,
   CHAT_RESUME_CONVERSATION_KEY,
   CHAT_SELECT_CONVERSATION_EVENT,
@@ -85,20 +89,15 @@ function isAdminRole(role?: string) {
   );
 }
 
-function canScrollVertically(element: HTMLElement, deltaY: number) {
-  const style = window.getComputedStyle(element);
-  if (style.overflowY !== "auto" && style.overflowY !== "scroll") {
-    return false;
+function readChatConversationMode(): ChatConversationFilter {
+  try {
+    return sessionStorage.getItem(CHAT_CONVERSATION_FILTER_KEY) === "task"
+      ? "task"
+      : "normal";
+  } catch {
+    return "normal";
   }
-
-  const maxScrollTop = element.scrollHeight - element.clientHeight;
-  if (maxScrollTop <= 1) {
-    return false;
-  }
-
-  return deltaY < 0 ? element.scrollTop > 0 : element.scrollTop < maxScrollTop;
 }
-
 interface ProfileFormValues {
   username: string;
   displayName?: string;
@@ -146,6 +145,8 @@ export default function MainLayout() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [terminalConnectionOpen, setTerminalConnectionOpen] = useState(false);
   const [sidebarSearchText, setSidebarSearchText] = useState("");
+  const [chatConversationMode, setChatConversationMode] =
+    useState<ChatConversationFilter>(readChatConversationMode);
   const [isMenuCollapsed, setIsMenuCollapsed] = useState(readStoredMainMenuCollapsed);
   const [shouldRenderMenuContent, setShouldRenderMenuContent] = useState(
     () => !readStoredMainMenuCollapsed(),
@@ -159,19 +160,28 @@ export default function MainLayout() {
     {
       key: "/settings?section=overview",
       label: t("layout.settings"),
-      icon: <SettingOutlined className="settings-popover-icon" />,
+      icon: (
+        <SettingOutlined className="settings-popover-icon" aria-hidden="true" />
+      ),
     },
     {
       key: "/settings?section=models",
       label: t("layout.modelProviderManagement"),
-      icon: <ApiOutlined className="settings-popover-icon" />,
+      icon: (
+        <ApiOutlined className="settings-popover-icon" aria-hidden="true" />
+      ),
     },
-    ...(isAdminUser && !runtimeFeatures.hideEvo
+    ...(!runtimeFeatures.hideEvo
       ? [
           {
             key: "/settings?section=developer",
             label: t("layout.developer"),
-            icon: <CodeOutlined className="settings-popover-icon" />,
+            icon: (
+              <CodeOutlined
+                className="settings-popover-icon"
+                aria-hidden="true"
+              />
+            ),
           },
         ]
       : []),
@@ -206,7 +216,6 @@ export default function MainLayout() {
     (import.meta.env as ImportMetaEnv & { VITE_APP_LOGO?: string })
       .VITE_APP_LOGO || "";
   const needsRestoreButtonSafeArea =
-    pathname.startsWith("/model-providers") ||
     pathname.startsWith("/cloud-documents") ||
     pathname.startsWith("/channels") ||
     pathname.startsWith("/settings") ||
@@ -224,45 +233,6 @@ export default function MainLayout() {
   ]
     .filter(Boolean)
     .join(" ");
-
-  const handleChatWheel = useCallback(
-    (event: ReactWheelEvent<HTMLDivElement>) => {
-      if (!isChatPage || event.deltaY === 0) {
-        return;
-      }
-
-      const target = event.target instanceof HTMLElement ? event.target : null;
-      const messageContainer = event.currentTarget.querySelector<HTMLElement>(
-        ".message-container",
-      );
-      if (!target || !messageContainer) {
-        return;
-      }
-
-      // The Markdown document editor owns wheel input, including when it has
-      // reached the top or bottom of its own scroll area.
-      if (target.closest(".writer-markdown-editor")) {
-        return;
-      }
-
-      let ancestor: HTMLElement | null = target;
-      while (ancestor && ancestor !== event.currentTarget) {
-        if (canScrollVertically(ancestor, event.deltaY)) {
-          return;
-        }
-        ancestor = ancestor.parentElement;
-      }
-
-      // The message list already handles its own wheel events, including
-      // nested scrollable blocks such as long thinking text.
-      if (messageContainer.contains(target)) {
-        return;
-      }
-
-      messageContainer.scrollBy({ top: event.deltaY, behavior: "auto" });
-    },
-    [isChatPage],
-  );
 
   const refreshLayoutUser = useCallback(async () => {
     if (!AgentAppsAuth.isLoggedIn()) {
@@ -332,13 +302,6 @@ export default function MainLayout() {
   }, [localSessionGate.enabled, refreshLayoutUser]);
 
   useEffect(() => {
-    if (!isAdminUser && developerActive) {
-      setDeveloperActive(false);
-      void persistDeveloperModeActive(false);
-    }
-  }, [developerActive, isAdminUser]);
-
-  useEffect(() => {
     if (pathname.startsWith("/self-evolution") && !canAccessSelfEvolution) {
       navigate("/agent/chat", { replace: true });
     }
@@ -376,6 +339,29 @@ export default function MainLayout() {
       // ignore persistence errors
     }
   }, [isMenuCollapsed]);
+
+  useEffect(() => {
+    const handleFilterChange = (event: Event) => {
+      const filter = (
+        event as CustomEvent<{ filter?: ChatConversationFilter }>
+      ).detail?.filter;
+      if (filter !== "normal" && filter !== "task") {
+        return;
+      }
+      setChatConversationMode(filter);
+    };
+
+    window.addEventListener(
+      CHAT_CONVERSATION_FILTER_EVENT,
+      handleFilterChange,
+    );
+    return () => {
+      window.removeEventListener(
+        CHAT_CONVERSATION_FILTER_EVENT,
+        handleFilterChange,
+      );
+    };
+  }, []);
 
   useEffect(() => {
     const handleConversationSelect = (event: Event) => {
@@ -461,6 +447,8 @@ export default function MainLayout() {
     setCurrentSidebarConversationId("");
     navigate(targetPath);
   };
+
+  const isTaskMode = chatConversationMode === "task";
 
   const renderModulePopover = (
     items: Array<{ key: string; label: string; icon: ReactNode }>,
@@ -762,7 +750,7 @@ export default function MainLayout() {
   }
 
   return (
-    <Layout hasSider className="main-layout" onWheelCapture={handleChatWheel}>
+    <Layout hasSider className="main-layout">
       <Sider
         width={252}
         collapsedWidth={0}
@@ -801,17 +789,19 @@ export default function MainLayout() {
               <div className="sider-primary-action">
                 <Button
                   type="text"
-                  className="sider-new-chat-button"
+                  className={`sider-new-chat-button${!isTaskMode ? " is-active" : ""}`}
                   icon={<PlusOutlined />}
                   onClick={() => handleNewChat(false)}
+                  aria-pressed={!isTaskMode}
                 >
                   {t("layout.newChat")}
                 </Button>
                 <Button
-                  type="primary"
-                  className="sider-new-chat-button sider-new-task-button"
+                  type="text"
+                  className={`sider-new-chat-button${isTaskMode ? " is-active" : ""}`}
                   icon={<PlusOutlined />}
                   onClick={() => handleNewChat(true)}
+                  aria-pressed={isTaskMode}
                 >
                   {t("layout.newTask")}
                 </Button>
@@ -935,34 +925,58 @@ export default function MainLayout() {
                             "/settings?section=models",
                             "/settings?section=developer",
                           ].includes(item.key) && (
-                            <RightOutlined className="settings-popover-accessory" />
+                            <RightOutlined
+                              className="settings-popover-accessory"
+                              aria-hidden="true"
+                            />
                           )}
                         </Button>
                       );
                       return btn;
                     })}
                     <div className="settings-popover-language">
-                      <GlobalOutlined className="settings-popover-icon" />
+                      <GlobalOutlined
+                        className="settings-popover-icon"
+                        aria-hidden="true"
+                      />
                       <LanguageSwitcher />
                     </div>
+                    {!hideLocalUserControls && (
+                      <div
+                        className="settings-popover-separator"
+                        role="separator"
+                      />
+                    )}
                     {!hideLocalUserControls && (
                       isLoggedIn ? (
                         <Button
                           type="text"
                           role="menuitem"
-                          className="settings-popover-button"
+                          className="settings-popover-button settings-popover-button--session"
                           onClick={handleLogout}
                         >
-                          <span>{t("layout.logout")}</span>
+                          <LogoutOutlined
+                            className="settings-popover-icon"
+                            aria-hidden="true"
+                          />
+                          <span className="settings-popover-label">
+                            {t("layout.logout")}
+                          </span>
                         </Button>
                       ) : (
                         <Button
                           type="text"
                           role="menuitem"
-                          className="settings-popover-button"
+                          className="settings-popover-button settings-popover-button--session"
                           onClick={handleGoLogin}
                         >
-                          <span>{t("layout.goLogin")}</span>
+                          <LoginOutlined
+                            className="settings-popover-icon"
+                            aria-hidden="true"
+                          />
+                          <span className="settings-popover-label">
+                            {t("layout.goLogin")}
+                          </span>
                         </Button>
                       )
                     )}

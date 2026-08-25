@@ -280,6 +280,10 @@ func estimateContext(w http.ResponseWriter, r *http.Request, exportPrompt bool) 
 			reqBody[key] = value
 		}
 	}
+	if err := applyChatFeatureControls(r.Context(), db, userID, reqBody); err != nil {
+		common.ReplyErr(w, "load chat feature controls failed", http.StatusInternalServerError)
+		return
+	}
 	if value, ok := raw["context_preview_allow_llm_routing"].(bool); ok {
 		reqBody["context_preview_allow_llm_routing"] = value
 	}

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Checkbox,
@@ -59,6 +59,14 @@ interface ToolManagementSectionProps {
 
 const DEFAULT_TOOL_PAGE_SIZE = 6;
 const TOOL_PAGE_SIZE_OPTIONS = [6, 12, 20, 50];
+const BUILT_IN_TOOL_DESCRIPTION_KEYS: Record<string, string> = {
+  kb: "settingsPage.systemTools.toolDescriptions.kb",
+  data_sources: "settingsPage.systemTools.toolDescriptions.dataSources",
+  external_db: "settingsPage.systemTools.toolDescriptions.externalDb",
+  writer_create: "settingsPage.systemTools.toolDescriptions.aiWriting",
+  writer_revision: "settingsPage.systemTools.toolDescriptions.aiRevision",
+  calculator: "settingsPage.systemTools.toolDescriptions.calculator",
+};
 
 const paginateRecords = <T,>(records: T[], page: number, pageSize: number) => {
   const start = (page - 1) * pageSize;
@@ -84,6 +92,59 @@ const resolveAllowedMcpToolIds = (server: McpServerAsset, tools: McpToolAsset[])
   const allowedToolSet = new Set(server.allowedTools);
   return toolIds.filter((toolId) => allowedToolSet.has(toolId));
 };
+
+interface ManagedToolSummaryProps {
+  fallback: string;
+  primary?: string;
+  secondary?: string;
+}
+
+export function ManagedToolSummary({ fallback, primary, secondary }: ManagedToolSummaryProps) {
+  const summaryRef = useRef<HTMLParagraphElement>(null);
+  const [overflowing, setOverflowing] = useState(false);
+  const visibleText = primary || secondary || fallback;
+  const tooltipText = [primary, secondary].filter(Boolean).join("\n") || fallback;
+
+  useLayoutEffect(() => {
+    const summary = summaryRef.current;
+    if (!summary) return;
+
+    const measure = () => {
+      setOverflowing(
+        summary.scrollHeight > summary.clientHeight + 1
+        || summary.scrollWidth > summary.clientWidth + 1,
+      );
+    };
+    measure();
+
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(summary);
+    return () => observer.disconnect();
+  }, [visibleText]);
+
+  const summary = (
+    <span
+      className="model-provider-service-summary-wrap"
+      tabIndex={overflowing ? 0 : undefined}
+    >
+      <p ref={summaryRef} className="model-provider-service-summary">
+        {visibleText}
+      </p>
+    </span>
+  );
+
+  if (!overflowing) return summary;
+  return (
+    <Tooltip
+      title={<div className="model-provider-tool-popover-content">{tooltipText}</div>}
+      classNames={{ root: "model-provider-tool-popover" }}
+      placement="bottomLeft"
+    >
+      {summary}
+    </Tooltip>
+  );
+}
 
 export default function ToolManagementSection({ description, initialQuery = "", layout = "default", refreshToken = 0, title, view }: ToolManagementSectionProps) {
   const { t, i18n } = useTranslation();
@@ -421,49 +482,46 @@ export default function ToolManagementSection({ description, initialQuery = "", 
   }, [mcpToolDraftIds, mcpToolTarget, refreshMcpServers, t]);
 
   const renderManagedToolSummary = (primary?: string, secondary?: string) => {
-    const text = [primary, secondary].filter(Boolean).join("\n");
     return (
-      <Tooltip
-        title={text ? <div className="model-provider-tool-popover-content">{text}</div> : undefined}
-        overlayClassName="model-provider-tool-popover"
-        placement="topLeft"
-      >
-        <span className="model-provider-service-summary-wrap">
-          <p className="model-provider-service-summary">
-            {primary || secondary || t("common.noData")}
-          </p>
-        </span>
-      </Tooltip>
+      <ManagedToolSummary
+        fallback={t("common.noData")}
+        primary={primary}
+        secondary={secondary}
+      />
     );
   };
 
-  const renderBuiltInToolCard = (tool: StructuredAsset) => (
-    <article className="model-provider-service-card model-provider-managed-tool-card" key={tool.id}>
-      <span className="model-provider-service-logo model-provider-service-logo-green">
-        <span className="model-provider-service-logo-icon"><ToolOutlined /></span>
-      </span>
-      <div className="model-provider-service-card-copy">
-        <div className="model-provider-service-title-row">
-          <h4>{tool.name || tool.id}</h4>
-          <Tag className="model-provider-service-status" color={tool.isEnabled ? "success" : "default"}>
-            {tool.isEnabled ? t("common.enabled") : t("common.disabled")}
-          </Tag>
+  const renderBuiltInToolCard = (tool: StructuredAsset) => {
+    const descriptionKey = BUILT_IN_TOOL_DESCRIPTION_KEYS[tool.id.trim().toLowerCase()];
+    const localizedDescription = descriptionKey ? t(descriptionKey) : tool.description;
+    return (
+      <article className="model-provider-service-card model-provider-managed-tool-card" key={tool.id}>
+        <span className="model-provider-service-logo model-provider-service-logo-green">
+          <span className="model-provider-service-logo-icon"><ToolOutlined /></span>
+        </span>
+        <div className="model-provider-service-card-copy">
+          <div className="model-provider-service-title-row">
+            <h4>{tool.name || tool.id}</h4>
+            <Tag className="model-provider-service-status" color={tool.isEnabled ? "success" : "default"}>
+              {tool.isEnabled ? t("common.enabled") : t("common.disabled")}
+            </Tag>
+          </div>
+          {renderManagedToolSummary(localizedDescription, tool.content)}
         </div>
-        {renderManagedToolSummary(tool.description, tool.content)}
-      </div>
-      <div className="model-provider-managed-tool-actions">
-        <Switch
-          aria-label={tool.name || tool.id}
-          checked={Boolean(tool.isEnabled)}
-          disabled={Boolean(tool.readonly)}
-          loading={toolActionLoading.has(tool.id)}
-          onChange={(checked) => {
-            void handleToggleTool(tool, checked);
-          }}
-        />
-      </div>
-    </article>
-  );
+        <div className="model-provider-managed-tool-actions">
+          <Switch
+            aria-label={tool.name || tool.id}
+            checked={Boolean(tool.isEnabled)}
+            disabled={Boolean(tool.readonly)}
+            loading={toolActionLoading.has(tool.id)}
+            onChange={(checked) => {
+              void handleToggleTool(tool, checked);
+            }}
+          />
+        </div>
+      </article>
+    );
+  };
 
   const renderMcpServerCard = (server: McpServerAsset) => {
     const isSettingsLayout = layout === "settings";

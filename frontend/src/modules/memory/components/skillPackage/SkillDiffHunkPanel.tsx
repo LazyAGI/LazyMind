@@ -22,6 +22,7 @@ interface SkillDiffHunkPanelProps {
   onHunkDecision?: (hunk: SkillDiffHunkBlock, decision: SkillDraftReviewActionDecision) => void;
   t: (key: string, options?: Record<string, unknown>) => string;
   stripFrontMatter?: boolean;
+  distributionReview?: boolean;
 }
 
 const stripLeadingFrontMatterLines = (lines: SkillDiffEntryLine[]) => {
@@ -70,6 +71,7 @@ const renderHunkActions = (
     submitting?: SkillDraftReviewActionDecision;
     onHunkDecision?: (hunk: SkillDiffHunkBlock, decision: SkillDraftReviewActionDecision) => void;
     t: (key: string, options?: Record<string, unknown>) => string;
+    distributionReview: boolean;
   },
 ) => {
   const {
@@ -82,6 +84,7 @@ const renderHunkActions = (
     submitting,
     onHunkDecision,
     t,
+    distributionReview,
   } = options;
 
   if (!showReviewChrome) {
@@ -95,8 +98,16 @@ const renderHunkActions = (
           className={`memory-diff-change-decision is-${isAccepted ? "accept" : "reject"}`}
         >
           {isAccepted
-            ? t("admin.memorySkillHunkAccepted")
-            : t("admin.memorySkillHunkRejected")}
+            ? t(
+                distributionReview
+                  ? "admin.memorySkillDistributionHunkAccepted"
+                  : "admin.memorySkillHunkAccepted",
+              )
+            : t(
+                distributionReview
+                  ? "admin.memorySkillDistributionHunkRejected"
+                  : "admin.memorySkillHunkRejected",
+              )}
         </span>
       ) : null}
       {canAct ? (
@@ -109,12 +120,28 @@ const renderHunkActions = (
             disabled={isSubmitting}
             onClick={() => onHunkDecision?.(hunk, "accept")}
           >
-            {t("admin.memorySkillHunkAccept")}
+            {t(
+              distributionReview
+                ? "admin.memorySkillDistributionHunkAccept"
+                : "admin.memorySkillHunkAccept",
+            )}
           </Button>
           <Popconfirm
-            title={t("admin.memorySkillHunkRejectConfirmTitle")}
-            description={t("admin.memorySkillHunkRejectConfirmContent")}
-            okText={t("admin.memorySkillHunkRejectConfirmOk")}
+            title={t(
+              distributionReview
+                ? "admin.memorySkillDistributionHunkRejectConfirmTitle"
+                : "admin.memorySkillHunkRejectConfirmTitle",
+            )}
+            description={t(
+              distributionReview
+                ? "admin.memorySkillDistributionHunkRejectConfirmContent"
+                : "admin.memorySkillHunkRejectConfirmContent",
+            )}
+            okText={t(
+              distributionReview
+                ? "admin.memorySkillDistributionHunkRejectConfirmOk"
+                : "admin.memorySkillHunkRejectConfirmOk",
+            )}
             cancelText={t("common.cancel")}
             onConfirm={() => onHunkDecision?.(hunk, "reject")}
           >
@@ -126,7 +153,11 @@ const renderHunkActions = (
               loading={submitting === "reject"}
               disabled={isSubmitting}
             >
-              {t("admin.memorySkillHunkReject")}
+              {t(
+                distributionReview
+                  ? "admin.memorySkillDistributionHunkReject"
+                  : "admin.memorySkillHunkReject",
+              )}
             </Button>
           </Popconfirm>
         </Space>
@@ -142,6 +173,7 @@ export default function SkillDiffHunkPanel({
   onHunkDecision,
   t,
   stripFrontMatter = false,
+  distributionReview = false,
 }: SkillDiffHunkPanelProps) {
   const mappedEntryLines = mapSkillDiffEntryLines(diffEntryLines);
   const entryLines = stripFrontMatter && !hunkReviewActive
@@ -199,6 +231,7 @@ export default function SkillDiffHunkPanel({
               submitting,
               onHunkDecision,
               t,
+              distributionReview,
             })}
             {region.lines.map((line, index) =>
               renderChangeLine(line, `${region.regionId}-${index}-${line.text}`),

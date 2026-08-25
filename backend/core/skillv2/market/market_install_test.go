@@ -7,8 +7,19 @@ import (
 	"strings"
 	"testing"
 
+	skillservice "lazymind/core/skillv2/service"
 	"lazymind/core/skillv2/testutil"
 )
+
+type marketZipDownloader struct {
+	path        string
+	receivedURL string
+}
+
+func (d *marketZipDownloader) Download(_ context.Context, rawURL string) (string, error) {
+	d.receivedURL = rawURL
+	return d.path, nil
+}
 
 func TestMarketInstall_CopiesSkillTreeForUser(t *testing.T) {
 	db := testutil.NewTestDB(t)
@@ -60,6 +71,57 @@ func TestMarketInstall_CopiesSkillTreeForUser(t *testing.T) {
 	}
 	if got := testutil.CountRows(t, db, "skill_market_installs", "market_item_id = ? AND user_id = ?", "market_item1", "user_002"); got != 1 {
 		t.Fatalf("market install row count after reinstall = %d, want 1", got)
+	}
+}
+
+func TestMarketInstall_RestoresTrashedInstalledSkill(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "market_skill", "market_rev1")
+	testutil.MustCreate(t, db, &testutil.SkillMarketItemRow{
+		ID:            "market_item1",
+		SourceSkillID: "market_skill",
+		Status:        "published",
+		CreatedAt:     testutil.TimeFixture(),
+		UpdatedAt:     testutil.TimeFixture(),
+	})
+	marketService := NewService(ServiceDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
+
+	installed, err := marketService.Install(context.Background(), InstallRequest{
+		MarketItemID: "market_item1",
+		UserID:       "user_002",
+		UserName:     "李四",
+	})
+	if err != nil {
+		t.Fatalf("initial Install returned error: %v", err)
+	}
+
+	skillService := skillservice.NewSkillService(skillservice.SkillServiceDeps{DB: db.DB})
+	if err := skillService.DeleteSkill(context.Background(), skillservice.DeleteSkillRequest{
+		SkillID: installed.SkillID,
+		UserID:  "user_002",
+	}); err != nil {
+		t.Fatalf("DeleteSkill returned error: %v", err)
+	}
+
+	reinstalled, err := marketService.Install(context.Background(), InstallRequest{
+		MarketItemID: "market_item1",
+		UserID:       "user_002",
+		UserName:     "李四",
+	})
+	if err != nil {
+		t.Fatalf("reinstall returned error: %v", err)
+	}
+	if reinstalled.SkillID != installed.SkillID {
+		t.Fatalf("reinstall returned skill %q, want restored skill %q", reinstalled.SkillID, installed.SkillID)
+	}
+	if got := testutil.CountRows(t, db, "skills", "id = ? AND deleted_at IS NOT NULL", installed.SkillID); got != 0 {
+		t.Fatalf("trashed installed skill count after reinstall = %d, want 0", got)
+	}
+	if got := testutil.CountRows(t, db, "skills", "id = ? AND deleted_at IS NULL", installed.SkillID); got != 1 {
+		t.Fatalf("restored installed skill count after reinstall = %d, want 1", got)
+	}
+	if got := testutil.CountRows(t, db, "skill_market_installs", "market_item_id = ? AND user_id = ? AND skill_id = ?", "market_item1", "user_002", installed.SkillID); got != 1 {
+		t.Fatalf("market install record count after restore = %d, want 1", got)
 	}
 }
 
@@ -129,15 +191,19 @@ func TestMarketAdminUnpublish_PreservesInstalledCopy(t *testing.T) {
 
 func TestMarketAdminPublishEditUnpublish(t *testing.T) {
 	db := testutil.NewTestDB(t)
+	zipPath := filepath.Join(t.TempDir(), "publish.zip")
+	testutil.WriteSkillZip(t, zipPath, map[string][]byte{
+		"SKILL.md": []byte("---\nname: 论文精读\ndescription: 阅读并总结论文\n---\n# 论文精读\n"),
+	})
 	service := NewAdminService(AdminServiceDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
 
 	published, err := service.Publish(context.Background(), PublishRequest{
 		AdminUserID: "admin_001",
-		Name:        "论文精读",
 		Tags:        []string{"research", "paper"},
 		Source: SourceInput{
-			Type:     "uploaded_zip",
-			UploadID: "upload_market_zip",
+			Type:       "uploaded_zip",
+			UploadID:   "upload_market_zip",
+			StoredPath: zipPath,
 		},
 	})
 	if err != nil {
@@ -161,6 +227,9 @@ func TestMarketAdminPublishEditUnpublish(t *testing.T) {
 	}
 	if source.Category != "external" {
 		t.Fatalf("published source category = %q, want external", source.Category)
+	}
+	if source.SkillName != "论文精读" {
+		t.Fatalf("published source name = %q, want SKILL.md name", source.SkillName)
 	}
 	var marketItem testutil.SkillMarketItemRow
 	if err := db.Where("id = ?", published.MarketItemID).Take(&marketItem).Error; err != nil {
@@ -309,14 +378,15 @@ func TestMarketAdminPublish_AllowsSingleTopLevelDirectory(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	zipPath := filepath.Join(t.TempDir(), "wrapped.zip")
 	testutil.WriteSkillZip(t, zipPath, map[string][]byte{
-		"openclaw-openclaw-changelog-update/SKILL.md":        []byte("---\nname: openclaw-changelog\ndescription: OpenClaw changelog skill\n---\n# OpenClaw\n"),
-		"openclaw-openclaw-changelog-update/references/a.md": []byte("# A\n"),
+		"openclaw-openclaw-changelog-update/SKILL.md":            []byte("---\nname: openclaw-changelog\ndescription: OpenClaw changelog skill\n---\n# OpenClaw\n"),
+		"openclaw-openclaw-changelog-update/references/a.md":     []byte("# A\n"),
+		"__MACOSX/openclaw-openclaw-changelog-update/._SKILL.md": []byte("macOS metadata"),
+		"openclaw-openclaw-changelog-update/.DS_Store":           []byte("finder metadata"),
 	})
 	service := NewAdminService(AdminServiceDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
 
 	published, err := service.Publish(context.Background(), PublishRequest{
 		AdminUserID: "admin_001",
-		Name:        "openclaw-openclaw-changelog-update",
 		Tags:        []string{"team"},
 		Source: SourceInput{
 			Type:       "uploaded_zip",
@@ -360,12 +430,93 @@ func TestMarketAdminPublish_AllowsSingleTopLevelDirectory(t *testing.T) {
 	if got := testutil.CountRows(t, db, "skill_revision_entries", "revision_id = ? AND path LIKE ?", *skill.HeadRevisionID, "openclaw-openclaw-changelog-update/%"); got != 0 {
 		t.Fatalf("wrapper path entry count = %d, want 0", got)
 	}
+	if got := testutil.CountRows(t, db, "skill_revision_entries", "revision_id = ? AND path LIKE ?", *skill.HeadRevisionID, "__MACOSX/%"); got != 0 {
+		t.Fatalf("macOS metadata entry count = %d, want 0", got)
+	}
+	if got := testutil.CountRows(t, db, "skill_revision_entries", "revision_id = ? AND path = ?", *skill.HeadRevisionID, ".DS_Store"); got != 0 {
+		t.Fatalf("Finder metadata entry count = %d, want 0", got)
+	}
 	var skillMDBlob skillBlobRow
 	if err := db.Where("hash = ?", *skillMDEntry.BlobHash).Take(&skillMDBlob).Error; err != nil {
 		t.Fatalf("query SKILL.md blob: %v", err)
 	}
 	if skillMDBlob.StorageBackend != "postgres" || len(skillMDBlob.Content) == 0 || skillMDBlob.StorageKey != nil {
 		t.Fatalf("SKILL.md blob storage invalid: %#v", skillMDBlob)
+	}
+}
+
+func TestMarketAdminPublishURLUsesSkillMDName(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	zipPath := filepath.Join(t.TempDir(), "main.zip")
+	testutil.WriteSkillZip(t, zipPath, map[string][]byte{
+		"repository-main/SKILL.md": []byte("---\nname: canonical-url-skill\ndescription: Canonical URL skill description\n---\n# Skill\n"),
+	})
+	downloader := &marketZipDownloader{path: zipPath}
+	service := NewAdminService(AdminServiceDeps{
+		DB:         db.DB,
+		BlobStore:  NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir())),
+		Downloader: downloader,
+	})
+
+	published, err := service.Publish(context.Background(), PublishRequest{
+		AdminUserID: "admin_001",
+		Tags:        []string{"team"},
+		Source: SourceInput{
+			Type: "url",
+			URL:  "https://github.com/example/repository/archive/refs/heads/main.zip",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Publish returned error: %v", err)
+	}
+	if downloader.receivedURL != "https://github.com/example/repository/archive/refs/heads/main.zip" {
+		t.Fatalf("download URL = %q", downloader.receivedURL)
+	}
+
+	var skill skillRow
+	if err := db.Where("id = ?", published.SourceSkillID).Take(&skill).Error; err != nil {
+		t.Fatalf("query source skill: %v", err)
+	}
+	if skill.SkillName != "canonical-url-skill" {
+		t.Fatalf("skill_name = %q, want SKILL.md name", skill.SkillName)
+	}
+	if skill.Description != "Canonical URL skill description" {
+		t.Fatalf("description = %q, want SKILL.md description", skill.Description)
+	}
+	var revision skillRevisionRow
+	if err := db.Where("id = ?", *skill.HeadRevisionID).Take(&revision).Error; err != nil {
+		t.Fatalf("query source revision: %v", err)
+	}
+	if revision.SourceRefID != "https://github.com/example/repository/archive/refs/heads/main.zip" {
+		t.Fatalf("source_ref_id = %q, want repository URL", revision.SourceRefID)
+	}
+}
+
+func TestMarketAdminPublishURLRejectsMissingSkillName(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	zipPath := filepath.Join(t.TempDir(), "main.zip")
+	testutil.WriteSkillZip(t, zipPath, map[string][]byte{
+		"repository-main/SKILL.md": []byte("---\ndescription: Missing canonical name\n---\n# Skill\n"),
+	})
+	service := NewAdminService(AdminServiceDeps{
+		DB:         db.DB,
+		BlobStore:  NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir())),
+		Downloader: &marketZipDownloader{path: zipPath},
+	})
+
+	_, err := service.Publish(context.Background(), PublishRequest{
+		AdminUserID: "admin_001",
+		Tags:        []string{"team"},
+		Source: SourceInput{
+			Type: "url",
+			URL:  "https://github.com/example/repository/archive/refs/heads/main.zip",
+		},
+	})
+	if err == nil || !strings.Contains(err.Error(), `frontmatter field "name" is required`) {
+		t.Fatalf("Publish error = %v, want missing SKILL.md name", err)
+	}
+	if got := testutil.CountRows(t, db, "skill_market_items", ""); got != 0 {
+		t.Fatalf("market item count = %d, want 0", got)
 	}
 }
 
@@ -382,7 +533,6 @@ func TestMarketPublishRejectsDuplicateCanonicalName(t *testing.T) {
 	}
 	if _, err := service.Publish(context.Background(), PublishRequest{
 		AdminUserID: "admin_001",
-		Name:        "first filename",
 		Tags:        []string{"debugging"},
 		Source:      SourceInput{Type: "uploaded_zip", StoredPath: firstZip},
 	}); err != nil {
@@ -390,7 +540,6 @@ func TestMarketPublishRejectsDuplicateCanonicalName(t *testing.T) {
 	}
 	if _, err := service.Publish(context.Background(), PublishRequest{
 		AdminUserID: "admin_002",
-		Name:        "different filename",
 		Tags:        []string{"research"},
 		Source:      SourceInput{Type: "uploaded_zip", StoredPath: secondZip},
 	}); err == nil || !strings.Contains(err.Error(), "skill market name already exists") {

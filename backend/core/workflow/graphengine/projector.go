@@ -239,6 +239,13 @@ func Project(graph *CompiledStateGraph, snapshot RuntimeSnapshot) Projection {
 		projection.Edges = append(projection.Edges, ProjectedEdge{From: edge.From, To: edge.To, State: state, When: when})
 	}
 	projection.Completed = projection.EndReached && len(projection.Current) == 0 && len(projection.Ready) == 0 && len(projection.Blocked) == 0
+	if projection.Completed {
+		for _, id := range graph.Runtime.CompletedContinueSteps {
+			if node, ok := graph.Nodes[id]; ok && Evaluate(node.Input, materials).Satisfied {
+				projection.Continue = append(projection.Continue, id)
+			}
+		}
+	}
 	sortProjection(&projection)
 	return projection
 }
@@ -251,7 +258,7 @@ func projectedEdgeKey(edge CompiledEdge) string {
 }
 
 func sortProjection(p *Projection) {
-	for _, values := range []*[]string{&p.Past, &p.Current, &p.Reachable, &p.Ready, &p.Retryable, &p.Rewindable, &p.Blocked, &p.Stale, &p.Pruned, &p.Bypassed} {
+	for _, values := range []*[]string{&p.Past, &p.Current, &p.Reachable, &p.Ready, &p.Retryable, &p.Rewindable, &p.Continue, &p.Blocked, &p.Stale, &p.Pruned, &p.Bypassed} {
 		sort.Strings(*values)
 	}
 }

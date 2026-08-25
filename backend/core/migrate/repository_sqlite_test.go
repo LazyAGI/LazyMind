@@ -2,6 +2,8 @@ package migrate
 
 import (
 	"database/sql"
+	"encoding/json"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -272,6 +274,259 @@ SELECT name FROM pragma_table_info('user_ui_preferences')
 WHERE name = 'accepted_user_agreement_version'
 `).Scan(&column); err != nil {
 		t.Fatalf("existing aggregate did not apply uncovered agreement column: %v", err)
+	}
+}
+
+func TestSchedulesFeatureControlMigrationPreservesLegacyPauseState(t *testing.T) {
+	db := openRawSQLite(t, t.TempDir()+"/schedules-control.db")
+	if _, err := db.Exec(`
+CREATE TABLE user_ui_preferences (
+  user_id varchar(255) PRIMARY KEY,
+  task_center_enabled boolean NOT NULL DEFAULT true
+);
+INSERT INTO user_ui_preferences (user_id, task_center_enabled)
+VALUES ('enabled-user', true), ('paused-user', false);
+`); err != nil {
+		t.Fatalf("seed legacy preferences: %v", err)
+	}
+	migrationDir := filepath.Join("..", "migrations", "dev_mode", "v0_3")
+	execMigrationFileForDriver(t, db, filepath.Join(migrationDir, "20260825022749_add_schedules_feature_control.up.sql"), "sqlite")
+
+	for _, tc := range []struct {
+		userID string
+		want   bool
+	}{{"enabled-user", true}, {"paused-user", false}} {
+		var got bool
+		if err := db.QueryRow(`SELECT schedules_enabled FROM user_ui_preferences WHERE user_id = ?`, tc.userID).Scan(&got); err != nil {
+			t.Fatalf("read schedules control for %s: %v", tc.userID, err)
+		}
+		if got != tc.want {
+			t.Fatalf("schedules_enabled for %s=%v, want %v", tc.userID, got, tc.want)
+		}
+	}
+
+	execMigrationFileForDriver(t, db, filepath.Join(migrationDir, "20260825022749_add_schedules_feature_control.down.sql"), "sqlite")
+	var columnCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('user_ui_preferences') WHERE name = 'schedules_enabled'`).Scan(&columnCount); err != nil {
+		t.Fatalf("inspect schedules control rollback: %v", err)
+	}
+	if columnCount != 0 {
+		t.Fatal("schedules_enabled should be removed by the down migration")
+	}
+}
+
+func TestChatEntryDefaultsMigrationPreservesLegacySettings(t *testing.T) {
+	db := openRawSQLite(t, t.TempDir()+"/chat-entry-defaults.db")
+	if _, err := db.Exec(`
+CREATE TABLE user_chat_settings (
+  user_id varchar(255) PRIMARY KEY,
+  enable_workflow boolean NOT NULL DEFAULT true,
+  plugin_mode varchar(16) NOT NULL DEFAULT 'dynamic',
+  enable_subagent boolean NOT NULL DEFAULT true,
+  updated_at datetime NOT NULL
+);
+INSERT INTO user_chat_settings (user_id, enable_workflow, plugin_mode, enable_subagent, updated_at)
+VALUES ('custom-user', false, 'auto', false, CURRENT_TIMESTAMP);
+INSERT INTO user_chat_settings (user_id, enable_workflow, plugin_mode, enable_subagent, updated_at)
+VALUES ('invalid-mode-user', true, 'legacy', true, CURRENT_TIMESTAMP);
+CREATE TABLE conversations (
+  id varchar(36) PRIMARY KEY,
+  create_user_id varchar(255) NOT NULL,
+  enable_plugin boolean,
+  plugin_mode varchar(16),
+  enable_subagent boolean
+);
+INSERT INTO conversations (id, create_user_id)
+VALUES ('legacy-conversation', 'custom-user');
+INSERT INTO conversations (id, create_user_id)
+VALUES ('no-settings-conversation', 'missing-user');
+INSERT INTO conversations (id, create_user_id)
+VALUES ('invalid-mode-conversation', 'invalid-mode-user');
+INSERT INTO conversations (
+  id, create_user_id, enable_plugin, plugin_mode, enable_subagent
+) VALUES ('partial-conversation', 'custom-user', true, 'dynamic', NULL);
+`); err != nil {
+		t.Fatalf("seed legacy chat settings: %v", err)
+	}
+	migrationDir := filepath.Join("..", "migrations", "dev_mode", "v0_3")
+	migrationPath := filepath.Join(migrationDir, "20260825031307_add_chat_entry_defaults.up.sql")
+	migrationBody, err := os.ReadFile(migrationPath)
+	if err != nil {
+		t.Fatalf("read chat entry defaults migration: %v", err)
+	}
+	sqliteMigration, err := migrationSQLForDriver(string(migrationBody), "sqlite")
+	if err != nil {
+		t.Fatalf("select SQLite chat entry defaults migration: %v", err)
+	}
+	backfillMarker := "UPDATE conversations\nSET enable_plugin"
+	backfillOffset := strings.Index(sqliteMigration, backfillMarker)
+	if backfillOffset < 0 {
+		t.Fatalf("conversation policy backfill statement missing from migration")
+	}
+	if _, err := db.Exec(sqliteMigration[:backfillOffset]); err != nil {
+		t.Fatalf("run chat defaults migration through backup capture: %v", err)
+	}
+	if _, err := db.Exec(`
+INSERT INTO conversations (id, create_user_id)
+VALUES ('migration-window-conversation', 'custom-user')
+`); err != nil {
+		t.Fatalf("create migration-window conversation: %v", err)
+	}
+	if _, err := db.Exec(sqliteMigration[backfillOffset:]); err != nil {
+		t.Fatalf("finish chat defaults migration after concurrent insert: %v", err)
+	}
+
+	var quickRaw, taskRaw string
+	if err := db.QueryRow(`
+SELECT quick_question_defaults, new_task_defaults
+FROM user_chat_settings WHERE user_id = 'custom-user'
+`).Scan(&quickRaw, &taskRaw); err != nil {
+		t.Fatalf("read migrated chat defaults: %v", err)
+	}
+	var quick, task struct {
+		ThinkingDepth        string `json:"thinking_depth"`
+		ConversationSettings struct {
+			ChatExecutor   string `json:"chat_executor"`
+			EnableWorkflow bool   `json:"enable_workflow"`
+			WorkflowMode   string `json:"workflow_mode"`
+			EnableSubagent bool   `json:"enable_subagent"`
+		} `json:"conversation_settings"`
+	}
+	if err := json.Unmarshal([]byte(quickRaw), &quick); err != nil {
+		t.Fatalf("decode quick-question defaults: %v, raw=%s", err, quickRaw)
+	}
+	if err := json.Unmarshal([]byte(taskRaw), &task); err != nil {
+		t.Fatalf("decode new-task defaults: %v, raw=%s", err, taskRaw)
+	}
+	if quick.ThinkingDepth != "medium" || quick.ConversationSettings.EnableWorkflow ||
+		quick.ConversationSettings.WorkflowMode != "auto" || quick.ConversationSettings.EnableSubagent ||
+		quick.ConversationSettings.ChatExecutor != "lazymind" {
+		t.Fatalf("unexpected migrated quick-question defaults: %#v", quick)
+	}
+	if task.ThinkingDepth != "high" || task.ConversationSettings.EnableWorkflow ||
+		task.ConversationSettings.WorkflowMode != "auto" || task.ConversationSettings.EnableSubagent ||
+		task.ConversationSettings.ChatExecutor != "lazymind" {
+		t.Fatalf("unexpected migrated new-task defaults: %#v", task)
+	}
+	var conversationDepth string
+	if err := db.QueryRow(`SELECT thinking_depth FROM conversations WHERE id = 'legacy-conversation'`).Scan(&conversationDepth); err != nil {
+		t.Fatalf("read migrated conversation thinking depth: %v", err)
+	}
+	if conversationDepth != "medium" {
+		t.Fatalf("legacy conversation thinking depth=%q, want medium", conversationDepth)
+	}
+	for _, tc := range []struct {
+		id             string
+		enableWorkflow bool
+		workflowMode   string
+		enableSubagent bool
+	}{
+		{id: "legacy-conversation", enableWorkflow: false, workflowMode: "auto", enableSubagent: false},
+		{id: "no-settings-conversation", enableWorkflow: true, workflowMode: "dynamic", enableSubagent: true},
+		{id: "invalid-mode-conversation", enableWorkflow: true, workflowMode: "dynamic", enableSubagent: true},
+		{id: "partial-conversation", enableWorkflow: true, workflowMode: "dynamic", enableSubagent: false},
+	} {
+		var enableWorkflow, enableSubagent bool
+		var workflowMode string
+		if err := db.QueryRow(`
+SELECT enable_plugin, plugin_mode, enable_subagent
+FROM conversations WHERE id = ?
+`, tc.id).Scan(&enableWorkflow, &workflowMode, &enableSubagent); err != nil {
+			t.Fatalf("read migrated conversation policy for %s: %v", tc.id, err)
+		}
+		if enableWorkflow != tc.enableWorkflow || workflowMode != tc.workflowMode || enableSubagent != tc.enableSubagent {
+			t.Fatalf(
+				"conversation %s policy=(%v,%q,%v), want (%v,%q,%v)",
+				tc.id, enableWorkflow, workflowMode, enableSubagent,
+				tc.enableWorkflow, tc.workflowMode, tc.enableSubagent,
+			)
+		}
+	}
+	var backupCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM conversation_policy_snapshot_backups`).Scan(&backupCount); err != nil {
+		t.Fatalf("count conversation policy rollback masks: %v", err)
+	}
+	if backupCount != 4 {
+		t.Fatalf("conversation policy rollback mask count=%d, want 4", backupCount)
+	}
+	var windowEnableWorkflow, windowEnableSubagent sql.NullBool
+	var windowWorkflowMode sql.NullString
+	if err := db.QueryRow(`
+SELECT enable_plugin, plugin_mode, enable_subagent
+FROM conversations WHERE id = 'migration-window-conversation'
+`).Scan(&windowEnableWorkflow, &windowWorkflowMode, &windowEnableSubagent); err != nil {
+		t.Fatalf("read migration-window conversation policy: %v", err)
+	}
+	if windowEnableWorkflow.Valid || windowWorkflowMode.Valid || windowEnableSubagent.Valid {
+		t.Fatalf("unbacked migration-window conversation was backfilled: (%#v,%#v,%#v)",
+			windowEnableWorkflow, windowWorkflowMode, windowEnableSubagent)
+	}
+	if _, err := db.Exec(`
+INSERT INTO conversations (
+  id, create_user_id, enable_plugin, plugin_mode, enable_subagent
+) VALUES ('post-migration-conversation', 'custom-user', false, 'auto', false)
+`); err != nil {
+		t.Fatalf("create post-migration conversation: %v", err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM conversation_policy_snapshot_backups`).Scan(&backupCount); err != nil {
+		t.Fatalf("recount conversation policy rollback masks: %v", err)
+	}
+	if backupCount != 4 {
+		t.Fatalf("post-migration conversation was added to rollback masks: count=%d", backupCount)
+	}
+
+	execMigrationFileForDriver(t, db, filepath.Join(migrationDir, "20260825031307_add_chat_entry_defaults.down.sql"), "sqlite")
+	for _, column := range []string{"quick_question_defaults", "new_task_defaults"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('user_chat_settings') WHERE name = ?`, column).Scan(&count); err != nil {
+			t.Fatalf("inspect %s rollback: %v", column, err)
+		}
+		if count != 0 {
+			t.Fatalf("%s should be removed by the down migration", column)
+		}
+	}
+	var conversationColumnCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('conversations') WHERE name = 'thinking_depth'`).Scan(&conversationColumnCount); err != nil {
+		t.Fatalf("inspect conversation thinking depth rollback: %v", err)
+	}
+	if conversationColumnCount != 0 {
+		t.Fatal("conversations.thinking_depth should be removed by the down migration")
+	}
+	for _, tc := range []struct {
+		id                               string
+		enableValid, modeValid, subValid bool
+		enableValue, subValue            bool
+		modeValue                        string
+	}{
+		{id: "legacy-conversation"},
+		{id: "no-settings-conversation"},
+		{id: "invalid-mode-conversation"},
+		{id: "migration-window-conversation"},
+		{id: "partial-conversation", enableValid: true, modeValid: true, enableValue: true, modeValue: "dynamic"},
+		{id: "post-migration-conversation", enableValid: true, modeValid: true, subValid: true, modeValue: "auto"},
+	} {
+		var enableWorkflow, enableSubagent sql.NullBool
+		var workflowMode sql.NullString
+		if err := db.QueryRow(`
+SELECT enable_plugin, plugin_mode, enable_subagent
+FROM conversations WHERE id = ?
+`, tc.id).Scan(&enableWorkflow, &workflowMode, &enableSubagent); err != nil {
+			t.Fatalf("read rolled-back conversation policy for %s: %v", tc.id, err)
+		}
+		if enableWorkflow.Valid != tc.enableValid || workflowMode.Valid != tc.modeValid || enableSubagent.Valid != tc.subValid ||
+			(enableWorkflow.Valid && enableWorkflow.Bool != tc.enableValue) ||
+			(workflowMode.Valid && workflowMode.String != tc.modeValue) ||
+			(enableSubagent.Valid && enableSubagent.Bool != tc.subValue) {
+			t.Fatalf("rolled-back conversation %s policy=(%#v,%#v,%#v), want valid=(%v,%v,%v)",
+				tc.id, enableWorkflow, workflowMode, enableSubagent, tc.enableValid, tc.modeValid, tc.subValid)
+		}
+	}
+	var backupTableCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'conversation_policy_snapshot_backups'`).Scan(&backupTableCount); err != nil {
+		t.Fatalf("inspect conversation policy rollback table: %v", err)
+	}
+	if backupTableCount != 0 {
+		t.Fatal("conversation policy rollback table should be removed by down migration")
 	}
 }
 

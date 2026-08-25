@@ -3745,52 +3745,21 @@
 }
 
 .memory-skill-package-create-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
   width: 100%;
 
-  .ant-select {
-    width: 160px;
-    flex: 0 0 160px;
-  }
-
-  .ant-select-selector {
-    overflow: hidden;
-    align-items: center;
-  }
-
-  .ant-select-selection-item {
-    display: flex;
-    align-items: center;
-    min-width: 0;
-    line-height: 22px;
-  }
-
-  .memory-skill-package-path-option {
-    width: 100%;
-    margin: 0;
-    line-height: 22px;
-    vertical-align: middle;
-  }
-
   .ant-input {
-    flex: 1 1 auto;
-    min-width: 0;
+    width: 100%;
   }
 }
 
-.memory-skill-package-path-dropdown {
-  .ant-select-item-option-content {
-    display: flex;
-    align-items: center;
-    overflow: hidden;
-    min-width: 0;
-    min-height: 32px;
-  }
-
-  .memory-skill-package-path-option {
-    margin: 0;
-    line-height: 22px;
-    vertical-align: middle;
-  }
+.memory-skill-package-create-target {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .memory-skill-package-body {
@@ -3985,6 +3954,12 @@
     box-shadow: inset 3px 0 0 #ff4d4f;
   }
 
+  &.is-pending {
+    padding-top: 38px;
+    background: rgba(22, 119, 255, 0.025);
+    box-shadow: inset 0 0 0 1px rgba(22, 119, 255, 0.12);
+  }
+
   .memory-diff-line {
     padding: 2px 8px 2px 28px;
   }
@@ -4013,6 +3988,7 @@
 
 .memory-skill-diff-inline-hunk.is-reviewable:hover .memory-skill-diff-inline-hunk-actions,
 .memory-skill-diff-inline-hunk.is-reviewable:focus-within .memory-skill-diff-inline-hunk-actions,
+.memory-skill-diff-inline-hunk.is-pending .memory-skill-diff-inline-hunk-actions,
 .memory-skill-diff-inline-hunk.is-accepted .memory-skill-diff-inline-hunk-actions,
 .memory-skill-diff-inline-hunk.is-rejected .memory-skill-diff-inline-hunk-actions {
   opacity: 1;
@@ -4183,7 +4159,7 @@
 
 .memory-version-list-item {
   width: 100%;
-  min-height: 72px;
+  min-height: 88px;
   border: 1px solid #e5ebf3;
   border-radius: 12px;
   background: #ffffff;
@@ -4237,6 +4213,16 @@
     color: #667085;
     font-size: 12px;
     line-height: 1.45;
+  }
+
+  small {
+    display: -webkit-box;
+    overflow: hidden;
+    color: #475467;
+    font-size: 11px;
+    line-height: 1.45;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
   }
 }
 
@@ -4321,6 +4307,12 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
+  small {
+    color: #667085;
+    font-size: 12px;
+    line-height: 1.45;
+  }
 }
 
 .memory-version-detail-tabs {
@@ -4334,6 +4326,41 @@
   .ant-tabs-tabpane {
     min-height: 0;
     flex: 1;
+  }
+}
+
+.memory-version-diff-view {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+
+  .memory-version-skill-package {
+    min-height: 360px;
+    height: calc(100vh - 330px);
+    height: calc(100dvh - 330px);
+  }
+}
+
+.memory-version-compare-banner {
+  border: 1px solid #d6e4ff;
+  border-radius: 12px;
+  background: #f5f8ff;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  strong {
+    flex: 0 0 auto;
+    color: #175cd3;
+    font-size: 14px;
+  }
+
+  span {
+    color: #475467;
+    font-size: 12px;
+    line-height: 1.45;
   }
 }
 
@@ -4480,9 +4507,19 @@
   }
 
   .memory-version-list-panel {
-    max-height: 42vh;
+    max-height: 230px;
     border-right: 0;
     border-bottom: 1px solid #e5ebf3;
+  }
+
+  .memory-version-list {
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .memory-version-list-item {
+    min-width: 230px;
   }
 
   .memory-version-detail-panel {
@@ -4504,6 +4541,17 @@
     height: auto;
     grid-template-columns: 1fr;
     grid-template-rows: minmax(160px, 32vh) minmax(320px, 1fr);
+  }
+
+  .memory-version-diff-view .memory-version-skill-package {
+    min-height: 480px;
+    height: auto;
+  }
+
+  .memory-version-compare-banner {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
   }
 
   .memory-version-skill-tree {

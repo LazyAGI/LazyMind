@@ -24,6 +24,7 @@ const (
 	CodePayloadTooLarge      = "payload_too_large"
 	CodeSkillPackageInvalid  = "skill_package_invalid"
 	CodeDiffRefMismatch      = "diff_ref_mismatch"
+	CodeDistributionConflict = "distribution_upgrade_conflict"
 	CodeInternal             = "internal_error"
 )
 
@@ -86,7 +87,8 @@ func statusForMessage(message string) int {
 		strings.Contains(msg, "draft snapshot changed"):
 		return http.StatusConflict
 	case strings.Contains(msg, "while draft overlay exists"), strings.Contains(msg, "draft belongs to another task"),
-		strings.Contains(msg, "cannot rollback while draft overlay exists"):
+		strings.Contains(msg, "cannot rollback while draft overlay exists"), strings.Contains(msg, "distribution upgrade conflicts"),
+		strings.Contains(msg, "distribution baseline is unavailable"), strings.Contains(msg, "distribution upgrade draft is active"):
 		return http.StatusConflict
 	case strings.Contains(msg, "already exists"), strings.Contains(msg, "duplicate"), strings.Contains(msg, "name conflict"):
 		return http.StatusConflict
@@ -123,6 +125,8 @@ func codeForMessage(message string, status int) string {
 	case strings.Contains(msg, "while draft overlay exists"), strings.Contains(msg, "draft belongs to another task"),
 		strings.Contains(msg, "cannot rollback while draft overlay exists"):
 		return CodeDraftConflict
+	case strings.Contains(msg, "distribution upgrade conflicts"), strings.Contains(msg, "distribution baseline is unavailable"), strings.Contains(msg, "distribution upgrade draft is active"):
+		return CodeDistributionConflict
 	case strings.Contains(msg, "already exists"), strings.Contains(msg, "duplicate"), strings.Contains(msg, "name conflict"):
 		return CodePathExists
 	case strings.Contains(msg, "write file over directory"), strings.Contains(msg, "directory over file"),

@@ -2,6 +2,7 @@
 
 Routes:
     POST /api/writer/documents:sync      Persist a LazyMind WriterDocument edit.
+    POST /api/writer/documents:convert   Convert Writer Markdown and LMD content.
     POST /api/subagent/tasks:cancel      LazyMind task cancellation callback.
 """
 from __future__ import annotations
@@ -20,11 +21,12 @@ from typing import Any, Dict, List, Literal, Optional
 
 import httpx
 import yaml
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from lazyllm.tools.tool_config_inject import inject_tool_config
 from lazyllm.tools.writer.data_models import WriterDocument
+from lazyllm.tools.writer.utils import convert_writer_content
 from lazymind.chat.engine.tools.writer import sync_writer_documents
 from lazymind.config import config
 from lazymind.model_config import inject_model_config
@@ -140,6 +142,13 @@ class WriterDocumentSyncRequest(BaseModel):
     tool_config: Dict[str, Any] = Field(default_factory=dict)
 
 
+class WriterDocumentConvertRequest(BaseModel):
+    source_format: Literal['markdown', 'lmd', 'writer_document']
+    target_format: Literal['markdown', 'lmd']
+    content: str
+    document_id: str = 'writer-document'
+
+
 class PptExportPage(BaseModel):
     html: str
     notes: str = ''
@@ -186,6 +195,22 @@ def sync_writer_document(request: WriterDocumentSyncRequest) -> dict:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     except Exception as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+@router.post('/api/writer/documents:convert', summary='Convert Writer Markdown and LMD content')
+def convert_writer_document(request: WriterDocumentConvertRequest) -> Response:
+    try:
+        converted = convert_writer_content(
+            request.content,
+            request.source_format,
+            request.target_format,
+            document_id=request.document_id,
+        )
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    media_type = 'text/markdown; charset=utf-8' if request.target_format == 'markdown' \
+        else 'application/vnd.lazymind.writer+json; charset=utf-8'
+    return Response(content=converted.encode('utf-8'), media_type=media_type)
 
 
 def _action_definition(

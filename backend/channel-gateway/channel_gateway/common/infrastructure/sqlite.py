@@ -17,7 +17,9 @@ from channel_gateway.common.domain.channel import (
 from channel_gateway.common.infrastructure.postgres import (
     GatewayStore,
     PostgresRuntimeLease,
+    decode_snapshot,
 )
+from channel_gateway.common.ports.providers import PayloadCipher
 
 
 _BOOLEAN_COLUMNS = {
@@ -209,27 +211,15 @@ class _SQLiteConnection:
         return self._connection.execute(_translate(statement), parameters)
 
 
-def _snapshot(value: Any) -> dict[str, Any]:
-    if isinstance(value, str):
-        try:
-            value = json.loads(value)
-        except json.JSONDecodeError:
-            return {}
-    if isinstance(value, list):
-        return {
-            'selection': {
-                'kind': 'conversation',
-                'items': list(value),
-            }
-        }
-    return dict(value) if isinstance(value, dict) else {}
-
-
 class SQLiteGatewayStore(GatewayStore):
     """SQLite dialect for the container store contract used by local/Desktop."""
 
-    def __init__(self, dsn: str):
-        super().__init__(dsn)
+    def __init__(
+        self,
+        dsn: str,
+        payload_cipher: PayloadCipher | None = None,
+    ):
+        super().__init__(dsn, payload_cipher)
         self._path = _database_path(dsn)
 
     def _connect(self) -> _SQLiteConnection:
@@ -359,6 +349,7 @@ class SQLiteGatewayStore(GatewayStore):
                 recipient_id TEXT NOT NULL,
                 text TEXT NOT NULL,
                 provider_context TEXT NOT NULL DEFAULT '{}',
+                sensitive_payload_ciphertext TEXT,
                 status VARCHAR(32) NOT NULL DEFAULT 'pending',
                 attempt_count INTEGER NOT NULL DEFAULT 0,
                 lease_owner TEXT,
@@ -473,6 +464,10 @@ class SQLiteGatewayStore(GatewayStore):
             CREATE INDEX IF NOT EXISTS channel_outbox_order_idx
             ON channel_outbox(account_id, order_key, created_sequence)
             """,
+            """
+            CREATE INDEX IF NOT EXISTS channel_outbox_monitor_idx
+            ON channel_outbox(provider, status, created_sequence)
+            """,
         )
         with self._connect() as connection:
             for statement in statements:
@@ -495,6 +490,9 @@ class SQLiteGatewayStore(GatewayStore):
             },
             'channel_connection_sessions': {
                 'cleanup_pending': 'BOOLEAN NOT NULL DEFAULT FALSE',
+            },
+            'channel_inbox': {
+                'sensitive_payload_ciphertext': 'TEXT',
             },
             'channel_processed_messages': {
                 'response_text': 'TEXT',
@@ -844,7 +842,7 @@ class SQLiteGatewayStore(GatewayStore):
                     ),
                 )
                 return inserted.rowcount == 1
-            value = _snapshot(row.get('snapshot_json')) if row else {}
+            value = decode_snapshot(row.get('snapshot_json')) if row else {}
             workspace = value.get('feishu_workspace')
             if not isinstance(workspace, dict):
                 workspace = {}
@@ -888,7 +886,7 @@ class SQLiteGatewayStore(GatewayStore):
                 """,
                 (account_id, external_address_hash),
             ).fetchone()
-            value = _snapshot(row.get('snapshot_json')) if row else {}
+            value = decode_snapshot(row.get('snapshot_json')) if row else {}
             workspace = value.get('feishu_workspace')
             if not isinstance(workspace, dict):
                 workspace = {}
@@ -940,7 +938,7 @@ class SQLiteGatewayStore(GatewayStore):
                 """,
                 (account_id, external_address_hash),
             ).fetchone()
-            value = _snapshot(row.get('snapshot_json')) if row else {}
+            value = decode_snapshot(row.get('snapshot_json')) if row else {}
             workspace = value.get('feishu_workspace')
             if not isinstance(workspace, dict):
                 workspace = {}
@@ -990,7 +988,7 @@ class SQLiteGatewayStore(GatewayStore):
                 """,
                 (account_id, external_address_hash),
             ).fetchone()
-            current = _snapshot(row.get('snapshot_json')) if row else {}
+            current = decode_snapshot(row.get('snapshot_json')) if row else {}
             value = dict(current)
             value.pop('selection', None)
             value['new_conversation'] = draft or {}
@@ -1043,7 +1041,7 @@ class SQLiteGatewayStore(GatewayStore):
                 """,
                 (account_id, external_address_hash),
             ).fetchone()
-            value = _snapshot(row.get('snapshot_json')) if row else {}
+            value = decode_snapshot(row.get('snapshot_json')) if row else {}
             if not preserve_selection:
                 value.pop('selection', None)
             value.pop('new_conversation', None)
@@ -1164,7 +1162,7 @@ class SQLiteGatewayStore(GatewayStore):
                 """,
                 (account_id, external_address_hash),
             ).fetchone()
-            value = _snapshot(row.get('snapshot_json')) if row else {}
+            value = decode_snapshot(row.get('snapshot_json')) if row else {}
             value.pop('selection', None)
             connection.execute(
                 """

@@ -3,6 +3,17 @@ import { WorkflowInfoApi, WorkflowSessionApi, TempUploadServiceApi } from "@/mod
 import i18n from "@/i18n";
 import type { ChatConfig } from "@/modules/chat/components/ChatConfigs";
 import { extractErrorCode, getLocalizedErrorMessage } from "@/components/request";
+import {
+  emptyWorkflowProjection,
+  markWorkflowResyncRequired,
+  reduceWorkflowEvent,
+  type WorkflowProjectionState,
+  type WorkflowStreamEvent,
+} from '@/modules/chat/store/workflowProjection';
+import {
+  subscribeWorkflowEventStream,
+  type WorkflowEventStreamSubscription,
+} from '@/modules/chat/utils/workflowEventStream';
 import { reconcileWorkflowSessionStatus } from '@/modules/chat/store/workflowStatus';
 
 export function buildWorkflowSearchConfig(
@@ -240,6 +251,7 @@ export interface WorkflowRuntimeProjection {
   current?: string[];
   reachable?: string[];
   ready?: string[];
+  continue?: string[];
   blocked?: string[];
   stale?: string[];
   pruned?: string[];
@@ -332,8 +344,47 @@ export interface TabDef {
    * WorkflowPanel must not special-case workflow IDs; it only executes these rules.
    */
   composite_behavior?: CompositeBehavior;
+  /** Hide this tab once the named material has a selected revision. */
+  hide_when_material?: string;
+  /** Explicitly enable or disable artifact downloads for this tab. */
+  allow_download?: boolean;
   /** Actions are rendered through provider modules; the composite stays domain-neutral. */
   actions?: WorkflowTabAction[];
+  /** Optional next step exposed after this tab completes; declared by the workflow package. */
+  completed_continue_step?: string;
+}
+
+export function workflowTabAllowsDownload(
+  tab: TabDef,
+  index: number,
+  total: number,
+): boolean {
+  return typeof tab.allow_download === 'boolean'
+    ? tab.allow_download
+    : index === total - 1;
+}
+
+/**
+ * Apply workflow-declared tab visibility without workflow-specific frontend logic.
+ *
+ * When readyMaterial is configured, conditional tabs stay hidden until that
+ * material exists. This avoids flashing the complete graph while an initial
+ * planning step is still deriving skip materials from the launch parameters.
+ */
+export function filterWorkflowTabs(
+  tabs: TabDef[] = [],
+  slots: SlotRevision[] = [],
+  readyMaterial?: string,
+): TabDef[] {
+  const present = new Set(
+    slots.filter((slot) => slot.selected).map((slot) => slot.slot),
+  );
+  const visibilityReady = !readyMaterial || present.has(readyMaterial);
+  return tabs.filter((tab) => {
+    if (!tab.hide_when_material) return true;
+    if (!visibilityReady) return false;
+    return !present.has(tab.hide_when_material);
+  });
 }
 
 /** Mutually exclusive column group: keep the first preferred slot that has data. */
@@ -358,6 +409,8 @@ export interface CompositeBehavior {
 export interface WorkflowUI {
   name?: string;
   tabs?: TabDef[];
+  /** Defer tabs with hide_when_material until this planning material exists. */
+  tab_visibility_ready_material?: string;
   /** Global widget config keyed by slot id. */
   slots?: Record<string, Record<string, unknown>>;
 }
@@ -439,6 +492,9 @@ interface WorkflowStore {
    *  so server refreshes don't overwrite the user's tab / sort_order focus. */
   focusedTabByConversation: Record<string, string | undefined>;
   focusedSortOrderByConversation: Record<string, number | undefined>;
+  /** Canonical Event Stream projection shared by in-chat and standalone panels. */
+  projectionBySession: Record<string, WorkflowProjectionState>;
+
   setSession: (conversationId: string, session: WorkflowSession | null) => void;
   updateSlot: (conversationId: string, slot: SlotRevision) => void;
   loadActiveSession: (
@@ -472,7 +528,11 @@ interface WorkflowStore {
   // value persists across `setSession()` refreshes that would otherwise wipe it.
   setFocusedTab: (conversationId: string, tabId: string) => void;
   setFocusedSortOrder: (conversationId: string, sortOrder: number | undefined) => void;
+  applyWorkflowEvent: (conversationId: string, sessionId: string, event: WorkflowStreamEvent) => void;
+  subscribeWorkflowSession: (conversationId: string, sessionId: string) => () => void;
 }
+
+const workflowStreams = new Map<string, { refs: number; subscription: WorkflowEventStreamSubscription }>();
 
 export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
   sessionByConversation: {},
@@ -483,6 +543,7 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
   dismissedSessionsByConversation: {},
   focusedTabByConversation: {},
   focusedSortOrderByConversation: {},
+  projectionBySession: {},
 
   bumpDismissedRefresh: (conversationId) => {
     set((s) => ({
@@ -766,4 +827,61 @@ export const useWorkflowStore = create<WorkflowStore>()((set, get) => ({
     });
   },
 
+  applyWorkflowEvent: (conversationId, sessionId, event) => {
+    set((state) => {
+      const previous = state.projectionBySession[sessionId] ?? emptyWorkflowProjection();
+      const projectionState = reduceWorkflowEvent(previous, event);
+      const session = state.sessionByConversation[conversationId];
+      if (!session || session.session_id !== sessionId) {
+        return { projectionBySession: { ...state.projectionBySession, [sessionId]: projectionState } };
+      }
+      const projection = projectionState.projection as WorkflowRuntimeProjection & { status?: string };
+      const reconciledStatus = reconcileWorkflowSessionStatus(session.status, projection);
+      return {
+        projectionBySession: { ...state.projectionBySession, [sessionId]: projectionState },
+        sessionByConversation: {
+          ...state.sessionByConversation,
+          [conversationId]: { ...session, status: reconciledStatus, projection },
+        },
+      };
+    });
+    const projectionState = get().projectionBySession[sessionId];
+    if (projectionState?.resyncRequired) {
+      // Closing and reconnecting without Last-Event-ID asks the server for a fresh snapshot.
+      workflowStreams.get(sessionId)?.subscription.resync();
+    }
+    if (event.type === 'artifact.upsert') {
+      void get().refreshSlots(conversationId, sessionId);
+    }
+  },
+
+  subscribeWorkflowSession: (conversationId, sessionId) => {
+    const existing = workflowStreams.get(sessionId);
+    if (existing) {
+      existing.refs += 1;
+    } else {
+      const current = get().projectionBySession[sessionId] ?? emptyWorkflowProjection();
+      const subscription = subscribeWorkflowEventStream(
+        sessionId,
+        current.resyncRequired ? 0 : current.cursor,
+        (event) => get().applyWorkflowEvent(conversationId, sessionId, event),
+        () => set((state) => ({
+          projectionBySession: {
+            ...state.projectionBySession,
+            [sessionId]: markWorkflowResyncRequired(state.projectionBySession[sessionId] ?? emptyWorkflowProjection()),
+          },
+        })),
+      );
+      workflowStreams.set(sessionId, { refs: 1, subscription });
+    }
+    return () => {
+      const current = workflowStreams.get(sessionId);
+      if (!current) return;
+      current.refs -= 1;
+      if (current.refs <= 0) {
+        current.subscription.close();
+        workflowStreams.delete(sessionId);
+      }
+    };
+  },
 }));

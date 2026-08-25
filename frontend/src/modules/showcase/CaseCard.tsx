@@ -1,11 +1,11 @@
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowRightOutlined } from "@ant-design/icons";
 import type { ShowcaseCase } from "./api";
-import { translateShowcaseCategory } from "./i18n";
 
 interface CaseCardProps {
   item: ShowcaseCase;
+  onTry?: (item: ShowcaseCase) => void;
 }
 
 const COVER_CLASS_BY_OUTPUT_TYPE: Record<string, string> = {
@@ -19,16 +19,21 @@ const COVER_CLASS_BY_OUTPUT_TYPE: Record<string, string> = {
   table: "table",
 };
 
-export default function CaseCard({ item }: CaseCardProps) {
+export default function CaseCard({ item, onTry }: CaseCardProps) {
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const coverClass = COVER_CLASS_BY_OUTPUT_TYPE[item.output_type] || "report";
 
   return (
     <article className="showcase-card">
       <Link
         className="showcase-card-link"
-        to={`/agent/chat/cases/${encodeURIComponent(item.id)}`}
+        to={`/agent/chat/home?showcase_case=${encodeURIComponent(item.id)}`}
+        onClick={(event) => {
+          if (onTry) {
+            event.preventDefault();
+            onTry(item);
+          }
+        }}
       >
         <div className={`showcase-card-image-wrap showcase-card-cover-${coverClass}`}>
           <div className="showcase-card-image-stage">
@@ -41,7 +46,7 @@ export default function CaseCard({ item }: CaseCardProps) {
           </div>
         </div>
         <div className="showcase-card-body">
-          <div className="showcase-card-category">{translateShowcaseCategory(t, item.category)}</div>
+          <div className="showcase-card-category">{item.category}</div>
           <div className="showcase-card-output">{item.output_label}</div>
           <h3>{item.title}</h3>
           <p>{item.description}</p>
@@ -49,18 +54,13 @@ export default function CaseCard({ item }: CaseCardProps) {
       </Link>
       <div className="showcase-card-footer">
         <span className="showcase-card-result">{item.result_summary}</span>
-        <button
-          type="button"
-          className="showcase-try-button"
-          onClick={() =>
-            navigate(
-              `/agent/chat/home?showcase_case=${encodeURIComponent(item.id)}`,
-            )
-          }
+        <Link
+          className="showcase-detail-link"
+          to={`/agent/chat/cases/${encodeURIComponent(item.id)}`}
         >
-          {t("showcase.try")}
+          {t("showcase.viewDetail")}
           <ArrowRightOutlined aria-hidden="true" />
-        </button>
+        </Link>
       </div>
     </article>
   );

@@ -20,6 +20,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/mcp"
 	"lazymind/core/modelconfig"
+	"lazymind/core/settings"
 	"lazymind/core/store"
 )
 
@@ -210,30 +211,35 @@ func applyChatRuntimeConfigs(ctx context.Context, db *gorm.DB, userID string, bo
 }
 
 // loadUserAgentConfig reads per-user defaults from user_chat_settings and applies
-// conversation-level overrides from the Conversation row when conversation_id is
-// present in body. The result is a partial agentic_config dict ready to merge.
-// It never returns an error; on DB failure it returns an empty map.
+// the immutable Conversation snapshot when conversation_id is present in body.
+// Historical NULL snapshot fields use the old hard defaults rather than following
+// a user setting that may have changed after the conversation was created.
+// It never returns an error; on DB failure it preserves the historical hard defaults.
 func loadUserAgentConfig(ctx context.Context, db *gorm.DB, userID string, body map[string]any) map[string]any {
-	out := map[string]any{}
-
-	// Load user-level defaults.
-	var settings orm.UserChatSettings
-	if err := db.WithContext(ctx).Where("user_id = ?", userID).First(&settings).Error; err == nil {
-		out["enable_workflow"] = settings.EnableWorkflow
-		out["workflow_mode"] = settings.WorkflowMode
-		out["enable_subagent"] = settings.EnableSubagent
+	policy := settings.LoadConversationExecutionPolicy(ctx, db, userID)
+	out := map[string]any{
+		"enable_workflow": policy.EnableWorkflow,
+		"workflow_mode":   policy.WorkflowMode,
+		"enable_subagent": policy.EnableSubagent,
 	}
 
-	// Apply conversation-level overrides when present.
+	// Apply the conversation snapshot when present.
 	convID, _ := body["conversation_id"].(string)
 	if convID != "" {
 		var conv orm.Conversation
 		if err := db.WithContext(ctx).Where("id = ?", convID).First(&conv).Error; err == nil {
+			historicalDefaults := settings.DefaultConversationExecutionPolicy()
+			out["enable_workflow"] = historicalDefaults.EnableWorkflow
+			out["workflow_mode"] = historicalDefaults.WorkflowMode
+			out["enable_subagent"] = historicalDefaults.EnableSubagent
 			if conv.EnableWorkflow != nil {
 				out["enable_workflow"] = *conv.EnableWorkflow
 			}
 			if conv.WorkflowMode != nil {
-				out["workflow_mode"] = *conv.WorkflowMode
+				mode := strings.ToLower(strings.TrimSpace(*conv.WorkflowMode))
+				if mode == "auto" || mode == "dynamic" {
+					out["workflow_mode"] = mode
+				}
 			}
 			if conv.EnableSubagent != nil {
 				out["enable_subagent"] = *conv.EnableSubagent
@@ -241,6 +247,30 @@ func loadUserAgentConfig(ctx context.Context, db *gorm.DB, userID string, body m
 		}
 	}
 	return out
+}
+
+func applyChatFeatureControls(ctx context.Context, db *gorm.DB, userID string, body map[string]any) error {
+	controls, err := settings.LoadFeatureControls(ctx, db, userID)
+	if err != nil {
+		return err
+	}
+	if controls.TaskCenterEnabled && controls.WorkflowsEnabled {
+		return nil
+	}
+	agentConfig, _ := body["agentic_config"].(map[string]any)
+	if agentConfig == nil {
+		agentConfig = map[string]any{}
+		body["agentic_config"] = agentConfig
+	}
+	if !controls.WorkflowsEnabled {
+		body["enable_workflow"] = false
+		agentConfig["enable_workflow"] = false
+	}
+	if !controls.TaskCenterEnabled {
+		body["enable_subagent"] = false
+		agentConfig["enable_subagent"] = false
+	}
+	return nil
 }
 
 func applyMCPRuntimeConfig(ctx context.Context, db *gorm.DB, userID string, body map[string]any) {

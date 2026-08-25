@@ -39,6 +39,7 @@ import (
 	"lazymind/core/subagent"
 	"lazymind/core/workflow"
 	workflowexecutor "lazymind/core/workflow/executor"
+	workflowstore "lazymind/core/workflow/store"
 
 	"github.com/gorilla/mux"
 	"golang.org/x/sync/errgroup"
@@ -64,8 +65,8 @@ func openAPIArtifactExportEnabled() bool {
 	return raw != "0" && raw != "false" && raw != "no" && raw != "off"
 }
 
-func buildCapabilityMCPHandler() (http.Handler, error) {
-	return capabilitybootstrap.NewHandler(capabilitybootstrap.Config{
+func buildCapabilityRuntime() (*capabilitybootstrap.Runtime, error) {
+	return capabilitybootstrap.NewRuntime(capabilitybootstrap.Config{
 		DB:                        store.DB(),
 		LazyDB:                    store.LazyLLMDB(),
 		AuthServiceBaseURL:        common.AuthServiceBaseURL(),
@@ -73,6 +74,7 @@ func buildCapabilityMCPHandler() (http.Handler, error) {
 		KnowledgeSearchBaseURL:    common.ChatServiceEndpoint(),
 		InternalServiceToken:      os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN"),
 		KnowledgeSearchHTTPClient: &http.Client{Timeout: 60 * time.Second},
+		ScanBaseURL:               common.ScanControlPlaneEndpoint(),
 	})
 }
 
@@ -123,7 +125,16 @@ func exportOpenAPIArtifacts(openAPIJSON []byte) {
 // handleAPI textPermissiontext。perms text extract_api_permissions.py text api_permissions.json（Kong RBAC），
 // text core text（text Kong + auth-service Authorization）。text gorilla/mux，text path text，text ":action" text。
 func handleAPI(r *mux.Router, method, path string, perms []string, h http.HandlerFunc) *mux.Route {
-	return r.HandleFunc(path, withMutationRequestAudit(method, path, withExternalAgentLease(h))).Methods(method)
+	return r.HandleFunc(path, withMutationRequestAudit(method, path,
+		withExternalAgentLease(withInvocationConversationScope(h)))).Methods(method)
+}
+
+func withInvocationConversationScope(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		const header = "X-LazyMind-Invocation-Conversation-Id"
+		ctx := workflowstore.WithConversationScope(r.Context(), r.Header.Get(header))
+		next(w, r.WithContext(ctx))
+	}
 }
 
 func withExternalAgentLease(next http.HandlerFunc) http.HandlerFunc {
@@ -562,11 +573,11 @@ func run(ctx context.Context) error {
 		w.Write(swaggerUIHTML)
 	}).Methods(http.MethodGet)
 
-	handler, err := buildCapabilityMCPHandler()
+	capabilityRuntime, err := buildCapabilityRuntime()
 	if err != nil {
 		return &startupError{msg: "initialize capability MCP", err: err}
 	}
-	registerCapabilityMCPRoute(r, handler)
+	registerCapabilityMCPRoute(r, capabilityRuntime.MCP)
 	log.Logger.Info().Str("path", "/mcp/capabilities/v1").Msg("capability MCP enabled")
 
 	listenAddr := coreListenAddr()

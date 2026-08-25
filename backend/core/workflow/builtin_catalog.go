@@ -142,7 +142,12 @@ func seedBuiltinWorkflow(ctx context.Context, db *gorm.DB, root string) (string,
 			}
 		}
 		var existing orm.WorkflowRevision
-		if tx.Where("plugin_resource_id = ? AND tree_hash = ?", resource.ID, treeHash).First(&existing).Error == nil {
+		// Package bytes alone do not identify an executable revision: compiler
+		// upgrades can change the typed graph without changing workflow.yaml. Reuse
+		// only the exact package + compiled graph pair, otherwise publish one new
+		// immutable built-in revision.
+		if tx.Where("plugin_resource_id = ? AND tree_hash = ? AND graph_hash = ?",
+			resource.ID, treeHash, compiled.GraphHash).First(&existing).Error == nil {
 			return tx.Model(&resource).Updates(map[string]any{"head_revision_id": existing.ID,
 				"version": existing.RevisionNo, "plugin_id": metadata.ID, "owner_user_id": "", // workflow-naming: persistence
 				"owner_scope": "builtin", "source_type": "builtin",

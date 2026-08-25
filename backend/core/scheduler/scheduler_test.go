@@ -2,10 +2,13 @@ package scheduler
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/store"
 )
 
 func newTestSchedulerDB(t *testing.T) *orm.DB {
@@ -13,7 +16,23 @@ func newTestSchedulerDB(t *testing.T) *orm.DB {
 	return orm.MigrateTestDB(t, &orm.UserSchedule{}, &orm.TaskCenterTask{}, &orm.UserUIPreferences{})
 }
 
-func TestFireSchedulesSkipsPausedTaskCenterAndMovesNextRunForward(t *testing.T) {
+func TestCreateTaskConversationPersistsHighThinkingDepth(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.Conversation{})
+	conversationID := createTaskConversation(t.Context(), db.DB, "user-1", "daily report")
+	if conversationID == "" {
+		t.Fatal("expected conversation to be created")
+	}
+
+	var conversation orm.Conversation
+	if err := db.First(&conversation, "id = ?", conversationID).Error; err != nil {
+		t.Fatalf("load conversation: %v", err)
+	}
+	if conversation.ThinkingDepth != "high" {
+		t.Fatalf("thinking depth = %q, want high", conversation.ThinkingDepth)
+	}
+}
+
+func TestFireSchedulesSkipsPausedSchedulesAndMovesNextRunForward(t *testing.T) {
 	db := newTestSchedulerDB(t)
 	now := time.Now().UTC()
 	schedule := orm.UserSchedule{
@@ -24,7 +43,7 @@ func TestFireSchedulesSkipsPausedTaskCenterAndMovesNextRunForward(t *testing.T) 
 		t.Fatalf("seed schedule: %v", err)
 	}
 	if err := db.Model(&orm.UserUIPreferences{}).Create(map[string]any{
-		"user_id": "user-1", "task_center_enabled": false, "skills_enabled": true, "mcp_enabled": true,
+		"user_id": "user-1", "task_center_enabled": true, "schedules_enabled": false, "skills_enabled": true, "mcp_enabled": true,
 		"created_at": now, "updated_at": now,
 	}).Error; err != nil {
 		t.Fatalf("seed controls: %v", err)
@@ -41,6 +60,79 @@ func TestFireSchedulesSkipsPausedTaskCenterAndMovesNextRunForward(t *testing.T) 
 	}
 	if saved.RunCount != 0 || saved.LastRunAt != nil {
 		t.Fatalf("paused schedule must not produce a new run: %#v", saved)
+	}
+}
+
+func TestResumeWaitingTasksKeepsTaskWaitingWhileSchedulesArePaused(t *testing.T) {
+	db := newTestSchedulerDB(t)
+	now := time.Now().UTC()
+	scheduleID := "sched-waiting"
+	windowStart := now.Add(-time.Hour)
+	windowEnd := now
+	if err := db.Model(&orm.UserUIPreferences{}).Create(map[string]any{
+		"user_id": "user-1", "task_center_enabled": true, "schedules_enabled": false,
+		"skills_enabled": true, "workflows_enabled": true, "mcp_enabled": true,
+		"created_at": now, "updated_at": now,
+	}).Error; err != nil {
+		t.Fatalf("seed controls: %v", err)
+	}
+	task := orm.TaskCenterTask{
+		ID: "waiting-task", UserID: "user-1", ConversationID: "", TaskType: "scheduled",
+		Status: "waiting_inputs", ScheduleID: &scheduleID, WindowStart: &windowStart, WindowEnd: &windowEnd,
+		DependencyStatus: "waiting", TriggerType: "scheduled", CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&task).Error; err != nil {
+		t.Fatalf("seed waiting task: %v", err)
+	}
+
+	resumeWaitingTasks(t.Context(), db.DB)
+
+	var saved orm.TaskCenterTask
+	if err := db.Where("id = ?", task.ID).Take(&saved).Error; err != nil {
+		t.Fatalf("load waiting task: %v", err)
+	}
+	if saved.Status != "waiting_inputs" || saved.DependencyStatus != "waiting" || saved.ConversationID != "" {
+		t.Fatalf("paused schedules must not launch a waiting task: %#v", saved)
+	}
+}
+
+func TestEnableScheduleUsesSchedulesControlIndependentlyFromSubtasks(t *testing.T) {
+	db := newTestSchedulerDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	now := time.Now().UTC()
+	schedule := orm.UserSchedule{
+		ID: "sched-independent", UserID: "user-1", Name: "daily", CronExpr: "0 9 * * *",
+		Timezone: "UTC", PromptTemplate: "daily", Enabled: false, NextRunAt: now.Add(time.Hour), CreatedAt: now,
+	}
+	if err := db.Create(&schedule).Error; err != nil {
+		t.Fatalf("seed schedule: %v", err)
+	}
+	if err := db.Model(&orm.UserUIPreferences{}).Create(map[string]any{
+		"user_id": "user-1", "task_center_enabled": false, "schedules_enabled": true,
+		"skills_enabled": true, "workflows_enabled": true, "mcp_enabled": true,
+		"created_at": now, "updated_at": now,
+	}).Error; err != nil {
+		t.Fatalf("seed controls: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/schedules/"+schedule.ID+":enable", nil)
+	req.Header.Set("X-User-Id", "user-1")
+	rec := httptest.NewRecorder()
+	EnableScheduleHandler(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("subtasks being off must not block schedules: status=%d body=%s", rec.Code, rec.Body.String())
+	}
+
+	if err := db.Model(&orm.UserUIPreferences{}).Where("user_id = ?", "user-1").Update("schedules_enabled", false).Error; err != nil {
+		t.Fatalf("pause schedules: %v", err)
+	}
+	req = httptest.NewRequest(http.MethodPost, "/schedules/"+schedule.ID+":enable", nil)
+	req.Header.Set("X-User-Id", "user-1")
+	rec = httptest.NewRecorder()
+	EnableScheduleHandler(rec, req)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("paused schedules must block enable: status=%d body=%s", rec.Code, rec.Body.String())
 	}
 }
 

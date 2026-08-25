@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef, useEffect, useMemo, createContext, useContext } from "react";
+import { useState, useCallback, useLayoutEffect, useRef, useEffect, useMemo, createContext, useContext } from "react";
 import ReactDOM from "react-dom";
 import type { SlotRevision, SlotVersionEntry, SlotWidgetConfig } from "@/modules/chat/store/workflowPanel";
 import { useWorkflowStore, draftStore } from "@/modules/chat/store/workflowPanel";
@@ -6,7 +6,12 @@ import { resolveCoreAssetUrl, resolveMarkdownImageUrlAsync, isExpiredSignedUrl }
 import { buildDiffLinesWithInline } from "@/modules/memory/shared";
 import { DiffLineContent } from "@/modules/memory/components/DiffLineContent";
 import { uploadFileInChunks } from "@/modules/chat/utils/chunkUpload";
-import { WorkflowSessionApi, type RewriteSelectionPreview } from "@/modules/chat/utils/request";
+import {
+  WorkflowSessionApi,
+  type RenderWriterDocumentResult,
+  type RewriteSelectionPreview,
+  type WriterDocumentSlot,
+} from "@/modules/chat/utils/request";
 import { FilePreviewDrawer } from "./FilePreviewDrawer";
 import {
   WriterArtifactContent,
@@ -14,6 +19,13 @@ import {
   unwrapArtifactPayload,
 } from './writerArtifactViews';
 import { WriterIRControl, type WriterIRSaveMode, type WriterIRSaveResult } from './WriterIRControl';
+import {
+  WriterDownloadFormatButton,
+  WriterDownloadFormatDialog,
+  writerDownloadCacheKey,
+  writerDownloadFilename,
+  writerMarkdownTitle,
+} from './WriterDownloadFormat';
 import { MarkdownArtifactEditor } from './MarkdownArtifactEditor';
 import {
   ArtifactRewriteDialog,
@@ -21,16 +33,19 @@ import {
 } from './ArtifactRewriteDialog';
 import { ArtifactRewriteSelectionAction } from './ArtifactRewriteSelectionAction';
 import { selectedMarkdownParagraph, type MarkdownSelection } from './artifactRewriteSelection';
+import { restoreWriterMarkdownInternalReferenceLabels } from './writerMarkdownAnchors';
 import {
   isWriterDocument,
   normalizeWriterDocumentForSync,
   restoreLegacyWriterImageReference,
+  restoreWriterInternalReferenceDisplayText,
   updateWriterBlockContent,
   type WriterBlock,
   type WriterDocument,
 } from './writerIR';
 import { WorkflowPanelTabActiveContext, SlotEditingContext } from './slotEditingContext';
 import MarkdownViewer from '@/modules/chat/components/MarkdownViewer';
+import HtmlBlock from '@/modules/chat/components/MarkdownViewer/HtmlBlock';
 import i18n from '@/i18n';
 import { useTranslation } from 'react-i18next';
 import { localizeErrorCode } from '@/components/request';
@@ -47,6 +62,77 @@ function tr(key: string, options?: Record<string, unknown>): string {
 }
 
 export const SlotDownloadContext = createContext(true);
+
+/**
+ * Reveal exactly one backend delta per paint when several SSE frames arrive in
+ * the same browser callback. Individual deltas are never split or rewritten.
+ */
+function useArtifactStreamContent(
+  streamId: string,
+  deltas: string[] | undefined,
+  fallbackContent: string,
+): string {
+  const [visibleContent, setVisibleContent] = useState(
+    () => deltas?.[0] ?? fallbackContent,
+  );
+  const streamIdRef = useRef(streamId);
+  const deltasRef = useRef(deltas);
+  const displayedCountRef = useRef(deltas?.length ? 1 : 0);
+  const frameRef = useRef<number>();
+
+  const cancelFrame = useCallback(() => {
+    if (frameRef.current === undefined) return;
+    window.cancelAnimationFrame(frameRef.current);
+    frameRef.current = undefined;
+  }, []);
+
+  const drainNext = useCallback(function drainNext() {
+    frameRef.current = undefined;
+    const currentDeltas = deltasRef.current;
+    if (!currentDeltas) return;
+
+    const index = displayedCountRef.current;
+    if (index >= currentDeltas.length) return;
+    displayedCountRef.current = index + 1;
+    setVisibleContent((current) => current + currentDeltas[index]);
+
+    if (displayedCountRef.current < currentDeltas.length) {
+      frameRef.current = window.requestAnimationFrame(drainNext);
+    }
+  }, []);
+
+  useLayoutEffect(() => {
+    if (streamIdRef.current !== streamId) {
+      cancelFrame();
+      streamIdRef.current = streamId;
+      displayedCountRef.current = 0;
+      setVisibleContent('');
+    }
+
+    deltasRef.current = deltas;
+    if (!deltas) {
+      cancelFrame();
+      displayedCountRef.current = 0;
+      setVisibleContent(fallbackContent);
+      return;
+    }
+
+    if (displayedCountRef.current > deltas.length) {
+      displayedCountRef.current = 0;
+      setVisibleContent('');
+    }
+
+    // Apply the first pending backend delta before the next paint. Any further
+    // deltas from the same network batch are revealed on following frames.
+    if (frameRef.current === undefined && displayedCountRef.current < deltas.length) {
+      drainNext();
+    }
+  }, [cancelFrame, deltas, drainNext, fallbackContent, streamId]);
+
+  useLayoutEffect(() => cancelFrame, [cancelFrame]);
+
+  return visibleContent;
+}
 
 /**
  * Normalize the content_type returned by the Python backend.
@@ -214,13 +300,16 @@ function useArtifactFileUrl(
 
 function useWriterMediaLibrary(sessionId?: string): unknown {
   const sessionByConversation = useWorkflowStore((state) => state.sessionByConversation);
-  const mediaAssetSlot = useMemo(() => Object.values(sessionByConversation)
-    .find((session) => session?.session_id === sessionId)
-    ?.slots
-    ?.find((candidate) => candidate.slot_id === 'resolved_media_assets' && candidate.selected), [
-      sessionByConversation,
-      sessionId,
-    ]);
+  const mediaAssetSlot = useMemo(() => {
+    const slots = Object.values(sessionByConversation)
+      .find((session) => session?.session_id === sessionId)
+      ?.slots;
+    return slots?.find(
+      (candidate) => candidate.slot_id === 'resolved_media_assets' && candidate.selected,
+    ) ?? slots?.find(
+      (candidate) => candidate.slot_id === 'media_assets' && candidate.selected,
+    );
+  }, [sessionByConversation, sessionId]);
   const [fetchedMediaAssetSlot, setFetchedMediaAssetSlot] = useState<SlotRevision>();
   const selectedMediaAssetSlot = mediaAssetSlot ?? fetchedMediaAssetSlot;
 
@@ -232,8 +321,11 @@ function useWriterMediaLibrary(sessionId?: string): unknown {
     let cancelled = false;
     WorkflowSessionApi().getSlots(sessionId)
       .then((response) => {
-        const slot = (response?.data?.data?.slots ?? []).find(
+        const slots = response?.data?.data?.slots ?? [];
+        const slot = slots.find(
           (candidate: SlotRevision) => candidate.slot_id === 'resolved_media_assets' && candidate.selected,
+        ) ?? slots.find(
+          (candidate: SlotRevision) => candidate.slot_id === 'media_assets' && candidate.selected,
         );
         if (!cancelled) setFetchedMediaAssetSlot(slot);
       })
@@ -408,15 +500,43 @@ function snapshotDiffCacheKey(snapshot: unknown): string {
 function formatPayloadForDiff(payload: unknown): string {
   const unwrapped = unwrapArtifactPayload(payload);
   if (isWriterDocument(unwrapped)) {
-    return writerDocumentToMarkdown(unwrapped);
+    return writerDocumentDiffText(unwrapped);
   }
   if (isWriterDocument(payload)) {
-    return writerDocumentToMarkdown(payload);
+    return writerDocumentDiffText(payload);
   }
   if (typeof unwrapped === 'string') return unwrapped;
   if (unwrapped != null) return JSON.stringify(unwrapped, null, 2);
   if (typeof payload === 'string') return payload;
   return payload == null ? '' : JSON.stringify(payload, null, 2);
+}
+
+function writerBlockDiffText(block: WriterBlock, headingLevel = 2): string {
+  const content = block.content ?? '';
+  let current = content;
+  if (block.type === 'heading') {
+    const level = Math.min(6, Math.max(1, Number(block.numbering?.level ?? headingLevel)));
+    current = `${'#'.repeat(level)} ${content}`;
+  } else if (block.type === 'list_item') {
+    const marker = block.numbering?.ordered ? '1.' : '-';
+    current = `${marker} ${content}`;
+  } else if (block.type === 'code' && !/^\s*(?:```|~~~)/.test(content)) {
+    current = `\`\`\`\n${content}\n\`\`\``;
+  } else if (block.type === 'quote') {
+    current = content.split('\n').map((line) => `> ${line}`).join('\n');
+  }
+  const children = (block.children ?? [])
+    .map((child) => writerBlockDiffText(child, headingLevel + 1))
+    .filter(Boolean)
+    .join('\n\n');
+  return [current, children].filter(Boolean).join('\n\n');
+}
+
+function writerDocumentDiffText(document: WriterDocument): string {
+  return [
+    document.title ? `# ${document.title}` : '',
+    document.blocks.map((block) => writerBlockDiffText(block)).filter(Boolean).join('\n\n'),
+  ].filter(Boolean).join('\n\n');
 }
 
 async function resolveSnapshotDiffText(snapshot: unknown): Promise<string> {
@@ -2064,50 +2184,17 @@ async function syncWriterDocumentSlot(
     throw new Error(tr('chat.writerIR.saveFailed'));
   }
   return {
-    document: result.document,
+    document: restoreWriterInternalReferenceDisplayText(result.document),
     sourceRevision: result.revision,
   };
 }
 
-function writerBlockToMarkdown(block: WriterBlock, depth = 0): string {
-  if (block.type === 'document') {
-    return (block.children ?? []).map((child) => writerBlockToMarkdown(child, depth)).filter(Boolean).join('\n\n');
-  }
-
-  const content = block.content?.trim() ?? '';
-  const children = (block.children ?? [])
-    .map((child) => writerBlockToMarkdown(child, depth + 1))
-    .filter(Boolean)
-    .join('\n\n');
-  let current = content;
-
-  if (block.type === 'heading') {
-    const level = Math.min(6, Math.max(1, Number(block.numbering?.level ?? 2)));
-    current = content ? `${'#'.repeat(level)} ${content}` : '';
-  } else if (block.type === 'list_item') {
-    current = content ? `${'  '.repeat(depth)}${block.numbering?.ordered ? '1.' : '-'} ${content}` : '';
-  } else if (block.type === 'quote') {
-    current = content ? content.split('\n').map((line) => `> ${line}`).join('\n') : '';
-  } else if (block.type === 'code') {
-    current = content ? `\`\`\`\n${content}\n\`\`\`` : '';
-  } else if (block.type === 'divider') {
-    current = '---';
-  }
-
-  return [current, children].filter(Boolean).join('\n\n');
+function writerMarkdownFilename(name: string, title = ''): string {
+  return writerDownloadFilename(title, 'md', name);
 }
 
-function writerDocumentToMarkdown(document: WriterDocument): string {
-  const title = document.title.trim() ? `# ${document.title.trim()}` : '';
-  const body = document.blocks.map((block) => writerBlockToMarkdown(block)).filter(Boolean).join('\n\n');
-  return `${[title, body].filter(Boolean).join('\n\n')}\n`;
-}
-
-function writerMarkdownFilename(name: string): string {
-  const trimmed = name.trim() || 'document';
-  if (trimmed.toLowerCase().endsWith('_ir.lmd')) return `${trimmed.slice(0, -7)}.md`;
-  if (trimmed.toLowerCase().endsWith('_ir.json')) return `${trimmed.slice(0, -8)}.md`;
-  return `${trimmed.replace(/\.(?:lmd|json)$/i, '')}.md`;
+function writerLmdFilename(name: string, title = ''): string {
+  return writerDownloadFilename(title, 'lmd', name);
 }
 
 function shouldRenderInlineStructuredContent(
@@ -2215,6 +2302,7 @@ function useRegisterWriterWriteBack({
   initialDelivery,
   synced,
   actionKey,
+  flushKey,
   sessionId,
   revision,
   getLatestRevision,
@@ -2227,6 +2315,7 @@ function useRegisterWriterWriteBack({
   initialDelivery?: boolean;
   synced?: boolean;
   actionKey?: string;
+  flushKey?: string;
   sessionId?: string;
   revision: number;
   getLatestRevision?: () => number;
@@ -2275,6 +2364,8 @@ function useRegisterWriterWriteBack({
       }
     }
   }, [getLatestRevision, onConflict, onSuccess, revision, sessionId]);
+  const writeBackRef = useRef(writeBack);
+  writeBackRef.current = writeBack;
 
   useEffect(() => {
     if (!enabled || !tabActive || !actionKey || !sessionId) return undefined;
@@ -2287,8 +2378,9 @@ function useRegisterWriterWriteBack({
       icon: 'write-back',
       disabled: disabled || status === 'loading',
       flushBeforeAction: true,
+      flushKey,
       onClick: () => {
-        void writeBack();
+        void writeBackRef.current();
       },
       statusText: status === 'success' || (synced && status === 'idle')
         ? tr('chat.writerIR.writeBackSuccess')
@@ -2308,13 +2400,13 @@ function useRegisterWriterWriteBack({
     actionKey,
     disabled,
     enabled,
+    flushKey,
     initialDelivery,
     registerFooterAction,
     sessionId,
     status,
     synced,
     tabActive,
-    writeBack,
     writeBackUrl,
   ]);
 }
@@ -2323,33 +2415,494 @@ function useRegisterArtifactDownload({
   enabled,
   actionKey,
   label,
-  url,
-  filename,
+  onClick,
 }: {
   enabled: boolean;
   actionKey?: string;
   label: string;
-  url?: string | null;
-  filename?: string;
+  onClick: () => void;
 }) {
   const tabActive = useContext(WorkflowPanelTabActiveContext);
   const { registerFooterAction } = useContext(SlotEditingContext);
+  const onClickRef = useRef(onClick);
+  onClickRef.current = onClick;
 
   useEffect(() => {
-    if (!enabled || !tabActive || !actionKey || !url) return undefined;
+    if (!enabled || !tabActive || !actionKey) return undefined;
     return registerFooterAction(actionKey, {
       label,
       order: 10,
       tone: 'secondary',
       icon: 'download',
-      onClick: () => {
-        const anchor = document.createElement('a');
-        anchor.href = url;
-        if (filename) anchor.download = filename;
-        anchor.click();
-      },
+      onClick: () => onClickRef.current(),
     });
-  }, [actionKey, enabled, filename, label, registerFooterAction, tabActive, url]);
+  }, [actionKey, enabled, label, registerFooterAction, tabActive]);
+}
+
+function isRenderedWriterDocument(value: unknown): value is RenderWriterDocumentResult {
+  if (!value || typeof value !== 'object') return false;
+  const result = value as Partial<RenderWriterDocumentResult>;
+  if (result.representation === 'markdown') return typeof result.document === 'string';
+  if (result.representation === 'ir') return isWriterDocument(result.document);
+  return false;
+}
+
+interface SlotWriterDocumentProps {
+  slot: SlotRevision;
+  sessionId: string;
+  slotId: WriterDocumentSlot;
+  revisionCount?: number;
+  onRefresh?: () => void;
+  readOnly?: boolean;
+}
+
+/**
+ * Writer outline/draft renderer backed by the numbering-aware render/save APIs.
+ * The backend owns numbering materialization and reverse materialization; this
+ * component only edits the returned representation and tracks its revision.
+ */
+function SlotWriterDocument({
+  slot,
+  sessionId,
+  slotId,
+  revisionCount,
+  onRefresh,
+  readOnly,
+}: SlotWriterDocumentProps) {
+  const allowDownload = useContext(SlotDownloadContext);
+  const mediaLibrary = useWriterMediaLibrary(sessionId);
+  const { setEditing: notifyEditing } = useContext(SlotEditingContext);
+  const [rendered, setRendered] = useState<RenderWriterDocumentResult | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [reloadToken, setReloadToken] = useState(0);
+  const [localRevision, setLocalRevision] = useState(slot.revision);
+  const [localRevisionCount, setLocalRevisionCount] = useState<number | undefined>(revisionCount);
+  const [writerEditing, setWriterEditing] = useState(false);
+  const [downloadFormatOpen, setDownloadFormatOpen] = useState(false);
+  const [downloadMarkdownContent, setDownloadMarkdownContent] = useState('');
+  const [rewriteSelection, setRewriteSelection] = useState<ArtifactRewriteSelection | null>(null);
+  const [rewritePreview, setRewritePreview] = useState<{
+    selection: ArtifactRewriteSelection;
+    preview: RewriteSelectionPreview;
+  } | null>(null);
+  const [renderedSelection, setRenderedSelection] = useState<MarkdownSelection | null>(null);
+  const markdownPreviewRef = useRef<HTMLDivElement>(null);
+  const latestRevisionRef = useRef(slot.revision);
+  const apiListIndex = -1;
+  const editingKey = `${sessionId}:${slotId}:${apiListIndex}:writer-document`;
+
+  const applySavedRevision = useCallback((revision?: number) => {
+    if (typeof revision !== 'number' || revision <= 0) return;
+    latestRevisionRef.current = Math.max(latestRevisionRef.current, revision);
+    setLocalRevision((current) => Math.max(current, revision));
+    setLocalRevisionCount((current) => Math.max(current ?? 0, revisionCount ?? 0, revision));
+  }, [revisionCount]);
+
+  useEffect(() => {
+    latestRevisionRef.current = Math.max(latestRevisionRef.current, slot.revision);
+    setLocalRevision((current) => Math.max(current, slot.revision));
+  }, [slot.revision]);
+
+  useEffect(() => {
+    if (typeof revisionCount !== 'number') return;
+    setLocalRevisionCount((current) => Math.max(current ?? 0, revisionCount));
+  }, [revisionCount]);
+
+  useEffect(() => {
+    let active = true;
+    const controller = new AbortController();
+    if (!rendered) setLoading(true);
+    setError(null);
+    WorkflowSessionApi().renderWriterDocument(
+      sessionId,
+      slotId,
+      { signal: controller.signal, silentError: true } as never,
+    ).then((response) => {
+      const result = response?.data?.data;
+      if (response?.data?.code !== 0 || !isRenderedWriterDocument(result)) {
+        throw new Error('invalid writer document response');
+      }
+      if (!active) return;
+      setRendered(result);
+      if (result.representation === 'markdown' && typeof result.document === 'string') {
+        setDownloadMarkdownContent(result.document);
+      }
+      setError(null);
+      setLoading(false);
+    }).catch((renderError: unknown) => {
+      if (!active || controller.signal.aborted) return;
+      setError(localizeErrorCode('2000509'));
+      setLoading(false);
+    });
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [reloadToken, sessionId, slot.revision, slotId]);
+
+  const refreshDocument = useCallback(() => {
+    setReloadToken((value) => value + 1);
+    onRefresh?.();
+  }, [onRefresh]);
+
+  const writerDocument = useMemo(() => (
+    rendered?.representation === 'ir' && isWriterDocument(rendered.document)
+      ? restoreWriterInternalReferenceDisplayText(
+        restoreLegacyWriterImageReference(rendered.document, mediaLibrary),
+      )
+      : null
+  ), [mediaLibrary, rendered]);
+  const markdown = rendered?.representation === 'markdown' && typeof rendered.document === 'string'
+    ? rendered.document
+    : '';
+  const displayRevision = localRevision;
+  const displayRevisionCount = localRevisionCount ?? revisionCount;
+  const showVersionBadge = Boolean(displayRevisionCount && displayRevisionCount > 0);
+  const canEdit = !readOnly;
+  const canEditWriterIR = canEdit && writerDocument?.ui_editable === true;
+  const canRewrite = canEdit
+    && displayRevision > 0
+    && rewriteSelection === null
+    && rewritePreview === null;
+  const initialDelivery = slot.write_back_state === 'initial_delivery';
+  const canWriteBack = slotId === 'draft_document'
+    && canEdit
+    && slot.write_back_ready === true
+    && displayRevision > 0
+    && (initialDelivery || slot.write_back_state === 'synced_clean' || slot.write_back_state === 'synced_dirty');
+  const writeBackDisabled = isWriterWriteBackDisabled(
+    slot,
+    canWriteBack,
+    displayRevision,
+    writerEditing,
+  );
+  const getLatestRevision = useCallback(() => latestRevisionRef.current, []);
+
+  const saveIRDocument = useCallback(async (
+    _sourceDocument: WriterDocument,
+    document: WriterDocument,
+    sourceRevision?: string | number,
+  ): Promise<WriterIRSaveResult> => {
+    if (readOnly || typeof sourceRevision !== 'number' || sourceRevision <= 0) {
+      throw new Error(tr('chat.writerIR.saveFailed'));
+    }
+    try {
+      const response = await WorkflowSessionApi().saveWriterDocument(
+        sessionId,
+        sourceRevision,
+        normalizeWriterDocumentForSync(document),
+        slotId,
+        { silentError: true } as never,
+      );
+      const result = response?.data?.data;
+      if (
+        response?.data?.code !== 0
+        || !isRenderedWriterDocument(result)
+        || result.representation !== 'ir'
+        || !isWriterDocument(result.document)
+        || typeof result.revision !== 'number'
+      ) {
+        throw new Error(tr('chat.writerIR.saveFailed'));
+      }
+      const savedDocument = restoreWriterInternalReferenceDisplayText(
+        restoreLegacyWriterImageReference(result.document, mediaLibrary),
+      );
+      setRendered({ ...result, document: savedDocument });
+      applySavedRevision(result.revision);
+      return { document: savedDocument, sourceRevision: result.revision };
+    } catch (saveError) {
+      if ((saveError as { response?: { status?: number } })?.response?.status === 409) {
+        onRefresh?.();
+      }
+      throw saveError;
+    }
+  }, [applySavedRevision, mediaLibrary, onRefresh, readOnly, sessionId, slotId]);
+
+  const saveMarkdown = useCallback(async (document: string, baseRevision: number) => {
+    if (readOnly || baseRevision <= 0) {
+      throw new Error(tr('chat.writerMarkdown.saveFailed'));
+    }
+    try {
+      const response = await WorkflowSessionApi().saveWriterDocument(
+        sessionId,
+        baseRevision,
+        document,
+        slotId,
+        { silentError: true } as never,
+      );
+      const result = response?.data?.data;
+      if (
+        response?.data?.code !== 0
+        || !isRenderedWriterDocument(result)
+        || result.representation !== 'markdown'
+        || typeof result.document !== 'string'
+        || typeof result.revision !== 'number'
+      ) {
+        throw new Error(tr('chat.writerMarkdown.saveFailed'));
+      }
+      const displayDocument = restoreWriterMarkdownInternalReferenceLabels(result.document, document);
+      setRendered({ ...result, document: displayDocument });
+      setDownloadMarkdownContent(displayDocument);
+      applySavedRevision(result.revision);
+      return { markdown: displayDocument, revision: result.revision };
+    } catch (saveError) {
+      if ((saveError as { response?: { status?: number } })?.response?.status === 409) {
+        onRefresh?.();
+      }
+      throw saveError;
+    }
+  }, [applySavedRevision, onRefresh, readOnly, sessionId, slotId]);
+
+  const handleWriterEditingChange = useCallback((editing: boolean) => {
+    setWriterEditing(editing);
+    notifyEditing(editingKey, editing);
+  }, [editingKey, notifyEditing]);
+
+  const openIRRewrite = useCallback((selection: {
+    nodeId: string;
+    selectedText: string;
+    anchor?: ArtifactRewriteSelection['anchor'];
+  }) => {
+    if (!canRewrite) return;
+    setRewriteSelection({
+      type: 'ir',
+      node_id: selection.nodeId,
+      selectedText: selection.selectedText,
+      anchor: selection.anchor,
+    });
+  }, [canRewrite]);
+
+  const openMarkdownRewrite = useCallback((selection: MarkdownSelection) => {
+    if (!canRewrite || !selection.text.trim()) return;
+    setRewriteSelection({
+      type: 'markdown',
+      selected_text: selection.text.trim(),
+      selectedText: selection.text.trim(),
+      anchor: selection.anchor,
+      paragraph: selection.paragraph,
+      startOffset: selection.startOffset,
+    });
+  }, [canRewrite]);
+
+  const handleRewriteApplied = useCallback((revision?: number) => {
+    applySavedRevision(revision);
+    setRewriteSelection(null);
+    setRewritePreview(null);
+    setRenderedSelection(null);
+    refreshDocument();
+  }, [applySavedRevision, refreshDocument]);
+
+  const handleRewritePreview = useCallback((preview: RewriteSelectionPreview) => {
+    if (!rewriteSelection) return;
+    setRewritePreview({ selection: rewriteSelection, preview });
+    setRenderedSelection(null);
+  }, [rewriteSelection]);
+
+  const handleWriteBackSuccess = useCallback((revision: number) => {
+    applySavedRevision(revision);
+    refreshDocument();
+  }, [applySavedRevision, refreshDocument]);
+
+  const recordRenderedMarkdownSelection = useCallback(() => {
+    const root = markdownPreviewRef.current;
+    setRenderedSelection(root ? selectedMarkdownParagraph(root) : null);
+  }, []);
+
+  useEffect(() => {
+    if (!canRewrite || canEdit || rendered?.representation !== 'markdown') return undefined;
+    document.addEventListener('selectionchange', recordRenderedMarkdownSelection);
+    return () => document.removeEventListener('selectionchange', recordRenderedMarkdownSelection);
+  }, [canEdit, canRewrite, recordRenderedMarkdownSelection, rendered?.representation]);
+
+  useRegisterWriterWriteBack({
+    enabled: canWriteBack,
+    initialDelivery,
+    actionKey: `${editingKey}:writeback`,
+    flushKey: editingKey,
+    sessionId,
+    revision: displayRevision,
+    getLatestRevision,
+    writeBackUrl: slot.write_back_url,
+    disabled: writeBackDisabled,
+    synced: slot.write_back_state === 'synced_clean',
+    onSuccess: handleWriteBackSuccess,
+    onConflict: refreshDocument,
+  });
+
+  const writerDocumentCacheContent = useMemo(
+    () => (writerDocument ? JSON.stringify(normalizeWriterDocumentForSync(writerDocument)) : ''),
+    [writerDocument],
+  );
+  const downloadContent = rendered?.representation === 'markdown'
+    ? downloadMarkdownContent || markdown
+    : writerDocumentCacheContent;
+  const downloadTitle = writerMarkdownTitle(
+    rendered?.representation === 'markdown' ? downloadContent : rendered?.title ?? '',
+  ) || rendered?.title || '';
+  const baseFilename = slot.caption || slotId;
+  const downloadMarkdownFilename = writerMarkdownFilename(baseFilename, downloadTitle);
+  const lmdFilename = writerLmdFilename(baseFilename, downloadTitle);
+
+  useRegisterArtifactDownload({
+    enabled: allowDownload && rendered?.representation === 'ir',
+    actionKey: `${editingKey}:download`,
+    label: tr('chat.slots.download'),
+    onClick: () => setDownloadFormatOpen(true),
+  });
+
+  if (loading && !rendered) {
+    return (
+      <div className='workflow-slot workflow-slot--artifact workflow-slot--pending'>
+        <span className='workflow-slot__placeholder'>{tr('common.loading')}</span>
+      </div>
+    );
+  }
+
+  if (error || !rendered) {
+    return (
+      <div className='workflow-slot workflow-slot--artifact workflow-slot--error'>
+        <span className='workflow-slot__placeholder'>{error ?? tr('chat.slots.contentLoadFailed')}</span>
+        <button className='workflow-slot__file-action-btn' type='button' onClick={refreshDocument}>
+          {tr('common.retry')}
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className='workflow-slot workflow-slot--artifact'>
+      <div className={`workflow-slot__artifact-body${rendered.representation === 'markdown' ? ' workflow-slot__artifact-body--markdown' : ''}`}>
+        {writerDocument ? (
+          <WriterIRControl
+            document={writerDocument}
+            sourceRevision={displayRevision}
+            readOnly={!canEditWriterIR}
+            editingKey={editingKey}
+            onSave={canEditWriterIR ? saveIRDocument : undefined}
+            onEditingChange={handleWriterEditingChange}
+            onRewriteSelection={canRewrite ? openIRRewrite : undefined}
+            rewriteDialogOpen={rewriteSelection !== null}
+            rewritePreview={rewritePreview?.selection.type === 'ir' ? {
+              nodeId: rewritePreview.selection.node_id,
+              sessionId,
+              slotId,
+              listIndex: apiListIndex,
+              preview: rewritePreview.preview,
+            } : null}
+            onRewritePreviewApplied={handleRewriteApplied}
+            onRewritePreviewRejected={() => setRewritePreview(null)}
+          />
+        ) : canEdit ? (
+          <MarkdownArtifactEditor
+            markdown={markdown}
+            sourceRevision={displayRevision}
+            editingKey={editingKey}
+            onSave={saveMarkdown}
+            onRefresh={refreshDocument}
+            onDownload={allowDownload ? () => setDownloadFormatOpen(true) : undefined}
+            onContentChange={setDownloadMarkdownContent}
+            onRewriteSelection={rewriteSelection || rewritePreview ? undefined : openMarkdownRewrite}
+            rewriteUnavailableReason={rewriteSelection || rewritePreview || canRewrite
+              ? undefined
+              : tr('chat.artifactRewrite.revisionUnavailable')}
+            rewriteDialogOpen={rewriteSelection !== null}
+            rewritePreview={rewritePreview?.selection.paragraph ? {
+              paragraph: rewritePreview.selection.paragraph,
+              startOffset: rewritePreview.selection.startOffset,
+              sessionId,
+              slotId,
+              listIndex: apiListIndex,
+              preview: rewritePreview.preview,
+            } : null}
+            onRewritePreviewApplied={handleRewriteApplied}
+            onRewritePreviewRejected={() => setRewritePreview(null)}
+          />
+        ) : (
+          <div
+            ref={markdownPreviewRef}
+            onMouseUp={recordRenderedMarkdownSelection}
+            onKeyUp={recordRenderedMarkdownSelection}
+            tabIndex={canRewrite ? 0 : undefined}
+          >
+            <div className='writer-artifact__markdown'>
+              <MarkdownViewer>{markdown}</MarkdownViewer>
+            </div>
+          </div>
+        )}
+      </div>
+      {canRewrite && renderedSelection && (
+        <ArtifactRewriteSelectionAction
+          anchor={renderedSelection.anchor}
+          label={renderedSelection.supported
+            ? tr('chat.artifactRewrite.action')
+            : tr('chat.artifactRewrite.singleParagraphHint')}
+          disabled={!renderedSelection.supported}
+          onActivate={() => openMarkdownRewrite(renderedSelection)}
+          onDismiss={() => setRenderedSelection(null)}
+        />
+      )}
+      <WriterWriteBackSummary slot={slot} revision={displayRevision} />
+      <div className='workflow-slot__artifact-footer'>
+        <div className='workflow-slot__artifact-footer-left'>
+          {showVersionBadge && !writerEditing && (
+            <SlotVersionPopover
+              sessionId={sessionId}
+              slotId={slotId}
+              listIndex={apiListIndex}
+              revisionCount={displayRevisionCount!}
+              currentRevision={displayRevision}
+              currentValue={slot.artifact_value}
+              currentChangeSource={slot.change_source}
+              contentType='json'
+              onRollbackDone={refreshDocument}
+            />
+          )}
+        </div>
+      </div>
+      <ArtifactRewriteDialog
+        open={rewriteSelection !== null}
+        sessionId={sessionId}
+        slotId={slotId}
+        listIndex={apiListIndex}
+        baseRevision={displayRevision}
+        selection={rewriteSelection}
+        onClose={() => setRewriteSelection(null)}
+        onApplied={handleRewriteApplied}
+        onPreviewReady={handleRewritePreview}
+      />
+      {allowDownload && (
+        <WriterDownloadFormatDialog
+          open={downloadFormatOpen}
+          onOpenChange={setDownloadFormatOpen}
+          markdown={rendered.representation === 'markdown' ? {
+            filename: downloadMarkdownFilename,
+            content: downloadContent,
+            mimeType: 'text/markdown;charset=utf-8',
+            cacheKey: writerDownloadCacheKey('writer-document:markdown', downloadContent),
+          } : {
+            filename: downloadMarkdownFilename,
+            mimeType: 'text/markdown;charset=utf-8',
+            cacheKey: writerDownloadCacheKey('writer-document:ir-markdown', writerDocumentCacheContent),
+            conversionSource: writerDocumentCacheContent,
+            conversionSourceFormat: 'writer_document',
+          }}
+          lmd={rendered.representation === 'ir' ? {
+            filename: lmdFilename,
+            content: writerDocumentCacheContent,
+            mimeType: 'application/json;charset=utf-8',
+            cacheKey: writerDownloadCacheKey('writer-document:ir', writerDocumentCacheContent),
+          } : {
+            filename: lmdFilename,
+            mimeType: 'application/json;charset=utf-8',
+            cacheKey: writerDownloadCacheKey('writer-document:markdown-lmd', downloadContent),
+            conversionSource: downloadContent,
+            conversionSourceFormat: 'markdown',
+          }}
+        />
+      )}
+    </div>
+  );
 }
 
 function SlotJsonFile({
@@ -2465,7 +3018,9 @@ function SlotJsonFile({
   const apiListIndex = slot.list_index ?? -1;
   const resolvedSlotId = slotId ?? slot.slot;
   const writerDocument = useMemo(() => isWriterDocument(payload)
-    ? restoreLegacyWriterImageReference(payload, mediaLibrary)
+    ? restoreWriterInternalReferenceDisplayText(
+      restoreLegacyWriterImageReference(payload, mediaLibrary),
+    )
     : null, [mediaLibrary, payload]);
 
   const usesWriterSync = resolvedSlotId !== 'draft_document'
@@ -2639,31 +3194,28 @@ function SlotJsonFile({
     onRefresh?.();
   }, [applySavedRevision, onRefresh]);
 
-  const [writerMarkdownDownload, setWriterMarkdownDownload] = useState<{
-    url: string;
-    filename: string;
-  } | null>(null);
-
-  useEffect(() => {
-    if (!writerDocument) {
-      setWriterMarkdownDownload(null);
+  const [downloadFormatOpen, setDownloadFormatOpen] = useState(false);
+  const writerDocumentCacheContent = useMemo(
+    () => (writerDocument ? JSON.stringify(normalizeWriterDocumentForSync(writerDocument)) : ''),
+    [writerDocument],
+  );
+  const openDownloadFormat = useCallback(() => {
+    if (writerDocument) {
+      setDownloadFormatOpen(true);
       return;
     }
-    const blob = new Blob([writerDocumentToMarkdown(writerDocument)], {
-      type: 'text/markdown;charset=utf-8',
-    });
-    const url = URL.createObjectURL(blob);
-    setWriterMarkdownDownload({
-      url,
-      filename: writerMarkdownFilename(name),
-    });
-    return () => URL.revokeObjectURL(url);
-  }, [name, writerDocument]);
+    if (!url) return;
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = name;
+    anchor.click();
+  }, [name, url, writerDocument]);
 
   useRegisterWriterWriteBack({
     enabled: canWriteBack,
     initialDelivery,
     actionKey: sessionId && slotId ? `${editingKey}:writeback` : undefined,
+    flushKey: editingKey,
     sessionId,
     revision: displayRevision,
     getLatestRevision,
@@ -2675,13 +3227,10 @@ function SlotJsonFile({
   });
 
   useRegisterArtifactDownload({
-    enabled: allowDownload && Boolean(writerMarkdownDownload || url),
+    enabled: allowDownload && Boolean(writerDocument || url),
     actionKey: sessionId && slotId ? `${editingKey}:download` : undefined,
-    label: writerMarkdownDownload
-      ? tr('chat.writer.downloadMarkdown')
-      : tr('chat.slots.download'),
-    url: writerMarkdownDownload?.url ?? (allowDownload ? url : undefined),
-    filename: writerMarkdownDownload?.filename ?? name,
+    label: tr('chat.slots.download'),
+    onClick: openDownloadFormat,
   });
 
   if (!hasSource) {
@@ -2789,6 +3338,26 @@ function SlotJsonFile({
         onApplied={handleIRRewriteApplied}
         onPreviewReady={handleIRRewritePreview}
       />
+      {writerDocument && (
+        <WriterDownloadFormatDialog
+          open={downloadFormatOpen}
+          onOpenChange={setDownloadFormatOpen}
+          markdown={{
+            filename: writerMarkdownFilename(name, writerDocument.title),
+            mimeType: 'text/markdown;charset=utf-8',
+            cacheKey: writerDownloadCacheKey('writer-document:markdown', writerDocumentCacheContent),
+            conversionSource: writerDocumentCacheContent,
+            conversionSourceFormat: 'writer_document',
+          }}
+          lmd={{
+            filename: writerLmdFilename(name, writerDocument.title),
+            mimeType: 'application/json;charset=utf-8',
+            cacheKey: writerDownloadCacheKey('writer-document:lmd', writerDocumentCacheContent),
+            conversionSource: writerDocumentCacheContent,
+            conversionSourceFormat: 'writer_document',
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -2826,7 +3395,9 @@ function SlotInlineStructured({
   const apiListIndex = slot.list_index ?? -1;
   const resolvedSlotId = slotId ?? slot.slot;
   const writerDocument = useMemo(() => isWriterDocument(payload)
-    ? restoreLegacyWriterImageReference(payload, mediaLibrary)
+    ? restoreWriterInternalReferenceDisplayText(
+      restoreLegacyWriterImageReference(payload, mediaLibrary),
+    )
     : null, [mediaLibrary, payload]);
 
   const usesWriterSync = resolvedSlotId !== 'draft_document'
@@ -2863,10 +3434,11 @@ function SlotInlineStructured({
     && displayRevision > 0
     && rewriteSelection === null
     && rewritePreview === null;
-  const [writerMarkdownDownload, setWriterMarkdownDownload] = useState<{
-    url: string;
-    filename: string;
-  } | null>(null);
+  const [downloadFormatOpen, setDownloadFormatOpen] = useState(false);
+  const writerDocumentCacheContent = useMemo(
+    () => (writerDocument ? JSON.stringify(normalizeWriterDocumentForSync(writerDocument)) : ''),
+    [writerDocument],
+  );
 
   const applySavedRevision = useCallback((revision?: number) => {
     if (typeof revision !== 'number' || revision <= 0) return;
@@ -2885,22 +3457,6 @@ function SlotInlineStructured({
       setLocalRevisionCount((prev) => (prev === undefined || revisionCount >= prev ? revisionCount : prev));
     }
   }, [revisionCount]);
-
-  useEffect(() => {
-    if (!writerDocument) {
-      setWriterMarkdownDownload(null);
-      return;
-    }
-    const blob = new Blob([writerDocumentToMarkdown(writerDocument)], {
-      type: 'text/markdown;charset=utf-8',
-    });
-    const url = URL.createObjectURL(blob);
-    setWriterMarkdownDownload({
-      url,
-      filename: writerMarkdownFilename(slot.caption || resolvedSlotId),
-    });
-    return () => URL.revokeObjectURL(url);
-  }, [resolvedSlotId, slot.caption, writerDocument]);
 
   const handleSaveWriterDocument = useCallback(async (
     sourceDocument: WriterDocument,
@@ -3000,6 +3556,7 @@ function SlotInlineStructured({
     enabled: canWriteBack,
     initialDelivery,
     actionKey: sessionId && slotId ? `${editingKey}:writeback` : undefined,
+    flushKey: editingKey,
     sessionId,
     revision: displayRevision,
     writeBackUrl: slot.write_back_url,
@@ -3010,11 +3567,10 @@ function SlotInlineStructured({
   });
 
   useRegisterArtifactDownload({
-    enabled: allowDownload && Boolean(writerMarkdownDownload),
+    enabled: allowDownload && Boolean(writerDocument),
     actionKey: sessionId && slotId ? `${editingKey}:download` : undefined,
-    label: tr('chat.writer.downloadMarkdown'),
-    url: writerMarkdownDownload?.url,
-    filename: writerMarkdownDownload?.filename,
+    label: tr('chat.slots.download'),
+    onClick: () => setDownloadFormatOpen(true),
   });
 
   if (payload === null) {
@@ -3082,6 +3638,26 @@ function SlotInlineStructured({
         onApplied={handleIRRewriteApplied}
         onPreviewReady={handleIRRewritePreview}
       />
+      {writerDocument && (
+        <WriterDownloadFormatDialog
+          open={downloadFormatOpen}
+          onOpenChange={setDownloadFormatOpen}
+          markdown={{
+            filename: writerMarkdownFilename(slot.caption || resolvedSlotId, writerDocument.title),
+            mimeType: 'text/markdown;charset=utf-8',
+            cacheKey: writerDownloadCacheKey('inline-writer-document:markdown', writerDocumentCacheContent),
+            conversionSource: writerDocumentCacheContent,
+            conversionSourceFormat: 'writer_document',
+          }}
+          lmd={{
+            filename: writerLmdFilename(slot.caption || resolvedSlotId, writerDocument.title),
+            mimeType: 'application/json;charset=utf-8',
+            cacheKey: writerDownloadCacheKey('inline-writer-document:lmd', writerDocumentCacheContent),
+            conversionSource: writerDocumentCacheContent,
+            conversionSourceFormat: 'writer_document',
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -3098,7 +3674,12 @@ interface SlotMarkdownFileProps {
 
 /** Displays the temporary Markdown emitted by a Writer Task SSE stream. */
 export function SlotMarkdownStream({ stream }: { stream: TaskArtifactStream }) {
-  const content = stream.final_content ?? stream.content;
+  const streamedContent = useArtifactStreamContent(
+    stream.stream_id,
+    stream.deltas,
+    stream.content,
+  );
+  const content = stream.final_content ?? streamedContent;
   const isAborted = stream.state === 'aborted';
   const showError = isAborted && !content;
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -3173,6 +3754,8 @@ function SlotMarkdownFile({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [content, setContent] = useState('');
+  const [downloadMarkdownContent, setDownloadMarkdownContent] = useState('');
+  const [downloadFormatOpen, setDownloadFormatOpen] = useState(false);
   const [currentValue, setCurrentValue] = useState(raw);
   const [localRevision, setLocalRevision] = useState(slot.revision);
   const [localRevisionCount, setLocalRevisionCount] = useState<number | undefined>(revisionCount);
@@ -3210,6 +3793,7 @@ function SlotMarkdownFile({
           throw new Error('invalid artifact content');
         }
         setContent(text);
+        setDownloadMarkdownContent(text);
         setLoading(false);
       })
       .catch((fetchError: unknown) => {
@@ -3240,7 +3824,6 @@ function SlotMarkdownFile({
   const showVersionBadge =
     displayRevisionCount !== undefined && displayRevisionCount > 0 && Boolean(sessionId && slotId);
   const resolvedSlotId = slotId ?? slot.slot;
-  const showArtifactActions = !WRITER_ARTIFACT_SLOT_IDS.has(resolvedSlotId);
   const initialDelivery = slot.write_back_state === 'initial_delivery';
   const canWriteBack = resolvedSlotId === 'draft_document'
     && Boolean(sessionId)
@@ -3262,23 +3845,45 @@ function SlotMarkdownFile({
     && !readOnly
     && WRITER_ARTIFACT_SLOT_IDS.has(resolvedSlotId);
 
+  useEffect(() => {
+    if (!canEditMarkdown) setDownloadMarkdownContent(content);
+  }, [canEditMarkdown, content]);
+
   const downloadMarkdown = useCallback(() => {
-    const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' });
-    const objectUrl = URL.createObjectURL(blob);
-    const anchor = document.createElement('a');
-    anchor.href = objectUrl;
-    anchor.download = name.toLowerCase().endsWith('.md') ? name : `${name.replace(/\.[^.]+$/, '') || 'writing_output'}.md`;
-    anchor.click();
-    URL.revokeObjectURL(objectUrl);
-  }, [content, name]);
+    setDownloadFormatOpen(true);
+  }, []);
+
+  const markdownFilename = useMemo(() => writerMarkdownFilename(name), [name]);
+  const downloadArticleTitle = useMemo(
+    () => writerMarkdownTitle(downloadMarkdownContent),
+    [downloadMarkdownContent],
+  );
+  const downloadMarkdownFilename = useMemo(
+    () => writerMarkdownFilename(name, downloadArticleTitle),
+    [downloadArticleTitle, name],
+  );
+  const lmdFilename = useMemo(
+    () => writerLmdFilename(name, downloadArticleTitle),
+    [downloadArticleTitle, name],
+  );
+  const markdownCacheKey = useMemo(
+    () => writerDownloadCacheKey('markdown-file:markdown', downloadMarkdownContent),
+    [downloadMarkdownContent],
+  );
+  const lmdCacheKey = useMemo(
+    () => writerDownloadCacheKey('markdown-file:lmd', downloadMarkdownContent),
+    [downloadMarkdownContent],
+  );
+  const canUseOriginalLmd = Boolean(originalUrl && downloadMarkdownContent === content);
+  const handleEditorContentChange = useCallback((markdown: string) => {
+    setDownloadMarkdownContent(markdown);
+  }, []);
 
   const saveMarkdown = useCallback(async (markdown: string, baseRevision: number) => {
     if (!sessionId || !slotId || readOnly) {
       throw new Error(tr('chat.writerMarkdown.saveFailed'));
     }
-    const filename = name.toLowerCase().endsWith('.md') || name.toLowerCase().endsWith('.markdown')
-      ? name
-      : `${name.replace(/\.[^.]+$/, '') || 'writing_output'}.md`;
+    const filename = markdownFilename;
     const file = new File([markdown], filename, { type: 'text/markdown;charset=utf-8' });
     const storedPath = await uploadFileInChunks(file);
     const nextValue: Record<string, unknown> = {
@@ -3305,8 +3910,8 @@ function SlotMarkdownFile({
       setLocalRevision(revision);
       setLocalRevisionCount((previous) => Math.max(previous ?? 0, revisionCount ?? 0, revision));
     }
-    return revision;
-  }, [apiListIndex, name, patchSlotItemValue, raw, readOnly, resolvedSlotId, revisionCount, sessionId, slotId]);
+    return { markdown, revision };
+  }, [apiListIndex, markdownFilename, patchSlotItemValue, raw, readOnly, resolvedSlotId, revisionCount, sessionId, slotId]);
 
   const refreshMarkdown = useCallback(() => {
     setReloadToken((value) => value + 1);
@@ -3369,6 +3974,7 @@ function SlotMarkdownFile({
     enabled: canWriteBack,
     initialDelivery,
     actionKey: markdownEditingKey ? `${markdownEditingKey}:writeback` : undefined,
+    flushKey: markdownEditingKey,
     sessionId,
     revision: displayRevision,
     writeBackUrl: slot.write_back_url,
@@ -3411,26 +4017,27 @@ function SlotMarkdownFile({
 
   return (
     <div className='workflow-slot workflow-slot--artifact'>
-      <div className='writer-artifact__output-toolbar' hidden={!allowDownload || (!showArtifactActions && !originalUrl)}>
+      <div className='writer-artifact__output-toolbar' hidden={!allowDownload}>
         {!canEditMarkdown && (
-          <button
-            type='button'
-            className='workflow-slot__file-action-btn writer-artifact__download-btn'
-            onClick={downloadMarkdown}
-          >
-            {tr('chat.writer.downloadMarkdown')}
-          </button>
+          <WriterDownloadFormatButton
+            markdown={{
+              filename: downloadMarkdownFilename,
+              content: downloadMarkdownContent,
+              mimeType: 'text/markdown;charset=utf-8',
+              cacheKey: markdownCacheKey,
+            }}
+            lmd={canUseOriginalLmd ? {
+              filename: lmdFilename,
+              href: originalUrl!,
+            } : {
+              filename: lmdFilename,
+              mimeType: 'application/json;charset=utf-8',
+              cacheKey: lmdCacheKey,
+              conversionSource: downloadMarkdownContent,
+              conversionSourceFormat: 'markdown',
+            }}
+          />
         )}
-        {originalUrl ? (
-          <a
-            href={originalUrl}
-            download={originalName}
-            className='workflow-slot__file-action-btn'
-            onClick={(e) => e.stopPropagation()}
-          >
-            {tr('chat.slots.downloadOriginalFile')}
-          </a>
-        ) : null}
       </div>
       <div className={`workflow-slot__artifact-body${canEditMarkdown ? ' workflow-slot__artifact-body--markdown' : ''}`}>
         {canEditMarkdown ? (
@@ -3440,11 +4047,13 @@ function SlotMarkdownFile({
             editingKey={markdownEditingKey}
             onSave={saveMarkdown}
             onRefresh={refreshMarkdown}
-            onDownload={downloadMarkdown}
+            onDownload={allowDownload ? downloadMarkdown : undefined}
+            onContentChange={handleEditorContentChange}
             onRewriteSelection={rewriteSelection || rewritePreview ? undefined : openMarkdownRewrite}
             rewriteUnavailableReason={rewriteSelection || rewritePreview || canRewriteMarkdown
               ? undefined
               : tr('chat.artifactRewrite.revisionUnavailable')}
+            rewriteDialogOpen={rewriteSelection !== null}
             rewritePreview={rewritePreview?.selection.paragraph ? {
               paragraph: rewritePreview.selection.paragraph,
               startOffset: rewritePreview.selection.startOffset,
@@ -3513,6 +4122,28 @@ function SlotMarkdownFile({
         onApplied={handleMarkdownRewriteApplied}
         onPreviewReady={handleMarkdownRewritePreview}
       />
+      {canEditMarkdown && allowDownload && (
+        <WriterDownloadFormatDialog
+          open={downloadFormatOpen}
+          onOpenChange={setDownloadFormatOpen}
+          markdown={{
+            filename: downloadMarkdownFilename,
+            content: downloadMarkdownContent,
+            mimeType: 'text/markdown;charset=utf-8',
+            cacheKey: markdownCacheKey,
+          }}
+          lmd={canUseOriginalLmd ? {
+            filename: lmdFilename,
+            href: originalUrl!,
+          } : {
+            filename: lmdFilename,
+            mimeType: 'application/json;charset=utf-8',
+            cacheKey: lmdCacheKey,
+            conversionSource: downloadMarkdownContent,
+            conversionSourceFormat: 'markdown',
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -3680,6 +4311,100 @@ export function SlotFile({ slot, sessionId, slotId, revisionCount, onRefresh, re
   );
 }
 
+function SlotHtmlFilePreview({
+  slot,
+  sessionId,
+  slotId,
+  revisionCount,
+  onRefresh,
+  readOnly,
+}: SlotFileProps) {
+  const raw = slot.artifact_value;
+  const record = raw && typeof raw === 'object'
+    ? raw as Record<string, unknown>
+    : { path: String(raw ?? '') };
+  const inlineHtml = typeof record.text === 'string' ? record.text : '';
+  const { url, resolving, hasSource, sourceKey } = useArtifactFileUrl(record, slot.revision);
+  const [html, setHtml] = useState(inlineHtml);
+  const [loadError, setLoadError] = useState(false);
+
+  useEffect(() => {
+    if (inlineHtml) {
+      setHtml(inlineHtml);
+      setLoadError(false);
+      return;
+    }
+    if (!url) {
+      setHtml('');
+      if (!resolving) setLoadError(hasSource);
+      return;
+    }
+
+    const controller = new AbortController();
+    setHtml('');
+    setLoadError(false);
+    fetch(url, { signal: controller.signal })
+      .then((response) => {
+        if (!response.ok) throw new Error(localizeErrorCode('2000509'));
+        return response.text();
+      })
+      .then((content) => {
+        if (isSpaFallbackHtml(content)) throw new Error(localizeErrorCode('2000509'));
+        setHtml(content);
+      })
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === 'AbortError') return;
+        setLoadError(true);
+      });
+
+    return () => controller.abort();
+  }, [hasSource, inlineHtml, resolving, sourceKey, url]);
+
+  // Preserve the existing file-card fallback when an old artifact cannot be
+  // fetched as text. Users can still preview/download it instead of seeing a
+  // dead HTML pane.
+  if (loadError) {
+    return (
+      <SlotFile
+        slot={slot}
+        sessionId={sessionId}
+        slotId={slotId}
+        revisionCount={revisionCount}
+        onRefresh={onRefresh}
+        readOnly={readOnly}
+      />
+    );
+  }
+  if (!html) return <SlotPending type='file' />;
+
+  const showVersionBadge = Boolean(
+    sessionId && slotId && revisionCount !== undefined && revisionCount > 0,
+  );
+
+  return (
+    <div className='workflow-slot workflow-slot--html-preview'>
+      <HtmlBlock code={html} />
+      {showVersionBadge && (
+        <div className='workflow-slot__artifact-footer'>
+          <div className='workflow-slot__artifact-footer-left'>
+            <SlotVersionPopover
+              sessionId={sessionId!}
+              slotId={slotId!}
+              listIndex={slot.list_index ?? -1}
+              revisionCount={revisionCount!}
+              currentRevision={slot.revision}
+              currentValue={slot.artifact_value}
+              currentChangeSource={slot.change_source}
+              contentType='file'
+              onRollbackDone={onRefresh}
+            />
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /**
  * SlotRenderer dispatches to the correct slot component based on the artifact
  * content_type returned by the backend.
@@ -3720,8 +4445,38 @@ export function SlotRenderer({
     return <SlotPending type={expectedType ?? 'text'} cardMode={cardMode} />;
   }
 
+  const resolvedWidgetSlotId = slotId ?? slot.slot;
+  if (
+    sessionId
+    && (slot.list_index ?? -1) === -1
+    && widget?.widgetType === 'writer-document'
+  ) {
+    return (
+      <SlotWriterDocument
+        slot={slot}
+        sessionId={sessionId}
+        slotId={resolvedWidgetSlotId as WriterDocumentSlot}
+        revisionCount={revisionCount}
+        onRefresh={onRefresh}
+        readOnly={readOnly}
+      />
+    );
+  }
+
   const normalized = normalizeContentType(slot.content_type ?? 'text');
   const artifactSlotKey = slotId || slot.slot;
+  if (widget?.widgetType === 'html-preview') {
+    return (
+      <SlotHtmlFilePreview
+        slot={slot}
+        sessionId={sessionId}
+        slotId={slotId}
+        revisionCount={revisionCount}
+        onRefresh={onRefresh}
+        readOnly={readOnly}
+      />
+    );
+  }
   if (widget?.widgetType === 'html-slide') {
     if (isSlideSpecArtifact(slot.artifact_value)) {
       return <SlotJsonSlide slot={slot} compact={cardMode} />;

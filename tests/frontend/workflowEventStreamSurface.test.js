@@ -35,4 +35,19 @@ describe('Workflow Panel live update surface', () => {
     expect(chatLayout).toContain('subscribeConvEvents(sessionId)');
     expect(chatLayout).toContain('unsubscribeConvEvents(sessionId)');
   });
+
+  it('retains workflow tasks for live artifact streams and both task center modes', () => {
+    const taskStore = read('frontend/src/modules/chat/store/taskCenter.ts');
+    const taskPanel = read('frontend/src/modules/chat/components/TaskCenter/index.tsx');
+    const chatLayout = read('frontend/src/modules/chat/pages/chatLayout/index.tsx');
+
+    expect(taskStore).toContain("payload.agent_type === 'workflow_step'");
+    expect(taskStore).not.toMatch(
+      /payload\.agent_type === 'workflow_step'[\s\S]{0,160}scheduleWorkflowSessionRefresh\(conversationId\);\s*return;/,
+    );
+    expect(taskStore).toContain('get().upsertTask(conversationId');
+    expect(taskPanel).toContain('if (filter === "all") return tasks;');
+    expect(taskPanel).toContain('buildOrdinaryTaskTimeline(tasks, workflowSteps)');
+    expect(chatLayout).toContain('taskCenterDisplayCount(');
+  });
 });

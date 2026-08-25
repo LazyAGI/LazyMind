@@ -58,6 +58,9 @@ type CompiledNode struct {
 	Acceptance      []string      `json:"acceptance_criteria,omitempty"`
 	Capabilities    []string      `json:"capabilities,omitempty"`
 	LegacyTools     []string      `json:"legacy_tools,omitempty"`
+	TerminalTools   []string      `json:"terminal_tools,omitempty"`
+	ToolsOnly       bool          `json:"tools_only,omitempty"`
+	StreamHeartbeat bool          `json:"stream_heartbeat,omitempty"`
 	Mode            string        `json:"mode,omitempty"`
 }
 
@@ -92,29 +95,33 @@ type ClarificationField struct {
 // Workflow package. Hosts consume this policy instead of branching on a
 // particular workflow id.
 type RuntimePolicy struct {
-	PublisherOwnedSlots []string             `json:"publisher_owned_slots,omitempty" yaml:"publisher_owned_slots,omitempty"`
-	CollectsKnowledge   bool                 `json:"collects_knowledge,omitempty" yaml:"collects_knowledge,omitempty"`
-	CompletedEditStep   string               `json:"completed_edit_step,omitempty" yaml:"completed_edit_step,omitempty"`
-	ClarificationFields []ClarificationField `json:"clarification_fields,omitempty" yaml:"clarification_fields,omitempty"`
+	PublisherOwnedSlots       []string             `json:"publisher_owned_slots,omitempty" yaml:"publisher_owned_slots,omitempty"`
+	ExclusiveToolCapabilities []string             `json:"exclusive_tool_capabilities,omitempty" yaml:"exclusive_tool_capabilities,omitempty"`
+	CollectsKnowledge         bool                 `json:"collects_knowledge,omitempty" yaml:"collects_knowledge,omitempty"`
+	CompletedEditStep         string               `json:"completed_edit_step,omitempty" yaml:"completed_edit_step,omitempty"`
+	CompletedContinueSteps    []string             `json:"completed_continue_steps,omitempty" yaml:"completed_continue_steps,omitempty"`
+	ClarificationFields       []ClarificationField `json:"clarification_fields,omitempty" yaml:"clarification_fields,omitempty"`
 }
 
 func (p RuntimePolicy) IsZero() bool {
-	return len(p.PublisherOwnedSlots) == 0 && !p.CollectsKnowledge &&
-		p.CompletedEditStep == "" && len(p.ClarificationFields) == 0
+	return len(p.PublisherOwnedSlots) == 0 && len(p.ExclusiveToolCapabilities) == 0 && !p.CollectsKnowledge &&
+		p.CompletedEditStep == "" && len(p.CompletedContinueSteps) == 0 && len(p.ClarificationFields) == 0
 }
 
 type CompiledStateGraph struct {
-	SchemaVersion     string                   `json:"schema_version"`
-	GraphHash         string                   `json:"graph_hash"`
-	StartRoute        string                   `json:"start_route"`
-	Runtime           RuntimePolicy            `json:"runtime,omitempty"`
-	Nodes             map[string]CompiledNode  `json:"nodes"`
-	ControlEdges      []CompiledEdge           `json:"control_edges"`
-	MaterialProducers map[string]ProducerRef   `json:"material_producers"`
-	InputExpressions  map[string]Expression    `json:"input_expressions"`
-	OptionalInputs    map[string][]MaterialRef `json:"optional_inputs"`
-	SkipExpansions    []CompiledBypass         `json:"skip_expansions,omitempty"`
-	StaticOrder       []string                 `json:"static_order"`
+	SchemaVersion         string                   `json:"schema_version"`
+	GraphHash             string                   `json:"graph_hash"`
+	StartRoute            string                   `json:"start_route"`
+	Runtime               RuntimePolicy            `json:"runtime,omitempty"`
+	Nodes                 map[string]CompiledNode  `json:"nodes"`
+	ControlEdges          []CompiledEdge           `json:"control_edges"`
+	MaterialProducers     map[string]ProducerRef   `json:"material_producers"`
+	MaterialTypes         map[string]string        `json:"material_types,omitempty"`
+	MaterialCardinalities map[string]string        `json:"material_cardinalities,omitempty"`
+	InputExpressions      map[string]Expression    `json:"input_expressions"`
+	OptionalInputs        map[string][]MaterialRef `json:"optional_inputs"`
+	SkipExpansions        []CompiledBypass         `json:"skip_expansions,omitempty"`
+	StaticOrder           []string                 `json:"static_order"`
 }
 
 type CompileResult struct {
@@ -183,6 +190,7 @@ type Projection struct {
 	Ready      []string                  `json:"ready"`
 	Retryable  []string                  `json:"retryable"`
 	Rewindable []string                  `json:"rewindable"`
+	Continue   []string                  `json:"continue"`
 	Blocked    []string                  `json:"blocked"`
 	Stale      []string                  `json:"stale"`
 	Pruned     []string                  `json:"pruned"`

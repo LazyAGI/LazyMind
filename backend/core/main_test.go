@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/mux"
 
 	"lazymind/core/externallease"
+	workflowstore "lazymind/core/workflow/store"
 )
 
 func TestOpenAPIArtifactExportCanBeDisabledForSignedDesktopBundle(t *testing.T) {
@@ -44,6 +45,21 @@ func TestExternalAgentOperationExposesOnlyMCPRuntimeSurface(t *testing.T) {
 		if got := externalAgentOperation(test.method, test.path); got != test.want {
 			t.Fatalf("externalAgentOperation(%q, %q) = %q, want %q", test.method, test.path, got, test.want)
 		}
+	}
+}
+
+func TestInvocationConversationScopeIsRequestLocal(t *testing.T) {
+	seen := ""
+	handler := withInvocationConversationScope(func(w http.ResponseWriter, r *http.Request) {
+		seen = workflowstore.ConversationScope(r.Context())
+		w.WriteHeader(http.StatusNoContent)
+	})
+	request := httptest.NewRequest(http.MethodGet, "/workflow-sessions", nil)
+	request.Header.Set("X-LazyMind-Invocation-Conversation-Id", "conversation-1")
+	response := httptest.NewRecorder()
+	handler(response, request)
+	if response.Code != http.StatusNoContent || seen != "conversation-1" || workflowstore.ConversationScope(request.Context()) != "" {
+		t.Fatalf("invocation scope leaked or was not propagated: status=%d seen=%q", response.Code, seen)
 	}
 }
 

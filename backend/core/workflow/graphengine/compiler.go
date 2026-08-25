@@ -51,6 +51,9 @@ type rawStep struct {
 	Acceptance      any
 	Capabilities    any
 	Tools           any
+	TerminalTools   any
+	ToolsOnly       bool
+	StreamHeartbeat bool
 	Mode            string
 }
 
@@ -69,7 +72,7 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 	graph := &CompiledStateGraph{
 		SchemaVersion: SchemaVersion, StartRoute: state.StartRoute, Nodes: map[string]CompiledNode{}, MaterialProducers: map[string]ProducerRef{},
 		InputExpressions: map[string]Expression{}, OptionalInputs: map[string][]MaterialRef{},
-		Runtime: plugin.Runtime,
+		MaterialTypes: map[string]string{}, MaterialCardinalities: map[string]string{}, Runtime: plugin.Runtime,
 	}
 	if graph.StartRoute == "" {
 		graph.StartRoute = "all"
@@ -93,6 +96,14 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 			result.Diagnostics = append(result.Diagnostics, materialDiag("E_MATERIAL_DUPLICATE", "error", fmt.Sprintf("workflow.yaml.slots[%d].id", i), id, "material id is duplicated: "+id))
 		}
 		knownMaterials[id] = true
+		if materialType := strings.ToLower(scalar(slot["type"])); materialType != "" {
+			graph.MaterialTypes[id] = materialType
+		}
+		cardinality := strings.ToLower(scalar(slot["cardinality"]))
+		if cardinality != "list" {
+			cardinality = "single"
+		}
+		graph.MaterialCardinalities[id] = cardinality
 		materialSpecs[id] = uiMaterialSpec{
 			Type:        strings.ToLower(scalar(slot["type"])),
 			Cardinality: strings.ToLower(scalar(slot["cardinality"])),
@@ -135,7 +146,8 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 		}
 		node := CompiledNode{ID: id, Label: step.Label, Route: step.Route, Prompt: step.Prompt,
 			Acceptance: stringList(step.Acceptance), Capabilities: stringList(step.Capabilities),
-			LegacyTools: stringList(step.Tools), Mode: step.Mode}
+			LegacyTools: stringList(step.Tools), TerminalTools: stringList(step.TerminalTools),
+			ToolsOnly: step.ToolsOnly, StreamHeartbeat: step.StreamHeartbeat, Mode: step.Mode}
 		if definition := workflowSteps[id]; definition != nil {
 			if len(node.Acceptance) == 0 {
 				node.Acceptance = stringList(definition["acceptance_criteria"])
@@ -201,6 +213,16 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 			result.Diagnostics = append(result.Diagnostics, nodeDiag(
 				"E_RUNTIME_EDIT_STEP_UNKNOWN", "error", "workflow.yaml.runtime.completed_edit_step",
 				stepID, "runtime completed edit step is not declared: "+stepID,
+			))
+		}
+	}
+	for i, stepID := range graph.Runtime.CompletedContinueSteps {
+		stepID = strings.TrimSpace(stepID)
+		graph.Runtime.CompletedContinueSteps[i] = stepID
+		if _, ok := workflowSteps[stepID]; !ok {
+			result.Diagnostics = append(result.Diagnostics, nodeDiag(
+				"E_RUNTIME_CONTINUE_STEP_UNKNOWN", "error", fmt.Sprintf("workflow.yaml.runtime.completed_continue_steps[%d]", i),
+				stepID, "runtime completed continue step is not declared: "+stepID,
 			))
 		}
 	}
@@ -524,7 +546,8 @@ func decodeRawStep(id string, raw map[string]any) rawStep {
 		Inputs: raw["inputs"], InputExpression: raw["input_expression"], OptionalInputs: raw["optional_inputs"],
 		Outputs: raw["outputs"], SkipIf: firstNonNil(raw["skip_if"], raw["skipif"]),
 		Prompt: scalar(raw["prompt"]), Acceptance: raw["acceptance_criteria"],
-		Capabilities: raw["capabilities"], Tools: raw["tools"], Mode: scalar(raw["mode"])}
+		Capabilities: raw["capabilities"], Tools: raw["tools"], TerminalTools: raw["terminal_tools"],
+		ToolsOnly: boolValue(raw["tools_only"]), StreamHeartbeat: boolValue(raw["stream_heartbeat"]), Mode: scalar(raw["mode"])}
 }
 
 func stringList(value any) []string {
@@ -861,8 +884,23 @@ func validateUI(
 		if scalar(widget["widgetType"]) == "html-slide" && specs[materialID].Type != "text" {
 			out = append(out, materialDiag("E_UI_WIDGET_INCOMPATIBLE", "error", path+".widgetType", materialID, "html-slide requires a text material"))
 		}
+		if scalar(widget["widgetType"]) == "html-preview" && specs[materialID].Type != "text" && specs[materialID].Type != "file" {
+			out = append(out, materialDiag("E_UI_WIDGET_INCOMPATIBLE", "error", path+".widgetType", materialID, "html-preview requires a text or file material"))
+		}
+	}
+	if materialID := scalar(ui["tab_visibility_ready_material"]); materialID != "" && !known[materialID] {
+		out = append(out, materialDiag(
+			"E_UI_MATERIAL_UNKNOWN", "error", "workflow.yaml.ui.tab_visibility_ready_material",
+			materialID, "tab visibility readiness references an unknown material",
+		))
 	}
 	for i, tab := range tabs {
+		if materialID := scalar(tab["hide_when_material"]); materialID != "" && !known[materialID] {
+			out = append(out, materialDiag(
+				"E_UI_MATERIAL_UNKNOWN", "error", fmt.Sprintf("workflow.yaml.ui.tabs[%d].hide_when_material", i),
+				materialID, "tab visibility references an unknown material",
+			))
+		}
 		refs := parseMaterialRefs(tab["slots"])
 		tabMaterials := map[string]bool{}
 		if len(refs) == 0 {
