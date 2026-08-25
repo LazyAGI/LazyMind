@@ -12,6 +12,7 @@ from lazymind.chat.engine.agent_runtime.projection_state import (
     message_tokens,
     reconcile_projection,
     render_projection,
+    split_projection,
     transition_metrics,
 )
 from lazymind.config import config
@@ -29,6 +30,11 @@ VALID_SUMMARY = '\n'.join([
     '## Pending work',
     'Continue the task.',
 ])
+
+
+def _projected(result):
+    prior, current = result
+    return list(prior) + list(current)
 
 
 def test_projection_append_preserves_existing_entries_byte_for_byte() -> None:
@@ -156,7 +162,7 @@ def test_new_oversized_result_spills_before_first_exposure(tmp_path) -> None:
             'tool_call_id': 'new',
             'content': 'X' * 20_000,
         })
-        projected = compact(history, runtime_state=state)
+        projected = _projected(compact(history, runtime_state=state))
 
     assert state['entries'][0]['kind'] == 'spilled'
     assert state['entries'][0]['model_visible'] is True
@@ -183,7 +189,7 @@ def test_cache_unjustified_old_prune_is_rolled_back_when_summary_fails() -> None
             keep_recent=0,
             summarizer=lambda _system, _user: 'invalid summary',
         )
-        projected = compact(history, runtime_state=state, remaining_rounds=1)
+        projected = _projected(compact(history, runtime_state=state, remaining_rounds=1))
 
     assert projected[0]['content'] == old_tool
     assert state['entries'][0]['kind'] == 'full'
@@ -208,7 +214,7 @@ def test_rejected_spill_candidate_creates_no_file(tmp_path) -> None:
             keep_recent=0,
             workspace=str(tmp_path),
         )
-        projected = compact(history, runtime_state=state, remaining_rounds=1)
+        projected = _projected(compact(history, runtime_state=state, remaining_rounds=1))
 
     assert projected[0]['content'] == huge
     assert not (tmp_path / 'tool_spills').exists()
@@ -237,15 +243,25 @@ def test_summary_is_stable_until_context_reaches_trigger_again() -> None:
             keep_recent=0,
             summarizer=summarize,
         )
-        first = compact(history, runtime_state=state)
+        first = _projected(compact(history, runtime_state=state))
         summary_bytes = json.dumps(state['entries'][0], ensure_ascii=False, sort_keys=True)
-        second = compact(history, runtime_state=state)
+        second = _projected(compact(history, runtime_state=state))
 
     assert len(calls) == 1
     assert first == second
     assert json.dumps(state['entries'][0], ensure_ascii=False, sort_keys=True) == summary_bytes
     assert state['entries'][0]['kind'] == 'summary'
     assert '_lazymind_meta' not in first[0]
+
+
+def test_split_projection_keeps_spanning_summary_in_prior() -> None:
+    entries = [
+        {'source_start': 0, 'source_end': 4, 'message': {'role': 'user', 'content': 'summary'}},
+        {'source_start': 4, 'source_end': 5, 'message': {'role': 'tool', 'content': 'now', 'tool_call_id': 'c1'}},
+    ]
+    prior, current = split_projection(entries, 3)
+    assert prior == [{'role': 'user', 'content': 'summary'}]
+    assert current == [{'role': 'tool', 'content': 'now', 'tool_call_id': 'c1'}]
 
 
 def test_accepted_prune_below_trigger_does_not_summarize_above_target() -> None:
@@ -269,7 +285,7 @@ def test_accepted_prune_below_trigger_does_not_summarize_above_target() -> None:
             keep_recent=0,
             summarizer=summarize,
         )
-        projected = compact(history, runtime_state={})
+        projected = _projected(compact(history, runtime_state={}))
 
     assert '[Earlier tool result compacted]' in projected[0]['content']
     assert calls['summary'] == 0

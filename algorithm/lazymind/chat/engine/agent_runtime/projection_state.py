@@ -112,6 +112,25 @@ def render_projection(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return rendered
 
 
+def split_projection(
+    entries: list[dict[str, Any]],
+    prior_len: int,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    prior_entries: list[dict[str, Any]] = []
+    current_entries: list[dict[str, Any]] = []
+    boundary = max(0, int(prior_len))
+    for entry in entries:
+        start = int(entry.get('source_start') or 0)
+        end = int(entry.get('source_end') or start)
+        if end <= boundary:
+            prior_entries.append(entry)
+        elif start >= boundary:
+            current_entries.append(entry)
+        else:
+            prior_entries.append(entry)
+    return render_projection(prior_entries), render_projection(current_entries)
+
+
 def projection_fingerprint(entries: list[dict[str, Any]]) -> str:
     payload = json.dumps(
         render_projection(entries),

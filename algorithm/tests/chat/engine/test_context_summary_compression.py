@@ -37,6 +37,11 @@ VALID_SUMMARY = '\n'.join(
 )
 
 
+def _projected(result):
+    prior, current = result
+    return list(prior) + list(current)
+
+
 def _long(text: str, times: int = 80) -> str:
     return (text + '\n') * times
 
@@ -359,7 +364,7 @@ def test_make_history_compactor_runs_stage2_after_prune() -> None:
             trigger='mid_turn',
             summarizer=summarizer,
         )
-        projected = compact(history, keep_full_turns=1)
+        projected = _projected(compact(history, keep_full_turns=1))
     assert calls['n'] >= 1
     assert is_runtime_summary_message(projected[0])
     assert all(section in REQUIRED_SUMMARY_SECTIONS for section in REQUIRED_SUMMARY_SECTIONS)

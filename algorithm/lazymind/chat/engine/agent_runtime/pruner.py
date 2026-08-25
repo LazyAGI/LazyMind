@@ -31,7 +31,7 @@ from .projection_state import (
     mark_projection_sent,
     projection_tokens,
     reconcile_projection,
-    render_projection,
+    split_projection,
     transition_metrics,
 )
 
@@ -401,7 +401,7 @@ def make_history_compactor(
     llm: Any = None,
     summarizer: Optional[Callable[[str, str], str]] = None,
     workspace: Optional[str] = None,
-) -> Callable[..., list[dict[str, Any]]]:
+) -> Callable[..., tuple[list[dict[str, Any]], list[dict[str, Any]]]]:
     """Build a mid-turn history projector compatible with ReactAgent/FunctionCall."""
 
     budget = build_context_budget(max_input_tokens, llm_config=llm_config)
@@ -413,11 +413,12 @@ def make_history_compactor(
         history: list[dict[str, Any]],
         keep_full_turns: Optional[int] = None,
         **kwargs: Any,
-    ) -> list[dict[str, Any]]:
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
         current_round_messages = list(kwargs.get('current_round_messages') or [])
         combined = list(history) + current_round_messages
+        prior_len = len(history)
         if not config['context_compression_enabled']:
-            return combined
+            return list(history), list(current_round_messages)
         effective_keep = max(
             0,
             int(default_keep if keep_full_turns is None else keep_full_turns),
@@ -491,7 +492,7 @@ def make_history_compactor(
             and before_total <= budget.effective_input_budget
         ):
             mark_projection_sent(state)
-            return render_projection(state['entries'])
+            return split_projection(state['entries'], prior_len)
 
         tool_indices = _entry_tool_indices(stable)
         protected = set(tool_indices[-effective_keep:]) if effective_keep else set()
@@ -677,6 +678,6 @@ def make_history_compactor(
             )
 
         mark_projection_sent(state)
-        return render_projection(state['entries'])
+        return split_projection(state['entries'], prior_len)
 
     return _compact

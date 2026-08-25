@@ -32,6 +32,11 @@ from lazymind.chat.engine.agent_runtime.pruner import (
 )
 
 
+def _projected(result):
+    prior, current = result
+    return list(prior) + list(current)
+
+
 def test_parse_token_limit_supports_k_m_suffixes() -> None:
     assert parse_token_limit('128K') == 128_000
     assert parse_token_limit('1M') == 1_000_000
@@ -367,7 +372,7 @@ def test_mid_turn_compactor_callback_compacts_old_tools() -> None:
     with config.temp('context_compression_enabled', True), \
             config.temp('context_summary_compression_enabled', False):
         compact = make_history_compactor(max_input_tokens=3_000, keep_recent=1, trigger='mid_turn')
-        projected = compact(history, keep_full_turns=1)
+        projected = _projected(compact(history, keep_full_turns=1))
     assert projected[1]['content'] == 'keep me'
     assert isinstance(projected[0]['content'], str)
     assert 'https://example.com' in projected[0]['content'] or 'compacted' in projected[0]['content']
@@ -397,7 +402,7 @@ def test_mid_turn_compactor_does_not_force_below_trigger() -> None:
             keep_recent=2,
             trigger='mid_turn',
         )
-        projected = compact(history, keep_full_turns=2)
+        projected = _projected(compact(history, keep_full_turns=2))
 
     assert projected == history
 
@@ -415,13 +420,13 @@ def test_mid_turn_compactor_accepts_live_prefix_and_keeps_zero() -> None:
     with config.temp('context_compression_enabled', True), \
             config.temp('context_summary_compression_enabled', False):
         compact = make_history_compactor(max_input_tokens=64_000, keep_recent=2)
-        projected = compact(
+        projected = _projected(compact(
             history,
             keep_full_turns=0,
             prefix=prefix,
             current_input='new request',
             runtime_state=state,
-        )
+        ))
 
     assert projected == history
     assert len(state['source_fingerprints']) == 1
@@ -443,7 +448,7 @@ def test_mid_turn_compactor_triggers_from_prefix_plus_history() -> None:
             config.temp('context_summary_compression_enabled', False), \
             config.temp('context_compression_reserved_output_tokens', 0):
         compact = make_history_compactor(max_input_tokens=10_000, keep_recent=0)
-        projected = compact(history, keep_full_turns=0, prefix=prefix, current_input='')
+        projected = _projected(compact(history, keep_full_turns=0, prefix=prefix, current_input=''))
 
     assert isinstance(projected[0]['content'], str)
     assert len(projected[0]['content']) < len(str(history[0]['content']))
@@ -457,13 +462,13 @@ def test_mid_turn_compactor_reconciles_tool_continuation_once() -> None:
     with config.temp('context_compression_enabled', True), \
             config.temp('context_summary_compression_enabled', False):
         compact = make_history_compactor(max_input_tokens=64_000)
-        projected = compact(
+        projected = _projected(compact(
             history,
             keep_full_turns=0,
             prefix={},
             current_input='',
             runtime_state=state,
-        )
+        ))
 
     assert projected == history
     assert len(state['entries']) == 1
@@ -765,14 +770,13 @@ def test_current_round_projection_is_what_llm_input_would_see(tmp_path) -> None:
     with config.temp('context_compression_spill_bytes', 1024), config.temp(
         'context_compression_enabled', True,
     ):
-        projected = compact(
+        remainder, llm_input = compact(
             prior,
             2,
             prefix={},
             current_input='',
             current_round_messages=originals,
         )
-    remainder, llm_input = projected[:len(prior)], projected[len(prior):]
     assert huge not in llm_input[0]['content']
     assert len(llm_input[0]['content']) < 4_000
     assert remainder[-1]['role'] == 'assistant'
