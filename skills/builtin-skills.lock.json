@@ -91,9 +91,9 @@
         "proposal"
       ],
       "market_visible": true,
-      "archive_sha256": "a1fe8498a691a7d7024af1a54c6e932dcf4c7e79bcd022632869565c92d85a82",
-      "tree_sha256": "d7e814564b16bec7a83dcaa1ee70646ed06a73d1151abe788a2c21667e83f7af",
-      "archive_size": 30050,
+      "archive_sha256": "8448dbaa6f957923fca038c3bde346403753f42c0b531b9f16462fcb9819a8d0",
+      "tree_sha256": "cea7ba7811f6209ccefd50c1ac2040067b81fb85112b97b248c679d393ca2f8b",
+      "archive_size": 30099,
       "package_file": "packages/bsk_E1A2FD55C759A485672BA6B94328.zip"
     },
     {

@@ -7,6 +7,8 @@ tags:
   - long-form-writing
   - report
   - proposal
+metadata:
+  source: Qwen Office structured-longform-writing
 ---
 
 # Structured Longform Writing
@@ -172,3 +174,7 @@ Before final delivery, review the draft against `references/quality-rubric.md`. 
 By default, output the final draft directly. Do not expose the internal brief, intermediate outline, or self-review unless useful to the user or explicitly requested.
 
 If important assumptions were made, add a short section at the end named “关键假设”. If evidence is missing, add “建议补充的数据/材料”. If the user asked for a draft that needs follow-up customization, add only the most important next refinement suggestion.
+
+## Source
+
+Adapted from Qwen Office's `structured-longform-writing` Skill for LazyMind.
