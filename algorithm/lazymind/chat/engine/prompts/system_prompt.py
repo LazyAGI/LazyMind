@@ -12,6 +12,7 @@ from .guidance import (
     CLARIFICATION_GUIDANCE,
     DECISION_PLANNING_GUIDANCE,
     DEFAULT_SYSTEM_PROMPT,
+    EDITABLE_WRITING_GUIDANCE,
     DELIVERABLE_GUIDANCE,
     FRESH_RESEARCH_GUIDANCE,
     LEARNING_GUIDANCE,
@@ -217,9 +218,13 @@ def add_standard_system_sections(
     show_tool_status: bool = True,
     task_profile: TaskProfile | None = None,
     dynamic_prompt_modules: bool = False,
+    include_editable_writing: bool = True,
 ) -> PromptBuilder:
     builder.system(
         'platform_identity', '', DEFAULT_SYSTEM_PROMPT, 'platform.guidance', priority=10,
+    ).system(
+        'editable_writing', '', EDITABLE_WRITING_GUIDANCE,
+        'platform.output.editable', priority=15, skip_if=not include_editable_writing,
     ).system(
         'response_language', '', _build_response_language_prompt(
             environment_context,

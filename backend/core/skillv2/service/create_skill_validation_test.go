@@ -116,8 +116,10 @@ func TestCreateSkillFromUploadedZip_AllowsSingleTopLevelDirectory(t *testing.T) 
 	db := newSkillV2TestDB(t)
 	zipPath := filepath.Join(t.TempDir(), "wrapped.zip")
 	writeSkillZip(t, zipPath, map[string][]byte{
-		"openclaw-openclaw-changelog-update/SKILL.md":        externalSkillMD("openclaw-openclaw-changelog-update", "OpenClaw changelog update"),
-		"openclaw-openclaw-changelog-update/references/a.md": []byte("# A\n"),
+		"openclaw-openclaw-changelog-update/SKILL.md":            externalSkillMD("openclaw-openclaw-changelog-update", "OpenClaw changelog update"),
+		"openclaw-openclaw-changelog-update/references/a.md":     []byte("# A\n"),
+		"__MACOSX/openclaw-openclaw-changelog-update/._SKILL.md": []byte("macOS metadata"),
+		"openclaw-openclaw-changelog-update/.DS_Store":           []byte("finder metadata"),
 	})
 	uploadStore := newFakeUploadStore()
 	uploadStore.Put(UploadSession{
@@ -142,6 +144,12 @@ func TestCreateSkillFromUploadedZip_AllowsSingleTopLevelDirectory(t *testing.T) 
 	}
 	if _, ok := entries["openclaw-openclaw-changelog-update/SKILL.md"]; ok {
 		t.Fatal("revision entries kept wrapper directory path")
+	}
+	if _, ok := entries["__MACOSX/openclaw-openclaw-changelog-update/._SKILL.md"]; ok {
+		t.Fatal("revision entries kept macOS metadata")
+	}
+	if _, ok := entries[".DS_Store"]; ok {
+		t.Fatal("revision entries kept Finder metadata")
 	}
 	skillBlob := getBlobByPath(t, db, resp.HeadRevisionID, "SKILL.md")
 	if skillBlob.StorageBackend != "postgres" || len(skillBlob.Content) == 0 || skillBlob.StorageKey != nil {

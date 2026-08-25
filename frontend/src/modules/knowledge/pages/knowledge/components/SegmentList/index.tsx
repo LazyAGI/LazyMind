@@ -33,6 +33,7 @@ interface IProps {
   loading?: boolean;
   scrollToId?: string;
   showNumber?: boolean;
+  onAskSegment?: (segment: Segment, selectedText?: string, group?: string) => void;
 }
 
 const SegmentList = forwardRef<SegmentListImperativeProps, IProps>(
@@ -52,6 +53,7 @@ const SegmentList = forwardRef<SegmentListImperativeProps, IProps>(
       loading = false,
       scrollToId,
       showNumber = true,
+      onAskSegment,
     } = props;
     const segmentDetailRef = useRef<ISegmentDetailModalRef>(null);
     useImperativeHandle(ref, () => ({
@@ -120,6 +122,7 @@ const SegmentList = forwardRef<SegmentListImperativeProps, IProps>(
                 editable={editable}
                 contentReadOnly={contentReadOnly}
                 showNumber={showNumber}
+                onAskSegment={onAskSegment}
               />
             );
           }}

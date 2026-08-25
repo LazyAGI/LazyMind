@@ -133,6 +133,9 @@ func readFiles(entries []*zip.File) (map[string][]byte, error) {
 	files := make(map[string][]byte, len(entries))
 	var total uint64
 	for _, entry := range entries {
+		if isIgnoredMetadata(entry.Name) {
+			continue
+		}
 		entryName := strings.TrimSuffix(entry.Name, "/")
 		name, err := CleanPath(entryName)
 		if err != nil {
@@ -202,4 +205,18 @@ func normalizeRoot(files map[string][]byte) map[string][]byte {
 		return normalized
 	}
 	return files
+}
+
+func isIgnoredMetadata(name string) bool {
+	name = strings.TrimSuffix(name, "/")
+	if name == "" {
+		return false
+	}
+	for _, part := range strings.Split(name, "/") {
+		lower := strings.ToLower(part)
+		if lower == "__macosx" || lower == ".ds_store" || lower == "thumbs.db" || lower == "desktop.ini" || strings.HasPrefix(part, "._") {
+			return true
+		}
+	}
+	return false
 }

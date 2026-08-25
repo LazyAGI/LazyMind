@@ -24,8 +24,6 @@ vi.mock("react-i18next", () => ({
       const translations: Record<string, string> = {
         "settingsPage.skills.mySkills": "我的技能",
         "settingsPage.skills.myWorkflows": "我的工作流",
-        "settingsPage.skills.taskCenterRequiredNotice": "子任务已关闭，因此工作流同步停用。重新开启子任务后，需手动开启工作流。",
-        "settingsPage.skills.taskCenterRequiredAria": "工作流不可用，请先开启子任务",
         "settingsPage.skills.bulkEnableAria": `批量启用${String(values?.label ?? "")}`,
         "settingsPage.skills.allDisabled": `0 / ${String(values?.total ?? 0)} 全部停用`,
         "settingsPage.controls.taskCenter.title": "任务中心",
@@ -45,7 +43,7 @@ vi.mock("@/modules/workflow/workflowDraftApi", () => ({
   setUserWorkflowEnabled: vi.fn(),
 }));
 
-describe("UserSkillWorkflowSettings workflow dependency", () => {
+describe("UserSkillWorkflowSettings workflow controls", () => {
   beforeEach(() => {
     Object.defineProperty(window, "matchMedia", {
       writable: true,
@@ -80,9 +78,8 @@ describe("UserSkillWorkflowSettings workflow dependency", () => {
     }]);
   });
 
-  it("keeps workflow controls off while subtasks are disabled", async () => {
+  it("keeps workflow controls available independently", async () => {
     render(<UserSkillWorkflowSettings
-      taskCenterEnabled={false}
       skillsEnabled
       workflowsEnabled
       groupSaving={null}
@@ -93,19 +90,17 @@ describe("UserSkillWorkflowSettings workflow dependency", () => {
 
     fireEvent.click(await screen.findByRole("button", { name: /我的工作流/ }));
 
-    const groupSwitch = screen.getByRole("switch", { name: "工作流不可用，请先开启子任务" });
-    expect(groupSwitch).toBeDisabled();
-    expect(groupSwitch).not.toBeChecked();
-    expect(screen.getByText("子任务已关闭，因此工作流同步停用。重新开启子任务后，需手动开启工作流。")).toBeInTheDocument();
-    expect(screen.getByRole("switch", { name: "settingsPage.skills.toggleAria" })).toBeDisabled();
+    const groupSwitch = screen.getByRole("switch", { name: "批量启用我的工作流" });
+    expect(groupSwitch).toBeEnabled();
+    expect(groupSwitch).toBeChecked();
+    expect(screen.getByRole("switch", { name: "settingsPage.skills.toggleAria" })).toBeEnabled();
 
     fireEvent.click(groupSwitch);
-    expect(mocks.onGroupChange).not.toHaveBeenCalled();
+    expect(mocks.onGroupChange).toHaveBeenCalledWith("workflows", false, 1);
   });
 
-  it("allows workflows to be enabled manually after subtasks are restored", async () => {
+  it("allows workflows to be enabled from their own master switch", async () => {
     render(<UserSkillWorkflowSettings
-      taskCenterEnabled
       skillsEnabled
       workflowsEnabled={false}
       groupSaving={null}

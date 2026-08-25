@@ -7,6 +7,31 @@ DROP INDEX IF EXISTS public.idx_skill_distribution_entries_blob;
 DROP TABLE IF EXISTS public.skill_distribution_entries;
 DROP INDEX IF EXISTS public.idx_skill_distribution_artifacts_uid_version;
 DROP TABLE IF EXISTS public.skill_distribution_artifacts;
+UPDATE public.conversations AS conversation
+SET enable_plugin = CASE
+        WHEN (SELECT backup.enable_plugin_was_null
+              FROM public.conversation_policy_snapshot_backups AS backup
+              WHERE backup.conversation_id = conversation.id) THEN NULL
+        ELSE conversation.enable_plugin
+    END,
+    plugin_mode = CASE
+        WHEN (SELECT backup.plugin_mode_was_null
+              FROM public.conversation_policy_snapshot_backups AS backup
+              WHERE backup.conversation_id = conversation.id) THEN NULL
+        ELSE conversation.plugin_mode
+    END,
+    enable_subagent = CASE
+        WHEN (SELECT backup.enable_subagent_was_null
+              FROM public.conversation_policy_snapshot_backups AS backup
+              WHERE backup.conversation_id = conversation.id) THEN NULL
+        ELSE conversation.enable_subagent
+    END
+WHERE EXISTS (
+    SELECT 1 FROM public.conversation_policy_snapshot_backups AS backup
+    WHERE backup.conversation_id = conversation.id
+ );
+DROP TABLE IF EXISTS public.conversation_policy_snapshot_backups;
+
 DROP TABLE IF EXISTS writer_download_conversions;
 DROP INDEX IF EXISTS idx_multi_answers_chat_histories_run_id;
 ALTER TABLE multi_answers_chat_histories DROP COLUMN IF EXISTS run_terminal;
@@ -18,12 +43,15 @@ ALTER TABLE chat_histories DROP COLUMN IF EXISTS run_status;
 ALTER TABLE chat_histories DROP COLUMN IF EXISTS run_id;
 DROP INDEX IF EXISTS idx_chat_histories_conversation_seq;
 DROP TABLE IF EXISTS agent_invocations;
-ALTER TABLE conversations DROP COLUMN IF EXISTS chat_executor;
+ALTER TABLE conversations
+    DROP COLUMN IF EXISTS thinking_depth,
+    DROP COLUMN IF EXISTS chat_executor;
 ALTER TABLE user_ui_preferences
     DROP COLUMN IF EXISTS document_parsing_enabled,
     DROP COLUMN IF EXISTS workflows_enabled,
     DROP COLUMN IF EXISTS mcp_enabled,
     DROP COLUMN IF EXISTS skills_enabled,
+    DROP COLUMN IF EXISTS schedules_enabled,
     DROP COLUMN IF EXISTS task_center_enabled;
 ALTER TABLE sub_agent_tasks DROP COLUMN IF EXISTS sources;
 ALTER TABLE plugin_transition_commands DROP COLUMN IF EXISTS retry_origin;
@@ -48,7 +76,16 @@ ALTER TABLE plugin_drafts DROP COLUMN IF EXISTS trash_expires_at;
 ALTER TABLE plugin_drafts DROP COLUMN IF EXISTS deleted_at;
 DROP INDEX IF EXISTS idx_conversations_user_archive_folder;
 DROP INDEX IF EXISTS idx_conversations_user_lifecycle;
+DROP INDEX IF EXISTS idx_conversations_ephemeral_expiry;
+DROP INDEX IF EXISTS idx_conversations_user_source;
+DROP INDEX IF EXISTS idx_conversations_user_ephemeral_history;
 DROP TABLE IF EXISTS conversation_archive_folders;
+ALTER TABLE conversations DROP COLUMN IF EXISTS source_display_name;
+ALTER TABLE conversations DROP COLUMN IF EXISTS source_document_id;
+ALTER TABLE conversations DROP COLUMN IF EXISTS source_dataset_id;
+ALTER TABLE conversations DROP COLUMN IF EXISTS source_type;
+ALTER TABLE conversations DROP COLUMN IF EXISTS ephemeral_expires_at;
+ALTER TABLE conversations DROP COLUMN IF EXISTS is_ephemeral;
 ALTER TABLE conversations DROP COLUMN IF EXISTS archive_folder_id;
 ALTER TABLE conversations DROP COLUMN IF EXISTS trash_expires_at;
 ALTER TABLE conversations DROP COLUMN IF EXISTS archived_at;
@@ -80,6 +117,9 @@ ALTER TABLE plugin_sessions
     DROP COLUMN IF EXISTS origin_ref,
     DROP COLUMN IF EXISTS origin_host;
 ALTER TABLE user_plugin_settings DROP COLUMN IF EXISTS call_mode;
+ALTER TABLE public.user_chat_settings
+    DROP COLUMN IF EXISTS quick_question_defaults,
+    DROP COLUMN IF EXISTS new_task_defaults;
 DO $$
 BEGIN
     IF EXISTS (
@@ -116,6 +156,28 @@ DROP INDEX IF EXISTS `idx_skill_distribution_entries_blob`;
 DROP TABLE IF EXISTS `skill_distribution_entries`;
 DROP INDEX IF EXISTS `idx_skill_distribution_artifacts_uid_version`;
 DROP TABLE IF EXISTS `skill_distribution_artifacts`;
+UPDATE conversations
+SET enable_plugin = CASE
+        WHEN (SELECT backup.enable_plugin_was_null
+              FROM conversation_policy_snapshot_backups AS backup
+              WHERE backup.conversation_id = conversations.id) THEN NULL
+        ELSE enable_plugin
+    END,
+    plugin_mode = CASE
+        WHEN (SELECT backup.plugin_mode_was_null
+              FROM conversation_policy_snapshot_backups AS backup
+              WHERE backup.conversation_id = conversations.id) THEN NULL
+        ELSE plugin_mode
+    END,
+    enable_subagent = CASE
+        WHEN (SELECT backup.enable_subagent_was_null
+              FROM conversation_policy_snapshot_backups AS backup
+              WHERE backup.conversation_id = conversations.id) THEN NULL
+        ELSE enable_subagent
+    END
+ WHERE id IN (SELECT conversation_id FROM conversation_policy_snapshot_backups);
+DROP TABLE IF EXISTS conversation_policy_snapshot_backups;
+
 DROP TABLE IF EXISTS writer_download_conversions;
 DROP INDEX IF EXISTS idx_multi_answers_chat_histories_run_id;
 ALTER TABLE multi_answers_chat_histories DROP COLUMN run_terminal;
@@ -127,11 +189,13 @@ ALTER TABLE chat_histories DROP COLUMN run_status;
 ALTER TABLE chat_histories DROP COLUMN run_id;
 DROP INDEX IF EXISTS idx_chat_histories_conversation_seq;
 DROP TABLE IF EXISTS agent_invocations;
+ALTER TABLE conversations DROP COLUMN thinking_depth;
 ALTER TABLE conversations DROP COLUMN chat_executor;
 ALTER TABLE user_ui_preferences DROP COLUMN document_parsing_enabled;
 ALTER TABLE user_ui_preferences DROP COLUMN workflows_enabled;
 ALTER TABLE user_ui_preferences DROP COLUMN mcp_enabled;
 ALTER TABLE user_ui_preferences DROP COLUMN skills_enabled;
+ALTER TABLE user_ui_preferences DROP COLUMN schedules_enabled;
 ALTER TABLE user_ui_preferences DROP COLUMN task_center_enabled;
 ALTER TABLE sub_agent_tasks DROP COLUMN sources;
 ALTER TABLE plugin_transition_commands DROP COLUMN retry_origin;
@@ -156,7 +220,16 @@ ALTER TABLE plugin_drafts DROP COLUMN trash_expires_at;
 ALTER TABLE plugin_drafts DROP COLUMN deleted_at;
 DROP INDEX IF EXISTS idx_conversations_user_archive_folder;
 DROP INDEX IF EXISTS idx_conversations_user_lifecycle;
+DROP INDEX IF EXISTS idx_conversations_ephemeral_expiry;
+DROP INDEX IF EXISTS idx_conversations_user_source;
+DROP INDEX IF EXISTS idx_conversations_user_ephemeral_history;
 DROP TABLE IF EXISTS conversation_archive_folders;
+ALTER TABLE conversations DROP COLUMN source_display_name;
+ALTER TABLE conversations DROP COLUMN source_document_id;
+ALTER TABLE conversations DROP COLUMN source_dataset_id;
+ALTER TABLE conversations DROP COLUMN source_type;
+ALTER TABLE conversations DROP COLUMN ephemeral_expires_at;
+ALTER TABLE conversations DROP COLUMN is_ephemeral;
 ALTER TABLE conversations DROP COLUMN archive_folder_id;
 ALTER TABLE conversations DROP COLUMN trash_expires_at;
 ALTER TABLE conversations DROP COLUMN archived_at;
@@ -185,6 +258,8 @@ ALTER TABLE plugin_sessions DROP COLUMN controller_host;
 ALTER TABLE plugin_sessions DROP COLUMN origin_ref;
 ALTER TABLE plugin_sessions DROP COLUMN origin_host;
 ALTER TABLE user_plugin_settings DROP COLUMN call_mode;
+ALTER TABLE user_chat_settings DROP COLUMN quick_question_defaults;
+ALTER TABLE user_chat_settings DROP COLUMN new_task_defaults;
 CREATE TABLE IF NOT EXISTS user_chat_settings_next (
     user_id varchar(255),
     enable_plugin numeric NOT NULL DEFAULT true,
