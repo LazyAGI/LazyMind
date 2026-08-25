@@ -12,6 +12,7 @@ import (
 	"lazymind/core/common/orm"
 	corestore "lazymind/core/store"
 
+	"github.com/glebarez/sqlite"
 	"github.com/gorilla/mux"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -270,9 +271,15 @@ func TestUserChatSettingsUpdateQueryLocksPostgresOnly(t *testing.T) {
 		t.Fatalf("postgres settings read must lock the row: %s", sql)
 	}
 
-	setupChatSettingsTest(t)
+	sqliteDB, err := gorm.Open(sqlite.Open(":memory:"), &gorm.Config{
+		DryRun:                 true,
+		SkipDefaultTransaction: true,
+	})
+	if err != nil {
+		t.Fatalf("open sqlite dry-run db: %v", err)
+	}
 	var sqliteRow orm.UserChatSettings
-	sqliteStatement := userChatSettingsUpdateQuery(corestore.DB().Session(&gorm.Session{DryRun: true})).
+	sqliteStatement := userChatSettingsUpdateQuery(sqliteDB).
 		Where("user_id = ?", "user-lock").First(&sqliteRow).Statement
 	if sql := sqliteStatement.SQL.String(); strings.Contains(sql, "FOR UPDATE") {
 		t.Fatalf("sqlite settings read must not emit FOR UPDATE: %s", sql)
