@@ -5,7 +5,7 @@ import { useImmer } from "use-immer";
 import SegmentList, { SegmentListImperativeProps } from "../SegmentList";
 import { Segment } from "@/api/generated/knowledge-client";
 import { from, expand, EMPTY, scan, takeWhile, map } from "rxjs";
-import { message, Modal, Switch } from "antd";
+import { message, Modal } from "antd";
 import { SegmentServiceApi } from "@/modules/knowledge/utils/request";
 import { CARD_PAGE_SIZE } from "@/modules/knowledge/constants/common";
 
@@ -23,11 +23,12 @@ interface SegmentTabProps {
   type?: string;
   onGetItemInfo?: (info: Segment) => void;
   onAskSegment?: (segment: Segment, selectedText?: string, group?: string) => void;
+  showSequence?: boolean;
 }
 
 const SegmentTab = (props: SegmentTabProps) => {
   const { t } = useTranslation();
-  const { detail, names = [], editable = false, type, onGetItemInfo, onAskSegment } = props;
+  const { detail, names = [], editable = false, type, onGetItemInfo, onAskSegment, showSequence = true } = props;
 
   const [currentType, setCurrentType] = useState(type || names[0] || "");
   const [segments, setSegments] = useImmer<Segment[]>([]);
@@ -36,7 +37,6 @@ const SegmentTab = (props: SegmentTabProps) => {
   const [searchParams] = useSearchParams();
   const segmentListRef = useRef<SegmentListImperativeProps>(null);
   const [loading, setLoading] = useState(false);
-  const [showSequence, setShowSequence] = useState(true);
 
   const canEdit = false;
 
@@ -335,34 +335,6 @@ const SegmentTab = (props: SegmentTabProps) => {
       className="flex flex-1 flex-col overflow-hidden"
       style={{ height: "100%" }}
     >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "flex-end",
-          gap: 8,
-          marginBottom: 8,
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            flexShrink: 0,
-          }}
-        >
-          <span style={{ color: "var(--color-text-description)" }}>
-            {t("knowledge.sequence")}
-          </span>
-          <Switch
-            size="small"
-            checked={showSequence}
-            onChange={setShowSequence}
-          />
-        </div>
-      </div>
-
       <SegmentList
         ref={segmentListRef}
         segments={segments}

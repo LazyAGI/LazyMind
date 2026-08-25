@@ -31,10 +31,21 @@
   min-height: 0;
   flex-direction: column;
   gap: 8px;
+
+  &.is-collapsed {
+    display: none;
+  }
 }
 
 .knowledge-preview-mode-tabs {
   height: 100%;
+  display: flex;
+  flex-direction: column;
+
+  > .ant-tabs-nav {
+    flex: none;
+    margin-bottom: 8px;
+  }
 
   > .ant-tabs-content-holder,
   > .ant-tabs-content-holder > .ant-tabs-content,
@@ -46,4 +57,37 @@
   > .ant-tabs-content-holder > .ant-tabs-content > .ant-tabs-tabpane {
     overflow: hidden;
   }
+
+  > .ant-tabs-content-holder {
+    flex: 1;
+    overflow: hidden;
+  }
+}
+
+.knowledge-preview-toolbar,
+.knowledge-preview-sequence {
+  display: flex;
+  align-items: center;
+}
+
+.knowledge-preview-toolbar {
+  gap: 12px;
+}
+
+.knowledge-preview-segment-select {
+  width: 160px;
+}
+
+.knowledge-preview-sequence {
+  flex: none;
+  gap: 8px;
+  color: var(--color-text-description);
+}
+
+.knowledge-preview-collapsed {
+  display: flex;
+  height: 100%;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 8px;
 }

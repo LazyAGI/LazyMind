@@ -1,8 +1,14 @@
-import { Button, message, Tag, Tooltip, Row, Col, Tabs } from "antd";
+import { Button, message, Tag, Tooltip, Row, Col, Select, Switch, Tabs } from "antd";
 import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useParams, useSearchParams, useNavigate } from "react-router-dom";
-import { CopyOutlined, FileImageOutlined } from "@ant-design/icons";
+import {
+  CopyOutlined,
+  DoubleLeftOutlined,
+  DoubleRightOutlined,
+  FileImageOutlined,
+} from "@ant-design/icons";
 import moment from "moment";
 import { Doc } from "@/api/generated/core-client";
 import { Segment } from "@/api/generated/knowledge-client";
@@ -87,10 +93,24 @@ const Detail = () => {
   const [exportingImagePdf, setExportingImagePdf] = useState(false);
   const [documentChatSelection, setDocumentChatSelection] =
     useState<DocumentChatSelection | null>(null);
-  const [previewSideTab, setPreviewSideTab] = useState("segments");
+  const [previewSideTab, setPreviewSideTab] = useState("chat");
+  const [previewSideCollapsed, setPreviewSideCollapsed] = useState(false);
+  const [segmentViewKey, setSegmentViewKey] = useState("");
+  const [segmentViewOptions, setSegmentViewOptions] = useState<
+    Array<{ label: ReactNode; value: string }>
+  >([]);
+  const [showSegmentSequence, setShowSegmentSequence] = useState(true);
+
+  const handleSegmentViewOptionsChange = useCallback(
+    (options: Array<{ label: ReactNode; value: string }>) => {
+      setSegmentViewOptions(options);
+    },
+    [],
+  );
 
   const askPdfSelection = useCallback((selection: PdfTextSelection) => {
     setDocumentChatSelection({ source: "pdf", ...selection });
+    setPreviewSideCollapsed(false);
     setPreviewSideTab("chat");
   }, []);
 
@@ -120,6 +140,7 @@ const Detail = () => {
       segmentNumber: segment.number,
       group: segmentGroup,
     });
+    setPreviewSideCollapsed(false);
     setPreviewSideTab("chat");
   }, []);
 
@@ -380,7 +401,7 @@ const Detail = () => {
         ]}
       />
       <Row gutter={[12, 12]} className="mt-6 min-h-0 w-full flex-1">
-        <Col span={15} className="min-h-0">
+        <Col flex={previewSideCollapsed ? "auto" : "0 0 62.5%"} className="min-h-0">
           <FileViewer
             ref={fileViewerRef}
             file={previewFile}
@@ -390,7 +411,7 @@ const Detail = () => {
             onPdfSelection={askPdfSelection}
           />
         </Col>
-        <Col span={9} className="min-h-0">
+        <Col flex={previewSideCollapsed ? "0 0 48px" : "0 0 37.5%"} className="min-h-0">
           <div
             style={{
               height: "100%",
@@ -401,43 +422,88 @@ const Detail = () => {
             }}
           >
             {knowledgeDetail ? (
-              <div className="knowledge-preview-side">
-                <Tabs
-                  className="knowledge-preview-mode-tabs"
-                  type="card"
-                  activeKey={previewSideTab}
-                  onChange={setPreviewSideTab}
-                  items={[
-                    {
-                      key: "segments",
-                      label: t("knowledge.segmentPreviewTab"),
-                      children: (
-                        <KnowledgeTabs
-                          knowledgeDetail={knowledgeDetail}
-                          onGetItemInfo={(data) => setSegmentDetail(data)}
-                          onAskSegment={askSegment}
+              <>
+                <div className={`knowledge-preview-side${previewSideCollapsed ? " is-collapsed" : ""}`}>
+                  <Tabs
+                    className="knowledge-preview-mode-tabs"
+                    activeKey={previewSideTab}
+                    onChange={setPreviewSideTab}
+                    tabBarExtraContent={(
+                      <div className="knowledge-preview-toolbar">
+                        {previewSideTab === "segments" ? (
+                          <>
+                            <Select
+                              className="knowledge-preview-segment-select"
+                              value={segmentViewKey || undefined}
+                              options={segmentViewOptions}
+                              onChange={setSegmentViewKey}
+                            />
+                            <div className="knowledge-preview-sequence">
+                              <span>{t("knowledge.sequence")}</span>
+                              <Switch
+                                size="small"
+                                checked={showSegmentSequence}
+                                onChange={setShowSegmentSequence}
+                              />
+                            </div>
+                          </>
+                        ) : null}
+                        <Button
+                          type="text"
+                          icon={<DoubleRightOutlined />}
+                          aria-label={t("common.collapse")}
+                          title={t("common.collapse")}
+                          onClick={() => setPreviewSideCollapsed(true)}
                         />
-                      ),
-                    },
-                    {
-                      key: "chat",
-                      label: t("knowledge.pdfChatTab"),
-                      children: (
-                        <PdfTemporaryChat
-                          datasetId={knowledgeBaseId}
-                          documentId={knowledgeId}
-                          fileName={knowledgeDetail.display_name || ""}
-                          selection={documentChatSelection || undefined}
-                          onClose={() => {
-                            setDocumentChatSelection(null);
-                            setPreviewSideTab("segments");
-                          }}
-                        />
-                      ),
-                    },
-                  ]}
-                />
-              </div>
+                      </div>
+                    )}
+                    items={[
+                      {
+                        key: "chat",
+                        label: t("knowledge.pdfChatTab"),
+                        children: (
+                          <PdfTemporaryChat
+                            datasetId={knowledgeBaseId}
+                            documentId={knowledgeId}
+                            fileName={knowledgeDetail.display_name || ""}
+                            selection={documentChatSelection || undefined}
+                            onClose={() => {
+                              setDocumentChatSelection(null);
+                              setPreviewSideTab("segments");
+                            }}
+                          />
+                        ),
+                      },
+                      {
+                        key: "segments",
+                        label: t("knowledge.segmentPreviewTab"),
+                        children: (
+                          <KnowledgeTabs
+                            knowledgeDetail={knowledgeDetail}
+                            onGetItemInfo={(data) => setSegmentDetail(data)}
+                            onAskSegment={askSegment}
+                            activeKey={segmentViewKey}
+                            onActiveKeyChange={setSegmentViewKey}
+                            onOptionsChange={handleSegmentViewOptionsChange}
+                            showSequence={showSegmentSequence}
+                          />
+                        ),
+                      },
+                    ]}
+                  />
+                </div>
+                {previewSideCollapsed ? (
+                  <div className="knowledge-preview-collapsed">
+                    <Button
+                      type="text"
+                      icon={<DoubleLeftOutlined />}
+                      aria-label={t("common.expand")}
+                      title={t("common.expand")}
+                      onClick={() => setPreviewSideCollapsed(false)}
+                    />
+                  </div>
+                ) : null}
+              </>
             ) : null}
           </div>
         </Col>
