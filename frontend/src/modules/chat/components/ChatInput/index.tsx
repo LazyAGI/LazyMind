@@ -59,9 +59,16 @@ import { buildCitedMessageText } from "../newChatContainer/utils/citeMessage";
 // Stable empty array reference — must NOT be inline `?? []` in a zustand selector
 // because a new array on every call triggers useSyncExternalStore to fire React error #185.
 const EMPTY_DISMISSED: Array<{ session_id: string; workflow_id: string }> = [];
+const THINKING_DEPTH_LABEL_KEYS: Record<ThinkingDepth, string> = {
+  low: "chat.thinkingDepthLow",
+  medium: "chat.thinkingDepthMedium",
+  high: "chat.thinkingDepthHigh",
+  max: "chat.thinkingDepthMax",
+};
 import ShowChatFileList from "../ShowChatFileList";
 import { formatFileSize } from "@/modules/chat/utils";
 import {
+  THINKING_DEPTH_VALUES,
   useChatThinkStore,
   type ThinkingDepth,
 } from "@/modules/chat/store/chatThink";
@@ -1352,12 +1359,10 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       value={effectiveThinkingDepth}
                       disabled={disabled || isStreaming || Boolean(fixedThinkingDepth)}
                       onChange={setThinkingDepth}
-                      options={[
-                        { value: "low", label: t("chat.thinkingDepthLow") },
-                        { value: "medium", label: t("chat.thinkingDepthMedium") },
-                        { value: "high", label: t("chat.thinkingDepthHigh") },
-                        { value: "max", label: t("chat.thinkingDepthMax") },
-                      ]}
+                      options={THINKING_DEPTH_VALUES.map((value) => ({
+                        value,
+                        label: t(THINKING_DEPTH_LABEL_KEYS[value]),
+                      }))}
                     />
                   )}
                   {/* <ModelSelector sessionId={sessionId} disabled={isStreaming} /> */}
@@ -1399,6 +1404,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                     key={configResetKey != null ? `config-reset-${configResetKey}` : undefined}
                     conversationId={sessionId && !sessionId.startsWith("temp_") ? sessionId : undefined}
                     initialSettings={initialConversationSettings}
+                    disabled={disabled || isStreaming}
                     hasWorkflowSession={hasWorkflowSession}
                     onSave={(settings) => {
                       setContextRuntimeSettings(settings);

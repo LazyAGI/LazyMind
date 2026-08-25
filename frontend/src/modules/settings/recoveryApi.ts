@@ -59,7 +59,7 @@ export async function listArchiveFolders(signal?: AbortSignal): Promise<ArchiveF
 export async function createArchiveFolder(name: string): Promise<ConversationArchiveFolder> {
   const response = await coreApi.apiCoreConversationArchiveFoldersPost({
     conversationArchiveFolderRequest: { name },
-  });
+  }, { silentError: true } as never);
   return response.data.folder;
 }
 
@@ -123,7 +123,7 @@ export async function archiveConversation(conversationId: string, folderId?: str
   await coreApi.apiCoreConversationsConversationIdArchivePost({
     conversationId,
     conversationArchiveRequest: { folder_id: folderId || null },
-  });
+  }, { silentError: true } as never);
 }
 
 export async function unarchiveConversation(conversationId: string): Promise<void> {
