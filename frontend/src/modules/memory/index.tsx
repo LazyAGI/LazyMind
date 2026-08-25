@@ -3896,6 +3896,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
         await Promise.all([refreshSkillAssets(), refreshSkillCategories()]);
       } catch (error) {
         console.error("Save skill draft failed:", error);
+        message.error(getLocalizedErrorMessage(error));
         return;
       } finally {
         setSkillSaving(false);
