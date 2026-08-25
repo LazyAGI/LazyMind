@@ -45,6 +45,7 @@ function task(id: string, title: string, resultTitle: string, template = "generi
 function showcaseCase(tasks: ReturnType<typeof task>[]): ShowcaseCase {
   return {
     id: "demo",
+    source_url: "https://skillhub.example/demo",
     title: "Card title",
     description: "Card description",
     detail_title: "Configured detail title",
@@ -85,6 +86,10 @@ describe("Showcase DetailPage", () => {
     renderDetail();
 
     expect(await screen.findByText("Configured detail title")).toBeInTheDocument();
+    const sourceLink = screen.getByRole("link", { name: "Configured detail title" });
+    expect(sourceLink).toHaveAttribute("href", "https://skillhub.example/demo");
+    expect(sourceLink).toHaveAttribute("target", "_blank");
+    expect(sourceLink).toHaveAttribute("rel", "noreferrer");
     expect(screen.queryByText("showcase.chooseTask")).not.toBeInTheDocument();
     expect(await screen.findByText("Single result")).toBeInTheDocument();
   });

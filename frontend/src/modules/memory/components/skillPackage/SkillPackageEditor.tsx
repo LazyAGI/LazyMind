@@ -22,6 +22,7 @@ import {
   FolderAddOutlined,
   RollbackOutlined,
   SaveOutlined,
+  SyncOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
 import type { DataNode } from "antd/es/tree";
@@ -37,10 +38,12 @@ import {
   deleteSkillDraftPath,
   discardSkillDraft,
   getSkillDraftStatus,
+  getSkillDistributionUpgradeStatus,
   getSkillTree,
   hasSkillDraftChanges,
   mkdirSkillDraftPath,
   probeSkillAgentReviewMode,
+  prepareSkillDistributionUpgrade,
   readSkillFsFile,
   submitSkillDraftReviewActions,
   undoSkillDraftReview,
@@ -51,6 +54,7 @@ import {
   type SkillDraftReviewMeta,
   type SkillDraftReviewDecision,
   type SkillDraftStatusRecord,
+  type SkillDistributionUpgradeStatusRecord,
   type SkillTreeNodeRecord,
 } from "../../skillApi";
 import { uploadSkillTempFile } from "../../skillUpload";
@@ -88,6 +92,7 @@ const SKILL_UPLOAD_ACCEPT_ATTR =
 interface SkillPackageEditorProps {
   skillId: string;
   canEdit: boolean;
+  autoUpdateEnabled: boolean;
   t: (key: string, options?: Record<string, unknown>) => string;
   onSkillUpdated?: () => void | Promise<void>;
 }
@@ -121,6 +126,7 @@ const EllipsisText = ({
 export default function SkillPackageEditor({
   skillId,
   canEdit,
+  autoUpdateEnabled,
   t,
   onSkillUpdated,
 }: SkillPackageEditorProps) {
@@ -129,6 +135,9 @@ export default function SkillPackageEditor({
   const [treeRoot, setTreeRoot] = useState<SkillTreeNodeRecord | null>(null);
   const [diffFiles, setDiffFiles] = useState<SkillDiffFileRecord[]>([]);
   const [draftStatus, setDraftStatus] = useState<SkillDraftStatusRecord | null>(null);
+  const [distributionStatus, setDistributionStatus] =
+    useState<SkillDistributionUpgradeStatusRecord | null>(null);
+  const [preparingUpgrade, setPreparingUpgrade] = useState(false);
   const [reviewMode, setReviewMode] = useState(false);
   const [selectedPath, setSelectedPath] = useState("");
   const [fileContent, setFileContent] = useState("");
@@ -177,6 +186,10 @@ export default function SkillPackageEditor({
   const canEditSelectedFile = Boolean(selectedFile && !selectedFileBinary);
   const hasLocalDraft = Boolean(
     draftStatus?.hasUncommittedDraft || (draftStatus?.overlayCount ?? 0) > 0,
+  );
+  const distributionReview = Boolean(distributionStatus?.pending);
+  const distributionConflictReview = Boolean(
+    distributionReview && distributionStatus?.conflicts.length,
   );
   const allFilesViewed =
     !reviewMode || changedPaths.every((path) => reviewedPaths.has(path));
@@ -250,13 +263,18 @@ export default function SkillPackageEditor({
     setErrorMessage("");
     contentCacheRef.current.clear();
     try {
-      const [tree, status] = await Promise.all([
+      const [tree, status, upgradeStatus] = await Promise.all([
         getSkillTree(skillId),
         getSkillDraftStatus(skillId),
+        getSkillDistributionUpgradeStatus(skillId).catch((error) => {
+          console.error("Load Skill distribution upgrade status failed:", error);
+          return null;
+        }),
       ]);
 
       setTreeRoot(tree);
       setDraftStatus(status);
+      setDistributionStatus(upgradeStatus);
 
       const hasDraftChanges = hasSkillDraftChanges(status);
 
@@ -305,6 +323,35 @@ export default function SkillPackageEditor({
       setLoading(false);
     }
   }, [skillId, t]);
+
+  const handlePrepareDistributionUpgrade = async () => {
+    if (!canEdit || preparingUpgrade || !distributionStatus?.updateAvailable) {
+      return;
+    }
+    setPreparingUpgrade(true);
+    try {
+      const prepared = await prepareSkillDistributionUpgrade(skillId);
+      if (prepared.conflicts.length > 0) {
+        message.warning(
+          t("admin.memorySkillDistributionUpgradeConflictPrepared", {
+            count: prepared.conflicts.length,
+          }),
+        );
+      } else {
+        message.success(t("admin.memorySkillDistributionUpgradePrepared"));
+      }
+      await refreshPackage();
+      await onSkillUpdated?.();
+    } catch (error) {
+      console.error("Prepare Skill distribution upgrade failed:", error);
+      message.error(
+        getLocalizedErrorMessage(error) ||
+          t("admin.memorySkillDistributionUpgradePrepareFailed"),
+      );
+    } finally {
+      setPreparingUpgrade(false);
+    }
+  };
 
   useEffect(() => {
     void refreshPackage();
@@ -1082,6 +1129,7 @@ export default function SkillPackageEditor({
         hunkReviewActive={Boolean(reviewMeta?.reviewId || fileDiff?.review?.reviewId)}
         hunkSubmitting={hunkSubmitting}
         onHunkDecision={(hunk, decision) => void handleHunkDecision(hunk.hunkId, decision)}
+        distributionReview={distributionReview}
         t={t}
       />
     );
@@ -1179,13 +1227,89 @@ export default function SkillPackageEditor({
 
   return (
     <div className="memory-skill-package-editor">
+      {distributionStatus?.managed &&
+      (distributionStatus.updateAvailable || distributionReview) ? (
+        <Alert
+          type={distributionConflictReview ? "warning" : "info"}
+          showIcon
+          className="memory-skill-package-review-alert memory-skill-distribution-upgrade-alert"
+          message={
+            distributionReview
+              ? t("admin.memorySkillDistributionUpgradePendingTitle")
+              : t("admin.memorySkillDistributionUpgradeAvailableTitle")
+          }
+          description={
+            <Space direction="vertical" size={6}>
+              <span>
+                {t("admin.memorySkillDistributionUpgradeVersions", {
+                  current: distributionStatus.currentVersion || "-",
+                  latest: distributionReview
+                    ? distributionStatus.pendingVersion || "-"
+                    : distributionStatus.latestVersion || "-",
+                })}
+              </span>
+              {distributionReview ? (
+                <span>{t("admin.memorySkillDistributionUpgradePendingSummary")}</span>
+              ) : null}
+              {distributionReview ? (
+                distributionStatus.conflicts.length > 0 ? (
+                  <Space wrap size={[4, 4]}>
+                    <span>{t("admin.memorySkillDistributionUpgradeConflicts")}</span>
+                    {distributionStatus.conflicts.map((conflict) => (
+                      <Tag color="red" key={`${conflict.path}:${conflict.kind}`}>
+                        {conflict.path} · {t(`admin.memorySkillDistributionConflict_${conflict.kind}`)}
+                      </Tag>
+                    ))}
+                  </Space>
+                ) : (
+                  <span>{t("admin.memorySkillDistributionUpgradeReviewHint")}</span>
+                )
+              ) : hasLocalDraft ? (
+                <span>{t("admin.memorySkillDistributionUpgradeDraftBlocked")}</span>
+              ) : autoUpdateEnabled ? (
+                <span>{t("admin.memorySkillDistributionAutoUpdateHint")}</span>
+              ) : null}
+            </Space>
+          }
+          action={
+            !distributionReview && !autoUpdateEnabled ? (
+              <Button
+                type="primary"
+                icon={<SyncOutlined />}
+                loading={preparingUpgrade}
+                disabled={!canEdit || hasLocalDraft}
+                onClick={() => void handlePrepareDistributionUpgrade()}
+              >
+                {t("admin.memorySkillDistributionUpgradePrepare")}
+              </Button>
+            ) : null
+          }
+        />
+      ) : null}
       {reviewMode ? (
         <Alert
           type="warning"
           showIcon
           className="memory-skill-package-review-alert"
-          message={t("admin.memorySkillPackageReviewTitle")}
-          description={t("admin.memorySkillPackageReviewHint")}
+          message={
+            distributionReview
+              ? t("admin.memorySkillDistributionUpgradeConfirmTitle")
+              : t("admin.memorySkillPackageReviewTitle")
+          }
+          description={
+            distributionReview ? (
+              <Space direction="vertical" size={6}>
+                <span>{t("admin.memorySkillDistributionUpgradeConfirmHint")}</span>
+                <Space wrap size={[4, 4]}>
+                  <Tag color="red">− {t("admin.memorySkillDistributionCurrentContent")}</Tag>
+                  <Tag color="green">+ {t("admin.memorySkillDistributionCandidateContent")}</Tag>
+                  <span>{t("admin.memorySkillDistributionDecisionHint")}</span>
+                </Space>
+              </Space>
+            ) : (
+              t("admin.memorySkillPackageReviewHint")
+            )
+          }
         />
       ) : hasLocalDraft ? (
         <Alert
@@ -1246,7 +1370,9 @@ export default function SkillPackageEditor({
                     disabled={!canBulkReview}
                     onClick={handleBatchAccept}
                   >
-                    {t("admin.memorySkillBatchAccept")}
+                    {distributionReview
+                      ? t("admin.memorySkillDistributionAcceptAll")
+                      : t("admin.memorySkillBatchAccept")}
                   </Button>
                   <Button
                     danger
@@ -1255,7 +1381,9 @@ export default function SkillPackageEditor({
                     disabled={!canBulkReject}
                     onClick={handleBatchReject}
                   >
-                    {t("admin.memorySkillBatchReject")}
+                    {distributionReview
+                      ? t("admin.memorySkillDistributionKeepAll")
+                      : t("admin.memorySkillBatchReject")}
                   </Button>
                 </>
               ) : null}
@@ -1279,7 +1407,9 @@ export default function SkillPackageEditor({
                 disabled={!allReviewed || reviewMutationBusy}
                 onClick={() => void handleConfirmReview()}
               >
-                {t("admin.memorySkillDraftConfirm")}
+                {distributionReview
+                  ? t("admin.memorySkillDistributionApplyUpdate")
+                  : t("admin.memorySkillDraftConfirm")}
               </Button>
               <Button
                 danger
@@ -1287,7 +1417,9 @@ export default function SkillPackageEditor({
                 disabled={reviewMutationBusy}
                 onClick={() => void handleDiscardDraft()}
               >
-                {t("admin.memorySkillDraftDiscard")}
+                {distributionReview
+                  ? t("admin.memorySkillDistributionSkipForNow")
+                  : t("admin.memorySkillDraftDiscard")}
               </Button>
             </>
           ) : null}

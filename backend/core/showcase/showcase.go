@@ -71,6 +71,7 @@ type ShowcaseCaseTask struct {
 type ShowcaseCase struct {
 	ID                string             `json:"id"`
 	Type              string             `json:"type"`
+	SourceURL         string             `json:"source_url"`
 	Title             string             `json:"title"`
 	Description       string             `json:"description"`
 	Category          string             `json:"category"`

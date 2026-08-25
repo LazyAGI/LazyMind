@@ -17,6 +17,7 @@ import (
 	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 
+	skilldistribution "lazymind/core/skillv2/distribution"
 	skillmetadata "lazymind/core/skillv2/metadata"
 	skillsearch "lazymind/core/skillv2/search"
 	skillpackage "lazymind/core/skillv2/skillpackage"
@@ -120,6 +121,14 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 			CreatedBy:     req.CreateUserID,
 		}); err != nil {
 			return err
+		}
+		if req.Distribution != nil {
+			if err := skilldistribution.BindInitialTx(ctx, tx, skilldistribution.InitialBinding{
+				SkillID: skillID, RevisionID: revisionID, BuiltinUID: req.Distribution.BuiltinUID,
+				Version: req.Distribution.Version, ArchiveSHA256: req.Distribution.ArchiveSHA256, TreeSHA256: req.Distribution.TreeSHA256,
+			}, now); err != nil {
+				return err
+			}
 		}
 		if err := s.resetDraft(tx, skillID, revisionID); err != nil {
 			return err
@@ -512,6 +521,11 @@ func (s *SkillService) deleteSkillGraphTx(ctx context.Context, tx *gorm.DB, skil
 	if err := tx.Model(&skillRevisionRow{}).Where("skill_id = ?", skillID).Pluck("id", &revisions).Error; err != nil {
 		return err
 	}
+	if tx.Migrator().HasTable("skill_distribution_bindings") {
+		if err := skilldistribution.DeleteBindingTx(ctx, tx, skillID, revisions); err != nil {
+			return err
+		}
+	}
 	if len(revisions) > 0 {
 		if err := tx.Where("revision_id IN ?", revisions).Delete(&skillRevisionEntryRow{}).Error; err != nil {
 			return err
@@ -601,6 +615,15 @@ func skillBlobReferenced(tx *gorm.DB, hash string) (bool, error) {
 	}
 	if revisionRefs > 0 {
 		return true, nil
+	}
+	if tx.Migrator().HasTable("skill_distribution_entries") {
+		var distributionRefs int64
+		if err := tx.Table("skill_distribution_entries").Where("blob_hash = ?", hash).Count(&distributionRefs).Error; err != nil {
+			return false, err
+		}
+		if distributionRefs > 0 {
+			return true, nil
+		}
 	}
 	var draftRefs int64
 	if err := tx.Model(&skillDraftEntryRow{}).Where("blob_hash = ?", hash).Count(&draftRefs).Error; err != nil {
@@ -740,6 +763,9 @@ func (s *SkillService) DiscardDraft(ctx context.Context, req DiscardDraftRequest
 		if skill.HeadRevisionID == nil {
 			return s.deleteSkillGraphTx(ctx, tx, req.SkillID, req.UserID)
 		}
+		if err := skilldistribution.CancelPendingTx(ctx, tx, req.SkillID, s.clock.Now()); err != nil {
+			return err
+		}
 		if err := tx.Where("skill_id = ?", req.SkillID).Delete(&skillDraftEntryRow{}).Error; err != nil {
 			return err
 		}
@@ -798,6 +824,11 @@ func markDraftReviewSessions(tx *gorm.DB, skillID, status, userID string, now ti
 
 func (s *SkillService) ApplyAutoEvoDraft(ctx context.Context, req AutoEvoDraftRequest) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if _, pending, err := skilldistribution.PendingRefTx(ctx, tx, req.SkillID); err != nil {
+			return err
+		} else if pending {
+			return skilldistribution.ErrUpgradeDraftActive
+		}
 		if err := tx.Where("skill_id = ?", req.SkillID).Delete(&skillDraftEntryRow{}).Error; err != nil {
 			return err
 		}
@@ -817,6 +848,11 @@ func (s *SkillService) ApplyAutoEvoDraft(ctx context.Context, req AutoEvoDraftRe
 func (s *SkillService) AcceptReview(ctx context.Context, req AcceptReviewRequest) (AcceptReviewResponse, error) {
 	var out AcceptReviewResponse
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if _, pending, err := skilldistribution.PendingRefTx(ctx, tx, req.SkillID); err != nil {
+			return err
+		} else if pending {
+			return skilldistribution.ErrUpgradeDraftActive
+		}
 		revisionID, err := s.commitFilesAsNewHead(ctx, tx, req.SkillID, req.UserID, "review_accept", req.Files)
 		if err != nil {
 			return err
@@ -1552,6 +1588,9 @@ func markPendingSkillDraftAuto(ctx context.Context, tx *gorm.DB, skillID string,
 			return nil
 		}
 		return err
+	}
+	if skilldistribution.IsUpgradeTaskID(draft.TaskID) {
+		return nil
 	}
 	var count int64
 	if err := tx.WithContext(ctx).Model(&skillDraftEntryRow{}).Where("skill_id = ?", skillID).Count(&count).Error; err != nil {

@@ -2246,6 +2246,7 @@ export interface ShowcaseCase {
     'output_type': string;
     'prompt': string;
     'prompt_short': string;
+    'source_url': string;
     'result_highlights'?: Array<string>;
     'result_summary': string;
     'steps'?: Array<ShowcaseCaseStep>;
@@ -2349,6 +2350,28 @@ export interface SkillDetailOpenAPIResponse {
 }
 export interface SkillDiscardOpenAPIResponse {
     'discarded': boolean;
+}
+export interface SkillDistributionConflictOpenAPIResponse {
+    'kind': string;
+    'path': string;
+}
+export interface SkillDistributionUpgradePrepareOpenAPIResponse {
+    'auto_merged': boolean;
+    'conflicts'?: Array<SkillDistributionConflictOpenAPIResponse>;
+    'draft_version': number;
+    'status': SkillDistributionUpgradeStatusOpenAPIResponse;
+}
+export interface SkillDistributionUpgradeStatusOpenAPIResponse {
+    'conflicts'?: Array<SkillDistributionConflictOpenAPIResponse>;
+    'current_archive_sha256'?: string;
+    'current_version'?: string;
+    'latest_archive_sha256'?: string;
+    'latest_version'?: string;
+    'managed': boolean;
+    'pending': boolean;
+    'pending_archive_sha256'?: string;
+    'pending_version'?: string;
+    'update_available': boolean;
 }
 export interface SkillDraftDeleteOpenAPIRequest {
     'expected_draft_version'?: number;
@@ -35069,6 +35092,74 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
         },
         /**
          *
+         * @summary Get builtin Skill distribution upgrade status
+         * @param {string} skillId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSkillsSkillIdDistributionUpgradeGet: async (skillId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'skillId' is not null or undefined
+            assertParamExists('apiCoreSkillsSkillIdDistributionUpgradeGet', 'skillId', skillId)
+            const localVarPath = `/api/core/skills/{skill_id}/distribution-upgrade`
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Merges the installed distribution base, current user Head, and latest builtin package. The candidate is staged in the existing Skill draft/review workflow.
+         * @summary Prepare a three-way builtin Skill distribution upgrade draft
+         * @param {string} skillId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSkillsSkillIdDistributionUpgradePreparePost: async (skillId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'skillId' is not null or undefined
+            assertParamExists('apiCoreSkillsSkillIdDistributionUpgradePreparePost', 'skillId', skillId)
+            const localVarPath = `/api/core/skills/{skill_id}/distribution-upgrade:prepare`
+                .replace(`{${"skill_id"}}`, encodeURIComponent(String(skillId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary Preview skill draft diff
          * @param {string} skillId
          * @param {*} [options] Override http request option.
@@ -35663,6 +35754,32 @@ export const SkillsApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary Get builtin Skill distribution upgrade status
+         * @param {string} skillId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreSkillsSkillIdDistributionUpgradeGet(skillId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SkillDistributionUpgradeStatusOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSkillsSkillIdDistributionUpgradeGet(skillId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['SkillsApi.apiCoreSkillsSkillIdDistributionUpgradeGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Merges the installed distribution base, current user Head, and latest builtin package. The candidate is staged in the existing Skill draft/review workflow.
+         * @summary Prepare a three-way builtin Skill distribution upgrade draft
+         * @param {string} skillId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreSkillsSkillIdDistributionUpgradePreparePost(skillId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<SkillDistributionUpgradePrepareOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSkillsSkillIdDistributionUpgradePreparePost(skillId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['SkillsApi.apiCoreSkillsSkillIdDistributionUpgradePreparePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary Preview skill draft diff
          * @param {string} skillId
          * @param {*} [options] Override http request option.
@@ -35940,6 +36057,26 @@ export const SkillsApiFactory = function (configuration?: Configuration, basePat
         },
         /**
          *
+         * @summary Get builtin Skill distribution upgrade status
+         * @param {SkillsApiApiCoreSkillsSkillIdDistributionUpgradeGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSkillsSkillIdDistributionUpgradeGet(requestParameters: SkillsApiApiCoreSkillsSkillIdDistributionUpgradeGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<SkillDistributionUpgradeStatusOpenAPIResponse> {
+            return localVarFp.apiCoreSkillsSkillIdDistributionUpgradeGet(requestParameters.skillId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Merges the installed distribution base, current user Head, and latest builtin package. The candidate is staged in the existing Skill draft/review workflow.
+         * @summary Prepare a three-way builtin Skill distribution upgrade draft
+         * @param {SkillsApiApiCoreSkillsSkillIdDistributionUpgradePreparePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSkillsSkillIdDistributionUpgradePreparePost(requestParameters: SkillsApiApiCoreSkillsSkillIdDistributionUpgradePreparePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<SkillDistributionUpgradePrepareOpenAPIResponse> {
+            return localVarFp.apiCoreSkillsSkillIdDistributionUpgradePreparePost(requestParameters.skillId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary Preview skill draft diff
          * @param {SkillsApiApiCoreSkillsSkillIdDraftPreviewGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -36126,6 +36263,20 @@ export interface SkillsApiApiCoreSkillsSkillIdDeleteRequest {
  * Request parameters for apiCoreSkillsSkillIdDiscardPost operation in SkillsApi.
  */
 export interface SkillsApiApiCoreSkillsSkillIdDiscardPostRequest {
+    readonly skillId: string
+}
+
+/**
+ * Request parameters for apiCoreSkillsSkillIdDistributionUpgradeGet operation in SkillsApi.
+ */
+export interface SkillsApiApiCoreSkillsSkillIdDistributionUpgradeGetRequest {
+    readonly skillId: string
+}
+
+/**
+ * Request parameters for apiCoreSkillsSkillIdDistributionUpgradePreparePost operation in SkillsApi.
+ */
+export interface SkillsApiApiCoreSkillsSkillIdDistributionUpgradePreparePostRequest {
     readonly skillId: string
 }
 
@@ -36333,6 +36484,28 @@ export class SkillsApi extends BaseAPI {
      */
     public apiCoreSkillsSkillIdDiscardPost(requestParameters: SkillsApiApiCoreSkillsSkillIdDiscardPostRequest, options?: RawAxiosRequestConfig) {
         return SkillsApiFp(this.configuration).apiCoreSkillsSkillIdDiscardPost(requestParameters.skillId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary Get builtin Skill distribution upgrade status
+     * @param {SkillsApiApiCoreSkillsSkillIdDistributionUpgradeGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreSkillsSkillIdDistributionUpgradeGet(requestParameters: SkillsApiApiCoreSkillsSkillIdDistributionUpgradeGetRequest, options?: RawAxiosRequestConfig) {
+        return SkillsApiFp(this.configuration).apiCoreSkillsSkillIdDistributionUpgradeGet(requestParameters.skillId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Merges the installed distribution base, current user Head, and latest builtin package. The candidate is staged in the existing Skill draft/review workflow.
+     * @summary Prepare a three-way builtin Skill distribution upgrade draft
+     * @param {SkillsApiApiCoreSkillsSkillIdDistributionUpgradePreparePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreSkillsSkillIdDistributionUpgradePreparePost(requestParameters: SkillsApiApiCoreSkillsSkillIdDistributionUpgradePreparePostRequest, options?: RawAxiosRequestConfig) {
+        return SkillsApiFp(this.configuration).apiCoreSkillsSkillIdDistributionUpgradePreparePost(requestParameters.skillId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**

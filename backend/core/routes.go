@@ -510,6 +510,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/skills", []string{"qa.write"}, skillv2handler.Create)
 	handleAPI(r, "GET", "/builtin-skills", []string{"qa.read"}, skillv2handler.ListBuiltinSkills)
 	handleAPI(r, "POST", "/builtin-skills/{builtin_skill_uid}:enable", []string{"qa.write"}, skillv2handler.EnableBuiltinSkill)
+	handleAPI(r, "GET", "/skills/{skill_id}/distribution-upgrade", []string{"qa.read"}, skillv2handler.DistributionUpgradeStatus)
+	handleAPI(r, "POST", "/skills/{skill_id}/distribution-upgrade:prepare", []string{"qa.write"}, skillv2handler.PrepareDistributionUpgrade)
 	handleAPI(r, "GET", "/skills/{skill_id}:shares", []string{"qa.read"}, skillv2handler.ListShareTargets)
 	handleAPI(r, "GET", "/skill-shares/incoming", []string{"qa.read"}, skillv2handler.IncomingShares)
 	handleAPI(r, "GET", "/skill-shares/outgoing", []string{"qa.read"}, skillv2handler.OutgoingShares)

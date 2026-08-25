@@ -327,6 +327,7 @@ export default function MemorySkillDetailPage() {
             key={packageReloadKey}
             skillId={skill.id}
             canEdit={canEditSkillDetail}
+            autoUpdateEnabled={Boolean(skill.autoEvo)}
             t={t}
             onSkillUpdated={handleSkillUpdated}
           />

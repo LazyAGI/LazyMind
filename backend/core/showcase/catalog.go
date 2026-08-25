@@ -323,6 +323,7 @@ func (c Catalog) ShowcaseCases(locale string) []ShowcaseCase {
 		cases = append(cases, ShowcaseCase{
 			ID:                definition.ID,
 			Type:              definition.Type,
+			SourceURL:         definition.Skill.SourceURL,
 			Title:             presentation.Card.Title,
 			Description:       presentation.Card.Description,
 			DetailTitle:       presentation.Detail.Title,
