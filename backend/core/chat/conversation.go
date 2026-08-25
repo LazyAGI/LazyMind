@@ -1643,7 +1643,7 @@ func DeleteConversation(w http.ResponseWriter, r *http.Request) {
 func PromoteConversation(w http.ResponseWriter, r *http.Request) {
 	convID := strings.TrimSpace(mux.Vars(r)["conversation_id"])
 	if convID == "" {
-		common.ReplyErr(w, "invalid conversation id", http.StatusBadRequest)
+		common.ReplyErr(w, "invalid conversation name", http.StatusBadRequest)
 		return
 	}
 	userID := store.UserID(r)
