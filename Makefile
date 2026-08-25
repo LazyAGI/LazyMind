@@ -509,8 +509,9 @@ lazymind-cli-build:
 	fi
 
 assistant-bridge-start: lazymind-cli-build
+	@"$(LAZYMIND_CLI_BIN)" assistant stop >/dev/null
 	@"$(LAZYMIND_CLI_BIN)" assistant start >/dev/null
-	@echo "✅ LazyMind 助理桥接器已启动；可直接在设置 → 助理中连接本机 Agent"
+	@echo "✅ LazyMind 助理桥接器已启动；可在设置 → 外部 Agent 集成中启用本机能力"
 
 assistant-bridge-stop:
 	@if [ -x "$(LAZYMIND_CLI_BIN)" ]; then \

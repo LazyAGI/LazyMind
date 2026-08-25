@@ -5,6 +5,7 @@
 import axios from "axios";
 import { authServiceApiUrl } from "@/runtime/apiBase";
 import i18n from "@/i18n";
+import { clearLocalAssistantSession } from "@/runtime/assistantSession";
 
 const STORAGE_KEY = "lazymind:user";
 export const AUTH_USER_CHANGE_EVENT = "lazymind:user-change";
@@ -142,6 +143,11 @@ export const AgentAppsAuth = {
       await logoutFromServer();
     } catch (error) {
       console.error("Logout from server failed:", error);
+    }
+    try {
+      await clearLocalAssistantSession();
+    } catch {
+      // The local Assistant Bridge is optional outside local deployments.
     }
     
     this.clearUserInfo();
