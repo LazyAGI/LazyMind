@@ -1436,5 +1436,10 @@
   "2002298": { "en-US": "Cannot prepare a distribution upgrade while a draft exists", "zh-CN": "存在草稿时无法准备技能分发升级" },
   "2002299": { "en-US": "The installed Skill distribution baseline is unavailable", "zh-CN": "已安装技能的分发基线不可用" },
   "2002300": { "en-US": "Distribution upgrade conflicts require draft review", "zh-CN": "技能分发升级冲突需要通过草稿审阅解决" },
-  "2002301": { "en-US": "A distribution upgrade draft is active", "zh-CN": "技能分发升级草稿正在处理中" }
+  "2002301": { "en-US": "A distribution upgrade draft is active", "zh-CN": "技能分发升级草稿正在处理中" },
+  "2002302": { "en-US": "Editable content exceeds the 2 MiB limit", "zh-CN": "可编辑内容超过 2 MiB 限制" },
+  "2002303": { "en-US": "The editable block changed; refresh and retry", "zh-CN": "可编辑内容已发生变化，请刷新后重试" },
+  "2002304": { "en-US": "Failed to save the editable block", "zh-CN": "保存可编辑内容失败" },
+  "2002305": { "en-US": "Skill name cannot exceed 80 characters", "zh-CN": "技能名称不能超过 80 个字符" },
+  "2002306": { "en-US": "Skill description cannot exceed 1024 characters", "zh-CN": "技能描述不能超过 1024 个字符" }
 }

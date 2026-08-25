@@ -8,6 +8,7 @@ type UserUIPreferences struct {
 	DeveloperModeActive           bool      `gorm:"column:developer_mode_active;not null;default:false"`
 	AcceptedUserAgreementVersion  string    `gorm:"column:accepted_user_agreement_version;type:varchar(64);not null;default:''"`
 	TaskCenterEnabled             bool      `gorm:"column:task_center_enabled;not null;default:true"`
+	SchedulesEnabled              bool      `gorm:"column:schedules_enabled;not null;default:true"`
 	SkillsEnabled                 bool      `gorm:"column:skills_enabled;not null;default:true"`
 	WorkflowsEnabled              bool      `gorm:"column:workflows_enabled;not null;default:true"`
 	MCPEnabled                    bool      `gorm:"column:mcp_enabled;not null;default:true"`

@@ -258,8 +258,10 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		}
 		initialConversationSettings["chat_executor"] = normalized
 	}
+	runInBackground, _ := raw["run_in_background"].(bool)
+	requestedThinkingDepth, _ := raw["thinking_depth"].(string)
 
-	conversationRecord, seq, err := ensureConversation(r.Context(), db, convID, displayName, searchConfigJSON, modelsJSON, userID, userName, initialConversationSettings)
+	conversationRecord, seq, err := ensureConversation(r.Context(), db, convID, displayName, searchConfigJSON, modelsJSON, userID, userName, runInBackground, requestedThinkingDepth, initialConversationSettings)
 	if err != nil {
 		if errors.Is(err, errConversationInTrash) {
 			common.ReplyErr(w, err.Error(), http.StatusConflict)
@@ -1554,6 +1556,7 @@ func GetConversationDetail(w http.ResponseWriter, r *http.Request) {
 			"workflow_mode":         c.WorkflowMode,
 			"enable_subagent":       c.EnableSubagent,
 			"chat_executor":         c.ChatExecutor,
+			"thinking_depth":        c.ThinkingDepth,
 			"assistant":             source.Assistant,
 			"project_key":           source.ProjectKey,
 			"project_name":          source.ProjectName,

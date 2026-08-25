@@ -199,7 +199,7 @@ export default function KnowledgeDataSettings({
       <span className="settings-knowledge-tool-icon" aria-hidden="true">{group.icon}</span>
       <div className="settings-knowledge-tool-copy">
         <strong>{displayName}</strong>
-        <p>{tool?.description || definition.description}</p>
+        <p>{definition.description}</p>
       </div>
       <Tag className={`settings-knowledge-state ${status.className}`}>{status.label}</Tag>
       <Switch
@@ -226,18 +226,20 @@ export default function KnowledgeDataSettings({
     />
   ) : (
     <div className="settings-knowledge-groups">
-      {toolGroups.map((group) => {
-        const registered = group.tools.filter((tool) => toolsByID.has(tool.id)).length;
-        const enabled = group.tools.filter((tool) => toolsByID.get(tool.id)?.isEnabled).length;
-        return <section className={`settings-knowledge-group is-${group.id}`} key={group.id}>
-          <header className="settings-knowledge-group-head">
-            <span>{group.icon}</span>
-            <div><h2>{group.title}</h2><p>{group.description}</p></div>
-            <Tag>{t("settingsPage.knowledge.enabledCount", { enabled, registered })}</Tag>
-          </header>
-          <div className="settings-knowledge-tool-list">{group.tools.map((tool) => renderTool(tool, group))}</div>
-        </section>;
-      })}
+      <div className="settings-knowledge-capability-flow">
+        {toolGroups.map((group) => {
+          const registered = group.tools.filter((tool) => toolsByID.has(tool.id)).length;
+          const enabled = group.tools.filter((tool) => toolsByID.get(tool.id)?.isEnabled).length;
+          return <section className={`settings-knowledge-group is-${group.id}`} key={group.id}>
+            <header className="settings-knowledge-group-head">
+              <span>{group.icon}</span>
+              <div><h2>{group.title}</h2><p>{group.description}</p></div>
+              <Tag>{t("settingsPage.knowledge.enabledCount", { enabled, registered })}</Tag>
+            </header>
+            <div className="settings-knowledge-tool-list">{group.tools.map((tool) => renderTool(tool, group))}</div>
+          </section>;
+        })}
+      </div>
       <section className="settings-knowledge-group is-parser">
         <header className="settings-knowledge-group-head">
           <span><ApiOutlined /></span>

@@ -1484,8 +1484,14 @@
       align-items: center;
     }
 
+    .settings-popover-label {
+      min-width: 0;
+      flex: 1;
+      justify-content: flex-start;
+    }
+
     .settings-active-badge {
-      margin-left: auto;
+      flex: 0 0 auto;
       padding: 0 6px;
       border-radius: 999px;
       font-size: 12px;
@@ -1493,6 +1499,11 @@
       color: #0958d9;
       background: #dbeafe;
       border: 1px solid #bfdbfe;
+    }
+
+    .settings-popover-accessory {
+      flex: 0 0 auto;
+      margin-left: auto;
     }
   }
 

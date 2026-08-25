@@ -347,7 +347,10 @@
           .input-bottom-actions-left-item {
             /* Frame 1312321162 */
             font-size: 12px;
+            font-family: inherit;
+            line-height: inherit;
             color: #5f6b7e;
+            background: transparent;
             cursor: pointer;
             /* Auto layout */
             display: flex;
@@ -377,6 +380,13 @@
               svg path {
                 fill: rgba(0, 106, 230, 1);
               }
+            }
+
+            &:disabled {
+              border-color: #dfe6ef;
+              color: #9aa6b7;
+              cursor: not-allowed;
+              opacity: .72;
             }
             &--icon-only {
               padding: 2px 5px;

@@ -43,6 +43,18 @@ func newExternalChatTestApplication(t *testing.T) (*externalChatApplication, *go
 	return newExternalChatApplication(db), db
 }
 
+func seedExternalConversationPolicy(t *testing.T, db *gorm.DB, userID string, enableWorkflow bool, workflowMode string, enableSubagent bool) {
+	t.Helper()
+	if err := db.Exec(`
+INSERT INTO user_chat_settings (
+  user_id, enable_workflow, plugin_mode, enable_subagent,
+  quick_question_defaults, new_task_defaults, updated_at
+) VALUES (?, ?, ?, ?, '{}', '{}', ?)
+`, userID, enableWorkflow, workflowMode, enableSubagent, time.Now().UTC()).Error; err != nil {
+		t.Fatalf("create user chat settings: %v", err)
+	}
+}
+
 func TestExternalExecutionProjectionJoinsAuthoritiesWithoutOwningState(t *testing.T) {
 	app, db := newExternalChatTestApplication(t)
 	clock := time.Now().UTC()
@@ -367,6 +379,90 @@ func TestDirectMCPInvocationDoesNotCreateSyntheticConversationTurn(t *testing.T)
 	}
 	if histories != 0 || runs != 0 {
 		t.Fatalf("synthetic histories=%d runs=%d", histories, runs)
+	}
+}
+
+func TestExternalConversationSnapshotsUserExecutionPolicy(t *testing.T) {
+	_, db := newExternalChatTestApplication(t)
+	seedExternalConversationPolicy(t, db, "snapshot-user", false, "auto", false)
+	link, err := externalcontext.New(db).ResolveInvocation(
+		context.Background(), "snapshot-user", "snapshot-invocation",
+		externalcontext.Source{
+			Provider: ChatExecutorCursor, HostID: "snapshot-host", ThreadID: "snapshot-thread",
+			TurnID: "snapshot-turn", Message: "snapshot policy",
+		},
+	)
+	if err != nil {
+		t.Fatalf("resolve external invocation: %v", err)
+	}
+	var conversation orm.Conversation
+	if err := db.Where("id = ?", link.ConversationID).Take(&conversation).Error; err != nil {
+		t.Fatalf("load external conversation: %v", err)
+	}
+	if conversation.EnableWorkflow == nil || *conversation.EnableWorkflow ||
+		conversation.WorkflowMode == nil || *conversation.WorkflowMode != "auto" ||
+		conversation.EnableSubagent == nil || *conversation.EnableSubagent {
+		t.Fatalf("external conversation did not snapshot user policy: %#v", conversation)
+	}
+	if err := db.Model(&orm.UserChatSettings{}).Where("user_id = ?", "snapshot-user").Updates(map[string]any{
+		"enable_workflow": true,
+		"plugin_mode":     "dynamic", // workflow-naming: persistence
+		"enable_subagent": true,
+	}).Error; err != nil {
+		t.Fatalf("change user chat settings: %v", err)
+	}
+	config := loadUserAgentConfig(context.Background(), db, "snapshot-user", map[string]any{
+		"conversation_id": link.ConversationID,
+	})
+	if config["enable_workflow"] != false || config["workflow_mode"] != "auto" || config["enable_subagent"] != false {
+		t.Fatalf("external conversation policy changed with user defaults: %#v", config)
+	}
+}
+
+func TestExistingExternalConversationFillsOnlyNullPolicyFields(t *testing.T) {
+	_, db := newExternalChatTestApplication(t)
+	now := time.Now().UTC()
+	seedExternalConversationPolicy(t, db, "user-1", false, "auto", false)
+	if err := db.Model(&orm.Conversation{}).Where("id = ?", "conversation-1").
+		Update("enable_plugin", true).Error; err != nil {
+		t.Fatalf("seed non-NULL conversation policy: %v", err)
+	}
+	if err := db.Create(&orm.ExternalAgentBinding{
+		ID: "existing-policy-binding", ConversationID: "conversation-1",
+		Provider: ChatExecutorCursor, HostID: "existing-policy-host",
+		ProviderThreadID: "existing-policy-thread", CreatedByUserID: "user-1",
+		CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("create external binding: %v", err)
+	}
+	if _, err := externalcontext.New(db).ResolveInvocation(
+		context.Background(), "user-1", "existing-policy-invocation",
+		externalcontext.Source{
+			Provider: ChatExecutorCursor, HostID: "existing-policy-host",
+			ThreadID: "existing-policy-thread", TurnID: "existing-policy-turn",
+		},
+	); err != nil {
+		t.Fatalf("resolve existing external conversation: %v", err)
+	}
+	var conversation orm.Conversation
+	if err := db.Where("id = ?", "conversation-1").Take(&conversation).Error; err != nil {
+		t.Fatalf("reload existing conversation: %v", err)
+	}
+	if conversation.EnableWorkflow == nil || !*conversation.EnableWorkflow ||
+		conversation.WorkflowMode == nil || *conversation.WorkflowMode != "auto" ||
+		conversation.EnableSubagent == nil || *conversation.EnableSubagent {
+		t.Fatalf("existing external policy fill overwrote non-NULL data or missed NULL data: %#v", conversation)
+	}
+}
+
+func TestNullConversationPolicyUsesHistoricalHardDefaults(t *testing.T) {
+	_, db := newExternalChatTestApplication(t)
+	seedExternalConversationPolicy(t, db, "user-1", false, "auto", false)
+	config := loadUserAgentConfig(context.Background(), db, "user-1", map[string]any{
+		"conversation_id": "conversation-1",
+	})
+	if config["enable_workflow"] != true || config["workflow_mode"] != "dynamic" || config["enable_subagent"] != true {
+		t.Fatalf("NULL conversation policy followed mutable user defaults: %#v", config)
 	}
 }
 

@@ -8,6 +8,8 @@ import (
 	"testing"
 
 	"github.com/gorilla/mux"
+
+	"lazymind/core/chat"
 )
 
 func TestOpenAPISpecCoversAllRegisteredRoutes(t *testing.T) {
@@ -89,6 +91,73 @@ func TestOpenAPISpecIncludesSkillMarketDelete(t *testing.T) {
 		if _, ok := openAPIParameterNamesForTest(t, op)["market_item_id"]; !ok {
 			t.Fatalf("DELETE %s missing market_item_id path parameter", path)
 		}
+	}
+}
+
+func TestOpenAPIConversationItemIncludesThinkingDepthEnum(t *testing.T) {
+	router := mux.NewRouter()
+	registerCoreRoutes(router)
+	specJSON, err := buildOpenAPISpecFromRouter(router)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+	properties := schemaPropertiesForTest(t, schemas, "ConversationItem")
+	depth, ok := properties["thinking_depth"].(map[string]any)
+	if !ok {
+		t.Fatalf("ConversationItem thinking_depth schema missing: %#v", properties["thinking_depth"])
+	}
+	rawEnum, ok := depth["enum"].([]any)
+	if !ok || !reflect.DeepEqual(rawEnum, []any{"low", "medium", "high", "max"}) {
+		t.Fatalf("ConversationItem thinking_depth enum=%#v", depth["enum"])
+	}
+}
+
+func TestOpenAPIChatEntryDefaultsEnumsMatchValidation(t *testing.T) {
+	router := mux.NewRouter()
+	registerCoreRoutes(router)
+	specJSON, err := buildOpenAPISpecFromRouter(router)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+	assertEnum := func(schemaName, propertyName string, want []any) {
+		t.Helper()
+		properties := schemaPropertiesForTest(t, schemas, schemaName)
+		property, ok := properties[propertyName].(map[string]any)
+		if !ok || !reflect.DeepEqual(property["enum"], want) {
+			t.Fatalf("%s.%s enum=%#v, want %#v", schemaName, propertyName, property["enum"], want)
+		}
+	}
+
+	thinkingDepths := []any{"low", "medium", "high", "max"}
+	workflowModes := []any{"auto", "dynamic"}
+	executors := []any{
+		chat.ChatExecutorLazyMind,
+		chat.ChatExecutorCodex,
+		chat.ChatExecutorCursor,
+		chat.ChatExecutorWorkBuddy,
+	}
+	for _, schemaName := range []string{
+		"chatEntryDefaultsOpenAPI",
+		"chatEntryDefaultsPatchOpenAPIRequest",
+	} {
+		assertEnum(schemaName, "thinking_depth", thinkingDepths)
+	}
+	for _, schemaName := range []string{
+		"chatConversationDefaultsOpenAPI",
+		"chatConversationDefaultsPatchOpenAPIRequest",
+	} {
+		assertEnum(schemaName, "workflow_mode", workflowModes)
+		assertEnum(schemaName, "chat_executor", executors)
 	}
 }
 
@@ -940,6 +1009,8 @@ func TestOpenAPISpecCoversEvolutionSkillMemoryPreferenceOperations(t *testing.T)
 		{"delete", "/api/core/model_providers/{model_provider_id}/groups/{group_id}/models/{model_id}", false, true, true},
 		{"get", "/api/core/personalization-setting", false, false, true},
 		{"put", "/api/core/personalization-setting", true, false, true},
+		{"get", "/api/core/user/chat-settings", false, false, true},
+		{"patch", "/api/core/user/chat-settings", true, false, true},
 		{"get", "/api/core/user/ui-preferences", false, false, true},
 		{"patch", "/api/core/user/ui-preferences", true, false, true},
 		{"get", "/api/core/skill-review:summary", false, false, false},
@@ -1112,13 +1183,43 @@ func TestOpenAPISpecMarksUIPreferencesPatchFieldsOptional(t *testing.T) {
 	if !ok {
 		t.Fatalf("userUIPreferencesPatchOpenAPIRequest properties missing")
 	}
-	for _, name := range []string{"chat_preference_notice_dismissed", "developer_mode_active", "skills_enabled", "workflows_enabled"} {
+	for _, name := range []string{"chat_preference_notice_dismissed", "developer_mode_active", "schedules_enabled", "skills_enabled", "workflows_enabled"} {
 		if _, ok := properties[name]; !ok {
 			t.Fatalf("userUIPreferencesPatchOpenAPIRequest expected property %q", name)
 		}
 	}
 	if required, ok := schema["required"].([]any); ok && len(required) > 0 {
 		t.Fatalf("userUIPreferencesPatchOpenAPIRequest fields should all be optional, got required=%v", required)
+	}
+
+	chatPatch, ok := schemas["userChatSettingsPatchOpenAPIRequest"].(map[string]any)
+	if !ok {
+		t.Fatal("userChatSettingsPatchOpenAPIRequest missing")
+	}
+	chatPatchProperties, ok := chatPatch["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("userChatSettingsPatchOpenAPIRequest properties missing")
+	}
+	for _, name := range []string{"enable_workflow", "workflow_mode", "enable_subagent", "quick_question", "new_task"} {
+		if _, ok := chatPatchProperties[name]; !ok {
+			t.Fatalf("userChatSettingsPatchOpenAPIRequest expected property %q", name)
+		}
+	}
+	if required, ok := chatPatch["required"].([]any); ok && len(required) > 0 {
+		t.Fatalf("userChatSettingsPatchOpenAPIRequest fields should all be optional, got required=%v", required)
+	}
+	chatResponse, ok := schemas["userChatSettingsOpenAPIResponse"].(map[string]any)
+	if !ok {
+		t.Fatal("userChatSettingsOpenAPIResponse missing")
+	}
+	chatResponseProperties, ok := chatResponse["properties"].(map[string]any)
+	if !ok {
+		t.Fatal("userChatSettingsOpenAPIResponse properties missing")
+	}
+	for _, name := range []string{"quick_question", "new_task"} {
+		if _, ok := chatResponseProperties[name]; !ok {
+			t.Fatalf("userChatSettingsOpenAPIResponse expected property %q", name)
+		}
 	}
 }
 
