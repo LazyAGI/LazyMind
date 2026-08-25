@@ -22,7 +22,7 @@ export const SKILL_NAME_MAX_LENGTH = 50;
 export const SKILL_DESCRIPTION_MAX_LENGTH = 1024;
 
 export function countSkillCharacters(value: unknown): number {
-  return Array.from(typeof value === "string" ? value : "").length;
+  return Array.from(typeof value === "string" ? value.trim() : "").length;
 }
 
 export function skillCharCountConfig(maxLength: number, visible = true) {
