@@ -85,4 +85,3 @@ def build_session_env_tool(
         }
 
     return set_session_env
-
