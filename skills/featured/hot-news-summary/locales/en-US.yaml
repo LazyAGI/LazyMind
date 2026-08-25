@@ -29,7 +29,7 @@ tasks:
       output_label: Today's hot-topic digest
     launch:
       prompt_short: Generate today's hot-topic digest for me.
-      prompt: Use the Daily topic assistant to create today's hot-topic digest. Aggregate and verify multi-platform hot-list data, select about 10 representative topics, report each platform's fetch status and fallback state, deduplicate the results, and preserve topic diversity. For every topic, provide three layers of insight—What, So What, and Now What—using a serious analytical style by default. Include source links, short excerpts, and a search-method note; state data gaps or fetch failures clearly and never invent facts. Finish with a structured report that can be edited and preserve the necessary historical archive information.
+      prompt: Based on the information currently available, prepare a concise digest of today's hot topics with brief analysis of what is worth attention. If information is insufficient or sources are unavailable, state the data limitations clearly.
     replay:
       steps:
         - title: Aggregate multi-platform hot lists
