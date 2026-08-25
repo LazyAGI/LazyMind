@@ -9,6 +9,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +19,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/workflow/artifactfile"
 	workflowexecutor "lazymind/core/workflow/executor"
+	"lazymind/core/workflow/graphengine"
 	workflowstore "lazymind/core/workflow/store"
 )
 
@@ -184,6 +186,60 @@ type prepareRequest struct {
 	ConversationID string         `json:"conversation_id"`
 	ControllerHost string         `json:"controller_host"`
 	RequestContext string         `json:"request_context"`
+}
+
+type preparationGraph struct {
+	Nodes map[string]struct {
+		Capabilities []string `json:"capabilities"`
+		LegacyTools  []string `json:"legacy_tools"`
+	} `json:"nodes"`
+	MaterialProducers map[string]struct {
+		Kind     string `json:"kind"`
+		Optional bool   `json:"optional"`
+	} `json:"material_producers"`
+	InputExpressions map[string]graphengine.Expression `json:"input_expressions"`
+}
+
+func collectRequiredInputMaterials(expression graphengine.Expression, materials map[string]struct{}) {
+	if expression.Material != "" {
+		materials[expression.Material] = struct{}{}
+	}
+	for _, nested := range expression.All {
+		collectRequiredInputMaterials(nested, materials)
+	}
+	for _, nested := range expression.Any {
+		// Keep the existing conservative preparation contract for alternatives:
+		// every candidate branch input must be available before the Session starts.
+		collectRequiredInputMaterials(nested, materials)
+	}
+}
+
+func missingExternalInputs(graph preparationGraph, inputBindings map[string]any) []string {
+	required := map[string]struct{}{}
+	if graph.InputExpressions == nil {
+		// Backward compatibility for compiled graphs without expression metadata.
+		for materialID, producer := range graph.MaterialProducers {
+			if producer.Kind == "external" && !producer.Optional {
+				required[materialID] = struct{}{}
+			}
+		}
+	} else {
+		for _, expression := range graph.InputExpressions {
+			collectRequiredInputMaterials(expression, required)
+		}
+	}
+	missing := make([]string, 0)
+	for materialID := range required {
+		producer, exists := graph.MaterialProducers[materialID]
+		if !exists || producer.Kind != "external" || producer.Optional {
+			continue
+		}
+		if _, exists := inputBindings[materialID]; !exists {
+			missing = append(missing, materialID)
+		}
+	}
+	sort.Strings(missing)
+	return missing
 }
 
 type toolCommandRequest struct {
@@ -611,15 +667,7 @@ func (h Handler) Prepare(w http.ResponseWriter, r *http.Request) {
 			controllerHost = "lazymind"
 		}
 		if h.Hosts != nil {
-			var graph struct {
-				Nodes map[string]struct {
-					Capabilities []string `json:"capabilities"`
-					LegacyTools  []string `json:"legacy_tools"`
-				} `json:"nodes"`
-				MaterialProducers map[string]struct {
-					Kind string `json:"kind"`
-				} `json:"material_producers"`
-			}
+			var graph preparationGraph
 			_ = json.Unmarshal(workflow.CompiledGraph, &graph)
 			capabilities, legacyTools := []string{}, []string{}
 			for _, node := range graph.Nodes {
@@ -635,14 +683,7 @@ func (h Handler) Prepare(w http.ResponseWriter, r *http.Request) {
 					strings.Join(missing, ", "), false)
 				return
 			}
-			missingInputs := []string{}
-			for materialID, producer := range graph.MaterialProducers {
-				if producer.Kind == "external" {
-					if _, exists := req.InputBindings[materialID]; !exists {
-						missingInputs = append(missingInputs, materialID)
-					}
-				}
-			}
+			missingInputs := missingExternalInputs(graph, req.InputBindings)
 			if len(missingInputs) > 0 {
 				plan, _ = json.Marshal(map[string]any{"status": "needs_input", "workflow_ref": workflow.WorkflowRef,
 					"workflow_id": workflow.WorkflowID, "workflow_revision": workflow.RevisionID,
@@ -896,6 +937,7 @@ func (h Handler) Command(delegate http.Handler) http.HandlerFunc {
 							value["ready_steps"] = projection["ready"]
 							value["retryable_steps"] = projection["retryable"]
 							value["rewindable_steps"] = projection["rewindable"]
+							value["continue_steps"] = projection["continue"]
 						}
 					}
 				}

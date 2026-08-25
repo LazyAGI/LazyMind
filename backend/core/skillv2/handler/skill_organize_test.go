@@ -31,8 +31,10 @@ func TestSubmitSkillOrganizeForwardsCoreManagedFields(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
 	testutil.SeedSkillWithRevision(t, db, "skill2", "rev2")
+	testutil.SeedSkillWithRevision(t, db, "skill3", "rev3")
 	setSkillOrganizeCategory(t, db, "skill1", "internal", "internal/论文精读")
 	setSkillOrganizeCategory(t, db, "skill2", "external", "external/论文精读-skill2")
+	setSkillOrganizeCategory(t, db, "skill3", "internal", "internal/第二技能")
 	testutil.SeedTextBlob(t, db, "external_draft_hash", "external draft")
 	testutil.SeedDraftEntry(t, db, "skill2", "SKILL.md", "upsert", "file", "external_draft_hash")
 	store.Init(db.DB, nil, nil)
@@ -59,7 +61,7 @@ func TestSubmitSkillOrganizeForwardsCoreManagedFields(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/core/skill_organize", strings.NewReader(`{
 		"requestid": "org_smoke",
 		"user_id": "ignored",
-		"skills": [" /skills/internal/论文精读/ ", "skills/external/论文精读-skill2"],
+		"skills": [" /skills/internal/论文精读/ ", "skills/external/论文精读-skill2", "skills/internal/第二技能"],
 		"fs_base_url": "http://frontend-should-not-win",
 		"artifact_dir": "tmp/a-skill-org",
 		"model_configs": {"llm": {"api_key": "frontend-should-not-win"}}
@@ -75,7 +77,7 @@ func TestSubmitSkillOrganizeForwardsCoreManagedFields(t *testing.T) {
 	if captured.UserID != "user_001" || captured.RequestID != "org_smoke" {
 		t.Fatalf("unexpected forwarded request identity: %#v", captured)
 	}
-	if strings.Join(captured.Skills, ",") != "internal/论文精读" {
+	if strings.Join(captured.Skills, ",") != "internal/论文精读,internal/第二技能" {
 		t.Fatalf("unexpected forwarded skills: %#v", captured.Skills)
 	}
 	if captured.ArtifactDir != "tmp/a-skill-org" {
@@ -118,6 +120,7 @@ func TestSubmitSkillOrganizeFiltersNonInternalSkills(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
 	testutil.SeedSkillWithRevision(t, db, "skill2", "rev2")
+	setSkillOrganizeCategory(t, db, "skill1", "internal", "internal/another-skill")
 	if err := db.Model(&testutil.SkillRow{}).Where("id = ?", "skill2").Updates(map[string]any{
 		"category":      "internal",
 		"relative_root": "internal/generated-skill",
@@ -139,7 +142,7 @@ func TestSubmitSkillOrganizeFiltersNonInternalSkills(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/core/skill_organize", strings.NewReader(`{
 		"requestid":"org_filtered",
-		"skills":["skills/creative/art_style","skills/vcs/git-guide","skills/research/论文精读","skills/external/downloaded","skills/internal/generated-skill"]
+		"skills":["skills/creative/art_style","skills/vcs/git-guide","skills/internal/another-skill","skills/external/downloaded","skills/internal/generated-skill"]
 	}`))
 	req.Header.Set("X-User-Id", "user_001")
 	rec := httptest.NewRecorder()
@@ -149,8 +152,53 @@ func TestSubmitSkillOrganizeFiltersNonInternalSkills(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
 	}
-	if strings.Join(captured.Skills, ",") != "internal/generated-skill" {
-		t.Fatalf("forwarded skills = %#v, want only internal skill", captured.Skills)
+	if strings.Join(captured.Skills, ",") != "internal/another-skill,internal/generated-skill" {
+		t.Fatalf("forwarded skills = %#v, want only internal skills", captured.Skills)
+	}
+}
+
+func TestSubmitSkillOrganizeRejectsSingleInternalSkill(t *testing.T) {
+	oldCaller := skillOrganizeCaller
+	oldDB := store.DB()
+	t.Cleanup(func() {
+		skillOrganizeCaller = oldCaller
+		store.Init(oldDB, nil, nil)
+	})
+
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	setSkillOrganizeCategory(t, db, "skill1", "internal", "internal/only-skill")
+	store.Init(db.DB, nil, nil)
+
+	called := false
+	skillOrganizeCaller = func(_ context.Context, _ algo.SkillOrganizeRequest) (*algo.SkillOrganizeResponse, int, error) {
+		called = true
+		return nil, 0, nil
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/api/core/skill_organize", strings.NewReader(`{
+		"requestid": "org_single_internal",
+		"skills": ["skills/internal/only-skill"]
+	}`))
+	req.Header.Set("X-User-Id", "user_001")
+	rec := httptest.NewRecorder()
+
+	SubmitSkillOrganize(rec, req)
+
+	if rec.Code != http.StatusBadRequest || called {
+		t.Fatalf("status=%d called=%v body=%s", rec.Code, called, rec.Body.String())
+	}
+	if !strings.Contains(rec.Body.String(), "skill_organize_insufficient_internal_skills") {
+		t.Fatalf("unexpected body: %s", rec.Body.String())
+	}
+	var count int64
+	if err := db.Model(&orm.ResourceUpdateTask{}).
+		Where("task_type = ?", orm.ResourceUpdateTaskTypeOrganizeSkill).
+		Count(&count).Error; err != nil {
+		t.Fatalf("count organize reservations: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("organize reservation count = %d, want 0", count)
 	}
 }
 

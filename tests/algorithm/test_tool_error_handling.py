@@ -1,6 +1,10 @@
 import importlib
 
+import pytest
+
 from lazymind.chat.engine.tools import kb
+from lazymind.chat.engine.tools.writer import WriterCreateToolkit
+from lazyllm.tools.agent import ToolExecutionError
 from lazyllm.tools.agent.toolsManager import MethodModuleTool
 
 skill_editor_mod = importlib.import_module('lazymind.chat.engine.tools.skill_editor')
@@ -31,12 +35,17 @@ def test_kb_keyword_search_maps_target_by_type(monkeypatch):
     by_file = kb.KBToolkit().kb_keyword_search('DeepSeek', 'report.pdf')
     by_docid = kb.KBToolkit().kb_keyword_search('DeepSeek', 'doc-1', target_type='docid')
 
-    assert by_file['success'] is True
+    assert by_file['total'] == 0
     assert calls[0]['file_name'] == 'report.pdf'
     assert calls[0]['doc_id'] == ''
-    assert by_docid['success'] is True
+    assert by_docid['total'] == 0
     assert calls[1]['file_name'] is None
     assert calls[1]['doc_id'] == 'doc-1'
+
+
+def test_writer_classifies_explicit_argument_failure():
+    with pytest.raises(ToolExecutionError, match='JSON array'):
+        WriterCreateToolkit().build_resources(file_paths_json='{}')
 
 
 def test_skill_editor_tool_group_exposes_action_specific_schemas():

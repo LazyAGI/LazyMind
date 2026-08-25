@@ -22,12 +22,15 @@ type AttemptContext struct {
 	PartialSelector     map[string][]int  `json:"partial_selector,omitempty"`
 	WorkflowRevision    string            `json:"workflow_revision"`
 	Inputs              map[string]any    `json:"inputs,omitempty"`
+	DeclaredInputTypes  map[string]string `json:"declared_input_types,omitempty"`
 	DeclaredOutputs     []string          `json:"declared_outputs,omitempty"`
 	DeclaredOutputTypes map[string]string `json:"declared_output_types,omitempty"`
 	RequiredOutputs     []string          `json:"required_outputs,omitempty"`
 	OutputCardinality   map[string]string `json:"output_cardinality,omitempty"`
 	Capabilities        []string          `json:"capabilities,omitempty"`
 	LegacyTools         []string          `json:"legacy_tools,omitempty"`
+	TerminalTools       []string          `json:"terminal_tools,omitempty"`
+	ToolsOnly           bool              `json:"tools_only,omitempty"`
 	Metadata            map[string]string `json:"metadata,omitempty"`
 }
 
@@ -38,10 +41,15 @@ type Artifact struct {
 	Seq         int             `json:"seq"`
 }
 
+type Control struct {
+	NextStep string `json:"next_step,omitempty"`
+}
+
 type Result struct {
 	Summary     string         `json:"summary,omitempty"`
 	ExecutorRef string         `json:"executor_ref,omitempty"`
 	Artifacts   []Artifact     `json:"artifacts,omitempty"`
+	Control     *Control       `json:"control,omitempty"`
 	Projection  map[string]any `json:"projection,omitempty"`
 }
 

@@ -10,6 +10,7 @@ import (
 
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
+	"lazymind/core/workflow"
 )
 
 type uiPreferencesAPITestResponse struct {
@@ -104,7 +105,7 @@ func TestPatchUIPreferencesPreservesOtherFeatureControls(t *testing.T) {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	resp := decodeUIPreferencesResponse(t, rec)
-	if resp.Data.TaskCenterEnabled || resp.Data.MCPEnabled || !resp.Data.SkillsEnabled || !resp.Data.WorkflowsEnabled ||
+	if resp.Data.TaskCenterEnabled || resp.Data.MCPEnabled || !resp.Data.SkillsEnabled || resp.Data.WorkflowsEnabled ||
 		!resp.Data.DocumentParsingEnabled {
 		t.Fatalf("unexpected controls after patch: %#v", resp.Data)
 	}
@@ -116,7 +117,7 @@ func TestPatchUIPreferencesPreservesOtherFeatureControls(t *testing.T) {
 	PatchUIPreferences(secondRec, secondReq)
 	secondResp := decodeUIPreferencesResponse(t, secondRec)
 	if secondRec.Code != http.StatusOK || secondResp.Data.TaskCenterEnabled || secondResp.Data.MCPEnabled || secondResp.Data.SkillsEnabled ||
-		!secondResp.Data.WorkflowsEnabled || !secondResp.Data.DocumentParsingEnabled {
+		secondResp.Data.WorkflowsEnabled || !secondResp.Data.DocumentParsingEnabled {
 		t.Fatalf("feature controls should patch independently, got %#v status=%d", secondResp.Data, secondRec.Code)
 	}
 
@@ -127,9 +128,70 @@ func TestPatchUIPreferencesPreservesOtherFeatureControls(t *testing.T) {
 	PatchUIPreferences(thirdRec, thirdReq)
 	thirdResp := decodeUIPreferencesResponse(t, thirdRec)
 	if thirdRec.Code != http.StatusOK || thirdResp.Data.TaskCenterEnabled || thirdResp.Data.MCPEnabled || thirdResp.Data.SkillsEnabled ||
-		!thirdResp.Data.WorkflowsEnabled || thirdResp.Data.DocumentParsingEnabled {
+		thirdResp.Data.WorkflowsEnabled || thirdResp.Data.DocumentParsingEnabled {
 		t.Fatalf("document parsing control should patch independently, got %#v status=%d", thirdResp.Data, thirdRec.Code)
 	}
+}
+
+func TestPatchUIPreferencesTaskCenterControlsWorkflowAvailability(t *testing.T) {
+	db := newUIPreferencesTestDB(t)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	now := time.Now().UTC()
+
+	resources := []orm.WorkflowResource{
+		{ID: "workflow-user", WorkflowRef: "user:u1", WorkflowID: "user", OwnerUserID: "u1", OwnerScope: "user:u1", RelativeRoot: "workflows/user", Status: "active", CreatedAt: now, UpdatedAt: now},
+		{ID: "workflow-builtin", WorkflowRef: "builtin:shared", WorkflowID: "shared", OwnerScope: "builtin", RelativeRoot: "workflows/shared", Status: "active", CreatedAt: now, UpdatedAt: now},
+	}
+	if err := db.Create(&resources).Error; err != nil {
+		t.Fatalf("seed workflows: %v", err)
+	}
+
+	patch := func(body string) uiPreferencesAPITestResponse {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodPatch, "/api/core/user/ui-preferences", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set("X-User-Id", "u1")
+		rec := httptest.NewRecorder()
+		PatchUIPreferences(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("patch %s: status=%d body=%s", body, rec.Code, rec.Body.String())
+		}
+		return decodeUIPreferencesResponse(t, rec)
+	}
+	assertWorkflowsDisabled := func() {
+		t.Helper()
+		var settings []orm.UserWorkflowSetting
+		if err := db.Where("user_id = ?", "u1").Order("plugin_ref").Find(&settings).Error; err != nil {
+			t.Fatalf("load workflow settings: %v", err)
+		}
+		if len(settings) != 2 {
+			t.Fatalf("expected both available workflows to be synchronized, got %#v", settings)
+		}
+		for _, setting := range settings {
+			if setting.Enabled || setting.CallMode != workflow.WorkflowCallModeDisabled {
+				t.Fatalf("workflow should be disabled with task center off, got %#v", setting)
+			}
+		}
+	}
+
+	resp := patch(`{"task_center_enabled":false}`)
+	if resp.Data.TaskCenterEnabled || resp.Data.WorkflowsEnabled {
+		t.Fatalf("disabling task center must also disable workflows, got %#v", resp.Data)
+	}
+	assertWorkflowsDisabled()
+
+	resp = patch(`{"workflows_enabled":true}`)
+	if resp.Data.WorkflowsEnabled {
+		t.Fatalf("workflows cannot be enabled while task center is disabled, got %#v", resp.Data)
+	}
+	assertWorkflowsDisabled()
+
+	resp = patch(`{"task_center_enabled":true}`)
+	if !resp.Data.TaskCenterEnabled || resp.Data.WorkflowsEnabled {
+		t.Fatalf("re-enabling task center must not re-enable workflows automatically, got %#v", resp.Data)
+	}
+	assertWorkflowsDisabled()
 }
 
 func TestPatchUIPreferencesBulkControlsSkillsAndWorkflowsIndependently(t *testing.T) {
@@ -161,7 +223,7 @@ func TestPatchUIPreferencesBulkControlsSkillsAndWorkflowsIndependently(t *testin
 	if err := db.Create(&workflows).Error; err != nil {
 		t.Fatalf("seed workflows: %v", err)
 	}
-	if err := db.Create(&orm.UserWorkflowSetting{UserID: "u1", WorkflowRef: "user:u1", Enabled: true, UpdatedAt: now}).Error; err != nil {
+	if err := db.Create(&orm.UserWorkflowSetting{UserID: "u1", WorkflowRef: "user:u1", Enabled: true, CallMode: workflow.WorkflowCallModeAuto, UpdatedAt: now}).Error; err != nil {
 		t.Fatalf("seed workflow setting: %v", err)
 	}
 
@@ -194,6 +256,10 @@ func TestPatchUIPreferencesBulkControlsSkillsAndWorkflowsIndependently(t *testin
 	}
 	assertWorkflows := func(enabled bool, expectedCount int) {
 		t.Helper()
+		expectedCallMode := workflow.WorkflowCallModeDisabled
+		if enabled {
+			expectedCallMode = workflow.WorkflowCallModeAuto
+		}
 		var settings []orm.UserWorkflowSetting
 		if err := db.Where("user_id = ?", "u1").Order("plugin_ref").Find(&settings).Error; err != nil {
 			t.Fatalf("load workflow settings: %v", err)
@@ -202,8 +268,8 @@ func TestPatchUIPreferencesBulkControlsSkillsAndWorkflowsIndependently(t *testin
 			t.Fatalf("expected %d workflow settings, got %#v", expectedCount, settings)
 		}
 		for _, setting := range settings {
-			if setting.Enabled != enabled {
-				t.Fatalf("workflow %s should be enabled=%v", setting.WorkflowRef, enabled)
+			if setting.Enabled != enabled || setting.CallMode != expectedCallMode {
+				t.Fatalf("workflow %s should be enabled=%v call_mode=%s, got %#v", setting.WorkflowRef, enabled, expectedCallMode, setting)
 			}
 		}
 	}

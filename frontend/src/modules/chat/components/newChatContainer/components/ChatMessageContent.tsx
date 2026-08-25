@@ -3,15 +3,14 @@ import {
   BulbOutlined,
   CommentOutlined,
   DownOutlined,
+  LoadingOutlined,
   UpOutlined,
 } from "@ant-design/icons";
 import { ChatConversationsResponseFinishReasonEnum } from "@/api/generated/chatbot-client";
 import MarkdownViewer from "@/modules/chat/components/MarkdownViewer";
 import { getCitationSources } from "@/modules/chat/utils/sourceAdapter";
 import { RoleTypes } from "@/modules/chat/constants/common";
-import {
-  formatThinkingForDisplay,
-} from "@/modules/chat/utils/thinking";
+import { formatThinkingForDisplay } from "@/modules/chat/utils/thinking";
 import { useTranslation } from "react-i18next";
 import ChatImages from "../../ChatImages";
 import ChatFiles from "../../ChatFiles";
@@ -36,6 +35,27 @@ interface ChatMessageContentProps {
   onToggleThinkingCollapse: (key: string, currentCollapsed?: boolean) => void;
 }
 
+function ModelRetryStatus({
+  retry,
+}: {
+  retry: {
+    retry_index: number;
+    max_attempts: number;
+  };
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <div className="chat-model-retry-status" role="status" aria-live="polite">
+      <LoadingOutlined spin />
+      {t("chat.modelRetrying", {
+        attempt: retry.retry_index + 1,
+        max: retry.max_attempts,
+      })}
+    </div>
+  );
+}
+
 export default function ChatMessageContent({
   item,
   uniqueKey,
@@ -48,8 +68,9 @@ export default function ChatMessageContent({
   const citeMessageList =
     item.role === RoleTypes.USER ? getCiteMessages(item) : [];
   const isStreaming =
+    !item.run_status &&
     item.finish_reason !==
-    ChatConversationsResponseFinishReasonEnum.FinishReasonStop;
+      ChatConversationsResponseFinishReasonEnum.FinishReasonStop;
   const isCollapsed = isThinkingCollapsed(thinkingKey, !isStreaming);
   const conversationIntent =
     item.intent_updated?.scope === "conversation"
@@ -73,6 +94,7 @@ export default function ChatMessageContent({
 
   return (
     <Flex vertical>
+      {item.model_retry ? <ModelRetryStatus retry={item.model_retry} /> : null}
       {conversationIntent ? (
         <Tooltip title={intentTooltip} placement="topLeft">
           <span className="chat-intent-updated">

@@ -29,6 +29,10 @@ func NewTestDB(t *testing.T) *TestDB {
 		&SkillBlobRow{},
 		&SkillRevisionRow{},
 		&SkillRevisionEntryRow{},
+		&orm.SkillDistributionArtifact{},
+		&orm.SkillDistributionEntry{},
+		&orm.SkillDistributionBinding{},
+		&orm.SkillRevisionDistribution{},
 		&SkillDraftRow{},
 		&SkillDraftEntryRow{},
 		&SkillDraftReviewSessionRow{},
@@ -68,6 +72,10 @@ func ResetSkillTables(t *testing.T, db *TestDB) {
 	t.Helper()
 
 	for _, table := range []string{
+		"skill_revision_distributions",
+		"skill_distribution_bindings",
+		"skill_distribution_entries",
+		"skill_distribution_artifacts",
 		"skill_draft_entries",
 		"skill_draft_review_action_items",
 		"skill_draft_review_action_batches",
@@ -138,6 +146,7 @@ type SkillRow struct {
 	UpdateStatus          string     `gorm:"column:update_status;type:text;not null;default:'up_to_date'"`
 	Ext                   []byte     `gorm:"column:ext;type:json"`
 	DeletedAt             *time.Time `gorm:"column:deleted_at"`
+	TrashExpiresAt        *time.Time `gorm:"column:trash_expires_at"`
 	DeletedBy             *string    `gorm:"column:deleted_by;type:text"`
 	CreatedAt             time.Time  `gorm:"column:created_at;not null"`
 	UpdatedAt             time.Time  `gorm:"column:updated_at;not null"`

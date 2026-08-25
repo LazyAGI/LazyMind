@@ -7,12 +7,20 @@ from dataclasses import replace
 from typing import Callable
 
 from channel_gateway.common.application.messages import ChannelMessageService
+from channel_gateway.common.application.task_artifacts import (
+    TASK_ARTIFACT_MONITOR_VERSION,
+)
 from channel_gateway.common.domain.channel import (
     ClaimedInbound,
     OutboundMessage,
-    WELCOME_MESSAGE,
+    welcome_message,
 )
-from channel_gateway.common.errors import RetryableProviderSideEffectError
+from channel_gateway.common.domain.chat import retainable_provider_context
+from channel_gateway.common.errors import (
+    LazyMindHTTPError,
+    RetryableLazyMindError,
+    RetryableProviderSideEffectError,
+)
 from channel_gateway.common.ports.messaging import MessageWorkerRepository
 from channel_gateway.common.ports.messaging import (
     DeliveryProviderRegistry,
@@ -24,17 +32,22 @@ from channel_gateway.common.ports.messaging import (
 _logger = logging.getLogger(__name__)
 _INBOUND_LEASE_SECONDS = 120
 _OUTBOUND_LEASE_SECONDS = 120
-# Core currently has no durable idempotency contract. Retrying a returned
-# application error could duplicate a completed turn, so only lease recovery
-# after a process crash can re-enter an inbound message.
 _MAX_INBOUND_ATTEMPTS = 1
+_MAX_RETRYABLE_CORE_ATTEMPTS = 3
 _MAX_PROVIDER_SIDE_EFFECT_ATTEMPTS = 5
 _MAX_OUTBOUND_ATTEMPTS = 5
 
 
-def _failure_message(provider_context: dict, exc: Exception) -> str:
-    del provider_context, exc
+def _failure_message() -> str:
     return 'LazyMind 暂时无法处理这条消息，请稍后重试。'
+
+
+def _inbound_attempt_limit(exc: Exception) -> int:
+    if isinstance(exc, RetryableLazyMindError):
+        return _MAX_RETRYABLE_CORE_ATTEMPTS
+    if isinstance(exc, LazyMindHTTPError) and exc.retryable:
+        return _MAX_RETRYABLE_CORE_ATTEMPTS
+    return _MAX_INBOUND_ATTEMPTS
 
 
 class LeaseLostError(RuntimeError):
@@ -134,12 +147,15 @@ class MessageWorker:
                 self._stop.wait(1.0)
 
     def _process(self, inbound: ClaimedInbound, claim_owner: str) -> None:
+        retained_context = retainable_provider_context(
+            inbound.provider_context
+        )
         fallback = OutboundMessage(
             provider=inbound.provider,
             account_id=inbound.account_id,
             order_key=inbound.order_key,
             recipient_id=inbound.recipient_id,
-            provider_context=inbound.provider_context,
+            provider_context=retained_context,
             text='LazyMind 暂时无法处理这条消息，请稍后重试。',
             intent_kind='failed',
         )
@@ -169,10 +185,6 @@ class MessageWorker:
                     owner_user_id=inbound.owner_user_id,
                     text=inbound.text,
                     request_id=f'channel_{inbound.message_key}',
-                    surface=str(
-                        inbound.provider_context.get('surface')
-                        or 'direct'
-                    ),
                     provider_context=inbound.provider_context,
                     on_stream=(
                         stream.update
@@ -187,6 +199,10 @@ class MessageWorker:
                 )
                 stream = None
                 lease.ensure_owned()
+                has_task = any(
+                    presentation.kind == 'task'
+                    for presentation in result.presentations
+                )
                 outbound = [
                     replace(
                         fallback,
@@ -200,9 +216,11 @@ class MessageWorker:
                                 for presentation
                                 in result.presentations
                             ],
-                            'task_monitor': any(
-                                presentation.kind == 'task'
-                                for presentation in result.presentations
+                            'task_monitor': has_task,
+                            'task_artifact_monitor_version': (
+                                TASK_ARTIFACT_MONITOR_VERSION
+                                if has_task
+                                else 0
                             ),
                             'streamed_text': streamed_text,
                         },
@@ -212,7 +230,7 @@ class MessageWorker:
                     outbound.append(
                         replace(
                             outbound[0],
-                            text=WELCOME_MESSAGE,
+                            text=welcome_message(inbound.provider),
                             intent_kind='welcome',
                             purpose='welcome',
                             metadata={},
@@ -222,6 +240,7 @@ class MessageWorker:
                     inbound.inbox_id,
                     claim_owner,
                     outbound,
+                    retained_context,
                 ):
                     _logger.warning(
                         'channel_inbound_completion_fenced inbox_id=%s',
@@ -255,13 +274,14 @@ class MessageWorker:
                 error=exc.__class__.__name__,
                 fallback=fallback,
                 max_attempts=_MAX_PROVIDER_SIDE_EFFECT_ATTEMPTS,
+                retained_provider_context=retained_context,
             )
         except Exception as exc:
             if stream is not None:
                 stream.abort()
             fallback = replace(
                 fallback,
-                text=_failure_message(inbound.provider_context, exc),
+                text=_failure_message(),
             )
             _logger.exception(
                 'channel_inbound_processing_failed inbox_id=%s attempt=%s',
@@ -273,7 +293,8 @@ class MessageWorker:
                 claim_owner,
                 error=exc.__class__.__name__,
                 fallback=fallback,
-                max_attempts=_MAX_INBOUND_ATTEMPTS,
+                max_attempts=_inbound_attempt_limit(exc),
+                retained_provider_context=retained_context,
             )
 
 

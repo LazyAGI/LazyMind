@@ -1,0 +1,473 @@
+initial: __start__
+
+transitions:
+  __start__: [{to: retrieve_product_evidence}]
+  retrieve_product_evidence: [{to: build_direction_outline}]
+  build_direction_outline: [{to: write_direction_document}]
+  write_direction_document: [{to: analyze_competitive_position}]
+  analyze_competitive_position: [{to: build_design_outline}]
+  build_design_outline: [{to: write_design_document}]
+  write_design_document: [{to: build_prd_outline}]
+  build_prd_outline: [{to: write_prd_document}]
+  write_prd_document: [{to: build_interactive_prototype}]
+  build_interactive_prototype: [{to: build_review_outline}]
+  build_review_outline: [{to: write_review_document}]
+  write_review_document: [{to: build_handoff_outline}]
+  build_handoff_outline: [{to: write_handoff_document}]
+  write_handoff_document: [{to: finalize_product_delivery}]
+  finalize_product_delivery: [{to: __end__}]
+
+steps:
+  retrieve_product_evidence:
+    label: 资料与知识库检索
+    prompt: |
+      {{runtime_instruction}}
+
+      Workflow preflight has already collected every required answer. Do not ask again and do not
+      infer defaults. First call normalize_product_parameters with the exact external product_goal,
+      stage_chain, execution_depth, word_target and reference_sample_choice values. Save its
+      execution_plan JSON and every returned top-level skip_* value to the matching optional output;
+      do not create a skip material absent from the tool result. Persist these small planning outputs
+      together immediately before profiling files or starting any search; do not defer or batch them
+      with the later evidence outputs. The UI uses this first artifact update to reveal only the
+      planned stage tabs.
+
+      Then perform one shared evidence pass for all stages in execution_plan.stage_chain. Load only the
+      child contracts needed to understand stage-specific evidence boundaries. If product_materials
+      or reference_sample files are bound, call profile_product_materials once with their exact
+      Workflow paths as one JSON array. Never call read_user_attachment and never materialize scalar
+      parameters as files. If no files are bound, call it with [] so resource_profiles still exists.
+
+      Search only when evidence can change a planned-stage decision. Use the selected knowledge
+      bases through kb with inherited runtime scope; never enumerate or guess kb_ids and do not
+      impose a fixed query-count cap. Use web_search for current public facts, especially when
+      competitive is planned; use url_fetch only when a relevant result needs more detail. Missing
+      or unconfigured providers are recorded once and are not retried indefinitely. When runtime
+      context does not expose a selected knowledge-base scope, make zero kb calls: do not probe kb
+      to discover whether a selection exists. If the first kb call reports missing scope,
+      unavailable configuration or a transport failure, stop that channel immediately; never
+      enumerate knowledge bases or guess identifiers as recovery.
+
+      Register only actual results as WEB-001... and KB-001..., with title/source, URL or document
+      label, date when available, query provenance, excerpt, fact/inference status and limitations.
+      Save research_evidence, research_log, material_digest and the real resource_profiles file once.
+      Never claim a search succeeded when it did not.
+    tools: [normalize_product_parameters, load_product_skill_contract, profile_product_materials, web_search, url_fetch, kb]
+    inputs:
+      - {material: product_goal, required: true}
+      - {material: stage_chain, required: true}
+      - {material: execution_depth, required: true}
+      - {material: word_target, required: true}
+      - {material: reference_sample_choice, required: true}
+      - {material: product_materials, required: false}
+      - {material: reference_sample, required: false}
+    outputs:
+      - {material: execution_plan}
+      - {material: skip_direction, required: false}
+      - {material: skip_competitive, required: false}
+      - {material: skip_design, required: false}
+      - {material: skip_prd, required: false}
+      - {material: skip_prototype, required: false}
+      - {material: skip_review, required: false}
+      - {material: skip_handoff, required: false}
+      - {material: research_evidence}
+      - {material: research_log}
+      - {material: material_digest}
+      - {material: resource_profiles}
+    acceptance_criteria: |
+      Preflight parameters normalize deterministically; one honest evidence pass covers the planned
+      chain, every WEB/KB ID maps to a real result, and user files are profiled exactly once.
+
+  build_direction_outline:
+    label: 产品方向大纲生成
+    mode: human
+    skip_if: {material: skip_direction}
+    rerun_when: 用户要求重新生成、调整或局部修改产品方向大纲。
+    prompt: |
+      {{runtime_instruction}}
+
+      Call load_product_skill_contract(stage_id="direction"). For first generation call
+      product_writer_prepare_context with stage_id="direction", execution_plan, research_evidence,
+      resource_profiles and execution_plan.word_target, with upstream_artifact_paths_json="[]". Generate
+      one outline, read it, validate_product_outline(stage_id="direction"), repair only structural
+      errors through one targeted revision, then update context from the final Markdown.
+
+      On rerun revise the latest direction_outline with document_slot="direction_outline"; never
+      create a second independent outline. Save direction_task, direction_context,
+      direction_outline, direction_outline_report and direction_context_approved. The editable
+      Markdown is the sole structural source. Save the exact prepare-context output paths as
+      direction_task/direction_context and the exact update-context output path as
+      direction_context_approved. Never read a JSON artifact with product_writer_read_markdown,
+      never save inline Markdown as a file path, and never revise or synthesize an approved context.
+      Stop for user editing and Continue approval.
+    tools: [load_product_skill_contract, product_writer_prepare_context, product_writer_generate_outline, product_writer_read_markdown, validate_product_outline, product_writer_update_context, product_writer_revise_markdown]
+    inputs:
+      - {material: execution_plan, required: true}
+      - {material: research_evidence, required: true}
+      - {material: resource_profiles, required: true}
+    outputs:
+      - {material: direction_task}
+      - {material: direction_context}
+      - {material: direction_outline}
+      - {material: direction_outline_report}
+      - {material: direction_context_approved}
+    acceptance_criteria: One editable, structurally valid direction outline exists and is approved by the user.
+
+  write_direction_document:
+    label: 产品方向文档生成
+    mode: human
+    skip_if: {material: skip_direction}
+    rerun_when: 用户要求修改、补充或局部重写产品方向文档。
+    prompt: |
+      {{runtime_instruction}}
+
+      Use the latest approved direction_outline as the only structure. First generation: plan
+      sections, call product_writer_write_sections exactly once, save the ordered paths, assemble
+      the draft and update context. On failure preserve checkpoints and end this attempt without a
+      second write call. Rerun only by targeted revision with document_slot="direction_document".
+      Section planning is deterministic: never patch its JSON, regenerate a parallel plan or retry
+      the write tool within the same attempt.
+      Save direction_section_plan, direction_chapters, direction_document and
+      direction_context_final. LazyMind Artifact revisions are the authoritative version record;
+      do not synthesize a parallel Manifest. Stop for user editing and Continue approval.
+    tools: [load_product_skill_contract, product_writer_plan_sections, product_writer_write_sections, product_writer_assemble_draft, product_writer_revise_markdown, product_writer_update_context]
+    inputs:
+      - {material: execution_plan, required: true}
+      - {material: direction_task, required: true}
+      - {material: direction_outline, required: true}
+      - {material: direction_context_approved, required: true}
+    outputs:
+      - {material: direction_section_plan, required: false}
+      - {material: direction_chapters, required: false}
+      - {material: direction_document}
+      - {material: direction_context_final}
+    acceptance_criteria: The editable direction brief follows the approved outline and preserves evidence and decision status.
+
+  analyze_competitive_position:
+    label: 竞品与生态位分析
+    mode: human
+    skip_if: {material: skip_competitive}
+    prompt: |
+      {{runtime_instruction}}
+
+      Call load_product_skill_contract(stage_id="competitive") and follow it completely. Use
+      research_evidence, material_digest and, when available, the approved direction_document as
+      the closed evidence set. The report must answer both current-product comparison and full
+      ecosystem positioning across direct, indirect, substitute, status-quo and adjacent options.
+      Preserve WEB/KB IDs and distinguish verified fact, user claim, inference, recommendation and
+      unknown. Generate one responsive self-contained HTML with comparison table, ecosystem visual,
+      evidence limits, product implications, collapsed evidence and clickable sources. Call
+      write_product_artifact(filename="competitive-analysis.html", validate_as="competitive"). If
+      the lightweight HTML check reports errors, make one targeted repair; if it still reports a
+      problem, preserve the generated report and state the limitation instead of regenerating the
+      analysis. Save competitive_analysis and stop for user approval.
+    tools: [load_product_skill_contract, write_product_artifact]
+    inputs:
+      - {material: execution_plan, required: true}
+      - {material: research_evidence, required: true}
+      - {material: research_log, required: true}
+      - {material: material_digest, required: true}
+      - {material: direction_document, required: false}
+    outputs:
+      - {material: competitive_analysis}
+    acceptance_criteria: The HTML covers comparison and ecosystem positioning with traceable evidence and product implications.
+
+  build_design_outline:
+    label: 产品方案大纲生成
+    mode: human
+    skip_if: {material: skip_design}
+    rerun_when: 用户要求重新生成、调整或局部修改产品方案大纲。
+    prompt: |
+      {{runtime_instruction}}
+
+      Call load_product_skill_contract(stage_id="design"). For first generation call
+      product_writer_prepare_context with stage_id="design", resource_profiles, research_evidence,
+      execution_plan.word_target, and upstream_artifact_paths_json containing every available approved
+      direction_document and competitive_analysis path. Generate, read and validate one outline;
+      repair only structural errors, then update context from the final Markdown. On rerun revise
+      the latest design_outline with document_slot="design_outline". Save design_task,
+      design_context, design_outline, design_outline_report and design_context_approved. Stop for
+      user editing and Continue approval. Save exact returned file paths: prepare-context task and
+      context outputs map to design_task/design_context, while update-context maps only to
+      design_context_approved. Never read JSON through product_writer_read_markdown, pass inline
+      Markdown as a path, or synthesize an approved context. Never restore sections the user deleted.
+    tools: [load_product_skill_contract, product_writer_prepare_context, product_writer_generate_outline, product_writer_read_markdown, validate_product_outline, product_writer_update_context, product_writer_revise_markdown]
+    inputs:
+      - {material: execution_plan, required: true}
+      - {material: research_evidence, required: true}
+      - {material: resource_profiles, required: true}
+      - {material: direction_document, required: false}
+      - {material: competitive_analysis, required: false}
+    outputs:
+      - {material: design_task}
+      - {material: design_context}
+      - {material: design_outline}
+      - {material: design_outline_report}
+      - {material: design_context_approved}
+    acceptance_criteria: One editable design outline incorporates actual approved upstream artifacts and is approved by the user.
+
+  write_design_document:
+    label: 产品方案文档生成
+    mode: human
+    skip_if: {material: skip_design}
+    rerun_when: 用户要求修改、补充或局部重写产品方案文档。
+    prompt: |
+      {{runtime_instruction}}
+
+      Use the latest approved design_outline as the only structure. Plan sections, write once with
+      stage-specific checkpoints, assemble and update context. On failure preserve checkpoints and
+      do not restart writing in this attempt. Rerun only by targeted revision with
+      document_slot="design_document". Save design_section_plan, design_chapters,
+      design_document and design_context_final. LazyMind revisions carry the version; do not create
+      a parallel Manifest. Section planning is deterministic; never patch its JSON or retry the
+      write tool in the same attempt. Stop for user editing and Continue approval.
+    tools: [load_product_skill_contract, product_writer_plan_sections, product_writer_write_sections, product_writer_assemble_draft, product_writer_revise_markdown, product_writer_update_context]
+    inputs:
+      - {material: execution_plan, required: true}
+      - {material: design_task, required: true}
+      - {material: design_outline, required: true}
+      - {material: design_context_approved, required: true}
+    outputs:
+      - {material: design_section_plan, required: false}
+      - {material: design_chapters, required: false}
+      - {material: design_document}
+      - {material: design_context_final}
+    acceptance_criteria: The editable product design follows the approved outline and actual upstream decisions.
+
+  build_prd_outline:
+    label: PRD 大纲生成
+    mode: human
+    skip_if: {material: skip_prd}
+    rerun_when: 用户要求重新生成、调整或局部修改 PRD 大纲。
+    prompt: |
+      {{runtime_instruction}}
+
+      Call load_product_skill_contract(stage_id="prd"). Prepare Writer context with stage_id="prd",
+      resource_profiles, research_evidence, execution_plan.word_target, and every available approved
+      design_document as upstream_artifact_paths_json. Generate, read and structurally validate one
+      outline, update context, and stop for approval. On rerun revise the latest prd_outline with
+      document_slot="prd_outline" rather than generating another outline. Save prd_task,
+      prd_context, prd_outline, prd_outline_report and prd_context_approved. Do not invent missing
+      product rules in order to make the PRD appear complete. Save exact returned file paths:
+      prepare-context task/context outputs map to prd_task/prd_context and update-context maps only
+      to prd_context_approved. Never read JSON through product_writer_read_markdown, pass inline
+      Markdown as a path, or synthesize an approved context.
+    tools: [load_product_skill_contract, product_writer_prepare_context, product_writer_generate_outline, product_writer_read_markdown, validate_product_outline, product_writer_update_context, product_writer_revise_markdown]
+    inputs:
+      - {material: execution_plan, required: true}
+      - {material: research_evidence, required: true}
+      - {material: resource_profiles, required: true}
+      - {material: design_document, required: false}
+    outputs:
+      - {material: prd_task}
+      - {material: prd_context}
+      - {material: prd_outline}
+      - {material: prd_outline_report}
+      - {material: prd_context_approved}
+    acceptance_criteria: One editable PRD outline uses the approved design or honestly marks missing upstream decisions.
+
+  write_prd_document:
+    label: PRD 文档生成
+    mode: human
+    skip_if: {material: skip_prd}
+    rerun_when: 用户要求修改、补充或局部重写 PRD。
+    prompt: |
+      {{runtime_instruction}}
+
+      Use the latest approved prd_outline as the only structure. Plan sections, write exactly once,
+      assemble and update context. Preserve checkpoints and end the attempt on failure. Rerun only
+      by targeted revision with document_slot="prd_document". Save prd_section_plan, prd_chapters,
+      prd_document and prd_context_final. Do not create a parallel Manifest. Stop for user editing
+      and Continue approval. Section planning is deterministic; never patch its JSON, generate a
+      parallel plan or retry the write tool within the same attempt.
+    tools: [load_product_skill_contract, product_writer_plan_sections, product_writer_write_sections, product_writer_assemble_draft, product_writer_revise_markdown, product_writer_update_context]
+    inputs:
+      - {material: execution_plan, required: true}
+      - {material: prd_task, required: true}
+      - {material: prd_outline, required: true}
+      - {material: prd_context_approved, required: true}
+    outputs:
+      - {material: prd_section_plan, required: false}
+      - {material: prd_chapters, required: false}
+      - {material: prd_document}
+      - {material: prd_context_final}
+    acceptance_criteria: The editable PRD follows the approved outline and distinguishes confirmed rules from gaps.
+
+  build_interactive_prototype:
+    label: 交互原型生成
+    mode: human
+    skip_if: {material: skip_prototype}
+    prompt: |
+      {{runtime_instruction}}
+
+      Call load_product_skill_contract(stage_id="prototype"). Use the actual material_digest and
+      every available approved design_document and prd_document. Conflicts or missing core behavior
+      must remain visible rather than being silently decided. Build a self-contained HTML/CSS/JS
+      prototype with a stated fidelity level, main path, meaningful interaction, and relevant empty,
+      loading, success, failure, validation, permission and recovery states. Call
+      write_product_artifact(filename="prototype.html", validate_as="prototype"). Make at most one
+      targeted repair for a lightweight HTML-check finding; preserve the artifact with an explicit
+      limitation rather than repeatedly regenerating it. Save prototype and stop for user approval.
+      Do not claim production readiness or browser visual QA that did not occur.
+    tools: [load_product_skill_contract, write_product_artifact]
+    inputs:
+      - {material: execution_plan, required: true}
+      - {material: material_digest, required: true}
+      - {material: design_document, required: false}
+      - {material: prd_document, required: false}
+    outputs:
+      - {material: prototype}
+    acceptance_criteria: The standalone prototype maps to approved upstream rules and exposes key states and limits.
+
+  build_review_outline:
+    label: 方案评审大纲生成
+    mode: human
+    skip_if: {material: skip_review}
+    rerun_when: 用户要求重新生成、调整或局部修改评审大纲。
+    prompt: |
+      {{runtime_instruction}}
+
+      Call load_product_skill_contract(stage_id="review"). Prepare Writer context with
+      stage_id="review", shared resource_profiles and research_evidence. Pass every available
+      approved direction_document, competitive_analysis, design_document, prd_document and prototype
+      as upstream_artifact_paths_json. Generate and validate one review outline, update context, and
+      stop for approval. On rerun revise review_outline with document_slot="review_outline". Save
+      review_task, review_context, review_outline, review_outline_report and
+      review_context_approved. The review is read-only by default and must name exact reviewed
+      versions and uncovered scope. Save exact returned file paths: prepare-context task/context
+      outputs map to review_task/review_context and update-context maps only to
+      review_context_approved. Never read JSON through product_writer_read_markdown, pass inline
+      Markdown as a path, or synthesize an approved context.
+    tools: [load_product_skill_contract, product_writer_prepare_context, product_writer_generate_outline, product_writer_read_markdown, validate_product_outline, product_writer_update_context, product_writer_revise_markdown]
+    inputs:
+      - {material: execution_plan, required: true}
+      - {material: research_evidence, required: true}
+      - {material: resource_profiles, required: true}
+      - {material: direction_document, required: false}
+      - {material: competitive_analysis, required: false}
+      - {material: design_document, required: false}
+      - {material: prd_document, required: false}
+      - {material: prototype, required: false}
+    outputs:
+      - {material: review_task}
+      - {material: review_context}
+      - {material: review_outline}
+      - {material: review_outline_report}
+      - {material: review_context_approved}
+    acceptance_criteria: One editable review outline is grounded in exact available artifact versions and approved by the user.
+
+  write_review_document:
+    label: 方案评审报告生成
+    mode: human
+    skip_if: {material: skip_review}
+    rerun_when: 用户要求修改、补充或局部重写评审报告。
+    prompt: |
+      {{runtime_instruction}}
+
+      Use the latest approved review_outline as the only structure. Plan, write once, assemble and
+      update context. Preserve checkpoints on failure. Rerun only by targeted revision with
+      document_slot="review_document". Save review_section_plan, review_chapters, review_document
+      and review_context_final. Stop for user editing and Continue approval; do not create a parallel
+      Manifest or silently modify reviewed upstream artifacts. Section planning is deterministic;
+      never patch its JSON or retry the write tool within the same attempt.
+    tools: [load_product_skill_contract, product_writer_plan_sections, product_writer_write_sections, product_writer_assemble_draft, product_writer_revise_markdown, product_writer_update_context]
+    inputs:
+      - {material: execution_plan, required: true}
+      - {material: review_task, required: true}
+      - {material: review_outline, required: true}
+      - {material: review_context_approved, required: true}
+    outputs:
+      - {material: review_section_plan, required: false}
+      - {material: review_chapters, required: false}
+      - {material: review_document}
+      - {material: review_context_final}
+    acceptance_criteria: The review report is traceable, prioritized and does not mutate reviewed artifacts.
+
+  build_handoff_outline:
+    label: 研发交付大纲生成
+    mode: human
+    skip_if: {material: skip_handoff}
+    rerun_when: 用户要求重新生成、调整或局部修改研发交付大纲。
+    prompt: |
+      {{runtime_instruction}}
+
+      Call load_product_skill_contract(stage_id="handoff"). Prepare Writer context with
+      stage_id="handoff", shared resource_profiles and research_evidence. Pass all available
+      approved design_document, prd_document, prototype and review_document paths as
+      upstream_artifact_paths_json. Generate and validate one handoff outline, update context and
+      stop for approval. On rerun revise handoff_outline with document_slot="handoff_outline". Save
+      handoff_task, handoff_context, handoff_outline, handoff_outline_report and
+      handoff_context_approved. Save exact returned file paths: prepare-context task/context outputs
+      map to handoff_task/handoff_context and update-context maps only to handoff_context_approved.
+      Never read JSON through product_writer_read_markdown, pass inline Markdown as a path, or
+      synthesize an approved context. Do not invent architecture, effort or release commitments.
+    tools: [load_product_skill_contract, product_writer_prepare_context, product_writer_generate_outline, product_writer_read_markdown, validate_product_outline, product_writer_update_context, product_writer_revise_markdown]
+    inputs:
+      - {material: execution_plan, required: true}
+      - {material: research_evidence, required: true}
+      - {material: resource_profiles, required: true}
+      - {material: design_document, required: false}
+      - {material: prd_document, required: false}
+      - {material: prototype, required: false}
+      - {material: review_document, required: false}
+    outputs:
+      - {material: handoff_task}
+      - {material: handoff_context}
+      - {material: handoff_outline}
+      - {material: handoff_outline_report}
+      - {material: handoff_context_approved}
+    acceptance_criteria: One editable handoff outline reflects exact approved dependencies, blockers and confirmation items.
+
+  write_handoff_document:
+    label: 研发交付文档生成
+    mode: human
+    skip_if: {material: skip_handoff}
+    rerun_when: 用户要求修改、补充或局部重写研发交付文档。
+    prompt: |
+      {{runtime_instruction}}
+
+      Use the latest approved handoff_outline as the only structure. Plan, write once, assemble and
+      update context. Preserve checkpoints on failure. Rerun only by targeted revision with
+      document_slot="handoff_document". Readiness
+      may be ready or ready-with-open-items only when the source contract's necessary inputs and
+      checks actually pass; otherwise mark it blocked. Save handoff_section_plan, handoff_chapters,
+      handoff_document and handoff_context_final. Do not create a parallel Manifest. Stop for user
+      approval. Section planning is deterministic; never patch its JSON, generate a parallel plan
+      or retry the write tool within the same attempt.
+    tools: [load_product_skill_contract, product_writer_plan_sections, product_writer_write_sections, product_writer_assemble_draft, product_writer_revise_markdown, product_writer_update_context]
+    inputs:
+      - {material: execution_plan, required: true}
+      - {material: handoff_task, required: true}
+      - {material: handoff_outline, required: true}
+      - {material: handoff_context_approved, required: true}
+    outputs:
+      - {material: handoff_section_plan, required: false}
+      - {material: handoff_chapters, required: false}
+      - {material: handoff_document}
+      - {material: handoff_context_final}
+    acceptance_criteria: The handoff package is traceable and gives a non-inflated implementation-readiness conclusion.
+
+  finalize_product_delivery:
+    label: 产品交付总结
+    prompt: |
+      {{runtime_instruction}}
+
+      Read execution_plan and every artifact actually produced. Load the router contract. Produce a
+      concise delivery_summary listing planned, completed and skipped stages, each actual LazyMind
+      Artifact revision, evidence/material gaps, approval state, readiness boundary and valid next
+      choices. The Workflow session, slots and revision history are the machine-readable record; do
+      not reconstruct a second Workspace/Manifest JSON contract. Never claim skipped or failed work
+      was completed, and never expose runtime trace or internal paths.
+    tools: [load_product_skill_contract]
+    inputs:
+      - {material: execution_plan, required: true}
+      - {material: direction_document, required: false}
+      - {material: competitive_analysis, required: false}
+      - {material: design_document, required: false}
+      - {material: prd_document, required: false}
+      - {material: prototype, required: false}
+      - {material: review_document, required: false}
+      - {material: handoff_document, required: false}
+    outputs:
+      - {material: delivery_summary}
+    acceptance_criteria: The summary matches the approved execution plan and only actual stage outputs.

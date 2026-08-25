@@ -5,13 +5,18 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"gorm.io/gorm"
 	"lazymind/core/state"
 )
 
-func Start(ctx context.Context, db *gorm.DB, stateStore state.Store, cfg Config) {
+// Start launches the resource update runtime (scheduler, worker, scanner, and
+// optional idle-fallback loops). All loops stop when ctx is cancelled; the
+// returned channel is closed once every loop has fully exited, so callers can
+// wait for clean shutdown.
+func Start(ctx context.Context, db *gorm.DB, stateStore state.Store, cfg Config) <-chan struct{} {
 	cfg = normalizeConfig(cfg)
 	workerID := defaultWorkerID("resourceupdate")
 	resourceUpdateInfo(logEventRuntimeStarted).
@@ -25,16 +30,31 @@ func Start(ctx context.Context, db *gorm.DB, stateStore state.Store, cfg Config)
 	scheduler := NewScheduler(db, cfg, workerID+"-scheduler")
 	worker := NewWorker(db, cfg, workerID+"-worker", stateStore)
 	scanner := NewScanner(db, cfg, workerID+"-scanner")
-	go runSchedulerLoop(ctx, scheduler, cfg.SchedulerTickInterval)
-	go runWorkerLoop(ctx, worker, cfg.WorkerInterval)
-	go runScannerLoop(ctx, scanner, cfg.ScannerInterval)
+	scanner.distributionAutoUpdater = newSkillDistributionAutoUpdater(db)
+
+	done := make(chan struct{})
+	var wg sync.WaitGroup
+	wg.Add(3)
+	go func() { defer wg.Done(); runSchedulerLoop(ctx, scheduler, cfg.SchedulerTickInterval) }()
+	go func() { defer wg.Done(); runWorkerLoop(ctx, worker, cfg.WorkerInterval) }()
+	go func() { defer wg.Done(); runScannerLoop(ctx, scanner, cfg.ScannerInterval) }()
 	if stateStore != nil {
 		idleProcessor := NewIdleProcessor(db, stateStore, cfg, workerID+"-idle")
-		go runIdleFallbackLoop(ctx, idleProcessor, cfg.ConversationIdleFallbackScanInterval)
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			runIdleFallbackLoop(ctx, idleProcessor, cfg.ConversationIdleFallbackScanInterval)
+		}()
 		if cfg.ConversationIdleEnableExpiredKeyNotify {
-			go runIdleExpiredKeyNotifyLoop(ctx, stateStore, idleProcessor)
+			wg.Add(1)
+			go func() { defer wg.Done(); runIdleExpiredKeyNotifyLoop(ctx, stateStore, idleProcessor) }()
 		}
 	}
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+	return done
 }
 
 func EnabledFromEnv() bool {

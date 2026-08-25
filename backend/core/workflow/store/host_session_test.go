@@ -17,7 +17,13 @@ func TestCreateHostSessionPersistsConversationBinding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := db.AutoMigrate(&orm.WorkflowSession{}); err != nil {
+	if err := db.AutoMigrate(&orm.WorkflowSession{}, &orm.Conversation{}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := db.Create(&orm.Conversation{ID: "conversation-1", BaseModel: orm.BaseModel{
+		CreateUserID: "owner", CreatedAt: now, UpdatedAt: now,
+	}}).Error; err != nil {
 		t.Fatal(err)
 	}
 	repo := New(db)
@@ -50,8 +56,8 @@ func TestListExternalSessionsIsOwnerScopedAndCursorPaged(t *testing.T) {
 	repo := New(db)
 	start := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
 	sessions := []orm.WorkflowSession{
-		{ID: "external-1", OriginHost: "external-agent", ControllerHost: "external-agent", WorkflowID: "writer", Status: "active", CreateUserID: "owner", CreatedAt: start, UpdatedAt: start},
-		{ID: "external-2", OriginHost: "external-agent", ControllerHost: "external-agent", WorkflowID: "image", Status: "stopped", CreateUserID: "owner", CreatedAt: start, UpdatedAt: start.Add(time.Minute)},
+		{ID: "external-1", ConversationID: "conversation-1", OriginHost: "external-agent", ControllerHost: "external-agent", WorkflowID: "writer", Status: "active", CreateUserID: "owner", CreatedAt: start, UpdatedAt: start},
+		{ID: "external-2", ConversationID: "conversation-2", OriginHost: "external-agent", ControllerHost: "external-agent", WorkflowID: "image", Status: "stopped", CreateUserID: "owner", CreatedAt: start, UpdatedAt: start.Add(time.Minute)},
 		{ID: "internal", OriginHost: "lazymind", ControllerHost: "lazymind", WorkflowID: "writer", Status: "active", CreateUserID: "owner", CreatedAt: start, UpdatedAt: start.Add(2 * time.Minute)},
 		{ID: "other-owner", OriginHost: "external-agent", ControllerHost: "external-agent", WorkflowID: "writer", Status: "active", CreateUserID: "other", CreatedAt: start, UpdatedAt: start.Add(3 * time.Minute)},
 		{ID: "dismissed", OriginHost: "external-agent", ControllerHost: "external-agent", WorkflowID: "writer", Status: "active", Dismissed: true, CreateUserID: "owner", CreatedAt: start, UpdatedAt: start.Add(4 * time.Minute)},
@@ -71,6 +77,12 @@ func TestListExternalSessionsIsOwnerScopedAndCursorPaged(t *testing.T) {
 	if err != nil || len(filtered.Sessions) != 1 || filtered.Sessions[0].SessionID != "external-1" {
 		t.Fatalf("filtered: %+v err=%v", filtered, err)
 	}
+	scopedContext := WithConversationScope(context.Background(), "conversation-1")
+	scoped, err := repo.ListExternalSessions(scopedContext, "owner", SessionListQuery{})
+	if err != nil || len(scoped.Sessions) != 1 || scoped.Sessions[0].SessionID != "external-1" ||
+		scoped.Sessions[0].ConversationID != "conversation-1" {
+		t.Fatalf("conversation-scoped list: %+v err=%v", scoped, err)
+	}
 	if _, err := repo.ListExternalSessions(context.Background(), "owner", SessionListQuery{Status: "active", PageToken: page.NextPageToken}); !errors.Is(err, ErrInvalidSessionQuery) {
 		t.Fatalf("cursor must be bound to filters: %v", err)
 	}
@@ -82,13 +94,17 @@ func TestSessionLifecycleCommandIsIdempotentAndInterruptsAttempt(t *testing.T) {
 		t.Fatal(err)
 	}
 	now := time.Now().UTC()
-	if err := repo.db.Create(&orm.WorkflowSession{ID: "session-1", OriginHost: "external-agent", ControllerHost: "external-agent",
+	if err := repo.db.Create(&orm.WorkflowSession{ID: "session-1", ConversationID: "conversation-1", OriginHost: "external-agent", ControllerHost: "external-agent",
 		WorkflowID: "writer", Status: "active", StateVersion: 4, CreateUserID: "owner", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := repo.db.Create(&orm.WorkflowSessionStep{ID: "attempt-1", SessionID: "session-1", StepID: "draft",
 		TaskID: "attempt-1", Status: "running", Validity: "effective", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
 		t.Fatal(err)
+	}
+	wrongConversation := WithConversationScope(context.Background(), "conversation-2")
+	if _, err := repo.SetSessionStopped(wrongConversation, "owner", "session-1", "wrong-scope", true); !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("cross-conversation stop error=%v", err)
 	}
 	version, err := repo.SetSessionStopped(context.Background(), "owner", "session-1", "stop-1", true)
 	if err != nil || version != 5 {
@@ -97,6 +113,9 @@ func TestSessionLifecycleCommandIsIdempotentAndInterruptsAttempt(t *testing.T) {
 	replayed, err := repo.SetSessionStopped(context.Background(), "owner", "session-1", "stop-1", true)
 	if err != nil || replayed != 5 {
 		t.Fatalf("replay: version=%d err=%v", replayed, err)
+	}
+	if _, err := repo.SetSessionStopped(wrongConversation, "owner", "session-1", "stop-1", true); !errors.Is(err, ErrPermissionDenied) {
+		t.Fatalf("cross-conversation replay error=%v", err)
 	}
 	var session orm.WorkflowSession
 	if err := repo.db.First(&session, "id = ?", "session-1").Error; err != nil || session.Status != "stopped" || session.StateVersion != 5 {

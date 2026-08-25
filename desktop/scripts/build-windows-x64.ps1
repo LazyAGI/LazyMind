@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Position = 0)]
-    [ValidateSet('build', 'installer', 'resume', 'doctor', 'clean', 'clean-all')]
+    [ValidateSet('build', 'installer', 'resume', 'resume-installer', 'doctor', 'clean', 'clean-all')]
     [string]$Action = 'build'
 )
 
@@ -52,8 +52,8 @@ function New-WindowsInstallerFileName {
         throw 'Could not resolve the Git commit for the Windows Desktop installer name.'
     }
     $package = Get-Content -LiteralPath (Join-Path $electronRoot 'package.json') -Raw | ConvertFrom-Json
-    if ([string]$package.version -notmatch '^\d+\.\d+\.\d+(?:-(?:alpha|beta|rc)\.\d+)?$') {
-        throw 'Windows installer package version must use SemVer (including alpha.N, beta.N, or rc.N).'
+    if ([string]$package.version -notmatch '^\d+\.\d+\.\d+(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$') {
+        throw 'Windows installer package version must use SemVer.'
     }
     $timestamp = (Get-Date).ToString('yyyyMMdd-HHmmss', [Globalization.CultureInfo]::InvariantCulture)
     return "LazyMind-windows-x64-installer-$($package.version)-$timestamp-$commit.exe"
@@ -241,6 +241,10 @@ function Copy-RuntimeApp {
         (Join-Path $repoRoot 'desktop\build'),
         (Join-Path $repoRoot 'desktop\cache'),
         (Join-Path $repoRoot 'desktop\dist'),
+        (Join-Path $repoRoot 'skills\.runtime'),
+        (Join-Path $repoRoot 'skills\research'),
+        (Join-Path $repoRoot 'skills\review'),
+        (Join-Path $repoRoot 'skills\search'),
         (Join-Path $repoRoot 'desktop\electron\node_modules'),
         (Join-Path $repoRoot 'frontend\node_modules'),
         (Join-Path $repoRoot 'frontend\src'),
@@ -254,6 +258,9 @@ function Copy-RuntimeApp {
     if ($releaseBuild) { $excludedDirs += (Join-Path $repoRoot 'algorithm\lazyllm') }
     & robocopy.exe $repoRoot $appRoot /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /NP /XD @excludedDirs /XF '*.pyc' '*.pyo' '.DS_Store' '.env' 'config.env' 'config.win.env'
     if ($LASTEXITCODE -gt 7) { throw "robocopy runtime app staging failed with code $LASTEXITCODE" }
+    foreach ($relativePath in @('skills\research', 'skills\review', 'skills\search')) {
+        Remove-GeneratedPath (Join-Path $appRoot $relativePath)
+    }
     $coreDevBinary = Join-Path $appRoot 'backend\core\core.exe'
     if (Test-Path -LiteralPath $coreDevBinary) { Remove-Item -LiteralPath $coreDevBinary -Force }
     if (-not (Test-Path -LiteralPath (Join-Path $appRoot 'frontend\dist\index.html') -PathType Leaf)) {
@@ -264,6 +271,65 @@ function Copy-RuntimeApp {
     }
 }
 
+function Materialize-OfflineSkills {
+    $arguments = @(
+        'run', './cmd/builtin-skill-bundle',
+        '--sources', (Join-Path $repoRoot 'skills\builtin-sources.yaml'),
+        '--lock', (Join-Path $repoRoot 'skills\builtin-skills.lock.json'),
+        '--cache', (Join-Path $repoRoot 'desktop\cache\builtin-skills'),
+        '--output', (Join-Path $runtimeRoot 'builtin-skills'),
+        '--featured-sources', (Join-Path $repoRoot 'skills\featured'),
+        '--featured-output', (Join-Path $runtimeRoot 'featured-skills')
+    )
+    if ($env:LAZYMIND_RELEASE_BUILD -eq 'true') {
+        $arguments += '--frozen-lockfile'
+    }
+    Invoke-NativeWithRetry 'Builtin Skill package download' 'go.exe' $arguments (Join-Path $repoRoot 'backend\core')
+}
+
+function New-DeferredPythonRuntimeStage {
+    $packagedRuntimeRoot = Join-Path $targetRoot 'runtime-installer'
+    Remove-GeneratedPath $packagedRuntimeRoot
+    New-Item -ItemType Directory -Force -Path $packagedRuntimeRoot | Out-Null
+
+    Write-Host '==> Staging deferred Python runtime for the assisted installer'
+    $pythonRuntimeRoot = Join-Path $runtimeRoot 'runtimes\python'
+    $pythonDepsRoot = Join-Path $runtimeRoot 'deps\python'
+    & robocopy.exe $runtimeRoot $packagedRuntimeRoot /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /NP /XD $pythonRuntimeRoot $pythonDepsRoot | Out-Null
+    if ($LASTEXITCODE -gt 7) { throw "robocopy deferred runtime staging failed with code $LASTEXITCODE" }
+
+    Add-Type -AssemblyName System.IO.Compression
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archivePath = Join-Path $packagedRuntimeRoot 'python-runtime.zip'
+    $archive = [IO.Compression.ZipFile]::Open($archivePath, [IO.Compression.ZipArchiveMode]::Create)
+    try {
+        foreach ($source in @(
+            @{ Root = $pythonRuntimeRoot; Prefix = 'runtimes/python' },
+            @{ Root = $pythonDepsRoot; Prefix = 'deps/python' }
+        )) {
+            if (-not (Test-Path -LiteralPath $source.Root -PathType Container)) {
+                throw "Bundled Python source directory is missing: $($source.Root)"
+            }
+            foreach ($file in Get-ChildItem -LiteralPath $source.Root -Recurse -File -Force) {
+                $relativePath = $file.FullName.Substring($source.Root.Length).TrimStart('\').Replace('\', '/')
+                $entryName = "$($source.Prefix)/$relativePath"
+                [IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                    $archive,
+                    $file.FullName,
+                    $entryName,
+                    [IO.Compression.CompressionLevel]::NoCompression
+                ) | Out-Null
+            }
+        }
+    } finally {
+        $archive.Dispose()
+    }
+    if (-not (Test-Path -LiteralPath $archivePath -PathType Leaf) -or (Get-Item -LiteralPath $archivePath).Length -eq 0) {
+        throw 'Deferred Python runtime archive was not created.'
+    }
+    return $packagedRuntimeRoot
+}
+
 function Finalize-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind = 'zip') {
     $finalZipName = New-WindowsZipFileName
     Materialize-PythonAliases
@@ -272,6 +338,8 @@ function Finalize-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind 
 
     Write-Host '==> Staging runtime application files'
     Copy-RuntimeApp
+    Write-Host '==> Materializing offline Skill packages and featured catalog'
+    Materialize-OfflineSkills
     $trustedLocalMode = if ($env:LAZYMIND_TRUSTED_LOCAL_MODE -eq 'true') { 'true' } else { 'false' }
     if ($trustedLocalMode -eq 'true') {
         Write-Host '==> Trusted local mode enabled for this desktop package'
@@ -283,6 +351,7 @@ function Finalize-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind 
         '--arch', 'amd64',
         '--trusted-local-mode', $trustedLocalMode
     )
+    Invoke-Native 'node.exe' @((Join-Path $repoRoot 'desktop\scripts\write-editable-ppt-dependency-config.mjs'), $runtimeRoot)
     $reparse = @(Get-ChildItem -LiteralPath $runtimeRoot -Recurse -Force -ErrorAction SilentlyContinue | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint })
     if ($reparse.Count -gt 0) {
         throw "Desktop runtime contains non-portable reparse points; first path: $($reparse[0].FullName)"
@@ -319,6 +388,7 @@ function Finalize-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind 
         ) -join "`r`n"
         Set-Content -LiteralPath (Join-Path $installerResourcesRoot 'lazymind-installer-metadata.nsh') -Value $installerMetadata -NoNewline
         Build-GoBinary (Join-Path $repoRoot 'local\local-runtime-manager') (Join-Path $installerResourcesRoot 'lazymind-installer-maintenance.exe') @('.\cmd\installer-maintenance')
+        $env:LAZYMIND_DESKTOP_RUNTIME_STAGE = New-DeferredPythonRuntimeStage
         Invoke-WindowsPackagingWithRetry 'pack:win:x64:installer'
         $builderInstaller = Join-Path $distRoot 'LazyMind-windows-x64-installer.exe'
         $finalInstaller = Join-Path $distRoot (New-WindowsInstallerFileName)
@@ -403,6 +473,7 @@ switch ($Action) {
     'build' { Build-Desktop }
     'installer' { Build-Desktop 'installer' }
     'resume' { Invoke-Doctor; Finalize-Desktop }
+    'resume-installer' { Invoke-Doctor; Finalize-Desktop 'installer' }
     'clean' {
         Remove-GeneratedPath $targetRoot
         Remove-GeneratedPath (Join-Path $distRoot 'win-unpacked')

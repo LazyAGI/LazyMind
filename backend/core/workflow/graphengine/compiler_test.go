@@ -3,6 +3,7 @@ package graphengine
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -76,6 +77,64 @@ func TestCompileArbitraryDAGAndProjectBlockedMerge(t *testing.T) {
 	})
 	if projection.Nodes["f"].Readiness != "ready" {
 		t.Fatalf("F should be ready: %#v", projection.Nodes["f"])
+	}
+}
+
+func TestCompilePreservesDeclaredRuntimePolicy(t *testing.T) {
+	workflowYAML := strings.Replace(validWorkflow, "id: graph-test", `id: graph-test
+runtime:
+  publisher_owned_slots: [final]
+  collects_knowledge: true
+  completed_edit_step: f
+  completed_continue_steps: [f]
+  exclusive_tool_capabilities: [writer.create]
+  clarification_fields:
+    - id: topic
+      label: Topic
+      question: What is the presentation topic?
+      type: text
+    - id: style
+      label: Style
+      question: Which visual style should be used?
+      type: single
+      choices: [Professional, Minimal]`, 1)
+	result := Compile(workflowYAML, validState, "", ProfilePublish)
+	if !result.Valid {
+		t.Fatalf("expected valid runtime policy, diagnostics=%#v", result.Diagnostics)
+	}
+	policy := result.Graph.Runtime
+	if !policy.CollectsKnowledge || policy.CompletedEditStep != "f" || len(policy.CompletedContinueSteps) != 1 || policy.CompletedContinueSteps[0] != "f" || len(policy.ExclusiveToolCapabilities) != 1 || policy.ExclusiveToolCapabilities[0] != "writer.create" || len(policy.PublisherOwnedSlots) != 1 || policy.PublisherOwnedSlots[0] != "final" {
+		t.Fatalf("runtime policy was not compiled: %#v", policy)
+	}
+	if len(policy.ClarificationFields) != 2 || policy.ClarificationFields[0].ID != "topic" || policy.ClarificationFields[1].Choices[1] != "Minimal" {
+		t.Fatalf("runtime clarification fields were not compiled: %#v", policy.ClarificationFields)
+	}
+}
+
+func TestCompileRejectsInvalidRuntimeClarificationFields(t *testing.T) {
+	workflowYAML := strings.Replace(validWorkflow, "id: graph-test", `id: graph-test
+runtime:
+  clarification_fields:
+    - id: style
+      question: ""
+      type: select
+    - id: style
+      question: Duplicate
+      type: single`, 1)
+	result := Compile(workflowYAML, validState, "", ProfilePublish)
+	codes := map[string]bool{}
+	for _, diagnostic := range result.Diagnostics {
+		codes[diagnostic.Code] = true
+	}
+	for _, code := range []string{
+		"E_RUNTIME_CLARIFICATION_QUESTION_REQUIRED",
+		"E_RUNTIME_CLARIFICATION_TYPE_INVALID",
+		"E_RUNTIME_CLARIFICATION_ID_DUPLICATE",
+		"E_RUNTIME_CLARIFICATION_CHOICES_REQUIRED",
+	} {
+		if !codes[code] {
+			t.Fatalf("expected %s, diagnostics=%#v", code, result.Diagnostics)
+		}
 	}
 }
 
@@ -185,6 +244,33 @@ steps:
 	}
 	if len(node.OptionalInputs) != 1 || node.OptionalInputs[0].Material != "style" {
 		t.Fatalf("unexpected optional inputs: %#v", node.OptionalInputs)
+	}
+}
+
+func TestCompilePreservesOptionalExternalSlot(t *testing.T) {
+	workflowYAML := `
+id: optional-external
+slots:
+  - {id: source, external: true, required: false}
+steps:
+  - {id: start, label: Start}
+`
+	stateYAML := `
+transitions:
+  __start__: [{to: start}]
+  start: [{to: __end__}]
+steps:
+  start:
+    inputs: [{material: source, required: false}]
+    outputs: []
+`
+	result := Compile(workflowYAML, stateYAML, "", ProfilePublish)
+	if !result.Valid {
+		t.Fatalf("expected valid graph, diagnostics=%#v", result.Diagnostics)
+	}
+	producer := result.Graph.MaterialProducers["source"]
+	if producer.Kind != "external" || !producer.Optional {
+		t.Fatalf("optional external producer was not preserved: %#v", producer)
 	}
 }
 
@@ -394,7 +480,15 @@ steps:
 }
 
 func TestBundledWorkflowsCompileForRuntime(t *testing.T) {
-	for _, workflowID := range []string{"writer-workflow", "image-workflow", "test-workflow"} {
+	for _, workflowID := range []string{
+		"writer-workflow",
+		"image-workflow",
+		"test-workflow",
+		"ppt-workflow",
+		"bid_tech_proposal_writer",
+		"academic_research_pipeline",
+		"product_solution_delivery",
+	} {
 		root := filepath.Join("..", "..", "..", "..", "workflows", workflowID)
 		workflowYAML, err := os.ReadFile(filepath.Join(root, "workflow.yaml"))
 		if err != nil {
@@ -409,6 +503,37 @@ func TestBundledWorkflowsCompileForRuntime(t *testing.T) {
 		if !result.Valid {
 			t.Fatalf("bundled plugin %s must compile: %#v", workflowID, result.Diagnostics)
 		}
+	}
+}
+
+func TestCompilePreservesMaterialRuntimeMetadata(t *testing.T) {
+	workflow := `id: cardinality-test
+slots:
+  - {id: source, type: text, cardinality: single, external: true}
+  - {id: images, type: image, cardinality: list, ordered: true, exposed: true}
+steps:
+  - {id: render, inputs: [source], outputs: [images]}
+`
+	state := `start_route: all
+steps:
+  render:
+    inputs: [{material: source, required: true}]
+    outputs: [images]
+transitions:
+  __start__: [{to: render}]
+  render: [{to: __end__}]
+`
+	compiled := Compile(workflow, state, "scenario", ProfileRuntimeLoad)
+	if !compiled.Valid || compiled.Graph == nil {
+		t.Fatalf("diagnostics=%v", compiled.Diagnostics)
+	}
+	if compiled.Graph.MaterialCardinalities["source"] != "single" ||
+		compiled.Graph.MaterialCardinalities["images"] != "list" {
+		t.Fatalf("cardinalities=%v", compiled.Graph.MaterialCardinalities)
+	}
+	if compiled.Graph.MaterialTypes["source"] != "text" ||
+		compiled.Graph.MaterialTypes["images"] != "image" {
+		t.Fatalf("types=%v", compiled.Graph.MaterialTypes)
 	}
 }
 
@@ -557,6 +682,99 @@ func TestChoiceWhenHintsExposeAllCandidatesAsReachable(t *testing.T) {
 	selected := SelectRouteTarget(graph, "__start__", "write", DecideRoute(graph, "__start__", nil))
 	if len(selected.Activated) != 1 || selected.Activated[0] != "write" || len(selected.Pruned) != 1 || selected.Pruned[0] != "revise" {
 		t.Fatalf("advancing one choice candidate must prune its siblings: %#v", selected)
+	}
+}
+
+func TestValidateUIDeclarativeHTMLSlideExport(t *testing.T) {
+	known := map[string]bool{"deck_pages": true, "speaker_notes": true}
+	specs := map[string]uiMaterialSpec{
+		"deck_pages":    {Type: "text", Cardinality: "list", Ordered: true},
+		"speaker_notes": {Type: "text", Cardinality: "list", Ordered: true},
+	}
+	ui := map[string]any{
+		"slots": map[string]any{
+			"deck_pages": map[string]any{"widgetType": "html-slide"},
+		},
+		"tabs": []map[string]any{{
+			"id": "deck", "layout": "composite",
+			"slots": []map[string]any{{"id": "deck_pages"}, {"id": "speaker_notes"}},
+			"actions": []map[string]any{{
+				"id": "export", "type": "export", "provider": "html-presentation",
+				"inputs":  map[string]string{"pages": "deck_pages", "notes": "speaker_notes"},
+				"formats": []string{"pdf", "editable-pptx"}, "alignment": "sort_order",
+			}},
+		}},
+	}
+
+	diagnostics := validateUI(ui, known, map[string]bool{}, specs, ProfilePublish)
+	if len(diagnostics) != 0 {
+		t.Fatalf("declarative HTML slide export should be valid: %#v", diagnostics)
+	}
+}
+
+func TestValidateUITabVisibilityAndHTMLPreview(t *testing.T) {
+	known := map[string]bool{"plan": true, "skip_prototype": true, "prototype": true}
+	specs := map[string]uiMaterialSpec{
+		"plan":           {Type: "json", Cardinality: "single"},
+		"skip_prototype": {Type: "text", Cardinality: "single"},
+		"prototype":      {Type: "file", Cardinality: "single"},
+	}
+	ui := map[string]any{
+		"tab_visibility_ready_material": "plan",
+		"slots": map[string]any{
+			"prototype": map[string]any{"widgetType": "html-preview"},
+		},
+		"tabs": []map[string]any{{
+			"id": "prototype", "hide_when_material": "skip_prototype",
+			"slots": []map[string]any{{"id": "prototype"}},
+		}},
+	}
+
+	if diagnostics := validateUI(ui, known, map[string]bool{}, specs, ProfilePublish); len(diagnostics) != 0 {
+		t.Fatalf("declarative tab visibility and HTML preview should be valid: %#v", diagnostics)
+	}
+
+	ui["tab_visibility_ready_material"] = "missing_plan"
+	ui["tabs"].([]map[string]any)[0]["hide_when_material"] = "missing_skip"
+	diagnostics := validateUI(ui, known, map[string]bool{}, specs, ProfilePublish)
+	unknownCount := 0
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == "E_UI_MATERIAL_UNKNOWN" {
+			unknownCount++
+		}
+	}
+	if unknownCount != 2 {
+		t.Fatalf("expected both unknown visibility materials to be rejected: %#v", diagnostics)
+	}
+}
+
+func TestValidateUIRejectsInvalidExportMappings(t *testing.T) {
+	known := map[string]bool{"page": true, "notes": true}
+	specs := map[string]uiMaterialSpec{
+		"page":  {Type: "image", Cardinality: "single"},
+		"notes": {Type: "text", Cardinality: "list", Ordered: false},
+	}
+	ui := map[string]any{
+		"slots": map[string]any{"page": map[string]any{"widgetType": "html-slide"}},
+		"tabs": []map[string]any{{
+			"id": "deck", "slots": []map[string]any{{"id": "page"}},
+			"actions": []map[string]any{{
+				"id": "export", "type": "export", "provider": "html-presentation",
+				"inputs":  map[string]string{"pages": "page", "notes": "notes"},
+				"formats": []string{"pdf"}, "alignment": "sort_order",
+			}},
+		}},
+	}
+
+	diagnostics := validateUI(ui, known, map[string]bool{}, specs, ProfilePublish)
+	for _, code := range []string{
+		"E_UI_WIDGET_INCOMPATIBLE",
+		"E_UI_ACTION_INPUT_OUTSIDE_TAB",
+		"E_UI_ACTION_ALIGNMENT_INCOMPATIBLE",
+	} {
+		if !hasDiagnostic(diagnostics, code) {
+			t.Fatalf("expected %s, diagnostics=%#v", code, diagnostics)
+		}
 	}
 }
 

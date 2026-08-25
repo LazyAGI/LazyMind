@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { listTasks, removeTask } from './api';
 import type { Task } from './api';
 import TaskDetail, { StatusTag, formatDate } from './TaskDetail';
+import { isTaskFinishedWithinDays } from './recentResults';
 import { CHAT_RESUME_CONVERSATION_KEY, selectChatConversationFilter } from '@/modules/chat/constants/chat';
 import StateGraphModal from '@/components/StateGraphModal';
 
@@ -53,8 +54,8 @@ export default function Workbench({ active, onViewAllStatus }: WorkbenchProps) {
   const failed = tasks.filter((task) => task.status === 'failed');
   const canceled = tasks.filter((task) => task.status === 'canceled');
   const completed = tasks.filter((task) => ['completed', 'succeeded'].includes(task.status));
-  const completedToday = completed.filter(isTaskFinishedToday);
-  const recent = completed.filter((task) => isTaskFinishedWithinDays(task, 7));
+  const recentReferenceTime = Date.now();
+  const recent = completed.filter((task) => isTaskFinishedWithinDays(task, 7, recentReferenceTime));
   const openConversation = (id: string) => {
     selectChatConversationFilter('task');
     sessionStorage.setItem(CHAT_RESUME_CONVERSATION_KEY, id);
@@ -66,7 +67,7 @@ export default function Workbench({ active, onViewAllStatus }: WorkbenchProps) {
       <div className='task-metrics'>
         <Metric icon={<UserOutlined />} tone='orange' label={t('taskCenter.needsAttention')} value={waiting.length} />
         <Metric icon={<ClockCircleOutlined />} tone='blue' label={t('taskCenter.helpingYou')} value={running.length} />
-        <Metric icon={<CheckCircleFilled />} tone='green' label={t('taskCenter.completedToday')} value={completedToday.length} />
+        <Metric icon={<CheckCircleFilled />} tone='green' label={t('taskCenter.completedLastSevenDays')} value={recent.length} />
         <Metric icon={<CloseCircleOutlined />} tone='red' label={t('taskCenter.statusFailed')} value={statusCounts.failed} />
         <Metric icon={<StopOutlined />} tone='gray' label={t('taskCenter.statusCanceled')} value={statusCounts.canceled} />
         <span className='task-metrics-note'>{t('taskCenter.summaryHint')}</span>
@@ -222,23 +223,4 @@ function taskProgress(task: Task) {
   if (!task.steps?.length) return null;
   const done = task.steps.filter((step) => ['completed', 'succeeded'].includes(step.status)).length;
   return Math.round((done / task.steps.length) * 100);
-}
-
-function taskFinishedAt(task: Task) {
-  return new Date(task.finished_at || task.updated_at);
-}
-
-function isTaskFinishedToday(task: Task) {
-  const finishedAt = taskFinishedAt(task);
-  const today = new Date();
-  return finishedAt.getFullYear() === today.getFullYear()
-    && finishedAt.getMonth() === today.getMonth()
-    && finishedAt.getDate() === today.getDate();
-}
-
-function isTaskFinishedWithinDays(task: Task, days: number) {
-  const finishedAt = taskFinishedAt(task);
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - days);
-  return finishedAt >= cutoff;
 }
