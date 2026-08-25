@@ -85,10 +85,15 @@
       "name": "diagram-design",
       "description": "在 LazyMind 中把系统架构、流程、时序、数据模型、时间线、泳道、象限和统计图等复杂信息制作成可下载的 HTML 或独立 SVG，支持显式请求的 reveal、step 和 loop 受控动画，也可安全提取 Mermaid 与 Draw.io 后重新设计。显式提及 diagram-design、画架构图/流程图/关系图/数据图、动态展示/逐步讲解、重绘 Mermaid/Draw.io、Terminal、Sketchy 或导出 SVG 时使用；按类型读取规范与示例，执行安全、可访问性、动画和类型专项校验后发布。第四阶段仍不支持 PNG、自动品牌抓取或持久化配置。",
       "category": "design",
+      "tags": [
+        "architecture-diagram",
+        "flowchart",
+        "visualization"
+      ],
       "market_visible": true,
-      "archive_sha256": "629bfa1563861cd1d73b22454a256c86c00a3a50d1d0ce18aed7e978b709e934",
-      "tree_sha256": "0fda75940181147794fa3e2dd913697aeecf156b3ddef0b381da50e16b2e5046",
-      "archive_size": 523105,
+      "archive_sha256": "885cb8054468cff51b9f0bdc0e02ae66b7bc0305fd538277ea83e75cf26108a7",
+      "tree_sha256": "9c0c017fc8d7f7a0a6c78413682ce075a2d054c58d4e96cb26de781947b8c399",
+      "archive_size": 523143,
       "package_file": "packages/bsk_01L0D6G4R4M8V2K7Q9C5X3H0EP.zip"
     },
     {
