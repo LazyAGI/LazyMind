@@ -19,7 +19,7 @@ import (
 const ExternalCategory = "external"
 
 const (
-	MaxSkillNameLength        = 50
+	MaxSkillNameLength        = 80
 	MaxSkillDescriptionLength = 1024
 )
 

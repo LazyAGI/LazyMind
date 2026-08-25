@@ -18,7 +18,7 @@ export type GlossarySource = "user" | "ai";
 export const GLOSSARY_TERM_MAX_LENGTH = 50;
 export const GLOSSARY_ALIAS_MAX_LENGTH = 50;
 export const GLOSSARY_CONTENT_MAX_LENGTH = 300;
-export const SKILL_NAME_MAX_LENGTH = 50;
+export const SKILL_NAME_MAX_LENGTH = 80;
 export const SKILL_DESCRIPTION_MAX_LENGTH = 1024;
 
 export function countSkillCharacters(value: unknown): number {

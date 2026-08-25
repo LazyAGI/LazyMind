@@ -10,7 +10,7 @@ import yaml  # type: ignore
 
 
 _PATH_SEGMENT_RE = re.compile(r'^[A-Za-z0-9._-]+$')
-_MAX_NAME_LENGTH = 50
+_MAX_NAME_LENGTH = 80
 _MAX_DESCRIPTION_LENGTH = 1024
 
 

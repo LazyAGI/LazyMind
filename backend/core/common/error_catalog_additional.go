@@ -375,7 +375,7 @@ func init() {
 	registerAdditionalErrorPattern("skill package contains duplicate path %q", "Invalid skill package", http.StatusBadRequest, 2002294)
 	registerAdditionalErrorPattern("skill package file %q exceeds %d bytes", "Invalid skill package", http.StatusBadRequest, 2002294)
 	registerAdditionalErrorPattern("skill package exceeds %d uncompressed bytes", "Invalid skill package", http.StatusBadRequest, 2002294)
-	registerAdditionalErrorPattern("skill name cannot exceed %d characters", "Skill name cannot exceed 50 characters", http.StatusBadRequest, 2002302)
+	registerAdditionalErrorPattern("skill name cannot exceed %d characters", "Skill name cannot exceed 80 characters", http.StatusBadRequest, 2002302)
 	registerAdditionalErrorPattern("skill description cannot exceed %d characters", "Skill description cannot exceed 1024 characters", http.StatusBadRequest, 2002303)
 
 	// Personal recovery and archive lifecycle errors.

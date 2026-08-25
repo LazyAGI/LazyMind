@@ -1437,6 +1437,6 @@
   "2002299": { "en-US": "The installed Skill distribution baseline is unavailable", "zh-CN": "已安装技能的分发基线不可用" },
   "2002300": { "en-US": "Distribution upgrade conflicts require draft review", "zh-CN": "技能分发升级冲突需要通过草稿审阅解决" },
   "2002301": { "en-US": "A distribution upgrade draft is active", "zh-CN": "技能分发升级草稿正在处理中" },
-  "2002302": { "en-US": "Skill name cannot exceed 50 characters", "zh-CN": "技能名称不能超过 50 个字符" },
+  "2002302": { "en-US": "Skill name cannot exceed 80 characters", "zh-CN": "技能名称不能超过 80 个字符" },
   "2002303": { "en-US": "Skill description cannot exceed 1024 characters", "zh-CN": "技能描述不能超过 1024 个字符" }
 }

@@ -61,7 +61,7 @@ def test_require_valid_skill_document_returns_immutable_parsed_document():
         ('---\nname: valid\ndescription: ""\n---\nBody.\n', 'missing_field', 'description'),
         ('---\nname: invalid/name\ndescription: Invalid name.\n---\nBody.\n', 'invalid_name', 'name'),
         (
-            f'---\nname: {"a" * 51}\ndescription: Long name.\n---\nBody.\n',
+            f'---\nname: {"a" * 81}\ndescription: Long name.\n---\nBody.\n',
             'name_too_long',
             'name',
         ),
