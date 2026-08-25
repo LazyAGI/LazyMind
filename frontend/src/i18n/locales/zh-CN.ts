@@ -1661,6 +1661,13 @@ const zhCN = {
     },
     writerMarkdown: {
       documentRegion: "Markdown 文档",
+      blockTypes: {
+        paragraph: "正文",
+        quote: "引用",
+        heading: "标题 {{level}}",
+        selectTooltip: "选择段落格式",
+        placeholder: "段落格式",
+      },
       unsaved: "有未保存修改",
       saved: "已保存",
       saving: "保存中...",

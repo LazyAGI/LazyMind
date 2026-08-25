@@ -332,11 +332,13 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
         <ChatMessageContent
           item={item}
           uniqueKey={uniqueKey}
+          conversationId={conversation.currentConversationIdRef.current || sessionId}
+          onCiteMessage={handleAddCiteMessage}
           isThinkingCollapsed={isThinkingCollapsed}
           onToggleThinkingCollapse={toggleThinkingCollapse}
         />
       ),
-      [isThinkingCollapsed, toggleThinkingCollapse],
+      [conversation, handleAddCiteMessage, isThinkingCollapsed, sessionId, toggleThinkingCollapse],
     );
 
     const handleSkillDeposit = useCallback(() => {
