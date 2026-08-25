@@ -112,6 +112,21 @@
       "package_file": "packages/bsk_C8C501AEDCEC9283F2C9F9F59AD8.zip"
     },
     {
+      "key": "user_fd308b11/hot-news-summary",
+      "uid": "bsk_1B9DC2E9E2C3E911E34E9C8EA1AA",
+      "source_url": "https://skillhub.cn/skills/user_fd308b11/hot-news-summary",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40user_fd308b11%2Fhot-news-summary",
+      "version": "0.0.0+7649628954ee",
+      "name": "hot-news-summary",
+      "description": "聚合8大平台热榜数据（微博/知乎/B站/抖音/百度/36氪/少数派/贴吧），通过结构化评分模型智能筛选10条热点，生成三层洞察点评（What/So What/Now What），支持四种点评风格（严肃分析/毒舌吐槽/投资视角/吃瓜八卦），输出群聊/知识库/可视化看板/语音播报四种格式；当用户需要了解今日热点、生成每日资讯摘要或追踪热门话题时使用",
+      "category": "external",
+      "market_visible": false,
+      "archive_sha256": "6c05f88d98b329e1d17cbe464bf97d0e02351bb09eb740022e88b4fd67178e97",
+      "tree_sha256": "7649628954ee2fdeb9895914c006a308f1285adf3067299f8cea8603258d04eb",
+      "archive_size": 13651,
+      "package_file": "packages/bsk_1B9DC2E9E2C3E911E34E9C8EA1AA.zip"
+    },
+    {
       "key": "user_6d79eef2/k12-smart-teacher",
       "uid": "bsk_8540F063D5202C3CE7D9B6F93366",
       "source_url": "https://skillhub.cn/skills/user_6d79eef2/k12-smart-teacher",

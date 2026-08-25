@@ -2016,6 +2016,54 @@
   }
 }
 
+.memory-char-count {
+  .ant-input-data-count {
+    min-width: 4.5em;
+    text-align: right;
+    pointer-events: none;
+  }
+
+  .ant-input-textarea-show-count {
+    display: block;
+    border: 1px solid #d9d9d9;
+    border-radius: 6px;
+    background: #fff;
+    padding-bottom: 16px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+
+    &:hover {
+      border-color: #4096ff;
+    }
+
+    &:focus-within {
+      border-color: #1677ff;
+      box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.12);
+    }
+
+    &:has(textarea.ant-input-status-error) {
+      border-color: #ff4d4f;
+
+      &:focus-within {
+        box-shadow: 0 0 0 2px rgba(255, 77, 79, 0.12);
+      }
+    }
+
+    textarea.ant-input {
+      border: 0 !important;
+      box-shadow: none !important;
+      background: transparent;
+      padding-bottom: 0 !important;
+      margin-bottom: 0;
+    }
+
+    .ant-input-data-count,
+    &::after {
+      bottom: 3px;
+      inset-inline-end: 11px;
+    }
+  }
+}
+
 .memory-form-field-full {
   grid-column: 1 / -1;
 }
@@ -3284,7 +3332,9 @@
     min-width: 0;
     width: 100%;
 
-    .ant-input {
+    .ant-input,
+    .ant-input-affix-wrapper,
+    .ant-input-outlined {
       flex: 1;
       min-width: 160px;
       max-width: 360px;
@@ -3331,7 +3381,7 @@
 .memory-skill-detail-description-edit {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
   min-width: 0;
 }

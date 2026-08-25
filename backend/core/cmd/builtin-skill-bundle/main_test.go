@@ -14,6 +14,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"lazymind/core/showcase"
@@ -295,15 +296,187 @@ func TestRunBuildsFeaturedCatalogAndKeepsSkillOutOfMarket(t *testing.T) {
 	if err := os.WriteFile(sources, []byte("schema_version: 1\nskills: []\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	definition := `schema_version: 2
+	definition := testFeaturedDefinition("https://example.test/demo.zip", "1.2.3")
+	if err := os.WriteFile(filepath.Join(featuredDir, "featured.yaml"), []byte(definition), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts := options{
+		Sources:         sources,
+		Lock:            filepath.Join(root, "lock.json"),
+		Cache:           filepath.Join(root, "cache"),
+		Output:          filepath.Join(root, "runtime", "builtin-skills"),
+		FeaturedSources: featuredSources,
+		FeaturedOutput:  filepath.Join(root, "runtime", "featured-skills"),
+	}
+	if err := run(context.Background(), opts, client); err != nil {
+		t.Fatal(err)
+	}
+	builtinCatalog := readCatalog(t, filepath.Join(opts.Output, "catalog.json"))
+	if len(builtinCatalog.Skills) != 1 || skillbuiltin.CatalogSkillMarketVisible(builtinCatalog.Skills[0]) {
+		t.Fatalf("builtin catalog = %#v", builtinCatalog)
+	}
+	body, err := os.ReadFile(filepath.Join(opts.FeaturedOutput, "catalog.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var featuredCatalog showcase.Catalog
+	if err := json.Unmarshal(body, &featuredCatalog); err != nil {
+		t.Fatal(err)
+	}
+	if len(featuredCatalog.Cases) != 1 || featuredCatalog.Cases[0].Skill.BuiltinSkillUID != builtinCatalog.Skills[0].UID {
+		t.Fatalf("featured catalog = %#v", featuredCatalog)
+	}
+	asset := featuredCatalog.Cases[0].Assets["cover"]
+	if asset.URL == "" || asset.SHA256 == "" {
+		t.Fatalf("compiled asset = %#v", asset)
+	}
+}
+
+func TestRunBuildsFeaturedCatalogFromLocalDirectory(t *testing.T) {
+	root := t.TempDir()
+	featuredSources := filepath.Join(root, "featured")
+	featuredDir := filepath.Join(featuredSources, "demo-featured")
+	skillDir := filepath.Join(featuredDir, "skill")
+	if err := os.MkdirAll(filepath.Join(skillDir, "references"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: local-featured\ndescription: local featured skill\nversion: 1.2.3\n---\n# Local Featured\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	referencePath := filepath.Join(skillDir, "references", "guide.md")
+	if err := os.WriteFile(referencePath, []byte("guide\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeTestPNG(t, filepath.Join(featuredDir, "assets", "cover.png"))
+	if err := os.WriteFile(filepath.Join(featuredDir, "featured.yaml"), []byte(testFeaturedDefinition("featured/demo-featured/skill", "1.2.3")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sources := filepath.Join(root, "sources.yaml")
+	if err := os.WriteFile(sources, []byte("schema_version: 1\nskills: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts := options{
+		Sources:         sources,
+		Lock:            filepath.Join(root, "lock.json"),
+		Cache:           filepath.Join(root, "cache"),
+		Output:          filepath.Join(root, "runtime", "builtin-skills"),
+		FeaturedSources: featuredSources,
+		FeaturedOutput:  filepath.Join(root, "runtime", "featured-skills"),
+	}
+	if err := run(context.Background(), opts, http.DefaultClient); err != nil {
+		t.Fatal(err)
+	}
+	builtinCatalog := readCatalog(t, filepath.Join(opts.Output, "catalog.json"))
+	if len(builtinCatalog.Skills) != 1 {
+		t.Fatalf("builtin catalog = %#v", builtinCatalog)
+	}
+	entry := builtinCatalog.Skills[0]
+	if entry.SourceURL != "builtin://featured/demo-featured/skill" || skillbuiltin.CatalogSkillMarketVisible(entry) {
+		t.Fatalf("local featured entry = %#v", entry)
+	}
+	packageFiles, err := skillpackage.ReadZip(filepath.Join(opts.Output, filepath.FromSlash(entry.PackageFile)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(packageFiles["references/guide.md"]) != "guide\n" {
+		t.Fatalf("package files = %#v", packageFiles)
+	}
+	featuredCatalog := readFeaturedCatalog(t, filepath.Join(opts.FeaturedOutput, "catalog.json"))
+	if len(featuredCatalog.Cases) != 1 || featuredCatalog.Cases[0].Skill.SourceURL != entry.SourceURL || featuredCatalog.Cases[0].Skill.BuiltinSkillUID != entry.UID {
+		t.Fatalf("featured catalog = %#v", featuredCatalog)
+	}
+
+	opts.Output = filepath.Join(root, "runtime-frozen", "builtin-skills")
+	opts.FeaturedOutput = filepath.Join(root, "runtime-frozen", "featured-skills")
+	opts.FrozenLockfile = true
+	if err := run(context.Background(), opts, http.DefaultClient); err != nil {
+		t.Fatalf("frozen local featured build failed: %v", err)
+	}
+	if err := os.WriteFile(referencePath, []byte("changed\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts.Output = filepath.Join(root, "runtime-changed", "builtin-skills")
+	opts.FeaturedOutput = filepath.Join(root, "runtime-changed", "featured-skills")
+	if err := run(context.Background(), opts, http.DefaultClient); err == nil {
+		t.Fatal("frozen build accepted a changed local Featured Skill")
+	}
+}
+
+func TestRunRejectsFeaturedSourceAssignedToSkillMarket(t *testing.T) {
+	root := t.TempDir()
+	featuredSources := filepath.Join(root, "featured")
+	featuredDir := filepath.Join(featuredSources, "demo-featured")
+	skillDir := filepath.Join(featuredDir, "skill")
+	if err := os.MkdirAll(skillDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(skillDir, "SKILL.md"), []byte("---\nname: local-featured\ndescription: local featured skill\nversion: 1.2.3\n---\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	writeTestPNG(t, filepath.Join(featuredDir, "assets", "cover.png"))
+	if err := os.WriteFile(filepath.Join(featuredDir, "featured.yaml"), []byte(testFeaturedDefinition("featured/demo-featured/skill", "1.2.3")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sources := filepath.Join(root, "sources.yaml")
+	if err := os.WriteFile(sources, []byte(`schema_version: 1
+bundled_skills:
+  - uid: bsk_market_demo
+    path: featured/demo-featured/skill
+    category: demo
+    version: 1.2.3
+skills: []
+`), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts := options{
+		Sources: sources, Lock: filepath.Join(root, "lock.json"), Cache: filepath.Join(root, "cache"),
+		Output: filepath.Join(root, "runtime", "builtin-skills"), FeaturedSources: featuredSources,
+		FeaturedOutput: filepath.Join(root, "runtime", "featured-skills"),
+	}
+	err := run(context.Background(), opts, http.DefaultClient)
+	if err == nil || !strings.Contains(err.Error(), "cannot be both a market Skill and a featured-only Skill") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestRunRejectsMissingLocalFeaturedDirectory(t *testing.T) {
+	root := t.TempDir()
+	featuredSources := filepath.Join(root, "featured")
+	featuredDir := filepath.Join(featuredSources, "demo-featured")
+	writeTestPNG(t, filepath.Join(featuredDir, "assets", "cover.png"))
+	if err := os.WriteFile(filepath.Join(featuredDir, "featured.yaml"), []byte(testFeaturedDefinition("featured/demo-featured/missing", "1.2.3")), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sources := filepath.Join(root, "sources.yaml")
+	if err := os.WriteFile(sources, []byte("schema_version: 1\nskills: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err := run(context.Background(), options{
+		Sources: sources, Lock: filepath.Join(root, "lock.json"), Cache: filepath.Join(root, "cache"),
+		Output: filepath.Join(root, "runtime", "builtin-skills"), FeaturedSources: featuredSources,
+		FeaturedOutput: filepath.Join(root, "runtime", "featured-skills"),
+	}, http.DefaultClient)
+	if err == nil || !strings.Contains(err.Error(), "bundled skill directory not found") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return f(request)
+}
+
+func testFeaturedDefinition(source, requiredVersion string) string {
+	return `schema_version: 2
 id: demo-featured
 type: work
 version: 1.0.0
 status: published
 default_locale: zh-CN
 skill:
-  source_url: https://example.test/demo.zip
-  required_version: 1.2.3
+  source_url: ` + source + `
+  required_version: ` + requiredVersion + `
 placement:
   home: true
   gallery: true
@@ -345,45 +518,19 @@ tasks:
       summary: Result
       highlights: [One]
 `
-	if err := os.WriteFile(filepath.Join(featuredDir, "featured.yaml"), []byte(definition), 0o644); err != nil {
-		t.Fatal(err)
-	}
-	opts := options{
-		Sources:         sources,
-		Lock:            filepath.Join(root, "lock.json"),
-		Cache:           filepath.Join(root, "cache"),
-		Output:          filepath.Join(root, "runtime", "builtin-skills"),
-		FeaturedSources: featuredSources,
-		FeaturedOutput:  filepath.Join(root, "runtime", "featured-skills"),
-	}
-	if err := run(context.Background(), opts, client); err != nil {
-		t.Fatal(err)
-	}
-	builtinCatalog := readCatalog(t, filepath.Join(opts.Output, "catalog.json"))
-	if len(builtinCatalog.Skills) != 1 || skillbuiltin.CatalogSkillMarketVisible(builtinCatalog.Skills[0]) {
-		t.Fatalf("builtin catalog = %#v", builtinCatalog)
-	}
-	body, err := os.ReadFile(filepath.Join(opts.FeaturedOutput, "catalog.json"))
+}
+
+func readFeaturedCatalog(t *testing.T, path string) showcase.Catalog {
+	t.Helper()
+	body, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	var featuredCatalog showcase.Catalog
-	if err := json.Unmarshal(body, &featuredCatalog); err != nil {
+	var catalog showcase.Catalog
+	if err := json.Unmarshal(body, &catalog); err != nil {
 		t.Fatal(err)
 	}
-	if len(featuredCatalog.Cases) != 1 || featuredCatalog.Cases[0].Skill.BuiltinSkillUID != builtinCatalog.Skills[0].UID {
-		t.Fatalf("featured catalog = %#v", featuredCatalog)
-	}
-	asset := featuredCatalog.Cases[0].Assets["cover"]
-	if asset.URL == "" || asset.SHA256 == "" {
-		t.Fatalf("compiled asset = %#v", asset)
-	}
-}
-
-type roundTripFunc func(*http.Request) (*http.Response, error)
-
-func (f roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
-	return f(request)
+	return catalog
 }
 
 func makeSkillZip(t *testing.T) []byte {

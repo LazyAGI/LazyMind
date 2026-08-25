@@ -4800,6 +4800,9 @@ const enUS = {
     memoryGlossaryTermMaxLength: "Phrase must not exceed {{count}} characters",
     memoryGlossaryAliasMaxLength: "Each word must not exceed {{count}} characters",
     memoryGlossaryContentMaxLength: "Content must not exceed {{count}} characters",
+    memorySkillNameMaxLength: "Skill name cannot exceed {{count}} characters",
+    memorySkillDescriptionMaxLength:
+      "Skill description cannot exceed {{count}} characters",
     memorySkillTagMaxCount: "A skill can have at most {{count}} tags",
     memoryGlossaryTermAliasExactDuplicate:
       "The phrase cannot be exactly the same as a word in this group: {{word}}. Please edit it before saving.",
