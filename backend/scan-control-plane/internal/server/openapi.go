@@ -328,6 +328,7 @@ func openAPISchemas() map[string]any {
 		"SyncState":                        enumSchema("IDLE", "SCHEDULED", "PENDING", "RUNNING", "FAILED"),
 		"TaskAction":                       enumSchema("CREATE", "REPARSE", "DELETE"),
 		"ParseTaskStatus":                  enumSchema("PENDING", "RUNNING", "SUBMITTED", "SUCCEEDED", "FAILED", "SUPERSEDED"),
+		"SourceOrderBy":                    enumSchema("latest_updated", "most_used", "recent_used"),
 	}
 }
 
@@ -911,6 +912,7 @@ func sourceListQueryParameters() []map[string]any {
 	return []map[string]any{
 		queryParameter("keyword", stringSchema()),
 		queryParameter("status", schemaRef("SourceStatus")),
+		queryParameter("order_by", schemaRef("SourceOrderBy")),
 		queryParameter("page", integerSchema()),
 		queryParameter("page_size", integerSchema()),
 	}

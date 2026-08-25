@@ -118,6 +118,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/dataset/algos", []string{"document.read"}, doc.ListAlgos)
 	handleAPI(r, "GET", "/dataset/tags", []string{"document.read"}, doc.AllDatasetTags)
 	handleAPI(r, "GET", "/datasets", []string{"document.read"}, doc.ListDatasets)
+	handleAPI(r, "POST", "/internal/datasets/usage:batch", nil, doc.InternalBatchDatasetUsage)
 	handleAPI(r, "POST", "/datasets", []string{"document.write"}, doc.CreateDataset)
 	handleAPI(r, "GET", "/datasets/{dataset}", []string{"document.read"}, doc.GetDataset)
 	handleAPI(r, "DELETE", "/datasets/{dataset}", []string{"document.write"}, doc.DeleteDataset)

@@ -97,6 +97,20 @@ type PromptUserState struct {
 
 func (PromptUserState) TableName() string { return "prompt_user_states" }
 
+type DatasetUserState struct {
+	ID             string     `gorm:"column:id;type:varchar(64);primaryKey"`
+	DatasetID      string     `gorm:"column:dataset_id;type:varchar(255);not null;uniqueIndex:uk_dataset_user_states_user_dataset,priority:2"`
+	UsageCount     int64      `gorm:"column:usage_count;type:bigint;not null;default:0"`
+	LastUsedAt     *time.Time `gorm:"column:last_used_at"`
+	CreateUserID   string     `gorm:"column:create_user_id;type:varchar(255);not null;uniqueIndex:uk_dataset_user_states_user_dataset,priority:1"`
+	CreateUserName string     `gorm:"column:create_user_name;type:varchar(255);not null"`
+	CreatedAt      time.Time  `gorm:"column:created_at;not null"`
+	UpdatedAt      time.Time  `gorm:"column:updated_at;not null"`
+	DeletedAt      *time.Time `gorm:"column:deleted_at"`
+}
+
+func (DatasetUserState) TableName() string { return "dataset_user_states" }
+
 type UserDisabledTool struct {
 	ID             int64      `gorm:"column:id;primaryKey;autoIncrement"`
 	ToolName       string     `gorm:"column:tool_name;type:varchar(255);not null;uniqueIndex:uk_user_disabled_tools_user_tool,priority:2"`

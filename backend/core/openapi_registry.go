@@ -851,7 +851,7 @@ type skillPathParams struct {
 type datasetQueryParams struct {
 	PageToken string   `query:"page_token"`
 	PageSize  int32    `query:"page_size"`
-	OrderBy   string   `query:"order_by"`
+	OrderBy   string   `query:"order_by" enum:"latest_updated,most_used,recent_used" desc:"Sort datasets by latest_updated (default), most_used (per current user usage), or recent_used (latest of last used and content update)."`
 	Keyword   string   `query:"keyword"`
 	Tags      []string `query:"tags"`
 	Source    string   `query:"source" enum:"manual,cloud,official_installed" desc:"Filter datasets by creation source: manual (local upload), cloud (cloud document sync) or official_installed (installed from the knowledge plaza)."`
