@@ -198,7 +198,7 @@ export default function KnowledgeDataSettings({
       <span className="settings-knowledge-tool-icon" aria-hidden="true">{group.icon}</span>
       <div className="settings-knowledge-tool-copy">
         <strong>{displayName}</strong>
-        <p>{tool?.description || definition.description}</p>
+        <p>{definition.description}</p>
       </div>
       <Tag className={`settings-knowledge-state ${status.className}`}>{status.label}</Tag>
       <Switch

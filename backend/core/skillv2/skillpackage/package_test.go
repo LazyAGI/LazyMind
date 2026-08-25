@@ -2,6 +2,7 @@ package skillpackage
 
 import (
 	"archive/zip"
+	"bytes"
 	"os"
 	"path/filepath"
 	"strings"
@@ -28,6 +29,28 @@ func TestReadZipNormalizesSingleRootAndHashesDeterministically(t *testing.T) {
 	}
 }
 
+func TestReadZipIgnoresSystemMetadataAndNormalizesRoot(t *testing.T) {
+	zipPath := writeZip(t, map[string]string{
+		"wrapped/SKILL.md":            "---\nname: demo\ndescription: demo\n---\n",
+		"wrapped/scripts/run.py":      "print('ok')\n",
+		"wrapped/.DS_Store":           "finder metadata",
+		"__MACOSX/wrapped/._SKILL.md": "macOS metadata",
+		"wrapped/Thumbs.db":           "windows thumbnail",
+	})
+	files, err := ReadZip(zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(files["SKILL.md"]) == "" || string(files["scripts/run.py"]) == "" {
+		t.Fatalf("unexpected normalized files: %#v", files)
+	}
+	for _, name := range []string{".DS_Store", "Thumbs.db", "__MACOSX/wrapped/._SKILL.md", "wrapped/.DS_Store"} {
+		if _, ok := files[name]; ok {
+			t.Fatalf("kept system metadata file %q in %#v", name, files)
+		}
+	}
+}
+
 func TestReadZipRejectsUnsafeAndOversizedEntries(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -45,6 +68,46 @@ func TestReadZipRejectsUnsafeAndOversizedEntries(t *testing.T) {
 				t.Fatalf("error = %v, want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestWriteZipIsDeterministicAndReadable(t *testing.T) {
+	files := map[string][]byte{
+		"SKILL.md":       []byte("---\nname: demo\ndescription: demo\n---\n"),
+		"scripts/run.py": []byte("print('ok')\n"),
+	}
+	first, err := WriteZip(files, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := WriteZip(files, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstBody, err := os.ReadFile(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondBody, err := os.ReadFile(second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(firstBody, secondBody) {
+		t.Fatal("deterministic archives differ")
+	}
+	read, err := ReadZip(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(read["scripts/run.py"], files["scripts/run.py"]) {
+		t.Fatalf("archive content = %q", read["scripts/run.py"])
+	}
+}
+
+func TestWriteZipRejectsUnsafePath(t *testing.T) {
+	_, err := WriteZip(map[string][]byte{"../SKILL.md": []byte("x")}, t.TempDir())
+	if err == nil || !strings.Contains(err.Error(), "unsafe path") {
+		t.Fatalf("error = %v", err)
 	}
 }
 

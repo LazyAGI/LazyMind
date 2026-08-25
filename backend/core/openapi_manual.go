@@ -418,7 +418,7 @@ func manualSchemas() map[string]any {
 		"PromptCategoryRequest":            objReq([]string{"name"}, prop("name", strSchema())),
 		"PromptCategory":                   objReq([]string{"id", "name"}, prop("id", strSchema()), prop("name", strSchema())),
 		"PromptCategoryListResponse":       obj(prop("categories", array(refSchema("PromptCategory")))),
-		"PromptPolishRequest":              objReq([]string{"content", "user_instruct"}, prop("content", strSchema()), prop("user_instruct", strSchema())),
+		"PromptPolishRequest":              objReq([]string{"content", "user_instruct"}, prop("content", strSchema()), prop("user_instruct", strSchema()), prop("allow_empty", boolSchema())),
 		"PromptPolishResponse":             obj(prop("content", strSchema())),
 		"PromptItem":                       obj(prop("name", strSchema()), prop("id", strSchema()), prop("content", strSchema()), prop("display_name", strSchema()), prop("category", strSchema()), prop("source", strSchema()), prop("is_favorite", boolSchema()), prop("usage_count", int64Schema()), prop("last_used_at", strSchema()), prop("created_at", strSchema()), prop("updated_at", strSchema())),
 		"PromptFacets":                     obj(prop("scopes", obj()), prop("categories", obj()), prop("category_total", int64Schema())),
@@ -512,7 +512,7 @@ func manualSchemas() map[string]any {
 		"ConversationSwitchStatusResponse": obj(prop("status", intSchema())),
 		"ConversationChatStatusResponse":   obj(prop("is_generating", boolSchema())),
 		"ConversationItem": obj(
-			prop("name", strSchema()), prop("conversation_id", strSchema()), prop("display_name", strSchema()), prop("search_config", obj()), prop("user", strSchema()), prop("chat_times", int64Schema()), prop("total_feedback_like", int64Schema()), prop("total_feedback_unlike", int64Schema()), prop("create_time", strSchema()), prop("update_time", strSchema()), prop("models", array(strSchema())), prop("chat_executor", enumStringSchema("lazymind", "codex", "cursor", "workbuddy")), prop("assistant", enumStringSchema("lazymind", "codex", "cursor", "workbuddy")), prop("project_key", strSchema()), prop("project_name", strSchema()),
+			prop("name", strSchema()), prop("conversation_id", strSchema()), prop("display_name", strSchema()), prop("search_config", obj()), prop("user", strSchema()), prop("chat_times", int64Schema()), prop("total_feedback_like", int64Schema()), prop("total_feedback_unlike", int64Schema()), prop("create_time", strSchema()), prop("update_time", strSchema()), prop("models", array(strSchema())), prop("chat_executor", enumStringSchema("lazymind", "codex", "cursor", "workbuddy")), prop("thinking_depth", enumStringSchema("low", "medium", "high", "max")), prop("assistant", enumStringSchema("lazymind", "codex", "cursor", "workbuddy")), prop("project_key", strSchema()), prop("project_name", strSchema()),
 		),
 		"ExternalExecutionInvocation": obj(
 			prop("total", intSchema()), prop("running", intSchema()), prop("succeeded", intSchema()),

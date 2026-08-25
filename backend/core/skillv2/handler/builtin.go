@@ -160,6 +160,9 @@ func EnableBuiltinSkill(w http.ResponseWriter, r *http.Request) {
 		Description:           pkg.Description,
 		IsEnabled:             boolPtr(true),
 		Source:                source,
+		Distribution: &skillservice.DistributionSource{
+			BuiltinUID: pkg.UID, Version: pkg.Version, ArchiveSHA256: pkg.SHA256, TreeSHA256: pkg.TreeSHA256,
+		},
 	})
 	if err != nil {
 		if existingID := installedBuiltinSkillID(r, db, userID, uid); existingID != "" {

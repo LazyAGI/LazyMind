@@ -10,6 +10,7 @@ import (
 	"path"
 	"sort"
 	"strings"
+	"time"
 )
 
 const (
@@ -60,6 +61,71 @@ func TreeHash(files map[string][]byte) string {
 	return hex.EncodeToString(hash.Sum(nil))
 }
 
+// WriteZip writes a deterministic Skill archive and returns its temporary path.
+// The caller owns the returned file and must remove it when it is no longer needed.
+func WriteZip(files map[string][]byte, directory string) (string, error) {
+	if len(files) > MaxFiles {
+		return "", fmt.Errorf("skill package contains too many entries: %d > %d", len(files), MaxFiles)
+	}
+	paths := make([]string, 0, len(files))
+	var total int64
+	for filePath, data := range files {
+		cleaned, err := CleanPath(filePath)
+		if err != nil {
+			return "", err
+		}
+		if cleaned != filePath {
+			return "", fmt.Errorf("unsafe path %q", filePath)
+		}
+		if len(data) > MaxFileBytes {
+			return "", fmt.Errorf("skill package file %q exceeds %d bytes", filePath, MaxFileBytes)
+		}
+		total += int64(len(data))
+		if total > MaxTotalBytes {
+			return "", fmt.Errorf("skill package exceeds %d uncompressed bytes", MaxTotalBytes)
+		}
+		paths = append(paths, filePath)
+	}
+	sort.Strings(paths)
+
+	file, err := os.CreateTemp(directory, ".skill-package-*.zip")
+	if err != nil {
+		return "", err
+	}
+	archivePath := file.Name()
+	keep := false
+	defer func() {
+		_ = file.Close()
+		if !keep {
+			_ = os.Remove(archivePath)
+		}
+	}()
+
+	writer := zip.NewWriter(file)
+	for _, filePath := range paths {
+		header := &zip.FileHeader{Name: filePath, Method: zip.Deflate}
+		header.SetMode(0o644)
+		header.Modified = time.Date(1980, time.January, 1, 0, 0, 0, 0, time.UTC)
+		entry, err := writer.CreateHeader(header)
+		if err != nil {
+			_ = writer.Close()
+			return "", err
+		}
+		if _, err := entry.Write(files[filePath]); err != nil {
+			_ = writer.Close()
+			return "", err
+		}
+	}
+	if err := writer.Close(); err != nil {
+		return "", err
+	}
+	if err := file.Close(); err != nil {
+		return "", err
+	}
+	keep = true
+	return archivePath, nil
+}
+
 func readFiles(entries []*zip.File) (map[string][]byte, error) {
 	if len(entries) > MaxFiles {
 		return nil, fmt.Errorf("skill package contains too many entries: %d > %d", len(entries), MaxFiles)
@@ -67,6 +133,9 @@ func readFiles(entries []*zip.File) (map[string][]byte, error) {
 	files := make(map[string][]byte, len(entries))
 	var total uint64
 	for _, entry := range entries {
+		if isIgnoredMetadata(entry.Name) {
+			continue
+		}
 		entryName := strings.TrimSuffix(entry.Name, "/")
 		name, err := CleanPath(entryName)
 		if err != nil {
@@ -136,4 +205,18 @@ func normalizeRoot(files map[string][]byte) map[string][]byte {
 		return normalized
 	}
 	return files
+}
+
+func isIgnoredMetadata(name string) bool {
+	name = strings.TrimSuffix(name, "/")
+	if name == "" {
+		return false
+	}
+	for _, part := range strings.Split(name, "/") {
+		lower := strings.ToLower(part)
+		if lower == "__macosx" || lower == ".ds_store" || lower == "thumbs.db" || lower == "desktop.ini" || strings.HasPrefix(part, "._") {
+			return true
+		}
+	}
+	return false
 }

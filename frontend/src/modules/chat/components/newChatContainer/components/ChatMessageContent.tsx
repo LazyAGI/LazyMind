@@ -30,6 +30,8 @@ const INTENT_FIELD_LABELS: Record<string, string> = {
 
 interface ChatMessageContentProps {
   item: any;
+  conversationId?: string;
+  onCiteMessage?: (text: string, historyId?: string) => void;
   uniqueKey?: string;
   isThinkingCollapsed: (key: string, defaultCollapsed?: boolean) => boolean;
   onToggleThinkingCollapse: (key: string, currentCollapsed?: boolean) => void;
@@ -58,6 +60,8 @@ function ModelRetryStatus({
 
 export default function ChatMessageContent({
   item,
+  conversationId,
+  onCiteMessage,
   uniqueKey,
   isThinkingCollapsed,
   onToggleThinkingCollapse,
@@ -162,7 +166,15 @@ export default function ChatMessageContent({
         </>
       )}
       <div className="chat-text">
-        <MarkdownViewer sources={sources} IS_STREAMING={isStreaming}>
+        <MarkdownViewer
+          sources={sources}
+          IS_STREAMING={isStreaming}
+          conversationId={conversationId}
+          historyId={item.history_id || item.id}
+          onCiteMessage={(text: string) =>
+            onCiteMessage?.(text, item.history_id || item.id)
+          }
+        >
           {item.display_delta || item.delta}
         </MarkdownViewer>
       </div>

@@ -225,6 +225,8 @@ def test_subagent_plan_preserves_extension_params_without_structured_duplicates(
         if section.section_id == 'subagent_role'
     )
     assert 'must never ask the user a question' in role_section.content
+    assert 'Never emit a fenced Markdown block with the language `editable`' in role_section.content
+    assert all(section.section_id != 'editable_writing' for section in plan.prompt.sections)
 
 
 def test_subagent_plan_uses_200_rounds_in_max_mode(tmp_path):

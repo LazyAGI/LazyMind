@@ -497,6 +497,7 @@ def _build_subagent_plan(
         current_query=ctx.objective,
         show_tool_status=False,
         tool_prompt_appendices=tool_prompt_appendices,
+        include_editable_writing=False,
     )
     builder.system(
         'subagent_role', 'SubAgent Role', (
@@ -509,7 +510,10 @@ def _build_subagent_plan(
             'Use the selected user-visible language for progress and the final summary. '
             'Artifact content must follow the language required by the task objective or '
             'the output slot contract; do not translate an artifact when its required '
-            'format specifies another language.'
+            'format specifies another language. '
+            'Never emit a fenced Markdown block with the language `editable`; that is a '
+            'main Chat Agent presentation protocol. Return normal summary text and persist '
+            'requested deliverables through the declared artifact tools.'
         ),
         'platform.subagent',
         priority=20,

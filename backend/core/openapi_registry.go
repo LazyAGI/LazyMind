@@ -1397,6 +1397,31 @@ type builtinSkillListOpenAPIResponse struct {
 	Total int                           `json:"total"`
 }
 
+type skillDistributionConflictOpenAPIResponse struct {
+	Path string `json:"path"`
+	Kind string `json:"kind"`
+}
+
+type skillDistributionUpgradeStatusOpenAPIResponse struct {
+	Managed              bool                                       `json:"managed"`
+	UpdateAvailable      bool                                       `json:"update_available"`
+	Pending              bool                                       `json:"pending"`
+	CurrentVersion       string                                     `json:"current_version,omitempty"`
+	CurrentArchiveSHA256 string                                     `json:"current_archive_sha256,omitempty"`
+	PendingVersion       string                                     `json:"pending_version,omitempty"`
+	PendingArchiveSHA256 string                                     `json:"pending_archive_sha256,omitempty"`
+	LatestVersion        string                                     `json:"latest_version,omitempty"`
+	LatestArchiveSHA256  string                                     `json:"latest_archive_sha256,omitempty"`
+	Conflicts            []skillDistributionConflictOpenAPIResponse `json:"conflicts"`
+}
+
+type skillDistributionUpgradePrepareOpenAPIResponse struct {
+	DraftVersion int64                                         `json:"draft_version"`
+	AutoMerged   bool                                          `json:"auto_merged"`
+	Conflicts    []skillDistributionConflictOpenAPIResponse    `json:"conflicts"`
+	Status       skillDistributionUpgradeStatusOpenAPIResponse `json:"status"`
+}
+
 type skillTreeNodeOpenAPIResponse struct {
 	Name     string                         `json:"name"`
 	Path     string                         `json:"path"`
@@ -2032,11 +2057,53 @@ type personalizationSettingOpenAPIResponse struct {
 	Enabled bool `json:"enabled"`
 }
 
+type chatConversationDefaultsOpenAPI struct {
+	ChatExecutor   string `json:"chat_executor" enum:"lazymind,codex,cursor,workbuddy"`
+	EnableWorkflow bool   `json:"enable_workflow"`
+	WorkflowMode   string `json:"workflow_mode" enum:"auto,dynamic"`
+	EnableSubagent bool   `json:"enable_subagent"`
+}
+
+type chatEntryDefaultsOpenAPI struct {
+	ThinkingDepth        string                          `json:"thinking_depth" enum:"low,medium,high,max"`
+	ConversationSettings chatConversationDefaultsOpenAPI `json:"conversation_settings"`
+}
+
+type chatConversationDefaultsPatchOpenAPIRequest struct {
+	ChatExecutor   *string `json:"chat_executor,omitempty" enum:"lazymind,codex,cursor,workbuddy"`
+	EnableWorkflow *bool   `json:"enable_workflow,omitempty"`
+	WorkflowMode   *string `json:"workflow_mode,omitempty" enum:"auto,dynamic"`
+	EnableSubagent *bool   `json:"enable_subagent,omitempty"`
+}
+
+type chatEntryDefaultsPatchOpenAPIRequest struct {
+	ThinkingDepth        *string                                      `json:"thinking_depth,omitempty" enum:"low,medium,high,max"`
+	ConversationSettings *chatConversationDefaultsPatchOpenAPIRequest `json:"conversation_settings,omitempty"`
+}
+
+type userChatSettingsPatchOpenAPIRequest struct {
+	EnableWorkflow *bool                                 `json:"enable_workflow,omitempty"`
+	WorkflowMode   *string                               `json:"workflow_mode,omitempty"`
+	EnableSubagent *bool                                 `json:"enable_subagent,omitempty"`
+	QuickQuestion  *chatEntryDefaultsPatchOpenAPIRequest `json:"quick_question,omitempty"`
+	NewTask        *chatEntryDefaultsPatchOpenAPIRequest `json:"new_task,omitempty"`
+}
+
+type userChatSettingsOpenAPIResponse struct {
+	EnableWorkflow bool                     `json:"enable_workflow"`
+	WorkflowMode   string                   `json:"workflow_mode"`
+	EnableSubagent bool                     `json:"enable_subagent"`
+	QuickQuestion  chatEntryDefaultsOpenAPI `json:"quick_question"`
+	NewTask        chatEntryDefaultsOpenAPI `json:"new_task"`
+	UpdatedAt      string                   `json:"updated_at"`
+}
+
 type userUIPreferencesPatchOpenAPIRequest struct {
 	ChatPreferenceNoticeDismissed *bool   `json:"chat_preference_notice_dismissed,omitempty"`
 	DeveloperModeActive           *bool   `json:"developer_mode_active,omitempty"`
 	AcceptedUserAgreementVersion  *string `json:"accepted_user_agreement_version,omitempty"`
 	TaskCenterEnabled             *bool   `json:"task_center_enabled,omitempty"`
+	SchedulesEnabled              *bool   `json:"schedules_enabled,omitempty"`
 	SkillsEnabled                 *bool   `json:"skills_enabled,omitempty"`
 	WorkflowsEnabled              *bool   `json:"workflows_enabled,omitempty"`
 	MCPEnabled                    *bool   `json:"mcp_enabled,omitempty"`
@@ -2048,6 +2115,7 @@ type userUIPreferencesOpenAPIResponse struct {
 	DeveloperModeActive           bool   `json:"developer_mode_active"`
 	AcceptedUserAgreementVersion  string `json:"accepted_user_agreement_version"`
 	TaskCenterEnabled             bool   `json:"task_center_enabled"`
+	SchedulesEnabled              bool   `json:"schedules_enabled"`
 	SkillsEnabled                 bool   `json:"skills_enabled"`
 	WorkflowsEnabled              bool   `json:"workflows_enabled"`
 	MCPEnabled                    bool   `json:"mcp_enabled"`
@@ -2058,6 +2126,7 @@ type userUIPreferencesOpenAPIResponse struct {
 
 type settingsFeatureControlsOpenAPIResponse struct {
 	TaskCenterEnabled      bool `json:"task_center_enabled"`
+	SchedulesEnabled       bool `json:"schedules_enabled"`
 	SkillsEnabled          bool `json:"skills_enabled"`
 	WorkflowsEnabled       bool `json:"workflows_enabled"`
 	MCPEnabled             bool `json:"mcp_enabled"`
@@ -2873,6 +2942,23 @@ func registeredCoreOperations() []openAPIOperation {
 		},
 		{
 			Method:     "GET",
+			Path:       "/skills/{skill_id}/distribution-upgrade",
+			Summary:    "Get builtin Skill distribution upgrade status",
+			Tags:       []string{"skills"},
+			PathParams: skillPathParams{},
+			Responses:  map[int]openAPIResponse{200: resp("Distribution upgrade status", skillDistributionUpgradeStatusOpenAPIResponse{})},
+		},
+		{
+			Method:      "POST",
+			Path:        "/skills/{skill_id}/distribution-upgrade:prepare",
+			Summary:     "Prepare a three-way builtin Skill distribution upgrade draft",
+			Description: "Merges the installed distribution base, current user Head, and latest builtin package. The candidate is staged in the existing Skill draft/review workflow.",
+			Tags:        []string{"skills"},
+			PathParams:  skillPathParams{},
+			Responses:   map[int]openAPIResponse{200: resp("Prepared distribution upgrade", skillDistributionUpgradePrepareOpenAPIResponse{})},
+		},
+		{
+			Method:     "GET",
 			Path:       "/skills/{skill_id}",
 			Summary:    "Get directory skill details",
 			Tags:       []string{"skills"},
@@ -3662,6 +3748,23 @@ func registeredCoreOperations() []openAPIOperation {
 			Responses:   map[int]openAPIResponse{200: resp("Updated personalization setting", personalizationSettingOpenAPIResponse{})},
 		},
 		{
+			Method:      "GET",
+			Path:        "/user/chat-settings",
+			Summary:     "Get quick-question and new-task defaults",
+			Description: "Returns independent thinking-depth and conversation defaults for the quick-question and new-task entry points. Legacy flat fields remain available and mirror the new-task conversation defaults.",
+			Tags:        []string{"user"},
+			Responses:   map[int]openAPIResponse{200: resp("Current user's chat entry defaults", userChatSettingsOpenAPIResponse{})},
+		},
+		{
+			Method:      "PATCH",
+			Path:        "/user/chat-settings",
+			Summary:     "Partially update quick-question and new-task defaults",
+			Description: "Every field is optional. Send quick_question or new_task to update one entry profile without replacing the other. Legacy flat fields remain accepted for installed clients.",
+			Tags:        []string{"user"},
+			RequestBody: jsonBodyOf(userChatSettingsPatchOpenAPIRequest{}, true),
+			Responses:   map[int]openAPIResponse{200: resp("Updated chat entry defaults", userChatSettingsOpenAPIResponse{})},
+		},
+		{
 			Method:    "GET",
 			Path:      "/user/ui-preferences",
 			Summary:   "Get current user's UI preferences",
@@ -3672,7 +3775,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "PATCH",
 			Path:        "/user/ui-preferences",
 			Summary:     "Partially update current user's UI preferences",
-			Description: "Partial update. Every field inside the request body is optional; send only fields that should change. Updating skills_enabled sets all current user skills to the same state; updating workflows_enabled independently sets all available workflows in one transaction.",
+			Description: "Partial update. Every field inside the request body is optional; send only fields that should change. Updating schedules_enabled pauses or resumes scheduled execution; updating skills_enabled sets all current user skills to the same state; updating workflows_enabled independently sets all available workflows in one transaction.",
 			Tags:        []string{"user"},
 			RequestBody: jsonBodyOf(userUIPreferencesPatchOpenAPIRequest{}, true),
 			Responses:   map[int]openAPIResponse{200: resp("Updated current user's UI preferences", userUIPreferencesOpenAPIResponse{})},

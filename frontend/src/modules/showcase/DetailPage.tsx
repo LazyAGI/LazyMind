@@ -236,7 +236,16 @@ export default function DetailPage() {
           {t("showcase.detail.back")}
         </Link>
         <div className="showcase-detail-heading">
-          <h1>{item.detail_title}</h1>
+          <h1>
+            <a
+              className="showcase-detail-source-link"
+              href={item.source_url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              {item.detail_title}
+            </a>
+          </h1>
           <p>{item.detail_description}</p>
         </div>
         <button type="button" className="showcase-detail-try-button" onClick={startCase}>

@@ -208,7 +208,7 @@ func conversationIDFromName(name string) string {
 }
 
 // ensureConversation textCreatetextUsertextConversation，textConversation、text history text seq、error
-func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName string, searchConfig json.RawMessage, models json.RawMessage, userID, userName string, conversationSettings map[string]any) (*orm.Conversation, int, error) {
+func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName string, searchConfig json.RawMessage, models json.RawMessage, userID, userName string, runInBackground bool, requestedThinkingDepth string, conversationSettings map[string]any) (*orm.Conversation, int, error) {
 	now := time.Now()
 	var c orm.Conversation
 	err := db.Where("id = ? AND create_user_id = ?", convID, userID).First(&c).Error
@@ -261,15 +261,27 @@ func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName st
 			UpdatedAt:      now,
 		},
 	}
+	if ephemeral, _ := conversationSettings["ephemeral"].(bool); ephemeral {
+		c.IsEphemeral = true
+		if persistent, _ := conversationSettings["persistent_ephemeral"].(bool); !persistent {
+			expiresAt := now.Add(24 * time.Hour)
+			c.EphemeralExpiresAt = &expiresAt
+		}
+		c.SourceType, _ = conversationSettings["source_type"].(string)
+		c.SourceDatasetID, _ = conversationSettings["source_dataset_id"].(string)
+		c.SourceDocumentID, _ = conversationSettings["source_document_id"].(string)
+		c.SourceDisplayName, _ = conversationSettings["source_display_name"].(string)
+	}
 	// Resolve plugin settings for the new conversation.
 	// Priority: caller-supplied conversation settings > user_chat_settings defaults.
 	// All fields are written once so the conversation owns a stable execution
 	// policy without per-request fallback queries.
-	settings := resolveInitialConversationSettings(ctx, db, userID, conversationSettings)
+	settings := resolveInitialConversationSettings(ctx, db, userID, runInBackground, requestedThinkingDepth, conversationSettings)
 	c.EnableWorkflow = &settings.enableWorkflow
 	c.WorkflowMode = &settings.workflowMode
 	c.EnableSubagent = &settings.enableSubagent
 	c.ChatExecutor = settings.chatExecutor
+	c.ThinkingDepth = settings.thinkingDepth
 	if err := db.Create(&c).Error; err != nil {
 		return nil, 0, err
 	}
@@ -281,28 +293,33 @@ type resolvedConversationSettings struct {
 	workflowMode   string
 	enableSubagent bool
 	chatExecutor   string
+	thinkingDepth  string
 }
 
 // resolveInitialConversationSettings merges caller-supplied overrides with the user's
 // global defaults from user_chat_settings. Fields present in conversationSettings take
 // priority; missing fields fall back to the DB defaults (or hardcoded values if
 // the user has no row yet).
-func resolveInitialConversationSettings(ctx context.Context, db *gorm.DB, userID string, conversationSettings map[string]any) resolvedConversationSettings {
-	// Start from hardcoded fallbacks (matches user_chat_settings DB defaults).
-	out := resolvedConversationSettings{
-		enableWorkflow: true,
-		workflowMode:   "dynamic",
-		enableSubagent: true,
-		chatExecutor:   ChatExecutorLazyMind,
+func resolveInitialConversationSettings(ctx context.Context, db *gorm.DB, userID string, runInBackground bool, requestedThinkingDepth string, conversationSettings map[string]any) resolvedConversationSettings {
+	legacy := defaultUserChatSettings(userID)
+	entry := quickQuestionDefaultsFromLegacy(legacy)
+	if runInBackground {
+		entry = newTaskDefaultsFromLegacy(legacy)
 	}
-	// Load user-level defaults.
 	if db != nil {
-		var s orm.UserChatSettings
-		if err := db.WithContext(ctx).Where("user_id = ?", userID).First(&s).Error; err == nil {
-			out.enableWorkflow = s.EnableWorkflow
-			out.workflowMode = s.WorkflowMode
-			out.enableSubagent = s.EnableSubagent
+		if stored, err := entryDefaultsForRequest(ctx, db, userID, runInBackground); err == nil {
+			entry = stored
 		}
+	}
+	out := resolvedConversationSettings{
+		enableWorkflow: entry.ConversationSettings.EnableWorkflow,
+		workflowMode:   entry.ConversationSettings.WorkflowMode,
+		enableSubagent: entry.ConversationSettings.EnableSubagent,
+		chatExecutor:   entry.ConversationSettings.ChatExecutor,
+		thinkingDepth:  entry.ThinkingDepth,
+	}
+	if depth, valid := normalizeThinkingDepth(requestedThinkingDepth); valid {
+		out.thinkingDepth = depth
 	}
 	// Apply caller-supplied overrides.
 	if v, ok := conversationSettings["enable_workflow"].(bool); ok {
@@ -789,6 +806,9 @@ func buildChatHistoryExt(raw map[string]any, query string) json.RawMessage {
 	if mentions, ok := raw["mentions"].([]any); ok && len(mentions) > 0 {
 		ext["mentions"] = mentions
 	}
+	if documentContext, ok := raw["document_context"].(map[string]any); ok && len(documentContext) > 0 {
+		ext["document_context"] = documentContext
+	}
 	b, err := json.Marshal(ext)
 	if err != nil {
 		return nil
@@ -1181,7 +1201,7 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		"databases":        raw["databases"],
 		"debug":            raw["debug"],
 		"reasoning":        resolveReasoning(raw),
-		"thinking_depth":   resolveThinkingDepth(raw),
+		"thinking_depth":   resolveThinkingDepth(ctx, db, convID, userID, raw),
 		"priority":         raw["priority"],
 		"use_memory":       useMemory,
 		"user_id":          strings.TrimSpace(userID),
@@ -1251,7 +1271,29 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 			}
 		}
 	}
+	applyDocumentContextFilter(body, raw)
 	return body
+}
+
+// applyDocumentContextFilter scopes preview chat retrieval to the document the
+// user is viewing. The context remains hidden from the visible user message,
+// while doc_id is forwarded as a normal retrieval filter.
+func applyDocumentContextFilter(body, raw map[string]any) {
+	context, _ := raw["document_context"].(map[string]any)
+	documentID, _ := context["document_id"].(string)
+	documentID = strings.TrimSpace(documentID)
+	if documentID == "" {
+		return
+	}
+
+	filters, _ := body["filters"].(map[string]any)
+	if filters == nil {
+		filters = map[string]any{}
+		body["filters"] = filters
+	}
+	if len(stringSlice(filters["doc_id"])) == 0 {
+		filters["doc_id"] = []string{documentID}
+	}
 }
 
 func promoteAgentRuntimeFlags(raw, body map[string]any) {
@@ -1359,12 +1401,35 @@ func resolveReasoning(raw map[string]any) bool {
 	return true
 }
 
-func resolveThinkingDepth(raw map[string]any) string {
+func resolveThinkingDepth(ctx context.Context, db *gorm.DB, convID, userID string, raw map[string]any) string {
 	if value, ok := raw["thinking_depth"].(string); ok {
-		switch strings.ToLower(strings.TrimSpace(value)) {
-		case "low", "medium", "high", "max":
-			return strings.ToLower(strings.TrimSpace(value))
+		if depth, valid := normalizeThinkingDepth(value); valid {
+			return depth
 		}
+	}
+	if db != nil && strings.TrimSpace(convID) != "" {
+		var snapshot struct {
+			ThinkingDepth string `gorm:"column:thinking_depth"`
+		}
+		query := db.WithContext(ctx).Model(&orm.Conversation{}).
+			Select("thinking_depth").Where("id = ?", strings.TrimSpace(convID))
+		if strings.TrimSpace(userID) != "" {
+			query = query.Where("create_user_id = ?", strings.TrimSpace(userID))
+		}
+		if err := query.Take(&snapshot).Error; err == nil {
+			if depth, valid := normalizeThinkingDepth(snapshot.ThinkingDepth); valid {
+				return depth
+			}
+		}
+	}
+	runInBackground, _ := raw["run_in_background"].(bool)
+	if db != nil {
+		if entry, err := entryDefaultsForRequest(ctx, db, userID, runInBackground); err == nil {
+			return entry.ThinkingDepth
+		}
+	}
+	if runInBackground {
+		return "high"
 	}
 	return "medium"
 }

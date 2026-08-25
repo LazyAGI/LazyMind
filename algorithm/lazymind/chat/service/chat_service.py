@@ -277,6 +277,14 @@ def _normalize_kb_id_filter(raw_kb_id: Any) -> str | list[str] | None:
     return None
 
 
+def _normalize_document_filter(filters: Dict[str, Any]) -> None:
+    """Translate the public doc_id filter to LazyLLM's RAG metadata key."""
+    raw_doc_id = filters.pop('doc_id', None)
+    normalized = _normalize_kb_id_filter(raw_doc_id)
+    if normalized:
+        filters['docid'] = normalized
+
+
 def _active_skills_from_history(
     history: list[dict[str, Any]],
     available_skills: list[str] | None,
@@ -883,6 +891,7 @@ async def _handle_chat_impl(
             flat_files.extend(files_map[seq_key])
     resolved_files = validate_and_resolve_files(flat_files)
     filters['kb_id'] = _normalize_kb_id_filter(filters.get('kb_id'))
+    _normalize_document_filter(filters)
     explicit_resource_payload = explicit_resources.model_dump()
     selected_kb_ids = filters.get('kb_id')
     if selected_kb_ids and not explicit_resource_payload['knowledge_base_ids']:

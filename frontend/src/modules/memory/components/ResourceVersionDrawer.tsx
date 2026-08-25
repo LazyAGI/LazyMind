@@ -46,6 +46,7 @@ import {
   pickDefaultFilePath,
   type SkillTreeFileItem,
 } from "./skillPackage/skillTreeUtils";
+import { buildCurrentRevisionLineage } from "./versionHistoryUtils";
 
 interface ResourceVersionDrawerProps {
   open: boolean;
@@ -63,6 +64,7 @@ type RevisionListItem = {
   changeSource: string;
   createdAt: string;
   isHead: boolean;
+  displayRevisionNo: number;
 };
 
 const buildRevisionDiffTreeData = (
@@ -147,36 +149,71 @@ const pickDefaultDiffFilePath = (files: SkillDiffFileRecord[]) => {
   );
 };
 
-const changeSourceColorMap: Record<string, string> = {
-  auto_apply: "blue",
-  direct_save: "green",
-  draft_commit: "purple",
-  draft_confirm: "purple",
-  create: "cyan",
-  internal_direct: "default",
-  review_accept: "gold",
-  metadata_update: "geekblue",
-  rollback: "orange",
+type RevisionChangeKind =
+  | "initial"
+  | "user_edit"
+  | "auto_evolution"
+  | "platform_update"
+  | "restore"
+  | "other";
+
+const userEditChangeSources = new Set([
+  "direct_save",
+  "draft_commit",
+  "draft_confirm",
+  "review_accept",
+  "metadata_update",
+]);
+
+const getRevisionChangeKind = (changeSource: string): RevisionChangeKind => {
+  const source = changeSource.trim();
+  if (source === "create" || source === "internal_direct") return "initial";
+  if (userEditChangeSources.has(source)) return "user_edit";
+  if (source === "auto_apply") return "auto_evolution";
+  if (source === "distribution_upgrade") return "platform_update";
+  if (source === "rollback") return "restore";
+  return "other";
 };
 
-const getChangeSourceLabel = (
-  changeSource: string,
+const changeKindColorMap: Record<RevisionChangeKind, string> = {
+  initial: "cyan",
+  user_edit: "purple",
+  auto_evolution: "blue",
+  platform_update: "magenta",
+  restore: "orange",
+  other: "default",
+};
+
+const changeKindLabelKeys: Record<RevisionChangeKind, string> = {
+  initial: "admin.memoryVersionKindInitial",
+  user_edit: "admin.memoryVersionKindUserEdit",
+  auto_evolution: "admin.memoryVersionKindAutoEvolution",
+  platform_update: "admin.memoryVersionKindPlatformUpdate",
+  restore: "admin.memoryVersionKindRestore",
+  other: "admin.memoryVersionKindOther",
+};
+
+const changeKindDescriptionKeys: Record<RevisionChangeKind, string> = {
+  initial: "admin.memoryVersionChangeDescriptionInitial",
+  user_edit: "admin.memoryVersionChangeDescriptionUserEdit",
+  auto_evolution: "admin.memoryVersionChangeDescriptionAutoEvolution",
+  platform_update: "admin.memoryVersionChangeDescriptionPlatformUpdate",
+  restore: "admin.memoryVersionChangeDescriptionRestore",
+  other: "admin.memoryVersionChangeDescriptionOther",
+};
+
+const getChangeKindLabel = (
+  kind: RevisionChangeKind,
   t: ResourceVersionDrawerProps["t"],
 ) => {
-  const normalized = changeSource.trim();
-  const labelMap: Record<string, string> = {
-    auto_apply: t("admin.memoryVersionChangeSourceAutoApply"),
-    direct_save: t("admin.memoryVersionChangeSourceDirectSave"),
-    draft_commit: t("admin.memoryVersionChangeSourceDraftConfirm"),
-    draft_confirm: t("admin.memoryVersionChangeSourceDraftConfirm"),
-    create: t("admin.memoryVersionChangeSourceCreate", { defaultValue: "Create" }),
-    internal_direct: t("admin.memoryVersionChangeSourceInternalDirect"),
-    review_accept: t("admin.memoryVersionChangeSourceReviewAccept"),
-    metadata_update: t("admin.memoryVersionChangeSourceMetadataUpdate"),
-    rollback: t("admin.memoryVersionChangeSourceRollback"),
-  };
+  return t(changeKindLabelKeys[kind]);
+};
 
-  return labelMap[normalized] || normalized || "-";
+const getChangeKindDescription = (
+  kind: RevisionChangeKind,
+  t: ResourceVersionDrawerProps["t"],
+) => {
+  return t(changeKindDescriptionKeys[kind]);
 };
 
 const formatRevisionLabel = (revisionNo: number) => `v${revisionNo}`;
@@ -362,6 +399,7 @@ function SkillRevisionDiffPanel({
 
 function RevisionDetail({
   revision,
+  previousRevision,
   content,
   previousContent,
   revisionTree,
@@ -384,6 +422,7 @@ function RevisionDetail({
   onSelectDiffFile,
 }: {
   revision: RevisionListItem | null;
+  previousRevision: RevisionListItem | null;
   content: string;
   previousContent: string;
   revisionTree: SkillTreeNodeRecord | null;
@@ -413,6 +452,9 @@ function RevisionDetail({
     () => parseMarkdownFrontMatter(previousContent),
     [previousContent],
   );
+  const changedFileCount = diffFiles.filter(
+    (file) => file.status?.toLowerCase() !== "unchanged",
+  ).length;
   if (loading) {
     return (
       <div className="memory-version-detail-card">
@@ -447,16 +489,28 @@ function RevisionDetail({
     );
   }
 
+  const changeKind = getRevisionChangeKind(revision.changeSource);
+
   return (
     <div className="memory-version-detail-card">
       <div className="memory-version-detail-summary">
         <div>
-          <span>{t("admin.memoryVersionChangeSource")}</span>
-          <strong>{getChangeSourceLabel(revision.changeSource, t)}</strong>
+          <span>{t("admin.memoryVersionChangeSummary")}</span>
+          <strong>{getChangeKindLabel(changeKind, t)}</strong>
+          <small>{getChangeKindDescription(changeKind, t)}</small>
         </div>
         <div>
-          <span>{t("admin.memoryVersionRange")}</span>
-          <strong>{formatRevisionLabel(revision.revisionNo)}</strong>
+          <span>{t("admin.memoryVersionCompareRange")}</span>
+          <strong>
+            {previousRevision
+              ? `${formatRevisionLabel(previousRevision.displayRevisionNo)} → ${formatRevisionLabel(revision.displayRevisionNo)}`
+              : t("admin.memoryVersionInitialVersion")}
+          </strong>
+          <small>
+            {previousRevision
+              ? t("admin.memoryVersionCompareRangeHint")
+              : t("admin.memoryVersionInitialVersionHint")}
+          </small>
         </div>
         <div>
           <span>{t("admin.memoryVersionChangedAt")}</span>
@@ -482,9 +536,46 @@ function RevisionDetail({
 
       <Tabs
         key={revision.revisionId}
-        defaultActiveKey={revision.changeSource === "metadata_update" ? "metadata" : "content"}
+        defaultActiveKey={
+          revision.changeSource === "metadata_update"
+            ? "metadata"
+            : previousRevision
+              ? "diff"
+              : "content"
+        }
         className="memory-version-detail-tabs"
         items={[
+          ...(previousRevision
+            ? [
+                {
+                  key: "diff",
+                  label: t("admin.memoryVersionTabComparePrevious"),
+                  children: (
+                    <div className="memory-version-diff-view">
+                      <div className="memory-version-compare-banner">
+                        <strong>
+                          {formatRevisionLabel(previousRevision.displayRevisionNo)} → {formatRevisionLabel(revision.displayRevisionNo)}
+                        </strong>
+                        <span>
+                          {t("admin.memoryVersionCompareFilesHint", {
+                            count: changedFileCount,
+                          })}
+                        </span>
+                      </div>
+                      <SkillRevisionDiffPanel
+                        files={diffFiles}
+                        selectedPath={selectedDiffPath}
+                        lines={selectedDiffLines}
+                        loading={diffLoading}
+                        error={diffError}
+                        t={t}
+                        onSelect={onSelectDiffFile}
+                      />
+                    </div>
+                  ),
+                },
+              ]
+            : []),
           {
             key: "content",
             label: t("admin.memoryVersionTabAfter"),
@@ -496,21 +587,6 @@ function RevisionDetail({
                 loading={fileLoading}
                 t={t}
                 onSelect={onSelectFile}
-              />
-            ),
-          },
-          {
-            key: "diff",
-            label: t("admin.memoryVersionTabDiff"),
-            children: (
-              <SkillRevisionDiffPanel
-                files={diffFiles}
-                selectedPath={selectedDiffPath}
-                lines={selectedDiffLines}
-                loading={diffLoading}
-                error={diffError}
-                t={t}
-                onSelect={onSelectDiffFile}
               />
             ),
           },
@@ -589,6 +665,11 @@ export default function ResourceVersionDrawer({
 
   const selectedRevision =
     revisions.find((item) => item.revisionId === selectedRevisionId) || null;
+  const selectedPreviousRevision = selectedRevision?.parentRevisionId
+    ? revisions.find(
+        (item) => item.revisionId === selectedRevision.parentRevisionId,
+      ) || null
+    : null;
   const canRollback = Boolean(selectedRevision && !selectedRevision.isHead);
 
   useEffect(() => {
@@ -633,14 +714,16 @@ export default function ResourceVersionDrawer({
         if (ignore) {
           return;
         }
-        const nextRevisions = items.map((item) => ({
-          revisionId: item.revisionId,
-          parentRevisionId: item.parentRevisionId,
-          revisionNo: item.revisionNo,
-          changeSource: item.changeSource,
-          createdAt: item.createdAt,
-          isHead: item.isHead,
-        }));
+        const nextRevisions = buildCurrentRevisionLineage(
+          items.map((item) => ({
+            revisionId: item.revisionId,
+            parentRevisionId: item.parentRevisionId,
+            revisionNo: item.revisionNo,
+            changeSource: item.changeSource,
+            createdAt: item.createdAt,
+            isHead: item.isHead,
+          })),
+        );
         setSkillRevisionCache(items);
         setRevisions(nextRevisions);
         loadedRevisionListRequestIdRef.current = requestId;
@@ -929,7 +1012,7 @@ export default function ResourceVersionDrawer({
     Modal.confirm({
       title: t('admin.memoryVersionRollbackConfirmTitle'),
       content: t('admin.memoryVersionRollbackConfirmContent', {
-        version: formatRevisionLabel(selectedRevision.revisionNo),
+        version: formatRevisionLabel(selectedRevision.displayRevisionNo),
         name: resourceName || resourceId,
       }),
       okText: t('admin.memoryVersionRollbackButton'),
@@ -1002,7 +1085,9 @@ export default function ResourceVersionDrawer({
             <div className="memory-version-list">
               {revisions.map((item) => {
                 const active = selectedRevisionId === item.revisionId;
-                const label = getChangeSourceLabel(item.changeSource, t);
+                const changeKind = getRevisionChangeKind(item.changeSource);
+                const label = getChangeKindLabel(changeKind, t);
+                const description = getChangeKindDescription(changeKind, t);
 
                 return (
                   <button
@@ -1013,7 +1098,7 @@ export default function ResourceVersionDrawer({
                   >
                     <span className="memory-version-list-item-main">
                       <strong>
-                        {formatRevisionLabel(item.revisionNo)}
+                        {formatRevisionLabel(item.displayRevisionNo)}
                         {item.isHead ? (
                           <em className="memory-version-current-badge">
                             {t("admin.memoryVersionCurrentBadge")}
@@ -1021,8 +1106,9 @@ export default function ResourceVersionDrawer({
                         ) : null}
                       </strong>
                       <span>{formatDateTime(item.createdAt)}</span>
+                      <small>{description}</small>
                     </span>
-                    <Tag color={changeSourceColorMap[item.changeSource] || "default"}>
+                    <Tag color={changeKindColorMap[changeKind]}>
                       {label}
                     </Tag>
                   </button>
@@ -1042,6 +1128,7 @@ export default function ResourceVersionDrawer({
         <section className="memory-version-detail-panel">
           <RevisionDetail
             revision={selectedRevision}
+            previousRevision={selectedPreviousRevision}
             content={content}
             previousContent={previousContent}
             revisionTree={revisionTree}

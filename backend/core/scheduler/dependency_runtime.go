@@ -15,6 +15,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/settings"
 	"lazymind/core/taskcenter"
 )
 
@@ -145,6 +146,13 @@ func resumeWaitingTasks(ctx context.Context, db *gorm.DB) {
 		if claimed.RowsAffected == 0 || task.ScheduleID == nil || task.WindowStart == nil || task.WindowEnd == nil {
 			continue
 		}
+		controls, err := settings.LoadFeatureControls(ctx, db, task.UserID)
+		if err != nil || !controls.SchedulesEnabled {
+			db.WithContext(ctx).Model(&orm.TaskCenterTask{}).
+				Where("id = ? AND status = ? AND dependency_status = ?", task.ID, "waiting_inputs", "checking").
+				Update("dependency_status", "waiting")
+			continue
+		}
 		var schedule orm.UserSchedule
 		if db.WithContext(ctx).Where("id = ?", *task.ScheduleID).First(&schedule).Error != nil {
 			_ = taskcenter.UpdateTaskStatus(ctx, db, task.ID, "failed")
@@ -163,6 +171,10 @@ func resumeWaitingTasks(ctx context.Context, db *gorm.DB) {
 		// launch expects waiting so return the lease to that state immediately before
 		// the compare-and-swap transition to running.
 		db.Model(&orm.TaskCenterTask{}).Where("id = ? AND dependency_status = ?", task.ID, "checking").Update("dependency_status", "waiting")
+		controls, err = settings.LoadFeatureControls(ctx, db, task.UserID)
+		if err != nil || !controls.SchedulesEnabled {
+			continue
+		}
 		launchDependentTask(db, schedule, task.ID, contextText)
 	}
 }
