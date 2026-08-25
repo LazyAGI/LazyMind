@@ -1,9 +1,18 @@
 from lazymind.chat.service.chat_service import (
+    _normalize_document_filter,
     _should_register_subagent_tools,
     _workflow_startup_clarification_available,
     _workflow_collects_knowledge_internally,
     _workflow_turn_is_bound,
 )
+
+
+def test_public_document_filter_is_translated_to_rag_metadata_key():
+    filters = {'kb_id': ['kb-1'], 'doc_id': ['doc-1']}
+
+    _normalize_document_filter(filters)
+
+    assert filters == {'kb_id': ['kb-1'], 'docid': 'doc-1'}
 
 
 def test_selected_ppt_workflow_owns_knowledge_collection():

@@ -266,6 +266,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     );
   }, [
     sessionId,
+    hasWorkflowSession,
     chatConfig?.knowledgeBaseId,
     chatConfig?.creators,
     chatConfig?.tags,
@@ -447,10 +448,24 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     const hasUploadedFiles = input?.some(
       (q: Query) => q.input_type === "image" || q.input_type === "file",
     );
+    const hasWorkflowMention = Array.isArray(extras?.mentions) &&
+      extras.mentions.some(
+        (mention) => (mention as { type?: unknown })?.type === "workflow",
+      );
+    const configSnapshot = extras?.chat_config_snapshot as ChatConfig | undefined;
+    const effectiveChatConfig = configSnapshot ?? chatConfig;
+    if (configSnapshot) {
+      // Keep the newly mounted chat composer aligned with the exact selection
+      // used for this message; later workflow-session syncs must not overwrite
+      // the persisted request scope with an empty transition-state value.
+      setChatConfig(configSnapshot);
+      setChatConfigFn(configSnapshot);
+    }
     const datasetList =
-      hasUploadedFiles || !chatConfig?.knowledgeBaseId?.length
+      (hasUploadedFiles && !hasWorkflowMention) ||
+      !effectiveChatConfig?.knowledgeBaseId?.length
         ? []
-        : chatConfig.knowledgeBaseId.map((k) => ({ id: k }));
+        : effectiveChatConfig.knowledgeBaseId.map((k) => ({ id: k }));
 
     // Attach active workflow session context so Go/Python can inject advance_step
     // instead of cold-start trigger tools on follow-up messages.
@@ -502,9 +517,9 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         conversation: {
           search_config: {
             dataset_list: datasetList,
-            database_ids: [chatConfig?.databaseBaseId]?.filter((id) => !!id),
-            creators: chatConfig?.creators,
-            tags: chatConfig?.tags,
+            database_ids: [effectiveChatConfig?.databaseBaseId]?.filter((id) => !!id),
+            creators: effectiveChatConfig?.creators,
+            tags: effectiveChatConfig?.tags,
           },
         },
         models: [t("chat.lazyMindModel")],
@@ -850,16 +865,16 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
           className="task-panel-restore-btn"
           onClick={() => setIsTaskPanelCollapsed(false)}
           title={t("taskCenter.panelTitle")}
-        >
-          <span className="task-panel-restore-icon">&#8249;</span>
-          <span className="task-panel-restore-label">
-            {taskDisplayCount > 0
+          >
+            <span className="task-panel-restore-icon">&#8249;</span>
+            <span className="task-panel-restore-label">
+              {taskDisplayCount > 0
               ? `${t("taskCenter.panelTitle")} (${taskDisplayCount})`
               : t("taskCenter.panelTitle")}
           </span>
-        </button>
-      )}
-      {((hasTaskPanelContent && !workflowPanelExpanded && !isTaskPanelCollapsed) || workflowPanelExpanded) && (
+          </button>
+        )}
+        {((hasTaskPanelContent && !workflowPanelExpanded && !isTaskPanelCollapsed) || workflowPanelExpanded) && (
         <div
           className={`right-box${!developerModeActive && !workflowPanelExpanded ? " right-box--ordinary" : ""}${workflowPanelExpanded ? " right-box--expanded-tab" : ""}${workflowPanelExpanded && expandedRailTab !== "tasks" ? " right-box--tab-hidden" : ""}`}
           style={!workflowPanelExpanded && panelWidth ? { width: panelWidth, minWidth: panelWidth } : undefined}

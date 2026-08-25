@@ -320,9 +320,11 @@ func init() {
 	registerAdditionalError("agent invocation conflicts with an existing record", http.StatusConflict, 2002027)
 	registerAdditionalError("task is terminal", http.StatusConflict, 2002049)
 	registerAdditionalError("chat_executor must be 'lazymind', 'codex', 'cursor', or 'workbuddy'", http.StatusBadRequest, 2002050)
+	registerAdditionalErrorAlias("assistant must be 'lazymind', 'codex', 'cursor', or 'workbuddy'", "chat_executor must be 'lazymind', 'codex', 'cursor', or 'workbuddy'", http.StatusBadRequest, 2002050)
 	registerAdditionalError("conversation has an unsupported chat executor", http.StatusConflict, 2002051)
 	registerAdditionalError("external chat executors require streaming", http.StatusConflict, 2002052)
 	registerAdditionalError("unsupported external chat provider", http.StatusBadRequest, 2002053)
+	registerAdditionalErrorAlias("invalid external Agent session catalog", "Invalid request", http.StatusBadRequest, 2000103)
 	registerAdditionalError("valid provider and host_id are required", http.StatusBadRequest, 2002054)
 	registerAdditionalError("host_id and lease_token are required", http.StatusBadRequest, 2002055)
 	registerAdditionalError("host_id, lease_token and event_id are required", http.StatusBadRequest, 2002056)
@@ -368,6 +370,11 @@ func init() {
 	registerAdditionalError("create managed artifact", http.StatusInternalServerError, 2002095)
 	registerAdditionalError("write managed artifact", http.StatusInternalServerError, 2002096)
 	registerAdditionalError("commit managed artifact", http.StatusInternalServerError, 2002097)
+	registerAdditionalErrorAlias("skill package contains too many entries", "Invalid skill package", http.StatusBadRequest, 2002294)
+	registerAdditionalErrorPattern("skill package cannot contain symlink %q", "Invalid skill package", http.StatusBadRequest, 2002294)
+	registerAdditionalErrorPattern("skill package contains duplicate path %q", "Invalid skill package", http.StatusBadRequest, 2002294)
+	registerAdditionalErrorPattern("skill package file %q exceeds %d bytes", "Invalid skill package", http.StatusBadRequest, 2002294)
+	registerAdditionalErrorPattern("skill package exceeds %d uncompressed bytes", "Invalid skill package", http.StatusBadRequest, 2002294)
 
 	// Personal recovery and archive lifecycle errors.
 	registerAdditionalError("query archive folders failed", http.StatusInternalServerError, 2002098)
@@ -395,6 +402,15 @@ func init() {
 	registerAdditionalError("archive folder is not empty; choose a move target", http.StatusConflict, 2002120)
 	registerAdditionalError("archive folder move target must differ from source", http.StatusBadRequest, 2002121)
 	registerAdditionalError("delete archive folder failed", http.StatusInternalServerError, 2002122)
+	registerAdditionalError("codex tcp bridge token is required", http.StatusServiceUnavailable, 2002284)
+	registerAdditionalError("writer download conversion is too large", http.StatusRequestEntityTooLarge, 2002285)
+	registerAdditionalError("slot must be source_document, outline_document, or draft_document", http.StatusBadRequest, 2002286)
+	registerAdditionalError("active", http.StatusNotFound, 2002287)
+	registerAdditionalError("slot must be outline_document or draft_document", http.StatusBadRequest, 2002288)
+	registerAdditionalError("invalid document", http.StatusBadRequest, 2002289)
+	registerAdditionalError("decode attempt result", http.StatusInternalServerError, 2002290)
+	registerAdditionalErrorPattern("control.next_step %q is not a reachable choice from %q", "Workflow next step is not reachable", http.StatusInternalServerError, 2002291)
+
 	// Chat attachment, editable PPTX, and Workflow artifact errors.
 	registerAdditionalErrorPattern("resolve turn %q", "Failed to resolve chat turn attachments", http.StatusInternalServerError, 2002123)
 	registerAdditionalError("invalid editable pptx bundle manifest", http.StatusBadRequest, 2002124)
@@ -558,6 +574,13 @@ func init() {
 	registerAdditionalError("zip downloader is not configured", http.StatusInternalServerError, 2002281)
 	registerAdditionalErrorPattern("unsupported market skill source type %q", "Unsupported market skill source type", http.StatusBadRequest, 2002282)
 	registerAdditionalError("skill package stored path is required", http.StatusBadRequest, 2002283)
+	registerAdditionalError("distribution binding is incomplete", http.StatusInternalServerError, 2002295)
+	registerAdditionalError("distribution upgrade service is not configured", http.StatusInternalServerError, 2002296)
+	registerAdditionalError("latest builtin Skill distribution was not found", http.StatusNotFound, 2002297)
+	registerAdditionalError("cannot prepare distribution upgrade while draft overlay exists", http.StatusConflict, 2002298)
+	registerAdditionalError("installed Skill distribution baseline is unavailable", http.StatusConflict, 2002299)
+	registerAdditionalError("distribution upgrade conflicts require draft review", http.StatusConflict, 2002300)
+	registerAdditionalError("distribution upgrade draft is active", http.StatusConflict, 2002301)
 }
 
 func registerAdditionalError(message string, status, code int) {

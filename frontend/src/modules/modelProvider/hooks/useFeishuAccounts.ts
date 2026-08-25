@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Form, Modal, message } from "antd";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import type { CloudConnectionUpdateBody } from "@/api/generated/auth-client";
 import { dataSourceCloudOauthApi } from "@/modules/dataSource/api/clients";
 import {
@@ -20,9 +21,12 @@ import {
 } from "@/modules/dataSource/mappers/cloudConnection";
 import { isFeishuAccountAuthValid } from "@/modules/dataSource/utils/feishuAccount";
 import { useFeishuOAuthFlow } from "./useFeishuOAuthFlow";
+import { CLOUD_DOCUMENTS_PATH } from "../utils/cloudDocumentUrls";
+import { markCloudDocumentConnectionSuccess } from "../utils/cloudDocumentOnboarding";
 
 export function useFeishuAccounts() {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [form] = Form.useForm<FeishuAccountFormValues>();
   const callbackUrl = getFeishuDataSourceCallbackUrl();
   const [accounts, setAccounts] = useState<FeishuAuthAccount[]>([]);
@@ -57,13 +61,21 @@ export function useFeishuAccounts() {
   const oauth = useFeishuOAuthFlow({ t, setAccounts, refreshAccounts });
   const { applyOauthResult, startFeishuOAuth, clearOauthAttempt } = oauth;
 
+  const finishOauthResult = (result: FeishuDataSourceOAuthMessage) => {
+    applyOauthResult(result);
+    if (result.status === "success" && result.connection.provider === "feishu") {
+      markCloudDocumentConnectionSuccess("feishu");
+      navigate(CLOUD_DOCUMENTS_PATH);
+    }
+  };
+
   useEffect(() => {
     void refreshAccounts();
 
     const storedResult = consumeFeishuDataSourceOAuthResult();
     if (storedResult) {
       window.setTimeout(() => {
-        applyOauthResult(storedResult);
+        finishOauthResult(storedResult);
       }, 0);
     }
 
@@ -74,7 +86,7 @@ export function useFeishuAccounts() {
       if (!event.data || event.data.channel !== FEISHU_DATA_SOURCE_OAUTH_CHANNEL) {
         return;
       }
-      applyOauthResult(event.data);
+      finishOauthResult(event.data);
     };
 
     window.addEventListener("message", handleMessage);

@@ -51,8 +51,10 @@ func TestDiffUploadedVsRevision_StripsSingleTopLevelDirectory(t *testing.T) {
 	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
 	zipPath := filepath.Join(t.TempDir(), "wrapped.zip")
 	testutil.WriteSkillZip(t, zipPath, map[string][]byte{
-		"openclaw-openclaw-changelog-update/SKILL.md":        []byte("# 论文精读 v2\n"),
-		"openclaw-openclaw-changelog-update/references/b.md": []byte("# B\n"),
+		"openclaw-openclaw-changelog-update/SKILL.md":            []byte("# 论文精读 v2\n"),
+		"openclaw-openclaw-changelog-update/references/b.md":     []byte("# B\n"),
+		"__MACOSX/openclaw-openclaw-changelog-update/._SKILL.md": []byte("macOS metadata"),
+		"openclaw-openclaw-changelog-update/.DS_Store":           []byte("finder metadata"),
 	})
 	uploads := testutil.NewFakeUploadStore()
 	uploads.Put(testutil.UploadSession{UploadID: "upload_wrapped_zip", OwnerUserID: "user_001", State: "completed", StoredPath: zipPath, Filename: "wrapped.zip"})
@@ -76,6 +78,9 @@ func TestDiffUploadedVsRevision_StripsSingleTopLevelDirectory(t *testing.T) {
 	for _, file := range result.Files {
 		if file.Path == "openclaw-openclaw-changelog-update/SKILL.md" {
 			t.Fatalf("diff kept wrapper directory path: %#v", file)
+		}
+		if file.Path == "__MACOSX/openclaw-openclaw-changelog-update/._SKILL.md" || file.Path == ".DS_Store" {
+			t.Fatalf("diff kept macOS metadata: %#v", file)
 		}
 	}
 }

@@ -19,11 +19,17 @@ const ExternalCategory = "external"
 type Metadata struct {
 	Name        string
 	Description string
+	Version     string
+	Category    string
+	Tags        []string
 }
 
 type frontmatter struct {
-	Name        string `yaml:"name"`
-	Description string `yaml:"description"`
+	Name        string   `yaml:"name"`
+	Description string   `yaml:"description"`
+	Version     string   `yaml:"version"`
+	Category    string   `yaml:"category"`
+	Tags        []string `yaml:"tags"`
 }
 
 func ParseRequired(content []byte) (Metadata, error) {
@@ -43,6 +49,9 @@ func ParseRequired(content []byte) (Metadata, error) {
 	meta := Metadata{
 		Name:        strings.TrimSpace(raw.Name),
 		Description: strings.TrimSpace(raw.Description),
+		Version:     strings.TrimSpace(raw.Version),
+		Category:    strings.TrimSpace(raw.Category),
+		Tags:        compact(raw.Tags),
 	}
 	if meta.Name == "" {
 		return Metadata{}, fmt.Errorf("SKILL.md frontmatter field \"name\" is required")
@@ -54,6 +63,23 @@ func ParseRequired(content []byte) (Metadata, error) {
 		return Metadata{}, fmt.Errorf("SKILL.md frontmatter field \"description\" is required")
 	}
 	return meta, nil
+}
+
+func compact(values []string) []string {
+	seen := make(map[string]struct{}, len(values))
+	out := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		out = append(out, value)
+	}
+	return out
 }
 
 func FromFiles(files map[string][]byte) (Metadata, error) {

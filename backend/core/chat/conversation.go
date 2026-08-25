@@ -421,6 +421,10 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		// Explicit per-request flags (for example a Feishu workspace selection)
 		// take precedence over persisted conversation defaults.
 		promoteAgentRuntimeFlags(raw, reqBody)
+		if err := applyChatFeatureControls(r.Context(), db, userID, reqBody); err != nil {
+			common.ReplyErr(w, "load chat feature controls failed", http.StatusInternalServerError)
+			return
+		}
 		workflowEnabled, _ := reqBody["enable_workflow"].(bool)
 		effectiveWorkflowRefs, bindingErr := resolveConversationWorkflowBinding(
 			r.Context(), db, convID, mentionedResources.WorkflowRefs,
@@ -1314,14 +1318,16 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 	var askAnswered bool
 	var askSavedAnswers any
 	var intentUpdated any
+	var externalAgentActivity any
 	if len(h.Ext) > 0 {
 		var ext struct {
-			Input           any  `json:"input"`
-			Mentions        any  `json:"mentions"`
-			AskPending      any  `json:"ask_pending"`
-			AskAnswered     bool `json:"ask_answered"`
-			AskSavedAnswers any  `json:"ask_saved_answers"`
-			IntentUpdated   any  `json:"intent_updated"`
+			Input                 any  `json:"input"`
+			Mentions              any  `json:"mentions"`
+			AskPending            any  `json:"ask_pending"`
+			AskAnswered           bool `json:"ask_answered"`
+			AskSavedAnswers       any  `json:"ask_saved_answers"`
+			IntentUpdated         any  `json:"intent_updated"`
+			ExternalAgentActivity any  `json:"external_agent_activity"`
 		}
 		if err := json.Unmarshal(h.Ext, &ext); err == nil {
 			input = ext.Input
@@ -1330,6 +1336,7 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 			askAnswered = ext.AskAnswered
 			askSavedAnswers = ext.AskSavedAnswers
 			intentUpdated = ext.IntentUpdated
+			externalAgentActivity = ext.ExternalAgentActivity
 		}
 	}
 	item := map[string]any{
@@ -1366,6 +1373,9 @@ func chatHistoryToResponseItem(h orm.ChatHistory) map[string]any {
 	}
 	if intentUpdated != nil {
 		item["intent_updated"] = intentUpdated
+	}
+	if externalAgentActivity != nil && strings.TrimSpace(h.Result) == "" {
+		item["external_user_only"] = true
 	}
 	return item
 }
@@ -1522,6 +1532,11 @@ func GetConversationDetail(w http.ResponseWriter, r *http.Request) {
 	var likeCnt, unlikeCnt int64
 	db.Model(&orm.ChatHistory{}).Where("conversation_id = ? AND feed_back = ?", c.ID, 1).Count(&likeCnt)
 	db.Model(&orm.ChatHistory{}).Where("conversation_id = ? AND feed_back = ?", c.ID, 2).Count(&unlikeCnt)
+	source, err := conversationSourceFor(r.Context(), db, userID, c.ID)
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	writeConversationJSON(w, http.StatusOK, map[string]any{
 		"conversation": map[string]any{
@@ -1540,6 +1555,9 @@ func GetConversationDetail(w http.ResponseWriter, r *http.Request) {
 			"workflow_mode":         c.WorkflowMode,
 			"enable_subagent":       c.EnableSubagent,
 			"chat_executor":         c.ChatExecutor,
+			"assistant":             source.Assistant,
+			"project_key":           source.ProjectKey,
+			"project_name":          source.ProjectName,
 		},
 	})
 }
@@ -1620,6 +1638,39 @@ func DeleteConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeConversationJSON(w, http.StatusOK, map[string]any{})
+}
+
+// PromoteConversation makes a preview-only conversation visible in normal chat history.
+func PromoteConversation(w http.ResponseWriter, r *http.Request) {
+	convID := strings.TrimSpace(mux.Vars(r)["conversation_id"])
+	if convID == "" {
+		common.ReplyErr(w, "invalid conversation name", http.StatusBadRequest)
+		return
+	}
+	userID := store.UserID(r)
+	if userID == "" {
+		userID = "0"
+	}
+	db := store.DB()
+	var conversation orm.Conversation
+	if err := db.Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", convID, userID).First(&conversation).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+		common.ReplyErr(w, "conversation not found", http.StatusNotFound)
+		return
+	} else if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if err := db.Model(&orm.Conversation{}).
+		Where("id = ? AND create_user_id = ?", convID, userID).
+		Updates(map[string]any{
+			"is_ephemeral":         false,
+			"ephemeral_expires_at": nil,
+			"updated_at":           time.Now().UTC(),
+		}).Error; err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	writeConversationJSON(w, http.StatusOK, map[string]any{"conversation_id": convID})
 }
 
 func archiveConversation(
@@ -1750,8 +1801,39 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 
 	db := store.DB()
 	q := db.Model(&orm.Conversation{}).Where("create_user_id = ? AND deleted_at IS NULL AND archived_at IS NULL", userID)
+	if !strings.EqualFold(strings.TrimSpace(r.URL.Query().Get("include_ephemeral")), "true") {
+		q = q.Where("is_ephemeral = ?", false)
+	}
+	externalBinding := db.Model(&orm.ExternalAgentBinding{}).Select("1").
+		Where("external_agent_bindings.conversation_id = conversations.id").
+		Where("external_agent_bindings.created_by_user_id = ?", userID)
+	validatedExternalBinding := db.Table("external_agent_bindings AS validated_bindings").Select("1").
+		Joins("JOIN external_agent_sessions AS validated_sessions ON validated_sessions.owner_user_id = validated_bindings.created_by_user_id AND validated_sessions.provider = validated_bindings.provider AND validated_sessions.host_id = validated_bindings.host_id AND validated_sessions.provider_thread_id = validated_bindings.provider_thread_id").
+		Where("validated_bindings.conversation_id = conversations.id").
+		Where("validated_bindings.created_by_user_id = ?", userID).
+		Where("validated_sessions.active = ?", true)
+	q = q.Where("NOT EXISTS (?) OR EXISTS (?)", externalBinding, validatedExternalBinding)
+	assistantFilter := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("assistant")))
+	if assistantFilter != "" {
+		if normalized, valid := normalizeChatExecutor(assistantFilter); !valid || normalized != assistantFilter {
+			common.ReplyErr(w, "assistant must be 'lazymind', 'codex', 'cursor', or 'workbuddy'", http.StatusBadRequest)
+			return
+		}
+		if assistantFilter == ChatExecutorLazyMind {
+			q = q.Where("NOT EXISTS (?)", externalBinding)
+		} else {
+			q = q.Where("EXISTS (?)", validatedExternalBinding.Where("validated_bindings.provider = ?", assistantFilter))
+		}
+	}
 	if keyword != "" {
-		q = q.Where("display_name LIKE ?", "%"+keyword+"%")
+		pattern := "%" + keyword + "%"
+		q = q.Where("display_name LIKE ? OR source_display_name LIKE ? OR source_document_id LIKE ?", pattern, pattern, pattern)
+	}
+	if sourceType := strings.TrimSpace(r.URL.Query().Get("source_type")); sourceType != "" {
+		q = q.Where("source_type = ?", sourceType)
+	}
+	if sourceDocumentID := strings.TrimSpace(r.URL.Query().Get("source_document_id")); sourceDocumentID != "" {
+		q = q.Where("source_document_id = ?", sourceDocumentID)
 	}
 	// Filter by is_task_conv when the caller passes the query param.
 	// Accepted values: "true" → only task conversations, "false" → only regular conversations.
@@ -1771,6 +1853,15 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 	q.Count(&total)
 	var list []orm.Conversation
 	q.Order("updated_at DESC").Offset(offset).Limit(pageSize).Find(&list)
+	conversationIDs := make([]string, 0, len(list))
+	for _, conversation := range list {
+		conversationIDs = append(conversationIDs, conversation.ID)
+	}
+	sources, err := conversationSources(r.Context(), db, userID, conversationIDs)
+	if err != nil {
+		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 
 	items := make([]map[string]any, 0, len(list))
 	for _, c := range list {
@@ -1795,6 +1886,11 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 			"name":                  "conversations/" + c.ID,
 			"conversation_id":       c.ID,
 			"display_name":          c.DisplayName,
+			"source_type":           c.SourceType,
+			"source_dataset_id":     c.SourceDatasetID,
+			"source_document_id":    c.SourceDocumentID,
+			"source_display_name":   c.SourceDisplayName,
+			"is_ephemeral":          c.IsEphemeral,
 			"search_config":         searchCfg,
 			"user":                  c.CreateUserName,
 			"chat_times":            c.ChatTimes,
@@ -1804,6 +1900,10 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 			"update_time":           c.UpdatedAt.UTC().Format(time.RFC3339),
 			"models":                models,
 			"is_task_conv":          c.IsTaskConv,
+			"chat_executor":         c.ChatExecutor,
+			"assistant":             sources[c.ID].Assistant,
+			"project_key":           sources[c.ID].ProjectKey,
+			"project_name":          sources[c.ID].ProjectName,
 		})
 	}
 	nextToken := ""
@@ -1815,6 +1915,59 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 		"total_size":      total,
 		"next_page_token": nextToken,
 	})
+}
+
+type conversationSource struct {
+	Assistant   string
+	ProjectKey  string
+	ProjectName string
+}
+
+func conversationSourceFor(ctx context.Context, db *gorm.DB, owner, conversationID string) (conversationSource, error) {
+	values, err := conversationSources(ctx, db, owner, []string{conversationID})
+	return values[conversationID], err
+}
+
+func conversationSources(ctx context.Context, db *gorm.DB, owner string, conversationIDs []string) (map[string]conversationSource, error) {
+	values := make(map[string]conversationSource, len(conversationIDs))
+	for _, conversationID := range conversationIDs {
+		values[conversationID] = conversationSource{Assistant: ChatExecutorLazyMind}
+	}
+	if len(conversationIDs) == 0 {
+		return values, nil
+	}
+	// During a rolling migration, the catalog table may not exist yet. Until
+	// it does, no external binding is validated and conversations keep their
+	// LazyMind presentation instead of failing unrelated conversation reads.
+	if !db.Migrator().HasTable(&orm.ExternalAgentSession{}) {
+		return values, nil
+	}
+	type sourceRow struct {
+		ConversationID string `gorm:"column:conversation_id"`
+		Provider       string `gorm:"column:provider"`
+		ProjectKey     string `gorm:"column:project_key"`
+		ProjectName    string `gorm:"column:project_name"`
+	}
+	var rows []sourceRow
+	if err := db.WithContext(ctx).Table("external_agent_bindings AS bindings").
+		Select("bindings.conversation_id, bindings.provider, sessions.project_key, sessions.project_name").
+		Joins("LEFT JOIN external_agent_sessions AS sessions ON sessions.owner_user_id = bindings.created_by_user_id AND sessions.provider = bindings.provider AND sessions.host_id = bindings.host_id AND sessions.provider_thread_id = bindings.provider_thread_id AND sessions.active = ?", true).
+		Where("bindings.created_by_user_id = ? AND bindings.conversation_id IN ?", owner, conversationIDs).
+		Order("bindings.created_at ASC, bindings.id ASC").
+		Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for _, row := range rows {
+		if !isExternalChatProvider(row.Provider) {
+			continue
+		}
+		if values[row.ConversationID].Assistant == ChatExecutorLazyMind {
+			values[row.ConversationID] = conversationSource{
+				Assistant: row.Provider, ProjectKey: row.ProjectKey, ProjectName: row.ProjectName,
+			}
+		}
+	}
+	return values, nil
 }
 
 // SetChatHistory text POST /api/v1/conversations:setChatHistory

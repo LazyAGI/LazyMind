@@ -19,6 +19,7 @@ import (
 
 	"lazymind/core/agentinvocation"
 	"lazymind/core/common/orm"
+	"lazymind/core/externalcontext"
 	"lazymind/core/workflow/artifactfile"
 )
 
@@ -166,8 +167,8 @@ func (a *externalChatApplication) claim(
 		now := a.now()
 		var run orm.ExternalChatRun
 		err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
-			Where("actor_user_id = ? AND provider = ? AND stop_requested = ? AND (status = ? OR (status = ? AND (lease_expires_at IS NULL OR lease_expires_at < ?)))",
-				owner, provider, false, "pending", "running", now).
+			Where("actor_user_id = ? AND provider = ? AND (host_id = '' OR host_id = ?) AND stop_requested = ? AND (status = ? OR (status = ? AND (lease_expires_at IS NULL OR lease_expires_at < ?)))",
+				owner, provider, hostID, false, "pending", "running", now).
 			Order("created_at ASC").Take(&run).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil
@@ -181,8 +182,8 @@ func (a *externalChatApplication) claim(
 		}
 		expires := now.Add(a.leaseTTL)
 		claimed := tx.Model(&orm.ExternalChatRun{}).
-			Where("id = ? AND stop_requested = ? AND (status = ? OR (status = ? AND (lease_expires_at IS NULL OR lease_expires_at < ?)))",
-				run.ID, false, "pending", "running", now).
+			Where("id = ? AND (host_id = '' OR host_id = ?) AND stop_requested = ? AND (status = ? OR (status = ? AND (lease_expires_at IS NULL OR lease_expires_at < ?)))",
+				run.ID, hostID, false, "pending", "running", now).
 			Updates(map[string]any{
 				"status": "running", "host_id": hostID, "lease_token": token,
 				"lease_expires_at": expires, "claimed_at": now, "last_heartbeat_at": now,
@@ -222,7 +223,7 @@ func (a *externalChatApplication) claim(
 		job = &externalChatJob{
 			RunID: run.ID, ConversationID: run.ConversationID, HistoryID: run.HistoryID,
 			Provider: run.Provider, ProviderThreadID: run.ProviderThreadID,
-			Action: action, Prompt: run.Prompt, LeaseToken: token, HostID: hostID,
+			Action: action, Prompt: run.Prompt, Query: run.Query, LeaseToken: token, HostID: hostID,
 		}
 		return nil
 	})
@@ -316,6 +317,11 @@ func (a *externalChatApplication) appendEvent(
 		switch event.Type {
 		case "thread_started":
 			if strings.TrimSpace(event.ProviderThreadID) != "" {
+				if err := externalcontext.New(tx).BindManagedThread(
+					ctx, owner, run.Provider, run.HostID, event.ProviderThreadID, run.ConversationID,
+				); err != nil {
+					return err
+				}
 				updates["provider_thread_id"] = event.ProviderThreadID
 				run.ProviderThreadID = event.ProviderThreadID
 			}

@@ -690,6 +690,32 @@ func TestOpenAPISpecIncludesAgentEvoContracts(t *testing.T) {
 	}
 }
 
+func TestOpenAPISpecUsesGatewaySafeExternalChatProviderRoutes(t *testing.T) {
+	r := mux.NewRouter()
+	registerCoreRoutes(r)
+
+	specJSON, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+	for _, route := range []struct {
+		method string
+		path   string
+	}{
+		{"get", "/api/core/external-chat/hosts/{provider}/status"},
+		{"post", "/api/core/external-chat/hosts/{provider}/claim"},
+		{"get", "/api/core/external-chat/providers/{provider}/sessions"},
+		{"post", "/api/core/external-chat/providers/{provider}/sessions/{thread_id}/binding"},
+		{"post", "/api/core/external-chat/providers/{provider}/sessions:sync"},
+	} {
+		openAPIOperationForTest(t, spec, route.method, route.path)
+	}
+}
+
 func TestOpenAPISpecDocumentsFeedbackCancellation(t *testing.T) {
 	r := mux.NewRouter()
 	registerCoreRoutes(r)
@@ -1535,6 +1561,32 @@ func TestOpenAPISpecIncludesLocaleHeaderForLocalizedCatalogs(t *testing.T) {
 			t.Fatalf("Accept-Language header missing for %s", path)
 		}
 	}
+}
+
+func TestOpenAPIShowcaseCaseIncludesSkillSourceURL(t *testing.T) {
+	r := mux.NewRouter()
+	registerAllRoutes(r)
+	specJSON, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+	schema := schemas["ShowcaseCase"].(map[string]any)
+	properties := schema["properties"].(map[string]any)
+	if sourceURL, ok := properties["source_url"].(map[string]any); !ok || sourceURL["type"] != "string" {
+		t.Fatalf("ShowcaseCase source_url = %#v, want required string", properties["source_url"])
+	}
+	required := schema["required"].([]any)
+	for _, field := range required {
+		if field == "source_url" {
+			return
+		}
+	}
+	t.Fatal("ShowcaseCase source_url is not required")
 }
 
 func TestOpenAPISpecIncludesMCPOperations(t *testing.T) {

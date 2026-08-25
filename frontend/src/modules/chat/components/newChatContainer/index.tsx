@@ -112,6 +112,11 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       onConversationSettingsChange,
       initialConversationSettings,
       hasWorkflowSession,
+      conversationTrailEnabled = true,
+      showThinkingDepth = true,
+      showSkillDeposit = true,
+      showConversationConfig = true,
+      fixedThinkingDepth,
     } = props;
 
     const { clearPendingMessage: clearStorePendingMessage } =
@@ -160,7 +165,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
     const conversationTrail = useConversationTrail({
       conversationId: sessionId,
       refreshKey: trailRefreshKey,
-      enabled: Boolean(sessionId),
+      enabled: Boolean(sessionId) && conversationTrailEnabled,
     });
     useEffect(() => {
       if (conversationTrail.items.length === 0) {
@@ -295,6 +300,20 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       replaceMessageList: conversation.replaceMessageList,
       createNewChat: conversation.createNewChat,
       sendMessage,
+      prepareMessage: ({
+        text,
+        citeMessage,
+        citeMessages: nextCiteMessages,
+        appendCitations = false,
+      }) => {
+        conversation.setContent(text);
+        if (!appendCitations) {
+          clearCiteMessages();
+        }
+        const citations = nextCiteMessages ?? (citeMessage ? [citeMessage] : []);
+        citations.forEach((citation) => handleAddCiteMessage(citation));
+        requestAnimationFrame(() => chatInputRef.current?.focus());
+      },
       disconnectConversationStream: conversation.disconnectConversationStream,
       uploadFiles: (files: File[]) => {
         chatInputRef.current?.uploadFiles(files);
@@ -422,6 +441,10 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               onConversationSettingsChange={onConversationSettingsChange}
               initialConversationSettings={initialConversationSettings}
               hasWorkflowSession={hasWorkflowSession}
+              showThinkingDepth={showThinkingDepth}
+              showSkillDeposit={showSkillDeposit}
+              showConversationConfig={showConversationConfig}
+              fixedThinkingDepth={fixedThinkingDepth}
             />
           </div>
           {sourcePanelSources.length > 0 && (

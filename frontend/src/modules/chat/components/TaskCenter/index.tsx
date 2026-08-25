@@ -23,6 +23,7 @@ import {
   ToolCallItem,
   ToolResultItem,
   TaskStatus,
+  isTaskCenterVisibleTask,
   useTaskCenterStore,
 } from "@/modules/chat/store/taskCenter";
 import {
@@ -1300,6 +1301,10 @@ const TaskCenter = (props: Props) => {
   const tasks = useTaskCenterStore((s) =>
     sessionId ? s.tasksByConversation[sessionId] ?? EMPTY_TASKS : EMPTY_TASKS,
   );
+  const visibleTasks = useMemo(
+    () => tasks.filter(isTaskCenterVisibleTask),
+    [tasks],
+  );
   const loading = useTaskCenterStore((s) =>
     sessionId ? Boolean(s._loadingTasks[sessionId]) : false,
   );
@@ -1313,12 +1318,12 @@ const TaskCenter = (props: Props) => {
   );
 
   const filteredTasks = useMemo(() => {
-    if (filter === "all") return tasks;
-    if (filter === "running") return tasks.filter((t) => RUNNING_STATUSES.includes(t.status));
-    if (filter === "succeeded") return tasks.filter((t) => t.status === "succeeded");
-    if (filter === "failed") return tasks.filter((t) => t.status === "failed" || t.status === "interrupted" || t.status === "canceled");
-    return tasks;
-  }, [tasks, filter]);
+    if (filter === "all") return visibleTasks;
+    if (filter === "running") return visibleTasks.filter((t) => RUNNING_STATUSES.includes(t.status));
+    if (filter === "succeeded") return visibleTasks.filter((t) => t.status === "succeeded");
+    if (filter === "failed") return visibleTasks.filter((t) => t.status === "failed" || t.status === "interrupted" || t.status === "canceled");
+    return visibleTasks;
+  }, [visibleTasks, filter]);
 
   const filterDefs: { key: FilterKey; label: string }[] = [
     { key: "all", label: t("taskCenter.filterAll") },
@@ -1368,9 +1373,9 @@ const TaskCenter = (props: Props) => {
             onClick={() => setFilter(key)}
           >
             {label}
-            {key === "running" && tasks.filter((t) => RUNNING_STATUSES.includes(t.status)).length > 0 && (
+            {key === "running" && visibleTasks.filter((t) => RUNNING_STATUSES.includes(t.status)).length > 0 && (
               <span className="task-filter-badge">
-                {tasks.filter((t) => RUNNING_STATUSES.includes(t.status)).length}
+                {visibleTasks.filter((t) => RUNNING_STATUSES.includes(t.status)).length}
               </span>
             )}
           </button>

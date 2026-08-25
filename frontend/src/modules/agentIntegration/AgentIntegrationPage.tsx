@@ -16,6 +16,9 @@ import {
 import "./index.scss";
 
 const REQUIRED_TOOLS = [
+  "cloud_document.list",
+  "cloud_document.get",
+  "cloud_document.search",
   "knowledge.list",
   "knowledge.document.list",
   "knowledge.document.get",

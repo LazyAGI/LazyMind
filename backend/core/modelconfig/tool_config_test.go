@@ -1,6 +1,7 @@
 package modelconfig
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -10,7 +11,8 @@ import (
 	"lazymind/core/common/orm"
 )
 
-func TestLoadSearchToolConfigReturnsSelectedTavilyCredential(t *testing.T) {
+func toolConfigTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
 	db, err := gorm.Open(sqlite.Open("file:"+t.Name()+"?mode=memory&cache=shared"), &gorm.Config{})
 	if err != nil {
 		t.Fatal(err)
@@ -22,21 +24,26 @@ func TestLoadSearchToolConfigReturnsSelectedTavilyCredential(t *testing.T) {
 	); err != nil {
 		t.Fatal(err)
 	}
+	return db
+}
+
+func seedToolProvider(t *testing.T, db *gorm.DB, userID, name, category, key string) {
+	t.Helper()
 	now := time.Now()
 	provider := orm.UserModelProvider{
-		ID: "provider-tavily", DefaultModelProviderID: "default-tavily",
-		Name: "Tavily", Category: "search",
-		BaseModel: orm.BaseModel{CreateUserID: "user-1", CreateUserName: "user-1",
+		ID: "provider-" + name, DefaultModelProviderID: "default-" + name,
+		Name: name, Category: category,
+		BaseModel: orm.BaseModel{CreateUserID: userID, CreateUserName: userID,
 			CreatedAt: now, UpdatedAt: now},
 	}
 	group := orm.UserModelProviderGroup{
-		ID: "group-tavily", UserModelProviderID: provider.ID, Name: "Tavily",
-		APIKey: "secret-token", IsVerified: true,
-		BaseModel: orm.BaseModel{CreateUserID: "user-1", CreateUserName: "user-1",
+		ID: "group-" + name, UserModelProviderID: provider.ID, Name: name,
+		APIKey: key, IsVerified: true,
+		BaseModel: orm.BaseModel{CreateUserID: userID, CreateUserName: userID,
 			CreatedAt: now, UpdatedAt: now},
 	}
 	selected := orm.UserSelectedProvider{
-		UserID: "user-1", UserName: "user-1", Category: "search",
+		UserID: userID, UserName: userID, Category: category,
 		UserModelProviderGroupID: group.ID, CreatedAt: now, UpdatedAt: now,
 	}
 	for _, value := range []any{&provider, &group, &selected} {
@@ -44,6 +51,11 @@ func TestLoadSearchToolConfigReturnsSelectedTavilyCredential(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+}
+
+func TestLoadSearchToolConfigReturnsSelectedTavilyCredential(t *testing.T) {
+	db := toolConfigTestDB(t)
+	seedToolProvider(t, db, "user-1", "Tavily", "search", "secret-token")
 
 	config, err := LoadSearchToolConfig(t.Context(), db, "user-1")
 	if err != nil {
@@ -51,5 +63,31 @@ func TestLoadSearchToolConfigReturnsSelectedTavilyCredential(t *testing.T) {
 	}
 	if config["tavily"] != "secret-token" {
 		t.Fatalf("unexpected search tool config: %#v", config)
+	}
+}
+
+func TestLoadToolConfigForCapabilitiesUsesWorkflowAllowlist(t *testing.T) {
+	db := toolConfigTestDB(t)
+	seedToolProvider(t, db, "user-1", "Tavily", "search", "web-token")
+	seedToolProvider(t, db, "user-1", "Sciverse", "datasource", "academic-token")
+
+	academic, err := LoadToolConfigForCapabilities(
+		t.Context(), db, "user-1", []string{"academic_search", "kb"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(academic, map[string]any{"sciverse": "academic-token"}) {
+		t.Fatalf("unexpected academic config: %#v", academic)
+	}
+
+	localOnly, err := LoadToolConfigForCapabilities(
+		t.Context(), db, "user-1", []string{"academic_writer_write_sections"},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(localOnly) != 0 {
+		t.Fatalf("local-only step received unrelated credentials: %#v", localOnly)
 	}
 }

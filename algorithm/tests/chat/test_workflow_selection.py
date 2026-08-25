@@ -24,11 +24,27 @@ def workflow_enabled():
 
 
 def _tool(contribution, name):
-    return next(tool for tool in contribution.tools if tool.__name__ == name)
+    pending = list(contribution.tools)
+    while pending:
+        tool = pending.pop(0)
+        if isinstance(tool, dict):
+            pending.extend(tool.get('tools') or [])
+        elif tool.__name__ == name:
+            return tool
+    raise StopIteration(name)
 
 
 def _tool_names(contribution):
-    return {tool.__name__ for tool in contribution.tools}
+    names = set()
+    pending = list(contribution.tools)
+    while pending:
+        tool = pending.pop(0)
+        if isinstance(tool, dict):
+            names.add(str(tool.get('name') or ''))
+            pending.extend(tool.get('tools') or [])
+        else:
+            names.add(tool.__name__)
+    return names
 
 
 def test_mentioned_workflow_is_injected_as_authoritative_selection():
@@ -77,7 +93,7 @@ def test_dynamic_trigger_loads_pinned_remote_package_without_listing():
     }
     with patch('lazymind.chat.workflow.workflow_manager._client') as client_factory, patch(
         'lazymind.chat.workflow.workflow_manager.HostWorkflowToolkit', return_value=toolkit,
-    ), patch('lazymind.chat.engine.subagent.tools._resolve_attachment', return_value=(
+    ), patch('lazymind.chat.workflow.workflow_manager._resolve_workflow_attachment', return_value=(
         '/safe/report.pdf', None,
     )), patch('lazymind.chat.workflow.workflow_manager._import_attachment', return_value={
         'resource_id': 'resource-1', 'revision': 1, 'content_hash': 'sha256:test',
@@ -130,6 +146,59 @@ def test_dynamic_trigger_loads_pinned_remote_package_without_listing():
         }, request_context='original workflow request',
     )
     toolkit.advance_step.assert_not_called()
+
+
+def test_dynamic_trigger_imports_scalar_binding_without_conversation_attachments():
+    toolkit = MagicMock()
+    toolkit.prepare_workflow.return_value = {
+        'session_id': 'session-1', 'state_version': 1, 'ready_steps': ['draft'],
+    }
+    with patch('lazymind.chat.workflow.workflow_manager._client') as client_factory, patch(
+        'lazymind.chat.workflow.workflow_manager.HostWorkflowToolkit', return_value=toolkit,
+    ), patch('lazymind.chat.workflow.workflow_manager._import_text_binding', return_value={
+        'resource_id': 'text-resource', 'revision': 1, 'content_hash': 'sha256:text',
+    }) as import_text:
+        client_factory.return_value.get_workflow.return_value.result = {
+            'workflow_id': 'report', 'revision_id': 'revision-1',
+            'compiled_graph': {
+                'material_types': {'target_length': 'text'},
+                'material_producers': {'target_length': {'kind': 'external'}},
+            },
+        }
+        client_factory.return_value.get_state.return_value = {
+            'session_id': 'session-1', 'state_version': 1,
+            'projection': {'reachable': ['draft'], 'ready': ['draft'], 'blocked': []},
+        }
+        contribution = resolve_workflow_injection(
+            None, current_query='write about 3000 words',
+            workflow_catalog=[{
+                'workflow_ref': 'builtin:report', 'workflow_id': 'report',
+                'revision_id': 'revision-1',
+            }],
+            allowed_workflow_refs=['builtin:report'],
+            workflow_activations=[{
+                'workflow_ref': 'builtin:report', 'workflow_id': 'report',
+                'revision_id': 'revision-1', 'tool_name': 'trigger_report_workflow',
+            }],
+        )
+
+        result = _tool(contribution, 'trigger_report_workflow')({
+            'target_length': '3000',
+        })
+
+    import_text.assert_called_once_with('target_length', '3000')
+    assert result['session_id'] == 'session-1'
+    assert 'target_length (text)' in _tool(
+        contribution, 'trigger_report_workflow',
+    ).__doc__
+    toolkit.prepare_workflow.assert_called_once_with(
+        'report', input_bindings={
+            'target_length': {
+                'resource_id': 'text-resource', 'revision': 1,
+                'content_hash': 'sha256:text',
+            },
+        }, request_context='write about 3000 words',
+    )
 
 
 def test_selected_workflow_declares_missing_only_startup_clarification():
@@ -576,13 +645,12 @@ def test_dynamic_trigger_returns_waiting_without_advancing_when_no_step_is_ready
     toolkit.advance_step.assert_not_called()
 
 
-def test_enabled_workflow_without_mention_keeps_generic_discovery_tools():
-    with patch('lazymind.chat.workflow.workflow_manager._client') as client_factory:
-        client_factory.return_value.get_workflow.return_value.result = {'workflow_id': 'any'}
-        contribution = resolve_workflow_injection(None, workflow_catalog=[])
+def test_enabled_workflow_without_catalog_exposes_only_lazy_authoring_group():
+    contribution = resolve_workflow_injection(None, workflow_catalog=[])
 
-        assert contribution.runtime_context == ''
-        assert _tool(contribution, 'get_workflow')('any') == {'workflow_id': 'any'}
+    assert contribution.runtime_context == ''
+    assert _tool_names(contribution) >= {'workflow_authoring', 'create_workflow_draft'}
+    assert 'get_workflow' not in _tool_names(contribution)
 
 
 def test_model_tool_projection_hides_controller_lifecycle_tools_without_session():
@@ -595,13 +663,8 @@ def test_model_tool_projection_hides_controller_lifecycle_tools_without_session(
     assert 'resume_workflow' not in names
 
 
-@pytest.mark.parametrize(
-    ('status', 'expects_resume'),
-    [('active', False), ('waiting', False), ('failed', False),
-     ('completed', False), ('stopped', True)],
-)
-def test_existing_session_hides_creation_and_only_stopped_session_exposes_resume(
-        status, expects_resume):
+@pytest.mark.parametrize('status', ['active', 'waiting', 'failed', 'completed', 'stopped'])
+def test_existing_session_hides_controller_lifecycle_tools(status):
     with patch('lazymind.chat.workflow.workflow_manager._client') as client_factory:
         client_factory.return_value.get_state.return_value = {
             'session_id': 'session-1', 'status': status, 'state_version': 3,
@@ -627,7 +690,7 @@ def test_existing_session_hides_creation_and_only_stopped_session_exposes_resume
     assert 'prepare_workflow' not in names
     assert 'start_workflow' not in names
     assert 'stop_workflow' not in names
-    assert ('resume_workflow' in names) is expects_resume
+    assert 'resume_workflow' not in names
 
 
 def test_existing_session_tools_inject_protocol_and_concurrency_fields():

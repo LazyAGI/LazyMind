@@ -214,15 +214,15 @@
         inset 0 0 0 1px rgba(22, 119, 255, 0.18),
         0 4px 14px rgba(15, 23, 42, 0.06);
     }
-  }
 
-  .sider-new-task-button.ant-btn {
-    background: #eaf3ff;
-    color: #0958d9;
-    box-shadow: inset 0 0 0 1px rgba(22, 119, 255, 0.14);
+    &.is-active {
+      background: #eaf3ff;
+      color: #0958d9;
+      box-shadow: inset 0 0 0 1px rgba(22, 119, 255, 0.14);
+    }
 
-    &:hover,
-    &:focus-visible {
+    &.is-active:hover,
+    &.is-active:focus-visible {
       background: #dbeafe !important;
       color: #0958d9 !important;
       box-shadow: inset 0 0 0 1px rgba(22, 119, 255, 0.24);
@@ -581,6 +581,10 @@
 
 .main-layout-content.is-chat-page .sub-app-container {
   overflow: hidden;
+}
+
+.main-layout-content.is-chat-page.is-sidebar-collapsed .workflow-panel__header {
+  padding-inline-start: 48px;
 }
 
 .main-layout-content.is-sidebar-collapsed {

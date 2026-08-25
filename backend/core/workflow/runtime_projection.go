@@ -13,6 +13,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
+	"lazymind/core/workflow/executor"
 	"lazymind/core/workflow/graphengine"
 )
 
@@ -266,7 +267,7 @@ func persistRouteDecision(ctx context.Context, db *gorm.DB, sessionID, from, att
 	return db.WithContext(ctx).Create(&orm.WorkflowRouteDecision{ID: "prd_" + common.GenerateID(), SessionID: sessionID, FromStepID: from, SourceAttemptID: attemptID, ActivatedJSON: a, PrunedJSON: p, BypassedJSON: b, WitnessJSON: wi, Validity: "effective", StateVersion: stateVersion, CreatedAt: time.Now().UTC()}).Error
 }
 
-func freezeRouteDecision(ctx context.Context, db *gorm.DB, sessionID, from, attemptID string) error {
+func freezeRouteDecision(ctx context.Context, db *gorm.DB, sessionID, from, taskID string) error {
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var session orm.WorkflowSession
 		if err := tx.Where("id = ?", sessionID).First(&session).Error; err != nil {
@@ -281,10 +282,30 @@ func freezeRouteDecision(ctx context.Context, db *gorm.DB, sessionID, from, atte
 			return err
 		}
 		decision := graphengine.DecideRoute(graph, from, snapshot.Materials)
+		var attempt orm.WorkflowSessionStep
+		if err := tx.Select("id", "result_json").Where(
+			"session_id = ? AND step_id = ? AND task_id = ?", sessionID, from, taskID,
+		).First(&attempt).Error; err != nil {
+			return err
+		}
+		var result executor.Result
+		if raw := strings.TrimSpace(attempt.ResultJSON); raw != "" && raw != "{}" {
+			if err := json.Unmarshal([]byte(raw), &result); err != nil {
+				return fmt.Errorf("decode attempt result: %w", err)
+			}
+		}
+		if result.Control != nil && strings.TrimSpace(result.Control.NextStep) != "" {
+			target := strings.TrimSpace(result.Control.NextStep)
+			selected := graphengine.SelectRouteTarget(graph, from, target, decision)
+			if len(selected.Activated) != 1 || selected.Activated[0] != target {
+				return fmt.Errorf("control.next_step %q is not a reachable choice from %q", target, from)
+			}
+			decision = selected
+		}
 		if err := tx.Model(&orm.WorkflowRouteDecision{}).Where("session_id = ? AND from_step_id = ? AND validity = ?", sessionID, from, "effective").Update("validity", "stale").Error; err != nil {
 			return err
 		}
-		if err := persistRouteDecision(ctx, tx, sessionID, from, attemptID, decision.Activated, decision.Pruned, decision.Bypassed, decision.Witnesses, session.StateVersion); err != nil {
+		if err := persistRouteDecision(ctx, tx, sessionID, from, attempt.ID, decision.Activated, decision.Pruned, decision.Bypassed, decision.Witnesses, session.StateVersion); err != nil {
 			return err
 		}
 		return reconcileSessionProjection(ctx, tx, &session)

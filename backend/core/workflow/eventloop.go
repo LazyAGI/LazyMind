@@ -87,7 +87,10 @@ type WorkflowStepParams struct {
 	// LegacyTools are immutable script-tool names compiled from the selected
 	// Workflow revision. They are resolved by the LazyMind Host when building
 	// the isolated Workflow SubAgent tool set; the model never supplies them.
-	LegacyTools []string `json:"legacy_tools,omitempty"`
+	LegacyTools     []string `json:"legacy_tools,omitempty"`
+	TerminalTools   []string `json:"terminal_tools,omitempty"`
+	ToolsOnly       bool     `json:"tools_only,omitempty"`
+	StreamHeartbeat bool     `json:"stream_heartbeat,omitempty"`
 
 	// Runtime is the package-declared host behavior for this immutable revision.
 	// It replaces workflow-id conditionals in the LazyMind executor.
@@ -145,6 +148,15 @@ func (p WorkflowStepParams) asMap() map[string]any {
 	}
 	if len(p.LegacyTools) > 0 {
 		m["legacy_tools"] = p.LegacyTools
+	}
+	if len(p.TerminalTools) > 0 {
+		m["terminal_tools"] = p.TerminalTools
+	}
+	if p.ToolsOnly {
+		m["tools_only"] = true
+	}
+	if p.StreamHeartbeat {
+		m["stream_heartbeat"] = true
 	}
 	if !p.Runtime.IsZero() {
 		m["workflow_runtime"] = p.Runtime
@@ -553,6 +565,12 @@ func launchWorkflowAttempt(
 	if len(params.LegacyTools) > 0 {
 		rawParamsMap["legacy_tools"] = params.LegacyTools
 	}
+	if len(params.TerminalTools) > 0 {
+		rawParamsMap["terminal_tools"] = params.TerminalTools
+	}
+	if params.ToolsOnly {
+		rawParamsMap["tools_only"] = true
+	}
 	if !params.Runtime.IsZero() {
 		rawParamsMap["workflow_runtime"] = params.Runtime
 	}
@@ -687,6 +705,8 @@ func OnSubAgentDone(
 	if status == subagent.StatusSucceeded && pctx != nil && pctx.SessionID != "" {
 		if err := freezeRouteDecision(ctx, db, pctx.SessionID, pctx.StepID, taskID); err != nil {
 			fmt.Printf("[plugin] freeze route decision failed session=%s step=%s err=%v\n", pctx.SessionID, pctx.StepID, err)
+			stepFailed = true
+			summary = "workflow route decision failed: " + err.Error()
 		} else {
 			var session orm.WorkflowSession
 			if db.WithContext(ctx).Select("status").Where("id = ?", pctx.SessionID).First(&session).Error == nil {

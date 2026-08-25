@@ -48,12 +48,15 @@ func TestHostRegistryStoresCapabilitiesWithoutExecutors(t *testing.T) {
 
 func TestDBContextLoaderBuildsNeutralPinnedAttempt(t *testing.T) {
 	db := executorComponentDB(t, &orm.WorkflowSession{}, &orm.WorkflowSessionStep{}, &orm.WorkflowOutbox{},
-		&orm.WorkflowRevision{}, &orm.WorkflowRevisionEntry{}, &orm.WorkflowBlob{}, &orm.WorkflowAttemptInputBinding{})
+		&orm.WorkflowRevision{}, &orm.WorkflowRevisionEntry{}, &orm.WorkflowBlob{},
+		&orm.WorkflowAttemptInputBinding{}, &orm.WorkflowSlotRevision{})
 	now := time.Now().UTC()
 	graph := graphengine.CompiledStateGraph{SchemaVersion: graphengine.SchemaVersion,
 		Nodes: map[string]graphengine.CompiledNode{"write": {ID: "write", Prompt: "write report",
 			Acceptance: []string{"clear"}, Outputs: []string{"report", "notes"},
-			RequiredOutputs: []string{"report"}, Capabilities: []string{"web"}}}}
+			RequiredOutputs: []string{"report"}, Capabilities: []string{"web"}}},
+		MaterialTypes:         map[string]string{"brief": "text", "images": "image"},
+		MaterialCardinalities: map[string]string{"report": "single", "notes": "list", "images": "list"}}
 	if err := db.Create(&orm.WorkflowRevision{ID: "revision-1", WorkflowResourceID: "resource-1", RevisionNo: 1,
 		CompiledGraph: graph.JSON(), GraphSchemaVersion: graph.SchemaVersion, CreatedAt: now}).Error; err != nil {
 		t.Fatal(err)
@@ -77,7 +80,8 @@ func TestDBContextLoaderBuildsNeutralPinnedAttempt(t *testing.T) {
 		Attempt: 2, TaskID: "task-1", Status: "queued", Validity: "effective", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
 		t.Fatal(err)
 	}
-	payload, _ := json.Marshal(AttemptContext{Operation: "retry", Objective: "updated objective"})
+	payload, _ := json.Marshal(AttemptContext{Operation: "retry", Objective: "updated objective",
+		Inputs: map[string]any{"images": map[string]any{"source_revision_id": "stale-provisional"}}})
 	if err := db.Create(&orm.WorkflowOutbox{ID: "outbox-1", AttemptID: "attempt-1", SessionID: "session-1",
 		PayloadJSON: payload, Status: "pending", CreatedAt: now, UpdatedAt: now}).Error; err != nil {
 		t.Fatal(err)
@@ -87,6 +91,22 @@ func TestDBContextLoaderBuildsNeutralPinnedAttempt(t *testing.T) {
 		SourceRevision: "3", ContentHash: "sha256:value", CreatedAt: now}).Error; err != nil {
 		t.Fatal(err)
 	}
+	for index, revisionID := range []string{"image-revision-1", "image-revision-2"} {
+		listIndex := index
+		if err := db.Create(&orm.WorkflowSlotRevision{ID: revisionID, SessionID: "session-1",
+			SlotID: "images", Revision: index + 1, ListIndex: &listIndex, Selected: true,
+			Slot: "images", StepID: "source", Attempt: 1, Validity: "effective",
+			CreatedAt: now}).Error; err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Create(&orm.WorkflowAttemptInputBinding{ID: "image-binding-" + revisionID,
+			SessionID: "session-1", AttemptID: "attempt-1", MaterialID: "images",
+			MaterialRevisionID: revisionID, SourceType: "artifact",
+			// Reverse timestamps: list_index, not insertion time or UUID, must win.
+			CreatedAt: now.Add(time.Duration(2-index) * time.Second)}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
 	value, err := (DBContextLoader{DB: db}).LoadAttemptContext(context.Background(), "attempt-1")
 	if err != nil {
 		t.Fatal(err)
@@ -94,7 +114,8 @@ func TestDBContextLoaderBuildsNeutralPinnedAttempt(t *testing.T) {
 	if value.AttemptID != "attempt-1" || value.AttemptNo != 2 || value.Operation != "retry" ||
 		value.Prompt != "write report" || !reflect.DeepEqual(value.DeclaredOutputs, []string{"report", "notes"}) ||
 		!reflect.DeepEqual(value.RequiredOutputs, []string{"report"}) || value.OutputCardinality["report"] != "single" ||
-		value.OutputCardinality["notes"] != "list" {
+		value.OutputCardinality["notes"] != "list" || value.DeclaredInputTypes["brief"] != "text" ||
+		value.DeclaredInputTypes["images"] != "image" {
 		t.Fatalf("context=%#v", value)
 	}
 	if value.Metadata["task_id"] != "task-1" || value.Metadata["controller_host"] != "lazymind" {
@@ -103,6 +124,11 @@ func TestDBContextLoaderBuildsNeutralPinnedAttempt(t *testing.T) {
 	input := value.Inputs["brief"].(map[string]any)
 	if input["source_id"] != "input-1" || input["source_revision_id"] != "resource-binding-1" {
 		t.Fatalf("input=%v", input)
+	}
+	images := value.Inputs["images"].([]map[string]any)
+	if len(images) != 2 || images[0]["source_revision_id"] != "image-revision-1" ||
+		images[1]["source_revision_id"] != "image-revision-2" {
+		t.Fatalf("list input=%v", images)
 	}
 	raw, _ := json.Marshal(value)
 	for _, forbidden := range []string{"api_key", "db_dsn", "workspace_path"} {

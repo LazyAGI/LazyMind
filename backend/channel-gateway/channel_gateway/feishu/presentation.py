@@ -119,6 +119,13 @@ class FeishuReplyRenderer:
                     'content': caption[:300],
                 }
             elements.append(element)
+        if streaming:
+            cancel = _cancel_generation_element(
+                provider_context,
+                language,
+            )
+            if cancel is not None:
+                elements.append(cancel)
         elements.extend(extra_elements or [])
         return {
             'schema': '2.0',
@@ -157,6 +164,54 @@ class FeishuReplyRenderer:
             },
             'body': {'elements': elements},
         }
+
+
+def _cancel_generation_element(
+    provider_context: dict[str, Any],
+    language: str,
+) -> dict[str, Any] | None:
+    workspace = provider_context.get('workspace_state')
+    if not isinstance(workspace, dict):
+        return None
+    chat_id = str(provider_context.get('chat_id') or '')
+    operation_id = str(workspace.get('active_operation_id') or '')
+    if not chat_id or not operation_id:
+        return None
+    text = 'Stop generation' if language == 'en' else '停止生成'
+    action = {
+        'lazymind_action': 'command',
+        'text': text,
+        'intended_chat_id': chat_id,
+        'command_action': {
+            'schema_version': '1',
+            'command': 'conversation.stop',
+            'parameters': {'evidence': [text]},
+        },
+        'workspace_action': {
+            'kind': 'operation.cancel',
+            'expected_view': str(workspace.get('view') or 'chat'),
+            'expected_revision': int(workspace.get('revision') or 0),
+            'expected_operation_id': operation_id,
+        },
+    }
+    return {
+        'tag': 'column_set',
+        'flex_mode': 'none',
+        'horizontal_spacing': '8px',
+        'columns': [{
+            'tag': 'column',
+            'width': 'weighted',
+            'weight': 1,
+            'elements': [{
+                'tag': 'button',
+                'name': 'cancel_generation',
+                'text': {'tag': 'plain_text', 'content': text},
+                'type': 'danger',
+                'width': 'fill',
+                'value': action,
+            }],
+        }],
+    }
 
 
 def parse_ask_form_submission(
@@ -711,22 +766,6 @@ def _task_status(status: str) -> tuple[str, str]:
         'stopped': ('已停止', 'grey'),
         'interrupted': ('已中断', 'grey'),
     }.get(normalized, (status or '已创建', 'blue'))
-
-
-def _workflow_title(task_title: str) -> str:
-    workflow = task_title.split(':', 1)[0].strip().lower()
-    return {
-        'writer-workflow': 'AI Writer 写作工作流',
-        'image-workflow': 'AI 绘图工作流',
-        'ppt-workflow': 'AI PPT 工作流',
-    }.get(
-        workflow,
-        (
-            f'{workflow.removesuffix("-workflow")} 工作流'
-            if workflow
-            else '工作流'
-        ),
-    )
 
 
 def _workflow_step_line(

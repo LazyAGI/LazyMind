@@ -4,6 +4,8 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -241,6 +243,47 @@ func ConnectorRuntime() (string, string, error) {
 		return "", "", err
 	}
 	return self, home, nil
+}
+
+func LazyMindHome() (string, error) { return lazyMindHome() }
+
+func PersistentHostID() (string, error) {
+	home, err := lazyMindHome()
+	if err != nil {
+		return "", err
+	}
+	path := filepath.Join(home, "connector-host-id")
+	if body, err := os.ReadFile(path); err == nil {
+		if value := strings.TrimSpace(string(body)); strings.HasPrefix(value, "host-") && len(value) == 37 {
+			return value, nil
+		}
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return "", err
+	}
+	if err := os.MkdirAll(home, 0o700); err != nil {
+		return "", err
+	}
+	value := make([]byte, 16)
+	if _, err := rand.Read(value); err != nil {
+		return "", err
+	}
+	id := "host-" + hex.EncodeToString(value)
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if errors.Is(err, os.ErrExist) {
+		body, readErr := os.ReadFile(path)
+		return strings.TrimSpace(string(body)), readErr
+	}
+	if err != nil {
+		return "", err
+	}
+	if _, err := file.WriteString(id + "\n"); err != nil {
+		_ = file.Close()
+		return "", err
+	}
+	if err := file.Close(); err != nil {
+		return "", err
+	}
+	return id, nil
 }
 
 func LazyMindMCPConfig(executable, home, externalRef, conversationID, leaseToken, hostID string) ([]byte, error) {

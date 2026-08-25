@@ -49,9 +49,12 @@ Without these tags the converter's gate may reject the HTML.
 ## 4b. Content element `data-el` ids
 
 Every reader-facing element carries `data-el` on its outermost container:
-`title`, `subtitle`, `narrative`, `bullet-i`, `kpi-i`, `table`, `image-i`,
+`title`, `subtitle`, `eyebrow`/`eyebrow-i`, `narrative`, `bullet-i`, `kpi-i`, `table`, `image-i`,
 `footer` (i is 1-based, in document order, no gaps). A small heading and its
 body share one `data-group`.
+
+Every `data-el` value MUST be unique within one page. `title` is reserved for
+the one main page title; labels or kickers above it use `eyebrow` instead.
 
 These ids let a later edit delete or retext exactly one item — in the HTML and,
 via the PPTX shape name, in the exported deck — instead of redrawing the page.

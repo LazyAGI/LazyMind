@@ -512,7 +512,7 @@ func manualSchemas() map[string]any {
 		"ConversationSwitchStatusResponse": obj(prop("status", intSchema())),
 		"ConversationChatStatusResponse":   obj(prop("is_generating", boolSchema())),
 		"ConversationItem": obj(
-			prop("name", strSchema()), prop("conversation_id", strSchema()), prop("display_name", strSchema()), prop("search_config", obj()), prop("user", strSchema()), prop("chat_times", int64Schema()), prop("total_feedback_like", int64Schema()), prop("total_feedback_unlike", int64Schema()), prop("create_time", strSchema()), prop("update_time", strSchema()), prop("models", array(strSchema())),
+			prop("name", strSchema()), prop("conversation_id", strSchema()), prop("display_name", strSchema()), prop("search_config", obj()), prop("user", strSchema()), prop("chat_times", int64Schema()), prop("total_feedback_like", int64Schema()), prop("total_feedback_unlike", int64Schema()), prop("create_time", strSchema()), prop("update_time", strSchema()), prop("models", array(strSchema())), prop("chat_executor", enumStringSchema("lazymind", "codex", "cursor", "workbuddy")), prop("assistant", enumStringSchema("lazymind", "codex", "cursor", "workbuddy")), prop("project_key", strSchema()), prop("project_name", strSchema()),
 		),
 		"ExternalExecutionInvocation": obj(
 			prop("total", intSchema()), prop("running", intSchema()), prop("succeeded", intSchema()),
@@ -807,7 +807,7 @@ func manualPaths() map[string]any {
 				param("path", "schedule_id", true, strSchema()), param("query", "page", false, intSchema()), param("query", "page_size", false, intSchema()),
 			), nil, response(200, "Schedule task page", refSchema("TaskCenterTaskListResponse")),
 		)},
-		"/conversations": map[string]any{"get": op("Conversation list", queryParams(param("query", "keyword", false, strSchema()), param("query", "page_size", false, intSchema()), param("query", "page_token", false, strSchema())), nil, response(200, "Conversation list", refSchema("ConversationListResponse")))},
+		"/conversations": map[string]any{"get": op("Conversation list", queryParams(param("query", "keyword", false, strSchema()), param("query", "assistant", false, enumStringSchema("lazymind", "codex", "cursor", "workbuddy")), param("query", "page_size", false, intSchema()), param("query", "page_token", false, strSchema())), nil, response(200, "Conversation list", refSchema("ConversationListResponse")))},
 		"/memory/soul": map[string]any{
 			"get": map[string]any{
 				"summary": "Get current user's Soul memory",

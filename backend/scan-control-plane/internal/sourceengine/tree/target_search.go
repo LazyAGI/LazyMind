@@ -25,6 +25,9 @@ func (e *DefaultTargetTreeEngine) Search(ctx context.Context, req TargetTreeSear
 		}
 		return e.fallback.Search(ctx, req)
 	}
+	if req.Direct {
+		return e.searchConnectorTargets(ctx, conn, req)
+	}
 	if isLocalFSTargetSearch(req) {
 		if targetSearchHasCurrentLevel(req) {
 			return e.buildAndSearchCachedTargets(ctx, conn, req)
@@ -58,13 +61,14 @@ func (e *DefaultTargetTreeEngine) searchCurrentLevelTargets(ctx context.Context,
 
 func (e *DefaultTargetTreeEngine) searchConnectorTargets(ctx context.Context, conn connector.SourceConnector, req TargetTreeSearchRequest) (TreeNodePage, error) {
 	pageSize := normalizePageSize(req.PageSize, e.limitForConnector(conn.Spec()))
-	rawPage, err := conn.ListChildren(ctx, connector.ListChildrenRequest{
+	rawPage, err := conn.Search(ctx, connector.SearchRequest{
 		TargetType:       req.TargetType,
 		TargetRef:        req.TargetRef,
 		NodeRef:          req.NodeRef,
-		ListMode:         connector.ListModePage,
+		Keyword:          req.Keyword,
 		Cursor:           req.Cursor,
 		PageSize:         pageSize,
+		Recursive:        req.Direct,
 		AgentID:          req.AgentID,
 		AuthConnectionID: req.AuthConnectionID,
 		ProviderOptions:  connector.ProviderOptions(req.ProviderOptions),

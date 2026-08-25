@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const sseHarness = vi.hoisted(() => ({
-  message: undefined as ((event: CustomEvent) => void) | undefined,
+  callbacks: new Map<string, Record<string, (event: CustomEvent) => void>>(),
 }));
 
 const workflowState = vi.hoisted(() => ({
@@ -20,6 +20,7 @@ vi.mock("@/components/request", () => ({
 
 vi.mock("@/modules/chat/utils/request", () => ({
   convEventsUrl: (conversationId: string) => `/events/${conversationId}`,
+  taskStreamUrl: (taskId: string) => `/tasks/${taskId}/stream`,
   TaskServiceApi: () => ({
     listConversationTasks: vi.fn().mockResolvedValue({ data: { tasks: [] } }),
     listConversationArtifacts: vi.fn().mockResolvedValue({ data: { artifacts: [] } }),
@@ -29,8 +30,8 @@ vi.mock("@/modules/chat/utils/request", () => ({
 vi.mock("@/modules/chat/utils/sse", () => ({
   Method: { GET: "GET" },
   SSE: class MockSSE {
-    constructor(_url: string, options: { callbacks?: Record<string, (event: CustomEvent) => void> }) {
-      sseHarness.message = options.callbacks?.message;
+    constructor(url: string, options: { callbacks?: Record<string, (event: CustomEvent) => void> }) {
+      sseHarness.callbacks.set(url, options.callbacks ?? {});
     }
 
     close() {}
@@ -53,12 +54,22 @@ vi.mock("@/components/StateGraphModal", () => ({
   WORKFLOW_GRAPH_REFRESH_EVENT: "workflow-graph-refresh",
 }));
 
-import { useTaskCenterStore } from "./taskCenter";
+import { isTaskCenterVisibleTask, useTaskCenterStore } from "./taskCenter";
+
+describe("isTaskCenterVisibleTask", () => {
+  it("keeps workflow execution tasks visible for detailed progress", () => {
+    expect(isTaskCenterVisibleTask({ agent_type: "workflow_step" })).toBe(true);
+  });
+
+  it("keeps ordinary subagent tasks visible", () => {
+    expect(isTaskCenterVisibleTask({ agent_type: "subagent" })).toBe(true);
+  });
+});
 
 describe("task center workflow events", () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    sseHarness.message = undefined;
+    sseHarness.callbacks.clear();
     useTaskCenterStore.setState({
       activeConversationId: "",
       tasksByConversation: {},
@@ -66,6 +77,7 @@ describe("task center workflow events", () => {
       _loadingTasks: {},
       _loadingArtifacts: {},
       _convStream: null,
+      _taskStreams: {},
     });
   });
 
@@ -77,7 +89,7 @@ describe("task center workflow events", () => {
   it("shows a newly created workflow step immediately", () => {
     useTaskCenterStore.getState().subscribeConvEvents("conversation-1");
 
-    sseHarness.message?.({
+    sseHarness.callbacks.get("/events/conversation-1")?.message?.({
       data: JSON.stringify({
         type: "task_created",
         payload: {
@@ -87,13 +99,56 @@ describe("task center workflow events", () => {
           status: "running",
         },
       }),
-    } as CustomEvent);
+    } as unknown as CustomEvent);
 
     expect(useTaskCenterStore.getState().getTasks("conversation-1")).toEqual([
       expect.objectContaining({
         task_id: "workflow-task-1",
         agent_type: "workflow_step",
         status: "running",
+      }),
+    ]);
+    expect(sseHarness.callbacks.has("/tasks/workflow-task-1/stream")).toBe(true);
+  });
+
+  it("applies live progress and execution updates to a workflow step", () => {
+    useTaskCenterStore.getState().subscribeConvEvents("conversation-1");
+
+    sseHarness.callbacks.get("/events/conversation-1")?.message?.({
+      data: JSON.stringify({
+        type: "task_created",
+        payload: {
+          task_id: "workflow-task-1",
+          agent_type: "workflow_step",
+          title: "image-workflow:collect_materials",
+          status: "pending",
+        },
+      }),
+    } as unknown as CustomEvent);
+    const taskMessage = sseHarness.callbacks.get("/tasks/workflow-task-1/stream")?.message;
+    taskMessage?.({
+      data: JSON.stringify({
+        type: "progress",
+        progress: 50,
+        current_phase: "collecting references",
+      }),
+    } as unknown as CustomEvent);
+    taskMessage?.({
+      data: JSON.stringify({
+        type: "think",
+        think: "Searching for seasonal material.",
+      }),
+    } as unknown as CustomEvent);
+
+    expect(useTaskCenterStore.getState().getTasks("conversation-1")).toEqual([
+      expect.objectContaining({
+        task_id: "workflow-task-1",
+        status: "running",
+        progress_pct: 50,
+        current_phase: "collecting references",
+        execution_log: [
+          { type: "think", content: "Searching for seasonal material." },
+        ],
       }),
     ]);
   });

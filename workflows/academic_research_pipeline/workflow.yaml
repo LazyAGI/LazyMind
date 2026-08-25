@@ -1,0 +1,285 @@
+id: academic_research_pipeline
+name: 学术研究与论文写作
+description: >
+  基于 academic-research-skills 的 academic-pipeline v3.21.0 适配为 LazyMind
+  内置工作流。从研究问题与方法设计开始，经过学术/知识库检索、证据综合、可编辑大纲、
+  可编辑全文、完整性检查、五视角同行评审、修订与复审、最终校验和 Markdown/Word 交付。
+  大纲、正文和修订复用 LazyMind Writer；检索优先使用 LazyMind academic_search
+  （Sciverse/可用学术源）及当前会话已选知识库，均不可用时允许以明确的无检索边界继续。
+
+when_to_use: >
+  当用户希望从研究主题出发完成“研究到论文”的全流程，或明确要求学术研究、文献检索、
+  论文大纲、完整论文、同行评审和修订交付组成的一体化流程时使用。启动前必须确认并绑定：
+  研究主题、论文类型（研究型/实证/文献综述/理论/案例/会议论文）、目标篇幅、正文语言（中文/英文）、
+  引用格式（APA 7/Chicago/MLA 9/IEEE/Vancouver/GB/T 7714）和导出格式（md/docx）。用户已经明确的值
+  直接使用；缺少任意项时一次性询问清楚，不能先启动后猜默认值。仅需单次检索、单独润色、
+  单独审稿或格式转换时不应触发完整流程。
+
+runtime:
+  exclusive_tool_capabilities: [writer.create, writer.revise]
+  collects_knowledge: true
+  clarification_fields:
+    - {id: research_topic, label: 研究主题, question: 请确认论文的研究主题或核心问题。, type: text}
+    - id: paper_type
+      label: 论文类型
+      question: 请选择论文类型。
+      type: single
+      choices: [研究型论文, 实证研究, 文献综述, 理论研究, 案例研究, 会议论文]
+    - {id: word_target, label: 目标篇幅, question: 请确认论文正文的目标字数。, type: text}
+    - id: paper_language
+      label: 正文语言
+      question: 请选择论文正文语言。
+      type: single
+      choices: [中文, 英文]
+    - id: citation_style
+      label: 引用格式
+      question: 请选择引用格式。
+      type: single
+      choices: [APA 7, Chicago, MLA 9, IEEE, Vancouver, GB/T 7714]
+    - id: output_format
+      label: 导出格式
+      question: 请选择最终导出格式。
+      type: single
+      choices: [docx, md]
+
+tool_scripts:
+  - path: scripts/pipeline_tools.py
+    functions:
+      - normalize_academic_parameters
+      - validate_and_allocate_academic_outline
+      - validate_and_allocate_academic_outline_from_inputs
+      - normalize_academic_review_decision
+      - audit_academic_manuscript
+      - audit_academic_manuscript_from_inputs
+  - path: scripts/writer_bridge.py
+    functions:
+      - academic_writer_prepare_context
+      - academic_writer_generate_outline
+      - academic_writer_save_validated_outline
+      - academic_writer_save_effective_outline
+      - academic_writer_normalize_outline
+      - academic_writer_update_context
+      - academic_writer_plan_sections
+      - academic_writer_write_sections
+      - academic_writer_assemble_draft
+      - academic_writer_revise_markdown
+      - academic_writer_revise_from_feedback
+      - academic_writer_preview_selection_rewrite
+  - path: scripts/document_builder.py
+    functions:
+      - compose_academic_paper_from_inputs
+
+artifact_actions:
+  rewrite_selection:
+    slots: [outline_document, draft_document, revised_document, second_revised_document]
+    preview_tool: academic_writer_preview_selection_rewrite
+
+steps:
+  - {id: formulate_research, label: 研究问题与方法设计}
+  - {id: retrieve_literature, label: 学术与知识库检索}
+  - {id: synthesize_evidence, label: 文献核验与证据综合}
+  - {id: build_paper_outline, label: 论文大纲生成}
+  - {id: write_paper_draft, label: 论文全文生成}
+  - {id: pre_review_integrity, label: 审稿前完整性检查}
+  - {id: peer_review, label: 五视角同行评审}
+  - {id: revise_paper, label: 论文一轮修订}
+  - {id: re_review, label: 修订验证复审}
+  - {id: second_revision, label: 论文二轮修订}
+  - {id: final_integrity, label: 最终完整性检查}
+  - {id: finalize_paper, label: 论文格式化与交付}
+  - {id: process_summary, label: 研究与写作过程记录}
+
+slots:
+  - {id: research_topic, label: 研究主题, type: text, cardinality: single, external: true, exposed: false}
+  - {id: word_target, label: 目标篇幅, type: text, cardinality: single, external: true, exposed: false}
+  - {id: paper_type, label: 论文类型, type: text, cardinality: single, external: true, exposed: false}
+  - {id: paper_language, label: 正文语言, type: text, cardinality: single, external: true, exposed: false}
+  - {id: citation_style, label: 引用格式, type: text, cardinality: single, external: true, exposed: false}
+  - {id: output_format, label: 导出格式, type: text, cardinality: single, external: true, exposed: false}
+
+  - {id: generation_parameters, label: 已确认研究参数, type: json, cardinality: single, exposed: true}
+  - {id: research_question_brief, label: 研究问题简报, type: text, cardinality: single, exposed: true}
+  - {id: methodology_blueprint, label: 方法论蓝图, type: text, cardinality: single, exposed: true}
+  - {id: literature_evidence, label: 已注册检索证据, type: text, cardinality: single, exposed: true}
+  - {id: search_log, label: 检索策略与执行记录, type: text, cardinality: single, exposed: true}
+  - {id: annotated_bibliography, label: 注释书目与来源核验, type: text, cardinality: single, exposed: true}
+  - {id: research_synthesis, label: 主题综合、矛盾与研究空白, type: text, cardinality: single, exposed: true}
+
+  - {id: writing_task, label: Writer 写作任务, type: file, cardinality: single, exposed: false}
+  - {id: resource_profiles, label: Writer 资源画像, type: file, cardinality: single, exposed: false}
+  - {id: writing_context, label: Writer 写作上下文, type: file, cardinality: single, exposed: false}
+  - {id: outline_document, label: 可编辑论文大纲, type: file, cardinality: single, exposed: true}
+  - {id: outline_check_report, label: 大纲检查报告, type: text, cardinality: single, exposed: true}
+  - {id: writing_context_after_outline, label: 大纲后写作上下文, type: file, cardinality: single, exposed: false}
+  - {id: effective_outline_check_report, label: 批准大纲一致性检查, type: text, cardinality: single, exposed: true}
+  - {id: section_instructions, label: Writer 章节规划, type: file, cardinality: single, exposed: false}
+  - {id: chapter_drafts, label: 分章生成稿, type: file, cardinality: list, ordered: true, allow_manual_add: false, exposed: true}
+  - {id: draft_document, label: 可编辑论文初稿, type: file, cardinality: single, exposed: true}
+  - {id: writing_context_after_draft, label: 初稿后写作上下文, type: file, cardinality: single, exposed: false}
+
+  - {id: pre_integrity_report, label: 审稿前完整性报告, type: text, cardinality: single, exposed: true}
+  - {id: pre_integrity_summary, label: 审稿前检查摘要, type: json, cardinality: single, exposed: true}
+  - {id: reviewer_configuration, label: 审稿视角配置, type: text, cardinality: single, exposed: true}
+  - {id: review_reports, label: 五视角审稿报告, type: text, cardinality: list, ordered: true, allow_manual_add: false, exposed: true}
+  - {id: editorial_decision, label: 编辑决定, type: text, cardinality: single, exposed: true}
+  - {id: revision_roadmap, label: 修订路线图, type: text, cardinality: single, exposed: true}
+
+  - {id: revision_task, label: 一轮修订任务, type: file, cardinality: single, exposed: false}
+  - {id: revision_locate_result, label: 一轮修订定位, type: file, cardinality: single, exposed: false}
+  - {id: revision_modify_plan, label: 一轮修订计划, type: file, cardinality: single, exposed: false}
+  - {id: revision_set, label: 一轮修订集, type: file, cardinality: single, exposed: false}
+  - {id: revision_result, label: 一轮修订结果, type: file, cardinality: single, exposed: false}
+  - {id: revised_document, label: 可编辑一轮修订稿, type: file, cardinality: single, exposed: true}
+  - {id: revision_response, label: 一轮修订响应表, type: text, cardinality: single, exposed: true}
+  - {id: writing_context_after_revision, label: 一轮修订后上下文, type: file, cardinality: single, exposed: false}
+  - {id: re_review_report, label: 修订验证复审报告, type: text, cardinality: single, exposed: true}
+  - {id: re_review_decision, label: 复审决定, type: text, cardinality: single, exposed: true}
+
+  - {id: second_revision_task, label: 二轮修订任务, type: file, cardinality: single, exposed: false}
+  - {id: second_revision_locate_result, label: 二轮修订定位, type: file, cardinality: single, exposed: false}
+  - {id: second_revision_modify_plan, label: 二轮修订计划, type: file, cardinality: single, exposed: false}
+  - {id: second_revision_set, label: 二轮修订集, type: file, cardinality: single, exposed: false}
+  - {id: second_revision_result, label: 二轮修订结果, type: file, cardinality: single, exposed: false}
+  - {id: second_revised_document, label: 可编辑二轮修订稿, type: file, cardinality: single, exposed: true}
+  - {id: second_revision_response, label: 二轮修订响应表, type: text, cardinality: single, exposed: true}
+
+  - {id: final_integrity_report, label: 最终完整性报告, type: text, cardinality: single, exposed: true}
+  - {id: final_integrity_summary, label: 最终完整性摘要, type: json, cardinality: single, exposed: true}
+  - {id: final_paper_markdown, label: 最终论文 Markdown, type: file, cardinality: single, exposed: true}
+  - {id: final_paper, label: 最终交付文件, type: file, cardinality: single, exposed: true}
+  - {id: delivery_metadata, label: 交付元数据, type: json, cardinality: single, exposed: true}
+  - {id: process_record, label: 研究与论文创建过程记录, type: text, cardinality: single, exposed: true}
+
+ui:
+  slots:
+    generation_parameters: {widgetType: json-block, readOnly: true, collapsed: false}
+    research_question_brief: {widgetType: text-markdown, readOnly: true}
+    methodology_blueprint: {widgetType: text-markdown, readOnly: true}
+    literature_evidence: {widgetType: text-markdown, readOnly: true, maxHeight: 680}
+    search_log: {widgetType: text-markdown, readOnly: true}
+    annotated_bibliography: {widgetType: text-markdown, readOnly: true, maxHeight: 680}
+    research_synthesis: {widgetType: text-markdown, readOnly: true, maxHeight: 680}
+    outline_document: {widgetType: file-card, readOnly: false}
+    outline_check_report: {widgetType: text-markdown, readOnly: true}
+    effective_outline_check_report: {widgetType: text-markdown, readOnly: true}
+    chapter_drafts: {widgetType: file-card, readOnly: true}
+    draft_document: {widgetType: file-card, readOnly: false}
+    pre_integrity_report: {widgetType: text-markdown, readOnly: true}
+    pre_integrity_summary: {widgetType: json-block, readOnly: true, collapsed: false}
+    reviewer_configuration: {widgetType: text-markdown, readOnly: true}
+    review_reports: {widgetType: text-markdown, readOnly: true}
+    editorial_decision: {widgetType: text-markdown, readOnly: true}
+    revision_roadmap: {widgetType: text-markdown, readOnly: true}
+    revised_document: {widgetType: file-card, readOnly: false}
+    revision_response: {widgetType: text-markdown, readOnly: true}
+    re_review_report: {widgetType: text-markdown, readOnly: true}
+    re_review_decision: {widgetType: text-markdown, readOnly: true}
+    second_revised_document: {widgetType: file-card, readOnly: false}
+    second_revision_response: {widgetType: text-markdown, readOnly: true}
+    final_integrity_report: {widgetType: text-markdown, readOnly: true}
+    final_integrity_summary: {widgetType: json-block, readOnly: true, collapsed: false}
+    final_paper_markdown: {widgetType: file-card, readOnly: true}
+    final_paper: {widgetType: file-card, readOnly: true}
+    delivery_metadata: {widgetType: json-block, readOnly: true, collapsed: false}
+    process_record: {widgetType: text-markdown, readOnly: true, maxHeight: 680}
+  tabs:
+    - id: research
+      step_id: formulate_research
+      label: 研究设计
+      layout: composite
+      slots: [{id: generation_parameters}, {id: research_question_brief}, {id: methodology_blueprint}]
+      composite_layout:
+        direction: row
+        children:
+          - {slot: research_question_brief, weight: 2}
+          - direction: column
+            weight: 1
+            children: [{slot: generation_parameters}, {slot: methodology_blueprint}]
+    - id: retrieval
+      step_id: retrieve_literature
+      label: 资料检索
+      layout: composite
+      slots: [{id: literature_evidence}, {id: search_log}]
+      composite_layout:
+        direction: row
+        children: [{slot: literature_evidence, weight: 2}, {slot: search_log, weight: 1}]
+    - id: synthesis
+      step_id: synthesize_evidence
+      label: 证据综合
+      layout: composite
+      slots: [{id: annotated_bibliography}, {id: research_synthesis}]
+      composite_layout:
+        direction: row
+        children: [{slot: annotated_bibliography, weight: 1}, {slot: research_synthesis, weight: 2}]
+    - id: outline
+      step_id: build_paper_outline
+      label: 大纲生成
+      layout: composite
+      slots: [{id: outline_document}, {id: outline_check_report}]
+      composite_layout:
+        direction: row
+        children: [{slot: outline_document, weight: 2}, {slot: outline_check_report, weight: 1}]
+    - id: draft
+      step_id: write_paper_draft
+      label: 全文生成
+      layout: list
+      slots: [{id: draft_document}, {id: chapter_drafts}, {id: effective_outline_check_report}]
+    - id: pre_integrity
+      step_id: pre_review_integrity
+      label: 审稿前完整性
+      layout: composite
+      slots: [{id: pre_integrity_report}, {id: pre_integrity_summary}]
+      composite_layout:
+        direction: row
+        children: [{slot: pre_integrity_report, weight: 2}, {slot: pre_integrity_summary, weight: 1}]
+    - id: review
+      step_id: peer_review
+      label: 同行评审
+      layout: list
+      slots: [{id: reviewer_configuration}, {id: review_reports}, {id: editorial_decision}, {id: revision_roadmap}]
+    - id: revision
+      step_id: revise_paper
+      label: 一轮修订
+      layout: composite
+      slots: [{id: revised_document}, {id: revision_response}]
+      composite_layout:
+        direction: row
+        children: [{slot: revised_document, weight: 2}, {slot: revision_response, weight: 1}]
+    - id: rereview
+      step_id: re_review
+      label: 修订复审
+      layout: composite
+      slots: [{id: re_review_report}, {id: re_review_decision}]
+      composite_layout:
+        direction: row
+        children: [{slot: re_review_report, weight: 2}, {slot: re_review_decision, weight: 1}]
+    - id: second_revision
+      step_id: second_revision
+      label: 二轮修订
+      layout: composite
+      slots: [{id: second_revised_document}, {id: second_revision_response}]
+      composite_layout:
+        direction: row
+        children: [{slot: second_revised_document, weight: 2}, {slot: second_revision_response, weight: 1}]
+    - id: final_integrity
+      step_id: final_integrity
+      label: 最终完整性
+      layout: composite
+      slots: [{id: final_integrity_report}, {id: final_integrity_summary}]
+      composite_layout:
+        direction: row
+        children: [{slot: final_integrity_report, weight: 2}, {slot: final_integrity_summary, weight: 1}]
+    - id: delivery
+      step_id: finalize_paper
+      label: 论文交付
+      layout: list
+      slots: [{id: final_paper}, {id: final_paper_markdown}, {id: delivery_metadata}]
+    - id: process
+      step_id: process_summary
+      label: 过程记录
+      layout: list
+      slots: [{id: process_record}]
+
+i18n:
+  zh-CN:
+    name: 学术研究与论文写作

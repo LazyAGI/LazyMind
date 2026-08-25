@@ -15,12 +15,50 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from pydantic import BaseModel, ConfigDict, Field
+import yaml
 
 from lazymind.workflow_sdk import (
     AdvanceRequest, StepCommand, WorkflowClient, WorkflowClientError,
 )
 
 LOG = logging.getLogger(__name__)
+
+
+def _workflow_document(files: Dict[str, Any]) -> Dict[str, Any]:
+    encoded = files.get('workflow.yaml')
+    if encoded is None:
+        return {}
+    source = base64.b64decode(encoded) if isinstance(encoded, str) else bytes(encoded)
+    document = yaml.safe_load(source.decode('utf-8')) or {}
+    return document if isinstance(document, dict) else {}
+
+
+def workflow_package_input_types(package: Dict[str, Any]) -> Dict[str, str]:
+    """Project external material types from a published Workflow package."""
+    graph = package.get('compiled_graph') if isinstance(package.get('compiled_graph'), dict) else {}
+    material_types = graph.get('material_types')
+    producers = graph.get('material_producers')
+    if isinstance(material_types, dict) and isinstance(producers, dict):
+        return {
+            str(material_id): str(material_type or 'text').strip().lower()
+            for material_id, material_type in material_types.items()
+            if isinstance(producers.get(str(material_id)), dict)
+            and producers[str(material_id)].get('kind') == 'external'
+        }
+
+    # Revisions published before typed compiled contracts remain readable from
+    # their immutable package source. New revisions always use the graph above.
+    files = package.get('files') if isinstance(package.get('files'), dict) else {}
+    result: Dict[str, str] = {}
+    for slot in _workflow_document(files).get('slots') or []:
+        if not isinstance(slot, dict):
+            continue
+        if slot.get('external') is not True and slot.get('producer') != 'external':
+            continue
+        material_id = str(slot.get('id') or '').strip()
+        if material_id:
+            result[material_id] = str(slot.get('type') or 'text').strip().lower()
+    return result
 
 
 def load_workflow_package_tools(

@@ -43,11 +43,11 @@ interface ChatUserMessageLike {
 
 export type ConversationHistoryRecord = Omit<
   Partial<BaseChatHistory>,
-  "feed_back" | "input" | "sources"
+  "feed_back" | "input" | "sources" | "execution"
 > &
   Omit<
     Partial<CoreConversationHistoryItem>,
-    "feed_back" | "input" | "sources"
+    "feed_back" | "input" | "sources" | "execution"
   > & {
     feed_back?: BaseChatHistory["feed_back"] | number | string;
     input?: Query[] | Array<Record<string, unknown>> | null;
@@ -60,6 +60,7 @@ export type ConversationHistoryRecord = Omit<
     tool_call_turns?: number | string;
     mentions?: ChatMention[] | null;
     execution?: ExternalExecutionProjection;
+    external_user_only?: boolean;
     run_id?: string;
     run_status?: "completed" | "interrupted" | "failed" | "cancelled";
     run_terminal?: Record<string, unknown>;
@@ -230,6 +231,10 @@ export function buildChatMessageListFromHistory(
         ? (record as any).collected_inputs
         : [],
     });
+
+    if (record.external_user_only) {
+      return;
+    }
 
     const isLastRecord = record === lastRecord;
     const isActuallyGenerating = isGenerating && isLastRecord;

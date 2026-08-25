@@ -29,7 +29,6 @@ const (
 	chatStopExpireTime   = 15 * time.Minute
 	chatCancelPollTime   = 500 * time.Millisecond
 	convEventsExpireTime = time.Hour * 24
-	convEventsMaxLen     = int64(1000)
 )
 
 type ChatStatus struct {
@@ -431,8 +430,10 @@ type ConvEvent struct {
 }
 
 // AppendConvEvent appends a ConvEvent to the conversation-level event LIST.
-// It is safe to call concurrently. The LIST is capped at convEventsMaxLen entries
-// (oldest dropped) and expires after convEventsExpireTime.
+// It is safe to call concurrently and expires after convEventsExpireTime.
+// Do not trim this LIST while WatchConvEvents uses a positional cursor: removing
+// entries from the head shifts every index and can permanently hide new events.
+// High-volume task token events use the dedicated per-task stream instead.
 func AppendConvEvent(ctx context.Context, stateStore state.Store, conversationID string, ev *ConvEvent) error {
 	if stateStore == nil || conversationID == "" || ev == nil {
 		return nil
@@ -442,15 +443,7 @@ func AppendConvEvent(ctx context.Context, stateStore state.Store, conversationID
 		return err
 	}
 	key := convEventsKey(conversationID)
-	if err := stateStore.RPush(ctx, key, bs, convEventsExpireTime); err != nil {
-		return err
-	}
-	if trimmer, ok := stateStore.(interface {
-		LTrim(context.Context, string, int64, int64) error
-	}); ok {
-		return trimmer.LTrim(ctx, key, -convEventsMaxLen, -1)
-	}
-	return nil
+	return stateStore.RPush(ctx, key, bs, convEventsExpireTime)
 }
 
 // WatchConvEvents long-polls the conversation-level event LIST starting from lastIndex+1

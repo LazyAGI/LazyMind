@@ -11,6 +11,9 @@
   Var InstallerHelper
   !ifndef BUILD_UNINSTALLER
     Var InstallDataChoice
+    Var InstallTypeChoice
+    Var InstallSimpleRadio
+    Var InstallFullRadio
     Var InstallKeepRadio
     Var InstallPurgeRadio
     Var InstalledVersion
@@ -53,8 +56,51 @@
   LangString LMDowngradeBlocked ${LANG_SIMPCHINESE} "已安装更高版本的 LazyMind。为保护本地数据，禁止降级安装。"
   LangString LMUpgradePurgeBlocked ${LANG_ENGLISH} "Upgrades always keep Local AppData. Remove --purge-lazymind-local-data and retry."
   LangString LMUpgradePurgeBlocked ${LANG_SIMPCHINESE} "升级始终保留 Local AppData。请移除 --purge-lazymind-local-data 后重试。"
+  LangString LMInstallTypePageTitle ${LANG_ENGLISH} "Installation type"
+  LangString LMInstallTypePageTitle ${LANG_SIMPCHINESE} "安装方式"
+  LangString LMInstallTypePageText ${LANG_ENGLISH} "Choose when LazyMind should prepare its bundled Python runtime."
+  LangString LMInstallTypePageText ${LANG_SIMPCHINESE} "请选择 LazyMind 何时准备内置 Python 运行环境。"
+  LangString LMSimpleInstall ${LANG_ENGLISH} "Simple installation (recommended)"
+  LangString LMSimpleInstall ${LANG_SIMPCHINESE} "简易安装（推荐）"
+  LangString LMSimpleInstallHelp ${LANG_ENGLISH} "Finish setup quickly without expanding Python files. Python is prepared automatically on first launch."
+  LangString LMSimpleInstallHelp ${LANG_SIMPCHINESE} "安装时不展开 Python 文件，可避免防火墙扫描造成的长时间等待；首次启动时自动准备。"
+  LangString LMFullInstall ${LANG_ENGLISH} "Full installation"
+  LangString LMFullInstall ${LANG_SIMPCHINESE} "完整安装"
+  LangString LMFullInstallHelp ${LANG_ENGLISH} "Expand Python files and warm up all local services before setup finishes, as in previous versions."
+  LangString LMFullInstallHelp ${LANG_SIMPCHINESE} "安装时展开 Python 文件，并在安装结束前预热全部本地服务。"
 
   !ifndef BUILD_UNINSTALLER
+  Function LMInstallTypePageCreate
+    !insertmacro MUI_HEADER_TEXT "$(LMInstallTypePageTitle)" "$(LMInstallTypePageText)"
+    nsDialogs::Create 1018
+    Pop $0
+    ${NSD_CreateLabel} 0 0 100% 18u "$(LMInstallTypePageText)"
+    Pop $1
+    ${NSD_CreateRadioButton} 8u 30u 92% 18u "$(LMSimpleInstall)"
+    Pop $InstallSimpleRadio
+    ${NSD_CreateLabel} 24u 50u 88% 30u "$(LMSimpleInstallHelp)"
+    Pop $1
+    ${NSD_CreateRadioButton} 8u 88u 92% 18u "$(LMFullInstall)"
+    Pop $InstallFullRadio
+    ${NSD_CreateLabel} 24u 108u 88% 30u "$(LMFullInstallHelp)"
+    Pop $1
+    ${If} $InstallTypeChoice == "full"
+      ${NSD_Check} $InstallFullRadio
+    ${Else}
+      ${NSD_Check} $InstallSimpleRadio
+    ${EndIf}
+    nsDialogs::Show
+  FunctionEnd
+
+  Function LMInstallTypePageLeave
+    ${NSD_GetState} $InstallFullRadio $0
+    ${If} $0 == ${BST_CHECKED}
+      StrCpy $InstallTypeChoice "full"
+    ${Else}
+      StrCpy $InstallTypeChoice "simple"
+    ${EndIf}
+  FunctionEnd
+
   Function LMInstallDataPageCreate
     ${If} $IsManualUpgrade == "1"
       Abort
@@ -119,6 +165,7 @@
 !macro customInit
   InitPluginsDir
   StrCpy $InstallDataChoice "keep"
+  StrCpy $InstallTypeChoice "simple"
   StrCpy $IsManualUpgrade "0"
   StrCpy $InstallerHelper "$PLUGINSDIR\lazymind-installer-maintenance.exe"
   File /oname=$PLUGINSDIR\lazymind-installer-maintenance.exe "${BUILD_RESOURCES_DIR}\lazymind-installer-maintenance.exe"
@@ -150,6 +197,16 @@
 
   ${GetParameters} $0
   ClearErrors
+  ${GetOptions} $0 "--full-install" $1
+  ${IfNot} ${Errors}
+    StrCpy $InstallTypeChoice "full"
+  ${EndIf}
+  ClearErrors
+  ${GetOptions} $0 "--simple-install" $1
+  ${IfNot} ${Errors}
+    StrCpy $InstallTypeChoice "simple"
+  ${EndIf}
+  ClearErrors
   ${GetOptions} $0 "--purge-lazymind-local-data" $1
   ${IfNot} ${Errors}
     ${If} $IsManualUpgrade == "1"
@@ -162,6 +219,9 @@
 !macroend
 
 !macro customPageAfterChangeDir
+  PageEx custom
+    PageCallbacks LMInstallTypePageCreate LMInstallTypePageLeave
+  PageExEnd
   PageEx custom
     PageCallbacks LMInstallDataPageCreate LMInstallDataPageLeave
   PageExEnd
@@ -265,6 +325,7 @@
     ${EndIf}
   ${EndIf}
 
+  ${If} $InstallTypeChoice == "full"
     CreateDirectory "$LOCALAPPDATA\LazyMind\logs"
     StrCpy $5 "$LOCALAPPDATA\LazyMind\logs\installer-nsis.log"
     FileOpen $6 "$5" a
@@ -322,6 +383,9 @@
       ${EndIf}
     ${EndIf}
   LMWarmupFinished:
+  ${Else}
+    DetailPrint "Simple installation selected; bundled Python will be prepared on first launch."
+  ${EndIf}
 !macroend
 
 !macro customUnInit

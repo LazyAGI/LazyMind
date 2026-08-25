@@ -2,6 +2,10 @@ import { defaultSchema } from "rehype-sanitize";
 
 export const customSchema: typeof defaultSchema = {
   ...defaultSchema,
+  protocols: {
+    ...defaultSchema.protocols,
+    src: [...(defaultSchema.protocols?.src || []), 'data'],
+  },
   attributes: {
     ...defaultSchema.attributes,
     "*": [

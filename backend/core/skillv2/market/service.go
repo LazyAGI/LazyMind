@@ -1,14 +1,12 @@
 package market
 
 import (
-	"archive/zip"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -23,6 +21,7 @@ import (
 
 	skillmetadata "lazymind/core/skillv2/metadata"
 	skillsearch "lazymind/core/skillv2/search"
+	skillpackage "lazymind/core/skillv2/skillpackage"
 )
 
 type ServiceDeps struct {
@@ -865,7 +864,7 @@ func (s *Service) filesFromSource(ctx context.Context, source SourceInput) (map[
 	if zipPath == "" {
 		return nil, fmt.Errorf("skill package stored path is required")
 	}
-	files, err := readZipFiles(zipPath)
+	files, err := skillpackage.ReadZip(zipPath)
 	if err != nil {
 		return nil, err
 	}
@@ -873,90 +872,6 @@ func (s *Service) filesFromSource(ctx context.Context, source SourceInput) (map[
 		return nil, fmt.Errorf("skill package must contain SKILL.md")
 	}
 	return files, nil
-}
-
-func readZipFiles(zipPath string) (map[string][]byte, error) {
-	reader, err := zip.OpenReader(zipPath)
-	if err != nil {
-		return nil, err
-	}
-	defer reader.Close()
-	files := map[string][]byte{}
-	for _, entry := range reader.File {
-		if entry.FileInfo().IsDir() {
-			if _, err := cleanSkillPath(strings.TrimSuffix(entry.Name, "/")); err != nil {
-				return nil, err
-			}
-			continue
-		}
-		name, err := cleanSkillPath(entry.Name)
-		if err != nil {
-			return nil, err
-		}
-		rc, err := entry.Open()
-		if err != nil {
-			return nil, err
-		}
-		data, readErr := io.ReadAll(rc)
-		closeErr := rc.Close()
-		if readErr != nil {
-			return nil, readErr
-		}
-		if closeErr != nil {
-			return nil, closeErr
-		}
-		files[name] = data
-	}
-	return normalizeSkillPackageRoot(files), nil
-}
-
-func normalizeSkillPackageRoot(files map[string][]byte) map[string][]byte {
-	if _, ok := files["SKILL.md"]; ok {
-		return files
-	}
-	root := ""
-	for filePath := range files {
-		parts := strings.SplitN(filePath, "/", 2)
-		if len(parts) != 2 || parts[1] == "" {
-			return files
-		}
-		if root == "" {
-			root = parts[0]
-			continue
-		}
-		if root != parts[0] {
-			return files
-		}
-	}
-	if root == "" {
-		return files
-	}
-	normalized := make(map[string][]byte, len(files))
-	prefix := root + "/"
-	for filePath, data := range files {
-		relPath := strings.TrimPrefix(filePath, prefix)
-		normalized[relPath] = data
-	}
-	if _, ok := normalized["SKILL.md"]; ok {
-		return normalized
-	}
-	return files
-}
-
-func cleanSkillPath(name string) (string, error) {
-	if name == "" || strings.HasPrefix(name, "/") || strings.Contains(name, `\`) || strings.Contains(name, "//") {
-		return "", fmt.Errorf("unsafe path %q", name)
-	}
-	cleaned := path.Clean(name)
-	if cleaned == "." || cleaned != name || strings.HasPrefix(cleaned, "../") || cleaned == ".." {
-		return "", fmt.Errorf("unsafe path %q", name)
-	}
-	for _, part := range strings.Split(cleaned, "/") {
-		if part == "" || part == "." || part == ".." {
-			return "", fmt.Errorf("unsafe path %q", name)
-		}
-	}
-	return cleaned, nil
 }
 
 func normalizeMarketTags(values []string) []string {

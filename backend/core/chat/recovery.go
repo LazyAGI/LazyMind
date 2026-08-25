@@ -134,7 +134,7 @@ func listRecoveryConversations(w http.ResponseWriter, r *http.Request, archived 
 		pageSize = value
 	}
 
-	q := db.Model(&orm.Conversation{}).Where("create_user_id = ?", userID)
+	q := db.Model(&orm.Conversation{}).Where("create_user_id = ? AND is_ephemeral = ?", userID, false)
 	if archived {
 		q = q.Where("deleted_at IS NULL AND archived_at IS NOT NULL")
 		folderID := strings.TrimSpace(r.URL.Query().Get("folder_id"))
@@ -334,7 +334,7 @@ func RestoreConversation(w http.ResponseWriter, r *http.Request) {
 
 func purgeConversation(ctxDB *gorm.DB, conversationID, userID string) error {
 	var conversation orm.Conversation
-	if err := ctxDB.Where("id = ? AND create_user_id = ? AND deleted_at IS NOT NULL", conversationID, userID).
+	if err := ctxDB.Where("id = ? AND create_user_id = ? AND (deleted_at IS NOT NULL OR is_ephemeral = ?)", conversationID, userID, true).
 		First(&conversation).Error; err != nil {
 		return err
 	}
@@ -371,7 +371,7 @@ func purgeConversation(ctxDB *gorm.DB, conversationID, userID string) error {
 		if err := taskcenter.MarkConversationPurged(context.Background(), tx, userID, conversationID, time.Now().UTC()); err != nil {
 			return err
 		}
-		result := tx.Where("id = ? AND create_user_id = ? AND deleted_at IS NOT NULL", conversationID, userID).
+		result := tx.Where("id = ? AND create_user_id = ? AND (deleted_at IS NOT NULL OR is_ephemeral = ?)", conversationID, userID, true).
 			Delete(&orm.Conversation{})
 		if result.Error != nil {
 			return result.Error
@@ -403,7 +403,7 @@ func PurgeConversation(w http.ResponseWriter, r *http.Request) {
 func EmptyConversationTrash(w http.ResponseWriter, r *http.Request) {
 	db := store.DB().WithContext(r.Context())
 	userID := recoveryUserID(r)
-	q := db.Model(&orm.Conversation{}).Where("create_user_id = ? AND deleted_at IS NOT NULL", userID)
+	q := db.Model(&orm.Conversation{}).Where("create_user_id = ? AND deleted_at IS NOT NULL AND is_ephemeral = ?", userID, false)
 	kind := strings.TrimSpace(r.URL.Query().Get("kind"))
 	if kind == "" {
 		kind = strings.TrimSpace(r.URL.Query().Get("is_task_conv"))
@@ -609,7 +609,10 @@ func DeleteConversationArchiveFolder(w http.ResponseWriter, r *http.Request) {
 func PurgeExpiredConversationTrash(ctx context.Context, db *gorm.DB, now time.Time) (purged, failed int) {
 	var rows []orm.Conversation
 	if err := db.WithContext(ctx).
-		Where("deleted_at IS NOT NULL AND trash_expires_at IS NOT NULL AND trash_expires_at <= ?", now).
+		Where(
+			"(deleted_at IS NOT NULL AND trash_expires_at IS NOT NULL AND trash_expires_at <= ?) OR (is_ephemeral = ? AND ephemeral_expires_at IS NOT NULL AND ephemeral_expires_at <= ?)",
+			now, true, now,
+		).
 		Find(&rows).Error; err != nil {
 		return 0, 1
 	}

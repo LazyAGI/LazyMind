@@ -18,6 +18,7 @@ import (
 	"lazymind/agentconnector/internal/adapters/workbuddy"
 	"lazymind/agentconnector/internal/assistantbridge"
 	"lazymind/agentconnector/internal/chatagent"
+	"lazymind/agentconnector/internal/codexcontrol"
 	"lazymind/agentconnector/internal/coreapi"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/mcpbridge"
@@ -184,7 +185,7 @@ func serveAssistant(ctx context.Context, address string, stderr io.Writer) error
 		return err
 	}
 	go func() {
-		if hostErr := runAgentHosts(ctx, api, []string{"codex", "cursor", "workbuddy"}, "", stderr); hostErr != nil && ctx.Err() == nil {
+		if hostErr := runAgentHosts(ctx, api, []string{"codex", "cursor", "workbuddy"}, "", server.CodexControl(), stderr); hostErr != nil && ctx.Err() == nil {
 			_, _ = fmt.Fprintln(stderr, "LazyMind Assistant host stopped:", hostErr)
 		}
 	}()
@@ -227,7 +228,7 @@ func runAgent(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 			statuses := make(map[string]any, len(providers))
 			for _, name := range providers {
 				var status map[string]any
-				if err := api.DoJSON(ctx, "GET", "/external-chat/hosts/"+name+":status", nil, &status); err != nil {
+				if err := api.DoJSON(ctx, "GET", "/external-chat/hosts/"+name+"/status", nil, &status); err != nil {
 					return err
 				}
 				statuses[name] = status
@@ -237,7 +238,7 @@ func runAgent(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 			}
 			return printJSON(stdout, map[string]any{"hosts": statuses})
 		}
-		return runAgentHosts(ctx, api, providers, *agentBinary, stderr)
+		return runAgentHosts(ctx, api, providers, *agentBinary, nil, stderr)
 	}
 	if len(args) < 2 || args[0] != "guide" {
 		return errors.New("usage: lazymind agent host run | lazymind agent guide <cursor|workbuddy|traework|deepseek-harness>")
@@ -306,10 +307,10 @@ func hostProviders(value string) ([]string, error) {
 	}
 }
 
-func newAgentRunner(provider, binary string) (chatagent.Runner, error) {
+func newAgentRunner(provider, binary string, control *codexcontrol.Controller) (chatagent.Runner, error) {
 	switch provider {
 	case "codex":
-		return codex.NewChatRunner(binary)
+		return codex.NewChatRunnerWithControl(binary, control)
 	case "cursor":
 		return cursor.NewChatRunner(binary)
 	case "workbuddy":
@@ -319,12 +320,12 @@ func newAgentRunner(provider, binary string) (chatagent.Runner, error) {
 	}
 }
 
-func runAgentHosts(ctx context.Context, api *coreapi.Client, providers []string, binary string, stderr io.Writer) error {
+func runAgentHosts(ctx context.Context, api *coreapi.Client, providers []string, binary string, control *codexcontrol.Controller, stderr io.Writer) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	hosts := make([]*chatagent.Host, 0, len(providers))
 	for _, provider := range providers {
-		runner, err := newAgentRunner(provider, binary)
+		runner, err := newAgentRunner(provider, binary, control)
 		if err != nil {
 			if len(providers) == 1 {
 				return err
