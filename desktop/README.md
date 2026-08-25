@@ -11,6 +11,8 @@ Desktop mode wraps the existing host-process Local runtime in an Electron shell.
 
 Desktop packages bundle the Go services, process-compose, Caddy, the compiled frontend, Python 3.11 runtime, auth/algorithm venvs, LazyLLM, Milvus Lite 3, and the Local dependency overlay. Model weights are not bundled.
 
+Platform-maintained Skill directories and installable Skill links are declared together in `skills/builtin-sources.yaml`; curated experiences keep their schema, locales, and images under `skills/featured/<id>/`. Desktop builds package or download every source into the same locked ZIP catalog under `resources/runtime/builtin-skills`, and compile the curated catalog plus content-hashed assets under `resources/runtime/featured-skills`. Bundled Caddy serves those assets through `/showcase-assets/` on both macOS and Windows. Release builds use the lock in frozen mode; users only unpack a Skill into their personal revision store when they click Install or Try.
+
 The frontend dependency tree is installed while building, but raw `frontend/node_modules` is not distributed. Vite compiles browser dependencies into `frontend/dist`, and Desktop serves that static output through bundled Caddy.
 
 ## Outputs
@@ -62,7 +64,12 @@ launch.
 
 Windows Desktop supports Windows 10/11 x64, runs as the current user, and does not require MinGW, administrator rights, or Developer Mode. Installer builds are unsigned unless standard electron-builder signing variables such as `CSC_LINK` are supplied.
 
-The assisted installer supports in-place upgrades, blocks downgrades, and warms the bundled Python, Node, and local services before completing. On a fresh or repair install, existing `%LOCALAPPDATA%\LazyMind` data can be retained (the default) or cleared. Upgrades always retain it. The uninstaller similarly defaults to removing the program only and can optionally clear Local AppData. Neither workflow reads, deletes, or moves `%USERPROFILE%\Documents\LazyMind`.
+The assisted installer supports in-place upgrades and blocks downgrades. It offers two installation types:
+
+- **Simple installation (default):** installs the bundled Python environment as a single archive, avoiding installation-time expansion and the long per-file firewall/antivirus scan. Python is expanded automatically on first launch.
+- **Full installation:** expands Python and warms the bundled Python, Node, and local services before setup completes, matching the previous installer behavior.
+
+Silent installs default to simple mode and accept `--simple-install` or `--full-install` explicitly. On a fresh or repair install, existing `%LOCALAPPDATA%\LazyMind` data can be retained (the default) or cleared. Upgrades always retain it. The uninstaller similarly defaults to removing the program only and can optionally clear Local AppData. Neither workflow reads, deletes, or moves `%USERPROFILE%\Documents\LazyMind`.
 
 ## Trusted local mode
 

@@ -1,18 +1,9 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass, field
-from datetime import datetime
-from pathlib import PurePath
 from typing import Any, Literal
 
-from channel_gateway.feishu.assistant import (
-    assistant_ui_error,
-    assistant_ui_status,
-    detail_run_status,
-    project_name,
-)
-from channel_gateway.feishu.cardkit import assistant_user_input_form
+from channel_gateway.common.domain.commands import ASSISTANT_PROVIDERS
 
 
 WorkspaceView = Literal[
@@ -51,9 +42,7 @@ _CAPABILITY_CATEGORIES = (
 _MAX_WORKSPACE_IMAGES = 6
 _MAX_CAPABILITY_ITEMS_PER_GROUP = 6
 _CAPABILITY_PAGE_SIZE = 10
-_ASSISTANT_ANSWER_PAGE_CHARS = 5000
-_ASSISTANT_TURN_PAGE_SIZE = 1
-_ASSISTANT_PROJECT_PAGE_SIZE = 6
+_CONVERSATION_PAGE_SIZE = 8
 _CAPABILITY_LABELS = {
     'knowledge_base': '知识库',
     'skill': 'Skill',
@@ -63,22 +52,25 @@ _CAPABILITY_LABELS = {
 }
 
 
-def _markdown_code(value: Any, language: str = '') -> str:
-    text = str(value or '')
-    longest = max(
-        (len(run) for run in re.findall(r'`+', text)),
-        default=0,
-    )
-    fence = '`' * max(3, longest + 1)
-    return f'{fence}{language}\n{text}\n{fence}'
+def _assistant_display_name(assistant: str) -> str:
+    return {
+        'lazymind': 'LazyMind',
+        'codex': 'Codex Desktop',
+        'cursor': 'Cursor CLI',
+        'workbuddy': 'WorkBuddy / CodeBuddy CLI',
+    }.get(assistant, 'LazyMind')
 
 
-def _capability_command() -> dict[str, Any]:
+def _capability_command(
+    evidence: str,
+    capabilities: tuple[str, ...] = _CAPABILITY_OVERVIEW_TYPES,
+) -> dict[str, Any]:
     return {
         'schema_version': '1',
         'command': 'capability.list',
         'parameters': {
-            'capabilities': list(_CAPABILITY_OVERVIEW_TYPES),
+            'capabilities': list(capabilities),
+            'evidence': [evidence],
         },
     }
 
@@ -91,24 +83,58 @@ MENU_EVENT_VIEWS = {
 }
 
 
-def _history_command() -> dict[str, Any]:
+def _history_command(
+    evidence: str,
+    assistant: str = 'lazymind',
+) -> dict[str, Any]:
     return {
         'schema_version': '1',
         'command': 'conversation.list',
-        'parameters': {},
+        'parameters': {
+            'assistant': (
+                assistant if assistant in ASSISTANT_PROVIDERS else 'lazymind'
+            ),
+            'evidence': [evidence],
+        },
     }
 
 
-def menu_command(view: str) -> dict[str, Any] | None:
+def _conversation_settings_command(evidence: str) -> dict[str, Any]:
+    return {
+        'schema_version': '1',
+        'command': 'conversation.settings',
+        'parameters': {
+            'section': 'executor',
+            'evidence': [evidence],
+        },
+    }
+
+
+def menu_command(
+    view: str,
+    assistant: str = 'lazymind',
+) -> dict[str, Any] | None:
     if view == 'capabilities':
-        return _capability_command()
+        return _capability_command('查看能力')
     if view == 'conversations':
-        return _history_command()
+        return _history_command('切换会话', assistant)
+    if view == 'assistant':
+        return _history_command('查看助理', assistant)
+    if view == 'settings':
+        return _conversation_settings_command('查看设置')
     return None
 
 
 def _localized(state: FeishuWorkspaceState, zh: str, en: str) -> str:
     return en if state.output_language == 'en' else zh
+
+
+def stale_card_notice(language: str = 'zh') -> str:
+    return (
+        'This card has expired. Use the latest LazyMind card.'
+        if language == 'en'
+        else '这张卡片已过期，请使用会话中最新的 LazyMind 卡片。'
+    )
 
 
 def is_feishu_image_key(value: Any) -> bool:
@@ -131,40 +157,20 @@ class FeishuWorkspaceState:
     revision: int = 0
     capability_category: str = ''
     capability_page: int = 0
-    pending_workflow_mode: str = 'dynamic'
+    conversation_page: int = 0
+    assistant: str = 'lazymind'
     thinking_depth: str = 'medium'
     output_language: str = 'zh'
     show_sources: bool = True
     new_session_open: bool = False
     active_operation_id: str = ''
     images: list[dict[str, str]] = field(default_factory=list)
-    assistant_mode: str = 'projects'
-    assistant_project_cwd: str = ''
-    assistant_project_page: int = 0
-    assistant_projects_cursor: str = ''
-    assistant_projects_next_cursor: str = ''
-    assistant_projects_previous_cursors: list[str] = field(default_factory=list)
-    assistant_selected_thread_id: str = ''
-    assistant_threads_cursor: str = ''
-    assistant_threads_next_cursor: str = ''
-    assistant_threads_previous_cursors: list[str] = field(default_factory=list)
-    assistant_threads_page: int = 0
-    assistant_answer_page: int = 0
 
     @classmethod
     def from_dict(cls, value: Any) -> FeishuWorkspaceState:
         raw = value if isinstance(value, dict) else {}
         view = str(raw.get('view') or 'chat')
         category = str(raw.get('capability_category') or '')
-        assistant_mode = (
-            str(raw.get('assistant_mode'))
-            if str(raw.get('assistant_mode')) in {
-                'projects',
-                'sessions',
-                'detail',
-            }
-            else 'projects'
-        )
         return cls(
             view=view if view in _VIEWS else 'chat',
             message_id=str(raw.get('message_id') or ''),
@@ -175,10 +181,11 @@ class FeishuWorkspaceState:
                 else ''
             ),
             capability_page=max(0, _integer(raw.get('capability_page'))),
-            pending_workflow_mode=(
-                str(raw.get('pending_workflow_mode'))
-                if str(raw.get('pending_workflow_mode')) in {'auto', 'dynamic'}
-                else 'dynamic'
+            conversation_page=max(0, _integer(raw.get('conversation_page'))),
+            assistant=(
+                str(raw.get('assistant'))
+                if str(raw.get('assistant')) in ASSISTANT_PROVIDERS
+                else 'lazymind'
             ),
             thinking_depth=(
                 str(raw.get('thinking_depth'))
@@ -195,59 +202,6 @@ class FeishuWorkspaceState:
             new_session_open=bool(raw.get('new_session_open', False)),
             active_operation_id=str(raw.get('active_operation_id') or ''),
             images=_workspace_images(raw.get('images')),
-            assistant_mode=assistant_mode,
-            assistant_project_cwd=str(
-                raw.get('assistant_project_cwd') or ''
-            )[:500],
-            assistant_project_page=max(
-                0,
-                _integer(raw.get('assistant_project_page')),
-            ),
-            assistant_projects_cursor=str(
-                raw.get('assistant_projects_cursor') or ''
-            )[:512],
-            assistant_projects_next_cursor=str(
-                raw.get('assistant_projects_next_cursor') or ''
-            )[:512],
-            assistant_projects_previous_cursors=[
-                str(item)[:512]
-                for item in (
-                    raw.get('assistant_projects_previous_cursors')
-                    if isinstance(
-                        raw.get('assistant_projects_previous_cursors'),
-                        list,
-                    )
-                    else []
-                )
-                if isinstance(item, str)
-            ][-100:],
-            assistant_selected_thread_id=str(raw.get('assistant_selected_thread_id') or '')[:512],
-            assistant_threads_cursor=str(
-                raw.get('assistant_threads_cursor') or ''
-            )[:512],
-            assistant_threads_next_cursor=str(
-                raw.get('assistant_threads_next_cursor') or ''
-            )[:512],
-            assistant_threads_previous_cursors=[
-                str(item)[:512]
-                for item in (
-                    raw.get('assistant_threads_previous_cursors')
-                    if isinstance(
-                        raw.get('assistant_threads_previous_cursors'),
-                        list,
-                    )
-                    else []
-                )
-                if isinstance(item, str)
-            ][-100:],
-            assistant_threads_page=max(
-                0,
-                _integer(raw.get('assistant_threads_page')),
-            ),
-            assistant_answer_page=max(
-                0,
-                _integer(raw.get('assistant_answer_page')),
-            ),
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -257,29 +211,14 @@ class FeishuWorkspaceState:
             'revision': self.revision,
             'capability_category': self.capability_category,
             'capability_page': self.capability_page,
-            'pending_workflow_mode': self.pending_workflow_mode,
+            'conversation_page': self.conversation_page,
+            'assistant': self.assistant,
             'thinking_depth': self.thinking_depth,
             'output_language': self.output_language,
             'show_sources': self.show_sources,
             'new_session_open': self.new_session_open,
             'active_operation_id': self.active_operation_id,
             'images': _workspace_images(self.images),
-            'assistant_mode': self.assistant_mode,
-            'assistant_project_cwd': self.assistant_project_cwd,
-            'assistant_project_page': self.assistant_project_page,
-            'assistant_projects_cursor': self.assistant_projects_cursor,
-            'assistant_projects_next_cursor': self.assistant_projects_next_cursor,
-            'assistant_projects_previous_cursors': list(
-                self.assistant_projects_previous_cursors
-            ),
-            'assistant_selected_thread_id': self.assistant_selected_thread_id,
-            'assistant_threads_cursor': self.assistant_threads_cursor,
-            'assistant_threads_next_cursor': self.assistant_threads_next_cursor,
-            'assistant_threads_previous_cursors': list(
-                self.assistant_threads_previous_cursors
-            ),
-            'assistant_threads_page': self.assistant_threads_page,
-            'assistant_answer_page': self.assistant_answer_page,
         }
 
     def advance(self) -> None:
@@ -293,12 +232,6 @@ class FeishuWorkspaceState:
         self.active_operation_id = operation_id
         self.images = []
         self.new_session_open = False
-
-    def leave_assistant_thread(self) -> None:
-        self.assistant_mode = 'sessions'
-        self.assistant_selected_thread_id = ''
-        self.assistant_answer_page = 0
-        self.images = []
 
     def navigate(
         self,
@@ -317,6 +250,8 @@ class FeishuWorkspaceState:
         if view == 'capabilities':
             self.capability_category = ''
             self.capability_page = 0
+        if view in {'assistant', 'conversations'}:
+            self.conversation_page = 0
 
     def open_new_session(self) -> None:
         self.view = 'conversations'
@@ -377,10 +312,6 @@ class FeishuWorkspaceRenderer:
         state = FeishuWorkspaceState.from_dict(
             provider_context.get('workspace_state')
         )
-        assistant_view = provider_context.get('assistant_view')
-        assistant_view = (
-            dict(assistant_view) if isinstance(assistant_view, dict) else {}
-        )
         result_complete = (
             provider_context.get('_workspace_result_complete') is True
         )
@@ -430,9 +361,27 @@ class FeishuWorkspaceRenderer:
                 )
             )
         elif state.view == 'assistant':
-            elements.extend(render_assistant(state, chat_id, assistant_view))
+            elements.extend(
+                cls._assistant(
+                    state,
+                    presentations,
+                    chat_id,
+                    result_complete=result_complete,
+                )
+            )
         elif state.view == 'settings':
-            elements.extend(cls._settings(state, chat_id))
+            elements.extend(
+                cls._settings(
+                    state,
+                    presentations,
+                    chat_id,
+                    conversation_id=str(
+                        provider_context.get('workspace_conversation_id')
+                        or ''
+                    ),
+                    result_complete=result_complete,
+                )
+            )
         return {
             'schema': '2.0',
             'config': {
@@ -492,6 +441,7 @@ class FeishuWorkspaceRenderer:
                 state,
                 presentations,
                 chat_id,
+                conversation_id=conversation_id,
                 result_complete=result_complete,
             )
         groups = _capability_groups(presentations)
@@ -515,7 +465,7 @@ class FeishuWorkspaceRenderer:
             and item.get('id')
             and item.get('enabled') is True
         }
-        if has_conversation:
+        if has_conversation or new_conversation_pending:
             selected = {
                 value for value in selected if value[0] != 'knowledge_base'
             }
@@ -533,39 +483,21 @@ class FeishuWorkspaceRenderer:
         )
         workflow_mode = (
             str(settings.get('workflow_mode') or 'dynamic')
-            if has_conversation
-            else state.pending_workflow_mode
+            if has_conversation or new_conversation_pending
+            else 'dynamic'
         )
         subagent_enabled = bool(settings.get('subagent_enabled', True))
-        workflow_action = (
-            _setting_action(
-                chat_id,
-                {
-                    'setting': 'workflow_mode',
-                    'mode': 'dynamic' if workflow_mode == 'auto' else 'auto',
-                },
-                '切换 Workflow 运行方式',
-                view='capabilities',
-                expected_revision=state.revision,
-                expected_operation_id=state.active_operation_id,
-                expected_conversation_id=conversation_id,
-            )
-            if has_conversation
-            else _command_action(
-                chat_id=chat_id,
-                text='切换 Workflow 运行方式',
-                command=_capability_command(),
-                workspace_action={
-                    'kind': 'new_session.workflow_mode',
-                    'mode': (
-                        'dynamic' if workflow_mode == 'auto' else 'auto'
-                    ),
-                    'expected_mode': workflow_mode,
-                    'expected_view': state.view,
-                    'expected_revision': state.revision,
-                    'expected_operation_id': state.active_operation_id,
-                },
-            )
+        workflow_action = _setting_action(
+            chat_id,
+            {
+                'setting': 'workflow_mode',
+                'mode': 'dynamic' if workflow_mode == 'auto' else 'auto',
+            },
+            '切换 Workflow 运行方式',
+            view='capabilities',
+            expected_revision=state.revision,
+            expected_operation_id=state.active_operation_id,
+            expected_conversation_id=conversation_id,
         )
         selection_scope_note = _localized(
             state,
@@ -622,7 +554,7 @@ class FeishuWorkspaceRenderer:
                         _command_action(
                             chat_id=chat_id,
                             text='刷新能力配置',
-                            command=_capability_command(),
+                            command=_capability_command('刷新能力配置'),
                             workspace_action={
                                 'kind': 'navigate',
                                 'view': 'capabilities',
@@ -635,7 +567,7 @@ class FeishuWorkspaceRenderer:
                         else _command_action(
                             chat_id=chat_id,
                             text='刷新能力列表',
-                            command=_capability_command(),
+                            command=_capability_command('刷新能力列表'),
                             workspace_action={
                                 'kind': 'navigate',
                                 'view': 'capabilities',
@@ -653,6 +585,8 @@ class FeishuWorkspaceRenderer:
                     f'<font color="grey">{selection_scope_note}</font>'
                 ),
             },
+        ]
+        elements.extend([
             {
                 'tag': 'markdown',
                 'content': _localized(
@@ -665,7 +599,7 @@ class FeishuWorkspaceRenderer:
                     else '**New-conversation defaults**　<font color="grey">Used by the first message</font>',
                 ),
             },
-        ]
+        ])
         if not groups:
             elements.append(
                 {
@@ -724,13 +658,11 @@ class FeishuWorkspaceRenderer:
                     is_selected = (resource_type, item_id) in selected
                     action = _resource_toggle_action(
                         chat_id=chat_id,
-                        kind='capability.toggle',
+                        state=state,
                         category=resource_type,
                         item=item,
                         enabled=not is_selected,
-                        expected_revision=state.revision,
-                        expected_operation_id=state.active_operation_id,
-                        catalog_only=False,
+                        conversation_id=conversation_id,
                     )
                     buttons.append({
                         'label': (
@@ -943,6 +875,125 @@ class FeishuWorkspaceRenderer:
         return elements
 
     @staticmethod
+    def _assistant(
+        state: FeishuWorkspaceState,
+        presentations: list[dict[str, Any]],
+        chat_id: str,
+        *,
+        result_complete: bool,
+    ) -> list[dict[str, Any]]:
+        refresh_text = '刷新助理与会话'
+        elements: list[dict[str, Any]] = [
+            _heading_action(
+                title=_localized(state, '选择助理', 'Choose assistant'),
+                description=_localized(
+                    state,
+                    '选择会话来源，再进入该助理已有会话继续任务；不会修改执行引擎。',
+                    'Choose a conversation source, then continue one of '
+                    'that assistant’s existing conversations. This does '
+                    'not change the execution engine.',
+                ),
+                button={
+                    'label': _localized(state, '刷新列表', 'Refresh'),
+                    'style': 'default',
+                    'action': _command_action(
+                        chat_id=chat_id,
+                        text=refresh_text,
+                        command=_history_command(
+                            refresh_text,
+                            state.assistant,
+                        ),
+                        workspace_action={
+                            'kind': 'navigate',
+                            'view': 'assistant',
+                            'expected_view': state.view,
+                            'expected_revision': state.revision,
+                            'expected_operation_id': state.active_operation_id,
+                        },
+                    ),
+                },
+            ),
+        ]
+        catalog = next(
+            (
+                item
+                for item in presentations
+                if item.get('kind') == 'assistant_catalog'
+            ),
+            {},
+        )
+        assistants = [
+            item
+            for item in (
+                catalog.get('assistants')
+                if isinstance(catalog.get('assistants'), list)
+                else []
+            )[:8]
+            if isinstance(item, dict)
+            and str(item.get('id') or '') in ASSISTANT_PROVIDERS
+        ]
+        if not assistants:
+            elements.append({
+                'tag': 'markdown',
+                'content': _localized(
+                    state,
+                    (
+                        '<font color="grey">暂无可选择的助理。</font>'
+                        if result_complete
+                        else '<font color="grey">正在同步助理与会话…</font>'
+                    ),
+                    (
+                        '<font color="grey">No assistants are available.</font>'
+                        if result_complete
+                        else '<font color="grey">Syncing assistants and conversations…</font>'
+                    ),
+                ),
+            })
+            return elements
+        unavailable: list[str] = []
+        for start in range(0, len(assistants), 2):
+            buttons: list[dict[str, Any]] = []
+            for assistant in assistants[start:start + 2]:
+                assistant_id = str(assistant.get('id') or '')
+                display_name = str(
+                    assistant.get('display_name') or assistant_id
+                )[:100]
+                selected = assistant_id == state.assistant
+                buttons.append({
+                    'label': f'{"✓" if selected else "＋"} {display_name}',
+                    'style': 'primary' if selected else 'default',
+                    'action': _assistant_select_action(
+                        chat_id,
+                        state,
+                        assistant_id=assistant_id,
+                        display_name=display_name,
+                    ),
+                })
+                if assistant.get('available') is not True:
+                    reason = str(
+                        assistant.get('unavailable_reason')
+                        or '当前离线，可查看历史但暂时不能继续执行'
+                    )[:160]
+                    unavailable.append(f'{display_name}：{reason}')
+            elements.append(_button_row(buttons))
+        if unavailable:
+            elements.append({
+                'tag': 'markdown',
+                'content': '<font color="grey">' + '\n'.join(unavailable) + '</font>',
+            })
+        elements.append({
+            'tag': 'markdown',
+            'content': _localized(
+                state,
+                '<font color="grey">选择助理后，将在新卡片中按项目展示其全部已有会话。</font>',
+                '<font color="grey">Choose an assistant to open a new '
+                'card with all existing conversations grouped by '
+                'project.</font>',
+            ),
+        })
+        return elements
+
+    @staticmethod
     def _conversation_history(
         state: FeishuWorkspaceState,
         presentations: list[dict[str, Any]],
@@ -980,21 +1031,35 @@ class FeishuWorkspaceRenderer:
         )
         panel_elements: list[dict[str, Any]] = [
             _heading_action(
-                title=_localized(state, '切换会话', 'Switch conversation'),
+                title=_localized(
+                    state,
+                    f'切换 {_assistant_display_name(state.assistant)} 会话',
+                    f'Switch {_assistant_display_name(state.assistant)} conversation',
+                ),
                 description=_localized(
                     state,
-                    '选择会话后，后续原生聊天会继续使用对应上下文与能力。',
-                    'Select a conversation to continue with its context and capabilities.',
+                    '会话列表跟随当前助理；选择后继续原上下文，不会新建或合并会话。',
+                    'The list follows the selected assistant. Choosing '
+                    'one resumes its original context without creating '
+                    'or merging conversations.',
                 ),
-                button={
-                    'label': _localized(state, '＋ 新建', '＋ New'),
-                    'style': 'primary',
-                    'action': _new_session_action(
-                        chat_id,
-                        state,
-                        kind='new_session.open',
-                    ),
-                },
+                button=(
+                    {
+                        'label': _localized(state, '＋ 新建', '＋ New'),
+                        'style': 'primary',
+                        'action': _new_session_action(
+                            chat_id,
+                            state,
+                            kind='new_session.open',
+                        ),
+                    }
+                    if state.assistant == 'lazymind'
+                    else {
+                        'label': _localized(state, '刷新', 'Refresh'),
+                        'style': 'default',
+                        'action': _history_refresh_action(chat_id, state),
+                    }
+                ),
             ),
         ]
         if conversation_title:
@@ -1057,7 +1122,7 @@ class FeishuWorkspaceRenderer:
                     '✅ **The selected conversation is now active**',
                 ),
             })
-        if state.new_session_open:
+        if state.new_session_open and state.assistant == 'lazymind':
             panel_elements.extend(
                 [
                     {
@@ -1116,16 +1181,10 @@ class FeishuWorkspaceRenderer:
                 )
             )
         panel_elements.extend(
-            FeishuWorkspaceRenderer._selection(
+            FeishuWorkspaceRenderer._conversation_catalog(
+                state,
                 presentations,
                 chat_id,
-                workspace_action={
-                    'kind': 'history.switch',
-                    'view': 'conversations',
-                    'expected_view': state.view,
-                    'expected_revision': state.revision,
-                    'expected_operation_id': state.active_operation_id,
-                },
                 selected_value=switch_index,
                 loading=switching,
                 empty=(
@@ -1137,8 +1196,8 @@ class FeishuWorkspaceRenderer:
                     if loading
                     else _localized(
                         state,
-                        '暂时没有历史会话。',
-                        'No previous conversations yet.',
+                        f'{_assistant_display_name(state.assistant)} 暂时没有历史会话。',
+                        f'No {_assistant_display_name(state.assistant)} conversations yet.',
                     )
                 ),
             )
@@ -1146,17 +1205,151 @@ class FeishuWorkspaceRenderer:
         return panel_elements
 
     @staticmethod
+    def _conversation_catalog(
+        state: FeishuWorkspaceState,
+        presentations: list[dict[str, Any]],
+        chat_id: str,
+        *,
+        selected_value: str,
+        loading: bool,
+        empty: str,
+    ) -> list[dict[str, Any]]:
+        catalog = next(
+            (
+                item for item in presentations
+                if item.get('kind') == 'conversation_catalog'
+            ),
+            {},
+        )
+        raw_items = catalog.get('items')
+        items = [
+            item for item in (raw_items if isinstance(raw_items, list) else [])
+            if isinstance(item, dict)
+            and _integer(item.get('index')) > 0
+            and (
+                str(item.get('conversation_id') or '')
+                or str(item.get('provider_thread_id') or '')
+            )
+        ]
+        if not items:
+            return [{'tag': 'markdown', 'content': empty}] if empty else []
+
+        projects: dict[str, list[dict[str, Any]]] = {}
+        for item in items:
+            project_key = str(item.get('project_key') or 'unassigned')
+            projects.setdefault(project_key, []).append(item)
+        ordered_items = [
+            item for project_items in projects.values() for item in project_items
+        ]
+        page_count = max(
+            1,
+            (len(ordered_items) + _CONVERSATION_PAGE_SIZE - 1)
+            // _CONVERSATION_PAGE_SIZE,
+        )
+        page = min(state.conversation_page, page_count - 1)
+        page_items = ordered_items[
+            page * _CONVERSATION_PAGE_SIZE:
+            (page + 1) * _CONVERSATION_PAGE_SIZE
+        ]
+        page_projects: dict[str, list[dict[str, Any]]] = {}
+        for item in page_items:
+            project_key = str(item.get('project_key') or 'unassigned')
+            page_projects.setdefault(project_key, []).append(item)
+
+        elements: list[dict[str, Any]] = []
+        selection_id = str(catalog.get('selection_id') or '')
+        for project_key, project_items in page_projects.items():
+            project_name = str(
+                project_items[0].get('project_name') or ''
+            ).strip()
+            if not project_name:
+                project_name = _localized(state, '未识别项目', 'Unassigned project')
+            if state.assistant != 'lazymind':
+                elements.append({
+                    'tag': 'markdown',
+                    'content': (
+                        f'**{project_name}**　<font color="grey">'
+                        f'{len(projects[project_key])} 个会话</font>'
+                    ),
+                })
+            for start in range(0, len(project_items), 2):
+                buttons: list[dict[str, Any]] = []
+                for item in project_items[start:start + 2]:
+                    index = _integer(item.get('index'))
+                    label = str(item.get('display_name') or '')
+                    marker = (
+                        '⏳' if loading and str(index) == selected_value
+                        else '✓' if str(index) == selected_value
+                        else f'{index}.'
+                    )
+                    buttons.append({
+                        'label': f'{marker} {label}'[:40],
+                        'style': 'primary' if str(index) == selected_value else 'default',
+                        'disabled': loading,
+                        'action': {
+                            'lazymind_action': 'select',
+                            'selection_id': selection_id,
+                            'selection': str(index),
+                            'text': str(index),
+                            'intended_chat_id': chat_id,
+                            'workspace_action': {
+                                'kind': 'history.switch',
+                                'view': 'conversations',
+                                'target_conversation_id': str(
+                                    item.get('conversation_id') or ''
+                                )[:512],
+                                'provider_thread_id': str(
+                                    item.get('provider_thread_id') or ''
+                                )[:512],
+                                'host_id': str(item.get('host_id') or '')[:512],
+                                'expected_view': state.view,
+                                'expected_revision': state.revision,
+                                'expected_operation_id': state.active_operation_id,
+                            },
+                        },
+                    })
+                elements.append(_button_row(buttons))
+        elements.append({
+            'tag': 'markdown',
+            'content': _localized(
+                state,
+                f'<font color="grey">第 {page + 1}/{page_count} 页 · 共 {len(items)} 个会话</font>',
+                f'<font color="grey">Page {page + 1}/{page_count} · {len(items)} conversations</font>',
+            ),
+        })
+        if page_count > 1:
+            buttons: list[dict[str, Any]] = []
+            if page > 0:
+                buttons.append({
+                    'label': _localized(state, '上一页', 'Previous'),
+                    'style': 'default',
+                    'action': _conversation_page_action(chat_id, state, page - 1),
+                })
+            if page + 1 < page_count:
+                buttons.append({
+                    'label': _localized(state, '下一页', 'Next'),
+                    'style': 'default',
+                    'action': _conversation_page_action(chat_id, state, page + 1),
+                })
+            elements.append(_button_row(buttons))
+        return elements
+
+    @staticmethod
     def _settings(
         state: FeishuWorkspaceState,
+        presentations: list[dict[str, Any]],
         chat_id: str,
+        *,
+        conversation_id: str,
+        result_complete: bool,
     ) -> list[dict[str, Any]]:
-        elements = [
+        elements: list[dict[str, Any]] = [
             _heading_action(
-                title=_localized(state, '体验设置', 'Experience settings'),
+                title=_localized(state, '设置', 'Settings'),
                 description=_localized(
                     state,
-                    '控制 LazyMind 的思考、语言、呈现和会话行为。',
-                    'Control LazyMind thinking, language, presentation, and conversation behavior.',
+                    '设置当前会话的执行引擎，以及飞书交互体验。',
+                    'Configure the current conversation’s execution engine and Feishu experience.',
                 ),
                 button={
                     'label': _localized(state, '自动保存', 'Auto-saved'),
@@ -1175,6 +1368,55 @@ class FeishuWorkspaceRenderer:
                     ),
                 },
             ),
+        ]
+        settings = next(
+            (
+                item
+                for item in presentations
+                if item.get('kind') == 'conversation_settings'
+            ),
+            {},
+        )
+        executors = [
+            item
+            for item in (
+                settings.get('executors')
+                if isinstance(settings.get('executors'), list)
+                else []
+            )[:8]
+            if isinstance(item, dict)
+            and str(item.get('id') or '')
+            and str(item.get('display_name') or '')
+        ]
+        if conversation_id:
+            elements.extend(
+                _executor_setting_elements(
+                    state=state,
+                    chat_id=chat_id,
+                    executors=executors,
+                    selected=str(settings.get('chat_executor') or ''),
+                    conversation_id=conversation_id,
+                    expected_revision=state.revision,
+                    expected_operation_id=state.active_operation_id,
+                    view='settings',
+                    result_complete=result_complete,
+                )
+            )
+        else:
+            elements.extend([
+                {'tag': 'hr'},
+                {
+                    'tag': 'markdown',
+                    'content': _localized(
+                        state,
+                        '<font color="grey">当前没有会话；发送消息或切换会话后可选择执行引擎。</font>',
+                        '<font color="grey">There is no current conversation. '
+                        'Send a message or switch conversations before '
+                        'choosing an execution engine.</font>',
+                    ),
+                },
+            ])
+        elements.extend([
             {
                 'tag': 'markdown',
                 'content': _localized(
@@ -1219,8 +1461,8 @@ class FeishuWorkspaceRenderer:
                 'tag': 'markdown',
                 'content': _localized(
                     state,
-                    '**语言设置**',
-                    '**Language settings**',
+                    '**界面语言**',
+                    '**Interface language**',
                 ),
             },
             _button_row(
@@ -1312,36 +1554,36 @@ class FeishuWorkspaceRenderer:
             _button_row(
                 [
                     {
-                        'label': _localized(state, '清空当前会话上下文', 'Clear conversation context'),
+                        'label': _localized(state, '开始空白新会话', 'Start a blank conversation'),
                         'style': 'danger_filled',
                         'action': _maintenance_action(
                             chat_id,
                             state,
-                            kind='maintenance.clear_conversation',
+                            kind='maintenance.new_conversation',
                             create=True,
                         ),
                         'confirm': {
                             'title': _localized(
                                 state,
-                                '清空当前会话上下文？',
-                                'Clear conversation context?',
+                                '开始空白新会话？',
+                                'Start a blank conversation?',
                             ),
                             'text': _localized(
                                 state,
                                 (
-                                    '将清除当前会话记忆与任务状态，后续回答不再引用'
-                                    '当前会话内容。此操作不可撤销。'
+                                    '将离开当前会话并等待你的第一条新消息；'
+                                    '原会话仍可从历史列表切回，已有后台任务不受影响。'
                                 ),
                                 (
-                                    'Clears current memory and task state. '
-                                    'This cannot be undone.'
+                                    'Leaves the current conversation and waits for your first new message. '
+                                    'The old conversation remains in history and existing background tasks continue.'
                                 ),
                             ),
                         },
                     }
                 ]
             ),
-        ]
+        ])
         return elements
 
     @staticmethod
@@ -1350,6 +1592,7 @@ class FeishuWorkspaceRenderer:
         presentations: list[dict[str, Any]],
         chat_id: str,
         *,
+        conversation_id: str,
         result_complete: bool,
     ) -> list[dict[str, Any]]:
         selected = _selected_capabilities(presentations)
@@ -1522,6 +1765,7 @@ class FeishuWorkspaceRenderer:
                                         chat_id,
                                         state,
                                         item,
+                                        conversation_id=conversation_id,
                                         enabled=(
                                             (
                                                 state.capability_category,
@@ -1590,7 +1834,7 @@ class FeishuWorkspaceRenderer:
                     'action': _command_action(
                         chat_id=chat_id,
                         text='返回能力',
-                        command=_capability_command(),
+                        command=_capability_command('返回能力'),
                         workspace_action={
                             'kind': 'navigate',
                             'view': 'capabilities',
@@ -1800,1069 +2044,6 @@ def _heading_action(
     }
 
 
-def render_assistant(
-    state: Any,
-    chat_id: str,
-    assistant_view: dict[str, Any],
-) -> list[dict[str, Any]]:
-    if state.assistant_mode == 'detail':
-        return _detail(state, chat_id, assistant_view)
-    if state.assistant_mode == 'sessions':
-        return _sessions(state, chat_id, assistant_view)
-    return _projects(state, chat_id, assistant_view)
-
-
-def _action(
-    chat_id: str,
-    kind: str,
-    text: str,
-    **values: Any,
-) -> dict[str, Any]:
-    return {
-        'lazymind_action': 'local',
-        'text': text,
-        'intended_chat_id': chat_id,
-        'workspace_action': {'kind': kind, **values},
-    }
-
-
-def _turn_pagination(
-    state: Any,
-    chat_id: str,
-    current_page: int,
-    page_count: int,
-    action_values: dict[str, Any] | None = None,
-) -> dict[str, Any]:
-    current_page = min(max(0, current_page), max(0, page_count - 1))
-    page_control = {
-        'tag': 'markdown',
-        'content': f'**{current_page + 1} / {page_count}**',
-    }
-    previous = _button({
-        'label': _localized(state, '上一页', 'Previous'),
-        'disabled': current_page == 0,
-        'action': _action(
-            chat_id,
-            'assistant.turns_page',
-            'Codex 上一页',
-            direction='older',
-            **(action_values or {}),
-        ),
-    })
-    next_button = _button({
-        'label': _localized(state, '下一页', 'Next'),
-        'disabled': current_page >= page_count - 1,
-        'action': _action(
-            chat_id,
-            'assistant.turns_page',
-            'Codex 下一页',
-            direction='newer',
-            **(action_values or {}),
-        ),
-    })
-    return {
-        'tag': 'column_set',
-        'flex_mode': 'none',
-        'horizontal_spacing': '8px',
-        'columns': [
-            {
-                'tag': 'column',
-                'width': 'weighted',
-                'weight': 1,
-                'elements': [element],
-            }
-            for element in (previous, page_control, next_button)
-        ],
-    }
-
-
-def _project_location(cwd: str) -> str:
-    parts = PurePath(str(cwd or '').rstrip('/\\')).parts
-    return '/'.join(parts[-2:]) if parts else '未归属项目'
-
-
-def _time_label(value: Any) -> str:
-    raw = str(value or '').strip()
-    if not raw:
-        return '—'
-    try:
-        return datetime.fromtimestamp(int(float(raw))).strftime(
-            '%Y-%m-%d %H:%M'
-        )
-    except (TypeError, ValueError, OverflowError, OSError):
-        return raw
-
-
-def _source_label(value: Any) -> str:
-    source = str(value or '').strip()
-    return {
-        'vscode': 'Codex Desktop',
-        'cli': 'Codex CLI',
-        'appserver': 'LazyMind',
-    }.get(source.lower(), source or 'Codex')
-
-
-def _error_text(state: Any, assistant_view: dict[str, Any]) -> str:
-    error = assistant_ui_error(assistant_view).strip()
-    normalized = error.lower()
-    if '2001600' in normalized:
-        return _localized(
-            state,
-            'Codex 已连接，但当前没有可展示的项目会话。',
-            'Codex is connected, but no project sessions are visible.',
-        )
-    if (
-        'codex assistant is not configured' in normalized
-        or 'codex executable not found' in normalized
-    ):
-        return _localized(
-            state,
-            (
-                '当前设备未找到可用 Codex。请先在本机安装并登录 Codex，'
-                '然后返回飞书重试；其他 LazyMind 功能不受影响。'
-            ),
-            (
-                'Codex is unavailable on this device. Install and sign in to '
-                'Codex locally, then retry in Feishu. Other LazyMind features '
-                'are unaffected.'
-            ),
-        )
-    return error or _localized(state, '请重试', 'Please retry')
-
-
-def _projects(
-    state: Any,
-    chat_id: str,
-    assistant_view: dict[str, Any],
-) -> list[dict[str, Any]]:
-    ui_status = assistant_ui_status(assistant_view)
-    projects = assistant_view.get('projects')
-    projects = projects if isinstance(projects, list) else []
-    unique_projects: list[dict[str, Any]] = []
-    seen_cwds: set[str] = set()
-    for project in projects:
-        if not isinstance(project, dict):
-            continue
-        cwd = str(project.get('cwd') or '').rstrip('/\\')
-        identity = cwd.casefold()
-        if not cwd or identity in seen_cwds:
-            continue
-        seen_cwds.add(identity)
-        unique_projects.append(project)
-    projects = unique_projects
-    project_names = [
-        str(project.get('name') or project_name(str(project.get('cwd') or '')))
-        for project in projects
-    ]
-    duplicate_names = {
-        name.casefold()
-        for name in project_names
-        if sum(
-            candidate.casefold() == name.casefold()
-            for candidate in project_names
-        ) > 1
-    }
-    total = max(0, _integer(assistant_view.get('total')))
-    page_count = max(
-        1,
-        (total + _ASSISTANT_PROJECT_PAGE_SIZE - 1)
-        // _ASSISTANT_PROJECT_PAGE_SIZE,
-    )
-    page = min(max(0, state.assistant_project_page), page_count - 1)
-    status = (
-        _localized(state, '● 已连接', '● Connected')
-        if ui_status == 'ready'
-        else _localized(state, '○ 正在检查连接', '○ Checking connection')
-    )
-    elements = [
-        _heading_action(
-            title=_localized(state, '选择 Codex 项目', 'Choose a Codex project'),
-            description=_localized(
-                state,
-                '项目来自 Codex 原生会话的工作目录。',
-                'Projects come from the working directories of native Codex sessions.',
-            ),
-            button={
-                'label': _localized(state, '刷新', 'Refresh'),
-                'action': _action(
-                    chat_id,
-                    'assistant.refresh',
-                    '刷新 Codex 项目',
-                ),
-            },
-        ),
-        {
-            'tag': 'markdown',
-            'content': f'**Codex**　<font color="green">{status}</font>',
-        },
-        {'tag': 'hr'},
-    ]
-    if ui_status == 'error':
-        elements.extend([
-            {
-                'tag': 'markdown',
-                'content': f'<font color="red">同步失败：{_error_text(state, assistant_view)}</font>',
-            },
-            _button_row([{
-                'label': _localized(state, '重试', 'Retry'),
-                'action': _action(
-                    chat_id,
-                    'assistant.retry',
-                    '重试同步 Codex 项目',
-                ),
-            }]),
-        ])
-    elif not projects:
-        elements.append({
-            'tag': 'markdown',
-            'content': _localized(
-                state,
-                '<font color="grey">暂无包含会话的 Codex 项目。</font>',
-                '<font color="grey">No Codex projects with sessions are available.</font>',
-            ),
-        })
-    for project in projects:
-        cwd = str(project.get('cwd') or '')
-        count = int(project.get('thread_count') or 0)
-        name = str(project.get('name') or project_name(cwd))
-        parent_name = PurePath(cwd.rstrip('/\\')).parent.name
-        display_name = (
-            f'{name} · {parent_name}'
-            if name.casefold() in duplicate_names
-            else name
-        )
-        elements.extend([
-            {
-                'tag': 'markdown',
-                'content': (
-                    f'**{display_name}**\n'
-                    f'<font color="grey">{_project_location(cwd)}</font>\n'
-                    f'<font color="grey">{count} 个会话 · '
-                    f'{_time_label(project.get("updated_at"))}</font>'
-                ),
-            },
-            _button_row([{
-                'label': _localized(state, '查看会话', 'View sessions'),
-                'action': _action(
-                    chat_id,
-                    'assistant.project',
-                    f'打开 Codex 项目 {display_name}',
-                    project_cwd=cwd,
-                    expected_projects_cursor=state.assistant_projects_cursor,
-                    expected_project_page=state.assistant_project_page,
-                ),
-            }]),
-        ])
-    if page_count > 1:
-        elements.extend([
-            {
-                'tag': 'markdown',
-                'content': _localized(
-                    state,
-                    f'<font color="grey">第 {page + 1} 页 · 共 {total} 个项目</font>',
-                    f'<font color="grey">Page {page + 1} · {total} projects</font>',
-                ),
-            },
-            _button_row([
-                {
-                    'label': _localized(state, '上一页', 'Previous'),
-                    'disabled': not state.assistant_projects_previous_cursors,
-                    'action': _action(
-                        chat_id,
-                        'assistant.projects_page',
-                        'Codex 项目上一页',
-                        direction='previous',
-                        expected_projects_cursor=state.assistant_projects_cursor,
-                        expected_project_page=state.assistant_project_page,
-                    ),
-                },
-                {
-                    'label': _localized(state, '下一页', 'Next'),
-                    'disabled': not state.assistant_projects_next_cursor,
-                    'action': _action(
-                        chat_id,
-                        'assistant.projects_page',
-                        'Codex 项目下一页',
-                        direction='next',
-                        expected_projects_cursor=state.assistant_projects_cursor,
-                        expected_project_page=state.assistant_project_page,
-                    ),
-                },
-            ]),
-        ])
-    return elements
-
-
-def _sessions(
-    state: Any,
-    chat_id: str,
-    assistant_view: dict[str, Any],
-) -> list[dict[str, Any]]:
-    ui_status = assistant_ui_status(assistant_view)
-    sessions = assistant_view.get('threads')
-    sessions = sessions if isinstance(sessions, list) else []
-    status = (
-        _localized(state, '● 已连接', '● Connected')
-        if ui_status == 'ready'
-        else _localized(state, '○ 正在检查连接', '○ Checking connection')
-    )
-    total = max(0, _integer(assistant_view.get('total')))
-    elements = [
-        _heading_action(
-            title=project_name(state.assistant_project_cwd),
-            description=_localized(
-                state,
-                '只显示该工作目录下的 Codex 原生会话。',
-                'Only native Codex sessions in this working directory are shown.',
-            ),
-            button={
-                'label': _localized(state, '返回项目', 'Back to projects'),
-                'action': _action(
-                    chat_id,
-                    'assistant.projects',
-                    '返回 Codex 项目',
-                    expected_project_cwd=state.assistant_project_cwd,
-                ),
-            },
-        ),
-        {
-            'tag': 'markdown',
-            'content': (
-                f'**Codex**　<font color="green">{status}</font>\n'
-                '<font color="grey">'
-                + _localized(
-                    state,
-                    '会话按最近更新时间排列；点击即可读取原生记录并继续。',
-                    'Sessions are sorted by update time; open one to read and continue.',
-                )
-                + '</font>'
-            ),
-        },
-        _button_row([{
-            'label': _localized(state, '＋ 新建 Codex 会话', '＋ New Codex session'),
-            'style': 'primary',
-            'action': _action(
-                chat_id,
-                'assistant.new',
-                f'在 {project_name(state.assistant_project_cwd)} 新建 Codex 会话',
-                cwd=state.assistant_project_cwd,
-                display_name=f'{project_name(state.assistant_project_cwd)} 会话',
-                expected_project_cwd=state.assistant_project_cwd,
-                expected_threads_cursor=state.assistant_threads_cursor,
-                expected_threads_page=state.assistant_threads_page,
-            ),
-        }]),
-        {'tag': 'hr'},
-    ]
-    if ui_status == 'error':
-        elements.extend([
-            {
-                'tag': 'markdown',
-                'content': f'<font color="red">同步失败：{_error_text(state, assistant_view)}</font>',
-            },
-            _button_row([{
-                'label': _localized(state, '重试', 'Retry'),
-                'action': _action(
-                    chat_id,
-                    'assistant.retry',
-                    '重试同步 Codex 会话',
-                ),
-            }]),
-        ])
-    elif not sessions:
-        elements.append({
-            'tag': 'markdown',
-            'content': _localized(
-                state,
-                '<font color="grey">暂无可用 Codex 会话。</font>',
-                '<font color="grey">No Codex sessions are available.</font>',
-            ),
-        })
-    for thread in sessions:
-        available = bool(thread.get('available'))
-        created_by_lazymind = bool(thread.get('created_by_lazymind'))
-        controlled_by_lazymind = bool(
-            thread.get('controlled_by_lazymind')
-        )
-        thread_status = (
-            _localized(state, '飞书执行中', 'Running in Feishu')
-            if controlled_by_lazymind
-            else
-            _localized(state, '可继续', 'Ready')
-            if available
-            else _localized(state, '运行中', 'Running')
-            if created_by_lazymind
-            else _localized(state, '运行中·只读', 'Running · read-only')
-        )
-        source = _source_label(
-            'appServer' if created_by_lazymind else thread.get('source')
-        )
-        elements.extend([
-            {
-                'tag': 'markdown',
-                'content': (
-                    f'**{thread.get("name") or thread.get("preview") or "未命名 Codex 会话"}**　'
-                    f'<font color="{"blue" if available else "orange"}">'
-                    f'{thread_status}</font>\n'
-                    f'<font color="grey">{thread.get("preview") or ""}</font>\n'
-                    f'<font color="grey">{source} · '
-                    f'{thread.get("cwd") or "—"} · '
-                    f'{_time_label(thread.get("updatedAt"))}</font>'
-                ),
-            },
-            _button_row([{
-                'label': _localized(state, '进入会话', 'Open session'),
-                'action': _action(
-                    chat_id,
-                    'assistant.open',
-                    '打开 Codex 会话',
-                    thread_id=str(thread.get('id') or ''),
-                    expected_project_cwd=state.assistant_project_cwd,
-                    expected_threads_cursor=state.assistant_threads_cursor,
-                    expected_threads_page=state.assistant_threads_page,
-                ),
-            }]),
-        ])
-    if sessions or state.assistant_threads_page:
-        elements.extend([
-            {
-                'tag': 'markdown',
-                'content': (
-                    _localized(
-                        state,
-                        f'第 {state.assistant_threads_page + 1} 页 · 共 {total} 个',
-                        f'Page {state.assistant_threads_page + 1} · {total} total',
-                    )
-                    if total
-                    else _localized(
-                        state,
-                        f'第 {state.assistant_threads_page + 1} 页',
-                        f'Page {state.assistant_threads_page + 1}',
-                    )
-                ),
-            },
-            _button_row([
-                {
-                    'label': _localized(state, '较新的会话', 'Newer sessions'),
-                    'disabled': not state.assistant_threads_previous_cursors,
-                    'action': _action(
-                        chat_id,
-                        'assistant.sessions_page',
-                        '查看较新的 Codex 会话',
-                        direction='newer',
-                        expected_project_cwd=state.assistant_project_cwd,
-                        expected_threads_cursor=state.assistant_threads_cursor,
-                        expected_threads_page=state.assistant_threads_page,
-                    ),
-                },
-                {
-                    'label': _localized(state, '更早的会话', 'Older sessions'),
-                    'disabled': not state.assistant_threads_next_cursor,
-                    'action': _action(
-                        chat_id,
-                        'assistant.sessions_page',
-                        '查看更早的 Codex 会话',
-                        direction='older',
-                        expected_project_cwd=state.assistant_project_cwd,
-                        expected_threads_cursor=state.assistant_threads_cursor,
-                        expected_threads_page=state.assistant_threads_page,
-                    ),
-                },
-            ]),
-        ])
-    return elements
-
-
-def _assistant_content_pages(text: str) -> list[str]:
-    remaining = str(text or '').strip()
-    pages: list[str] = []
-    while len(remaining) > _ASSISTANT_ANSWER_PAGE_CHARS:
-        cut = remaining.rfind('\n\n', 0, _ASSISTANT_ANSWER_PAGE_CHARS + 1)
-        if cut < _ASSISTANT_ANSWER_PAGE_CHARS // 2:
-            cut = remaining.rfind('\n', 0, _ASSISTANT_ANSWER_PAGE_CHARS + 1)
-        if cut < _ASSISTANT_ANSWER_PAGE_CHARS // 2:
-            cut = _ASSISTANT_ANSWER_PAGE_CHARS
-        pages.append(remaining[:cut].strip())
-        remaining = remaining[cut:].strip()
-    if remaining:
-        pages.append(remaining)
-    return pages
-
-
-def _detail(
-    state: Any,
-    chat_id: str,
-    assistant_view: dict[str, Any],
-) -> list[dict[str, Any]]:
-    ui_status = assistant_ui_status(assistant_view)
-    detail = assistant_view if assistant_view.get('kind') == 'detail' else {}
-    thread = detail.get('thread')
-    thread = dict(thread) if isinstance(thread, dict) else {}
-    snapshot = detail.get('snapshot')
-    snapshot = dict(snapshot) if isinstance(snapshot, dict) else {}
-    turns = detail.get('turns')
-    turns = list(turns) if isinstance(turns, list) else []
-    offset = max(0, _integer(detail.get('offset')))
-    total_turns = max(0, _integer(detail.get('total_turns')))
-    run_status = detail_run_status(assistant_view)
-    dispatching = ui_status == 'dispatching'
-    cancelling = ui_status == 'cancelling'
-    running = run_status == 'running'
-    releasing = run_status == 'releasing'
-    release_failed = run_status == 'release_failed'
-    busy = dispatching or cancelling or run_status in {
-        'running',
-        'waiting_for_input',
-        'releasing',
-        'release_failed',
-    }
-    controlled = bool(thread.get('controlled_by_lazymind'))
-    readonly = (
-        releasing
-        or release_failed
-        or (not bool(thread.get('available')) and not controlled)
-    )
-    conversation_id = str(snapshot.get('conversation_id') or '')
-    status = (
-        _localized(state, '正在取消', 'Cancelling')
-        if cancelling
-        else _localized(state, '正在提交', 'Submitting')
-        if dispatching
-        else _localized(state, '运行中', 'Running')
-        if running
-        else _localized(state, '正在归还控制权', 'Releasing control')
-        if releasing
-        else _localized(state, '控制权归还失败', 'Control release failed')
-        if release_failed
-        else _localized(state, '运行中·只读', 'Running · read-only')
-        if readonly
-        else _localized(state, '已绑定，可从飞书继续', 'Bound · ready in Feishu')
-        if conversation_id
-        else _localized(state, '可继续', 'Ready')
-    )
-    transcript = '\n\n'.join(
-        (
-            f'**{_localized(state, "你", "You")}**\n\n'
-            if str(item.get('role') or '').lower() in {'user', 'you'}
-            else '**Codex**\n\n'
-        )
-        + str(item.get('text') or '')
-        for item in turns
-        if str(item.get('text') or '').strip()
-    )
-    pages = _assistant_content_pages(transcript)
-    page = min(state.assistant_answer_page, max(0, len(pages) - 1))
-    elements = [
-        _heading_action(
-            title=(
-                f'← {thread.get("name") or thread.get("preview") or "Codex 会话"}'
-            ),
-            description=(
-                f'{project_name(str(thread.get("cwd") or ""))} · '
-                f'{_source_label("appServer" if thread.get("created_by_lazymind") else thread.get("source"))} · '
-                f'{_time_label(thread.get("updatedAt"))}'
-            ),
-            button={
-                'label': _localized(state, '返回会话', 'Sessions'),
-                'disabled': busy,
-                'action': _action(
-                    chat_id,
-                    'assistant.back',
-                    '返回 Codex 会话列表',
-                    thread_id=str(thread.get('id') or ''),
-                ),
-            },
-        ),
-        {
-            'tag': 'markdown',
-            'content': (
-                f'<font color="{"orange" if readonly else "green"}">'
-                f'● {status}</font>\n'
-                f'<font color="grey">{_project_location(str(thread.get("cwd") or ""))}</font>'
-            ),
-        },
-        {'tag': 'hr'},
-    ]
-    if dispatching:
-        elements.append({
-            'tag': 'markdown',
-            'content': _localized(
-                state,
-                '<font color="blue">⏳ 正在将任务提交给 Codex…</font>',
-                '<font color="blue">⏳ Submitting the task to Codex…</font>',
-            ),
-        })
-        prompt = str(assistant_view.get('prompt') or '').strip()
-        if prompt:
-            elements.append({
-                'tag': 'markdown',
-                'content': (
-                    f'**{_localized(state, "飞书本轮", "Latest from Feishu")}**'
-                    f'\n\n{prompt}'
-                ),
-            })
-    elif cancelling:
-        elements.append({
-            'tag': 'markdown',
-            'content': _localized(
-                state,
-                '<font color="blue">⏳ 已发送中断请求，正在等待 Codex 终止并归还控制权…</font>',
-                '<font color="blue">⏳ Interrupt sent; waiting for Codex to stop and release control…</font>',
-            ),
-        })
-    elif ui_status == 'error':
-        elements.extend([
-            {
-                'tag': 'markdown',
-                'content': f'<font color="red">打开失败：{_error_text(state, assistant_view)}</font>',
-            },
-            _button_row([{
-                'label': _localized(state, '返回项目会话', 'Project sessions'),
-                'disabled': busy,
-                'action': _action(
-                    chat_id,
-                    'assistant.back',
-                    '返回项目会话',
-                    thread_id=str(thread.get('id') or ''),
-                ),
-            }]),
-        ])
-    if pages:
-        page_label = (
-            f'　<font color="grey">{page + 1} / {len(pages)}</font>'
-            if len(pages) > 1 else ''
-        )
-        elements.append({
-            'tag': 'markdown',
-            'content': f'{page_label}\n\n{pages[page]}' if page_label else pages[page],
-        })
-        if len(pages) > 1 and not busy:
-            elements.append(_button_row([
-                {
-                    'label': _localized(state, '上一段', 'Previous part'),
-                    'disabled': page == 0,
-                    'action': _action(
-                        chat_id,
-                        'assistant.answer_page',
-                        '查看 Codex 会话上一段',
-                        direction='previous',
-                        offset=offset,
-                        total_turns=total_turns,
-                        thread_id=str(thread.get('id') or ''),
-                        expected_answer_page=state.assistant_answer_page,
-                    ),
-                },
-                {
-                    'label': _localized(state, '下一段', 'Next part'),
-                    'disabled': page >= len(pages) - 1,
-                    'action': _action(
-                        chat_id,
-                        'assistant.answer_page',
-                        '查看 Codex 会话下一段',
-                        direction='next',
-                        offset=offset,
-                        total_turns=total_turns,
-                        thread_id=str(thread.get('id') or ''),
-                        expected_answer_page=state.assistant_answer_page,
-                    ),
-                },
-            ]))
-    if not pages and not running and ui_status == 'ready':
-        elements.append({
-            'tag': 'markdown',
-            'content': _localized(
-                state,
-                '<font color="grey">该会话暂无消息，可直接从底部输入框开始。</font>',
-                '<font color="grey">No messages yet. Start from the input below.</font>',
-            ),
-        })
-    if total_turns and not busy:
-        turn_page_count = max(
-            1,
-            (
-                total_turns
-                + _ASSISTANT_TURN_PAGE_SIZE
-                - 1
-            )
-            // _ASSISTANT_TURN_PAGE_SIZE,
-        )
-        elements.append(_turn_pagination(
-            state,
-            chat_id,
-            offset // _ASSISTANT_TURN_PAGE_SIZE,
-            turn_page_count,
-            {
-                'offset': offset,
-                'total_turns': total_turns,
-                'thread_id': str(thread.get('id') or ''),
-            },
-        ))
-    if dispatching:
-        footer = _localized(
-            state,
-            '<font color="grey">任务正在提交，完成前暂不接收新消息。</font>',
-            '<font color="grey">The task is being submitted; new messages are paused until it is accepted.</font>',
-        )
-    elif running and not cancelling:
-        run_id = str(snapshot.get('run_id') or '')
-        progress = _localized(
-            state,
-            '正在生成回答…',
-            'Generating an answer…',
-        )
-        running_elements = [
-            {
-                'tag': 'markdown',
-                'content': (
-                    '<font color="blue">Codex 正在处理</font>\n'
-                    f'<font color="grey">{progress}</font>'
-                ),
-            },
-            {
-                'tag': 'markdown',
-                'content': _localized(
-                    state,
-                    (
-                        '<font color="grey">LazyMind 正在控制此 Codex Thread；'
-                        'Codex Desktop 会暂时显示“已在另一个应用中打开”。'
-                        '完成或取消后将释放订阅。</font>'
-                    ),
-                    (
-                        '<font color="grey">LazyMind currently controls this '
-                        'Codex Thread. The subscription is released after '
-                        'completion or cancellation.</font>'
-                    ),
-                ),
-            },
-        ]
-        if run_id:
-            running_elements.append(_button_row([{
-                'label': _localized(state, '取消', 'Cancel'),
-                'style': 'danger',
-                'action': _action(
-                    chat_id,
-                    'operation.cancel',
-                    '取消 Codex 任务',
-                    thread_id=str(thread.get('id') or ''),
-                    operation_id=state.active_operation_id,
-                    run_id=run_id,
-                ),
-            }]))
-        else:
-            running_elements.append({
-                'tag': 'markdown',
-                'content': _localized(
-                    state,
-                    '<font color="orange">运行标识尚未同步，请刷新后再取消。</font>',
-                    '<font color="orange">The run identifier is not ready; refresh before cancelling.</font>',
-                ),
-            })
-        elements.extend(running_elements)
-        live_answer = str(snapshot.get('answer') or '')
-        if live_answer:
-            elements.insert(
-                -2,
-                {
-                    'tag': 'markdown',
-                    'content': (
-                        f'**{_localized(state, "飞书本轮", "Latest from Feishu")}**'
-                        f'\n\n{assistant_view.get("prompt") or ""}\n\n**Codex**\n\n{live_answer[:16000]}'
-                    ),
-                },
-            )
-    elif releasing or release_failed:
-        elements.extend([
-            {
-                'tag': 'markdown',
-                'content': _localized(
-                    state,
-                    (
-                        '<font color="blue">任务已结束，正在归还 Codex 控制权。</font>'
-                        if releasing
-                        else '<font color="red">控制权尚未归还，当前会话保持只读。</font>'
-                    ),
-                    (
-                        '<font color="blue">The task ended; releasing Codex control.</font>'
-                        if releasing
-                        else '<font color="red">Control is not released; this session remains read-only.</font>'
-                    ),
-                ),
-            },
-        ])
-        if release_failed:
-            elements.append(_button_row([{
-                'label': _localized(state, '重试归还控制权', 'Retry release'),
-                'style': 'primary',
-                'action': _action(
-                    chat_id,
-                    'assistant.release',
-                    '重试归还 Codex 控制权',
-                    thread_id=str(thread.get('id') or ''),
-                ),
-            }]))
-    elif snapshot.get('answer') and not turns:
-        elements.extend([
-            {'tag': 'hr'},
-            {
-                'tag': 'markdown',
-                'content': (
-                    f'**{_localized(state, "飞书本轮", "Latest from Feishu")}**'
-                    f'\n\n{assistant_view.get("prompt") or ""}\n\n**Codex**\n\n{str(snapshot.get("answer"))[:16000]}'
-                ),
-            },
-        ])
-    request = snapshot.get('pending_request')
-    request = (
-        dict(request)
-        if isinstance(request, dict) and request.get('request_id')
-        else None
-    )
-    if request:
-        elements.extend(_assistant_request_elements(
-            state,
-            chat_id,
-            request,
-            str(thread.get('id') or ''),
-            str(snapshot.get('run_id') or ''),
-        ))
-    for image in state.images:
-        image_key = str(image.get('image_key') or '')
-        if not is_feishu_image_key(image_key):
-            continue
-        element: dict[str, Any] = {'tag': 'img', 'img_key': image_key}
-        caption = str(image.get('caption') or '').strip()
-        if caption:
-            element['alt'] = {
-                'tag': 'plain_text',
-                'content': caption[:300],
-            }
-        elements.append(element)
-    if cancelling:
-        footer = _localized(
-            state,
-            '<font color="grey">只有收到 Codex 终止事件并完成控制权归还后，本卡片才会显示已取消。</font>',
-            '<font color="grey">The card shows cancelled only after Codex stops and control is released.</font>',
-        )
-    elif running:
-        footer = _localized(
-            state,
-            '<font color="grey">Codex 任务正在运行；完成或取消前不会接收新消息。</font>',
-            '<font color="grey">Codex is running; new messages are paused until it completes or is cancelled.</font>',
-        )
-    elif run_status == 'waiting_for_input':
-        footer = _localized(
-            state,
-            '<font color="grey">请使用上方确认按钮或表单，暂不接收底部输入框的新消息。</font>',
-            '<font color="grey">Use the approval controls above; new composer messages are paused.</font>',
-        )
-    elif releasing:
-        footer = _localized(
-            state,
-            '<font color="grey">任务已结束，LazyMind 正在归还会话控制权。</font>',
-            '<font color="grey">The task ended; LazyMind is releasing session control.</font>',
-        )
-    elif release_failed:
-        footer = _localized(
-            state,
-            '<font color="grey">控制权尚未归还，当前会话保持只读，请使用上方重试。</font>',
-            '<font color="grey">Control is not released. This session remains read-only; retry above.</font>',
-        )
-    else:
-        footer = _localized(
-            state,
-            (
-                '<font color="grey">从飞书底部输入框继续；'
-                '新消息、执行进度和回答都会更新在本卡片。</font>'
-                if not readonly
-                else '<font color="grey">此会话正在其他端运行，飞书暂时只读。</font>'
-            ),
-            (
-                '<font color="grey">Continue from the Feishu input; new messages, '
-                'progress, and answers update here.</font>'
-                if not readonly
-                else '<font color="grey">This session is running elsewhere and is read-only in Feishu.</font>'
-            ),
-        )
-    navigation_buttons = [{
-        'label': _localized(state, '返回项目会话', 'Project sessions'),
-        'disabled': busy,
-        'action': _action(
-            chat_id,
-            'assistant.back',
-            '返回项目会话',
-            thread_id=str(thread.get('id') or ''),
-        ),
-    }]
-    if conversation_id:
-        navigation_buttons.append({
-            'label': _localized(state, '删除会话', 'Delete session'),
-            'style': 'danger',
-            'disabled': busy,
-            'action': _action(
-                chat_id,
-                'assistant.delete',
-                '删除 Codex 会话',
-                thread_id=str(thread.get('id') or ''),
-                conversation_id=conversation_id,
-            ),
-            'confirm': {
-                'title': _localized(
-                    state,
-                    '确认删除会话？',
-                    'Delete this session?',
-                ),
-                'text': _localized(
-                    state,
-                    '该会话将从 Codex 项目列表归档，并从 LazyMind 中移除。',
-                    'This session will be archived in Codex and removed from LazyMind.',
-                ),
-            },
-        })
-    elements.extend([
-        {'tag': 'hr'},
-        {'tag': 'markdown', 'content': footer},
-        _button_row(navigation_buttons),
-    ])
-    return elements
-
-
-def _assistant_request_elements(
-    state: Any,
-    chat_id: str,
-    request: dict[str, Any],
-    thread_id: str,
-    run_id: str,
-) -> list[dict[str, Any]]:
-    request_id = str(request.get('request_id') or '')
-    kind = str(request.get('kind') or 'request')
-    summary = str(request.get('summary') or '')
-    request_titles = {
-        'command_approval': ('命令执行审批', 'Command approval'),
-        'file_change_approval': ('文件变更审批', 'File change approval'),
-        'permissions_approval': ('权限审批', 'Permission approval'),
-        'user_input': ('需要补充信息', 'Input required'),
-    }
-    chinese_title, english_title = request_titles.get(
-        kind,
-        ('需要你的操作', 'Action required'),
-    )
-    title = _localized(state, chinese_title, english_title)
-    elements: list[dict[str, Any]] = [
-        {
-            'tag': 'markdown',
-            'content': f'**{title}**',
-        }
-    ]
-    if kind not in request_titles and summary:
-        elements.append({
-            'tag': 'markdown',
-            'content': _markdown_code(summary),
-        })
-    error = str(request.get('error') or '')
-    if error:
-        elements.append({
-            'tag': 'markdown',
-            'content': f'<font color="red">{error}</font>',
-        })
-    if kind == 'user_input' and not error:
-        form = assistant_user_input_form(request, chat_id, thread_id)
-        if form is not None:
-            elements.append(form)
-        else:
-            elements.append({
-                'tag': 'markdown',
-                'content': '<font color="red">该输入请求超出飞书卡片容量，无法完整提交。</font>',
-            })
-    field_labels = {
-        'command': '命令',
-        'cwd': '工作目录',
-        'reason': '原因',
-        'additional_permissions': '附加权限',
-        'policy_amendment': '可选的持久执行规则',
-        'permissions': '申请的权限范围',
-        'environmentId': 'Environment',
-        'itemId': 'Item',
-        'item_id': '变更项 ID',
-        'file_scope': '文件变更范围',
-        'file': '变更文件',
-        'diff': 'Diff',
-    }
-    detail_lines = []
-    for detail_field in request.get('fields') or []:
-        if not isinstance(detail_field, dict):
-            continue
-        value = str(detail_field.get('value') or '')
-        if not value:
-            continue
-        field_kind = str(detail_field.get('kind') or 'detail')
-        detail_lines.append(
-            f'**{field_labels.get(field_kind, field_kind)}**\n'
-            + _markdown_code(
-                value,
-                str(detail_field.get('language') or ''),
-            )
-        )
-    if detail_lines:
-        elements.append({'tag': 'markdown', 'content': '\n\n'.join(detail_lines)})
-
-    labels = {
-        'allow_once': ('允许一次', 'Allow once'),
-        'allow_session': ('本会话允许', 'Allow session'),
-        'grant_turn': ('允许本轮', 'Allow this turn'),
-        'grant_session': ('允许会话', 'Allow session'),
-        'deny': ('拒绝', 'Deny'),
-        'policy': ('应用策略', 'Apply policy'),
-    }
-    approval_buttons = []
-    for action in request.get('actions') or []:
-        if not isinstance(action, dict):
-            continue
-        action_id = str(action.get('id') or '')
-        action_kind = str(action.get('kind') or '')
-        if (
-            not action_id
-            or action_kind == 'submit'
-            or action_kind not in labels
-        ):
-            continue
-        chinese, english = labels.get(action_kind, ('继续', 'Continue'))
-        approval_buttons.append({
-            'label': str(action.get('label') or _localized(
-                state, chinese, english,
-            ))[:200],
-            'style': (
-                'danger' if action_kind == 'deny'
-                else 'primary' if action_kind in {'allow_once', 'grant_turn'}
-                else 'default'
-            ),
-            'action': _action(
-                chat_id,
-                'assistant.respond',
-                '响应 Codex 请求',
-                request_id=request_id,
-                request_kind=kind,
-                action_id=action_id,
-                thread_id=thread_id,
-            ),
-        })
-    for index in range(0, len(approval_buttons), 3):
-        elements.append(_button_row(approval_buttons[index:index + 3]))
-    if not approval_buttons and run_id:
-        elements.append(_button_row([{
-            'label': _localized(state, '取消任务', 'Cancel task'),
-            'style': 'danger',
-            'action': _action(
-                chat_id,
-                'operation.cancel',
-                '取消无法安全响应的 Codex 请求',
-                thread_id=thread_id,
-                operation_id=state.active_operation_id,
-                run_id=run_id,
-            ),
-        }]))
-    return elements
-
-
 def _command_action(
     *,
     chat_id: str,
@@ -2900,9 +2081,56 @@ def _history_refresh_action(
     return _command_action(
         chat_id=chat_id,
         text='同步历史会话',
-        command=_history_command(),
+        command=_history_command('同步历史会话', state.assistant),
         workspace_action={
             'kind': 'history.open',
+            'view': state.view,
+            'expected_view': state.view,
+            'expected_revision': state.revision,
+            'expected_operation_id': state.active_operation_id,
+        },
+    )
+
+
+def _assistant_select_action(
+    chat_id: str,
+    state: FeishuWorkspaceState,
+    *,
+    assistant_id: str,
+    display_name: str,
+) -> dict[str, Any]:
+    return _command_action(
+        chat_id=chat_id,
+        text=f'选择 {display_name} 助理',
+        command=_history_command(
+            f'选择 {display_name} 助理',
+            assistant_id,
+        ),
+        workspace_action={
+            'kind': 'assistant.select',
+            'assistant': assistant_id,
+            'view': 'conversations',
+            'new_card': True,
+            'expected_view': state.view,
+            'expected_revision': state.revision,
+            'expected_operation_id': state.active_operation_id,
+        },
+    )
+
+
+def _conversation_page_action(
+    chat_id: str,
+    state: FeishuWorkspaceState,
+    page: int,
+) -> dict[str, Any]:
+    return _command_action(
+        chat_id=chat_id,
+        text='翻页查看会话',
+        command=_history_command('翻页查看会话', state.assistant),
+        workspace_action={
+            'kind': 'conversation.page',
+            'page': max(0, page),
+            'view': 'conversations',
             'expected_view': state.view,
             'expected_revision': state.revision,
             'expected_operation_id': state.active_operation_id,
@@ -2927,16 +2155,11 @@ def _capability_catalog_action(
     }
     if page is not None:
         workspace_action['page'] = max(0, page)
+    text = f'查看{_CAPABILITY_LABELS.get(category, "知识库")}'
     return _command_action(
         chat_id=chat_id,
-        text=f'查看{_CAPABILITY_LABELS.get(category, "知识库")}',
-        command={
-            'schema_version': '1',
-            'command': 'capability.list',
-            'parameters': {
-                'capabilities': [category],
-            },
-        },
+        text=text,
+        command=_capability_command(text, (category,)),
         workspace_action=workspace_action,
     )
 
@@ -2946,17 +2169,16 @@ def _capability_toggle_action(
     state: FeishuWorkspaceState,
     item: dict[str, Any],
     *,
+    conversation_id: str,
     enabled: bool,
 ) -> dict[str, Any]:
     return _resource_toggle_action(
         chat_id=chat_id,
-        kind='capability.toggle',
+        state=state,
         category=state.capability_category,
         item=item,
         enabled=enabled,
-        expected_revision=state.revision,
-        expected_operation_id=state.active_operation_id,
-        catalog_only=True,
+        conversation_id=conversation_id,
     )
 
 
@@ -2978,41 +2200,46 @@ def _capability_page_action(
 def _resource_toggle_action(
     *,
     chat_id: str,
-    kind: str,
+    state: FeishuWorkspaceState,
     category: str,
     item: dict[str, Any],
     enabled: bool,
-    expected_revision: int,
-    expected_operation_id: str,
-    catalog_only: bool,
+    conversation_id: str,
 ) -> dict[str, Any]:
-    return _command_action(
-        chat_id=chat_id,
-        text=f'切换{_CAPABILITY_LABELS.get(category, "资源")}',
-        command={
-            'schema_version': '1',
-            'command': 'capability.list',
-            'parameters': {
-                'capabilities': (
-                    [category]
-                    if catalog_only
-                    else list(_CAPABILITY_OVERVIEW_TYPES)
-                ),
-            },
+    item_id = str(item.get('id') or '')
+    change = {
+        'knowledge_base': {
+            'setting': 'knowledge_base',
+            'dataset_id': item_id,
+            'enabled': enabled,
         },
-        workspace_action={
-            'kind': kind,
-            'category': category,
-            'expected_revision': expected_revision,
-            'expected_operation_id': expected_operation_id,
-            'expected_view': 'capabilities',
-            'resource': {
-                'type': category,
-                'id': str(item.get('id') or ''),
-                'name': str(item.get('name') or '')[:100],
-                'enabled': enabled,
-            },
+        'skill': {
+            'setting': 'skill',
+            'skill_id': item_id,
+            'enabled': enabled,
         },
+        'workflow': {
+            'setting': 'workflow',
+            'workflow_ref': item_id,
+            'enabled': enabled,
+        },
+        'tool': {
+            'setting': 'tool',
+            'tool_name': item_id,
+            'enabled': enabled,
+        },
+    }.get(category)
+    if change is None:
+        raise ValueError(f'Unsupported capability category: {category}')
+    label = str(item.get('name') or _CAPABILITY_LABELS[category])[:100]
+    return _setting_action(
+        chat_id,
+        change,
+        f'{"启用" if enabled else "关闭"}{label}',
+        view='capabilities',
+        expected_revision=state.revision,
+        expected_operation_id=state.active_operation_id,
+        expected_conversation_id=conversation_id,
     )
 
 
@@ -3027,7 +2254,7 @@ def _new_session_action(
         return _command_action(
             chat_id=chat_id,
             text='设置新会话起点',
-            command=_history_command(),
+            command=_history_command('设置新会话起点'),
             workspace_action={
                 'kind': kind,
                 'expected_view': state.view,
@@ -3043,6 +2270,7 @@ def _new_session_action(
             'command': 'conversation.new',
             'parameters': {
                 'message': '',
+                'evidence': ['创建会话'],
             },
         },
         workspace_action={
@@ -3080,6 +2308,7 @@ def _maintenance_action(
             'command': 'conversation.new',
             'parameters': {
                 'message': '',
+                'evidence': ['确认会话维护操作'],
             },
         },
         workspace_action={
@@ -3140,6 +2369,90 @@ def _preference_action(
     )
 
 
+def _executor_setting_elements(
+    *,
+    state: FeishuWorkspaceState,
+    chat_id: str,
+    executors: list[dict[str, Any]],
+    selected: str,
+    conversation_id: str,
+    expected_revision: int,
+    expected_operation_id: str,
+    view: str = 'capabilities',
+    result_complete: bool = False,
+) -> list[dict[str, Any]]:
+    elements: list[dict[str, Any]] = [
+        {'tag': 'hr'},
+        {
+            'tag': 'markdown',
+            'content': _localized(
+                state,
+                '**执行引擎**　<font color="grey">决定当前会话下一轮由谁完成任务；各 Agent 保留各自的一对一会话映射</font>',
+                '**Execution engine**　<font color="grey">Choose who '
+                'executes the next turn; every Agent keeps its own '
+                'one-to-one conversation mapping</font>',
+            ),
+        },
+    ]
+    if not executors:
+        elements.append({
+            'tag': 'markdown',
+            'content': _localized(
+                state,
+                (
+                    '<font color="grey">暂无可用执行器。</font>'
+                    if result_complete
+                    else '<font color="grey">正在同步执行器状态…</font>'
+                ),
+                (
+                    '<font color="grey">No executors are available.</font>'
+                    if result_complete
+                    else '<font color="grey">Syncing executor status…</font>'
+                ),
+            ),
+        })
+        return elements
+    unavailable: list[str] = []
+    for start in range(0, len(executors), 2):
+        buttons: list[dict[str, Any]] = []
+        for executor in executors[start:start + 2]:
+            executor_id = str(executor.get('id') or '')[:64]
+            display_name = str(
+                executor.get('display_name') or executor_id
+            )[:100]
+            available = executor.get('available') is True
+            is_selected = executor_id == selected
+            buttons.append({
+                'label': f'{"✓" if is_selected else "＋"} {display_name}',
+                'style': 'primary' if is_selected else 'default',
+                'disabled': not available,
+                'action': _setting_action(
+                    chat_id,
+                    {
+                        'setting': 'executor',
+                        'executor_id': executor_id,
+                    },
+                    f'使用 {display_name} 执行当前会话',
+                    view=view,
+                    expected_revision=expected_revision,
+                    expected_operation_id=expected_operation_id,
+                    expected_conversation_id=conversation_id,
+                ),
+            })
+            if not available:
+                reason = str(
+                    executor.get('unavailable_reason') or '当前不可用'
+                )[:160]
+                unavailable.append(f'{display_name}：{reason}')
+        elements.append(_button_row(buttons))
+    if unavailable:
+        elements.append({
+            'tag': 'markdown',
+            'content': '<font color="grey">' + '<br>'.join(unavailable) + '</font>',
+        })
+    return elements
+
+
 def _setting_action(
     chat_id: str,
     change: dict[str, Any],
@@ -3150,16 +2463,19 @@ def _setting_action(
     expected_operation_id: str,
     expected_conversation_id: str,
 ) -> dict[str, Any]:
+    parameters: dict[str, Any] = {
+        'change': change,
+        'evidence': [text],
+    }
+    if expected_conversation_id:
+        parameters['expected_conversation_id'] = expected_conversation_id
     return _command_action(
         chat_id=chat_id,
         text=text,
         command={
             'schema_version': '1',
             'command': 'conversation.settings.update',
-            'parameters': {
-                'change': change,
-                'expected_conversation_id': expected_conversation_id,
-            },
+            'parameters': parameters,
         },
         workspace_action={
             'kind': 'setting.update',

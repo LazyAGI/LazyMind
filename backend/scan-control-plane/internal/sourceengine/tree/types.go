@@ -89,10 +89,16 @@ type TargetTreeSearchRequest struct {
 	AuthConnectionID string                  `json:"auth_connection_id,omitempty"`
 	ProviderOptions  map[string]any          `json:"provider_options,omitempty"`
 	IncludeFiles     bool                    `json:"include_files,omitempty"`
+	Direct           bool                    `json:"direct,omitempty"`
 	ListMode         string                  `json:"list_mode,omitempty"`
 	PageSize         int                     `json:"page_size,omitempty"`
 	Cursor           string                  `json:"cursor,omitempty"`
 	MaxItems         int                     `json:"max_items,omitempty"`
+}
+
+type TargetTreeRecommendationRequest struct {
+	AgentID         string         `json:"agent_id,omitempty"`
+	ProviderOptions map[string]any `json:"provider_options,omitempty"`
 }
 
 type SourceTreeChildrenRequest struct {
@@ -181,6 +187,8 @@ type SourceDocumentListResponse struct {
 type TargetTreeEngine interface {
 	ListChildren(ctx context.Context, req TargetTreeChildrenRequest) (TreeNodePage, error)
 	Search(ctx context.Context, req TargetTreeSearchRequest) (TreeNodePage, error)
+	Recommend(ctx context.Context, req TargetTreeRecommendationRequest) (TreeNodePage, error)
+	RecommendList(ctx context.Context, req TargetTreeRecommendationRequest) (TreeNodePage, error)
 }
 
 type SourceTreeQueryEngine interface {

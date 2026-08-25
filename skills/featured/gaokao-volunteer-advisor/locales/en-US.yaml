@@ -1,0 +1,134 @@
+locale: en-US
+
+classification:
+  category: Education consulting
+  tags:
+    - Gaokao
+    - University applications
+    - Major selection
+
+presentation:
+  card:
+    title: Gaokao application advisor
+    description: Plan university and major choices from scores, rank, subject selection, and personal preferences
+    output_type: report
+    output_label: Application advice
+    cover_asset: cover
+    result_summary: Turn rank analysis into an adjustable reach, match, and safety application plan
+  detail:
+    title: Gaokao application advisor
+    description: Use scores, rank, subjects, and preferences to shortlist universities and majors, plan application tiers, and assess admission risks.
+    attachment_hint: Score, rank, subject selection, and university or major preference sheet
+
+tasks:
+  - id: volunteer-plan
+    selector:
+      title: Application plan
+      description: Build reach, match, and safety choices from rank, subjects, and preferences
+      output_label: Application plan
+    launch:
+      prompt_short: Create a reach, match, and safety application plan from my gaokao score, rank, and preferences.
+      prompt: Create a gaokao application plan from my province, year, subject selection, score, rank, preferred university level, cities, and majors. Explain the reach, match, and safety tiers, the basis for each university and major choice, key risks, and how to adjust the plan. Ask for essential missing information first.
+    replay:
+      steps:
+        - title: Verify exam information
+          description: Confirm province, year, subjects, score, rank, and other basic conditions
+        - title: Organize personal preferences
+          description: Clarify cities, university level, major direction, and acceptable constraints
+        - title: Build application tiers
+          description: Use historical admission ranks to form a layered candidate list
+        - title: Deliver the application plan
+          description: Provide ordering, decision rationale, risks, and adjustment advice
+    result:
+      template: generic_report_v1
+      eyebrow: Application plan
+      title: Reach, match, and safety application recommendations
+      summary: Produce an application plan with tiers, university and major rationale, and risk warnings
+      highlights:
+        - Layered university and major candidate list
+        - Reach, match, and safety tiers with ordering
+        - Rejection, reassignment, and major restriction risks
+
+  - id: rank-analysis
+    selector:
+      title: Rank and admission analysis
+      description: Estimate admission ranges for target universities and majors from score and rank
+      output_label: Rank analysis report
+    launch:
+      prompt_short: Analyze which universities and majors are realistic for my gaokao rank.
+      prompt: Analyze my gaokao admission rank using my province, year, subject selection, score, and rank. Explain the university levels, major ranges, and reach, match, and safety boundaries worth considering. If target universities or historical data are missing, ask me for them and state the data limitations.
+    replay:
+      steps:
+        - title: Confirm the rank basis
+          description: Verify province, year, subject category, and score-to-rank table
+        - title: Align historical data
+          description: Compare recent minimum ranks and volatility for target universities and majors
+        - title: Estimate admission ranges
+          description: Define reference boundaries for reach, match, and safety choices
+        - title: Summarize the analysis
+          description: Explain opportunities, risks, and data that still need verification
+    result:
+      template: generic_report_v1
+      eyebrow: Rank analysis report
+      title: University and major admission range analysis
+      summary: Use rank to estimate admission ranges and risks for target universities and majors
+      highlights:
+        - Rank basis and historical data alignment
+        - Target university and major admission ranges
+        - Data volatility and analysis limitations
+
+  - id: major-selection
+    selector:
+      title: Major selection advice
+      description: Shortlist majors using interests, academic strengths, and development goals
+      output_label: Major selection advice
+    launch:
+      prompt_short: Recommend suitable university majors from my interests and academic strengths.
+      prompt: Help me shortlist university majors from my interests, academic strengths, personality, career direction, subject restrictions, and city preferences. Compare course content, capability requirements, employment directions, postgraduate paths, and potential risks, and suggest ways to investigate each major further.
+    replay:
+      steps:
+        - title: Identify personal characteristics
+          description: Organize interests, strongest subjects, personality, and career direction
+        - title: Check subject restrictions
+          description: Exclude majors that conflict with subject or physical requirements
+        - title: Compare major directions
+          description: Compare study content, training paths, employment, and postgraduate options
+        - title: Build the recommendation list
+          description: Provide priorities, rationale, and ways to validate the choices
+    result:
+      template: generic_report_v1
+      eyebrow: Major selection advice
+      title: University major fit and development advice
+      summary: Produce a major shortlist with fit rationale, study paths, and risk warnings
+      highlights:
+        - Interest and capability fit analysis
+        - Major study and development path comparison
+        - Subject, physical condition, and employment risks
+
+  - id: admission-rules
+    selector:
+      title: Admission rule explanation
+      description: Explain parallel applications, filing, reassignment, and rejection rules
+      output_label: Admission rule guide
+    launch:
+      prompt_short: Explain the gaokao filing and admission rules for my province.
+      prompt: Explain the gaokao application and admission rules for my province and year, focusing on batches, parallel applications, filing ratios, major reassignment, rejection risks, and special admission programs. Distinguish official rules, general experience, and information that still needs verification, and highlight restrictions that can affect the result.
+    replay:
+      steps:
+        - title: Confirm province and year
+          description: Identify the applicable policy, batches, and application model
+        - title: Break down the filing process
+          description: Explain the sequence of ranking, matching, filing, and university admission
+        - title: Analyze key risks
+          description: Identify reassignment, rejection, major restriction, and batch transition risks
+        - title: Produce a rule checklist
+          description: List rules to confirm and official verification channels before submission
+    result:
+      template: generic_report_v1
+      eyebrow: Admission rule guide
+      title: Gaokao filing and admission rule checklist
+      summary: Turn complex admission policies into actionable application rules and risk checks
+      highlights:
+        - Filing and admission process
+        - Reassignment and rejection risks
+        - Rules that require official verification

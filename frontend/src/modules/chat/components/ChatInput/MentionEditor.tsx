@@ -49,6 +49,8 @@ type Candidate = {
   name: string;
   description?: string;
   content?: string;
+  disabled?: boolean;
+  disabledReason?: string;
 };
 
 type QueryState = {
@@ -66,6 +68,9 @@ export interface MentionEditorRef {
   focus: () => void;
   getMentions: () => ChatMention[];
 }
+
+const isImeComposingEvent = (event: React.KeyboardEvent<HTMLElement>) =>
+  event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229;
 
 const groups: Array<{
   type: CandidateType;
@@ -183,7 +188,14 @@ async function loadCandidates(type: CandidateType, keyword: string): Promise<Can
   }
   if (type === "tool") {
     const response = await listToolAssetsPage({ keyword, silentError: true });
-    return response.records.map((item) => ({ id: item.id, type, name: item.name, description: item.description }));
+    return response.records.map((item) => ({
+      id: item.id,
+      type,
+      name: item.name,
+      description: item.description,
+      disabled: item.isEnabled === false,
+      disabledReason: item.isEnabled === false ? "已在设置中停用" : undefined,
+    }));
   }
   if (type === "workflow") {
     const response = await axiosInstance.get(`${BASE_URL}/api/core/chat/settings/workflows`, { params: { keyword } });
@@ -201,6 +213,7 @@ async function loadCandidates(type: CandidateType, keyword: string): Promise<Can
 }
 
 function loadAndCacheCandidates(type: CandidateType, keyword: string) {
+  if (type === "tool") return loadCandidates(type, keyword);
   const key = cacheKey(type, keyword);
   const cached = candidateCache.get(key);
   if (cached) return Promise.resolve(cached);
@@ -228,6 +241,7 @@ function loadAndCacheCandidates(type: CandidateType, keyword: string) {
 }
 
 function cachedCandidates(type: CandidateType, keyword: string) {
+  if (type === "tool") return [];
   const exact = candidateCache.get(cacheKey(type, keyword));
   if (exact) return exact;
   const base = candidateCache.get(cacheKey(type, ""));
@@ -245,7 +259,18 @@ const MentionEditor = forwardRef<MentionEditorRef, {
   onPaste: (event: React.ClipboardEvent<HTMLDivElement>) => void;
   onSend: () => void;
   onCompositionChange: (composing: boolean) => void;
-}>(({ value, disabled, placeholder, onChange, onMentionsChange, onPaste, onSend, onCompositionChange }, ref) => {
+  disabledMentionReasons?: Partial<Record<MentionType, string>>;
+}>(({
+  value,
+  disabled,
+  placeholder,
+  onChange,
+  onMentionsChange,
+  onPaste,
+  onSend,
+  onCompositionChange,
+  disabledMentionReasons,
+}, ref) => {
   const { t } = useTranslation();
   const editorRef = useRef<HTMLDivElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -330,7 +355,7 @@ const MentionEditor = forwardRef<MentionEditorRef, {
       setLoading(false);
     }
     const hasExactCache = targetGroups.every((item) =>
-      candidateCache.has(cacheKey(item.type, query.keyword)),
+      item.type !== "tool" && candidateCache.has(cacheKey(item.type, query.keyword)),
     );
     if (hasExactCache) {
       setCandidates(targetGroups.flatMap((item) => cachedCandidates(item.type, query.keyword)));
@@ -377,10 +402,23 @@ const MentionEditor = forwardRef<MentionEditorRef, {
     setExpandedTypes(new Set());
   }, []);
 
+  const getDisabledReason = useCallback((candidate: Candidate) => (
+    candidate.disabledReason || disabledMentionReasons?.[candidate.type as MentionType]
+  ), [disabledMentionReasons]);
+
+  const isCandidateDisabled = useCallback((candidate: Candidate) => (
+    candidate.disabled || Boolean(getDisabledReason(candidate))
+  ), [getDisabledReason]);
+
   const insertCandidate = useCallback((candidate: Candidate) => {
     const editor = editorRef.current;
     const currentQuery = queryRef.current;
     if (!editor || !currentQuery) return;
+    const candidateDisabledReason = getDisabledReason(candidate);
+    if (candidate.disabled || candidateDisabledReason) {
+      message.info(candidateDisabledReason || "该能力已停用");
+      return;
+    }
     if (
       candidate.type === "workflow" &&
       serializeEditor(editor).mentions.some((mention) => mention.type === "workflow")
@@ -421,12 +459,27 @@ const MentionEditor = forwardRef<MentionEditorRef, {
     setActiveIndex(-1);
     emit();
     editor.focus();
-  }, [emit, t]);
+  }, [emit, getDisabledReason, t]);
 
   const visibleCandidates = candidates.filter((candidate) => {
     if (expandedTypes.has(candidate.type)) return true;
     return candidates.filter((item) => item.type === candidate.type).indexOf(candidate) < 9;
   });
+
+  const moveActiveCandidate = (direction: 1 | -1) => {
+    if (!visibleCandidates.some((candidate) => !isCandidateDisabled(candidate))) {
+      setActiveIndex(-1);
+      return;
+    }
+    setActiveIndex((current) => {
+      let index = current < 0 ? (direction > 0 ? -1 : 0) : current;
+      for (let step = 0; step < visibleCandidates.length; step += 1) {
+        index = (index + direction + visibleCandidates.length) % visibleCandidates.length;
+        if (!isCandidateDisabled(visibleCandidates[index])) return index;
+      }
+      return -1;
+    });
+  };
 
   return (
     <div className="chat-mention-editor-wrapper">
@@ -447,10 +500,13 @@ const MentionEditor = forwardRef<MentionEditorRef, {
         onCompositionEnd={() => { onCompositionChange(false); refreshQuery(); }}
         onPaste={onPaste}
         onKeyDown={(event) => {
+          if (isImeComposingEvent(event)) {
+            return;
+          }
           if (query) {
             if (event.key === "ArrowDown" || event.key === "ArrowUp") {
               event.preventDefault();
-              if (visibleCandidates.length) setActiveIndex((current) => event.key === "ArrowDown" ? (current + 1) % visibleCandidates.length : (current <= 0 ? visibleCandidates.length - 1 : current - 1));
+              moveActiveCandidate(event.key === "ArrowDown" ? 1 : -1);
               return;
             }
             if ((event.key === "Enter" || event.key === "Tab") && activeIndex >= 0 && visibleCandidates[activeIndex]) {
@@ -494,8 +550,14 @@ const MentionEditor = forwardRef<MentionEditorRef, {
               <div className="chat-mention-options">
               {items.map((item) => {
                 const index = visibleCandidates.indexOf(item);
-                return <button type="button" role="option" title={item.description ? `${item.name}\n${item.description}` : item.name} aria-selected={activeIndex === index} className={`chat-mention-option${activeIndex === index ? " is-active" : ""}`} key={`${item.type}-${item.id}`} onMouseEnter={() => setActiveIndex(index)} onMouseDown={(event) => { event.preventDefault(); insertCandidate(item); }}>
+                const itemDisabled = isCandidateDisabled(item);
+                const itemDisabledReason = getDisabledReason(item);
+                const title = itemDisabled
+                  ? `${item.name}\n${itemDisabledReason || "该能力已停用"}`
+                  : item.description ? `${item.name}\n${item.description}` : item.name;
+                return <button type="button" role="option" title={title} aria-selected={activeIndex === index} className={`chat-mention-option${activeIndex === index ? " is-active" : ""}`} disabled={itemDisabled} key={`${item.type}-${item.id}`} onMouseEnter={() => { if (!itemDisabled) setActiveIndex(index); }} onMouseDown={(event) => { event.preventDefault(); if (!itemDisabled) insertCandidate(item); }}>
                   <span className="chat-mention-option-name">{item.name}</span>
+                  {itemDisabled ? <span className="chat-mention-option-status">{itemDisabledReason || "已停用"}</span> : null}
                   {group.type === "conversation" && item.description ? <span className="chat-mention-option-description">{item.description}</span> : null}
                 </button>;
               })}

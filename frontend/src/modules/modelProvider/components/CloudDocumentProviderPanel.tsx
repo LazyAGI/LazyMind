@@ -1,21 +1,11 @@
-import type { MouseEvent, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { Alert, Form, Input, Modal, Skeleton, Tag } from "antd";
 import {
   ArrowRightOutlined,
-  BulbOutlined,
-  CheckCircleFilled,
   FolderOpenOutlined,
 } from "@ant-design/icons";
-import { Link } from "react-router-dom";
 import { FeishuCredentialHintAlertFromForm } from "@/modules/dataSource/common/FeishuCredentialHintAlert";
 import { formatValidFeishuAccountNames } from "@/modules/dataSource/utils/feishuAccount";
-import {
-  CLOUD_CAPABILITY_I18N_KEYS,
-  CLOUD_QUICK_ACTION_PATHS,
-  cloudProviderCapabilityConfigs,
-  type CloudCapabilityId,
-  type CloudQuickActionId,
-} from "../constants/cloudProviderCapabilities";
 import { cloudAuthProviderOptions, cloudProviderOptions } from "../constants/cloudProviderOptions";
 import {
   CLOUD_DOCUMENTS_FEISHU_SETUP_PATH,
@@ -78,68 +68,6 @@ function getProviderDescription(
     return t("modelProvider.cloudDocuments.notionSetupRequiredHint");
   }
   return t("modelProvider.cloudDocuments.notionAuthPendingHint");
-}
-
-function ProviderCapabilityGuide({
-  type,
-  isEnabled,
-  t,
-}: {
-  type: "feishu" | "notion" | "local" | "googledrive";
-  isEnabled: boolean;
-  t: CloudDocumentProvidersVm["t"];
-}) {
-  const config = cloudProviderCapabilityConfigs[type];
-  const capabilityIds: CloudCapabilityId[] = isEnabled
-    ? config.enabledCapabilities
-    : config.previewCapabilities;
-  const scenarioKey = isEnabled ? config.scenarioKey : config.previewScenarioKey;
-  const quickActions: CloudQuickActionId[] = isEnabled ? config.quickActions : [];
-
-  return (
-    <div className="model-provider-cloud-doc-capability-guide">
-      <div className="model-provider-cloud-doc-capability-row">
-        <span
-          className={`model-provider-cloud-doc-capability-label${isEnabled ? " is-enabled" : ""}`}
-        >
-          {isEnabled ? <CheckCircleFilled aria-hidden="true" /> : null}
-          {isEnabled
-            ? t("modelProvider.cloudDocuments.enabledCapabilitiesLabel")
-            : type === "local"
-              ? t("modelProvider.cloudDocuments.configuredCapabilitiesLabel")
-              : t("modelProvider.cloudDocuments.previewCapabilitiesLabel")}
-        </span>
-        <div className="model-provider-cloud-doc-capability-list">
-          {capabilityIds.map((id) => (
-            <span key={id} className="model-provider-cloud-doc-capability-item">
-              {t(CLOUD_CAPABILITY_I18N_KEYS[id])}
-            </span>
-          ))}
-        </div>
-      </div>
-      <p className="model-provider-cloud-doc-scenario">
-        <BulbOutlined aria-hidden="true" />
-        <span>{t(scenarioKey)}</span>
-      </p>
-      {quickActions.length > 0 ? (
-        <div className="model-provider-cloud-doc-quick-actions">
-          {quickActions.map((action) => (
-            <Link
-              key={action}
-              className="model-provider-cloud-doc-quick-action"
-              to={CLOUD_QUICK_ACTION_PATHS[action]}
-              onClick={(event: MouseEvent<HTMLAnchorElement>) => event.stopPropagation()}
-            >
-              {action === "knowledge"
-                ? t("modelProvider.cloudDocuments.goKnowledge")
-                : t("modelProvider.cloudDocuments.goChat")}
-              <ArrowRightOutlined aria-hidden="true" />
-            </Link>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
 }
 
 function ProviderLogo({
@@ -214,19 +142,14 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
         <div className="model-provider-cloud-doc-resource-row">
           <ProviderLogo type="local" icon={<FolderOpenOutlined />} />
           <div className="model-provider-cloud-doc-resource-copy">
-            <h2>{getProviderTitle("local", t)}</h2>
+            <h3>{getProviderTitle("local", t)}</h3>
             <p>{getProviderDescription("local", t, vm)}</p>
-            <ProviderCapabilityGuide
-              type="local"
-              isEnabled={vm.localSourceCount > 0}
-              t={t}
-            />
+          </div>
+          <div className="model-provider-cloud-doc-resource-count">
+            <strong>{vm.localSourceCount}</strong>
+            {t("modelProvider.cloudDocuments.directoryUnit")}
           </div>
           <div className="model-provider-cloud-doc-resource-controls">
-            <div className="model-provider-cloud-doc-directory-count">
-              <strong>{vm.localSourceCount}</strong>
-              <span>{t("modelProvider.cloudDocuments.directoryCountUnit")}</span>
-            </div>
             <button
               type="button"
               className="model-provider-cloud-doc-resource-action"
@@ -274,19 +197,18 @@ export default function CloudDocumentProviderPanel({ vm }: { vm: CloudDocumentPr
           >
             <ProviderLogo type={item.type} icon={item.icon} logoUrl={item.logoUrl} />
             <div className="model-provider-cloud-doc-resource-copy">
-              <h2>{getProviderTitle(item.type, t)}</h2>
+              <h3>{getProviderTitle(item.type, t)}</h3>
               <p>{getProviderDescription(item.type, t, vm)}</p>
-              <ProviderCapabilityGuide type={item.type} isEnabled={isAuthValid} t={t} />
             </div>
+            <Tag
+              className="model-provider-cloud-doc-resource-status"
+              color={
+                isAuthValid ? "success" : isProviderLocked ? "default" : "processing"
+              }
+            >
+              {authStatusText}
+            </Tag>
             <div className="model-provider-cloud-doc-resource-controls">
-              <Tag
-                className="model-provider-cloud-doc-resource-status"
-                color={
-                  isAuthValid ? "success" : isProviderLocked ? "default" : "processing"
-                }
-              >
-                {authStatusText}
-              </Tag>
               <button
                 type="button"
                 className="model-provider-cloud-doc-resource-action"
@@ -350,7 +272,13 @@ export function CloudDocumentModals({ vm }: { vm: CloudDocumentProvidersVm }) {
           name="appId"
           rules={[{ required: true, message: t("modelProvider.cloudDocuments.appIdRequired") }]}
         >
-          <Input placeholder={t("modelProvider.cloudDocuments.appIdPlaceholder")} />
+          <Input
+            placeholder={t(
+              cloudSetupProvider === "notion"
+                ? "modelProvider.cloudDocuments.notionAppIdPlaceholder"
+                : "modelProvider.cloudDocuments.appIdPlaceholder",
+            )}
+          />
         </Form.Item>
         <Form.Item
           label={t("modelProvider.cloudDocuments.appSecret")}

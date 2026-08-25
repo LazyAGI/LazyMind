@@ -134,6 +134,10 @@ prune_runtime_app() {
   else
     remove_generated_path "${app_root}/algorithm/lazyllm/docs"
   fi
+  remove_generated_path "${app_root}/skills/.runtime"
+  remove_generated_path "${app_root}/skills/research"
+  remove_generated_path "${app_root}/skills/review"
+  remove_generated_path "${app_root}/skills/search"
   remove_generated_path "${app_root}/backend/core/core"
 }
 
@@ -149,6 +153,7 @@ mkdir -p \
 
 echo "==> Building Go desktop runtime binaries"
 (cd "${ROOT}/local/local-runtime-manager" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/local-runtime-manager" .)
+(cd "${ROOT}/local/lazymind-cli" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/lazymind" ./cmd/lazymind)
 (cd "${ROOT}/local/local-proxy" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/local-proxy" ./cmd/local-proxy)
 (cd "${ROOT}/backend/core" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/core" .)
 (cd "${ROOT}/backend/scan-control-plane" && "${GO_BIN}" build "${GO_BUILD_FLAGS[@]}" -o "${RUNTIME_ROOT}/bin/scan-control-plane" ./cmd/scan-control-plane)
@@ -206,6 +211,10 @@ rsync -a --delete \
   --exclude "local/runtime" \
   --exclude "desktop/build" \
   --exclude "desktop/cache" \
+  --exclude "skills/.runtime" \
+  --exclude "skills/research" \
+  --exclude "skills/review" \
+  --exclude "skills/search" \
   --exclude "node_modules" \
   --exclude "__pycache__" \
   --exclude ".pytest_cache" \
@@ -223,6 +232,22 @@ rsync -a --delete \
 
 prune_runtime_app "${RUNTIME_ROOT}/app"
 assert_desktop_runtime_app "${RUNTIME_ROOT}/app"
+
+echo "==> Materializing offline Skill packages and featured catalog"
+BUILTIN_SKILL_BUNDLE_ARGS=(
+  run ./cmd/builtin-skill-bundle
+  --sources "${ROOT}/skills/builtin-sources.yaml"
+  --lock "${ROOT}/skills/builtin-skills.lock.json"
+  --cache "${ROOT}/desktop/cache/builtin-skills"
+  --output "${RUNTIME_ROOT}/builtin-skills"
+  --featured-sources "${ROOT}/skills/featured"
+  --featured-output "${RUNTIME_ROOT}/featured-skills"
+)
+if [[ "${RELEASE_BUILD}" == "true" ]]; then
+  BUILTIN_SKILL_BUNDLE_ARGS+=(--frozen-lockfile)
+fi
+(cd "${ROOT}/backend/core" && "${GO_BIN}" "${BUILTIN_SKILL_BUNDLE_ARGS[@]}")
+
 TRUSTED_LOCAL_MODE=false
 if [[ "${LAZYMIND_TRUSTED_LOCAL_MODE:-}" == "true" ]]; then
   TRUSTED_LOCAL_MODE=true
@@ -231,6 +256,7 @@ fi
 node "${ROOT}/desktop/scripts/write-runtime-manifest.mjs" \
   "${RUNTIME_ROOT}" --platform darwin --arch arm64 \
   --trusted-local-mode "${TRUSTED_LOCAL_MODE}"
+node "${ROOT}/desktop/scripts/write-editable-ppt-dependency-config.mjs" "${RUNTIME_ROOT}"
 
 echo "==> Packaging Electron app"
 if [[ ! -f "${APP_ICON}" ]]; then

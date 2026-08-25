@@ -14,7 +14,6 @@ from channel_gateway.common.domain.channel import (
 )
 from channel_gateway.common.domain.channel import account_view
 from channel_gateway.common.errors import GatewayError
-from channel_gateway.common.ports.providers import RuntimeSupervisor
 from channel_gateway.common.ports.providers import PayloadCipher
 from channel_gateway.common.ports.providers import RuntimeLease
 from channel_gateway.wechat.domain import WeChatConfig, WeChatError
@@ -586,24 +585,3 @@ class WeChatConnectionService:
             'account': account,
             'error': error,
         }
-
-
-class WeChatRuntimeSupervisor:
-    """Owns the lifecycle of WeChat login and message receivers."""
-
-    def __init__(
-        self,
-        *,
-        connections: WeChatConnectionService,
-        accounts: RuntimeSupervisor,
-    ):
-        self._connections = connections
-        self._accounts = accounts
-
-    def start(self) -> None:
-        self._accounts.start()
-        self._connections.start()
-
-    def stop(self) -> None:
-        self._connections.stop()
-        self._accounts.stop()

@@ -11,12 +11,16 @@ from channel_gateway.common.domain.commands import (
     command_kind,
 )
 from channel_gateway.common.domain.outbound import (
+    ConversationCatalogItemPresentation,
+    ConversationCatalogPresentation,
     AskPresentation,
     AskQuestionPresentation,
+    ExecutionPresentation,
     ReplyPresentation,
     SelectionOption,
     SelectionPresentation,
     TaskPresentation,
+    is_image_content_type,
     optional_int,
 )
 from channel_gateway.common.ports.repository import NavigationRepository
@@ -36,6 +40,8 @@ def project_core_presentations(
             presentation = _ask(event.payload)
         elif event.type == 'task_created':
             presentation = _task(event.payload)
+        elif event.type == 'execution_projection':
+            presentation = _execution(event.payload)
         else:
             presentation = None
         if presentation is not None:
@@ -121,6 +127,57 @@ def _task(payload: dict) -> TaskPresentation | None:
     )
 
 
+def _execution(payload: dict) -> ExecutionPresentation | None:
+    provider = str(payload.get('provider') or '').strip().lower()
+    status = str(payload.get('status') or '').strip().lower()
+    if (
+        not provider
+        or len(provider) > 32
+        or status not in {'pending', 'running', 'completed', 'failed', 'stopped'}
+    ):
+        return None
+    invocation = payload.get('invocation')
+    invocation = invocation if isinstance(invocation, dict) else {}
+    raw_workflows = payload.get('workflows')
+    workflows: list[str] = []
+    for workflow in raw_workflows if isinstance(raw_workflows, list) else []:
+        if not isinstance(workflow, dict):
+            continue
+        workflow_id = str(workflow.get('workflow_id') or '')[:64]
+        workflow_status = str(workflow.get('status') or '')[:32]
+        if workflow_id:
+            workflows.append(
+                f'{workflow_id} · {workflow_status}'
+                if workflow_status
+                else workflow_id
+            )
+    return ExecutionPresentation(
+        kind='execution',
+        provider=provider,
+        status=status,
+        host_id=str(payload.get('host_id') or '')[:128],
+        host_online=payload.get('host_online') is True,
+        recovery_count=max(0, optional_int(payload.get('recovery_count')) or 0),
+        invocation_count=max(0, optional_int(invocation.get('total')) or 0),
+        tools=tuple(
+            str(tool)[:128]
+            for tool in (
+                invocation.get('tools')
+                if isinstance(invocation.get('tools'), list)
+                else []
+            )[:20]
+            if str(tool)
+        ),
+        workflows=tuple(workflows[:10]),
+        artifact_count=max(0, optional_int(payload.get('artifact_count')) or 0),
+        artifact_revision_count=max(
+            0,
+            optional_int(payload.get('artifact_revision_count')) or 0,
+        ),
+        error_message=str(payload.get('error_message') or '')[:500],
+    )
+
+
 def _durable_core_events(
     events: tuple[CoreEvent, ...],
 ) -> tuple[dict[str, Any], ...]:
@@ -168,7 +225,7 @@ def _durable_core_events(
             }
             if not bounded_value['paths']:
                 continue
-        elif content_type in {'image', 'file'} or content_type.startswith('image/'):
+        elif content_type == 'file' or is_image_content_type(content_type):
             source = str(value.get('url') or '')
             if (
                 not source
@@ -283,7 +340,7 @@ class ChannelReplyBuilder:
         self,
         account_id: str,
         external_address_hash: str,
-    ) -> SelectionPresentation | None:
+    ) -> ReplyPresentation | None:
         selection = self._store.get_selection_context(
             account_id,
             external_address_hash,
@@ -293,6 +350,40 @@ class ChannelReplyBuilder:
         raw_items = selection.get('items')
         if not isinstance(raw_items, list):
             return None
+        kind = str(selection.get('kind') or '')
+        if kind == 'conversation':
+            items = tuple(
+                ConversationCatalogItemPresentation(
+                    index=index,
+                    conversation_id=str(item.get('conversation_id') or ''),
+                    provider_thread_id=str(item.get('provider_thread_id') or ''),
+                    display_name=self._selection_label(item, index),
+                    update_time=str(item.get('update_time') or ''),
+                    project_key=str(item.get('project_key') or ''),
+                    project_name=str(item.get('project_name') or ''),
+                )
+                for index, item in enumerate(raw_items, start=1)
+                if isinstance(item, dict)
+                and (
+                    str(item.get('conversation_id') or '')
+                    or str(item.get('provider_thread_id') or '')
+                )
+            )
+            if not items:
+                return None
+            assistant = next(
+                (
+                    str(item.get('assistant') or 'lazymind')
+                    for item in raw_items if isinstance(item, dict)
+                ),
+                'lazymind',
+            )
+            return ConversationCatalogPresentation(
+                kind='conversation_catalog',
+                selection_id=str(selection.get('id') or ''),
+                assistant=assistant,
+                items=items,
+            )
         options = tuple(
             SelectionOption(
                 label=self._selection_label(item, index),
@@ -310,7 +401,6 @@ class ChannelReplyBuilder:
             'tool': '选择工具',
             'personalization': '选择个人习惯',
         }
-        kind = str(selection.get('kind') or '')
         return SelectionPresentation(
             kind='selection',
             selection_id=str(selection.get('id') or ''),

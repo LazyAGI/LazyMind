@@ -1,8 +1,14 @@
 package chat
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"path/filepath"
 	"testing"
+	"time"
+
+	"lazymind/core/state"
 )
 
 // --- Key generation functions ---
@@ -32,6 +38,103 @@ func TestChatStopKey(t *testing.T) {
 	if got != want {
 		t.Fatalf("got %q, want %q", got, want)
 	}
+}
+
+func TestRetryChatCancelSignalRecoversFromTransientErrors(t *testing.T) {
+	attempts := 0
+	received, err := retryChatCancelSignal(context.Background(), func(context.Context) (bool, error) {
+		attempts++
+		if attempts < 3 {
+			return false, errors.New("temporary state backend failure")
+		}
+		return true, nil
+	}, nil, time.Microsecond, time.Microsecond, 2*time.Microsecond)
+	if err != nil || !received || attempts != 3 {
+		t.Fatalf("received=%v err=%v attempts=%d, want true/nil/3", received, err, attempts)
+	}
+}
+
+func TestRetryChatCancelSignalStopsBackoffOnContextCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	received, err := retryChatCancelSignal(ctx, func(context.Context) (bool, error) {
+		return false, errors.New("temporary state backend failure")
+	}, func(error, time.Duration) {
+		cancel()
+	}, time.Hour, time.Hour, time.Hour)
+	if received || !errors.Is(err, context.Canceled) {
+		t.Fatalf("received=%v err=%v, want false/context canceled", received, err)
+	}
+}
+
+func TestRetryChatCancelSignalEmptyPollDoesNotCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	attempts := 0
+	received, err := retryChatCancelSignal(ctx, func(context.Context) (bool, error) {
+		attempts++
+		if attempts == 3 {
+			cancel()
+		}
+		return false, nil
+	}, nil, time.Microsecond, time.Microsecond, 2*time.Microsecond)
+	if received || !errors.Is(err, context.Canceled) || attempts != 3 {
+		t.Fatalf("received=%v err=%v attempts=%d, want false/context canceled/3", received, err, attempts)
+	}
+}
+
+func TestClearChatDataRemovesStaleStopSignal(t *testing.T) {
+	ctx := context.Background()
+	stateStore, err := state.NewSQLiteStore(t.TempDir() + "/state.db")
+	if err != nil {
+		t.Fatalf("new sqlite store: %v", err)
+	}
+	defer stateStore.Close()
+
+	if err := setChatCancelSignal(ctx, stateStore, "conv", "history"); err != nil {
+		t.Fatalf("set stop signal: %v", err)
+	}
+	if err := clearChatData(ctx, stateStore, "conv", "history"); err != nil {
+		t.Fatalf("clear chat data: %v", err)
+	}
+	received, err := stateStore.LPop(ctx, chatStopKey("conv", "history"))
+	if err != nil || received {
+		t.Fatalf("stale stop signal received=%v err=%v, want false/nil", received, err)
+	}
+}
+
+func TestCancelChatOnStopOnlyCancelsForReceivedSignal(t *testing.T) {
+	stateStore, err := state.NewSQLiteStore(t.TempDir() + "/state.db")
+	if err != nil {
+		t.Fatalf("new sqlite store: %v", err)
+	}
+	defer stateStore.Close()
+
+	t.Run("watcher context ends without stop", func(t *testing.T) {
+		watchCtx, stopWatcher := context.WithCancel(context.Background())
+		chatCtx, cancelChat := context.WithCancel(context.Background())
+		defer cancelChat()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			cancelChatOnStop(watchCtx, stateStore, "conv", "empty", cancelChat)
+		}()
+		stopWatcher()
+		<-done
+		if chatCtx.Err() != nil {
+			t.Fatalf("chat context error=%v, want nil", chatCtx.Err())
+		}
+	})
+
+	t.Run("received stop cancels chat", func(t *testing.T) {
+		if err := setChatCancelSignal(context.Background(), stateStore, "conv", "signal"); err != nil {
+			t.Fatalf("set stop signal: %v", err)
+		}
+		chatCtx, cancelChat := context.WithCancel(context.Background())
+		defer cancelChat()
+		cancelChatOnStop(context.Background(), stateStore, "conv", "signal", cancelChat)
+		if !errors.Is(chatCtx.Err(), context.Canceled) {
+			t.Fatalf("chat context error=%v, want context canceled", chatCtx.Err())
+		}
+	})
 }
 
 // TestChatMultiKey generates the correct Redis key format.
@@ -141,9 +244,10 @@ func TestChatChunkResponseRoundTrip(t *testing.T) {
 		ConversationID:   "conv-1",
 		Seq:              1,
 		Delta:            "hello",
-		FinishReason:     "stop",
+		DeltaMode:        ChatDeltaModeReplace,
 		HistoryID:        "hist-1",
 		ReasoningContent: "thinking...",
+		RuntimeEvent:     completedRunEvent("run-1", true),
 	}
 	bs, err := json.Marshal(orig)
 	if err != nil {
@@ -153,7 +257,7 @@ func TestChatChunkResponseRoundTrip(t *testing.T) {
 	if err := json.Unmarshal(bs, &restored); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if restored.ConversationID != orig.ConversationID || restored.Delta != orig.Delta {
+	if restored.ConversationID != orig.ConversationID || restored.Delta != orig.Delta || restored.DeltaMode != orig.DeltaMode {
 		t.Fatalf("roundtrip mismatch")
 	}
 }
@@ -197,5 +301,49 @@ func TestAppendConvEvent_EmptyConversationID(t *testing.T) {
 func TestAppendConvEvent_NilEvent(t *testing.T) {
 	if err := AppendConvEvent(t.Context(), nil, "conv-1", nil); err != nil {
 		t.Fatalf("expected nil for nil event, got %v", err)
+	}
+}
+
+func TestAppendConvEventPreservesCursorAfterFormerListLimit(t *testing.T) {
+	stateStore, err := state.NewSQLiteStore(filepath.Join(t.TempDir(), "state.db"))
+	if err != nil {
+		t.Fatalf("new state store: %v", err)
+	}
+	defer stateStore.Close()
+
+	const conversationID = "conv-cursor"
+	for i := 0; i < 1002; i++ {
+		if err := AppendConvEvent(t.Context(), stateStore, conversationID, &ConvEvent{
+			Type: "task_created",
+			Payload: map[string]any{
+				"sequence": i,
+			},
+		}); err != nil {
+			t.Fatalf("append event %d: %v", i, err)
+		}
+	}
+
+	events, err := stateStore.LRange(t.Context(), convEventsKey(conversationID), 0, -1)
+	if err != nil {
+		t.Fatalf("list events: %v", err)
+	}
+	if len(events) != 1002 {
+		t.Fatalf("event count=%d want=1002", len(events))
+	}
+
+	ctx, cancel := context.WithCancel(t.Context())
+	seen := []int64{}
+	err = WatchConvEvents(ctx, stateStore, conversationID, 999, func(index int64, _ *ConvEvent) error {
+		seen = append(seen, index)
+		if len(seen) == 2 {
+			cancel()
+		}
+		return nil
+	})
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("watch error=%v want context canceled", err)
+	}
+	if len(seen) != 2 || seen[0] != 1000 || seen[1] != 1001 {
+		t.Fatalf("seen indexes=%v want [1000 1001]", seen)
 	}
 }

@@ -28,6 +28,7 @@ import (
 	"lazymind/core/common/readonlyorm"
 	applog "lazymind/core/log"
 	"lazymind/core/modelconfig"
+	"lazymind/core/settings"
 	"lazymind/core/store"
 
 	"github.com/gorilla/mux"
@@ -1406,13 +1407,31 @@ func startTasksInternal(r *http.Request, datasetID string, taskIDs []string) ([]
 		}
 	}
 
-	if len(parseTaskIDs) > 0 {
-		items, _ := startParseTasksInternal(r, datasetID, parseTaskIDs)
-		mergeTaskResults(items)
-	}
-	if len(reparseTaskIDs) > 0 {
-		items, _ := startReparseTasksInternal(r, datasetID, reparseTaskIDs)
-		mergeTaskResults(items)
+	parsingTaskIDs := append(append([]string{}, parseTaskIDs...), reparseTaskIDs...)
+	if len(parsingTaskIDs) > 0 {
+		controls, err := settings.LoadFeatureControls(r.Context(), store.DB(), common.UserID(r))
+		if err != nil {
+			return nil, fmt.Errorf("query document parsing settings failed: %w", err)
+		}
+		if !controls.DocumentParsingEnabled {
+			for _, taskID := range parsingTaskIDs {
+				resultsByTaskID[taskID] = StartTaskResult{
+					TaskID:       taskID,
+					Status:       "FAILED",
+					SubmitStatus: "REJECTED",
+					Message:      "document parsing is paused in settings",
+				}
+			}
+		} else {
+			if len(parseTaskIDs) > 0 {
+				items, _ := startParseTasksInternal(r, datasetID, parseTaskIDs)
+				mergeTaskResults(items)
+			}
+			if len(reparseTaskIDs) > 0 {
+				items, _ := startReparseTasksInternal(r, datasetID, reparseTaskIDs)
+				mergeTaskResults(items)
+			}
+		}
 	}
 	if len(copyTaskIDs) > 0 {
 		items, _ := startCopyTasksInternal(r, datasetID, copyTaskIDs)
@@ -1748,7 +1767,7 @@ func buildTaskResponse(r *http.Request, row orm.Task) TaskResponse {
 		resp.TaskInfo.FailedDocumentSize = resp.TaskInfo.TotalDocumentSize
 		resp.TaskInfo.FailedDocumentCount = resp.TaskInfo.TotalDocumentCount
 	}
-	resp.TaskState = normalizeTaskStateForUI(resp.TaskState)
+	resp.TaskState = NormalizeTaskStateForUI(resp.TaskState)
 	if resp.TaskState == "FAILED" {
 		if resp.ErrMsg == "" {
 			resp.ErrMsg = resp.ConvertError
@@ -1903,9 +1922,10 @@ func isSuccessState(state string) bool {
 	return s == string(TaskStateSucceeded) || s == "SUCCEEDED" || s == "SUCCESS"
 }
 
-// normalizeTaskStateForUI maps core/lazyllm task states to the values expected by the
-// knowledge import-task panel (WAITING / WORKING / SUCCESS / FAILED / CANCELED).
-func normalizeTaskStateForUI(state string) string {
+// NormalizeTaskStateForUI maps core/lazyllm task states to the values expected
+// by the knowledge import-task panel and progress aggregation
+// (WAITING / WORKING / SUCCESS / FAILED / CANCELED).
+func NormalizeTaskStateForUI(state string) string {
 	s := strings.ToUpper(strings.TrimSpace(state))
 	switch s {
 	case string(TaskStateCreating), string(TaskStateUploading), string(TaskStateUploaded):

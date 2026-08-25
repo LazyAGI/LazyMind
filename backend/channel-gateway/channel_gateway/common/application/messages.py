@@ -15,7 +15,6 @@ from channel_gateway.common.domain.commands import (
     ChatCommand,
     ConversationNewCommand,
     ConversationSwitchCommand,
-    WorkflowInvokeCommand,
 )
 
 
@@ -37,17 +36,22 @@ class ChannelMessageService:
     def process(
         self,
         *,
-        provider: str,
+        provider: str = '',
         account_id: str,
         external_address_hash: str,
         owner_user_id: str,
         text: str,
         request_id: str,
-        surface: str = 'direct',
         provider_context: dict[str, Any] | None = None,
         on_stream: Callable[[CoreStreamUpdate], None] | None = None,
     ) -> ChannelReply:
         context = dict(provider_context or {})
+        channel_error = str(context.get('channel_error') or '').strip()
+        if channel_error:
+            return ChannelReply(
+                intent_kind=ActionKind.CHAT,
+                text=channel_error,
+            )
         routed = self._router.route(
             provider=provider,
             account_id=account_id,
@@ -55,7 +59,6 @@ class ChannelMessageService:
             owner_user_id=owner_user_id,
             text=text,
             request_id=request_id,
-            surface=surface,
             provider_context=context,
         )
         if isinstance(routed, str):
@@ -64,7 +67,7 @@ class ChannelMessageService:
                 text=routed,
             )
         _logger.info(
-            'channel_intent_routed source=%s action=%s request_id=%s',
+            'channel_command_routed source=%s action=%s request_id=%s',
             routed.source,
             routed.command.command.value,
             request_id,
@@ -76,6 +79,7 @@ class ChannelMessageService:
             on_stream(CoreStreamUpdate())
 
         return self._executor.execute(
+            provider=provider,
             command=routed.command,
             account_id=account_id,
             external_address_hash=external_address_hash,
@@ -83,14 +87,13 @@ class ChannelMessageService:
             request_id=request_id,
             grounding_messages=routed.grounding_messages,
             catalog=routed.catalog,
-            provider=provider,
             provider_context=context,
             on_stream=on_stream,
         )
 
 
 def _starts_core_stream(command) -> bool:
-    if isinstance(command, (ChatCommand, WorkflowInvokeCommand)):
+    if isinstance(command, ChatCommand):
         return True
     if isinstance(
         command,

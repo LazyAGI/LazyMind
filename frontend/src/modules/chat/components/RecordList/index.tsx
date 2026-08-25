@@ -1,9 +1,11 @@
 import {
-  CloseOutlined,
   CloudDownloadOutlined,
   DeleteOutlined,
   DownOutlined,
   FilterOutlined,
+  FolderOutlined,
+  FilePdfOutlined,
+  MoreOutlined,
 } from "@ant-design/icons";
 import classnames from "classnames";
 import {
@@ -35,6 +37,7 @@ import {
 } from "react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { useNavigate } from "react-router-dom";
 import InfiniteScroll from "react-infinite-scroll-component";
 import { axiosInstance, BASE_URL } from "@/components/request";
 import { useChatThinkStore } from "@/modules/chat/store/chatThink";
@@ -55,6 +58,8 @@ import {
 } from "@/modules/chat/constants/chat";
 import "./index.scss";
 import { downloadStream } from "@/modules/chat/utils/download";
+import ArchiveConversationModal from "../ArchiveConversationModal";
+import { unarchiveConversation } from "@/modules/settings/recoveryApi";
 
 const EXPORT_FILE_TYPE_XLSX = "EXPORT_FILE_TYPE_XLSX";
 const SIDEBAR_SEARCH_DEBOUNCE_MS = 300;
@@ -123,6 +128,7 @@ function getConversationGroup(updateTime?: string): ConversationGroup {
 const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
   (props, ref) => {
     const { t } = useTranslation();
+    const navigate = useNavigate();
     const {
       currentSessionId,
       onSelected,
@@ -140,6 +146,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     const [checkedList, setCheckedList] = useState<string[]>([]);
     const [showBatchExport, setShowBatchExport] = useState(false);
     const [isHistoryLoading, setIsHistoryLoading] = useState(true);
+    const [archiveItem, setArchiveItem] = useState<Conversation | null>(null);
     // convTypeFilter: which conversation types to show. Default = normal only (no task convs).
     // Values: 'normal' = non-task, 'task' = task. Multiple values allowed.
     const [convTypeFilter, setConvTypeFilter] = useState<string[]>(() => {
@@ -339,7 +346,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       }
       deleteHistoryInFlightRef.current = true;
       deleteHistoryLastInvokeRef.current = now;
-      ChatServiceApi()
+      return ChatServiceApi()
         .conversationServiceDeleteConversation({
           conversation: data.conversation_id || "",
         })
@@ -347,11 +354,47 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           message.success(t("chat.deleteConversationSuccess"));
           getHistory({ isFirst: true });
           document.getElementById(scrollableTargetId)?.scrollTo({ top: 0 });
+          onRemove(data);
         })
         .finally(() => {
           deleteHistoryInFlightRef.current = false;
         });
-      onRemove(data);
+    }
+
+    function confirmDeleteHistory(data: Conversation) {
+      Modal.confirm({
+        title: t("settingsPage.recovery.moveToTrashTitle", { name: data.display_name }),
+        content: t("settingsPage.recovery.moveToTrashDescription"),
+        okText: t("settingsPage.recovery.moveToTrash"),
+        cancelText: t("common.cancel"),
+        okButtonProps: { danger: true },
+        onOk: () => deleteHistory(data),
+      });
+    }
+
+    function showArchivedFeedback(data: Conversation) {
+      const conversationId = data.conversation_id || "";
+      const messageKey = `archived:${conversationId}`;
+      message.open({
+        key: messageKey,
+        type: "success",
+        duration: 8,
+        content: (
+          <span className="archive-feedback">
+            {t("settingsPage.recovery.archivedSuccess")}
+            <Button type="link" size="small" onClick={() => {
+              void unarchiveConversation(conversationId)
+                .then(() => {
+                  message.destroy(messageKey);
+                  message.success(t("settingsPage.recovery.unarchived"));
+                  getHistory({ isFirst: true });
+                })
+                .catch(() => message.error(t("settingsPage.recovery.operationFailed")));
+            }}>{t("settingsPage.recovery.undo")}</Button>
+            <Button type="link" size="small" onClick={() => navigate("/settings?section=recovery")}>{t("settingsPage.recovery.viewArchived")}</Button>
+          </span>
+        ),
+      });
     }
 
     function batchDeleteHistory() {
@@ -468,6 +511,10 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
 
     function renderItemText(params: { item: Conversation; selected: boolean }) {
       const { item, selected } = params;
+      const source = item as Conversation & {
+        source_type?: string;
+        source_display_name?: string;
+      };
       return (
         <div
           className={classnames("record", { selected })}
@@ -488,21 +535,35 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           <Tooltip title={item.display_name}>
             <span className="title">{item.display_name}</span>
           </Tooltip>
+          {source.source_type === "pdf_preview" ? (
+            <Tooltip title={source.source_display_name || t("knowledge.pdfChatSavedSource")}>
+              <FilePdfOutlined className="record-source-icon" aria-label={t("knowledge.pdfChatSavedSource")} />
+            </Tooltip>
+          ) : null}
           <span className="update-time">
             {dayjs(item.update_time).format("MM/DD")}
           </span>
-          {!showBatchExport && (
-            <>
-              <CloseOutlined
+          {!showBatchExport ? (
+            <Dropdown
+              trigger={["click"]}
+              menu={{ items: [
+                { key: "archive", icon: <FolderOutlined />, label: t("settingsPage.recovery.archiveAction"), onClick: () => setArchiveItem(item) },
+                { key: "trash", icon: <DeleteOutlined />, danger: true, label: t("settingsPage.recovery.moveToTrash"), onClick: () => confirmDeleteHistory(item) },
+              ] }}
+            >
+              <Button
+                type="text"
+                size="small"
                 className="close"
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  deleteHistory(item);
+                icon={<MoreOutlined />}
+                aria-label={t("settingsPage.recovery.moreActions")}
+                onClick={(event: React.MouseEvent<HTMLElement>) => {
+                  event.preventDefault();
+                  event.stopPropagation();
                 }}
               />
-            </>
-          )}
+            </Dropdown>
+          ) : null}
         </div>
       );
     }
@@ -563,6 +624,20 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
 
     return (
       <div className={classnames("record-container", { compact })}>
+        <ArchiveConversationModal
+          open={Boolean(archiveItem)}
+          conversationId={archiveItem?.conversation_id}
+          title={archiveItem?.display_name}
+          onCancel={() => setArchiveItem(null)}
+          onArchived={() => {
+            const archived = archiveItem;
+            setArchiveItem(null);
+            if (!archived) return;
+            getHistory({ isFirst: true });
+            onRemove(archived);
+            showArchivedFeedback(archived);
+          }}
+        />
         {!hideHeader && (
           <div className="record-header">
             {(!compact || showBatchActions) && (

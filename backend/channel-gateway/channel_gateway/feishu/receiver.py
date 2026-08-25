@@ -1,4 +1,5 @@
 import multiprocessing
+import logging
 import queue
 import threading
 import time
@@ -18,6 +19,46 @@ from channel_gateway.feishu.sdk import LarkChannelClient
 
 _ACK_TIMEOUT_SECONDS = 10
 _ACTION_ACK_TIMEOUT_SECONDS = 2.0
+_logger = logging.getLogger(__name__)
+
+
+def _dispatch_parent_event(
+    kind: str,
+    payload: dict,
+    acknowledgements,
+    *,
+    on_message: Callable[[FeishuInboundMessage], None],
+    on_action: Callable[[FeishuInboundAction], dict | None],
+    on_menu: Callable[[FeishuInboundMenu], None],
+) -> None:
+    """Dispatch one SDK event without turning event failure into WS failure."""
+    acknowledgement_id = str(payload['acknowledgement_id'])
+    response = None
+    try:
+        if kind == 'message':
+            on_message(FeishuInboundMessage(**payload['message']))
+        elif kind == 'action':
+            response = on_action(FeishuInboundAction(**payload['action']))
+        elif kind == 'menu':
+            on_menu(FeishuInboundMenu(**payload['menu']))
+        else:
+            raise ValueError(f'Unsupported Feishu event kind: {kind}')
+    except Exception as exc:
+        acknowledgements.put(
+            (
+                acknowledgement_id,
+                False,
+                exc.__class__.__name__,
+                None,
+            )
+        )
+        _logger.warning(
+            'feishu_event_rejected kind=%s error=%s',
+            kind,
+            exc.__class__.__name__,
+        )
+        return
+    acknowledgements.put((acknowledgement_id, True, '', response))
 
 
 def _await_persistence_ack(
@@ -202,77 +243,15 @@ class ProcessLarkReceiverClient:
                 if not self._process.is_alive():
                     break
                 continue
-            if kind == 'message':
-                acknowledgement_id = str(
-                    payload['acknowledgement_id']
+            if kind in {'message', 'action', 'menu'}:
+                _dispatch_parent_event(
+                    kind,
+                    payload,
+                    self._acknowledgements,
+                    on_message=self._on_message,
+                    on_action=self._on_action,
+                    on_menu=self._on_menu,
                 )
-                try:
-                    self._on_message(
-                        FeishuInboundMessage(
-                            **payload['message']
-                        )
-                    )
-                except Exception as exc:
-                    self._acknowledgements.put(
-                        (
-                            acknowledgement_id,
-                            False,
-                            exc.__class__.__name__,
-                            None,
-                        )
-                    )
-                    terminal_error = str(exc)
-                    break
-                else:
-                    self._acknowledgements.put(
-                        (acknowledgement_id, True, '', None)
-                    )
-            elif kind == 'action':
-                acknowledgement_id = str(
-                    payload['acknowledgement_id']
-                )
-                try:
-                    response = self._on_action(
-                        FeishuInboundAction(
-                            **payload['action']
-                        )
-                    )
-                except Exception as exc:
-                    self._acknowledgements.put(
-                        (
-                            acknowledgement_id,
-                            False,
-                            exc.__class__.__name__,
-                            None,
-                        )
-                    )
-                    terminal_error = str(exc)
-                    break
-                else:
-                    self._acknowledgements.put(
-                        (acknowledgement_id, True, '', response)
-                    )
-            elif kind == 'menu':
-                acknowledgement_id = str(
-                    payload['acknowledgement_id']
-                )
-                try:
-                    self._on_menu(FeishuInboundMenu(**payload['menu']))
-                except Exception as exc:
-                    self._acknowledgements.put(
-                        (
-                            acknowledgement_id,
-                            False,
-                            exc.__class__.__name__,
-                            None,
-                        )
-                    )
-                    terminal_error = str(exc)
-                    break
-                else:
-                    self._acknowledgements.put(
-                        (acknowledgement_id, True, '', None)
-                    )
             elif kind == 'ready':
                 with self._lock:
                     self._ready = True

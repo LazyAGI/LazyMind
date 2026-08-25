@@ -34,7 +34,7 @@ embed_image:
   - source: openai
     type: cross_modal_embed
     name: siglip
-    url: http://10.119.21.178:34335/embeddings
+    url: http://10.119.16.203:8004/embeddings
     skip_auth: true
 
 # Vision-language model for image-aware query rewriting and vision_extractor tool.
@@ -42,7 +42,7 @@ vlm:
   - source: openai
     type: vlm
     name: lazyllm
-    url: http://10.119.16.10:36324/v1/
+    url:  http://10.119.21.233:25120/v1/
     skip_auth: true
 
 speech_to_text:

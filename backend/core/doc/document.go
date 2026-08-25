@@ -314,6 +314,23 @@ func StaticFileURLFromAnyStoragePath(pathOrURL string) string {
 	return staticFileURLFromFullPath(raw)
 }
 
+// StaticFileReferenceFromAnyStoragePath returns a stable unsigned reference.
+// Browser clients must exchange it through static-files:sign before reading.
+func StaticFileReferenceFromAnyStoragePath(pathOrURL string) string {
+	raw := strings.TrimSpace(pathOrURL)
+	if raw == "" {
+		return ""
+	}
+	rel := relFromStaticFilesURL(raw)
+	if rel == "" {
+		rel = fileRelativePath(raw)
+	}
+	if rel == "" || rel == "." || strings.HasPrefix(rel, "../") {
+		return ""
+	}
+	return "/static-files/" + encodeStaticFilePath(filepath.ToSlash(rel))
+}
+
 func encodeStaticFilePath(rel string) string {
 	parts := strings.Split(rel, "/")
 	for i, part := range parts {
@@ -1328,6 +1345,70 @@ func BatchDeleteDocument(w http.ResponseWriter, r *http.Request) {
 	}
 	recalcAffectedFolderStats(r.Context(), datasetID, pids...)
 	w.WriteHeader(http.StatusOK)
+}
+
+// ClearMarketDatasetDocuments removes every non-deleted document of a dataset:
+// external delete on the parsing service, uploaded-file cleanup, soft delete of
+// the document/task rows and folder stats recalculation. It is the "clear old
+// documents" step of the knowledge market update pipeline (strategy A): an
+// official install does not allow user-managed documents, so the whole dataset
+// is the safe scope and retries start from a clean state. Returns the number of
+// removed documents.
+func ClearMarketDatasetDocuments(ctx context.Context, ds *orm.Dataset) (int, error) {
+	if ds == nil {
+		return 0, fmt.Errorf("dataset is required")
+	}
+	db := store.DB()
+	if db == nil {
+		return 0, fmt.Errorf("store not initialized")
+	}
+	var roots []orm.Document
+	if err := db.WithContext(ctx).
+		Where("dataset_id = ? AND deleted_at IS NULL", ds.ID).
+		Find(&roots).Error; err != nil {
+		return 0, fmt.Errorf("query documents failed: %w", err)
+	}
+	rowsToDelete, err := expandDocumentsForDelete(ctx, ds.ID, roots)
+	if err != nil {
+		return 0, err
+	}
+	if len(rowsToDelete) == 0 {
+		return 0, nil
+	}
+	// External delete via the parsing service; a synthetic request carries the
+	// caller's ctx (deleteExternalDocs only uses requestContext(r)).
+	req := (&http.Request{}).WithContext(ctx)
+	if err := deleteExternalDocs(req, ds.ID, rowsToDelete); err != nil {
+		return 0, fmt.Errorf("external delete failed: %w", err)
+	}
+	if err := deleteUploadedFiles(ctx, ds.TenantID, ds.ID, rowsToDelete); err != nil {
+		log.Logger.Error().Err(err).Str("dataset_id", ds.ID).Msg("clear market dataset: uploaded file cleanup failed")
+	}
+	now := time.Now().UTC()
+	docIDs := documentIDsFromRows(rowsToDelete)
+	if err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Model(&orm.Document{}).
+			Where("dataset_id = ? AND id IN ? AND deleted_at IS NULL", ds.ID, docIDs).
+			Updates(map[string]any{"deleted_at": now, "updated_at": now}).Error; err != nil {
+			return err
+		}
+		if err := tx.Model(&orm.Task{}).
+			Where("doc_id IN ? AND dataset_id = ? AND deleted_at IS NULL", docIDs, ds.ID).
+			Updates(map[string]any{"deleted_at": now, "updated_at": now}).Error; err != nil {
+			return err
+		}
+		return nil
+	}); err != nil {
+		return 0, fmt.Errorf("soft delete documents failed: %w", err)
+	}
+	pids := make([]string, 0, len(rowsToDelete))
+	for _, row := range rowsToDelete {
+		if pid := strings.TrimSpace(row.PID); pid != "" {
+			pids = append(pids, pid)
+		}
+	}
+	recalcAffectedFolderStats(ctx, ds.ID, pids...)
+	return len(rowsToDelete), nil
 }
 
 func expandDocumentsForDelete(ctx context.Context, datasetID string, roots []orm.Document) ([]orm.Document, error) {

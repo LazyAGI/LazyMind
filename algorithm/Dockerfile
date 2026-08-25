@@ -23,6 +23,9 @@ ENV PIP_INDEX_URL=${PIP_INDEX_URL} \
     PIP_RETRIES=${PIP_RETRIES} \
     PIP_DISABLE_PIP_VERSION_CHECK=1
 
+# Keep this layer limited to packages required to build/install LazyLLM.
+# Do not add optional runtime tools, fonts, or other extensions here: changing
+# this layer invalidates the expensive LazyLLM dependency cache below.
 RUN set -eu; \
     for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources; do \
       [ -f "$f" ] || continue; \
@@ -32,9 +35,7 @@ RUN set -eu; \
         "$f"; \
     done; \
     apt-get update && apt-get install -y --no-install-recommends \
-        ca-certificates curl git ffmpeg build-essential gcc \
-        libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 libxcb1 \
-        python3-dev ripgrep \
+        ca-certificates git build-essential gcc python3-dev \
     && update-ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
@@ -43,6 +44,13 @@ RUN set -eu; \
 RUN pip install --no-cache-dir "lazyllm==${LAZYLLM_VERSION}" \
     && python -c "import importlib.metadata as m; assert m.version('lazyllm') == '${LAZYLLM_VERSION}'" \
     && lazyllm install rag
+
+# Optional runtime tools and extensions belong after LazyLLM so changes here do
+# not invalidate its large dependency layer.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        curl ffmpeg fonts-noto-cjk fonts-wqy-zenhei \
+        libgl1 libglib2.0-0 libsm6 libxext6 libxrender1 libxcb1 ripgrep \
+    && rm -rf /var/lib/apt/lists/*
 
 # Copy only the dependency manifest so this layer is invalidated only when
 # requirements change, not when LazyMind source code changes.

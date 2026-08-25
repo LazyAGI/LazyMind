@@ -7,6 +7,7 @@ import (
 
 	"gorm.io/gorm"
 
+	skilldistribution "lazymind/core/skillv2/distribution"
 	skillmetadata "lazymind/core/skillv2/metadata"
 	skillreview "lazymind/core/skillv2/review"
 	skillsearch "lazymind/core/skillv2/search"
@@ -173,14 +174,20 @@ func (s versionStore) AfterCommit(ctx context.Context, tx *gorm.DB, revision ver
 	if err := skillmetadata.SyncPublished(ctx, tx, revision.ResourceID, entries, revision.CreatedAt); err != nil {
 		return err
 	}
-	return skillsearch.RebuildSkillTx(ctx, tx, revision.ResourceID, revision.CreatedAt)
+	if err := skillsearch.RebuildSkillTx(ctx, tx, revision.ResourceID, revision.CreatedAt); err != nil {
+		return err
+	}
+	return skilldistribution.PromotePendingTx(ctx, tx, revision.ResourceID, revision.ID, revision.CreatedAt)
 }
 
 func (s versionStore) AfterRollback(ctx context.Context, tx *gorm.DB, skillID string, revisionID string, entries map[string]versionfs.Entry, now time.Time) error {
 	if err := skillmetadata.SyncPublished(ctx, tx, skillID, entries, now); err != nil {
 		return err
 	}
-	return skillsearch.RebuildSkillTx(ctx, tx, skillID, now)
+	if err := skillsearch.RebuildSkillTx(ctx, tx, skillID, now); err != nil {
+		return err
+	}
+	return skilldistribution.RebindForRevisionTx(ctx, tx, skillID, revisionID, now)
 }
 
 func (s versionStore) ListBlobHashes(ctx context.Context, tx *gorm.DB) ([]string, error) {

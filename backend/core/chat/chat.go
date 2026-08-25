@@ -1,4 +1,4 @@
-// chat text /api/chat text /api/chat_stream text，
+// Package chat adapts Core conversation requests to the LazyMind chat stream.
 package chat
 
 import (
@@ -19,7 +19,6 @@ import (
 )
 
 const (
-	chatPath       = "/api/chat"
 	streamChatPath = "/api/chat/stream"
 
 	defaultDialTimeout = 10 * time.Second
@@ -45,10 +44,11 @@ type ChatMessage struct {
 }
 
 type DatasetFilters struct {
-	Subject    []string `json:"subject,omitempty"`
-	DatasetIDs []string `json:"kb_id,omitempty"`
-	Tags       []string `json:"tags,omitempty"`
-	Creators   []string `json:"creator,omitempty"`
+	Subject     []string `json:"subject,omitempty"`
+	DatasetIDs  []string `json:"kb_id,omitempty"`
+	DocumentIDs []string `json:"doc_id,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	Creators    []string `json:"creator,omitempty"`
 }
 
 type LazyChatRequest struct {
@@ -79,6 +79,7 @@ type ChatMessageOptions struct {
 
 type ChatConversationOptions struct {
 	SessionID      string         `json:"session_id"`
+	RunID          string         `json:"run_id"`
 	ConversationID string         `json:"conversation_id,omitempty"`
 	UserID         string         `json:"user_id"`
 	Mode           string         `json:"mode,omitempty"`
@@ -143,6 +144,7 @@ type LazyChatData struct {
 	WorkflowPreflightUpdated *WorkflowPreflightUpdatedEvent `json:"workflow_preflight_updated,omitempty"`
 	Heartbeat                bool                           `json:"heartbeat,omitempty"`
 	ToolCallTurns            int64                          `json:"tool_call_turns"`
+	RuntimeEvent             *ChatRuntimeEvent              `json:"runtime_event,omitempty"`
 }
 
 // TaskCreatedEvent is emitted by create_subagent (via translator) on the main SSE.
@@ -220,7 +222,7 @@ type WorkflowPreflightUpdatedEvent struct {
 	Snapshot map[string]any `json:"snapshot,omitempty"`
 }
 
-// LazyChatResponse text /api/chat textResponse。
+// LazyChatResponse is one line emitted by the algorithm chat stream.
 type LazyChatResponse struct {
 	Code int          `json:"code"`
 	Msg  string       `json:"msg"`
@@ -230,13 +232,21 @@ type LazyChatResponse struct {
 
 // LazyStreamData text /api/chat_stream text。
 type LazyStreamData struct {
-	RawText string
 	Resp    *LazyChatResponse
+	Err     error
+	ErrKind lazyStreamErrorKind
 }
 
-// ChatService text（/api/chat text /api/chat_stream）。
+type lazyStreamErrorKind uint8
+
+const (
+	lazyStreamErrorProtocol lazyStreamErrorKind = iota + 1
+	lazyStreamErrorTransport
+)
+
+// ChatService owns the algorithm chat-stream connection.
 type ChatService struct {
-	chatURL       string
+	baseURL       string
 	streamChatURL string
 	client        *http.Client
 }
@@ -268,42 +278,10 @@ func NewChatServiceWithEndpoint(endpoint string) *ChatService {
 		Timeout: totalTimeout,
 	}
 	return &ChatService{
-		chatURL:       endpoint + chatPath,
+		baseURL:       endpoint,
 		streamChatURL: endpoint + streamChatPath,
 		client:        client,
 	}
-}
-
-// Chat text /api/chat，Gettext。
-func (c *ChatService) Chat(ctx context.Context, req *LazyChatRequest) (*LazyChatResponse, error) {
-	bodyBytes, err := json.Marshal(req)
-	if err != nil {
-		return nil, err
-	}
-	fmt.Printf(
-		"[Core] [CHAT_UPSTREAM_REQUEST] [stream=false] [url=%s] [session_id=%s] [user_id=%s] [reasoning=%v] [%s]\n",
-		c.chatURL, req.Conversation.SessionID, req.Conversation.UserID, req.Runtime.Reasoning,
-		modelconfig.SummarizeLLMConfigForLog(req.Runtime.LLMConfig),
-	)
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.chatURL, bytes.NewReader(bodyBytes))
-	if err != nil {
-		return nil, err
-	}
-	httpReq.Header.Set("Content-Type", "application/json")
-
-	resp, err := c.client.Do(httpReq)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, errors.New("upstream /api/chat returned non-200")
-	}
-	var out LazyChatResponse
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, err
-	}
-	return &out, nil
 }
 
 // StreamChat text /api/chat_stream，text channel；ctx Unsettext channel text。
@@ -355,7 +333,8 @@ func lazyStreamHandler(ctx context.Context, resp *http.Response) <-chan *LazyStr
 			data := &LazyStreamData{}
 			var streamResp LazyChatResponse
 			if err := json.Unmarshal([]byte(text), &streamResp); err != nil {
-				data.RawText = text
+				data.Err = fmt.Errorf("invalid algorithm stream frame: %w", err)
+				data.ErrKind = lazyStreamErrorProtocol
 			} else {
 				data.Resp = &streamResp
 			}
@@ -363,6 +342,12 @@ func lazyStreamHandler(ctx context.Context, resp *http.Response) <-chan *LazyStr
 			case dataChan <- data:
 			case <-ctx.Done():
 				return
+			}
+		}
+		if err := scanner.Err(); err != nil && ctx.Err() == nil {
+			select {
+			case dataChan <- &LazyStreamData{Err: fmt.Errorf("read algorithm stream: %w", err), ErrKind: lazyStreamErrorTransport}:
+			case <-ctx.Done():
 			}
 		}
 	}()
@@ -384,6 +369,10 @@ type UpstreamStreamChunk struct {
 	WorkflowPreflightUpdated *WorkflowPreflightUpdatedEvent `json:"workflow_preflight_updated,omitempty"`
 	Heartbeat                bool                           `json:"heartbeat,omitempty"`
 	ToolCallTurns            int64                          `json:"tool_call_turns"`
+	ExternalEventSequence    int64                          `json:"external_event_sequence,omitempty"`
+	Execution                *externalExecutionProjection   `json:"execution,omitempty"`
+	RuntimeEvent             *ChatRuntimeEvent              `json:"runtime_event,omitempty"`
+	Err                      error                          `json:"-"`
 }
 
 type upstreamStreamLine struct {
@@ -409,6 +398,9 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	}
 	if s, ok := body["session_id"].(string); ok {
 		req.Conversation.SessionID = s
+	}
+	if runID, ok := body["run_id"].(string); ok {
+		req.Conversation.RunID = strings.TrimSpace(runID)
 	}
 	req.Message.History = chatMessagesFromAny(body["history"])
 	req.Message.Files = filesMapFromAny(body["files"])
@@ -610,12 +602,13 @@ func datasetFiltersFromAny(v any) *DatasetFilters {
 		return nil
 	}
 	filters := &DatasetFilters{
-		Subject:    stringSlice(m["subject"]),
-		DatasetIDs: stringSlice(m["kb_id"]),
-		Tags:       stringSlice(m["tags"]),
-		Creators:   stringSlice(m["creator"]),
+		Subject:     stringSlice(m["subject"]),
+		DatasetIDs:  stringSlice(m["kb_id"]),
+		DocumentIDs: stringSlice(m["doc_id"]),
+		Tags:        stringSlice(m["tags"]),
+		Creators:    stringSlice(m["creator"]),
 	}
-	if len(filters.Subject) == 0 && len(filters.DatasetIDs) == 0 && len(filters.Tags) == 0 && len(filters.Creators) == 0 {
+	if len(filters.Subject) == 0 && len(filters.DatasetIDs) == 0 && len(filters.DocumentIDs) == 0 && len(filters.Tags) == 0 && len(filters.Creators) == 0 {
 		return nil
 	}
 	return filters
@@ -809,19 +802,82 @@ func StreamChatUpstream(ctx context.Context, baseURL string, body map[string]any
 	out := make(chan UpstreamStreamChunk, 1)
 	go func() {
 		defer close(out)
+		terminalSeen := false
+		var terminalChunk *UpstreamStreamChunk
 		for d := range streamChan {
 			if d == nil {
 				continue
 			}
+			if d.Err != nil {
+				if terminalSeen && d.ErrKind == lazyStreamErrorTransport && terminalChunk != nil {
+					select {
+					case out <- *terminalChunk:
+					case <-ctx.Done():
+					}
+					return
+				}
+				select {
+				case out <- UpstreamStreamChunk{Err: d.Err}:
+				case <-ctx.Done():
+				}
+				return
+			}
 			if d.Resp == nil {
-				// textFailedtext RawText：text，text，text
 				continue
 			}
 			chunk := upstreamStreamChunkFromData(d.Resp.Data)
+			isTerminalFrame := false
+			if terminalSeen && (hasBusinessStreamPayload(chunk) || chunk.RuntimeEvent != nil) {
+				chunk.Err = errors.New("algorithm emitted payload after run_finished")
+			}
+			if chunk.RuntimeEvent != nil {
+				if err := chunk.RuntimeEvent.Validate(req.Conversation.RunID); err != nil {
+					chunk.Err = err
+				} else if chunk.RuntimeEvent.Type == RuntimeEventRunFinished {
+					if hasBusinessStreamPayload(chunk) {
+						chunk.Err = errors.New("algorithm combined run_finished with business payload")
+					} else if terminalSeen {
+						chunk.Err = errors.New("algorithm emitted duplicate run_finished")
+					} else {
+						terminalSeen = true
+						isTerminalFrame = true
+						copyOfChunk := chunk
+						terminalChunk = &copyOfChunk
+					}
+				}
+			}
+			if d.Resp.Code != http.StatusOK {
+				message := strings.TrimSpace(d.Resp.Msg)
+				if message == "" {
+					message = "algorithm chat stream failed"
+				}
+				chunk.Err = fmt.Errorf("algorithm chat stream failed: %s", message)
+			}
+			if chunk.Err != nil {
+				select {
+				case out <- UpstreamStreamChunk{Err: chunk.Err}:
+				case <-ctx.Done():
+				}
+				return
+			}
+			if isTerminalFrame && chunk.Err == nil {
+				continue
+			}
 			select {
 			case out <- chunk:
 			case <-ctx.Done():
 				return
+			}
+		}
+		if !terminalSeen && ctx.Err() == nil {
+			select {
+			case out <- UpstreamStreamChunk{Err: errors.New("algorithm stream ended without run_finished")}:
+			case <-ctx.Done():
+			}
+		} else if terminalChunk != nil && ctx.Err() == nil {
+			select {
+			case out <- *terminalChunk:
+			case <-ctx.Done():
 			}
 		}
 	}()
@@ -843,5 +899,6 @@ func upstreamStreamChunkFromData(data LazyChatData) UpstreamStreamChunk {
 		WorkflowPreflightUpdated: data.WorkflowPreflightUpdated,
 		Heartbeat:                data.Heartbeat,
 		ToolCallTurns:            data.ToolCallTurns,
+		RuntimeEvent:             data.RuntimeEvent,
 	}
 }

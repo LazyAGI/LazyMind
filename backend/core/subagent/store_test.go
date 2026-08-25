@@ -103,6 +103,32 @@ func TestStatusAndArtifactLifecycle(t *testing.T) {
 	}
 }
 
+func TestUpdateSourcesReplacesTaskSnapshot(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	if _, err := CreateTask(ctx, db.DB, CreateTaskInput{
+		TaskID: "task-sources", ConversationID: "conv-sources", AgentType: "research",
+		Title: "research", Mode: "auto",
+	}); err != nil {
+		t.Fatalf("create task: %v", err)
+	}
+
+	sources := json.RawMessage(`[{"index":"1.1","title":"Example","source_roles":["searched"]}]`)
+	if err := UpdateSources(ctx, db.DB, "task-sources", sources); err != nil {
+		t.Fatalf("update sources: %v", err)
+	}
+	task, err := GetTask(ctx, db.DB, "task-sources")
+	if err != nil {
+		t.Fatalf("get task: %v", err)
+	}
+	if string(task.Sources) != string(sources) {
+		t.Fatalf("sources: got %s, want %s", task.Sources, sources)
+	}
+	if err := UpdateSources(ctx, db.DB, "task-sources", json.RawMessage(`{"bad":true}`)); err == nil {
+		t.Fatal("expected object snapshot to be rejected")
+	}
+}
+
 func TestListTasksByConversationForUserEnforcesOwnership(t *testing.T) {
 	db := newTestDB(t)
 	ctx := context.Background()
@@ -135,6 +161,26 @@ func TestListTasksByConversationForUserEnforcesOwnership(t *testing.T) {
 	}
 	if len(artifacts) != 1 || artifacts[0].TaskID != "mine" {
 		t.Fatalf("expected only user-1 artifact, got %#v", artifacts)
+	}
+}
+
+func TestListTasksByConversationForUserIncludesWorkflowAttempts(t *testing.T) {
+	db := newTestDB(t)
+	ctx := context.Background()
+	for _, input := range []CreateTaskInput{
+		{TaskID: "independent", ConversationID: "conv", CreateUserID: "user-1", AgentType: "research"},
+		{TaskID: "workflow", ConversationID: "conv", CreateUserID: "user-1", AgentType: "workflow_step"},
+	} {
+		if _, err := CreateTask(ctx, db.DB, input); err != nil {
+			t.Fatal(err)
+		}
+	}
+	tasks, err := ListTasksByConversationForUser(ctx, db.DB, "conv", "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(tasks) != 2 || tasks[0].ID != "independent" || tasks[1].ID != "workflow" {
+		t.Fatalf("public tasks = %#v, want independent and workflow tasks", tasks)
 	}
 }
 

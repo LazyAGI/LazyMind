@@ -9,13 +9,17 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
 	"gorm.io/gorm"
 	"lazymind/core/common"
+	"lazymind/core/workflow/artifactfile"
 	workflowexecutor "lazymind/core/workflow/executor"
+	"lazymind/core/workflow/graphengine"
 	workflowstore "lazymind/core/workflow/store"
 )
 
@@ -40,6 +44,34 @@ type Handler struct {
 	Store      *workflowstore.Repository
 	Hosts      *workflowexecutor.HostRegistry
 	Projection http.Handler
+}
+
+func (h Handler) ListSessions(w http.ResponseWriter, r *http.Request) {
+	owner, ok := identityAndVersion(w, r)
+	if !ok {
+		return
+	}
+	pageSize := 0
+	if value := strings.TrimSpace(r.URL.Query().Get("page_size")); value != "" {
+		var err error
+		pageSize, err = strconv.Atoi(value)
+		if err != nil {
+			fail(w, http.StatusUnprocessableEntity, "INVALID_SESSION_QUERY", "page_size must be an integer", false)
+			return
+		}
+	}
+	page, err := h.Store.ListExternalSessions(r.Context(), owner, workflowstore.SessionListQuery{
+		Status: r.URL.Query().Get("status"), PageSize: pageSize, PageToken: r.URL.Query().Get("page_token"),
+	})
+	if errors.Is(err, workflowstore.ErrInvalidSessionQuery) {
+		fail(w, http.StatusUnprocessableEntity, "INVALID_SESSION_QUERY", "status, page_size or page_token is invalid", false)
+		return
+	}
+	if err != nil {
+		fail(w, http.StatusServiceUnavailable, "WORKFLOW_SESSION_LIST_FAILED", err.Error(), true)
+		return
+	}
+	writeJSON(w, http.StatusOK, envelope{Data: page})
 }
 
 func (h Handler) ListWorkflows(w http.ResponseWriter, r *http.Request) {
@@ -72,6 +104,30 @@ func (h Handler) GetWorkflow(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, envelope{Data: value})
+}
+
+// GetProjection adds owner and contract checks around the existing pure
+// projection handler. Internal Runtime callers keep using the raw handler.
+func (h Handler) GetProjection(w http.ResponseWriter, r *http.Request) {
+	owner, ok := identityAndVersion(w, r)
+	if !ok {
+		return
+	}
+	if err := h.Store.AuthorizeSession(r.Context(), mux.Vars(r)["session_id"], owner); err != nil {
+		if errors.Is(err, workflowstore.ErrNotFound) {
+			fail(w, http.StatusNotFound, "WORKFLOW_SESSION_NOT_FOUND", "workflow session was not found", false)
+		} else if errors.Is(err, workflowstore.ErrPermissionDenied) {
+			fail(w, http.StatusForbidden, "PERMISSION_DENIED", "workflow session belongs to another owner", false)
+		} else {
+			fail(w, http.StatusServiceUnavailable, "WORKFLOW_PROJECTION_UNAVAILABLE", err.Error(), true)
+		}
+		return
+	}
+	if h.Projection == nil {
+		fail(w, http.StatusServiceUnavailable, "WORKFLOW_PROJECTION_UNAVAILABLE", "Workflow projection handler is unavailable", true)
+		return
+	}
+	h.Projection.ServeHTTP(w, r)
 }
 
 func writeJSON(w http.ResponseWriter, status int, value any) {
@@ -127,8 +183,63 @@ type prepareRequest struct {
 	InputBindings  map[string]any `json:"input_bindings"`
 	OriginHost     string         `json:"origin_host"`
 	OriginRef      string         `json:"origin_ref"`
+	ConversationID string         `json:"conversation_id"`
 	ControllerHost string         `json:"controller_host"`
 	RequestContext string         `json:"request_context"`
+}
+
+type preparationGraph struct {
+	Nodes map[string]struct {
+		Capabilities []string `json:"capabilities"`
+		LegacyTools  []string `json:"legacy_tools"`
+	} `json:"nodes"`
+	MaterialProducers map[string]struct {
+		Kind     string `json:"kind"`
+		Optional bool   `json:"optional"`
+	} `json:"material_producers"`
+	InputExpressions map[string]graphengine.Expression `json:"input_expressions"`
+}
+
+func collectRequiredInputMaterials(expression graphengine.Expression, materials map[string]struct{}) {
+	if expression.Material != "" {
+		materials[expression.Material] = struct{}{}
+	}
+	for _, nested := range expression.All {
+		collectRequiredInputMaterials(nested, materials)
+	}
+	for _, nested := range expression.Any {
+		// Keep the existing conservative preparation contract for alternatives:
+		// every candidate branch input must be available before the Session starts.
+		collectRequiredInputMaterials(nested, materials)
+	}
+}
+
+func missingExternalInputs(graph preparationGraph, inputBindings map[string]any) []string {
+	required := map[string]struct{}{}
+	if graph.InputExpressions == nil {
+		// Backward compatibility for compiled graphs without expression metadata.
+		for materialID, producer := range graph.MaterialProducers {
+			if producer.Kind == "external" && !producer.Optional {
+				required[materialID] = struct{}{}
+			}
+		}
+	} else {
+		for _, expression := range graph.InputExpressions {
+			collectRequiredInputMaterials(expression, required)
+		}
+	}
+	missing := make([]string, 0)
+	for materialID := range required {
+		producer, exists := graph.MaterialProducers[materialID]
+		if !exists || producer.Kind != "external" || producer.Optional {
+			continue
+		}
+		if _, exists := inputBindings[materialID]; !exists {
+			missing = append(missing, materialID)
+		}
+	}
+	sort.Strings(missing)
+	return missing
 }
 
 type toolCommandRequest struct {
@@ -244,6 +355,9 @@ func (h Handler) ListArtifacts(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusServiceUnavailable, "ARTIFACT_LIST_FAILED", err.Error(), true)
 		return
 	}
+	for index := range values {
+		values[index].Value = artifactfile.Metadata(values[index].Value)
+	}
 	writeJSON(w, http.StatusOK, envelope{Data: map[string]any{"artifacts": values}})
 }
 
@@ -261,6 +375,11 @@ func (h Handler) ReadArtifact(w http.ResponseWriter, r *http.Request) {
 		fail(w, http.StatusForbidden, "PERMISSION_DENIED", "artifact belongs to another owner", false)
 		return
 	}
+	if err != nil {
+		fail(w, http.StatusServiceUnavailable, "ARTIFACT_READ_FAILED", err.Error(), true)
+		return
+	}
+	value.Value, err = artifactfile.Inline(value.Value)
 	if err != nil {
 		fail(w, http.StatusServiceUnavailable, "ARTIFACT_READ_FAILED", err.Error(), true)
 		return
@@ -399,7 +518,10 @@ func (h Handler) setStopped(w http.ResponseWriter, r *http.Request, stopped bool
 	if stopped {
 		status = "stopped"
 	}
-	writeJSON(w, http.StatusOK, envelope{Data: map[string]any{"session_id": mux.Vars(r)["session_id"], "status": status, "state_version": version}})
+	writeJSON(w, http.StatusOK, envelope{Data: map[string]any{
+		"session_id": mux.Vars(r)["session_id"], "status": status,
+		"state_version": version, "command_id": commandID,
+	}})
 }
 
 func (h Handler) StopWorkflow(w http.ResponseWriter, r *http.Request)   { h.setStopped(w, r, true) }
@@ -545,15 +667,7 @@ func (h Handler) Prepare(w http.ResponseWriter, r *http.Request) {
 			controllerHost = "lazymind"
 		}
 		if h.Hosts != nil {
-			var graph struct {
-				Nodes map[string]struct {
-					Capabilities []string `json:"capabilities"`
-					LegacyTools  []string `json:"legacy_tools"`
-				} `json:"nodes"`
-				MaterialProducers map[string]struct {
-					Kind string `json:"kind"`
-				} `json:"material_producers"`
-			}
+			var graph preparationGraph
 			_ = json.Unmarshal(workflow.CompiledGraph, &graph)
 			capabilities, legacyTools := []string{}, []string{}
 			for _, node := range graph.Nodes {
@@ -569,14 +683,7 @@ func (h Handler) Prepare(w http.ResponseWriter, r *http.Request) {
 					strings.Join(missing, ", "), false)
 				return
 			}
-			missingInputs := []string{}
-			for materialID, producer := range graph.MaterialProducers {
-				if producer.Kind == "external" {
-					if _, exists := req.InputBindings[materialID]; !exists {
-						missingInputs = append(missingInputs, materialID)
-					}
-				}
-			}
+			missingInputs := missingExternalInputs(graph, req.InputBindings)
 			if len(missingInputs) > 0 {
 				plan, _ = json.Marshal(map[string]any{"status": "needs_input", "workflow_ref": workflow.WorkflowRef,
 					"workflow_id": workflow.WorkflowID, "workflow_revision": workflow.RevisionID,
@@ -648,8 +755,17 @@ func (h Handler) Consume(w http.ResponseWriter, r *http.Request) {
 	if workflowPackage, packageErr := h.Store.GetWorkflowPackage(r.Context(), owner, prepared.WorkflowID, revisionID); packageErr == nil {
 		var original prepareRequest
 		_ = json.Unmarshal(prepared.RequestJSON, &original)
-		conversationID := ""
-		if original.OriginHost == "lazymind" {
+		conversationID := strings.TrimSpace(original.ConversationID)
+		if conversationID != "" {
+			if err := h.Store.AuthorizeConversation(r.Context(), conversationID, owner); err != nil {
+				if errors.Is(err, workflowstore.ErrPermissionDenied) {
+					fail(w, http.StatusForbidden, "PERMISSION_DENIED", "conversation is unavailable to this owner", false)
+				} else {
+					fail(w, http.StatusServiceUnavailable, "CONVERSATION_LOOKUP_FAILED", err.Error(), true)
+				}
+				return
+			}
+		} else if original.OriginHost == "lazymind" {
 			conversationID = original.OriginRef
 		}
 		session, _, createErr := h.Store.CreateHostSession(r.Context(), owner, req.SessionID, conversationID,
@@ -821,6 +937,7 @@ func (h Handler) Command(delegate http.Handler) http.HandlerFunc {
 							value["ready_steps"] = projection["ready"]
 							value["retryable_steps"] = projection["retryable"]
 							value["rewindable_steps"] = projection["rewindable"]
+							value["continue_steps"] = projection["continue"]
 						}
 					}
 				}

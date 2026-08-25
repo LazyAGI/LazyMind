@@ -45,7 +45,7 @@ import ChatSelector, { type ChatSelectorImperativeProps } from "../ChatSelector"
 import PromptModal, { PromptImperativeProps } from "../PromptModal";
 import { appendPromptToDraft } from "../PromptModal/promptLibrary";
 import ChatConfigModal from "./ChatConfigModal";
-import type { ConversationWorkflowSettings } from "../../utils/request";
+import type { ConversationRuntimeSettings } from "../../utils/request";
 import { WorkflowSessionApi } from "../../utils/request";
 import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
 import BatchChatComponent, { BatchChatImperativeProps } from "../BatchChat";
@@ -68,7 +68,19 @@ import {
 import { useChatNewMessageStore } from "@/modules/chat/store/chatNewMessage";
 import { useTranslation } from "react-i18next";
 import { PromptServiceApi } from "@/modules/chat/utils/request";
+import {
+  listToolAssetsPage,
+  TOOL_AVAILABILITY_CHANGED_EVENT,
+  type ToolAvailabilityChange,
+} from "@/modules/memory/toolApi";
 import { Popover, Tag } from "antd";
+import type {
+  ChatFileList,
+  ChatInputImperativeProps,
+  SendMessageParams,
+} from "./types";
+
+export type { ChatFileList, ChatInputImperativeProps, SendMessageParams } from "./types";
 
 /**
  * Shows a button in the toolbar when there are dismissed workflow sessions.
@@ -334,24 +346,6 @@ function preprocessUpload(
   return { filesToAdd, clearFirst, toasts };
 }
 
-export interface SendMessageParams {
-  text: string;
-  mentions?: ChatMention[];
-  citeMessage?: string;
-  citeMessages?: string[];
-  citeHistoryIds?: (string | undefined)[];
-  clearInput?: boolean;
-  fileList?: ChatFileList[];
-  fileListRef?: React.RefObject<ImageUploadImperativeProps | null>;
-  files?: (RcFile & { uri: string })[];
-  create_time?: string;
-  thinking_depth?: ThinkingDepth;
-  /** When true, the payload will include run_in_background=true and the task center badge will increment. */
-  run_in_background?: boolean;
-  /** Structured answers from an AskCard submission; forwarded to the backend as ask_answers_structured. */
-  ask_answers_structured?: import("@/modules/chat/components/AskCard").AskAnswersStructured;
-}
-
 interface ChatInputProps {
   value: string;
   onChange: (value: string) => void;
@@ -376,13 +370,15 @@ interface ChatInputProps {
   onStopGeneration?: () => void;
   embeddingReady?: boolean | null;
   /** Called when workflow settings change (e.g. from the chat config popover). */
-  onWorkflowSettingsChange?: (settings: ConversationWorkflowSettings) => void;
+  onConversationSettingsChange?: (settings: ConversationRuntimeSettings) => void;
   /** Initial workflow settings to pre-populate the config popover. */
-  initialWorkflowSettings?: ConversationWorkflowSettings;
+  initialConversationSettings?: ConversationRuntimeSettings;
   /** When true, the allow-workflow toggle in config is locked (workflow session is active). */
   hasWorkflowSession?: boolean;
   /** Optional case-driven category selectors shown in the welcome composer. */
   showcaseSelection?: ShowcaseSelection;
+  /** Resources bound by a curated experience and included in every send. */
+  boundMentions?: ChatMention[];
   multimodalEmbeddingReady?: boolean | null;
   rerankReady?: boolean | null;
   disabled?: boolean;
@@ -399,45 +395,21 @@ interface ChatInputProps {
   onSkillDeposit?: () => void;
   /** Send the next message as a background task. Used by the new-task entry point. */
   runInBackground?: boolean;
-}
-
-export interface ShowcaseSelectionOption {
-  value: string;
-  label: string;
-  description?: string;
-  prompt?: string;
+  showThinkingDepth?: boolean;
+  showSkillDeposit?: boolean;
+  showConversationConfig?: boolean;
+  fixedThinkingDepth?: ThinkingDepth;
 }
 
 export interface ShowcaseSelection {
-  primaryValue: string;
-  primaryLabel: string;
-  primaryAriaLabel: string;
-  secondaryValue?: string;
-  secondaryOptions?: ShowcaseSelectionOption[];
-  secondaryAriaLabel: string;
-  onSecondaryChange?: (value: string) => void;
-}
-
-export interface ChatFileList {
-  uid: string;
-  name: string;
-  base64: string;
-  /** Local object URL or data URL for preview / open. */
-  previewUrl?: string;
-  suffix: string;
-  size: string;
+  value: string;
+  label: string;
+  ariaLabel: string;
 }
 
 export interface SkillDepositStats {
   userTurns: number;
   toolCallTurns: number;
-}
-
-export interface ChatInputImperativeProps {
-  clearFiles: () => void;
-  element: HTMLDivElement | null;
-  focus: () => void;
-  uploadFiles: (files: File[]) => void;
 }
 
 interface SendButtonProps {
@@ -517,11 +489,16 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       skillDepositStats,
       skillDepositDisabledReason,
       onSkillDeposit,
-      onWorkflowSettingsChange,
-      initialWorkflowSettings,
+      onConversationSettingsChange,
+      initialConversationSettings,
       hasWorkflowSession,
       showcaseSelection,
+      boundMentions = [],
       runInBackground = false,
+      showThinkingDepth = true,
+      showSkillDeposit = true,
+      showConversationConfig = true,
+      fixedThinkingDepth,
     } = props;
     const fileListRef = useRef<ImageUploadImperativeProps | null>(null);
     const knowledgeSelectorRef = useRef<ChatSelectorImperativeProps | null>(null);
@@ -535,25 +512,83 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       string | null
     >(null);
     const { thinkingDepth, setThinkingDepth } = useChatThinkStore();
+    const effectiveThinkingDepth = fixedThinkingDepth ?? thinkingDepth;
     const { setNewMessage } = useChatNewMessageStore();
     const { t } = useTranslation();
     const [text, setText] = useState("");
     const [mentions, setMentions] = useState<ChatMention[]>([]);
-    const [contextRuntimeSettings, setContextRuntimeSettings] = useState(initialWorkflowSettings);
+    const effectiveMentions = useMemo(() => {
+      const merged = new Map<string, ChatMention>();
+      for (const mention of [...boundMentions, ...mentions]) {
+        merged.set(`${mention.type}:${mention.resource_id}`, mention);
+      }
+      return [...merged.values()];
+    }, [boundMentions, mentions]);
+    const [contextRuntimeSettings, setContextRuntimeSettings] = useState(initialConversationSettings);
     const [contextUsageReset, setContextUsageReset] = useState(0);
     const [addMenuOpen, setAddMenuOpen] = useState(false);
+    const [knowledgeToolsEnabled, setKnowledgeToolsEnabled] = useState<{
+      kb: boolean | null;
+      temp_kb: boolean | null;
+    }>({ kb: null, temp_kb: null });
     const disabledNoticeId = useId();
     const previousSessionIdRef = useRef<string | undefined>(undefined);
     const hasSentMessageRef = useRef(false);
 
     useEffect(() => {
-      setContextRuntimeSettings(initialWorkflowSettings);
-    }, [initialWorkflowSettings]);
+      setContextRuntimeSettings(initialConversationSettings);
+    }, [initialConversationSettings]);
 
     const [fileList, setFileList] = useState<ChatFileList[]>([]);
     const { setPendingMessage, clearPendingMessage } = useChatMessageStore();
     const { saveInputContent, getInputContent, clearInputContent } =
       useChatInputStore();
+
+    const refreshKnowledgeToolAvailability = useCallback(async () => {
+      try {
+        const response = await listToolAssetsPage({ silentError: true });
+        const toolsByID = new Map(
+          response.records.map((tool) => [tool.id, tool.isEnabled]),
+        );
+        setKnowledgeToolsEnabled({
+          kb: toolsByID.get("kb") ?? null,
+          temp_kb: toolsByID.get("temp_kb") ?? null,
+        });
+      } catch {
+        // Keep entries usable until the authoritative state can be read.
+      }
+    }, []);
+
+    const handleToolAvailabilityChanged = useCallback((event: Event) => {
+      const change = (event as CustomEvent<ToolAvailabilityChange>).detail;
+      if (change?.id === "kb" || change?.id === "temp_kb") {
+        setKnowledgeToolsEnabled((current) => ({
+          ...current,
+          [change.id]: change.enabled,
+        }));
+      }
+      void refreshKnowledgeToolAvailability();
+    }, [refreshKnowledgeToolAvailability]);
+
+    useEffect(() => {
+      void refreshKnowledgeToolAvailability();
+      window.addEventListener(
+        TOOL_AVAILABILITY_CHANGED_EVENT,
+        handleToolAvailabilityChanged,
+      );
+      return () => window.removeEventListener(
+        TOOL_AVAILABILITY_CHANGED_EVENT,
+        handleToolAvailabilityChanged,
+      );
+    }, [handleToolAvailabilityChanged, refreshKnowledgeToolAvailability]);
+
+    const knowledgeBaseEnabled = knowledgeToolsEnabled.kb !== false;
+    const temporaryFileSearchEnabled = knowledgeToolsEnabled.temp_kb !== false;
+    const knowledgeBaseDisabledReason = "知识库检索已在设置中停用";
+    const temporaryFileSearchDisabledReason = "临时文件检索已在设置中停用";
+    const uploadTypes = temporaryFileSearchEnabled
+      ? allowedUploadTypes
+      : allowedImageTypes;
 
     const debouncedSaveInput = useMemo(
       () =>
@@ -598,10 +633,28 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
             }
             return;
           }
-          fileListRef.current?.uploadFiles(files);
+          const uploadableFiles = temporaryFileSearchEnabled
+            ? files
+            : files.filter((file) => {
+              const suffix = file.name.substring(file.name.lastIndexOf(".")).toLowerCase();
+              return allowedImageTypes.includes(suffix);
+            });
+          if (uploadableFiles.length !== files.length) {
+            message.warning(`${temporaryFileSearchDisabledReason}，仅支持上传图片`);
+          }
+          if (uploadableFiles.length > 0) {
+            fileListRef.current?.uploadFiles(uploadableFiles);
+          }
         },
       }),
-      [clearPendingMessage, clearMultiData, disabled, disabledReason],
+      [
+        clearPendingMessage,
+        clearMultiData,
+        disabled,
+        disabledReason,
+        temporaryFileSearchDisabledReason,
+        temporaryFileSearchEnabled,
+      ],
     );
 
     useEffect(() => {
@@ -850,8 +903,14 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       setNewMessage(false);
       const sendParams: SendMessageParams = {
         text: normalizedText,
-        thinking_depth: thinkingDepth,
-        mentions,
+        chatConfigSnapshot: {
+          knowledgeBaseId: [...(chatConfig?.knowledgeBaseId ?? [])],
+          creators: [...(chatConfig?.creators ?? [])],
+          tags: [...(chatConfig?.tags ?? [])],
+          databaseBaseId: chatConfig?.databaseBaseId,
+        },
+        thinking_depth: effectiveThinkingDepth,
+        mentions: effectiveMentions,
         citeMessage: normalizedCiteMessages.join("\n\n"),
         citeMessages: normalizedCiteMessages,
         citeHistoryIds: citeHistoryIds?.filter(
@@ -974,7 +1033,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
               const finalSuffix = finalFile.name
                 .substring(finalFile.name.lastIndexOf("."))
                 .toLowerCase();
-              if (allowedUploadTypes.includes(finalSuffix)) {
+              if (uploadTypes.includes(finalSuffix)) {
                 if (fileList.length + files.length < MAX_UPLOAD_FILES) {
                   files.push(finalFile);
                 } else {
@@ -992,11 +1051,11 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
           e.stopPropagation();
 
           if (invalidFiles.length > 0) {
-            message.warning(
-              t("chat.unsupportedFileType", {
+            message.warning(temporaryFileSearchEnabled
+              ? t("chat.unsupportedFileType", {
                 types: t("chat.supportedUploadTypeSummary"),
-              }),
-            );
+              })
+              : `${temporaryFileSearchDisabledReason}，仅支持上传图片`);
           }
 
           if (files.length > 0) {
@@ -1029,7 +1088,15 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
           document.execCommand("insertText", false, plainText);
         }
       },
-      [disabled, disabledReason, fileList.length, t],
+      [
+        disabled,
+        disabledReason,
+        fileList.length,
+        t,
+        temporaryFileSearchDisabledReason,
+        temporaryFileSearchEnabled,
+        uploadTypes,
+      ],
     );
 
     return (
@@ -1121,6 +1188,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                 value={value}
                 onChange={handleInputChange}
                 onMentionsChange={setMentions}
+                disabledMentionReasons={knowledgeBaseEnabled ? undefined : {
+                  knowledge_base: knowledgeBaseDisabledReason,
+                }}
                 onPaste={handlePaste}
                 onCompositionChange={(composing) => {
                   isComposingRef.current = composing;
@@ -1158,33 +1228,46 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       classNames={{ root: "chat-add-resource-popover" }}
                       content={
                         <div className="chat-add-resource-menu">
-                          <button
-                            type="button"
-                            onClick={() => {
-                              if (fileList.length >= MAX_UPLOAD_FILES) {
-                                message.warning(t("chat.maxFilesWarning"));
+                          <Tooltip
+                            title={temporaryFileSearchEnabled
+                              ? undefined
+                              : `${temporaryFileSearchDisabledReason}，仅支持上传图片`}
+                          >
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (fileList.length >= MAX_UPLOAD_FILES) {
+                                  message.warning(t("chat.maxFilesWarning"));
+                                  setAddMenuOpen(false);
+                                  return;
+                                }
+                                // Open the file picker while still inside the
+                                // user gesture, then close the popover.
+                                fileListRef.current?.openFileDialog();
                                 setAddMenuOpen(false);
-                                return;
-                              }
-                              // Open the file picker while still inside the
-                              // user gesture, then close the popover.
-                              fileListRef.current?.openFileDialog();
-                              setAddMenuOpen(false);
-                            }}
-                          >
-                            <PaperClipOutlined />
-                            {t("chat.addAttachment")}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setAddMenuOpen(false);
-                              knowledgeSelectorRef.current?.open(document.body);
-                            }}
-                          >
-                            <BookOutlined />
-                            {t("chat.knowledgeBase")}
-                          </button>
+                              }}
+                            >
+                              <PaperClipOutlined />
+                              {temporaryFileSearchEnabled
+                                ? t("chat.addAttachment")
+                                : "添加图片"}
+                            </button>
+                          </Tooltip>
+                          <Tooltip title={knowledgeBaseEnabled ? undefined : knowledgeBaseDisabledReason}>
+                            <span className="chat-add-resource-menu-tooltip-anchor">
+                              <button
+                                type="button"
+                                disabled={!knowledgeBaseEnabled}
+                                onClick={() => {
+                                  setAddMenuOpen(false);
+                                  knowledgeSelectorRef.current?.open(document.body);
+                                }}
+                              >
+                                <BookOutlined />
+                                {t("chat.knowledgeBase")}
+                              </button>
+                            </span>
+                          </Tooltip>
                           <button
                             type="button"
                             onClick={() => {
@@ -1218,6 +1301,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         embeddingReady={embeddingReady}
                         multimodalEmbeddingReady={multimodalEmbeddingReady}
                         rerankReady={rerankReady}
+                        disabled={!knowledgeBaseEnabled}
+                        disabledReason={knowledgeBaseDisabledReason}
                         onChange={onKnowledgeBaseChange}
                       />
                     </div>
@@ -1226,7 +1311,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                         updateFiles={updateImageList}
                         listNum={fileList.length}
                         ref={fileListRef}
-                        types={allowedUploadTypes}
+                        types={uploadTypes}
                         max={MAX_UPLOAD_FILES}
                         onBeforeAddFiles={onBeforeAddFiles}
                         disabled={disabled || isPromptPolishing}
@@ -1243,59 +1328,38 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                           aria-hidden="true"
                         />
                         <Select
-                          aria-label={showcaseSelection.primaryAriaLabel}
+                          aria-label={showcaseSelection.ariaLabel}
                           className="chat-showcase-category-select"
                           size="small"
-                          value={showcaseSelection.primaryValue}
+                          value={showcaseSelection.value}
                           disabled={disabled || isStreaming}
                           options={[
                             {
-                              value: showcaseSelection.primaryValue,
-                              label: showcaseSelection.primaryLabel,
+                              value: showcaseSelection.value,
+                              label: showcaseSelection.label,
                             },
                           ]}
                         />
                       </span>
-                      {showcaseSelection.secondaryOptions?.length ? (
-                        <span className="chat-showcase-control chat-showcase-scene-control">
-                          <span className="chat-showcase-scene-icon" aria-hidden="true">
-                            <i />
-                            <i />
-                            <i />
-                            <i />
-                          </span>
-                          <Select
-                            aria-label={showcaseSelection.secondaryAriaLabel}
-                            className="chat-showcase-category-select chat-showcase-subcategory-select"
-                            size="small"
-                            value={showcaseSelection.secondaryValue}
-                            disabled={disabled || isStreaming}
-                            onChange={showcaseSelection.onSecondaryChange}
-                            options={showcaseSelection.secondaryOptions.map((option) => ({
-                              value: option.value,
-                              label: option.label,
-                              title: option.description,
-                            }))}
-                          />
-                        </span>
-                      ) : null}
                     </div>
                   ) : null}
-                  <Select
-                    aria-label={t("chat.thinkingDepth")}
-                    className="chat-thinking-depth-select"
-                    size="small"
-                    variant="borderless"
-                    value={thinkingDepth}
-                    disabled={disabled || isStreaming}
-                    onChange={setThinkingDepth}
-                    options={[
-                      { value: "low", label: t("chat.thinkingDepthLow") },
-                      { value: "medium", label: t("chat.thinkingDepthMedium") },
-                      { value: "high", label: t("chat.thinkingDepthHigh") },
-                      { value: "max", label: t("chat.thinkingDepthMax") },
-                    ]}
-                  />
+                  {showThinkingDepth && (
+                    <Select
+                      aria-label={t("chat.thinkingDepth")}
+                      className="chat-thinking-depth-select"
+                      size="small"
+                      variant="borderless"
+                      value={effectiveThinkingDepth}
+                      disabled={disabled || isStreaming || Boolean(fixedThinkingDepth)}
+                      onChange={setThinkingDepth}
+                      options={[
+                        { value: "low", label: t("chat.thinkingDepthLow") },
+                        { value: "medium", label: t("chat.thinkingDepthMedium") },
+                        { value: "high", label: t("chat.thinkingDepthHigh") },
+                        { value: "max", label: t("chat.thinkingDepthMax") },
+                      ]}
+                    />
+                  )}
                   {/* <ModelSelector sessionId={sessionId} disabled={isStreaming} /> */}
                   {showHistoryButton && openHistory && (
                     <div
@@ -1305,7 +1369,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       {t("chat.chatHistory")}
                     </div>
                   )}
-                  {isChatContent && (
+                  {showSkillDeposit && isChatContent && (
                     <Tooltip title={skillDepositTooltip}>
                       <div
                         className={`input-bottom-actions-left-item skill-deposit-action${
@@ -1331,25 +1395,17 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       </div>
                     </Tooltip>
                   )}
-                  <ChatConfigModal
-                    key={
-                      configResetKey != null
-                        ? `config-reset-${configResetKey}`
-                        : undefined
-                    }
-                    conversationId={
-                      sessionId && !sessionId.startsWith("temp_")
-                        ? sessionId
-                        : undefined
-                    }
-                    initialSettings={initialWorkflowSettings}
+                  {showConversationConfig && <ChatConfigModal
+                    key={configResetKey != null ? `config-reset-${configResetKey}` : undefined}
+                    conversationId={sessionId && !sessionId.startsWith("temp_") ? sessionId : undefined}
+                    initialSettings={initialConversationSettings}
                     hasWorkflowSession={hasWorkflowSession}
                     onSave={(settings) => {
                       setContextRuntimeSettings(settings);
-                      onWorkflowSettingsChange?.(settings);
+                      onConversationSettingsChange?.(settings);
                     }}
-                  />
-                  {sessionId && !sessionId.startsWith("temp_") && (
+                  />}
+                  {showConversationConfig && sessionId && !sessionId.startsWith("temp_") && (
                     <DismissedWorkflowRestoreButton conversationId={sessionId} />
                   )}
                 </div>
@@ -1362,7 +1418,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       resetKey={`${sessionId ?? "new"}:${contextUsageReset}`}
                       staleKey={JSON.stringify({
                         text: value,
-                        mentions: mentions.map((item) => [item.type, item.resource_id]),
+                        mentions: effectiveMentions.map((item) => [item.type, item.resource_id]),
                         files: fileList.map((item) => item.uid),
                         cites: normalizedCiteMessages,
                         knowledge: {
@@ -1371,7 +1427,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                           tags: chatConfig?.tags ?? [],
                         },
                         runtime: contextRuntimeSettings,
-                        thinkingDepth,
+                        thinkingDepth: effectiveThinkingDepth,
                       })}
                       buildRequest={() => {
                         const files = fileListRef.current?.getFiles() ?? [];
@@ -1393,14 +1449,14 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                               uri: file.uri,
                             })),
                           ],
-                          mentions,
+                          mentions: effectiveMentions,
                           cite_messages: normalizedCiteMessages,
                           filters: {
                             kb_id: chatConfig?.knowledgeBaseId ?? [],
                             creator: chatConfig?.creators ?? [],
                             tags: chatConfig?.tags ?? [],
                           },
-                          thinking_depth: thinkingDepth,
+                          thinking_depth: effectiveThinkingDepth,
                           ...contextRuntimeSettings,
                         };
                       }}

@@ -23,7 +23,9 @@ type RuntimeManifest struct {
 }
 
 type RuntimeManifestFeatures struct {
-	TrustedLocalMode bool `json:"trustedLocalMode,omitempty"`
+	TrustedLocalMode      bool `json:"trustedLocalMode,omitempty"`
+	OfflineBuiltinSkills  bool `json:"offlineBuiltinSkills,omitempty"`
+	OfflineFeaturedSkills bool `json:"offlineFeaturedSkills,omitempty"`
 }
 
 type RuntimeManifestPaths struct {

@@ -132,7 +132,7 @@ const externalServiceConfigs: ExternalServiceConfig[] = [
     category: "parsing",
     fields: ["baseUrl", "apiKey"],
     logo: <FilePdfOutlined />,
-    logoUrl: "https://www.google.com/s2/favicons?domain=mineru.net&sz=96",
+    logoUrl: "https://mineru.net/favicon-96x96.png",
     tone: "blue",
     status: "configured",
   },
@@ -527,7 +527,19 @@ function ExternalServiceLogo({ service }: { service: ExternalServiceConfig }) {
   );
 }
 
-export default function ExternalServicesPage() {
+interface ExternalServicesPageProps {
+  includeMcp?: boolean;
+  includeBuiltinTools?: boolean;
+  includeDependencies?: boolean;
+  visibleCategories?: ServiceCategoryKey[];
+}
+
+export default function ExternalServicesPage({
+  includeMcp = true,
+  includeBuiltinTools = true,
+  includeDependencies = true,
+  visibleCategories,
+}: ExternalServicesPageProps = {}) {
   const { t, i18n } = useTranslation();
   const currentLanguage = i18n.resolvedLanguage || i18n.language || "zh-CN";
   const [form] = Form.useForm<Record<string, ExternalServiceFormValues>>();
@@ -1010,6 +1022,9 @@ export default function ExternalServicesPage() {
   };
 
   const renderServiceCategory = (categoryKey: ServiceCategoryKey) => {
+    if (visibleCategories && !visibleCategories.includes(categoryKey)) {
+      return null;
+    }
     const category = serviceCategories.find((item) => item.key === categoryKey);
     if (!category) {
       return null;
@@ -1115,11 +1130,11 @@ export default function ExternalServicesPage() {
 
           <div className="model-provider-tools-substack">
             {renderServiceCategory("parsing")}
-            <DependencyInstallSection />
+            {includeDependencies ? <DependencyInstallSection /> : null}
             {renderServiceCategory("search")}
             {renderServiceCategory("academic")}
-            {developerActive ? <ToolManagementSection view="builtin" /> : null}
-            <ToolManagementSection view="mcp" />
+            {developerActive && includeBuiltinTools ? <ToolManagementSection view="builtin" /> : null}
+            {includeMcp ? <ToolManagementSection view="mcp" /> : null}
           </div>
         </div>
       </Spin>

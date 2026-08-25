@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button, Empty, Form, Input, Modal, Popconfirm, Select, Tag, Tooltip, message } from "antd";
+import type { InputRef } from "antd";
 import { useTranslation } from "react-i18next";
 import { localizeErrorCode } from "@/components/request";
 import {
@@ -15,6 +16,8 @@ import {
 } from "@ant-design/icons";
 import { modelProvidersApi, unwrapModelProviderData } from "../api";
 import "../index.scss";
+
+const SENSENOVA_LOGO_URL = "https://www.sensenova.ai/images/logo.png";
 
 type ModelCapability =
   | "LLM_CHAT"
@@ -187,8 +190,7 @@ function isSensenovaProvider(provider?: Pick<ProviderOption, "source" | "name"> 
 }
 
 function isSensenovaNewBaseUrl(url?: string): boolean {
-  const normalized = normalizeFormText(url).replace(/\/+$/, "");
-  return normalized === normalizeFormText(SENSENOVA_NEW_BASE_URL).replace(/\/+$/, "");
+  return normalizeBaseUrlForCompare(url) === normalizeBaseUrlForCompare(SENSENOVA_NEW_BASE_URL);
 }
 
 function createConnectionGroup(provider: ProviderOption, overrides: Partial<ProviderConnectionGroup> = {}): ProviderConnectionGroup {
@@ -249,16 +251,16 @@ function getProviderBrand(name: string) {
 
 function getProviderLogoUrl(name: string) {
   const normalized = name.trim().toLowerCase();
+  if (/sensenova|sensecore|商汤|日日新/.test(normalized)) return SENSENOVA_LOGO_URL;
   const domainMap: Array<[RegExp, string]> = [
     [/claude|anthropic/, "anthropic.com"],
     [/deepseek/, "deepseek.com"],
     [/doubao|volc|ark/, "volcengine.com"],
-    [/glm|bigmodel|zhipu/, "bigmodel.cn"],
+    [/glm|bigmodel|zhipu/, "zhipuai.cn"],
     [/kimi|moonshot/, "moonshot.cn"],
     [/minimax/, "minimaxi.com"],
     [/openai/, "openai.com"],
     [/qwen|tongyi|通义/, "qwen.ai"],
-    [/sensenova|sensecore|商汤|日日新/, "platform.sensenova.cn"],
     [/siliconflow/, "siliconflow.cn"],
   ];
   const match = domainMap.find(([pattern]) => pattern.test(normalized));
@@ -324,6 +326,10 @@ interface ApiGroup {
   api_key_preview?: string;
   is_verified?: boolean;
   user_model_provider_id: string;
+}
+
+interface SavedProviderGroup extends ApiGroup {
+  check?: CheckModelProviderResult;
 }
 
 interface CheckModelProviderResult {
@@ -468,8 +474,12 @@ function renderDescriptionWithLinks(description: string) {
   });
 }
 
+function normalizeBaseUrlForCompare(value?: string) {
+  return normalizeFormText(value).replace(/\/+$/, "");
+}
+
 function isDefaultProviderBaseUrl(provider: Pick<ProviderOption, "baseUrl">, baseUrl?: string) {
-  return normalizeFormText(baseUrl) === normalizeFormText(provider.baseUrl);
+  return normalizeBaseUrlForCompare(baseUrl) === normalizeBaseUrlForCompare(provider.baseUrl);
 }
 
 export default function ModelProviderPage() {
@@ -494,6 +504,9 @@ export default function ModelProviderPage() {
   const [loadingGroupModelIds, setLoadingGroupModelIds] = useState<Record<string, boolean>>({});
   const [sensenovaBaseUrlPreset, setSensenovaBaseUrlPreset] = useState<string>("");
   const watchedProviderBaseUrl = Form.useWatch("baseUrl", providerConfigForm);
+  const watchedProviderApiKey = Form.useWatch("apiKey", providerConfigForm);
+  const providerApiKeyInputRef = useRef<InputRef>(null);
+  const verifyApiKeyInputRef = useRef<InputRef>(null);
   const providerSearchRequestIdRef = useRef(0);
   const initialProvidersLoadedRef = useRef(false);
   const localizedFallbacks = useMemo(() => createModelProviderFallbacks(t), [i18n.language, t]);
@@ -503,6 +516,9 @@ export default function ModelProviderPage() {
     ? `${verifyGroupModal.provider.id}:${verifyGroupModal.group.id}`
     : "";
   const verifyGroupBusy = activeVerifyKey ? Boolean(verifyingGroupIds[activeVerifyKey]) : false;
+  const verifyApiKeyRequired = verifyGroupModal
+    ? isDefaultProviderBaseUrl(verifyGroupModal.provider, verifyGroupModal.group.baseUrl)
+    : false;
   const baseUrlChanged = configProvider
     ? !isDefaultProviderBaseUrl(
         configProvider,
@@ -650,7 +666,7 @@ export default function ModelProviderPage() {
 
     const groupName = normalizeFormText(values.name);
     const baseUrl = normalizeFormText(values.baseUrl);
-    const apiKey = normalizeFormText(values.apiKey);
+    const apiKey = normalizeFormText(values.apiKey) || normalizeFormText(providerApiKeyInputRef.current?.input?.value);
     const isCustomBaseUrl = !isDefaultProviderBaseUrl(configProvider, baseUrl);
     const existingProvider = addedProviderList.find((provider) => provider.id === configProvider.id);
     const existingGroup = activeConfigModal.group
@@ -663,29 +679,34 @@ export default function ModelProviderPage() {
     }
 
     setProviderConfigSaving(true);
+    const closeVerificationNotice = apiKey
+      ? message.loading(t("modelProvider.message.verifyingApiKey"), 0)
+      : undefined;
     try {
       const payload = {
         name: groupName || configProvider.name,
         base_url: baseUrl,
-        verify: false,
+        verify: Boolean(apiKey),
         ...(apiKey ? { api_key: apiKey } : {}),
       };
+      const requestOptions = apiKey ? { timeout: 3 * 60 * 1000 } : undefined;
       const savedGroup = activeConfigModal.group
-        ? unwrapModelProviderData<ApiGroup>((await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdPatch({
+        ? unwrapModelProviderData<SavedProviderGroup>((await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdPatch({
             modelProviderId: configProvider.id,
             groupId: activeConfigModal.group.id,
             updateModelProviderGroupOpenAPIRequest: payload,
-          })).data)
-        : unwrapModelProviderData<ApiGroup>((await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsPost({
+          }, requestOptions)).data)
+        : unwrapModelProviderData<SavedProviderGroup>((await modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsPost({
             modelProviderId: configProvider.id,
             createModelProviderGroupOpenAPIRequest: payload,
-          })).data);
+          }, requestOptions)).data);
       const nextGroup = mapApiGroup(
         configProvider,
         {
           ...savedGroup,
           api_key_configured: Boolean(apiKey || existingGroup?.apiKeyConfigured || savedGroup.api_key_configured || savedGroup.api_key),
           api_key_preview: apiKey ? maskApiKey(apiKey) : existingGroup?.apiKeyPreview || savedGroup.api_key_preview,
+          is_verified: apiKey ? savedGroup.check?.success === true : savedGroup.is_verified,
         },
         existingGroup?.models || []
       );
@@ -711,13 +732,19 @@ export default function ModelProviderPage() {
             ]
       );
       setExpandedProviderIds((current) => ({ ...current, [configProvider.id]: true }));
-      message.success(t("modelProvider.message.groupSaved", { name: nextGroup.name }));
+      message.success(apiKey
+        ? t("modelProvider.message.groupVerifiedAndSaved", { name: nextGroup.name })
+        : t("modelProvider.message.groupSaved", { name: nextGroup.name }));
 
       setConfigModal(null);
       providerConfigForm.resetFields();
       setSensenovaBaseUrlPreset("");
-    } catch (error) {
+    } catch {
+      if (apiKey) {
+        message.error(t("modelProvider.message.groupVerifyFailed"));
+      }
     } finally {
+      closeVerificationNotice?.();
       setProviderConfigSaving(false);
     }
   };
@@ -727,8 +754,14 @@ export default function ModelProviderPage() {
   };
 
   const verifyProviderGroup = async (providerId: string, groupId: string, apiKey: string) => {
-    const requestApiKey = normalizeFormText(apiKey);
-    if (!requestApiKey) {
+    const provider = addedProviderList.find((item) => item.id === providerId);
+    const group = provider?.groups.find((item) => item.id === groupId);
+    if (!provider || !group) {
+      return;
+    }
+
+    const requestApiKey = normalizeFormText(apiKey) || normalizeFormText(verifyApiKeyInputRef.current?.input?.value);
+    if (!requestApiKey && isDefaultProviderBaseUrl(provider, group.baseUrl)) {
       message.warning(t("modelProvider.message.fillApiKeyBeforeVerify"));
       return;
     }
@@ -740,16 +773,11 @@ export default function ModelProviderPage() {
 
     setVerifyingGroupIds((current) => ({ ...current, [verifyKey]: true }));
     try {
-      const provider = addedProviderList.find((item) => item.id === providerId);
-      const group = provider?.groups.find((item) => item.id === groupId);
-      if (!provider || !group) {
-        return;
-      }
       const payload: Record<string, unknown> = {
         provider_name: provider.name,
         base_url: group.baseUrl,
-        api_key: requestApiKey,
         dry_run: false,
+        ...(requestApiKey ? { api_key: requestApiKey } : {}),
       };
       // The new SenseNova platform URL requires a model name for connectivity check.
       if (isSensenovaProvider(provider) && isSensenovaNewBaseUrl(group.baseUrl)) {
@@ -1288,7 +1316,7 @@ export default function ModelProviderPage() {
         confirmLoading={providerConfigSaving}
         destroyOnHidden
         maskClosable={!providerConfigSaving}
-        okText={t("modelProvider.saveConfig")}
+        okText={normalizeFormText(watchedProviderApiKey) ? t("modelProvider.verifyAndSaveConfig") : t("modelProvider.saveConfig")}
         open={!!configModal}
         title={t("modelProvider.groupConfigTitle", { name: configProvider?.name || "" })}
         width={520}
@@ -1387,6 +1415,7 @@ export default function ModelProviderPage() {
               autoComplete="off"
               maxLength={512}
               placeholder={apiKeyRequired ? t("modelProvider.apiKeyPlaceholder") : t("modelProvider.apiKeyOptionalPlaceholder")}
+              ref={providerApiKeyInputRef}
               visibilityToggle={false}
             />
           </Form.Item>
@@ -1425,13 +1454,14 @@ export default function ModelProviderPage() {
             </div>
           ) : null}
           <Form.Item
-            extra={t("modelProvider.verifyApiKeyExtra")}
+            extra={t(verifyApiKeyRequired ? "modelProvider.verifyApiKeyExtra" : "modelProvider.verifyApiKeyCustomExtra")}
             label="API Key"
             name="apiKey"
             normalize={(value: string | undefined) => value?.trim()}
+            required={verifyApiKeyRequired}
             rules={[
               {
-                required: true,
+                required: verifyApiKeyRequired,
                 message: t("modelProvider.validation.apiKeyRequired"),
               },
               { max: 512, message: t("modelProvider.validation.apiKeyMax") },
@@ -1446,7 +1476,8 @@ export default function ModelProviderPage() {
             <Input.Password
               autoComplete="off"
               maxLength={512}
-              placeholder={t("modelProvider.verifyApiKeyPlaceholder")}
+              placeholder={t(verifyApiKeyRequired ? "modelProvider.verifyApiKeyPlaceholder" : "modelProvider.apiKeyOptionalPlaceholder")}
+              ref={verifyApiKeyInputRef}
               visibilityToggle={false}
             />
           </Form.Item>

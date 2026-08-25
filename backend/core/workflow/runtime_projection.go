@@ -13,6 +13,7 @@ import (
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
+	"lazymind/core/workflow/executor"
 	"lazymind/core/workflow/graphengine"
 )
 
@@ -192,7 +193,14 @@ func projectSession(ctx context.Context, db *gorm.DB, session *orm.WorkflowSessi
 		}
 		var artifactCount int64
 		if attempt.TaskID != "" {
-			if err := db.WithContext(ctx).Model(&orm.SubAgentArtifact{}).Where("task_id = ?", attempt.TaskID).Count(&artifactCount).Error; err != nil {
+			if err := db.WithContext(ctx).Model(&orm.SubAgentArtifact{}).
+				Where("task_id = ?", attempt.TaskID).Count(&artifactCount).Error; err != nil {
+				return projectionResponse{}, err
+			}
+		}
+		if artifactCount == 0 {
+			if err := db.WithContext(ctx).Model(&orm.WorkflowSlotRevision{}).
+				Where("producer_attempt_id = ?", attempt.ID).Count(&artifactCount).Error; err != nil {
 				return projectionResponse{}, err
 			}
 		}
@@ -259,7 +267,7 @@ func persistRouteDecision(ctx context.Context, db *gorm.DB, sessionID, from, att
 	return db.WithContext(ctx).Create(&orm.WorkflowRouteDecision{ID: "prd_" + common.GenerateID(), SessionID: sessionID, FromStepID: from, SourceAttemptID: attemptID, ActivatedJSON: a, PrunedJSON: p, BypassedJSON: b, WitnessJSON: wi, Validity: "effective", StateVersion: stateVersion, CreatedAt: time.Now().UTC()}).Error
 }
 
-func freezeRouteDecision(ctx context.Context, db *gorm.DB, sessionID, from, attemptID string) error {
+func freezeRouteDecision(ctx context.Context, db *gorm.DB, sessionID, from, taskID string) error {
 	return db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var session orm.WorkflowSession
 		if err := tx.Where("id = ?", sessionID).First(&session).Error; err != nil {
@@ -274,14 +282,59 @@ func freezeRouteDecision(ctx context.Context, db *gorm.DB, sessionID, from, atte
 			return err
 		}
 		decision := graphengine.DecideRoute(graph, from, snapshot.Materials)
+		var attempt orm.WorkflowSessionStep
+		if err := tx.Select("id", "result_json").Where(
+			"session_id = ? AND step_id = ? AND task_id = ?", sessionID, from, taskID,
+		).First(&attempt).Error; err != nil {
+			return err
+		}
+		var result executor.Result
+		if raw := strings.TrimSpace(attempt.ResultJSON); raw != "" && raw != "{}" {
+			if err := json.Unmarshal([]byte(raw), &result); err != nil {
+				return fmt.Errorf("decode attempt result: %w", err)
+			}
+		}
+		if result.Control != nil && strings.TrimSpace(result.Control.NextStep) != "" {
+			target := strings.TrimSpace(result.Control.NextStep)
+			selected := graphengine.SelectRouteTarget(graph, from, target, decision)
+			if len(selected.Activated) != 1 || selected.Activated[0] != target {
+				return fmt.Errorf("control.next_step %q is not a reachable choice from %q", target, from)
+			}
+			decision = selected
+		}
 		if err := tx.Model(&orm.WorkflowRouteDecision{}).Where("session_id = ? AND from_step_id = ? AND validity = ?", sessionID, from, "effective").Update("validity", "stale").Error; err != nil {
 			return err
 		}
-		if err := persistRouteDecision(ctx, tx, sessionID, from, attemptID, decision.Activated, decision.Pruned, decision.Bypassed, decision.Witnesses, session.StateVersion); err != nil {
+		if err := persistRouteDecision(ctx, tx, sessionID, from, attempt.ID, decision.Activated, decision.Pruned, decision.Bypassed, decision.Witnesses, session.StateVersion); err != nil {
 			return err
 		}
 		return reconcileSessionProjection(ctx, tx, &session)
 	})
+}
+
+// FinalizeHostAttempt applies the same terminal projection semantics used by
+// LazyMind's managed ChatAgent after a Host-neutral Attempt reaches terminal
+// state. Host transport and product names never enter the graph algorithm.
+func FinalizeHostAttempt(ctx context.Context, db *gorm.DB, sessionID, stepID, attemptID, status string) error {
+	switch status {
+	case "succeeded":
+		var existing int64
+		if err := db.WithContext(ctx).Model(&orm.WorkflowRouteDecision{}).
+			Where("session_id = ? AND from_step_id = ? AND source_attempt_id = ? AND validity = ?",
+				sessionID, stepID, attemptID, "effective").Count(&existing).Error; err != nil {
+			return err
+		}
+		if existing > 0 {
+			return nil
+		}
+		return freezeRouteDecision(ctx, db, sessionID, stepID, attemptID)
+	case "failed":
+		return UpdateSessionStatus(ctx, db, sessionID, SessionStatusFailed)
+	case "cancelled", "interrupted":
+		return UpdateSessionStatus(ctx, db, sessionID, SessionStatusWaiting)
+	default:
+		return gorm.ErrInvalidData
+	}
 }
 
 // reconcileSessionProjection derives terminal state from the same projection

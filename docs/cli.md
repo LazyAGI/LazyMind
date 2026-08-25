@@ -654,3 +654,98 @@ tests/test_cli.py
 - dedup 信号源：远端 `doc-list` 只能提供 `relative_path + document_size`，精到 `mtime` 的判断依赖本地 `~/.lazymind/datasets/<ds>/uploaded.json` 索引。首次在一台新机器上对一个已有 dataset 运行 `upload`，所有文件会被保守地归为 `existing`（除非远端 doc 状态是 FAILED）
 - 跨 run 索引只会在任务真正 SUCCESS 之后才写入：非 `--wait` 模式下 `uploaded.json` 不会更新，下次运行 dedup 退化为"所有文件都没有本地索引"的保守态
 - 当前 CLI 是单机串行上传，没有 `--jobs` 并发（规划中）
+
+## 16. 让外部 Agent 使用 LazyMind
+
+外部 Agent 统一通过宿主机 `lazymind mcp proxy` 使用 LazyMind。Desktop 和标准 Docker 启动命令都会自动托管这个 connector：
+
+- LazyMind Desktop 继续使用内置进程托管和 IPC。
+- `make up` / `make up-build` 会在 Docker 服务启动后自动构建并启动回环地址上的「助理桥接器」，`make down` 会停止它。
+- 用户打开“设置 → 助理”，点击对应卡片的“连接”即可；不需要执行 `mcp add`、复制 JSON 或单独启动 Agent Host。
+- Docker 用户没有安装 Go 时，`make up` 会用 Docker 中的 Go 工具链交叉编译当前宿主机的 connector，不新增宿主机开发依赖。
+
+桥接器只监听 `127.0.0.1`，只接受本机 LazyMind 页面来源。它使用现有本地会话引导凭证，并且写入 Agent 配置的内容只有 connector 绝对路径、`mcp proxy` 参数以及可选的 `LAZYMIND_HOME`；不会写入 access token 或 refresh token。
+
+直接执行裸 `docker compose up` 无法启动宿主机进程，因此标准用户入口是 `make up`。源码调试仍可使用 `lazymind agent guide <agent>` 查看备用配置，但它不再是正常安装流程。
+
+### 16.1 Codex CLI
+
+“设置 → 助理 → Codex CLI → 连接”会复用现有 Codex Adapter：先验证 LazyMind 的 23 个工具，再调用 Codex 原生 `codex mcp add`。重新连接和断开分别更新或移除同一个受管条目，不直接编辑 Codex 私有配置。
+
+如果已经存在一个不属于当前 LazyMind 安装的同名 `lazymind` 服务，桥接器会拒绝覆盖或删除。连接成功后新建 Codex 任务即可加载工具。
+
+### 16.2 Desktop 与 Docker 使用同一入口
+
+Desktop 通过 Electron IPC 调用 connector；Docker 网页通过本机回环 Assistant Bridge 调用相同 adapter。两种入口的探测、归属校验、工具预检和最终配置完全一致，没有 Plugin、Marketplace 或 Codex Skill 分支。
+
+### 16.3 Cursor
+
+桥接器直接在 `~/.cursor/mcp.json#mcpServers` 中原子合并受管的 `lazymind` 条目，并保留其他服务和顶层设置。第一次修改前会创建 `.lazymind-backup`；断开时只删除归属于当前 connector 的条目。Cursor 中已经存在的外来同名条目不会被覆盖。连接后新建 Cursor Agent 会话即可。
+
+### 16.4 WorkBuddy
+
+桥接器检测 CodeBuddy CN / WorkBuddy，并原子合并 `~/.codebuddy/mcp.json#mcpServers`。备份、归属判断和精确移除规则与 Cursor 相同，不再要求用户进入 MCP 页面粘贴 JSON。连接后在 WorkBuddy 中新建会话即可。
+
+### 16.5 TRAE Work
+
+桥接器写入 TRAE Work Agent 实际读取的用户级 `mcp.json#mcpServers`，不会调用会写入错误 `servers` 字段的 `--add-mcp`。它保留其他配置并只管理当前 LazyMind 条目。连接后重启 TRAE Work 或新建会话。TRAE Work 本期仍只作为 MCP 客户端，不出现在 LazyMind 的对话执行器列表中。
+
+### 16.6 DeepSeek Harness
+
+桥接器在 `~/.dsh/profiles/web/cordis.patch.yml` 顶层列表中合并一个 ID 为 `mcp-lazymind` 的官方 `@deepseek-ai/dsh-mcp-client` 条目。YAML 中的其他 patch 和注释会保留，首次修改前同样创建备份；断开只移除该 insert。Harness 会热加载这个 profile，MCP 调用仍进入统一 Invocation Ledger。DeepSeek Harness 本期同样不是 LazyMind 对话执行器。
+
+### 16.7 能力和安全边界
+
+五个 Agent 得到完全相同的 23 个 Tool。其中九个是只读 Capability：
+
+- `cloud_document.list`
+- `cloud_document.get`
+- `cloud_document.search`
+
+- `knowledge.list`
+- `knowledge.document.list`
+- `knowledge.document.get`
+- `knowledge.search`
+- `skill.list`
+- `skill.get`
+
+另外 14 个是通用 Workflow Driver：
+
+- `workflow.list`
+- `workflow.get`
+- `workflow.input.import`
+- `workflow.input.get`
+- `workflow.start`
+- `workflow.state`
+- `workflow.session.list`
+- `workflow.session.stop`
+- `workflow.session.resume`
+- `workflow.step.begin`
+- `workflow.step.resume`
+- `workflow.step.submit`
+- `workflow.artifact.list`
+- `workflow.artifact.get`
+
+使用 Workflow 时，外部 Agent 先通过 `workflow.start` 在当前外部会话对应的 LazyMind Conversation 中建立持久 Session，再按 `state → step.begin → 原生执行 → step.submit` 循环运行。新 Workflow 启动时会原子归档同一 Conversation 中已经 `completed`、`failed` 或 `stopped` 的旧 Session；`active` / `waiting` Session 仍需先停止。Agent 丢失 Session ID 时用 `workflow.session.list` 找回，该列表默认只返回当前外部会话的唯一未归档 Session，不再混入同一用户的其他 Agent 会话；`state`、步骤、产物和 stop/resume 同样受当前 Conversation 约束。只有连接器中断但步骤仍在执行时才用 `workflow.step.resume` 恢复同一个 execution。LazyMind 固定 Workflow revision，并负责步骤状态、输入见证、产物内容、列表顺序和版本；外部 Agent 只执行 `step_contract`，不会成为 Core 内的 Executor 实现。
+
+每个 `tools/call` 都会先建立持久调用记录，结束后写入成功、失败或中断状态，并关联 Workflow、Session、Step、Attempt、Artifact 等安全 ID。记录只保存参数哈希和白名单摘要，不保存 prompt、知识库查询正文、文件内容、绝对路径、Base64 或访问令牌。当前版本已经收集这些数据，LazyMind 前端展示留到后续版本。
+
+`knowledge.search` 始终只返回检索结果，不进入 chat 或回答生成链路。LazyMind 不共享或接管外部 Agent 会话；新配置通常在外部 Agent 新建会话后生效。
+
+`cloud_document.*` 读取当前用户已经在 LazyMind 授权并启用对话的飞书账号。`list` 返回账号，`get` 在线浏览 Drive/Wiki 目录，`search` 在线递归搜索标题；三者复用 Auth Service 令牌刷新和现有 Feishu connector，不创建 Scan Source、不读取知识库索引、不启动扫描或同步。Provider 游标由 Core 绑定账号、目录和查询后封装，外部 Agent 只回传不透明 token。
+
+### 16.8 用外部 Agent 执行 LazyMind 对话
+
+“外部 Agent 使用 LazyMind MCP”和“外部 Agent 替代 LazyMind ChatAgent”是两个独立方向。完成前面的 MCP 配置后，Cursor、WorkBuddy、TRAE Work 和 DeepSeek Harness 可以在自己的界面调用 LazyMind；要让外部 Agent 在 LazyMind 对话界面内生成回复，还必须具备可靠的非交互运行、事件和会话恢复接口。当前只接入以下三个官方 CLI：
+
+- Codex 使用 `codex exec --json`；
+- Cursor 使用独立的 `cursor-agent`，安装后执行 `cursor-agent login`；
+- WorkBuddy 使用独立的 CodeBuddy Code CLI（`codebuddy` 或 `cbc`），启动交互会话后执行 `/login`。
+
+Cursor IDE 和 CodeBuddy CN 已登录，不代表这两个独立 CLI 已登录。LazyMind 不读取、复制或保存外部 Agent 的登录凭证。
+
+LazyMind Desktop 和 Docker Assistant Bridge 都会自动托管本机已经安装的三个 CLI；用户不需要另起 `agent host` 进程。缺失的 CLI 只会把自身注册为不可用，不影响其他 provider。然后可在 LazyMind 的对话配置中选择 Codex、Cursor 或 WorkBuddy；若对应 Host 尚未连接，界面会拒绝切换并给出提示。`lazymind agent host ...` 仅保留为开发诊断入口。
+
+TRAE Work 没有满足该边界的无头结果/事件/恢复接口；DeepSeek Harness 当前的外部执行协议也不能恢复既有会话，且与运行时 MCP 注入存在约束。因此二者不会注册 `ExternalChatRun` Host，不会出现在 `chat_executor` 中。这不影响它们在各自界面调用 LazyMind MCP。
+
+所有 provider 共用同一条数据链：LazyMind 创建和持久化对话轮次，本机 Host 调用外部 CLI，CLI 通过既有 LazyMind MCP 使用 Knowledge、Skill 和 Workflow，结果仍回到 LazyMind 的 SSE、历史、刷新续流和停止链。每个 LazyMind 会话只续接该 provider 自己的 session/thread ID；切换 provider 不会把一家产品的私有会话 ID 交给另一家。外部 CLI 的文件操作被放在 `~/.lazymind/agent-workspaces/<conversation_id>` 的独立目录中，Workflow 产物和版本仍以 LazyMind Runtime 中的记录为准。

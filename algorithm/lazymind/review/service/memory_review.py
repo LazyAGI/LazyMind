@@ -59,13 +59,10 @@ def _truncate_log_text(value: Any, limit: int = 4000) -> str:
 
 
 def _write_retry_fingerprint(entry: Dict[str, Any]) -> tuple[str, str] | None:
-    result = entry.get('result')
-    if not isinstance(result, dict):
-        return None
-    key = str(result.get('retry_fingerprint') or '').strip()
+    key = str(entry.get('retry_fingerprint') or '').strip()
     if not key:
         return None
-    return str(entry.get('tool') or ''), key
+    return str(entry.get('operation') or ''), key
 
 
 def _unresolved_write_failures(write_results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -73,7 +70,7 @@ def _unresolved_write_failures(write_results: List[Dict[str, Any]]) -> List[Dict
     unresolved_reversed: List[Dict[str, Any]] = []
     for entry in reversed(write_results):
         key = _write_retry_fingerprint(entry)
-        if entry.get('success') is True:
+        if entry.get('status') == 'succeeded':
             if key is not None:
                 later_success_keys.add(key)
         elif key is None or key not in later_success_keys:
@@ -89,9 +86,7 @@ def _summarize_tool_errors(
     codes: List[str] = []
     messages: List[str] = []
     for entry in failures:
-        raw_error = entry.get('error')
-        error = raw_error if isinstance(raw_error, dict) else {}
-        code = str(error.get('code') or 'write_failed')
+        code = str(entry.get('error_code') or 'write_failed')
         message = _SAFE_REVIEW_ERROR_MESSAGES.get(code, 'A memory tool failed.')
         if code not in codes:
             codes.append(code)
@@ -104,7 +99,7 @@ def _summarize_tool_errors(
 
 
 def _multiple_failure_code(failures: List[Dict[str, Any]]) -> str:
-    tools = {str(entry.get('tool') or '') for entry in failures}
+    tools = {str(entry.get('operation') or '') for entry in failures}
     if tools.issubset(_WRITE_TOOLS):
         return 'multiple_write_failures'
     if tools and tools.isdisjoint(_WRITE_TOOLS):
@@ -132,6 +127,24 @@ def review_memory(
     )
     lazyllm.globals._init_sid(sid=task_id)
     lazyllm.locals._init_sid(sid=task_id)
+    lazyllm.set_trace_context({
+        'trace_id': conversation_id, 'session_id': conversation_id, 'user_id': user_id,
+        'sampled': True, 'request_tags': ['memory_review'],
+        'module_trace': {
+            'by_class': {
+                'FunctionCall': False, 'ToolManager': False,
+                'Pipeline': False, 'Diverter': False,
+            },
+            'by_name': {
+                '_build_history': False, '_post_action': False,
+                '_safe_call': False, '_indexed_call': False,
+            },
+        },
+        'trace_metadata': {
+            'task_id': task_id, 'conversation_id': conversation_id,
+            'trigger': 'conversation_idle', 'history_len': len(history),
+        },
+    })
     inject_model_config(llm_config)
     LOG.info(
         f'[MemoryReview] review started: user_id={user_id} '
@@ -146,7 +159,7 @@ def review_memory(
         'episode_occurred_at_ms': episode_occurred_at_ms,
         'episode_source_kind': 'memory_review',
         'memory_source_kind': 'memory_review',
-        'memory_tool_results': [],
+        'memory_operation_ledger': [],
     }
     lazyllm.globals['agentic_config'] = config
 
@@ -223,21 +236,21 @@ def review_memory(
         f'has_llm_config={bool(llm_config)} '
         f'res={_truncate_log_text(res)!r}'
     )
-    ledger = [entry for entry in config['memory_tool_results'] if isinstance(entry, dict)]
-    write_results = [entry for entry in ledger if entry.get('tool') in _WRITE_TOOLS]
-    successful_writes = [entry for entry in write_results if entry.get('success') is True]
+    ledger = [entry for entry in config['memory_operation_ledger'] if isinstance(entry, dict)]
+    write_results = [entry for entry in ledger if entry.get('operation') in _WRITE_TOOLS]
+    successful_writes = [entry for entry in write_results if entry.get('status') == 'succeeded']
     applied_writes = [
         entry for entry in successful_writes
-        if entry.get('mutation') is True
+        if entry.get('mutation') == 'applied'
     ]
     mutated_writes = [
         entry for entry in write_results
-        if entry.get('mutation') is True
+        if entry.get('mutation') in {'applied', 'unknown'}
     ]
     failed_writes = _unresolved_write_failures(write_results)
     read_failures = [
         entry for entry in ledger
-        if entry.get('tool') not in _WRITE_TOOLS and entry.get('success') is not True
+        if entry.get('operation') not in _WRITE_TOOLS and entry.get('status') != 'succeeded'
     ]
     unresolved_ids = {id(entry) for entry in [*failed_writes, *read_failures]}
     unresolved_failures = [entry for entry in ledger if id(entry) in unresolved_ids]
@@ -268,7 +281,7 @@ def review_memory(
         retryable = (
             all(entry.get('retryable') is True for entry in unresolved_failures)
             and not applied_writes
-            and all(entry.get('mutation') is False for entry in unresolved_failures)
+            and all(entry.get('mutation') == 'none' for entry in unresolved_failures)
         )
         return MemoryReviewResult(
             status='failed',

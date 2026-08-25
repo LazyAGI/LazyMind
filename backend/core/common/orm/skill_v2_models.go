@@ -27,6 +27,7 @@ type SkillV2Skill struct {
 	UpdateStatus          string     `gorm:"column:update_status;type:varchar(32);not null;default:'up_to_date'"`
 	Ext                   []byte     `gorm:"column:ext;type:json"`
 	DeletedAt             *time.Time `gorm:"column:deleted_at"`
+	TrashExpiresAt        *time.Time `gorm:"column:trash_expires_at"`
 	DeletedBy             *string    `gorm:"column:deleted_by;type:varchar(255)"`
 	CreatedAt             time.Time  `gorm:"column:created_at;not null"`
 	UpdatedAt             time.Time  `gorm:"column:updated_at;not null"`
@@ -77,6 +78,50 @@ type SkillV2RevisionEntry struct {
 }
 
 func (SkillV2RevisionEntry) TableName() string { return "skill_revision_entries" }
+
+type SkillDistributionArtifact struct {
+	ArchiveSHA256   string    `gorm:"column:archive_sha256;type:varchar(64);primaryKey"`
+	BuiltinSkillUID string    `gorm:"column:builtin_skill_uid;type:varchar(64);not null;index:idx_skill_distribution_artifacts_uid_version,priority:1"`
+	Version         string    `gorm:"column:version;type:varchar(64);not null;index:idx_skill_distribution_artifacts_uid_version,priority:2"`
+	TreeSHA256      string    `gorm:"column:tree_sha256;type:varchar(64);not null"`
+	CreatedAt       time.Time `gorm:"column:created_at;not null"`
+}
+
+func (SkillDistributionArtifact) TableName() string { return "skill_distribution_artifacts" }
+
+type SkillDistributionEntry struct {
+	ArchiveSHA256 string  `gorm:"column:archive_sha256;type:varchar(64);primaryKey"`
+	Path          string  `gorm:"column:path;type:varchar(1024);primaryKey"`
+	EntryType     string  `gorm:"column:entry_type;type:varchar(16);not null"`
+	BlobHash      *string `gorm:"column:blob_hash;type:varchar(64);index:idx_skill_distribution_entries_blob"`
+	Size          int64   `gorm:"column:size"`
+	Mime          string  `gorm:"column:mime;type:varchar(128)"`
+	FileType      string  `gorm:"column:file_type;type:varchar(32);not null;default:'unknown'"`
+	Binary        bool    `gorm:"column:binary;not null;default:false"`
+	Mode          int     `gorm:"column:mode;not null;default:420"`
+}
+
+func (SkillDistributionEntry) TableName() string { return "skill_distribution_entries" }
+
+type SkillDistributionBinding struct {
+	SkillID              string    `gorm:"column:skill_id;type:varchar(36);primaryKey"`
+	BuiltinSkillUID      string    `gorm:"column:builtin_skill_uid;type:varchar(64);not null;index:idx_skill_distribution_bindings_uid"`
+	CurrentArchiveSHA256 string    `gorm:"column:current_archive_sha256;type:varchar(64);not null"`
+	PendingArchiveSHA256 string    `gorm:"column:pending_archive_sha256;type:varchar(64);not null;default:''"`
+	Conflicts            []byte    `gorm:"column:conflicts;type:json;not null;default:'[]'"`
+	CreatedAt            time.Time `gorm:"column:created_at;not null"`
+	UpdatedAt            time.Time `gorm:"column:updated_at;not null"`
+}
+
+func (SkillDistributionBinding) TableName() string { return "skill_distribution_bindings" }
+
+type SkillRevisionDistribution struct {
+	RevisionID    string    `gorm:"column:revision_id;type:varchar(36);primaryKey"`
+	ArchiveSHA256 string    `gorm:"column:archive_sha256;type:varchar(64);not null;index:idx_skill_revision_distributions_archive"`
+	CreatedAt     time.Time `gorm:"column:created_at;not null"`
+}
+
+func (SkillRevisionDistribution) TableName() string { return "skill_revision_distributions" }
 
 type SkillV2Draft struct {
 	SkillID        string     `gorm:"column:skill_id;type:varchar(36);primaryKey"`
