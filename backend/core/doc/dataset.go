@@ -732,7 +732,9 @@ type datasetListOrder struct {
 func resolveDatasetListOrder(orderBy string) datasetListOrder {
 	switch strings.TrimSpace(orderBy) {
 	case "latest_updated":
-		return datasetListOrder{clause: "updated_at desc"}
+		return datasetListOrder{
+			clause: "COALESCE((SELECT MAX(documents.updated_at) FROM documents WHERE documents.dataset_id = datasets.id AND documents.deleted_at IS NULL), datasets.updated_at) DESC, datasets.id DESC",
+		}
 	case "most_used":
 		return datasetListOrder{
 			clause:    "COALESCE(dus.usage_count, 0) DESC, datasets.updated_at DESC, datasets.id DESC",
