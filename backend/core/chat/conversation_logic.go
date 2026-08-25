@@ -262,9 +262,11 @@ func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName st
 		},
 	}
 	if ephemeral, _ := conversationSettings["ephemeral"].(bool); ephemeral {
-		expiresAt := now.Add(24 * time.Hour)
 		c.IsEphemeral = true
-		c.EphemeralExpiresAt = &expiresAt
+		if persistent, _ := conversationSettings["persistent_ephemeral"].(bool); !persistent {
+			expiresAt := now.Add(24 * time.Hour)
+			c.EphemeralExpiresAt = &expiresAt
+		}
 		c.SourceType, _ = conversationSettings["source_type"].(string)
 		c.SourceDatasetID, _ = conversationSettings["source_dataset_id"].(string)
 		c.SourceDocumentID, _ = conversationSettings["source_document_id"].(string)

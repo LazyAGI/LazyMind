@@ -7,12 +7,17 @@ import type { ChatSourceCollection } from "@/modules/chat/utils/sourceAdapter";
 import type { SendMessageParams } from "../ChatInput/types";
 import type { ChatMention } from "../ChatInput/MentionEditor";
 import type { ChatConfig } from "../ChatConfigs";
+import type { ThinkingDepth } from "@/modules/chat/store/chatThink";
 
 export interface ChatImperativeProps {
   replaceMessageList: (id: string, data: any[]) => void;
   createNewChat: () => void;
   sendMessage: (params: SendMessageParams) => void;
-  prepareMessage: (params: Pick<SendMessageParams, "text" | "citeMessage" | "citeMessages">) => void;
+  prepareMessage: (
+    params: Pick<SendMessageParams, "text" | "citeMessage" | "citeMessages"> & {
+      appendCitations?: boolean;
+    },
+  ) => void;
   disconnectConversationStream?: (
     conversationId: string,
     options?: { persistResumeKey?: boolean },
@@ -66,6 +71,10 @@ export interface ChatContainerProps {
   initialConversationSettings?: import("@/modules/chat/utils/request").ConversationRuntimeSettings;
   hasWorkflowSession?: boolean;
   conversationTrailEnabled?: boolean;
+  showThinkingDepth?: boolean;
+  showSkillDeposit?: boolean;
+  showConversationConfig?: boolean;
+  fixedThinkingDepth?: ThinkingDepth;
 }
 
 export interface ChatMessage {

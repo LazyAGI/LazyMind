@@ -395,6 +395,10 @@ interface ChatInputProps {
   onSkillDeposit?: () => void;
   /** Send the next message as a background task. Used by the new-task entry point. */
   runInBackground?: boolean;
+  showThinkingDepth?: boolean;
+  showSkillDeposit?: boolean;
+  showConversationConfig?: boolean;
+  fixedThinkingDepth?: ThinkingDepth;
 }
 
 export interface ShowcaseSelection {
@@ -491,6 +495,10 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       showcaseSelection,
       boundMentions = [],
       runInBackground = false,
+      showThinkingDepth = true,
+      showSkillDeposit = true,
+      showConversationConfig = true,
+      fixedThinkingDepth,
     } = props;
     const fileListRef = useRef<ImageUploadImperativeProps | null>(null);
     const knowledgeSelectorRef = useRef<ChatSelectorImperativeProps | null>(null);
@@ -504,6 +512,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       string | null
     >(null);
     const { thinkingDepth, setThinkingDepth } = useChatThinkStore();
+    const effectiveThinkingDepth = fixedThinkingDepth ?? thinkingDepth;
     const { setNewMessage } = useChatNewMessageStore();
     const { t } = useTranslation();
     const [text, setText] = useState("");
@@ -900,7 +909,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
           tags: [...(chatConfig?.tags ?? [])],
           databaseBaseId: chatConfig?.databaseBaseId,
         },
-        thinking_depth: thinkingDepth,
+        thinking_depth: effectiveThinkingDepth,
         mentions: effectiveMentions,
         citeMessage: normalizedCiteMessages.join("\n\n"),
         citeMessages: normalizedCiteMessages,
@@ -1334,21 +1343,23 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       </span>
                     </div>
                   ) : null}
-                  <Select
-                    aria-label={t("chat.thinkingDepth")}
-                    className="chat-thinking-depth-select"
-                    size="small"
-                    variant="borderless"
-                    value={thinkingDepth}
-                    disabled={disabled || isStreaming}
-                    onChange={setThinkingDepth}
-                    options={[
-                      { value: "low", label: t("chat.thinkingDepthLow") },
-                      { value: "medium", label: t("chat.thinkingDepthMedium") },
-                      { value: "high", label: t("chat.thinkingDepthHigh") },
-                      { value: "max", label: t("chat.thinkingDepthMax") },
-                    ]}
-                  />
+                  {showThinkingDepth && (
+                    <Select
+                      aria-label={t("chat.thinkingDepth")}
+                      className="chat-thinking-depth-select"
+                      size="small"
+                      variant="borderless"
+                      value={effectiveThinkingDepth}
+                      disabled={disabled || isStreaming || Boolean(fixedThinkingDepth)}
+                      onChange={setThinkingDepth}
+                      options={[
+                        { value: "low", label: t("chat.thinkingDepthLow") },
+                        { value: "medium", label: t("chat.thinkingDepthMedium") },
+                        { value: "high", label: t("chat.thinkingDepthHigh") },
+                        { value: "max", label: t("chat.thinkingDepthMax") },
+                      ]}
+                    />
+                  )}
                   {/* <ModelSelector sessionId={sessionId} disabled={isStreaming} /> */}
                   {showHistoryButton && openHistory && (
                     <div
@@ -1358,7 +1369,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       {t("chat.chatHistory")}
                     </div>
                   )}
-                  {isChatContent && (
+                  {showSkillDeposit && isChatContent && (
                     <Tooltip title={skillDepositTooltip}>
                       <div
                         className={`input-bottom-actions-left-item skill-deposit-action${
@@ -1384,25 +1395,17 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       </div>
                     </Tooltip>
                   )}
-                  <ChatConfigModal
-                    key={
-                      configResetKey != null
-                        ? `config-reset-${configResetKey}`
-                        : undefined
-                    }
-                    conversationId={
-                      sessionId && !sessionId.startsWith("temp_")
-                        ? sessionId
-                        : undefined
-                    }
+                  {showConversationConfig && <ChatConfigModal
+                    key={configResetKey != null ? `config-reset-${configResetKey}` : undefined}
+                    conversationId={sessionId && !sessionId.startsWith("temp_") ? sessionId : undefined}
                     initialSettings={initialConversationSettings}
                     hasWorkflowSession={hasWorkflowSession}
                     onSave={(settings) => {
                       setContextRuntimeSettings(settings);
                       onConversationSettingsChange?.(settings);
                     }}
-                  />
-                  {sessionId && !sessionId.startsWith("temp_") && (
+                  />}
+                  {showConversationConfig && sessionId && !sessionId.startsWith("temp_") && (
                     <DismissedWorkflowRestoreButton conversationId={sessionId} />
                   )}
                 </div>
@@ -1424,7 +1427,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                           tags: chatConfig?.tags ?? [],
                         },
                         runtime: contextRuntimeSettings,
-                        thinkingDepth,
+                        thinkingDepth: effectiveThinkingDepth,
                       })}
                       buildRequest={() => {
                         const files = fileListRef.current?.getFiles() ?? [];
@@ -1453,7 +1456,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                             creator: chatConfig?.creators ?? [],
                             tags: chatConfig?.tags ?? [],
                           },
-                          thinking_depth: thinkingDepth,
+                          thinking_depth: effectiveThinkingDepth,
                           ...contextRuntimeSettings,
                         };
                       }}

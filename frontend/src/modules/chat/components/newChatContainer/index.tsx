@@ -113,6 +113,10 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       initialConversationSettings,
       hasWorkflowSession,
       conversationTrailEnabled = true,
+      showThinkingDepth = true,
+      showSkillDeposit = true,
+      showConversationConfig = true,
+      fixedThinkingDepth,
     } = props;
 
     const { clearPendingMessage: clearStorePendingMessage } =
@@ -296,9 +300,16 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       replaceMessageList: conversation.replaceMessageList,
       createNewChat: conversation.createNewChat,
       sendMessage,
-      prepareMessage: ({ text, citeMessage, citeMessages: nextCiteMessages }) => {
+      prepareMessage: ({
+        text,
+        citeMessage,
+        citeMessages: nextCiteMessages,
+        appendCitations = false,
+      }) => {
         conversation.setContent(text);
-        clearCiteMessages();
+        if (!appendCitations) {
+          clearCiteMessages();
+        }
         const citations = nextCiteMessages ?? (citeMessage ? [citeMessage] : []);
         citations.forEach((citation) => handleAddCiteMessage(citation));
         requestAnimationFrame(() => chatInputRef.current?.focus());
@@ -430,6 +441,10 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               onConversationSettingsChange={onConversationSettingsChange}
               initialConversationSettings={initialConversationSettings}
               hasWorkflowSession={hasWorkflowSession}
+              showThinkingDepth={showThinkingDepth}
+              showSkillDeposit={showSkillDeposit}
+              showConversationConfig={showConversationConfig}
+              fixedThinkingDepth={fixedThinkingDepth}
             />
           </div>
           {sourcePanelSources.length > 0 && (

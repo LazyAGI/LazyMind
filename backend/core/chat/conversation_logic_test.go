@@ -87,6 +87,27 @@ func TestEphemeralConversationIsHiddenUntilPromoted(t *testing.T) {
 	}
 }
 
+func TestPersistentEphemeralConversationHasNoExpiry(t *testing.T) {
+	database := newPromptTestDB(t)
+	db := database.DB
+	store.Init(db, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	conversation, _, err := ensureConversation(
+		context.Background(), db, "persistent-preview", "Preview chat", nil, nil,
+		"u1", "User 1", map[string]any{
+			"ephemeral": true, "persistent_ephemeral": true,
+			"source_type": "pdf_preview", "source_document_id": "doc-1",
+		},
+	)
+	if err != nil {
+		t.Fatalf("create persistent ephemeral conversation: %v", err)
+	}
+	if !conversation.IsEphemeral || conversation.EphemeralExpiresAt != nil {
+		t.Fatalf("persistent ephemeral conversation should not expire: %#v", conversation)
+	}
+}
+
 func TestConversationListSeparatesAssistantOwnershipFromExecutionEngine(t *testing.T) {
 	database := newPromptTestDB(t)
 	db := database.DB

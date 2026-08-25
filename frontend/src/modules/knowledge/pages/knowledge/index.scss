@@ -28,9 +28,12 @@
 .knowledge-preview-side {
   display: flex;
   flex: 1;
+  width: 100%;
+  min-width: 0;
   min-height: 0;
   flex-direction: column;
   gap: 8px;
+  overflow: hidden;
 
   &.is-collapsed {
     display: none;
@@ -38,6 +41,8 @@
 }
 
 .knowledge-preview-mode-tabs {
+  width: 100%;
+  min-width: 0;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -64,6 +69,13 @@
   }
 }
 
+.knowledge-preview-layout,
+.knowledge-preview-file-column,
+.knowledge-preview-panel-column {
+  min-width: 0;
+  overflow: hidden;
+}
+
 .knowledge-preview-toolbar,
 .knowledge-preview-sequence {
   display: flex;
@@ -76,6 +88,10 @@
 
 .knowledge-preview-segment-select {
   width: 160px;
+}
+
+.knowledge-preview-chat-history-select {
+  width: 220px;
 }
 
 .knowledge-preview-sequence {

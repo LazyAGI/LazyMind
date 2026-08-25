@@ -16,6 +16,7 @@ import {
 } from "@/modules/chat/utils/request";
 import { axiosInstance, BASE_URL } from "@/components/request";
 import { emitConversationActivity } from "@/modules/chat/utils/conversationActivity";
+import { buildChatMessageListFromHistory } from "@/modules/chat/utils/message";
 import "./index.scss";
 import type { DocumentChatSelection } from "./types";
 
@@ -24,6 +25,9 @@ interface PdfTemporaryChatProps {
   documentId: string;
   fileName: string;
   selection?: DocumentChatSelection;
+  conversationToLoad?: string;
+  onConversationChange?: (conversationId?: string) => void;
+  onHistoryChange?: () => void;
   onClose: () => void;
 }
 
@@ -39,13 +43,15 @@ export default function PdfTemporaryChat({
   documentId,
   fileName,
   selection,
+  conversationToLoad,
+  onConversationChange,
+  onHistoryChange,
   onClose,
 }: PdfTemporaryChatProps) {
   const { t } = useTranslation();
   const chatRef = useRef<ChatImperativeProps>(null);
   const initialConversationIdRef = useRef(newPreviewConversationId());
   const conversationIdRef = useRef(initialConversationIdRef.current);
-  const savedRef = useRef(false);
   const preparedSelectionRef = useRef("");
   const [conversationId, setConversationId] = useState(initialConversationIdRef.current);
   const [conversationCreated, setConversationCreated] = useState(false);
@@ -54,25 +60,39 @@ export default function PdfTemporaryChat({
   const [restartKey, setRestartKey] = useState(0);
   const [chatConfig, setChatConfig] = useState({ knowledgeBaseId: [datasetId] });
 
-  const discardConversation = useCallback(async (id: string) => {
-    if (!id || id.startsWith("temp_")) return;
-    try {
-      await ChatServiceApi().conversationServiceDeleteConversation({ conversation: id });
-    } catch {
-      // A failed cleanup must not block closing the document preview.
-    }
-  }, []);
-
   useEffect(() => {
     conversationIdRef.current = conversationId;
   }, [conversationId]);
 
   useEffect(() => () => {
     sessionStorage.removeItem(CHAT_RESUME_CONVERSATION_KEY);
-    if (!savedRef.current) {
-      void discardConversation(conversationIdRef.current);
-    }
-  }, [discardConversation]);
+  }, []);
+
+  useEffect(() => {
+    if (!conversationToLoad || !chatRef.current) return;
+    let cancelled = false;
+    Promise.all([
+      ChatServiceApi().conversationServiceGetConversationHistory({ name: conversationToLoad }),
+      ChatServiceApi().conversationServiceGetChatStatus({ conversationId: conversationToLoad }),
+    ]).then(([historyResponse, statusResponse]) => {
+      if (cancelled) return;
+      const list = buildChatMessageListFromHistory(historyResponse.data.history || [], {
+        isGenerating: Boolean(statusResponse.data?.is_generating),
+      });
+      setConversationId(conversationToLoad);
+      conversationIdRef.current = conversationToLoad;
+      setConversationCreated(true);
+      setSaved(false);
+      preparedSelectionRef.current = "";
+      chatRef.current?.replaceMessageList(conversationToLoad, list);
+      if (statusResponse.data?.is_generating) {
+        chatRef.current?.openResumeSSE?.(conversationToLoad);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [conversationToLoad]);
 
   useEffect(() => {
     if (!selection) return;
@@ -90,6 +110,7 @@ export default function PdfTemporaryChat({
       chatRef.current.prepareMessage({
         text: "",
         citeMessage: selection.text,
+        appendCitations: true,
       });
     };
     let timer = window.setTimeout(sendWhenReady, 50);
@@ -100,6 +121,7 @@ export default function PdfTemporaryChat({
     input: Query[],
     action: ChatConversationsRequestActionEnum,
     callbacks: Record<string, (event: CustomEvent) => void>,
+    extras?: Record<string, unknown>,
   ) => new SSE(CHAT_STREAM_URL, {
     method: Method.POST,
     headers: {
@@ -118,6 +140,8 @@ export default function PdfTemporaryChat({
       models: [t("chat.lazyMindModel")],
       stream: true,
       input,
+      ...extras,
+      thinking_depth: "low",
       mode: "auto",
       basic_chat_only: true,
       create_time: new Date().toISOString(),
@@ -125,6 +149,7 @@ export default function PdfTemporaryChat({
         enable_workflow: false,
         enable_subagent: false,
         ephemeral: true,
+        persistent_ephemeral: true,
         source_type: "pdf_preview",
         source_dataset_id: datasetId,
         source_document_id: documentId,
@@ -164,21 +189,16 @@ export default function PdfTemporaryChat({
     callbacks,
   });
 
-  const startNewConversation = async () => {
-    const previous = conversationIdRef.current;
-    const previousWasSaved = savedRef.current;
+  const startNewConversation = () => {
     chatRef.current?.createNewChat();
     const nextId = newPreviewConversationId();
     setConversationId(nextId);
     conversationIdRef.current = nextId;
     setConversationCreated(false);
-    savedRef.current = false;
     setSaved(false);
     preparedSelectionRef.current = "";
     setRestartKey((key) => key + 1);
-    if (!previousWasSaved) {
-      await discardConversation(previous);
-    }
+    onConversationChange?.(undefined);
   };
 
   const saveConversation = async () => {
@@ -189,10 +209,10 @@ export default function PdfTemporaryChat({
       await axiosInstance.post(
         `${BASE_URL}/api/core/conversations/${encodeURIComponent(id)}:promote`,
       );
-      savedRef.current = true;
       setSaved(true);
       emitConversationActivity({ conversationId: id });
       message.success(t("knowledge.pdfChatSaved"));
+      onHistoryChange?.();
     } finally {
       setSaving(false);
     }
@@ -230,8 +250,10 @@ export default function PdfTemporaryChat({
           onOpenSSE={openSSE}
           onOpenResumeSSE={openResumeSSE}
           onConversationIdChange={(id) => {
+            if (!id) return;
             setConversationId(id);
             setConversationCreated(true);
+            onHistoryChange?.();
           }}
           parseErrorData={(data) => data}
           setIsChatContent={() => {}}
@@ -241,6 +263,10 @@ export default function PdfTemporaryChat({
           setChatConfigFn={setChatConfig}
           initialConversationSettings={{ enable_workflow: false, enable_subagent: false }}
           conversationTrailEnabled={conversationCreated}
+          showThinkingDepth={false}
+          showSkillDeposit={false}
+          showConversationConfig={false}
+          fixedThinkingDepth="low"
         />
       </div>
     </aside>

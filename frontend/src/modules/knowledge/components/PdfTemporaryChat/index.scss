@@ -43,9 +43,13 @@
 
 .pdf-temporary-chat__body {
   flex: 1;
+  min-width: 0;
   min-height: 0;
+  overflow: hidden;
 
   .chat-chat-container {
+    width: 100%;
+    min-width: 0;
     padding-bottom: 8px;
   }
 

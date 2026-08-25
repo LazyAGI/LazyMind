@@ -11,6 +11,7 @@ import {
 } from "@ant-design/icons";
 import moment from "moment";
 import { Doc } from "@/api/generated/core-client";
+import type { Conversation } from "@/api/generated/chatbot-client";
 import { Segment } from "@/api/generated/knowledge-client";
 
 import type { Dataset as KnowledgeDataset } from "@/api/generated/knowledge-client";
@@ -35,6 +36,7 @@ import { DetailPageHeader, type PdfTextSelection } from "@/components/ui";
 import type { DocumentChatSelection } from "@/modules/knowledge/components/PdfTemporaryChat/types";
 import PdfTemporaryChat from "@/modules/knowledge/components/PdfTemporaryChat";
 import { localizeErrorCode } from "@/components/request";
+import { ChatServiceApi } from "@/modules/chat/utils/request";
 import "./index.scss";
 
 type KnowledgeDetail = Doc & {
@@ -100,6 +102,31 @@ const Detail = () => {
     Array<{ label: ReactNode; value: string }>
   >([]);
   const [showSegmentSequence, setShowSegmentSequence] = useState(true);
+  const [documentChatHistory, setDocumentChatHistory] = useState<Conversation[]>([]);
+  const [selectedDocumentConversation, setSelectedDocumentConversation] = useState<string>();
+
+  const refreshDocumentChatHistory = useCallback(() => {
+    if (!knowledgeId) return;
+    ChatServiceApi().conversationServiceListConversations(
+      { pageSize: 100 },
+      {
+        params: {
+          include_ephemeral: true,
+          source_type: "pdf_preview",
+          source_document_id: knowledgeId,
+          is_task_conv: false,
+        },
+        silentError: true,
+      } as never,
+    ).then((response) => {
+      setDocumentChatHistory(response.data.conversations || []);
+    }).catch(() => {});
+  }, [knowledgeId]);
+
+  useEffect(() => {
+    setSelectedDocumentConversation(undefined);
+    refreshDocumentChatHistory();
+  }, [refreshDocumentChatHistory]);
 
   const handleSegmentViewOptionsChange = useCallback(
     (options: Array<{ label: ReactNode; value: string }>) => {
@@ -400,8 +427,11 @@ const Detail = () => {
           },
         ]}
       />
-      <Row gutter={[12, 12]} className="mt-6 min-h-0 w-full flex-1">
-        <Col flex={previewSideCollapsed ? "auto" : "0 0 62.5%"} className="min-h-0">
+      <Row gutter={[12, 12]} className="knowledge-preview-layout mt-6 min-h-0 w-full flex-1">
+        <Col
+          flex={previewSideCollapsed ? "auto" : "0 0 62.5%"}
+          className="knowledge-preview-file-column min-h-0 min-w-0"
+        >
           <FileViewer
             ref={fileViewerRef}
             file={previewFile}
@@ -411,7 +441,10 @@ const Detail = () => {
             onPdfSelection={askPdfSelection}
           />
         </Col>
-        <Col flex={previewSideCollapsed ? "0 0 48px" : "0 0 37.5%"} className="min-h-0">
+        <Col
+          flex={previewSideCollapsed ? "0 0 48px" : "0 0 37.5%"}
+          className="knowledge-preview-panel-column min-h-0 min-w-0"
+        >
           <div
             style={{
               height: "100%",
@@ -447,7 +480,19 @@ const Detail = () => {
                               />
                             </div>
                           </>
-                        ) : null}
+                        ) : (
+                          <Select
+                            allowClear
+                            className="knowledge-preview-chat-history-select"
+                            placeholder={t("knowledge.pdfChatHistoryPlaceholder")}
+                            value={selectedDocumentConversation}
+                            options={documentChatHistory.map((conversation) => ({
+                              value: conversation.conversation_id || "",
+                              label: `${conversation.display_name || t("knowledge.pdfChatPanelLabel")} · ${moment(conversation.update_time).format("MM-DD HH:mm")}`,
+                            })).filter((option) => Boolean(option.value))}
+                            onChange={(value) => setSelectedDocumentConversation(value || undefined)}
+                          />
+                        )}
                         <Button
                           type="text"
                           icon={<DoubleRightOutlined />}
@@ -467,6 +512,9 @@ const Detail = () => {
                             documentId={knowledgeId}
                             fileName={knowledgeDetail.display_name || ""}
                             selection={documentChatSelection || undefined}
+                            conversationToLoad={selectedDocumentConversation}
+                            onConversationChange={setSelectedDocumentConversation}
+                            onHistoryChange={refreshDocumentChatHistory}
                             onClose={() => {
                               setDocumentChatSelection(null);
                               setPreviewSideTab("segments");

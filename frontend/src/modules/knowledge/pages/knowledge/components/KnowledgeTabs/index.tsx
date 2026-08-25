@@ -1,5 +1,5 @@
 import { Empty, TabsProps } from "antd";
-import { useEffect, useMemo, useState } from "react";
+import { cloneElement, isValidElement, useEffect, useMemo, useState } from "react";
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
@@ -261,6 +261,9 @@ const KnowledgeTabs = (props: {
 
   const activeKey = controlledActiveKey || internalActiveKey;
   const activeTab = tabs?.find((tab) => String(tab.key) === activeKey);
+  const activeContent = isValidElement<{ showSequence?: boolean }>(activeTab?.children)
+    ? cloneElement(activeTab.children, { showSequence })
+    : activeTab?.children;
 
   useEffect(() => {
     onOptionsChange?.((tabs || []).map((tab) => ({
@@ -274,7 +277,7 @@ const KnowledgeTabs = (props: {
   ) : !tabs?.length ? (
     <Empty description={t("knowledge.noContent")} style={{ marginTop: 80 }} />
   ) : (
-    <div className="knowledge-segment-content">{activeTab?.children}</div>
+    <div className="knowledge-segment-content">{activeContent}</div>
   );
 };
 

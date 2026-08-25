@@ -23,6 +23,13 @@ export function useCiteMessagesInput(
         return;
       }
 
+      if (citeMessagesRef.current.includes(normalizedText)) {
+        requestAnimationFrame(() => {
+          chatInputRef.current?.focus();
+        });
+        return;
+      }
+
       // Keep setState pure: warn outside the updater so the tip always surfaces.
       if (citeMessagesRef.current.length >= MAX_CITE_MESSAGE_COUNT) {
         message.warning(
