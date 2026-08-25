@@ -28,9 +28,24 @@ func TestUserConfigModelsAutoMigrate(t *testing.T) {
 	if !db.Migrator().HasColumn(&UserChatSettings{}, "plugin_mode") {
 		t.Fatal("expected user_chat_settings.plugin_mode column")
 	}
+	for _, column := range []string{"quick_question_defaults", "new_task_defaults"} {
+		if !db.Migrator().HasColumn(&UserChatSettings{}, column) {
+			t.Fatalf("expected user_chat_settings.%s column", column)
+		}
+	}
 
 	if !db.Migrator().HasColumn(&UserUIPreferences{}, "user_id") {
 		t.Fatal("expected user_ui_preferences.user_id column")
+	}
+	if !db.Migrator().HasColumn(&UserUIPreferences{}, "schedules_enabled") {
+		t.Fatal("expected user_ui_preferences.schedules_enabled column")
+	}
+}
+
+func TestConversationThinkingDepthAutoMigrate(t *testing.T) {
+	db := MigrateTestDB(t, &Conversation{})
+	if !db.Migrator().HasColumn(&Conversation{}, "thinking_depth") {
+		t.Fatal("expected conversations.thinking_depth column")
 	}
 }
 

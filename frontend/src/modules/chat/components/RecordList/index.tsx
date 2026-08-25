@@ -628,6 +628,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           open={Boolean(archiveItem)}
           conversationId={archiveItem?.conversation_id}
           title={archiveItem?.display_name}
+          itemKind={(archiveItem as (Conversation & { is_task_conv?: boolean }) | null)?.is_task_conv ? "task" : "dialog"}
           onCancel={() => setArchiveItem(null)}
           onArchived={() => {
             const archived = archiveItem;

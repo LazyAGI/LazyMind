@@ -37,7 +37,7 @@ vi.mock('react-i18next', () => ({
       'chat.conversationConfigEnableSubagentTooltip': '子任务说明',
       'chat.conversationConfigFeatureControlsLoading': '正在读取任务中心状态…',
       'chat.conversationConfigFeatureControlsUnavailable': '任务中心状态不可用',
-      'chat.conversationConfigTaskCenterDisabled': '任务中心已关闭，对话中的子任务和工作流暂不可用。',
+      'chat.conversationConfigTaskCenterDisabled': '任务中心已关闭，子任务暂不可用。',
       'chat.conversationConfigWorkflowMasterDisabled': '工作流总开关已关闭。',
     }[key] ?? key),
   }),
@@ -60,7 +60,7 @@ vi.mock('@/modules/user/uiPreferencesApi', () => ({
   fetchUserUiPreferences: mocks.fetchUserUiPreferences,
 }));
 
-describe('ChatConfigPopover task center dependency', () => {
+describe('ChatConfigPopover feature control independence', () => {
   beforeEach(() => {
     mocks.fetchUserUiPreferences.mockReset();
     mocks.fetchUserUiPreferences.mockResolvedValue({
@@ -75,7 +75,67 @@ describe('ChatConfigPopover task center dependency', () => {
     mocks.onSave.mockReset();
   });
 
-  it('shows effective disabled controls and updates without overwriting saved chat choices', async () => {
+  it('stays closed after being disabled while open', async () => {
+    mocks.fetchUserUiPreferences.mockResolvedValue({
+      task_center_enabled: true,
+      workflows_enabled: true,
+    });
+
+    const { rerender } = render(
+      <ChatConfigPopover
+        initialSettings={{
+          enable_workflow: true,
+          workflow_mode: 'auto',
+          enable_subagent: true,
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '对话配置' }));
+    expect(
+      await screen.findByRole('radiogroup', { name: '对话执行者' }),
+    ).toBeInTheDocument();
+
+    rerender(
+      <ChatConfigPopover
+        disabled
+        initialSettings={{
+          enable_workflow: true,
+          workflow_mode: 'auto',
+          enable_subagent: true,
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '对话配置' })).toBeDisabled();
+      expect(
+        screen.getByRole('tooltip').closest('.ant-popover'),
+      ).toHaveStyle({ pointerEvents: 'none' });
+    });
+
+    rerender(
+      <ChatConfigPopover
+        initialSettings={{
+          enable_workflow: true,
+          workflow_mode: 'auto',
+          enable_subagent: true,
+        }}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: '对话配置' })).toBeEnabled();
+    expect(
+      screen.getByRole('tooltip').closest('.ant-popover'),
+    ).toHaveStyle({ pointerEvents: 'none' });
+  });
+
+  it('disables only subtasks when the task center is off and workflows are on', async () => {
+    mocks.fetchUserUiPreferences.mockResolvedValue({
+      task_center_enabled: false,
+      workflows_enabled: true,
+    });
+
     render(
       <ChatConfigPopover
         initialSettings={{
@@ -89,17 +149,100 @@ describe('ChatConfigPopover task center dependency', () => {
 
     fireEvent.click(screen.getByText('对话配置'));
 
-    expect(await screen.findByText('任务中心已关闭，对话中的子任务和工作流暂不可用。')).toBeInTheDocument();
+    const taskControlsNotice = await screen.findByText('任务中心已关闭，子任务暂不可用。');
     const subagentSwitch = screen.getByRole('switch', { name: '允许子任务' });
     expect(subagentSwitch).toBeDisabled();
     expect(subagentSwitch).not.toBeChecked();
+    expect(subagentSwitch).toHaveAttribute('aria-describedby', taskControlsNotice.id);
 
     const workflowControl = screen.getByLabelText('工作流执行方式');
+    expect(workflowControl).not.toHaveAttribute('aria-describedby');
     expect(
-      within(workflowControl).getAllByRole('radio').every((radio) => radio.hasAttribute('disabled')),
+      within(workflowControl).getAllByRole('radio').every(
+        (radio) => !radio.hasAttribute('disabled'),
+      ),
     ).toBe(true);
+    expect(within(workflowControl).getByRole('radio', { name: '自动执行' })).toBeChecked();
+    expect(screen.queryByText('工作流总开关已关闭。')).not.toBeInTheDocument();
     expect(mocks.onSave).not.toHaveBeenCalled();
     expect(mocks.patchConversationSettings).not.toHaveBeenCalled();
+  });
+
+  it('disables only workflows when the workflow master is off and the task center is on', async () => {
+    mocks.fetchUserUiPreferences.mockResolvedValue({
+      task_center_enabled: true,
+      workflows_enabled: false,
+    });
+
+    render(
+      <ChatConfigPopover
+        initialSettings={{
+          enable_workflow: true,
+          workflow_mode: 'auto',
+          enable_subagent: true,
+        }}
+        onSave={mocks.onSave}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('对话配置'));
+
+    const workflowControlsNotice = await screen.findByText('工作流总开关已关闭。');
+    const subagentSwitch = screen.getByRole('switch', { name: '允许子任务' });
+    expect(subagentSwitch).toBeEnabled();
+    expect(subagentSwitch).toBeChecked();
+    expect(subagentSwitch).not.toHaveAttribute('aria-describedby');
+
+    const workflowControl = screen.getByLabelText('工作流执行方式');
+    expect(workflowControl).toHaveAttribute('aria-describedby', workflowControlsNotice.id);
+    expect(
+      within(workflowControl).getAllByRole('radio').every(
+        (radio) => radio.hasAttribute('disabled'),
+      ),
+    ).toBe(true);
+    expect(within(workflowControl).getByRole('radio', { name: '禁用' })).toBeChecked();
+    expect(screen.queryByText('任务中心已关闭，子任务暂不可用。')).not.toBeInTheDocument();
+    expect(mocks.onSave).not.toHaveBeenCalled();
+    expect(mocks.patchConversationSettings).not.toHaveBeenCalled();
+  });
+
+  it('updates master availability without overwriting saved chat choices', async () => {
+    mocks.fetchUserUiPreferences.mockResolvedValue({
+      task_center_enabled: true,
+      workflows_enabled: true,
+    });
+
+    render(
+      <ChatConfigPopover
+        initialSettings={{
+          enable_workflow: true,
+          workflow_mode: 'auto',
+          enable_subagent: true,
+        }}
+        onSave={mocks.onSave}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('对话配置'));
+
+    const subagentSwitch = screen.getByRole('switch', { name: '允许子任务' });
+    const workflowControl = screen.getByLabelText('工作流执行方式');
+    const autoMode = within(workflowControl).getByRole('radio', { name: '自动执行' });
+    const disabledMode = within(workflowControl).getByRole('radio', { name: '禁用' });
+
+    await waitFor(() => expect(subagentSwitch).toBeEnabled());
+    expect(subagentSwitch).toBeChecked();
+    expect(autoMode).toBeChecked();
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent('lazymind:user-ui-preferences-changed', {
+        detail: { task_center_enabled: false, workflows_enabled: false },
+      }));
+    });
+
+    await waitFor(() => expect(subagentSwitch).toBeDisabled());
+    expect(subagentSwitch).not.toBeChecked();
+    expect(disabledMode).toBeChecked();
 
     act(() => {
       window.dispatchEvent(new CustomEvent('lazymind:user-ui-preferences-changed', {
@@ -109,10 +252,7 @@ describe('ChatConfigPopover task center dependency', () => {
 
     await waitFor(() => expect(subagentSwitch).toBeEnabled());
     expect(subagentSwitch).toBeChecked();
-    expect(screen.getByText('工作流总开关已关闭。')).toBeInTheDocument();
-    expect(
-      within(workflowControl).getAllByRole('radio').every((radio) => radio.hasAttribute('disabled')),
-    ).toBe(true);
+    expect(disabledMode).toBeChecked();
 
     act(() => {
       window.dispatchEvent(new CustomEvent('lazymind:user-ui-preferences-changed', {
@@ -125,7 +265,78 @@ describe('ChatConfigPopover task center dependency', () => {
         within(workflowControl).getAllByRole('radio').every((radio) => !radio.hasAttribute('disabled')),
       ).toBe(true);
     });
+    expect(subagentSwitch).toBeChecked();
+    expect(autoMode).toBeChecked();
     expect(mocks.onSave).not.toHaveBeenCalled();
     expect(mocks.patchConversationSettings).not.toHaveBeenCalled();
+  });
+
+  it('keeps subtask and workflow choices independent', async () => {
+    mocks.fetchUserUiPreferences.mockResolvedValue({
+      task_center_enabled: true,
+      workflows_enabled: true,
+    });
+    mocks.patchConversationSettings.mockResolvedValue(undefined);
+
+    render(
+      <ChatConfigPopover
+        conversationId="conversation-1"
+        initialSettings={{
+          enable_workflow: true,
+          workflow_mode: 'auto',
+          enable_subagent: true,
+        }}
+        onSave={mocks.onSave}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('对话配置'));
+
+    const subagentSwitch = screen.getByRole('switch', { name: '允许子任务' });
+    const workflowControl = screen.getByLabelText('工作流执行方式');
+    const autoMode = within(workflowControl).getByRole('radio', { name: '自动执行' });
+    const disabledMode = within(workflowControl).getByRole('radio', { name: '禁用' });
+
+    await waitFor(() => expect(subagentSwitch).toBeEnabled());
+    fireEvent.click(subagentSwitch);
+
+    await waitFor(() => {
+      expect(mocks.patchConversationSettings).toHaveBeenNthCalledWith(1, 'conversation-1', {
+        enable_workflow: true,
+        workflow_mode: 'auto',
+        enable_subagent: false,
+      });
+    });
+    expect(subagentSwitch).not.toBeChecked();
+    expect(autoMode).toBeChecked();
+    expect(
+      within(workflowControl).getAllByRole('radio').every(
+        (radio) => !radio.hasAttribute('disabled'),
+      ),
+    ).toBe(true);
+
+    fireEvent.click(disabledMode);
+
+    await waitFor(() => {
+      expect(mocks.patchConversationSettings).toHaveBeenNthCalledWith(2, 'conversation-1', {
+        enable_workflow: false,
+        workflow_mode: 'auto',
+        enable_subagent: false,
+      });
+    });
+    expect(subagentSwitch).not.toBeChecked();
+    expect(disabledMode).toBeChecked();
+
+    fireEvent.click(subagentSwitch);
+
+    await waitFor(() => {
+      expect(mocks.patchConversationSettings).toHaveBeenNthCalledWith(3, 'conversation-1', {
+        enable_workflow: false,
+        workflow_mode: 'auto',
+        enable_subagent: true,
+      });
+    });
+    expect(subagentSwitch).toBeChecked();
+    expect(disabledMode).toBeChecked();
   });
 });

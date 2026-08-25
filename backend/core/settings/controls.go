@@ -16,6 +16,7 @@ import (
 // preference row is intentionally treated as fully enabled for upgrade safety.
 type FeatureControls struct {
 	TaskCenterEnabled      bool `json:"task_center_enabled"`
+	SchedulesEnabled       bool `json:"schedules_enabled"`
 	SkillsEnabled          bool `json:"skills_enabled"`
 	WorkflowsEnabled       bool `json:"workflows_enabled"`
 	MCPEnabled             bool `json:"mcp_enabled"`
@@ -25,6 +26,7 @@ type FeatureControls struct {
 func DefaultFeatureControls() FeatureControls {
 	return FeatureControls{
 		TaskCenterEnabled:      true,
+		SchedulesEnabled:       true,
 		SkillsEnabled:          true,
 		WorkflowsEnabled:       true,
 		MCPEnabled:             true,
@@ -54,8 +56,9 @@ func LoadFeatureControls(ctx context.Context, db *gorm.DB, userID string) (Featu
 	}
 	return FeatureControls{
 		TaskCenterEnabled:      preferences.TaskCenterEnabled,
+		SchedulesEnabled:       preferences.SchedulesEnabled,
 		SkillsEnabled:          preferences.SkillsEnabled,
-		WorkflowsEnabled:       preferences.TaskCenterEnabled && preferences.WorkflowsEnabled,
+		WorkflowsEnabled:       preferences.WorkflowsEnabled,
 		MCPEnabled:             preferences.MCPEnabled,
 		DocumentParsingEnabled: preferences.DocumentParsingEnabled,
 	}, nil

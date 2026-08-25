@@ -619,31 +619,8 @@ func CheckGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "group not found", http.StatusNotFound)
 		return
 	}
-	apiKeyRequired := isAPIKeyRequiredForBaseURL(r.Context(), db, parent.DefaultModelProviderID, urlStr)
-	if apiKey == "" && apiKeyRequired {
-		common.ReplyErr(w, "api_key is required when using the default base_url", http.StatusBadRequest)
-		return
-	}
 	if apiKey == "" {
-		if !req.DryRun {
-			now := time.Now()
-			tx := db.WithContext(r.Context()).
-				Model(&orm.UserModelProviderGroup{}).
-				Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", groupID, parentID, userID).
-				Updates(map[string]interface{}{
-					"is_verified": true,
-					"updated_at":  now,
-				})
-			if tx.Error != nil {
-				common.ReplyErr(w, "update group verify status failed", http.StatusInternalServerError)
-				return
-			}
-			if tx.RowsAffected == 0 {
-				common.ReplyErr(w, "group not found", http.StatusNotFound)
-				return
-			}
-		}
-		common.ReplyOK(w, CheckModelProviderData{Success: true})
+		common.ReplyErr(w, "api_key is required", http.StatusBadRequest)
 		return
 	}
 

@@ -410,7 +410,7 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 	}
 	if depth, ok := body["thinking_depth"].(string); ok {
 		depth = strings.ToLower(strings.TrimSpace(depth))
-		if depth == "low" || depth == "medium" || depth == "high" {
+		if depth == "low" || depth == "medium" || depth == "high" || depth == "max" {
 			req.Runtime.ThinkingDepth = depth
 		}
 	}

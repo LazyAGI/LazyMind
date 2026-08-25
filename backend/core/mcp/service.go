@@ -223,6 +223,7 @@ func setMCPFeatureControl(ctx context.Context, db *gorm.DB, userID string, enabl
 		return db.WithContext(ctx).Model(&orm.UserUIPreferences{}).Create(map[string]any{
 			"user_id":             userID,
 			"task_center_enabled": true,
+			"schedules_enabled":   true,
 			"skills_enabled":      true,
 			"workflows_enabled":   true,
 			"mcp_enabled":         enabled,
@@ -322,13 +323,12 @@ func LoadRuntimeConfig(ctx context.Context, db *gorm.DB, userID string) ([]Runti
 	if err != nil {
 		return nil, err
 	}
-	if !controls.MCPEnabled {
-		return []RuntimeConfig{}, nil
-	}
 	var rows []orm.MCPServer
 	q := db.WithContext(ctx).Where("enabled = ? AND deleted_at IS NULL AND transport IN ?", true, []string{transportSSE, transportHTTP})
 	if userID == "" {
 		q = q.Where("share = ?", true)
+	} else if !controls.MCPEnabled {
+		q = q.Where("share = ? AND create_user_id <> ?", true, userID)
 	} else {
 		q = q.Where("(create_user_id = ? OR share = ?)", userID, true)
 	}
