@@ -100,6 +100,9 @@ func TestWriterDocumentRenderSlotIncludesSource(t *testing.T) {
 	if _, ok := writerDocumentSlot("source_document"); ok {
 		t.Fatal("source_document must remain read-only")
 	}
+	if slot, ok := writerDocumentSlot("flat_draft_document"); !ok || slot != "flat_draft_document" {
+		t.Fatalf("flat_draft_document slot = %q, %v", slot, ok)
+	}
 }
 
 func TestLoadWriterWriteBackArtifact_InlineMarkdown(t *testing.T) {
@@ -121,7 +124,7 @@ func TestLoadWriterWriteBackBaseline_UsesSourceDocumentForInitialSync(t *testing
 	seedWriterRevision(t, db, "draft-1", "draft_document", 1, false, "ai", source)
 	seedWriterRevision(t, db, "draft-2", "draft_document", 2, true, "human", source)
 
-	baseline, err := loadWriterWriteBackBaseline(context.Background(), db.DB, "session", 2)
+	baseline, err := loadWriterWriteBackBaseline(context.Background(), db.DB, "session", "draft_document", 2)
 	if err != nil {
 		t.Fatalf("load baseline: %v", err)
 	}
@@ -138,11 +141,11 @@ func TestLoadWriterWriteBackBaseline_PrefersLatestSyncedDraft(t *testing.T) {
 	source := json.RawMessage(`{"data":{"document_id":"source-doc","provider_binding":{"provider":"feishu","document_id":"source-doc"}}}`)
 	syncedDraft := json.RawMessage(`{"data":{"document_id":"synced-doc","provider_binding":{"provider":"feishu","document_id":"synced-doc"}},"meta":{"lazymind_provider_sync":{"confirmed":true}}}`)
 	seedWriterRevision(t, db, "source", "source_document", 1, true, "ai", source)
-	seedWriterRevision(t, db, "draft-1", "draft_document", 1, false, "host", syncedDraft)
-	seedWriterRevision(t, db, "draft-2", "draft_document", 2, false, "human", syncedDraft)
-	seedWriterRevision(t, db, "draft-3", "draft_document", 3, true, "human", syncedDraft)
+	seedWriterRevision(t, db, "draft-1", "flat_draft_document", 1, false, "host", syncedDraft)
+	seedWriterRevision(t, db, "draft-2", "flat_draft_document", 2, false, "human", syncedDraft)
+	seedWriterRevision(t, db, "draft-3", "flat_draft_document", 3, true, "human", syncedDraft)
 
-	baseline, err := loadWriterWriteBackBaseline(context.Background(), db.DB, "session", 3)
+	baseline, err := loadWriterWriteBackBaseline(context.Background(), db.DB, "session", "flat_draft_document", 3)
 	if err != nil {
 		t.Fatalf("load baseline: %v", err)
 	}

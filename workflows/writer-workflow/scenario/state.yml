@@ -11,6 +11,8 @@ transitions:
         Generate, reuse, display, or revise an authoring outline. Choose this route
         for a supplied source only when the user explicitly identifies that source
         as an outline to use or revise.
+    - to: write_flat_document
+      when: Generate a new flat article without an outline.
     - to: write_document
       when: >
         Revise or fully rewrite an existing full document directly. This is the mandatory
@@ -26,6 +28,9 @@ transitions:
       when: Draft the full document from the latest outline revision.
     - to: __end__
       when: The requested outline work is complete.
+
+  write_flat_document:
+    - to: __end__
 
   write_document:
     - to: __end__
@@ -154,6 +159,48 @@ steps:
       this execution handled an AI revision. For a cloud-bound revision,
       outline_write_result must report success.
 
+  write_flat_document:
+    label: 短文成稿
+    tools_only: true
+    stream_heartbeat: true
+    prompt: |
+      {{runtime_instruction}}
+
+      Authoritative current user request:
+      {{user_input}}
+
+      All input artifacts are already bound to the workspace. The writer_command produced by
+      prepare is immutable and must select structure_mode=flat. Do not reinterpret the request,
+      generate an outline, or create section instructions. Call writer_flat_draft_workspace
+      exactly once without arguments. The workspace saves every output itself; finish immediately
+      from its completion metadata.
+    tools:
+      - writer_flat_draft_workspace
+    terminal_tools:
+      - writer_flat_draft_workspace
+    inputs:
+      - material: writer_command
+        required: true
+      - material: writing_task
+        required: true
+      - material: media_assets
+        required: true
+      - material: writing_context
+        required: true
+    outputs:
+      - material: flat_draft_document
+      - material: flat_writing_context_after_draft
+      - material: short_writing_plan
+      - material: flat_visual_plan
+      - material: flat_resolved_media_assets
+        required: false
+    acceptance_criteria: |
+      flat_draft_document, flat_writing_context_after_draft, short_writing_plan, and
+      flat_visual_plan are present. flat_draft_document is Markdown or a non-outline
+      WriterDocument IR with ui_editable=true. No
+      outline_document, section_instructions, or draft_blocks are produced. When flat_visual_plan is
+      non-empty, flat_resolved_media_assets is also present.
+
   write_document:
     label: 成稿
     tools_only: true
@@ -224,8 +271,8 @@ steps:
         required: false
     acceptance_criteria: |
       draft_document and writing_context_after_draft are present. Markdown output is a
-      `.md` file or an IR document with ui_editable=true. Drafting artifacts are required
-      for generation/rewrite mode; IR generation also requires visual_plan and
+      `.md` file or an IR document with ui_editable=true. Generation/rewrite requires
+      section_instructions and draft_blocks; IR generation also requires visual_plan and
       resolved_media_assets. A targeted revision requires document_revision_task,
       document_locate_result, document_modify_plan, document_revision_set, and a successful
       document_revision_result. A targeted image-adding revision also requires resolved_media_assets.

@@ -50,7 +50,7 @@ func enrichWriterWriteBackSlots(ctx context.Context, db *gorm.DB, sessionID stri
 
 	for i := range slots {
 		slot := &slots[i]
-		if slot.SlotID != "draft_document" || slot.ListIndex != nil {
+		if (slot.SlotID != "draft_document" && slot.SlotID != "flat_draft_document") || slot.ListIndex != nil {
 			continue
 		}
 		info := writerWriteBackState(ctx, db, sessionID, *slot, source)
@@ -119,7 +119,7 @@ func writerWriteBackState(
 
 	var revisions []orm.WorkflowSlotRevision
 	if err := db.WithContext(ctx).
-		Where("session_id = ? AND slot_id = ? AND list_index IS NULL AND revision < ?", sessionID, "draft_document", draft.Revision).
+		Where("session_id = ? AND slot_id = ? AND list_index IS NULL AND revision < ?", sessionID, draft.SlotID, draft.Revision).
 		Order("revision DESC").
 		Find(&revisions).Error; err != nil {
 		return info

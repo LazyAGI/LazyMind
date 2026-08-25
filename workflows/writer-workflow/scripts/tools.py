@@ -24,8 +24,10 @@ from lazyllm.tools.writer.data_models import (
     ModifyPlan,
     PatchResult,
     PatchSet,
+    ShortWritingPlan,
     StringReplaceSet,
     TargetDocument,
+    VisualPlan,
     WriterDocument,
 )
 from lazyllm.tools.writer.numbering import (
@@ -37,7 +39,12 @@ from lazyllm.tools.writer.numbering import (
     materialize_ir,
     materialize_markdown,
 )
-from lazyllm.tools.writer.tools import WriterResourceTools, WriterRevisionTools
+from lazyllm.tools.writer.tools import (
+    WriterDraftingTools,
+    WriterPlanningTools,
+    WriterResourceTools,
+    WriterRevisionTools,
+)
 from lazyllm.tools.writer.tools.revision_tools import apply_patch_to_ir
 from lazyllm.tools.writer.utils import (
     load_artifact_json,
@@ -63,7 +70,7 @@ from lazymind.chat.engine.tools.writer import (
 from lazymind.chat.engine.tools.multimodal import image_generator
 from lazymind.model_config import is_model_role_available
 
-WRITER_IMAGE_ACQUISITION_PROMPT = '''Create one professional visual for a long-form document.
+WRITER_IMAGE_ACQUISITION_PROMPT = '''Create one professional visual for a document.
 
 Visual type: {visual_type}
 The visual must communicate: {purpose}
@@ -74,6 +81,30 @@ brand logos, decorative filler, and small unreadable text. Return exactly one im
 
 
 LOG = logging.getLogger(__name__)
+
+WRITER_DEFAULT_STRUCTURE_MODE: Literal['flat', 'sectioned'] = 'sectioned'
+_WRITER_STRUCTURE_CLASSIFIER_PROMPT = '''Classify the final presentation structure for a new
+Writer document. Return exactly one JSON object and nothing else:
+{"structure_mode":"flat|sectioned|unclear"}
+
+Apply these rules in order:
+1. An explicit presentation requirement overrides length. Chapters, sections, or subheadings
+   mean sectioned. Continuous prose, or explicitly no chapters, sections, or subheadings, means
+   flat. Asking for an outline as a planning step does not by itself require sectioned output.
+2. With no explicit presentation requirement, a requested length at or below 1200 Chinese
+   characters/words means flat; above 1200 means sectioned. An unquantified short article means
+   flat and an unquantified long article means sectioned.
+3. Return unclear when presentation and length are both unclear, when explicit requirements
+   conflict, or when a mentioned length is not clearly the requested output length. Never infer
+   length from topic complexity.
+
+Examples:
+- 写一篇1000字的文章 -> flat
+- 写一篇1000字的文章，要有小标题 -> sectioned
+- 写一篇2000字的文章，不要小标题 -> flat
+- write a 900-word article with subheadings -> sectioned
+- write an article about spring -> unclear
+'''
 
 _KB_EVIDENCE_TOOL_NAMES = {
     'KBToolkit_kb_search',
@@ -91,7 +122,8 @@ class WriterCommand(BaseModel):
     action: Literal['create', 'use_outline', 'rewrite', 'revise', 'read']
     source_role: Literal['none', 'outline', 'document']
     target_stage: Literal['prepared', 'outline', 'document']
-    next_step: Literal['outline', 'write_document', '__end__']
+    next_step: Literal['outline', 'write_flat_document', 'write_document', '__end__']
+    structure_mode: Literal['flat', 'sectioned'] = 'sectioned'
     user_instruction: str
     source_ref: str | None = None
     target_ref: str | None = None
@@ -179,7 +211,7 @@ def _authoritative_writer_input_path(
         if str(remote_inputs.get(candidate) or '').strip()
     ), '')
     step_id = str((ctx.params or {}).get('step_id') or '').strip()
-    if step_id in {'outline', 'write_document'}:
+    if step_id in {'outline', 'write_flat_document', 'write_document'}:
         if require_workflow_binding and not authoritative:
             raise ValueError(
                 f'{keys[0]} is missing from authoritative workflow inputs.'
@@ -194,6 +226,59 @@ def _load_writer_command(path: str) -> WriterCommand:
     if not path:
         raise ValueError('writer_command_path is required.')
     return WriterCommand.model_validate(_read_json_file(path))
+
+
+def _writer_structure_payload(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    text = str(value or '').strip()
+    fenced = re.search(r'```(?:json)?\s*([\s\S]*?)```', text, re.IGNORECASE)
+    if fenced:
+        text = fenced.group(1).strip()
+    decoder = json.JSONDecoder()
+    objects: list[dict[str, Any]] = []
+    for match in re.finditer(r'\{', text):
+        try:
+            payload, _ = decoder.raw_decode(text, match.start())
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            objects.append(payload)
+    if not objects:
+        raise ValueError('Writer structure classifier returned no JSON object.')
+    return objects[-1]
+
+
+def writer_classify_structure(user_input: str) -> Literal['flat', 'sectioned']:
+    """Classify a new document inside prepare; uncertainty keeps the legacy route."""
+    request = str(user_input or '').strip()
+    if not request:
+        return WRITER_DEFAULT_STRUCTURE_MODE
+    try:
+        raw = AutoModel(model='llm')(
+            f'{_WRITER_STRUCTURE_CLASSIFIER_PROMPT}\nCurrent request:\n{request[:4000]}',
+            response_format={'type': 'json_object'},
+            stream_output=False,
+        )
+        structure_mode = str(
+            _writer_structure_payload(raw).get('structure_mode') or ''
+        ).strip().lower()
+    except Exception as exc:  # noqa: BLE001 - classification must fail closed.
+        LOG.warning(
+            '[Writer] Structure classification failed; defaulting to %s: %s',
+            WRITER_DEFAULT_STRUCTURE_MODE,
+            exc,
+        )
+        return WRITER_DEFAULT_STRUCTURE_MODE
+    if structure_mode == 'flat':
+        return 'flat'
+    if structure_mode == 'sectioned':
+        return 'sectioned'
+    LOG.info(
+        '[Writer] Structure classification was unclear; defaulting to %s.',
+        WRITER_DEFAULT_STRUCTURE_MODE,
+    )
+    return WRITER_DEFAULT_STRUCTURE_MODE
 
 
 def writer_resolve_command(
@@ -233,8 +318,15 @@ def writer_resolve_command(
     if target_stage == 'prepared' and action != 'read':
         raise ValueError('target_stage="prepared" requires action="read".')
 
+    structure_mode = (
+        writer_classify_structure(user_input)
+        if action == 'create' and target_stage == 'document'
+        else WRITER_DEFAULT_STRUCTURE_MODE
+    )
     if action == 'read':
         next_step = '__end__'
+    elif action == 'create' and target_stage == 'document' and structure_mode == 'flat':
+        next_step = 'write_flat_document'
     elif action == 'rewrite' or (action == 'revise' and source_role == 'document'):
         next_step = 'write_document'
     else:
@@ -245,6 +337,7 @@ def writer_resolve_command(
         source_role=source_role,
         target_stage=target_stage,
         next_step=next_step,
+        structure_mode=structure_mode,
         user_instruction=user_input,
         source_ref=source_ref or None,
         target_ref=target_ref or None,
@@ -407,6 +500,13 @@ def _read_json_file(path: str) -> Any:
     if isinstance(raw, dict) and 'data' in raw:
         return raw['data']
     return raw
+
+
+def _writer_tool_artifact_data(result: Any) -> Any:
+    path = str(result.get('artifact_path') or '').strip() if isinstance(result, dict) else ''
+    if not path:
+        raise ValueError(f'Writer tool did not return artifact_path: {result!r}')
+    return _read_json_file(path)
 
 
 def _action_artifact_data(value: Any) -> Any:
@@ -977,6 +1077,7 @@ def writer_prepare_workspace(
         'resource_profiles': resource_profiles,
         'writing_context': writing_context,
         'representation': representation,
+        'structure_mode': command.structure_mode,
         'next_step': command.next_step,
         'control': {'next_step': command.next_step},
         'warnings': media_result.get('warnings') or [],
@@ -1449,6 +1550,127 @@ def _acquire_web_search_resources(request: Mapping[str, Any]) -> list[dict]:
         }
         for index, url in enumerate(urls, start=1)
     ]
+def writer_generate_short_writing_plan(
+    writing_task_path: str,
+    writing_context_path: str,
+) -> str:
+    """Generate and persist one whole-document plan for a flat article."""
+    result = WriterPlanningTools(
+        llm=AutoModel(model='llm'),
+        artifact_store=str(_run_root('short-writing-plan-source')),
+    ).generate_short_writing_plan(
+        task=writing_task_path,
+        context=writing_context_path,
+    )
+    content = ShortWritingPlan.model_validate(
+        _writer_tool_artifact_data(result),
+    ).model_dump_json(exclude_defaults=True)
+    return _save_json_artifact(
+        'short_writing_plan',
+        content,
+        writer_schema('planning.ShortWritingPlan'),
+        directory=_run_root('short-writing-plan'),
+    )
+
+
+def writer_generate_short_visual_plan(
+    writing_task_path: str,
+    short_writing_plan_path: str,
+    writing_context_path: str,
+) -> dict:
+    """Generate and persist one strongly typed visual plan for a flat article."""
+    writing_task = _read_json_file(writing_task_path)
+    visual_policy = (writing_task.get('constraints') or {}).get('visual_policy') or {}
+    require_input_image_reuse = visual_policy.get('require_input_image_reuse') is True
+    warnings: list[str] = []
+    payload: Any = {'instructions': []}
+    if visual_policy.get('allow_visuals') is not False:
+        try:
+            result = WriterPlanningTools(
+                llm=AutoModel(model='llm'),
+                artifact_store=str(_run_root('short-visual-plan-source')),
+            ).generate_short_visual_plan(
+                task=writing_task_path,
+                short_writing_plan=short_writing_plan_path,
+                context=writing_context_path,
+            )
+            payload = _writer_tool_artifact_data(result)
+            warnings.extend((result.get('metadata') or {}).get('warnings') or [])
+        except Exception as exc:
+            if require_input_image_reuse:
+                raise RuntimeError(
+                    f'Required visual planning failed: {type(exc).__name__}: {exc}'
+                ) from exc
+            warnings.append(f'Visual planning failed: {type(exc).__name__}: {exc}')
+    visual_plan = VisualPlan.model_validate(
+        payload or {'instructions': []},
+    ).model_dump()
+    instructions = visual_plan['instructions']
+    if require_input_image_reuse and not instructions:
+        raise ValueError('Required input image reuse produced no visual plan instructions.')
+    return {
+        'visual_plan': _save_json_artifact(
+            'visual_plan',
+            json.dumps(visual_plan, ensure_ascii=False),
+            writer_schema('multimodal.VisualPlan'),
+            directory=_run_root('short-visual-plan'),
+        ),
+        'visual_need_count': len(instructions),
+        'visual_need_ids': [str(need.get('need_id') or '') for need in instructions],
+        'warnings': warnings,
+    }
+
+
+def writer_generate_short_document(
+    writing_task_path: str,
+    short_writing_plan_path: str,
+    writing_context_path: str,
+    visual_plan_path: str = '',
+    resolved_media_assets_path: str = '',
+) -> str:
+    """Generate and persist one complete flat short document."""
+    events = DraftMarkdownStreamEventEmitter(
+        require_context().emit,
+        slot='flat_draft_document',
+    )
+    try:
+        drafting = WriterDraftingTools(
+            llm=AutoModel(model='llm'),
+            artifact_store=str(_run_root('short-document-source')),
+        )
+        with drafting.stream_short_document(
+            task=writing_task_path,
+            short_writing_plan=short_writing_plan_path,
+            context=writing_context_path,
+            visual_plan=visual_plan_path or None,
+            media_assets=resolved_media_assets_path or None,
+        ) as stream:
+            for delta in stream:
+                try:
+                    events.feed(str(delta))
+                except Exception as exc:  # noqa: BLE001 - preview forwarding is best effort.
+                    LOG.warning('[Writer] Short document delta callback failed: %s', exc)
+            result = stream.result()
+        document = _writer_tool_artifact_data(result)
+        if resolved_media_assets_path and isinstance(document, str):
+            document = _fill_markdown_media_placeholders(
+                document,
+                _read_json_file(resolved_media_assets_path),
+            )
+        if isinstance(document, str) and 'media-placeholder://' in document:
+            raise ValueError('Short document contains unresolved media placeholders.')
+        path = _save_writer_document(
+            'draft_document',
+            document,
+            expected_stage='draft',
+            editable=True,
+            directory=_run_root('short-document'),
+        )
+    except Exception as exc:
+        events.abort(str(exc))
+        raise
+    events.end()
+    return path
 
 
 def _acquire_generated_image(
@@ -2149,9 +2371,10 @@ def writer_preview_selection_rewrite(
         llm=AutoModel(model='llm'),
         artifact_store=str(_action_root(artifact_store, 'rewrite-preview')),
     )
-    if slot not in {'outline_document', 'draft_document'}:
+    if slot not in {'outline_document', 'flat_draft_document', 'draft_document'}:
         raise ValueError(
-            'selection rewrite requires an outline_document or draft_document slot.',
+            'selection rewrite requires an outline_document, flat_draft_document, '
+            'or draft_document slot.',
         )
     selection_type = str((selection or {}).get('type') or '')
     if isinstance(document, Mapping):
@@ -2174,7 +2397,7 @@ def writer_preview_selection_rewrite(
         candidate_path = Path(_save_writer_document(
             slot, revised,
             expected_stage='outline' if slot == 'outline_document' else None,
-            editable=slot == 'draft_document',
+            editable=slot in {'flat_draft_document', 'draft_document'},
             directory=Path(revision.artifact_store),
         ))
         result = {
@@ -2189,6 +2412,10 @@ def writer_preview_selection_rewrite(
     else:
         if selection_type != 'markdown':
             raise ValueError("Markdown artifacts require selection.type='markdown'.")
+        if slot == 'flat_draft_document':
+            instruction += (
+                '\nKeep the replacement as exactly one Markdown paragraph; do not split it.'
+            )
         replace_set = StringReplaceSet.model_validate(
             revision.build_selected_markdown_replace_set(
                 document, instruction, str(selection.get('selected_text') or ''), context,
@@ -3030,6 +3257,159 @@ def writer_draft_workspace() -> dict:
     _persist_draft_workspace_state(state, checkpoint_path)
     _emit_writer_progress('成稿校验完成，正在保存工作区结果')
     saved_keys = _save_draft_workspace_artifacts(result)
+    state['artifacts_saved'] = True
+    state['saved_artifact_keys'] = saved_keys
+    _persist_draft_workspace_state(state, checkpoint_path, completed=True)
+    return _draft_workspace_completion(result, saved_keys)
+
+
+_FLAT_OUTPUT_SLOTS = {
+    'draft_document': 'flat_draft_document',
+    'writing_context_after_draft': 'flat_writing_context_after_draft',
+    'visual_plan': 'flat_visual_plan',
+    'resolved_media_assets': 'flat_resolved_media_assets',
+}
+
+
+def _published_flat_draft_workspace_result(
+    result: Mapping[str, Any],
+) -> dict[str, Any]:
+    published = dict(result)
+    for source, target in _FLAT_OUTPUT_SLOTS.items():
+        if source in published:
+            published[target] = published.pop(source)
+    return published
+
+
+def writer_flat_draft_workspace() -> dict:
+    """Generate one new flat document on the dedicated flat Workflow path."""
+    _emit_writer_progress('正在读取短文成稿任务与已有 checkpoint')
+    user_input = _authoritative_writer_user_input('')
+    writer_command_path = _authoritative_writer_input_path(
+        'writer_command', require_workflow_binding=True,
+    )
+    writing_task_path = _authoritative_writer_input_path(
+        'writing_task', require_workflow_binding=True,
+    )
+    writing_context_path = _authoritative_writer_input_path(
+        'writing_context', require_workflow_binding=True,
+    )
+    media_assets_path = _authoritative_writer_input_path('media_assets')
+    command = _load_writer_command(writer_command_path)
+    if command.structure_mode != 'flat':
+        raise ValueError(
+            'write_flat_document requires writer_command.structure_mode="flat".'
+        )
+    if command.target_stage != 'document' or command.action != 'create':
+        raise ValueError('write_flat_document only supports new flat document creation.')
+    if not writing_task_path or not writing_context_path:
+        raise ValueError('writing_task_path and writing_context_path are required.')
+    if user_input and command.request_fingerprint != _writer_request_fingerprint(user_input):
+        raise ValueError(
+            'writer_command belongs to a different user request; restart from prepare.'
+        )
+
+    operation = 'generate'
+    fingerprint = _draft_workspace_fingerprint(
+        operation,
+        user_input,
+        writing_task_path,
+        writing_context_path,
+        media_assets_path,
+        '',
+        '',
+        '',
+        '',
+    )
+    state, checkpoint_path = _draft_workspace_state(fingerprint)
+    result: dict[str, Any] = dict(state.get('result') or {})
+    result['operation'] = operation
+    result['writer_command'] = writer_command_path
+    if state.get('completed'):
+        _emit_writer_progress('正在复用已完成的短文成稿 checkpoint')
+        saved_keys = list(state.get('saved_artifact_keys') or [])
+        if not state.get('artifacts_saved'):
+            saved_keys = _save_draft_workspace_artifacts(
+                _published_flat_draft_workspace_result(result)
+            )
+            state['artifacts_saved'] = True
+            state['saved_artifact_keys'] = saved_keys
+            _persist_draft_workspace_state(state, checkpoint_path, completed=True)
+        return _draft_workspace_completion(result, saved_keys)
+
+    task = _read_json_file(writing_task_path)
+    representation = str((task.get('output') or {}).get('representation') or '').strip()
+    if representation not in {'markdown', 'ir'}:
+        raise ValueError(
+            "Flat short-document generation requires 'markdown' or 'ir' representation."
+        )
+    if not result.get('short_writing_plan'):
+        result['short_writing_plan'] = writer_generate_short_writing_plan(
+            writing_task_path=writing_task_path,
+            writing_context_path=writing_context_path,
+        )
+        state['result'] = result
+        _persist_draft_workspace_state(state, checkpoint_path)
+    if not result.get('visual_plan'):
+        planning = writer_generate_short_visual_plan(
+            writing_task_path=writing_task_path,
+            short_writing_plan_path=result['short_writing_plan'],
+            writing_context_path=writing_context_path,
+        )
+        result.update({
+            'visual_plan': planning['visual_plan'],
+            'visual_need_count': planning['visual_need_count'],
+            'warnings': [
+                *(result.get('warnings') or []),
+                *(planning.get('warnings') or []),
+            ],
+        })
+        state['result'] = result
+        _persist_draft_workspace_state(state, checkpoint_path)
+
+    resolved_media = str(result.get('resolved_media_assets') or '')
+    visual_need_count = int(result.get('visual_need_count') or 0)
+    if visual_need_count > 0 and not resolved_media:
+        if not media_assets_path:
+            raise ValueError(
+                'media_assets_path is required when the short draft has visual media.'
+            )
+        media = writer_resolve_visual_media(
+            visual_plan_path=result['visual_plan'],
+            media_assets_path=media_assets_path,
+        )
+        resolved_media = media['resolved_media_assets']
+        result['resolved_media_assets'] = resolved_media
+        result['warnings'] = [
+            *(result.get('warnings') or []),
+            *(media.get('warnings') or []),
+        ]
+        state['result'] = result
+        _persist_draft_workspace_state(state, checkpoint_path)
+    if not result.get('draft_document'):
+        result['draft_document'] = writer_generate_short_document(
+            writing_task_path=writing_task_path,
+            short_writing_plan_path=result['short_writing_plan'],
+            writing_context_path=writing_context_path,
+            visual_plan_path=result['visual_plan'],
+            resolved_media_assets_path=resolved_media,
+        )
+        result['representation'] = representation
+        state['result'] = result
+        _persist_draft_workspace_state(state, checkpoint_path)
+
+    if not result.get('writing_context_after_draft'):
+        _emit_writer_progress('正在更新短文成稿上下文')
+        result['writing_context_after_draft'] = writer_update_writing_context(
+            content_artifact_path=result['draft_document'],
+            writing_context_path=writing_context_path,
+        )
+    state['result'] = result
+    _persist_draft_workspace_state(state, checkpoint_path)
+    _emit_writer_progress('短文成稿校验完成，正在保存工作区结果')
+    saved_keys = _save_draft_workspace_artifacts(
+        _published_flat_draft_workspace_result(result)
+    )
     state['artifacts_saved'] = True
     state['saved_artifact_keys'] = saved_keys
     _persist_draft_workspace_state(state, checkpoint_path, completed=True)

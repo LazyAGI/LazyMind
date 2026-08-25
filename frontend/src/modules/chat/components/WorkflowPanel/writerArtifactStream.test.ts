@@ -32,6 +32,7 @@ function task(taskId: string, status: SubAgentTask['status'], streams: TaskArtif
 describe('findWriterArtifactStream', () => {
   const stepCases: Array<[string, string]> = [
     ['outline', 'outline_document'],
+    ['write_flat_document', 'flat_draft_document'],
     ['write_document', 'draft_document'],
   ];
 

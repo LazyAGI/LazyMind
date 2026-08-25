@@ -21,6 +21,7 @@ export const WRITER_ARTIFACT_SLOT_IDS = new Set([
   'outline_document',
   'section_instructions',
   'draft_sections',
+  'flat_draft_document',
   'draft_document',
   'review_report',
   'review_summary',
@@ -800,6 +801,7 @@ export function WriterArtifactContent({
       return <SectionInstructionsView data={payload} />;
     case 'draft_sections':
       return <DraftSectionView data={payload} />;
+    case 'flat_draft_document':
     case 'draft_document':
       return <DraftDocumentView data={payload} />;
     case 'review_report':

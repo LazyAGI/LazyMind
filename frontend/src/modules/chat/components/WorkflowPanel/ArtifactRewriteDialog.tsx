@@ -446,7 +446,7 @@ export function ArtifactRewriteInlineDiff({
         listIndex,
         preview.artifact.value,
         preview.artifact.content_type,
-        slotId === 'draft_document' ? 'draft' : 'checkpoint',
+        ['draft_document', 'flat_draft_document'].includes(slotId) ? 'draft' : 'checkpoint',
         preview.base_revision,
         { silentError: true } as never,
       );

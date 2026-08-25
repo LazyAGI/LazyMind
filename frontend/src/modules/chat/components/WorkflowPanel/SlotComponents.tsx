@@ -892,7 +892,7 @@ export function SlotVersionPopover({
   const [flushing, setFlushing] = useState(false);
   const versionUploadRef = useRef<HTMLInputElement>(null);
   const { getSlotVersions, rollbackSlotItem, patchSlotItemValue } = useWorkflowStore();
-  const isWriterDraft = slotId === 'draft_document';
+  const isWriterDraft = slotId === 'draft_document' || slotId === 'flat_draft_document';
   const versionLabel = (revision: number) => isWriterDraft
     ? tr('chat.writerIR.localVersion', { version: revision })
     : `v${revision}`;
@@ -2243,6 +2243,12 @@ interface SlotJsonFileProps {
   readOnly?: boolean;
 }
 
+function isWriterWriteBackSlot(
+  slotId?: string,
+): slotId is 'flat_draft_document' | 'draft_document' {
+  return slotId === 'flat_draft_document' || slotId === 'draft_document';
+}
+
 function WriterWriteBackSummary({
   slot,
   revision,
@@ -2250,7 +2256,7 @@ function WriterWriteBackSummary({
   slot: SlotRevision;
   revision: number;
 }) {
-  if (slot.slot_id !== 'draft_document' || !Number.isFinite(revision) || revision <= 0) {
+  if (!isWriterWriteBackSlot(slot.slot_id) || !Number.isFinite(revision) || revision <= 0) {
     return null;
   }
 
@@ -2304,6 +2310,7 @@ function useRegisterWriterWriteBack({
   actionKey,
   flushKey,
   sessionId,
+  slotId,
   revision,
   getLatestRevision,
   writeBackUrl: serverWriteBackUrl,
@@ -2317,6 +2324,7 @@ function useRegisterWriterWriteBack({
   actionKey?: string;
   flushKey?: string;
   sessionId?: string;
+  slotId?: WriterDocumentSlot;
   revision: number;
   getLatestRevision?: () => number;
   writeBackUrl?: string;
@@ -2339,6 +2347,7 @@ function useRegisterWriterWriteBack({
         currentRevision,
         undefined,
         undefined,
+        slotId,
         { silentError: true } as never,
       );
       const result = response?.data?.data;
@@ -2363,7 +2372,7 @@ function useRegisterWriterWriteBack({
         setStatus('error');
       }
     }
-  }, [getLatestRevision, onConflict, onSuccess, revision, sessionId]);
+  }, [getLatestRevision, onConflict, onSuccess, revision, sessionId, slotId]);
   const writeBackRef = useRef(writeBack);
   writeBackRef.current = writeBack;
 
@@ -2566,7 +2575,7 @@ function SlotWriterDocument({
     && rewriteSelection === null
     && rewritePreview === null;
   const initialDelivery = slot.write_back_state === 'initial_delivery';
-  const canWriteBack = slotId === 'draft_document'
+  const canWriteBack = isWriterWriteBackSlot(slotId)
     && canEdit
     && slot.write_back_ready === true
     && displayRevision > 0
@@ -2721,6 +2730,7 @@ function SlotWriterDocument({
     actionKey: `${editingKey}:writeback`,
     flushKey: editingKey,
     sessionId,
+    slotId: isWriterWriteBackSlot(slotId) ? slotId : undefined,
     revision: displayRevision,
     getLatestRevision,
     writeBackUrl: slot.write_back_url,
@@ -3023,13 +3033,13 @@ function SlotJsonFile({
     )
     : null, [mediaLibrary, payload]);
 
-  const usesWriterSync = resolvedSlotId !== 'draft_document'
+  const usesWriterSync = !isWriterWriteBackSlot(resolvedSlotId)
     && apiListIndex === -1
     && hasProviderTarget(writerDocument);
   const displayRevision = loadedRevision ?? slot.revision;
   const displayRevisionCount = localRevisionCount ?? revisionCount;
   const getLatestRevision = useCallback(() => latestRevisionRef.current, []);
-  const hasFeishuWriteBackTarget = resolvedSlotId === 'draft_document'
+  const hasFeishuWriteBackTarget = isWriterWriteBackSlot(resolvedSlotId)
     && Boolean(sessionId)
     && apiListIndex === -1
     && !readOnly
@@ -3117,7 +3127,9 @@ function SlotJsonFile({
     };
     delete nextValue.url;
 
-    const persistMode = resolvedSlotId === 'draft_document' ? 'draft' : mode;
+    const persistMode = ['draft_document', 'flat_draft_document'].includes(resolvedSlotId)
+      ? 'draft'
+      : mode;
     const revision = await patchSlotItemValue(
       sessionId, slotId, apiListIndex, nextValue, 'file', persistMode,
       typeof sourceRevision === 'number' ? sourceRevision : undefined,
@@ -3217,6 +3229,7 @@ function SlotJsonFile({
     actionKey: sessionId && slotId ? `${editingKey}:writeback` : undefined,
     flushKey: editingKey,
     sessionId,
+    slotId: isWriterWriteBackSlot(resolvedSlotId) ? resolvedSlotId : undefined,
     revision: displayRevision,
     getLatestRevision,
     writeBackUrl: slot.write_back_url,
@@ -3400,12 +3413,12 @@ function SlotInlineStructured({
     )
     : null, [mediaLibrary, payload]);
 
-  const usesWriterSync = resolvedSlotId !== 'draft_document'
+  const usesWriterSync = !isWriterWriteBackSlot(resolvedSlotId)
     && apiListIndex === -1
     && hasProviderTarget(writerDocument);
   const displayRevision = localRevision ?? slot.revision;
   const displayRevisionCount = localRevisionCount ?? revisionCount;
-  const hasFeishuWriteBackTarget = resolvedSlotId === 'draft_document'
+  const hasFeishuWriteBackTarget = isWriterWriteBackSlot(resolvedSlotId)
     && Boolean(sessionId)
     && apiListIndex === -1
     && !readOnly
@@ -3489,7 +3502,9 @@ function SlotInlineStructured({
       }
     }
     const serialized = replaceStructuredArtifactPayload(slot.artifact_value, document);
-    const persistMode = resolvedSlotId === 'draft_document' ? 'draft' : mode;
+    const persistMode = ['draft_document', 'flat_draft_document'].includes(resolvedSlotId)
+      ? 'draft'
+      : mode;
     const revision = await patchSlotItemValue(
       sessionId, slotId, apiListIndex, serialized, 'json', persistMode,
       typeof sourceRevision === 'number' ? sourceRevision : undefined,
@@ -3558,6 +3573,7 @@ function SlotInlineStructured({
     actionKey: sessionId && slotId ? `${editingKey}:writeback` : undefined,
     flushKey: editingKey,
     sessionId,
+    slotId: isWriterWriteBackSlot(resolvedSlotId) ? resolvedSlotId : undefined,
     revision: displayRevision,
     writeBackUrl: slot.write_back_url,
     disabled: writeBackDisabled,
@@ -3825,7 +3841,7 @@ function SlotMarkdownFile({
     displayRevisionCount !== undefined && displayRevisionCount > 0 && Boolean(sessionId && slotId);
   const resolvedSlotId = slotId ?? slot.slot;
   const initialDelivery = slot.write_back_state === 'initial_delivery';
-  const canWriteBack = resolvedSlotId === 'draft_document'
+  const canWriteBack = isWriterWriteBackSlot(resolvedSlotId)
     && Boolean(sessionId)
     && apiListIndex === -1
     && !readOnly
@@ -3901,7 +3917,9 @@ function SlotMarkdownFile({
       apiListIndex,
       nextValue,
       'file',
-      resolvedSlotId === 'draft_document' ? 'draft' : 'checkpoint',
+      ['draft_document', 'flat_draft_document'].includes(resolvedSlotId)
+        ? 'draft'
+        : 'checkpoint',
       baseRevision,
     );
     setContent(markdown);
@@ -3976,6 +3994,7 @@ function SlotMarkdownFile({
     actionKey: markdownEditingKey ? `${markdownEditingKey}:writeback` : undefined,
     flushKey: markdownEditingKey,
     sessionId,
+    slotId: isWriterWriteBackSlot(resolvedSlotId) ? resolvedSlotId : undefined,
     revision: displayRevision,
     writeBackUrl: slot.write_back_url,
     disabled: writeBackDisabled,
