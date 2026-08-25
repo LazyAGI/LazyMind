@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChatFileList } from "../ChatInput";
+import type { ChatFileList } from "../ChatInput/types";
 import { CloseCircleFilled } from "@ant-design/icons";
 import { Image, Tooltip } from "antd";
 import { allowedImageTypes } from "../ImageUpload";

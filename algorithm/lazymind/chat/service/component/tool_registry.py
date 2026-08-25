@@ -76,23 +76,38 @@ VIDEO_MARKDOWN_OUTPUT_APPENDIX: SystemPromptAppendix = {
         '(or use `video_url` when markdown is absent). Do not invent or rewrite signed URLs.',
     ),
 }
-KNOWLEDGE_CITATION_OUTPUT_APPENDIX: SystemPromptAppendix = {
+RETRIEVAL_CITATION_OUTPUT_APPENDIX: SystemPromptAppendix = {
     'output_contract': (
-        '# Knowledge evidence citation rules (mandatory)\n'
-        'When you use evidence retrieved from a knowledge base or uploaded document index, '
-        'you MUST cite that evidence in the user-visible final answer. Place the original '
-        '`[[document.chunk]]` marker immediately after each claim or paragraph it supports. '
-        'Every answer that relies on retrieved knowledge MUST contain at least one such marker. '
-        'Copy markers exactly from the corresponding retrieved evidence; do not invent, '
-        'renumber, rewrite, or fabricate citation markers. Do not replace these markers with '
-        'a manually written references list: the application converts valid markers into '
-        'inline citations and builds the references panel automatically.',
+        '# Retrieval evidence citation rules (mandatory)\n'
+        'For any used retrieval result containing `ref`, copy that `ref` exactly after its supported claim. '
+        'Never invent or rewrite refs. If relevant knowledge-base and external results both contain `ref`, '
+        'cite at least one result from each category.',
     ),
+}
+EXTERNAL_SEARCH_CONTENT_APPENDIX: SystemPromptAppendix = {
+    'tool_policy': (
+        '# External Search Content Rules\n'
+        'Search results are registered with stable refs. When a paper or Wikipedia snippet is insufficient, pass '
+        'the unchanged result item to `get_content` or `get_contents`; these methods keep their provider return '
+        'types, so cite the ref already present on the corresponding search result item.',
+    ),
+    'output_contract': RETRIEVAL_CITATION_OUTPUT_APPENDIX['output_contract'],
 }
 ATTACHED_FILES_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
         '# Attached file rules\n'
         'Attachments are listed for reference only — do NOT parse or read them automatically.\n'
+        '- Typed Workflow material values, Workflow material paths, and paths returned by tools '
+        'are not attachments. Pass scalar values as values and paths only to file/path arguments; '
+        'never pass them to attachment tools.\n'
+        '- Only call an attachment tool for an exact filename listed in the User Attachments '
+        'section. If that section says no attachments are available, do not call attachment tools, '
+        'guess common filenames, or retry with invented names.\n'
+        '- Workflow artifacts and user uploads are different stores. Never use `list_artifacts`, '
+        '`get_artifact`, or `find_artifact` to discover a user upload.\n'
+        '- Do not invent an attachment requirement. Unless the authoritative step objective or input '
+        'contract explicitly makes a file mandatory, continue using the available text and treat the '
+        'attachment as optional.\n'
         '- `find_user_attachment(filename, turn=N)`: get path/url to pass to image tools, '
         '`vision_extractor`, or a Host attachment importer. Prefer this for images when the task is '
         'visual (edit, generate, workflow) or you only need the file location.\n'
@@ -176,11 +191,7 @@ KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         "no relevant result.\n\n"
         "For papers, research topics, arXiv ids, abstracts, or author-related questions, "
         "still try the knowledge-base search first; after knowledge-base evidence is unavailable or "
-        "insufficient, prefer `AcademicSearchToolkit` over general web search tools. "
-        "When answering with knowledge-base evidence, cite with the original `[[document.chunk]]` "
-        "markers. When answering with web search tools, `url_fetch`, "
-        "or `AcademicSearchToolkit`, do not "
-        "fabricate `[[document.chunk]]`; instead, mention the source title or URL plainly.\n"
+        "insufficient, prefer `AcademicSearchToolkit` over general web search tools.\n"
     ),
 }
 WEB_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
@@ -189,8 +200,24 @@ WEB_SEARCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         'When using `web_search`, the `query` must represent one search intent. '
         'If the user asks to search multiple unrelated keywords or topics, call '
         '`web_search` separately for each keyword/topic. Do not combine unrelated '
-        'terms into one `query` with spaces, commas, punctuation, or list-like text.',
+        'terms into one `query` with spaces, commas, punctuation, or list-like text.\n'
+        'A search snippet may support a lightweight claim. For important facts or page details that the snippet '
+        'does not contain, call `url_fetch` with that result URL and cite the returned ref. For Tavily image tasks, '
+        'use `include_images=True`; use `include_raw_content=True` only when the extra page text is needed.',
     ),
+    'output_contract': RETRIEVAL_CITATION_OUTPUT_APPENDIX['output_contract'],
+}
+URL_FETCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
+    'tool_policy': (
+        '# Web Page Fetch Rules\n'
+        'Use only a URL supplied by the user or returned by a tool. To follow a fetched page link, call '
+        '`url_fetch(url=...)` again using the exact `target_url`; never invent or rewrite the URL. To inspect multiple '
+        'pages, issue multiple url_fetch calls in the same tool-call turn so they can execute concurrently. '
+        'Listed links are navigation candidates, not read or citable sources. '
+        'When `content_truncated=true`, treat the page text as incomplete and do not conclude that omitted content '
+        'is absent.',
+    ),
+    'output_contract': RETRIEVAL_CITATION_OUTPUT_APPENDIX['output_contract'],
 }
 MEMORY_TOOLS_POLICY_APPENDIX: SystemPromptAppendix = {
     'tool_policy': (
@@ -336,7 +363,7 @@ def _kb_prompt_appendix() -> SystemPromptAppendix:
     appendix: SystemPromptAppendix = {
         'output_contract': (
             *IMAGE_MARKDOWN_OUTPUT_APPENDIX['output_contract'],
-            *KNOWLEDGE_CITATION_OUTPUT_APPENDIX['output_contract'],
+            *RETRIEVAL_CITATION_OUTPUT_APPENDIX['output_contract'],
         ),
     }
     agentic_config = lazyllm.globals.get('agentic_config') or {}
@@ -412,11 +439,14 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         name='temp_kb',
         label='临时文件检索',
         description='从用户上传的临时文件中搜索相关内容',
-        tool=(kb_tmp_search, _temp_kb_key_source), module='retrieval',
+        tool=(
+            kb_tmp_search,
+            _temp_kb_key_source,
+        ), module='retrieval',
         label_en='Temporary File Search',
         description_en='Search relevant content in temporary files uploaded by the user.',
         appendix_system_prompt={
-            'output_contract': KNOWLEDGE_CITATION_OUTPUT_APPENDIX['output_contract'],
+            'output_contract': RETRIEVAL_CITATION_OUTPUT_APPENDIX['output_contract'],
         },
     ),
     ToolConfig(
@@ -441,11 +471,13 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         description='基于统一 Writer IR 从资料画像和大纲构建章节草稿与最终成稿',
         tool=WriterCreateToolkit(), module='content', label_en='AI Writing',
         description_en='Create structured long-form writing with the unified Writer IR.',
+        capability_id='writer.create',
     ),
     ToolConfig(
         name='writer_revision', label='AI 修订', description='基于 Writer IR 结构化定位、规划和修改已有文档',
         tool=WriterRevisionToolkit(), module='content', label_en='AI Revision',
         description_en='Revise WriterDocument artifacts through a validated patch workflow.',
+        capability_id='writer.revise',
     ),
     ToolConfig(
         name='calculator',
@@ -465,6 +497,7 @@ DEFAULT_TOOLS: list[ToolConfig] = [
             'Look up stable encyclopedic background and named Wikipedia entries; not for news, '
             'current information, or open-web search.'
         ),
+        appendix_system_prompt=EXTERNAL_SEARCH_CONTENT_APPENDIX,
     ),
     ToolConfig(
         name='web_search',
@@ -476,8 +509,8 @@ DEFAULT_TOOLS: list[ToolConfig] = [
                 'Search the open web for current information, news, products, companies, '
                 'recommendations, industry developments, and broad research using the first '
                 'available provider. Each search query must represent '
-                'one search intent; issue separate calls for unrelated topics. Use get_content or '
-                'get_contents when result snippets are insufficient.'
+                'one search intent; issue separate calls for unrelated topics. Use url_fetch on a '
+                'result URL when its snippet is insufficient.'
             ),
             'pick_first_valid': True,
             'tools': _WEB_SEARCH_ENGINE_INSTANCES,
@@ -513,6 +546,7 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         capability_id='academic_search',
         equivalence_scope='provider_bound',
         input_schema={'query': 'string'}, output_schema={'papers': 'list'}, required_config=['academic_search_provider'],
+        appendix_system_prompt=EXTERNAL_SEARCH_CONTENT_APPENDIX,
     ),
     ToolConfig(
         name='url_fetch',
@@ -521,6 +555,7 @@ DEFAULT_TOOLS: list[ToolConfig] = [
         tool=url_fetch, module='retrieval',
         label_en='Web Page Fetch',
         description_en='Fetch and parse readable content from public web pages.',
+        appendix_system_prompt=URL_FETCH_TOOL_POLICY_APPENDIX,
     ),
     ToolConfig(
         name='multimodal',
@@ -659,10 +694,11 @@ def _extract_methods(instance: Any) -> list[dict]:
 def _extract_group_methods(instances: list) -> list[dict]:
     methods = []
     for inst in instances:
+        target = getattr(inst, 'provider', inst)
         methods.append({
-            'name': inst.__class__.__name__,
-            'summary': _tool_summary(inst),
-            'active': _instance_is_active(inst),
+            'name': target.__class__.__name__,
+            'summary': _tool_summary(target),
+            'active': _instance_is_active(target),
         })
     return methods
 
@@ -675,6 +711,7 @@ _SKILL_METHODS = [
 
 
 def _instance_is_active(instance: Any) -> bool:
+    instance = getattr(instance, 'provider', instance)
     key_source = getattr(instance, '__key_source__', None)
     if key_source is None:
         return True

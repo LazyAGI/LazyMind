@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Checkbox,
@@ -17,7 +17,16 @@ import {
   Tooltip,
   message,
 } from "antd";
-import { CloudServerOutlined, PlusOutlined, SearchOutlined, ToolOutlined } from "@ant-design/icons";
+import {
+  AppstoreAddOutlined,
+  CloudServerOutlined,
+  DeleteOutlined,
+  EditOutlined,
+  PlusOutlined,
+  ReloadOutlined,
+  SearchOutlined,
+  ToolOutlined,
+} from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { localizeErrorCode } from "@/components/request";
 import type { StructuredAsset } from "@/modules/memory/shared";
@@ -40,6 +49,11 @@ import {
 type ToolView = "builtin" | "mcp";
 
 interface ToolManagementSectionProps {
+  description?: string;
+  initialQuery?: string;
+  layout?: "default" | "settings";
+  refreshToken?: number;
+  title?: string;
   view: ToolView;
 }
 
@@ -71,11 +85,64 @@ const resolveAllowedMcpToolIds = (server: McpServerAsset, tools: McpToolAsset[])
   return toolIds.filter((toolId) => allowedToolSet.has(toolId));
 };
 
-export default function ToolManagementSection({ view }: ToolManagementSectionProps) {
+interface ManagedToolSummaryProps {
+  fallback: string;
+  primary?: string;
+  secondary?: string;
+}
+
+export function ManagedToolSummary({ fallback, primary, secondary }: ManagedToolSummaryProps) {
+  const summaryRef = useRef<HTMLParagraphElement>(null);
+  const [overflowing, setOverflowing] = useState(false);
+  const visibleText = primary || secondary || fallback;
+  const tooltipText = [primary, secondary].filter(Boolean).join("\n") || fallback;
+
+  useLayoutEffect(() => {
+    const summary = summaryRef.current;
+    if (!summary) return;
+
+    const measure = () => {
+      setOverflowing(
+        summary.scrollHeight > summary.clientHeight + 1
+        || summary.scrollWidth > summary.clientWidth + 1,
+      );
+    };
+    measure();
+
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(summary);
+    return () => observer.disconnect();
+  }, [visibleText]);
+
+  const summary = (
+    <span
+      className="model-provider-service-summary-wrap"
+      tabIndex={overflowing ? 0 : undefined}
+    >
+      <p ref={summaryRef} className="model-provider-service-summary">
+        {visibleText}
+      </p>
+    </span>
+  );
+
+  if (!overflowing) return summary;
+  return (
+    <Tooltip
+      title={<div className="model-provider-tool-popover-content">{tooltipText}</div>}
+      classNames={{ root: "model-provider-tool-popover" }}
+      placement="bottomLeft"
+    >
+      {summary}
+    </Tooltip>
+  );
+}
+
+export default function ToolManagementSection({ description, initialQuery = "", layout = "default", refreshToken = 0, title, view }: ToolManagementSectionProps) {
   const { t, i18n } = useTranslation();
   const currentLanguage = i18n.resolvedLanguage || i18n.language || "zh-CN";
-  const [searchInput, setSearchInput] = useState("");
-  const [query, setQuery] = useState("");
+  const [searchInput, setSearchInput] = useState(initialQuery);
+  const [query, setQuery] = useState(initialQuery);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(DEFAULT_TOOL_PAGE_SIZE);
   const [toolAssets, setToolAssets] = useState<StructuredAsset[]>([]);
@@ -167,13 +234,23 @@ export default function ToolManagementSection({ view }: ToolManagementSectionPro
       return;
     }
     void refreshMcpServers();
-  }, [refreshMcpServers, refreshToolAssets, view]);
+  }, [refreshMcpServers, refreshToken, refreshToolAssets, view]);
 
   useEffect(() => {
     setCurrentPage(1);
   }, [query, view]);
 
+  useEffect(() => {
+    setSearchInput(initialQuery);
+    setQuery(initialQuery);
+  }, [initialQuery]);
+
   const activeTotal = view === "mcp" ? mcpListTotal : toolListTotal;
+  const mcpSummary = useMemo(() => ({
+    enabled: mcpServers.filter((server) => server.enabled).length,
+    tools: mcpServers.reduce((total, server) => total + Number(server.toolCount || 0), 0),
+    verified: mcpServers.filter((server) => server.isVerified).length,
+  }), [mcpServers]);
 
   useEffect(() => {
     const maxPage = Math.max(1, Math.ceil(activeTotal / pageSize));
@@ -397,19 +474,12 @@ export default function ToolManagementSection({ view }: ToolManagementSectionPro
   }, [mcpToolDraftIds, mcpToolTarget, refreshMcpServers, t]);
 
   const renderManagedToolSummary = (primary?: string, secondary?: string) => {
-    const text = [primary, secondary].filter(Boolean).join("\n");
     return (
-      <Tooltip
-        title={text ? <div className="model-provider-tool-popover-content">{text}</div> : undefined}
-        overlayClassName="model-provider-tool-popover"
-        placement="topLeft"
-      >
-        <span className="model-provider-service-summary-wrap">
-          <p className="model-provider-service-summary">
-            {primary || secondary || t("common.noData")}
-          </p>
-        </span>
-      </Tooltip>
+      <ManagedToolSummary
+        fallback={t("common.noData")}
+        primary={primary}
+        secondary={secondary}
+      />
     );
   };
 
@@ -429,11 +499,10 @@ export default function ToolManagementSection({ view }: ToolManagementSectionPro
       </div>
       <div className="model-provider-managed-tool-actions">
         <Switch
+          aria-label={tool.name || tool.id}
           checked={Boolean(tool.isEnabled)}
-          checkedChildren={t("common.enabled")}
           disabled={Boolean(tool.readonly)}
           loading={toolActionLoading.has(tool.id)}
-          unCheckedChildren={t("common.disabled")}
           onChange={(checked) => {
             void handleToggleTool(tool, checked);
           }}
@@ -443,18 +512,20 @@ export default function ToolManagementSection({ view }: ToolManagementSectionPro
   );
 
   const renderMcpServerCard = (server: McpServerAsset) => {
+    const isSettingsLayout = layout === "settings";
     const enableDisabled = !server.isVerified && !server.enabled;
     const allowedCount =
-      server.allowedTools === undefined ? server.toolCount : server.allowedTools.length;
+      server.allowedTools === undefined ? Number(server.toolCount || 0) : server.allowedTools.length;
     const transportLabel = getMcpTransportLabel(server.transport);
     const switchNode = (
       <Switch
+        aria-label={`${server.name} ${t("admin.memoryMcpEnableStatus")}`}
         checked={server.enabled}
-        checkedChildren={t("common.enabled")}
+        checkedChildren={isSettingsLayout ? undefined : t("common.enabled")}
         disabled={enableDisabled}
         loading={mcpActionLoading.has(getMcpActionKey("toggle", server.id))}
-        size="small"
-        unCheckedChildren={t("common.disabled")}
+        size={isSettingsLayout ? "default" : "small"}
+        unCheckedChildren={isSettingsLayout ? undefined : t("common.disabled")}
         onChange={(checked) => {
           void handleToggleMcpServer(server, checked);
         }}
@@ -462,51 +533,61 @@ export default function ToolManagementSection({ view }: ToolManagementSectionPro
     );
 
     return (
-      <article className="model-provider-service-card model-provider-managed-tool-card" key={server.id}>
-        <span className="model-provider-service-logo model-provider-service-logo-blue">
+      <article className="model-provider-service-card model-provider-managed-tool-card model-provider-mcp-server-card" key={server.id}>
+        <span className="model-provider-service-logo model-provider-service-logo-blue" aria-hidden="true">
           <span className="model-provider-service-logo-icon"><CloudServerOutlined /></span>
         </span>
         <div className="model-provider-service-card-copy">
           <div className="model-provider-service-title-row">
             <h4>{server.name}</h4>
           </div>
+          {renderManagedToolSummary(server.url)}
           <div className="model-provider-managed-tool-status-row">
             <Tag className="model-provider-service-status" color={server.isVerified ? "blue" : "warning"}>
               {server.isVerified ? t("admin.memoryMcpVerified") : t("admin.memoryMcpUnverified")}
             </Tag>
+            <span>{transportLabel}</span>
+            <span>{t("admin.memoryMcpTimeoutSeconds", { count: server.timeout })}</span>
+            <span>{server.toolCount || 0} {t("admin.memoryMcpTools")}</span>
+            <span>{t("admin.memoryMcpAllowedToolsCount", { count: allowedCount })}</span>
+          </div>
+        </div>
+        <div className="model-provider-managed-tool-actions">
+          <div className="model-provider-mcp-server-state">
             <Tag className="model-provider-service-status" color={server.enabled ? "success" : "default"}>
               {server.enabled ? t("common.enabled") : t("common.disabled")}
             </Tag>
+            {enableDisabled ? (
+              <Tooltip title={t("admin.memoryMcpEnableRequiresVerified")}>
+                <span>{switchNode}</span>
+              </Tooltip>
+            ) : switchNode}
           </div>
-          {renderManagedToolSummary(
-            server.url,
-            `${transportLabel} · ${t("admin.memoryMcpTimeoutSeconds", { count: server.timeout })} · ${t("admin.memoryMcpAllowedToolsCount", { count: allowedCount })}`,
-          )}
-        </div>
-        <div className="model-provider-managed-tool-actions">
-          {enableDisabled ? (
-            <Tooltip title={t("admin.memoryMcpEnableRequiresVerified")}>
-              <span>{switchNode}</span>
-            </Tooltip>
-          ) : switchNode}
-          <Space className="model-provider-managed-tool-links" size={0} wrap>
+          <Space className="model-provider-managed-tool-links" size={isSettingsLayout ? 6 : 0} wrap>
             <Button
+              icon={isSettingsLayout ? <ReloadOutlined /> : undefined}
               loading={mcpActionLoading.has(getMcpActionKey("check", server.id))}
               size="small"
-              type="link"
+              type={isSettingsLayout ? "default" : "link"}
               onClick={() => void handleCheckMcpServer(server)}
             >
               {t("admin.memoryMcpCheck")}
             </Button>
             <Button
+              icon={isSettingsLayout ? <AppstoreAddOutlined /> : undefined}
               loading={mcpActionLoading.has(getMcpActionKey("discover", server.id))}
               size="small"
-              type="link"
+              type={isSettingsLayout ? "default" : "link"}
               onClick={() => void handleDiscoverMcpTools(server)}
             >
               {t("admin.memoryMcpDiscover")}
             </Button>
-            <Button size="small" type="link" onClick={() => openMcpEditModal(server)}>
+            <Button
+              icon={isSettingsLayout ? <EditOutlined /> : undefined}
+              size="small"
+              type={isSettingsLayout ? "default" : "link"}
+              onClick={() => openMcpEditModal(server)}
+            >
               {t("common.edit")}
             </Button>
             <Popconfirm
@@ -519,7 +600,12 @@ export default function ToolManagementSection({ view }: ToolManagementSectionPro
               title={t("admin.memoryMcpDeleteConfirm", { name: server.name })}
               onConfirm={() => void handleDeleteMcpServer(server)}
             >
-              <Button danger size="small" type="link">
+              <Button
+                danger
+                icon={isSettingsLayout ? <DeleteOutlined /> : undefined}
+                size="small"
+                type={isSettingsLayout ? "default" : "link"}
+              >
                 {t("common.delete")}
               </Button>
             </Popconfirm>
@@ -537,20 +623,20 @@ export default function ToolManagementSection({ view }: ToolManagementSectionPro
     mcpToolIds.some((toolId) => selectedMcpToolSet.has(toolId)) && !allMcpToolsSelected;
 
   return (
-    <section className="model-provider-service-category model-provider-tool-management-section">
+    <section className={`model-provider-service-category model-provider-tool-management-section${layout === "settings" ? " is-settings-layout" : ""}`}>
       <div className="model-provider-service-category-top">
         <div className="model-provider-service-category-head model-provider-tool-category-title">
           <span>{view === "mcp" ? <CloudServerOutlined /> : <ToolOutlined />}</span>
           <div>
             <h3>
-              {view === "mcp"
+              {title || (view === "mcp"
                 ? t("modelProvider.external.mcpToolManagementTitle")
-                : t("modelProvider.external.toolManagementTitle")}
+                : t("modelProvider.external.toolManagementTitle"))}
             </h3>
             <p>
-              {view === "mcp"
+              {description || (view === "mcp"
                 ? t("modelProvider.external.mcpToolManagementDesc")
-                : t("modelProvider.external.toolManagementDesc")}
+                : t("modelProvider.external.toolManagementDesc"))}
             </p>
           </div>
         </div>
@@ -584,6 +670,15 @@ export default function ToolManagementSection({ view }: ToolManagementSectionPro
           </Button>
         ) : null}
       </div>
+
+      {view === "mcp" && layout === "settings" ? (
+        <div className="model-provider-mcp-overview" aria-live="polite">
+          <span><strong>{mcpListTotal}</strong>{t("admin.memoryMcpServer")}</span>
+          <span><strong>{mcpSummary.enabled}</strong>{t("common.enabled")}</span>
+          <span><strong>{mcpSummary.verified}</strong>{t("admin.memoryMcpVerified")}</span>
+          <span><strong>{mcpSummary.tools}</strong>{t("admin.memoryMcpTools")}</span>
+        </div>
+      ) : null}
 
       <Spin spinning={view === "mcp" ? mcpLoading : toolLoading}>
         {activeTotal === 0 && !(view === "mcp" ? mcpLoading : toolLoading) ? (

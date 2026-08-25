@@ -1,6 +1,6 @@
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
-import { SendMessageParams } from "@/modules/chat/components/ChatInput";
+import type { SendMessageParams } from "@/modules/chat/components/ChatInput/types";
 
 interface ChatMessageStore {
   pendingMessage: SendMessageParams | null;

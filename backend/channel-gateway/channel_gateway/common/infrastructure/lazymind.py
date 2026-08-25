@@ -17,6 +17,7 @@ import httpx
 from channel_gateway.common.domain.chat import (
     ChatOptions,
     CoreEvent,
+    CoreRunTerminal,
     CoreStreamUpdate,
     CoreTurnResult,
 )
@@ -25,12 +26,14 @@ from channel_gateway.common.errors import (
     InvalidStaticAssetError,
     LazyMindError,
     LazyMindHTTPError,
+    RetryableLazyMindError,
 )
 
 
 _logger = logging.getLogger(__name__)
 _CHAT_SEMANTIC_IDLE_SECONDS = 180
-_CHAT_STOP_TIMEOUT_SECONDS = 5.0
+_CHAT_RESUME_ATTEMPTS = 8
+_CHAT_RESUME_DELAY_SECONDS = 0.5
 _LATEST_ANSWER_TIMEOUT_SECONDS = 3.0
 _TASK_SNAPSHOT_TIMEOUT_SECONDS = 3.0
 _TURN_ENRICHMENT_TIMEOUT_SECONDS = 10.0
@@ -78,12 +81,58 @@ class _ChatStreamState:
     history_id: str = ''
     deltas: list[str] = field(default_factory=list)
     last_message: str = ''
-    saw_done: bool = False
-    finish_reason: str = ''
+    run_terminal: CoreRunTerminal | None = None
     sources: list[Any] = field(default_factory=list)
     events: list[CoreEvent] = field(default_factory=list)
     last_stream_update: CoreStreamUpdate | None = None
-    external_agent: bool = False
+    external_event_sequence: int = 0
+
+
+def _runtime_terminal(value: Any) -> CoreRunTerminal | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise LazyMindError('LazyMind runtime event is invalid')
+    if (
+        value.get('schema_version') != 1
+        or not str(value.get('event_id') or '')
+        or not str(value.get('run_id') or '')
+    ):
+        raise LazyMindError('LazyMind runtime event envelope is invalid')
+    event_type = str(value.get('type') or '')
+    if event_type not in {
+        'model_retry_scheduled', 'model_call_finished', 'run_finished',
+    }:
+        raise LazyMindError('LazyMind runtime event type is unsupported')
+    if event_type != 'run_finished':
+        return None
+    data = value.get('data')
+    if not isinstance(data, dict):
+        raise LazyMindError('LazyMind run terminal is invalid')
+    status = str(data.get('status') or '')
+    reason = str(data.get('reason') or '')
+    partial_output = data.get('partial_output')
+    if (
+        status not in {'completed', 'interrupted', 'failed', 'cancelled'}
+        or not reason
+        or not isinstance(partial_output, bool)
+    ):
+        raise LazyMindError('LazyMind run terminal fields are invalid')
+    return CoreRunTerminal(
+        status=status,
+        reason=reason,
+        code=str(data.get('code') or ''),
+        partial_output=partial_output,
+    )
+
+
+def _terminal_text(terminal: CoreRunTerminal) -> str:
+    if terminal.status == 'cancelled':
+        return 'LazyMind 已停止当前任务。'
+    code = f'（{terminal.code}）' if terminal.code else ''
+    if terminal.status == 'interrupted':
+        return f'LazyMind 未能完整完成当前任务{code}。'
+    return f'LazyMind 执行失败{code}。'
 
 
 def _strip_tool_payloads(value: str) -> str:
@@ -166,26 +215,14 @@ class LazyMindClient:
         on_stream: Callable[[CoreStreamUpdate], None] | None = None,
     ) -> CoreTurnResult:
         options = options or ChatOptions()
-        if options.external_agent:
-            state = self._consume_external_agent_stream(
-                owner_user_id=owner_user_id,
-                request_id=request_id,
-                conversation_id=conversation_id,
-                text=text,
-                on_stream=on_stream,
-            )
-            return self._complete_chat_turn(
-                owner_user_id=owner_user_id,
-                request_id=request_id,
-                state=state,
-                tracked_task_ids=None,
-            )
+        new_conversation = not conversation_id
         tracked_task_ids, task_snapshot = self._start_task_snapshot(
             owner_user_id=owner_user_id,
             conversation_id=conversation_id,
             request_id=request_id,
-            options=options,
         )
+        if new_conversation:
+            conversation_id = str(uuid.uuid4())
         state = self._consume_chat_stream(
             owner_user_id=owner_user_id,
             request_id=request_id,
@@ -193,6 +230,7 @@ class LazyMindClient:
                 text=text,
                 conversation_id=conversation_id,
                 options=options,
+                initial_settings=new_conversation,
             ),
             conversation_id=conversation_id,
             on_stream=on_stream,
@@ -215,17 +253,10 @@ class LazyMindClient:
         owner_user_id: str,
         conversation_id: str,
         request_id: str,
-        options: ChatOptions,
     ) -> tuple[
         set[str] | None,
         concurrent.futures.Future[list[dict[str, Any]]] | None,
     ]:
-        if not (
-            options.features.enable_workflow
-            or options.features.enable_subagent
-            or options.features.enable_tasks
-        ):
-            return None, None
         if not conversation_id:
             return set(), None
         return None, self._auxiliary.submit(
@@ -269,6 +300,7 @@ class LazyMindClient:
         text: str,
         conversation_id: str,
         options: ChatOptions,
+        initial_settings: bool,
     ) -> dict[str, Any]:
         conversation: dict[str, Any] = {}
         if options.search_config is not None:
@@ -286,21 +318,12 @@ class LazyMindClient:
                 ],
             ],
             'mode': 'auto',
-            'basic_chat_only': options.features.basic_chat_only,
-            'enable_workflow': (
-                options.enable_workflow
-                if options.enable_workflow is not None
-                else options.features.enable_workflow
-            ),
-            'enable_subagent': options.features.enable_subagent,
-            'disabled_tools': self._unique(
-                [
-                    *options.features.disabled_tools,
-                    *options.disabled_tools,
-                ]
-            ),
             'create_time': dt.datetime.now(dt.timezone.utc).isoformat(),
         }
+        if options.enable_workflow is not None:
+            payload['enable_workflow'] = options.enable_workflow
+        if options.disabled_tools:
+            payload['disabled_tools'] = self._unique(options.disabled_tools)
         if options.mentions:
             payload['mentions'] = options.mentions
         if options.workflow_mode is not None:
@@ -315,18 +338,19 @@ class LazyMindClient:
             )
         if options.thinking_depth is not None:
             payload['thinking_depth'] = options.thinking_depth
-        if conversation_id:
-            payload['conversation_id'] = conversation_id
-        else:
-            initial_workflow_settings: dict[str, Any] = {}
+        payload['conversation_id'] = conversation_id
+        if initial_settings:
+            initial_conversation_settings: dict[str, Any] = {}
             if options.enable_workflow is not None:
-                initial_workflow_settings['enable_workflow'] = (
+                initial_conversation_settings['enable_workflow'] = (
                     options.enable_workflow
                 )
             if options.workflow_mode is not None:
-                initial_workflow_settings['workflow_mode'] = options.workflow_mode
-            if initial_workflow_settings:
-                payload['initial_workflow_settings'] = initial_workflow_settings
+                initial_conversation_settings['workflow_mode'] = options.workflow_mode
+            if initial_conversation_settings:
+                payload['initial_conversation_settings'] = (
+                    initial_conversation_settings
+                )
         return payload
 
     def _consume_chat_stream(
@@ -337,9 +361,12 @@ class LazyMindClient:
         payload: dict[str, Any],
         conversation_id: str,
         on_stream: Callable[[CoreStreamUpdate], None] | None,
+        _state: _ChatStreamState | None = None,
+        _endpoint: str = '',
+        _resume_attempt: int = 0,
     ) -> _ChatStreamState:
-        state = _ChatStreamState(conversation_id=conversation_id)
-        endpoint = f'{self._base_url}/conversations:chat'
+        state = _state or _ChatStreamState(conversation_id=conversation_id)
+        endpoint = _endpoint or f'{self._base_url}/conversations:chat'
         semantic_progress_at = time.monotonic()
         completed = False
         try:
@@ -363,9 +390,7 @@ class LazyMindClient:
                     if not data:
                         continue
                     if data == '[DONE]':
-                        state.saw_done = True
-                        completed = True
-                        break
+                        continue
                     try:
                         frame = json.loads(data)
                     except json.JSONDecodeError as exc:
@@ -373,6 +398,16 @@ class LazyMindClient:
                     result = frame.get('result', frame)
                     if not isinstance(result, dict):
                         continue
+                    event_sequence = int(
+                        result.get('external_event_sequence') or 0
+                    )
+                    if (
+                        event_sequence
+                        and event_sequence <= state.external_event_sequence
+                    ):
+                        continue
+                    if event_sequence:
+                        state.external_event_sequence = event_sequence
                     semantic_progress = False
                     current_id = result.get('conversation_id')
                     if current_id:
@@ -384,18 +419,6 @@ class LazyMindClient:
                     if isinstance(current_sources, list) and current_sources:
                         state.sources = list(current_sources)
                         semantic_progress = True
-                    external_event = result.get('external_agent_event')
-                    if isinstance(external_event, dict):
-                        semantic_progress = True
-                        state.events.append(
-                            CoreEvent(
-                                source='chat',
-                                type='external_agent_event',
-                                payload=dict(external_event),
-                            )
-                        )
-                    else:
-                        external_event = None
                     task_created = None
                     for event_type in _CHAT_EVENT_FIELDS:
                         event_payload = result.get(event_type)
@@ -427,9 +450,14 @@ class LazyMindClient:
                                     request_id=request_id,
                                     payload=event_payload,
                                 )
-                    finish_reason = str(result.get('finish_reason') or '')
-                    if finish_reason and finish_reason != 'FINISH_REASON_UNSPECIFIED':
-                        state.finish_reason = finish_reason
+                    runtime_event = result.get('runtime_event')
+                    terminal = _runtime_terminal(runtime_event)
+                    if isinstance(runtime_event, dict):
+                        state.events.append(CoreEvent(
+                            source='chat',
+                            type='runtime_event',
+                            payload=dict(runtime_event),
+                        ))
                         semantic_progress = True
                     delta = result.get('delta')
                     if isinstance(delta, str) and delta:
@@ -456,179 +484,97 @@ class LazyMindClient:
                             result.get('thinking_duration_s'),
                             conversation_id=state.conversation_id,
                             history_id=state.history_id,
-                            external_event=external_event,
                             task_created=task_created,
                         )
                         if update != state.last_stream_update:
                             on_stream(update)
                             state.last_stream_update = update
-                    if finish_reason == 'FINISH_REASON_UNKNOWN':
-                        detail = str(
-                            result.get('message')
-                            or (
-                                external_event.get('message')
-                                if isinstance(external_event, dict)
-                                else ''
-                            )
-                            or ''
-                        ).strip()
-                        raise LazyMindError(
-                            detail or 'LazyMind chat generation failed'
-                        )
-                    if state.finish_reason:
+                    if terminal is not None:
+                        state.run_terminal = terminal
                         completed = True
                         break
-        except LazyMindError:
-            raise
-        except httpx.HTTPError as exc:
-            raise LazyMindError(
-                f'Cannot reach LazyMind Core: {exc.__class__.__name__}'
-            ) from exc
-        finally:
-            if not completed and state.conversation_id:
-                self._stop_chat_generation(
-                    owner_user_id=owner_user_id,
-                    request_id=request_id,
-                    conversation_id=state.conversation_id,
-                    history_id=state.history_id,
-                )
-        return state
-
-    def _consume_external_agent_stream(
-        self,
-        *,
-        owner_user_id: str,
-        request_id: str,
-        conversation_id: str,
-        text: str,
-        on_stream: Callable[[CoreStreamUpdate], None] | None,
-    ) -> _ChatStreamState:
-        if not conversation_id:
-            raise LazyMindError('External agent conversation id is required')
-        state = _ChatStreamState(
-            conversation_id=conversation_id,
-            external_agent=True,
-        )
-        endpoint = (
-            f'{self._base_url}/external-agent-conversations/'
-            f'{quote(conversation_id, safe="")}:run'
-        )
-        try:
-            with httpx.stream(
-                'POST',
-                endpoint,
-                json={'query': text},
-                headers=self._headers(
-                    owner_user_id,
-                    request_id,
-                    accept='text/event-stream',
-                ),
-                timeout=self._timeout,
-            ) as response:
-                self._raise_for_status(response, 'external agent run')
-                for line in response.iter_lines():
-                    normalized = line.strip()
-                    if not normalized.startswith('data:'):
-                        continue
-                    data = normalized[5:].strip()
-                    if not data:
-                        continue
-                    if data == '[DONE]':
-                        state.saw_done = True
-                        break
-                    try:
-                        frame = json.loads(data)
-                    except json.JSONDecodeError as exc:
-                        raise LazyMindError(
-                            'LazyMind external agent returned invalid SSE JSON'
-                        ) from exc
-                    if not isinstance(frame, dict):
-                        continue
-                    current_id = str(frame.get('conversation_id') or '')
-                    if current_id:
-                        state.conversation_id = current_id
-                    history_id = str(frame.get('history_id') or '')
-                    if history_id:
-                        state.history_id = history_id
-                    event = frame.get('event')
-                    if not isinstance(event, dict):
-                        continue
-                    event = dict(event)
-                    snapshot = (
-                        dict(frame['snapshot'])
-                        if isinstance(frame.get('snapshot'), dict)
-                        else {}
-                    )
-                    canonical_update = {
-                        'event': event,
-                        'snapshot': snapshot,
-                    }
-                    answer = snapshot.get('answer')
-                    if isinstance(answer, str) and answer:
-                        state.last_message = answer
-                    terminal = event.get('terminal') is True
-                    if terminal:
-                        state.finish_reason = (
-                            'FINISH_REASON_UNKNOWN'
-                            if event.get('type') == 'turn_failed'
-                            else 'FINISH_REASON_STOP'
-                        )
-                    if on_stream is not None:
-                        update = self._stream_update(
-                            state.last_message,
-                            None,
-                            conversation_id=state.conversation_id,
-                            history_id=state.history_id,
-                            external_event=canonical_update,
-                        )
-                        if update != state.last_stream_update:
-                            on_stream(update)
-                            state.last_stream_update = update
-                    if terminal and event.get('type') == 'turn_failed':
-                        raise LazyMindError(
-                            str(event.get('message') or '').strip()
-                            or 'External agent run failed'
-                        )
-        except LazyMindError:
-            raise
-        except httpx.HTTPError as exc:
-            raise LazyMindError(
-                f'Cannot reach LazyMind Core: {exc.__class__.__name__}'
-            ) from exc
-        return state
-
-    def _stop_chat_generation(
-        self,
-        *,
-        owner_user_id: str,
-        request_id: str,
-        conversation_id: str,
-        history_id: str,
-    ) -> bool:
-        try:
-            self._request_json(
-                'POST',
-                (
-                    f'{self._base_url}/conversations/'
-                    f'{quote(conversation_id, safe="")}:stop'
-                ),
+        except LazyMindHTTPError as exc:
+            if exc.status_code not in {
+                404, 408, 425, 429, 500, 502, 503, 504,
+            }:
+                raise
+            return self._recover_chat_stream(
                 owner_user_id=owner_user_id,
-                request_id=f'{request_id}_stop',
-                json_body={
-                    'conversation_id': conversation_id,
-                    'history_id': history_id,
-                },
-                error_label='chat stop',
-                timeout_seconds=_CHAT_STOP_TIMEOUT_SECONDS,
+                request_id=request_id,
+                initial_payload=payload,
+                state=state,
+                on_stream=on_stream,
+                attempt=_resume_attempt,
+                cause=exc,
             )
-            return True
-        except LazyMindError as exc:
-            _logger.warning(
-                'channel_chat_stop_failed conversation_id=%s error=%s',
-                conversation_id,
-                exc.__class__.__name__,
+        except LazyMindError:
+            raise
+        except httpx.HTTPError as exc:
+            return self._recover_chat_stream(
+                owner_user_id=owner_user_id,
+                request_id=request_id,
+                initial_payload=payload,
+                state=state,
+                on_stream=on_stream,
+                attempt=_resume_attempt,
+                cause=exc,
             )
-            return False
+        if not completed:
+            return self._recover_chat_stream(
+                owner_user_id=owner_user_id,
+                request_id=request_id,
+                initial_payload=payload,
+                state=state,
+                on_stream=on_stream,
+                attempt=_resume_attempt,
+                cause=LazyMindError(
+                    'LazyMind chat stream ended before completion'
+                ),
+            )
+        return state
+
+    def _recover_chat_stream(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+        initial_payload: dict[str, Any],
+        state: _ChatStreamState,
+        on_stream: Callable[[CoreStreamUpdate], None] | None,
+        attempt: int,
+        cause: Exception,
+    ) -> _ChatStreamState:
+        if attempt >= _CHAT_RESUME_ATTEMPTS:
+            raise LazyMindError(
+                'Cannot resume LazyMind external Chat after Core disconnect'
+            ) from cause
+        time.sleep(_CHAT_RESUME_DELAY_SECONDS)
+        endpoint = f'{self._base_url}/conversations:chat'
+        payload = initial_payload
+        if state.conversation_id and state.history_id:
+            endpoint = f'{self._base_url}/conversations:resumeChat'
+            payload = {
+                'conversation_id': state.conversation_id,
+                'history_id': state.history_id,
+                'after_sequence': state.external_event_sequence,
+            }
+        _logger.warning(
+            'channel_chat_stream_recovering conversation_id=%s '
+            'history_id=%s attempt=%s',
+            state.conversation_id,
+            state.history_id,
+            attempt + 1,
+        )
+        return self._consume_chat_stream(
+            owner_user_id=owner_user_id,
+            request_id=request_id,
+            payload=payload,
+            conversation_id=state.conversation_id,
+            on_stream=on_stream,
+            _state=state,
+            _endpoint=endpoint,
+            _resume_attempt=attempt + 1,
+        )
 
     @staticmethod
     def _stream_update(
@@ -637,7 +583,6 @@ class LazyMindClient:
         *,
         conversation_id: str = '',
         history_id: str = '',
-        external_event: dict[str, Any] | None = None,
         task_created: dict[str, Any] | None = None,
     ) -> CoreStreamUpdate:
         text = _strip_tool_payloads(raw_text)
@@ -657,7 +602,6 @@ class LazyMindClient:
             thinking_seconds=_optional_seconds(raw_thinking_seconds),
             conversation_id=conversation_id,
             history_id=history_id,
-            external_event=external_event,
             task_created=task_created,
         )
 
@@ -675,29 +619,32 @@ class LazyMindClient:
         )
         if not state.conversation_id:
             raise LazyMindError('LazyMind did not return a conversation id')
-        if not state.saw_done and not state.finish_reason:
+        if state.run_terminal is None:
             raise LazyMindError('LazyMind chat stream ended before completion')
-        if not answer and not state.events:
+        latest_item: dict[str, Any] = {}
+        if (not answer and not state.events) or state.external_event_sequence > 0:
             try:
-                latest_history_id, latest_answer = self._latest_answer(
+                latest_item = self._latest_history_item(
                     owner_user_id=owner_user_id,
                     conversation_id=state.conversation_id,
                     request_id=request_id,
                 )
                 if (
-                    latest_history_id == state.history_id
-                    and latest_answer
+                    str(latest_item.get('id') or '') == state.history_id
+                    and latest_item.get('result')
                 ):
-                    answer = latest_answer
+                    answer = str(latest_item['result']).strip()
             except LazyMindError:
                 pass
         answer = sanitize_channel_text(answer)
-        if not state.external_agent:
-            self._append_turn_artifacts(
-                owner_user_id=owner_user_id,
-                request_id=request_id,
-                state=state,
-            )
+        if state.run_terminal.status != 'completed':
+            terminal_text = _terminal_text(state.run_terminal)
+            answer = f'{answer}\n\n{terminal_text}'.strip()
+        self._append_turn_artifacts(
+            owner_user_id=owner_user_id,
+            request_id=request_id,
+            state=state,
+        )
         if not answer and not state.events:
             raise LazyMindError('LazyMind returned no answer')
         if tracked_task_ids is not None:
@@ -707,11 +654,18 @@ class LazyMindClient:
                 state=state,
                 tracked_task_ids=tracked_task_ids,
             )
+        execution = latest_item.get('execution')
+        if isinstance(execution, dict):
+            state.events.append(CoreEvent(
+                source='conversation',
+                type='execution_projection',
+                payload=dict(execution),
+            ))
         return CoreTurnResult(
             conversation_id=state.conversation_id,
             history_id=state.history_id,
             answer=answer,
-            finish_reason=state.finish_reason,
+            run_terminal=state.run_terminal,
             sources=tuple(state.sources),
             events=tuple(state.events),
         )
@@ -955,34 +909,6 @@ class LazyMindClient:
                 exc.__class__.__name__,
             )
 
-    def classify_intent(
-        self,
-        *,
-        owner_user_id: str,
-        request_id: str,
-        provider: str,
-        message: str,
-        state: dict[str, Any],
-        command_registry: dict[str, Any],
-    ) -> dict[str, Any]:
-        payload = self._request_json(
-            'POST',
-            f'{self._base_url}/channel-intents:classify',
-            owner_user_id=owner_user_id,
-            request_id=request_id,
-            json_body={
-                'provider': provider,
-                'message': message,
-                'state': state,
-                'command_registry': command_registry,
-            },
-            error_label='channel intent classifier',
-        )
-        data = payload.get('data')
-        if not isinstance(data, dict):
-            raise LazyMindError('LazyMind channel intent response is invalid')
-        return data
-
     def download_static_image(
         self,
         *,
@@ -1051,213 +977,20 @@ class LazyMindClient:
                 'Cannot download LazyMind static file'
             ) from exc
 
-    def list_external_projects(
+    def stop_chat_generation(
         self,
         *,
         owner_user_id: str,
-        request_id: str,
-        provider: str,
-        cursor: str = '',
-        limit: int = 20,
-    ) -> dict[str, Any]:
-        params: dict[str, Any] = {'limit': limit}
-        if cursor:
-            params['cursor'] = cursor
-        return self._external_data(
-            self._request_json(
-                'GET',
-                (
-                    f'{self._base_url}/external-agents/'
-                    f'{quote(provider, safe="")}/projects'
-                ),
-                owner_user_id=owner_user_id,
-                request_id=request_id,
-                params=params,
-                error_label='external agent projects',
-            ),
-            'external agent projects',
-        )
-
-    def list_external_threads(
-        self,
-        *,
-        owner_user_id: str,
-        request_id: str,
-        provider: str,
-        cursor: str = '',
-        cwd: str = '',
-        limit: int = 20,
-    ) -> dict[str, Any]:
-        params: dict[str, Any] = {'limit': limit}
-        if cursor:
-            params['cursor'] = cursor
-        if cwd:
-            params['cwd'] = cwd
-        return self._external_data(
-            self._request_json(
-                'GET',
-                (
-                    f'{self._base_url}/external-agents/'
-                    f'{quote(provider, safe="")}/threads'
-                ),
-                owner_user_id=owner_user_id,
-                request_id=request_id,
-                params=params,
-                error_label='external agent threads',
-            ),
-            'external agent threads',
-        )
-
-    def read_external_thread(
-        self,
-        *,
-        owner_user_id: str,
-        request_id: str,
-        provider: str,
-        thread_id: str,
-        offset: int | None = None,
-        limit: int | None = None,
-        tail: bool = False,
-    ) -> dict[str, Any]:
-        params: dict[str, Any] = {}
-        if offset is not None:
-            params['offset'] = offset
-        if limit is not None:
-            params['limit'] = limit
-        if tail:
-            params['tail'] = 'true'
-        return self._external_data(
-            self._request_json(
-                'GET',
-                (
-                    f'{self._base_url}/external-agents/'
-                    f'{quote(provider, safe="")}/threads/'
-                    f'{quote(thread_id, safe="")}'
-                ),
-                owner_user_id=owner_user_id,
-                request_id=request_id,
-                params=params or None,
-                error_label='external agent thread',
-            ),
-            'external agent thread',
-        )
-
-    def bind_external_thread(
-        self,
-        *,
-        owner_user_id: str,
-        request_id: str,
-        provider: str,
-        provider_thread_id: str = '',
-        new_session: bool = False,
-        cwd: str = '',
-        conversation_id: str = '',
-        display_name: str = '',
-    ) -> dict[str, Any]:
-        body: dict[str, Any] = {
-            'new_session': new_session,
-        }
-        if provider_thread_id:
-            body['provider_thread_id'] = provider_thread_id
-        if cwd:
-            body['cwd'] = cwd
-        if conversation_id:
-            body['conversation_id'] = conversation_id
-        if display_name:
-            body['display_name'] = display_name
-        return self._external_data(
-            self._request_json(
-                'POST',
-                (
-                    f'{self._base_url}/external-agents/'
-                    f'{quote(provider, safe="")}/bindings'
-                ),
-                owner_user_id=owner_user_id,
-                request_id=request_id,
-                json_body=body,
-                error_label='external agent binding',
-            ),
-            'external agent binding',
-        )
-
-    def interrupt_external_conversation(
-        self,
-        *,
-        owner_user_id: str,
-        request_id: str,
         conversation_id: str,
-        expected_run_id: str,
+        request_id: str,
     ) -> None:
         self._request_json(
             'POST',
-            (
-                f'{self._base_url}/external-agent-conversations/'
-                f'{quote(conversation_id, safe="")}:interrupt'
-            ),
+            f'{self._base_url}/conversations:stopChatGeneration',
             owner_user_id=owner_user_id,
             request_id=request_id,
-            json_body={'expected_run_id': expected_run_id},
-            error_label='external agent interruption',
-        )
-
-    def release_external_conversation(
-        self,
-        *,
-        owner_user_id: str,
-        request_id: str,
-        conversation_id: str,
-    ) -> None:
-        self._request_json(
-            'POST',
-            (
-                f'{self._base_url}/external-agent-conversations/'
-                f'{quote(conversation_id, safe="")}:release'
-            ),
-            owner_user_id=owner_user_id,
-            request_id=request_id,
-            error_label='external agent release',
-        )
-
-    def delete_external_conversation(
-        self,
-        *,
-        owner_user_id: str,
-        request_id: str,
-        conversation_id: str,
-    ) -> None:
-        self._request_json(
-            'DELETE',
-            (
-                f'{self._base_url}/external-agent-conversations/'
-                f'{quote(conversation_id, safe="")}'
-            ),
-            owner_user_id=owner_user_id,
-            request_id=request_id,
-            error_label='external agent deletion',
-        )
-
-    def respond_external_request(
-        self,
-        *,
-        owner_user_id: str,
-        request_id: str,
-        external_request_id: str,
-        action_id: str,
-        answers: dict[str, Any] | None = None,
-    ) -> None:
-        body: dict[str, Any] = {'action_id': action_id}
-        if answers is not None:
-            body['answers'] = answers
-        self._request_json(
-            'POST',
-            (
-                f'{self._base_url}/external-agent-requests/'
-                f'{quote(external_request_id, safe="")}:respond'
-            ),
-            owner_user_id=owner_user_id,
-            request_id=request_id,
-            json_body=body,
-            error_label='external agent request response',
+            json_body={'conversation_id': conversation_id},
+            error_label='conversation stop',
         )
 
     def list_conversations(
@@ -1267,10 +1000,13 @@ class LazyMindClient:
         request_id: str,
         page_size: int = 100,
         page_token: str = '',
+        assistant: str = '',
     ) -> dict[str, Any]:
         params: dict[str, Any] = {'page_size': page_size}
         if page_token:
             params['page_token'] = page_token
+        if assistant:
+            params['assistant'] = assistant
         return self._request_json(
             'GET',
             f'{self._base_url}/conversations',
@@ -1279,6 +1015,54 @@ class LazyMindClient:
             params=params,
             error_label='conversation list',
         )
+
+    def list_external_agent_sessions(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+        provider: str,
+        page_size: int = 100,
+        page_token: str = '',
+    ) -> dict[str, Any]:
+        params: dict[str, Any] = {'page_size': page_size}
+        if page_token:
+            params['page_token'] = page_token
+        payload = self._request_json(
+            'GET',
+            f'{self._base_url}/external-chat/providers/'
+            f'{quote(provider, safe="")}/sessions',
+            owner_user_id=owner_user_id,
+            request_id=request_id,
+            params=params,
+            error_label='external Agent session catalog',
+        )
+        data = payload.get('data')
+        return dict(data) if isinstance(data, dict) else payload
+
+    def bind_external_agent_session(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+        provider: str,
+        host_id: str,
+        provider_thread_id: str,
+    ) -> dict[str, Any]:
+        payload = self._request_json(
+            'POST',
+            f'{self._base_url}/external-chat/providers/'
+            f'{quote(provider, safe="")}/sessions/'
+            f'{quote(provider_thread_id, safe="")}/binding',
+            owner_user_id=owner_user_id,
+            request_id=request_id,
+            params={'host_id': host_id},
+            error_label='external Agent session binding',
+        )
+        data = payload.get('data')
+        if not isinstance(data, dict):
+            raise LazyMindError('LazyMind external Agent binding response is invalid')
+        return dict(data)
 
     def get_conversation_detail(
         self,
@@ -1341,6 +1125,25 @@ class LazyMindClient:
             raise LazyMindError('LazyMind conversation configuration response is invalid')
         return data
 
+    def list_chat_executors(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+    ) -> list[dict[str, Any]]:
+        payload = self._request_json(
+            'GET',
+            f'{self._base_url}/chat/executors',
+            owner_user_id=owner_user_id,
+            request_id=request_id,
+            error_label='chat executor catalog',
+        )
+        data = payload.get('data')
+        values = data.get('executors') if isinstance(data, dict) else None
+        if not isinstance(values, list):
+            raise LazyMindError('LazyMind chat executor catalog is invalid')
+        return [dict(item) for item in values if isinstance(item, dict)]
+
     def update_conversation_agent_settings(
         self,
         *,
@@ -1352,7 +1155,7 @@ class LazyMindClient:
         self._request_json(
             'PATCH',
             f'{self._base_url}/conversations/'
-            f'{quote(conversation_id, safe="")}/workflow-settings',
+            f'{quote(conversation_id, safe="")}/settings',
             owner_user_id=owner_user_id,
             request_id=request_id,
             json_body=settings,
@@ -1658,7 +1461,9 @@ class LazyMindClient:
                 ),
             )
         except httpx.HTTPError as exc:
-            raise LazyMindError(f'Cannot load LazyMind {error_label}') from exc
+            raise RetryableLazyMindError(
+                f'Cannot load LazyMind {error_label}'
+            ) from exc
         self._raise_for_status(response, error_label)
         try:
             payload = response.json()
@@ -1671,18 +1476,6 @@ class LazyMindClient:
         return payload
 
     @staticmethod
-    def _external_data(
-        payload: dict[str, Any],
-        error_label: str,
-    ) -> dict[str, Any]:
-        data = payload.get('data')
-        if not isinstance(data, dict):
-            raise LazyMindError(
-                f'LazyMind {error_label} returned an invalid payload'
-            )
-        return data
-
-    @staticmethod
     def _raise_for_status(response: httpx.Response, error_label: str) -> None:
         if 200 <= response.status_code < 300:
             return
@@ -1692,13 +1485,13 @@ class LazyMindClient:
             f'LazyMind {error_label} returned HTTP {response.status_code}: {body[:300]}',
         )
 
-    def _latest_answer(
+    def _latest_history_item(
         self,
         *,
         owner_user_id: str,
         conversation_id: str,
         request_id: str,
-    ) -> tuple[str, str]:
+    ) -> dict[str, Any]:
         payload = self._request_json(
             'GET',
             (
@@ -1713,11 +1506,11 @@ class LazyMindClient:
         )
         history = payload.get('history')
         if not isinstance(history, list) or not history:
-            return '', ''
+            return {}
         item = history[0]
         if not isinstance(item, dict):
-            return '', ''
-        return str(item.get('id') or ''), str(item.get('result') or '').strip()
+            return {}
+        return dict(item)
 
     def _download_static_image(self, static_path: str) -> tuple[int, bytes]:
         try:

@@ -29,7 +29,6 @@ import (
 	skillremotefs "lazymind/core/skillv2/remotefs"
 	skillreview "lazymind/core/skillv2/review"
 	skillrevision "lazymind/core/skillv2/revision"
-	skillsearch "lazymind/core/skillv2/search"
 	skillservice "lazymind/core/skillv2/service"
 	skillshare "lazymind/core/skillv2/share"
 	"lazymind/core/store"
@@ -99,27 +98,33 @@ func List(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	resp, err := newSkillService(db).ListSkills(r.Context(), skillservice.ListSkillsRequest{UserID: userID})
+	page := positiveQueryInt(r, "page", 1)
+	requestedPageSize := positiveQueryInt(r, "page_size", 20)
+	effectivePageSize := requestedPageSize
+	if effectivePageSize > 100 {
+		effectivePageSize = 100
+	}
+	resp, err := newSkillService(db).ListSkills(r.Context(), skillservice.ListSkillsRequest{
+		UserID:   userID,
+		Keyword:  r.URL.Query().Get("keyword"),
+		Category: r.URL.Query().Get("category"),
+		Tags:     r.URL.Query()["tags"],
+		Offset:   (page - 1) * effectivePageSize,
+		Limit:    effectivePageSize,
+	})
 	if err != nil {
 		replyServiceError(w, err)
 		return
 	}
-	items, err := filterSkillSummaries(r.Context(), db, resp.Items, r)
-	if err != nil {
-		replyServiceError(w, err)
-		return
-	}
-	total := len(items)
-	items = paginateSkillSummaries(items, r)
-	out := make([]map[string]any, 0, len(items))
-	for _, item := range items {
+	out := make([]map[string]any, 0, len(resp.Items))
+	for _, item := range resp.Items {
 		out = append(out, skillSummaryDTO(item))
 	}
 	common.ReplyOK(w, map[string]any{
 		"items":     out,
-		"page":      positiveQueryInt(r, "page", 1),
-		"page_size": positiveQueryInt(r, "page_size", 20),
-		"total":     total,
+		"page":      page,
+		"page_size": requestedPageSize,
+		"total":     resp.Total,
 	})
 }
 
@@ -359,6 +364,17 @@ func ListTrash(w http.ResponseWriter, r *http.Request) {
 		replyServiceError(w, err)
 		return
 	}
+	categorySet := make(map[string]struct{})
+	for _, item := range resp.Items {
+		if category := strings.TrimSpace(item.Category); category != "" {
+			categorySet[category] = struct{}{}
+		}
+	}
+	categories := make([]string, 0, len(categorySet))
+	for category := range categorySet {
+		categories = append(categories, category)
+	}
+	sort.Strings(categories)
 	items := filterTrashedSkillSummaries(resp.Items, r)
 	total := len(items)
 	items = paginateSkillSummaries(items, r)
@@ -367,10 +383,11 @@ func ListTrash(w http.ResponseWriter, r *http.Request) {
 		out = append(out, skillSummaryDTO(item))
 	}
 	common.ReplyOK(w, map[string]any{
-		"items":     out,
-		"page":      positiveQueryInt(r, "page", 1),
-		"page_size": positiveQueryInt(r, "page_size", 20),
-		"total":     total,
+		"categories": categories,
+		"items":      out,
+		"page":       positiveQueryInt(r, "page", 1),
+		"page_size":  positiveQueryInt(r, "page_size", 20),
+		"total":      total,
 	})
 }
 
@@ -413,6 +430,26 @@ func EmptyTrash(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	common.ReplyOK(w, map[string]any{"purged": count})
+}
+
+// PurgeExpiredTrash runs the existing skill purge service per expired item so
+// local blob cleanup remains identical to a manual permanent deletion.
+func PurgeExpiredTrash(ctx context.Context, db *gorm.DB, now time.Time) (purged, failed int) {
+	var skills []orm.SkillV2Skill
+	if err := db.WithContext(ctx).
+		Where("deleted_at IS NOT NULL AND trash_expires_at IS NOT NULL AND trash_expires_at <= ?", now).
+		Find(&skills).Error; err != nil {
+		return 0, 1
+	}
+	service := newSkillService(db)
+	for _, skill := range skills {
+		if err := service.PurgeSkill(ctx, skillservice.PurgeSkillRequest{SkillID: skill.ID, UserID: skill.OwnerUserID}); err != nil {
+			failed++
+			continue
+		}
+		purged++
+	}
+	return purged, failed
 }
 
 func Tree(w http.ResponseWriter, r *http.Request) {
@@ -1107,7 +1144,6 @@ func MarketPublish(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var req struct {
-		Name     string             `json:"name"`
 		Tags     []string           `json:"tags"`
 		Category string             `json:"category"`
 		Source   skillSourceRequest `json:"source"`
@@ -1115,7 +1151,11 @@ func MarketPublish(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
-	source := skillmarket.SourceInput{Type: strings.TrimSpace(req.Source.Type), UploadID: strings.TrimSpace(req.Source.UploadID)}
+	source := skillmarket.SourceInput{
+		Type:     strings.TrimSpace(req.Source.Type),
+		UploadID: strings.TrimSpace(req.Source.UploadID),
+		URL:      strings.TrimSpace(req.Source.URL),
+	}
 	if source.UploadID != "" {
 		session, err := dbUploadStore{db: db}.Get(r.Context(), source.UploadID)
 		if err != nil {
@@ -1135,7 +1175,6 @@ func MarketPublish(w http.ResponseWriter, r *http.Request) {
 	}
 	resp, err := newMarketService(db).Publish(r.Context(), skillmarket.PublishRequest{
 		AdminUserID: userID,
-		Name:        strings.TrimSpace(req.Name),
 		Tags:        marketRequestTags(req.Tags, req.Category),
 		Source:      source,
 	})
@@ -1783,7 +1822,11 @@ func remoteRequestWithHeaderUser(r *http.Request) *http.Request {
 }
 
 func newMarketService(db *gorm.DB) *skillmarket.Service {
-	return skillmarket.NewService(skillmarket.ServiceDeps{DB: db, BlobStore: skillmarket.NewBlobStore(db, skillmarket.NewLocalObjectStore(skillObjectRoot()))})
+	return skillmarket.NewService(skillmarket.ServiceDeps{
+		DB:         db,
+		BlobStore:  skillmarket.NewBlobStore(db, skillmarket.NewLocalObjectStore(skillObjectRoot())),
+		Downloader: httpZipDownloader{},
+	})
 }
 
 func newShareService(db *gorm.DB) *skillshare.Service {
@@ -2154,6 +2197,9 @@ func skillSummaryDTO(item skillservice.SkillSummary) map[string]any {
 	if item.DeletedAt != nil {
 		out["deleted_at"] = item.DeletedAt
 	}
+	if item.TrashExpiresAt != nil {
+		out["trash_expires_at"] = item.TrashExpiresAt
+	}
 	if strings.TrimSpace(item.DeletedBy) != "" {
 		out["deleted_by"] = item.DeletedBy
 	}
@@ -2518,32 +2564,6 @@ func findServiceTreeNode(node skillservice.TreeNode, path string) *skillservice.
 	return nil
 }
 
-func filterSkillSummaries(ctx context.Context, db *gorm.DB, items []skillservice.SkillSummary, r *http.Request) ([]skillservice.SkillSummary, error) {
-	keyword := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("keyword")))
-	category := strings.TrimSpace(r.URL.Query().Get("category"))
-	tags := compactStrings(r.URL.Query()["tags"])
-	out := make([]skillservice.SkillSummary, 0, len(items))
-	for _, item := range items {
-		if category != "" && item.Category != category {
-			continue
-		}
-		if len(tags) > 0 && !hasAllTags(item.Tags, tags) {
-			continue
-		}
-		if keyword != "" && !strings.Contains(strings.ToLower(item.Name+" "+item.SkillName+" "+item.Description), keyword) {
-			matched, err := skillHeadTextContains(ctx, db, item.ID, keyword)
-			if err != nil {
-				return nil, err
-			}
-			if !matched {
-				continue
-			}
-		}
-		out = append(out, item)
-	}
-	return out, nil
-}
-
 func filterTrashedSkillSummaries(items []skillservice.SkillSummary, r *http.Request) []skillservice.SkillSummary {
 	keyword := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("keyword")))
 	category := strings.TrimSpace(r.URL.Query().Get("category"))
@@ -2562,14 +2582,6 @@ func filterTrashedSkillSummaries(items []skillservice.SkillSummary, r *http.Requ
 		out = append(out, item)
 	}
 	return out
-}
-
-func skillHeadTextContains(ctx context.Context, db *gorm.DB, skillID, keyword string) (bool, error) {
-	keyword = strings.ToLower(strings.TrimSpace(keyword))
-	if keyword == "" {
-		return true, nil
-	}
-	return skillsearch.NewService(skillsearch.ServiceDeps{DB: db}).Contains(ctx, skillID, keyword)
 }
 
 func paginateSkillSummaries(items []skillservice.SkillSummary, r *http.Request) []skillservice.SkillSummary {

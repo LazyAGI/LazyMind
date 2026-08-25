@@ -32,7 +32,7 @@ interface MultiAnswerDisplayProps {
     answerIndex: number,
     showFullToolbar: boolean,
   ) => React.ReactNode;
-  renderKnowledgeBase?: (answerIndex: number) => React.ReactNode;
+  renderSources?: (answerIndex: number) => React.ReactNode;
   initialSelectedIndex?: number;
   initialPreference?: PreferenceType;
   isStreaming?: boolean;
@@ -45,7 +45,7 @@ const MultiAnswerDisplay: React.FC<MultiAnswerDisplayProps> = ({
   onSelectAnswer,
   disabled = false,
   renderFooter,
-  renderKnowledgeBase,
+  renderSources,
   initialSelectedIndex,
   initialPreference,
   isStreaming = false,
@@ -106,7 +106,7 @@ const MultiAnswerDisplay: React.FC<MultiAnswerDisplayProps> = ({
           </div>
 
           {}
-          {renderKnowledgeBase && renderKnowledgeBase(selectedAnswer)}
+          {renderSources && renderSources(selectedAnswer)}
 
           {}
           {renderFooter && renderFooter(selectedAnswer, true)}
@@ -134,7 +134,7 @@ const MultiAnswerDisplay: React.FC<MultiAnswerDisplayProps> = ({
             </div>
 
             {}
-            {renderKnowledgeBase && index === 0 && renderKnowledgeBase(index)}
+            {renderSources && index === 0 && renderSources(index)}
 
             {}
             {renderFooter && renderFooter(index, false)}

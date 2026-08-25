@@ -19,6 +19,7 @@ import { useTranslation } from "react-i18next";
 import type { ChatMention } from "../../ChatInput/MentionEditor";
 import { CHAT_SELECT_CONVERSATION_EVENT } from "@/modules/chat/constants/chat";
 import { IdentityAvatar } from "@/modules/identityAvatar";
+import type { ChatSource } from "@/modules/chat/utils/sourceAdapter";
 
 const MENTION_ICONS = {
   knowledge_base: <DatabaseOutlined />,
@@ -40,7 +41,7 @@ function mentionHref(mention: ChatMention) {
         ? `/memory-management/workflows/builtin/${encodeURIComponent(mention.resource_id.slice(8))}`
         : `/memory-management/workflows/${id}`;
     case "tool":
-      return "/model-providers/tools";
+      return "/settings?section=system_tools";
     case "conversation":
       return `/agent/chat?conversation_id=${id}`;
     default:
@@ -98,6 +99,7 @@ interface MessageListProps {
   initialCard?: React.ReactNode;
   sendMessage: (text: string, clearInput?: boolean, extras?: Record<string, unknown>) => void;
   regenerate: () => void;
+  regenerateDisabled?: boolean;
   stopGeneration: () => void;
   renderText: (item: any) => React.ReactNode;
   updateAssistantMessage: (data: any, id?: string, index?: number) => void;
@@ -115,6 +117,7 @@ interface MessageListProps {
   onResendEditedUserMessage?: (index: number, value: string) => void;
   onCopyUserMessage?: (item: any) => void;
   onCiteMessage?: (text: string, historyId?: string) => void;
+  onOpenSources?: (sources: ChatSource[]) => void;
   footer?: React.ReactNode;
 }
 
@@ -246,6 +249,7 @@ const MessageList: React.FC<MessageListProps> = ({
   initialCard,
   sendMessage,
   regenerate,
+  regenerateDisabled = false,
   stopGeneration,
   renderText,
   updateAssistantMessage,
@@ -263,6 +267,7 @@ const MessageList: React.FC<MessageListProps> = ({
   onResendEditedUserMessage,
   onCopyUserMessage,
   onCiteMessage,
+  onOpenSources,
   footer,
 }) => {
   const { t } = useTranslation();
@@ -486,6 +491,7 @@ const MessageList: React.FC<MessageListProps> = ({
                   length={messageList.length}
                   sendMessage={sendMessage}
                   regenerate={regenerate}
+                  regenerateDisabled={regenerateDisabled}
                   stopGeneration={stopGeneration}
                   renderText={renderText}
                   updateMessage={(msg: any) =>
@@ -496,6 +502,7 @@ const MessageList: React.FC<MessageListProps> = ({
                   onCiteMessage={(text: string) =>
                     onCiteMessage?.(text, item.history_id || item.id)
                   }
+                  onOpenSources={onOpenSources}
                   hasLaterUserMessage={messageList
                     .slice(index + 1)
                     .some(

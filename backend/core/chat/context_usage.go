@@ -70,7 +70,7 @@ func (c *ChatService) ContextUsage(ctx context.Context, req *LazyChatRequest) (*
 	if err != nil {
 		return nil, err
 	}
-	endpoint := strings.TrimSuffix(c.chatURL, chatPath) + contextUsagePath
+	endpoint := c.baseURL + contextUsagePath
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, err
@@ -96,7 +96,7 @@ func (c *ChatService) ContextPrompt(ctx context.Context, req *LazyChatRequest) (
 	if err != nil {
 		return nil, err
 	}
-	endpoint := strings.TrimSuffix(c.chatURL, chatPath) + contextPromptPath
+	endpoint := c.baseURL + contextPromptPath
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(bodyBytes))
 	if err != nil {
 		return nil, err
@@ -231,11 +231,12 @@ func estimateContext(w http.ResponseWriter, r *http.Request, exportPrompt bool) 
 		common.ReplyErr(w, "query disabled tools failed", http.StatusInternalServerError)
 		return
 	}
-	resourceContext.DisabledTools = mergeDisabledToolNames(resourceContext.DisabledTools, disabled)
 	resourceContext.DisabledTools = mergeDisabledToolNames(
 		resourceContext.DisabledTools, mentioned.ExcludedToolNames,
 	)
 	resourceContext.DisabledTools = applyMentionedTools(resourceContext.DisabledTools, mentioned.ToolNames)
+	// A setting-level pause must not be bypassed by an explicit @tool mention.
+	resourceContext.DisabledTools = mergeDisabledToolNames(resourceContext.DisabledTools, disabled)
 
 	reqBody := buildChatRequestBody(
 		r.Context(), db, convID, sessionID, query, histories, raw,
@@ -279,6 +280,10 @@ func estimateContext(w http.ResponseWriter, r *http.Request, exportPrompt bool) 
 			reqBody[key] = value
 		}
 	}
+	if err := applyChatFeatureControls(r.Context(), db, userID, reqBody); err != nil {
+		common.ReplyErr(w, "load chat feature controls failed", http.StatusInternalServerError)
+		return
+	}
 	if value, ok := raw["context_preview_allow_llm_routing"].(bool); ok {
 		reqBody["context_preview_allow_llm_routing"] = value
 	}
@@ -304,6 +309,14 @@ func estimateContext(w http.ResponseWriter, r *http.Request, exportPrompt bool) 
 			workflowContext["revision_no"] = active.WorkflowRevisionNo
 			workflowContext["tree_hash"] = active.WorkflowTreeHash
 			workflowContext["remote_root"] = active.WorkflowRemoteRoot
+			refOrID := active.WorkflowRef
+			if refOrID == "" {
+				refOrID = active.WorkflowID
+			}
+			delete(workflowContext, "runtime")
+			if runtimePolicy, ok := workflow.RuntimePolicyForRevision(r.Context(), db, userID, refOrID, active.WorkflowRevisionID); ok {
+				workflowContext["runtime"] = runtimePolicy
+			}
 		}
 	}
 	reqBody["workflow_context"] = workflowContext

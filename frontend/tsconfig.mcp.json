@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "preserveSymlinks": true,
+    "types": ["vitest/globals", "@testing-library/jest-dom"]
+  },
+  "include": [
+    "src/vite-env.d.ts",
+    "src/modules/chat/components/ChatInput/ChatConfigModal.tsx",
+    "src/modules/chat/components/ChatInput/ChatConfigModal.test.tsx"
+  ]
+}

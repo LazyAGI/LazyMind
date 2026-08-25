@@ -50,9 +50,9 @@ func GetChatSettings(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// PatchConversationWorkflowSettings updates conversation-level plugin/subagent overrides.
-// Supports enable_workflow, workflow_mode, enable_subagent; null clears back to global default.
-func PatchConversationWorkflowSettings(w http.ResponseWriter, r *http.Request) {
+// PatchConversationSettings updates the Agent executor and the conversation's
+// Workflow/subagent overrides through one settings boundary.
+func PatchConversationSettings(w http.ResponseWriter, r *http.Request) {
 	userID := store.UserID(r)
 	if userID == "" {
 		common.ReplyErr(w, "unauthorized", http.StatusUnauthorized)
@@ -68,7 +68,6 @@ func PatchConversationWorkflowSettings(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "conversation_id required", http.StatusBadRequest)
 		return
 	}
-
 	var body map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		common.ReplyErr(w, "invalid body: "+err.Error(), http.StatusBadRequest)
@@ -76,6 +75,7 @@ func PatchConversationWorkflowSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	updates := map[string]any{}
+	requestedExecutor := ""
 	if raw, present := body["enable_workflow"]; present {
 		if raw == nil {
 			updates["enable_plugin"] = nil
@@ -102,9 +102,33 @@ func PatchConversationWorkflowSettings(w http.ResponseWriter, r *http.Request) {
 			updates["plugin_mode"] = v // workflow-naming: persistence
 		}
 	}
+	if raw, present := body["chat_executor"]; present {
+		value, ok := raw.(string)
+		normalized, valid := normalizeChatExecutor(value)
+		if !ok || !valid {
+			common.ReplyErr(w, chatExecutorValidationMessage(), http.StatusBadRequest)
+			return
+		}
+		updates["chat_executor"] = normalized
+		requestedExecutor = normalized
+	}
 	if len(updates) == 0 {
 		common.ReplyErr(w, "no valid fields to update", http.StatusBadRequest)
 		return
+	}
+	var conversation orm.Conversation
+	if err := db.WithContext(r.Context()).Where("id = ? AND create_user_id = ?", convID, userID).
+		First(&conversation).Error; err != nil {
+		common.ReplyErr(w, "conversation not found", http.StatusNotFound)
+		return
+	}
+	if requestedExecutor != "" {
+		if isExternalChatProvider(requestedExecutor) {
+			if err := externalChatUnavailableError(r.Context(), userID, requestedExecutor); err != nil {
+				common.ReplyErr(w, err.Error(), http.StatusConflict)
+				return
+			}
+		}
 	}
 	if enabled, exists := updates["enable_plugin"]; exists && enabled == false {
 		var workflowCount int64
@@ -121,7 +145,7 @@ func PatchConversationWorkflowSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := db.WithContext(r.Context()).Model(&orm.Conversation{}).
-		Where("id = ? AND create_user_id = ?", convID, userID).
+		Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", convID, userID).
 		Updates(updates).Error; err != nil {
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
 		return

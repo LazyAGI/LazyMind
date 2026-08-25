@@ -81,6 +81,12 @@ type QueueRequest struct {
 }
 
 func appendEvent(tx *gorm.DB, row orm.WorkflowSessionStep, owner, eventType string, payload json.RawMessage, now time.Time) error {
+	if owner == "" {
+		var session orm.WorkflowSession
+		if err := tx.Select("create_user_id").Where("id = ?", row.SessionID).First(&session).Error; err == nil {
+			owner = session.CreateUserID
+		}
+	}
 	return tx.Create(&orm.WorkflowEvent{SessionID: row.SessionID, OwnerUserID: owner,
 		ContractVersion: ContractVersion, EventType: eventType, EntityID: row.ID,
 		PayloadJSON: payload, CreatedAt: now}).Error
@@ -163,14 +169,49 @@ func (s *Service) ClaimForHost(ctx context.Context, executorID, host string) (Cl
 	if err != nil {
 		return Claim{}, err
 	}
+	return s.claimCandidate(ctx, candidate, executorID, false)
+}
+
+// ClaimAttemptForHost claims one exact Attempt for an interactive Host. A
+// repeat from the same executor rotates the lease, which lets a restarted MCP
+// connection resume without exposing the internal lease token to the model.
+func (s *Service) ClaimAttemptForHost(ctx context.Context, attemptID, executorID, host string) (Claim, error) {
+	if !SchemaCapable(s.db) {
+		return Claim{}, ErrSchemaUnavailable
+	}
+	var candidate orm.WorkflowSessionStep
+	query := s.db.WithContext(ctx).Model(&orm.WorkflowSessionStep{}).
+		Select("plugin_session_steps.*").                                                               // workflow-naming: persistence
+		Where("plugin_session_steps.id = ? AND plugin_session_steps.validity = 'effective'", attemptID) // workflow-naming: persistence
+	if host != "" {
+		query = query.Joins("JOIN plugin_sessions ps ON ps.id = plugin_session_steps.session_id").
+			Where("COALESCE(ps.controller_host, 'lazymind') = ?", host)
+	}
+	if err := query.First(&candidate).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return Claim{}, ErrNotClaimable
+		}
+		return Claim{}, err
+	}
+	return s.claimCandidate(ctx, candidate, executorID, true)
+}
+
+func (s *Service) claimCandidate(ctx context.Context, candidate orm.WorkflowSessionStep, executorID string, allowCurrentOwner bool) (Claim, error) {
+	now := s.now()
 	token, err := newToken()
 	if err != nil {
 		return Claim{}, err
 	}
 	expires := now.Add(s.config.leaseDuration())
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		result := tx.Model(&orm.WorkflowSessionStep{}).
-			Where("id = ? AND fencing_generation = ? AND (status = 'queued' OR lease_expires_at < ?)", candidate.ID, candidate.FencingGeneration, now).
+		condition := "id = ? AND fencing_generation = ? AND (status = 'queued' OR lease_expires_at < ?"
+		args := []any{candidate.ID, candidate.FencingGeneration, now}
+		if allowCurrentOwner {
+			condition += " OR (lease_owner = ? AND status IN ('claimed','running'))"
+			args = append(args, executorID)
+		}
+		condition += ")"
+		result := tx.Model(&orm.WorkflowSessionStep{}).Where(condition, args...).
 			Updates(map[string]any{"status": "claimed", "lease_owner": executorID,
 				"lease_token": token, "fencing_generation": gorm.Expr("fencing_generation + 1"),
 				"lease_expires_at": expires, "heartbeat_at": now, "updated_at": now})

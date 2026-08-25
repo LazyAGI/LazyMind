@@ -7,8 +7,8 @@ from typing import Any, Dict, List, Optional, Union
 import lazyllm
 from lazyllm import AutoModel
 from lazyllm.components.formatter import encode_query_with_filepaths
+from lazyllm.tools.agent import ToolExecutionError
 
-from lazymind.chat.engine.tools.infra import tool_error, tool_success
 from lazymind.chat.engine.tools.infra.image_generation_support import (
     _DEFAULT_BATCH_SIZE,
     _DEFAULT_IMAGE_SIZE,
@@ -77,22 +77,19 @@ def vision_extractor(url: str, instruction: Optional[str] = None) -> Dict[str, A
             description prompt.
 
     Returns:
-        A unified tool payload whose result contains the extracted
-        description and resolved local path.
+        The extracted description and resolved local path.
     """
     raw = str(url or '').strip()
     if not raw:
-        return tool_error('vision_extractor', 'url is required')
+        raise ToolExecutionError('url is required')
     if Path(raw.split('?', 1)[0]).suffix.lower() == '.pdf':
-        return tool_error(
-            'vision_extractor',
-            'vision_extractor only supports image files; use kb_tmp_search to read PDF content',
-            error_type='UnsupportedFileType',
+        raise ToolExecutionError(
+            'vision_extractor only supports image files; use kb_tmp_search to read PDF content.'
         )
 
     local_path = resolve_tool_image_path(raw)
     if not local_path:
-        raise ValueError(f'image file not found: {raw}')
+        raise ToolExecutionError(f'Image file not found: {raw}')
 
     prompt_instruction = (
         str(instruction).strip() if instruction else _VISION_EXTRACT_DEFAULT_INSTRUCTION
@@ -111,7 +108,7 @@ def vision_extractor(url: str, instruction: Optional[str] = None) -> Dict[str, A
         priority=priority,
     )
     text = str(out).strip()
-    return tool_success('vision_extractor', {'description': text, 'url': local_path})
+    return {'description': text, 'url': local_path}
 
 
 def image_generator(
@@ -131,7 +128,7 @@ def image_generator(
         batch_size: Number of images to generate (default 1).
 
     Returns:
-        On success: ``success``, ``prompt``, ``local_path``, optional
+        Returns ``prompt``, ``local_path``, optional
         ``image_url`` / ``image_markdown``, and ``images`` (list per file).
         Copy ``image_markdown`` verbatim when answering; never rewrite signed
         ``/static-files/`` paths or expose bare local filesystem paths.
@@ -208,7 +205,7 @@ def video_generator(
         ratio: Aspect ratio, e.g. ``16:9``.
 
     Returns:
-        On success: ``success``, ``prompt``, ``local_path``, optional
+        Returns ``prompt``, ``local_path``, optional
         ``video_url`` / ``video_markdown``, and ``videos`` (list per file).
         When answering the user, copy ``video_markdown`` verbatim (or
         ``video_url`` if markdown is absent); do not invent or rewrite
@@ -252,31 +249,23 @@ def video_to_gif(
         duration: Optional clip length in seconds from ``start``.
 
     Returns:
-        On success: ``success``, ``local_path``, optional ``image_url`` /
+        Returns ``local_path``, optional ``image_url`` /
         ``image_markdown`` (GIF is shown as an image), plus conversion params.
         Copy ``image_markdown`` verbatim when answering the user.
     """
     raw = str(url or '').strip()
     if not raw:
-        return tool_error('video_to_gif', 'url is required')
+        raise ToolExecutionError('url is required')
     ffmpeg_path, ffprobe_path = resolve_ffmpeg_binaries()
     if not ffmpeg_path or not ffprobe_path:
-        return tool_error(
-            'video_to_gif',
-            (
-                'FFMPEG_DEPENDENCY_MISSING: Animated GIF output requires FFmpeg. '
-                'The generated video remains available.'
-            ),
-            error_type='MissingDependency',
-            meta={
-                'dependency': 'ffmpeg',
-                'settings_path': '/model-providers/tools#ffmpeg-dependency',
-                'fallback': 'video',
-            },
+        raise ToolExecutionError(
+            'Animated GIF output requires FFmpeg. Configure it at '
+            '/settings?section=system_tools#ffmpeg-dependency; '
+            'the generated video remains available.'
         )
     local_path = resolve_tool_video_path(raw)
     if not local_path:
-        raise ValueError(f'video file not found: {raw}')
+        raise ToolExecutionError(f'Video file not found: {raw}')
     return run_video_to_gif(
         local_path,
         fps=fps,

@@ -398,15 +398,10 @@ var errorCatalog = map[string]*AppError{
 	"unmarshal response":                              NewAppError(http.StatusBadGateway, 2001224, "unmarshal response"),
 	"upstream returned empty error body":              NewAppError(http.StatusBadGateway, 2001225, "upstream returned empty error body"),
 	"upstream returned error payload without message": NewAppError(http.StatusBadGateway, 2001226, "upstream returned error payload without message"),
-
-	// External Agent assistant errors.
-	"unsupported external agent provider":                   NewAppError(http.StatusBadRequest, 2002015, "Unsupported external agent provider"),
-	"external agent binding not found":                      NewAppError(http.StatusNotFound, 2002016, "External agent binding not found"),
-	"external agent thread is controlled by another user":   NewAppError(http.StatusConflict, 2002017, "External agent thread is controlled by another user"),
-	"unmanaged provider thread may still be active locally": NewAppError(http.StatusConflict, 2002018, "Provider thread may still be active locally"),
-	"external agent request not found":                      NewAppError(http.StatusNotFound, 2002019, "External agent request not found"),
-	"codex assistant is not configured":                     NewAppError(http.StatusServiceUnavailable, 2002020, "Codex assistant is not configured"),
-	"continue in fork failed":                               NewAppError(http.StatusBadGateway, 2002021, "Failed to continue in a forked Codex session"),
+	"invalid external agent source":                   NewAppError(http.StatusBadRequest, 2002292, "Invalid external Agent source"),
+	"external agent thread belongs to another user or conversation": NewAppError(
+		http.StatusConflict, 2002293, "External Agent thread belongs to another user or conversation",
+	),
 }
 
 func ResolveAppError(message string, statusCode int) *AppError {

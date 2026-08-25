@@ -9,55 +9,62 @@ import SigninDashboard from "@/modules/signin/pages/dashboard";
 import LoginTransition from "@/modules/signin/pages/loginTransition";
 import ChatApp from "@/modules/chat/ChatApp";
 import Home from "@/modules/chat/pages/home";
-import ShowcaseGalleryPage from "@/modules/showcase/GalleryPage";
-import ShowcaseDetailPage from "@/modules/showcase/DetailPage";
-import KnowledgeApp from "@/modules/knowledge/KnowledgeApp";
-import KnowledgeList from "@/modules/knowledge/pages/list";
-import KnowledgeAuth from "@/modules/knowledge/pages/auth";
-import KnowledgeDetail from "@/modules/knowledge/pages/detail";
-import Knowledge from "@/modules/knowledge/pages/knowledge";
-import AdminLayout from "@/modules/admin/AdminLayout";
-import TaskCenterPage from "@/modules/taskCenter";
-import UserManagement from "@/modules/admin/pages/user";
-import GroupManagement from "@/modules/admin/pages/group";
-import GroupDetail from "@/modules/admin/pages/group/detail.tsx";
-import DatabaseConnectionsPage from "@/modules/dataSource/database";
-import DataSourceFeishuCallback from "@/modules/dataSource/common/feishuCallback";
-import CloudDocumentsPage from "@/modules/modelProvider/pages/CloudDocumentsPage";
-import FeishuAccountPage from "@/modules/modelProvider/pages/FeishuAccountPage";
-import GoogleDriveConnectionPage from "@/modules/modelProvider/pages/GoogleDriveConnectionPage";
-import GoogleDriveSetupGuide from "@/modules/modelProvider/pages/GoogleDriveSetupGuide";
-import LocalDataSourcePage from "@/modules/modelProvider/pages/LocalDataSourcePage";
-import FeishuSetupGuide from "@/modules/modelProvider/pages/FeishuSetupGuide";
-import NotionSetupGuide from "@/modules/modelProvider/pages/NotionSetupGuide";
-import DatasetListPage from "@/modules/datasetManagement/pages/list";
-import DatasetDetailPage from "@/modules/datasetManagement/pages/detail";
-import {
-  TerminalConnectionPage,
-} from "@/modules/channelGateway";
-import MemoryManagement from "@/modules/memory";
-import MemoryManagementListPage from "@/modules/memory/pages/list";
-import MemoryReviewPage from "@/modules/memory/pages/review";
-import MemoryGlossaryDetailPage from "@/modules/memory/pages/glossaryDetail";
-import MemorySkillDetailPage from "@/modules/memory/pages/skillDetail";
-import ModelProviderPage from "@/modules/modelProvider";
-import CloudDocumentsLayout from "@/modules/modelProvider/CloudDocumentsLayout";
-import ModelProvidersPage from "@/modules/modelProvider/pages/ModelProvidersPage";
-import ExternalServicesPage from "@/modules/modelProvider/pages/ExternalServicesPage";
-import DefaultServicesPage from "@/modules/modelProvider/pages/DefaultServicesPage";
-import {
-  SelfEvolutionAlgorithmManagementPage,
-  SelfEvolutionRoutingStrategyPage,
-  SelfEvolutionTrafficStatsPage,
-  SelfEvolutionHomePage,
-  SelfEvolutionDetailPage,
-  SelfEvolutionObservationPage,
-} from "@/modules/selfEvolution";
 import { getAntdLocale } from "@/i18n/antdLocale";
 import { runtimeFeatures } from "@/runtime/features";
 import { isLocalSessionEnabled } from "@/runtime/localSession";
 import UserAgreementPage from "@/pages/UserAgreementPage";
+import SettingsPage from "@/modules/settings";
 
+const ShowcaseGalleryPage = lazy(() => import("@/modules/showcase/GalleryPage"));
+const ShowcaseDetailPage = lazy(() => import("@/modules/showcase/DetailPage"));
+const KnowledgeApp = lazy(() => import("@/modules/knowledge/KnowledgeApp"));
+const KnowledgeList = lazy(() => import("@/modules/knowledge/pages/list"));
+const KnowledgeAuth = lazy(() => import("@/modules/knowledge/pages/auth"));
+const KnowledgeDetail = lazy(() => import("@/modules/knowledge/pages/detail"));
+const Knowledge = lazy(() => import("@/modules/knowledge/pages/knowledge"));
+const AdminLayout = lazy(() => import("@/modules/admin/AdminLayout"));
+const TaskCenterPage = lazy(() => import("@/modules/taskCenter"));
+const UserManagement = lazy(() => import("@/modules/admin/pages/user"));
+const GroupManagement = lazy(() => import("@/modules/admin/pages/group"));
+const GroupDetail = lazy(() => import("@/modules/admin/pages/group/detail.tsx"));
+const DatabaseConnectionsPage = lazy(() => import("@/modules/dataSource/database"));
+const DataSourceFeishuCallback = lazy(() => import("@/modules/dataSource/common/feishuCallback"));
+const CloudDocumentsPage = lazy(() => import("@/modules/modelProvider/pages/CloudDocumentsPage"));
+const FeishuAccountPage = lazy(() => import("@/modules/modelProvider/pages/FeishuAccountPage"));
+const GoogleDriveConnectionPage = lazy(() => import("@/modules/modelProvider/pages/GoogleDriveConnectionPage"));
+const GoogleDriveSetupGuide = lazy(() => import("@/modules/modelProvider/pages/GoogleDriveSetupGuide"));
+const LocalDataSourcePage = lazy(() => import("@/modules/modelProvider/pages/LocalDataSourcePage"));
+const FeishuSetupGuide = lazy(() => import("@/modules/modelProvider/pages/FeishuSetupGuide"));
+const NotionSetupGuide = lazy(() => import("@/modules/modelProvider/pages/NotionSetupGuide"));
+const DatasetListPage = lazy(() => import("@/modules/datasetManagement/pages/list"));
+const DatasetDetailPage = lazy(() => import("@/modules/datasetManagement/pages/detail"));
+const TerminalConnectionPage = lazy(() => import("@/modules/channelGateway").then((module) => ({
+  default: module.TerminalConnectionPage,
+})));
+const MemoryManagement = lazy(() => import("@/modules/memory"));
+const MemoryManagementListPage = lazy(() => import("@/modules/memory/pages/list"));
+const MemoryReviewPage = lazy(() => import("@/modules/memory/pages/review"));
+const MemoryGlossaryDetailPage = lazy(() => import("@/modules/memory/pages/glossaryDetail"));
+const MemorySkillDetailPage = lazy(() => import("@/modules/memory/pages/skillDetail"));
+const CloudDocumentsLayout = lazy(() => import("@/modules/modelProvider/CloudDocumentsLayout"));
+const SelfEvolutionAlgorithmManagementPage = lazy(() => import("@/modules/selfEvolution").then((module) => ({
+  default: module.SelfEvolutionAlgorithmManagementPage,
+})));
+const SelfEvolutionRoutingStrategyPage = lazy(() => import("@/modules/selfEvolution").then((module) => ({
+  default: module.SelfEvolutionRoutingStrategyPage,
+})));
+const SelfEvolutionTrafficStatsPage = lazy(() => import("@/modules/selfEvolution").then((module) => ({
+  default: module.SelfEvolutionTrafficStatsPage,
+})));
+const SelfEvolutionHomePage = lazy(() => import("@/modules/selfEvolution").then((module) => ({
+  default: module.SelfEvolutionHomePage,
+})));
+const SelfEvolutionDetailPage = lazy(() => import("@/modules/selfEvolution").then((module) => ({
+  default: module.SelfEvolutionDetailPage,
+})));
+const SelfEvolutionObservationPage = lazy(() => import("@/modules/selfEvolution").then((module) => ({
+  default: module.SelfEvolutionObservationPage,
+})));
 const WorkflowDetailPage = lazy(() => import("@/modules/workflow/pages/detail"));
 const BuiltinWorkflowDetailPage = lazy(() => import("@/modules/workflow/pages/builtin-detail"));
 
@@ -69,6 +76,7 @@ export default function AppRouter() {
     <ConfigProvider
       locale={getAntdLocale(i18n.resolvedLanguage || i18n.language)}
     >
+      <Suspense fallback={<Spin style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "100%" }} />}>
       <Routes>
         <Route
           path="/legal/user-agreement"
@@ -175,53 +183,24 @@ export default function AppRouter() {
             <Route path="docs/notion-setup" element={<NotionSetupGuide />} />
             <Route path="docs/google-drive-setup" element={<GoogleDriveSetupGuide />} />
           </Route>
-          <Route path="model-providers" element={<ModelProviderPage />}>
-            <Route index element={<Navigate to="default-services" replace />} />
-            <Route path="models" element={<ModelProvidersPage />} />
-            <Route
-              path="document-parsing"
-              element={<Navigate to="/model-providers/tools" replace />}
-            />
-            <Route path="tools" element={<ExternalServicesPage />} />
-            <Route
-              path="cloud-documents"
-              element={<Navigate to="/cloud-documents" replace />}
-            />
-            <Route
-              path="cloud-documents/local"
-              element={<Navigate to="/cloud-documents/local" replace />}
-            />
-            <Route
-              path="cloud-documents/feishu"
-              element={<Navigate to="/cloud-documents/feishu" replace />}
-            />
-            <Route
-              path="cloud-documents/google-drive"
-              element={<Navigate to="/cloud-documents/google-drive" replace />}
-            />
-            <Route
-              path="cloud-documents/docs/feishu-setup"
-              element={<Navigate to="/cloud-documents/docs/feishu-setup" replace />}
-            />
-            <Route
-              path="cloud-documents/docs/notion-setup"
-              element={<Navigate to="/cloud-documents/docs/notion-setup" replace />}
-            />
-            <Route
-              path="cloud-documents/docs/google-drive-setup"
-              element={<Navigate to="/cloud-documents/docs/google-drive-setup" replace />}
-            />
-            <Route
-              path="external-services"
-              element={<Navigate to="/model-providers/tools" replace />}
-            />
-            <Route path="default-services" element={<DefaultServicesPage />} />
-          </Route>
+          <Route path="model-providers" element={<Navigate to="/settings?section=models" replace />} />
+          <Route path="model-providers/default-services" element={<Navigate to="/settings?section=models" replace />} />
+          <Route path="model-providers/models" element={<Navigate to="/settings?section=models&view=providers" replace />} />
+          <Route path="model-providers/document-parsing" element={<Navigate to="/settings?section=knowledge&tool=document-parsing" replace />} />
+          <Route path="model-providers/tools" element={<Navigate to="/settings?section=system_tools" replace />} />
+          <Route path="model-providers/external-services" element={<Navigate to="/settings?section=system_tools" replace />} />
+          <Route path="model-providers/cloud-documents" element={<Navigate to="/cloud-documents" replace />} />
+          <Route path="model-providers/cloud-documents/local" element={<Navigate to="/cloud-documents/local" replace />} />
+          <Route path="model-providers/cloud-documents/feishu" element={<Navigate to="/cloud-documents/feishu" replace />} />
+          <Route path="model-providers/cloud-documents/google-drive" element={<Navigate to="/cloud-documents/google-drive" replace />} />
+          <Route path="model-providers/cloud-documents/docs/feishu-setup" element={<Navigate to="/cloud-documents/docs/feishu-setup" replace />} />
+          <Route path="model-providers/cloud-documents/docs/notion-setup" element={<Navigate to="/cloud-documents/docs/notion-setup" replace />} />
+          <Route path="model-providers/cloud-documents/docs/google-drive-setup" element={<Navigate to="/cloud-documents/docs/google-drive-setup" replace />} />
           <Route path="memory-management" element={<MemoryManagement />}>
             <Route index element={<MemoryManagementListPage />} />
             <Route
               path="tools"
-              element={<Navigate to="/model-providers/tools" replace />}
+              element={<Navigate to="/settings?section=system_tools" replace />}
             />
             <Route path="skills" element={<MemoryManagementListPage />} />
             <Route path="skills/:itemId" element={<MemorySkillDetailPage />} />
@@ -246,8 +225,8 @@ export default function AppRouter() {
             <Route path="review/:tab/:itemId" element={<MemoryReviewPage />} />
           </Route>
           <Route path="memory-management/workflows" element={<Navigate to="/memory-management/skills?skillView=workflows" replace />} />
-          <Route path="memory-management/workflows/builtin/:workflowId" element={<Suspense fallback={<Spin style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }} />}><BuiltinWorkflowDetailPage /></Suspense>} />
-          <Route path="memory-management/workflows/:workflowId" element={<Suspense fallback={<Spin style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100%' }} />}><WorkflowDetailPage /></Suspense>} />
+          <Route path="memory-management/workflows/builtin/:workflowId" element={<BuiltinWorkflowDetailPage />} />
+          <Route path="memory-management/workflows/:workflowId" element={<WorkflowDetailPage />} />
           {runtimeFeatures.hideEvo ? (
             <Route
               path="self-evolution/*"
@@ -290,6 +269,11 @@ export default function AppRouter() {
             </>
           )}
           <Route path="task-center" element={<TaskCenterPage />} />
+          <Route
+            path="settings/agent-integrations"
+            element={<Navigate to="/settings?section=assistants" replace />}
+          />
+          <Route path="settings" element={<SettingsPage />} />
         </Route>
         {runtimeFeatures.hideCloudAdmin ? (
           <Route
@@ -306,6 +290,7 @@ export default function AppRouter() {
         )}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </Suspense>
     </ConfigProvider>
   );
 }

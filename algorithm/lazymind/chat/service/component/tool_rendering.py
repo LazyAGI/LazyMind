@@ -5,18 +5,30 @@ import re
 from html import escape
 from typing import Any
 
+from .tool_render_templates import (
+    KB_EMPTY_RESULT_MESSAGES,
+    TOOL_RENDER_FALLBACKS,
+    TOOL_RENDER_PROFILES,
+)
+
 _TOOL_PREVIEW_TAG = 'tp'
 _TOOL_RESULT_PREVIEW_TAG = 'trp'
 _TOOL_CALL_TAG = 'tool_call'
 _TOOL_RESULT_TAG = 'tool_result'
 
 _SEARCH_TOOL_RE = re.compile(
-    r'^(?P<class_name>[A-Za-z0-9]+Search)_(?P<method>search|get_content|get_contents|meta_search|meta_catalog)$'
+    r'^(?P<class_name>[A-Za-z0-9]+Search|WikipediaToolkit)_'
+    r'(?P<method>search|get_content|get_contents|meta_search|meta_catalog)$'
 )
 
 
 def _humanize_search_brand(class_name: str) -> str:
-    stem = class_name[:-len('Search')] if class_name.endswith('Search') else class_name
+    if class_name.endswith('Search'):
+        stem = class_name[:-len('Search')]
+    elif class_name.endswith('Toolkit'):
+        stem = class_name[:-len('Toolkit')]
+    else:
+        stem = class_name
     stem = re.sub(r'([A-Z]+)([A-Z][a-z])', r'\1 \2', stem)
     return re.sub(r'([a-z0-9])([A-Z])', r'\1 \2', stem)
 
@@ -38,733 +50,61 @@ def _render_tool_context(tool_name: str) -> tuple[str, dict[str, str]]:
     return f'search_provider_{method}', {'brand': brand, 'method': method.replace('_', ' ')}
 
 
-_REPRESENTATIVE_TOOL_ARGUMENTS: dict[str, str] = {
-    'kb_search': 'query',
-    'kb_tmp_search': 'query',
-    'kb_get_parent_node': 'node_id',
-    'kb_get_window_nodes': 'number',
-    'kb_keyword_search': 'keyword',
-    'calculator': 'expression',
-    'search_provider_search': 'query',
-    'search_provider_get_content': 'item.title / item.url',
-    'search_provider_get_contents': 'items.title / items.url',
-    'search_provider_meta_search': 'query',
-    'search_provider_meta_catalog': 'include_sample_values',
-    'url_fetch': 'urls / url',
-    'vocab_learn': 'suggestions.word <-> suggestions.synonym',
-    'vision_extractor': 'url',
-    'skill_editor': 'name',
-    'SkillManagementToolkit_create_skill': 'name',
-    'SkillManagementToolkit_install_skill': 'github_url',
-    'SkillManagementToolkit_edit_file': 'path',
-    'SkillManagementToolkit_patch_file': 'path',
-    'SkillManagementToolkit_create_file': 'path',
-    'SkillManagementToolkit_delete_file': 'path',
-    'SkillManagementToolkit_rename_skill': 'name',
-    'SkillManagementToolkit_remove_skill': 'name',
-    'list_knowledge_bases': 'keyword',
-    'list_knowledge_base_documents': 'knowledge_base_ids / keyword',
-    'list_data_sources': 'keyword',
-    'aggregate_knowledge_base_documents': 'group_by / knowledge_base_ids',
-    'list_external_dbs': 'keyword',
-    'describe_external_db': 'connection_id',
-    'external_db_query': 'sql',
-    'get_skill': 'name',
-    'read_reference': 'rel_path',
-    'run_script': 'rel_path',
-    'read_file': 'path',
-    'list_dir': 'path',
-    'search_in_files': 'pattern',
-    'make_dir': 'path',
-    'write_file': 'path',
-    'delete_file': 'path',
-    'move_file': 'src',
-    'download_file': 'url',
-    'FeishuWikiFS_ls': 'path',
-    'FeishuWikiFS_info': 'path',
-    'FeishuWikiFS_mkdir': 'path',
-    'FeishuWikiFS_rm': 'path',
-    'FeishuWikiFS_exists': 'path',
-    'FeishuWikiFS_read': 'path',
-    'FeishuWikiFS_read_file': 'path',
-    'FeishuWikiFS_read_with_references': 'path',
-    'FeishuWikiFS_resolve_link': 'url_or_path',
-    'FeishuWikiFS_get_document_id': 'path',
-    'FeishuWikiFS_get_doc_blocks': 'path',
-    'FeishuWikiFS_update_doc_block_text': 'path/block_id',
-    'FeishuWikiFS_write': 'path',
-    'FeishuWikiFS_move': 'path1',
-    'FeishuWikiFS_copy': 'path1',
-    'GoogleDriveFS_search': 'keywords',
-    'GoogleDriveFS_find': 'pattern',
-    'advance_step': 'step_ids/steps.step_id',
-    'advance_step_and_hand_off': 'step_id/steps.step_id',
-    'advance_steps': 'steps',
-    'advance_steps_and_hand_off': 'steps',
+_REPRESENTATIVE_TOOL_ARGUMENTS = {
+    name: profile['argument']
+    for name, profile in TOOL_RENDER_PROFILES.items()
+    if profile.get('argument')
+}
+_TOOL_CALL_PREVIEW_TEMPLATES = {
+    name: profile['call']['en']
+    for name, profile in TOOL_RENDER_PROFILES.items()
+    if profile.get('call')
+}
+_ZH_TOOL_CALL_PREVIEW_TEMPLATES = {
+    name: profile['call']['zh']
+    for name, profile in TOOL_RENDER_PROFILES.items()
+    if profile.get('call')
+}
+_TOOL_RESULT_PREVIEW_TEMPLATES = {
+    name: profile['success']['en']
+    for name, profile in TOOL_RENDER_PROFILES.items()
+    if profile.get('success')
+}
+_ZH_TOOL_RESULT_PREVIEW_TEMPLATES = {
+    name: profile['success']['zh']
+    for name, profile in TOOL_RENDER_PROFILES.items()
+    if profile.get('success')
+}
+_TOOL_RESULT_FAILURE_TEMPLATES = {
+    name: profile['failure']['en']
+    for name, profile in TOOL_RENDER_PROFILES.items()
+    if profile.get('failure')
+}
+_ZH_TOOL_RESULT_FAILURE_TEMPLATES = {
+    name: profile['failure']['zh']
+    for name, profile in TOOL_RENDER_PROFILES.items()
+    if profile.get('failure')
+}
+_TOOL_RESULT_APPROVAL_TEMPLATES = {
+    name: profile['approval']['en']
+    for name, profile in TOOL_RENDER_PROFILES.items()
+    if profile.get('approval')
+}
+_ZH_TOOL_RESULT_APPROVAL_TEMPLATES = {
+    name: profile['approval']['zh']
+    for name, profile in TOOL_RENDER_PROFILES.items()
+    if profile.get('approval')
 }
 
-_REPRESENTATIVE_TOOL_RESULTS: dict[str, str] = {
-    'search_provider_search': 'title',
-    'search_provider_get_content': 'text',
-    'search_provider_get_contents': 'text',
-    'search_provider_meta_search': 'total_count',
-    'search_provider_meta_catalog': 'fields',
-    'url_fetch': 'results.result.final_url / final_url',
-    'calculator': 'result',
-    'vision_extractor': 'description',
-    'skill_editor': 'reason',
-    'SkillManagementToolkit_create_skill': 'status',
-    'SkillManagementToolkit_install_skill': 'skill_key',
-    'SkillManagementToolkit_edit_file': 'status',
-    'SkillManagementToolkit_patch_file': 'status',
-    'SkillManagementToolkit_create_file': 'status',
-    'SkillManagementToolkit_delete_file': 'status',
-    'SkillManagementToolkit_rename_skill': 'status',
-    'SkillManagementToolkit_remove_skill': 'status',
-    'list_knowledge_bases': 'datasets',
-    'list_knowledge_base_documents': 'documents',
-    'list_data_sources': 'provider_groups',
-    'aggregate_knowledge_base_documents': 'groups',
-    'list_external_dbs': 'connections',
-    'describe_external_db': 'tables',
-    'external_db_query': 'rows',
-    'run_script': 'stdout',
-    'read_file': 'content',
-    'list_dir': 'path',
-    'search_in_files': 'status',
-    'make_dir': 'path',
-    'write_file': 'path',
-    'delete_file': 'path',
-    'move_file': 'dst',
-    'download_file': 'path',
-    'FeishuWikiFS_ls': 'path',
-    'FeishuWikiFS_info': 'path',
-    'FeishuWikiFS_mkdir': 'path',
-    'FeishuWikiFS_rm': 'path',
-    'FeishuWikiFS_exists': 'path',
-    'FeishuWikiFS_read': 'path',
-    'FeishuWikiFS_read_file': 'content',
-    'FeishuWikiFS_read_with_references': 'content',
-    'FeishuWikiFS_resolve_link': 'title',
-    'FeishuWikiFS_get_document_id': 'document_id',
-    'FeishuWikiFS_get_doc_blocks': 'plain_text',
-    'FeishuWikiFS_update_doc_block_text': 'block_id',
-    'FeishuWikiFS_write': 'path',
-    'FeishuWikiFS_move': 'path2',
-    'FeishuWikiFS_copy': 'path2',
-    'GoogleDriveFS_search': 'title',
-    'GoogleDriveFS_find': 'title',
-}
-
-_TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
-    'kb_search': 'Checking {value} in the knowledge base for relevant material.',
-    'kb_tmp_search': 'Checking attached files for material related to {value}.',
-    'kb_get_parent_node': 'Loading surrounding context for {value} before continuing now.',
-    'kb_get_window_nodes': 'Expanding nearby related segments around {value} for review.',
-    'kb_keyword_search': 'Searching target documents with {value} as the keyword.',
-    'calculator': 'Evaluating the expression {value}.',
-    'search_provider_search': 'Searching {brand} for {value}.',
-    'search_provider_get_content': 'Reading a {brand} search result for {value}.',
-    'search_provider_get_contents': 'Reading selected {brand} search results for {value}.',
-    'search_provider_meta_search': 'Searching {brand} metadata for {value}.',
-    'search_provider_meta_catalog': 'Loading {brand} metadata fields.',
-    'url_fetch': 'Reading page content from {value}.',
-    'vision_extractor': 'Extracting information from the image.',
-    'vocab_learn': 'Updating vocabulary entries for {value} now.',
-    'skill_editor': 'Updating reusable skill notes related to {value} now.',
-    'SkillManagementToolkit_create_skill': 'Creating reusable skill {value} now.',
-    'SkillManagementToolkit_install_skill': 'Installing reusable skill from {value} now.',
-    'SkillManagementToolkit_edit_file': 'Editing reusable skill file {value} now.',
-    'SkillManagementToolkit_patch_file': 'Patching reusable skill file {value} now.',
-    'SkillManagementToolkit_create_file': 'Creating reusable skill file {value} now.',
-    'SkillManagementToolkit_delete_file': 'Deleting reusable skill file {value} now.',
-    'SkillManagementToolkit_rename_skill': 'Renaming reusable skill {value} now.',
-    'SkillManagementToolkit_remove_skill': 'Removing reusable skill {value} now.',
-    'list_knowledge_bases': 'Listing readable datasets matching {value}.',
-    'list_knowledge_base_documents': 'Listing readable documents for {value}.',
-    'list_data_sources': 'Checking configured data-source services.',
-    'aggregate_knowledge_base_documents': 'Aggregating document statistics by {value}.',
-    'list_external_dbs': 'Listing configured external database connections.',
-    'describe_external_db': 'Inspecting the external database schema for {value}.',
-    'external_db_query': 'Running a read-only external database query for {value}.',
-    'get_skill': 'Opening skill details for {value} before continuing now.',
-    'read_reference': 'Reading skill reference material from {value} for review.',
-    'run_script': 'Running the selected skill helper script at {value} now.',
-    'read_file': 'Reading file content from {value} for review now.',
-    'list_dir': 'Listing folder contents from {value} for review now.',
-    'search_in_files': 'Searching project files for matches to {value} now.',
-    'make_dir': 'Preparing folder {value} for the requested use now.',
-    'write_file': 'Writing requested content into file {value} now for update.',
-    'delete_file': 'Preparing file {value} for the requested deletion now.',
-    'move_file': 'Preparing file move operation starting from {value} now.',
-    'download_file': 'Downloading requested file from source {value} now for use.',
-    'FeishuWikiFS_ls': 'Listing Feishu folder contents at {value}.',
-    'FeishuWikiFS_info': 'Fetching Feishu file info for {value}.',
-    'FeishuWikiFS_mkdir': 'Creating Feishu folder at {value}.',
-    'FeishuWikiFS_rm': 'Deleting Feishu file or folder at {value}.',
-    'FeishuWikiFS_exists': 'Checking whether {value} exists in Feishu.',
-    'FeishuWikiFS_read': 'Reading Feishu document content from {value}.',
-    'FeishuWikiFS_read_file': 'Reading Feishu file content from {value}.',
-    'FeishuWikiFS_read_with_references': 'Reading Feishu document content and references from {value}.',
-    'FeishuWikiFS_resolve_link': 'Fetching Feishu document metadata for {value}.',
-    'FeishuWikiFS_get_document_id': 'Resolving the Feishu document id for {value}.',
-    'FeishuWikiFS_get_doc_blocks': 'Listing editable Feishu document blocks for {value}.',
-    'FeishuWikiFS_update_doc_block_text': 'Updating Feishu document block {value}.',
-    'FeishuWikiFS_write': 'Writing content to Feishu file at {value}.',
-    'FeishuWikiFS_move': 'Moving Feishu file from {value} to the target path.',
-    'FeishuWikiFS_copy': 'Copying Feishu file from {value} to the target path.',
-    'GoogleDriveFS_search': 'Searching Google Drive for {value}.',
-    'GoogleDriveFS_find': 'Finding Google Drive file names matching {value}.',
-    'advance_step': 'Switching to step {value}.',
-    'advance_step_and_hand_off': 'Switching to step {value} and handing off.',
-    'advance_steps': 'Starting the Ready step batch {value}.',
-    'advance_steps_and_hand_off': 'Starting the Ready step batch {value} and handing off.',
-    'regex:get_(.+)_methods': 'Expanding the {match} Toolkit.',
-    'regex:trigger_(.+)_workflow': 'Checking whether the {match} workflow fits this request.',
-}
-_TOOL_CALL_FALLBACK_TEMPLATE = 'Calling {tool_name} to handle the request.'
-_TOOL_CALL_PREVIEW_TEMPLATES['ask_user'] = 'Gathering questions for you, please wait…'
-
-_ZH_TOOL_CALL_PREVIEW_TEMPLATES: dict[str, str] = {
-    'kb_search': '正在知识库中检索与 {value} 相关的知识。',
-    'kb_tmp_search': '正在附件中检索与 {value} 相关的内容。',
-    'kb_get_parent_node': '正在加载 {value} 的相关上下文。',
-    'kb_get_window_nodes': '正在扩展 {value} 附近的相关片段。',
-    'kb_keyword_search': '正在目标文档中搜索关键词 {value}。',
-    'calculator': '正在计算表达式 {value}。',
-    'search_provider_search': '正在使用 {brand} 搜索 {value}。',
-    'search_provider_get_content': '正在读取 {brand} 搜索结果 {value}。',
-    'search_provider_get_contents': '正在批量读取 {brand} 搜索结果 {value}。',
-    'search_provider_meta_search': '正在检索 {brand} 元数据 {value}。',
-    'search_provider_meta_catalog': '正在加载 {brand} 元数据字段目录。',
-    'url_fetch': '正在读取网页 {value} 。',
-    'vision_extractor': '正在提取图像信息。',
-    'vocab_learn': '正在更新与 {value} 相关的词汇表。',
-    'skill_editor': '正在更新与 {value} 相关的技能。',
-    'SkillManagementToolkit_create_skill': '正在创建 {value} 技能。',
-    'SkillManagementToolkit_install_skill': '正在从 {value} 安装技能。',
-    'SkillManagementToolkit_edit_file': '正在编辑技能文件 {value}。',
-    'SkillManagementToolkit_patch_file': '正在修补技能文件 {value}。',
-    'SkillManagementToolkit_create_file': '正在创建技能文件 {value}。',
-    'SkillManagementToolkit_delete_file': '正在删除技能文件 {value}。',
-    'SkillManagementToolkit_rename_skill': '正在重命名 {value} 技能。',
-    'SkillManagementToolkit_remove_skill': '正在删除 {value} 技能。',
-    'list_knowledge_bases': '正在列出匹配 {value} 的可读知识库。',
-    'list_knowledge_base_documents': '正在列出 {value} 中的可读文档。',
-    'list_data_sources': '正在检查已配置的数据源服务。',
-    'aggregate_knowledge_base_documents': '正在按 {value} 聚合文档统计。',
-    'list_external_dbs': '正在列出已配置的外部数据库连接。',
-    'describe_external_db': '正在查看外部数据库 {value} 的表结构。',
-    'external_db_query': '正在执行只读外部数据库查询：{value}。',
-    'get_skill': '正在打开 {value} 的技能详情。',
-    'read_reference': '正在读取 {value} 技能的参考资料。',
-    'run_script': '正在运行技能 {value} 的预定义脚本。',
-    'read_file': '正在读取文件 {value}。',
-    'list_dir': '正在列出文件夹 {value} 的内容。',
-    'search_in_files': '正在项目文件中搜索 {value} 的相关内容。',
-    'make_dir': '正在创建文件夹 {value}。',
-    'write_file': '正在向文件 {value} 中写入内容。',
-    'delete_file': '正在准备删除文件 {value}。',
-    'move_file': '正在准备移动文件 {value}。',
-    'download_file': '正在从 {value} 下载文件。',
-    'FeishuWikiFS_ls': '正在列出飞书文件夹 {value} 的内容。',
-    'FeishuWikiFS_info': '正在获取飞书文件 {value} 的信息。',
-    'FeishuWikiFS_mkdir': '正在飞书中创建文件夹 {value}。',
-    'FeishuWikiFS_rm': '正在删除飞书文件或文件夹 {value}。',
-    'FeishuWikiFS_exists': '正在检查 {value} 是否存在于飞书中。',
-    'FeishuWikiFS_read': '正在读取飞书文档 {value} 的内容。',
-    'FeishuWikiFS_read_file': '正在读取飞书文件 {value} 的内容。',
-    'FeishuWikiFS_read_with_references': '正在读取飞书文档 {value} 的正文和引用。',
-    'FeishuWikiFS_resolve_link': '正在获取飞书文档 {value} 的基础信息。',
-    'FeishuWikiFS_get_document_id': '正在解析飞书文档 {value} 的 document_id。',
-    'FeishuWikiFS_get_doc_blocks': '正在列出飞书文档 {value} 的可编辑块。',
-    'FeishuWikiFS_update_doc_block_text': '正在更新飞书文档块 {value}。',
-    'FeishuWikiFS_write': '正在向飞书文件 {value} 写入内容。',
-    'FeishuWikiFS_move': '正在将飞书文件从 {value} 移动到目标路径。',
-    'FeishuWikiFS_copy': '正在将飞书文件从 {value} 复制到目标路径。',
-    'GoogleDriveFS_search': '正在 Google Drive 中搜索 {value}。',
-    'GoogleDriveFS_find': '正在 Google Drive 中查找文件名匹配 {value} 的文件。',
-    'advance_step': '正在切换到步骤 {value}...',
-    'advance_step_and_hand_off': '正在切换到步骤 {value} 并交出控制权...',
-    'advance_steps': '正在批量启动可执行步骤 {value}...',
-    'advance_steps_and_hand_off': '正在批量启动可执行步骤 {value} 并交出控制权...',
-    'regex:get_(.+)_methods': '正在展开{match}工具箱。',
-    'regex:trigger_(.+)_workflow': '正在检查 {match} 工作流是否适合当前需求...',
-}
-_ZH_TOOL_CALL_FALLBACK_TEMPLATE = '正在调用工具 {tool_name}...'
-_ZH_TOOL_CALL_PREVIEW_TEMPLATES['ask_user'] = '我正在组织问题，请稍后'
-
-_TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
-    'kb_search': 'Knowledge base results for {value} are ready now.',
-    'kb_tmp_search': 'Attached file results for {value} are ready now.',
-    'kb_get_parent_node': 'Surrounding context for {value} was loaded successfully now.',
-    'kb_get_window_nodes': 'Nearby related segments around {value} were expanded successfully.',
-    'kb_keyword_search': 'Document results for keyword {value} were found successfully.',
-    'calculator': 'Expression was evaluated successfully, result is {value}',
-    'search_provider_search': '{brand} search results for {value} are ready now.',
-    'search_provider_get_content': '{brand} search result content for {value} was loaded successfully.',
-    'search_provider_get_contents': 'Selected {brand} search result content for {value} was loaded successfully.',
-    'search_provider_meta_search': '{brand} metadata search found {value} matching records.',
-    'search_provider_meta_catalog': '{brand} metadata fields were loaded successfully.',
-    'url_fetch': 'Page content from {value} was loaded successfully.',
-    'vision_extractor': 'Image information has been extracted.',
-    'vocab_learn': 'Vocabulary entries for {value} were updated successfully.',
-    'skill_editor': 'Skill operation for {value} completed successfully.',
-    'SkillManagementToolkit_create_skill': 'Skill {value} was created successfully.',
-    'SkillManagementToolkit_install_skill': 'Skill {value} was installed successfully.',
-    'SkillManagementToolkit_edit_file': 'Skill file {value} was edited successfully.',
-    'SkillManagementToolkit_patch_file': 'Skill file {value} was patched successfully.',
-    'SkillManagementToolkit_create_file': 'Skill file {value} was created successfully.',
-    'SkillManagementToolkit_delete_file': 'Skill file {value} was deleted successfully.',
-    'SkillManagementToolkit_rename_skill': 'Skill {value} was renamed successfully.',
-    'SkillManagementToolkit_remove_skill': 'Skill {value} was removed successfully.',
-    'list_knowledge_bases': 'Readable datasets for {value} were loaded successfully.',
-    'list_knowledge_base_documents': 'Readable documents for {value} were loaded successfully.',
-    'list_data_sources': 'Configured data-source services were loaded successfully.',
-    'aggregate_knowledge_base_documents': 'Document statistics for {value} were aggregated successfully.',
-    'list_external_dbs': 'External database connections were loaded successfully.',
-    'describe_external_db': 'External database schema for {value} was loaded successfully.',
-    'external_db_query': 'Read-only external database query for {value} completed successfully.',
-    'get_skill': 'Skill details for {value} were loaded successfully now.',
-    'read_reference': 'Skill reference material from {value} was loaded successfully.',
-    'ask_user': 'Please answer the questions below.',
-    'run_script': 'Skill helper script at {value} finished running successfully.',
-    'read_file': 'File content from {value} was loaded successfully now.',
-    'list_dir': 'Folder contents from {value} were retrieved successfully now.',
-    'search_in_files': 'Project file matches for {value} were found successfully.',
-    'make_dir': 'Folder {value} is ready for the requested use.',
-    'write_file': 'Requested content was written into {value} successfully.',
-    'delete_file': 'Requested deletion for file {value} completed successfully now.',
-    'move_file': 'Requested file move from {value} completed successfully now.',
-    'download_file': 'Requested file from {value} was downloaded successfully now.',
-    'FeishuWikiFS_ls': 'Feishu folder contents at {value} were listed successfully.',
-    'FeishuWikiFS_info': 'Feishu file info for {value} was retrieved successfully.',
-    'FeishuWikiFS_mkdir': 'Feishu folder at {value} was created successfully.',
-    'FeishuWikiFS_rm': 'Feishu file or folder at {value} was deleted successfully.',
-    'FeishuWikiFS_exists': 'Existence check for {value} in Feishu completed successfully.',
-    'FeishuWikiFS_read': 'Feishu document content from {value} was loaded successfully.',
-    'FeishuWikiFS_read_file': 'Feishu file content from {value} was loaded successfully.',
-    'FeishuWikiFS_read_with_references': (
-        'Feishu document content and references from {value} were loaded successfully.'
-    ),
-    'FeishuWikiFS_resolve_link': 'Feishu document metadata for {value} was retrieved successfully.',
-    'FeishuWikiFS_get_document_id': 'Feishu document id for {value} was resolved successfully.',
-    'FeishuWikiFS_get_doc_blocks': 'Editable Feishu document blocks for {value} were listed successfully.',
-    'FeishuWikiFS_update_doc_block_text': 'Feishu document block {value} was updated successfully.',
-    'FeishuWikiFS_write': 'Content was written to Feishu file at {value} successfully.',
-    'FeishuWikiFS_move': 'Feishu file was moved from {value} to the target path successfully.',
-    'FeishuWikiFS_copy': 'Feishu file was copied from {value} to the target path successfully.',
-    'GoogleDriveFS_search': 'Google Drive search results for {value} are ready.',
-    'GoogleDriveFS_find': 'Google Drive files matching {value} were found.',
-    'advance_step': 'Workflow launched.',
-    'advance_step_and_hand_off': 'Step queued. Workflow launched.',
-    'advance_steps': 'Workflow step batch launched.',
-    'advance_steps_and_hand_off': 'Workflow step batch queued and launched.',
-    'regex:get_(.+)_methods': 'The {match} Toolkit has been expanded.',
-    'regex:trigger_(.+)_workflow': (
-        'Workflow initialization completed. Result: {result.outcome}. Reason: {result.reason}.'
-    ),
-}
-
-_ZH_TOOL_RESULT_PREVIEW_TEMPLATES: dict[str, str] = {
-    'kb_search': '已查询到 {value} 的知识库结果。',
-    'kb_tmp_search': '已查询到 {value} 的附件检索结果。',
-    'kb_get_parent_node': '已成功加载 {value} 的相关上下文。',
-    'kb_get_window_nodes': '已成功扩展 {value} 附近的相关片段。',
-    'kb_keyword_search': '已找到关键词 {value} 的文档结果。',
-    'calculator': '已计算完成，结果为 {value}',
-    'search_provider_search': '已找到 {value} 的 {brand} 搜索结果。',
-    'search_provider_get_content': '已成功读取 {brand} 搜索结果 {value} 的内容。',
-    'search_provider_get_contents': '已成功批量读取 {brand} 搜索结果 {value} 的内容。',
-    'search_provider_meta_search': '已找到 {value} 条 {brand} 元数据结果。',
-    'search_provider_meta_catalog': '已成功加载 {brand} 元数据字段目录。',
-    'url_fetch': '已成功加载 {value} 的网页内容。',
-    'vision_extractor': '已成功提取图像信息。',
-    'vocab_learn': '已成功更新 {value} 的词汇表。',
-    'skill_editor': '{value} 技能操作已完成。',
-    'SkillManagementToolkit_create_skill': '已成功创建 {value} 技能。',
-    'SkillManagementToolkit_install_skill': '已成功安装 {value} 技能。',
-    'SkillManagementToolkit_edit_file': '已成功编辑技能文件 {value}。',
-    'SkillManagementToolkit_patch_file': '已成功修补技能文件 {value}。',
-    'SkillManagementToolkit_create_file': '已成功创建技能文件 {value}。',
-    'SkillManagementToolkit_delete_file': '已成功删除技能文件 {value}。',
-    'SkillManagementToolkit_rename_skill': '已成功重命名 {value} 技能。',
-    'SkillManagementToolkit_remove_skill': '已成功删除 {value} 技能。',
-    'list_knowledge_bases': '已成功加载 {value} 的可读知识库列表。',
-    'list_knowledge_base_documents': '已成功加载 {value} 的可读文档列表。',
-    'list_data_sources': '已成功加载数据源服务列表。',
-    'aggregate_knowledge_base_documents': '已成功完成 {value} 的文档统计聚合。',
-    'list_external_dbs': '已成功加载外部数据库连接列表。',
-    'describe_external_db': '已成功加载外部数据库 {value} 的表结构。',
-    'external_db_query': '已成功完成只读外部数据库查询：{value}。',
-    'get_skill': '已成功加载 {value} 的技能详情。',
-    'read_reference': '已成功加载 {value} 技能的参考资料。',
-    'ask_user': '请您回答下面的问题',
-    'run_script': '技能 {value} 的预定义脚本已成功运行。',
-    'read_file': '已成功加载文件 {value} 的内容。',
-    'list_dir': '已成功获取文件夹 {value} 的内容。',
-    'search_in_files': '已找到项目文件中与 {value} 匹配的内容。',
-    'make_dir': '文件夹 {value} 已准备好。',
-    'write_file': '已成功向 {value} 写入内容。',
-    'delete_file': '已成功完成文件 {value} 的删除操作。',
-    'move_file': '已成功完成从 {value} 开始的文件移动操作。',
-    'download_file': '已成功下载来自 {value} 的文件。',
-    'FeishuWikiFS_ls': '已成功列出飞书文件夹 {value} 的内容。',
-    'FeishuWikiFS_info': '已成功获取飞书文件 {value} 的信息。',
-    'FeishuWikiFS_mkdir': '已成功在飞书中创建文件夹 {value}。',
-    'FeishuWikiFS_rm': '已成功删除飞书文件或文件夹 {value}。',
-    'FeishuWikiFS_exists': '已完成对飞书中 {value} 的存在性检查。',
-    'FeishuWikiFS_read': '已成功读取飞书文档 {value} 的内容。',
-    'FeishuWikiFS_read_file': '已成功读取飞书文件 {value} 的内容。',
-    'FeishuWikiFS_read_with_references': '已成功读取飞书文档 {value} 的正文和引用。',
-    'FeishuWikiFS_resolve_link': '已成功获取飞书文档 {value} 的基础信息。',
-    'FeishuWikiFS_get_document_id': '已成功解析飞书文档 {value} 的 document_id。',
-    'FeishuWikiFS_get_doc_blocks': '已成功列出飞书文档 {value} 的可编辑块。',
-    'FeishuWikiFS_update_doc_block_text': '已成功更新飞书文档块 {value}。',
-    'FeishuWikiFS_write': '已成功向飞书文件 {value} 写入内容。',
-    'FeishuWikiFS_move': '已成功将飞书文件从 {value} 移动到目标路径。',
-    'FeishuWikiFS_copy': '已成功将飞书文件从 {value} 复制到目标路径。',
-    'GoogleDriveFS_search': '已查询到 {value} 的 Google Drive 搜索结果。',
-    'GoogleDriveFS_find': '已找到文件名匹配 {value} 的 Google Drive 文件。',
-    'advance_step': '工作流已启动',
-    'advance_step_and_hand_off': '步骤已排队，工作流已启动',
-    'advance_steps': '工作流步骤已批量启动',
-    'advance_steps_and_hand_off': '工作流步骤已批量排队并启动',
-    'regex:get_(.+)_methods': '已经展开{match}工具箱。',
-    'regex:trigger_(.+)_workflow': (
-        '工作流初始化已完成，结果是 {result.outcome}，原因是 {result.reason}。'
-    ),
-}
-
-_TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
-    'kb_search': 'Knowledge base results for {value} could not be found.',
-    'kb_tmp_search': 'Attached file results for {value} could not be found.',
-    'kb_get_parent_node': 'Surrounding context for {value} could not be loaded.',
-    'kb_get_window_nodes': 'Nearby related segments around {value} could not be expanded.',
-    'kb_keyword_search': 'Document results for keyword {value} could not be found.',
-    'calculator': 'Expression {value} could not be evaluated.',
-    'search_provider_search': '{brand} search results for {value} could not be retrieved.',
-    'search_provider_get_content': '{brand} search result content for {value} could not be loaded.',
-    'search_provider_get_contents': 'Selected {brand} search result content for {value} could not be loaded.',
-    'search_provider_meta_search': '{brand} metadata results for {value} could not be retrieved.',
-    'search_provider_meta_catalog': '{brand} metadata fields could not be loaded.',
-    'url_fetch': 'Page content from {value} could not be loaded.',
-    'vision_extractor': 'Vision extraction for {value} could not be completed.',
-    'vocab_learn': 'Vocabulary entries for {value} could not be updated.',
-    'skill_editor': 'Reusable skill notes for {value} could not be updated.',
-    'SkillManagementToolkit_create_skill': 'Skill {value} could not be created.',
-    'SkillManagementToolkit_install_skill': 'Skill from {value} could not be installed.',
-    'SkillManagementToolkit_edit_file': 'Skill file {value} could not be edited.',
-    'SkillManagementToolkit_patch_file': 'Skill file {value} could not be patched.',
-    'SkillManagementToolkit_create_file': 'Skill file {value} could not be created.',
-    'SkillManagementToolkit_delete_file': 'Skill file {value} could not be deleted.',
-    'SkillManagementToolkit_rename_skill': 'Skill {value} could not be renamed.',
-    'SkillManagementToolkit_remove_skill': 'Skill {value} could not be removed.',
-    'list_knowledge_bases': 'Readable datasets for {value} could not be loaded.',
-    'list_knowledge_base_documents': 'Readable documents for {value} could not be loaded.',
-    'list_data_sources': 'Configured data-source services could not be loaded.',
-    'aggregate_knowledge_base_documents': 'Document statistics for {value} could not be aggregated.',
-    'list_external_dbs': 'External database connections could not be loaded.',
-    'describe_external_db': 'External database schema for {value} could not be loaded.',
-    'external_db_query': 'Read-only external database query for {value} could not be completed.',
-    'get_skill': 'Skill details for {value} could not be loaded.',
-    'read_reference': 'Skill reference material from {value} could not be read.',
-    'run_script': 'Skill helper script at {value} did not finish.',
-    'read_file': 'File content from {value} could not be read.',
-    'list_dir': 'Folder contents from {value} could not be listed.',
-    'search_in_files': 'Project file search for {value} could not finish.',
-    'make_dir': 'Folder {value} could not be prepared for use.',
-    'write_file': 'Requested content could not be written into {value} now.',
-    'delete_file': 'Requested deletion for file {value} could not complete.',
-    'move_file': 'Requested file move from {value} could not complete.',
-    'download_file': 'Requested file from {value} could not be downloaded.',
-    'FeishuWikiFS_ls': 'Feishu folder contents at {value} could not be listed.',
-    'FeishuWikiFS_info': 'Feishu file info for {value} could not be retrieved.',
-    'FeishuWikiFS_mkdir': 'Feishu folder at {value} could not be created.',
-    'FeishuWikiFS_rm': 'Feishu file or folder at {value} could not be deleted.',
-    'FeishuWikiFS_exists': 'Existence check for {value} in Feishu could not be completed.',
-    'FeishuWikiFS_read': 'Feishu document content from {value} could not be loaded.',
-    'FeishuWikiFS_read_file': 'Feishu file content from {value} could not be loaded.',
-    'FeishuWikiFS_read_with_references': 'Feishu document content and references from {value} could not be loaded.',
-    'FeishuWikiFS_resolve_link': 'Feishu document metadata for {value} could not be retrieved.',
-    'FeishuWikiFS_get_document_id': 'Feishu document id for {value} could not be resolved.',
-    'FeishuWikiFS_get_doc_blocks': 'Editable Feishu document blocks for {value} could not be listed.',
-    'FeishuWikiFS_update_doc_block_text': 'Feishu document block {value} could not be updated.',
-    'FeishuWikiFS_write': 'Content could not be written to Feishu file at {value}.',
-    'FeishuWikiFS_move': 'Feishu file could not be moved from {value} to the target path.',
-    'FeishuWikiFS_copy': 'Feishu file could not be copied from {value} to the target path.',
-    'GoogleDriveFS_search': 'Google Drive search results for {value} could not be retrieved.',
-    'GoogleDriveFS_find': 'Google Drive file names matching {value} could not be found.',
-    'advance_step': 'Step {value} could not be started.',
-    'advance_step_and_hand_off': 'Step {value} could not be queued.',
-    'advance_steps': 'Step batch {value} could not be started.',
-    'advance_steps_and_hand_off': 'Step batch {value} could not be queued.',
-    'regex:get_(.+)_methods': 'The {match} Toolkit could not be expanded.',
-    'regex:trigger_(.+)_workflow': (
-        'Workflow initialization failed. Result: {result.outcome}. Reason: {result.reason}.'
-    ),
-}
-
-_ZH_TOOL_RESULT_FAILURE_TEMPLATES: dict[str, str] = {
-    'kb_search': '未能找到 {value} 的知识库结果。',
-    'kb_tmp_search': '未能找到 {value} 的附件检索结果。',
-    'kb_get_parent_node': '未能加载 {value} 的相关上下文。',
-    'kb_get_window_nodes': '未能扩展 {value} 附近的相关片段。',
-    'kb_keyword_search': '未能找到关键词 {value} 的文档结果。',
-    'calculator': '未能计算表达式 {value}。',
-    'search_provider_search': '未能获取 {value} 的 {brand} 搜索结果。',
-    'search_provider_get_content': '未能读取 {brand} 搜索结果 {value} 的内容。',
-    'search_provider_get_contents': '未能批量读取 {brand} 搜索结果 {value} 的内容。',
-    'search_provider_meta_search': '未能获取 {value} 的 {brand} 元数据结果。',
-    'search_provider_meta_catalog': '未能加载 {brand} 元数据字段目录。',
-    'url_fetch': '未能加载网页 {value} 的内容。',
-    'vision_extractor': '未能完成 {value} 的图像信息提取。',
-    'vocab_learn': '未能更新 {value} 的词汇表。',
-    'skill_editor': '未能更新 {value} 的技能。',
-    'SkillManagementToolkit_create_skill': '未能创建 {value} 技能。',
-    'SkillManagementToolkit_install_skill': '未能从 {value} 安装技能。',
-    'SkillManagementToolkit_edit_file': '未能编辑技能文件 {value}。',
-    'SkillManagementToolkit_patch_file': '未能修补技能文件 {value}。',
-    'SkillManagementToolkit_create_file': '未能创建技能文件 {value}。',
-    'SkillManagementToolkit_delete_file': '未能删除技能文件 {value}。',
-    'SkillManagementToolkit_rename_skill': '未能重命名 {value} 技能。',
-    'SkillManagementToolkit_remove_skill': '未能删除 {value} 技能。',
-    'list_knowledge_bases': '未能加载 {value} 的可读知识库列表。',
-    'list_knowledge_base_documents': '未能加载 {value} 的可读文档列表。',
-    'list_data_sources': '未能加载数据源服务列表。',
-    'aggregate_knowledge_base_documents': '未能完成 {value} 的文档统计聚合。',
-    'list_external_dbs': '未能加载外部数据库连接列表。',
-    'describe_external_db': '未能加载外部数据库 {value} 的表结构。',
-    'external_db_query': '未能完成只读外部数据库查询：{value}。',
-    'get_skill': '未能加载 {value} 的技能详情。',
-    'read_reference': '未能读取 {value} 技能参考资料。',
-    'run_script': '技能 {value} 的预定义脚本未能运行完成。',
-    'read_file': '未能读取文件 {value} 的内容。',
-    'list_dir': '未能列出文件夹 {value} 的内容。',
-    'search_in_files': '未能完成项目文件中与 {value} 相关的搜索。',
-    'make_dir': '未能创建文件夹 {value}。',
-    'write_file': '未能向 {value} 写入内容。',
-    'delete_file': '未能完成文件 {value} 的删除操作。',
-    'move_file': '未能完成从 {value} 开始的文件移动操作。',
-    'download_file': '未能下载来自 {value} 的文件。',
-    'FeishuWikiFS_ls': '未能列出飞书文件夹 {value} 的内容。',
-    'FeishuWikiFS_info': '未能获取飞书文件 {value} 的信息。',
-    'FeishuWikiFS_mkdir': '未能在飞书中创建文件夹 {value}。',
-    'FeishuWikiFS_rm': '未能删除飞书文件或文件夹 {value}。',
-    'FeishuWikiFS_exists': '未能完成对飞书中 {value} 的存在性检查。',
-    'FeishuWikiFS_read': '未能读取飞书文档 {value} 的内容。',
-    'FeishuWikiFS_read_file': '未能读取飞书文件 {value} 的内容。',
-    'FeishuWikiFS_read_with_references': '未能读取飞书文档 {value} 的正文和引用。',
-    'FeishuWikiFS_resolve_link': '未能获取飞书文档 {value} 的基础信息。',
-    'FeishuWikiFS_get_document_id': '未能解析飞书文档 {value} 的 document_id。',
-    'FeishuWikiFS_get_doc_blocks': '未能列出飞书文档 {value} 的可编辑块。',
-    'FeishuWikiFS_update_doc_block_text': '未能更新飞书文档块 {value}。',
-    'FeishuWikiFS_write': '未能向飞书文件 {value} 写入内容。',
-    'FeishuWikiFS_move': '未能将飞书文件从 {value} 移动到目标路径。',
-    'FeishuWikiFS_copy': '未能将飞书文件从 {value} 复制到目标路径。',
-    'GoogleDriveFS_search': '未能获取 {value} 的 Google Drive 搜索结果。',
-    'GoogleDriveFS_find': '未能找到文件名匹配 {value} 的 Google Drive 文件。',
-    'advance_step': '步骤 {value} 启动失败',
-    'advance_step_and_hand_off': '步骤 {value} 排队失败',
-    'advance_steps': '步骤批次 {value} 启动失败',
-    'advance_steps_and_hand_off': '步骤批次 {value} 排队失败',
-    'regex:get_(.+)_methods': '未能展开{match}工具箱。',
-    'regex:trigger_(.+)_workflow': (
-        '工作流初始化失败，结果是 {result.outcome}，原因是 {result.reason}。'
-    ),
-}
-
-_TOOL_RESULT_APPROVAL_TEMPLATES: dict[str, str] = {
-    'delete_file': 'Please review the confirmation note "{value}" before deleting this file.',
-    'move_file': 'Please review the confirmation note "{value}" before moving this file.',
-    'write_file': 'Please review the confirmation note "{value}" before writing this file.',
-    'download_file': 'Please review the confirmation note "{value}" before downloading this file.',
-    'FeishuWikiFS_rm': 'Please review the confirmation note "{value}" before deleting this Feishu file.',
-    'FeishuWikiFS_move': 'Please review the confirmation note "{value}" before moving this Feishu file.',
-    'FeishuWikiFS_write': 'Please review the confirmation note "{value}" before writing this Feishu file.',
-}
-
-_ZH_TOOL_RESULT_APPROVAL_TEMPLATES: dict[str, str] = {
-    'delete_file': '删除这个文件前，请先确认提示“{value}”。',
-    'move_file': '移动这个文件前，请先确认提示“{value}”。',
-    'write_file': '写入这个文件前，请先确认提示“{value}”。',
-    'download_file': '下载这个文件前，请先确认提示“{value}”。',
-    'FeishuWikiFS_rm': '删除这个飞书文件前，请先确认提示“{value}”。',
-    'FeishuWikiFS_move': '移动这个飞书文件前，请先确认提示“{value}”。',
-    'FeishuWikiFS_write': '写入这个飞书文件前，请先确认提示“{value}”。',
-}
-
-_NOTION_TOOL_ARGUMENTS = {
-    'NotionFS_ls': 'path',
-    'NotionFS_info': 'path',
-    'NotionFS_mkdir': 'path',
-    'NotionFS_rm': 'path',
-    'NotionFS_exists': 'path',
-    'NotionFS_read': 'path',
-    'NotionFS_read_file': 'path',
-    'NotionFS_search': 'query',
-    'NotionFS_read_with_references': 'path',
-    'NotionFS_resolve_link': 'url_or_path',
-    'NotionFS_get_document_id': 'path',
-    'NotionFS_get_doc_blocks': 'path',
-    'NotionFS_update_doc_block_text': 'path/block_id',
-    'NotionFS_write': 'path',
-    'NotionFS_move': 'path1',
-}
-_NOTION_TOOL_RESULTS = {
-    **_NOTION_TOOL_ARGUMENTS,
-    'NotionFS_read_file': 'content',
-    'NotionFS_search': 'title',
-    'NotionFS_read_with_references': 'content',
-    'NotionFS_resolve_link': 'title',
-    'NotionFS_get_document_id': 'document_id',
-    'NotionFS_get_doc_blocks': 'plain_text',
-    'NotionFS_update_doc_block_text': 'block_id',
-    'NotionFS_move': 'path2',
-}
-_REPRESENTATIVE_TOOL_ARGUMENTS.update(_NOTION_TOOL_ARGUMENTS)
-_REPRESENTATIVE_TOOL_RESULTS.update(_NOTION_TOOL_RESULTS)
-
-_TOOL_CALL_PREVIEW_TEMPLATES.update({
-    'NotionFS_ls': 'Listing Notion page contents at {value}.',
-    'NotionFS_info': 'Fetching Notion page info for {value}.',
-    'NotionFS_mkdir': 'Creating Notion page at {value}.',
-    'NotionFS_rm': 'Deleting Notion page or block at {value}.',
-    'NotionFS_exists': 'Checking whether {value} exists in Notion.',
-    'NotionFS_read': 'Reading Notion content from {value}.',
-    'NotionFS_read_file': 'Reading Notion content from {value}.',
-    'NotionFS_search': 'Searching Notion titles for {value}.',
-    'NotionFS_read_with_references': 'Reading Notion content and linked references from {value}.',
-    'NotionFS_resolve_link': 'Fetching Notion page metadata for {value}.',
-    'NotionFS_get_document_id': 'Resolving the Notion document id for {value}.',
-    'NotionFS_get_doc_blocks': 'Listing editable Notion blocks for {value}.',
-    'NotionFS_update_doc_block_text': 'Updating Notion block {value}.',
-    'NotionFS_write': 'Writing content to Notion at {value}.',
-    'NotionFS_move': 'Moving Notion content from {value} to the target path.',
-})
-_ZH_TOOL_CALL_PREVIEW_TEMPLATES.update({
-    'NotionFS_ls': '正在列出 Notion 页面 {value} 的内容。',
-    'NotionFS_info': '正在获取 Notion 页面 {value} 的信息。',
-    'NotionFS_mkdir': '正在 Notion 中创建页面 {value}。',
-    'NotionFS_rm': '正在删除 Notion 页面或块 {value}。',
-    'NotionFS_exists': '正在检查 {value} 是否存在于 Notion 中。',
-    'NotionFS_read': '正在读取 Notion 页面 {value} 的内容。',
-    'NotionFS_read_file': '正在读取 Notion 页面 {value} 的内容。',
-    'NotionFS_search': '正在 Notion 中搜索标题 {value}。',
-    'NotionFS_read_with_references': '正在读取 Notion 页面 {value} 的正文和引用。',
-    'NotionFS_resolve_link': '正在获取 Notion 页面 {value} 的基础信息。',
-    'NotionFS_get_document_id': '正在解析 Notion 页面 {value} 的 document_id。',
-    'NotionFS_get_doc_blocks': '正在列出 Notion 页面 {value} 的可编辑块。',
-    'NotionFS_update_doc_block_text': '正在更新 Notion 块 {value}。',
-    'NotionFS_write': '正在向 Notion 页面 {value} 写入内容。',
-    'NotionFS_move': '正在将 Notion 内容从 {value} 移动到目标路径。',
-})
-_TOOL_RESULT_PREVIEW_TEMPLATES.update({
-    'NotionFS_ls': 'Notion page contents at {value} were listed successfully.',
-    'NotionFS_info': 'Notion page info for {value} was retrieved successfully.',
-    'NotionFS_mkdir': 'Notion page at {value} was created successfully.',
-    'NotionFS_rm': 'Notion page or block at {value} was deleted successfully.',
-    'NotionFS_exists': 'Existence check for {value} in Notion completed successfully.',
-    'NotionFS_read': 'Notion content from {value} was loaded successfully.',
-    'NotionFS_read_file': 'Notion content from {value} was loaded successfully.',
-    'NotionFS_search': 'Notion search results for {value} were retrieved successfully.',
-    'NotionFS_read_with_references': 'Notion content and linked references from {value} were loaded successfully.',
-    'NotionFS_resolve_link': 'Notion page metadata for {value} was retrieved successfully.',
-    'NotionFS_get_document_id': 'Notion document id for {value} was resolved successfully.',
-    'NotionFS_get_doc_blocks': 'Editable Notion blocks for {value} were listed successfully.',
-    'NotionFS_update_doc_block_text': 'Notion block {value} was updated successfully.',
-    'NotionFS_write': 'Content was written to Notion at {value} successfully.',
-    'NotionFS_move': 'Notion content was moved from {value} to the target path successfully.',
-})
-_ZH_TOOL_RESULT_PREVIEW_TEMPLATES.update({
-    'NotionFS_ls': '已成功列出 Notion 页面 {value} 的内容。',
-    'NotionFS_info': '已成功获取 Notion 页面 {value} 的信息。',
-    'NotionFS_mkdir': '已成功在 Notion 中创建页面 {value}。',
-    'NotionFS_rm': '已成功删除 Notion 页面或块 {value}。',
-    'NotionFS_exists': '已完成对 Notion 中 {value} 的存在性检查。',
-    'NotionFS_read': '已成功读取 Notion 页面 {value} 的内容。',
-    'NotionFS_read_file': '已成功读取 Notion 页面 {value} 的内容。',
-    'NotionFS_search': '已成功获取 Notion 中 {value} 的搜索结果。',
-    'NotionFS_read_with_references': '已成功读取 Notion 页面 {value} 的正文和引用。',
-    'NotionFS_resolve_link': '已成功获取 Notion 页面 {value} 的基础信息。',
-    'NotionFS_get_document_id': '已成功解析 Notion 页面 {value} 的 document_id。',
-    'NotionFS_get_doc_blocks': '已成功列出 Notion 页面 {value} 的可编辑块。',
-    'NotionFS_update_doc_block_text': '已成功更新 Notion 块 {value}。',
-    'NotionFS_write': '已成功向 Notion 页面 {value} 写入内容。',
-    'NotionFS_move': '已成功将 Notion 内容从 {value} 移动到目标路径。',
-})
-_TOOL_RESULT_FAILURE_TEMPLATES.update({
-    'NotionFS_ls': 'Notion page contents at {value} could not be listed.',
-    'NotionFS_info': 'Notion page info for {value} could not be retrieved.',
-    'NotionFS_mkdir': 'Notion page at {value} could not be created.',
-    'NotionFS_rm': 'Notion page or block at {value} could not be deleted.',
-    'NotionFS_exists': 'Existence check for {value} in Notion could not be completed.',
-    'NotionFS_read': 'Notion content from {value} could not be loaded.',
-    'NotionFS_read_file': 'Notion content from {value} could not be loaded.',
-    'NotionFS_search': 'Notion search results for {value} could not be retrieved.',
-    'NotionFS_read_with_references': 'Notion content and linked references from {value} could not be loaded.',
-    'NotionFS_resolve_link': 'Notion page metadata for {value} could not be retrieved.',
-    'NotionFS_get_document_id': 'Notion document id for {value} could not be resolved.',
-    'NotionFS_get_doc_blocks': 'Editable Notion blocks for {value} could not be listed.',
-    'NotionFS_update_doc_block_text': 'Notion block {value} could not be updated.',
-    'NotionFS_write': 'Content could not be written to Notion at {value}.',
-    'NotionFS_move': 'Notion content could not be moved from {value} to the target path.',
-})
-_ZH_TOOL_RESULT_FAILURE_TEMPLATES.update({
-    'NotionFS_ls': '未能列出 Notion 页面 {value} 的内容。',
-    'NotionFS_info': '未能获取 Notion 页面 {value} 的信息。',
-    'NotionFS_mkdir': '未能在 Notion 中创建页面 {value}。',
-    'NotionFS_rm': '未能删除 Notion 页面或块 {value}。',
-    'NotionFS_exists': '未能完成对 Notion 中 {value} 的存在性检查。',
-    'NotionFS_read': '未能读取 Notion 页面 {value} 的内容。',
-    'NotionFS_read_file': '未能读取 Notion 页面 {value} 的内容。',
-    'NotionFS_search': '未能获取 Notion 中 {value} 的搜索结果。',
-    'NotionFS_read_with_references': '未能读取 Notion 页面 {value} 的正文和引用。',
-    'NotionFS_resolve_link': '未能获取 Notion 页面 {value} 的基础信息。',
-    'NotionFS_get_document_id': '未能解析 Notion 页面 {value} 的 document_id。',
-    'NotionFS_get_doc_blocks': '未能列出 Notion 页面 {value} 的可编辑块。',
-    'NotionFS_update_doc_block_text': '未能更新 Notion 块 {value}。',
-    'NotionFS_write': '未能向 Notion 页面 {value} 写入内容。',
-    'NotionFS_move': '未能将 Notion 内容从 {value} 移动到目标路径。',
-})
-_TOOL_RESULT_APPROVAL_TEMPLATES.update({
-    'NotionFS_rm': 'Please review the confirmation note "{value}" before deleting this Notion page.',
-    'NotionFS_move': 'Please review the confirmation note "{value}" before moving this Notion page.',
-    'NotionFS_write': 'Please review the confirmation note "{value}" before writing this Notion page.',
-})
-_ZH_TOOL_RESULT_APPROVAL_TEMPLATES.update({
-    'NotionFS_rm': '删除这个 Notion 页面前，请先确认提示“{value}”。',
-    'NotionFS_move': '移动这个 Notion 页面前，请先确认提示“{value}”。',
-    'NotionFS_write': '写入这个 Notion 页面前，请先确认提示“{value}”。',
-})
-
-_TOOL_RESULT_FALLBACK_TEMPLATE = '{tool_name} has finished.'
-_TOOL_RESULT_FAILURE_FALLBACK_TEMPLATE = '{tool_name} could not be completed.'
-_TOOL_RESULT_APPROVAL_FALLBACK_TEMPLATE = 'This operation needs confirmation before continuing.'
-_TOOL_RESULT_INACTIVE_FALLBACK_TEMPLATE = '{tool_name} is not active.'
-_ZH_TOOL_RESULT_FALLBACK_TEMPLATE = '工具 {tool_name} 已调用完成。'
-_ZH_TOOL_RESULT_FAILURE_FALLBACK_TEMPLATE = '工具 {tool_name} 未能调用完成。'
-_ZH_TOOL_RESULT_APPROVAL_FALLBACK_TEMPLATE = '此操作需要确认后才能继续。'
-_ZH_TOOL_RESULT_INACTIVE_FALLBACK_TEMPLATE = '工具 {tool_name} 未激活。'
-
-_KB_EMPTY_RESULT_MESSAGES: dict[str, dict[str, str]] = {
-    'kb_search': {
-        'en': 'Knowledge base search finished with no matching results',
-        'zh': '知识库搜索已完成，但没有找到匹配结果',
-    },
-    'kb_get_parent_node': {
-        'en': 'No parent context was found for the requested node',
-        'zh': '未找到请求节点的上级上下文',
-    },
-    'kb_get_window_nodes': {
-        'en': 'No nearby knowledge base segments were found',
-        'zh': '未找到附近的知识库片段',
-    },
-    'kb_keyword_search': {
-        'en': 'Keyword search finished with no matching document segments',
-        'zh': '关键词搜索已完成，但没有找到匹配的文档片段',
-    },
-}
+_TOOL_CALL_FALLBACK_TEMPLATE = TOOL_RENDER_FALLBACKS['call']['en']
+_ZH_TOOL_CALL_FALLBACK_TEMPLATE = TOOL_RENDER_FALLBACKS['call']['zh']
+_TOOL_RESULT_FALLBACK_TEMPLATE = TOOL_RENDER_FALLBACKS['success']['en']
+_ZH_TOOL_RESULT_FALLBACK_TEMPLATE = TOOL_RENDER_FALLBACKS['success']['zh']
+_TOOL_RESULT_FAILURE_FALLBACK_TEMPLATE = TOOL_RENDER_FALLBACKS['failure']['en']
+_ZH_TOOL_RESULT_FAILURE_FALLBACK_TEMPLATE = TOOL_RENDER_FALLBACKS['failure']['zh']
+_TOOL_RESULT_APPROVAL_FALLBACK_TEMPLATE = TOOL_RENDER_FALLBACKS['approval']['en']
+_ZH_TOOL_RESULT_APPROVAL_FALLBACK_TEMPLATE = TOOL_RENDER_FALLBACKS['approval']['zh']
+_KB_EMPTY_RESULT_MESSAGES = KB_EMPTY_RESULT_MESSAGES
 
 _FALLBACK_REPRESENTATIVE_RESULT_KEYS = (
     'result',
@@ -816,16 +156,9 @@ _LOW_SIGNAL_ARGUMENT_KEYS = {
 
 _MAX_REPRESENTATIVE_RESULT_LENGTH = 200
 _MAX_TOOL_RESULT_PREVIEW_LENGTH = 50
+_MAX_SUCCESS_RESULT_NORMALIZATION_DEPTH = 6
 
 _ZH_PREVIEW_RE = re.compile('[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff]')
-_TOOL_NOT_AVAILABLE_RE = re.compile(
-    r'Tool \[[^\]]+\] is not available\. Please choose from the available tools\.',
-    re.IGNORECASE,
-)
-_TOOL_EXECUTION_ERROR_RE = re.compile(
-    r'^\s*(?:\[Tool Error\]|Tool \[[^\]]+\] (?:arguments format|parameters) error\b)',
-    re.IGNORECASE,
-)
 
 
 def _tool_name_suffixes(tool_name: str) -> list[str]:
@@ -1042,25 +375,6 @@ def _friendly_preview_text(value: Any) -> str:
     return str(value)
 
 
-def _representative_tool_result(tool_name: str, result: Any) -> Any:
-    render_name, _ = _render_tool_context(tool_name)
-    if isinstance(result, dict):
-        payload = result.get('result') if isinstance(result.get('result'), dict) else result
-        key = _resolve_tool_key(render_name, _REPRESENTATIVE_TOOL_RESULTS)
-        if key and payload.get(key) is not None:
-            return payload.get(key)
-        for fallback_key in _FALLBACK_REPRESENTATIVE_RESULT_KEYS:
-            if payload.get(fallback_key) is not None:
-                return payload.get(fallback_key)
-        if payload:
-            first_key = next(iter(payload))
-            return payload.get(first_key)
-        return ''
-    if isinstance(result, list):
-        return result
-    return result
-
-
 def _tool_preview_value(value: Any) -> str:
     text = _truncate_representative_result(_friendly_preview_text(value))
     return text.replace('\n', ' ').strip()
@@ -1080,35 +394,16 @@ def _truncate_tool_result_preview(value: Any) -> str:
 
 def _tool_result_status(result: Any) -> str:
     if isinstance(result, dict):
-        success = result.get('success')
-        if success is False:
-            return 'failed'
-        payload = result.get('result') if isinstance(result.get('result'), dict) else result
-        status = str(payload.get('status') or '').strip().lower()
-        if status == 'needs_approval':
+        if result.get('ok') is False and result.get('needs_approval') is True:
             return 'needs_approval'
-        if status in ('error', 'missing', 'failed', 'fail'):
-            return 'failed'
-    elif isinstance(result, str):
-        if _TOOL_NOT_AVAILABLE_RE.search(result):
-            return 'inactive'
-        if _TOOL_EXECUTION_ERROR_RE.search(result):
+        if result.get('ok') is False:
             return 'failed'
     return 'ok'
 
 
 def _tool_result_failure_detail(result: Any) -> str:
-    if isinstance(result, dict):
-        error = result.get('error')
-        if isinstance(error, dict):
-            for key in ('reason', 'detail', 'type'):
-                value = error.get(key)
-                if value:
-                    return _truncate_tool_result_preview(value)
-        for key in ('reason', 'error', 'message', 'path', 'status'):
-            value = result.get(key)
-            if value:
-                return _truncate_tool_result_preview(value)
+    if isinstance(result, dict) and result.get('ok') is False and result.get('value'):
+        return _truncate_tool_result_preview(result['value'])
     return _truncate_tool_result_preview(result)
 
 
@@ -1164,18 +459,21 @@ def _render_preview_template(
     result: Any = None,
 ) -> str:
     render_name, render_context = _render_tool_context(tool_name)
-    template = _resolve_tool_key(render_name, template_map)
+    template = template_map.get(render_name)
     match_group = None
     if template is None:
         template, m = _resolve_tool_key_regex(render_name, template_map)
         if m:
             match_group = m.group(1) if m.lastindex else m.group(0)
+    if template is None:
+        template = _resolve_tool_key(render_name, template_map)
     template = template or fallback_template
     preview_value = value or 'the current item'
     context = {
         key: f'**{item}**'
         for key, item in render_context.items()
     }
+    business_value = _normalized_success_business_value(result)
     result_mapping = _tool_result_mapping(result)
     if result_mapping is None and result is not None:
         result_mapping = {
@@ -1184,6 +482,12 @@ def _render_preview_template(
         }
     if result_mapping is not None:
         context['result'] = _TemplateResult(result_mapping)
+    output = _truncate_tool_result_preview(business_value)
+    if output:
+        context['output'] = f'**{output}**'
+    count = _tool_result_count(business_value)
+    if count is not None:
+        context['count'] = f'**{count}**'
     context['value'] = f'**{preview_value}**'
     context['tool_name'] = f'**{tool_name}**'
     context['match'] = f'**{match_group or render_name}**'
@@ -1199,52 +503,62 @@ def _tool_call_preview(tool_name: str, preview_value: str, language: str = 'en')
     )
 
 
-def _tool_result_preview_display_value(tool_name: str, result: Any, value: str = '') -> str:
-    status = _tool_result_status(result)
-    if _tool_name_is(tool_name, 'SkillManagementToolkit_install_skill') and status == 'ok':
-        return _truncate_tool_result_preview(_representative_tool_result(tool_name, result))
-    if (
-        _tool_name_is(tool_name, 'calculator')
-        and status == 'ok'
-        and isinstance(result, dict)
-        and result.get('result')
-    ):
-        return _truncate_tool_result_preview(result.get('result'))
-    return value or _truncate_tool_result_preview(_representative_tool_result(tool_name, result))
-
-
-def _tool_result_mapping(value: Any) -> dict[str, Any] | None:
-    """Normalize mapping, nested-result, and JSON-string tool results."""
-    if isinstance(value, dict):
-        nested = value.get('result')
-        if isinstance(nested, dict):
-            return nested
-        if isinstance(nested, str):
-            parsed = _tool_result_mapping(nested)
-            if parsed is not None:
-                return parsed
+def _normalized_success_business_value(value: Any, depth: int = 0) -> Any:
+    """Normalize JSON-serialized successful business values for rendering."""
+    if depth >= _MAX_SUCCESS_RESULT_NORMALIZATION_DEPTH:
         return value
+    if isinstance(value, dict) and value.get('ok') is False:
+        return value
+    if isinstance(value, dict) and value.get('ok') is True and 'value' in value:
+        return _normalized_success_business_value(value.get('value'), depth + 1)
     if isinstance(value, str):
         try:
             parsed = json.loads(value)
         except (TypeError, ValueError):
-            return None
-        return _tool_result_mapping(parsed) if isinstance(parsed, dict) else None
-    return None
+            return value
+        if isinstance(parsed, (dict, list)):
+            return _normalized_success_business_value(parsed, depth + 1)
+        return value
+    if isinstance(value, dict) and isinstance(value.get('result'), (dict, str)):
+        nested = _normalized_success_business_value(value.get('result'), depth + 1)
+        if isinstance(nested, (dict, list)):
+            return nested
+    return value
+
+
+def _tool_result_mapping(value: Any) -> dict[str, Any] | None:
+    """Build the stable mapping consumed by dotted result templates."""
+    if isinstance(value, dict) and value.get('ok') is False:
+        return {
+            **value,
+            'outcome': 'failed',
+            'reason': value.get('value') or 'Tool call failed',
+        }
+    payload = _normalized_success_business_value(value)
+    return payload if isinstance(payload, dict) else None
+
+
+def _tool_result_count(value: Any) -> int | None:
+    payload = _normalized_success_business_value(value)
+    if not isinstance(payload, list):
+        return None
+    return sum(
+        1 for item in payload
+        if not (
+            isinstance(item, dict)
+            and str(item.get('title') or '').strip().lower() == 'summary'
+            and not str(item.get('url') or '').strip()
+        )
+    )
 
 
 def _tool_result_preview(tool_name: str, result: Any, value: str = '', language: str = 'en') -> str:
     status = _tool_result_status(result)
-    display_value = _tool_result_preview_display_value(tool_name, result, value)
-    if status == 'inactive':
-        tmpl = _language_fallback(
-            language,
-            _TOOL_RESULT_INACTIVE_FALLBACK_TEMPLATE,
-            _ZH_TOOL_RESULT_INACTIVE_FALLBACK_TEMPLATE,
-        )
-        if '{tool_name}' in tmpl:
-            tmpl = tmpl.replace('{tool_name}', f'**{tool_name}**')
-        return _ensure_trailing_newline(tmpl)
+    business_value = (
+        _normalized_success_business_value(result)
+        if status == 'ok'
+        else result
+    )
     if status == 'needs_approval':
         return _render_preview_template(
             tool_name,
@@ -1260,7 +574,7 @@ def _tool_result_preview(tool_name: str, result: Any, value: str = '', language:
     if status == 'failed':
         return _render_preview_template(
             tool_name,
-            display_value or _tool_result_failure_detail(result),
+            value or _tool_result_failure_detail(result),
             _language_templates(language, _TOOL_RESULT_FAILURE_TEMPLATES, _ZH_TOOL_RESULT_FAILURE_TEMPLATES),
             _language_fallback(
                 language,
@@ -1269,14 +583,17 @@ def _tool_result_preview(tool_name: str, result: Any, value: str = '', language:
             ),
             result,
         )
-    payload = result.get('result') if isinstance(result, dict) and isinstance(result.get('result'), dict) else result
-    if isinstance(payload, dict) and payload.get('total') == 0 and _tool_name_starts(tool_name, 'kb_'):
+    if (
+        isinstance(business_value, dict)
+        and business_value.get('total') == 0
+        and _tool_name_starts(tool_name, 'kb_')
+    ):
         msg = _resolve_tool_key(tool_name, _KB_EMPTY_RESULT_MESSAGES)
         if msg:
             return _ensure_trailing_newline(msg.get(language) or msg.get('en', ''))
     return _render_preview_template(
         tool_name,
-        display_value,
+        value,
         _language_templates(language, _TOOL_RESULT_PREVIEW_TEMPLATES, _ZH_TOOL_RESULT_PREVIEW_TEMPLATES),
         _language_fallback(language, _TOOL_RESULT_FALLBACK_TEMPLATE, _ZH_TOOL_RESULT_FALLBACK_TEMPLATE),
         result,
@@ -1301,18 +618,7 @@ def _tool_call_frame_text(tool_call: dict[str, Any], language: str = 'en') -> tu
         'name': tool_name,
         'arguments': arguments if isinstance(arguments, dict) else {},
     }
-    batch_urls = arguments.get('urls') if isinstance(arguments, dict) else None
-    if _tool_name_is(tool_name, 'url_fetch') and isinstance(batch_urls, list) and len(batch_urls) > 1:
-        clean_urls = [str(item).strip() for item in batch_urls if str(item).strip()]
-        sample = ', '.join(clean_urls[:2])
-        if language == 'zh':
-            suffix = f'，另有 {len(clean_urls) - 2} 个' if len(clean_urls) > 2 else ''
-            preview = f'正在并发读取 **{len(clean_urls)}** 个网页：**{sample}**{suffix}。\n'
-        else:
-            suffix = f', plus {len(clean_urls) - 2} more' if len(clean_urls) > 2 else ''
-            preview = f'Fetching **{len(clean_urls)}** web pages concurrently: **{sample}**{suffix}.\n'
-    else:
-        preview = _tool_call_preview(tool_name, preview_value, language)
+    preview = _tool_call_preview(tool_name, preview_value, language)
     text = (
         f'<{_TOOL_PREVIEW_TAG} id="{escape(tool_call_id, quote=True)}">{preview}</{_TOOL_PREVIEW_TAG}>'
         f'<{_TOOL_CALL_TAG}>{json.dumps(payload, ensure_ascii=False, separators=(",", ":"))}</{_TOOL_CALL_TAG}>'

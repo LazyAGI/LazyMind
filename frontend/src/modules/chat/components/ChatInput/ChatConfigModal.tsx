@@ -5,23 +5,75 @@ import { SettingOutlined, QuestionCircleOutlined } from '@ant-design/icons';
 import {
   ChatServiceApi,
   ConversationSettingsApi,
-  parseConversationWorkflowSettings,
-  type ConversationWorkflowSettings,
+  parseConversationRuntimeSettings,
+  type ChatExecutor,
+  type ChatExecutorDescriptor,
+  type ConversationRuntimeSettings,
 } from '../../utils/request';
+import {
+  fetchUserUiPreferences,
+  USER_UI_PREFERENCES_CHANGED_EVENT,
+} from '@/modules/user/uiPreferencesApi';
 import './ChatConfigModal.scss';
 
 interface ChatConfigPopoverProps {
   /** When provided, settings are saved to the server immediately on change. */
   conversationId?: string;
   /** Initial settings to display. If not provided, fetched from server on first open. */
-  initialSettings?: ConversationWorkflowSettings;
+  initialSettings?: ConversationRuntimeSettings;
   /** Called with the new settings after a successful save. */
-  onSave?: (settings: ConversationWorkflowSettings) => void;
+  onSave?: (settings: ConversationRuntimeSettings) => void;
   /** When true, workflows cannot be disabled because a workflow session is active. */
   hasWorkflowSession?: boolean;
 }
 
 type WorkflowExecutionMode = 'auto' | 'dynamic' | 'disabled';
+
+export function resolveWorkflowExecutionMode(
+  settings: ConversationRuntimeSettings | null,
+  hasWorkflowSession: boolean,
+  workflowAvailable = true,
+): WorkflowExecutionMode {
+  if (!workflowAvailable) {
+    return 'disabled';
+  }
+  if (!hasWorkflowSession && settings?.enable_workflow === false) {
+    return 'disabled';
+  }
+  return settings?.workflow_mode === 'auto' ? 'auto' : 'dynamic';
+}
+
+const lazyMindExecutor: ChatExecutorDescriptor = {
+  id: 'lazymind',
+  display_name: 'LazyMind',
+  kind: 'internal',
+  installed: true,
+  host_online: true,
+  available: true,
+};
+
+export function buildExecutorCatalog(
+  executors: ChatExecutorDescriptor[],
+  selectedId: ChatExecutor,
+  unavailableReason: string,
+): ChatExecutorDescriptor[] {
+  const catalog = new Map<string, ChatExecutorDescriptor>([
+    [lazyMindExecutor.id, lazyMindExecutor],
+  ]);
+  executors.forEach((executor) => catalog.set(executor.id, executor));
+  if (!catalog.has(selectedId)) {
+    catalog.set(selectedId, {
+      id: selectedId,
+      display_name: selectedId,
+      kind: 'external',
+      installed: false,
+      host_online: false,
+      available: false,
+      unavailable_reason: unavailableReason,
+    });
+  }
+  return Array.from(catalog.values());
+}
 
 export default function ChatConfigPopover({
   conversationId,
@@ -31,12 +83,18 @@ export default function ChatConfigPopover({
 }: ChatConfigPopoverProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const [settings, setSettings] = useState<ConversationWorkflowSettings | null>(
+  const [settings, setSettings] = useState<ConversationRuntimeSettings | null>(
     initialSettings ?? null,
   );
+  const [executors, setExecutors] = useState<ChatExecutorDescriptor[]>([]);
+  const [featureControls, setFeatureControls] = useState({
+    loaded: false,
+    error: false,
+    taskCenterEnabled: false,
+    workflowsEnabled: false,
+  });
   // Track whether we've already fetched defaults to avoid repeated requests.
   const fetchedRef = useRef(false);
-  const enforcedWorkflowConversationRef = useRef<string | null>(null);
 
   // Sync external initialSettings into local state; reset fetch cache on conversation change.
   useEffect(() => {
@@ -51,30 +109,59 @@ export default function ChatConfigPopover({
     }
   }, [conversationId, initialSettings]);
 
-  // Starting/attaching a workflow makes approval mode authoritative for this
-  // conversation. Enforce it once per attached session; users may still switch
-  // between auto and approval afterwards, but cannot disable until it is removed.
   useEffect(() => {
-    if (!hasWorkflowSession) {
-      enforcedWorkflowConversationRef.current = null;
-      return;
-    }
-    const key = conversationId || 'pending-conversation';
-    if (enforcedWorkflowConversationRef.current === key) return;
-    enforcedWorkflowConversationRef.current = key;
-    const next: ConversationWorkflowSettings = {
-      ...settings,
-      enable_workflow: true,
-      workflow_mode: 'dynamic',
-    };
-    setSettings(next);
-    onSave?.(next);
-    if (conversationId && !conversationId.startsWith('temp_')) {
-      void ConversationSettingsApi().patchWorkflowSettings(conversationId, next).catch(() => {
-        enforcedWorkflowConversationRef.current = null;
+    let active = true;
+    const applyPreferences = (preferences: {
+      task_center_enabled: boolean;
+      workflows_enabled: boolean;
+    }) => {
+      if (!active) return;
+      setFeatureControls({
+        loaded: true,
+        error: false,
+        taskCenterEnabled: preferences.task_center_enabled,
+        workflowsEnabled: preferences.workflows_enabled,
       });
-    }
-  }, [conversationId, hasWorkflowSession, onSave, settings]);
+    };
+    const refreshPreferences = async () => {
+      try {
+        applyPreferences(await fetchUserUiPreferences({ silentError: true } as never));
+      } catch {
+        if (active) {
+          setFeatureControls({
+            loaded: true,
+            error: true,
+            taskCenterEnabled: false,
+            workflowsEnabled: false,
+          });
+        }
+      }
+    };
+    const handlePreferencesChanged = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        task_center_enabled?: boolean;
+        workflows_enabled?: boolean;
+      }>).detail;
+      if (
+        typeof detail?.task_center_enabled === 'boolean'
+        && typeof detail.workflows_enabled === 'boolean'
+      ) {
+        applyPreferences({
+          task_center_enabled: detail.task_center_enabled,
+          workflows_enabled: detail.workflows_enabled,
+        });
+        return;
+      }
+      void refreshPreferences();
+    };
+
+    void refreshPreferences();
+    window.addEventListener(USER_UI_PREFERENCES_CHANGED_EVENT, handlePreferencesChanged);
+    return () => {
+      active = false;
+      window.removeEventListener(USER_UI_PREFERENCES_CHANGED_EVENT, handlePreferencesChanged);
+    };
+  }, []);
 
   // Fetch settings from server the first time the popover opens.
   async function ensureSettings() {
@@ -88,7 +175,7 @@ export default function ChatConfigPopover({
           await ChatServiceApi().conversationServiceGetConversationDetail({
             conversation: conversationId,
           });
-        const convSettings = parseConversationWorkflowSettings(
+        const convSettings = parseConversationRuntimeSettings(
           detailRes.data.conversation,
         );
         if (convSettings) {
@@ -105,6 +192,34 @@ export default function ChatConfigPopover({
     }
   }
 
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    const refresh = async () => {
+      try {
+        const response = await ConversationSettingsApi().listChatExecutors();
+        const payload = (response.data as any)?.data ?? response.data;
+        const values = Array.isArray(payload?.executors) ? payload.executors : [];
+        if (active) {
+          setExecutors(
+            values.filter(
+              (item: ChatExecutorDescriptor) =>
+                item && typeof item.id === 'string' && typeof item.display_name === 'string',
+            ),
+          );
+        }
+      } catch {
+        // Keep the last known catalog; Core remains the final validation boundary.
+      }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 3000);
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [open]);
+
   function handleOpenChange(next: boolean) {
     setOpen(next);
     if (next) {
@@ -112,24 +227,73 @@ export default function ChatConfigPopover({
     }
   }
 
-  async function handleChange(patch: Partial<ConversationWorkflowSettings>) {
+  async function handleChange(patch: Partial<ConversationRuntimeSettings>) {
+    if (
+      (patch.enable_workflow === true && !workflowControlsAvailable)
+      || (patch.enable_subagent === true && !taskControlsAvailable)
+    ) {
+      return;
+    }
     const next = { ...settings, ...patch };
-    setSettings(next);
     try {
+      const target = executors.find((item) => item.id === patch.chat_executor);
+      if (target && !target.available) {
+        message.error(target.unavailable_reason || t('chat.conversationConfigExecutorUnavailable'));
+        return;
+      }
+      setSettings(next);
       if (conversationId && !conversationId.startsWith('temp_')) {
-        await ConversationSettingsApi().patchWorkflowSettings(conversationId, next);
+        await ConversationSettingsApi().patchConversationSettings(conversationId, next);
         message.success(t('chat.conversationConfigSaved'));
       }
       onSave?.(next);
     } catch {
       setSettings(settings);
+      if (patch.chat_executor) {
+        message.error(t('chat.conversationConfigExecutorUnavailable'));
+      }
     }
   }
 
-  const workflowEnabled = settings?.enable_workflow ?? true;
-  const executionMode: WorkflowExecutionMode = workflowEnabled
-    ? (settings?.workflow_mode ?? 'dynamic')
-    : 'disabled';
+  const chatExecutor = settings?.chat_executor ?? 'lazymind';
+  const executorCatalog = buildExecutorCatalog(
+    executors,
+    chatExecutor,
+    t('chat.conversationConfigExecutorUnavailable'),
+  );
+  const displayedExecutor = executorCatalog.find((item) => item.id === chatExecutor)
+    ?? lazyMindExecutor;
+  const executorOptions = executorCatalog.map((item) => ({
+    label: item.display_name,
+    value: item.id,
+    disabled: !item.available,
+  }));
+  const executorDescription = displayedExecutor.available === false
+    ? displayedExecutor.unavailable_reason || t('chat.conversationConfigExecutorUnavailable')
+    : displayedExecutor.kind === 'external'
+      ? t('chat.conversationConfigExecutorExternalDesc', {
+          name: displayedExecutor.display_name,
+        })
+      : t('chat.conversationConfigExecutorLazyMindDesc');
+  const taskControlsAvailable = featureControls.loaded
+    && !featureControls.error
+    && featureControls.taskCenterEnabled;
+  const workflowControlsAvailable = taskControlsAvailable && featureControls.workflowsEnabled;
+  const executionMode = resolveWorkflowExecutionMode(
+    settings,
+    hasWorkflowSession,
+    workflowControlsAvailable,
+  );
+  const featureControlsMessage = !featureControls.loaded
+    ? t('chat.conversationConfigFeatureControlsLoading')
+    : featureControls.error
+      ? t('chat.conversationConfigFeatureControlsUnavailable')
+      : !featureControls.taskCenterEnabled
+        ? t('chat.conversationConfigTaskCenterDisabled')
+        : !featureControls.workflowsEnabled
+          ? t('chat.conversationConfigWorkflowMasterDisabled')
+          : null;
+  const featureControlsMessageId = 'chat-config-feature-controls-message';
 
   function handleExecutionModeChange(mode: string | number) {
     const nextMode = mode as WorkflowExecutionMode;
@@ -142,6 +306,45 @@ export default function ChatConfigPopover({
 
   const content = (
     <div className="chat-config-popover-content">
+      {featureControlsMessage ? (
+        <p
+          id={featureControlsMessageId}
+          className="chat-config-master-notice"
+          role="status"
+        >
+          {featureControlsMessage}
+        </p>
+      ) : null}
+      <div className="chat-config-section chat-config-executor-section">
+        <div className="chat-config-row-label chat-config-section-title">
+          <span className="chat-config-label">{t('chat.conversationConfigExecutor')}</span>
+          <Tooltip title={t('chat.conversationConfigExecutorTooltip')} placement="top">
+            <QuestionCircleOutlined className="chat-config-help-icon" />
+          </Tooltip>
+        </div>
+        <div
+          className="chat-config-executor-grid"
+          role="radiogroup"
+          aria-label={t('chat.conversationConfigExecutor')}
+        >
+          {executorOptions.map((option) => (
+            <button
+              key={option.value}
+              type="button"
+              role="radio"
+              aria-checked={chatExecutor === option.value}
+              className={chatExecutor === option.value ? 'is-selected' : ''}
+              disabled={option.disabled}
+              onClick={() => void handleChange({ chat_executor: option.value as ChatExecutor })}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+        <p className="chat-config-workflow-description">
+          {executorDescription}
+        </p>
+      </div>
       <div className="chat-config-section chat-config-workflow-section">
         <div className="chat-config-row-label chat-config-section-title">
           <span className="chat-config-label">{t('chat.conversationConfigWorkflowExecution')}</span>
@@ -153,6 +356,9 @@ export default function ChatConfigPopover({
           block
           className="chat-config-workflow-mode"
           value={executionMode}
+          disabled={!workflowControlsAvailable}
+          aria-label={t('chat.conversationConfigWorkflowExecution')}
+          aria-describedby={featureControlsMessage ? featureControlsMessageId : undefined}
           onChange={handleExecutionModeChange}
           options={[
             { label: t('chat.conversationConfigWorkflowAuto'), value: 'auto' },
@@ -179,7 +385,10 @@ export default function ChatConfigPopover({
             </Tooltip>
           </div>
           <Switch
-            checked={settings?.enable_subagent ?? true}
+            checked={taskControlsAvailable && (settings?.enable_subagent ?? true)}
+            disabled={!taskControlsAvailable}
+            aria-label={t('chat.conversationConfigEnableSubagent')}
+            aria-describedby={featureControlsMessage ? featureControlsMessageId : undefined}
             onChange={(v: boolean) => handleChange({ enable_subagent: v })}
           />
         </div>

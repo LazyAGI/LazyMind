@@ -2,8 +2,9 @@ id: writer-workflow
 name: AI Writer
 description: >
   Read source documents and knowledge, create or reuse an outline, draft a
-  structured document, revise either the outline or full text, and deliver it
-  as Markdown or publish it to Feishu through one WriterDocument-based workflow.
+  structured document, revise either the outline or full text, and produce
+  Markdown or WriterDocument IR according to the selected writing path. Exporting
+  an IR draft as Markdown is a separate user-initiated download flow.
 
 when_to_use: >
   Always use this workflow when the user's primary request is to create a complete
@@ -12,50 +13,106 @@ when_to_use: >
   this workflow even when the user does not know or name AI Writer; do not
   generate the requested full document directly in chat. Also use it for
   continuing from a supplied outline, revising an existing Feishu document, or
-  publishing a generated document to Feishu. Do not require the
+  delivering a generated document. When a writer session already owns the current
+  draft, requests to insert, replace, move, or delete an image are document revisions:
+  rerun write_document and keep image acquisition inside that step. Never route such
+  a request to a standalone image task or generic subagent. Do not require the
   user to choose between creation and revision workflows; select the applicable
-  reachable step from the user's request and the available artifacts. When
-  triggering after clarification or a cloud-file read, request_context must
-  preserve every user-supplied source and destination URL verbatim, including
-  URLs supplied through ask_user; a document-content summary never replaces
+  reachable step from the user's request and the available artifacts. When the
+  current turn supplies a Markdown, plain-text, or LMD file to write, continue,
+  or revise, trigger this workflow before reading or editing that file with generic
+  attachment tools. Preserve its exact basename in request_context and let the
+  prepare step load it; do not substitute the file contents for its identity.
+  When triggering after clarification or a cloud-file read, request_context must
+  likewise preserve every user-supplied source and destination URL verbatim,
+  including URLs supplied through ask_user; a content summary never replaces
   its locator.
+
+runtime:
+  exclusive_tool_capabilities:
+    - writer.create
+    - writer.revise
+  completed_continue_steps:
+    - write_document
 
 tool_scripts:
   - path: scripts/tools.py
     functions:
       - writer_build_writing_task
+      - writer_load_local_document
+      - writer_collect_available_media
       - writer_load_document
       - writer_profile_resources
       - writer_create_writing_context
+      - writer_prepare_workspace
       - writer_prepare_outline
       - writer_generate_outline
+      - writer_outline_workspace
+      - writer_generate_rewrite_outline
+      - writer_generate_rewrite_section_instructions
       - writer_generate_section_instructions
-      - writer_generate_draft_blocks
-      - writer_generate_draft_blocks_markdown
+      - writer_resolve_visual_media
+      - writer_resolve_revision_media
       - writer_generate_draft_document
-      - writer_generate_draft_document_markdown
+      - writer_draft_workspace
       - writer_update_writing_context
-      - writer_generate_final_document
       - writer_export_markdown
-      - writer_build_revision_task
-      - writer_locate_revision_target
-      - writer_generate_modify_plan
-      - writer_generate_patch_set
-      - writer_apply_revision
+      - writer_render_document
+      - writer_save_document
+      - writer_convert_markdown_to_ir
       - writer_create_document
       - writer_publish_revision
       - writer_replace_document
+      - writer_preview_selection_rewrite
+      - writer_sync_document
       - writer_append_document
+      - writer_build_revision_task
+      - writer_locate_revision_target
+      - writer_generate_modify_plan
+      - writer_generate_revision_set
+      - writer_apply_revision
+      - writer_publish_revision
+      - writer_replace_document
+
+artifact_actions:
+  rewrite_selection:
+    slots: [outline_document, draft_document]
+    preview_tool: writer_preview_selection_rewrite
+  sync_document:
+    slots: [draft_document]
+    execute_tool: writer_sync_document
+  render_document:
+    slots: [source_document, outline_document, draft_document]
+    preview_tool: writer_render_document
+    execute_tool: writer_render_document
+  save_document:
+    slots: [outline_document, draft_document]
+    execute_tool: writer_save_document
 
 steps:
   - id: prepare
   - id: outline
   - id: write_document
-  - id: publish
 
 slots:
+  - id: writer_command
+    label: Writer Command
+    type: file
+    cardinality: single
   - id: writing_task
     label: Writing Task
+    type: file
+    cardinality: single
+  - id: media_assets
+    label: Available Media
+    type: file
+    cardinality: single
+  - id: resolved_media_assets
+    label: Resolved Media
+    type: file
+    cardinality: single
+  - id: visual_plan
+    label: Visual Plan
     type: file
     cardinality: single
   - id: resource_profiles
@@ -66,7 +123,7 @@ slots:
     label: Writing Context
     type: file
     cardinality: single
-  - id: source_ir
+  - id: source_document
     label: Source Document
     type: file
     cardinality: single
@@ -75,7 +132,7 @@ slots:
     type: file
     cardinality: single
 
-  - id: outline_ir
+  - id: outline_document
     label: Outline
     type: file
     cardinality: single
@@ -96,12 +153,12 @@ slots:
     label: Outline Modification Plan
     type: file
     cardinality: single
-  - id: outline_patch_set
-    label: Outline Patch Set
+  - id: outline_revision_set
+    label: Outline Revision Set
     type: file
     cardinality: single
-  - id: outline_patch_result
-    label: Outline Patch Result
+  - id: outline_revision_result
+    label: Outline Revision Result
     type: file
     cardinality: single
   - id: outline_write_result
@@ -113,10 +170,6 @@ slots:
     label: Section Instructions
     type: file
     cardinality: single
-  - id: section_plan_ir
-    label: Section Plan Result
-    type: file
-    cardinality: single
   - id: draft_blocks
     label: Draft Blocks
     type: file
@@ -126,23 +179,10 @@ slots:
     label: Full Draft
     type: file
     cardinality: single
-  - id: draft_document_md
-    label: Full Draft Markdown
-    type: file
-    cardinality: single
   - id: writing_context_after_draft
     label: Writing Context After Draft
     type: file
     cardinality: single
-  - id: final_document
-    label: Final Document
-    type: file
-    cardinality: single
-  - id: final_document_md
-    label: Final Document Markdown
-    type: file
-    cardinality: single
-
   - id: document_revision_task
     label: Document Revision Task
     type: file
@@ -155,66 +195,46 @@ slots:
     label: Document Modification Plan
     type: file
     cardinality: single
-  - id: document_patch_set
-    label: Document Patch Set
+  - id: document_revision_set
+    label: Document Revision Set
     type: file
     cardinality: single
-  - id: document_patch_result
-    label: Document Patch Result
+  - id: document_revision_result
+    label: Document Revision Result
     type: file
     cardinality: single
-  - id: delivered_markdown
-    label: Delivered Markdown
+  - id: document_write_result
+    label: Document Cloud Sync Result
     type: file
     cardinality: single
-  - id: publish_result
-    label: Publish Result
-    type: file
-    cardinality: single
-  - id: publish_target_document
-    label: Created Publish Target
-    type: file
-    cardinality: single
-  - id: published_document
-    label: Published Document
-    type: file
-    cardinality: single
-  - id: published_link
-    label: Published Document Link
-    type: text
-    cardinality: single
-
 ui:
+  slots:
+    outline_document:
+      widgetType: writer-document
+    draft_document:
+      widgetType: writer-document
   tabs:
     - id: prepare
       step_id: prepare
       label: Preparation
       layout: list
       slots:
-        - id: source_ir
+        - id: source_document
 
     - id: outline
       step_id: outline
       label: Outline
       layout: list
       slots:
-        - id: outline_ir
+        - id: outline_document
+      completed_continue_step: write_document
 
     - id: result
       step_id: write_document
       label: Final Document
       layout: list
       slots:
-        - id: final_document
-
-    - id: publish
-      step_id: publish
-      label: 交付文稿
-      layout: list
-      slots:
-        - id: delivered_markdown
-        - id: published_link
-        - id: published_document
+        - id: draft_document
 
 i18n:
   zh-CN:
@@ -223,28 +243,21 @@ i18n:
       prepare: {label: 写作准备}
       outline: {label: 大纲}
       write_document: {label: 成稿}
-      publish: {label: 交付文稿}
     tabs:
       prepare: {label: 写作准备}
       outline: {label: 大纲}
       result: {label: 成稿}
-      publish: {label: 交付文稿}
     slots:
       writing_task: {label: 写作任务}
+      writer_command: {label: 写作控制命令}
+      media_assets: {label: 可用图片素材}
+      resolved_media_assets: {label: 已解析图片素材}
+      visual_plan: {label: 视觉规划}
       resource_profiles: {label: 资源画像}
       writing_context: {label: 写作上下文}
-      source_ir: {label: 资源文档}
+      source_document: {label: 资源文档}
       target_document: {label: 云文档目标}
-      outline_ir: {label: 大纲}
+      outline_document: {label: 大纲}
       section_instructions: {label: 章节规划}
-      section_plan_ir: {label: 章节规划结果}
       draft_blocks: {label: 章节草稿}
-      draft_document: {label: 完整初稿}
-      draft_document_md: {label: 完整初稿 Markdown}
-      final_document: {label: 最终正文}
-      final_document_md: {label: 最终正文 Markdown}
-      delivered_markdown: {label: Markdown 文稿}
-      publish_result: {label: 发布结果}
-      publish_target_document: {label: 新建发布目标}
-      published_document: {label: 已发布飞书文档}
-      published_link: {label: 飞书文档链接}
+      draft_document: {label: 成稿}

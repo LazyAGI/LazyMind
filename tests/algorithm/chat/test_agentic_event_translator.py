@@ -1,12 +1,18 @@
 from lazymind.chat.service.component import AgentEventFrameTranslator
 from lazymind.chat.service.component.tool_rendering import (
     _tool_call_frame_text,
+    _tool_result_status,
     _tool_result_frame_text,
 )
 from lazymind.chat.service.utils.citations import (
     CITATION_REFS_KEY,
     annotate_citations,
+    register_external_search_result,
 )
+
+
+def test_business_failed_status_is_not_a_tool_execution_failure():
+    assert _tool_result_status({'status': 'failed', 'message': 'Task did not finish.'}) == 'ok'
 
 
 def test_translator_rewrites_citations_registered_by_tools():
@@ -29,12 +35,8 @@ def test_translator_rewrites_citations_registered_by_tools():
             'id': 'call-1',
             'name': 'kb_search',
             'result': {
-                'success': True,
-                'tool': 'kb_search',
-                'result': {
-                    'total': 1,
-                    'items': [item],
-                },
+                'total': 1,
+                'items': [item],
             },
         }],
     })
@@ -76,6 +78,57 @@ def test_final_answer_citation_display_starts_from_first_cited_document():
     assert '[3](#source-3.1 "doc-3.md")' not in text
     assert sources[0]['index'] == '3.1'
     assert sources[0]['display_index'] == 1
+
+
+def test_translator_merges_searched_and_cited_sources_with_roles():
+    translator = AgentEventFrameTranslator(query='q')
+    first = register_external_search_result({
+        'title': 'First',
+        'url': 'https://example.test/first',
+    }, translator.citation_state)
+    register_external_search_result({
+        'title': 'Second',
+        'url': 'https://example.test/second',
+    }, translator.citation_state)
+
+    frames = translator.finish({
+        'text': f'Use {first["ref"]}.',
+        'sources': [{
+            'index': '9.1',
+            'source_type': 'external',
+            'title': 'Unused existing source',
+            'url': 'https://example.test/unused',
+        }],
+    })
+    assert [(source['title'], source['source_roles']) for source in frames[-1]['sources']] == [
+        ('First', ['cited', 'searched']),
+        ('Second', ['searched']),
+    ]
+    assert 'searched_sources' not in frames[-1]
+
+
+def test_final_sources_preserve_distinct_citation_indices_for_same_url():
+    translator = AgentEventFrameTranslator(query='q')
+    register_external_search_result({
+        'title': 'Search result',
+        'url': 'https://example.test/shared#search',
+    }, translator.citation_state)
+
+    frames = translator.finish({
+        'text': 'Use [[9.1]].',
+        'sources': [{
+            'index': '9.1',
+            'source_type': 'external',
+            'title': 'Existing source',
+            'url': 'https://example.test/shared',
+            'content': 'Existing evidence',
+        }],
+    })
+
+    assert [(source['index'], source['source_roles']) for source in frames[-1]['sources']] == [
+        ('9.1', ['cited']),
+        ('1.1', ['searched']),
+    ]
 
 
 def test_translator_counts_tool_call_turns_not_individual_calls():
@@ -179,7 +232,7 @@ def test_searchbase_tool_rendering_extracts_provider_brand():
         'result': [{'title': 'Agent news item', 'url': 'https://example.test'}],
     }, preview_value=preview_value)
 
-    assert '**Tavily** search results for **agent news** are ready now.' in result_text
+    assert '**Tavily** search for **agent news** returned **1** results.' in result_text
     assert '"name":"TavilySearch_search"' in result_text
 
 
@@ -242,14 +295,55 @@ def test_skill_reference_rendering_does_not_treat_content_error_words_as_failure
     assert '已成功加载 **reference.md** 技能的参考资料。' in result_text
 
 
+def test_tool_rendering_preserves_explicit_approval_signal():
+    result_text = _tool_result_frame_text({
+        'id': 'call-reference',
+        'name': 'read_reference',
+        'result': {
+            'ok': False,
+            'value': 'Reading reference.md requires approval.',
+            'needs_approval': True,
+        },
+    }, language='zh', preview_value='reference.md')
+
+    assert '此操作需要确认后才能继续。' in result_text
+
+
 def test_skill_reference_rendering_preserves_explicit_tool_failure():
     result_text = _tool_result_frame_text({
         'id': 'call-reference',
         'name': 'read_reference',
-        'result': '[Tool Error] FileNotFoundError: reference.md',
+        'result': {
+            'ok': False,
+            'value': 'reference.md not found',
+        },
     }, language='zh', preview_value='reference.md')
 
     assert '未能读取 **reference.md** 技能参考资料。' in result_text
+
+
+def test_workflow_rendering_normalizes_canonical_success_and_failure():
+    success_text = _tool_result_frame_text({
+        'id': 'call-workflow-success',
+        'name': 'trigger_writer_workflow',
+        'result': {
+            'ok': True,
+            'value': {'outcome': 'queued', 'reason': 'accepted'},
+        },
+    })
+    failure_text = _tool_result_frame_text({
+        'id': 'call-workflow-failure',
+        'name': 'trigger_writer_workflow',
+        'result': {
+            'ok': False,
+            'value': 'Workflow service is unavailable',
+        },
+    })
+
+    assert 'Result: **queued**. Reason: **accepted**.' in success_text
+    assert 'Result: **failed**. Reason: **Workflow service is unavailable**.' in failure_text
+    assert '{result.' not in success_text
+    assert '{result.' not in failure_text
 
 
 def test_create_skill_rendering_uses_single_segment_name_and_preserves_failure():
@@ -271,9 +365,8 @@ def test_create_skill_rendering_uses_single_segment_name_and_preserves_failure()
         'id': 'call-create-skill',
         'name': 'SkillManagementToolkit_create_skill',
         'result': {
-            'success': False,
-            'tool': 'create_skill',
-            'error': "Skill name 'internal2/skill' is invalid.",
+            'ok': False,
+            'value': "Skill name 'internal2/skill' is invalid.",
         },
     }, language='zh', preview_value='internal2/skill')
 

@@ -60,6 +60,13 @@ export type McpServerListResult = {
   total: number;
 };
 
+export type BulkUpdateMcpServersResult = {
+  enabled: boolean;
+  totalCount: number;
+  updatedCount: number;
+  skippedUnverifiedCount: number;
+};
+
 const toolsApi = ToolsApiFactory(
   new CoreConfiguration({ basePath: BASE_URL }),
   BASE_URL,
@@ -71,6 +78,24 @@ const mcpServersApi = McpServersApiFactory(
   axiosInstance,
 );
 const coreBasePath = `${BASE_URL}/api/core`;
+
+export const TOOL_AVAILABILITY_CHANGED_EVENT =
+  "lazymind:tool-availability-changed";
+
+export type ToolAvailabilityChange = {
+  id: string;
+  enabled: boolean;
+};
+
+export function notifyToolAvailabilityChanged(change: ToolAvailabilityChange) {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(
+    new CustomEvent<ToolAvailabilityChange>(
+      TOOL_AVAILABILITY_CHANGED_EVENT,
+      { detail: change },
+    ),
+  );
+}
 
 export type McpToolAsset = {
   id: string;
@@ -193,6 +218,7 @@ const normalizeToolGroup = (item: ToolGroupOpenAPIResponse): StructuredAsset => 
     tags: [],
     content: methodSummaries.join("；") || description,
     isEnabled: !item.disabled,
+    isAvailable: item.active !== false,
     readonly: item.can_disable === false,
   };
 };
@@ -279,6 +305,26 @@ export async function listMcpServersPage(
   return {
     records,
     total: readListTotal(rawPayload, rawResponse, records.length),
+  };
+}
+
+export async function setAllMcpServersEnabled(
+  enabled: boolean,
+): Promise<BulkUpdateMcpServersResult> {
+  const response = await axiosInstance.patch(`${coreBasePath}/mcp_servers:enabled`, {
+    enabled,
+  });
+  const payload = unwrapResponsePayload(response.data as {
+    enabled?: boolean;
+    total_count?: number;
+    updated_count?: number;
+    skipped_unverified_count?: number;
+  });
+  return {
+    enabled: toBooleanValue(payload.enabled, enabled),
+    totalCount: toNumberValue(payload.total_count),
+    updatedCount: toNumberValue(payload.updated_count),
+    skippedUnverifiedCount: toNumberValue(payload.skipped_unverified_count),
   };
 }
 

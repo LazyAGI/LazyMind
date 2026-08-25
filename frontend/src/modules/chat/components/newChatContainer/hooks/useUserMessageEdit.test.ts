@@ -245,6 +245,21 @@ describe("useUserMessageEdit", () => {
     expect(successMock).toHaveBeenCalledWith("chat.copySuccess");
   });
 
+  it("handleCopyUserMessage copies the displayed text when it differs from delta", async () => {
+    const writeText = vi.fn().mockResolvedValue(undefined);
+    Object.assign(navigator, { clipboard: { writeText } });
+    const { result } = setup();
+
+    await act(async () => {
+      await result.current.handleCopyUserMessage({
+        delta: "raw text",
+        display_delta: "displayed text",
+      });
+    });
+
+    expect(writeText).toHaveBeenCalledWith("displayed text");
+  });
+
   it("handleCopyUserMessage is a no-op for blank text", async () => {
     const writeText = vi.fn();
     Object.assign(navigator, { clipboard: { writeText } });

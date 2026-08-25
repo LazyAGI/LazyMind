@@ -14,6 +14,17 @@
 .chat-config-popover-content {
   padding: 18px 20px;
 
+  .chat-config-master-notice {
+    margin: 0 0 14px;
+    padding: 9px 10px;
+    border: 1px solid #d8e4f5;
+    border-radius: 8px;
+    background: #f4f8fe;
+    color: #4f6078;
+    font-size: 12px;
+    line-height: 1.6;
+  }
+
   .chat-config-section {
     margin-bottom: 14px;
 
@@ -30,6 +41,49 @@
 
   .chat-config-section-title {
     margin-bottom: 12px;
+  }
+
+  .chat-config-executor-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+
+    button {
+      min-width: 0;
+      height: 40px;
+      padding: 0 12px;
+      overflow: hidden;
+      border: 1px solid #d9e0ea;
+      border-radius: 8px;
+      background: #f7f8fa;
+      color: #4f5968;
+      font: inherit;
+      line-height: 38px;
+      text-align: center;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      cursor: pointer;
+      transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+
+      &:hover:not(:disabled) {
+        border-color: #91bfff;
+        background: #f2f7ff;
+      }
+
+      &.is-selected {
+        border-color: #1677ff;
+        background: #edf5ff;
+        color: #1677ff;
+        font-weight: 600;
+        box-shadow: inset 0 0 0 1px #1677ff;
+      }
+
+      &:disabled {
+        color: #aeb5c0;
+        cursor: not-allowed;
+        opacity: 0.72;
+      }
+    }
   }
 
   .chat-config-workflow-mode {

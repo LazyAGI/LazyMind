@@ -15,6 +15,7 @@ const electronMainScript = path.join(scriptsDir, "..", "electron", "src", "main.
 const electronBuilderConfig = path.join(scriptsDir, "..", "electron", "electron-builder.config.cjs");
 const electronPackage = path.join(scriptsDir, "..", "electron", "package.json");
 const darwinBuildScript = path.join(scriptsDir, "build-darwin-arm64.sh");
+const windowsBuildScript = path.join(scriptsDir, "build-windows-x64.ps1");
 const installerScript = path.join(scriptsDir, "..", "installer", "installer.nsh");
 const macosWorkflow = path.join(scriptsDir, "..", "..", ".github", "workflows", "macos-installer.yml");
 const macosFinalizeWorkflow = path.join(
@@ -40,6 +41,17 @@ function nsisMacro(source, name) {
   return match[1];
 }
 
+function writeOfflineSkillFixtures(root) {
+  const packages = path.join(root, "builtin-skills", "packages");
+  mkdirSync(packages, { recursive: true });
+  writeFileSync(path.join(root, "builtin-skills", "catalog.json"), '{"schema_version":1,"skills":[]}\n');
+  writeFileSync(path.join(packages, "fixture.zip"), "fixture");
+  const featured = path.join(root, "featured-skills");
+  mkdirSync(featured, { recursive: true });
+  mkdirSync(path.join(featured, "assets"), { recursive: true });
+  writeFileSync(path.join(featured, "catalog.json"), '{"schema_version":1,"cases":[]}\n');
+}
+
 for (const target of [
   { platform: "darwin", arch: "arm64", suffix: "" },
   { platform: "windows", arch: "amd64", suffix: ".exe" },
@@ -52,6 +64,7 @@ for (const target of [
       for (const name of ["process-compose", "local-proxy", "core", "scan-control-plane", "file-watcher", "caddy"]) {
         writeFileSync(path.join(bin, `${name}${target.suffix}`), name);
       }
+      writeOfflineSkillFixtures(root);
       execFileSync(process.execPath, [
         manifestScript,
         root,
@@ -61,9 +74,15 @@ for (const target of [
       const manifest = JSON.parse(readFileSync(path.join(root, "manifest.json"), "utf8"));
       assert.equal(manifest.platform, target.platform);
       assert.equal(manifest.arch, target.arch);
-      assert.deepEqual(manifest.features, { trustedLocalMode: false });
+      assert.deepEqual(manifest.features, {
+        trustedLocalMode: false,
+        offlineBuiltinSkills: true,
+        offlineFeaturedSkills: true,
+      });
       assert.equal(manifest.binaries.core, `bin/core${target.suffix}`);
       assert.ok(manifest.checksums[`bin/core${target.suffix}`]);
+      assert.ok(manifest.checksums["builtin-skills/catalog.json"]);
+      assert.ok(manifest.checksums["featured-skills/catalog.json"]);
       assert.equal(Object.keys(manifest.checksums).some((key) => key.includes("\\")), false);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -74,6 +93,7 @@ for (const target of [
 test("writes trusted local mode into the desktop runtime manifest", () => {
   const root = mkdtempSync(path.join(os.tmpdir(), "lazymind-manifest-trusted-"));
   try {
+    writeOfflineSkillFixtures(root);
     execFileSync(process.execPath, [
       manifestScript,
       root,
@@ -82,10 +102,36 @@ test("writes trusted local mode into the desktop runtime manifest", () => {
       "--trusted-local-mode", "true",
     ]);
     const manifest = JSON.parse(readFileSync(path.join(root, "manifest.json"), "utf8"));
-    assert.deepEqual(manifest.features, { trustedLocalMode: true });
+    assert.deepEqual(manifest.features, {
+      trustedLocalMode: true,
+      offlineBuiltinSkills: true,
+      offlineFeaturedSkills: true,
+    });
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("macOS and Windows builds materialize builtin Skills before writing the runtime manifest", () => {
+  const darwin = readFileSync(darwinBuildScript, "utf8");
+  const windows = readFileSync(windowsBuildScript, "utf8");
+  for (const source of [darwin, windows]) {
+    const bundle = source.indexOf("builtin-skill-bundle");
+    const manifest = source.indexOf("write-runtime-manifest.mjs");
+    assert.ok(bundle >= 0, "build script must invoke the shared builtin Skill bundler");
+    assert.ok(manifest > bundle, "builtin Skills must be materialized before the runtime manifest is written");
+    assert.match(source, /builtin-sources\.yaml/);
+    assert.match(source, /builtin-skills\.lock\.json/);
+    assert.match(source, /featured-sources/);
+    assert.match(source, /featured-output/);
+  }
+  assert.match(darwin, /--exclude "skills\/\.runtime"/);
+  assert.match(darwin, /remove_generated_path "\$\{app_root\}\/skills\/\.runtime"/);
+  for (const category of ["research", "review", "search"]) {
+    assert.match(darwin, new RegExp(`--exclude "skills/${category}"`));
+    assert.match(windows, new RegExp(`skills\\\\${category}`));
+  }
+  assert.match(windows, /skills\\\.runtime/);
 });
 
 test("generates a multi-resolution Windows ICO from the macOS icon", () => {
@@ -118,6 +164,28 @@ test("normalizes shared desktop release tags to standard SemVer", async () => {
   assert.equal(normalizeReleaseTag("v1.2.3-alpha.2").packageVersion, "1.2.3-alpha.2");
   assert.equal(normalizeReleaseTag("v1.2.3").packageVersion, "1.2.3");
   assert.throws(() => normalizeReleaseTag("release-1.2"), /Unsupported release tag/);
+});
+
+test("Windows installer accepts development and release package versions", () => {
+  const source = readFileSync(path.join(scriptsDir, "build-windows-x64.ps1"), "utf8");
+  const packageJson = JSON.parse(readFileSync(electronPackage, "utf8"));
+  const match = source.match(/\[string\]\$package\.version -notmatch '([^']+)'/);
+  assert.ok(match, "missing Windows installer package version validation");
+
+  const versionPattern = new RegExp(match[1]);
+  for (const version of [
+    packageJson.version,
+    "1.2.3",
+    "1.2.3-alpha.2",
+    "1.2.3-beta.4",
+    "1.2.3-rc.1",
+    "1.2.3-preview",
+    "1.2.3-preview.1+build.7",
+  ]) {
+    assert.match(version, versionPattern);
+  }
+  assert.doesNotMatch("v1.2.3", versionPattern);
+  assert.doesNotMatch("1.2", versionPattern);
 });
 
 test("Windows installer force-stops LazyMind before invoking an old uninstaller", () => {
@@ -169,9 +237,9 @@ test("Windows installer diagnoses paths and does not roll back when warmup fails
   );
   assert.match(
     install,
-    /ExecWait[^\n]+--installer-warmup --timeout-seconds 240[^\n]+\$3[\s\S]*LMWarmupCheckStopped:[\s\S]*check-stopped --install-dir "\$INSTDIR"/,
+    /\$InstallTypeChoice == "full"[\s\S]*ExecWait[^\n]+--installer-warmup --timeout-seconds 360[^\n]+\$3[\s\S]*LMWarmupCheckStopped:[\s\S]*check-stopped --install-dir "\$INSTDIR"/,
   );
-  assert.match(install, /Starting Electron installer warmup \(timeout=240s\)/);
+  assert.match(install, /Starting Electron installer warmup \(timeout=360s\)/);
   assert.match(install, /installer-nsis\.log[\s\S]*Starting Electron installer warmup/);
   assert.match(install, /Electron installer warmup returned exit code \$3/);
   assert.match(
@@ -181,6 +249,24 @@ test("Windows installer diagnoses paths and does not roll back when warmup fails
   assert.match(install, /\$4 == 1[\s\S]*StrCpy \$3 4[\s\S]*\$3 != 0/);
   assert.doesNotMatch(install, /MB_ABORTRETRYIGNORE|SetErrorLevel 4/);
   assert.match(install, /installation will continue/);
+});
+
+test("Windows installer offers simple and full installation modes", () => {
+  const source = readFileSync(installerScript, "utf8");
+  const init = nsisMacro(source, "customInit");
+  const pages = nsisMacro(source, "customPageAfterChangeDir");
+  const install = nsisMacro(source, "customInstall");
+
+  assert.match(source, /LangString LMSimpleInstall[^\n]+"Simple installation \(recommended\)"/);
+  assert.match(source, /LangString LMSimpleInstall[^\n]+"简易安装（推荐）"/);
+  assert.match(source, /LangString LMFullInstall[^\n]+"Full installation"/);
+  assert.match(source, /LangString LMFullInstall[^\n]+"完整安装"/);
+  assert.match(init, /StrCpy \$InstallTypeChoice "simple"/);
+  assert.match(init, /--full-install[\s\S]*StrCpy \$InstallTypeChoice "full"/);
+  assert.match(init, /--simple-install[\s\S]*StrCpy \$InstallTypeChoice "simple"/);
+  assert.match(pages, /PageCallbacks LMInstallTypePageCreate LMInstallTypePageLeave/);
+  assert.match(install, /\$InstallTypeChoice == "full"[\s\S]*--installer-warmup/);
+  assert.match(install, /Simple installation selected; bundled Python will be prepared on first launch/);
 });
 
 test("Windows CI treats branches as non-tags without leaking git probe failures", () => {
@@ -204,7 +290,7 @@ test("Windows CI treats branches as non-tags without leaking git probe failures"
     source,
     /test-windows-installer:[\s\S]*name: Checkout smoke test scripts[\s\S]*ref: \$\{\{ inputs\.git_ref \|\| github\.ref \}\}[\s\S]*name: Download the exact installer built above/,
   );
-  assert.match(source, /Start-Process -FilePath \$env:INSTALLER_PATH -ArgumentList "\/S" -Wait/);
+  assert.match(source, /Start-Process -FilePath \$env:INSTALLER_PATH -ArgumentList "\/S --full-install" -Wait/);
   assert.match(source, /DisplayVersion -ne \$env:EXPECTED_VERSION/);
   assert.match(source, /expectedProductVersion = "\$\(\$Matches\[1\]\)\.\$\(\$Matches\[2\]\)\.\$\(\$Matches\[3\]\)\.0"/);
   assert.match(source, /Start-Process -FilePath \$uninstaller -ArgumentList "\/S" -Wait/);
@@ -226,13 +312,22 @@ test("Windows NSIS installer uses electron-builder's default LZMA payload", () =
   assert.match(packageJson.scripts["pack:win:x64"], /--publish never$/);
   assert.match(packageJson.scripts["pack:win:x64:installer"], /--publish never$/);
   assert.match(buildScript, /function Invoke-WindowsPackagingWithRetry/);
+  assert.match(buildScript, /\[0-9A-Za-z-\]\+/, "development SemVer identifiers such as 0.3.0-dev must be accepted");
   assert.match(buildScript, /function Invoke-NativeWithRetry/);
   assert.match(buildScript, /maximumAttempts = 3/);
   assert.match(buildScript, /ELECTRON_CACHE/);
   assert.match(buildScript, /ELECTRON_BUILDER_CACHE/);
   assert.match(buildScript, /LAZYMIND_TRUSTED_LOCAL_MODE/);
   assert.match(buildScript, /--trusted-local-mode', \$trustedLocalMode/);
+  assert.match(buildScript, /function New-DeferredPythonRuntimeStage/);
+  assert.match(buildScript, /python-runtime\.zip/);
+  assert.match(buildScript, /Add-Type -AssemblyName System\.IO\.Compression\s/);
+  assert.match(buildScript, /robocopy\.exe \$runtimeRoot \$packagedRuntimeRoot[^\n]+\| Out-Null/);
+  assert.match(buildScript, /CompressionLevel\]::NoCompression/);
+  assert.match(buildScript, /LAZYMIND_DESKTOP_RUNTIME_STAGE = New-DeferredPythonRuntimeStage/);
+  assert.match(buildScript, /'resume-installer' \{ Invoke-Doctor; Finalize-Desktop 'installer' \}/);
   assert.match(workflow, /Cache Electron and electron-builder downloads/);
+  assert.match(workflow, /ArgumentList "\/S --full-install"/);
   assert.match(workflow, /Submodule checkout attempt \$attempt\/3 failed/);
   assert.match(workflow, /pnpm activation attempt \$attempt\/3 failed/);
 });
@@ -419,6 +514,25 @@ test("Desktop opens the home page from the sidecar readiness event with status p
   assert.match(
     source,
     /function waitForDesktopHomeReady\(\) \{[\s\S]*Promise\.race\(\[[\s\S]*waitForHomeReadySignal\(\),[\s\S]*waitForRuntimeReady\(\{ capability: "home" \}\)/,
+  );
+});
+
+test("Desktop supervises the external Agent host until the application quits", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  assert.match(
+    source,
+    /function scheduleAgentHostRestart\(\)[\s\S]*isQuitting[\s\S]*setTimeout\([\s\S]*startAgentHost\(\)/,
+    "an unexpected Agent host exit must schedule a bounded restart",
+  );
+  assert.match(
+    source,
+    /child\.once\("close"[\s\S]*scheduleAgentHostRestart\(\)/,
+    "the Agent host close handler must enter supervision",
+  );
+  assert.match(
+    source,
+    /function beginFastQuit[\s\S]*clearTimeout\(agentHostRestartTimer\)[\s\S]*agentHostProcess\?\.kill\(\)/,
+    "application shutdown must disable supervision before stopping the Agent host",
   );
 });
 

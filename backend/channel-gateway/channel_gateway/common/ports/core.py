@@ -8,19 +8,7 @@ from channel_gateway.common.domain.chat import (
 )
 
 
-class IntentClient(Protocol):
-    def classify_intent(
-        self,
-        *,
-        owner_user_id: str,
-        request_id: str,
-        provider: str,
-        message: str,
-        state: dict[str, Any],
-        command_registry: dict[str, Any],
-    ) -> dict[str, Any]:
-        ...
-
+class CapabilityCatalogClient(Protocol):
     def get_capability_catalog(
         self,
         *,
@@ -51,6 +39,29 @@ class ConversationClient(Protocol):
         request_id: str,
         page_size: int = 100,
         page_token: str = '',
+        assistant: str = '',
+    ) -> dict[str, Any]:
+        ...
+
+    def list_external_agent_sessions(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+        provider: str,
+        page_size: int = 100,
+        page_token: str = '',
+    ) -> dict[str, Any]:
+        ...
+
+    def bind_external_agent_session(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+        provider: str,
+        host_id: str,
+        provider_thread_id: str,
     ) -> dict[str, Any]:
         ...
 
@@ -74,6 +85,15 @@ class ConversationClient(Protocol):
     ) -> dict[str, Any]:
         ...
 
+    def stop_chat_generation(
+        self,
+        *,
+        owner_user_id: str,
+        conversation_id: str,
+        request_id: str,
+    ) -> None:
+        ...
+
 
 class TaskClient(Protocol):
     def list_conversation_tasks(
@@ -87,98 +107,15 @@ class TaskClient(Protocol):
         ...
 
 
-class ExternalAgentClient(Protocol):
-    def list_external_projects(
-        self,
-        *,
-        owner_user_id: str,
-        request_id: str,
-        provider: str,
-        cursor: str = '',
-        limit: int = 20,
-    ) -> dict[str, Any]:
-        ...
-
-    def list_external_threads(
-        self,
-        *,
-        owner_user_id: str,
-        request_id: str,
-        provider: str,
-        cursor: str = '',
-        cwd: str = '',
-        limit: int = 20,
-    ) -> dict[str, Any]:
-        ...
-
-    def read_external_thread(
-        self,
-        *,
-        owner_user_id: str,
-        request_id: str,
-        provider: str,
-        thread_id: str,
-        offset: int | None = None,
-        limit: int | None = None,
-        tail: bool = False,
-    ) -> dict[str, Any]:
-        ...
-
-    def bind_external_thread(
-        self,
-        *,
-        owner_user_id: str,
-        request_id: str,
-        provider: str,
-        provider_thread_id: str = '',
-        new_session: bool = False,
-        cwd: str = '',
-        conversation_id: str = '',
-        display_name: str = '',
-    ) -> dict[str, Any]:
-        ...
-
-    def interrupt_external_conversation(
-        self,
-        *,
-        owner_user_id: str,
-        request_id: str,
-        conversation_id: str,
-        expected_run_id: str,
-    ) -> None:
-        ...
-
-    def release_external_conversation(
-        self,
-        *,
-        owner_user_id: str,
-        request_id: str,
-        conversation_id: str,
-    ) -> None:
-        ...
-
-    def delete_external_conversation(
-        self,
-        *,
-        owner_user_id: str,
-        request_id: str,
-        conversation_id: str,
-    ) -> None:
-        ...
-
-    def respond_external_request(
-        self,
-        *,
-        owner_user_id: str,
-        request_id: str,
-        external_request_id: str,
-        action_id: str,
-        answers: dict[str, Any] | None = None,
-    ) -> None:
-        ...
-
-
 class CapabilityClient(Protocol):
+    def list_chat_executors(
+        self,
+        *,
+        owner_user_id: str,
+        request_id: str,
+    ) -> list[dict[str, Any]]:
+        ...
+
     def update_conversation_search_config(
         self,
         *,
@@ -293,9 +230,8 @@ class StaticAssetClient(Protocol):
 
 
 class LazyMindCore(
-    IntentClient,
+    CapabilityCatalogClient,
     ConversationClient,
-    ExternalAgentClient,
     CapabilityClient,
     StaticAssetClient,
     Protocol,

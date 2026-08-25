@@ -297,8 +297,7 @@
               }
             }
 
-            .chat-showcase-control-icon,
-            .chat-showcase-scene-icon {
+            .chat-showcase-control-icon {
               position: absolute;
               z-index: 1;
               left: 8px;
@@ -343,39 +342,6 @@
               }
             }
 
-            .chat-showcase-scene-control {
-              min-width: 124px;
-              border-color: #bfd6fb;
-              border-radius: 5px;
-              background: #f3f7ff;
-              color: #2f68bb;
-
-              &:hover,
-              &:focus-within {
-                border-color: #76a9f3;
-                background: #eaf2ff;
-              }
-            }
-
-            .chat-showcase-scene-icon {
-              display: grid;
-              width: 15px;
-              height: 15px;
-              grid-template-columns: repeat(2, 4px);
-              grid-template-rows: repeat(2, 4px);
-              place-content: center;
-              gap: 2px;
-              border-radius: 4px;
-              background: #dfebff;
-              color: #3175d7;
-
-              i {
-                width: 4px;
-                height: 4px;
-                border-radius: 1px;
-                background: currentColor;
-              }
-            }
           }
 
           .input-bottom-actions-left-item {
@@ -721,6 +687,13 @@
         background: #f0f5ff;
         color: #1769e0;
       }
+
+      &:disabled,
+      &:disabled:hover {
+        background: transparent;
+        color: #9aa6b8;
+        cursor: not-allowed;
+      }
     }
 
     .chat-mention-option-name {
@@ -729,6 +702,13 @@
       font-size: 12px;
       font-weight: 500;
       text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .chat-mention-option-status {
+      flex: 0 0 auto;
+      color: #8b96a8;
+      font-size: 11px;
       white-space: nowrap;
     }
 
@@ -891,6 +871,12 @@
   flex-direction: column;
   gap: 3px;
 
+  .chat-add-resource-menu-tooltip-anchor,
+  .chat-add-resource-menu-tooltip-anchor > button {
+    display: flex;
+    width: 100%;
+  }
+
   button {
     display: flex;
     align-items: center;
@@ -926,6 +912,17 @@
       .anticon {
         background: #e5efff;
         color: #1268db;
+      }
+    }
+
+    &:disabled {
+      background: transparent;
+      color: #aeb9c9;
+      cursor: not-allowed;
+
+      .anticon {
+        background: #f4f6f9;
+        color: #aeb9c9;
       }
     }
   }

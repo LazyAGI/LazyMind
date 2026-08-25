@@ -37,6 +37,7 @@ import type { GroupItem, UserItem } from "@/api/generated/auth-client";
 import { createGroupApi, createUserApi } from "@/modules/signin/utils/request";
 import { runtimeFeatures } from "@/runtime/features";
 import GlossaryInboxModal from "./components/GlossaryInboxModal";
+import { MemoryManagementContext } from "./context";
 import MemoryDraftModal, {
   type SkillCreateSource,
 } from "./components/MemoryDraftModal";
@@ -83,6 +84,7 @@ import {
   rejectEvolutionSuggestion,
   type EvolutionSuggestionRecord,
 } from "./evolutionApi";
+import MemoryManagementListPage from "./pages/list";
 import {
   addGlossaryConflictToGroups,
   batchRemoveGlossaryAssets,
@@ -118,6 +120,7 @@ import {
   type SkillShareAction,
   type SkillShareCenterTab,
   type SkillTreeNode,
+  type SkillViewMode,
   type StructuredAsset,
   GLOSSARY_ALIAS_MAX_LENGTH,
   GLOSSARY_CONTENT_MAX_LENGTH,
@@ -223,7 +226,12 @@ const getManualSkillReviewCreatedSkillNames = (
   );
 const skillRecordNameMatches = (item: SkillAssetRecord, skillName: string) =>
   item.name.trim().toLowerCase() === skillName.trim().toLowerCase();
-export default function MemoryManagement() {
+
+interface MemoryManagementProps {
+  embeddedTab?: MemoryTab;
+}
+
+export default function MemoryManagement({ embeddedTab }: MemoryManagementProps = {}) {
   const { t } = useTranslation();
   const location = useLocation();
   const navigate = useNavigate();
@@ -241,11 +249,12 @@ export default function MemoryManagement() {
   const routeListTab = parseMemoryTab(tabRouteMatch?.params.tab);
   const queryRouteTab = parseMemoryTab(searchParams.get("tab"));
   const routeMemoryTab = (
-    skillRouteItemId
+    embeddedTab ||
+    (skillRouteItemId
       ? "skills"
       : glossaryRouteItemId
         ? "glossary"
-        : reviewRouteTab || routeListTab || queryRouteTab || "skills"
+        : reviewRouteTab || routeListTab || queryRouteTab || "skills")
   ) as MemoryTab;
   const initialGlossaryDetailTarget = null;
   const initialReviewProposalId = (() => {
@@ -313,11 +322,9 @@ export default function MemoryManagement() {
     defaultSkillListPageSize,
   );
   const [skillListTotal, setSkillListTotal] = useState(initialSkills.length);
-  const [skillView, setSkillView] = useState<
-    "installed" | "market" | "workflows" | "trash"
-  >(() => {
+  const [skillView, setSkillView] = useState<SkillViewMode | "workflows">(() => {
     const sv = new URLSearchParams(window.location.search).get("skillView");
-    if (sv === "workflows" || sv === "market" || sv === "trash") return sv;
+    if (sv === "workflows" || sv === "market") return sv;
     return "installed";
   });
   const [installedSkillSource, setInstalledSkillSource] = useState<
@@ -526,6 +533,10 @@ export default function MemoryManagement() {
   }, []);
   const navigateToMemoryList = useCallback(
     (tab?: MemoryTab, options?: { replace?: boolean }) => {
+      if (embeddedTab) {
+        setActiveTab(tab || embeddedTab);
+        return;
+      }
       navigate(
         {
           pathname: buildMemoryTabPath(tab || "skills"),
@@ -534,7 +545,7 @@ export default function MemoryManagement() {
         { replace: options?.replace },
       );
     },
-    [buildMemorySearch, buildMemoryTabPath, navigate],
+    [buildMemorySearch, buildMemoryTabPath, embeddedTab, navigate],
   );
   const navigateToGlossaryDetail = useCallback(
     (itemId: string) => {
@@ -1442,6 +1453,10 @@ export default function MemoryManagement() {
   }, [glossaryInboxOpen, refreshGlossaryConflicts]);
 
   useEffect(() => {
+    if (embeddedTab) {
+      setActiveTab(embeddedTab);
+      return;
+    }
     const queryTab = parseMemoryTab(searchParams.get("tab"));
     const nextTab = skillRouteItemId
       ? "skills"
@@ -1456,6 +1471,7 @@ export default function MemoryManagement() {
     routeListTab,
     searchParams,
     skillRouteItemId,
+    embeddedTab,
   ]);
 
   useEffect(() => {
@@ -4852,9 +4868,17 @@ export default function MemoryManagement() {
 
   return (
     <div
-      className={`admin-page memory-page ${isReviewMode ? "is-review-mode" : ""}`}
+      className={`admin-page memory-page ${isReviewMode ? "is-review-mode" : ""}${embeddedTab ? " is-embedded" : ""}`}
     >
-      <Outlet context={outletContext} />
+      <MemoryManagementContext.Provider
+        value={{ ...outletContext, embedded: Boolean(embeddedTab) }}
+      >
+        {embeddedTab ? (
+          <MemoryManagementListPage />
+        ) : (
+          <Outlet context={outletContext} />
+        )}
+      </MemoryManagementContext.Provider>
 
       {showGlossaryInboxUi ? (
         <GlossaryInboxModal

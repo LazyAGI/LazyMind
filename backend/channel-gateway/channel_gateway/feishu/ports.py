@@ -4,7 +4,6 @@ from collections.abc import Callable
 from typing import Any, Protocol
 
 from channel_gateway.common.domain.channel import (
-    ClaimedOutbound,
     InboundEnvelope,
     RuntimeFence,
 )
@@ -93,8 +92,6 @@ class FeishuWorkspaceRepository(Protocol):
         operation_id: str,
         expected_message_id: str,
         expected_revision: int | None = None,
-        *,
-        advance_revision: bool = True,
     ) -> dict[str, Any]:
         ...
 
@@ -425,6 +422,7 @@ class FeishuOutboundClient(Protocol):
         initial_card: dict[str, Any],
         message_id: str = '',
         should_render: Callable[[], bool] | None = None,
+        on_message_started: Callable[[str], None] | None = None,
         render_card: Callable[
             [CoreStreamUpdate, bool, bool],
             dict[str, Any],
@@ -458,34 +456,4 @@ class FeishuOutboundFactory(Protocol):
         self,
         credentials: FeishuAppCredentials,
     ) -> FeishuOutboundClient:
-        ...
-
-
-class FeishuTaskOutboxRepository(Protocol):
-    def list_sent_task_outbounds(
-        self,
-        *,
-        provider: str,
-        limit: int,
-    ) -> list[ClaimedOutbound]:
-        ...
-
-    def sync_task_artifact_outbounds(
-        self,
-        *,
-        parent: ClaimedOutbound,
-        part_index: int,
-        artifacts: list[dict[str, str]],
-    ) -> dict[str, int]:
-        ...
-
-    def compare_and_save_sent_task_monitor_state(
-        self,
-        *,
-        outbox_id: str,
-        part_index: int,
-        expected_revision: int,
-        state: dict[str, Any],
-        complete: bool,
-    ) -> dict[str, Any] | None:
         ...

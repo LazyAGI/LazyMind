@@ -39,15 +39,16 @@ type WorkflowSession struct {
 
 func (WorkflowSession) TableName() string { return "plugin_sessions" }
 
-// WorkflowSessionStep tracks one step execution instance inside a plugin session.
-// Each record maps to exactly one sub_agent_tasks row (task_id == sub_agent_tasks.id).
+// WorkflowSessionStep is the authoritative attempt state inside a Workflow session.
+// Native LazyMind execution may use TaskID to reference a sub_agent_tasks adapter
+// record. Hosted execution uses the attempt ID directly and creates no SubAgent task.
 type WorkflowSessionStep struct {
 	ID        string `gorm:"column:id;type:varchar(36);primaryKey"`
 	SessionID string `gorm:"column:session_id;type:varchar(36);not null"`
 	StepID    string `gorm:"column:step_id;type:varchar(64);not null"`
 	Attempt   int    `gorm:"column:attempt;not null;default:1"`
 	TaskID    string `gorm:"column:task_id;type:varchar(36);not null"`
-	// Status mirrors sub_agent_tasks.status (synced by Go on each event).
+	// Status is owned by Workflow Runtime. Native execution mirrors accepted task events.
 	Status            string     `gorm:"column:status;type:varchar(16);not null;default:pending"`
 	Validity          string     `gorm:"column:validity;type:varchar(16);not null;default:effective"`
 	LeaseOwner        string     `gorm:"column:lease_owner;type:varchar(255);not null;default:''"`
@@ -102,7 +103,8 @@ type WorkflowSlotRevision struct {
 	// ContentSnapshot is kept for legacy fallback (pre-migration AI rows where
 	// artifact_seq was not yet populated, and pre-human_artifact_id human rows).
 	ContentSnapshot json.RawMessage `gorm:"column:content_snapshot;type:jsonb"`
-	// ChangeSource distinguishes AI-generated ('ai') from human-edited ('human') revisions.
+	// ChangeSource distinguishes AI-generated ('ai'), human-edited ('human'), and
+	// provider-confirmed ('provider_sync') revisions.
 	ChangeSource      string    `gorm:"column:change_source;type:varchar(16);not null;default:'ai'"`
 	Slot              string    `gorm:"column:slot;type:varchar(255);not null"`
 	StepID            string    `gorm:"column:step_id;type:varchar(64);not null"`
@@ -224,12 +226,15 @@ func (WorkflowStepIntent) TableName() string { return "plugin_step_intents" }
 // The original Content column is kept for backward compatibility; readers should prefer
 // the split columns and fall back to Content when the split columns are empty.
 type WorkflowDraft struct {
-	ID        string    `gorm:"column:id;type:varchar(36);primaryKey"`
-	Name      string    `gorm:"column:name;type:varchar(255);not null;default:''"`
-	Content   string    `gorm:"column:content;type:text;not null;default:''"`
-	CreatedBy string    `gorm:"column:created_by;type:varchar(255);not null;default:'';index:idx_plugin_drafts_created_by;uniqueIndex:idx_plugin_drafts_user_plugin_id,priority:1,where:plugin_id != ''"`
-	CreatedAt time.Time `gorm:"column:created_at;not null"`
-	UpdatedAt time.Time `gorm:"column:updated_at;not null"`
+	ID                         string     `gorm:"column:id;type:varchar(36);primaryKey"`
+	Name                       string     `gorm:"column:name;type:varchar(255);not null;default:''"`
+	Content                    string     `gorm:"column:content;type:text;not null;default:''"`
+	CreatedBy                  string     `gorm:"column:created_by;type:varchar(255);not null;default:'';index:idx_plugin_drafts_created_by;uniqueIndex:idx_plugin_drafts_user_plugin_id,priority:1,where:plugin_id != '' AND deleted_at IS NULL"`
+	CreatedAt                  time.Time  `gorm:"column:created_at;not null"`
+	UpdatedAt                  time.Time  `gorm:"column:updated_at;not null"`
+	DeletedAt                  *time.Time `gorm:"column:deleted_at"`
+	TrashExpiresAt             *time.Time `gorm:"column:trash_expires_at"`
+	PublishedStatusBeforeTrash string     `gorm:"column:published_status_before_trash;type:varchar(16);not null;default:''"`
 	// Split content columns (migration 20260706120000).
 	// generate_status: '' | 'generating' | 'brief_done' | 'skeleton_done' | 'state_done' | 'done' | 'failed'
 	//   ''             — never triggered AI generation
@@ -393,6 +398,7 @@ type UserWorkflowSetting struct {
 	UserID      string    `gorm:"column:user_id;type:varchar(255);primaryKey"`
 	WorkflowRef string    `gorm:"column:plugin_ref;type:varchar(512);primaryKey"`
 	Enabled     bool      `gorm:"column:enabled;not null;default:false"`
+	CallMode    string    `gorm:"column:call_mode;type:varchar(16);not null;default:disabled"` // auto | manual | disabled
 	UpdatedAt   time.Time `gorm:"column:updated_at;not null"`
 }
 

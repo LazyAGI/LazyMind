@@ -20,6 +20,7 @@ import (
 	"lazymind/core/common/orm"
 	"lazymind/core/mcp"
 	"lazymind/core/modelconfig"
+	"lazymind/core/settings"
 	"lazymind/core/store"
 )
 
@@ -243,12 +244,40 @@ func loadUserAgentConfig(ctx context.Context, db *gorm.DB, userID string, body m
 	return out
 }
 
+func applyChatFeatureControls(ctx context.Context, db *gorm.DB, userID string, body map[string]any) error {
+	controls, err := settings.LoadFeatureControls(ctx, db, userID)
+	if err != nil {
+		return err
+	}
+	if controls.TaskCenterEnabled && controls.WorkflowsEnabled {
+		return nil
+	}
+	agentConfig, _ := body["agentic_config"].(map[string]any)
+	if agentConfig == nil {
+		agentConfig = map[string]any{}
+		body["agentic_config"] = agentConfig
+	}
+	if !controls.WorkflowsEnabled {
+		body["enable_workflow"] = false
+		agentConfig["enable_workflow"] = false
+	}
+	if !controls.TaskCenterEnabled {
+		body["enable_subagent"] = false
+		agentConfig["enable_subagent"] = false
+	}
+	return nil
+}
+
 func applyMCPRuntimeConfig(ctx context.Context, db *gorm.DB, userID string, body map[string]any) {
 	mcpConfig, err := mcp.LoadRuntimeConfig(ctx, db, userID)
 	if err != nil {
 		fmt.Printf("[Core] [MCP_CONFIG] failed to load for user %s: %v\n", userID, err)
 	} else if len(mcpConfig) > 0 {
-		body["mcp_config"] = mcpConfig
+		values := make([]any, len(mcpConfig))
+		for i := range mcpConfig {
+			values[i] = mcpConfig[i]
+		}
+		body["mcp_config"] = values
 	}
 }
 

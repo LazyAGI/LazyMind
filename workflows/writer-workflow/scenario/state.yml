@@ -8,28 +8,26 @@ transitions:
   prepare:
     - to: outline
       when: >
-        Generate, reuse, display, or revise an outline. This route is mandatory
-        for a targeted revision when the prepared source_ir.stage is outline.
+        Generate, reuse, display, or revise an authoring outline. Choose this route
+        for a supplied source only when the user explicitly identifies that source
+        as an outline to use or revise.
     - to: write_document
       when: >
-        Revise an existing full document directly. Use this route for a targeted
-        revision only when the prepared source_ir.stage is draft or final.
+        Revise or fully rewrite an existing full document directly. This is the mandatory
+        route when the user asks to add, delete, replace, or rewrite sections or paragraphs,
+        condense the whole document, change its chapter count, or merge or reorder chapters
+        in a supplied article, report, or other complete document. References to headings,
+        section numbers, or insertion positions do not make the source an outline.
     - to: __end__
       when: The requested read-only preparation is complete.
 
   outline:
     - to: write_document
       when: Draft the full document from the latest outline revision.
-    - to: publish
-      when: Publish the outline itself to a cloud document.
     - to: __end__
       when: The requested outline work is complete.
 
   write_document:
-    - to: publish
-      when: Deliver the completed local document as Markdown or publish it to Feishu.
-
-  publish:
     - to: __end__
 
 steps:
@@ -37,140 +35,105 @@ steps:
     label: 写作准备
     mode: auto
     route: choice
+    tools_only: true
+    stream_heartbeat: true
     prompt: |
       {{runtime_instruction}}
 
-      Artifact persistence rule: writer tools return absolute local file paths.
-      Save every declared output in this step with content_type="file" and the exact
-      returned path as value. Never save a path with content_type="json" or "text";
-      doing so stores the path string instead of the file.
+      Authoritative current user request:
+      {{user_input}}
 
-      Prepare the user's complete writing workspace without generating an outline or
-      document body.
+      Prepare the workspace only; do not generate an outline or body.
 
-      Before creating any artifact, verify resource identity. If the request refers to
-      "this", "my", "the supplied", or "the original" Feishu/Lark outline or document,
-      but {{user_input}} contains no exact Feishu/Lark URL, stop this step and report
-      that the source locator was lost or missing. Do not continue as a from-scratch
-      request and do not reconstruct the document from a summary.
+      Select one writer_prepare_workspace operation:
+      - create: start from scratch.
+      - use_outline: use or revise a supplied outline.
+      - rewrite_document: rewrite or restructure a supplied complete document.
+      - revise_document: make targeted changes to a supplied complete document.
+      - prepare_only: only when the user explicitly requests read-only preparation and no
+        writing change. Never select it merely because this is the prepare step, because a
+        source_document is not available yet, or because you cannot access a URL directly.
 
-      1. Call writer_build_writing_task(query="{{user_input}}") and save its path as
-         writing_task.
-      2. If the request contains a Feishu/Lark document that must be read, call
-         writer_load_document(user_input="{{user_input}}", stage=<final for a direct
-         in-place revision of an existing document; outline only when the user explicitly
-         wants to create, use, or revise the document as an authoring outline>). Merely
-         mentioning an outline title, outline section, or text located before/after an
-         outline does not make the whole document an outline. Save source_ir and
-         target_document. Do not call writer_load_document for unrelated ordinary URLs.
-      3. If the request selects or references a knowledge base, use the kb framework
-         tools to retrieve the relevant evidence first. Preserve the returned evidence
-         text for the next call.
-      4. Call writer_profile_resources with writing_task_path, the complete original
-         user_input, source_ir_path when present, and knowledge_text when KB evidence was
-         retrieved. Save resource_profiles.
-      5. Call writer_create_writing_context with writing_task_path,
-         resource_profiles_path, and source_ir_path when present. Save its returned path
-         as writing_context.
+      Do not choose target_stage. writer_prepare_workspace derives the terminal target from
+      the authoritative request: full document by default, outline only when explicitly
+      requested as the final deliverable, and prepared only for an explicit read-only request.
 
-      source_ir and target_document are optional because a from-scratch request has no
-      cloud source. Do not invent either artifact. If a required tool fails, stop without
-      synthesizing a fallback artifact.
+      A supplied Feishu/Lark URL is loaded by writer_prepare_workspace; do not pre-read it.
+      If the current user request references Feishu/Lark but has no exact URL, report the
+      missing locator. If a knowledge base is explicitly requested, query it once and pass
+      the evidence as knowledge_text; otherwise skip KB. Targeted section changes, text
+      expansion, or image insertion in a supplied full document require revise_document.
 
-      In the final summary, when source_ir exists, explicitly report its stage and the
-      required next step. Use "next step: outline revision" for stage="outline", and
-      "next step: full-document revision" for stage="draft" or stage="final". This
-      routing information must be stated even when the user did not ask to see it.
-      When source_ir does not exist, explicitly state: "No source file was provided.
-      Continue directly to outline without requesting confirmation." Do not emit this
-      instruction when source_ir exists.
+      Call writer_prepare_workspace exactly once with operation and knowledge_text when retrieved.
+      The wrapper accepts knowledge_text only when a preceding successful knowledge-base
+      retrieval is present in this step's tool history; never compose it from the request,
+      attachments, filenames, URLs, or your own writing instructions.
+      The wrapper reads the authoritative user request directly. Pass source_filename only for an
+      uploaded .md, .markdown, .txt, or .lmd source, using its basename exactly. Never put
+      a Feishu/Lark URL or an uploaded image filename in source_filename. The workspace
+      saves its declared artifacts itself. Do not invent fallback artifacts.
+
+      Report representation and the exact `REQUIRED_NEXT_STEP: <next_step>` returned.
+      If source_document is absent, state that processing continues directly to outline.
     tools:
       - kb
-      - cloud_files
-      - writer_build_writing_task
-      - writer_load_document
-      - writer_profile_resources
-      - writer_create_writing_context
+      - writer_prepare_workspace
+    terminal_tools:
+      - writer_prepare_workspace
     outputs:
+      - material: writer_command
       - material: writing_task
+      - material: media_assets
       - material: resource_profiles
       - material: writing_context
-      - material: source_ir
+      - material: source_document
         required: false
       - material: target_document
         required: false
     acceptance_criteria: |
-      writing_task, resource_profiles, and writing_context are present.
-      When a Feishu/Lark source was required, source_ir and target_document are also present.
+      writer_command, writing_task, media_assets, resource_profiles, and writing_context are present.
+      media_assets is valid even when its assets mapping is empty.
+      When a Feishu/Lark source was required, source_document and target_document are also present.
 
   outline:
     label: 大纲
     route: choice
+    tools_only: true
+    rerun_when: >
+      The user asks to modify, regenerate, or replace the current outline artifact.
     prompt: |
       {{runtime_instruction}}
 
-      Artifact persistence rule: writer tools return absolute local file paths.
-      Save every declared output in this step with content_type="file" and the exact
-      returned path as value. Never save a path with content_type="json" or "text".
+      Authoritative current user request:
+      {{user_input}}
 
-      Maintain one user-visible outline artifact: outline_ir. Every successful execution
-      must save the result under that same key with stage="outline" and
-      ui_editable=true, creating a new artifact revision rather than a second card.
+      All input artifacts are already bound to the workspace. The wrapper resolves them
+      authoritatively; do not search for artifacts and do not construct or pass file paths.
 
-      Retrieve writing_task, writing_context, resource_profiles, and source_ir when it
-      exists. Also retrieve the latest selected outline_ir and
-      writing_context_after_outline when previous revisions exist.
+      The writer_command produced by prepare is immutable and is the sole routing decision.
+      Do not reinterpret the request or create, resolve, or replace that command. Call
+      writer_outline_workspace exactly once without operation or artifact path arguments.
+      Do not call internal tools.
 
-      Dynamically select exactly one mode:
-
-      A. Prepare supplied outline:
-         When no outline_ir exists and the user supplied source_ir as the outline to use,
-         call writer_prepare_outline(source_ir_path=<source_ir path>).
-
-      B. Generate or regenerate outline:
-         When no outline_ir exists without a supplied outline, or the user explicitly
-         requests complete regeneration, call writer_generate_outline using writing_task
-         and the current writing_context.
-
-      C. Revise current outline:
-         When outline_ir exists and the user requests a targeted change, use the latest
-         selected outline_ir as base_ir. Call writer_build_revision_task with the current
-         user instruction, then call writer_locate_revision_target,
-         writer_generate_modify_plan, writer_generate_patch_set, and
-         writer_apply_revision in that order.
-         Persist the returned task, locate result, modify plan, patch set, and patch
-         result under the outline_* internal keys. If write_result is non-empty, persist
-         it as outline_write_result. Save the returned revised_ir path as outline_ir,
-         not under a new key.
-
-      Do not call generation and revision tools in the same execution. After the selected
-      mode produces the new outline_ir, call writer_update_writing_context using that
-      outline and the latest available context. Save the result as
-      writing_context_after_outline.
-
-      A cloud-bound outline revision is synchronized by writer_apply_revision and the
-      returned outline_ir is the provider-confirmed document. Human frontend edits also
-      remain revisions of this same outline_ir slot.
+      The workspace saves outline_document, writing_context_after_outline, and any revision
+      artifacts itself. Do not reread the result for a summary.
     tools:
-      - writer_prepare_outline
-      - writer_generate_outline
-      - writer_build_revision_task
-      - writer_locate_revision_target
-      - writer_generate_modify_plan
-      - writer_generate_patch_set
-      - writer_apply_revision
-      - writer_update_writing_context
+      - writer_outline_workspace
+    terminal_tools:
+      - writer_outline_workspace
     inputs:
+      - material: writer_command
+        required: true
       - material: writing_task
         required: true
       - material: writing_context
         required: true
-      - material: source_ir
+      - material: source_document
         required: false
       - material: resource_profiles
         required: false
     outputs:
-      - material: outline_ir
+      - material: outline_document
       - material: writing_context_after_outline
       - material: outline_revision_task
         required: false
@@ -178,125 +141,72 @@ steps:
         required: false
       - material: outline_modify_plan
         required: false
-      - material: outline_patch_set
+      - material: outline_revision_set
         required: false
-      - material: outline_patch_result
+      - material: outline_revision_result
         required: false
       - material: outline_write_result
         required: false
     acceptance_criteria: |
-      outline_ir and writing_context_after_outline are present, and outline_ir has
-      stage="outline" and ui_editable=true. Revision internals are required only when
+      outline_document and writing_context_after_outline are present. Markdown outlines
+      are `.md`; IR outlines have stage="outline" and ui_editable=true. Revision internals are required only when
       this execution handled an AI revision. For a cloud-bound revision,
       outline_write_result must report success.
 
   write_document:
     label: 成稿
+    tools_only: true
+    stream_heartbeat: true
+    rerun_when: >
+      The user asks to modify or rewrite the current draft_document, including changes
+      to text, structure, images, tables, references, formatting, or insertion position.
     prompt: |
       {{runtime_instruction}}
 
-      Artifact persistence rule: writer tools return absolute local file paths.
-      Save every declared output in this step with content_type="file" and the exact
-      returned path as value. Never save a path with content_type="json" or "text".
+      Authoritative current user request:
+      {{user_input}}
 
-      Maintain one user-visible full-document artifact: final_document. Every successful
-      execution must save its result under that same key with stage="final" and
-      ui_editable=true, creating a new artifact revision rather than a second card.
+      All input artifacts are already bound to the workspace. The wrapper resolves them
+      authoritatively; do not search for artifacts and do not construct or pass file paths.
 
-      Retrieve the latest selected final_document when it exists, plus source_ir,
-      outline_ir, writing_task, writing_context, writing_context_after_outline, and
-      writing_context_after_draft when available.
-
-      Dynamically select exactly one mode:
-
-      A. Generate or rewrite from outline:
-         Use this mode when final_document does not exist and an outline is available, or
-         when the user explicitly asks to rewrite from the latest outline.
-         This rule is mandatory when outline_ir has stage="outline": requests such as
-         "expand the outline into a full article" or "write it back after drafting" are
-         generation requests, not targeted revisions. The requested later destination
-         does not change the mode selected in this step.
-
-         1. Call writer_generate_section_instructions using the latest outline_ir and
-            writing_context_after_outline. Save section_instructions and section_plan_ir.
-         2. Call writer_generate_draft_blocks_markdown once with writing_task,
-            section_instructions, and writing_context_after_outline. It returns every
-            generated Markdown section path in order. Save each returned path as a separate
-            draft_blocks entry with content_type="file", preserving order in one
-            save_artifacts call. Never stringify the path list or save the whole list as one
-            content_type="file" entry.
-         3. Call writer_generate_draft_document_markdown using the last section path,
-            current context, and outline. Save draft_document and draft_document_md.
-         4. Call writer_update_writing_context using draft_document and save
-            writing_context_after_draft.
-         5. Call writer_generate_final_document using draft_document and
-            writing_context_after_draft. Save final_document and final_document_md.
-
-         Chapter planning therefore always runs after the latest outline revision and
-         immediately before drafting.
-
-      B. Revise current full document:
-         Use this mode when the user asks for a targeted modification. Prefer the latest
-         selected final_document as base_ir; for a direct revision workflow, use source_ir.
-         The selected base_ir must have stage="draft" or stage="final". Never call
-         writer_apply_revision on an outline-stage IR from this step.
-
-         1. Call writer_build_revision_task with the current user instruction and base_ir.
-         2. Call writer_locate_revision_target, writer_generate_modify_plan,
-            writer_generate_patch_set, then writer_apply_revision using the latest
-            available writing context.
-         3. Persist the task, locate result, modify plan, patch set, and patch result
-            under the document_* internal keys.
-         4. Save the returned revised_ir path as final_document, not under a new key.
-         5. Call writer_update_writing_context using the revised final_document and save
-            writing_context_after_draft.
-
-         Do not rerun chapter planning for a targeted body revision. A cloud-bound
-         body revision remains local in this step. Its document_patch_set is applied to
-         the bound source only by the publish step. Human frontend edits remain revisions
-         of this same slot.
-
-      Complete exactly one mode in each run. Generation mode is complete when its draft
-      lineage produces final_document. Revision mode is complete when its revision task,
-      locate result, modify plan, patch set, and successful patch result produce
-      final_document. A tool failure leaves the selected mode incomplete and should be
-      retried within that same mode.
+      The writer_command produced by prepare is immutable and is the sole routing decision.
+      Do not reinterpret the request or create, resolve, or replace that command. Call
+      writer_draft_workspace exactly once without operation or artifact path arguments.
+      Do not call internal tools. The workspace saves every output itself; finish immediately
+      from its completion metadata.
     tools:
-      - writer_generate_section_instructions
-      - writer_generate_draft_blocks_markdown
-      - writer_generate_draft_document_markdown
-      - writer_update_writing_context
-      - writer_generate_final_document
-      - writer_build_revision_task
-      - writer_locate_revision_target
-      - writer_generate_modify_plan
-      - writer_generate_patch_set
-      - writer_apply_revision
+      - writer_draft_workspace
+    terminal_tools:
+      - writer_draft_workspace
     inputs:
-      - material: outline_ir
+      - material: writer_command
+        required: true
+      - material: outline_document
         required: true
         alternatives:
-          - material: source_ir
+          - material: source_document
       - material: writing_task
+        required: true
+      - material: media_assets
         required: true
       - material: writing_context_after_outline
         required: true
         alternatives:
           - material: writing_context
+      - material: source_document
+        required: false
+      - material: target_document
+        required: false
     outputs:
-      - material: final_document
+      - material: draft_document
       - material: writing_context_after_draft
       - material: section_instructions
         required: false
-      - material: section_plan_ir
+      - material: visual_plan
+        required: false
+      - material: resolved_media_assets
         required: false
       - material: draft_blocks
-        required: false
-      - material: draft_document
-        required: false
-      - material: draft_document_md
-        required: false
-      - material: final_document_md
         required: false
       - material: document_revision_task
         required: false
@@ -304,126 +214,23 @@ steps:
         required: false
       - material: document_modify_plan
         required: false
-      - material: document_patch_set
+      - material: document_revision_set
         required: false
-      - material: document_patch_result
+      - material: document_revision_result
         required: false
-    acceptance_criteria: |
-      final_document and writing_context_after_draft are present, with
-      final_document.stage="final" and ui_editable=true. Drafting artifacts are required
-      for generation/rewrite mode. A targeted revision requires document_revision_task,
-      document_locate_result, document_modify_plan, document_patch_set, and a successful
-      document_patch_result. This step must not mutate a cloud document.
-
-  publish:
-    label: 交付文稿
-    prompt: |
-      {{runtime_instruction}}
-
-      This is the unified delivery step. Retrieve the latest selected final_document.
-      Use outline_ir only when final_document does not exist and the user explicitly
-      requested delivering the outline itself. Never substitute outline_ir after
-      final-document generation or revision fails.
-
-      Select exactly one delivery mode from the user's complete request:
-
-      A. Markdown delivery (default):
-         Use this mode unless the user explicitly requested a Feishu/Lark destination
-         or write-back action. A Feishu/Lark URL used only as a source or reference does
-         not authorize publishing to it.
-         1. Call writer_export_markdown with the latest selected WriterDocument path.
-         2. writer_export_markdown returns the .md path as a plain string. Save that
-            string directly as delivered_markdown with content_type="file".
-         3. Do not call any Feishu publishing tool and do not ask for a destination.
-
-      B. Feishu delivery:
-         Use this mode only when the user explicitly asks to write back/update the
-         original Feishu document, publish/write to Feishu, create a new Feishu
-         document, save as another Feishu document, append to a Feishu document, or
-         supplies an explicit destination.
-
-      1. If publish_target_document already exists from an earlier attempt of this step,
-         reuse it as target_document_path. Do not create another document.
-      2. A targeted revision of the original bound source uses patch delivery. Retrieve
-         source_ir and document_patch_set, then call writer_publish_revision. The revision
-         is publishable when document_revision_task, document_patch_set, and a successful
-         document_patch_result are present.
-      3. A document generated through the draft lineage uses replacement delivery when
-         the user requests writing it back to the same bound source. Retrieve
-         final_document and source_ir, then call writer_replace_document. This route
-         applies to generated or explicitly rewritten content rather than a targeted
-         revision.
-      4. Call writer_append_document only when the user explicitly requests append,
-         continue-at-end, or preservation of all existing target content.
-      5. If the selected WriterDocument is unbound and the user explicitly asks to
-         write/publish it to "my Feishu", or requests "new document", "create in
-         Feishu", or "save as", call writer_create_document first. Pass parent_uri when
-         a folder/wiki parent was supplied; otherwise create in the user's Feishu root.
-         The explicit Feishu delivery request authorizes this creation; do not ask for
-         another confirmation. Save the returned artifact as publish_target_document,
-         then pass its path as target_document_path to writer_append_document. A newly
-         created target is empty.
-      6. If an existing non-empty target is specified but append versus replace is not
-         clear from the user request and artifact lineage, ask the user. Never default
-         to append for an existing document.
-
-      Before passing an existing artifact to a writer tool, call get_artifact, extract
-      the absolute path string from value.path, and pass that string to the tool. Never
-      pass the value object or only an artifact filename.
-
-      writer_create_document only needs the intended title and optional parent_uri. Save
-      its exact returned file path as publish_target_document. Then call
-      writer_append_document with absolute content_path and target_document_path values.
-
-      Only after the selected publishing tool succeeds, save its exact publish_result
-      and published_document file paths and save its exact published_link string. If
-      any create, write, or read-back call fails, do not synthesize or save any of
-      these outputs; report the tool failure so the step can retry or fail.
-
-      All publishing tools return published_document re-read from the provider with
-      ui_editable=true.
-
-      Artifact persistence rule: delivered_markdown, publish_target_document,
-      publish_result, and published_document are absolute local file paths and must be
-      saved with content_type="file". published_link is text. Never save a file path as
-      JSON or text.
-    tools:
-      - writer_export_markdown
-      - writer_create_document
-      - writer_publish_revision
-      - writer_replace_document
-      - writer_append_document
-    inputs:
-      - material: final_document
-        required: true
-        alternatives:
-          - material: outline_ir
-      - material: target_document
-        required: false
-      - material: source_ir
-        required: false
-      - material: document_revision_task
-        required: false
-      - material: document_patch_set
-        required: false
-      - material: document_patch_result
-        required: false
-    outputs:
-      - material: delivered_markdown
-        required: false
-      - material: publish_target_document
-        required: false
-      - material: publish_result
-        required: false
-      - material: published_document
-        required: false
-      - material: published_link
+      - material: document_write_result
         required: false
     acceptance_criteria: |
-      Exactly one delivery mode succeeds. Markdown mode requires delivered_markdown to
-      be a real .md file generated from the latest selected WriterDocument and requires
-      no Feishu artifacts. Feishu mode requires publish_result to report success,
-      published_document to be the provider-confirmed editable WriterDocument, and
-      published_link to be the provider URL returned by the same successful tool call.
-      A targeted revision succeeds through writer_publish_revision with its prepared
-      document_patch_set.
+      draft_document and writing_context_after_draft are present. Markdown output is a
+      `.md` file or an IR document with ui_editable=true. Drafting artifacts are required
+      for generation/rewrite mode; IR generation also requires visual_plan and
+      resolved_media_assets. A targeted revision requires document_revision_task,
+      document_locate_result, document_modify_plan, document_revision_set, and a successful
+      document_revision_result. A targeted image-adding revision also requires resolved_media_assets.
+      When generation started without draft_document and used a cloud-bound `.lmd` source,
+      document_write_result must report success and draft_document must be the
+      provider-confirmed document. Every cloud-bound IR full-document rewrite also requires
+      one successful document_write_result and a provider-confirmed draft_document,
+      regardless of whether a previous draft existed. Markdown rewrite remains local and
+      does not require document_write_result. Later targeted revisions must not mutate the
+      cloud document automatically.

@@ -218,6 +218,10 @@ def _workflow_prompt(request: LLMTaskRequest) -> str:
         'Every non-external slot must be produced exactly once. Each workflow step must have a matching state step.',
         'state.yml must include transitions.__start__ and eventually reach __end__.',
         'Allowed slot types: text, image, file, json. Use English snake_case ids.',
+        'Do not invent user uploads or make an external attachment mandatory unless the caller input '
+        'explicitly requires one. When a file or image is merely useful context, design it as optional '
+        'and make every step continue from the available text when no attachment is present. Step '
+        'prompts may call attachment tools only for exact filenames listed by the runtime.',
         _skill_context(request),
         _tool_context(request),
         _input_context(request),

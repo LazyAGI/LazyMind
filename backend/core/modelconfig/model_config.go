@@ -3,13 +3,87 @@ package modelconfig
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"os"
 	"sort"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
+	"lazymind/core/common"
 	"lazymind/core/modelprovider"
 )
+
+const cloudToolTokenTimeout = 5 * time.Second
+
+var cloudToolProviders = []string{"feishu", "googledrive", "notion"}
+
+type cloudConnectionList struct {
+	Data struct {
+		Items []struct {
+			ConnectionID string `json:"connection_id"`
+		} `json:"items"`
+	} `json:"data"`
+}
+
+type cloudTokenResponse struct {
+	Data struct {
+		AccessToken string `json:"access_token"`
+	} `json:"data"`
+}
+
+// LoadCloudToolConfig loads current user-scoped cloud credentials at execution time.
+func LoadCloudToolConfig(ctx context.Context, userID string) (map[string]any, error) {
+	toolConfig := map[string]any{}
+	for _, provider := range cloudToolProviders {
+		tokens, err := LoadCloudProviderTokens(ctx, provider, userID)
+		if err != nil {
+			return nil, err
+		}
+		if len(tokens) == 1 {
+			toolConfig[provider] = tokens[0]
+		} else if len(tokens) > 1 {
+			toolConfig[provider] = tokens
+		}
+	}
+	return toolConfig, nil
+}
+
+func LoadCloudProviderTokens(ctx context.Context, provider, userID string) ([]string, error) {
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	userID = strings.TrimSpace(userID)
+	if provider == "" || userID == "" {
+		return nil, nil
+	}
+	headers := map[string]string{}
+	if token := strings.TrimSpace(os.Getenv("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN")); token != "" {
+		headers["X-LazyMind-Internal-Token"] = token
+	}
+	listURL := fmt.Sprintf("%s/v1/cloud/connections/internal/chat-enabled?provider=%s&owner_user_id=%s",
+		common.AuthServiceBaseURL(), url.QueryEscape(provider), url.QueryEscape(userID))
+	var connections cloudConnectionList
+	if err := common.ApiGet(ctx, listURL, headers, &connections, cloudToolTokenTimeout); err != nil {
+		return nil, fmt.Errorf("list chat-enabled %s connections: %w", provider, err)
+	}
+	tokens := make([]string, 0, len(connections.Data.Items))
+	for _, item := range connections.Data.Items {
+		connectionID := strings.TrimSpace(item.ConnectionID)
+		if connectionID == "" {
+			continue
+		}
+		tokenURL := fmt.Sprintf("%s/v1/cloud/connections/%s/token?user_id=%s",
+			common.AuthServiceBaseURL(), url.PathEscape(connectionID), url.QueryEscape(userID))
+		var response cloudTokenResponse
+		if err := common.ApiGet(ctx, tokenURL, headers, &response, cloudToolTokenTimeout); err != nil {
+			continue
+		}
+		if token := strings.TrimSpace(response.Data.AccessToken); token != "" {
+			tokens = append(tokens, token)
+		}
+	}
+	return tokens, nil
+}
 
 type SelectedRuntimeModel struct {
 	ModelType        string
@@ -196,6 +270,143 @@ func LoadSearchToolConfig(ctx context.Context, db *gorm.DB, userID string) (map[
 	return map[string]any{toolName: value}, nil
 }
 
+// LoadAcademicSearchToolConfig returns the selected academic-search
+// credential in the dynamic tool-auth shape consumed by the algorithm
+// service. Sciverse is configured as a datasource rather than a generic web
+// search provider, so it must be resolved independently from
+// LoadSearchToolConfig.
+func LoadAcademicSearchToolConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]any, error) {
+	userID = strings.TrimSpace(userID)
+	row, err := loadSelectedProviderConfig(ctx, db, userID, "datasource", false)
+	if err != nil {
+		return nil, err
+	}
+	if row == nil {
+		row, err = loadConfiguredSciverseDatasource(ctx, db, userID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if row == nil {
+		row, err = loadSelectedProviderConfig(ctx, db, "", "datasource", true)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if row == nil || normalizeSearchToolName(row.ProviderName) != "sciverse" {
+		return nil, nil
+	}
+	value := normalizeOCRAuthValue(row.APIKey)
+	if value == nil {
+		return nil, nil
+	}
+	return map[string]any{"sciverse": value}, nil
+}
+
+// LoadToolConfigForCapabilities loads Host-private credentials only for tools
+// declared by the current Workflow node. The declaration is the SubAgent tool
+// allowlist; a local-only step therefore receives no search or cloud secrets.
+func LoadToolConfigForCapabilities(
+	ctx context.Context,
+	db *gorm.DB,
+	userID string,
+	capabilities []string,
+) (map[string]any, error) {
+	allowed := make(map[string]struct{}, len(capabilities))
+	for _, capability := range capabilities {
+		name := strings.ToLower(strings.TrimSpace(capability))
+		if name != "" {
+			allowed[name] = struct{}{}
+		}
+	}
+	merge := func(target map[string]any, source map[string]any) map[string]any {
+		if target == nil && len(source) > 0 {
+			target = map[string]any{}
+		}
+		for key, value := range source {
+			target[key] = value
+		}
+		return target
+	}
+	has := func(name string) bool {
+		_, ok := allowed[name]
+		return ok
+	}
+
+	var config map[string]any
+	if has("web_search") {
+		entry, err := LoadSearchToolConfig(ctx, db, userID)
+		if err != nil {
+			return nil, err
+		}
+		config = merge(config, entry)
+	}
+	if has("academic_search") {
+		entry, err := LoadAcademicSearchToolConfig(ctx, db, userID)
+		if err != nil {
+			return nil, err
+		}
+		config = merge(config, entry)
+	}
+	for _, provider := range cloudToolProviders {
+		if !has("cloud_files") && !has(provider) {
+			continue
+		}
+		tokens, err := LoadCloudProviderTokens(ctx, provider, userID)
+		if err != nil {
+			return nil, err
+		}
+		if len(tokens) == 1 {
+			config = merge(config, map[string]any{provider: tokens[0]})
+		} else if len(tokens) > 1 {
+			config = merge(config, map[string]any{provider: tokens})
+		}
+	}
+	return config, nil
+}
+
+func loadConfiguredSciverseDatasource(
+	ctx context.Context,
+	db *gorm.DB,
+	userID string,
+) (*selectedProviderConfig, error) {
+	if db == nil || userID == "" {
+		return nil, nil
+	}
+	var row selectedProviderConfig
+	err := db.WithContext(ctx).Table("user_model_provider_groups g").
+		Select("p.name AS provider_name, g.base_url, g.api_key, g.api_key_ciphertext").
+		Joins(
+			"JOIN user_model_providers p ON "+
+				"p.id = g.user_model_provider_id AND "+
+				"p.create_user_id = g.create_user_id AND "+
+				"p.deleted_at IS NULL",
+		).
+		Where(
+			"g.create_user_id = ? AND g.deleted_at IS NULL AND g.is_verified = ? "+
+				"AND (TRIM(g.api_key) <> '' OR TRIM(g.api_key_ciphertext) <> '') "+
+				"AND p.category = ? AND p.name IN ?",
+			userID,
+			true,
+			"datasource",
+			[]string{"Sciverse", "Sciverse Search"},
+		).
+		Order("g.updated_at DESC").
+		Limit(1).
+		Scan(&row).Error
+	if err != nil {
+		return nil, err
+	}
+	if row.ProviderName == "" && row.BaseURL == "" {
+		return nil, nil
+	}
+	row.APIKey, err = modelprovider.ResolveAPIKey(row.APIKey, row.APIKeyCiphertext)
+	if err != nil {
+		return nil, err
+	}
+	return &row, nil
+}
+
 func normalizeSearchToolName(providerName string) string {
 	normalized := strings.Map(func(r rune) rune {
 		if r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
@@ -215,6 +426,8 @@ func normalizeSearchToolName(providerName string) string {
 		return "bing"
 	case "tavily":
 		return "tavily"
+	case "sciverse", "sciversesearch":
+		return "sciverse"
 	default:
 		return ""
 	}

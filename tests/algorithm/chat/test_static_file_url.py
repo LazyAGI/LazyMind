@@ -72,6 +72,20 @@ def test_static_file_url_from_any_strips_external_host_prefix(tmp_path, monkeypa
     assert resolve_local_image_path(signed) == str(image.resolve())
 
 
+def test_static_file_url_from_any_signs_local_absolute_upload_path(tmp_path, monkeypatch):
+    upload_root = tmp_path / 'uploads'
+    image = upload_root / 'ai_generated' / 'puppy.png'
+    image.parent.mkdir(parents=True)
+    image.write_bytes(b'png')
+
+    _mock_upload_root(monkeypatch, upload_root)
+    monkeypatch.setenv('LAZYMIND_FILE_URL_SIGN_SECRET', 'test-secret')
+
+    signed = static_file_url_from_any(str(image.resolve()))
+    assert signed.startswith('/static-files/ai_generated/puppy.png?')
+    assert str(upload_root).lstrip('/') not in signed
+
+
 def test_basename_from_path_handles_urls_and_paths():
     assert basename_from_path('https://example.test/assets/chart.png?token=1') == 'chart.png'
     assert basename_from_path('/tmp/chart.png') == 'chart.png'

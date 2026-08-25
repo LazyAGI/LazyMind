@@ -3,10 +3,13 @@ package taskcenter
 import (
 	"context"
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/store"
 )
 
 func newTestTaskDB(t *testing.T) *orm.DB {
@@ -79,7 +82,7 @@ func TestListTasks_FilterByStatus(t *testing.T) {
 	}
 }
 
-func TestArchiveTaskRunHidesRunAndSoftDeletesConversation(t *testing.T) {
+func TestArchiveTaskRunHidesRunAndPreservesConversation(t *testing.T) {
 	db := newTestTaskDB(t)
 	if err := db.AutoMigrate(&orm.UserSchedule{}, &orm.Conversation{}, &orm.TaskRunInput{}); err != nil {
 		t.Fatalf("auto migrate related models: %v", err)
@@ -108,9 +111,9 @@ func TestArchiveTaskRunHidesRunAndSoftDeletesConversation(t *testing.T) {
 	if err := db.First(&archived, "id = ?", "run-delete").Error; err != nil || archived.ArchivedAt == nil {
 		t.Fatalf("run was not archived: task=%#v err=%v", archived, err)
 	}
-	var deletedConversation orm.Conversation
-	if err := db.First(&deletedConversation, "id = ?", conversation.ID).Error; err != nil || deletedConversation.DeletedAt == nil {
-		t.Fatalf("conversation was not soft-deleted: conversation=%#v err=%v", deletedConversation, err)
+	var preservedConversation orm.Conversation
+	if err := db.First(&preservedConversation, "id = ?", conversation.ID).Error; err != nil || preservedConversation.DeletedAt != nil {
+		t.Fatalf("conversation lifecycle was mutated: conversation=%#v err=%v", preservedConversation, err)
 	}
 	var visibleRuns int64
 	if err := db.Model(&orm.TaskCenterTask{}).Where("schedule_id = ? AND archived_at IS NULL", schedule.ID).Count(&visibleRuns).Error; err != nil || visibleRuns != 1 {
@@ -119,6 +122,60 @@ func TestArchiveTaskRunHidesRunAndSoftDeletesConversation(t *testing.T) {
 	var updatedSchedule orm.UserSchedule
 	if err := db.First(&updatedSchedule, "id = ?", schedule.ID).Error; err != nil || updatedSchedule.RunCount != 1 {
 		t.Fatalf("expected visible run_count=1, schedule=%#v err=%v", updatedSchedule, err)
+	}
+}
+
+func TestListTasksReportsConversationLifecycleState(t *testing.T) {
+	db := orm.MigrateTestDB(t,
+		&orm.TaskCenterTask{}, &orm.Conversation{}, &orm.UserSchedule{},
+		&orm.WorkflowSession{}, &orm.SubAgentTask{},
+	)
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	now := time.Now().UTC()
+	archivedAt := now.Add(-time.Hour)
+	deletedAt := now.Add(-30 * time.Minute)
+	conversations := []orm.Conversation{
+		{ID: "conv-active", DisplayName: "Active", ChannelID: "default", BaseModel: orm.BaseModel{CreateUserID: "user-1", CreateUserName: "user-1", CreatedAt: now, UpdatedAt: now}},
+		{ID: "conv-archived", DisplayName: "Archived", ChannelID: "default", ArchivedAt: &archivedAt, BaseModel: orm.BaseModel{CreateUserID: "user-1", CreateUserName: "user-1", CreatedAt: now, UpdatedAt: now}},
+		{ID: "conv-trash", DisplayName: "Trash", ChannelID: "default", BaseModel: orm.BaseModel{CreateUserID: "user-1", CreateUserName: "user-1", CreatedAt: now, UpdatedAt: now, DeletedAt: &deletedAt}},
+	}
+	if err := db.Create(&conversations).Error; err != nil {
+		t.Fatal(err)
+	}
+	for _, conversationID := range []string{"conv-active", "conv-archived", "conv-trash", "conv-missing"} {
+		if err := db.Create(&orm.TaskCenterTask{
+			ID: "task-" + conversationID, UserID: "user-1", ConversationID: conversationID,
+			TaskType: "background_chat", Status: "succeeded", CreatedAt: now, UpdatedAt: now,
+		}).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/task-center/tasks?page_size=20", nil)
+	req.Header.Set("X-User-Id", "user-1")
+	rec := httptest.NewRecorder()
+	ListTasks(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("list tasks status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Items []taskResponse `json:"items"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatal(err)
+	}
+	states := map[string]string{}
+	for _, item := range response.Items {
+		states[item.ConversationID] = item.ConversationState
+	}
+	want := map[string]string{
+		"conv-active": "active", "conv-archived": "archived", "conv-trash": "trash", "conv-missing": "missing",
+	}
+	for conversationID, state := range want {
+		if states[conversationID] != state {
+			t.Fatalf("conversation %s state=%q want=%q; all=%#v", conversationID, states[conversationID], state, states)
+		}
 	}
 }
 

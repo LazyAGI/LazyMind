@@ -1,0 +1,623 @@
+.writer-markdown-editor {
+  --writer-markdown-page-max-width: 780px;
+  position: relative;
+  container: writer-markdown-editor / inline-size;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  max-height: 620px;
+  border: 1px solid var(--color-border, #d9dce3);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--color-bg-base, #fff);
+}
+
+.writer-markdown-editor--width-wide {
+  --writer-markdown-page-max-width: 1080px;
+}
+
+.writer-markdown-editor__document-layout {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  column-gap: 8px;
+  align-items: start;
+  min-width: 0;
+  min-height: 0;
+}
+
+.writer-markdown-editor--outline-open .writer-markdown-editor__document-layout {
+  grid-template-columns: minmax(132px, 176px) minmax(0, 1fr);
+  column-gap: 12px;
+}
+
+.writer-markdown-editor__main {
+  min-width: 0;
+  grid-column: 2;
+}
+
+.writer-markdown-editor__display-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 34px;
+  padding: 2px 4px 8px;
+  border-bottom: 1px solid #edf1f5;
+  background: rgba(255, 255, 255, 0.96);
+}
+
+.writer-markdown-editor__width-control,
+.writer-markdown-editor__width-options {
+  display: inline-flex;
+  align-items: center;
+}
+
+.writer-markdown-editor__width-control { gap: 7px; }
+
+.writer-markdown-editor__width-label {
+  color: #64748b;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.writer-markdown-editor__width-options {
+  padding: 2px;
+  border: 1px solid #dbe3ee;
+  border-radius: 7px;
+  background: #f8fafc;
+}
+
+.writer-markdown-editor .writer-markdown-editor__width-option {
+  min-height: 24px;
+  padding: 2px 9px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #64748b;
+  line-height: 1;
+}
+
+.writer-markdown-editor .writer-markdown-editor__width-option:hover {
+  background: #eef2f7;
+}
+
+.writer-markdown-editor .writer-markdown-editor__width-option[aria-pressed='true'] {
+  background: #fff;
+  color: #1e40af;
+  box-shadow: 0 1px 3px rgb(15 23 42 / 10%);
+  font-weight: 600;
+}
+
+.writer-markdown-editor__outline-rail {
+  position: sticky;
+  top: 0;
+  min-width: 0;
+  min-height: 34px;
+  max-height: 480px;
+  grid-column: 1;
+}
+
+.writer-markdown-editor__outline {
+  position: relative;
+  min-height: 120px;
+  max-height: 480px;
+  padding: 3px 14px 14px 0;
+  overflow: auto;
+  border-right: 1px solid #e5eaf0;
+}
+
+.writer-markdown-editor .writer-markdown-editor__outline-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #64748b;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.writer-markdown-editor .writer-markdown-editor__outline-toggle:hover:not(:disabled) {
+  border-color: transparent;
+  background: #f1f5f9;
+  color: #2563eb;
+}
+
+.writer-markdown-editor .writer-markdown-editor__outline-toggle:focus-visible,
+.writer-markdown-editor .writer-markdown-editor__outline-document-link:focus-visible,
+.writer-markdown-editor .writer-markdown-editor__outline-link:focus-visible {
+  outline: 2px solid rgba(37, 99, 235, 0.34);
+  outline-offset: 1px;
+}
+
+.writer-markdown-editor .writer-markdown-editor__outline-toggle--collapsed {
+  margin-top: 4px;
+  color: #2563eb;
+}
+
+.writer-markdown-editor .writer-markdown-editor__outline-document-link {
+  display: block;
+  width: 100%;
+  min-height: 30px;
+  margin: 5px 0 4px;
+  padding: 4px 6px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #2563eb;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.writer-markdown-editor .writer-markdown-editor__outline-document-link:hover:not(:disabled) {
+  border-color: transparent;
+  background: #f1f5f9;
+  color: #1d4ed8;
+}
+
+.writer-markdown-editor__outline-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.writer-markdown-editor__outline-list li {
+  margin: 0;
+}
+
+.writer-markdown-editor .writer-markdown-editor__outline-link {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  padding: 4px 6px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: #475569;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.writer-markdown-editor .writer-markdown-editor__outline-link:hover {
+  border-color: transparent;
+  background: #f1f5f9;
+  color: #1d4ed8;
+}
+
+.writer-markdown-editor .writer-markdown-editor__outline-link--level-2 { padding-left: 16px; }
+.writer-markdown-editor .writer-markdown-editor__outline-link--level-3 { padding-left: 26px; }
+.writer-markdown-editor .writer-markdown-editor__outline-link--level-4 { padding-left: 36px; }
+.writer-markdown-editor .writer-markdown-editor__outline-link--level-5 { padding-left: 46px; }
+.writer-markdown-editor .writer-markdown-editor__outline-link--level-6 { padding-left: 56px; }
+
+.writer-markdown-editor__outline-empty {
+  padding: 6px;
+  color: #94a3b8;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+@container writer-markdown-editor (max-width: 680px) {
+  .writer-markdown-editor__document-layout,
+  .writer-markdown-editor--outline-open .writer-markdown-editor__document-layout {
+    grid-template-columns: minmax(0, 1fr);
+    column-gap: 0;
+  }
+
+  .writer-markdown-editor__outline-rail,
+  .writer-markdown-editor__main {
+    grid-column: 1 / -1;
+  }
+
+  .writer-markdown-editor__outline-rail {
+    position: static;
+    max-height: none;
+  }
+
+  .writer-markdown-editor__outline {
+    max-height: 180px;
+    padding: 3px 4px 10px;
+    border-right: 0;
+    border-bottom: 1px solid #e5eaf0;
+  }
+}
+
+.writer-markdown-editor__surface {
+  position: relative;
+  min-height: 0;
+  max-height: 480px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  color: var(--color-text, #1f2329);
+}
+
+.writer-markdown-editor__surface .mdxeditor-toolbar {
+  position: fixed;
+  top: var(--writer-markdown-selection-toolbar-top, -9999px);
+  left: var(--writer-markdown-selection-toolbar-left, -9999px);
+  z-index: 1200;
+  width: max-content;
+  max-width: var(--writer-markdown-selection-toolbar-max-width, calc(100vw - 16px));
+  min-height: 42px;
+  gap: 4px;
+  padding: 5px 6px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  border: 1px solid rgba(15, 23, 42, 0.08);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow:
+    0 1px 2px rgba(15, 23, 42, 0.06),
+    0 12px 30px rgba(15, 23, 42, 0.14);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  scrollbar-width: none;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.writer-markdown-editor__surface .mdxeditor-toolbar::-webkit-scrollbar {
+  display: none;
+}
+
+.writer-markdown-editor--selection-toolbar-visible .writer-markdown-editor__surface .mdxeditor-toolbar {
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  animation: writer-markdown-toolbar-in 140ms ease-out;
+}
+
+.writer-markdown-editor__toolbar-group {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+
+.writer-markdown-editor__toolbar-group [class*='_toolbarGroupOfGroups_'] {
+  gap: 1px;
+  margin: 0;
+}
+
+.writer-markdown-editor__toolbar-divider {
+  flex: 0 0 auto;
+  width: 1px;
+  height: 20px;
+  margin: 0 2px;
+  background: #e2e8f0;
+}
+
+.writer-markdown-editor__surface .mdxeditor-toolbar [data-toolbar-item='true'] {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  min-width: 30px;
+  padding: 0;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #475569;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    transform 120ms ease;
+}
+
+.writer-markdown-editor__surface .mdxeditor-toolbar [data-toolbar-item='true'] svg {
+  width: 16px;
+  height: 16px;
+  color: currentColor;
+}
+
+.writer-markdown-editor__surface .mdxeditor-toolbar [data-toolbar-item='true']:hover:not(:disabled) {
+  background: #f1f5f9;
+  color: #0f172a;
+}
+
+.writer-markdown-editor__surface .mdxeditor-toolbar [data-toolbar-item='true']:active:not(:disabled) {
+  transform: translateY(1px);
+  background: #e2e8f0;
+}
+
+.writer-markdown-editor__surface .mdxeditor-toolbar [data-toolbar-item='true'][data-state='on'] {
+  background: #eff6ff;
+  color: #245bdb;
+}
+
+.writer-markdown-editor__surface .mdxeditor-toolbar [data-toolbar-item='true']:disabled,
+.writer-markdown-editor__surface .mdxeditor-toolbar [data-toolbar-item='true'][data-disabled] {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.writer-markdown-editor__toolbar-group--block [data-toolbar-item='true'] {
+  justify-content: space-between;
+  width: auto !important;
+  min-width: 100px !important;
+  max-width: 132px;
+  padding: 0 8px 0 10px !important;
+  margin: 0;
+  background: #f8fafc;
+  color: #334155;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.writer-markdown-editor__polish-action,
+.writer-markdown-editor__reference-select {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  min-height: 30px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.writer-markdown-editor__polish-action {
+  gap: 5px;
+  padding: 0 10px;
+  background: #eef4ff;
+  color: #245bdb;
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    transform 120ms ease;
+}
+
+.writer-markdown-editor__polish-action:hover:not(:disabled) {
+  background: #dfeaff;
+  color: #1746b0;
+}
+
+.writer-markdown-editor__polish-action:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.writer-markdown-editor__polish-action:focus-visible,
+.writer-markdown-editor__reference-select:focus-visible {
+  outline: 2px solid #3370ff;
+  outline-offset: 1px;
+}
+
+.writer-markdown-editor__polish-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.writer-markdown-editor__reference-select {
+  gap: 5px;
+  padding: 0 8px 0 9px;
+  border-color: #e2e8f0;
+  background: #fff;
+  color: #475569;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    color 120ms ease,
+    transform 120ms ease;
+}
+
+.writer-markdown-editor__reference-select:hover:not(:disabled) {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+  color: #334155;
+}
+
+.writer-markdown-editor__reference-select:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.writer-markdown-editor__reference-remove {
+  justify-content: center;
+  width: 30px;
+  min-width: 30px;
+  padding: 0;
+}
+
+.writer-markdown-editor__reference-select > svg {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  color: #64748b;
+}
+
+.writer-markdown-editor__reference-caret {
+  width: 10px !important;
+  height: 10px !important;
+  margin-left: 2px;
+  color: #94a3b8 !important;
+}
+
+.writer-markdown-editor__reference-select:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.writer-markdown-editor__reference-dropdown {
+  z-index: 1300 !important;
+  width: min(288px, calc(100vw - 24px));
+}
+
+.writer-markdown-editor__reference-dropdown .ant-dropdown-menu {
+  width: 100%;
+  max-height: 296px;
+  padding: 6px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.99);
+  box-shadow:
+    0 2px 6px rgba(15, 23, 42, 0.06),
+    0 16px 36px rgba(15, 23, 42, 0.14);
+  scrollbar-color: #cbd5e1 transparent;
+  scrollbar-width: thin;
+}
+
+.writer-markdown-editor__reference-dropdown .ant-dropdown-menu-item {
+  min-height: 36px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  color: #334155;
+  font-size: 12px;
+  line-height: 20px;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.writer-markdown-editor__reference-dropdown .ant-dropdown-menu-item:hover,
+.writer-markdown-editor__reference-dropdown .ant-dropdown-menu-item-active {
+  background: #f1f5f9 !important;
+  color: #0f172a !important;
+}
+
+.writer-markdown-editor__reference-dropdown .ant-dropdown-menu-item:active {
+  background: #e8f0ff !important;
+  color: #245bdb !important;
+}
+
+.writer-markdown-editor__reference-dropdown .ant-dropdown-menu-title-content {
+  min-width: 0;
+}
+
+.writer-markdown-editor__reference-option {
+  display: grid;
+  grid-template-columns: 26px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.writer-markdown-editor__reference-option-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: #f8fafc;
+  color: #64748b;
+}
+
+.writer-markdown-editor__reference-option-icon > svg {
+  width: 13px;
+  height: 13px;
+}
+
+.writer-markdown-editor__reference-option-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@keyframes writer-markdown-toolbar-in {
+  from {
+    transform: translateY(3px) scale(0.985);
+    opacity: 0;
+  }
+
+  to {
+    transform: translateY(0) scale(1);
+    opacity: 1;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .writer-markdown-editor--selection-toolbar-visible .writer-markdown-editor__surface .mdxeditor-toolbar {
+    animation: none;
+  }
+
+  .writer-markdown-editor__surface .mdxeditor-toolbar [data-toolbar-item='true'],
+  .writer-markdown-editor__polish-action,
+  .writer-markdown-editor__reference-select,
+  .writer-markdown-editor__reference-dropdown .ant-dropdown-menu-item {
+    transition: none;
+  }
+}
+
+.writer-markdown-editor__surface .mdxeditor-root-contenteditable {
+  box-sizing: border-box;
+  width: min(100%, var(--writer-markdown-page-max-width));
+  margin: 0 auto;
+  min-height: 300px;
+  padding: 20px 24px;
+}
+
+.writer-markdown-editor__surface a[href^='#block-'] {
+  color: #3370ff;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  cursor: pointer;
+}
+
+.writer-markdown-editor__system-anchor {
+  display: block;
+  height: 0;
+  overflow: hidden;
+}
+
+.writer-markdown-editor__rewrite-layer {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  pointer-events: none;
+}
+
+.writer-markdown-editor__surface p.artifact-rewrite-inline-diff,
+.writer-markdown-editor__surface p.artifact-rewrite-inline-diff [data-lexical-text='true'] {
+  color: transparent;
+  caret-color: transparent;
+  text-decoration-color: transparent;
+  user-select: none;
+}
+
+.writer-markdown-editor__notice {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.writer-markdown-editor__notice--warning {
+  color: #8a5b00;
+  background: #fff7e6;
+}
+
+.writer-markdown-editor__notice--error {
+  color: #b42318;
+  background: #fff1f0;
+}
+
+.mdxeditor-popup-container {
+  z-index: 1300;
+}

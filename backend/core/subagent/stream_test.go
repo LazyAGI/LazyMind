@@ -40,6 +40,21 @@ func TestArtifactDedupKey(t *testing.T) {
 	}
 }
 
+func TestTaskStreamHeartbeatsUseDeclaredRuntimeMetadata(t *testing.T) {
+	task := &orm.SubAgentTask{
+		AgentType: "workflow_step",
+		Params:    []byte(`{"stream_heartbeat":true}`),
+	}
+	if !taskStreamHeartbeatsEnabled(task) {
+		t.Fatal("expected declared stream heartbeat metadata to enable heartbeats")
+	}
+
+	task.Params = []byte(`{"workflow_id":"renamed-workflow","step_id":"renamed-step"}`)
+	if taskStreamHeartbeatsEnabled(task) {
+		t.Fatal("workflow identity alone must not enable stream heartbeats")
+	}
+}
+
 // TestStepToTaskEvent maps SubAgentStep to TaskEvent by role.
 func TestStepToTaskEvent(t *testing.T) {
 	// Text role step becomes a text event with content.

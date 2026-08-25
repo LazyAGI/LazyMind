@@ -4,6 +4,7 @@ import lazyllm
 from lazymind.chat.service.component.tool_registry import (
     DEFAULT_TOOLS,
     IMAGE_MARKDOWN_OUTPUT_APPENDIX,
+    RETRIEVAL_CITATION_OUTPUT_APPENDIX,
     SKILL_TOOL_CONFIG,
     ToolConfig,
     _capability_is_denied,
@@ -151,6 +152,18 @@ def test_memory_tools_are_registered_as_one_eager_group():
     assert 'preference_editor' in memory_policy
 
 
+def test_writer_tools_publish_stable_capability_ids():
+    capabilities = {
+        config.name: config.capability_id
+        for config in DEFAULT_TOOLS
+        if config.name in {'writer_create', 'writer_revision'}
+    }
+    assert capabilities == {
+        'writer_create': 'writer.create',
+        'writer_revision': 'writer.revise',
+    }
+
+
 def test_shared_prompt_appendix_is_reused_and_deduplicated():
     configs = [
         cfg for cfg in DEFAULT_TOOLS
@@ -210,6 +223,40 @@ def test_search_tool_descriptions_distinguish_open_web_from_encyclopedic_lookup(
     assert 'current information' in web_config.tool['desc']
     assert 'stable encyclopedic background' in wikipedia_config.description_en
     assert 'not for news' in wikipedia_config.description_en
+
+
+def test_external_retrieval_tools_share_the_citation_output_contract():
+    configs = [
+        cfg for cfg in DEFAULT_TOOLS
+        if cfg.name in {'web_search', 'academic_search', 'wikipedia', 'url_fetch'}
+    ]
+    collected = collect_system_prompt_appendices(configs)
+
+    assert collected['output_contract'] == list(RETRIEVAL_CITATION_OUTPUT_APPENDIX['output_contract'])
+    assert any('exact `target_url`' in item for item in collected['tool_policy'])
+    assert any('get_content' in item for item in collected['tool_policy'])
+
+
+def test_mixed_kb_and_web_tools_share_one_citation_output_contract():
+    configs = [
+        cfg for cfg in DEFAULT_TOOLS
+        if cfg.name in {'kb', 'web_search'}
+    ]
+    lazyllm.globals['agentic_config'] = {'filters': {'kb_id': 'selected-kb'}}
+    collected = collect_system_prompt_appendices(configs)
+
+    citation_contracts = [
+        item for item in collected['output_contract']
+        if 'Retrieval evidence citation rules' in item
+    ]
+    assert citation_contracts == list(RETRIEVAL_CITATION_OUTPUT_APPENDIX['output_contract'])
+    contract = '\n'.join(citation_contracts)
+    assert 'copy that `ref` exactly' in contract
+    assert '[[document.chunk]]' not in contract
+    assert 'cite at least one result from each category' in contract
+
+    policy = '\n'.join(collected['tool_policy'])
+    assert 'cite at least one result from each category' not in policy
 
 
 def test_prompt_appendix_deduplication_normalizes_whitespace():

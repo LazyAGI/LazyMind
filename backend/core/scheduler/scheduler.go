@@ -21,6 +21,7 @@ import (
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/settings"
 	"lazymind/core/store"
 	"lazymind/core/taskcenter"
 )
@@ -29,6 +30,10 @@ import (
 
 // CreateSchedule inserts a new UserSchedule and computes the first next_run_at.
 func CreateSchedule(ctx context.Context, db *gorm.DB, s *orm.UserSchedule) error {
+	s.Name = strings.TrimSpace(s.Name)
+	if s.Name == "" {
+		return errors.New("name required")
+	}
 	if s.ID == "" {
 		s.ID = common.GeneratePrefixedID("sched_", 36)
 	}
@@ -256,11 +261,24 @@ func truncateRunes(s string, maxRunes int, suffix string) string {
 // ── Scheduler loop ────────────────────────────────────────────────────────────
 
 // RunScheduler starts a goroutine that fires due schedules every 30 seconds.
-// Call once at application startup. The goroutine stops when ctx is cancelled.
-// Task status is now derived on read via resolveTaskStatus (chat_histories presence),
-// so no periodic reconciler is needed here.
-func RunScheduler(ctx context.Context, db *gorm.DB, chatBaseURL string) {
+// Call once at application startup. The goroutine stops when ctx is cancelled,
+// at which point the returned channel is closed so callers can wait for the
+// ticker loop to fully exit. Task status is now derived on read via
+// resolveTaskStatus (chat_histories presence), so no periodic reconciler is
+// needed here.
+//
+// The returned channel only tracks the ticker goroutine. fireOne may launch
+// detached task-execution goroutines (sendScheduledChatRequest) that run with
+// context.Background and outlive this loop — they are deliberately not waited
+// on, because scheduled tasks are user business work that should complete even
+// when the process is stopping. Callers that close shared resources (e.g. the
+// DB pool) on Done() must account for those detached writes still being in
+// flight; in core, the DB/Redis pools are intentionally not closed on shutdown
+// for this reason.
+func RunScheduler(ctx context.Context, db *gorm.DB, chatBaseURL string) <-chan struct{} {
+	done := make(chan struct{})
 	go func() {
+		defer close(done)
 		repairFutureScheduleNextRunsAt(ctx, db, time.Now().UTC())
 		ticker := time.NewTicker(30 * time.Second)
 		defer ticker.Stop()
@@ -274,6 +292,7 @@ func RunScheduler(ctx context.Context, db *gorm.DB, chatBaseURL string) {
 			}
 		}
 	}()
+	return done
 }
 
 // repairFutureScheduleNextRunsAt corrects future timestamps produced when a
@@ -305,6 +324,31 @@ func repairFutureScheduleNextRunsAt(ctx context.Context, db *gorm.DB, now time.T
 	}
 }
 
+// RecomputeEnabledSchedules moves an enabled user's schedules forward from now.
+// It deliberately does not create work or alter run history, which means a
+// task-center resume never backfills triggers missed while the master switch was
+// paused.
+func RecomputeEnabledSchedules(ctx context.Context, db *gorm.DB, userID string, now time.Time) error {
+	var schedules []orm.UserSchedule
+	if err := db.WithContext(ctx).
+		Where("user_id = ? AND enabled = ?", userID, true).
+		Find(&schedules).Error; err != nil {
+		return err
+	}
+	for _, schedule := range schedules {
+		next, err := nextCronTimeAfter(schedule.CronExpr, schedule.Timezone, now)
+		if err != nil {
+			return err
+		}
+		if err := db.WithContext(ctx).Model(&orm.UserSchedule{}).
+			Where("id = ? AND user_id = ?", schedule.ID, userID).
+			Update("next_run_at", next.UTC()).Error; err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // maxConcurrentFires is the maximum number of schedules fired concurrently in one tick.
 const maxConcurrentFires = 50
 
@@ -322,6 +366,14 @@ func fireSchedules(ctx context.Context, db *gorm.DB, _ string) {
 	var wg sync.WaitGroup
 	for _, s := range due {
 		s := s
+		controls, err := settings.LoadFeatureControls(ctx, db, s.UserID)
+		if err != nil {
+			continue
+		}
+		if !controls.TaskCenterEnabled {
+			_ = RecomputeEnabledSchedules(ctx, db, s.UserID, now)
+			continue
+		}
 		sem <- struct{}{}
 		wg.Add(1)
 		go func() {
@@ -714,6 +766,15 @@ func EnableScheduleHandler(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/schedules/")
 	id := strings.TrimSuffix(path, ":enable")
 	db := store.DB()
+	controls, err := settings.LoadFeatureControls(r.Context(), db, userID)
+	if err != nil {
+		common.ReplyErr(w, "query task center settings failed", http.StatusInternalServerError)
+		return
+	}
+	if !controls.TaskCenterEnabled {
+		common.ReplyErr(w, "task center is paused in settings", http.StatusConflict)
+		return
+	}
 	// Recompute next_run_at from now so the schedule fires at the correct future time.
 	var s orm.UserSchedule
 	if err := db.WithContext(r.Context()).
@@ -840,6 +901,15 @@ func RunNowHandler(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/schedules/")
 	id := strings.TrimSuffix(path, ":run-now")
 	db := store.DB()
+	controls, err := settings.LoadFeatureControls(r.Context(), db, userID)
+	if err != nil {
+		common.ReplyErr(w, "query task center settings failed", http.StatusInternalServerError)
+		return
+	}
+	if !controls.TaskCenterEnabled {
+		common.ReplyErr(w, "task center is paused in settings", http.StatusConflict)
+		return
+	}
 	var s orm.UserSchedule
 	if err := db.WithContext(r.Context()).
 		Where("id = ? AND user_id = ?", id, userID).First(&s).Error; err != nil {

@@ -136,7 +136,7 @@ func TestDisabledBuiltinWorkflowIDs_ReturnsDisabled(t *testing.T) {
 		UpdatedAt: now,
 	})
 	db.DB.Create(&orm.UserWorkflowSetting{
-		UserID: "user-1", WorkflowRef: "builtin:bsk_02", Enabled: true,
+		UserID: "user-1", WorkflowRef: "builtin:bsk_02", Enabled: true, CallMode: WorkflowCallModeAuto,
 		UpdatedAt: now,
 	})
 	ids, err := DisabledBuiltinWorkflowIDs(db.DB, "user-1")
@@ -192,6 +192,7 @@ func TestListWorkflowVersions_NotFound(t *testing.T) {
 func TestListUserWorkflowSettings_ReturnsWorkflowContract(t *testing.T) {
 	db := newHandlerTestDB(t)
 	seedWorkflowResource(t, db, "custom-workflow", "wf-custom", "user-1")
+	seedCatalogWorkflow(t, db, "writer-workflow")
 
 	req := httptest.NewRequest(http.MethodGet, "/chat/settings/workflows", nil)
 	req.Header.Set("X-User-Id", "user-1")
@@ -213,8 +214,53 @@ func TestListUserWorkflowSettings_ReturnsWorkflowContract(t *testing.T) {
 	if err := json.Unmarshal(resp.Data["workflows"], &workflows); err != nil {
 		t.Fatalf("decode workflows: %v, body=%s", err, rec.Body.String())
 	}
-	if len(workflows) != 1 || workflows[0]["workflow_ref"] != "custom-workflow" {
+	if len(workflows) != 2 {
 		t.Fatalf("unexpected workflows: %#v", workflows)
+	}
+	for _, item := range workflows {
+		if item["workflow_ref"] == "builtin:writer-workflow" && (item["enabled"] != true || item["call_mode"] != WorkflowCallModeAuto) {
+			t.Fatalf("built-in workflow must default to automatic matching: %#v", item)
+		}
+	}
+}
+
+func TestEnabledCatalogOnlyIncludesAutomaticWorkflows(t *testing.T) {
+	db := newHandlerTestDB(t)
+	seedCatalogWorkflow(t, db, "writer-workflow")
+	catalog, err := EnabledCatalog(db.DB, "user-1")
+	if err != nil || len(catalog) != 1 {
+		t.Fatalf("default catalog = %#v, err=%v", catalog, err)
+	}
+	if err := db.Create(&orm.UserWorkflowSetting{
+		UserID: "user-1", WorkflowRef: "builtin:writer-workflow", Enabled: true, CallMode: WorkflowCallModeManual,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	catalog, err = EnabledCatalog(db.DB, "user-1")
+	if err != nil || len(catalog) != 0 {
+		t.Fatalf("manual workflow leaked into automatic catalog = %#v, err=%v", catalog, err)
+	}
+	suppressedBuiltins, err := DisabledBuiltinWorkflowIDs(db.DB, "user-1")
+	if err != nil || len(suppressedBuiltins) != 1 || suppressedBuiltins[0] != "writer-workflow" {
+		t.Fatalf("manual builtin suppression = %#v, err=%v", suppressedBuiltins, err)
+	}
+	if err := db.Model(&orm.UserWorkflowSetting{}).
+		Where("user_id=? AND plugin_ref=?", "user-1", "builtin:writer-workflow"). // workflow-naming: persistence
+		Updates(map[string]any{"enabled": true, "call_mode": WorkflowCallModeAuto}).Error; err != nil {
+		t.Fatal(err)
+	}
+	catalog, err = EnabledCatalog(db.DB, "user-1")
+	if err != nil || len(catalog) != 1 || catalog[0]["call_mode"] != WorkflowCallModeAuto {
+		t.Fatalf("automatic catalog = %#v, err=%v", catalog, err)
+	}
+	if err := db.Model(&orm.UserWorkflowSetting{}).
+		Where("user_id=? AND plugin_ref=?", "user-1", "builtin:writer-workflow"). // workflow-naming: persistence
+		Updates(map[string]any{"enabled": false, "call_mode": WorkflowCallModeDisabled}).Error; err != nil {
+		t.Fatal(err)
+	}
+	catalog, err = EnabledCatalog(db.DB, "user-1")
+	if err != nil || len(catalog) != 0 {
+		t.Fatalf("paused workflow leaked into automatic catalog = %#v, err=%v", catalog, err)
 	}
 }
 
@@ -232,7 +278,7 @@ func TestPatchUserWorkflowSetting_Unauthorized(t *testing.T) {
 func TestPatchUserWorkflowSetting_ExistingWorkflowUpserts(t *testing.T) {
 	db := newHandlerTestDB(t)
 	seedWorkflowResource(t, db, "custom-plugin", "pid-custom", "user-1")
-	body := jsonBody(`{"enabled":false}`)
+	body := jsonBody(`{"call_mode":"manual"}`)
 	req := httptest.NewRequest(http.MethodPatch, "/workflows/custom-plugin/settings", body)
 	req = mux.SetURLVars(req, map[string]string{"workflow_ref": "custom-plugin"})
 	req.Header.Set("X-User-Id", "user-1")
@@ -240,6 +286,26 @@ func TestPatchUserWorkflowSetting_ExistingWorkflowUpserts(t *testing.T) {
 	PatchUserWorkflowSetting(rec, req)
 	if rec.Code != http.StatusOK {
 		t.Fatalf("got %d, want %d, body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	var setting orm.UserWorkflowSetting
+	if err := db.Where("user_id=? AND plugin_ref=?", "user-1", "custom-plugin").Take(&setting).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !setting.Enabled || setting.CallMode != WorkflowCallModeManual {
+		t.Fatalf("stored setting = %#v, want enabled manual", setting)
+	}
+}
+
+func TestPatchUserWorkflowSettingRejectsInvalidCallMode(t *testing.T) {
+	db := newHandlerTestDB(t)
+	seedWorkflowResource(t, db, "custom-plugin", "pid-custom", "user-1")
+	req := httptest.NewRequest(http.MethodPatch, "/workflows/custom-plugin/settings", jsonBody(`{"call_mode":"sometimes"}`))
+	req = mux.SetURLVars(req, map[string]string{"workflow_ref": "custom-plugin"})
+	req.Header.Set("X-User-Id", "user-1")
+	rec := httptest.NewRecorder()
+	PatchUserWorkflowSetting(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("got %d, want %d, body=%s", rec.Code, http.StatusBadRequest, rec.Body.String())
 	}
 }
 

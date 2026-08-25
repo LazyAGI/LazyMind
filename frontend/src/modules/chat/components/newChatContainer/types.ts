@@ -2,9 +2,9 @@ import type { ReactNode } from "react";
 import {
   ChatConversationsRequestActionEnum,
   Query,
-  Source,
 } from "@/api/generated/chatbot-client";
-import type { SendMessageParams } from "../ChatInput";
+import type { ChatSourceCollection } from "@/modules/chat/utils/sourceAdapter";
+import type { SendMessageParams } from "../ChatInput/types";
 import type { ChatMention } from "../ChatInput/MentionEditor";
 import type { ChatConfig } from "../ChatConfigs";
 
@@ -18,8 +18,14 @@ export interface ChatImperativeProps {
   ) => void;
   uploadFiles?: (files: File[]) => void;
   openResumeSSE?: (conversationId: string) => void;
-  appendAutoAdvanceTurn?: (conversationId: string, driverMessage: string) => void;
-  ensureAutoAdvanceUserTurn?: (conversationId: string, driverMessage: string) => void;
+  appendAutoAdvanceTurn?: (
+    conversationId: string,
+    driverMessage: string,
+  ) => void;
+  ensureAutoAdvanceUserTurn?: (
+    conversationId: string,
+    driverMessage: string,
+  ) => void;
 }
 
 export interface ChatContainerProps {
@@ -35,6 +41,7 @@ export interface ChatContainerProps {
   onOpenResumeSSE?: (
     conversationId: string,
     callbacks: Record<string, (e: CustomEvent) => void>,
+    cursor?: { historyId?: string; afterSequence?: number },
   ) => any;
   onConversationIdChange?: (conversationId: string) => void;
   parseErrorData: (data: string) => string;
@@ -52,10 +59,10 @@ export interface ChatContainerProps {
   disabledReason?: string;
   disabledDescription?: ReactNode;
   disabledAction?: ReactNode;
-  onWorkflowSettingsChange?: (
-    settings: import("@/modules/chat/utils/request").ConversationWorkflowSettings,
+  onConversationSettingsChange?: (
+    settings: import("@/modules/chat/utils/request").ConversationRuntimeSettings,
   ) => void;
-  initialWorkflowSettings?: import("@/modules/chat/utils/request").ConversationWorkflowSettings;
+  initialConversationSettings?: import("@/modules/chat/utils/request").ConversationRuntimeSettings;
   hasWorkflowSession?: boolean;
 }
 
@@ -63,6 +70,7 @@ export interface ChatMessage {
   role?: string;
   delta?: string;
   raw_delta?: string;
+  delta_mode?: "append" | "replace";
   images?: {
     base64?: string;
     uid?: string;
@@ -72,12 +80,32 @@ export interface ChatMessage {
     uid?: string;
   }[];
   finish_reason?: string;
+  run_status?: "completed" | "interrupted" | "failed" | "cancelled";
+  model_retry?: {
+    retry_index: number;
+    max_attempts: number;
+  };
+  run_terminal?: {
+    status: "completed" | "interrupted" | "failed" | "cancelled";
+    reason:
+      | "normal"
+      | "awaiting_user_input"
+      | "model_incomplete"
+      | "model_failure"
+      | "runtime_failure"
+      | "user_cancelled";
+    code?: string;
+    partial_output: boolean;
+    model_call_id?: string;
+    diagnostic_id?: string;
+  };
   inputs?: Query[];
   reasoning_content?: string;
   thinking_duration_s?: number | string;
   thinking_time_s?: number | string;
   history_id?: string;
-  sources?: Source[];
+  external_event_sequence?: number;
+  sources?: ChatSourceCollection;
   feed_back?: string;
   answers?: Array<{
     content: string;
@@ -85,7 +113,7 @@ export interface ChatMessage {
     history_id?: string;
     raw_content?: string;
     reasoning_content?: string;
-    sources?: Source[];
+    sources?: ChatSourceCollection;
     thinking_duration_s?: string;
   }>;
   answer_index?: number;
@@ -111,14 +139,14 @@ export interface ChatMessage {
   };
   resolved_tool_limit_decision_id?: string;
   mentions?: ChatMention[];
-	collected_inputs?: Array<{
-		task_id: string;
-		conversation_id?: string;
-		source_name?: string;
-		executed_at?: string;
-		mode?: string;
-		summary?: string;
-	}>;
+  collected_inputs?: Array<{
+    task_id: string;
+    conversation_id?: string;
+    source_name?: string;
+    executed_at?: string;
+    mode?: string;
+    summary?: string;
+  }>;
   intent_updated?: {
     scope: "conversation";
     intent_context: Record<string, unknown>;

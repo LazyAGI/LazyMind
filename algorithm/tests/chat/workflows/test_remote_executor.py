@@ -1,5 +1,6 @@
 import json
 import os
+import threading
 
 import httpx
 import pytest
@@ -18,20 +19,65 @@ def test_remote_executor_ignores_non_json_stream_frames():
     assert RemoteWorkflowExecutor._parse_frame('event: heartbeat\n\n') is None
 
 
-def test_remote_executor_embeds_host_local_file(tmp_path):
-    output = tmp_path / 'report.txt'
-    output.write_text('remote result', encoding='utf-8')
-    value = RemoteWorkflowExecutor._embed_files(
-        {'path': 'report.txt', 'name': 'report.txt'}, 'file', str(tmp_path))
-    assert value['path'].startswith('data:text/plain;base64,')
-    assert str(tmp_path) not in value['path']
+@pytest.mark.asyncio
+async def test_remote_executor_persists_artifact_before_task_center_event(monkeypatch, tmp_path):
+    worker = RemoteWorkflowExecutor()
 
+    class Runtime:
+        task_artifact = None
+        workflow_artifact = None
+        uploaded = None
 
-def test_remote_executor_preserves_core_static_file_url():
-    signed_url = '/static-files/ai_generated/result.png?expires=123&sig=test'
-    value = RemoteWorkflowExecutor._embed_files(
-        {'path': signed_url}, 'image', '/tmp/workspace')
-    assert value['path'] == signed_url
+        async def context(self, *_):
+            return {'metadata': {'task_id': 'task-1'}, 'inputs': {}}
+
+        async def execution_spec(self, *_):
+            return {'task': {'input_slots': [], 'output_slots': ['image_output']},
+                    'workspace_path': str(tmp_path / 'task-1'),
+                    'params': {}, 'steps': [], 'llm_config': {}}
+
+        async def heartbeat(self, *_):
+            return None
+
+        async def task_event(self, _client, _task, _lease, event):
+            if event.get('type') == 'artifact':
+                self.task_artifact = event
+
+        async def artifact(self, _client, _attempt, _lease, artifact):
+            self.workflow_artifact = artifact
+
+        async def upload_artifact_file(self, _client, attempt, lease, filename, content):
+            self.uploaded = (attempt, lease, filename, content)
+            return '/var/lib/lazymind/uploads/workflow-artifacts/session-1/attempt-1/result.png'
+
+        async def complete(self, *_):
+            return None
+
+        async def fail(self, *_):
+            pytest.fail('the attempt should not fail')
+
+    async def stream(**kwargs):
+        output = os.path.join(kwargs['task_spec']['workspace_path'], 'result.png')
+        with open(output, 'wb') as handle:
+            handle.write(b'png')
+        yield 'data: ' + json.dumps({
+            'type': 'artifact', 'slot': 'image_output', 'content_type': 'image',
+            'seq': 1, 'value': {'path': output},
+        }) + '\n\n'
+        yield 'data: {"type":"done","status":"succeeded","summary":"done"}\n\n'
+
+    from lazymind.chat.engine.subagent import runner
+    runtime = Runtime()
+    worker.runtime = runtime
+    monkeypatch.setattr(runner, 'run_subagent_stream', stream)
+
+    await worker._run_claim(object(), {'attempt_id': 'attempt-1', 'lease_token': 'lease-1'})
+
+    task_value = runtime.task_artifact['value']['path']
+    workflow_value = runtime.workflow_artifact['value']['path']
+    assert task_value == '/var/lib/lazymind/uploads/workflow-artifacts/session-1/attempt-1/result.png'
+    assert task_value == workflow_value
+    assert runtime.uploaded == ('attempt-1', 'lease-1', 'result.png', b'png')
 
 
 @pytest.mark.asyncio
@@ -47,19 +93,173 @@ async def test_remote_executor_materializes_fenced_inputs_in_host_workspace(tmp_
 
     runtime = Runtime()
     worker.runtime = runtime
-    values = await worker._materialize_inputs(
+    values = await worker._resolve_inputs(
         object(), 'attempt-1', 'lease-1', {'inputs': {'brief': {}}}, str(tmp_path))
     assert runtime.calls == [('attempt-1', 'lease-1', 'brief')]
     assert values['brief'] == str(tmp_path / 'inputs' / 'brief.txt')
     assert (tmp_path / 'inputs' / 'brief.txt').read_text() == 'hello'
 
 
-def test_remote_executor_does_not_embed_paths_outside_workspace(tmp_path):
-    outside = tmp_path.parent / 'secret.txt'
-    outside.write_text('secret', encoding='utf-8')
-    value = RemoteWorkflowExecutor._embed_files(
-        {'path': str(outside)}, 'file', str(tmp_path))
-    assert value['path'] == ''
+@pytest.mark.asyncio
+async def test_remote_executor_passes_external_scalar_inputs_as_values(tmp_path):
+    worker = RemoteWorkflowExecutor()
+
+    class Runtime:
+        async def input(self, _client, _attempt, _lease, material):
+            values = {
+                'topic': ('topic.txt', '5Lq65bel5pm66IO96L6F5Yqp6L2v5Lu25rWL6K+V'),
+                'word_target': ('word_target.txt', 'NDAw'),
+                'options': ('options.txt', 'eyJmb3JtYXQiOiAiZG9jeCJ9'),
+            }
+            name, encoded = values[material]
+            return {'name': name, 'mime_type': 'text/plain', 'content_base64': encoded}
+
+    worker.runtime = Runtime()
+    context = {
+        'declared_input_types': {
+            'topic': 'text', 'word_target': 'text', 'options': 'json',
+        },
+        'inputs': {
+            key: {'source_type': 'input_resource'}
+            for key in ('topic', 'word_target', 'options')
+        },
+    }
+    values = await worker._resolve_inputs(
+        object(), 'attempt-1', 'lease-1', context, str(tmp_path),
+    )
+
+    assert values == {
+        'topic': '人工智能辅助软件测试',
+        'word_target': '400',
+        'options': {'format': 'docx'},
+    }
+    assert not (tmp_path / 'inputs').exists()
+
+
+@pytest.mark.asyncio
+async def test_remote_executor_materializes_every_list_input_in_order(tmp_path):
+    worker = RemoteWorkflowExecutor()
+
+    class Runtime:
+        async def input(self, _client, _attempt, _lease, _material):
+            return {'items': [
+                {'name': '../effect.png', 'content_base64': 'Zmlyc3Q='},
+                {'name': '../effect.png', 'content_base64': 'c2Vjb25k'},
+            ]}
+
+    worker.runtime = Runtime()
+    values = await worker._resolve_inputs(
+        object(), 'attempt-1', 'lease-1', {'inputs': {'effect_images': [{}, {}]}}, str(tmp_path))
+    expected = [
+        tmp_path / 'inputs' / 'effect_images' / '0001_effect.png',
+        tmp_path / 'inputs' / 'effect_images' / '0002_effect.png',
+    ]
+    assert values['effect_images'] == [str(path) for path in expected]
+    assert [path.read_text() for path in expected] == ['first', 'second']
+
+
+@pytest.mark.asyncio
+async def test_remote_executor_preserves_single_item_list_cardinality(tmp_path):
+    worker = RemoteWorkflowExecutor()
+
+    class Runtime:
+        async def input(self, _client, _attempt, _lease, _material):
+            return {'items': [{'name': 'only.png', 'content_base64': 'b25seQ=='}]}
+
+    worker.runtime = Runtime()
+    values = await worker._resolve_inputs(
+        object(), 'attempt-1', 'lease-1', {'inputs': {'images': [{}]}}, str(tmp_path))
+    assert values['images'] == [str(tmp_path / 'inputs' / 'images' / '0001_only.png')]
+
+
+@pytest.mark.asyncio
+async def test_remote_executor_keeps_workflow_inputs_out_of_user_attachments(
+    monkeypatch, tmp_path,
+):
+    worker = RemoteWorkflowExecutor()
+    captured = {}
+
+    class Runtime:
+        async def context(self, *_):
+            return {
+                'metadata': {'task_id': 'task-1'},
+                'declared_input_types': {'brief': 'text'},
+                'inputs': {'brief': {'source_type': 'input_resource'}},
+            }
+
+        async def input(self, *_):
+            return {'name': 'brief.txt', 'content_base64': 'aGVsbG8='}
+
+        async def execution_spec(self, *_):
+            return {
+                'task': {'input_slots': ['brief'], 'output_slots': []},
+                'workspace_path': str(tmp_path / 'task-1'),
+                'params': {
+                    'history_files_per_turn': {'1': ['/uploads/real-user-file.txt']},
+                },
+                'steps': [],
+                'llm_config': {},
+            }
+
+        async def complete(self, *_):
+            return None
+
+        async def fail(self, *_):
+            pytest.fail('the attempt should not fail')
+
+        async def task_event(self, *_):
+            return None
+
+    async def stream(**kwargs):
+        captured.update(kwargs['task_spec']['params'])
+        yield 'data: {"type":"done","status":"succeeded","summary":"done"}\n\n'
+
+    from lazymind.chat.engine.subagent import runner
+    worker.runtime = Runtime()
+    monkeypatch.setattr(runner, 'run_subagent_stream', stream)
+
+    await worker._run_claim(object(), {'attempt_id': 'attempt-1', 'lease_token': 'lease-1'})
+
+    assert captured['remote_inputs']['brief'] == 'hello'
+    assert captured['remote_input_types'] == {'brief': 'text'}
+    assert captured['remote_input_value_slots'] == ['brief']
+    assert '_attachment_context' not in captured
+    agentic = runner._build_agentic_config(
+        {'conversation_id': 'conversation-1', 'objective': 'test'},
+        captured,
+        'workflow_step',
+    )
+    assert agentic['files'] == ['/uploads/real-user-file.txt']
+    assert captured['remote_inputs']['brief'] not in agentic['files']
+
+
+def test_workflow_material_prompt_forbids_attachment_tools():
+    from lazymind.chat.engine.subagent.runner import (
+        _resolve_attachment_configs,
+        _workflow_material_bindings_section,
+    )
+
+    params = {
+        'remote_inputs': {
+            'topic': '人工智能辅助软件测试',
+            'outline_document': '/workspace/inputs/outline_document.md',
+        },
+        'remote_input_types': {'topic': 'text', 'outline_document': 'file'},
+        'remote_input_value_slots': ['topic'],
+    }
+    prompt = _workflow_material_bindings_section(params)
+
+    assert 'not user-uploaded attachments' in prompt
+    assert 'kind=value' in prompt
+    assert '"value": "人工智能辅助软件测试"' in prompt
+    assert '"path": "/workspace/inputs/outline_document.md"' in prompt
+    assert 'read_user_attachment' in prompt
+    assert _resolve_attachment_configs({}, 'workflow_step', params) == []
+    assert _resolve_attachment_configs(
+        {'history_files_per_turn': {'1': ['/uploads/real-user-file.txt']}},
+        'ordinary_subagent',
+        {},
+    )
 
 
 @pytest.mark.asyncio
@@ -68,6 +268,7 @@ async def test_execution_spec_failure_marks_claimed_attempt_failed():
 
     class Runtime:
         failure = ''
+        terminal = None
 
         async def context(self, *_):
             return {'metadata': {'task_id': 'missing-task'}, 'inputs': {}}
@@ -80,14 +281,20 @@ async def test_execution_spec_failure_marks_claimed_attempt_failed():
         async def fail(self, _client, _attempt, _lease, message):
             self.failure = message
 
+        async def task_event(self, _client, task, _lease, event):
+            self.terminal = (task, event)
+
     runtime = Runtime()
     worker.runtime = runtime
     await worker._run_claim(object(), {'attempt_id': 'attempt-1', 'lease_token': 'lease-1'})
     assert runtime.failure.startswith('executor setup failed:')
+    assert runtime.terminal == ('missing-task', {
+        'type': 'error', 'status': 'failed', 'message': runtime.failure,
+    })
 
 
 @pytest.mark.asyncio
-async def test_completion_rejection_becomes_explicit_failure(monkeypatch):
+async def test_completion_rejection_becomes_explicit_failure(monkeypatch, tmp_path):
     worker = RemoteWorkflowExecutor()
 
     class Runtime:
@@ -98,7 +305,8 @@ async def test_completion_rejection_becomes_explicit_failure(monkeypatch):
             return {'metadata': {'task_id': 'task-1'}, 'inputs': {}}
 
         async def execution_spec(self, *_):
-            return {'task': {'input_slots': [], 'output_slots': []}, 'params': {}, 'steps': [],
+            return {'task': {'input_slots': [], 'output_slots': []},
+                    'workspace_path': str(tmp_path / 'task-1'), 'params': {}, 'steps': [],
                     'llm_config': {}}
 
         async def heartbeat(self, *_):
@@ -129,9 +337,10 @@ async def test_completion_rejection_becomes_explicit_failure(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_reclaimed_attempt_resumes_durable_steps_in_isolated_workspace(monkeypatch):
+async def test_reclaimed_attempt_resumes_durable_steps_in_workspace(monkeypatch, tmp_path):
     worker = RemoteWorkflowExecutor()
     captured = {}
+    workspace = tmp_path / 'task-1'
 
     class Runtime:
         completed = False
@@ -140,7 +349,8 @@ async def test_reclaimed_attempt_resumes_durable_steps_in_isolated_workspace(mon
             return {'metadata': {'task_id': 'task-1'}, 'inputs': {}}
 
         async def execution_spec(self, *_):
-            return {'task': {'input_slots': [], 'output_slots': []}, 'params': {},
+            return {'task': {'input_slots': [], 'output_slots': []},
+                    'workspace_path': str(workspace), 'params': {},
                     'steps': [{'seq': 0, 'role': 'text', 'content': {'content': 'checkpoint'}}],
                     'llm_config': {}, 'tool_config': {'tavily': 'test-token'}}
 
@@ -165,20 +375,18 @@ async def test_reclaimed_attempt_resumes_durable_steps_in_isolated_workspace(mon
     assert runtime.completed is True
     assert captured['resume'] is True
     assert captured['tool_config'] == {'tavily': 'test-token'}
+    assert captured['task_spec']['workspace_path'] == str(workspace)
     assert captured['initial_steps'][0]['content']['content'] == 'checkpoint'
-    workspace = captured['task_spec']['workspace_path']
-    assert 'lazymind-workflow-attempt-1-' in workspace
-    assert not os.path.exists(workspace)
+    assert workspace.exists()
 
 
 @pytest.mark.asyncio
-async def test_lease_loss_cancels_subagent_and_suppresses_stale_terminal(monkeypatch):
-    import asyncio
+async def test_lease_loss_cancels_subagent_and_suppresses_stale_terminal(monkeypatch, tmp_path):
     from lazymind.chat.engine.subagent import runner
-    import lazymind.chat.workflow.remote_executor as remote_module
 
     worker = RemoteWorkflowExecutor()
-    cancelled = asyncio.Event()
+    worker.heartbeat_seconds = 0.01
+    cancelled = threading.Event()
 
     class Runtime:
         terminal_calls = 0
@@ -187,9 +395,10 @@ async def test_lease_loss_cancels_subagent_and_suppresses_stale_terminal(monkeyp
             return {'metadata': {'task_id': 'task-1'}, 'inputs': {}}
 
         async def execution_spec(self, *_):
-            return {'task': {'input_slots': [], 'output_slots': []}, 'params': {}, 'steps': []}
+            return {'task': {'input_slots': [], 'output_slots': []},
+                    'workspace_path': str(tmp_path / 'task-1'), 'params': {}, 'steps': []}
 
-        async def heartbeat(self, *_):
+        def heartbeat_sync(self, *_):
             raise httpx.HTTPStatusError(
                 'lease lost', request=httpx.Request('POST', 'http://runtime/heartbeat'),
                 response=httpx.Response(409))
@@ -204,19 +413,13 @@ async def test_lease_loss_cancels_subagent_and_suppresses_stale_terminal(monkeyp
             self.terminal_calls += 1
 
     async def stream(**_kwargs):
-        await cancelled.wait()
+        cancelled.wait(timeout=1)
         yield 'data: {"type":"error","status":"failed","message":"cancelled"}\n\n'
-
-    original_sleep = asyncio.sleep
-
-    async def immediate_sleep(_seconds):
-        await original_sleep(0)
 
     runtime = Runtime()
     worker.runtime = runtime
     monkeypatch.setattr(runner, 'run_subagent_stream', stream)
     monkeypatch.setattr(worker, '_cancel_subagent', lambda _task: cancelled.set())
-    monkeypatch.setattr(remote_module.asyncio, 'sleep', immediate_sleep)
     await worker._run_claim(object(), {'attempt_id': 'attempt-1', 'lease_token': 'lease-1'})
     assert cancelled.is_set()
     assert runtime.terminal_calls == 0

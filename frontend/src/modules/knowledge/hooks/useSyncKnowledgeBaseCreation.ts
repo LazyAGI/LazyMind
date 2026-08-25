@@ -86,6 +86,7 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
     useState<FeishuDataSourceConnection | null>(null);
   const [notionAuthAccounts, setNotionAuthAccounts] = useState<FeishuAuthAccount[]>([]);
   const [isGoogleDriveAuthValid, setIsGoogleDriveAuthValid] = useState(false);
+  const [cloudConnectionLoading, setCloudConnectionLoading] = useState(true);
   const [cloudSetupProvider, setCloudSetupProvider] =
     useState<CloudDataSourceProvider>("feishu");
   const [feishuSetupModalOpen, setFeishuSetupModalOpen] = useState(false);
@@ -143,7 +144,16 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
     handleSearchLocalPathOptions,
     handleLoadLocalPathChildren,
     resetLocalPathBrowseOptions,
-  } = useLocalPathTree({ t, form, getPreferredLocalAgentId });
+    localPathRecommendations,
+    localPathRecommendationsLoading,
+    localPathRecommendationsError,
+    loadLocalPathRecommendations,
+  } = useLocalPathTree({
+    t,
+    form,
+    getPreferredLocalAgentId,
+    recommendationsEnabled: wizardOpen && selectedType === "local",
+  });
 
   const getActiveFeishuAuthConnectionId = () => {
     const fromOauth = `${oauthConnection?.connectionId || ""}`.trim();
@@ -351,11 +361,41 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
   }, [form]);
 
   useEffect(() => {
-    void ctx.refreshFeishuAuthAccounts();
-    void ctx.refreshNotionAuthAccounts();
-    void refreshGoogleDriveAuthState();
+    let active = true;
+    void Promise.allSettled([
+      ctx.refreshFeishuAuthAccounts(),
+      ctx.refreshNotionAuthAccounts(),
+      refreshGoogleDriveAuthState(),
+    ]).finally(() => {
+      if (active) {
+        setCloudConnectionLoading(false);
+      }
+    });
+    return () => {
+      active = false;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  const handleCreateFromCloudDocuments = (
+    type: Extract<SourceType, "local" | "feishu" | "notion">,
+  ) => {
+    if (type === "feishu" && validFeishuAccounts.length === 1) {
+      const connection = validFeishuAccounts[0].connection;
+      if (connection?.connectionId) {
+        ctx.handleSelectFeishuAuthConnection(connection);
+        return;
+      }
+    }
+    if (type === "notion" && validNotionAccounts.length === 1) {
+      const connection = validNotionAccounts[0].connection;
+      if (connection?.connectionId) {
+        ctx.handleSelectNotionAuthConnection(connection);
+        return;
+      }
+    }
+    ctx.handleCreateProviderSelect(type);
+  };
 
   const openCreateModal = useCallback(() => {
     setCreateProviderModalOpen(true);
@@ -392,6 +432,7 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
     isFeishuAuthValid,
     isNotionAuthValid,
     isGoogleDriveAuthValid,
+    cloudConnectionLoading,
     validFeishuAccounts,
     validNotionAccounts,
     localPathOptions,
@@ -400,6 +441,10 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
     handleSearchLocalPathOptions,
     handleLoadLocalPathChildren,
     resetLocalPathBrowseOptions,
+    localPathRecommendations,
+    localPathRecommendationsLoading,
+    localPathRecommendationsError,
+    loadLocalPathRecommendations,
     feishuTargetTreeData,
     feishuTargetLoading,
     loadFeishuTargetOptions,
@@ -408,6 +453,7 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
     resetFeishuTargetBrowseOptions,
     seedFeishuTargetTree,
     handleCreateProviderSelect: ctx.handleCreateProviderSelect,
+    handleCreateFromCloudDocuments,
     handleOpenFeishuGuideFromAuthSelect: ctx.handleOpenFeishuGuideFromAuthSelect,
     handleAddFeishuAuthFromSelect: ctx.handleAddFeishuAuthFromSelect,
     handleAddNotionAuthFromSelect: ctx.handleAddNotionAuthFromSelect,

@@ -3,6 +3,8 @@ from __future__ import annotations
 from .citations import (
     annotate_citations,
     build_stream_citation_scanner,
+    materialize_source_views,
+    register_existing_sources,
     register_image_url,
     reset_citation_state,
     rewrite_citations,
@@ -31,6 +33,8 @@ __all__ = [
     'build_stream_citation_scanner',
     'local_path_from_static_file_url',
     'log_and_emit_frame',
+    'materialize_source_views',
+    'register_existing_sources',
     'register_image_url',
     'reset_citation_state',
     'response_payload',

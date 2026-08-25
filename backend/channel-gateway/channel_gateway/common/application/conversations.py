@@ -12,6 +12,7 @@ from channel_gateway.common.application.capabilities import (
     ResolvedChanges,
 )
 from channel_gateway.common.domain.commands import (
+    AssistantProvider,
     CommandEnvelope,
     ConversationSwitchCommand,
     PreparedConversationTarget,
@@ -21,7 +22,7 @@ from channel_gateway.common.domain.commands import (
 )
 from channel_gateway.common.errors import LazyMindError, LazyMindHTTPError
 from channel_gateway.common.domain.chat import (
-    ChannelFeatureProfile,
+    ChatOptions,
     CoreStreamUpdate,
     CoreTurnResult,
 )
@@ -78,26 +79,44 @@ class ConversationActions:
         source_command: CommandEnvelope | None = None,
         source_messages: Sequence[str] = (),
         catalog: dict[str, Any],
-        features: ChannelFeatureProfile,
-        conversation_id_override: str | None = None,
-        external_agent: bool = False,
         activate_route: bool = True,
         ask_answers_structured: dict[str, Any] | None = None,
         inputs: Sequence[dict[str, str]] = (),
         mentions: Sequence[dict[str, str]] = (),
         thinking_depth: str | None = None,
+        conversation_id_override: str | None = None,
         on_stream: Callable[[CoreStreamUpdate], None] | None = None,
+        chat_only: bool = False,
     ) -> ConversationResult:
         conversation_id = (
             conversation_id_override
             if conversation_id_override is not None
-            else self._store.get_route(
-                account_id,
-                external_address_hash,
-            )
+            else self._store.get_route(account_id, external_address_hash)
         )
+        if chat_only and conversation_id:
+            try:
+                detail = self._client.get_conversation_detail(
+                    owner_user_id=owner_user_id,
+                    conversation_id=conversation_id,
+                    request_id=f'{request_id}_route',
+                )
+            except LazyMindHTTPError as exc:
+                if exc.status_code != 404:
+                    raise
+                self._store.begin_new_conversation(
+                    account_id,
+                    external_address_hash,
+                )
+                conversation_id = None
+            else:
+                if str(detail.get('chat_executor') or 'lazymind') != 'lazymind':
+                    self._store.begin_new_conversation(
+                        account_id,
+                        external_address_hash,
+                    )
+                    conversation_id = None
         state = self._store.get_navigation_state(account_id, external_address_hash) or {}
-        explicit_new = state.get('mode') == 'new_pending'
+        explicit_new = not chat_only and state.get('mode') == 'new_pending'
         resolved = (
             resolved_changes
             if resolved_changes is not None
@@ -133,31 +152,28 @@ class ConversationActions:
                 else []
             )
             options = self._capabilities.turn_options(resolved, base_dataset_ids)
-            options = self._capabilities.merge_options(
-                self._capabilities.options_from_dict(
+            if not chat_only:
+                options = ChatOptions.from_dict(
                     self._store.get_pending_turn(
                         account_id,
                         external_address_hash,
                     )
-                ),
-                options,
-            )
+                ).merged(options)
         else:
             default_ids = self._capabilities.default_dataset_ids(catalog)
             options = self._capabilities.new_conversation_options([], default_ids)
-            options = self._capabilities.merge_options(
-                options,
-                self._capabilities.options_from_dict(
-                    self._store.get_pending_turn(
-                        account_id,
-                        external_address_hash,
-                    )
-                ),
-            )
+            if not chat_only:
+                options = options.merged(
+                    ChatOptions.from_dict(
+                        self._store.get_pending_turn(
+                            account_id,
+                            external_address_hash,
+                        )
+                    ),
+                )
             if explicit_new:
-                options = self._capabilities.merge_options(
-                    options,
-                    self._capabilities.options_from_dict(
+                options = options.merged(
+                    ChatOptions.from_dict(
                         self._store.get_new_conversation_draft(
                             account_id,
                             external_address_hash,
@@ -165,8 +181,7 @@ class ConversationActions:
                     ),
                 )
             if resolved:
-                options = self._capabilities.merge_options(
-                    options,
+                options = options.merged(
                     self._capabilities.new_conversation_options(
                         resolved,
                         default_ids,
@@ -186,8 +201,6 @@ class ConversationActions:
                     request_id=request_id,
                     structured=ask_answers_structured,
                 )
-            options.features = features
-            options.external_agent = external_agent
             options.inputs.extend(dict(item) for item in inputs)
             options.ask_answers_structured = ask_answers_structured
             options.mentions.extend(dict(item) for item in mentions)
@@ -196,6 +209,9 @@ class ConversationActions:
                 if thinking_depth in {'low', 'medium', 'high', 'max'}
                 else None
             )
+            if chat_only:
+                options.workflow_mode = 'auto'
+                options.ask_answers_structured = None
             turn = self._client.chat(
                 owner_user_id=owner_user_id,
                 text=message,
@@ -210,6 +226,25 @@ class ConversationActions:
                     account_id,
                     external_address_hash,
                 )
+                if chat_only:
+                    return self.chat(
+                        account_id=account_id,
+                        external_address_hash=external_address_hash,
+                        owner_user_id=owner_user_id,
+                        request_id=f'{request_id}_recreated',
+                        message=message,
+                        changes=[],
+                        resolved_changes=[],
+                        source_command=source_command,
+                        source_messages=source_messages,
+                        catalog={},
+                        activate_route=activate_route,
+                        inputs=inputs,
+                        thinking_depth=thinking_depth,
+                        conversation_id_override='',
+                        on_stream=on_stream,
+                        chat_only=True,
+                    )
                 raise ActionMessage(
                     '当前会话已经不存在，已进入新会话状态；刚才的任务没有发送，请再发一次。'
                 ) from exc
@@ -296,7 +331,6 @@ class ConversationActions:
         source_command: CommandEnvelope,
         source_messages: Sequence[str],
         catalog: dict[str, Any],
-        features: ChannelFeatureProfile,
         on_stream: Callable[[CoreStreamUpdate], None] | None = None,
     ) -> str | ConversationResult:
         resolved = self._capabilities.resolve_changes(
@@ -316,8 +350,6 @@ class ConversationActions:
             resolved,
             self._capabilities.default_dataset_ids(catalog),
         )
-        if draft.workflow_mode is None:
-            draft.workflow_mode = 'dynamic'
         current_id = self._store.get_route(account_id, external_address_hash)
         previous_title = self._safe_title(
             owner_user_id=owner_user_id,
@@ -327,7 +359,7 @@ class ConversationActions:
         self._store.begin_new_conversation(
             account_id,
             external_address_hash,
-            self._capabilities.options_to_dict(draft),
+            draft.to_dict(),
         )
         if message:
             return self.chat(
@@ -341,7 +373,6 @@ class ConversationActions:
                 source_command=source_command,
                 source_messages=source_messages,
                 catalog=catalog,
-                features=features,
                 on_stream=on_stream,
             )
         lines = ['── 已进入新会话 ──']
@@ -372,20 +403,36 @@ class ConversationActions:
         external_address_hash: str,
         owner_user_id: str,
         request_id: str,
+        assistant: AssistantProvider = 'lazymind',
     ) -> str | ConversationResult:
-        items = self._all_conversations(owner_user_id, request_id)[:_LIST_LIMIT]
+        items = self._all_conversations(
+            owner_user_id,
+            request_id,
+            assistant=assistant,
+        )
         snapshot = [
             {
                 'conversation_id': str(item.get('conversation_id') or ''),
+                'host_id': str(item.get('host_id') or ''),
+                'provider_thread_id': str(item.get('provider_thread_id') or ''),
                 'display_name': self._display_name(item),
                 'update_time': str(item.get('update_time') or ''),
+                'assistant': assistant,
+                'project_key': str(item.get('project_key') or ''),
+                'project_name': str(item.get('project_name') or ''),
             }
             for item in items
-            if item.get('conversation_id')
+            if item.get('conversation_id') or item.get('provider_thread_id')
         ]
+        if assistant != 'lazymind':
+            projects: dict[str, list[dict[str, str]]] = {}
+            for item in snapshot:
+                projects.setdefault(item['project_key'] or 'unassigned', []).append(item)
+            snapshot = [item for project in projects.values() for item in project]
         if not snapshot:
             self._store.clear_selection_snapshot(account_id, external_address_hash)
-            return '暂时没有历史会话。你可以说“帮我创建一个新会话”。'
+            label = self._assistant_label(assistant)
+            return f'{label} 暂时没有可继续的历史会话。'
         self._store.save_selection_snapshot(
             account_id,
             external_address_hash,
@@ -394,14 +441,16 @@ class ConversationActions:
             dt.datetime.now(dt.timezone.utc) + _SNAPSHOT_TTL,
         )
         current_id = self._store.get_route(account_id, external_address_hash)
-        lines = ['最近会话：']
-        for index, item in enumerate(snapshot, start=1):
+        lines = [f'{self._assistant_label(assistant)} 最近会话：']
+        for index, item in enumerate(snapshot[:_LIST_LIMIT], start=1):
             marker = '●' if item['conversation_id'] == current_id else ' '
             lines.append(
                 f'{marker} {index}. {item["display_name"]}    '
                 f'{self._format_time(item["update_time"])}'
             )
-        lines.extend(('', '直接说“切到第几个会话”即可。'))
+        lines.extend(('', '请在卡片中选择；纯文本渠道可回复会话编号。'))
+        if len(snapshot) > _LIST_LIMIT:
+            lines.append(f'飞书卡片可分页查看全部 {len(snapshot)} 个会话。')
         return ConversationResult(
             text='\n'.join(lines),
         )
@@ -417,7 +466,6 @@ class ConversationActions:
         owner_user_id: str,
         request_id: str,
         catalog: dict[str, Any],
-        features: ChannelFeatureProfile,
         on_stream: Callable[[CoreStreamUpdate], None] | None = None,
     ) -> str | ConversationResult:
         parameters = command.parameters
@@ -461,7 +509,6 @@ class ConversationActions:
                 not parameters.message
                 and not parameters.resource_changes
             ),
-            features=features,
         )
         if not parameters.message:
             if parameters.resource_changes:
@@ -498,7 +545,6 @@ class ConversationActions:
             source_command=command,
             source_messages=source_messages,
             catalog=catalog,
-            features=features,
             conversation_id_override=target_id,
             on_stream=on_stream,
         )
@@ -543,10 +589,11 @@ class ConversationActions:
                 raise ActionMessage(
                     f'当前列表只有 1～{len(snapshot)}，当前会话没有改变。'
                 )
-            return (
-                str(snapshot[index - 1].get('conversation_id') or ''),
-                index,
-            )
+            return self._materialize_switch_target(
+                snapshot[index - 1],
+                owner_user_id=owner_user_id,
+                request_id=request_id,
+            ), index
         matches = self._match_conversations(
             self._all_conversations(owner_user_id, request_id),
             parameters.target.value,
@@ -587,6 +634,34 @@ class ConversationActions:
             )
         return str(matches[0].get('conversation_id') or ''), None
 
+    def _materialize_switch_target(
+        self,
+        item: dict[str, Any],
+        *,
+        owner_user_id: str,
+        request_id: str,
+    ) -> str:
+        conversation_id = str(item.get('conversation_id') or '')
+        if conversation_id:
+            return conversation_id
+        provider = str(item.get('assistant') or '')
+        host_id = str(item.get('host_id') or '')
+        thread_id = str(item.get('provider_thread_id') or '')
+        if provider not in {'codex', 'cursor', 'workbuddy'} or not host_id or not thread_id:
+            raise ActionMessage('这个外部会话当前不可继续，请刷新会话列表。')
+        binding = self._client.bind_external_agent_session(
+            owner_user_id=owner_user_id,
+            request_id=f'{request_id}_bind',
+            provider=provider,
+            host_id=host_id,
+            provider_thread_id=thread_id,
+        )
+        conversation_id = str(binding.get('conversation_id') or '')
+        if not conversation_id:
+            raise ActionMessage('外部会话当前不可继续，请刷新会话列表。')
+        item['conversation_id'] = conversation_id
+        return conversation_id
+
     def _load_switch_target(
         self,
         *,
@@ -621,7 +696,6 @@ class ConversationActions:
         external_address_hash: str,
         owner_user_id: str,
         request_id: str,
-        features: ChannelFeatureProfile,
     ) -> str | ConversationResult:
         conversation_id = self._store.get_route(account_id, external_address_hash)
         if not conversation_id:
@@ -650,8 +724,7 @@ class ConversationActions:
         return ConversationResult(
             text=(
                 f'当前会话：{title}\n'
-                f'最后更新：{updated_at}\n'
-                + self._feature_summary(features)
+                f'最后更新：{updated_at}'
             ),
             presentations=(
                 ConversationPresentation(
@@ -661,6 +734,27 @@ class ConversationActions:
                 ),
             ),
         )
+
+    def stop(
+        self,
+        *,
+        account_id: str,
+        external_address_hash: str,
+        owner_user_id: str,
+        request_id: str,
+    ) -> str:
+        conversation_id = self._store.get_route(
+            account_id,
+            external_address_hash,
+        )
+        if not conversation_id:
+            return '当前没有正在执行的会话。'
+        self._client.stop_chat_generation(
+            owner_user_id=owner_user_id,
+            conversation_id=conversation_id,
+            request_id=request_id,
+        )
+        return '已请求停止当前会话的生成与后台执行。'
 
     def more_history(
         self,
@@ -736,7 +830,6 @@ class ConversationActions:
         target_id: str,
         display_index: int | None,
         activate: bool = True,
-        features: ChannelFeatureProfile,
     ) -> ConversationResult:
         detail, history = self._load_switch_target(
             owner_user_id=owner_user_id,
@@ -772,7 +865,6 @@ class ConversationActions:
             (
                 f'当前会话：{label}',
                 f'最后更新：{self._format_time(str(detail.get("update_time") or ""))}',
-                self._feature_summary(features),
                 '',
             )
         )
@@ -799,38 +891,37 @@ class ConversationActions:
             ),
         )
 
-    @staticmethod
-    def _feature_summary(features: ChannelFeatureProfile) -> str:
-        enabled = features.enabled_feature_labels
-        if not enabled:
-            return (
-                '当前渠道只执行基础聊天，不会推进原有 '
-                'Workflow、Task、SubAgent 或 Ask 流程。'
-            )
-        return (
-            f'当前渠道已开放：{"、".join(enabled)}。'
-            '实际能否调用取决于你的账号与会话配置。'
-        )
-
     def _all_conversations(
         self,
         owner_user_id: str,
         request_id: str,
+        assistant: str = '',
     ) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         page_token = ''
         seen_tokens: set[str] = set()
-        for _ in range(20):
+        while True:
             if page_token in seen_tokens:
                 return items
             seen_tokens.add(page_token)
-            payload = self._client.list_conversations(
-                owner_user_id=owner_user_id,
-                request_id=request_id,
-                page_size=_CORE_PAGE_SIZE,
-                page_token=page_token,
-            )
-            raw = payload.get('conversations')
+            if assistant and assistant != 'lazymind':
+                payload = self._client.list_external_agent_sessions(
+                    owner_user_id=owner_user_id,
+                    request_id=request_id,
+                    provider=assistant,
+                    page_size=_CORE_PAGE_SIZE,
+                    page_token=page_token,
+                )
+                raw = payload.get('sessions')
+            else:
+                payload = self._client.list_conversations(
+                    owner_user_id=owner_user_id,
+                    request_id=request_id,
+                    page_size=_CORE_PAGE_SIZE,
+                    page_token=page_token,
+                    assistant=assistant,
+                )
+                raw = payload.get('conversations')
             if isinstance(raw, list):
                 items.extend(dict(item) for item in raw if isinstance(item, dict))
             next_token = str(payload.get('next_page_token') or '')
@@ -838,6 +929,15 @@ class ConversationActions:
                 return items
             page_token = next_token
         return items
+
+    @staticmethod
+    def _assistant_label(assistant: str) -> str:
+        return {
+            'lazymind': 'LazyMind',
+            'codex': 'Codex Desktop',
+            'cursor': 'Cursor CLI',
+            'workbuddy': 'WorkBuddy / CodeBuddy CLI',
+        }.get(assistant, 'LazyMind')
 
     def _match_conversations(
         self,

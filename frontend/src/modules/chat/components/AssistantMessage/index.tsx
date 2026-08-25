@@ -1,26 +1,29 @@
 import { Button, Divider, Flex, message, Spin, Tooltip } from "antd";
 import { trim, debounce } from "lodash";
-import { useCallback, useEffect, useReducer, useRef } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import type { MouseEvent } from "react";
 import { useTranslation } from "react-i18next";
 
 import "./index.scss";
 import {
   CopyOutlined,
+  CloseOutlined,
   DislikeFilled,
   DislikeOutlined,
   ExclamationCircleOutlined,
+  FileTextOutlined,
   LikeFilled,
   LikeOutlined,
   ReloadOutlined,
+  RightOutlined,
 } from "@ant-design/icons";
 import {
   ChatConversationsResponseFinishReasonEnum,
   FeedBackChatHistoryRequestTypeEnum,
-  Source,
 } from "@/api/generated/chatbot-client";
 import { AgentAppsAuth } from "@/components/auth";
 import { isAskPendingReadOnly } from "@/modules/chat/utils/message";
+import type { ExternalExecutionProjection } from "@/modules/chat/utils/message";
 import { ChatServiceApi, decideToolLimit } from "@/modules/chat/utils/request";
 import { useWorkflowStore } from "@/modules/chat/store/workflowPanel";
 import { WorkflowPanel } from "@/modules/chat/components/WorkflowPanel";
@@ -29,7 +32,131 @@ import FeedbackModal from "../FeedbackModal";
 import AskCard from "@/modules/chat/components/AskCard";
 import ToolLimitCard from "@/modules/chat/components/ToolLimitCard";
 import ArtifactDownloadButton from "@/modules/chat/components/ArtifactCollectorCard/ArtifactDownloadButton";
+import RunStatusCard from "@/modules/chat/components/RunStatusCard";
+import {
+  type ChatSource,
+  type ChatSourceCollection,
+  getSearchSources,
+  getSourceDedupKey,
+  getSourceEvidenceText,
+  getSourceFaviconUrl,
+  getSourceLabel,
+  getSourceSubtitle,
+  isExternalSource,
+  openSource,
+} from "@/modules/chat/utils/sourceAdapter";
 import { IdentityAvatar } from "@/modules/identityAvatar";
+
+const SOURCE_ICON_TONES = 6;
+
+function getSourceIconTone(source: ChatSource) {
+  const value = getSourceSubtitle(source) || getSourceLabel(source);
+  let hash = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 31 + value.charCodeAt(index)) | 0;
+  }
+  return Math.abs(hash) % SOURCE_ICON_TONES;
+}
+
+function getSourceIconInitial(source: ChatSource) {
+  const value = (getSourceSubtitle(source) || getSourceLabel(source)).trim();
+  return value ? value[0].toLocaleUpperCase() : "S";
+}
+
+function SourceFavicon({
+  source,
+  compact = false,
+}: {
+  source: ChatSource;
+  compact?: boolean;
+}) {
+  const [hasFaviconError, setHasFaviconError] = useState(false);
+  const faviconUrl = getSourceFaviconUrl(source);
+  const showFavicon = Boolean(faviconUrl && !hasFaviconError);
+
+  return (
+    <span
+      className={`chat-source-brand-icon tone-${getSourceIconTone(source)}${compact ? " is-compact" : ""}`}
+      aria-hidden="true"
+    >
+      {showFavicon ? (
+        <img
+          src={faviconUrl}
+          alt=""
+          loading="lazy"
+          referrerPolicy="no-referrer"
+          onError={() => setHasFaviconError(true)}
+        />
+      ) : isExternalSource(source) ? (
+        <span className="chat-source-brand-initial">
+          {getSourceIconInitial(source)}
+        </span>
+      ) : (
+        <FileTextOutlined />
+      )}
+    </span>
+  );
+}
+
+export function ChatSourcePanel({
+  sources,
+  onClose,
+}: {
+  sources: ChatSource[];
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+
+  return (
+    <aside className="chat-source-panel" aria-label={t("chat.references")}>
+      <div className="chat-source-panel-header">
+        <h2 className="chat-source-panel-title">
+          <span>{t("chat.references")}</span>
+          <span className="chat-source-panel-count">{sources.length}</span>
+        </h2>
+        <Button
+          type="text"
+          className="chat-source-panel-close"
+          icon={<CloseOutlined />}
+          onClick={onClose}
+          aria-label={t("common.close")}
+        />
+      </div>
+      <div className="chat-source-panel-body">
+        <div className="chat-source-list">
+          {sources.map((source, sourceIndex) => (
+            <button
+              type="button"
+              className="chat-source-item"
+              key={getSourceDedupKey(source, sourceIndex)}
+              onClick={() => openSource(source)}
+              title={getSourceLabel(source)}
+            >
+              <SourceFavicon source={source} />
+              <span className="chat-source-item-copy">
+                <span className="chat-source-item-heading">
+                  {getSourceSubtitle(source) || t("chat.references")}
+                </span>
+                <strong className="chat-source-item-title">
+                  {getSourceLabel(source)}
+                </strong>
+                {getSourceEvidenceText(source) && (
+                  <span className="chat-source-item-content">
+                    {getSourceEvidenceText(source)}
+                  </span>
+                )}
+              </span>
+              <RightOutlined
+                className="chat-source-item-arrow"
+                aria-hidden="true"
+              />
+            </button>
+          ))}
+        </div>
+      </div>
+    </aside>
+  );
+}
 
 async function copyTextToClipboard(text: string) {
   const normalizedText = text.trim();
@@ -42,8 +169,7 @@ async function copyTextToClipboard(text: string) {
       await navigator.clipboard.writeText(normalizedText);
       return;
     }
-  } catch {
-  }
+  } catch {}
 
   const textarea = document.createElement("textarea");
   textarea.value = normalizedText;
@@ -77,6 +203,76 @@ interface FeedbackState {
   localFeedbackType: FeedBackChatHistoryRequestTypeEnum | undefined;
   localFeedbackHistoryId: string | undefined;
   targetHistoryId: string | undefined;
+}
+
+function ExternalExecutionSummary({
+  execution,
+}: {
+  execution?: ExternalExecutionProjection;
+}) {
+  const { t } = useTranslation();
+  if (!execution) {
+    return null;
+  }
+  const provider =
+    execution.provider.charAt(0).toUpperCase() + execution.provider.slice(1);
+  const status = t(`chat.executionStatus.${execution.status}`);
+  const workflows = execution.workflows
+    .map((workflow) => `${workflow.workflow_id} · ${workflow.status}`)
+    .join(", ");
+  return (
+    <details
+      className={`external-execution external-execution-${execution.status}`}
+    >
+      <summary>
+        <span className="external-execution-dot" />
+        <span>{provider}</span>
+        <span className="external-execution-status">{status}</span>
+      </summary>
+      <div className="external-execution-details">
+        <span>
+          {t("chat.executionCalls", { count: execution.invocation.total })}
+          {execution.invocation.tools.length > 0
+            ? ` · ${execution.invocation.tools.join(", ")}`
+            : ""}
+        </span>
+        {execution.recovery_count > 0 && (
+          <span>
+            {t("chat.executionRecovery", { count: execution.recovery_count })}
+          </span>
+        )}
+        {workflows && (
+          <span>
+            {t("chat.executionWorkflow")} · {workflows}
+          </span>
+        )}
+        {execution.artifact_revision_count > 0 && (
+          <span>
+            {t("chat.executionArtifacts", { count: execution.artifact_count })}
+            {" · "}
+            {t("chat.executionVersions", {
+              count: execution.artifact_revision_count,
+            })}
+          </span>
+        )}
+        {execution.host_id && (
+          <span>
+            {t("chat.executionHost")} · {execution.host_id} ·{" "}
+            {t(
+              execution.host_online
+                ? "chat.executionHostOnline"
+                : "chat.executionHostOffline",
+            )}
+          </span>
+        )}
+        {execution.error_message && (
+          <span className="external-execution-error">
+            {execution.error_message}
+          </span>
+        )}
+      </div>
+    </details>
+  );
 }
 
 type FeedbackAction =
@@ -194,6 +390,7 @@ const AssistantMessage = (props: any) => {
     length,
     sendMessage,
     regenerate,
+    regenerateDisabled,
     stopGeneration,
     renderText,
     updateMessage,
@@ -202,6 +399,7 @@ const AssistantMessage = (props: any) => {
     isLatestDualAnswer,
     onCiteMessage,
     hasLaterUserMessage,
+    onOpenSources,
   } = props;
   const citeButtonRef = useRef<HTMLButtonElement | null>(null);
   const citeSelectionTextRef = useRef("");
@@ -211,7 +409,9 @@ const AssistantMessage = (props: any) => {
   // instance with useRef so it is stable across re-renders.
   const persistAskAnswersRef = useRef(
     debounce((sid: string, hid: string, answers: Record<number, any>) => {
-      ChatServiceApi().conversationServiceSaveAskAnswers(sid, hid, answers).catch(() => {});
+      ChatServiceApi()
+        .conversationServiceSaveAskAnswers(sid, hid, answers)
+        .catch(() => {});
     }, 600),
   );
   const [feedbackState, dispatch] = useReducer(feedbackReducer, {
@@ -222,17 +422,8 @@ const AssistantMessage = (props: any) => {
     targetHistoryId: undefined,
   });
 
-  const loadActiveSession = useWorkflowStore((s) => s.loadActiveSession);
-  // Eagerly load the workflow session so the panel appears without waiting for component mount.
-  const isLast = index === length - 1;
-  useEffect(() => {
-    if (isLast && sessionId) {
-      loadActiveSession(sessionId);
-    }
-  }, [isLast, sessionId, loadActiveSession]);
-
   const workflowSession = useWorkflowStore((s) =>
-    sessionId ? s.sessionByConversation[sessionId] ?? null : null,
+    sessionId ? (s.sessionByConversation[sessionId] ?? null) : null,
   );
 
   useEffect(() => {
@@ -361,10 +552,7 @@ const AssistantMessage = (props: any) => {
     const right = Math.max(...lineRects.map((lineRect) => lineRect.right));
     const centerX = (left + right) / 2;
     // Keep the fixed button inside the viewport (button ~ translateX(-50%)).
-    const clampedLeft = Math.min(
-      Math.max(centerX, 28),
-      window.innerWidth - 28,
-    );
+    const clampedLeft = Math.min(Math.max(centerX, 28), window.innerWidth - 28);
 
     showCiteButton(selectedText, Math.max(8, top - 42), clampedLeft);
   };
@@ -406,78 +594,33 @@ const AssistantMessage = (props: any) => {
     );
   }
 
-  function getSourceDisplayIndex(source: any) {
-    const index = source?.index;
-    if (source?.display_index !== undefined && source?.display_index !== null) {
-      return source.display_index;
-    }
-    if (source?.document_index !== undefined && source?.document_index !== null) {
-      return source.document_index;
-    }
-    if (typeof index === "string" && index.includes(".")) {
-      return index.split(".")[0];
-    }
-    return index;
-  }
-
-  function getSourceDocumentKey(source: any, sourceIndex: number) {
-    const displayIndex = getSourceDisplayIndex(source);
-    if (displayIndex !== undefined && displayIndex !== null) {
-      return `${source?.dataset_id || ""}:${source?.file_name || source?.document_id || ""}:${displayIndex}`;
-    }
-    if (source?.document_id) {
-      return `${source?.dataset_id || ""}:${source.document_id}`;
-    }
-    return `source-${sourceIndex}`;
-  }
-
-  function getDocumentSources(sources: Source[]) {
-    const seen = new Set<string>();
-    return Object.values(sources).filter((source: any, sourceIndex: number) => {
-      const key = getSourceDocumentKey(source, sourceIndex);
-      if (seen.has(key)) {
-        return false;
-      }
-      seen.add(key);
-      return true;
-    });
-  }
-
-  function openSource(source: any) {
-    if (source?.dataset_id === "default") {
-      message.error(t("chat.tempFileNotSupportJump"));
-      return;
-    }
-    const url = `/lib/knowledge/knowledge/${source.dataset_id}/${source.document_id}?group_name=${source.group_name}&segement_id=${source.segement_id}&number=${source.segment_number}&from=chat`;
-    window.open(url, "_blank");
-  }
-
-  function renderKnowledgeBase() {
-    const sources = item.sources as Source[];
-    if (!sources || sources.length < 1) {
-      return <></>;
-    }
+  function renderSourceButton(sources?: ChatSourceCollection) {
+    const displaySources = getSearchSources(sources);
+    if (!displaySources.length) return null;
     return (
-      <div className="chat-assistant-msg-knowledge-info">
-        {getDocumentSources(sources).map((source: Source, sourceIndex: number) => {
-          return (
-            <div
-              className="chat-assistant-msg-knowledge"
-              key={getSourceDocumentKey(source, sourceIndex)}
-            >
-              <span style={{ marginRight: "8px" }}>
-                {getSourceDisplayIndex(source)}
-              </span>
-              <span
-                className="knowledgeName"
-                onClick={() => openSource(source)}
-              >
-                {source.file_name}
-              </span>
-            </div>
-          );
-        })}
-      </div>
+      <Tooltip title={`${t("chat.references")} (${displaySources.length})`}>
+        <Button
+          className="tool-btn source-btn"
+          onClick={() => onOpenSources?.(displaySources)}
+          aria-label={`${t("chat.references")} (${displaySources.length})`}
+        >
+          <span className="chat-source-button-icons" aria-hidden="true">
+            {displaySources.slice(0, 3).map((source, sourceIndex) => (
+              <SourceFavicon
+                source={source}
+                compact
+                key={getSourceDedupKey(source, sourceIndex)}
+              />
+            ))}
+          </span>
+          <span className="chat-source-button-label">
+            {t("chat.references")}
+          </span>
+          <span className="chat-source-button-count">
+            {displaySources.length}
+          </span>
+        </Button>
+      </Tooltip>
     );
   }
 
@@ -495,7 +638,11 @@ const AssistantMessage = (props: any) => {
       const answer = item.answers.find(
         (ans: any) => ans.history_id === resolvedHistoryId,
       );
-      if (answer && answer.feed_back !== undefined && answer.feed_back !== null) {
+      if (
+        answer &&
+        answer.feed_back !== undefined &&
+        answer.feed_back !== null
+      ) {
         return normalizeFeedbackType(answer.feed_back);
       }
     }
@@ -599,7 +746,10 @@ const AssistantMessage = (props: any) => {
         },
       })
       .then(() => {
-        const updatedItem = createUpdatedItem(nextFeedbackType, targetHistoryId);
+        const updatedItem = createUpdatedItem(
+          nextFeedbackType,
+          targetHistoryId,
+        );
         updateMessage(updatedItem);
 
         dispatch({
@@ -715,41 +865,6 @@ const AssistantMessage = (props: any) => {
       .catch(() => {});
   }
 
-  function renderAnswerKnowledgeBase(answerIndex: number) {
-    const answer = item.answers?.[answerIndex];
-    if (!answer) {
-      return null;
-    }
-
-    const sources = answer.sources as Source[];
-    if (!sources || sources.length < 1) {
-      return null;
-    }
-
-    return (
-      <div className="chat-assistant-msg-knowledge-info">
-        {getDocumentSources(sources).map((source: Source, sourceIndex: number) => {
-          return (
-            <div
-              className="chat-assistant-msg-knowledge"
-              key={getSourceDocumentKey(source, sourceIndex)}
-            >
-              <span style={{ marginRight: "8px" }}>
-                {getSourceDisplayIndex(source)}
-              </span>
-              <span
-                className="knowledgeName"
-                onClick={() => openSource(source)}
-              >
-                {source.file_name}
-              </span>
-            </div>
-          );
-        })}
-      </div>
-    );
-  }
-
   function renderAnswerFooter(answerIndex: number, showFullToolbar = false) {
     const answer = item.answers?.[answerIndex];
     if (!answer) {
@@ -766,7 +881,7 @@ const AssistantMessage = (props: any) => {
           style={{ margin: "12px 0" }}
         />
         <div className="chat-assistant-msg-tool-chat-toolbar">
-          <div>
+          <div className="chat-assistant-msg-tool-actions">
             <Tooltip title={t("chat.copy")}>
               <Button
                 className="tool-btn"
@@ -782,11 +897,14 @@ const AssistantMessage = (props: any) => {
               <Tooltip title={t("chat.regenerate")}>
                 <Button
                   className="tool-btn"
-                  icon={<ReloadOutlined />}
+                  aria-label={t("chat.regenerate")}
+                  disabled={regenerateDisabled}
+                  icon={<ReloadOutlined aria-hidden="true" />}
                   onClick={regenerate}
                 />
               </Tooltip>
             )}
+            {renderSourceButton(answer.sources)}
           </div>
           {showFullToolbar && (
             <Flex>
@@ -838,7 +956,7 @@ const AssistantMessage = (props: any) => {
       <>
         <Divider className="chat-assistant-msg-tool-divider" />
         <div className="chat-assistant-msg-tool-chat-toolbar">
-          <div>
+          <div className="chat-assistant-msg-tool-actions">
             <Tooltip title={t("chat.copy")}>
               <Button
                 className="tool-btn"
@@ -854,11 +972,14 @@ const AssistantMessage = (props: any) => {
               <Tooltip title={t("chat.regenerate")}>
                 <Button
                   className="tool-btn"
-                  icon={<ReloadOutlined />}
+                  aria-label={t("chat.regenerate")}
+                  disabled={regenerateDisabled}
+                  icon={<ReloadOutlined aria-hidden="true" />}
                   onClick={regenerate}
                 />
               </Tooltip>
             )}
+            {renderSourceButton(item.sources)}
           </div>
           <Flex>
             {currentFeedback ===
@@ -900,12 +1021,18 @@ const AssistantMessage = (props: any) => {
   }
 
   function renderBottom() {
+    const runActive =
+      !item.run_status &&
+      item.finish_reason ===
+        ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified;
+    const runFailed =
+      item.run_status === "failed" || item.run_status === "interrupted";
     if (
       item.tool_limit_pending &&
-      item.tool_limit_pending.decision_id !== item.resolved_tool_limit_decision_id &&
+      item.tool_limit_pending.decision_id !==
+        item.resolved_tool_limit_decision_id &&
       sessionId &&
-      item.finish_reason ===
-        ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified
+      runActive
     ) {
       return (
         <ToolLimitCard
@@ -913,11 +1040,7 @@ const AssistantMessage = (props: any) => {
           pending={item.tool_limit_pending}
           onDecision={async (action) => {
             const decisionId = item.tool_limit_pending.decision_id;
-            await decideToolLimit(
-              sessionId,
-              decisionId,
-              action,
-            );
+            await decideToolLimit(sessionId, decisionId, action);
             updateMessage({
               id: item.id,
               history_id: item.history_id,
@@ -943,28 +1066,38 @@ const AssistantMessage = (props: any) => {
           disabled={isReadOnly}
           savedAnswers={item.ask_saved_answers}
           onAnswerChange={(idx, ans) => {
-            const currentAnswers = { ...(item.ask_saved_answers || {}), [idx]: ans };
+            const currentAnswers = {
+              ...(item.ask_saved_answers || {}),
+              [idx]: ans,
+            };
             // Update in-memory message immediately so answers survive session switches.
             updateMessage({ ...item, ask_saved_answers: currentAnswers });
             // Debounced write to backend so answers survive page reload.
             if (sessionId && item.history_id) {
-              persistAskAnswersRef.current(sessionId, item.history_id, currentAnswers);
+              persistAskAnswersRef.current(
+                sessionId,
+                item.history_id,
+                currentAnswers,
+              );
             }
           }}
           onSubmit={(payload) => {
             persistAskAnswersRef.current.cancel();
             // Mark the card as answered in memory so it shows as disabled immediately.
-            updateMessage({ ...item, ask_answered: true, ask_saved_answers: undefined });
-            props.sendMessage?.(payload.text, undefined, { ask_answers_structured: payload.structured });
+            updateMessage({
+              ...item,
+              ask_answered: true,
+              ask_saved_answers: undefined,
+            });
+            props.sendMessage?.(payload.text, undefined, {
+              ask_answers_structured: payload.structured,
+            });
           }}
         />
       );
     }
     // Show stop button while still streaming (no card present).
-    if (
-      item.finish_reason ===
-      ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified
-    ) {
+    if (runActive) {
       return (
         <Button className="stop-btn" onClick={stopGeneration}>
           {t("chat.stopGenerate")}
@@ -972,6 +1105,17 @@ const AssistantMessage = (props: any) => {
       );
     }
     // Show error + regenerate on unknown/failed finish.
+    if (runFailed) {
+      return (
+        <Button
+          className="stop-btn"
+          disabled={regenerateDisabled}
+          onClick={regenerate}
+        >
+          {t("chat.regenerate")}
+        </Button>
+      );
+    }
     if (
       item.finish_reason ===
       ChatConversationsResponseFinishReasonEnum.FinishReasonUnknown
@@ -982,6 +1126,7 @@ const AssistantMessage = (props: any) => {
           <Button
             className="stop-btn"
             style={{ marginLeft: 10 }}
+            disabled={regenerateDisabled}
             onClick={regenerate}
           >
             {t("chat.regenerate")}
@@ -1005,11 +1150,18 @@ const AssistantMessage = (props: any) => {
     );
 
   const shouldShowLoading =
+    !item.model_retry &&
     !(item.delta && trim(item.delta)?.length > 0) &&
     !(item.reasoning_content && trim(item.reasoning_content)?.length > 0) &&
     !hasMultipleAnswersContent &&
+    !item.run_status &&
     item.finish_reason ===
       ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified;
+  const runCompleted =
+    item.run_status === "completed" ||
+    (!item.run_status &&
+      item.finish_reason ===
+        ChatConversationsResponseFinishReasonEnum.FinishReasonStop);
 
   const shouldUseMultiAnswerStyle =
     hasMultipleAnswers &&
@@ -1023,13 +1175,11 @@ const AssistantMessage = (props: any) => {
         className="chat-assistant-msg-multi-answer-wrap"
         onMouseUp={handleMouseUp}
       >
-        <IdentityAvatar
-          className="chat-avatar"
-          kind="soul"
-          size={32}
-        />
+        <IdentityAvatar className="chat-avatar" kind="soul" size={32} />
         <div className="chat-bot-box-multi">
           <div className="chat-bot">
+            <ExternalExecutionSummary execution={item.execution} />
+            <RunStatusCard terminal={item.run_terminal} />
             {shouldShowLoading
               ? renderLoading()
               : renderText({ ...item, delta: "" })}
@@ -1062,27 +1212,14 @@ const AssistantMessage = (props: any) => {
                 );
               }}
               onSelectAnswer={onSelectAnswer}
-              disabled={
-                item.finish_reason !==
-                ChatConversationsResponseFinishReasonEnum.FinishReasonStop
-              }
-              renderFooter={
-                item.finish_reason ===
-                ChatConversationsResponseFinishReasonEnum.FinishReasonStop
-                  ? renderAnswerFooter
-                  : undefined
-              }
-              renderKnowledgeBase={
-                item.finish_reason ===
-                ChatConversationsResponseFinishReasonEnum.FinishReasonStop
-                  ? renderAnswerKnowledgeBase
-                  : undefined
-              }
+              disabled={!runCompleted}
+              renderFooter={runCompleted ? renderAnswerFooter : undefined}
               initialSelectedIndex={item.selected_answer_index}
               initialPreference={item.answer_preference}
               isStreaming={
+                !item.run_status &&
                 item.finish_reason ===
-                ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified
+                  ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified
               }
             />
           </div>
@@ -1113,13 +1250,11 @@ const AssistantMessage = (props: any) => {
       className="chat-assistant-msg-single-answer-wrap"
       onMouseUp={handleMouseUp}
     >
-      <IdentityAvatar
-        className="chat-avatar"
-        kind="soul"
-        size={32}
-      />
+      <IdentityAvatar className="chat-avatar" kind="soul" size={32} />
       <div className="chat-bot-box-single">
         <div className="chat-bot">
+          <ExternalExecutionSummary execution={item.execution} />
+          <RunStatusCard terminal={item.run_terminal} />
           {shouldShowLoading
             ? renderLoading()
             : item.onboardingInfo
@@ -1130,16 +1265,7 @@ const AssistantMessage = (props: any) => {
             renderError()}
 
           {}
-          {item.finish_reason ===
-            ChatConversationsResponseFinishReasonEnum.FinishReasonStop &&
-            !item.onboardingInfo &&
-            renderKnowledgeBase()}
-
-          {}
-          {item.finish_reason ===
-            ChatConversationsResponseFinishReasonEnum.FinishReasonStop &&
-            !item.onboardingInfo &&
-            renderFooter()}
+          {runCompleted && !item.onboardingInfo && renderFooter()}
         </div>
         {(item.ask_pending || index === length - 1) && renderBottom()}
         {index === length - 1 && workflowSession && sessionId && (

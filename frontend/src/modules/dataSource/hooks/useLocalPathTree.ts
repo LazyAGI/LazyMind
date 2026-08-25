@@ -3,24 +3,38 @@ import type { FormInstance, TreeSelectProps } from "antd";
 import type { TFunction } from "i18next";
 import { getLocalizedErrorMessage } from "@/components/request";
 import { dataSourceScanApi } from "../api/clients";
+import { listLocalPathRecommendations } from "../api/localPathRecommendations";
 import type { SourceFormValues } from "../constants/types";
 import { getScanTreeNodePath, type ScanV2TreeNode } from "../utils/scanAccessors";
-import type { LocalPathTreeNode } from "../utils/feishuTarget";
+import type {
+  LocalPathRecommendation,
+  LocalPathTreeNode,
+} from "../utils/feishuTarget";
 
 interface UseLocalPathTreeParams {
   t: TFunction;
   form: FormInstance<SourceFormValues>;
   getPreferredLocalAgentId: () => string;
+  recommendationsEnabled?: boolean;
 }
 
 export function useLocalPathTree({
   t,
   form,
   getPreferredLocalAgentId,
+  recommendationsEnabled = false,
 }: UseLocalPathTreeParams) {
   const [localPathOptions, setLocalPathOptions] = useState<LocalPathTreeNode[]>([]);
   const [localPathLoading, setLocalPathLoading] = useState(false);
+  const [localPathRecommendations, setLocalPathRecommendations] = useState<
+    LocalPathRecommendation[]
+  >([]);
+  const [localPathRecommendationsLoading, setLocalPathRecommendationsLoading] =
+    useState(false);
+  const [localPathRecommendationsError, setLocalPathRecommendationsError] =
+    useState("");
   const localPathRequestSeqRef = useRef(0);
+  const recommendationsLoadedRef = useRef(false);
   const localPathSearchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(
@@ -31,6 +45,53 @@ export function useLocalPathTree({
     },
     [],
   );
+
+  const loadLocalPathRecommendations = async () => {
+    setLocalPathRecommendationsLoading(true);
+    setLocalPathRecommendationsError("");
+    try {
+      const response = await listLocalPathRecommendations({
+        agent_id: getPreferredLocalAgentId() || undefined,
+      });
+      const items = (response.data.items || []) as ScanV2TreeNode[];
+      setLocalPathRecommendations(
+        items
+          .map((item) => {
+            const value = getScanTreeNodePath(item);
+            if (!value) {
+              return null;
+            }
+            const providerPath = `${item.provider_meta?.path || ""}`.trim();
+            return {
+              key: `${item.key || value}`,
+              value,
+              title: `${item.display_name || item.object_key || value}`,
+              path: providerPath || `${item.object_key || value}`,
+            } satisfies LocalPathRecommendation;
+          })
+          .filter((item): item is LocalPathRecommendation => Boolean(item)),
+      );
+      recommendationsLoadedRef.current = true;
+    } catch (error) {
+      setLocalPathRecommendations([]);
+      setLocalPathRecommendationsError(getLocalizedErrorMessage(error));
+    } finally {
+      setLocalPathRecommendationsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!recommendationsEnabled) {
+      recommendationsLoadedRef.current = false;
+      return;
+    }
+    if (!recommendationsLoadedRef.current) {
+      void loadLocalPathRecommendations();
+    }
+    // The recommendation endpoint is loaded once whenever the local-source
+    // wizard opens. Manual refresh remains available in the UI.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [recommendationsEnabled]);
 
   const buildLocalPathHelperOptions = (helperText?: string): LocalPathTreeNode[] => {
     if (!helperText) {
@@ -242,6 +303,10 @@ export function useLocalPathTree({
   return {
     localPathOptions,
     localPathLoading,
+    localPathRecommendations,
+    localPathRecommendationsLoading,
+    localPathRecommendationsError,
+    loadLocalPathRecommendations,
     loadLocalPathOptions,
     handleSearchLocalPathOptions,
     handleLoadLocalPathChildren,

@@ -201,4 +201,3 @@ func (c *LocalFSConnector) CheckPathExists(ctx context.Context, agentID, path st
 	_, err := c.agent.StatPath(ctx, StatPathRequest{AgentID: agentID, Path: path})
 	return err == nil
 }
-

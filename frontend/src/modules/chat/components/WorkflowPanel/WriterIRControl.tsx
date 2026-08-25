@@ -1,31 +1,48 @@
+import { MenuFoldOutlined, MenuUnfoldOutlined } from '@ant-design/icons';
 import {
   createElement,
   Fragment,
   useCallback,
   useContext,
   useEffect,
+  useId,
+  useMemo,
   useRef,
   useState,
   type ReactNode,
 } from 'react';
 import { useTranslation } from 'react-i18next';
 import {
+  collectWriterOutline,
+  getWriterInternalReference,
   getWriterSpanStyles,
+  isWriterSystemAnchorBlock,
   normalizeWriterCodeLanguage,
   repairWriterCodeToolbarPollution,
   sameWriterDocument,
   sameWriterDocumentForSync,
+  writerHeadingLevel,
   type WriterBlock,
   type WriterDocument,
   type WriterSpan,
 } from './writerIR';
-import { WriterIRDocumentEditor } from './WriterIRDocumentEditor';
+import {
+  WriterIRDocumentEditor,
+  type WriterIRRewritePreview,
+  type WriterIRRewriteSelection,
+} from './WriterIRDocumentEditor';
+import { ArtifactRewriteSelectionAction } from './ArtifactRewriteSelectionAction';
+import { ArtifactRewriteSelectionHighlight } from './ArtifactRewriteSelectionHighlight';
+import {
+  selectionActionAnchor,
+  type SelectionActionAnchor,
+} from './artifactRewriteSelection';
 import { highlightCode } from '../MarkdownViewer/syntaxHighlight';
 import { SlotEditingContext } from './slotEditingContext';
 import './WriterIRControl.scss';
 
 /** Idle debounce after the latest edit before draft autosave. */
-const WRITER_IR_AUTOSAVE_IDLE_MS = 3_000;
+const WRITER_IR_AUTOSAVE_IDLE_MS = 1_000;
 /** Max time a dirty draft can wait before a draft save is forced. */
 const WRITER_IR_AUTOSAVE_MAX_WAIT_MS = 15_000;
 /** Coalesce follow-up saves after an in-flight request finishes. */
@@ -33,6 +50,7 @@ const WRITER_IR_SAVE_FOLLOWUP_MS = 400;
 
 type WriterIRSaveRunResult = 'noop' | 'saved' | 'error' | 'busy';
 export type WriterIRSaveMode = 'draft' | 'checkpoint';
+type WriterIRPageWidth = 'default' | 'wide';
 
 export interface WriterIRControlProps {
   document: WriterDocument;
@@ -40,6 +58,11 @@ export interface WriterIRControlProps {
   readOnly?: boolean;
   /** Stable key used to register flush-before-retry with WorkflowPanel. */
   editingKey?: string;
+  /**
+   * When true (draft_document), local Save / flush never create a version.
+   * Versions are created only by successful Feishu write-back.
+   */
+  feishuVersionOnly?: boolean;
   onSave?: (
     sourceDocument: WriterDocument,
     revisedDocument: WriterDocument,
@@ -47,17 +70,18 @@ export interface WriterIRControlProps {
     mode?: WriterIRSaveMode,
   ) => Promise<WriterIRSaveResult | void>;
   onEditingChange?: (editing: boolean) => void;
+  /** Reports the current draft so the write-back action can compare it with its Feishu baseline. */
+  onDocumentChange?: (document: WriterDocument) => void;
+  onRewriteSelection?: (selection: WriterIRRewriteSelection) => void;
+  rewriteDialogOpen?: boolean;
+  rewritePreview?: WriterIRRewritePreview | null;
+  onRewritePreviewApplied?: (revision?: number) => void;
+  onRewritePreviewRejected?: () => void;
 }
 
 export interface WriterIRSaveResult {
   document: WriterDocument;
   sourceRevision?: string | number;
-}
-
-function asHeadingLevel(block: WriterBlock): 1 | 2 | 3 | 4 | 5 | 6 {
-  const raw = Number(block.numbering?.level ?? 2);
-  if (!Number.isFinite(raw)) return 2;
-  return Math.min(6, Math.max(1, Math.trunc(raw))) as 1 | 2 | 3 | 4 | 5 | 6;
 }
 
 function hasEditableWriterBlock(blocks: WriterBlock[]): boolean {
@@ -76,6 +100,10 @@ function renderMarkedText(text: string, styles: string[], key: string) {
   return <Fragment key={key}>{content}</Fragment>;
 }
 
+function writerBlockDomId(nodeId: string): string {
+  return `writer-block-${nodeId}`;
+}
+
 function SpanContent({ block }: { block: WriterBlock }) {
   const content = block.content ?? '';
   const spans = block.spans ?? [];
@@ -83,18 +111,30 @@ function SpanContent({ block }: { block: WriterBlock }) {
   if (spans.length === 0 || joined !== content) return <>{content}</>;
   return (
     <>
-      {spans.map((span: WriterSpan, index) => (
-        renderMarkedText(span.text, getWriterSpanStyles(span), `${block.node_id}-${index}`)
-      ))}
+      {spans.map((span: WriterSpan, index) => {
+        const key = `${block.node_id}-${index}`;
+        const content = renderMarkedText(span.text, getWriterSpanStyles(span), `${key}-text`);
+        const reference = getWriterInternalReference(span);
+        return reference ? (
+          <a
+            className='writer-ir__internal-ref'
+            href={`#${writerBlockDomId(reference.targetNodeId)}`}
+            key={key}
+          >
+            {content}
+          </a>
+        ) : <Fragment key={key}>{content}</Fragment>;
+      })}
     </>
   );
 }
 
 function PreviewBlockContent({ block }: { block: WriterBlock }) {
   if (block.type === 'heading') {
+    const level = writerHeadingLevel(block);
     return createElement(
-      `h${asHeadingLevel(block)}`,
-      { className: `writer-ir__heading writer-ir__heading--${asHeadingLevel(block)}` },
+      `h${level}`,
+      { className: `writer-ir__heading writer-ir__heading--${level}` },
       <SpanContent block={block} />,
     );
   }
@@ -137,6 +177,7 @@ function BlockShell({
 }: { block: WriterBlock; children?: ReactNode }) {
   return (
     <div
+      id={writerBlockDomId(block.node_id)}
       className='writer-ir__block'
       data-node-id={block.node_id}
       data-node-type={block.type}
@@ -164,6 +205,10 @@ function BlockSequence({ blocks }: { blocks: WriterBlock[] }) {
 
   for (let index = 0; index < blocks.length;) {
     const block = blocks[index];
+    if (isWriterSystemAnchorBlock(block)) {
+      index += 1;
+      continue;
+    }
     if (block.type === 'list_item') {
       const ordered = Boolean(block.numbering?.ordered);
       const group: WriterBlock[] = [];
@@ -219,8 +264,15 @@ export function WriterIRControl({
   sourceRevision,
   readOnly = false,
   editingKey,
+  feishuVersionOnly = false,
   onSave,
   onEditingChange,
+  onDocumentChange,
+  onRewriteSelection,
+  rewriteDialogOpen = false,
+  rewritePreview,
+  onRewritePreviewApplied,
+  onRewritePreviewRejected,
 }: WriterIRControlProps) {
   const { t } = useTranslation();
   const { registerFlush } = useContext(SlotEditingContext);
@@ -232,6 +284,14 @@ export function WriterIRControl({
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState<string>();
   const [externalUpdate, setExternalUpdate] = useState(false);
+  const [outlineOpen, setOutlineOpen] = useState(false);
+  const [pageWidth, setPageWidth] = useState<WriterIRPageWidth>('default');
+  const [readOnlySelection, setReadOnlySelection] = useState<
+    (WriterIRRewriteSelection & { anchor: SelectionActionAnchor }) | null
+  >(null);
+  const [readOnlyRewriteLayer, setReadOnlyRewriteLayer] = useState<HTMLDivElement | null>(null);
+  const [readOnlyRewritePinned, setReadOnlyRewritePinned] = useState(false);
+  const pinnedReadOnlyRangeRef = useRef<Range | null>(null);
   const textEditStartRef = useRef<WriterDocument | null>(null);
   const pendingExternalDocumentRef = useRef<{
     document: WriterDocument;
@@ -257,6 +317,30 @@ export function WriterIRControl({
   const onSaveRef = useRef(onSave);
   const historyRef = useRef(history);
   const futureRef = useRef(future);
+  const outlineId = useId();
+  const outlineItems = useMemo(() => collectWriterOutline(draft.blocks), [draft.blocks]);
+  const outlineBaseLevel = useMemo(
+    () => Math.min(...outlineItems.map((item) => item.level), 6),
+    [outlineItems],
+  );
+
+  const navigateToOutlineItem = useCallback((nodeId: string) => {
+    const target = Array.from(
+      rootRef.current?.querySelectorAll<HTMLElement>('[data-node-id]') ?? [],
+    ).find((element) => element.dataset.nodeId === nodeId);
+    if (!target || typeof target.scrollIntoView !== 'function') return;
+    const reduceMotion = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    target.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+  }, []);
+
+  const navigateToDocumentTitle = useCallback(() => {
+    const target = rootRef.current?.querySelector<HTMLElement>(
+      '.writer-ir__title, .writer-ir__title-editor',
+    );
+    if (!target || typeof target.scrollIntoView !== 'function') return;
+    const reduceMotion = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+    target.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'start' });
+  }, []);
 
   const clearAutoSaveTimers = useCallback(() => {
     if (autoSaveIdleTimerRef.current !== undefined) {
@@ -304,7 +388,19 @@ export function WriterIRControl({
       ? sourceRevision === baseSourceRevision
       : document === baseDocument;
     if (sourceMatchesBase) {
-      if (draft !== baseDocument) {
+      const documentChanged = !sameWriterDocument(document, baseDocument)
+        && !sameWriterDocumentForSync(document, baseDocument);
+      if (documentChanged && draft === baseDocument) {
+        pendingExternalDocumentRef.current = null;
+        setBaseDocument(document);
+        baseDocumentRef.current = document;
+        lastCheckpointDocumentRef.current = document;
+        setDraft(document);
+        draftRef.current = document;
+        setHistory([]);
+        setFuture([]);
+        setExternalUpdate(false);
+      } else if (draft !== baseDocument) {
         pendingExternalDocumentRef.current = null;
         setExternalUpdate(false);
       }
@@ -371,6 +467,10 @@ export function WriterIRControl({
     // Only surface local dirty state. In-flight saves must not lock parent UI.
     onEditingChange?.(dirty);
   }, [dirty, onEditingChange]);
+
+  useEffect(() => {
+    onDocumentChange?.(draft);
+  }, [draft, onDocumentChange]);
 
   useEffect(
     () => () => onEditingChange?.(false),
@@ -512,9 +612,11 @@ export function WriterIRControl({
       baseSourceRevisionRef.current = savedSourceRevision;
       pendingExternalDocumentRef.current = null;
       setBaseSourceRevision(savedSourceRevision);
-      // Versioned save becomes the checkpoint baseline.
+      // Versioned save becomes the checkpoint baseline. For Feishu-only
+      // versioning, every successful local persist is the flush baseline.
       if (
-        saveMode === 'checkpoint'
+        feishuVersionOnly
+        || saveMode === 'checkpoint'
         || savedSourceRevision !== previousRevision
       ) {
         lastCheckpointDocumentRef.current = sameWriterDocumentForSync(snapshot, savedDocument)
@@ -557,7 +659,7 @@ export function WriterIRControl({
         scheduleFollowupSave();
       }
     }
-  }, [clearAutoSaveTimers, documentReadOnly, scheduleFollowupSave, t]);
+  }, [clearAutoSaveTimers, documentReadOnly, feishuVersionOnly, scheduleFollowupSave, t]);
 
   saveRunnerRef.current = runSave;
 
@@ -570,15 +672,15 @@ export function WriterIRControl({
 
   /** Explicit Save button: create a versioned checkpoint. */
   const requestCheckpointSave = useCallback(() => {
-    escalateSaveMode('checkpoint');
+    escalateSaveMode(feishuVersionOnly ? 'draft' : 'checkpoint');
     clearAutoSaveTimers();
     void saveRunnerRef.current();
-  }, [clearAutoSaveTimers, escalateSaveMode]);
+  }, [clearAutoSaveTimers, escalateSaveMode, feishuVersionOnly]);
 
   /** Flush before conversation actions (continue/retry → chat): version the draft. */
   const flushPendingSave = useCallback(async (): Promise<boolean> => {
     if (documentReadOnly || !onSaveRef.current) return true;
-    escalateSaveMode('checkpoint');
+    escalateSaveMode(feishuVersionOnly ? 'draft' : 'checkpoint');
     clearAutoSaveTimers();
     if (saveFollowupTimerRef.current !== undefined) {
       window.clearTimeout(saveFollowupTimerRef.current);
@@ -600,13 +702,13 @@ export function WriterIRControl({
         return true;
       }
 
-      escalateSaveMode('checkpoint');
+      escalateSaveMode(feishuVersionOnly ? 'draft' : 'checkpoint');
       const result = await runSave();
       if (result === 'error') return false;
       if (result === 'noop') return true;
     }
     return sameWriterDocumentForSync(draftRef.current, lastCheckpointDocumentRef.current);
-  }, [clearAutoSaveTimers, documentReadOnly, escalateSaveMode, runSave]);
+  }, [clearAutoSaveTimers, documentReadOnly, escalateSaveMode, feishuVersionOnly, runSave]);
 
   useEffect(() => {
     if (!editingKey) return undefined;
@@ -696,6 +798,11 @@ export function WriterIRControl({
     setSaveError(undefined);
   }, []);
 
+  const handleCrossReferenceApplied = useCallback((nextDocument: WriterDocument) => {
+    handleDocumentChange(nextDocument);
+    requestDraftSave();
+  }, [handleDocumentChange, requestDraftSave]);
+
   const discardChanges = () => {
     const pending = pendingExternalDocumentRef.current;
     const nextDocument = pending?.document ?? baseDocument;
@@ -730,51 +837,236 @@ export function WriterIRControl({
     requestCheckpointSave();
   };
 
+  const recordReadOnlySelection = useCallback(() => {
+    const root = rootRef.current;
+    const selection = globalThis.getSelection();
+    if (!root || !selection || selection.rangeCount === 0 || selection.isCollapsed) {
+      setReadOnlySelection(null);
+      return;
+    }
+    const range = selection.getRangeAt(0);
+    if (!root.contains(range.startContainer) || !root.contains(range.endContainer)) {
+      setReadOnlySelection(null);
+      return;
+    }
+    const elementFor = (node: Node) => node instanceof HTMLElement ? node : node.parentElement;
+    const startBlock = elementFor(range.startContainer)?.closest<HTMLElement>('[data-node-id]');
+    const endBlock = elementFor(range.endContainer)?.closest<HTMLElement>('[data-node-id]');
+    const selectedText = selection.toString().trim();
+    if (!startBlock || startBlock !== endBlock || !selectedText) {
+      setReadOnlySelection(null);
+      return;
+    }
+    const nodeId = startBlock.dataset.nodeId;
+    const anchor = selectionActionAnchor(range);
+    if (!nodeId || !anchor) {
+      setReadOnlySelection(null);
+      return;
+    }
+    setReadOnlySelection({ nodeId, selectedText, anchor });
+  }, []);
+
+  useEffect(() => {
+    if (!documentReadOnly || !onRewriteSelection) return undefined;
+    globalThis.document.addEventListener('selectionchange', recordReadOnlySelection);
+    return () => globalThis.document.removeEventListener('selectionchange', recordReadOnlySelection);
+  }, [documentReadOnly, onRewriteSelection, recordReadOnlySelection]);
+
+  useEffect(() => {
+    if (!rewriteDialogOpen) {
+      pinnedReadOnlyRangeRef.current = null;
+      setReadOnlyRewritePinned(false);
+    }
+  }, [rewriteDialogOpen]);
+
+  const getPinnedReadOnlyRange = useCallback((): Range | null => {
+    const range = pinnedReadOnlyRangeRef.current;
+    if (!range) return null;
+    try {
+      return range.cloneRange();
+    } catch {
+      return null;
+    }
+  }, []);
+
   return (
     <section
-      className='writer-ir'
+      className={`writer-ir writer-ir--width-${pageWidth}${outlineOpen ? ' writer-ir--outline-open' : ''}`}
       aria-label={t('chat.writerIR.documentRegion')}
       ref={rootRef}
     >
-      {externalUpdate && (
-        <div className='writer-ir__notice writer-ir__notice--warning' role='alert'>
-          <span>{t('chat.writerIR.externalUpdate')}</span>
-          <div>
-            <button type='button' onClick={saveLocalVersion}>{t('common.save')}</button>
-            <button type='button' onClick={discardChanges}>{t('chat.writerIR.discard')}</button>
-          </div>
-        </div>
-      )}
-      {saveError && (
-        <div className='writer-ir__notice writer-ir__notice--error' role='alert'>
-          <span>{t('chat.writerIR.saveError', { error: saveError })}</span>
-          <div>
-            <button type='button' onClick={requestDraftSave}>{t('common.retry')}</button>
-            <button type='button' onClick={discardChanges}>{t('chat.writerIR.discard')}</button>
-          </div>
-        </div>
-      )}
-
-      {documentReadOnly ? (
-        <article className='writer-ir__document'>
-          <h1 className='writer-ir__title'>{draft.title}</h1>
-          {draft.blocks.length > 0 ? (
-            <BlockSequence blocks={draft.blocks} />
-          ) : (
-            <div className='writer-ir__empty' role='status'>
-              {t('chat.writerIR.emptyDocument')}
+      <aside
+        className='writer-ir__outline-rail'
+        id={outlineId}
+        onClick={(event) => event.stopPropagation()}
+      >
+        {outlineOpen ? (
+          <nav className='writer-ir__outline' aria-label={t('chat.writerIR.outline')}>
+            <button
+              type='button'
+              className='writer-ir__outline-toggle'
+              title={t('chat.writerIR.collapseOutline')}
+              aria-label={t('chat.writerIR.collapseOutline')}
+              aria-controls={outlineId}
+              aria-expanded='true'
+              onClick={() => setOutlineOpen(false)}
+            >
+              <MenuFoldOutlined aria-hidden />
+            </button>
+            <button
+              type='button'
+              className='writer-ir__outline-document-link'
+              title={draft.title}
+              aria-label={t('chat.writerIR.jumpToHeading', { title: draft.title })}
+              onClick={navigateToDocumentTitle}
+            >
+              {draft.title}
+            </button>
+            {outlineItems.length > 0 ? (
+              <ol className='writer-ir__outline-list'>
+                {outlineItems.map((item) => (
+                  <li key={item.nodeId}>
+                    <button
+                      type='button'
+                      className={
+                        `writer-ir__outline-link writer-ir__outline-link--level-${
+                          Math.max(1, item.level - outlineBaseLevel + 1)
+                        }`
+                      }
+                      title={item.title}
+                      aria-label={t('chat.writerIR.jumpToHeading', { title: item.title })}
+                      onClick={() => navigateToOutlineItem(item.nodeId)}
+                    >
+                      {item.title}
+                    </button>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <div className='writer-ir__outline-empty' role='status'>
+                {t('chat.writerIR.noHeadings')}
+              </div>
+            )}
+          </nav>
+        ) : (
+          <button
+            type='button'
+            className='writer-ir__outline-toggle writer-ir__outline-toggle--collapsed'
+            title={t('chat.writerIR.expandOutline')}
+            aria-label={t('chat.writerIR.expandOutline')}
+            aria-controls={outlineId}
+            aria-expanded='false'
+            onClick={() => setOutlineOpen(true)}
+          >
+            <MenuUnfoldOutlined aria-hidden />
+          </button>
+        )}
+      </aside>
+      <div className='writer-ir__main'>
+        <div
+          className='writer-ir__display-toolbar'
+          role='toolbar'
+          aria-label={t('chat.writerIR.displaySettings')}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className='writer-ir__width-control'>
+            <span className='writer-ir__width-label'>{t('chat.writerIR.pageWidth')}</span>
+            <div
+              className='writer-ir__width-options'
+              role='group'
+              aria-label={t('chat.writerIR.pageWidth')}
+            >
+              {(['default', 'wide'] as const).map((width) => (
+                <button
+                  key={width}
+                  type='button'
+                  className='writer-ir__width-option'
+                  aria-pressed={pageWidth === width}
+                  onClick={() => setPageWidth(width)}
+                >
+                  {t(`chat.writerIR.pageWidths.${width}`)}
+                </button>
+              ))}
             </div>
-          )}
-        </article>
-      ) : (
-        <WriterIRDocumentEditor
-          document={draft}
-          ariaLabel={t('chat.writerIR.documentRegion')}
-          onChange={handleDocumentChange}
-          onFocus={beginTextEdit}
-          onBlur={handleTextBlur}
-        />
-      )}
+          </div>
+        </div>
+        {externalUpdate && (
+          <div className='writer-ir__notice writer-ir__notice--warning' role='alert'>
+            <span>{t('chat.writerIR.externalUpdate')}</span>
+            <div>
+              <button type='button' onClick={saveLocalVersion}>{t('common.save')}</button>
+              <button type='button' onClick={discardChanges}>{t('chat.writerIR.discard')}</button>
+            </div>
+          </div>
+        )}
+        {saveError && (
+          <div className='writer-ir__notice writer-ir__notice--error' role='alert'>
+            <span>{t('chat.writerIR.saveError', { error: saveError })}</span>
+            <div>
+              <button type='button' onClick={requestDraftSave}>{t('common.retry')}</button>
+              <button type='button' onClick={discardChanges}>{t('chat.writerIR.discard')}</button>
+            </div>
+          </div>
+        )}
+
+        {documentReadOnly ? (
+          <div className='writer-ir__editor-shell'>
+            <article
+              className='writer-ir__document'
+              onMouseUp={recordReadOnlySelection}
+              onKeyUp={recordReadOnlySelection}
+              tabIndex={onRewriteSelection ? 0 : undefined}
+            >
+              <h1 className='writer-ir__title'>{draft.title}</h1>
+              {draft.blocks.length > 0 ? (
+                <BlockSequence blocks={draft.blocks} />
+              ) : (
+                <div className='writer-ir__empty' role='status'>
+                  {t('chat.writerIR.emptyDocument')}
+                </div>
+              )}
+            </article>
+            <div className='writer-ir__rewrite-layer' ref={setReadOnlyRewriteLayer} />
+            <ArtifactRewriteSelectionHighlight
+              layer={readOnlyRewriteLayer}
+              getRange={getPinnedReadOnlyRange}
+              active={readOnlyRewritePinned}
+            />
+            {onRewriteSelection && readOnlySelection && (
+              <ArtifactRewriteSelectionAction
+                anchor={readOnlySelection.anchor}
+                label={t('chat.artifactRewrite.action')}
+                onActivate={() => {
+                  const browserSelection = globalThis.getSelection();
+                  if (browserSelection?.rangeCount && !browserSelection.isCollapsed) {
+                    pinnedReadOnlyRangeRef.current = browserSelection.getRangeAt(0).cloneRange();
+                    setReadOnlyRewritePinned(true);
+                  }
+                  onRewriteSelection(readOnlySelection);
+                  setReadOnlySelection(null);
+                }}
+                onDismiss={() => setReadOnlySelection(null)}
+              />
+            )}
+          </div>
+        ) : (
+          <WriterIRDocumentEditor
+            document={draft}
+            ariaLabel={t('chat.writerIR.documentRegion')}
+            onChange={handleDocumentChange}
+            onCrossReferenceApplied={handleCrossReferenceApplied}
+            onFocus={beginTextEdit}
+            onBlur={handleTextBlur}
+            rewriteDialogOpen={rewriteDialogOpen}
+            onRewriteSelection={
+              !dirty && !saving && !externalUpdate ? onRewriteSelection : undefined
+            }
+            rewritePreview={rewritePreview}
+            onRewritePreviewApplied={onRewritePreviewApplied}
+            onRewritePreviewRejected={onRewritePreviewRejected}
+          />
+        )}
+      </div>
     </section>
   );
 }

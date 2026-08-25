@@ -31,6 +31,41 @@ func TestWriterDocumentSyncRouteParsesSingleSlotIndex(t *testing.T) {
 	}
 }
 
+func TestWriterDocumentWriteBackRoute(t *testing.T) {
+	r := mux.NewRouter()
+	r.UseEncodedPath()
+	registerAllRoutes(r)
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/workflow-sessions/ps-1/writer-document:write-back",
+		nil,
+	)
+	var match mux.RouteMatch
+	if !r.Match(req, &match) {
+		t.Fatal("expected WriterDocument write-back route to match")
+	}
+	want := "/workflow-sessions/{session_id}/writer-document:write-back"
+	if got, err := match.Route.GetPathTemplate(); err != nil || got != want {
+		t.Fatalf("expected route template %q, got %q (err=%v)", want, got, err)
+	}
+}
+
+func TestArtifactActionRoutes(t *testing.T) {
+	r := mux.NewRouter()
+	r.UseEncodedPath()
+	registerAllRoutes(r)
+	path := "/workflow-sessions/ps-1/slots/draft_document/items/idx/-1:action-preview"
+	req := httptest.NewRequest(http.MethodPost, path, nil)
+	var match mux.RouteMatch
+	if !r.Match(req, &match) {
+		t.Fatal("expected artifact action preview route to match")
+	}
+	if got := match.Vars["list_index"]; got != "-1" {
+		t.Fatalf("expected list_index -1, got %q", got)
+	}
+}
+
 func TestAgentThreadEventsRouteWinsOverGenericThreadRoute(t *testing.T) {
 	r := mux.NewRouter()
 	r.UseEncodedPath()
@@ -71,6 +106,41 @@ func TestSkillMarketTagsRouteWinsOverItemRoute(t *testing.T) {
 	}
 	if want := "/skill-market/tags"; gotTemplate != want {
 		t.Fatalf("expected template %q, got %q", want, gotTemplate)
+	}
+}
+
+func TestKnowledgeMarketDomainsRouteWinsOverItemRoute(t *testing.T) {
+	r := mux.NewRouter()
+	r.UseEncodedPath()
+	registerAllRoutes(r)
+
+	var match mux.RouteMatch
+	req := httptest.NewRequest(http.MethodGet, "/knowledge-market/domains", nil)
+	if !r.Match(req, &match) {
+		t.Fatal("expected knowledge market domains route to match")
+	}
+	gotTemplate, err := match.Route.GetPathTemplate()
+	if err != nil {
+		t.Fatalf("get matched route template: %v", err)
+	}
+	if want := "/knowledge-market/domains"; gotTemplate != want {
+		t.Fatalf("expected template %q, got %q", want, gotTemplate)
+	}
+
+	itemReq := httptest.NewRequest(http.MethodGet, "/knowledge-market/items/domains", nil)
+	var itemMatch mux.RouteMatch
+	if !r.Match(itemReq, &itemMatch) {
+		t.Fatal("expected knowledge market item route to match")
+	}
+	gotTemplate, err = itemMatch.Route.GetPathTemplate()
+	if err != nil {
+		t.Fatalf("get item route template: %v", err)
+	}
+	if want := "/knowledge-market/items/{market_item_id}"; gotTemplate != want {
+		t.Fatalf("expected template %q, got %q", want, gotTemplate)
+	}
+	if gotID := itemMatch.Vars["market_item_id"]; gotID != "domains" {
+		t.Fatalf("expected market_item_id %q, got %q", "domains", gotID)
 	}
 }
 

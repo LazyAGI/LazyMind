@@ -33,6 +33,25 @@
   }
 }
 
+.knowledge-settings-return.ant-btn {
+  height: 30px;
+  margin: 0 0 6px -8px;
+  padding: 0 8px;
+  color: #475467;
+  font-weight: 600;
+
+  &:hover,
+  &:focus-visible {
+    color: #175cd3;
+    background: #eff6ff;
+  }
+
+  &:focus-visible {
+    outline: 2px solid #2f6bff;
+    outline-offset: 2px;
+  }
+}
+
 .knowledge-page-header-actions {
   display: flex;
   flex-direction: column;

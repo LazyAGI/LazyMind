@@ -47,7 +47,8 @@ def test_normalize_history_keeps_kb_tool_calls_and_sanitizes_results():
         'role': 'assistant',
         'content': (
             '<tool_call>{"id":"call-1","name":"kb_search","arguments":{"query":"q"}}</tool_call>'
-            '<tool_result>{"id":"call-1","name":"kb_search","result":{"items":[{"text":"old [[9.1]]","ref":"[[9.1]]","citation_index":"9.1"}]}}</tool_result>'
+            '<tool_result>{"id":"call-1","name":"kb_search","result":{"items":'
+            '[{"text":"old [[9.1]]","ref":"[[9.1]]","citation_index":"9.1"}]}}</tool_result>'
             '最终答案 [9](#source-9.1 "old.pdf")。'
         ),
     }]

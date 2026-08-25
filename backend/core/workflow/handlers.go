@@ -50,16 +50,19 @@ func enrichArtifactValue(raw json.RawMessage, contentType string) json.RawMessag
 
 // sessionDTO is the frontend shape for a WorkflowSession.
 type sessionDTO struct {
-	SessionID      string    `json:"session_id"`
-	ConversationID string    `json:"conversation_id"`
-	WorkflowID     string    `json:"workflow_id"`
-	Status         string    `json:"status"`
-	CurrentStepID  string    `json:"current_step_id"`
-	IntentContext  string    `json:"intent_context,omitempty"`
-	CreatedAt      time.Time `json:"created_at"`
-	UpdatedAt      time.Time `json:"updated_at"`
-	Slots          []slotDTO `json:"slots,omitempty"`
-	Steps          []stepDTO `json:"steps,omitempty"`
+	SessionID      string `json:"session_id"`
+	ConversationID string `json:"conversation_id"`
+	WorkflowID     string `json:"workflow_id"`
+	// PinnedRevisionID is retained for immutable runtime identity; version numbers
+	// are intentionally not exposed because they are not a reliable UI run label.
+	PinnedRevisionID string    `json:"pinned_revision_id,omitempty"`
+	Status           string    `json:"status"`
+	CurrentStepID    string    `json:"current_step_id"`
+	IntentContext    string    `json:"intent_context,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+	UpdatedAt        time.Time `json:"updated_at"`
+	Slots            []slotDTO `json:"slots,omitempty"`
+	Steps            []stepDTO `json:"steps,omitempty"`
 }
 
 // stepDTO summarises one plugin_session_steps attempt for UI history.  // workflow-naming: persistence
@@ -86,9 +89,18 @@ type slotDTO struct {
 	ArtifactValue json.RawMessage `json:"artifact_value,omitempty"`
 	Caption       *string         `json:"caption,omitempty"`
 	ChangeSource  string          `json:"change_source,omitempty"`
-	StepID        string          `json:"step_id,omitempty"`
-	RevisionCount int             `json:"revision_count,omitempty"`
-	OrderVersion  *int            `json:"order_version,omitempty"`
+	// Write-back state is calculated from the server-side Writer revision history
+	// and source document. It must not be inferred from a locally edited artifact.
+	WriteBackReady     bool   `json:"write_back_ready,omitempty"`
+	WriteBackDirty     bool   `json:"write_back_dirty,omitempty"`
+	WriteBackState     string `json:"write_back_state,omitempty"`
+	WriteBackURL       string `json:"write_back_url,omitempty"`
+	Provider           string `json:"provider,omitempty"`
+	ProviderDocumentID string `json:"provider_document_id,omitempty"`
+	LastSyncedRevision *int   `json:"last_synced_revision,omitempty"`
+	StepID             string `json:"step_id,omitempty"`
+	RevisionCount      int    `json:"revision_count,omitempty"`
+	OrderVersion       *int   `json:"order_version,omitempty"`
 
 	// Internal fields — used by enrichSlots, never serialised to the client.
 	ArtifactSeq     *int            `json:"-"`
@@ -99,14 +111,15 @@ type slotDTO struct {
 
 func toSessionDTO(s *orm.WorkflowSession) sessionDTO {
 	return sessionDTO{
-		SessionID:      s.ID,
-		ConversationID: s.ConversationID,
-		WorkflowID:     s.WorkflowID,
-		Status:         s.Status,
-		CurrentStepID:  s.CurrentStepID,
-		IntentContext:  s.IntentContext,
-		CreatedAt:      s.CreatedAt,
-		UpdatedAt:      s.UpdatedAt,
+		SessionID:        s.ID,
+		ConversationID:   s.ConversationID,
+		WorkflowID:       s.WorkflowID,
+		PinnedRevisionID: s.WorkflowRevisionID,
+		Status:           s.Status,
+		CurrentStepID:    s.CurrentStepID,
+		IntentContext:    s.IntentContext,
+		CreatedAt:        s.CreatedAt,
+		UpdatedAt:        s.UpdatedAt,
 	}
 }
 
@@ -325,6 +338,8 @@ func enrichSlots(ctx context.Context, db *gorm.DB, sessionID string, slots []slo
 			slot.OrderVersion = &ov
 		}
 	}
+
+	enrichWriterWriteBackSlots(ctx, db, sessionID, slots)
 }
 
 // ListConversationSessions handles GET /conversations/{conversation_id}/workflow-sessions.

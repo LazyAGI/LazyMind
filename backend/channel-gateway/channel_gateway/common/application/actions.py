@@ -11,17 +11,16 @@ from channel_gateway.common.domain.commands import (
     CapabilityConfigureCommand,
     CapabilityListCommand,
     ChatCommand,
-    ClarifyCommand,
     CommandEnvelope,
     ConversationCurrentCommand,
     ConversationListCommand,
     ConversationNewCommand,
     ConversationSettingsCommand,
     ConversationSettingsUpdateCommand,
+    ConversationStopCommand,
     ConversationSwitchCommand,
     HistoryMoreCommand,
     SelectionChooseCommand,
-    WorkflowInvokeCommand,
 )
 from channel_gateway.common.application.conversations import (
     ConversationActions,
@@ -33,9 +32,7 @@ from channel_gateway.common.application.replies import (
 from channel_gateway.common.ports.core import LazyMindCore
 from channel_gateway.common.ports.repository import NavigationRepository
 from channel_gateway.common.domain.chat import (
-    BASIC_CHAT_FEATURES,
     ChannelExecutionContext,
-    ChannelFeatureProfile,
     CoreStreamUpdate,
 )
 from channel_gateway.common.domain.outbound import ReplyPresentation
@@ -49,9 +46,6 @@ class ChannelActionExecutor:
         *,
         store: NavigationRepository,
         client: LazyMindCore,
-        feature_resolver: (
-            Callable[[str], ChannelFeatureProfile] | None
-        ) = None,
     ):
         self._store = store
         self._client = client
@@ -62,14 +56,11 @@ class ChannelActionExecutor:
             capabilities=self._capabilities,
         )
         self._replies = ChannelReplyBuilder(store)
-        self._feature_resolver = (
-            feature_resolver
-            or (lambda _provider: BASIC_CHAT_FEATURES)
-        )
 
     def execute(
         self,
         *,
+        provider: str = '',
         command: CommandEnvelope,
         account_id: str,
         external_address_hash: str,
@@ -77,11 +68,9 @@ class ChannelActionExecutor:
         request_id: str,
         grounding_messages: Sequence[str],
         catalog: dict[str, Any],
-        provider: str = '',
         provider_context: dict[str, Any] | None = None,
         on_stream: Callable[[CoreStreamUpdate], None] | None = None,
     ) -> ChannelReply:
-        features = self._feature_resolver(provider)
         execution = ChannelExecutionContext.from_provider_context(
             provider_context
         )
@@ -95,16 +84,13 @@ class ChannelActionExecutor:
         try:
             if isinstance(command, ChatCommand):
                 parameters = command.parameters
-                assistant_conversation_id = self._external_agent_conversation(
-                    execution
-                )
                 text = self._conversations.chat(
+                    chat_only=provider == 'wechat',
                     message=parameters.message,
                     changes=parameters.resource_changes,
                     source_command=command,
                     source_messages=grounding_messages,
                     catalog=catalog,
-                    features=features,
                     ask_answers_structured=(
                         execution.ask_answers_structured
                     ),
@@ -112,9 +98,6 @@ class ChannelActionExecutor:
                         item.to_dict() for item in execution.attachments
                     ),
                     thinking_depth=execution.thinking_depth,
-                    conversation_id_override=assistant_conversation_id,
-                    external_agent=assistant_conversation_id is not None,
-                    activate_route=assistant_conversation_id is None,
                     on_stream=on_stream,
                     **context,
                 )
@@ -126,27 +109,36 @@ class ChannelActionExecutor:
                     source_command=command,
                     source_messages=grounding_messages,
                     catalog=catalog,
-                    features=features,
                     on_stream=on_stream,
                     **context,
                 )
             elif isinstance(command, ConversationListCommand):
-                text = self._conversations.list_conversations(**context)
+                text = self._conversations.list_conversations(
+                    assistant=command.parameters.assistant,
+                    **context,
+                )
+                if execution.include_assistant_catalog:
+                    presentations = (
+                        self._capabilities.assistant_catalog(
+                            owner_user_id=owner_user_id,
+                            request_id=f'{request_id}_assistant_catalog',
+                        ),
+                    )
             elif isinstance(command, ConversationSwitchCommand):
                 text = self._conversations.switch(
                     command=command,
                     source_messages=grounding_messages,
                     selection_external_address_hash=external_address_hash,
                     catalog=catalog,
-                    features=features,
                     on_stream=on_stream,
                     **context,
                 )
             elif isinstance(command, ConversationCurrentCommand):
                 text = self._conversations.current(
-                    features=features,
                     **context,
                 )
+            elif isinstance(command, ConversationStopCommand):
+                text = self._conversations.stop(**context)
             elif isinstance(command, HistoryMoreCommand):
                 text = self._conversations.more_history(**context)
             elif isinstance(command, CapabilityListCommand):
@@ -156,7 +148,6 @@ class ChannelActionExecutor:
                         catalog=catalog,
                         account_id=account_id,
                         external_address_hash=external_address_hash,
-                        features=features,
                         save_selection=(
                             str(
                                 (provider_context or {}).get(
@@ -232,37 +223,14 @@ class ChannelActionExecutor:
                         catalog=catalog,
                         account_id=account_id,
                         external_address_hash=external_address_hash,
-                        features=features,
                     )
                 )
-                presentations = (
-                    capability_presentation,
-                    settings_presentation,
-                )
-            elif isinstance(command, WorkflowInvokeCommand):
-                if not features.enable_workflow:
-                    raise ActionMessage(
-                        '当前渠道没有开放工作流功能，配置没有改变。'
+                presentations = (capability_presentation,)
+                if settings_presentation is not None:
+                    presentations = (
+                        capability_presentation,
+                        settings_presentation,
                     )
-                parameters = command.parameters
-                workflow = self._workflow(
-                    parameters.workflow_ref,
-                    catalog,
-                )
-                text = self._conversations.chat(
-                    message=parameters.message,
-                    changes=[],
-                    source_command=command,
-                    source_messages=grounding_messages,
-                    catalog=catalog,
-                    features=features,
-                    mentions=(self._client.mention('workflow', workflow),),
-                    thinking_depth=execution.thinking_depth,
-                    on_stream=on_stream,
-                    **context,
-                )
-            elif isinstance(command, ClarifyCommand):
-                text = command.parameters.clarification_question
             elif isinstance(command, SelectionChooseCommand):
                 raise RuntimeError(
                     'selection.choose must be resolved before execution'
@@ -280,25 +248,3 @@ class ChannelActionExecutor:
             external_address_hash=external_address_hash,
             extra_presentations=presentations,
         )
-
-    @staticmethod
-    def _external_agent_conversation(
-        execution: ChannelExecutionContext,
-    ) -> str | None:
-        return execution.external_agent_conversation_id or None
-
-    @staticmethod
-    def _workflow(
-        workflow_ref: str,
-        catalog: dict[str, Any],
-    ) -> dict[str, Any]:
-        workflows = catalog.get('workflow')
-        if isinstance(workflows, list):
-            for item in workflows:
-                if (
-                    isinstance(item, dict)
-                    and bool(item.get('enabled', False))
-                    and str(item.get('id') or '') == workflow_ref
-                ):
-                    return item
-        raise ActionMessage('所选工作流当前不可用，请重新查看可用能力。')

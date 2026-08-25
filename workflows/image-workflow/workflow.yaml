@@ -2,29 +2,42 @@ id: image-workflow
 name: AI Image Generation
 description: >
   Generate, find, or edit images from natural language descriptions, and create
-  animated GIF stickers (动态表情包) via video generation then GIF conversion
-  inside the existing generate_image step.
-  The workflow is dynamic: ChatAgent routes through analyze_subject,
-  collect_materials, optimize_prompt, then generate_image or enhance_image
+  static memes, animated GIF stickers, and multi-item meme packs inside the
+  existing generate_image step. Animated delivery uses video generation then
+  GIF conversion. Meme media is generated without text, then a deterministic
+  local postprocessor fits and centers the caption inside a normalized box.
+  The workflow is dynamic: after analyze_subject, ChatAgent either skips directly
+  to optimize_prompt for self-contained requests or runs collect_materials when
+  external/uploaded/KB/reference material is genuinely needed, then routes to generate_image or enhance_image
   based on user intent (CREATE_NEW, FIND_AND_EDIT, EDIT_UPLOAD, CREATE_ANIMATED,
-  ANIMATE_UPLOAD, etc.).
+  ANIMATE_UPLOAD, CREATE_STATIC_MEME, CREATE_ANIMATED_MEME,
+  CREATE_MEME_PACK, etc.).
 
 when_to_use: >
   Trigger this workflow ONLY when the user's image request is COMPLEX and needs
   multi-step workflow support — e.g. knowledge-base style (kb_search), web/image
   search first then generate or edit, find-and-modify ("找一张XX再改成YY"),
   reference-based generation, uploaded-image editing with detailed instructions,
-  animated GIF / 动态表情包 / 动图 (text-to-video then GIF, or animate an uploaded
-  image), or a rich multi-constraint description that benefits from analyze →
-  collect → optimize → generate/enhance.
+  static or animated meme/reaction/sticker creation, a multi-item meme pack,
+  animated GIF / 动图 (text-to-video then GIF, or animate an uploaded image),
+  or a rich multi-constraint description that benefits from analyze → collect →
+  optimize → generate/enhance.
   Examples that SHOULD trigger: "根据知识库中的风格画一张产品图",
   "先搜几张赛博朋克参考图再画一张类似的", "找哈兰德照片然后加上王老吉字样",
-  "给我生成一个动态表情包", "给我生成三个动态表情包", "把这张图做成动态表情包", "做成动图 GIF",
+  "做一张收到的静态表情包", "给我生成一个动态表情包", "给我做一套聊天表情包",
+  "给我生成三个动态表情包", "把这张图做成动态表情包", "做成动图 GIF",
+  "生成白色小猫，底部居中加蓝色‘妈妈’字幕",
   "启动绘图插件", "打开图片生成插件".
+  HIGHEST-PRIORITY TEXT-OVERLAY RULE: ALWAYS trigger this workflow when a request to
+  generate a new image requires exact literal display text, a caption/subtitle/label,
+  or text layout attributes such as position, font color, outline/stroke, or size.
+  This rule applies even when the request is otherwise a simple one-shot still and even
+  when the user never says meme/表情包. Exact display text requires the deterministic
+  meme_add_caption pipeline; do not use built-in image_generator/image_editor directly.
   Do NOT trigger for SIMPLE one-shot still-image requests. If the user uses casual
   short phrasing such as "直接", "给我", "随便画", "画个猫", "帮我生成一张图"
-  without KB/search/edit/animated/complex constraints, prefer the built-in
-  image_generator / image_editor tools instead of this workflow.
+  without KB/search/edit/animated/complex constraints AND without exact display text or
+  text-layout requirements, prefer the built-in image_generator / image_editor tools.
   Do NOT call video_generator / video_to_gif directly for 动态表情包 — use this
   workflow so analyze → optimize → generate_image (video→GIF) runs end-to-end.
   Do NOT trigger if image generation is merely one sub-step within a larger
@@ -36,6 +49,7 @@ tool_scripts:
     functions:
       - image_search_tool
       - validate_image_ref
+      - meme_add_caption
 
 steps:
   - id: analyze_subject
@@ -88,6 +102,11 @@ slots:
     type: text
     cardinality: single
 
+  - id: meme_generation_plan
+    label: Meme Generation Plan
+    type: json
+    cardinality: single
+
   - id: enhanced_image_output
     label: Enhanced Images
     type: image
@@ -101,6 +120,12 @@ slots:
 
   - id: generated_image_output
     label: Generated Image
+    type: image
+    cardinality: list
+    ordered: true
+
+  - id: meme_static_output
+    label: Static Meme
     type: image
     cardinality: list
     ordered: true
@@ -144,18 +169,21 @@ ui:
       layout: list
       slots:
         - id: prompt_used
+        - id: meme_generation_plan
 
     - id: result
       label: Result
       layout: composite
       slots:
         - id: generated_image_output
+        - id: meme_static_output
         - id: image_output
         - id: gif_output
         - id: enhanced_image_output
         - id: video_output
       composite_layout:
         - generated_image_output
+        - meme_static_output
         - image_output
         - gif_output
         - enhanced_image_output
@@ -191,7 +219,9 @@ i18n:
       material_summary: {label: 材料摘要}
       raw_source_image: {label: 原始底图}
       prompt_used: {label: 优化后的提示词}
+      meme_generation_plan: {label: 表情包生成计划}
       generated_image_output: {label: 生成图片}
+      meme_static_output: {label: 静态表情包}
       enhanced_image_output: {label: 增强图片}
       image_output: {label: 原始图片}
       gif_output: {label: 动态 GIF}

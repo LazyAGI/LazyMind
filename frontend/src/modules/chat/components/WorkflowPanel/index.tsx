@@ -1,10 +1,21 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useTranslation } from 'react-i18next';
 import { Popconfirm, Tooltip } from 'antd';
-import { FullscreenOutlined, FullscreenExitOutlined } from '@ant-design/icons';
+import {
+  CloudUploadOutlined,
+  DownloadOutlined,
+  ExportOutlined,
+  FullscreenOutlined,
+  FullscreenExitOutlined,
+} from '@ant-design/icons';
 import { useWorkflowSession } from '@/modules/chat/hooks/useWorkflow';
-import { useWorkflowStore } from '@/modules/chat/store/workflowPanel';
+import {
+  filterWorkflowTabs,
+  workflowTabAllowsDownload,
+  useWorkflowStore,
+} from '@/modules/chat/store/workflowPanel';
+import { useTaskCenterStore, type SubAgentTask, type TaskArtifactStream } from '@/modules/chat/store/taskCenter';
 import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
 import { WorkflowSessionApi } from '@/modules/chat/utils/request';
 import StateGraphModal from '@/components/StateGraphModal';
@@ -18,6 +29,7 @@ import type {
   TabDef,
   WorkflowUI,
   SlotDef,
+  CompositePanelNode,
   CompositeLayoutNode,
   CompositeColumnNode,
   InnerTabsNode,
@@ -26,9 +38,54 @@ import {
   isWriterIrSource,
   SlotRenderer,
   SlotDownloadContext,
-  SlotEditingContext,
+  SlotMarkdownStream,
 } from './SlotComponents';
+import { SlideThumb } from './ppt/SlideThumb';
+import { WorkflowTabActions } from './actions/WorkflowTabActions';
+import { WorkflowPanelTabActiveContext, SlotEditingContext, type SlotFooterAction } from './slotEditingContext';
+import { findWriterArtifactStream } from './writerArtifactStream';
+import { resolveCompletedContinueStep } from './workflowContinue';
+import { moveSelectedCompositePages, sameCompositePageOrder } from './compositePageReorder';
 import './WorkflowPanel.scss';
+
+const DOCUMENT_FOOTER_LINK_ORDER = 20;
+const EMPTY_TASK_CENTER_TASKS: SubAgentTask[] = [];
+
+type DocumentFooterItem =
+  | { kind: 'button'; key: string; order: number; action: SlotFooterAction }
+  | { kind: 'link'; key: string; order: number; href: string; label: string };
+
+function buildDocumentFooterItems(footerActions: Map<string, SlotFooterAction>): {
+  statusMessages: Array<{ key: string; text: string; tone?: SlotFooterAction['statusTone'] }>;
+  actionItems: DocumentFooterItem[];
+} {
+  const statusMessages: Array<{ key: string; text: string; tone?: SlotFooterAction['statusTone'] }> = [];
+  const actionItems: DocumentFooterItem[] = [];
+
+  for (const [key, action] of footerActions.entries()) {
+    if (action.statusText) {
+      statusMessages.push({ key: `${key}:status`, text: action.statusText, tone: action.statusTone });
+    }
+    if (action.statusLink) {
+      actionItems.push({
+        kind: 'link',
+        key: `${key}:link`,
+        order: DOCUMENT_FOOTER_LINK_ORDER,
+        href: action.statusLink.href,
+        label: action.statusLink.label,
+      });
+    }
+    actionItems.push({
+      kind: 'button',
+      key,
+      order: action.order ?? 100,
+      action,
+    });
+  }
+
+  actionItems.sort((left, right) => left.order - right.order);
+  return { statusMessages, actionItems };
+}
 
 /** Parse a JSON intent context string and return the text field, or '' if empty/invalid. */
 function parseIntentText(raw?: string): string {
@@ -297,7 +354,7 @@ function getTabStepId(tab: TabDef): string | undefined {
 }
 
 /**
- * Lock slot editing only while the workflow session is actively running.
+ * Lock slot editing only while the plugin session is actively running.
  * When idle (waiting / failed / completed), ui_editable artifacts stay editable
  * so the user can revise and re-run a later step from the updated content.
  */
@@ -408,7 +465,7 @@ function getTabSlotRevisions(
   return slots.filter((s) => s.slot === artifactKey && s.selected);
 }
 
-function isStructuredWriterArtifactRevision(slot: SlotRevision): boolean {
+function isStructuredArtifactRevision(slot: SlotRevision): boolean {
   if (slot.content_type === 'json') return true;
   const raw = slot.artifact_value;
   if (!raw || typeof raw !== 'object') return false;
@@ -418,16 +475,15 @@ function isStructuredWriterArtifactRevision(slot: SlotRevision): boolean {
   return isWriterIrSource(normalized) || normalized.endsWith('.json');
 }
 
-/** Prefer the structured WriterDocument over its Markdown export when both exist. */
-function resolveWriterFinalSlotDefs(tab: TabDef, session: WorkflowSession): SlotDef[] {
-  if (session.workflow_id !== 'writer-workflow') return tab.slots;
+/** Prefer a structured sibling artifact over its Markdown export when both exist. */
+function resolvePreferredStructuredSlotDefs(tab: TabDef, session: WorkflowSession): SlotDef[] {
   const declaredSlotIds = new Set(tab.slots.map((slot) => slot.id));
 
   return tab.slots.flatMap((slotDef) => {
     if (!slotDef.id.endsWith('_md')) return [slotDef];
     const irSlotId = slotDef.id.slice(0, -3);
     const hasIRArtifact = getTabSlotRevisions(session, tab, irSlotId)
-      .some(isStructuredWriterArtifactRevision);
+      .some(isStructuredArtifactRevision);
     if (!hasIRArtifact) return [slotDef];
     if (declaredSlotIds.has(irSlotId)) return [];
 
@@ -438,6 +494,20 @@ function resolveWriterFinalSlotDefs(tab: TabDef, session: WorkflowSession): Slot
       type: 'text',
     }];
   });
+}
+
+/** Pick the first HTML material in this composite row for its filmstrip thumbnail. */
+function findCompositeHtmlRevision(
+  session: WorkflowSession,
+  tab: TabDef,
+  sortOrder: number,
+): SlotRevision | undefined {
+  for (const slot of tab.slots) {
+    if (slot.widget?.widgetType !== 'html-slide') continue;
+    const revision = findSlotRevision(session, tab, slot.id, sortOrder);
+    if (revision) return revision;
+  }
+  return undefined;
 }
 
 /** Get all distinct sort_orders present across the participating slots. */
@@ -451,10 +521,8 @@ function getCompositeRows(
     ?? (session.steps?.some((s) => s.step_id === tab.id) ? tab.id : undefined);
   for (const slot of session.slots ?? []) {
     const matchesTabStep = scopeStepId ? slot.step_id === scopeStepId : slot.selected;
-    if (matchesTabStep && participating.has(slot.slot)) {
-      if (slot.sort_order !== undefined) {
-        orders.add(slot.sort_order);
-      }
+    if (matchesTabStep && participating.has(slot.slot) && slot.sort_order !== undefined) {
+      orders.add(slot.sort_order);
     }
   }
   return Array.from(orders).sort((a, b) => a - b);
@@ -531,6 +599,7 @@ function InnerTabsCell({
             {rev ? (
               <SlotRenderer
                 slot={rev}
+                widget={def?.widget}
                 expectedType={def?.type}
                 sessionId={session.session_id}
                 slotId={slotId}
@@ -554,6 +623,203 @@ function InnerTabsCell({
 // CompositeSlotGrid
 // ---------------------------------------------------------------------------
 
+type PageBarPosition = 'top' | 'bottom' | 'left' | 'right';
+
+function CompositeThumbnailRail({
+  position,
+  pages,
+  currentPage,
+  onChange,
+  onReorder,
+  reordering = false,
+  tab,
+  session,
+}: {
+  position: PageBarPosition;
+  pages: number[];
+  currentPage: number;
+  onChange: (page: number) => void;
+  onReorder?: (nextPages: number[]) => void | Promise<void>;
+  reordering?: boolean;
+  tab: TabDef;
+  session: WorkflowSession;
+}) {
+  const { t } = useTranslation();
+  const isCol = position === 'left' || position === 'right';
+  const idx = Math.max(0, pages.indexOf(currentPage));
+  const dragPagesRef = useRef<Set<number>>(new Set());
+  const [insertIdx, setInsertIdx] = useState<number | null>(null);
+  const [selectedPages, setSelectedPages] = useState<Set<number>>(new Set());
+  const [draggingPages, setDraggingPages] = useState<Set<number>>(new Set());
+
+  useEffect(() => {
+    const available = new Set(pages);
+    setSelectedPages((selected) => {
+      const next = new Set(Array.from(selected).filter((page) => available.has(page)));
+      if (next.size === selected.size) return selected;
+      return next;
+    });
+  }, [pages.join(',')]);
+
+  const computeInsertIdx = useCallback((event: React.DragEvent, itemIdx: number) => {
+    const rect = (event.currentTarget as HTMLElement).getBoundingClientRect();
+    if (isCol) return event.clientY < rect.top + rect.height / 2 ? itemIdx : itemIdx + 1;
+    return event.clientX < rect.left + rect.width / 2 ? itemIdx : itemIdx + 1;
+  }, [isCol]);
+
+  const handlePageClick = (sortOrder: number, event: React.MouseEvent) => {
+    if (event.ctrlKey || event.metaKey) {
+      setSelectedPages((selected) => {
+        const next = new Set(selected);
+        if (next.has(sortOrder)) next.delete(sortOrder);
+        else next.add(sortOrder);
+        return next;
+      });
+    } else {
+      setSelectedPages(new Set([sortOrder]));
+    }
+    onChange(sortOrder);
+  };
+
+  const handleDragStart = (sortOrder: number, event: React.DragEvent) => {
+    if (!onReorder || reordering) return;
+    const moving = selectedPages.has(sortOrder)
+      ? new Set(selectedPages)
+      : new Set([sortOrder]);
+    dragPagesRef.current = moving;
+    setSelectedPages(moving);
+    setDraggingPages(moving);
+    event.dataTransfer.setData(
+      'application/x-workflow-page-sort',
+      JSON.stringify(Array.from(moving)),
+    );
+    event.dataTransfer.effectAllowed = 'move';
+  };
+
+  const handleDragOver = (pageIdx: number, event: React.DragEvent) => {
+    if (!onReorder || dragPagesRef.current.size === 0) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    setInsertIdx(computeInsertIdx(event, pageIdx));
+  };
+
+  const resetDrag = () => {
+    dragPagesRef.current = new Set();
+    setInsertIdx(null);
+    setDraggingPages(new Set());
+  };
+
+  const handleDrop = async (pageIdx: number, event: React.DragEvent) => {
+    event.preventDefault();
+    const moving = dragPagesRef.current;
+    const gapIdx = computeInsertIdx(event, pageIdx);
+    resetDrag();
+    if (!moving.size || !onReorder) return;
+    const next = moveSelectedCompositePages(pages, moving, gapIdx);
+    if (sameCompositePageOrder(next, pages)) return;
+    await onReorder(next);
+    setSelectedPages(new Set());
+  };
+
+  const canDrag = Boolean(onReorder) && !reordering;
+  const hasAnyHtmlPreview = pages.some((sortOrder) =>
+    Boolean(findCompositeHtmlRevision(session, tab, sortOrder)),
+  );
+
+  return (
+    <div
+      className={[
+        'composite-thumb-rail',
+        `composite-thumb-rail--${isCol ? 'col' : 'row'}`,
+        `composite-thumb-rail--${position}`,
+        !hasAnyHtmlPreview ? 'composite-thumb-rail--compact' : '',
+      ].filter(Boolean).join(' ')}
+      onDragLeave={canDrag ? (event) => {
+        if (!(event.currentTarget as HTMLElement).contains(event.relatedTarget as Node | null)) {
+          setInsertIdx(null);
+        }
+      } : undefined}
+    >
+      <div className='composite-thumb-rail__nav'>
+        <button
+          type='button'
+          className='composite-thumb-rail__arrow'
+          disabled={idx <= 0 || reordering}
+          onClick={() => idx > 0 && onChange(pages[idx - 1])}
+          aria-label={t('chat.workflowPreviousPage')}
+        >
+          {isCol ? '↑' : '←'}
+        </button>
+        <div
+          className={`composite-thumb-rail__list composite-thumb-rail__list--${isCol ? 'col' : 'row'}`}
+          role='list'
+        >
+          {canDrag && <div className={`composite-thumb-rail__insert${insertIdx === 0 ? ' composite-thumb-rail__insert--active' : ''}`} aria-hidden='true' />}
+          {pages.map((sortOrder, pageIdx) => {
+            const revision = findCompositeHtmlRevision(session, tab, sortOrder);
+            const hasHtmlPreview = Boolean(revision);
+            const selected = selectedPages.has(sortOrder);
+            const dragging = draggingPages.has(sortOrder);
+            return (
+              <React.Fragment key={`${sortOrder}-${pageIdx}`}>
+                <button
+                  type='button'
+                  role='listitem'
+                  draggable={canDrag}
+                  className={[
+                    'composite-thumb-rail__item',
+                    sortOrder === currentPage ? 'composite-thumb-rail__item--active' : '',
+                    selected ? 'composite-thumb-rail__item--selected' : '',
+                    canDrag ? 'composite-thumb-rail__item--draggable' : '',
+                    dragging ? 'composite-thumb-rail__item--dragging' : '',
+                    !hasHtmlPreview ? 'composite-thumb-rail__item--fallback' : '',
+                  ].filter(Boolean).join(' ')}
+                  onClick={(event) => handlePageClick(sortOrder, event)}
+                  onDragStart={(event) => handleDragStart(sortOrder, event)}
+                  onDragOver={(event) => handleDragOver(pageIdx, event)}
+                  onDrop={(event) => { void handleDrop(pageIdx, event); }}
+                  onDragEnd={resetDrag}
+                  title={canDrag ? t('chat.workflowPageMultiSelectDragHint') : undefined}
+                  aria-label={t('chat.workflowRowAria', { index: pageIdx + 1 })}
+                  aria-current={sortOrder === currentPage ? 'true' : undefined}
+                  aria-pressed={selected}
+                >
+                  {hasHtmlPreview && <span className='composite-thumb-rail__badge'>{pageIdx + 1}</span>}
+                  {selectedPages.size > 1 && selected && (
+                    <span className='composite-thumb-rail__selection-badge' aria-hidden='true'>
+                      {selectedPages.size}
+                    </span>
+                  )}
+                  <span
+                    className={`composite-thumb-rail__preview${hasHtmlPreview ? '' : ' composite-thumb-rail__preview--fallback'}`}
+                    aria-hidden='true'
+                  >
+                    {revision ? (
+                      <SlideThumb slot={revision} sessionId={session.session_id} />
+                    ) : (
+                      <span className='composite-thumb-rail__page-number'>{pageIdx + 1}</span>
+                    )}
+                  </span>
+                </button>
+                {canDrag && <div className={`composite-thumb-rail__insert${insertIdx === pageIdx + 1 ? ' composite-thumb-rail__insert--active' : ''}`} aria-hidden='true' />}
+              </React.Fragment>
+            );
+          })}
+        </div>
+        <button
+          type='button'
+          className='composite-thumb-rail__arrow'
+          disabled={idx >= pages.length - 1 || reordering}
+          onClick={() => idx < pages.length - 1 && onChange(pages[idx + 1])}
+          aria-label={t('chat.workflowNextPage')}
+        >
+          {isCol ? '↓' : '→'}
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function CompositeSlotGrid({
   tab,
   session,
@@ -570,6 +836,7 @@ function CompositeSlotGrid({
   readOnly?: boolean;
 }) {
   const { t } = useTranslation();
+  const reorderSlotItems = useWorkflowStore((state) => state.reorderSlotItems);
   const rows = getCompositeRows(tab, session);
   const columns = filterColumnsByVisibleSlots(
     buildColumns(tab),
@@ -579,6 +846,84 @@ function CompositeSlotGrid({
 
   // Compute total weight for flex proportions.
   const totalWeight = columns.reduce((s, c) => s + c.weight, 0) || 1;
+  const pageBarPosition = tab.composite_tab_position as PageBarPosition | undefined;
+  const paged = Boolean(pageBarPosition);
+  const stackCompositeCells = Boolean(
+    tab.composite_layout
+      && !Array.isArray(tab.composite_layout)
+      && tab.composite_layout.direction === 'column',
+  );
+  const [currentPage, setCurrentPage] = useState<number | null>(null);
+  const [reorderError, setReorderError] = useState<string | null>(null);
+  const [reordering, setReordering] = useState(false);
+
+  useEffect(() => {
+    if (!paged) return;
+    if (!rows.length) {
+      setCurrentPage(null);
+      return;
+    }
+    setCurrentPage((page) => page != null && rows.includes(page) ? page : rows[0]);
+  }, [paged, rows.join(',')]);
+
+  useEffect(() => {
+    if (paged) onFocusSortOrder?.(currentPage ?? undefined);
+  }, [paged, currentPage, onFocusSortOrder]);
+
+  const activePage = currentPage ?? rows[0];
+  const reorderableCompositeSlotIds = tab.slots
+    .filter((slot) => slot.cardinality === 'list' && slot.ordered)
+    .map((slot) => slot.id)
+    .filter((slotId) => getTabSlotRevisions(session, tab, slotId)
+      .filter((revision) => revision.selected && revision.list_index !== undefined)
+      .length > 1);
+  const canReorderPages = paged
+    && rows.length > 1
+    && reorderableCompositeSlotIds.length > 0
+    && !readOnly;
+
+  const handlePageReorder = useCallback(async (nextPages: number[]) => {
+    if (!canReorderPages || reordering || nextPages.length !== rows.length) return;
+    if (nextPages.every((page, index) => page === rows[index])) return;
+
+    const focusedVisualIdx = Math.max(0, nextPages.indexOf(activePage));
+    // Composite pagination aligns every participating ordered-list slot by its
+    // visual sort_order. Reorder all such slots together so page identity stays
+    // aligned for text, images, HTML previews, notes, and future widget types.
+    setReordering(true);
+    setReorderError(null);
+    try {
+      for (const slotId of reorderableCompositeSlotIds) {
+        const revisions = getTabSlotRevisions(session, tab, slotId)
+          .filter((revision) => revision.selected
+            && revision.sort_order !== undefined
+            && revision.list_index !== undefined)
+          .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+        if (revisions.length < 2) continue;
+        const bySortOrder = new Map(revisions.map((revision) => [revision.sort_order as number, revision]));
+        const nextListOrder = nextPages
+          .map((sortOrder) => bySortOrder.get(sortOrder)?.list_index)
+          .filter((listIndex): listIndex is number => listIndex !== undefined);
+        if (nextListOrder.length !== revisions.length) {
+          throw new Error(t('chat.workflowPageReorderFailed'));
+        }
+        await reorderSlotItems(
+          session.session_id,
+          slotId,
+          nextListOrder,
+          revisions[0]?.order_version ?? 0,
+        );
+      }
+      await onRefresh?.();
+      const nextFocusedPage = focusedVisualIdx + 1;
+      setCurrentPage(nextFocusedPage);
+      onFocusSortOrder?.(nextFocusedPage);
+    } catch (error) {
+      setReorderError(error instanceof Error ? error.message : t('chat.workflowPageReorderFailed'));
+    } finally {
+      setReordering(false);
+    }
+  }, [activePage, canReorderPages, onFocusSortOrder, onRefresh, reorderSlotItems, reordering, reorderableCompositeSlotIds, rows, session, tab, t]);
 
   if (rows.length === 0) {
     return (
@@ -588,18 +933,106 @@ function CompositeSlotGrid({
     );
   }
 
-  return (
-    <div className='composite-grid'>
-      {rows.map((sortOrder) => (
+  const renderSlotCell = (
+    slotId: string,
+    sortOrder: number,
+    key: React.Key,
+    style?: React.CSSProperties,
+  ) => {
+    const def = tab.slots.find((slot) => slot.id === slotId);
+    const rev = findSlotRevision(session, tab, def?.id ?? slotId, sortOrder);
+    return (
+      <div key={key} className='composite-grid__cell' style={style}>
+        {def?.label && <span className='composite-grid__cell-label'>{def.label}</span>}
+        {rev ? (
+          <SlotRenderer
+            slot={rev}
+            widget={def?.widget}
+            expectedType={def?.type}
+            sessionId={session.session_id}
+            slotId={slotId}
+            revisionCount={rev.revision_count}
+            onRefresh={onRefresh}
+            onReference={onReference}
+            hideImageMutationActions={hideImageMutationActions}
+            readOnly={readOnly}
+          />
+        ) : (
+          <div className='composite-grid__cell-empty'>—</div>
+        )}
+      </div>
+    );
+  };
+
+  const hasNestedContainer = (node: CompositePanelNode): boolean =>
+    Boolean(node.children?.some((child) => child.direction || hasNestedContainer(child)));
+
+  const formatCLayout = tab.composite_layout && !Array.isArray(tab.composite_layout)
+    ? tab.composite_layout
+    : undefined;
+  const renderNestedComposite = (
+    node: CompositePanelNode,
+    sortOrder: number,
+    path: string,
+    root = false,
+  ): React.ReactNode => {
+    if (node.slot) return renderSlotCell(node.slot, sortOrder, path);
+    if (node.tabs?.length) {
+      const tabSlotIds = (node.tabs as unknown[])
+        .map((item) => typeof item === 'string'
+          ? item
+          : String((item as { slot?: string })?.slot ?? ''))
+        .filter(Boolean);
+      return (
+        <div key={path} className='composite-grid__cell'>
+          <InnerTabsCell
+            tabsNode={{ tabs: tabSlotIds }}
+            tab={tab}
+            session={session}
+            slotDefs={tab.slots}
+            sortOrder={sortOrder}
+            onRefresh={onRefresh}
+            onReference={onReference}
+            hideImageMutationActions={hideImageMutationActions}
+            readOnly={readOnly}
+          />
+        </div>
+      );
+    }
+    if (!node.direction || !node.children?.length) {
+      return <div key={path} className='composite-grid__cell-empty'>—</div>;
+    }
+    const children = node.children;
+    return (
+      <div
+        key={path}
+        className={`composite-grid__tree composite-grid__tree--${node.direction}${root ? ' composite-grid__tree--root' : ''}`}
+      >
+        {children.map((child, index) => (
+          <div
+            key={`${path}-${index}`}
+            className='composite-grid__tree-child'
+            style={{ flex: `${child.weight ?? 1} 1 0` }}
+          >
+            {renderNestedComposite(child, sortOrder, `${path}-${index}`)}
+          </div>
+        ))}
+      </div>
+    );
+  };
+
+  const renderRow = (sortOrder: number) => (
         <div
           key={sortOrder}
-          className='composite-grid__row'
+          className={`composite-grid__row${formatCLayout && hasNestedContainer(formatCLayout) ? ' composite-grid__row--tree' : stackCompositeCells ? ' composite-grid__row--stack' : ''}`}
           onClick={() => onFocusSortOrder?.(sortOrder)}
           role='button'
           tabIndex={0}
           aria-label={t('chat.workflowRowAria', { index: sortOrder })}
         >
-          {columns.map((col, colIdx) => {
+          {formatCLayout && hasNestedContainer(formatCLayout)
+            ? renderNestedComposite(formatCLayout, sortOrder, `page-${sortOrder}`, true)
+            : columns.map((col, colIdx) => {
             const flexBasis = `${(col.weight / totalWeight) * 100}%`;
             if (isInnerTabsNode(col.slotId)) {
               return (
@@ -623,38 +1056,43 @@ function CompositeSlotGrid({
               );
             }
             const slotId = col.slotId as string;
-            const def = tab.slots.find((s) => s.id === slotId);
-            const artifactKey = def?.id ?? slotId;
-            const rev = findSlotRevision(session, tab, artifactKey, sortOrder);
-            return (
-              <div
-                key={slotId}
-                className='composite-grid__cell'
-                style={{ flexBasis, flexGrow: col.weight, flexShrink: 1 }}
-              >
-                {def?.label && (
-                  <span className='composite-grid__cell-label'>{def.label}</span>
-                )}
-                {rev ? (
-                  <SlotRenderer
-                    slot={rev}
-                    expectedType={def?.type}
-                    sessionId={session.session_id}
-                    slotId={slotId}
-                    revisionCount={rev.revision_count}
-                    onRefresh={onRefresh}
-                    onReference={onReference}
-                    hideImageMutationActions={hideImageMutationActions}
-                    readOnly={readOnly}
-                  />
-                ) : (
-                  <div className='composite-grid__cell-empty'>—</div>
-                )}
-              </div>
-            );
+            return renderSlotCell(slotId, sortOrder, slotId, {
+              flexBasis,
+              flexGrow: col.weight,
+              flexShrink: 1,
+            });
           })}
         </div>
-      ))}
+  );
+
+  if (!paged) {
+    return <div className='composite-grid'>{rows.map(renderRow)}</div>;
+  }
+
+  const rail = (
+    <CompositeThumbnailRail
+      position={pageBarPosition!}
+      pages={rows}
+      currentPage={activePage}
+      onChange={setCurrentPage}
+      onReorder={canReorderPages ? handlePageReorder : undefined}
+      reordering={reordering}
+      tab={tab}
+      session={session}
+    />
+  );
+
+  return (
+    <div className='composite-shell composite-shell--paged'>
+      <div className={`composite-with-pagebar composite-with-pagebar--${pageBarPosition}`}>
+        {(pageBarPosition === 'top' || pageBarPosition === 'left') && rail}
+        <div className='composite-main'>
+          <WorkflowTabActions actions={tab.actions} tab={tab} session={session} rows={rows} />
+          {reorderError && <span className='composite-toolbar__error'>{reorderError}</span>}
+          <div className='composite-grid composite-grid--paged'>{renderRow(activePage)}</div>
+        </div>
+        {(pageBarPosition === 'bottom' || pageBarPosition === 'right') && rail}
+      </div>
     </div>
   );
 }
@@ -845,6 +1283,7 @@ function SortableImageList({
               <SlotRenderer
                 slot={rev}
                 cardMode
+                widget={slotDef.widget}
                 expectedType={slotDef.type}
                 sessionId={session.session_id}
                 slotId={slotDef.id}
@@ -882,6 +1321,7 @@ function SortableImageList({
 function NamedTabSlot({
   slotDef,
   revisions,
+  artifactStream,
   session,
   onRefresh,
   onReference,
@@ -892,6 +1332,7 @@ function NamedTabSlot({
   slotDef: SlotDef;
   revisions: SlotRevision[];
   session: WorkflowSession;
+  artifactStream?: TaskArtifactStream;
   onRefresh?: () => void;
   onReference?: (slot: SlotRevision) => void;
   onFocusSortOrder?: (sortOrder: number | undefined) => void;
@@ -902,6 +1343,9 @@ function NamedTabSlot({
   const slotLabel = slotDef.label ?? slotDef.id;
   const isImageList = slotDef.type === 'image' && slotDef.cardinality === 'list';
   const isDraggable = Boolean(slotDef.ordered) && !readOnly;
+  const showStream = Boolean(artifactStream && (
+    revisions.length === 0 || artifactStream.state === 'streaming'
+  ));
 
   return (
     <div className='workflow-panel__named-slot'>
@@ -910,7 +1354,9 @@ function NamedTabSlot({
           <span className='workflow-panel__slot-label'>{slotLabel}</span>
         )}
       </div>
-      {revisions.length === 0 ? (
+      {showStream && artifactStream ? (
+        <SlotMarkdownStream stream={artifactStream} />
+      ) : revisions.length === 0 ? (
         <div
           className='workflow-panel__slot-placeholder'
           aria-label={`${slotLabel} pending`}
@@ -940,6 +1386,7 @@ function NamedTabSlot({
           >
             <SlotRenderer
               slot={rev}
+              widget={slotDef.widget}
               originalFileSlot={
                 slotDef.id === 'delivered_markdown'
                   ? session.slots?.find((item) => item.slot === 'final_document' && item.selected)
@@ -963,6 +1410,7 @@ function NamedTabSlot({
 function TabSlotGrid({
   tab,
   session,
+  tasks,
   onRefresh,
   onReference,
   onFocusSortOrder,
@@ -970,6 +1418,7 @@ function TabSlotGrid({
 }: {
   tab: TabDef;
   session: WorkflowSession;
+  tasks: SubAgentTask[];
   onRefresh?: () => void;
   onReference?: (slot: SlotRevision) => void;
   onFocusSortOrder?: (sortOrder: number | undefined) => void;
@@ -1021,7 +1470,7 @@ function TabSlotGrid({
     const filtered = slotDefs.filter((s) => visible.has(s.id));
     return filtered.length > 0 ? filtered : slotDefs;
   };
-  const visibleSlots = resolveVisibleSlots(resolveWriterFinalSlotDefs(tab, session));
+  const visibleSlots = resolveVisibleSlots(resolvePreferredStructuredSlotDefs(tab, session));
   return (
     <div className={`workflow-panel__tab-content workflow-panel__tab-content--${tab.layout ?? 'vertical'}`}>
       {/* Hidden file input for adding new items */}
@@ -1036,8 +1485,14 @@ function TabSlotGrid({
       {visibleSlots.map((slotDef) => {
         const artifactKey = slotDef.id;
         const revisions = getTabSlotRevisions(session, tab, artifactKey);
+        const artifactStream = findWriterArtifactStream(
+          session,
+          getTabStepId(tab),
+          slotDef.id,
+          tasks,
+        );
         const hideEmpty = Boolean(tab.composite_behavior?.hide_empty_columns);
-        if (hideEmpty && revisions.length === 0) {
+        if (hideEmpty && revisions.length === 0 && !artifactStream) {
           return null;
         }
         return (
@@ -1045,6 +1500,7 @@ function TabSlotGrid({
             key={slotDef.id}
             slotDef={slotDef}
             revisions={revisions}
+            artifactStream={artifactStream}
             session={session}
             onRefresh={onRefresh}
             onReference={onReference}
@@ -1094,6 +1550,11 @@ export function WorkflowPanel({
 }: WorkflowPanelProps) {
   const { t, i18n } = useTranslation();
   const { session, loading, refresh } = useWorkflowSession(conversationId);
+  const taskCenterTasks = useTaskCenterStore((state) =>
+    conversationId
+      ? state.tasksByConversation[conversationId] ?? EMPTY_TASK_CENTER_TASKS
+      : EMPTY_TASK_CENTER_TASKS,
+  );
   const bumpDismissedRefresh = useWorkflowStore((s) => s.bumpDismissedRefresh);
   const autoRunning = useWorkflowStore((s) =>
     conversationId ? (s.autoRunningByConversation[conversationId] ?? false) : false,
@@ -1119,6 +1580,7 @@ export function WorkflowPanel({
   const flushFns = useRef<Map<string, () => Promise<boolean>>>(new Map());
   const [anySlotEditing, setAnySlotEditing] = useState(false);
   const [actionPending, setActionPending] = useState(false);
+  const [footerActions, setFooterActions] = useState<Map<string, SlotFooterAction>>(new Map());
 
   const setExpandedMode = useCallback((nextExpanded: boolean) => {
     if (nextExpanded) setCollapsed(false);
@@ -1178,8 +1640,28 @@ export function WorkflowPanel({
     };
   }, []);
 
-  const flushPendingEdits = useCallback(async (): Promise<boolean> => {
-    const flushers = [...flushFns.current.values()];
+  const registerFooterAction = useCallback((key: string, action: SlotFooterAction | null) => {
+    setFooterActions((previous) => {
+      const next = new Map(previous);
+      if (action) next.set(key, action);
+      else next.delete(key);
+      return next;
+    });
+    return () => {
+      setFooterActions((previous) => {
+        if (!previous.has(key)) return previous;
+        const next = new Map(previous);
+        next.delete(key);
+        return next;
+      });
+    };
+  }, []);
+
+  const flushPendingEdits = useCallback(async (flushKey?: string): Promise<boolean> => {
+    const selectedFlusher = flushKey ? flushFns.current.get(flushKey) : undefined;
+    const flushers = flushKey
+      ? (selectedFlusher ? [selectedFlusher] : [])
+      : [...flushFns.current.values()];
     if (flushers.length === 0) return true;
     const results = await Promise.all(flushers.map((flush) => flush()));
     return results.every(Boolean);
@@ -1188,6 +1670,7 @@ export function WorkflowPanel({
   useEffect(() => {
     editingSlots.current.clear();
     flushFns.current.clear();
+    setFooterActions(new Map());
     setAnySlotEditing(false);
     setActionPending(false);
   }, [session?.session_id]);
@@ -1205,11 +1688,43 @@ export function WorkflowPanel({
 
   // Restore the previously focused tab when UI loads.
   useEffect(() => {
-    const tabs: TabDef[] = ui.tabs ?? [];
+    const tabs = filterWorkflowTabs(
+      ui.tabs ?? [],
+      session?.slots ?? [],
+      ui.tab_visibility_ready_material,
+    );
     if (!tabs.length || !persistedFocusedTab) return;
     const idx = tabs.findIndex((t) => t.id === persistedFocusedTab);
     if (idx !== -1) setActiveTabIdx(idx);
-  }, [ui.tabs, persistedFocusedTab]);
+  }, [ui.tabs, ui.tab_visibility_ready_material, persistedFocusedTab, session?.slots]);
+
+  // Until the user explicitly chooses a visible tab, follow the runtime
+  // frontier. This also moves focus immediately when a skip material removes
+  // the previously selected tab.
+  useEffect(() => {
+    const tabs = filterWorkflowTabs(
+      ui.tabs ?? [],
+      session?.slots ?? [],
+      ui.tab_visibility_ready_material,
+    );
+    const focusedTabVisible = Boolean(
+      persistedFocusedTab && tabs.some((tab) => tab.id === persistedFocusedTab),
+    );
+    if (!tabs.length || focusedTabVisible || !session) return;
+    let idx = tabs.findIndex((tab) => getTabStepId(tab) === session.current_step_id);
+    if (idx === -1 && (session.status === 'completed' || session.status === 'failed')) {
+      idx = tabs.length - 1;
+    }
+    if (idx !== -1) setActiveTabIdx(idx);
+  }, [
+    ui.tabs,
+    ui.tab_visibility_ready_material,
+    persistedFocusedTab,
+    session?.current_step_id,
+    session?.session_id,
+    session?.slots,
+    session?.status,
+  ]);
 
   // Track focused tab changes.
   const handleTabChange = useCallback((idx: number, tabId: string) => {
@@ -1234,8 +1749,15 @@ export function WorkflowPanel({
 
   if (!session) return null;
 
-  const tabs: TabDef[] = ui.tabs ?? [];
+  const tabs = filterWorkflowTabs(
+    ui.tabs ?? [],
+    session.slots ?? [],
+    ui.tab_visibility_ready_material,
+  );
   const hasTabs = tabs.length > 0;
+  const visibleActiveTabIdx = hasTabs
+    ? Math.min(activeTabIdx, tabs.length - 1)
+    : 0;
   const hasIntent = true;
   const sessionReadOnly = isWorkflowSessionReadOnly(session, autoRunning);
 
@@ -1244,20 +1766,25 @@ export function WorkflowPanel({
     session.status === 'active' ||
     session.status === 'completed' ||
     session.status === 'failed';
-  const terminalSession = session.status === 'completed'
-    || session.status === 'failed'
-    || session.status === 'stopped';
-  // autoRunning is only an optimistic transport hint. A durable terminal
-  // session always wins, even if a delayed/replayed conversation event arrives.
-  const displayStatus = autoRunning && !terminalSession ? 'active' : session.status;
-  // Only block footer actions while the workflow is actually running (or flush-in-progress).
+  const documentFooter = useMemo(
+    () => buildDocumentFooterItems(footerActions),
+    [footerActions],
+  );
+  const displayStatus = autoRunning ? 'active' : session.status;
+  // Only block footer actions while the plugin is actually running (or flush-in-progress).
   // Dirty editors no longer disable retry — click flushes saves first, then proceeds.
   const sessionBusy = displayStatus === 'active' || autoRunning;
   const buttonsDisabled = sessionBusy || actionPending;
   const dismissDisabled = dismissing || anySlotEditing || actionPending;
   const collapseDisabled = (anySlotEditing || actionPending) && !collapsed;
-  // "继续" is only shown in waiting/active; completed/failed show rollback step picker instead.
-  const showContinue = displayStatus === 'waiting' || displayStatus === 'active';
+  const completedContinueStepId = resolveCompletedContinueStep(
+    session,
+    tabs[visibleActiveTabIdx],
+  );
+  // Workflow packages may expose a follow-on action from a completed tab.
+  const showContinue = displayStatus === 'waiting'
+    || displayStatus === 'active'
+    || Boolean(completedContinueStepId);
   const showStepRollback =
     (session.status === 'completed' || session.status === 'failed')
     && Boolean(session.steps && session.steps.length > 0);
@@ -1277,11 +1804,11 @@ export function WorkflowPanel({
   const effectivePast = new Set(session.projection?.past ?? []);
   const continueDisabled = buttonsDisabled || currentStepStatus === 'failed';
 
-  async function runFooterAction(action: () => void) {
+  async function runFooterAction(action: () => void, flushKey?: string) {
     if (sessionBusy || actionPending) return;
     setActionPending(true);
     try {
-      const saved = await flushPendingEdits();
+      const saved = await flushPendingEdits(flushKey);
       if (!saved) return;
       action();
     } finally {
@@ -1290,7 +1817,10 @@ export function WorkflowPanel({
   }
 
   function handleContinue() {
-    void runFooterAction(() => onSendMessage?.(t('chat.workflowContinue')));
+    const message = completedContinueStepId
+      ? `${t('chat.workflowRollbackPrefix')}${completedContinueStepId}`
+      : t('chat.workflowContinue');
+    void runFooterAction(() => onSendMessage?.(message));
   }
 
   function handleRetry() {
@@ -1301,8 +1831,16 @@ export function WorkflowPanel({
     void runFooterAction(() => onSendMessage?.(`${t('chat.workflowRollbackPrefix')}${stepId}`));
   }
 
+  const continueLabel = displayStatus === 'waiting'
+    ? t('chat.workflowSaveAndContinue')
+    : t('chat.workflowContinue');
+
   const panel = (
-    <SlotEditingContext.Provider value={{ setEditing: handleSlotEditingChange, registerFlush }}>
+    <SlotEditingContext.Provider value={{
+      setEditing: handleSlotEditingChange,
+      registerFlush,
+      registerFooterAction,
+    }}>
     <div
       className={`workflow-panel workflow-panel--${displayStatus}${collapsed ? ' workflow-panel--collapsed' : ''}${expanded ? ' workflow-panel--expanded' : ''}`}
       data-session-id={session.session_id}
@@ -1311,7 +1849,7 @@ export function WorkflowPanel({
       {/* Header */}
       <div className='workflow-panel__header'>
         <div className='workflow-panel__header-left'>
-          <span className='workflow-panel__title'>{session.workflow_id}</span>
+          <span className='workflow-panel__title'>{ui.name || session.workflow_id}</span>
           <span
             className={`workflow-panel__status workflow-panel__status--${displayStatus}`}
             aria-label={t('chat.workflowStatusAria', { status: t(STATUS_KEY[displayStatus] ?? displayStatus) })}
@@ -1449,9 +1987,9 @@ export function WorkflowPanel({
               <React.Fragment key={tab.id}>
                 <button
                   role='tab'
-                  aria-selected={idx === activeTabIdx}
+                  aria-selected={idx === visibleActiveTabIdx}
                   aria-controls={`workflow-tab-panel-${tab.id}`}
-                  className={`workflow-panel__tab${idx === activeTabIdx ? ' workflow-panel__tab--active' : ''}${idx < activeTabIdx ? ' workflow-panel__tab--done' : ''}`}
+                  className={`workflow-panel__tab${idx === visibleActiveTabIdx ? ' workflow-panel__tab--active' : ''}${idx < visibleActiveTabIdx ? ' workflow-panel__tab--done' : ''}`}
                   onClick={() => handleTabChange(idx, tab.id)}
                   type='button'
                 >
@@ -1466,7 +2004,7 @@ export function WorkflowPanel({
                   )}
                 </button>
                 {idx < tabs.length - 1 && (
-                  <span className={`workflow-panel__tab-connector${idx < activeTabIdx ? ' workflow-panel__tab-connector--done' : ''}`} aria-hidden='true' />
+                  <span className={`workflow-panel__tab-connector${idx < visibleActiveTabIdx ? ' workflow-panel__tab-connector--done' : ''}`} aria-hidden='true' />
                 )}
               </React.Fragment>
             );
@@ -1483,18 +2021,21 @@ export function WorkflowPanel({
                 key={tab.id}
                 id={`workflow-tab-panel-${tab.id}`}
                 role='tabpanel'
-                hidden={idx !== activeTabIdx}
+                hidden={idx !== visibleActiveTabIdx}
               >
-                <SlotDownloadContext.Provider value={idx === tabs.length - 1}>
+                <WorkflowPanelTabActiveContext.Provider value={idx === visibleActiveTabIdx}>
+                <SlotDownloadContext.Provider value={workflowTabAllowsDownload(tab, idx, tabs.length)}>
                   <TabSlotGrid
                     tab={tab}
                     session={session}
+                    tasks={taskCenterTasks}
                     onRefresh={refresh}
                     onReference={onReference}
                     onFocusSortOrder={handleFocusSortOrder}
                     readOnly={sessionReadOnly}
                   />
                 </SlotDownloadContext.Provider>
+                </WorkflowPanelTabActiveContext.Provider>
               </div>
             ))
           ) : (
@@ -1511,6 +2052,71 @@ export function WorkflowPanel({
       {/* Footer */}
       {!collapsed && showActions && (
         <div className='workflow-panel__footer' role='group' aria-label={t('chat.workflowSessionControls')}>
+          {documentFooter.actionItems.length > 0 || documentFooter.statusMessages.length > 0 ? (
+            <div className='workflow-panel__footer-document'>
+              {documentFooter.statusMessages.length > 0 ? (
+                <div className='workflow-panel__footer-meta'>
+                  {documentFooter.statusMessages.map((message) => (
+                    <span
+                      key={message.key}
+                      className={
+                        message.tone === 'error'
+                          ? 'workflow-panel__footer-action-status workflow-panel__footer-action-status--error'
+                          : message.tone === 'success'
+                            ? 'workflow-panel__footer-action-status workflow-panel__footer-action-status--success'
+                            : 'workflow-panel__footer-action-status'
+                      }
+                      role={message.tone === 'error' ? 'alert' : 'status'}
+                    >
+                      {message.text}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+              {documentFooter.actionItems.length > 0 ? (
+                <div className='workflow-panel__footer-actions'>
+                  {documentFooter.actionItems.map((item) => {
+                    if (item.kind === 'link') {
+                      return (
+                        <a
+                          key={item.key}
+                          className='workflow-panel__action-btn workflow-panel__action-btn--secondary workflow-panel__action-btn--link'
+                          href={item.href}
+                          target='_blank'
+                          rel='noopener noreferrer'
+                        >
+                          <ExportOutlined aria-hidden />
+                          {item.label}
+                        </a>
+                      );
+                    }
+
+                    const { action } = item;
+                    return (
+                      <button
+                        key={item.key}
+                        type='button'
+                        className={`workflow-panel__action-btn workflow-panel__action-btn--${action.tone ?? 'secondary'}`}
+                        disabled={actionPending || action.disabled}
+                        aria-disabled={actionPending || action.disabled}
+                        onClick={() => {
+                          if (action.flushBeforeAction) {
+                            void runFooterAction(action.onClick, action.flushKey);
+                            return;
+                          }
+                          action.onClick();
+                        }}
+                      >
+                        {action.icon === 'write-back' ? <CloudUploadOutlined aria-hidden /> : null}
+                        {action.icon === 'download' ? <DownloadOutlined aria-hidden /> : null}
+                        {action.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
           {displayStatus === 'active' && onStop && (
             <button
               type='button'
@@ -1555,10 +2161,14 @@ export function WorkflowPanel({
                     ? t('chat.workflowSavingBeforeAction')
                     : buttonsDisabled
                       ? t('chat.workflowBtnDisabledHint')
-                      : t('chat.workflowContinue')
+                      : anySlotEditing
+                        ? t('chat.workflowContinueFlushHint')
+                        : completedContinueStepId
+                          ? t('chat.workflowContinueWithLatestOutline')
+                          : continueLabel
               }
             >
-              {actionPending ? t('chat.workflowSavingBeforeAction') : t('chat.workflowContinue')}
+              {actionPending ? t('chat.workflowSavingBeforeAction') : continueLabel}
             </button>
           )}
           {showStepRollback && (

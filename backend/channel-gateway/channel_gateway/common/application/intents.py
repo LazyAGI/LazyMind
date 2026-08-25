@@ -12,7 +12,6 @@ from channel_gateway.common.domain.commands import (
     RESOLVED_CONVERSATION_TARGET_KEY,
     RESOLVED_RESOURCE_SELECTIONS_KEY,
     SCHEMA_VERSION,
-    ActionKind,
     CapabilityConfigureCommand,
     CapabilityConfigureParameters,
     ChatCommand,
@@ -24,11 +23,8 @@ from channel_gateway.common.domain.commands import (
     ResourceIndexSelector,
     SelectionContinuation,
     SelectionChooseCommand,
-    WorkflowInvokeCommand,
-    command_registry,
 )
 from channel_gateway.common.errors import LazyMindError
-from channel_gateway.common.ports.core import IntentClient
 from channel_gateway.common.ports.repository import IntentRepository
 
 
@@ -267,76 +263,12 @@ def resolve_pending_selection(
     raise LazyMindError('Saved channel selection has no continuation')
 
 
-class ChannelIntentClassifier:
-    """Calls the stateless classifier with the Gateway-owned command registry."""
-
-    def __init__(self, client: IntentClient):
-        self._client = client
-
-    def classify(
-        self,
-        *,
-        provider: str,
-        owner_user_id: str,
-        message: str,
-        request_id: str,
-        state: dict[str, Any],
-    ) -> CommandEnvelope:
-        payload = self._client.classify_intent(
-            owner_user_id=owner_user_id,
-            request_id=request_id,
-            provider=provider,
-            message=message,
-            state=state,
-            command_registry=command_registry(
-                self._allowed_commands(state)
-            ),
-        )
-        try:
-            return COMMAND_ADAPTER.validate_python(payload)
-        except ValidationError as exc:
-            raise LazyMindError('Core returned an invalid channel command') from exc
-
-    @staticmethod
-    def _allowed_commands(state: dict[str, Any]) -> set[ActionKind]:
-        allowed = set(ActionKind)
-        allowed.discard(ActionKind.CONVERSATION_SETTINGS_UPDATE)
-        latest_selection = state.get('latest_selection')
-        if (
-            not isinstance(latest_selection, dict)
-            or not latest_selection.get('has_continuation')
-        ):
-            allowed.discard(ActionKind.SELECTION_CHOOSE)
-        workflows = state.get('available_workflows')
-        if not isinstance(workflows, list) or not workflows:
-            allowed.discard(ActionKind.WORKFLOW_INVOKE)
-        return allowed
-
-    def catalog(
-        self,
-        *,
-        owner_user_id: str,
-        request_id: str,
-        kinds: set[str],
-    ) -> dict[str, Any]:
-        return self._client.get_capability_catalog(
-            owner_user_id=owner_user_id,
-            request_id=f'{request_id}_catalog',
-            kinds=kinds,
-        )
-
-
 def canonicalize_command(
     command: CommandEnvelope,
     current_message: str,
 ) -> CommandEnvelope:
     """Apply parameter identities declared by the command contract."""
 
-    if isinstance(command, WorkflowInvokeCommand):
-        parameters = command.parameters.model_copy(
-            update={'message': current_message}
-        )
-        return command.model_copy(update={'parameters': parameters})
     if isinstance(command, ChatCommand) and not command.parameters.resource_changes:
         parameters = command.parameters.model_copy(
             update={'message': current_message}
@@ -375,11 +307,6 @@ def validate_command(
         and task != grounding_messages[-1]
     ):
         raise LazyMindError('Plain chat must preserve the complete user message')
-    if (
-        isinstance(command, WorkflowInvokeCommand)
-        and task != grounding_messages[-1]
-    ):
-        raise LazyMindError('Workflow task must preserve the complete user message')
     if isinstance(command, ConversationSwitchCommand):
         target = parameters.target
         if target.kind == 'index':
@@ -396,25 +323,6 @@ def validate_command(
         capabilities = list(parameters.capabilities)
         if len(set(capabilities)) != len(capabilities):
             raise LazyMindError('Capability categories contain duplicates')
-    return command
-
-
-def validate_workflow_catalog(
-    command: CommandEnvelope,
-    catalog: dict[str, Any],
-) -> CommandEnvelope:
-    if not isinstance(command, WorkflowInvokeCommand):
-        return command
-    workflows = catalog.get('workflow')
-    if not isinstance(workflows, list):
-        raise LazyMindError('No workflow catalog is available for this channel')
-    available_refs = {
-        str(item.get('id') or '')
-        for item in workflows
-        if isinstance(item, dict) and bool(item.get('enabled', False))
-    }
-    if command.parameters.workflow_ref not in available_refs:
-        raise LazyMindError('The selected workflow is not available to this user')
     return command
 
 

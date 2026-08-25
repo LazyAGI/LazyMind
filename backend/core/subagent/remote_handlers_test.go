@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,6 +20,11 @@ import (
 
 func remoteSubagentFixture(t *testing.T) *orm.DB {
 	t.Helper()
+	authService := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"data":{"items":[]}}`))
+	}))
+	t.Cleanup(authService.Close)
+	t.Setenv("LAZYMIND_AUTH_SERVICE_URL", authService.URL)
 	db := newTestDB(t)
 	if err := db.AutoMigrate(
 		&orm.WorkflowSessionStep{},
@@ -50,6 +56,24 @@ func remoteSubagentFixture(t *testing.T) *orm.DB {
 	return db
 }
 
+func TestRemoteArtifactEventEnforcesDeclaredFileType(t *testing.T) {
+	db := remoteSubagentFixture(t)
+	if err := db.Model(&orm.SubAgentTask{}).Where("id = ?", "task-remote").Update("params",
+		json.RawMessage(`{"output_slot_types":{"report":"file"}}`)).Error; err != nil {
+		t.Fatal(err)
+	}
+	rejected := postRemoteTaskEvent(t, "lease-live", map[string]any{
+		"type": "artifact", "slot": "report", "content_type": "text", "value": map[string]any{"text": "draft"},
+	})
+	if rejected.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status=%d body=%s", rejected.Code, rejected.Body.String())
+	}
+	var count int64
+	if err := db.Model(&orm.SubAgentArtifact{}).Where("task_id = ?", "task-remote").Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("count=%d err=%v", count, err)
+	}
+}
+
 func postRemoteTaskEvent(t *testing.T, lease string, event map[string]any) *httptest.ResponseRecorder {
 	t.Helper()
 	body, _ := json.Marshal(event)
@@ -79,6 +103,23 @@ func seedRemoteSearchProvider(t *testing.T, db *orm.DB) {
 	}
 }
 
+func seedRemoteAcademicProvider(t *testing.T, db *orm.DB) {
+	t.Helper()
+	now := time.Now()
+	base := orm.BaseModel{CreateUserID: "user-1", CreateUserName: "user-1", CreatedAt: now, UpdatedAt: now}
+	provider := orm.UserModelProvider{ID: "provider-sciverse", DefaultModelProviderID: "default-sciverse",
+		Name: "Sciverse", Category: "datasource", BaseModel: base}
+	group := orm.UserModelProviderGroup{ID: "group-sciverse", UserModelProviderID: provider.ID,
+		Name: "Sciverse", APIKey: "workflow-academic-token", IsVerified: true, BaseModel: base}
+	selected := orm.UserSelectedProvider{UserID: "user-1", UserName: "user-1", Category: "datasource",
+		UserModelProviderGroupID: group.ID, CreatedAt: now, UpdatedAt: now}
+	for _, value := range []any{&provider, &group, &selected} {
+		if err := db.Create(value).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestRemoteTaskEventsRequireBoundAttemptLease(t *testing.T) {
 	remoteSubagentFixture(t)
 	for _, lease := range []string{"", "stale"} {
@@ -91,9 +132,22 @@ func TestRemoteTaskEventsRequireBoundAttemptLease(t *testing.T) {
 
 func TestRemoteExecutionSpecReturnsTaskParamsAndDurableSteps(t *testing.T) {
 	db := remoteSubagentFixture(t)
+	authService := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.Contains(r.URL.Path, "/token") {
+			_, _ = w.Write([]byte(`{"data":{"access_token":"feishu-token"}}`))
+			return
+		}
+		if r.URL.Query().Get("provider") == "feishu" {
+			_, _ = w.Write([]byte(`{"data":{"items":[{"connection_id":"connection-1"}]}}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"data":{"items":[]}}`))
+	}))
+	t.Cleanup(authService.Close)
+	t.Setenv("LAZYMIND_AUTH_SERVICE_URL", authService.URL)
 	seedRemoteSearchProvider(t, db)
 	if err := db.Model(&orm.SubAgentTask{}).Where("id = ?", "task-remote").Update("params",
-		json.RawMessage(`{"operation":"execute"}`)).Error; err != nil {
+		json.RawMessage(`{"operation":"execute","legacy_tools":["web_search","cloud_files"]}`)).Error; err != nil {
 		t.Fatal(err)
 	}
 	if err := AppendRemoteStep(context.Background(), db.DB, "task-remote", "text",
@@ -119,8 +173,37 @@ func TestRemoteExecutionSpecReturnsTaskParamsAndDurableSteps(t *testing.T) {
 	if toolConfig["tavily"] != "workflow-search-token" {
 		t.Fatalf("tool_config=%#v", toolConfig)
 	}
-	if _, exposed := data["workspace_path"]; exposed {
-		t.Fatalf("Core workspace must not be exposed: %#v", data)
+	if toolConfig["feishu"] != "feishu-token" {
+		t.Fatalf("tool_config=%#v", toolConfig)
+	}
+	if data["workspace_path"] != "/core/path/must-not-be-used" {
+		t.Fatalf("workspace_path=%#v", data["workspace_path"])
+	}
+}
+
+func TestRemoteExecutionSpecLoadsOnlyDeclaredAcademicSearchConfig(t *testing.T) {
+	db := remoteSubagentFixture(t)
+	seedRemoteSearchProvider(t, db)
+	seedRemoteAcademicProvider(t, db)
+	if err := db.Model(&orm.SubAgentTask{}).Where("id = ?", "task-remote").Update("params",
+		json.RawMessage(`{"operation":"execute","legacy_tools":["academic_search","kb"]}`)).Error; err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/internal/subagent/tasks/task-remote/execution-spec", nil)
+	req = mux.SetURLVars(req, map[string]string{"task_id": "task-remote"})
+	req.Header.Set("Authorization", "Bearer executor-secret")
+	req.Header.Set("X-Workflow-Lease-Token", "lease-live")
+	rec := httptest.NewRecorder()
+	InternalGetExecutionSpec(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	toolConfig := getData(rec.Body.Bytes())["tool_config"].(map[string]any)
+	if toolConfig["sciverse"] != "workflow-academic-token" {
+		t.Fatalf("tool_config=%#v", toolConfig)
+	}
+	if _, ok := toolConfig["tavily"]; ok {
+		t.Fatalf("undeclared web search credential leaked into academic step: %#v", toolConfig)
 	}
 }
 
@@ -130,10 +213,14 @@ func TestRemoteTaskEventsPersistStreamStateAndInvalidatePanel(t *testing.T) {
 	EventHooks = &eventHooks{}
 	t.Cleanup(func() { EventHooks = previousHooks })
 	updates := []string{}
+	taskUpdates := []TaskEvent{}
 	EventHooks.RegisterConversationEventHook(func(_ context.Context, _ state.Store, convID, _ string,
 		eventType string, payload map[string]any) {
 		if convID == "conversation-1" && eventType == "workflow_runtime_updated" {
 			updates = append(updates, payload["change"].(string))
+		}
+		if convID == "conversation-1" && eventType == "task_updated" {
+			taskUpdates = append(taskUpdates, payload["event"].(TaskEvent))
 		}
 	})
 
@@ -144,6 +231,14 @@ func TestRemoteTaskEventsPersistStreamStateAndInvalidatePanel(t *testing.T) {
 		{"type": "tool_calls", "tool_calls": []map[string]any{{"id": "1", "name": "read"}}},
 		{"type": "tool_results", "tool_results": []map[string]any{{"id": "1", "result": "ok"}}},
 		{"type": "progress", "progress": 42, "current_phase": "working"},
+		{"type": "artifact_stream_start", "slot": "draft_document", "content_type": "text/markdown",
+			"stream_id": "stream-1", "chunk_index": 1},
+		{"type": "artifact_stream", "slot": "draft_document", "content_type": "text/markdown",
+			"stream_id": "stream-1", "chunk_index": 2, "delta": "hello"},
+		{"type": "artifact_stream_end", "slot": "draft_document", "content_type": "text/markdown",
+			"stream_id": "stream-1", "chunk_index": 3},
+		{"type": "artifact_stream_abort", "slot": "outline_document", "content_type": "text/markdown",
+			"stream_id": "stream-2", "chunk_index": 2, "message": "stopped"},
 		{"type": "artifact", "slot": "report", "content_type": "text", "seq": 1,
 			"value": map[string]any{"text": "result"}},
 	}
@@ -173,6 +268,22 @@ func TestRemoteTaskEventsPersistStreamStateAndInvalidatePanel(t *testing.T) {
 	wantUpdates := []string{"task_start", "progress", "artifact"}
 	if !reflect.DeepEqual(updates, wantUpdates) {
 		t.Fatalf("updates=%v want=%v", updates, wantUpdates)
+	}
+	// Token/tool deltas remain on the dedicated task stream. Only bounded
+	// lifecycle and Writer preview events are mirrored to the conversation stream.
+	wantTaskUpdates := []string{
+		"task_start", "progress", "artifact_stream_start", "artifact_stream",
+		"artifact_stream_end", "artifact_stream_abort",
+	}
+	gotTaskUpdates := make([]string, 0, len(taskUpdates))
+	for _, event := range taskUpdates {
+		gotTaskUpdates = append(gotTaskUpdates, event.Type)
+	}
+	if !reflect.DeepEqual(gotTaskUpdates, wantTaskUpdates) {
+		t.Fatalf("task updates=%v want=%v", gotTaskUpdates, wantTaskUpdates)
+	}
+	if taskUpdates[3].Delta != "hello" || taskUpdates[3].StreamID != "stream-1" || taskUpdates[3].ChunkIndex != 2 {
+		t.Fatalf("stream delta=%#v", taskUpdates[3])
 	}
 }
 

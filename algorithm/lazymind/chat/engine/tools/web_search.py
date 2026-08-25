@@ -1,59 +1,33 @@
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict
 
-from lazymind.chat.engine.tools.infra import (
-    fetch_url_content,
-    tool_success,
-)
+from lazyllm.tools.agent import ToolExecutionError
+
+from lazymind.chat.engine.tools.infra import fetch_url_content
 
 
-def url_fetch(url: str = '', urls: Optional[List[str]] = None) -> Dict[str, Any]:
-    """Fetch readable content from one or more public web pages.
+def url_fetch(url: str) -> Dict[str, Any]:
+    """Fetch readable content from one public web page.
 
     Use this for public web pages. Do not use it for authenticated cloud-file
     URLs such as Feishu/Lark Wiki or Docs and Notion; use CloudFileToolkit for
     those links instead. Never invent or guess a URL: use a URL supplied by the
-    user or returned by a search tool. When several public URLs need inspection, pass all of
-    them in `urls` in one call instead of relying on multiple parallel tool
-    calls. The pages are fetched concurrently with bounded concurrency.
+    user or returned by a search tool. To inspect several pages, issue multiple
+    url_fetch calls in the same tool-call turn so ToolManager can execute them
+    concurrently. To follow a returned link, copy its exact target_url into a new
+    url_fetch call.
 
     Args:
-        url: One absolute URL, or a domain/path that can be normalized to HTTPS.
-            Use this for a single page and omit it when `urls` is supplied.
-        urls: Public URLs to fetch as one batch. Duplicate URLs are fetched once.
+        url: One public HTTP(S) URL, or a domain/path that can be normalized to HTTPS.
 
     Returns:
-        For one URL, the existing page metadata and extracted text payload. For
-        a batch, a dict containing total/succeeded/failed counts and one result
-        per URL; an individual failure does not discard successful pages.
+        Page title, extracted text, truncation state, and links represented as
+        text plus target_url.
     """
-    requested = [str(item).strip() for item in (urls or []) if str(item).strip()]
-    if str(url or '').strip():
-        requested.insert(0, str(url).strip())
-    requested = list(dict.fromkeys(requested))
-    if not requested:
-        raise ValueError('url or urls is required')
-    if len(requested) == 1:
-        return tool_success('url_fetch', fetch_url_content(requested[0]))
-
-    def fetch_one(item: str) -> Dict[str, Any]:
-        try:
-            return {'url': item, 'success': True, 'result': fetch_url_content(item)}
-        except Exception as exc:
-            return {
-                'url': item,
-                'success': False,
-                'error': f'{type(exc).__name__}: {exc}',
-            }
-
-    with ThreadPoolExecutor(max_workers=min(len(requested), 5)) as executor:
-        results = list(executor.map(fetch_one, requested))
-    succeeded = sum(bool(item['success']) for item in results)
-    return tool_success('url_fetch', {
-        'total': len(results),
-        'succeeded': succeeded,
-        'failed': len(results) - succeeded,
-        'results': results,
-    })
+    if not str(url or '').strip():
+        raise ToolExecutionError('url is required')
+    try:
+        return fetch_url_content(url)
+    except ValueError as exc:
+        raise ToolExecutionError(str(exc)) from exc

@@ -1,14 +1,12 @@
 package market
 
 import (
-	"archive/zip"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path"
 	"path/filepath"
@@ -23,24 +21,27 @@ import (
 
 	skillmetadata "lazymind/core/skillv2/metadata"
 	skillsearch "lazymind/core/skillv2/search"
+	skillpackage "lazymind/core/skillv2/skillpackage"
 )
 
 type ServiceDeps struct {
-	DB        *gorm.DB
-	BlobStore *BlobStore
+	DB         *gorm.DB
+	BlobStore  *BlobStore
+	Downloader ZipDownloader
 }
 
 type AdminServiceDeps = ServiceDeps
 
 type Service struct {
-	db        *gorm.DB
-	blobStore *BlobStore
+	db         *gorm.DB
+	blobStore  *BlobStore
+	downloader ZipDownloader
 }
 
 type AdminService = Service
 
 func NewService(deps ServiceDeps) *Service {
-	return &Service{db: deps.DB, blobStore: deps.BlobStore}
+	return &Service{db: deps.DB, blobStore: deps.BlobStore, downloader: deps.Downloader}
 }
 
 func NewAdminService(deps AdminServiceDeps) *AdminService {
@@ -62,9 +63,12 @@ type GetInstalledTreeRequest struct {
 	UserID  string
 }
 
+type ZipDownloader interface {
+	Download(ctx context.Context, url string) (string, error)
+}
+
 type PublishRequest struct {
 	AdminUserID string
-	Name        string
 	Tags        []string
 	Source      SourceInput
 }
@@ -74,6 +78,7 @@ type SourceInput struct {
 	UploadID   string
 	StoredPath string
 	Filename   string
+	URL        string
 }
 
 type PublishResponse struct {
@@ -150,6 +155,17 @@ func (s *Service) Install(ctx context.Context, req InstallRequest) (InstallRespo
 			out.SkillID = installedSkillID
 			return nil
 		}
+		restoredSkillID, err := restoreTrashedInstalledSkill(ctx, tx, item, req.UserID, now)
+		if err != nil {
+			return err
+		}
+		if restoredSkillID != "" {
+			if err := recordMarketInstall(ctx, tx, item.ID, req.UserID, restoredSkillID, now); err != nil {
+				return err
+			}
+			out.SkillID = restoredSkillID
+			return nil
+		}
 		if err := detachLegacyPublisherSource(ctx, tx, item, req.UserID, now); err != nil {
 			return err
 		}
@@ -190,6 +206,57 @@ func existingInstalledSkillID(ctx context.Context, tx *gorm.DB, marketItemID, us
 		return "", nil
 	}
 	return row.SkillID, nil
+}
+
+func restoreTrashedInstalledSkill(ctx context.Context, tx *gorm.DB, item skillMarketItemRow, userID string, now time.Time) (string, error) {
+	var candidate struct {
+		ID           string `gorm:"column:id"`
+		RelativeRoot string `gorm:"column:relative_root"`
+	}
+	result := tx.WithContext(ctx).
+		Table("skills AS skills").
+		Select("skills.id, skills.relative_root").
+		Where("skills.owner_user_id = ? AND skills.deleted_at IS NOT NULL", userID).
+		Where(`EXISTS (
+			SELECT 1 FROM skill_revisions AS revisions
+			WHERE revisions.skill_id = skills.id
+				AND revisions.change_source = ?
+				AND revisions.source_ref_type = ?
+				AND revisions.source_ref_id = ?
+		)`, "market_install", "skill", item.SourceSkillID).
+		Order("skills.deleted_at DESC, skills.updated_at DESC, skills.id ASC").
+		Limit(1).
+		Scan(&candidate)
+	if result.Error != nil {
+		return "", result.Error
+	}
+	if result.RowsAffected == 0 {
+		return "", nil
+	}
+
+	var conflicts int64
+	if err := tx.WithContext(ctx).Model(&skillRow{}).
+		Where("owner_user_id = ? AND relative_root = ? AND deleted_at IS NULL AND id <> ?", userID, candidate.RelativeRoot, candidate.ID).
+		Count(&conflicts).Error; err != nil {
+		return "", err
+	}
+	if conflicts > 0 {
+		return "", fmt.Errorf("skill name conflict")
+	}
+	if err := tx.WithContext(ctx).Model(&skillRow{}).
+		Where("id = ? AND owner_user_id = ? AND deleted_at IS NOT NULL", candidate.ID, userID).
+		Updates(map[string]any{
+			"deleted_at":       nil,
+			"trash_expires_at": nil,
+			"deleted_by":       nil,
+			"updated_at":       now,
+		}).Error; err != nil {
+		return "", err
+	}
+	if err := skillsearch.RebuildSkillTx(ctx, tx, candidate.ID, now); err != nil {
+		return "", err
+	}
+	return candidate.ID, nil
 }
 
 func detachLegacyPublisherSource(ctx context.Context, tx *gorm.DB, item skillMarketItemRow, userID string, now time.Time) error {
@@ -242,7 +309,7 @@ func (s *Service) GetInstalledTree(ctx context.Context, req GetInstalledTreeRequ
 }
 
 func (s *Service) Publish(ctx context.Context, req PublishRequest) (PublishResponse, error) {
-	files, err := filesFromSource(req)
+	files, err := s.filesFromSource(ctx, req.Source)
 	if err != nil {
 		return PublishResponse{}, err
 	}
@@ -300,6 +367,10 @@ func (s *Service) Publish(ctx context.Context, req PublishRequest) (PublishRespo
 		if err != nil {
 			return err
 		}
+		sourceRefID := strings.TrimSpace(req.Source.UploadID)
+		if sourceRefID == "" {
+			sourceRefID = strings.TrimSpace(req.Source.URL)
+		}
 		if err := tx.Create(&skillRevisionRow{
 			ID:            revisionID,
 			SkillID:       sourceSkillID,
@@ -307,7 +378,7 @@ func (s *Service) Publish(ctx context.Context, req PublishRequest) (PublishRespo
 			TreeHash:      treeHash,
 			ChangeSource:  "market_publish",
 			SourceRefType: req.Source.Type,
-			SourceRefID:   req.Source.UploadID,
+			SourceRefID:   sourceRefID,
 			CreatedBy:     &adminID,
 			CreatedAt:     now,
 		}).Error; err != nil {
@@ -771,11 +842,29 @@ func hashEntries(entries []skillRevisionEntryRow) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func filesFromSource(req PublishRequest) (map[string][]byte, error) {
-	if strings.TrimSpace(req.Source.StoredPath) == "" {
-		return defaultSkillFiles(req.Name), nil
+func (s *Service) filesFromSource(ctx context.Context, source SourceInput) (map[string][]byte, error) {
+	sourceType := strings.ToLower(strings.TrimSpace(source.Type))
+	zipPath := strings.TrimSpace(source.StoredPath)
+	if sourceType == "url" {
+		if strings.TrimSpace(source.URL) == "" {
+			return nil, fmt.Errorf("url required")
+		}
+		if s.downloader == nil {
+			return nil, fmt.Errorf("zip downloader is not configured")
+		}
+		downloadedPath, err := s.downloader.Download(ctx, source.URL)
+		if err != nil {
+			return nil, err
+		}
+		defer os.Remove(downloadedPath)
+		zipPath = downloadedPath
+	} else if sourceType != "uploaded_zip" {
+		return nil, fmt.Errorf("unsupported market skill source type %q", source.Type)
 	}
-	files, err := readZipFiles(req.Source.StoredPath)
+	if zipPath == "" {
+		return nil, fmt.Errorf("skill package stored path is required")
+	}
+	files, err := skillpackage.ReadZip(zipPath)
 	if err != nil {
 		return nil, err
 	}
@@ -783,116 +872,6 @@ func filesFromSource(req PublishRequest) (map[string][]byte, error) {
 		return nil, fmt.Errorf("skill package must contain SKILL.md")
 	}
 	return files, nil
-}
-
-func readZipFiles(zipPath string) (map[string][]byte, error) {
-	reader, err := zip.OpenReader(zipPath)
-	if err != nil {
-		return nil, err
-	}
-	defer reader.Close()
-	files := map[string][]byte{}
-	for _, entry := range reader.File {
-		if isIgnoredSkillZipMetadata(entry.Name) {
-			continue
-		}
-		if entry.FileInfo().IsDir() {
-			if _, err := cleanSkillPath(strings.TrimSuffix(entry.Name, "/")); err != nil {
-				return nil, err
-			}
-			continue
-		}
-		name, err := cleanSkillPath(entry.Name)
-		if err != nil {
-			return nil, err
-		}
-		rc, err := entry.Open()
-		if err != nil {
-			return nil, err
-		}
-		data, readErr := io.ReadAll(rc)
-		closeErr := rc.Close()
-		if readErr != nil {
-			return nil, readErr
-		}
-		if closeErr != nil {
-			return nil, closeErr
-		}
-		files[name] = data
-	}
-	return normalizeSkillPackageRoot(files), nil
-}
-
-func isIgnoredSkillZipMetadata(name string) bool {
-	name = strings.TrimSuffix(name, "/")
-	if name == "" {
-		return false
-	}
-	for _, part := range strings.Split(name, "/") {
-		lower := strings.ToLower(part)
-		if lower == "__macosx" || lower == ".ds_store" || lower == "thumbs.db" || lower == "desktop.ini" || strings.HasPrefix(part, "._") {
-			return true
-		}
-	}
-	return false
-}
-
-func normalizeSkillPackageRoot(files map[string][]byte) map[string][]byte {
-	if _, ok := files["SKILL.md"]; ok {
-		return files
-	}
-	root := ""
-	for filePath := range files {
-		parts := strings.SplitN(filePath, "/", 2)
-		if len(parts) != 2 || parts[1] == "" {
-			return files
-		}
-		if root == "" {
-			root = parts[0]
-			continue
-		}
-		if root != parts[0] {
-			return files
-		}
-	}
-	if root == "" {
-		return files
-	}
-	normalized := make(map[string][]byte, len(files))
-	prefix := root + "/"
-	for filePath, data := range files {
-		relPath := strings.TrimPrefix(filePath, prefix)
-		normalized[relPath] = data
-	}
-	if _, ok := normalized["SKILL.md"]; ok {
-		return normalized
-	}
-	return files
-}
-
-func cleanSkillPath(name string) (string, error) {
-	if name == "" || strings.HasPrefix(name, "/") || strings.Contains(name, `\`) || strings.Contains(name, "//") {
-		return "", fmt.Errorf("unsafe path %q", name)
-	}
-	cleaned := path.Clean(name)
-	if cleaned == "." || cleaned != name || strings.HasPrefix(cleaned, "../") || cleaned == ".." {
-		return "", fmt.Errorf("unsafe path %q", name)
-	}
-	for _, part := range strings.Split(cleaned, "/") {
-		if part == "" || part == "." || part == ".." {
-			return "", fmt.Errorf("unsafe path %q", name)
-		}
-	}
-	return cleaned, nil
-}
-
-func defaultSkillFiles(name string) map[string][]byte {
-	quotedName, _ := json.Marshal(strings.TrimSpace(name))
-	return map[string][]byte{
-		"SKILL.md":        []byte("---\nname: " + string(quotedName) + "\ndescription: 用于阅读和总结论文。\n---\n# " + name + "\n"),
-		"references/a.md": []byte("# 参考资料\n\n这是参考资料。\n"),
-		"scripts/run.py":  []byte("print(\"hello skill\")\n"),
-	}
 }
 
 func normalizeMarketTags(values []string) []string {

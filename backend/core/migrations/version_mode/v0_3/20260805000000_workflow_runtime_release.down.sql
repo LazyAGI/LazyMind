@@ -1,12 +1,57 @@
 -- +migrate Dialect postgres
+DROP INDEX IF EXISTS public.idx_skill_revision_distributions_archive;
+DROP TABLE IF EXISTS public.skill_revision_distributions;
+DROP INDEX IF EXISTS public.idx_skill_distribution_bindings_uid;
+DROP TABLE IF EXISTS public.skill_distribution_bindings;
+DROP INDEX IF EXISTS public.idx_skill_distribution_entries_blob;
+DROP TABLE IF EXISTS public.skill_distribution_entries;
+DROP INDEX IF EXISTS public.idx_skill_distribution_artifacts_uid_version;
+DROP TABLE IF EXISTS public.skill_distribution_artifacts;
+DROP TABLE IF EXISTS writer_download_conversions;
+DROP INDEX IF EXISTS idx_multi_answers_chat_histories_run_id;
+ALTER TABLE multi_answers_chat_histories DROP COLUMN IF EXISTS run_terminal;
+ALTER TABLE multi_answers_chat_histories DROP COLUMN IF EXISTS run_status;
+ALTER TABLE multi_answers_chat_histories DROP COLUMN IF EXISTS run_id;
+DROP INDEX IF EXISTS idx_chat_histories_run_id;
+ALTER TABLE chat_histories DROP COLUMN IF EXISTS run_terminal;
+ALTER TABLE chat_histories DROP COLUMN IF EXISTS run_status;
+ALTER TABLE chat_histories DROP COLUMN IF EXISTS run_id;
+DROP INDEX IF EXISTS idx_chat_histories_conversation_seq;
+DROP TABLE IF EXISTS agent_invocations;
+ALTER TABLE conversations DROP COLUMN IF EXISTS chat_executor;
+ALTER TABLE user_ui_preferences
+    DROP COLUMN IF EXISTS document_parsing_enabled,
+    DROP COLUMN IF EXISTS workflows_enabled,
+    DROP COLUMN IF EXISTS mcp_enabled,
+    DROP COLUMN IF EXISTS skills_enabled,
+    DROP COLUMN IF EXISTS task_center_enabled;
+ALTER TABLE sub_agent_tasks DROP COLUMN IF EXISTS sources;
 ALTER TABLE plugin_transition_commands DROP COLUMN IF EXISTS retry_origin;
 DROP TABLE IF EXISTS external_agent_operations;
+DROP TABLE IF EXISTS external_chat_hosts;
+DROP TABLE IF EXISTS external_chat_run_events;
 DROP TABLE IF EXISTS external_agent_runs;
+DROP TABLE IF EXISTS external_agent_sessions;
 DROP TABLE IF EXISTS external_agent_bindings;
 DROP TABLE IF EXISTS public.episode_memories;
 DROP TABLE IF EXISTS public.memory_current_entries;
 DROP INDEX IF EXISTS public.idx_chat_histories_algorithm_create_time;
 ALTER TABLE public.chat_histories DROP COLUMN IF EXISTS algorithm_id;
+DROP INDEX IF EXISTS idx_plugin_drafts_user_trash;
+DROP INDEX IF EXISTS idx_plugin_drafts_user_plugin_id;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_plugin_drafts_user_plugin_id
+    ON plugin_drafts(created_by, plugin_id) WHERE plugin_id != '';
+ALTER TABLE task_center_tasks DROP COLUMN IF EXISTS archived_reason;
+ALTER TABLE skills DROP COLUMN IF EXISTS trash_expires_at;
+ALTER TABLE plugin_drafts DROP COLUMN IF EXISTS published_status_before_trash;
+ALTER TABLE plugin_drafts DROP COLUMN IF EXISTS trash_expires_at;
+ALTER TABLE plugin_drafts DROP COLUMN IF EXISTS deleted_at;
+DROP INDEX IF EXISTS idx_conversations_user_archive_folder;
+DROP INDEX IF EXISTS idx_conversations_user_lifecycle;
+DROP TABLE IF EXISTS conversation_archive_folders;
+ALTER TABLE conversations DROP COLUMN IF EXISTS archive_folder_id;
+ALTER TABLE conversations DROP COLUMN IF EXISTS trash_expires_at;
+ALTER TABLE conversations DROP COLUMN IF EXISTS archived_at;
 ALTER TABLE plugin_drafts DROP COLUMN IF EXISTS driver_content;
 ALTER TABLE plugin_attempt_input_bindings
     DROP COLUMN IF EXISTS content_hash,
@@ -63,14 +108,58 @@ BEGIN
 END $$;
 
 -- +migrate Dialect sqlite
+DROP INDEX IF EXISTS `idx_skill_revision_distributions_archive`;
+DROP TABLE IF EXISTS `skill_revision_distributions`;
+DROP INDEX IF EXISTS `idx_skill_distribution_bindings_uid`;
+DROP TABLE IF EXISTS `skill_distribution_bindings`;
+DROP INDEX IF EXISTS `idx_skill_distribution_entries_blob`;
+DROP TABLE IF EXISTS `skill_distribution_entries`;
+DROP INDEX IF EXISTS `idx_skill_distribution_artifacts_uid_version`;
+DROP TABLE IF EXISTS `skill_distribution_artifacts`;
+DROP TABLE IF EXISTS writer_download_conversions;
+DROP INDEX IF EXISTS idx_multi_answers_chat_histories_run_id;
+ALTER TABLE multi_answers_chat_histories DROP COLUMN run_terminal;
+ALTER TABLE multi_answers_chat_histories DROP COLUMN run_status;
+ALTER TABLE multi_answers_chat_histories DROP COLUMN run_id;
+DROP INDEX IF EXISTS idx_chat_histories_run_id;
+ALTER TABLE chat_histories DROP COLUMN run_terminal;
+ALTER TABLE chat_histories DROP COLUMN run_status;
+ALTER TABLE chat_histories DROP COLUMN run_id;
+DROP INDEX IF EXISTS idx_chat_histories_conversation_seq;
+DROP TABLE IF EXISTS agent_invocations;
+ALTER TABLE conversations DROP COLUMN chat_executor;
+ALTER TABLE user_ui_preferences DROP COLUMN document_parsing_enabled;
+ALTER TABLE user_ui_preferences DROP COLUMN workflows_enabled;
+ALTER TABLE user_ui_preferences DROP COLUMN mcp_enabled;
+ALTER TABLE user_ui_preferences DROP COLUMN skills_enabled;
+ALTER TABLE user_ui_preferences DROP COLUMN task_center_enabled;
+ALTER TABLE sub_agent_tasks DROP COLUMN sources;
 ALTER TABLE plugin_transition_commands DROP COLUMN retry_origin;
 DROP TABLE IF EXISTS external_agent_operations;
+DROP TABLE IF EXISTS external_chat_hosts;
+DROP TABLE IF EXISTS external_chat_run_events;
 DROP TABLE IF EXISTS external_agent_runs;
+DROP TABLE IF EXISTS external_agent_sessions;
 DROP TABLE IF EXISTS external_agent_bindings;
 DROP TABLE IF EXISTS episode_memories;
 DROP TABLE IF EXISTS memory_current_entries;
 DROP INDEX IF EXISTS idx_chat_histories_algorithm_create_time;
 ALTER TABLE chat_histories DROP COLUMN algorithm_id;
+DROP INDEX IF EXISTS idx_plugin_drafts_user_trash;
+DROP INDEX IF EXISTS idx_plugin_drafts_user_plugin_id;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_plugin_drafts_user_plugin_id
+    ON plugin_drafts(created_by, plugin_id) WHERE plugin_id != '';
+ALTER TABLE task_center_tasks DROP COLUMN archived_reason;
+ALTER TABLE skills DROP COLUMN trash_expires_at;
+ALTER TABLE plugin_drafts DROP COLUMN published_status_before_trash;
+ALTER TABLE plugin_drafts DROP COLUMN trash_expires_at;
+ALTER TABLE plugin_drafts DROP COLUMN deleted_at;
+DROP INDEX IF EXISTS idx_conversations_user_archive_folder;
+DROP INDEX IF EXISTS idx_conversations_user_lifecycle;
+DROP TABLE IF EXISTS conversation_archive_folders;
+ALTER TABLE conversations DROP COLUMN archive_folder_id;
+ALTER TABLE conversations DROP COLUMN trash_expires_at;
+ALTER TABLE conversations DROP COLUMN archived_at;
 ALTER TABLE plugin_drafts DROP COLUMN driver_content;
 ALTER TABLE plugin_attempt_input_bindings DROP COLUMN content_hash;
 ALTER TABLE plugin_attempt_input_bindings DROP COLUMN source_revision;
@@ -108,3 +197,15 @@ DELETE FROM user_chat_settings_next;
 INSERT INTO user_chat_settings_next SELECT * FROM user_chat_settings;
 DROP TABLE user_chat_settings;
 ALTER TABLE user_chat_settings_next RENAME TO user_chat_settings;
+
+-- +migrate Dialect postgres
+DROP INDEX IF EXISTS public.idx_knowledge_market_installs_user;
+DROP TABLE IF EXISTS public.knowledge_market_installs;
+DROP INDEX IF EXISTS public.idx_knowledge_market_items_category_status;
+DROP TABLE IF EXISTS public.knowledge_market_items;
+
+-- +migrate Dialect sqlite
+DROP INDEX IF EXISTS `idx_knowledge_market_installs_user`;
+DROP TABLE IF EXISTS `knowledge_market_installs`;
+DROP INDEX IF EXISTS `idx_knowledge_market_items_category_status`;
+DROP TABLE IF EXISTS `knowledge_market_items`;
