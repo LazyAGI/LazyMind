@@ -77,10 +77,10 @@
       "package_file": "packages/bsk_01K0M8SCV7PAPERSEARCH9Q2X3A4B.zip"
     },
     {
-      "key": "c14a2be347251fe4a497d265e1863d958c5dd832",
-      "uid": "bsk_EB1580D5EDF4CCFDC18F4EB05E58",
-      "source_url": "https://github.com/xiaoyanZzz/LazyRAG/archive/c14a2be347251fe4a497d265e1863d958c5dd832.zip",
-      "resolved_url": "https://github.com/xiaoyanZzz/LazyRAG/archive/c14a2be347251fe4a497d265e1863d958c5dd832.zip",
+      "key": "user_141d55f7/structured-longform-writing",
+      "uid": "bsk_E1A2FD55C759A485672BA6B94328",
+      "source_url": "https://skillhub.cn/skills/user_141d55f7/structured-longform-writing",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40user_141d55f7%2Fstructured-longform-writing",
       "version": "1.0.0",
       "name": "structured-longform-writing",
       "description": "Use for structured long-form writing, including blogs, reports, proposals, plans, PRDs, competitive analyses, research summaries, technical design docs, internal briefings, and decision documents. Trigger when the user asks to write, draft, expand, organize, polish into, or turn rough notes, attachments, webpages, knowledge-base results, or gathered materials into a complete long-form document. Do not use for simple rewriting, one-paragraph summaries, title brainstorming, short messages, translation-only tasks, or purely creative fiction.",
@@ -91,10 +91,10 @@
         "proposal"
       ],
       "market_visible": true,
-      "archive_sha256": "020e5f08f6cc21813bd8742ed4c56ba2df9d6713448eac1675526ac0d474d5bc",
-      "tree_sha256": "d7e814564b16bec7a83dcaa1ee70646ed06a73d1151abe788a2c21667e83f7af",
-      "archive_size": 30742,
-      "package_file": "packages/bsk_EB1580D5EDF4CCFDC18F4EB05E58.zip"
+      "archive_sha256": "a364bce16eddbc2af98cfbc3436966a4a513716d3744710f14d1564e4f11f57a",
+      "tree_sha256": "535f5274d4c5628b327f5da9a05263ed67f8fdc041fef886d632e74236ff6aad",
+      "archive_size": 30076,
+      "package_file": "packages/bsk_E1A2FD55C759A485672BA6B94328.zip"
     },
     {
       "key": "user_7c4df347/gaokao-volunteer-advisor",
