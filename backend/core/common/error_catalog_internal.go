@@ -457,8 +457,7 @@ func init() {
 	registerAdditionalErrorPattern("call_mode must be '%s', '%s' or '%s'", "Invalid request", http.StatusBadRequest, 2000103)
 	registerAdditionalErrorAlias("workflow is paused", "Conflict", http.StatusConflict, 2000107)
 	for _, source := range []string{
-		"invalid channel intent request", "invalid channel intent state", "invalid channel command registry",
-		"invalid channel intent response", "basic chat does not support background execution",
+		"basic chat does not support background execution",
 		"basic chat does not support ask answers", "basic chat does not support plugin mentions",
 		"conversation_id, decision_id and a valid action are required", "conversation and x-user-id are required",
 		"invalid search config patch", "at most 20 knowledge bases are allowed",
@@ -478,6 +477,9 @@ func init() {
 		"writer artifact path is outside allowed storage", "read writer artifact",
 		"active draft_document markdown is empty",
 		"active draft_document must be an .lmd or .md artifact",
+		"invalid writer download conversion key", "invalid writer download filename",
+		"invalid writer download conversion request", "invalid writer download source format",
+		"invalid writer download target format", "writer download conversion failed",
 	} {
 		registerAdditionalErrorAlias(source, "Invalid request", http.StatusBadRequest, 2000103)
 	}
@@ -502,6 +504,7 @@ func init() {
 	for _, source := range []string{
 		"workflow session not found", "selected artifact not found",
 		"writer session not found", "active draft_document not found",
+		"writer download conversion not found",
 	} {
 		registerAdditionalErrorAlias(source, "Resource not found", http.StatusNotFound, 2000106)
 	}
@@ -516,18 +519,27 @@ func init() {
 		"built-in workflow package directory not found", "workflow.yaml missing from revision",
 		"pin legacy workflow session revision", "resolve conversation plugin binding failed",
 		"decode conversation ext",
+		"load artifact action head revision", "parse artifact action policy",
+		"artifact action head revision is incomplete",
 		"decode sync_document action response", "artifact sync state save failed",
+		"invalid render response",
 		"task unavailable",
 		"query task center settings failed", "query settings controls failed",
 		"query document parsing settings failed",
+		"query writer download conversion failed", "writer download conversion path is invalid",
+		"open writer download conversion failed", "read writer download conversion failed",
+		"save writer download conversion failed", "index writer download conversion failed",
+		"encode writer download conversion request failed",
 	} {
 		registerAdditionalErrorAlias(source, "Internal server error", http.StatusInternalServerError, 2000000)
 	}
 	for _, source := range []string{
-		"channel intent classification failed", "writer document sync failed", "sensitive-word check unavailable",
+		"writer document sync failed", "sensitive-word check unavailable",
 		"sensitive-word check failed",
 		"workflow artifact action failed",
 		"writer document write-back failed",
+		"render writer document failed",
+		"writer download conversion service unavailable",
 	} {
 		registerAdditionalErrorAlias(source, "Upstream service error", http.StatusBadGateway, 2000110)
 	}
@@ -548,4 +560,38 @@ func init() {
 	registerAdditionalErrorPattern("seed builtin workflow %s", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorPattern("lazymind host execution failed: %s", "Internal server error", http.StatusInternalServerError, 2000000)
 	registerAdditionalErrorAlias("lazymind host execution failed", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorPattern("save sources task=%s", "Internal server error", http.StatusInternalServerError, 2000000)
+	registerAdditionalErrorPattern("invalid sources snapshot", "Internal server error", http.StatusInternalServerError, 2000000)
+	for _, source := range []string{
+		"chat service returned no run terminal",
+		"invalid algorithm stream frame",
+		"read algorithm stream",
+		"algorithm emitted payload after run_finished",
+		"algorithm combined run_finished with business payload",
+		"algorithm emitted duplicate run_finished",
+		"algorithm stream ended without run_finished",
+		"runtime event is nil",
+		"invalid runtime event envelope",
+		"runtime event run_id mismatch",
+		"unsupported runtime event type",
+		"invalid model_retry_scheduled data",
+		"model_retry_scheduled fields are required",
+		"invalid model_retry_scheduled values",
+		"invalid model_call_finished data",
+		"model_call_finished fields are required",
+		"model_call_finished finish outcome is invalid",
+		"unsupported model finish",
+		"model_call_finished failure outcome is invalid",
+		"unsupported model failure origin",
+		"unsupported model failure code",
+		"unsupported model_call_finished kind",
+		"runtime event is not run_finished",
+		"invalid run_finished data",
+		"run_finished partial_output is required",
+		"run_finished partial_output must be boolean",
+		"run_finished code must be a string",
+		"invalid run status/reason combination",
+	} {
+		registerAdditionalErrorAlias(source, "algorithm chat stream failed", http.StatusBadGateway, 2002077)
+	}
 }

@@ -6,6 +6,7 @@ import (
 
 	"gorm.io/gorm"
 
+	"lazymind/core/modelconfig"
 	"lazymind/core/modelprovider"
 )
 
@@ -28,16 +29,6 @@ func loadSelectedSearchToolCredential(ctx context.Context, db *gorm.DB, userID s
 	return loadSharedToolCredential(ctx, db, searchProviderCategory)
 }
 
-func loadAcademicSearchToolCredential(ctx context.Context, db *gorm.DB, userID string) (*selectedToolProviderCredential, error) {
-	if item, err := loadSelectedToolCredentialForUser(ctx, db, userID, datasourceProviderCategory); err != nil || item != nil {
-		return item, err
-	}
-	if item, err := loadConfiguredSciverseDatasourceCredentialForUser(ctx, db, userID); err != nil || item != nil {
-		return item, err
-	}
-	return loadSharedToolCredential(ctx, db, datasourceProviderCategory)
-}
-
 func loadSelectedSearchToolCredentialForUser(
 	ctx context.Context,
 	db *gorm.DB,
@@ -49,67 +40,11 @@ func loadSelectedSearchToolCredentialForUser(
 	)
 }
 
-func loadSelectedToolCredentialForUser(
-	ctx context.Context,
-	db *gorm.DB,
-	userID string,
-	category string,
-) (*selectedToolProviderCredential, error) {
-	return scanSelectedSearchToolCredential(
-		db.WithContext(ctx).Table("user_selected_providers usp").
-			Where("usp.user_id = ? AND usp.category = ?", userID, category),
-	)
-}
-
 func loadSharedToolCredential(ctx context.Context, db *gorm.DB, category string) (*selectedToolProviderCredential, error) {
 	return scanSelectedSearchToolCredential(
 		db.WithContext(ctx).Table("user_selected_providers usp").
 			Where("usp.share = ? AND usp.category = ?", true, category),
 	)
-}
-
-func loadConfiguredSciverseDatasourceCredentialForUser(
-	ctx context.Context,
-	db *gorm.DB,
-	userID string,
-) (*selectedToolProviderCredential, error) {
-	var row struct {
-		ProviderName     string `gorm:"column:provider_name"`
-		APIKey           string `gorm:"column:api_key"`
-		APIKeyCiphertext string `gorm:"column:api_key_ciphertext"`
-	}
-	err := db.WithContext(ctx).Table("user_model_provider_groups g").
-		Select("p.name AS provider_name, g.api_key, g.api_key_ciphertext").
-		Joins(
-			"JOIN user_model_providers p ON "+
-				"p.id = g.user_model_provider_id AND "+
-				"p.create_user_id = g.create_user_id AND "+
-				"p.deleted_at IS NULL",
-		).
-		Where(
-			"g.create_user_id = ? AND g.deleted_at IS NULL AND g.is_verified = ? AND (TRIM(g.api_key) <> '' OR TRIM(g.api_key_ciphertext) <> '') AND p.category = ? AND p.name IN ?",
-			userID,
-			true,
-			datasourceProviderCategory,
-			[]string{"Sciverse", "Sciverse Search"},
-		).
-		Order("g.updated_at DESC").
-		Limit(1).
-		Scan(&row).Error
-	if err != nil {
-		return nil, err
-	}
-	row.APIKey, err = modelprovider.ResolveAPIKey(row.APIKey, row.APIKeyCiphertext)
-	if err != nil {
-		return nil, err
-	}
-	if strings.TrimSpace(row.ProviderName) == "" || strings.TrimSpace(row.APIKey) == "" {
-		return nil, nil
-	}
-	return &selectedToolProviderCredential{
-		ProviderName: row.ProviderName,
-		APIKey:       row.APIKey,
-	}, nil
 }
 
 func scanSelectedSearchToolCredential(q *gorm.DB) (*selectedToolProviderCredential, error) {
@@ -259,8 +194,7 @@ func searchToolConfigEntry(ctx context.Context, db *gorm.DB, userID string) (map
 }
 
 func academicSearchToolConfigEntry(ctx context.Context, db *gorm.DB, userID string) (map[string]any, error) {
-	credential, err := loadAcademicSearchToolCredential(ctx, db, userID)
-	return toolConfigEntryFromCredential(credential, err)
+	return modelconfig.LoadAcademicSearchToolConfig(ctx, db, userID)
 }
 
 func toolConfigEntryFromCredential(

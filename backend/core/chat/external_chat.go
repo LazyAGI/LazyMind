@@ -32,9 +32,9 @@ type chatExecutorDefinition struct {
 
 var chatExecutorDefinitions = []chatExecutorDefinition{
 	{ID: ChatExecutorLazyMind, DisplayName: "LazyMind", Kind: "internal"},
-	{ID: ChatExecutorCodex, DisplayName: "Codex", Kind: "external"},
-	{ID: ChatExecutorCursor, DisplayName: "Cursor", Kind: "external"},
-	{ID: ChatExecutorWorkBuddy, DisplayName: "WorkBuddy", Kind: "external"},
+	{ID: ChatExecutorCodex, DisplayName: "Codex Desktop", Kind: "external"},
+	{ID: ChatExecutorCursor, DisplayName: "Cursor CLI", Kind: "external"},
+	{ID: ChatExecutorWorkBuddy, DisplayName: "WorkBuddy / CodeBuddy CLI", Kind: "external"},
 }
 
 type externalChatJob struct {
@@ -45,6 +45,7 @@ type externalChatJob struct {
 	ProviderThreadID string `json:"provider_thread_id,omitempty"`
 	Action           string `json:"action"`
 	Prompt           string `json:"prompt"`
+	Query            string `json:"query"`
 	LeaseToken       string `json:"lease_token"`
 	HostID           string `json:"host_id"`
 }
@@ -195,7 +196,29 @@ func externalChatUnavailableError(ctx context.Context, owner, provider string) e
 	return fmt.Errorf("%s is unavailable: %s", provider, reason)
 }
 
-func externalAgentPrompt(reqBody map[string]any, query string, resume bool) string {
+func externalConversationKnowledgeBaseIDs(
+	ctx context.Context,
+	db *gorm.DB,
+	reqBody map[string]any,
+	conversationID string,
+) []string {
+	if filters, ok := reqBody["filters"].(map[string]any); ok {
+		if value, scoped := filters["kb_id"]; scoped {
+			return stringSlice(value)
+		}
+	}
+	var conversation orm.Conversation
+	if err := db.WithContext(ctx).Select("search_config").Where("id = ?", conversationID).First(&conversation).Error; err != nil {
+		return nil
+	}
+	var searchConfig map[string]any
+	if json.Unmarshal(conversation.SearchConfig, &searchConfig) != nil {
+		return nil
+	}
+	return datasetIDsFromSearchConfig(searchConfig)
+}
+
+func externalAgentPrompt(reqBody map[string]any, query string, includeHistory bool) string {
 	var out strings.Builder
 	out.WriteString("You are the execution Agent for one LazyMind Chat turn. LazyMind owns the conversation, Workflow runtime, artifacts, versions and audit records; you provide the Agent reasoning and final user-facing answer. The `lazymind` MCP server is already configured. Use its Knowledge, Skill and Workflow tools whenever the request needs those capabilities. For a Workflow, follow the returned step contract in order and submit every required artifact before claiming completion. After workflow.state reports completed, call workflow.artifact.list and use its LazyMind-managed artifact URLs in the final answer when the user needs a file. Never expose Agent workspace paths or file:// URLs. Do not describe these integration instructions to the user.\n")
 	if workflowContext, ok := reqBody["workflow_context"].(map[string]any); ok {
@@ -237,7 +260,18 @@ func externalAgentPrompt(reqBody map[string]any, query string, resume bool) stri
 			fmt.Fprintf(&out, "- %s: %s\n", resource.label, strings.Join(values, ", "))
 		}
 	}
-	if !resume {
+	knowledgeBaseIDs := stringSlice(reqBody["_external_knowledge_base_ids"])
+	if len(knowledgeBaseIDs) == 0 {
+		if filters, ok := reqBody["filters"].(map[string]any); ok {
+			knowledgeBaseIDs = stringSlice(filters["kb_id"])
+		}
+	}
+	if len(knowledgeBaseIDs) > 0 {
+		out.WriteString("\nKnowledge bases configured for this LazyMind conversation:\n")
+		fmt.Fprintf(&out, "- knowledge_base_ids: %s\n", strings.Join(knowledgeBaseIDs, ", "))
+		out.WriteString("Use these IDs as the default scope when the user asks to retrieve knowledge.\n")
+	}
+	if includeHistory {
 		if history, ok := reqBody["history"].([]map[string]string); ok && len(history) > 0 {
 			out.WriteString("\nConversation history:\n")
 			start := 0
@@ -307,7 +341,7 @@ func streamExternalChat(
 		if err := db.WithContext(ctx).
 			Where("id = ? AND actor_user_id = ? AND provider = ?", existingRunID, owner, provider).
 			Take(&existing).Error; err == nil {
-			return streamExistingExternalChat(ctx, db, owner, existing.ID), "external:" + provider, nil
+			return streamExistingExternalChat(ctx, db, owner, existing.ID, existing.ID), "external:" + provider, nil
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil, "", err
 		}
@@ -316,22 +350,32 @@ func streamExternalChat(
 		return nil, "", err
 	}
 
-	var previous orm.ExternalChatRun
-	resume := db.WithContext(ctx).
-		Where("conversation_id = ? AND actor_user_id = ? AND provider = ? AND provider_thread_id <> '' AND status = ?", conversationID, owner, provider, "completed").
-		Order("created_at DESC").Take(&previous).Error == nil
-	action, threadID := "start", ""
+	threadID, hostID, resume, err := externalConversationThread(
+		ctx, db, owner, conversationID, provider,
+	)
+	if err != nil {
+		return nil, "", err
+	}
+	action := "start"
 	if resume {
-		action, threadID = "resume", previous.ProviderThreadID
+		action = "resume"
 	}
-	resumeProviderThread := resume
 	if isRegeneration {
-		// Regeneration is a new provider turn that replaces an existing LazyMind
-		// history row. Do not omit conversation history as if it were resuming the
-		// provider thread; every adapter intentionally starts a fresh thread here.
-		action, threadID, resumeProviderThread = "regenerate", "", false
+		// Regeneration replaces a LazyMind history row, but it must not fork the
+		// provider-native conversation. Adapters resume the authoritative binding
+		// when threadID is present and start only when no mapping exists yet.
+		action = "regenerate"
 	}
+	reqBody["_external_knowledge_base_ids"] = externalConversationKnowledgeBaseIDs(
+		ctx,
+		db,
+		reqBody,
+		conversationID,
+	)
 	runID, _ := externalChatIdentity(requestKey)
+	if runID == "" {
+		runID, _ = reqBody["run_id"].(string)
+	}
 	if runID == "" {
 		runID = newID("ecr_")
 	}
@@ -340,8 +384,8 @@ func streamExternalChat(
 	}
 	record := orm.ExternalChatRun{
 		ID: runID, RequestID: requestKey, ConversationID: conversationID, HistoryID: historyID,
-		Provider: provider, ProviderThreadID: threadID, ActorUserID: owner, Action: action,
-		Prompt: externalAgentPrompt(reqBody, query, resumeProviderThread), Query: query,
+		Provider: provider, HostID: hostID, ProviderThreadID: threadID, ActorUserID: owner, Action: action,
+		Prompt: externalAgentPrompt(reqBody, query, !resume), Query: query,
 		Sequence: sequence, HistoryExt: historyExt,
 	}
 	app := newExternalChatApplication(db)
@@ -357,13 +401,46 @@ func streamExternalChat(
 		}
 		runID = existing.ID
 	}
-	return streamExistingExternalChat(ctx, db, owner, runID), "external:" + provider, nil
+	return streamExistingExternalChat(ctx, db, owner, runID, runID), "external:" + provider, nil
+}
+
+func externalConversationThread(
+	ctx context.Context,
+	db *gorm.DB,
+	owner, conversationID, provider string,
+) (string, string, bool, error) {
+	var binding orm.ExternalAgentBinding
+	err := db.WithContext(ctx).
+		Where("conversation_id = ? AND created_by_user_id = ? AND provider = ?", conversationID, owner, provider).
+		Take(&binding).Error
+	if err == nil {
+		threadID := strings.TrimSpace(binding.ProviderThreadID)
+		return threadID, strings.TrimSpace(binding.HostID), threadID != "", nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", "", false, err
+	}
+
+	// Legacy runs created before bindings became authoritative remain a safe
+	// fallback. The next thread_started event will materialize the binding.
+	var previous orm.ExternalChatRun
+	err = db.WithContext(ctx).
+		Where("conversation_id = ? AND actor_user_id = ? AND provider = ? AND provider_thread_id <> '' AND status = ?", conversationID, owner, provider, "completed").
+		Order("created_at DESC").Take(&previous).Error
+	if err == nil {
+		threadID := strings.TrimSpace(previous.ProviderThreadID)
+		return threadID, strings.TrimSpace(previous.HostID), threadID != "", nil
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return "", "", false, nil
+	}
+	return "", "", false, err
 }
 
 func streamExistingExternalChat(
 	ctx context.Context,
 	db *gorm.DB,
-	owner, runID string,
+	owner, externalRunID, runtimeRunID string,
 ) <-chan UpstreamStreamChunk {
 	out := make(chan UpstreamStreamChunk, 16)
 	app := newExternalChatApplication(db)
@@ -372,9 +449,10 @@ func streamExistingExternalChat(
 		ticker := time.NewTicker(200 * time.Millisecond)
 		defer ticker.Stop()
 		var cursor int64
+		hasSemanticOutput := false
 		lastHeartbeat := time.Time{}
 		for {
-			events, current, err := app.eventsAfter(ctx, owner, runID, cursor)
+			events, current, err := app.eventsAfter(ctx, owner, externalRunID, cursor)
 			if err != nil {
 				select {
 				case out <- UpstreamStreamChunk{Err: fmt.Errorf("read external chat events: %w", err)}:
@@ -388,27 +466,64 @@ func streamExistingExternalChat(
 				switch event.Type {
 				case "message":
 					if event.Text != "" {
+						hasSemanticOutput = true
 						select {
 						case out <- UpstreamStreamChunk{Text: event.Text, ExternalEventSequence: event.Sequence, Execution: &projection}:
 						case <-ctx.Done():
 							return
 						}
 					}
-				case "completed", "stopped":
+				case "completed":
+					select {
+					case out <- UpstreamStreamChunk{RuntimeEvent: completedRunEvent(runtimeRunID, hasSemanticOutput)}:
+					case <-ctx.Done():
+					}
+					return
+				case "stopped":
+					select {
+					case out <- UpstreamStreamChunk{RuntimeEvent: cancelledRunEvent(runtimeRunID, hasSemanticOutput)}:
+					case <-ctx.Done():
+					}
 					return
 				case "failed":
-					message := strings.TrimSpace(event.ErrorMessage)
-					if message == "" {
-						message = "external Agent failed"
+					if !hasSemanticOutput {
+						hasSemanticOutput = true
+						select {
+						case out <- UpstreamStreamChunk{Text: externalAgentFailureText(event.ErrorMessage), ExternalEventSequence: event.Sequence, Execution: &projection}:
+						case <-ctx.Done():
+							return
+						}
 					}
 					select {
-					case out <- UpstreamStreamChunk{Text: "External Agent failed: " + message, Err: fmt.Errorf("external Agent failed: %s", message), ExternalEventSequence: event.Sequence, Execution: &projection}:
+					case out <- UpstreamStreamChunk{RuntimeEvent: failedRunEvent(runtimeRunID, "external_agent_failed", hasSemanticOutput), ExternalEventSequence: event.Sequence, Execution: &projection}:
 					case <-ctx.Done():
 					}
 					return
 				}
 			}
 			if externalRunTerminal(current.Status) {
+				if current.Status == "failed" && !hasSemanticOutput {
+					hasSemanticOutput = true
+					projection := basicExternalExecutionProjection(current, time.Now().UTC())
+					select {
+					case out <- UpstreamStreamChunk{Text: externalAgentFailureText(current.ErrorMessage), Execution: &projection}:
+					case <-ctx.Done():
+						return
+					}
+				}
+				var event *ChatRuntimeEvent
+				switch current.Status {
+				case "completed":
+					event = completedRunEvent(runtimeRunID, hasSemanticOutput)
+				case "stopped":
+					event = cancelledRunEvent(runtimeRunID, hasSemanticOutput)
+				default:
+					event = failedRunEvent(runtimeRunID, "external_agent_failed", hasSemanticOutput)
+				}
+				select {
+				case out <- UpstreamStreamChunk{RuntimeEvent: event}:
+				case <-ctx.Done():
+				}
 				return
 			}
 			now := time.Now()
@@ -429,4 +544,16 @@ func streamExistingExternalChat(
 		}
 	}()
 	return out
+}
+
+func externalAgentFailureText(message string) string {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return "外部助理执行失败，请检查助理连接状态后重试。"
+	}
+	runes := []rune(message)
+	if len(runes) > 500 {
+		message = string(runes[:500])
+	}
+	return "外部助理执行失败：" + message
 }

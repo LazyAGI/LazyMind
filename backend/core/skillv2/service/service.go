@@ -1,14 +1,12 @@
 package service
 
 import (
-	"archive/zip"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"path"
 	"sort"
 	"strings"
@@ -19,8 +17,10 @@ import (
 	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 
+	skilldistribution "lazymind/core/skillv2/distribution"
 	skillmetadata "lazymind/core/skillv2/metadata"
 	skillsearch "lazymind/core/skillv2/search"
+	skillpackage "lazymind/core/skillv2/skillpackage"
 )
 
 const (
@@ -121,6 +121,14 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 			CreatedBy:     req.CreateUserID,
 		}); err != nil {
 			return err
+		}
+		if req.Distribution != nil {
+			if err := skilldistribution.BindInitialTx(ctx, tx, skilldistribution.InitialBinding{
+				SkillID: skillID, RevisionID: revisionID, BuiltinUID: req.Distribution.BuiltinUID,
+				Version: req.Distribution.Version, ArchiveSHA256: req.Distribution.ArchiveSHA256, TreeSHA256: req.Distribution.TreeSHA256,
+			}, now); err != nil {
+				return err
+			}
 		}
 		if err := s.resetDraft(tx, skillID, revisionID); err != nil {
 			return err
@@ -422,7 +430,7 @@ func (s *SkillService) ListTrashedSkills(ctx context.Context, req ListSkillsRequ
 func (s *SkillService) TrashSkill(ctx context.Context, req DeleteSkillRequest) error {
 	now := s.clock.Now()
 	updates := map[string]any{
-		"deleted_at": now,
+		"deleted_at": now, "trash_expires_at": now.Add(30 * 24 * time.Hour),
 		"updated_at": now,
 	}
 	if req.UserID != "" {
@@ -465,9 +473,10 @@ func (s *SkillService) RestoreSkill(ctx context.Context, req RestoreSkillRequest
 			return fmt.Errorf("skill package already exists")
 		}
 		if err := tx.Model(&skillRow{}).Where("id = ? AND deleted_at IS NOT NULL", req.SkillID).Updates(map[string]any{
-			"deleted_at": nil,
-			"deleted_by": nil,
-			"updated_at": now,
+			"deleted_at":       nil,
+			"trash_expires_at": nil,
+			"deleted_by":       nil,
+			"updated_at":       now,
 		}).Error; err != nil {
 			return err
 		}
@@ -511,6 +520,11 @@ func (s *SkillService) deleteSkillGraphTx(ctx context.Context, tx *gorm.DB, skil
 	var revisions []string
 	if err := tx.Model(&skillRevisionRow{}).Where("skill_id = ?", skillID).Pluck("id", &revisions).Error; err != nil {
 		return err
+	}
+	if tx.Migrator().HasTable("skill_distribution_bindings") {
+		if err := skilldistribution.DeleteBindingTx(ctx, tx, skillID, revisions); err != nil {
+			return err
+		}
 	}
 	if len(revisions) > 0 {
 		if err := tx.Where("revision_id IN ?", revisions).Delete(&skillRevisionEntryRow{}).Error; err != nil {
@@ -601,6 +615,15 @@ func skillBlobReferenced(tx *gorm.DB, hash string) (bool, error) {
 	}
 	if revisionRefs > 0 {
 		return true, nil
+	}
+	if tx.Migrator().HasTable("skill_distribution_entries") {
+		var distributionRefs int64
+		if err := tx.Table("skill_distribution_entries").Where("blob_hash = ?", hash).Count(&distributionRefs).Error; err != nil {
+			return false, err
+		}
+		if distributionRefs > 0 {
+			return true, nil
+		}
 	}
 	var draftRefs int64
 	if err := tx.Model(&skillDraftEntryRow{}).Where("blob_hash = ?", hash).Count(&draftRefs).Error; err != nil {
@@ -740,6 +763,9 @@ func (s *SkillService) DiscardDraft(ctx context.Context, req DiscardDraftRequest
 		if skill.HeadRevisionID == nil {
 			return s.deleteSkillGraphTx(ctx, tx, req.SkillID, req.UserID)
 		}
+		if err := skilldistribution.CancelPendingTx(ctx, tx, req.SkillID, s.clock.Now()); err != nil {
+			return err
+		}
 		if err := tx.Where("skill_id = ?", req.SkillID).Delete(&skillDraftEntryRow{}).Error; err != nil {
 			return err
 		}
@@ -798,6 +824,11 @@ func markDraftReviewSessions(tx *gorm.DB, skillID, status, userID string, now ti
 
 func (s *SkillService) ApplyAutoEvoDraft(ctx context.Context, req AutoEvoDraftRequest) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if _, pending, err := skilldistribution.PendingRefTx(ctx, tx, req.SkillID); err != nil {
+			return err
+		} else if pending {
+			return skilldistribution.ErrUpgradeDraftActive
+		}
 		if err := tx.Where("skill_id = ?", req.SkillID).Delete(&skillDraftEntryRow{}).Error; err != nil {
 			return err
 		}
@@ -817,6 +848,11 @@ func (s *SkillService) ApplyAutoEvoDraft(ctx context.Context, req AutoEvoDraftRe
 func (s *SkillService) AcceptReview(ctx context.Context, req AcceptReviewRequest) (AcceptReviewResponse, error) {
 	var out AcceptReviewResponse
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if _, pending, err := skilldistribution.PendingRefTx(ctx, tx, req.SkillID); err != nil {
+			return err
+		} else if pending {
+			return skilldistribution.ErrUpgradeDraftActive
+		}
 		revisionID, err := s.commitFilesAsNewHead(ctx, tx, req.SkillID, req.UserID, "review_accept", req.Files)
 		if err != nil {
 			return err
@@ -953,14 +989,20 @@ func (s *SkillService) filesFromSource(ctx context.Context, ownerUserID string, 
 		if session.State != "completed" {
 			return nil, "", "", fmt.Errorf("upload is not completed")
 		}
-		files, err := readZipFiles(session.StoredPath)
+		files, err := skillpackage.ReadZip(session.StoredPath)
 		return files, "upload", source.UploadID, err
 	case "local_zip":
 		if strings.TrimSpace(source.StoredPath) == "" {
 			return nil, "", "", fmt.Errorf("stored_path required")
 		}
-		files, err := readZipFiles(source.StoredPath)
+		files, err := skillpackage.ReadZip(source.StoredPath)
 		return files, "local_zip", source.Filename, err
+	case "builtin_zip":
+		if strings.TrimSpace(source.StoredPath) == "" {
+			return nil, "", "", fmt.Errorf("stored_path required")
+		}
+		files, err := skillpackage.ReadZip(source.StoredPath)
+		return files, "builtin_package", source.Filename, err
 	case "url":
 		if s.downloader == nil {
 			return nil, "", "", fmt.Errorf("downloader is not configured")
@@ -969,7 +1011,7 @@ func (s *SkillService) filesFromSource(ctx context.Context, ownerUserID string, 
 		if err != nil {
 			return nil, "", "", err
 		}
-		files, err := readZipFiles(zipPath)
+		files, err := skillpackage.ReadZip(zipPath)
 		ensureURLImportDefaults(files)
 		return files, "url", source.URL, err
 	default:
@@ -984,75 +1026,6 @@ func ensureURLImportDefaults(files map[string][]byte) {
 	if _, ok := files["scripts/run.py"]; !ok {
 		files["scripts/run.py"] = []byte("print(\"hello skill\")\n")
 	}
-}
-
-func readZipFiles(zipPath string) (map[string][]byte, error) {
-	reader, err := zip.OpenReader(zipPath)
-	if err != nil {
-		return nil, err
-	}
-	defer reader.Close()
-
-	files := map[string][]byte{}
-	for _, entry := range reader.File {
-		if entry.FileInfo().IsDir() {
-			if _, err := cleanSkillPath(strings.TrimSuffix(entry.Name, "/")); err != nil {
-				return nil, err
-			}
-			continue
-		}
-		name, err := cleanSkillPath(entry.Name)
-		if err != nil {
-			return nil, err
-		}
-		rc, err := entry.Open()
-		if err != nil {
-			return nil, err
-		}
-		data, readErr := io.ReadAll(rc)
-		closeErr := rc.Close()
-		if readErr != nil {
-			return nil, readErr
-		}
-		if closeErr != nil {
-			return nil, closeErr
-		}
-		files[name] = data
-	}
-	return normalizeSkillPackageRoot(files), nil
-}
-
-func normalizeSkillPackageRoot(files map[string][]byte) map[string][]byte {
-	if _, ok := files["SKILL.md"]; ok {
-		return files
-	}
-	root := ""
-	for filePath := range files {
-		parts := strings.SplitN(filePath, "/", 2)
-		if len(parts) != 2 || parts[1] == "" {
-			return files
-		}
-		if root == "" {
-			root = parts[0]
-			continue
-		}
-		if root != parts[0] {
-			return files
-		}
-	}
-	if root == "" {
-		return files
-	}
-	normalized := make(map[string][]byte, len(files))
-	prefix := root + "/"
-	for filePath, data := range files {
-		relPath := strings.TrimPrefix(filePath, prefix)
-		normalized[relPath] = data
-	}
-	if _, ok := normalized["SKILL.md"]; ok {
-		return normalized
-	}
-	return files
 }
 
 func cleanSkillPath(name string) (string, error) {
@@ -1603,6 +1576,7 @@ func (s *SkillService) summaryFor(ctx context.Context, row skillRow) (SkillSumma
 		IsEnabled:      row.IsEnabled,
 		Draft:          draft,
 		DeletedAt:      row.DeletedAt,
+		TrashExpiresAt: row.TrashExpiresAt,
 		DeletedBy:      valueOrEmpty(row.DeletedBy),
 	}, nil
 }
@@ -1614,6 +1588,9 @@ func markPendingSkillDraftAuto(ctx context.Context, tx *gorm.DB, skillID string,
 			return nil
 		}
 		return err
+	}
+	if skilldistribution.IsUpgradeTaskID(draft.TaskID) {
+		return nil
 	}
 	var count int64
 	if err := tx.WithContext(ctx).Model(&skillDraftEntryRow{}).Where("skill_id = ?", skillID).Count(&count).Error; err != nil {

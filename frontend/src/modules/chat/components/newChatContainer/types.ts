@@ -7,19 +7,31 @@ import type { ChatSourceCollection } from "@/modules/chat/utils/sourceAdapter";
 import type { SendMessageParams } from "../ChatInput/types";
 import type { ChatMention } from "../ChatInput/MentionEditor";
 import type { ChatConfig } from "../ChatConfigs";
+import type { ThinkingDepth } from "@/modules/chat/store/chatThink";
 
 export interface ChatImperativeProps {
   replaceMessageList: (id: string, data: any[]) => void;
   createNewChat: () => void;
   sendMessage: (params: SendMessageParams) => void;
+  prepareMessage: (
+    params: Pick<SendMessageParams, "text" | "citeMessage" | "citeMessages"> & {
+      appendCitations?: boolean;
+    },
+  ) => void;
   disconnectConversationStream?: (
     conversationId: string,
     options?: { persistResumeKey?: boolean },
   ) => void;
   uploadFiles?: (files: File[]) => void;
   openResumeSSE?: (conversationId: string) => void;
-  appendAutoAdvanceTurn?: (conversationId: string, driverMessage: string) => void;
-  ensureAutoAdvanceUserTurn?: (conversationId: string, driverMessage: string) => void;
+  appendAutoAdvanceTurn?: (
+    conversationId: string,
+    driverMessage: string,
+  ) => void;
+  ensureAutoAdvanceUserTurn?: (
+    conversationId: string,
+    driverMessage: string,
+  ) => void;
 }
 
 export interface ChatContainerProps {
@@ -58,12 +70,18 @@ export interface ChatContainerProps {
   ) => void;
   initialConversationSettings?: import("@/modules/chat/utils/request").ConversationRuntimeSettings;
   hasWorkflowSession?: boolean;
+  conversationTrailEnabled?: boolean;
+  showThinkingDepth?: boolean;
+  showSkillDeposit?: boolean;
+  showConversationConfig?: boolean;
+  fixedThinkingDepth?: ThinkingDepth;
 }
 
 export interface ChatMessage {
   role?: string;
   delta?: string;
   raw_delta?: string;
+  delta_mode?: "append" | "replace";
   images?: {
     base64?: string;
     uid?: string;
@@ -73,6 +91,25 @@ export interface ChatMessage {
     uid?: string;
   }[];
   finish_reason?: string;
+  run_status?: "completed" | "interrupted" | "failed" | "cancelled";
+  model_retry?: {
+    retry_index: number;
+    max_attempts: number;
+  };
+  run_terminal?: {
+    status: "completed" | "interrupted" | "failed" | "cancelled";
+    reason:
+      | "normal"
+      | "awaiting_user_input"
+      | "model_incomplete"
+      | "model_failure"
+      | "runtime_failure"
+      | "user_cancelled";
+    code?: string;
+    partial_output: boolean;
+    model_call_id?: string;
+    diagnostic_id?: string;
+  };
   inputs?: Query[];
   reasoning_content?: string;
   thinking_duration_s?: number | string;
@@ -113,14 +150,14 @@ export interface ChatMessage {
   };
   resolved_tool_limit_decision_id?: string;
   mentions?: ChatMention[];
-	collected_inputs?: Array<{
-		task_id: string;
-		conversation_id?: string;
-		source_name?: string;
-		executed_at?: string;
-		mode?: string;
-		summary?: string;
-	}>;
+  collected_inputs?: Array<{
+    task_id: string;
+    conversation_id?: string;
+    source_name?: string;
+    executed_at?: string;
+    mode?: string;
+    summary?: string;
+  }>;
   intent_updated?: {
     scope: "conversation";
     intent_context: Record<string, unknown>;

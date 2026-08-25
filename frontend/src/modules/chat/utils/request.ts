@@ -134,6 +134,11 @@ export function exportContextPrompt(payload: Record<string, unknown>) {
     .then((response) => response.data as Blob);
 }
 
+// SubAgent task SSE endpoint. Granular execution events are streamed here so
+// they cannot crowd lifecycle events out of the conversation event channel.
+export const taskStreamUrl = (taskId: string) =>
+  `${coreApiBaseUrl}/tasks/${encodeURIComponent(taskId)}:stream`;
+
 // Conversation-level events SSE endpoint.
 export const convEventsUrl = (conversationId: string) =>
   `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}/events`;
@@ -236,9 +241,41 @@ export interface WriteBackWriterDocumentRequest {
   revised_document: Record<string, unknown>;
 }
 
+export type WriterDocumentSlot = 'outline_document' | 'draft_document';
+export type WriterDocumentRepresentation = 'markdown' | 'ir';
+export type RenderedWriterDocument = string | Record<string, unknown>;
+
+export interface RenderWriterDocumentResult {
+  title: string;
+  representation: WriterDocumentRepresentation;
+  document: RenderedWriterDocument;
+}
+
+export interface SaveWriterDocumentResult extends RenderWriterDocumentResult {
+  revision: number;
+}
+
 export type RewriteSelection =
   | { type: 'ir'; node_id: string }
-  | { type: 'markdown'; selected_text: string };
+  | { type: 'markdown'; selected_text: string }
+  | {
+    type: 'ppt_html';
+    page: number;
+    el: string;
+    /** 1-based occurrence among elements carrying the same data-el. */
+    index?: number;
+    group?: string;
+    selected_text?: string;
+    computed_style?: {
+      font_size?: string;
+      width?: string;
+      height?: string;
+      line_height?: string;
+      letter_spacing?: string;
+      text_align?: string;
+      font_weight?: string;
+    };
+  };
 
 export interface RewriteSelectionPreviewRequest {
   action: 'rewrite_selection';
@@ -253,24 +290,47 @@ export interface RewriteSelectionPreview {
   status: 'ready';
   action: 'rewrite_selection';
   base_revision: number;
-  representation: 'ir' | 'markdown';
+  representation: 'ir' | 'markdown' | 'ppt_html';
   target: {
     type: 'block';
     block_type: string;
     node_id?: string;
+    el?: string;
+    index?: number;
+    group?: string;
+    page?: number;
   };
   preview: {
     old_text: string;
     new_text: string;
   };
   patch: {
-    type: 'writer_ir_patch' | 'string_replace_set';
+    type: 'writer_ir_patch' | 'string_replace_set' | 'ppt_html_ops';
     payload: Record<string, unknown>;
   };
   artifact: {
     content_type: string;
-    value: Record<string, unknown>;
+    value: Record<string, unknown> | string;
+    caption?: string;
   };
+  candidate_html?: string;
+  commit?: { token: string };
+  layout_notes?: string[];
+}
+
+export interface ExecuteArtifactActionRequest {
+  action: 'rewrite_selection';
+  base_revision: number;
+  input: { commit_token: string };
+}
+
+export interface ExecuteArtifactActionResult {
+  status: 'applied';
+  action: 'rewrite_selection';
+  base_revision: number;
+  revision: number;
+  representation: 'ppt_html';
+  artifact: RewriteSelectionPreview['artifact'];
 }
 
 // Workflow Session API.
@@ -375,6 +435,23 @@ export function WorkflowSessionApi() {
         options,
       );
     },
+    executeArtifactAction(
+      sessionId: string,
+      slotId: string,
+      listIndex: number,
+      payload: ExecuteArtifactActionRequest,
+      options?: RawAxiosRequestConfig,
+    ) {
+      return axiosInstance.post<{
+        code: number;
+        message: string;
+        data: ExecuteArtifactActionResult;
+      }>(
+        `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}:action-execute`,
+        payload,
+        options,
+      );
+    },
     syncWriterDocument(
       sessionId: string,
       slotId: string,
@@ -388,6 +465,43 @@ export function WorkflowSessionApi() {
         data: SyncWriterDocumentResult;
       }>(
         `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/slots/${encodeURIComponent(slotId)}/items/idx/${listIndex}:sync-writer-document`,
+        payload,
+        options,
+      );
+    },
+    renderWriterDocument(
+      sessionId: string,
+      slot: WriterDocumentSlot,
+      options?: RawAxiosRequestConfig,
+    ) {
+      return axiosInstance.post<{
+        code: number;
+        message: string;
+        data: RenderWriterDocumentResult;
+      }>(
+        `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/writer-document:render`,
+        { slot },
+        options,
+      );
+    },
+    saveWriterDocument(
+      sessionId: string,
+      baseRevision: number,
+      document: RenderedWriterDocument,
+      slot: WriterDocumentSlot,
+      options?: RawAxiosRequestConfig,
+    ) {
+      const payload: Record<string, unknown> = {
+        base_revision: baseRevision,
+        document,
+      };
+      if (slot !== 'draft_document') payload.slot = slot;
+      return axiosInstance.post<{
+        code: number;
+        message: string;
+        data: SaveWriterDocumentResult;
+      }>(
+        `${coreApiBaseUrl}/workflow-sessions/${encodeURIComponent(sessionId)}/writer-document:save`,
         payload,
         options,
       );

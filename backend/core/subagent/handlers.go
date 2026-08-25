@@ -47,21 +47,24 @@ func InternalGetExecutionSpec(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "model config unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	toolConfig, err := modelconfig.LoadSearchToolConfig(r.Context(), store.DB(), task.CreateUserID)
+	var runtimeParams struct {
+		LegacyTools []string `json:"legacy_tools"`
+	}
+	if len(task.Params) > 0 {
+		if err := json.Unmarshal(task.Params, &runtimeParams); err != nil {
+			common.ReplyErr(w, "tool config unavailable", http.StatusServiceUnavailable)
+			return
+		}
+	}
+	toolConfig, err := modelconfig.LoadToolConfigForCapabilities(
+		r.Context(), store.DB(), task.CreateUserID, runtimeParams.LegacyTools,
+	)
 	if err != nil {
 		common.ReplyErr(w, "tool config unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	if toolConfig == nil {
 		toolConfig = map[string]any{}
-	}
-	cloudToolConfig, err := modelconfig.LoadCloudToolConfig(r.Context(), task.CreateUserID)
-	if err != nil {
-		common.ReplyErr(w, "tool config unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	for name, credential := range cloudToolConfig {
-		toolConfig[name] = credential
 	}
 	steps, _ := LoadSteps(r.Context(), store.DB(), taskID)
 	stepDTOs := make([]stepDTO, 0, len(steps))
@@ -175,6 +178,7 @@ type taskDTO struct {
 	Summary          string          `json:"summary"`
 	InputSlots       json.RawMessage `json:"input_slots"`
 	OutputSlots      json.RawMessage `json:"output_slots"`
+	Sources          json.RawMessage `json:"sources"`
 	CreatedAt        time.Time       `json:"created_at"`
 	UpdatedAt        time.Time       `json:"updated_at"`
 	Artifacts        []artifactDTO   `json:"artifacts,omitempty"`
@@ -223,6 +227,7 @@ func toTaskDTO(t *orm.SubAgentTask) taskDTO {
 		Summary:          t.Summary,
 		InputSlots:       normalizeJSON(t.InputSlots, "[]"),
 		OutputSlots:      normalizeJSON(t.OutputSlots, "[]"),
+		Sources:          normalizeJSON(json.RawMessage(t.Sources), "[]"),
 		CreatedAt:        t.CreatedAt,
 		UpdatedAt:        t.UpdatedAt,
 	}

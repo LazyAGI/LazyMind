@@ -37,6 +37,21 @@ if (!supportedTargets.has(target)) {
 
 const executableSuffix = options.platform === "windows" ? ".exe" : "";
 const executable = (name) => `bin/${name}${executableSuffix}`;
+const builtinSkillCatalog = path.join(runtimeRoot, "builtin-skills", "catalog.json");
+if (!existsSync(builtinSkillCatalog)) {
+  console.error(`builtin Skill catalog is missing: ${builtinSkillCatalog}`);
+  process.exit(1);
+}
+const featuredSkillCatalog = path.join(runtimeRoot, "featured-skills", "catalog.json");
+if (!existsSync(featuredSkillCatalog)) {
+  console.error(`featured Skill catalog is missing: ${featuredSkillCatalog}`);
+  process.exit(1);
+}
+const featuredSkillAssets = path.join(runtimeRoot, "featured-skills", "assets");
+if (!existsSync(featuredSkillAssets)) {
+  console.error(`featured Skill assets are missing: ${featuredSkillAssets}`);
+  process.exit(1);
+}
 
 function sha256(file) {
   return createHash("sha256").update(readFileSync(file)).digest("hex");
@@ -65,7 +80,9 @@ const manifest = {
   platform: options.platform,
   arch: options.arch,
   features: {
-    trustedLocalMode: trustedLocalModeOption === "true"
+    trustedLocalMode: trustedLocalModeOption === "true",
+    offlineBuiltinSkills: true,
+    offlineFeaturedSkills: true
   },
   binaries: {
     "process-supervisor": executable("process-compose"),
@@ -97,7 +114,11 @@ const manifest = {
     "lazyllm-algo": { healthPath: "/docs" },
     "chat": { healthPath: "/health" }
   },
-  checksums: walk(path.join(runtimeRoot, "bin"), runtimeRoot)
+  checksums: {
+    ...walk(path.join(runtimeRoot, "bin"), runtimeRoot),
+    ...walk(path.join(runtimeRoot, "builtin-skills"), runtimeRoot),
+    ...walk(path.join(runtimeRoot, "featured-skills"), runtimeRoot)
+  }
 };
 
 writeFileSync(path.join(runtimeRoot, "manifest.json"), `${JSON.stringify(manifest, null, 2)}\n`);

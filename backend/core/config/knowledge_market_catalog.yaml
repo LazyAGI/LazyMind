@@ -1,0 +1,346 @@
+# Knowledge market catalog — source of truth for knowledge_market_items.
+# Loaded at startup by knowledge_market.SeedCatalog(); mirrors datasource_catalog.yaml.
+#
+# 本期正式接入 4 个典型领域知识库：
+#   1. lawtext/laws                     — 中国法律法规 Markdown 仓库（全部状态）
+#   2. ImCa0/just-laws                  — 现行法律 Markdown 仓库
+#   3. salpt/chinatax-policy-corpus     — 税务政策 Parquet 数据集（逐行成文）
+#   4. microsoft/generative-ai-for-beginners — 生成式 AI 课程（zh-CN + 英文原版）
+#
+# 2026-08-18 新增 4 个典型领域知识库（医疗 / 教育 / 互联网 / Java 开发）：
+#   5. Snailclimb/JavaGuide           — JavaGuide Java 开发知识库（互联网）
+#   6. chenhaodev/chronic-guideline-wiki-zh — 慢性病临床指南（医疗）
+#   7. OWASP/CheatSheetSeries           — 应用安全速查表（互联网）
+#   8. choucsan/Gaokao-Compass-11M      — 高考志愿填报数据（教育）
+#
+# source_adapter 选择对应的 source 包适配器；当前 4 个来源均使用通用 adapter。
+# source_options 为该适配器的自由配置，安装时严格校验，未知字段会安装失败。
+# 未配置 source_adapter 的条目仍使用旧行为：下载后所有文件直接入库。
+# 字段说明：package_url 为唯一下载入口（.git 结尾 → git 仓库；否则直链 + zip 解压）；
+# package_revision 可选，固定 git 分支/tag；文件清单与 sha256 安装时实时生成，不在目录维护。
+# online_access_url 为「在线查询」使用的公开网页地址（产品维护）：必须可被模型直接抓取
+# 正文（url_fetch），不能是 git 仓库/zip 直链/需登录页面；为空时前端不展示「在线查询」。
+
+knowledge_market_items:
+  - id: lawtext-laws
+    category: industry
+    name: 中国法律法规在线文库
+    description: 来自国家法律法规数据库的中国法律法规 Markdown 语料，覆盖宪法、法律、行政法规、司法解释、监察法规及附录，包含有效、修改、废止等全部状态文件，适合法条检索与 RAG 知识库。
+    icon: ⚖
+    domain: 法律
+    tags: [法律, 法律法规]
+    package_url: https://github.com/lawtext/laws.git
+    package_revision: main
+    online_access_url: https://github.com/lawtext/laws
+    data_source: GitHub lawtext/laws
+    source_adapter: generic_markdown
+    source_options:
+      include:
+        - '^content/(法律|行政法规|司法解释|监察法规|宪法|appendix)/[^/]+\.md$'
+      exclude:
+        - '_index\.md$'
+      front_matter: true
+      title_fields: ["LinkTitle", "title"]
+      heading_fallback: false
+      title_fallback_template: "{{name}}"
+      group_field: group
+      group_fallback_template: "{{seg1}}"
+      status_field: status
+      status_map:
+        "有效": "有效"
+        "生效": "有效"
+        "已修改": "已修改"
+        "已废止": "已废止"
+        "尚未生效": "尚未生效"
+        "": "未知"
+      strip_front_matter: false
+      display_name_template: "{{title}}.md"
+      relative_path_template: "{{group}}/{{status}}"
+      tags: ["lawtext", "{{group}}", "{{status}}"]
+    sample_questions:
+      - 根据现行宪法，全国人民代表大会的职权有哪些？
+      - 合同解除的法律效果是什么？
+
+  - id: just-laws
+    category: industry
+    name: 国家现行法律知识库
+    description: 收录 311 部现行有效法律的 Markdown 语料，按宪法、民商法、刑法、行政法、经济法、社会法、程序法等部门组织，并保留编章节条结构，适合法律问答与精细切片。
+    icon: ⚖
+    domain: 法律
+    tags: [法律, 现行法律]
+    package_url: https://github.com/ImCa0/just-laws.git
+    package_revision: master
+    online_access_url: https://github.com/ImCa0/just-laws
+    data_source: GitHub ImCa0/just-laws
+    source_adapter: generic_markdown
+    source_options:
+      include:
+        - '^docs/(administrative|economic|constitutional-relevance|civil-and-commercial|social|procedural|criminal-law|constitution|ecological-environment)/[^/]+/(README\.md|preamble\.md|[0-9]{2}-[^/]+\.md)$'
+      exclude:
+        - '/versions/'
+      front_matter: false
+      heading_fallback: true
+      title_fallback_template: "{{seg2}}"
+      display_name_template: "{{title}}.md"
+      relative_path_template: "{{seg1}}"
+      tags: ["just_laws", "{{seg1}}"]
+    sample_questions:
+      - 民法典中合同编的主要章节有哪些？
+      - 刑法关于正当防卫是如何规定的？
+
+  - id: chinatax-policy
+    category: industry
+    name: 中国税务政策法规知识库
+    description: 从国家税务总局政策法规库采集的税务政策语料，共 5,593 条，覆盖税务规范性文件、财税文件、政策解读、法律和行政法规；入库时逐条生成 Markdown 文档。
+    icon: 🏛
+    domain: 政务
+    tags: [税务, 政策法规, 政务]
+    package_url: https://huggingface.co/datasets/salpt/chinatax-policy-corpus/resolve/main/data/train-00000-of-00001.parquet
+    package_revision: main
+    online_access_url: https://huggingface.co/datasets/salpt/chinatax-policy-corpus
+    data_source: HuggingFace salpt/chinatax-policy-corpus
+    source_adapter: generic_tabular
+    source_options:
+      input_extensions: [".parquet"]
+      doc_mode: row
+      title_fields: ["title", "document_number"]
+      title_fallback_template: "税务政策_{{seq}}"
+      field_defaults:
+        effect_level: "其他"
+      document_template: |
+        # {{title}}
+
+        **文号：** {{document_number}}
+
+        **效力级别：** {{effect_level}}
+
+        **税种：** {{tax_type}}
+
+        **时效性：** {{aging}}
+
+        **发布机构：** {{issuing_department}}
+
+        **成文日期：** {{written_date}}
+
+        **来源：** {{url}}
+
+        {{content}}
+      display_name_template: "{{title}}.md"
+      relative_path_template: "税务政策/{{effect_level}}"
+      tags: ["chinatax", "{{effect_level}}", "{{tax_type}}"]
+    sample_questions:
+      - 小型微利企业享受哪些企业所得税优惠？
+      - 增值税留抵退税政策适用哪些行业？
+
+  - id: generative-ai-for-beginners
+    category: industry
+    name: 生成式人工智能知识库
+    description: 微软生成式 AI 入门课程，覆盖 LLM、模型选择、提示工程、向量检索、RAG、Agent、微调、AI 安全与 LLMOps 等主题；同时入库 zh-CN 翻译与英文原版课程文档。
+    icon: 🤖
+    domain: 互联网
+    tags: [生成式AI, RAG, Agent, 课程]
+    package_url: https://github.com/microsoft/generative-ai-for-beginners.git
+    package_revision: main
+    online_access_url: https://microsoft.github.io/generative-ai-for-beginners/
+    data_source: GitHub microsoft/generative-ai-for-beginners
+    source_adapter: generic_file_copy
+    source_options:
+      extensions: [".md"]
+      groups:
+        - name: zh-CN
+          match:
+            - '^translations/zh-CN/.*\.md$'
+          strip_prefix: "translations/zh-CN/"
+          display_name_template: "zh-CN/{{path}}"
+          relative_path_template: "zh-CN/{{dir}}"
+          tags: ["generative-ai", "zh-CN"]
+        - name: en-original
+          match:
+            - '^(README|AGENTS)\.md$'
+            - '^docs/[^/]+\.md$'
+            - '^(0[0-9]|1[0-9]|2[0-1])-[^/]+/.*\.md$'
+          display_name_template: "{{path}}"
+          relative_path_template: "{{dir}}"
+          tags: ["generative-ai", "en-original"]
+    sample_questions:
+      - 什么是检索增强生成（RAG），它适合解决什么问题？
+      - 提示工程中常见的技巧有哪些？
+
+  # ---------- 典型领域知识库新增（2026-08-18：医疗 / 教育 / 互联网 / Java 开发） ----------
+
+  - id: java-guide
+    category: industry
+    name: JavaGuide（Java 开发知识库）
+    description: 中文 Java 开发知识体系（Snailclimb/JavaGuide），docs/ 下 441 篇原创知识文档，覆盖 Java 基础/集合/并发/JVM、数据库、计算机基础、网络、系统设计、高可用与 AI 等主题，适合开发实践与知识检索。
+    icon: ☕
+    domain: 互联网
+    tags: [互联网, Java, 开发知识, 中文]
+    package_url: https://github.com/Snailclimb/JavaGuide.git
+    package_revision: main
+    online_access_url: https://javaguide.cn/
+    data_source: GitHub Snailclimb/JavaGuide
+    source_adapter: generic_markdown
+    source_options:
+      include:
+        - '^docs/.*\.md$'
+      exclude:
+        - '^docs/(README|home)\.md$'
+        - '^docs/snippets/.*\.snippet\.md$'
+        - '^docs/ai/TODO\.md$'
+      front_matter: true
+      strip_front_matter: true
+      title_fields: ["title"]
+      heading_fallback: true
+      title_fallback_template: "{{name}}"
+      display_name_template: "{{title}}.md"
+      relative_path_template: "JavaGuide/{{seg1}}"
+      tags: ["JavaGuide", "{{seg1}}"]
+    sample_questions:
+      - Java 中 HashMap 的底层实现原理是什么？
+      - JVM 内存区域是如何划分的？
+      - MySQL 为什么使用 B+ 树作为索引结构？
+
+  - id: chronic-disease-guidelines
+    category: industry
+    name: 慢性病临床指南知识库
+    description: 慢性病诊疗指南知识条目（肾病、糖尿病等），疾病定义、诊断与治疗要点原文，共 2,755 条，适合医学知识检索与医疗问答。
+    icon: 🩺
+    domain: 医疗
+    tags: [医疗, 临床指南, 慢性病]
+    package_url: https://huggingface.co/datasets/chenhaodev/chronic-guideline-wiki-zh.git
+    package_revision: main
+    online_access_url: https://huggingface.co/datasets/chenhaodev/chronic-guideline-wiki-zh
+    data_source: HuggingFace chenhaodev/chronic-guideline-wiki-zh
+    source_adapter: generic_tabular
+    source_options:
+      input_extensions: [".parquet"]
+      doc_mode: row
+      title_fields: []
+      title_fallback_template: "慢性病指南_{{seq}}"
+      document_template: |
+        # 慢性病指南_{{seq}}
+
+        {{text}}
+      display_name_template: "慢性病指南_{{seq}}.md"
+      relative_path_template: "临床指南/慢性病"
+      tags: ["医疗", "慢性病", "临床指南"]
+    sample_questions:
+      - 肾病综合征的诊断标准是什么？
+      - 糖尿病的慢性并发症有哪些？
+
+  - id: owasp-cheatsheets
+    category: industry
+    name: OWASP 应用安全速查表知识库
+    description: OWASP 官方应用安全速查表（109 篇），覆盖认证、注入、XSS、CSRF、日志、密钥管理等 Web 安全主题，适合安全规范检索与研发参考。
+    icon: 🛡
+    domain: 互联网
+    tags: [互联网, 网络安全, 应用安全, 英文]
+    package_url: https://github.com/OWASP/CheatSheetSeries.git
+    package_revision: master
+    online_access_url: https://cheatsheetseries.owasp.org/
+    data_source: GitHub OWASP/CheatSheetSeries
+    source_adapter: generic_markdown
+    source_options:
+      include:
+        - '^cheatsheets/[^/]+\.md$'
+      front_matter: false
+      heading_fallback: true
+      title_fallback_template: "{{name}}"
+      display_name_template: "{{title}}.md"
+      relative_path_template: "owasp"
+      tags: ["owasp", "security"]
+    sample_questions:
+      - 认证场景下推荐的密码存储与校验方式是什么？
+      - SQL 注入防护的推荐做法有哪些？
+
+  - id: gaokao-compass
+    category: industry
+    name: 高考志愿填报数据知识库
+    description: GaokaoCompass 高考志愿填报数据集（HuggingFace choucsan/Gaokao-Compass-11M），覆盖 31 个省份 2017-2025 年的招生计划、院校录取分数线、专业录取分与分数段位次表，共 861 个 CSV 按年份/省份组织，适合高考志愿填报事实查询与 RAG 检索。
+    icon: 🎓
+    domain: 教育
+    tags: [教育, 高考, 志愿填报, 招生数据]
+    package_url: https://huggingface.co/datasets/choucsan/Gaokao-Compass-11M.git
+    package_revision: main
+    online_access_url: https://huggingface.co/datasets/choucsan/Gaokao-Compass-11M
+    data_source: HuggingFace choucsan/Gaokao-Compass-11M
+    source_adapter: generic_file_copy
+    source_options:
+      extensions: [".csv"]
+      include:
+        - '^data/[0-9]{4}/[a-z]+/[^/]+\.csv$'
+      display_name_template: "{{seg1}}-{{seg2}}-{{name}}.csv"
+      relative_path_template: "gaokao-compass/{{seg1}}"
+      tags: ["高考", "志愿填报", "{{seg1}}"]
+    sample_questions:
+      - 2024 年广东省物理类本科批的录取控制分数线是多少？
+      - 北京工业大学 2024 年在广东物理类的招生计划人数是多少？
+
+  # ---------- 评测集接入（2026-08-18，原始文档优先） ----------
+
+  - id: induocrbench
+    category: evaluation
+    name: InduOCRBench 工业文档 OCR 知识库
+    description: InduOCRBench（HuggingFace qihoo360/InduOCRBench）的 570 篇工业文档 Markdown 语料，覆盖表格、票据、说明书等工业场景，适合文档 OCR 与表格理解评测。
+    icon: 📑
+    domain: 工业
+    tags: [评测集, OCR, 表格理解, 中文]
+    package_url: https://huggingface.co/datasets/qihoo360/InduOCRBench/resolve/main/ocr_data/md.zip
+    package_revision: main
+    online_access_url: https://huggingface.co/datasets/qihoo360/InduOCRBench
+    data_source: HuggingFace qihoo360/InduOCRBench
+    source_adapter: generic_file_copy
+    source_options:
+      extensions: [".md"]
+      display_name_template: "{{basename}}"
+      relative_path_template: "induocrbench"
+      tags: ["induocrbench"]
+    sample_questions:
+      - 某工业设备说明书中设备的额定功率是多少？
+      - 某单据表格中金额合计是多少？
+
+  - id: financebench
+    category: evaluation
+    name: FinanceBench 财报问答评测知识库
+    description: FinanceBench（GitHub patronus-ai/financebench）pdfs/ 目录的 368 份美股财报 PDF（10-K/10-Q/8-K/年报，约 700MB），适合财报检索与数值推理评测。。
+    icon: 📈
+    domain: 金融
+    tags: [评测集, 财报, 金融, 英文]
+    package_url: https://github.com/patronus-ai/financebench.git
+    package_revision: main
+    online_access_url: https://github.com/patronus-ai/financebench
+    data_source: GitHub patronus-ai/financebench
+    source_adapter: generic_file_copy
+    source_options:
+      extensions: [".pdf"]
+      include:
+        - "^pdfs/"
+      display_name_template: "{{basename}}"
+      relative_path_template: "financebench"
+      tags: ["financebench"]
+    sample_questions:
+      - 某公司 10-K 中报告的总营收是多少？
+      - 某公司年报中净收入同比变化是多少？
+
+  - id: open-ragbench
+    category: evaluation
+    name: Open RAGBench 论文检索评测知识库
+    description: Open RAGBench（HuggingFace vectara/open_ragbench）的 1,000 篇 arXiv 论文原始 JSON（约 742MB），覆盖各学科论文，适合文档检索与 RAG 评测。
+    icon: 📄
+    domain: 科研
+    tags: [评测集, 论文, RAG, 英文]
+    package_url: https://huggingface.co/datasets/vectara/open_ragbench.git
+    package_revision: main
+    online_access_url: https://huggingface.co/datasets/vectara/open_ragbench
+    data_source: HuggingFace vectara/open_ragbench
+    source_adapter: generic_file_copy
+    source_options:
+      extensions: [".json"]
+      include:
+        - "^pdf/arxiv/corpus/"
+      display_name_template: "{{basename}}"
+      relative_path_template: "open-ragbench"
+      tags: ["open-ragbench"]
+    sample_questions:
+      - 某篇论文提出的方法在哪些数据集上进行了实验？
+      - 某篇论文摘要中提到的核心贡献是什么？

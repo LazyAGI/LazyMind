@@ -314,40 +314,39 @@ func (s *SQLiteStore) LTrim(ctx context.Context, key string, start, stop int64) 
 	return tx.Commit()
 }
 
-func (s *SQLiteStore) BLPop(ctx context.Context, key string, timeout time.Duration) error {
-	deadline := time.Time{}
-	if timeout > 0 {
-		deadline = time.Now().Add(timeout)
+func (s *SQLiteStore) LPop(ctx context.Context, key string) (bool, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return false, err
 	}
-	for {
-		tx, err := s.db.BeginTx(ctx, nil)
-		if err != nil {
-			return err
-		}
-		var id int64
-		err = tx.QueryRowContext(ctx, `SELECT id FROM state_list WHERE key = ? AND `+liveWhere()+` ORDER BY id ASC LIMIT 1`, key, nowMS()).Scan(&id)
-		if err == nil {
-			_, err = tx.ExecContext(ctx, `DELETE FROM state_list WHERE id = ?`, id)
-			if err == nil {
-				err = tx.Commit()
-			} else {
-				_ = tx.Rollback()
-			}
-			return err
-		}
+	var id int64
+	err = tx.QueryRowContext(ctx, `SELECT id FROM state_list WHERE key = ? AND `+liveWhere()+` ORDER BY id ASC LIMIT 1`, key, nowMS()).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
 		_ = tx.Rollback()
-		if !errors.Is(err, sql.ErrNoRows) {
-			return err
-		}
-		if !deadline.IsZero() && time.Now().After(deadline) {
-			return sql.ErrNoRows
-		}
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		case <-time.After(200 * time.Millisecond):
-		}
+		return false, nil
 	}
+	if err != nil {
+		_ = tx.Rollback()
+		return false, err
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM state_list WHERE id = ?`, id)
+	if err != nil {
+		_ = tx.Rollback()
+		return false, err
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		_ = tx.Rollback()
+		return false, err
+	}
+	if deleted != 1 {
+		_ = tx.Rollback()
+		return false, nil
+	}
+	if err = tx.Commit(); err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (s *SQLiteStore) ZAdd(ctx context.Context, key, member string, score float64, ttl time.Duration) error {

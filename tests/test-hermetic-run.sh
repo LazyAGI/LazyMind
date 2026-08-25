@@ -37,6 +37,12 @@ run_auth_service() {
   "$LAZYMIND_TEST_PYTHON" -m pytest tests/backend/auth-service/ -v --tb=short
 }
 
+run_channel_gateway() {
+  cd "$ROOT"
+  "$LAZYMIND_TEST_PYTHON" -m unittest discover \
+    -s backend/channel-gateway/tests -p 'test_*.py' -v
+}
+
 run_backend_core() {
   cd "$ROOT/tests/backend/core"
   go test ./... -v
@@ -54,6 +60,7 @@ run_algorithm() {
 
 run_section "Frontend" run_frontend
 run_section "auth-service" run_auth_service
+run_section "channel-gateway" run_channel_gateway
 run_section "backend/core" run_backend_core
 run_section "local/local-proxy" run_backend_local_proxy
 run_section "algorithm" run_algorithm

@@ -568,7 +568,7 @@ func TestProcessComposeGeneratedConfigContainsOnlyHostProcesses(t *testing.T) {
 	}
 }
 
-func TestInstallerWarmupGeneratesCompleteProcessGraph(t *testing.T) {
+func TestInstallerWarmupGeneratesReducedProcessGraph(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
 	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
@@ -594,17 +594,19 @@ func TestInstallerWarmupGeneratesCompleteProcessGraph(t *testing.T) {
 		channelGatewayProcessName,
 		coreProcessName,
 		frontendProcessName,
-		scanControlPlaneProcessName,
-		fileWatcherProcessName,
 		milvusLiteProcessName,
 		processorServerProcessName,
-		processorWorkerProcessName,
 		algoProcessName,
 		docServerProcessName,
 		chatProcessName,
 	} {
 		if _, ok := parsed.Processes[name]; !ok {
 			t.Fatalf("warmup graph missing process %s", name)
+		}
+	}
+	for _, name := range []string{fileWatcherProcessName, scanControlPlaneProcessName, processorWorkerProcessName} {
+		if _, ok := parsed.Processes[name]; ok {
+			t.Fatalf("warmup graph unexpectedly contains process %s", name)
 		}
 	}
 	for name, process := range parsed.Processes {
@@ -616,7 +618,7 @@ func TestInstallerWarmupGeneratesCompleteProcessGraph(t *testing.T) {
 	}
 }
 
-func TestInstallerWarmupCreatesFileWatcherImportDirectory(t *testing.T) {
+func TestInstallerWarmupDoesNotCreateFileWatcherImportDirectory(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
 	cfg, paths, err := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
@@ -631,8 +633,8 @@ func TestInstallerWarmupCreatesFileWatcherImportDirectory(t *testing.T) {
 	if err := ensureRuntimeDirs(cfg, paths); err != nil {
 		t.Fatalf("ensure runtime dirs: %v", err)
 	}
-	if info, err := os.Stat(cfg.FileWatcher.WatchHostDir); err != nil || !info.IsDir() {
-		t.Fatalf("warmup did not create file watcher import directory %q: %v", cfg.FileWatcher.WatchHostDir, err)
+	if _, err := os.Stat(cfg.FileWatcher.WatchHostDir); !os.IsNotExist(err) {
+		t.Fatalf("warmup touched file watcher import directory %q: %v", cfg.FileWatcher.WatchHostDir, err)
 	}
 }
 
@@ -925,6 +927,18 @@ func TestKillStaleRuntimeProcessesStopsScannerOrphan(t *testing.T) {
 	<-waitDone
 	if processAlive(cmd.Process.Pid) {
 		t.Fatalf("expected orphan process %d to stop", cmd.Process.Pid)
+	}
+}
+
+func TestSelectLANIPv4SkipsLoopbackAndContainerBridges(t *testing.T) {
+	candidates := []lanIPv4Candidate{
+		{name: "lo", flags: net.FlagUp | net.FlagLoopback, ip: net.ParseIP("10.255.255.254")},
+		{name: "docker0", flags: net.FlagUp, ip: net.ParseIP("172.17.0.1")},
+		{name: "br-f16ec9f3bf18", flags: net.FlagUp, ip: net.ParseIP("172.20.0.1")},
+		{name: "eth0", flags: net.FlagUp, ip: net.ParseIP("172.24.189.31")},
+	}
+	if got := selectLANIPv4(candidates); got != "172.24.189.31" {
+		t.Fatalf("selectLANIPv4() = %q, want WSL eth0 address", got)
 	}
 }
 

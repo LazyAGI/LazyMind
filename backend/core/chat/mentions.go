@@ -312,15 +312,19 @@ func resolveConversationWorkflowBinding(
 		}
 		return currentRefs, nil
 	}
-	if !enabled {
-		if persist {
-			return nil, writeConversationWorkflowBinding(ctx, db, conversationID, "")
-		}
-		return nil, nil
-	}
 	boundRef, err := readConversationWorkflowBinding(ctx, db, conversationID)
 	if err != nil {
 		return nil, err
+	}
+	// New user conversations intentionally start with general Workflow discovery
+	// disabled. An explicit @workflow mention is nevertheless an affirmative
+	// selection, and its exact binding must survive clarification turns before a
+	// Session exists. Otherwise an ask_user answer arrives without a mention, the
+	// bound trigger disappears, and ChatAgent falls back to unrelated tools/skills.
+	// Keep only the explicitly bound Workflow enabled here; applyWorkflowSelection
+	// will continue to restrict the request to this single ref.
+	if !enabled && boundRef == "" {
+		return nil, nil
 	}
 	for _, ref := range excludedRefs {
 		if ref == boundRef {
@@ -526,7 +530,7 @@ func mentionedConversationContext(ctx context.Context, db *gorm.DB, userID, curr
 	var chunks []string
 	for _, id := range ids {
 		var conversation orm.Conversation
-		if err := db.WithContext(ctx).Where("id = ? AND create_user_id = ?", id, userID).Take(&conversation).Error; err != nil {
+		if err := db.WithContext(ctx).Where("id = ? AND create_user_id = ? AND deleted_at IS NULL", id, userID).Take(&conversation).Error; err != nil {
 			return "", fmt.Errorf("conversation mention is not readable: %s", id)
 		}
 		if id == currentID {
@@ -573,6 +577,13 @@ func mergeMentionedWorkflows(ctx context.Context, db *gorm.DB, userID string, re
 	selected := make([]map[string]any, 0, len(refs))
 	var forcedBuiltins []string
 	for _, ref := range refs {
+		callMode, err := workflow.UserWorkflowCallMode(db, userID, ref)
+		if err != nil {
+			return nil, nil, fmt.Errorf("load workflow call mode: %w", err)
+		}
+		if callMode == workflow.WorkflowCallModeDisabled {
+			return nil, nil, fmt.Errorf("workflow is paused: %s", ref)
+		}
 		if strings.HasPrefix(ref, "builtin:") {
 			forcedBuiltins = append(forcedBuiltins, strings.TrimPrefix(ref, "builtin:"))
 			continue
@@ -593,6 +604,32 @@ func mergeMentionedWorkflows(ctx context.Context, db *gorm.DB, userID string, re
 		selected = append(selected, map[string]any{"workflow_ref": row.WorkflowRef, "workflow_id": row.WorkflowID, "name": row.Name, "description": row.Description, "when_to_use": row.WhenToUse, "source_type": row.SourceType, "remote_root": "remote://" + row.RelativeRoot, "revision_id": row.HeadRevisionID, "revision_no": row.Version, "tree_hash": row.TreeHash})
 	}
 	return selected, forcedBuiltins, nil
+}
+
+func applyWorkflowContextCallMode(db *gorm.DB, userID string, reqBody map[string]any) error {
+	workflowContext, ok := reqBody["workflow_context"].(map[string]any)
+	if !ok || workflowContext == nil {
+		return nil
+	}
+	workflowRef := strings.TrimSpace(fmt.Sprint(workflowContext["workflow_ref"]))
+	if workflowRef == "" {
+		return nil
+	}
+	callMode, err := workflow.UserWorkflowCallMode(db, userID, workflowRef)
+	if err != nil {
+		return fmt.Errorf("load active workflow call mode: %w", err)
+	}
+	if callMode != workflow.WorkflowCallModeDisabled {
+		return nil
+	}
+	for _, key := range []string{
+		"session_id", "workflow_id", "current_step", "workflow_ref",
+		"revision_id", "revision_no", "tree_hash", "remote_root", "runtime",
+	} {
+		delete(workflowContext, key)
+	}
+	reqBody["workflow_context"] = workflowContext
+	return nil
 }
 
 // applyWorkflowSelection is the single catalog/allowlist assembly path used by
@@ -619,6 +656,9 @@ func applyWorkflowSelection(
 		delete(reqBody, "allowed_workflow_refs")
 		delete(reqBody, "workflow_activations")
 		return nil
+	}
+	if err := applyWorkflowContextCallMode(db, userID, reqBody); err != nil {
+		return err
 	}
 	if len(mentionedRefs) > 1 {
 		return fmt.Errorf("at most one workflow mention is allowed per turn")
@@ -668,6 +708,12 @@ func applyWorkflowSelection(
 				"workflow_ref": mentionedRefs[0],
 				"workflow_id":  strings.TrimPrefix(mentionedRefs[0], "builtin:"),
 			}
+			if runtimePolicy, ok := workflow.RuntimePolicyForRevision(
+				ctx, db, userID, mentionedRefs[0], "",
+			); ok {
+				selected["runtime"] = runtimePolicy
+			}
+			catalog = append(catalog, selected)
 		}
 		if activation := buildWorkflowActivation(selected, mentionedRefs[0]); activation != nil {
 			reqBody["workflow_activations"] = []map[string]any{activation}
@@ -716,7 +762,7 @@ func buildWorkflowActivation(item map[string]any, workflowRef string) map[string
 	if name == "" {
 		name = workflowID
 	}
-	return map[string]any{
+	activation := map[string]any{
 		"workflow_ref": workflowRef,
 		"workflow_id":  workflowID,
 		"revision_id":  optionalActivationString(item["revision_id"]),
@@ -725,8 +771,12 @@ func buildWorkflowActivation(item map[string]any, workflowRef string) map[string
 			"Start the exact executable Workflow %q explicitly selected by the user and return its Ready frontier. This is execution, not resource lookup. %s %s",
 			name, fmt.Sprint(item["description"]), fmt.Sprint(item["when_to_use"]),
 		)),
-		"prompt": "The user explicitly selected an executable Workflow with @workflow. Call its bound trigger directly in this turn. Do not search for the Workflow as an artifact, do not merely explain it, and do not call list_workflows or select another Workflow.",
+		"prompt": "The user explicitly selected an executable Workflow with @workflow. Apply its declared Runtime startup clarification policy first; ask only for missing declared fields. When no declared field is missing, call its bound trigger directly. Do not search for the Workflow as an artifact, do not merely explain it, and do not call list_workflows or select another Workflow.",
 	}
+	if runtimePolicy, ok := item["runtime"]; ok && runtimePolicy != nil {
+		activation["runtime"] = runtimePolicy
+	}
+	return activation
 }
 
 func optionalActivationString(value any) string {

@@ -1,4 +1,4 @@
-import Markdown from "react-markdown";
+import Markdown, { defaultUrlTransform } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
@@ -21,8 +21,7 @@ import {
 import { customSchema } from "./config";
 import rehypeRaw from "rehype-raw";
 import {
-	basenameFromPath,
-  resolveCoreAssetUrl,
+  basenameFromPath,
   resolveMarkdownImageUrlAsync,
 } from "@/modules/knowledge/utils/imageUrl";
 import HtmlBlock from "./HtmlBlock";
@@ -52,6 +51,7 @@ const BOLD_BARE_URL_PATTERN = /\*\*((?:https?:\/\/|www\.)[^\s*<>()]+)\*\*/g;
 const BARE_URL_PATTERN = /(?<!\(|\[)(https?:\/\/[^\s<>[\]"'`（）。，、；：！？…—]+)/g;
 // Fullwidth and CJK punctuation that should never be treated as part of a URL.
 const TRAILING_FULLWIDTH_PUNCT = /[（）。，、；：！？…—\u3000-\u303F\uFF00-\uFFEF]+$/;
+const SAFE_INLINE_IMAGE_DATA = /^data:image\/(?:png|jpe?g|gif|webp|bmp);base64,/i;
 
 const markdownRemarkWorkflows = [[remarkGfm, { singleTilde: false }], remarkMath];
 const markdownRehypeWorkflows = [
@@ -59,6 +59,10 @@ const markdownRehypeWorkflows = [
   rehypeKatex,
   [rehypeSanitize, customSchema],
 ];
+
+export function markdownUrlTransform(value: string): string {
+  return SAFE_INLINE_IMAGE_DATA.test(value) ? value : defaultUrlTransform(value);
+}
 
 const MarkdownRenderContext = createContext<{
   isStreaming: boolean;
@@ -160,15 +164,13 @@ const ImageComponent = (props: any) => {
   const { t } = useTranslation();
   const [imageLoadError, setImageLoadError] = useState(false);
   const [previewVisible, setPreviewVisible] = useState(false);
-  const [resolvedSrc, setResolvedSrc] = useState(() =>
-    resolveCoreAssetUrl(props.src || ""),
-  );
+  const [resolvedSrc, setResolvedSrc] = useState("");
 
   useEffect(() => {
     let cancelled = false;
     const rawSrc = props.src || "";
     setImageLoadError(false);
-    setResolvedSrc(resolveCoreAssetUrl(rawSrc));
+    setResolvedSrc("");
 
     resolveMarkdownImageUrlAsync(rawSrc)
       .then((url) => {
@@ -178,7 +180,7 @@ const ImageComponent = (props: any) => {
       })
       .catch(() => {
         if (!cancelled) {
-          setResolvedSrc(resolveCoreAssetUrl(rawSrc));
+          setResolvedSrc("");
         }
       });
 
@@ -451,6 +453,7 @@ const MarkdownViewer = memo((props: any) => {
       <MarkdownRenderContext.Provider value={renderContextValue}>
         <Markdown
           {...markdownProps}
+          urlTransform={markdownProps.urlTransform ?? markdownUrlTransform}
           remarkPlugins={markdownRemarkWorkflows}
           rehypePlugins={markdownRehypeWorkflows}
           components={markdownComponents}

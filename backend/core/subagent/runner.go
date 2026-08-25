@@ -64,6 +64,7 @@ type TaskEvent struct {
 	ContentType  string          `json:"content_type,omitempty"`
 	Seq          int             `json:"seq,omitempty"`
 	Value        json.RawMessage `json:"value,omitempty"`
+	Sources      json.RawMessage `json:"sources,omitempty"`
 	Status       string          `json:"status,omitempty"`
 	Summary      string          `json:"summary,omitempty"`
 	Message      string          `json:"message,omitempty"`
@@ -73,8 +74,8 @@ type TaskEvent struct {
 	// Text / think streaming content.
 	Text  string `json:"text,omitempty"`
 	Think string `json:"think,omitempty"`
-	// Attempt-scoped Markdown Draft preview fields. These events are stored only
-	// in the short-lived Task stream and never persisted as artifacts or steps.
+	// Attempt-scoped Markdown Draft preview fields. These events remain
+	// ephemeral and are never persisted as artifacts or steps.
 	StreamID   string `json:"stream_id,omitempty"`
 	ChunkIndex int64  `json:"chunk_index,omitempty"`
 	Delta      string `json:"delta,omitempty"`
@@ -196,6 +197,10 @@ func routeEventWithWorkflowHooks(ctx context.Context, db *gorm.DB, stateStore st
 		if artifactHook {
 			routeWorkflowArtifact(ctx, db, stateStore, ev.TaskID, ev.ArtifactKey)
 		}
+	case "sources":
+		if err := UpdateSources(ctx, db, ev.TaskID, ev.Sources); err != nil {
+			return fmt.Errorf("save sources task=%s: %w", ev.TaskID, err)
+		}
 	case "done":
 		status := ev.Status
 		if status == "" {
@@ -229,9 +234,10 @@ func routeEventWithWorkflowHooks(ctx context.Context, db *gorm.DB, stateStore st
 		// Draft preview events are intentionally ephemeral: append to the Task
 		// stream below, without creating DB steps, artifacts, or workflow revisions.
 	}
-	if isArtifactStreamEvent(ev.Type) {
-		// Deliver Draft preview events immediately to SSE clients connected to
-		// this process, without waiting for the Redis replay copy.
+	if isArtifactStreamEvent(ev.Type) || ev.Type == "progress" ||
+		ev.Type == "done" || ev.Type == "error" {
+		// Deliver preview, phase, and terminal updates immediately to connected
+		// clients, without waiting for the Redis replay copy.
 		taskLiveEvents.publish(ev.TaskID, ev)
 	}
 	_ = AppendStreamEvent(ctx, stateStore, ev.TaskID, ev)
@@ -253,10 +259,10 @@ func routeError(ctx context.Context, db *gorm.DB, stateStore state.Store, taskID
 	routeWorkflowStepStatus(ctx, db, stateStore, taskID, StatusFailed, message)
 }
 
-// PublishConversationTaskEvent multiplexes task changes onto the one active
-// conversation stream. Workflow steps invalidate the Workflow view; independent
-// tasks carry their live event. Artifact bodies are reloaded from the signed
-// conversation-artifact endpoint instead of being copied into the event log.
+// PublishConversationTaskEvent keeps the conversation stream limited to bounded
+// lifecycle changes. Granular text/think/tool events stay on the per-task SSE
+// stream; copying token deltas here can exhaust the conversation event transport
+// and prevent later task_created events from reaching the frontend.
 func PublishConversationTaskEvent(
 	ctx context.Context,
 	db *gorm.DB,
@@ -272,16 +278,23 @@ func PublishConversationTaskEvent(
 	}
 	if task.AgentType == "workflow_step" {
 		switch ev.Type {
+		case "artifact_stream_start", "artifact_stream", "artifact_stream_end", "artifact_stream_abort":
+			// WorkflowPanel consumes Writer previews from the one conversation
+			// stream even though workflow tasks stay hidden from TaskCenter.
+			EventHooks.CallConversationEvent(ctx, stateStore, task.ConversationID, "", "task_updated",
+				map[string]any{"task_id": ev.TaskID, "event": ev})
 		case "task_start", "progress", "artifact", "done", "error":
+			EventHooks.CallConversationEvent(ctx, stateStore, task.ConversationID, "",
+				"workflow_runtime_updated", map[string]any{"task_id": ev.TaskID, "change": ev.Type})
 		default:
-			return
+			// Tool and reasoning events for workflow steps are not shown in the
+			// standalone task panel and do not affect WorkflowPanel projections.
 		}
-		EventHooks.CallConversationEvent(ctx, stateStore, task.ConversationID, "",
-			"workflow_runtime_updated", map[string]any{"task_id": ev.TaskID, "change": ev.Type})
-		return
 	}
-	if ev.Type == "artifact" {
-		ev.Value = nil
+	switch ev.Type {
+	case "task_start", "progress", "sources", "done", "error":
+	default:
+		return
 	}
 	EventHooks.CallConversationEvent(ctx, stateStore, task.ConversationID, "", "task_updated",
 		map[string]any{"task_id": ev.TaskID, "event": ev})

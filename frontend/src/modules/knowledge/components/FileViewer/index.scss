@@ -73,6 +73,24 @@
   }
 }
 
+// docx-preview renders every page into one growing document. FileViewer's
+// generic content host intentionally clips overflow for PDF/Office renderers,
+// so Word needs to own its vertical scroll area explicitly.
+.file-viewer-word-scroll {
+  box-sizing: border-box;
+  width: 100%;
+  max-width: 800px;
+  height: 100%;
+  min-height: 0;
+  margin: 0 auto;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.file-viewer-word-document {
+  min-height: 100%;
+}
+
 .file-viewer-media-container {
   display: flex;
   align-items: center;

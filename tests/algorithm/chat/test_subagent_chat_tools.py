@@ -39,11 +39,6 @@ def _patch_list_tasks(monkeypatch, tasks=None):
     monkeypatch.setattr(sct, '_list_conversation_tasks', lambda: tasks if tasks is not None else _TASKS)
 
 
-def _r(result):
-    """Unwrap tool_success envelope: {success, tool, result: {...}} → inner dict."""
-    return result.get('result', result)
-
-
 def test_resolve_task_by_exact_title():
     task = sct._resolve_task('素材收集', _TASKS)
     assert task['task_id'] == 'tid-2'
@@ -94,8 +89,8 @@ def test_create_subagent_manual_returns_immediately(monkeypatch):
         objective='gather refs',
         output_slots=['refs'],
     )
-    assert _r(result)['status'] == 'ok'
-    assert 'started in the background' in _r(result)['message']
+    assert result['status'] == 'ok'
+    assert 'started in the background' in result['message']
     # Must have emitted exactly one task_created event.
     assert write_calls[0][0] == 'task_created'
     assert write_calls[0][1]['title'] == '素材收集'
@@ -141,8 +136,8 @@ def test_create_subagent_auto_polls_and_returns_summary(monkeypatch):
         objective='do it',
         output_slots=['out'],
     )
-    assert _r(result)['status'] == 'ok'
-    assert 'completed' in _r(result)['message']
+    assert result['status'] == 'ok'
+    assert 'completed' in result['message']
     assert poll_count[0] >= 3
 
 
@@ -161,8 +156,8 @@ def test_create_subagent_auto_failed_task(monkeypatch):
     result = sct.create_subagent(
         agent_type='test', title='失败任务', objective='fail', output_slots=['x'],
     )
-    assert _r(result)['status'] == 'failed'
-    assert 'failed' in _r(result)['message']
+    assert result['status'] == 'failed'
+    assert 'failed' in result['message']
 
 
 def test_create_subagent_auto_emits_heartbeat(monkeypatch):
@@ -210,22 +205,22 @@ def test_create_subagent_auto_emits_heartbeat(monkeypatch):
 def test_list_subagents_all(monkeypatch):
     _patch_list_tasks(monkeypatch)
     result = sct.list_subagents()
-    assert _r(result)['status'] == 'ok'
-    assert '任务A' in _r(result)['message']
-    assert '素材收集' in _r(result)['message']
+    assert result['status'] == 'ok'
+    assert '任务A' in result['message']
+    assert '素材收集' in result['message']
 
 
 def test_list_subagents_filtered_by_status(monkeypatch):
     _patch_list_tasks(monkeypatch)
     result = sct.list_subagents(status='running')
-    assert '素材收集' in _r(result)['message']
-    assert '任务A' not in _r(result)['message']
+    assert '素材收集' in result['message']
+    assert '任务A' not in result['message']
 
 
 def test_list_subagents_empty(monkeypatch):
     _patch_list_tasks(monkeypatch, tasks=[])
     result = sct.list_subagents()
-    assert 'No SubAgent tasks' in _r(result)['message']
+    assert 'No SubAgent tasks' in result['message']
 
 
 # ---------------------------------------------------------------------------
@@ -235,15 +230,15 @@ def test_list_subagents_empty(monkeypatch):
 def test_get_subagent_status_found(monkeypatch):
     _patch_list_tasks(monkeypatch)
     result = sct.get_subagent_status('素材收集')
-    assert _r(result)['status'] == 'ok'
-    assert '60%' in _r(result)['message']
-    assert '分析中' in _r(result)['message']
+    assert result['status'] == 'ok'
+    assert '60%' in result['message']
+    assert '分析中' in result['message']
 
 
 def test_get_subagent_status_not_found(monkeypatch):
     _patch_list_tasks(monkeypatch)
     result = sct.get_subagent_status('不存在的任务')
-    assert _r(result)['status'] == 'empty'
+    assert result['status'] == 'empty'
 
 
 # ---------------------------------------------------------------------------
@@ -253,15 +248,15 @@ def test_get_subagent_status_not_found(monkeypatch):
 def test_list_subagent_artifacts_found(monkeypatch):
     _patch_list_tasks(monkeypatch)
     result = sct.list_subagent_artifacts('素材收集')
-    assert _r(result)['status'] == 'ok'
-    assert 'refs' in _r(result)['keys']
-    assert 'keywords' in _r(result)['keys']
+    assert result['status'] == 'ok'
+    assert 'refs' in result['keys']
+    assert 'keywords' in result['keys']
 
 
 def test_list_subagent_artifacts_not_found(monkeypatch):
     _patch_list_tasks(monkeypatch)
     result = sct.list_subagent_artifacts('不存在')
-    assert _r(result)['status'] == 'empty'
+    assert result['status'] == 'empty'
 
 
 # ---------------------------------------------------------------------------
@@ -271,12 +266,12 @@ def test_list_subagent_artifacts_not_found(monkeypatch):
 def test_get_subagent_artifacts_all_keys(monkeypatch):
     _patch_list_tasks(monkeypatch)
     result = sct.get_subagent_artifacts('素材收集')
-    assert _r(result)['status'] == 'ok'
-    assert len(_r(result)['artifacts']) == 2
+    assert result['status'] == 'ok'
+    assert len(result['artifacts']) == 2
 
 
 def test_get_subagent_artifacts_filtered_keys(monkeypatch):
     _patch_list_tasks(monkeypatch)
     result = sct.get_subagent_artifacts('素材收集', keys=['refs'])
-    assert _r(result)['status'] == 'ok'
-    assert all(a['artifact_key'] == 'refs' for a in _r(result)['artifacts'])
+    assert result['status'] == 'ok'
+    assert all(a['artifact_key'] == 'refs' for a in result['artifacts'])

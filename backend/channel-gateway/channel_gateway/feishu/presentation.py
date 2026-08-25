@@ -119,6 +119,13 @@ class FeishuReplyRenderer:
                     'content': caption[:300],
                 }
             elements.append(element)
+        if streaming:
+            cancel = _cancel_generation_element(
+                provider_context,
+                language,
+            )
+            if cancel is not None:
+                elements.append(cancel)
         elements.extend(extra_elements or [])
         return {
             'schema': '2.0',
@@ -157,6 +164,54 @@ class FeishuReplyRenderer:
             },
             'body': {'elements': elements},
         }
+
+
+def _cancel_generation_element(
+    provider_context: dict[str, Any],
+    language: str,
+) -> dict[str, Any] | None:
+    workspace = provider_context.get('workspace_state')
+    if not isinstance(workspace, dict):
+        return None
+    chat_id = str(provider_context.get('chat_id') or '')
+    operation_id = str(workspace.get('active_operation_id') or '')
+    if not chat_id or not operation_id:
+        return None
+    text = 'Stop generation' if language == 'en' else '停止生成'
+    action = {
+        'lazymind_action': 'command',
+        'text': text,
+        'intended_chat_id': chat_id,
+        'command_action': {
+            'schema_version': '1',
+            'command': 'conversation.stop',
+            'parameters': {'evidence': [text]},
+        },
+        'workspace_action': {
+            'kind': 'operation.cancel',
+            'expected_view': str(workspace.get('view') or 'chat'),
+            'expected_revision': int(workspace.get('revision') or 0),
+            'expected_operation_id': operation_id,
+        },
+    }
+    return {
+        'tag': 'column_set',
+        'flex_mode': 'none',
+        'horizontal_spacing': '8px',
+        'columns': [{
+            'tag': 'column',
+            'width': 'weighted',
+            'weight': 1,
+            'elements': [{
+                'tag': 'button',
+                'name': 'cancel_generation',
+                'text': {'tag': 'plain_text', 'content': text},
+                'type': 'danger',
+                'width': 'fill',
+                'value': action,
+            }],
+        }],
+    }
 
 
 def parse_ask_form_submission(
@@ -376,7 +431,11 @@ class FeishuPresentationRenderer:
                 ),
                 extra_elements=extra_elements,
             ),
-            'workspace': False,
+            'workspace': (
+                message.provider_context.get(
+                    'workspace_reanchor_to_bottom'
+                ) is True
+            ),
             'replace_message_id': str(
                 message.provider_context.get(
                     'workspace_stream_message_id'
@@ -709,6 +768,98 @@ def _task_status(status: str) -> tuple[str, str]:
     }.get(normalized, (status or '已创建', 'blue'))
 
 
+def _workflow_step_line(
+    index: int,
+    task: dict[str, Any],
+    *,
+    attempt: int,
+) -> str:
+    status = str(task.get('status') or 'pending').lower()
+    icon = {
+        'completed': '✅',
+        'succeeded': '✅',
+        'success': '✅',
+        'failed': '❌',
+        'cancelled': '⏹️',
+        'canceled': '⏹️',
+        'stopped': '⏹️',
+        'interrupted': '⏸️',
+        'running': '🔄',
+    }.get(status, '⏳')
+    step = _workflow_step_key(task)
+    label = {
+        'prepare': '准备素材与上下文',
+        'outline': '生成大纲',
+        'write_document': '撰写正文',
+        'write-document': '撰写正文',
+        'deliver': '交付结果',
+        'generate': '生成内容',
+        'analyze_subject': '分析主题',
+        'collect_materials': '收集素材',
+        'optimize_prompt': '优化提示词',
+        'generate_image': '生成图片',
+        'enhance_image': '编辑图片',
+        'video_to_gif': '转换为动图',
+    }.get(step.lower(), step.replace('_', ' ') or f'步骤 {index}')
+    if attempt > 1:
+        label = f'{label}（重试 {attempt - 1}）'
+    status_label, _template = _task_status(status)
+    return f'{icon} **{index}. {label}**　{status_label}'
+
+
+def _workflow_step_key(task: dict[str, Any]) -> str:
+    raw_title = str(task.get('title') or '')
+    return raw_title.split(':', 1)[-1].strip().lower()[:200]
+
+
+def _workflow_progress(
+    tasks: list[dict[str, Any]],
+) -> int | None:
+    if not tasks:
+        return None
+    return _optional_percent(
+        tasks[-1].get(
+            'progress_pct',
+            tasks[-1].get('progress'),
+        )
+    )
+
+
+def workflow_progress_text(tasks: list[dict[str, Any]]) -> str:
+    """Compact live Workflow state for the in-flight answer card."""
+    ordered = sorted(
+        tasks[-20:],
+        key=lambda task: int(task.get('seq_in_conversation') or 0),
+    )
+    if not ordered:
+        return ''
+    attempts: dict[str, int] = {}
+    lines = ['**Workflow 进度**']
+    for index, task in enumerate(ordered, start=1):
+        step = _workflow_step_key(task)
+        attempts[step] = attempts.get(step, 0) + 1
+        lines.append(
+            _workflow_step_line(
+                index,
+                task,
+                attempt=attempts[step],
+            )
+        )
+    current = ordered[-1]
+    progress = _workflow_progress(ordered)
+    phase = presentable_feishu_text(
+        str(current.get('current_phase') or '')
+    )
+    detail = []
+    if progress is not None:
+        detail.append(f'{progress}%')
+    if phase and phase not in {'执行中...', '执行中…'}:
+        detail.append(phase[:200])
+    if detail:
+        lines.append(f'<font color="grey">当前：{" · ".join(detail)}</font>')
+    return '\n'.join(lines)[:3500]
+
+
 def task_progress_text(task: dict[str, Any] | None) -> str:
     """Compact live projection of the task state reported by Core."""
     if task is None:
@@ -747,6 +898,7 @@ def _presentable_task_summary(value: str) -> str:
     for marker in (
         '\n执行路径：',
         '\n执行路径:',
+        '\n[assistant]',
         '\n[tool:',
     ):
         summary = summary.split(marker, 1)[0]

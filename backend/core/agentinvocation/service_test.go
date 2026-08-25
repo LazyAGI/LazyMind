@@ -16,6 +16,7 @@ import (
 	"gorm.io/gorm"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/externalcontext"
 )
 
 const testRequestHash = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
@@ -70,6 +71,90 @@ func TestServiceInvocationLifecycleIsIdempotent(t *testing.T) {
 	}
 	if _, err = service.Finish(context.Background(), "user-2", input.ID, finish); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("owner isolation: %v", err)
+	}
+}
+
+func TestServiceLinksCodexThreadTurnsToOneConversation(t *testing.T) {
+	service := newTestService(t)
+	first := testStartInput("inv-source-1", "knowledge.list")
+	first.Source = &externalcontext.Source{
+		Provider: "codex", HostID: "host-1", ThreadID: "codex-thread-1", TurnID: "codex-turn-1", ThreadSource: "user", Message: "第一轮用户消息",
+	}
+	started, err := service.StartLinked(context.Background(), "user-1", first)
+	if err != nil || started.Source == nil {
+		t.Fatalf("start linked: result=%+v err=%v", started, err)
+	}
+	if started.Source.ConversationID == "" || started.Source.ExternalRef != "" || started.Source.HistoryID != "" {
+		t.Fatalf("incomplete source link: %+v", started.Source)
+	}
+
+	parallel := testStartInput("inv-source-2", "workflow.list")
+	parallel.Source = first.Source
+	second, err := service.StartLinked(context.Background(), "user-1", parallel)
+	if err != nil || second.Source == nil || *second.Source != *started.Source {
+		t.Fatalf("same turn did not reuse source link: first=%+v second=%+v err=%v", started.Source, second.Source, err)
+	}
+	if _, err := service.Finish(context.Background(), "user-1", first.ID, FinishInput{Status: StatusSucceeded}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Finish(context.Background(), "user-1", parallel.ID, FinishInput{
+		Status: StatusSucceeded,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nextTurn := testStartInput("inv-source-3", "workflow.start")
+	nextTurn.Source = &externalcontext.Source{Provider: "codex", HostID: "host-1", ThreadID: "codex-thread-1", TurnID: "codex-turn-2", Message: "第二轮用户消息"}
+	third, err := service.StartLinked(context.Background(), "user-1", nextTurn)
+	if err != nil || third.Source == nil || third.Source.ConversationID != started.Source.ConversationID ||
+		third.Source.ExternalRef != "" || third.Source.HistoryID != "" {
+		t.Fatalf("next turn mapping: first=%+v third=%+v err=%v", started.Source, third.Source, err)
+	}
+	var histories int64
+	if err := service.db.Model(&orm.ChatHistory{}).
+		Where("conversation_id = ?", started.Source.ConversationID).Count(&histories).Error; err != nil || histories != 0 {
+		t.Fatalf("history count=%d err=%v", histories, err)
+	}
+
+	foreign := testStartInput("inv-source-foreign", "knowledge.list")
+	foreign.Source = first.Source
+	if _, err := service.StartLinked(context.Background(), "user-2", foreign); !errors.Is(err, ErrConflict) {
+		t.Fatalf("foreign owner reused binding: %v", err)
+	}
+}
+
+func TestServiceFinishDoesNotAdoptWorkflowSessionEvidence(t *testing.T) {
+	service := newTestService(t)
+	if err := service.db.Exec(`CREATE TABLE plugin_sessions (
+		id TEXT PRIMARY KEY, conversation_id TEXT NOT NULL DEFAULT '', origin_ref TEXT NOT NULL DEFAULT '',
+		create_user_id TEXT NOT NULL
+	)`).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := service.db.Exec(`INSERT INTO plugin_sessions(id, create_user_id) VALUES ('legacy-session','user-1')`).Error; err != nil {
+		t.Fatal(err)
+	}
+	input := testStartInput("inv-legacy-read", "workflow.state")
+	input.Source = &externalcontext.Source{
+		Provider: "codex", HostID: "host-1", ThreadID: "current-thread", TurnID: "current-turn", Message: "读取当前工作流",
+	}
+	if _, err := service.StartLinked(context.Background(), "user-1", input); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.Finish(context.Background(), "user-1", input.ID, FinishInput{
+		Status: StatusSucceeded, SessionID: "legacy-session",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var legacy struct {
+		ConversationID string
+		OriginRef      string
+	}
+	if err := service.db.Table("plugin_sessions").Select("conversation_id, origin_ref").
+		Where("id = ?", "legacy-session").Take(&legacy).Error; err != nil {
+		t.Fatal(err)
+	}
+	if legacy.ConversationID != "" || legacy.OriginRef != "" {
+		t.Fatalf("read-only Workflow evidence changed session ownership: %#v", legacy)
 	}
 }
 
@@ -198,7 +283,10 @@ func newTestService(t *testing.T) *Service {
 	if err != nil {
 		t.Fatalf("open database: %v", err)
 	}
-	if err := db.AutoMigrate(&orm.AgentInvocation{}); err != nil {
+	if err := db.AutoMigrate(
+		&orm.AgentInvocation{}, &orm.ExternalAgentBinding{}, &orm.Conversation{},
+		&orm.ExternalChatRun{}, &orm.ChatHistory{},
+	); err != nil {
 		t.Fatalf("migrate database: %v", err)
 	}
 	return New(db)

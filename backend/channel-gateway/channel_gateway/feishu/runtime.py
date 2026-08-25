@@ -4,7 +4,6 @@ import base64
 import hashlib
 import json
 import logging
-import math
 import threading
 import time
 from dataclasses import dataclass, field, replace
@@ -17,6 +16,7 @@ from channel_gateway.common.domain.chat import (
     ChannelAttachment,
     ChannelExecutionContext,
 )
+from channel_gateway.common.domain.commands import ASSISTANT_PROVIDERS
 from channel_gateway.common.ports.providers import (
     RuntimeCredentialStore,
     RuntimeLease,
@@ -28,7 +28,6 @@ from channel_gateway.feishu.domain import (
     FeishuInboundMenu,
     FeishuInboundMessage,
     FeishuRuntimeError,
-    workspace_card_expired,
 )
 from channel_gateway.feishu.ports import (
     FeishuReceiverClient,
@@ -36,23 +35,24 @@ from channel_gateway.feishu.ports import (
     FeishuRuntimeRepository,
 )
 from channel_gateway.feishu.registration import configure_bot_menu
+from channel_gateway.feishu.presentation import FeishuReplyRenderer
 from channel_gateway.feishu.workspace import (
     FeishuWorkspaceRenderer,
     FeishuWorkspaceState,
     MENU_EVENT_VIEWS,
     menu_command,
+    stale_card_notice,
 )
 _logger = logging.getLogger(__name__)
 
 
 _MAX_INBOUND_IMAGE_BYTES = 10 * 1024 * 1024
-_ACTION_REFRESH_DELAY_SECONDS = 0.35
-_ACTION_REFRESH_RETRY_DELAYS = (0.5, 1.0, 2.0, 4.0)
-_BOT_MENU_CONFIG_VERSION = 5
+_BOT_MENU_CONFIG_VERSION = 6
+_BOT_MENU_RETRY_SECONDS = 30.0
 
 
 _RESULT_WORKSPACE_ACTIONS = {
-    'maintenance.clear_conversation',
+    'maintenance.new_conversation',
     'new_session.create',
     'prompt.run',
 }
@@ -76,6 +76,8 @@ class _AppWorker:
     thread: threading.Thread | None = None
     channel: FeishuReceiverClient | None = None
     lease: RuntimeLease | None = None
+    menu_error: str = ''
+    next_menu_attempt_at: float = 0.0
 
 
 class FeishuRuntime:
@@ -156,19 +158,6 @@ class FeishuRuntime:
     ) -> None:
         account = self._credentials.load_runtime_account(account_id)
         credentials = account['credentials']
-        try:
-            configure_bot_menu(
-                credentials.app_id,
-                credentials.app_secret,
-                publish_version=f'1.0.{_BOT_MENU_CONFIG_VERSION}',
-            )
-        except FeishuRuntimeError as exc:
-            _logger.warning(
-                'feishu_bot_menu_configuration_pending '
-                'account_id=%s error=%s',
-                account_id,
-                str(exc)[:500],
-            )
         route = _AccountRoute(
             account_id=account_id,
             owner_user_id=str(account['owner_user_id']),
@@ -214,6 +203,8 @@ class FeishuRuntime:
                 worker.thread.start()
             else:
                 worker.account_ids.add(account_id)
+                worker.menu_error = ''
+                worker.next_menu_attempt_at = 0.0
                 worker.reload_event.set()
         self._stop_workers(workers_to_stop)
 
@@ -347,6 +338,7 @@ class FeishuRuntime:
         )
         channel_thread.start()
         runtime_status = 'starting'
+        runtime_error = ''
         try:
             while (
                 not self._shutdown.is_set()
@@ -355,20 +347,36 @@ class FeishuRuntime:
             ):
                 lease.keepalive()
                 connection_state = channel.connection_state()
+                if channel.is_ready() and connection_state == 'connected':
+                    self._refresh_bot_menu(worker, credentials)
                 if (
                     channel.is_ready()
                     and connection_state == 'connected'
-                    and runtime_status != 'running'
                 ):
-                    if self._set_worker_status(
-                        worker,
-                        lease,
-                        'running',
+                    desired_status = (
+                        'degraded' if worker.menu_error else 'running'
+                    )
+                    desired_error = worker.menu_error
+                    if (
+                        (
+                            runtime_status != desired_status
+                            or runtime_error != desired_error
+                        )
+                        and self._set_worker_status(
+                            worker,
+                            lease,
+                            desired_status,
+                            worker.menu_error or None,
+                        )
                     ):
-                        runtime_status = 'running'
+                        runtime_status = desired_status
+                        runtime_error = desired_error
                 elif (
                     connection_state == 'reconnecting'
-                    and runtime_status != 'degraded'
+                    and (
+                        runtime_status != 'degraded'
+                        or runtime_error != '飞书长连接正在重连'
+                    )
                 ):
                     if self._set_worker_status(
                         worker,
@@ -377,6 +385,7 @@ class FeishuRuntime:
                         '飞书长连接正在重连',
                     ):
                         runtime_status = 'degraded'
+                        runtime_error = '飞书长连接正在重连'
                 if not channel_thread.is_alive():
                     if start_error:
                         raise FeishuRuntimeError(
@@ -393,6 +402,31 @@ class FeishuRuntime:
                 if worker.channel is channel:
                     worker.channel = None
 
+    @staticmethod
+    def _refresh_bot_menu(
+        worker: _AppWorker,
+        credentials: FeishuAppCredentials,
+    ) -> None:
+        now = time.monotonic()
+        if now < worker.next_menu_attempt_at:
+            return
+        try:
+            configure_bot_menu(
+                credentials.app_id,
+                credentials.app_secret,
+                publish_version=f'1.0.{_BOT_MENU_CONFIG_VERSION}',
+            )
+        except FeishuRuntimeError as exc:
+            worker.menu_error = str(exc)[:500]
+            worker.next_menu_attempt_at = now + _BOT_MENU_RETRY_SECONDS
+            _logger.warning(
+                'feishu_bot_menu_configuration_pending error=%s',
+                exc.__class__.__name__,
+            )
+            return
+        worker.menu_error = ''
+        worker.next_menu_attempt_at = float('inf')
+
     def _handle_message(
         self,
         worker: _AppWorker,
@@ -403,7 +437,6 @@ class FeishuRuntime:
             or not message.message_id
             or not message.chat_id
             or not message.sender_id
-            or (not message.text and not message.image_key)
         ):
             return
         with self._lock:
@@ -420,6 +453,15 @@ class FeishuRuntime:
             raise FeishuRuntimeError(
                 'Feishu runtime lease is unavailable'
             )
+        if not message.text and not message.image_key:
+            if message.message_type:
+                self._send_input_notice(
+                    route=route,
+                    chat_id=message.chat_id,
+                    message_id=message.message_id,
+                    text='目前支持文字、富文本和单张图片，请换一种方式发送。',
+                )
+            return
 
         address = self._addresses.direct(
             route.account_id,
@@ -443,7 +485,13 @@ class FeishuRuntime:
             finally:
                 sender.close()
             if not content or len(content) > _MAX_INBOUND_IMAGE_BYTES:
-                raise FeishuRuntimeError('飞书图片为空或超过 10 MB')
+                self._send_input_notice(
+                    route=route,
+                    chat_id=message.chat_id,
+                    message_id=message.message_id,
+                    text='图片为空或超过 10 MB，本次消息未提交。',
+                )
+                return
             attachment = ChannelAttachment.from_dict({
                 'input_type': 'image',
                 'input_base64': _image_data_url(content),
@@ -475,14 +523,18 @@ class FeishuRuntime:
             chat_id=message.chat_id,
             conversation_id=conversation_id,
         )
+        public_execution = ChannelExecutionContext.from_provider_context(
+            provider_context
+        )
         execution = replace(
-            ChannelExecutionContext.from_provider_context(provider_context),
+            public_execution,
             attachments=attachments,
         )
         provider_context = {
             **provider_context,
             'workspace_surface': 'reply',
-            'channel_execution': execution.to_dict(),
+            'workspace_reanchor_to_bottom': True,
+            'channel_execution': public_execution.to_dict(),
             'command_action': _chat_command_action(
                 effective_text,
                 required=bool(attachments),
@@ -498,6 +550,11 @@ class FeishuRuntime:
             recipient_id=message.chat_id,
             text=effective_text,
             provider_context=provider_context,
+            sensitive_context=(
+                {'channel_execution': execution.to_dict()}
+                if attachments
+                else {}
+            ),
         )
         if not self._store.claim_feishu_workspace_and_ingest(
             route.account_id,
@@ -536,6 +593,25 @@ class FeishuRuntime:
             )
         finally:
             sender.close()
+
+    def _send_stale_action_notice(
+        self,
+        *,
+        route: _AccountRoute,
+        action: FeishuInboundAction,
+        language: str,
+    ) -> None:
+        self._send_input_notice(
+            route=route,
+            chat_id=action.chat_id,
+            message_id=(
+                action.event_id
+                or hashlib.sha256(
+                    f'{action.message_id}:{action.sender_id}'.encode('utf-8')
+                ).hexdigest()
+            ),
+            text=stale_card_notice(language),
+        )
 
     @staticmethod
     def _send_card_to_bottom(
@@ -623,38 +699,26 @@ class FeishuRuntime:
             ).encode('utf-8')
         ).hexdigest()
         if workspace.message_id and workspace.message_id != action.message_id:
+            self._send_stale_action_notice(
+                route=route,
+                action=action,
+                language=workspace.output_language,
+            )
             return None
 
         action_data = action.workspace_action or {}
         action_kind = str(action_data.get('kind') or '')
-        if action_kind == 'operation.cancel':
-            return None
         if action_kind and (
             str(action_data.get('expected_view') or '') != workspace.view
             or action_data.get('expected_revision') != workspace.revision
             or str(action_data.get('expected_operation_id') or '')
             != workspace.active_operation_id
         ):
-            if action.action == 'local' and workspace.view in {
-                'chat',
-                'settings',
-            }:
-                card = FeishuWorkspaceRenderer.render(
-                    provider_context=self._workspace_provider_context(
-                        account_id=route.account_id,
-                        address_hash=address_hash,
-                        workspace=workspace,
-                        chat_id=action.chat_id,
-                        conversation_id=conversation_id,
-                    ),
-                    presentations=[],
-                )
-                self._log_action_ready(
-                    action,
-                    started_at=started_at,
-                    cached=True,
-                )
-                return card
+            self._send_stale_action_notice(
+                route=route,
+                action=action,
+                language=workspace.output_language,
+            )
             return None
         if action_kind == 'setting.update':
             command_action = action.command_action
@@ -666,26 +730,25 @@ class FeishuRuntime:
             expected_conversation_id = str(
                 action_data.get('expected_conversation_id') or ''
             )
+            change = (
+                parameters.get('change')
+                if isinstance(parameters, dict)
+                else None
+            )
             if (
                 str(action_data.get('view') or 'capabilities')
-                not in {'capabilities', 'settings'}
-                or not expected_conversation_id
+                not in {'capabilities', 'assistant', 'settings'}
                 or not isinstance(parameters, dict)
+                or not isinstance(change, dict)
                 or str(parameters.get('expected_conversation_id') or '')
                 != expected_conversation_id
                 or expected_conversation_id != conversation_id
             ):
-                return None
-        if action_kind == 'new_session.workflow_mode':
-            navigation = self._store.get_navigation_state(
-                route.account_id,
-                address_hash,
-            ) or {}
-            if (
-                conversation_id
-                or navigation.get('mode') != 'new_pending'
-                or not workspace.active_operation_id
-            ):
+                self._send_stale_action_notice(
+                    route=route,
+                    action=action,
+                    language=workspace.output_language,
+                )
                 return None
         if action.action == 'local' and not action_kind:
             return None
@@ -702,7 +765,14 @@ class FeishuRuntime:
         )
         if action_kind == 'history.switch':
             workspace.begin_operation(message_key)
-            workspace.view = 'conversations'
+            target_view = str(action_data.get('view') or 'conversations')
+            workspace.view = (
+                target_view
+                if target_view in {'assistant', 'conversations'}
+                else 'conversations'
+            )
+        elif action_kind == 'operation.cancel':
+            workspace.begin_operation(message_key)
         elif (
             action.action == 'ask'
             or action_kind in _RESULT_WORKSPACE_ACTIONS
@@ -737,8 +807,11 @@ class FeishuRuntime:
             conversation_id=conversation_id,
             workspace_action=action.workspace_action,
         )
+        public_execution = ChannelExecutionContext.from_provider_context(
+            provider_context
+        )
         execution = replace(
-            ChannelExecutionContext.from_provider_context(provider_context),
+            public_execution,
             ask_answers_structured=(
                 dict(action.ask_answers_structured)
                 if isinstance(action.ask_answers_structured, dict)
@@ -748,7 +821,7 @@ class FeishuRuntime:
         provider_context = {
             **provider_context,
             'workspace_operation_id': workspace.active_operation_id,
-            'channel_execution': execution.to_dict(),
+            'channel_execution': public_execution.to_dict(),
             'selection_action': (
                 {
                     'selection_id': action.selection_id,
@@ -763,13 +836,17 @@ class FeishuRuntime:
                 else None
             ),
             'workspace_surface': (
-                'management'
+                'reply'
+                if action_kind == 'operation.cancel'
+                else 'management'
                 if (
                     isinstance(action.workspace_action, dict)
                     and action_kind not in _RESULT_WORKSPACE_ACTIONS
                 )
                 else 'reply'
             ),
+            '_parallel_inbound': action_kind == 'operation.cancel',
+            'workspace_reanchor_to_bottom': action_data.get('new_card') is True,
         }
         if action.action == 'local':
             card = FeishuWorkspaceRenderer.render(
@@ -793,6 +870,11 @@ class FeishuRuntime:
             recipient_id=action.chat_id,
             text=action.text,
             provider_context=provider_context,
+            sensitive_context=(
+                {'channel_execution': execution.to_dict()}
+                if execution.ask_answers_structured is not None
+                else {}
+            ),
         )
         if not self._store.claim_feishu_workspace_and_ingest(
             route.account_id,
@@ -804,12 +886,23 @@ class FeishuRuntime:
             envelope,
             lease.fence,
         ):
+            self._send_stale_action_notice(
+                route=route,
+                action=action,
+                language=workspace.output_language,
+            )
             return None
         self._log_action_ready(
             action,
             started_at=started_at,
             cached=False,
         )
+        if action_kind == 'operation.cancel':
+            return FeishuReplyRenderer.render(
+                provider_context=provider_context,
+                text='已请求停止当前会话的生成与后台执行。',
+                status='⏹️ **停止请求已提交**',
+            )
         return None
 
     def _handle_menu(
@@ -925,6 +1018,15 @@ class FeishuRuntime:
                 address_hash,
             )
         )
+        if not source_message_id:
+            source_message_id = current.message_id
+            source_operation_id = current.active_operation_id
+            source_revision = current.revision
+            state = current
+            state.navigate(view)
+            state.active_operation_id = message_key
+            state.advance()
+            prepared_state = state.to_dict()
         if (
             source_message_id
             and (
@@ -937,7 +1039,7 @@ class FeishuRuntime:
 
         state = FeishuWorkspaceState.from_dict(prepared_state)
         state.message_id = str(message_id)
-        command = menu_command(view)
+        command = menu_command(view, state.assistant)
         if command is not None:
             provider_context = {
                 **self._workspace_provider_context(
@@ -962,10 +1064,12 @@ class FeishuRuntime:
                 text={
                     'capabilities': '查看能力',
                     'conversations': '切换会话',
+                    'assistant': '查看助理',
+                    'settings': '查看设置',
                 }[view],
                 provider_context=provider_context,
             )
-            claimed = self._store.claim_feishu_workspace_and_ingest(
+            self._store.claim_feishu_workspace_and_ingest(
                 route.account_id,
                 address_hash,
                 state.to_dict(),
@@ -975,14 +1079,6 @@ class FeishuRuntime:
                 envelope,
                 lease.fence,
             )
-            if claimed:
-                self._retire_replaced_workspace_card(
-                    account_id=route.account_id,
-                    address_hash=address_hash,
-                    previous_message_id=source_message_id,
-                    current_message_id=state.message_id,
-                    language=state.output_language,
-                )
             return
 
         if not self._store.save_feishu_workspace_state_if_revision(
@@ -993,223 +1089,12 @@ class FeishuRuntime:
             preserve_current_message=False,
         ):
             return
-        self._retire_replaced_workspace_card(
-            account_id=route.account_id,
-            address_hash=address_hash,
-            previous_message_id=source_message_id,
-            current_message_id=state.message_id,
-            language=state.output_language,
-        )
 
     def _remember_direct_chat(self, account_id: str, chat_id: str) -> None:
         if not account_id or not chat_id:
             return
         with self._lock:
-            direct_chats = getattr(self, '_direct_chats', None)
-            if direct_chats is None:
-                direct_chats = {}
-                self._direct_chats = direct_chats
-            direct_chats[account_id] = chat_id
-
-    def _schedule_action_card_refresh(
-        self,
-        account_id: str,
-        message_id: str,
-        card: dict[str, Any],
-        *,
-        address_hash: str = '',
-        expected_revision: int | None = None,
-        expected_operation_id: str = '',
-        follow_current_message: bool = False,
-    ) -> None:
-        timer = threading.Timer(
-            _ACTION_REFRESH_DELAY_SECONDS,
-            self._refresh_action_card,
-            args=(
-                account_id,
-                message_id,
-                card,
-                address_hash,
-                expected_revision,
-                expected_operation_id,
-                follow_current_message,
-            ),
-        )
-        timer.daemon = True
-        timer.name = 'feishu-card-action-refresh'
-        timer.start()
-
-    def _expire_workspace_card(
-        self,
-        *,
-        account_id: str,
-        address_hash: str,
-        message_id: str,
-        current_message_id: str,
-        language: str,
-    ) -> None:
-        del account_id, address_hash, message_id, current_message_id, language
-
-    def _retire_replaced_workspace_card(
-        self,
-        *,
-        account_id: str,
-        address_hash: str,
-        previous_message_id: str,
-        current_message_id: str,
-        language: str,
-    ) -> None:
-        del (
-            account_id,
-            address_hash,
-            previous_message_id,
-            current_message_id,
-            language,
-        )
-
-    def _refresh_action_card(
-        self,
-        account_id: str,
-        message_id: str,
-        card: dict[str, Any],
-        address_hash: str = '',
-        expected_revision: int | None = None,
-        expected_operation_id: str = '',
-        follow_current_message: bool = False,
-    ) -> None:
-        for attempt in range(len(_ACTION_REFRESH_RETRY_DELAYS) + 1):
-            sender = None
-            try:
-                if address_hash:
-                    current = FeishuWorkspaceState.from_dict(
-                        self._store.get_feishu_workspace_state(
-                            account_id,
-                            address_hash,
-                        )
-                    )
-                    if (
-                        expected_revision is not None
-                        and current.revision != expected_revision
-                        or expected_operation_id
-                        and current.active_operation_id
-                        != expected_operation_id
-                    ):
-                        return
-                    if follow_current_message:
-                        if not current.message_id:
-                            return
-                        message_id = current.message_id
-                    elif current.message_id != message_id:
-                        return
-                account = self._credentials.load_runtime_account(account_id)
-                sender = self._channels.create_sender(account['credentials'])
-                sender.update_card(message_id=message_id, card=card)
-                _logger.info(
-                    'feishu_card_action_refresh_succeeded '
-                    'account_id=%s message_id=%s',
-                    account_id,
-                    message_id,
-                )
-                if follow_current_message and address_hash:
-                    latest = FeishuWorkspaceState.from_dict(
-                        self._store.get_feishu_workspace_state(
-                            account_id,
-                            address_hash,
-                        )
-                    )
-                    if (
-                        latest.message_id
-                        and latest.message_id != message_id
-                        and (
-                            expected_revision is None
-                            or latest.revision == expected_revision
-                        )
-                        and (
-                            not expected_operation_id
-                            or latest.active_operation_id
-                            == expected_operation_id
-                        )
-                    ):
-                        message_id = latest.message_id
-                        continue
-                return
-            except Exception as exc:
-                retry_error = exc
-                if (
-                    workspace_card_expired(exc)
-                    and address_hash
-                    and expected_revision is not None
-                ):
-                    try:
-                        with self._lock:
-                            chat_id = str(
-                                self._direct_chats.get(account_id, '')
-                            )
-                        if chat_id and sender is not None:
-                            new_message_id = sender.send_card(
-                                chat_id=chat_id,
-                                card=card,
-                                idempotency_key=(
-                                    f'feishu-card-recover:{message_id}:'
-                                    f'{expected_revision}'
-                                ),
-                            )
-                            if not new_message_id:
-                                raise FeishuRuntimeError(
-                                    'Feishu replacement card returned no message id'
-                                )
-                            saved = self._store.save_feishu_workspace_message(
-                                account_id,
-                                address_hash,
-                                new_message_id,
-                                expected_operation_id,
-                                message_id,
-                                expected_revision,
-                            )
-                            if saved.get('message_id') != new_message_id:
-                                self._expire_workspace_card(
-                                    account_id=account_id,
-                                    address_hash=address_hash,
-                                    message_id=new_message_id,
-                                    current_message_id=str(
-                                        saved.get('message_id') or ''
-                                    ),
-                                    language=str(
-                                        saved.get('output_language') or 'zh'
-                                    ),
-                                )
-                            return
-                    except Exception as recovery_exc:
-                        retry_error = recovery_exc
-                        if attempt == len(_ACTION_REFRESH_RETRY_DELAYS):
-                            _logger.exception(
-                                'feishu_card_action_recovery_failed '
-                                'account_id=%s message_id=%s',
-                                account_id,
-                                message_id,
-                            )
-                if attempt == len(_ACTION_REFRESH_RETRY_DELAYS):
-                    _logger.exception(
-                        'feishu_card_action_refresh_failed '
-                        'account_id=%s message_id=%s',
-                        account_id,
-                        message_id,
-                    )
-                else:
-                    retry_after = getattr(
-                        retry_error,
-                        'retry_after_seconds',
-                        None,
-                    )
-                    delay = _ACTION_REFRESH_RETRY_DELAYS[attempt]
-                    if isinstance(retry_after, (int, float)):
-                        retry_after = float(retry_after)
-                        if math.isfinite(retry_after) and retry_after >= 0:
-                            delay = max(delay, retry_after)
-                    time.sleep(delay)
-            finally:
-                if sender is not None:
-                    sender.close()
+            self._direct_chats[account_id] = chat_id
 
     @staticmethod
     def _log_action_ready(
@@ -1253,16 +1138,30 @@ class FeishuRuntime:
                 workspace.capability_page = max(0, page)
             workspace.view = 'capabilities'
         elif kind == 'history.switch':
-            workspace.view = 'conversations'
+            target_view = str(action.get('view') or 'conversations')
+            workspace.view = (
+                target_view
+                if target_view in {'assistant', 'conversations'}
+                else 'conversations'
+            )
         elif kind == 'history.open':
+            target_view = str(action.get('view') or 'conversations')
+            workspace.view = (
+                target_view
+                if target_view in {'assistant', 'conversations'}
+                else 'conversations'
+            )
+        elif kind == 'assistant.select':
+            assistant = str(action.get('assistant') or '')
+            if assistant in ASSISTANT_PROVIDERS:
+                workspace.assistant = assistant
+            workspace.conversation_page = 0
             workspace.view = 'conversations'
-        elif kind == 'capability.toggle':
-            workspace.view = 'capabilities'
-        elif kind == 'new_session.workflow_mode':
-            mode = str(action.get('mode') or '')
-            if mode in {'auto', 'dynamic'}:
-                workspace.pending_workflow_mode = mode
-            workspace.view = 'capabilities'
+        elif kind == 'conversation.page':
+            page = action.get('page')
+            if isinstance(page, int) and not isinstance(page, bool):
+                workspace.conversation_page = max(0, page)
+            workspace.view = 'conversations'
         elif kind == 'new_session.open':
             workspace.open_new_session()
         elif kind == 'new_session.cancel':
@@ -1272,7 +1171,7 @@ class FeishuRuntime:
             workspace.prepare_new_session()
         elif kind == 'setting.update':
             target_view = str(action.get('view') or 'capabilities')
-            if target_view in {'capabilities', 'settings'}:
+            if target_view in {'capabilities', 'assistant', 'settings'}:
                 workspace.view = target_view
         elif kind == 'preference':
             name = str(action.get('name') or '')
@@ -1295,7 +1194,7 @@ class FeishuRuntime:
         elif kind == 'maintenance.reset_preferences':
             workspace.reset_preferences()
             workspace.view = 'settings'
-        elif kind == 'maintenance.clear_conversation':
+        elif kind == 'maintenance.new_conversation':
             workspace.prepare_new_session()
 
     def _workspace_provider_context(
@@ -1327,8 +1226,12 @@ class FeishuRuntime:
             ),
             include_capability_settings=(
                 workspace.view == 'capabilities'
-                and bool(conversation_id)
+                and bool(
+                    conversation_id
+                    or navigation.get('mode') == 'new_pending'
+                )
             ),
+            include_assistant_catalog=(workspace.view == 'assistant'),
         )
         return {
             'chat_id': chat_id,

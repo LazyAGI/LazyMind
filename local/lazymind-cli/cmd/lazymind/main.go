@@ -16,7 +16,9 @@ import (
 	"lazymind/agentconnector/internal/adapters/cursor"
 	"lazymind/agentconnector/internal/adapters/mcpclient"
 	"lazymind/agentconnector/internal/adapters/workbuddy"
+	"lazymind/agentconnector/internal/assistantbridge"
 	"lazymind/agentconnector/internal/chatagent"
+	"lazymind/agentconnector/internal/codexcontrol"
 	"lazymind/agentconnector/internal/coreapi"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/mcpbridge"
@@ -41,6 +43,8 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 		return runMCP(ctx, args[1:])
 	case "agent":
 		return runAgent(ctx, args[1:], stdout, stderr)
+	case "assistant":
+		return runAssistant(ctx, args[1:], stdout, stderr)
 	case "internal":
 		return runInternal(ctx, args[1:], stdout, stderr)
 	case "help", "-h", "--help":
@@ -78,14 +82,25 @@ func runInternal(ctx context.Context, args []string, stdout, stderr io.Writer) e
 	case "codex":
 		return runInternalCodex(ctx, action, *agentBinary, bridge, stdout)
 	case string(mcpclient.Cursor), string(mcpclient.WorkBuddy), string(mcpclient.TRAEWork), string(mcpclient.DeepSeekHarness):
-		if action != "status" {
-			return fmt.Errorf("%s uses manual setup; only status is supported", agent)
-		}
 		adapter, err := mcpclient.New(mcpclient.Kind(agent), *agentBinary, "", bridge)
 		if err != nil {
 			return err
 		}
-		return printJSON(stdout, adapter.Status(ctx))
+		var status mcpclient.Status
+		switch action {
+		case "connect":
+			status, err = adapter.Connect(ctx)
+		case "status":
+			status = adapter.Status(ctx)
+		case "disconnect":
+			status, err = adapter.Disconnect(ctx)
+		default:
+			return fmt.Errorf("unsupported %s action %q", agent, action)
+		}
+		if err != nil {
+			return err
+		}
+		return printJSON(stdout, status)
 	default:
 		return fmt.Errorf("unsupported external Agent %q", agent)
 	}
@@ -111,6 +126,71 @@ func runInternalCodex(ctx context.Context, action, binary string, bridge *mcpbri
 		return err
 	}
 	return printJSON(stdout, status)
+}
+
+func runAssistant(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	if len(args) == 0 {
+		return errors.New("usage: lazymind assistant <start|serve|status|stop>")
+	}
+	action := strings.ToLower(args[0])
+	flags := flag.NewFlagSet("assistant "+action, flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	address := flags.String("listen", assistantbridge.DefaultAddress, "Assistant Bridge loopback address")
+	if err := flags.Parse(args[1:]); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("unexpected Assistant Bridge arguments")
+	}
+	switch action {
+	case "serve":
+		return serveAssistant(ctx, *address, stderr)
+	case "start":
+		status, err := assistantbridge.Start(ctx, *address)
+		if err != nil {
+			return err
+		}
+		return printJSON(stdout, status)
+	case "status":
+		status, err := assistantbridge.Health(ctx, *address)
+		if err != nil {
+			return err
+		}
+		return printJSON(stdout, status)
+	case "stop":
+		if err := assistantbridge.Stop(ctx, *address); err != nil {
+			return err
+		}
+		return printJSON(stdout, map[string]any{"ok": true, "running": false})
+	default:
+		return fmt.Errorf("unsupported Assistant Bridge action %q", action)
+	}
+}
+
+func serveAssistant(ctx context.Context, address string, stderr io.Writer) error {
+	store, err := credentials.NewStore("", "")
+	if err != nil {
+		return err
+	}
+	bridge, err := mcpbridge.New(store)
+	if err != nil {
+		return err
+	}
+	server, err := assistantbridge.New(address, bridge)
+	if err != nil {
+		return err
+	}
+	api, err := coreapi.New(store)
+	if err != nil {
+		return err
+	}
+	go func() {
+		if hostErr := runAgentHosts(ctx, api, []string{"codex", "cursor", "workbuddy"}, "", server.CodexControl(), stderr); hostErr != nil && ctx.Err() == nil {
+			_, _ = fmt.Fprintln(stderr, "LazyMind Assistant host stopped:", hostErr)
+		}
+	}()
+	_, _ = fmt.Fprintln(stderr, "LazyMind Assistant Bridge listening on", address)
+	return server.Serve(ctx)
 }
 
 func runAgent(ctx context.Context, args []string, stdout, stderr io.Writer) error {
@@ -148,7 +228,7 @@ func runAgent(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 			statuses := make(map[string]any, len(providers))
 			for _, name := range providers {
 				var status map[string]any
-				if err := api.DoJSON(ctx, "GET", "/external-chat/hosts/"+name+":status", nil, &status); err != nil {
+				if err := api.DoJSON(ctx, "GET", "/external-chat/hosts/"+name+"/status", nil, &status); err != nil {
 					return err
 				}
 				statuses[name] = status
@@ -158,7 +238,7 @@ func runAgent(ctx context.Context, args []string, stdout, stderr io.Writer) erro
 			}
 			return printJSON(stdout, map[string]any{"hosts": statuses})
 		}
-		return runAgentHosts(ctx, api, providers, *agentBinary, stderr)
+		return runAgentHosts(ctx, api, providers, *agentBinary, nil, stderr)
 	}
 	if len(args) < 2 || args[0] != "guide" {
 		return errors.New("usage: lazymind agent host run | lazymind agent guide <cursor|workbuddy|traework|deepseek-harness>")
@@ -227,10 +307,10 @@ func hostProviders(value string) ([]string, error) {
 	}
 }
 
-func newAgentRunner(provider, binary string) (chatagent.Runner, error) {
+func newAgentRunner(provider, binary string, control *codexcontrol.Controller) (chatagent.Runner, error) {
 	switch provider {
 	case "codex":
-		return codex.NewChatRunner(binary)
+		return codex.NewChatRunnerWithControl(binary, control)
 	case "cursor":
 		return cursor.NewChatRunner(binary)
 	case "workbuddy":
@@ -240,12 +320,12 @@ func newAgentRunner(provider, binary string) (chatagent.Runner, error) {
 	}
 }
 
-func runAgentHosts(ctx context.Context, api *coreapi.Client, providers []string, binary string, stderr io.Writer) error {
+func runAgentHosts(ctx context.Context, api *coreapi.Client, providers []string, binary string, control *codexcontrol.Controller, stderr io.Writer) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	hosts := make([]*chatagent.Host, 0, len(providers))
 	for _, provider := range providers {
-		runner, err := newAgentRunner(provider, binary)
+		runner, err := newAgentRunner(provider, binary, control)
 		if err != nil {
 			if len(providers) == 1 {
 				return err
@@ -304,14 +384,14 @@ func usage(out io.Writer) {
 
 Usage:
   lazymind mcp proxy
+  lazymind assistant <start|serve|status|stop>
   lazymind agent host <run|status> [--provider codex|cursor|workbuddy|all]
   lazymind agent guide <cursor|workbuddy|traework|deepseek-harness>
 
-Codex can connect with its native 'codex mcp add' command or from
-LazyMind Desktop settings. LazyMind Desktop hosts all installed Agent CLIs;
-the public command defaults to Codex for backward compatibility. Cursor,
-WorkBuddy, TRAE Work, and DeepSeek Harness guides only print native MCP setup
-and never modify Agent config. TRAE Work and DeepSeek Harness are MCP clients,
-not LazyMind Chat executors. The internal Adapter commands are not a public CLI.
+LazyMind Desktop and the Docker Assistant Bridge both expose one-click managed
+connections in Settings -> Assistants. The bridge also hosts installed Codex,
+Cursor, and WorkBuddy Chat CLIs. Agent guides only print fallback MCP setup;
+TRAE Work and DeepSeek Harness remain MCP clients rather than Chat executors.
+Internal Adapter commands are not a public CLI.
 `)
 }

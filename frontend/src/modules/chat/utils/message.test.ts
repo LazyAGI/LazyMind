@@ -181,6 +181,15 @@ describe("buildChatMessageListFromHistory", () => {
     expect(list[1]).toMatchObject({ role: RoleTypes.ASSISTANT, execution });
   });
 
+  it("renders observed external activity as the original user message only", () => {
+    const list = buildChatMessageListFromHistory([
+      { id: "h1", query: "查看有哪些知识库", result: "", external_user_only: true },
+    ]);
+    expect(list).toEqual([
+      expect.objectContaining({ role: RoleTypes.USER, delta: "查看有哪些知识库" }),
+    ]);
+  });
+
   it("strips citation markers from the displayed user query by default", () => {
     const history = [
       { id: "h1", query: "<cite_message>ctx</cite_message>real question", result: "answer" },

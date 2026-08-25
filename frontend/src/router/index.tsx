@@ -13,7 +13,6 @@ import { getAntdLocale } from "@/i18n/antdLocale";
 import { runtimeFeatures } from "@/runtime/features";
 import { isLocalSessionEnabled } from "@/runtime/localSession";
 import UserAgreementPage from "@/pages/UserAgreementPage";
-import { isDesktopRuntime } from "@/runtime/mode";
 import SettingsPage from "@/modules/settings";
 
 const ShowcaseGalleryPage = lazy(() => import("@/modules/showcase/GalleryPage"));
@@ -47,11 +46,7 @@ const MemoryManagementListPage = lazy(() => import("@/modules/memory/pages/list"
 const MemoryReviewPage = lazy(() => import("@/modules/memory/pages/review"));
 const MemoryGlossaryDetailPage = lazy(() => import("@/modules/memory/pages/glossaryDetail"));
 const MemorySkillDetailPage = lazy(() => import("@/modules/memory/pages/skillDetail"));
-const ModelProviderPage = lazy(() => import("@/modules/modelProvider"));
 const CloudDocumentsLayout = lazy(() => import("@/modules/modelProvider/CloudDocumentsLayout"));
-const ModelProvidersPage = lazy(() => import("@/modules/modelProvider/pages/ModelProvidersPage"));
-const ExternalServicesPage = lazy(() => import("@/modules/modelProvider/pages/ExternalServicesPage"));
-const DefaultServicesPage = lazy(() => import("@/modules/modelProvider/pages/DefaultServicesPage"));
 const SelfEvolutionAlgorithmManagementPage = lazy(() => import("@/modules/selfEvolution").then((module) => ({
   default: module.SelfEvolutionAlgorithmManagementPage,
 })));
@@ -70,7 +65,6 @@ const SelfEvolutionDetailPage = lazy(() => import("@/modules/selfEvolution").the
 const SelfEvolutionObservationPage = lazy(() => import("@/modules/selfEvolution").then((module) => ({
   default: module.SelfEvolutionObservationPage,
 })));
-const AgentIntegrationPage = lazy(() => import("@/modules/agentIntegration/AgentIntegrationPage"));
 const WorkflowDetailPage = lazy(() => import("@/modules/workflow/pages/detail"));
 const BuiltinWorkflowDetailPage = lazy(() => import("@/modules/workflow/pages/builtin-detail"));
 
@@ -189,53 +183,24 @@ export default function AppRouter() {
             <Route path="docs/notion-setup" element={<NotionSetupGuide />} />
             <Route path="docs/google-drive-setup" element={<GoogleDriveSetupGuide />} />
           </Route>
-          <Route path="model-providers" element={<ModelProviderPage />}>
-            <Route index element={<Navigate to="default-services" replace />} />
-            <Route path="models" element={<ModelProvidersPage />} />
-            <Route
-              path="document-parsing"
-              element={<Navigate to="/model-providers/tools" replace />}
-            />
-            <Route path="tools" element={<ExternalServicesPage />} />
-            <Route
-              path="cloud-documents"
-              element={<Navigate to="/cloud-documents" replace />}
-            />
-            <Route
-              path="cloud-documents/local"
-              element={<Navigate to="/cloud-documents/local" replace />}
-            />
-            <Route
-              path="cloud-documents/feishu"
-              element={<Navigate to="/cloud-documents/feishu" replace />}
-            />
-            <Route
-              path="cloud-documents/google-drive"
-              element={<Navigate to="/cloud-documents/google-drive" replace />}
-            />
-            <Route
-              path="cloud-documents/docs/feishu-setup"
-              element={<Navigate to="/cloud-documents/docs/feishu-setup" replace />}
-            />
-            <Route
-              path="cloud-documents/docs/notion-setup"
-              element={<Navigate to="/cloud-documents/docs/notion-setup" replace />}
-            />
-            <Route
-              path="cloud-documents/docs/google-drive-setup"
-              element={<Navigate to="/cloud-documents/docs/google-drive-setup" replace />}
-            />
-            <Route
-              path="external-services"
-              element={<Navigate to="/model-providers/tools" replace />}
-            />
-            <Route path="default-services" element={<DefaultServicesPage />} />
-          </Route>
+          <Route path="model-providers" element={<Navigate to="/settings?section=models" replace />} />
+          <Route path="model-providers/default-services" element={<Navigate to="/settings?section=models" replace />} />
+          <Route path="model-providers/models" element={<Navigate to="/settings?section=models&view=providers" replace />} />
+          <Route path="model-providers/document-parsing" element={<Navigate to="/settings?section=knowledge&tool=document-parsing" replace />} />
+          <Route path="model-providers/tools" element={<Navigate to="/settings?section=system_tools" replace />} />
+          <Route path="model-providers/external-services" element={<Navigate to="/settings?section=system_tools" replace />} />
+          <Route path="model-providers/cloud-documents" element={<Navigate to="/cloud-documents" replace />} />
+          <Route path="model-providers/cloud-documents/local" element={<Navigate to="/cloud-documents/local" replace />} />
+          <Route path="model-providers/cloud-documents/feishu" element={<Navigate to="/cloud-documents/feishu" replace />} />
+          <Route path="model-providers/cloud-documents/google-drive" element={<Navigate to="/cloud-documents/google-drive" replace />} />
+          <Route path="model-providers/cloud-documents/docs/feishu-setup" element={<Navigate to="/cloud-documents/docs/feishu-setup" replace />} />
+          <Route path="model-providers/cloud-documents/docs/notion-setup" element={<Navigate to="/cloud-documents/docs/notion-setup" replace />} />
+          <Route path="model-providers/cloud-documents/docs/google-drive-setup" element={<Navigate to="/cloud-documents/docs/google-drive-setup" replace />} />
           <Route path="memory-management" element={<MemoryManagement />}>
             <Route index element={<MemoryManagementListPage />} />
             <Route
               path="tools"
-              element={<Navigate to="/model-providers/tools" replace />}
+              element={<Navigate to="/settings?section=system_tools" replace />}
             />
             <Route path="skills" element={<MemoryManagementListPage />} />
             <Route path="skills/:itemId" element={<MemorySkillDetailPage />} />
@@ -306,7 +271,7 @@ export default function AppRouter() {
           <Route path="task-center" element={<TaskCenterPage />} />
           <Route
             path="settings/agent-integrations"
-            element={isDesktopRuntime() ? <AgentIntegrationPage /> : <Navigate to="/agent/chat" replace />}
+            element={<Navigate to="/settings?section=assistants" replace />}
           />
           <Route path="settings" element={<SettingsPage />} />
         </Route>

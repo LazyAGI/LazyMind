@@ -1,0 +1,273 @@
+id: product_solution_delivery
+name: 产品方案与交付
+description: >
+  基于 product-solution-delivery Skill 的内置产品工作流。启动前由聊天入口补齐产品目标、
+  阶段链、执行深度、文本篇幅和样例选择，再将规范参数传入可裁剪的七阶段执行链。既可只
+  运行产品方向、竞品与生态位、产品方案、PRD、交互原型、方案评审或
+  研发交付中的一个阶段，也可运行任意合法局部链或经用户明确授权的全量链。文本阶段复用
+  LazyMind Writer 完成可编辑大纲、分章流式写作、正文审批和选区 AI 润色；资料阶段复用
+  当前会话已选知识库和网页检索；竞品报告与原型交付为可预览的自包含 HTML。
+
+when_to_use: >
+  当用户希望梳理产品方向、分析竞品与生态位、设计产品机制/流程/UI、编写 PRD、制作交互
+  原型、评审既有产品产物、准备研发交付，或明确要求从某阶段连续做到另一阶段时使用。
+  用户点名单一阶段时只运行该阶段；明确说“连续”“从 X 到 Y”“同时生成”时选择最短合法
+  阶段链；只有明确说“全流程”“七阶段”或“从零做到研发交付”时才运行全量链。调用 Workflow
+  前必须确认并绑定：产品目标、规范英文阶段链（direction/competitive/design/prd/prototype/
+  review/handoff）、执行深度（light/minimum-fill/full）；阶段链含文本产物时还必须确认每份
+  文本目标字数，以及已提供样例或明确使用默认结构。纯竞品/原型链把字数绑定为
+  not-applicable、样例绑定为 not-required。用户已经明确的值直接使用；缺少时调用 ask_user
+  展示启动前交互卡：产品目标用文本题；范围用“产品方向/竞品与生态位/产品方案/PRD/交互原型/
+  方案评审/研发交付/七阶段全流程/自定义连续阶段”；深度用“轻量/最小补齐/完整”；文本链再问
+  每份目标字数和“已提供样例/使用默认结构”。选择已提供样例时必须绑定对应附件。尽量在一张
+  卡片中一次问齐，不得先触发 Workflow 再创建“意图识别/询问参数”节点。缺少必要上游材料时
+  先请求材料，除非该材料会由本次链的前序阶段生成，或用户明确授权生成标注缺口的草稿。
+  不得用于单独市场
+  规模测算、路线图排序、技术架构、发布运维、数据分析方案或营销文案。
+
+runtime:
+  exclusive_tool_capabilities: [writer.create, writer.revise]
+  collects_knowledge: true
+  clarification_fields:
+    - {id: product_goal, label: 产品目标, question: 请说明本次要解决的产品问题和目标用户。, type: text}
+    - id: stage_chain
+      label: 执行范围
+      question: 请选择要执行的阶段或连续阶段。
+      type: single
+      choices: [产品方向, 竞品与生态位, 产品方案, PRD, 交互原型, 方案评审, 研发交付, 七阶段全流程]
+    - id: execution_depth
+      label: 执行深度
+      question: 请选择执行深度。
+      type: single
+      choices: [light, minimum-fill, full]
+    - {id: word_target, label: 文本篇幅, question: 请确认每份文本产物的目标字数；纯竞品或原型任务可答 not-applicable。, type: text}
+    - id: reference_sample_choice
+      label: 参照样例
+      question: 请确认是使用已提供样例，还是使用默认结构。
+      type: single
+      choices: [已提供, 使用默认结构, not-required]
+
+tool_scripts:
+  - path: scripts/tools.py
+    functions:
+      - load_product_skill_contract
+      - normalize_product_parameters
+      - write_product_artifact
+  - path: scripts/writer_bridge.py
+    functions:
+      - product_writer_prepare_context
+      - profile_product_materials
+      - product_writer_generate_outline
+      - product_writer_read_markdown
+      - validate_product_outline
+      - product_writer_update_context
+      - product_writer_plan_sections
+      - product_writer_write_sections
+      - product_writer_assemble_draft
+      - product_writer_revise_markdown
+      - product_writer_preview_selection_rewrite
+
+artifact_actions:
+  rewrite_selection:
+    slots:
+      - direction_outline
+      - direction_document
+      - design_outline
+      - design_document
+      - prd_outline
+      - prd_document
+      - review_outline
+      - review_document
+      - handoff_outline
+      - handoff_document
+    preview_tool: product_writer_preview_selection_rewrite
+
+steps:
+  - {id: retrieve_product_evidence, label: 资料与知识库检索}
+  - {id: build_direction_outline, label: 产品方向大纲}
+  - {id: write_direction_document, label: 产品方向文档}
+  - {id: analyze_competitive_position, label: 竞品与生态位}
+  - {id: build_design_outline, label: 产品方案大纲}
+  - {id: write_design_document, label: 产品方案文档}
+  - {id: build_prd_outline, label: PRD 大纲}
+  - {id: write_prd_document, label: PRD 文档}
+  - {id: build_interactive_prototype, label: 交互原型}
+  - {id: build_review_outline, label: 方案评审大纲}
+  - {id: write_review_document, label: 方案评审报告}
+  - {id: build_handoff_outline, label: 研发交付大纲}
+  - {id: write_handoff_document, label: 研发交付文档}
+  - {id: finalize_product_delivery, label: 交付总结}
+
+slots:
+  - {id: product_goal, label: 产品目标, type: text, cardinality: single, external: true, exposed: false}
+  - {id: stage_chain, label: 目标阶段链, type: text, cardinality: single, external: true, exposed: false}
+  - {id: execution_depth, label: 当前阶段执行深度, type: text, cardinality: single, external: true, exposed: false}
+  - {id: word_target, label: 文本目标篇幅, type: text, cardinality: single, external: true, exposed: false}
+  - {id: reference_sample_choice, label: 参照样例选择, type: text, cardinality: single, external: true, exposed: false}
+  - {id: reference_sample, label: 参照样例或模板, type: file, cardinality: single, external: true, exposed: false}
+  - {id: product_materials, label: 产品输入材料, type: file, cardinality: list, external: true, exposed: false}
+
+  - {id: execution_plan, label: 产品执行计划, type: json, cardinality: single, exposed: true}
+  - {id: skip_direction, label: 跳过产品方向, type: text, cardinality: single, exposed: false}
+  - {id: skip_competitive, label: 跳过竞品分析, type: text, cardinality: single, exposed: false}
+  - {id: skip_design, label: 跳过产品方案, type: text, cardinality: single, exposed: false}
+  - {id: skip_prd, label: 跳过 PRD, type: text, cardinality: single, exposed: false}
+  - {id: skip_prototype, label: 跳过交互原型, type: text, cardinality: single, exposed: false}
+  - {id: skip_review, label: 跳过方案评审, type: text, cardinality: single, exposed: false}
+  - {id: skip_handoff, label: 跳过研发交付, type: text, cardinality: single, exposed: false}
+
+  - {id: research_evidence, label: 已注册产品资料, type: text, cardinality: single, exposed: true}
+  - {id: research_log, label: 资料检索记录, type: text, cardinality: single, exposed: true}
+  - {id: material_digest, label: 输入材料摘要, type: text, cardinality: single, exposed: true}
+  - {id: resource_profiles, label: Writer 资料画像, type: file, cardinality: single, exposed: false}
+
+  - {id: direction_task, label: 方向 Writer 任务, type: file, cardinality: single, exposed: false}
+  - {id: direction_context, label: 方向写作上下文, type: file, cardinality: single, exposed: false}
+  - {id: direction_outline, label: 可编辑产品方向大纲, type: file, cardinality: single, exposed: true}
+  - {id: direction_outline_report, label: 产品方向大纲检查, type: text, cardinality: single, exposed: true}
+  - {id: direction_context_approved, label: 批准后方向上下文, type: file, cardinality: single, exposed: false}
+  - {id: direction_section_plan, label: 产品方向章节规划, type: file, cardinality: single, exposed: false}
+  - {id: direction_chapters, label: 产品方向分章稿, type: file, cardinality: list, ordered: true, allow_manual_add: false, exposed: true}
+  - {id: direction_document, label: 可编辑产品方向文档, type: file, cardinality: single, exposed: true}
+  - {id: direction_context_final, label: 产品方向最终上下文, type: file, cardinality: single, exposed: false}
+
+  - {id: competitive_analysis, label: 竞品与生态位报告, type: file, cardinality: single, exposed: true}
+
+  - {id: design_task, label: 方案 Writer 任务, type: file, cardinality: single, exposed: false}
+  - {id: design_context, label: 方案写作上下文, type: file, cardinality: single, exposed: false}
+  - {id: design_outline, label: 可编辑产品方案大纲, type: file, cardinality: single, exposed: true}
+  - {id: design_outline_report, label: 产品方案大纲检查, type: text, cardinality: single, exposed: true}
+  - {id: design_context_approved, label: 批准后方案上下文, type: file, cardinality: single, exposed: false}
+  - {id: design_section_plan, label: 产品方案章节规划, type: file, cardinality: single, exposed: false}
+  - {id: design_chapters, label: 产品方案分章稿, type: file, cardinality: list, ordered: true, allow_manual_add: false, exposed: true}
+  - {id: design_document, label: 可编辑产品方案文档, type: file, cardinality: single, exposed: true}
+  - {id: design_context_final, label: 产品方案最终上下文, type: file, cardinality: single, exposed: false}
+
+  - {id: prd_task, label: PRD Writer 任务, type: file, cardinality: single, exposed: false}
+  - {id: prd_context, label: PRD 写作上下文, type: file, cardinality: single, exposed: false}
+  - {id: prd_outline, label: 可编辑 PRD 大纲, type: file, cardinality: single, exposed: true}
+  - {id: prd_outline_report, label: PRD 大纲检查, type: text, cardinality: single, exposed: true}
+  - {id: prd_context_approved, label: 批准后 PRD 上下文, type: file, cardinality: single, exposed: false}
+  - {id: prd_section_plan, label: PRD 章节规划, type: file, cardinality: single, exposed: false}
+  - {id: prd_chapters, label: PRD 分章稿, type: file, cardinality: list, ordered: true, allow_manual_add: false, exposed: true}
+  - {id: prd_document, label: 可编辑 PRD 文档, type: file, cardinality: single, exposed: true}
+  - {id: prd_context_final, label: PRD 最终上下文, type: file, cardinality: single, exposed: false}
+
+  - {id: prototype, label: 可交互产品原型, type: file, cardinality: single, exposed: true}
+
+  - {id: review_task, label: 评审 Writer 任务, type: file, cardinality: single, exposed: false}
+  - {id: review_context, label: 评审写作上下文, type: file, cardinality: single, exposed: false}
+  - {id: review_outline, label: 可编辑评审大纲, type: file, cardinality: single, exposed: true}
+  - {id: review_outline_report, label: 评审大纲检查, type: text, cardinality: single, exposed: true}
+  - {id: review_context_approved, label: 批准后评审上下文, type: file, cardinality: single, exposed: false}
+  - {id: review_section_plan, label: 评审章节规划, type: file, cardinality: single, exposed: false}
+  - {id: review_chapters, label: 评审分章稿, type: file, cardinality: list, ordered: true, allow_manual_add: false, exposed: true}
+  - {id: review_document, label: 可编辑方案评审报告, type: file, cardinality: single, exposed: true}
+  - {id: review_context_final, label: 评审最终上下文, type: file, cardinality: single, exposed: false}
+
+  - {id: handoff_task, label: 交付 Writer 任务, type: file, cardinality: single, exposed: false}
+  - {id: handoff_context, label: 交付写作上下文, type: file, cardinality: single, exposed: false}
+  - {id: handoff_outline, label: 可编辑研发交付大纲, type: file, cardinality: single, exposed: true}
+  - {id: handoff_outline_report, label: 研发交付大纲检查, type: text, cardinality: single, exposed: true}
+  - {id: handoff_context_approved, label: 批准后交付上下文, type: file, cardinality: single, exposed: false}
+  - {id: handoff_section_plan, label: 研发交付章节规划, type: file, cardinality: single, exposed: false}
+  - {id: handoff_chapters, label: 研发交付分章稿, type: file, cardinality: list, ordered: true, allow_manual_add: false, exposed: true}
+  - {id: handoff_document, label: 可编辑研发交付文档, type: file, cardinality: single, exposed: true}
+  - {id: handoff_context_final, label: 研发交付最终上下文, type: file, cardinality: single, exposed: false}
+
+  - {id: delivery_summary, label: 产品交付摘要, type: text, cardinality: single, exposed: true}
+
+ui:
+  # The first step derives all skip_* materials from the launch parameters.
+  # Keep conditional tabs out of the initial paint until that plan is available.
+  tab_visibility_ready_material: execution_plan
+  slots:
+    execution_plan: {widgetType: json-block, readOnly: true, collapsed: false}
+    research_evidence: {widgetType: text-markdown, readOnly: true, maxHeight: 680}
+    research_log: {widgetType: text-markdown, readOnly: true}
+    material_digest: {widgetType: text-markdown, readOnly: true, maxHeight: 680}
+    direction_outline: {widgetType: file-card, readOnly: false}
+    direction_outline_report: {widgetType: text-markdown, readOnly: true}
+    direction_chapters: {widgetType: file-card, readOnly: true}
+    direction_document: {widgetType: file-card, readOnly: false}
+    competitive_analysis: {widgetType: html-preview, readOnly: true}
+    design_outline: {widgetType: file-card, readOnly: false}
+    design_outline_report: {widgetType: text-markdown, readOnly: true}
+    design_chapters: {widgetType: file-card, readOnly: true}
+    design_document: {widgetType: file-card, readOnly: false}
+    prd_outline: {widgetType: file-card, readOnly: false}
+    prd_outline_report: {widgetType: text-markdown, readOnly: true}
+    prd_chapters: {widgetType: file-card, readOnly: true}
+    prd_document: {widgetType: file-card, readOnly: false}
+    prototype: {widgetType: html-preview, readOnly: true}
+    review_outline: {widgetType: file-card, readOnly: false}
+    review_outline_report: {widgetType: text-markdown, readOnly: true}
+    review_chapters: {widgetType: file-card, readOnly: true}
+    review_document: {widgetType: file-card, readOnly: false}
+    handoff_outline: {widgetType: file-card, readOnly: false}
+    handoff_outline_report: {widgetType: text-markdown, readOnly: true}
+    handoff_chapters: {widgetType: file-card, readOnly: true}
+    handoff_document: {widgetType: file-card, readOnly: false}
+    delivery_summary: {widgetType: text-markdown, readOnly: true}
+  tabs:
+    - id: retrieval
+      step_id: retrieve_product_evidence
+      label: 资料检索
+      layout: composite
+      slots: [{id: execution_plan}, {id: research_evidence}, {id: material_digest}, {id: research_log}]
+      composite_layout:
+        direction: row
+        children:
+          - direction: column
+            weight: 2
+            children: [{slot: execution_plan}, {slot: research_evidence}]
+          - direction: column
+            weight: 1
+            children: [{slot: material_digest}, {slot: research_log}]
+    - id: direction_outline
+      step_id: build_direction_outline
+      label: 方向大纲
+      hide_when_material: skip_direction
+      layout: composite
+      slots: [{id: direction_outline}, {id: direction_outline_report}]
+      composite_layout: {direction: row, children: [{slot: direction_outline, weight: 2}, {slot: direction_outline_report, weight: 1}]}
+    - {id: direction_document, step_id: write_direction_document, label: 产品方向, hide_when_material: skip_direction, layout: composite, slots: [{id: direction_document}, {id: direction_chapters}], composite_layout: {direction: column, children: [{slot: direction_document, weight: 3}, {slot: direction_chapters, weight: 1}]}}
+    - {id: competitive, step_id: analyze_competitive_position, label: 竞品生态位, hide_when_material: skip_competitive, layout: list, slots: [{id: competitive_analysis}]}
+    - id: design_outline
+      step_id: build_design_outline
+      label: 方案大纲
+      hide_when_material: skip_design
+      layout: composite
+      slots: [{id: design_outline}, {id: design_outline_report}]
+      composite_layout: {direction: row, children: [{slot: design_outline, weight: 2}, {slot: design_outline_report, weight: 1}]}
+    - {id: design_document, step_id: write_design_document, label: 产品方案, hide_when_material: skip_design, layout: composite, slots: [{id: design_document}, {id: design_chapters}], composite_layout: {direction: column, children: [{slot: design_document, weight: 3}, {slot: design_chapters, weight: 1}]}}
+    - id: prd_outline
+      step_id: build_prd_outline
+      label: PRD 大纲
+      hide_when_material: skip_prd
+      layout: composite
+      slots: [{id: prd_outline}, {id: prd_outline_report}]
+      composite_layout: {direction: row, children: [{slot: prd_outline, weight: 2}, {slot: prd_outline_report, weight: 1}]}
+    - {id: prd_document, step_id: write_prd_document, label: PRD, hide_when_material: skip_prd, layout: composite, slots: [{id: prd_document}, {id: prd_chapters}], composite_layout: {direction: column, children: [{slot: prd_document, weight: 3}, {slot: prd_chapters, weight: 1}]}}
+    - {id: prototype, step_id: build_interactive_prototype, label: 交互原型, hide_when_material: skip_prototype, layout: list, slots: [{id: prototype}]}
+    - id: review_outline
+      step_id: build_review_outline
+      label: 评审大纲
+      hide_when_material: skip_review
+      layout: composite
+      slots: [{id: review_outline}, {id: review_outline_report}]
+      composite_layout: {direction: row, children: [{slot: review_outline, weight: 2}, {slot: review_outline_report, weight: 1}]}
+    - {id: review_document, step_id: write_review_document, label: 方案评审, hide_when_material: skip_review, layout: composite, slots: [{id: review_document}, {id: review_chapters}], composite_layout: {direction: column, children: [{slot: review_document, weight: 3}, {slot: review_chapters, weight: 1}]}}
+    - id: handoff_outline
+      step_id: build_handoff_outline
+      label: 交付大纲
+      hide_when_material: skip_handoff
+      layout: composite
+      slots: [{id: handoff_outline}, {id: handoff_outline_report}]
+      composite_layout: {direction: row, children: [{slot: handoff_outline, weight: 2}, {slot: handoff_outline_report, weight: 1}]}
+    - {id: handoff_document, step_id: write_handoff_document, label: 研发交付, hide_when_material: skip_handoff, layout: composite, slots: [{id: handoff_document}, {id: handoff_chapters}], composite_layout: {direction: column, children: [{slot: handoff_document, weight: 3}, {slot: handoff_chapters, weight: 1}]}}
+    - {id: delivery, step_id: finalize_product_delivery, label: 交付总结, layout: list, slots: [{id: delivery_summary}]}
+
+i18n:
+  zh-CN:
+    name: 产品方案与交付

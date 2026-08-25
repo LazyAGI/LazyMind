@@ -123,13 +123,27 @@ func TestRemoteHandlerReadsResourceAndArtifactInputs(t *testing.T) {
 		Validity: "effective", CreatedAt: now}).Error; err != nil {
 		t.Fatal(err)
 	}
+	imageID := "image-1"
+	imageValue, _ := json.Marshal(map[string]any{
+		"path": "https://images.example.test/subject.png", "caption": "web reference",
+	})
+	if err := db.Create(&orm.WorkflowHumanArtifact{ID: imageID, SessionID: value.SessionID, Slot: "material_images",
+		ContentType: "image", Value: imageValue, CreatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowSlotRevision{ID: "revision-3", SessionID: value.SessionID, SlotID: "material_images",
+		Revision: 1, Selected: true, HumanArtifactID: &imageID, Slot: "material_images", StepID: "collect", Attempt: 1,
+		Validity: "effective", CreatedAt: now}).Error; err != nil {
+		t.Fatal(err)
+	}
 	tests := []struct {
 		material string
 		binding  map[string]any
 		want     string
 	}{{"brief", map[string]any{"source_type": "input_resource", "source_id": resource.ID}, "brief"},
 		{"draft", map[string]any{"source_type": "artifact", "source_revision_id": "revision-1"}, `{"ok":true}`},
-		{"draft_document", map[string]any{"source_type": "artifact", "source_revision_id": "revision-2"}, "# Durable draft"}}
+		{"draft_document", map[string]any{"source_type": "artifact", "source_revision_id": "revision-2"}, "# Durable draft"},
+		{"material_images", map[string]any{"source_type": "artifact", "source_revision_id": "revision-3"}, "https://images.example.test/subject.png"}}
 	for _, test := range tests {
 		t.Run(test.material, func(t *testing.T) {
 			ctx := value
@@ -152,6 +166,71 @@ func TestRemoteHandlerReadsResourceAndArtifactInputs(t *testing.T) {
 				t.Fatalf("content=%q", decoded)
 			}
 		})
+	}
+}
+
+func TestRemoteHandlerReadsEveryListArtifactInput(t *testing.T) {
+	value := AttemptContext{AttemptID: "attempt-list", SessionID: "session-list", StepID: "step-list", Inputs: map[string]any{}}
+	handler, db, claim := remoteHandlerFixture(t, value)
+	now := time.Now().UTC()
+	bindings := make([]map[string]any, 0, 2)
+	for index, content := range []string{"first", "second"} {
+		path := filepath.Join(t.TempDir(), content+".png")
+		if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		humanID := "human-list-" + content
+		raw, _ := json.Marshal(map[string]any{"filename": content + ".png", "path": path})
+		if err := db.Create(&orm.WorkflowHumanArtifact{ID: humanID, SessionID: value.SessionID,
+			Slot: "images", ContentType: "image", Value: raw, CreatedAt: now}).Error; err != nil {
+			t.Fatal(err)
+		}
+		revisionID := "revision-list-" + content
+		listIndex := index
+		if err := db.Create(&orm.WorkflowSlotRevision{ID: revisionID, SessionID: value.SessionID,
+			SlotID: "images", Revision: index + 1, ListIndex: &listIndex, Selected: true,
+			HumanArtifactID: &humanID, Slot: "images", StepID: "source", Attempt: 1,
+			Validity: "effective", CreatedAt: now}).Error; err != nil {
+			t.Fatal(err)
+		}
+		bindings = append(bindings, map[string]any{"source_type": "artifact", "source_revision_id": revisionID})
+	}
+	value.Inputs["images"] = bindings
+	handler.Contexts = staticContextLoader{value: value}
+	req := httptest.NewRequest(http.MethodGet, "/inputs/images", nil)
+	req.Header.Set("Authorization", "Bearer test-token")
+	req.Header.Set("X-Workflow-Lease-Token", claim.LeaseToken)
+	req = mux.SetURLVars(req, map[string]string{"attempt_id": value.AttemptID, "material_id": "images"})
+	rec := httptest.NewRecorder()
+	handler.Input(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var envelope remoteEnvelope
+	_ = json.Unmarshal(rec.Body.Bytes(), &envelope)
+	items := envelope.Data.(map[string]any)["items"].([]any)
+	if len(items) != 2 {
+		t.Fatalf("items=%v", items)
+	}
+	for index, want := range []string{"first", "second"} {
+		item := items[index].(map[string]any)
+		decoded, _ := base64.StdEncoding.DecodeString(item["content_base64"].(string))
+		if string(decoded) != want {
+			t.Fatalf("item %d content=%q", index, decoded)
+		}
+	}
+
+	value.Inputs["images"] = bindings[:1]
+	handler.Contexts = staticContextLoader{value: value}
+	rec = httptest.NewRecorder()
+	handler.Input(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("single-item list status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	_ = json.Unmarshal(rec.Body.Bytes(), &envelope)
+	items = envelope.Data.(map[string]any)["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("single-item list lost cardinality: %v", envelope.Data)
 	}
 }
 

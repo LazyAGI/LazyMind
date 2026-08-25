@@ -37,6 +37,10 @@ const SyncKnowledgeBaseCreationFlowInner: FC<{
     handleSearchLocalPathOptions,
     handleLoadLocalPathChildren,
     resetLocalPathBrowseOptions,
+    localPathRecommendations,
+    localPathRecommendationsLoading,
+    localPathRecommendationsError,
+    loadLocalPathRecommendations,
     feishuTargetTreeData,
     feishuTargetLoading,
     loadFeishuTargetOptions,
@@ -73,6 +77,9 @@ const SyncKnowledgeBaseCreationFlowInner: FC<{
         savingMode={wizardSavingMode || undefined}
         localPathOptions={localPathOptions}
         localPathLoading={localPathLoading}
+        localPathRecommendations={localPathRecommendations}
+        localPathRecommendationsLoading={localPathRecommendationsLoading}
+        localPathRecommendationsError={localPathRecommendationsError}
         feishuTargetLoading={feishuTargetLoading}
         feishuTargetTreeData={feishuTargetTreeData}
         allowTypeSelection={false}
@@ -91,6 +98,9 @@ const SyncKnowledgeBaseCreationFlowInner: FC<{
         onSearchLocalPathOptions={handleSearchLocalPathOptions}
         onLoadLocalPathChildren={handleLoadLocalPathChildren}
         onResetLocalPathBrowseOptions={resetLocalPathBrowseOptions}
+        onLoadLocalPathRecommendations={() => {
+          void loadLocalPathRecommendations();
+        }}
         onLoadFeishuTargetOptions={() => {
           void loadFeishuTargetOptions();
         }}

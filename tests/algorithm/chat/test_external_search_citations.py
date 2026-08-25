@@ -16,6 +16,7 @@ class FakeSearch(SearchBase):
         self.last_results = []
 
     def search(self, query: str, limit: int = 5):
+        """Return deterministic external search results for citation tests."""
         if query == 'slow':
             time.sleep(0.04)
         results = [{
@@ -37,6 +38,10 @@ class FakeSearch(SearchBase):
             'extra': dict(item.get('extra') or {}),
             'content': f"Fetched {item['title']} from {offset}",
         }
+
+    def get_contents(self, items: list[dict]):
+        """Return fetched content for multiple provider results."""
+        return [self.get_content(item) for item in items]
 
     def meta_search(self, query: str = ''):
         """Return fake metadata search results."""
@@ -70,6 +75,18 @@ def test_search_and_meta_search_register_without_changing_envelopes_or_provider_
     assert results[0]['ref'] == meta['items'][0]['ref'] == '[[1.1]]'
     assert 'ref' not in raw_results[0]
     assert state[CITATION_REFS_KEY]['1.1']['content'] == 'Snippet for agents'
+
+
+def test_collect_only_registers_sources_without_exposing_citation_refs():
+    state, provider, manager = _setup_manager()
+    lazyllm.globals['agentic_config']['citation_mode'] = 'collect_only'
+
+    results = _call(manager, 'FakeSearch_search', {'query': 'subagent'})
+
+    assert results == provider.last_results
+    assert 'ref' not in results[0]
+    assert 'citation_index' not in results[0]
+    assert state[CITATION_REFS_KEY]['1.1']['title'] == 'Result for subagent'
 
 
 def test_ranked_duplicates_are_preserved_and_share_registry_ref():
@@ -180,3 +197,15 @@ def test_parallel_tools_register_citations_in_original_tool_call_order():
     assert results[1]['value'][0]['ref'] == '[[2.1]]'
     assert state[CITATION_REFS_KEY]['1.1']['url'] == 'https://example.test/slow'
     assert state[CITATION_REFS_KEY]['2.1']['url'] == 'https://example.test/fast'
+
+
+def test_allowed_tool_names_are_forwarded_to_tool_manager():
+    _, _, manager = _setup_manager()
+
+    result = manager(
+        {'function': {'name': 'FakeSearch_search', 'arguments': {'query': 'agents'}}},
+        allowed_tool_names=set(),
+    )[0]
+
+    assert result['ok'] is False
+    assert 'FakeSearch_search' in result['value']

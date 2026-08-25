@@ -1,13 +1,19 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/signal"
+	"syscall"
 	"testing"
+	"time"
 
 	"github.com/gorilla/mux"
 
 	"lazymind/core/externallease"
+	workflowstore "lazymind/core/workflow/store"
 )
 
 func TestOpenAPIArtifactExportCanBeDisabledForSignedDesktopBundle(t *testing.T) {
@@ -39,6 +45,21 @@ func TestExternalAgentOperationExposesOnlyMCPRuntimeSurface(t *testing.T) {
 		if got := externalAgentOperation(test.method, test.path); got != test.want {
 			t.Fatalf("externalAgentOperation(%q, %q) = %q, want %q", test.method, test.path, got, test.want)
 		}
+	}
+}
+
+func TestInvocationConversationScopeIsRequestLocal(t *testing.T) {
+	seen := ""
+	handler := withInvocationConversationScope(func(w http.ResponseWriter, r *http.Request) {
+		seen = workflowstore.ConversationScope(r.Context())
+		w.WriteHeader(http.StatusNoContent)
+	})
+	request := httptest.NewRequest(http.MethodGet, "/workflow-sessions", nil)
+	request.Header.Set("X-LazyMind-Invocation-Conversation-Id", "conversation-1")
+	response := httptest.NewRecorder()
+	handler(response, request)
+	if response.Code != http.StatusNoContent || seen != "conversation-1" || workflowstore.ConversationScope(request.Context()) != "" {
+		t.Fatalf("invocation scope leaked or was not propagated: status=%d seen=%q", response.Code, seen)
 	}
 }
 
@@ -113,5 +134,62 @@ func TestValidateStartupConfigRejectsInvalidPreferenceCapacity(t *testing.T) {
 				t.Fatalf("validateStartupConfig() should reject %q", value)
 			}
 		})
+	}
+}
+
+func TestShutdownTimeoutDefaultsToThirtySeconds(t *testing.T) {
+	t.Setenv("LAZYMIND_SHUTDOWN_TIMEOUT", "")
+	if got := shutdownTimeout(); got != 30*time.Second {
+		t.Fatalf("shutdownTimeout() = %v, want 30s", got)
+	}
+}
+
+func TestShutdownTimeoutRespectsEnvOverride(t *testing.T) {
+	cases := []struct {
+		in   string
+		name string
+		want time.Duration
+	}{
+		{"15s", "15s", 15 * time.Second},
+		{"2m", "2m", 2 * time.Minute},
+		{"0", "0-falls-back-to-default", 30 * time.Second},
+		{"-5s", "negative-falls-back-to-default", 30 * time.Second},
+		{"not-a-duration", "invalid-falls-back-to-default", 30 * time.Second},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("LAZYMIND_SHUTDOWN_TIMEOUT", tc.in)
+			if got := shutdownTimeout(); got != tc.want {
+				t.Fatalf("shutdownTimeout() for %q = %v, want %v", tc.in, got, tc.want)
+			}
+		})
+	}
+}
+
+// TestSignalNotifyContextCancelsOnInterrupt verifies the signal-handling
+// primitive that main() relies on: a NotifyContext-wrapped context is
+// cancelled when the process receives SIGINT. This is the §5 "signal → ctx"
+// contract test — kept narrow (no run()/DB) so it stays a pure unit test.
+func TestSignalNotifyContextCancelsOnInterrupt(t *testing.T) {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	self, err := os.FindProcess(os.Getpid())
+	if err != nil {
+		t.Fatalf("find self process: %v", err)
+	}
+
+	// Deliver SIGINT to ourselves. NotifyContext must turn it into ctx
+	// cancellation; use a timeout so a broken handler fails the test fast
+	// rather than hanging the whole suite.
+	if err := self.Signal(os.Interrupt); err != nil {
+		t.Fatalf("signal self: %v", err)
+	}
+
+	select {
+	case <-ctx.Done():
+		// Expected: the first signal cancels ctx.
+	case <-time.After(2 * time.Second):
+		t.Fatal("signal.NotifyContext ctx was not cancelled after SIGINT")
 	}
 }

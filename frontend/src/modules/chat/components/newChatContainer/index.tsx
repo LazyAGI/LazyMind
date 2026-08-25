@@ -25,6 +25,7 @@ import { ChatSourcePanel } from "../AssistantMessage";
 import ChatMessageContent from "./components/ChatMessageContent";
 import ScrollToBottomButton from "./components/ScrollToBottomButton";
 import ConversationTrail from "./components/ConversationTrail";
+import StreamRecoveryBanner from "./components/StreamRecoveryBanner";
 import { useChatConversation } from "./hooks/useChatConversation";
 import { useCiteMessagesInput } from "./hooks/useCiteMessagesInput";
 import { useThinkingCollapse } from "./hooks/useThinkingCollapse";
@@ -94,7 +95,6 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       onOpenSSE,
       onOpenResumeSSE,
       onConversationIdChange,
-      parseErrorData,
       setShowHistoryList,
       showHistoryList,
       showHistoryButton = true,
@@ -112,6 +112,11 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       onConversationSettingsChange,
       initialConversationSettings,
       hasWorkflowSession,
+      conversationTrailEnabled = true,
+      showThinkingDepth = true,
+      showSkillDeposit = true,
+      showConversationConfig = true,
+      fixedThinkingDepth,
     } = props;
 
     const { clearPendingMessage: clearStorePendingMessage } =
@@ -147,7 +152,6 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       onOpenSSE,
       onOpenResumeSSE,
       onConversationIdChange,
-      parseErrorData,
       setIsChatContent,
       clearStorePendingMessage,
       clearCiteMessages,
@@ -161,7 +165,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
     const conversationTrail = useConversationTrail({
       conversationId: sessionId,
       refreshKey: trailRefreshKey,
-      enabled: Boolean(sessionId),
+      enabled: Boolean(sessionId) && conversationTrailEnabled,
     });
     useEffect(() => {
       if (conversationTrail.items.length === 0) {
@@ -232,8 +236,9 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       );
       return Boolean(
         lastAssistantMessage &&
-          lastAssistantMessage.finish_reason !==
-            ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified,
+          (lastAssistantMessage.run_status ||
+            lastAssistantMessage.finish_reason !==
+              ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified),
       );
     }, [conversation.messageList]);
     const shouldRemindSkillDeposit =
@@ -295,6 +300,20 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
       replaceMessageList: conversation.replaceMessageList,
       createNewChat: conversation.createNewChat,
       sendMessage,
+      prepareMessage: ({
+        text,
+        citeMessage,
+        citeMessages: nextCiteMessages,
+        appendCitations = false,
+      }) => {
+        conversation.setContent(text);
+        if (!appendCitations) {
+          clearCiteMessages();
+        }
+        const citations = nextCiteMessages ?? (citeMessage ? [citeMessage] : []);
+        citations.forEach((citation) => handleAddCiteMessage(citation));
+        requestAnimationFrame(() => chatInputRef.current?.focus());
+      },
       disconnectConversationStream: conversation.disconnectConversationStream,
       uploadFiles: (files: File[]) => {
         chatInputRef.current?.uploadFiles(files);
@@ -340,6 +359,12 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
                 sendMessage({ text, clearInput, ...(extras ?? {}) });
               }}
               regenerate={conversation.regenerate}
+              regenerateDisabled={
+                !canChat ||
+                conversation.loading ||
+                conversation.isStreaming ||
+                conversation.runtimeWaiting
+              }
               stopGeneration={conversation.stopGeneration}
               renderText={renderText}
               updateAssistantMessage={conversation.updateAssistantMessage}
@@ -368,6 +393,11 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
                 onClick={conversation.scroll.handleToBottom}
               />
             )}
+
+            <StreamRecoveryBanner
+              recovery={conversation.streamRecovery}
+              onReconnect={conversation.retryStreamRecovery}
+            />
 
             <ChatInput
               value={conversation.content}
@@ -411,6 +441,10 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
               onConversationSettingsChange={onConversationSettingsChange}
               initialConversationSettings={initialConversationSettings}
               hasWorkflowSession={hasWorkflowSession}
+              showThinkingDepth={showThinkingDepth}
+              showSkillDeposit={showSkillDeposit}
+              showConversationConfig={showConversationConfig}
+              fixedThinkingDepth={fixedThinkingDepth}
             />
           </div>
           {sourcePanelSources.length > 0 && (

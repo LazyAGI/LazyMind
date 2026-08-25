@@ -5,6 +5,7 @@ import time
 from dataclasses import replace
 from typing import Any
 
+from channel_gateway.common.application.task_artifacts import find_task
 from channel_gateway.common.domain.channel import (
     ClaimedInbound,
     ClaimedOutbound,
@@ -35,7 +36,6 @@ from channel_gateway.feishu.presentation import (
     streaming_reply_card,
     task_progress_text,
 )
-from channel_gateway.feishu.task_monitor import find_task
 from channel_gateway.feishu.workspace import (
     FeishuWorkspaceState,
 )
@@ -48,17 +48,6 @@ _LIVE_TASK_POLL_SECONDS = 1.5
 
 
 _logger = logging.getLogger(__name__)
-
-
-def _expire_workspace_card(
-    sender: Any,
-    *,
-    message_id: str,
-    workspace: dict[str, Any],
-) -> None:
-    # Stale CardKit actions are fenced by message/revision/operation.  Do not
-    # create a second user-visible replacement card for an already stale card.
-    del sender, message_id, workspace
 
 
 class _ManagedReplyStream:
@@ -276,6 +265,11 @@ class FeishuDeliveryProvider:
             message.provider_context.get('workspace_message_id')
             or ''
         )
+        reanchor_to_bottom = (
+            message.provider_context.get(
+                'workspace_reanchor_to_bottom'
+            ) is True
+        )
         management = (
             message.provider_context.get('workspace_surface') == 'management'
         )
@@ -286,10 +280,22 @@ class FeishuDeliveryProvider:
                     **message.provider_context,
                     'chat_id': chat_id,
                 }),
-                message_id=workspace_message_id,
+                message_id=(
+                    '' if reanchor_to_bottom else workspace_message_id
+                ),
                 should_render=(
                     (lambda: self._workspace_chat_is_visible(message))
-                    if management
+                    if management or reanchor_to_bottom
+                    else None
+                ),
+                on_message_started=(
+                    (
+                        lambda message_id: self._adopt_stream_message(
+                            message,
+                            message_id,
+                        )
+                    )
+                    if reanchor_to_bottom
                     else None
                 ),
             )
@@ -307,12 +313,34 @@ class FeishuDeliveryProvider:
             owner_user_id=message.owner_user_id,
         )
 
+    def _adopt_stream_message(
+        self,
+        message: ClaimedInbound,
+        message_id: str,
+    ) -> None:
+        context = message.provider_context
+        source = FeishuWorkspaceState.from_dict(
+            context.get('workspace_state')
+        )
+        saved = self._store.save_feishu_workspace_message(
+            message.account_id,
+            message.order_key,
+            message_id,
+            source.active_operation_id,
+            source.message_id,
+            source.revision,
+        )
+        if str(saved.get('message_id') or '') != message_id:
+            context['_workspace_stream_suppress_final'] = True
+            return
+        context['workspace_state'] = saved
+        context['workspace_message_id'] = message_id
+        context['workspace_stream_message_id'] = message_id
+
     def _workspace_chat_is_visible(
         self,
         message: ClaimedInbound,
-        stream: ReplyStream | None = None,
     ) -> bool:
-        del stream
         context = message.provider_context
         if context.get('_workspace_stream_suppress_final'):
             return False
@@ -594,7 +622,12 @@ class FeishuDeliveryProvider:
                     part.get('replace_message_id')
                     or (
                         expected_message_id
-                        if part.get('workspace') is True
+                        if (
+                            part.get('workspace') is True
+                            and message.provider_context.get(
+                                'workspace_reanchor_to_bottom'
+                            ) is not True
+                        )
                         else ''
                     )
                     or ''
@@ -654,11 +687,6 @@ class FeishuDeliveryProvider:
                             )
                         else:
                             workspace_stale = True
-                            _expire_workspace_card(
-                                sender,
-                                message_id=message_id,
-                                workspace=saved_workspace,
-                            )
                             message_id = adopted_message_id
                         message.provider_context['workspace_state'] = (
                             saved_workspace

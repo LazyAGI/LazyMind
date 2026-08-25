@@ -41,6 +41,10 @@ x-proxy-env: &proxy-env
 x-core-env: &core-env
   ACL_DB_DRIVER: postgres
   ACL_DB_DSN: "host=db user=root password=123456 dbname=core port=5432 sslmode=disable TimeZone=UTC"
+  # Local development may execute a dev migration that is later removed from
+  # its branch. Reconcile only unknown history in the latest open dev release;
+  # production deployments should leave this unset/false.
+  MIGRATION_RECONCILE_UNKNOWN_DEV_HISTORY: ${MIGRATION_RECONCILE_UNKNOWN_DEV_HISTORY:-true}
   LAZYMIND_PREFERENCE_INDEX_MAX_ITEMS: ${LAZYMIND_PREFERENCE_INDEX_MAX_ITEMS:-100}
   LAZYMIND_REDIS_URL: redis://test:123456@redis:6379/0
   LAZYMIND_UPLOAD_ROOT: /var/lib/lazymind/uploads
@@ -308,6 +312,7 @@ services:
       <<: *proxy-env
     volumes:
       - channel-gateway-data:/var/lib/lazymind/channel-gateway
+      - ./data/core/uploads:/var/lib/lazymind/uploads
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8085/readyz')\" || exit 1"]
       interval: 10s
@@ -357,7 +362,7 @@ services:
       - ./data/evo:/var/lib/lazymind/evo
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/subagent:/data/subagent
-      - ./skills:/skills:ro
+      - ./skills/.runtime:/skills/.runtime:ro
     expose:
       - "8000"
     extra_hosts:
@@ -403,7 +408,7 @@ services:
     volumes:
       - ./backend/core:/app
       - ./data/core/uploads:/var/lib/lazymind/uploads
-      - ./skills:/skills:ro
+      - ./skills/.runtime:/skills/.runtime:ro
     environment:
       <<: *core-env
     depends_on:
@@ -430,6 +435,7 @@ services:
       - "80"
     volumes:
       - ./workflows:/usr/share/nginx/html/workflows:ro
+      - ./skills/.runtime:/skills/.runtime:ro
     depends_on:
       kong:
         condition: service_started
@@ -708,6 +714,40 @@ services:
         aliases:
           - parsing
 
+  # Editable HTML→PPTX export. Opt in with LAZYMIND_OUTPUT_EDITABLE_PPT=true.
+  ppt-export:
+    profiles:
+      - editable-ppt
+    image: ${PPT_PLAYWRIGHT_IMAGE:-mcr.microsoft.com/playwright:v1.58.2-noble}
+    restart: unless-stopped
+    working_dir: /export
+    volumes:
+      - ./workflows/ppt-workflow/runtime/scripts/export_pptx:/export
+      - ppt-export-node-modules:/export/node_modules
+      - ./data/subagent:/data/subagent
+    environment:
+      PORT: "8099"
+    command:
+      - bash
+      - -lc
+      - |
+        set -euo pipefail
+        if [[ ! -d node_modules/pptxgenjs || ! -d node_modules/playwright ]] \
+          || ! node -e "const v=require('./node_modules/playwright/package.json').version; process.exit(v==='1.58.2'?0:1)"; then
+          npm install --omit=dev
+        fi
+        exec node ppt_export_http_server.mjs
+    expose:
+      - "8099"
+    ports:
+      - "${PPT_EXPORT_HOST_PORT:-8099}:8099"
+    healthcheck:
+      test: ['CMD', 'curl', '-f', 'http://localhost:8099/health']
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 60s
+
   chat:
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-algorithm:${LAZYMIND_IMAGE_TAG:-latest}
     restart: unless-stopped
@@ -784,6 +824,8 @@ services:
       LAZYMIND_ROUTER_DEFAULT_ALGO_PATH: /opt/lazymind/chat
       LAZYMIND_ROUTER_DEFAULT_INSTANCE_COUNT: 1
       LAZYMIND_WORKFLOWS_DIR: /app/workflows
+      LAZYMIND_OUTPUT_EDITABLE_PPT: ${LAZYMIND_OUTPUT_EDITABLE_PPT:-false}
+      LAZYMIND_PPT_EXPORT_URL: ${LAZYMIND_PPT_EXPORT_URL:-http://ppt-export:8099}
       <<: [*runtime-home, *trace-config, *proxy-env, *db-conn, *core-db-conn, *llm-api-keys, *upload-paths, *ocr-env, *cache-env]
     command: ["python", "-m", "lazymind.router.app", "--port", "8046"]
     depends_on:
@@ -795,6 +837,9 @@ services:
         condition: service_healthy
       lazyllm-parse-worker:
         condition: service_healthy
+      ppt-export:
+        condition: service_started
+        required: false
 
   evo-api:
     init: true
@@ -971,4 +1016,5 @@ volumes:
   opensearch-data:
   sqlite-data:
   evo-data:
+  ppt-export-node-modules:
   channel-gateway-data:

@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"lazymind/agentconnector/internal/agentexec"
+	"lazymind/agentconnector/internal/codexcontrol"
 	"lazymind/agentconnector/internal/mcpbridge"
 )
 
@@ -23,21 +24,27 @@ type Adapter struct {
 	self           string
 	bridge         *mcpbridge.Bridge
 	home           string
+	hostID         string
+	controlAddress string
+	control        *codexcontrol.Controller
 }
 
 type Status struct {
-	Agent          string   `json:"agent"`
-	Installed      bool     `json:"installed"`
-	Version        string   `json:"version,omitempty"`
-	Configured     bool     `json:"configured"`
-	Owned          bool     `json:"owned"`
-	ServiceReady   bool     `json:"service_ready"`
-	Ready          bool     `json:"ready"`
-	Command        string   `json:"command,omitempty"`
-	Arguments      []string `json:"arguments,omitempty"`
-	Endpoint       string   `json:"endpoint,omitempty"`
-	Tools          []string `json:"tools,omitempty"`
-	ReadinessError string   `json:"readiness_error,omitempty"`
+	Agent             string   `json:"agent"`
+	Installed         bool     `json:"installed"`
+	Version           string   `json:"version,omitempty"`
+	Configured        bool     `json:"configured"`
+	Owned             bool     `json:"owned"`
+	ServiceReady      bool     `json:"service_ready"`
+	Ready             bool     `json:"ready"`
+	Command           string   `json:"command,omitempty"`
+	Arguments         []string `json:"arguments,omitempty"`
+	Endpoint          string   `json:"endpoint,omitempty"`
+	Tools             []string `json:"tools,omitempty"`
+	ReadinessError    string   `json:"readiness_error,omitempty"`
+	ControlConfigured bool     `json:"control_configured"`
+	ControlConnected  bool     `json:"control_connected"`
+	RestartRequired   bool     `json:"restart_required"`
 }
 
 type mcpConfig struct {
@@ -54,6 +61,15 @@ type transport struct {
 }
 
 func New(binary, self string, bridge *mcpbridge.Bridge) (*Adapter, error) {
+	return NewWithControl(binary, self, bridge, codexcontrol.DefaultAddress, nil)
+}
+
+func NewWithControl(
+	binary, self string,
+	bridge *mcpbridge.Bridge,
+	controlAddress string,
+	control *codexcontrol.Controller,
+) (*Adapter, error) {
 	if bridge == nil {
 		return nil, errors.New("MCP bridge is required")
 	}
@@ -69,17 +85,18 @@ func New(binary, self string, bridge *mcpbridge.Bridge) (*Adapter, error) {
 	if err != nil {
 		return nil, fmt.Errorf("resolve LazyMind executable: %w", err)
 	}
-	connectorHome := strings.TrimSpace(os.Getenv("LAZYMIND_HOME"))
-	if connectorHome != "" {
-		connectorHome, err = filepath.Abs(connectorHome)
-		if err != nil {
-			return nil, fmt.Errorf("resolve LAZYMIND_HOME: %w", err)
-		}
-		connectorHome = filepath.Clean(connectorHome)
+	connectorHome, err := agentexec.LazyMindHome()
+	if err != nil {
+		return nil, err
+	}
+	hostID, err := agentexec.PersistentHostID()
+	if err != nil {
+		return nil, fmt.Errorf("resolve LazyMind Agent Host identity: %w", err)
 	}
 	return &Adapter{
 		binary: resolvedBinary, discoveryError: discoveryError,
 		self: resolvedSelf, bridge: bridge, home: connectorHome,
+		hostID: hostID, controlAddress: strings.TrimSpace(controlAddress), control: control,
 	}, nil
 }
 
@@ -123,7 +140,7 @@ func findBinary(configured string) (string, error) {
 			candidates = append(candidates, filepath.Join(root, "ChatGPT", "resources", name))
 		}
 	}
-	resolved, err := agentexec.Find(configured, "LAZYMIND_CODEX_BIN", []string{name}, candidates)
+	resolved, err := findBinaryFromSources(configured, []string{name}, candidates)
 	if err != nil {
 		if strings.TrimSpace(configured) != "" || strings.TrimSpace(os.Getenv("LAZYMIND_CODEX_BIN")) != "" {
 			return "", fmt.Errorf("resolve configured Codex CLI: %w", err)
@@ -131,6 +148,34 @@ func findBinary(configured string) (string, error) {
 		return "", errors.New("Codex CLI is not installed; install Codex CLI before connecting LazyMind")
 	}
 	return resolved, nil
+}
+
+func findBinaryFromSources(configured string, names, candidates []string) (string, error) {
+	if strings.TrimSpace(configured) == "" {
+		configured = strings.TrimSpace(os.Getenv("LAZYMIND_CODEX_BIN"))
+	}
+	if configured != "" {
+		return agentexec.Find(configured, "", nil, nil)
+	}
+	completeDistributions := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		if codexDistributionHasHost(candidate) {
+			completeDistributions = append(completeDistributions, candidate)
+		}
+	}
+	if resolved, err := agentexec.Find("", "", nil, completeDistributions); err == nil {
+		return resolved, nil
+	}
+	return agentexec.Find("", "", names, candidates)
+}
+
+func codexDistributionHasHost(binary string) bool {
+	host := "codex-code-mode-host"
+	if runtime.GOOS == "windows" {
+		host += ".exe"
+	}
+	info, err := os.Stat(filepath.Join(filepath.Dir(binary), host))
+	return err == nil && !info.IsDir()
 }
 
 // FindBinary is shared by the MCP installation adapter and the hosted Chat
@@ -153,6 +198,9 @@ func (a *Adapter) Connect(ctx context.Context) (Status, error) {
 		return Status{}, fmt.Errorf("LazyMind MCP preflight failed: %w", err)
 	}
 	if exists && config.Enabled && a.hasCurrentEnvironment(config) {
+		if _, err := codexcontrol.Configure(a.controlAddress); err != nil {
+			return Status{}, fmt.Errorf("configure Codex native control: %w", err)
+		}
 		return a.populateStatus(ctx, Status{
 			Agent: "codex", Installed: true, ServiceReady: true,
 			Endpoint: probe.Endpoint, Tools: probe.Tools,
@@ -164,11 +212,18 @@ func (a *Adapter) Connect(ctx context.Context) (Status, error) {
 			return Status{}, fmt.Errorf("remove stale Codex MCP configuration: %w", err)
 		}
 	}
-	if err := a.addConfig(ctx, a.self, []string{"mcp", "proxy"}, currentEnvironment(a.home)); err != nil {
+	if err := a.addConfig(ctx, a.self, []string{"mcp", "proxy"}, currentEnvironment(a.home, a.hostID)); err != nil {
 		if exists {
 			_ = a.addConfig(context.Background(), config.Transport.Command, config.Transport.Args, config.Transport.Env)
 		}
 		return Status{}, fmt.Errorf("add Codex MCP configuration: %w", err)
+	}
+	if _, err := codexcontrol.Configure(a.controlAddress); err != nil {
+		_, _ = agentexec.Run(context.Background(), a.binary, "mcp", "remove", serverName)
+		if exists {
+			_ = a.addConfig(context.Background(), config.Transport.Command, config.Transport.Args, config.Transport.Env)
+		}
+		return Status{}, fmt.Errorf("configure Codex native control: %w", err)
 	}
 	configured, configuredExists, verifyErr := a.getConfig(ctx)
 	if verifyErr != nil || !configuredExists || !configured.Enabled || !a.isOwned(configured) || !a.hasCurrentEnvironment(configured) {
@@ -188,13 +243,17 @@ func (a *Adapter) Connect(ctx context.Context) (Status, error) {
 }
 
 func (a *Adapter) Status(ctx context.Context) (Status, error) {
+	probe, probeErr := a.bridge.Probe(ctx)
+	return a.StatusWithProbe(ctx, probe, probeErr)
+}
+
+func (a *Adapter) StatusWithProbe(ctx context.Context, probe mcpbridge.ProbeResult, probeErr error) (Status, error) {
 	if a.discoveryError != nil {
 		return Status{
 			Agent: "codex", Installed: false, Ready: false,
 			ReadinessError: a.discoveryError.Error(),
 		}, nil
 	}
-	probe, probeErr := a.bridge.Probe(ctx)
 	status := Status{Agent: "codex", Installed: true, ServiceReady: probeErr == nil}
 	if probeErr == nil {
 		status.Endpoint = probe.Endpoint
@@ -221,15 +280,21 @@ func (a *Adapter) Disconnect(ctx context.Context) (Status, error) {
 			return Status{}, fmt.Errorf("remove Codex MCP configuration: %w", err)
 		}
 	}
+	if err := codexcontrol.RemoveConfig(a.controlAddress); err != nil {
+		return Status{}, fmt.Errorf("remove Codex native control enrollment: %w", err)
+	}
 	return a.Status(ctx)
 }
 
 func (a *Adapter) populateStatus(ctx context.Context, status Status) (Status, error) {
-	version, err := agentexec.Run(ctx, a.binary, "--version")
-	if err != nil {
-		return Status{}, fmt.Errorf("read Codex version: %w", err)
+	controlConfig, controlErr := codexcontrol.InspectConfig(a.controlAddress)
+	if controlErr == nil {
+		status.ControlConfigured = controlConfig.Configured
 	}
-	status.Version = strings.TrimSpace(version)
+	if a.control != nil {
+		controlStatus := a.control.Status()
+		status.ControlConnected = controlStatus.Ready
+	}
 	config, exists, err := a.getConfig(ctx)
 	if err != nil {
 		return Status{}, err
@@ -252,6 +317,16 @@ func (a *Adapter) populateStatus(ctx context.Context, status Status) (Status, er
 	case !a.hasCurrentEnvironment(config):
 		status.Ready = false
 		status.ReadinessError = "Codex MCP configuration uses a different LazyMind credential directory; reconnect from LazyMind Desktop settings"
+	case controlErr != nil:
+		status.Ready = false
+		status.ReadinessError = "Codex native control configuration is unavailable: " + controlErr.Error()
+	case !status.ControlConfigured:
+		status.Ready = false
+		status.ReadinessError = "Codex native control is not configured; reconnect from LazyMind settings"
+	case !status.ControlConnected:
+		status.Ready = false
+		status.RestartRequired = true
+		status.ReadinessError = "Restart Codex once so it connects to LazyMind native control"
 	default:
 		status.Ready = status.ServiceReady
 	}
@@ -303,12 +378,17 @@ func (a *Adapter) hasCurrentEnvironment(config mcpConfig) bool {
 	if configuredHome == "." {
 		configuredHome = ""
 	}
-	return configuredHome == a.home
+	return configuredHome == a.home && config.Transport.Env["LAZYMIND_AGENT_PROVIDER"] == "codex" &&
+		config.Transport.Env["LAZYMIND_AGENT_HOST_ID"] == a.hostID
 }
 
-func currentEnvironment(home string) map[string]string {
-	if home == "" {
-		return nil
+func currentEnvironment(home, hostID string) map[string]string {
+	environment := map[string]string{
+		"LAZYMIND_AGENT_PROVIDER": "codex", "LAZYMIND_AGENT_HOST_ID": hostID,
 	}
-	return map[string]string{"LAZYMIND_HOME": home}
+	if home == "" {
+		return environment
+	}
+	environment["LAZYMIND_HOME"] = home
+	return environment
 }

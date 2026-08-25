@@ -59,6 +59,11 @@ const desktopCredentialIdentityPath = path.join(app.getPath("userData"), "creden
 const startupLogPath = path.join(desktopLogsDir, "desktop-startup.log");
 const sidecarPath = process.env.LAZYMIND_DESKTOP_SIDECAR ||
   path.join(runtimeResourcesRoot, "bin", `local-runtime-manager${isWindows ? ".exe" : ""}`);
+const editablePptDependencyConfigPath = path.join(
+  runtimeResourcesRoot,
+  "config",
+  "editable-ppt-dependencies.json",
+);
 const agentConnectorPath = process.env.LAZYMIND_DESKTOP_AGENT_CONNECTOR ||
   path.join(runtimeResourcesRoot, "bin", `lazymind${isWindows ? ".exe" : ""}`);
 const maxStartupLogEntries = 1200;
@@ -124,6 +129,23 @@ let startupState = {
   updatedAt: new Date().toISOString(),
 };
 
+function loadEditablePptDependencyConfig() {
+  try {
+    const config = JSON.parse(fs.readFileSync(editablePptDependencyConfigPath, "utf8"));
+    return {
+      windowsX64: config?.windowsX64 || {},
+      darwinArm64: config?.darwinArm64 || {},
+    };
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      appendStartupLog("desktop", `editable PPT dependency config unavailable: ${error.message}`);
+    }
+    return { windowsX64: {}, darwinArm64: {} };
+  }
+}
+
+const editablePptDependencyConfig = loadEditablePptDependencyConfig();
+
 function loadOrCreateDesktopCredentialIdentity() {
   fs.mkdirSync(path.dirname(desktopCredentialIdentityPath), { recursive: true });
   try {
@@ -179,12 +201,18 @@ function sidecarEnv() {
     LAZYMIND_LOCAL_PROXY_ADDRESS: "127.0.0.1",
     LAZYMIND_LOCAL_AUTO_LOGIN_ALLOW_LAN: "false",
     LAZYMIND_OPENAPI_ARTIFACT_EXPORT_ENABLED: "false",
+    LAZYMIND_NODE_EXECUTABLE: process.execPath,
+    LAZYMIND_NODE_RUN_AS_NODE: "true",
     VITE_LAZYMIND_MODE: "desktop",
     PYTHONDONTWRITEBYTECODE: "1",
   };
   env.LAZYMIND_MODEL_PROVIDER_SECRET_KEY ||= deriveDesktopCredentialKey(desktopCredentialIdentity, "model-provider");
   env.LAZYMIND_MCP_SECRET_KEY ||= deriveDesktopCredentialKey(desktopCredentialIdentity, "mcp");
   env.LAZYMIND_AUTH_CLOUD_SECRET_KEY ||= deriveDesktopCredentialKey(desktopCredentialIdentity, "cloud-oauth");
+  env.LAZYMIND_EDITABLE_PPT_WINDOWS_X64_URL ||= editablePptDependencyConfig.windowsX64.url || "";
+  env.LAZYMIND_EDITABLE_PPT_WINDOWS_X64_SHA256 ||= editablePptDependencyConfig.windowsX64.sha256 || "";
+  env.LAZYMIND_EDITABLE_PPT_DARWIN_ARM64_URL ||= editablePptDependencyConfig.darwinArm64.url || "";
+  env.LAZYMIND_EDITABLE_PPT_DARWIN_ARM64_SHA256 ||= editablePptDependencyConfig.darwinArm64.sha256 || "";
   if (explicitRuntimeRoot) {
     env.LAZYMIND_RUNTIME_ROOT = explicitRuntimeRoot;
   } else {
@@ -427,10 +455,10 @@ function runSidecar(command, extra = [], options = {}) {
 function runAgentConnector(agent, action) {
   const allowedActions = {
     codex: new Set(["connect", "status", "disconnect"]),
-    cursor: new Set(["status"]),
-    workbuddy: new Set(["status"]),
-    traework: new Set(["status"]),
-    "deepseek-harness": new Set(["status"]),
+    cursor: new Set(["connect", "status", "disconnect"]),
+    workbuddy: new Set(["connect", "status", "disconnect"]),
+    traework: new Set(["connect", "status", "disconnect"]),
+    "deepseek-harness": new Set(["connect", "status", "disconnect"]),
   };
   if (!allowedActions[agent]?.has(action)) {
     return Promise.reject(new Error(`Unsupported external Agent action: ${agent}/${action}`));
@@ -1500,6 +1528,7 @@ ipcMain.on("lazymind:renderer-ready", (event) => {
 
 ipcMain.handle("lazymind:runtimeStatus", () => readStatus());
 ipcMain.handle("lazymind:agentIntegrationStatus", (_event, agent) => runAgentConnector(agent, "status"));
+ipcMain.handle("lazymind:agentIntegrationAction", (_event, agent, action) => runAgentConnector(agent, action));
 ipcMain.handle("lazymind:codexIntegrationAction", (_event, action) => runAgentConnector("codex", action));
 ipcMain.handle("lazymind:restartRuntime", async () => {
   await runSidecar("down");
