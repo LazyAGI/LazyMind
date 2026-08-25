@@ -26,6 +26,7 @@ import {
 } from "@/modules/knowledge/utils/imageUrl";
 import HtmlBlock from "./HtmlBlock";
 import MermaidBlock from "./MermaidBlock";
+import EditableBlock from "./EditableBlock";
 import {
   getLanguageFromClassName,
   getRawLanguageFromClassName,
@@ -67,6 +68,9 @@ export function markdownUrlTransform(value: string): string {
 const MarkdownRenderContext = createContext<{
   isStreaming: boolean;
   markSources: ChatSource[];
+  conversationId?: string;
+  historyId?: string;
+  onCiteMessage?: (text: string) => void;
 }>({
   isStreaming: false,
   markSources: [],
@@ -246,7 +250,12 @@ const CodeComponent = (props: any) => {
 };
 
 const PreComponent = (props: any) => {
-  const { isStreaming } = useContext(MarkdownRenderContext);
+  const {
+    isStreaming,
+    conversationId,
+    historyId,
+    onCiteMessage,
+  } = useContext(MarkdownRenderContext);
   const child = Array.isArray(props.children) ? props.children[0] : props.children;
 
   if (isValidElement(child)) {
@@ -257,6 +266,18 @@ const PreComponent = (props: any) => {
     const rawLanguage = getRawLanguageFromClassName(childProps.className);
     const language = getLanguageFromClassName(childProps.className);
     const code = String(childProps.children ?? "").replace(/\n$/, "");
+
+    if (rawLanguage === "editable" && !isStreaming && conversationId && historyId) {
+      return (
+        <EditableBlock
+          key={`${conversationId}:${historyId}`}
+          value={code}
+          conversationId={conversationId}
+          historyId={historyId}
+          onCiteSelection={onCiteMessage}
+        />
+      );
+    }
 
     if (rawLanguage === "html" || rawLanguage === "htm") {
       return <HtmlBlock code={code} isStreaming={isStreaming} />;
@@ -409,6 +430,9 @@ const MarkdownViewer = memo((props: any) => {
     components: customComponents,
     sources = [],
     IS_STREAMING,
+    conversationId,
+    historyId,
+    onCiteMessage,
     ...markdownProps
   } = props;
   const normalizedChildren =
@@ -432,8 +456,11 @@ const MarkdownViewer = memo((props: any) => {
     () => ({
       isStreaming: Boolean(IS_STREAMING),
       markSources,
+      conversationId,
+      historyId,
+      onCiteMessage,
     }),
-    [IS_STREAMING, markSources],
+    [IS_STREAMING, conversationId, historyId, markSources, onCiteMessage],
   );
 
   const markdownComponents = useMemo(
