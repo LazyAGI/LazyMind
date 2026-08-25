@@ -3,6 +3,13 @@ import { persist } from "zustand/middleware";
 
 export type ThinkingDepth = "low" | "medium" | "high" | "max";
 
+export const THINKING_DEPTH_VALUES: ThinkingDepth[] = [
+  "low",
+  "medium",
+  "high",
+  "max",
+];
+
 interface ChatThinkStore {
   think: boolean;
   thinkingDepth: ThinkingDepth;

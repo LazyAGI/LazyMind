@@ -128,13 +128,15 @@ type Conversation struct {
 	Model         string          `gorm:"column:model;type:varchar(64);default:''"`
 	Models        json.RawMessage `gorm:"column:models;type:json"`
 	ChatTimes     int32           `gorm:"column:chat_times;not null;default:0"`
-	// Workflow/subagent mode overrides at conversation level (NULL falls back to user_chat_settings).
+	// Workflow/subagent policy snapshot. Historical NULL values use the legacy hard defaults.
 	EnableWorkflow *bool   `gorm:"column:enable_plugin"`
 	WorkflowMode   *string `gorm:"column:plugin_mode;type:varchar(16)"`
 	EnableSubagent *bool   `gorm:"column:enable_subagent"`
 	// ChatExecutor selects the upstream Agent while the existing Chat application
 	// remains responsible for persistence, Workflow, artifacts and SSE delivery.
 	ChatExecutor string `gorm:"column:chat_executor;type:varchar(32);not null;default:'lazymind'"`
+	// ThinkingDepth snapshots the entry default selected when the conversation is created.
+	ThinkingDepth string `gorm:"column:thinking_depth;type:varchar(16);not null;default:'medium'"`
 	// IsTaskConv marks conversations created by the scheduler or task center (not user-initiated).
 	IsTaskConv         bool       `gorm:"column:is_task_conv;not null;default:false"`
 	IsEphemeral        bool       `gorm:"column:is_ephemeral;not null;default:false"`
