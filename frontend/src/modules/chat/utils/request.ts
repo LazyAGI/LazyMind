@@ -606,6 +606,21 @@ function withJsonOptions(
 
 export function ChatServiceApi() {
   return {
+    patchEditableBlock(
+      payload: {
+        conversation_id: string;
+        history_id: string;
+        base_content: string;
+        content: string;
+      },
+      options?: RawAxiosRequestConfig,
+    ) {
+      return axiosInstance.patch<{ content: string; result: string }>(
+        `${coreApiBaseUrl}/conversations:editable-block`,
+        payload,
+        withJsonOptions(options),
+      );
+    },
     conversationServiceGetMultiAnswersSwitchStatus(options?: RawAxiosRequestConfig) {
       return axiosInstance.get<GetMultiAnswersSwitchStatusResponse>(
         `${coreApiBaseUrl}/conversation:switchStatus`,
@@ -861,6 +876,20 @@ export function PromptServiceApi() {
         `${coreApiBaseUrl}/prompts/${encodeURIComponent(promptID)}:use`,
         undefined,
         silentOptions,
+      );
+    },
+    polishEditableSelection(
+      payload: {
+        content: string;
+        user_instruct: string;
+        allow_empty: true;
+      },
+      options?: RawAxiosRequestConfig,
+    ) {
+      return axiosInstance.post<PromptPolishOpenAPIResponse>(
+        `${coreApiBaseUrl}/prompts:polish`,
+        payload,
+        withJsonOptions(options),
       );
     },
     promptServicePolishPrompt(

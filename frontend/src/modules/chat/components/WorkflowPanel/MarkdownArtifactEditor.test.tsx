@@ -7,6 +7,7 @@ vi.mock('@mdxeditor/editor', async () => {
   const { flushSync } = await import('react-dom');
   const emptyPlugin = () => ({});
   const EmptyControl = () => null;
+  const FormattingControl = () => <button type='button' title='format-bold'>B</button>;
   const MDXEditor = React.forwardRef((props: Record<string, unknown>, ref) => {
     const markdownRef = React.useRef(String(props.markdown ?? ''));
     const surfaceRef = React.useRef<HTMLDivElement>(null);
@@ -59,7 +60,7 @@ vi.mock('@mdxeditor/editor', async () => {
   });
   return {
     BlockTypeSelect: EmptyControl,
-    BoldItalicUnderlineToggles: EmptyControl,
+    BoldItalicUnderlineToggles: FormattingControl,
     ListsToggle: EmptyControl,
     MDXEditor,
     GenericJsxEditor: EmptyControl,
@@ -83,6 +84,7 @@ vi.mock('@mdxeditor/editor', async () => {
 });
 
 vi.mock('@ant-design/icons', () => ({
+  CommentOutlined: () => null,
   DisconnectOutlined: () => null,
   DownOutlined: () => null,
   FontSizeOutlined: () => null,
@@ -133,6 +135,7 @@ vi.mock('antd', () => ({
 }));
 
 vi.mock('react-i18next', () => ({
+  initReactI18next: { type: '3rdParty', init: () => undefined },
   useTranslation: () => ({ t: (key: string) => key }),
 }));
 
@@ -323,6 +326,10 @@ describe('MarkdownArtifactEditor rewrite selection highlight', () => {
 
     const polish = await screen.findByTitle('chat.artifactRewrite.action');
     expect((polish as HTMLButtonElement).disabled).toBe(false);
+    polish.focus();
+    browserSelection?.removeAllRanges();
+    document.dispatchEvent(new Event('selectionchange'));
+    expect((polish as HTMLButtonElement).disabled).toBe(false);
     fireEvent.click(polish);
 
     await waitFor(() => {
@@ -333,6 +340,99 @@ describe('MarkdownArtifactEditor rewrite selection highlight', () => {
     await waitFor(() => {
       expect(screen.getByTestId('rewrite-selection-highlight').getAttribute('data-active')).toBe('false');
     });
+  });
+
+  it('keeps the editor selection state during toolbar mousedown', async () => {
+    const { container } = render(<Harness />);
+    const paragraph = container.querySelector('p');
+    const textNode = paragraph?.firstChild;
+    expect(paragraph).not.toBeNull();
+    expect(textNode).not.toBeNull();
+
+    const range = document.createRange();
+    range.setStart(textNode!, 0);
+    range.setEnd(textNode!, 5);
+    const browserSelection = window.getSelection();
+    browserSelection?.removeAllRanges();
+    browserSelection?.addRange(range);
+    fireEvent.mouseUp(paragraph!);
+
+    const polish = await screen.findByTitle('chat.artifactRewrite.action');
+    const bold = await screen.findByTitle('format-bold');
+    expect((polish as HTMLButtonElement).disabled).toBe(false);
+
+    fireEvent.mouseDown(bold);
+    browserSelection?.removeAllRanges();
+    document.dispatchEvent(new Event('selectionchange'));
+
+    expect((polish as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(bold);
+  });
+
+  it('offers the chat citation action inside the selection toolbar', async () => {
+    const onCiteSelection = vi.fn();
+    const { container } = render(
+      <MarkdownArtifactEditor
+        markdown='Alpha beta gamma'
+        sourceRevision={1}
+        presentation='chat'
+        onSave={async () => 1}
+        onCiteSelection={onCiteSelection}
+      />,
+    );
+    const paragraph = container.querySelector('p');
+    const textNode = paragraph?.firstChild;
+    expect(textNode).not.toBeNull();
+
+    const range = document.createRange();
+    range.setStart(textNode!, 0);
+    range.setEnd(textNode!, 5);
+    const browserSelection = window.getSelection();
+    browserSelection?.removeAllRanges();
+    browserSelection?.addRange(range);
+    fireEvent.mouseUp(paragraph!);
+
+    fireEvent.click(await screen.findByTitle('chat.cite'));
+    expect(onCiteSelection).toHaveBeenCalledWith('Alpha');
+  });
+
+  it('selects a whole chat paragraph after hovering its leading gutter for one second', () => {
+    vi.useFakeTimers();
+    try {
+      const { container } = render(
+        <MarkdownArtifactEditor
+          markdown='Alpha beta gamma'
+          sourceRevision={1}
+          presentation='chat'
+          onSave={async () => 1}
+        />,
+      );
+      const editor = container.querySelector<HTMLElement>('.writer-markdown-editor');
+      const editable = screen.getByTestId('markdown-editable');
+      const paragraph = container.querySelector<HTMLElement>('p');
+      expect(editor).not.toBeNull();
+      expect(paragraph).not.toBeNull();
+      vi.spyOn(editable, 'getBoundingClientRect').mockReturnValue({
+        ...rect(),
+        left: 80,
+        right: 500,
+        width: 420,
+      });
+      vi.spyOn(paragraph!, 'getBoundingClientRect').mockReturnValue({
+        ...rect(),
+        left: 100,
+        right: 500,
+        width: 400,
+      });
+
+      fireEvent.mouseMove(editor!, { clientX: 90, clientY: 110 });
+      act(() => vi.advanceTimersByTime(999));
+      expect(window.getSelection()?.toString()).toBe('');
+      act(() => vi.advanceTimersByTime(1));
+      expect(window.getSelection()?.toString()).toContain('Alpha beta gamma');
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('reports the controlled reference dropdown expanded state', async () => {

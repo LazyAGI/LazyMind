@@ -1706,6 +1706,13 @@ const enUS = {
     },
     writerMarkdown: {
       documentRegion: "Markdown document",
+      blockTypes: {
+        paragraph: "Paragraph",
+        quote: "Quote",
+        heading: "Heading {{level}}",
+        selectTooltip: "Select paragraph format",
+        placeholder: "Paragraph format",
+      },
       unsaved: "Unsaved changes",
       saved: "Saved",
       saving: "Saving...",

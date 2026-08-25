@@ -581,6 +581,9 @@ func init() {
 	registerAdditionalError("installed Skill distribution baseline is unavailable", http.StatusConflict, 2002299)
 	registerAdditionalError("distribution upgrade conflicts require draft review", http.StatusConflict, 2002300)
 	registerAdditionalError("distribution upgrade draft is active", http.StatusConflict, 2002301)
+	registerAdditionalError("editable content exceeds the 2 mib limit", http.StatusBadRequest, 2002302)
+	registerAdditionalError("editable block changed; refresh and retry", http.StatusConflict, 2002303)
+	registerAdditionalError("save editable block failed", http.StatusInternalServerError, 2002304)
 }
 
 func registerAdditionalError(message string, status, code int) {
