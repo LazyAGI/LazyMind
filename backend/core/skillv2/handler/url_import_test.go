@@ -2,9 +2,13 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
+	"strconv"
+	"strings"
 	"testing"
 
 	"lazymind/core/common"
@@ -12,6 +16,26 @@ import (
 )
 
 func TestNormalizeSkillImportURL(t *testing.T) {
+	apiServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/repos/example/skills" {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"default_branch":"main"}`))
+			return
+		}
+		const commitsPrefix = "/repos/example/skills/commits/"
+		if strings.HasPrefix(r.URL.EscapedPath(), commitsPrefix) {
+			ref, err := url.PathUnescape(strings.TrimPrefix(r.URL.EscapedPath(), commitsPrefix))
+			if err == nil && map[string]bool{"main": true, "feature/foo": true, "v1.2.3": true, "0123456789abcdef0123456789abcdef01234567": true}[ref] {
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		http.NotFound(w, r)
+	}))
+	defer apiServer.Close()
+
 	tests := []struct {
 		name       string
 		rawURL     string
@@ -22,13 +46,46 @@ func TestNormalizeSkillImportURL(t *testing.T) {
 		{
 			name:    "GitHub repository root",
 			rawURL:  "https://github.com/example/skills",
-			wantURL: "https://github.com/example/skills/archive/HEAD.zip",
+			wantURL: "https://github.com/example/skills/archive/main.zip",
 		},
 		{
 			name:       "GitHub tree subdirectory",
 			rawURL:     "https://github.com/example/skills/tree/main/skills/target",
-			wantURL:    "https://github.com/example/skills/archive/refs/heads/main.zip",
+			wantURL:    "https://github.com/example/skills/archive/main.zip",
 			wantPrefix: "skills/target",
+		},
+		{
+			name:       "GitHub branch containing slash",
+			rawURL:     "https://github.com/example/skills/tree/feature/foo/skills/target",
+			wantURL:    "https://github.com/example/skills/archive/feature%2Ffoo.zip",
+			wantPrefix: "skills/target",
+		},
+		{
+			name:       "GitHub tag",
+			rawURL:     "https://github.com/example/skills/tree/v1.2.3/skills/target",
+			wantURL:    "https://github.com/example/skills/archive/v1.2.3.zip",
+			wantPrefix: "skills/target",
+		},
+		{
+			name:       "GitHub commit SHA",
+			rawURL:     "https://github.com/example/skills/tree/0123456789abcdef0123456789abcdef01234567/skills/target",
+			wantURL:    "https://github.com/example/skills/archive/0123456789abcdef0123456789abcdef01234567.zip",
+			wantPrefix: "skills/target",
+		},
+		{
+			name:    "GitHub tag archive URL",
+			rawURL:  "https://github.com/example/skills/archive/refs/tags/v1.2.3.zip",
+			wantURL: "https://github.com/example/skills/archive/v1.2.3.zip",
+		},
+		{
+			name:    "GitHub branch archive URL",
+			rawURL:  "https://github.com/example/skills/archive/refs/heads/main.zip",
+			wantURL: "https://github.com/example/skills/archive/main.zip",
+		},
+		{
+			name:    "GitHub branch archive URL containing slash",
+			rawURL:  "https://github.com/example/skills/archive/refs/heads/feature/foo.zip",
+			wantURL: "https://github.com/example/skills/archive/feature%2Ffoo.zip",
 		},
 		{
 			name:    "direct zip URL",
@@ -40,11 +97,21 @@ func TestNormalizeSkillImportURL(t *testing.T) {
 			rawURL:  "ftp://example.test/skills.zip",
 			wantErr: true,
 		},
+		{
+			name:    "GitHub tree missing path",
+			rawURL:  "https://github.com/example/skills/tree/main",
+			wantErr: true,
+		},
+		{
+			name:    "GitHub URL with query",
+			rawURL:  "https://github.com/example/skills?download=1",
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			gotURL, gotPrefix, err := normalizeSkillImportURL(tt.rawURL)
+			gotURL, gotPrefix, err := normalizeSkillImportURLWithResolver(context.Background(), tt.rawURL, apiServer.Client(), apiServer.URL)
 			if tt.wantErr {
 				if err == nil {
 					t.Fatal("normalizeSkillImportURL returned nil error")
@@ -98,5 +165,18 @@ func TestCreateSkillFromInvalidURLReturnsInvalidParams(t *testing.T) {
 	}
 	if got := testutil.CountRows(t, db, "skills", ""); got != 0 {
 		t.Fatalf("skills count = %d, want 0", got)
+	}
+}
+
+func TestHTTPZipDownloaderRejectsOversizedContentLength(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Length", strconv.FormatInt(maxSkillDownloadBytes+1, 10))
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	_, err := (httpZipDownloader{}).Download(context.Background(), server.URL)
+	if err == nil || !strings.Contains(err.Error(), "download exceeds") {
+		t.Fatalf("error = %v, want download size error", err)
 	}
 }

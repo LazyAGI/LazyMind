@@ -377,6 +377,10 @@ func init() {
 	registerAdditionalErrorPattern("skill package exceeds %d uncompressed bytes", "Invalid skill package", http.StatusBadRequest, 2002294)
 	registerAdditionalErrorPattern("skill name cannot exceed %d characters", "Skill name cannot exceed 80 characters", http.StatusBadRequest, 2002305)
 	registerAdditionalErrorPattern("skill description cannot exceed %d characters", "Skill description cannot exceed 1024 characters", http.StatusBadRequest, 2002306)
+	registerAdditionalErrorPattern("github ref lookup failed with http status %d", "Invalid request", http.StatusBadRequest, 2000103)
+	registerAdditionalErrorAlias("github ref lookup failed", "Invalid request", http.StatusBadRequest, 2000103)
+	registerAdditionalErrorAlias("github ref lookup returned invalid json", "Invalid request", http.StatusBadRequest, 2000103)
+	registerAdditionalErrorPattern("skill package download exceeds %d bytes", "Invalid skill package", http.StatusBadRequest, 2002294)
 
 	// Personal recovery and archive lifecycle errors.
 	registerAdditionalError("query archive folders failed", http.StatusInternalServerError, 2002098)

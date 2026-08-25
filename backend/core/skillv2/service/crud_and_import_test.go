@@ -118,10 +118,12 @@ func TestCreateSkillFromURL_ImportsGitHubTreeSubdirectory(t *testing.T) {
 	db := newSkillV2TestDB(t)
 	zipPath := filepath.Join(t.TempDir(), "github-tree.zip")
 	writeSkillZip(t, zipPath, map[string][]byte{
-		"skills-main/skills/target/SKILL.md":        externalSkillMD("目标技能", "从 GitHub 子目录导入"),
-		"skills-main/skills/target/references/a.md": []byte("# 目标资料\n"),
-		"skills-main/skills/target/assets/logo.png": minimalPNGBytes(),
-		"skills-main/skills/ignored/SKILL.md":       externalSkillMD("忽略技能", "不应导入"),
+		"skills-main/skills/target/SKILL.md":            externalSkillMD("目标技能", "从 GitHub 子目录导入"),
+		"skills-main/skills/target/references/a.md":     []byte("# 目标资料\n"),
+		"skills-main/skills/target/assets/logo.png":     minimalPNGBytes(),
+		"skills-main/skills/ignored/SKILL.md":           externalSkillMD("忽略技能", "不应导入"),
+		"skills-main/skills/target/.DS_Store":           []byte("finder metadata"),
+		"__MACOSX/skills-main/skills/target/._SKILL.md": []byte("macOS metadata"),
 	})
 	archiveURL := "https://github.com/example/skills/archive/refs/heads/main.zip"
 	svc := NewSkillService(SkillServiceDeps{
@@ -159,6 +161,9 @@ func TestCreateSkillFromURL_ImportsGitHubTreeSubdirectory(t *testing.T) {
 	assertRevisionEntries(t, db, resp.HeadRevisionID)
 	if got := countRows(t, db, "skill_revision_entries", "revision_id = ? AND path LIKE ?", resp.HeadRevisionID, "ignored/%"); got != 0 {
 		t.Fatalf("ignored subtree entry count = %d, want 0", got)
+	}
+	if got := countRows(t, db, "skill_revision_entries", "revision_id = ? AND path LIKE ?", resp.HeadRevisionID, "%DS_Store%"); got != 0 {
+		t.Fatalf("system metadata entry count = %d, want 0", got)
 	}
 }
 
