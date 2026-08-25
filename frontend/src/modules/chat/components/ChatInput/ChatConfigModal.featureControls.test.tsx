@@ -75,6 +75,61 @@ describe('ChatConfigPopover feature control independence', () => {
     mocks.onSave.mockReset();
   });
 
+  it('stays closed after being disabled while open', async () => {
+    mocks.fetchUserUiPreferences.mockResolvedValue({
+      task_center_enabled: true,
+      workflows_enabled: true,
+    });
+
+    const { rerender } = render(
+      <ChatConfigPopover
+        initialSettings={{
+          enable_workflow: true,
+          workflow_mode: 'auto',
+          enable_subagent: true,
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '对话配置' }));
+    expect(
+      await screen.findByRole('radiogroup', { name: '对话执行者' }),
+    ).toBeInTheDocument();
+
+    rerender(
+      <ChatConfigPopover
+        disabled
+        initialSettings={{
+          enable_workflow: true,
+          workflow_mode: 'auto',
+          enable_subagent: true,
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '对话配置' })).toBeDisabled();
+      expect(
+        screen.getByRole('tooltip').closest('.ant-popover'),
+      ).toHaveStyle({ pointerEvents: 'none' });
+    });
+
+    rerender(
+      <ChatConfigPopover
+        initialSettings={{
+          enable_workflow: true,
+          workflow_mode: 'auto',
+          enable_subagent: true,
+        }}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: '对话配置' })).toBeEnabled();
+    expect(
+      screen.getByRole('tooltip').closest('.ant-popover'),
+    ).toHaveStyle({ pointerEvents: 'none' });
+  });
+
   it('disables only subtasks when the task center is off and workflows are on', async () => {
     mocks.fetchUserUiPreferences.mockResolvedValue({
       task_center_enabled: false,

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { forwardRef, useImperativeHandle } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -10,8 +10,31 @@ const mocks = vi.hoisted(() => ({
   setThinkingDepth: vi.fn(),
   getShowcaseCase: vi.fn(),
   getKnowledgeMarketItem: vi.fn(),
+  getChatSettings: vi.fn(),
   clearFiles: vi.fn(),
+  latestChatInputProps: null as any,
 }));
+
+const entryDefaults = {
+  quick_question: {
+    thinking_depth: "low",
+    conversation_settings: {
+      chat_executor: "lazymind",
+      enable_workflow: false,
+      workflow_mode: "auto",
+      enable_subagent: false,
+    },
+  },
+  new_task: {
+    thinking_depth: "max",
+    conversation_settings: {
+      chat_executor: "codex",
+      enable_workflow: true,
+      workflow_mode: "dynamic",
+      enable_subagent: true,
+    },
+  },
+};
 
 const featuredCase: ShowcaseCase = {
   builtin_skill_uid: "builtin.product-design",
@@ -46,6 +69,7 @@ vi.mock("react-i18next", async (importOriginal) => {
 
 vi.mock("@/modules/chat/components/ChatInput", () => ({
   default: forwardRef(function MockChatInput(props: any, ref) {
+    mocks.latestChatInputProps = props;
     useImperativeHandle(ref, () => ({
       clearFiles: mocks.clearFiles,
       focus: vi.fn(),
@@ -102,6 +126,30 @@ vi.mock("@/components/request", () => ({
   axiosInstance: {},
   localizeErrorCode: (code: string) => code,
 }));
+vi.mock("@/modules/chat/utils/request", () => ({
+  FALLBACK_CHAT_ENTRY_DEFAULTS: {
+    quick_question: {
+      thinking_depth: "medium",
+      conversation_settings: {
+        chat_executor: "lazymind",
+        enable_workflow: false,
+        workflow_mode: "dynamic",
+        enable_subagent: true,
+      },
+    },
+    new_task: {
+      thinking_depth: "high",
+      conversation_settings: {
+        chat_executor: "lazymind",
+        enable_workflow: true,
+        workflow_mode: "dynamic",
+        enable_subagent: true,
+      },
+    },
+  },
+  parseChatEntryDefaults: (payload: any) => payload?.data ?? payload,
+  ConversationSettingsApi: () => ({ getChatSettings: mocks.getChatSettings }),
+}));
 vi.mock("@/modules/chat/store/chatThink", () => ({
   useChatThinkStore: {
     getState: () => ({ setThinkingDepth: mocks.setThinkingDepth }),
@@ -127,15 +175,146 @@ describe("NewChatPage featured templates", () => {
     mocks.setThinkingDepth.mockClear();
     mocks.getShowcaseCase.mockReset();
     mocks.getKnowledgeMarketItem.mockReset();
+    mocks.getChatSettings.mockReset();
+    mocks.getChatSettings.mockResolvedValue({ data: { data: entryDefaults } });
     mocks.clearFiles.mockReset();
+    mocks.latestChatInputProps = null;
   });
 
-  it("keeps template controls and capability cards while the user edits the template", () => {
+  it("applies the configured Quick Q&A defaults to the welcome composer", async () => {
     render(
       <MemoryRouter initialEntries={["/agent/chat/home"]}>
         <NewChatPage />
       </MemoryRouter>,
     );
+
+    await waitFor(() => {
+      expect(mocks.setThinkingDepth).toHaveBeenLastCalledWith("low");
+      expect(mocks.latestChatInputProps.initialConversationSettings).toEqual(
+        entryDefaults.quick_question.conversation_settings,
+      );
+    });
+  });
+
+  it("applies the configured New task defaults and switches profiles without mixing values", async () => {
+    window.sessionStorage.setItem("chat_new_run_in_background", "1");
+    render(
+      <MemoryRouter initialEntries={["/agent/chat/home"]}>
+        <NewChatPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(mocks.setThinkingDepth).toHaveBeenLastCalledWith("max");
+      expect(mocks.latestChatInputProps.initialConversationSettings).toEqual(
+        entryDefaults.new_task.conversation_settings,
+      );
+      expect(mocks.latestChatInputProps.runInBackground).toBe(true);
+    });
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("lazymind:chat-select-conversation", {
+        detail: { conversationId: "", runInBackground: false },
+      }));
+    });
+
+    await waitFor(() => {
+      expect(mocks.setThinkingDepth).toHaveBeenLastCalledWith("low");
+      expect(mocks.latestChatInputProps.initialConversationSettings).toEqual(
+        entryDefaults.quick_question.conversation_settings,
+      );
+      expect(mocks.latestChatInputProps.runInBackground).toBe(false);
+    });
+  });
+
+  it("blocks new conversations until failed defaults can be reloaded", async () => {
+    mocks.getChatSettings.mockRejectedValueOnce(new Error("offline"));
+    window.sessionStorage.setItem("chat_new_run_in_background", "1");
+
+    render(
+      <MemoryRouter initialEntries={["/agent/chat/home"]}>
+        <NewChatPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(mocks.setThinkingDepth).toHaveBeenLastCalledWith("high");
+      expect(mocks.latestChatInputProps.initialConversationSettings).toEqual({
+        chat_executor: "lazymind",
+        enable_workflow: true,
+        workflow_mode: "dynamic",
+        enable_subagent: true,
+      });
+    });
+    expect(screen.getByText("settingsPage.tasks.entryDefaultsLoadFailed")).toBeInTheDocument();
+    expect(mocks.latestChatInputProps.disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", {
+      name: "settingsPage.tasks.retryEntryDefaults",
+    }));
+
+    await waitFor(() => {
+      expect(mocks.latestChatInputProps.disabled).toBe(false);
+      expect(mocks.setThinkingDepth).toHaveBeenLastCalledWith("max");
+      expect(mocks.latestChatInputProps.initialConversationSettings).toEqual(
+        entryDefaults.new_task.conversation_settings,
+      );
+    });
+  });
+
+  it("does not apply entry defaults while resuming an existing conversation", async () => {
+    window.sessionStorage.setItem("chat_resume_conversation_id", "conversation-1");
+
+    render(
+      <MemoryRouter initialEntries={["/agent/chat/home"]}>
+        <NewChatPage />
+      </MemoryRouter>,
+    );
+
+    expect(mocks.setThinkingDepth).not.toHaveBeenCalled();
+    await waitFor(() => expect(mocks.getChatSettings).toHaveBeenCalledOnce());
+    await waitFor(() => expect(
+      screen.queryByText("settingsPage.tasks.entryDefaultsLoading"),
+    ).not.toBeInTheDocument());
+    expect(mocks.setThinkingDepth).not.toHaveBeenCalled();
+  });
+
+  it("stops applying entry defaults after an existing conversation is selected", async () => {
+    render(
+      <MemoryRouter initialEntries={["/agent/chat/home"]}>
+        <NewChatPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(mocks.setThinkingDepth).toHaveBeenLastCalledWith("low");
+    });
+    mocks.setThinkingDepth.mockClear();
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("lazymind:chat-select-conversation", {
+        detail: { conversationId: "conversation-1", source: "sidebar" },
+      }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", {
+        name: "chat-input",
+        hidden: true,
+      })).not.toBeVisible();
+    });
+    expect(mocks.setThinkingDepth).not.toHaveBeenCalled();
+  });
+
+  it("keeps template controls and capability cards while the user edits the template", async () => {
+    render(
+      <MemoryRouter initialEntries={["/agent/chat/home"]}>
+        <NewChatPage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(
+      screen.queryByText("settingsPage.tasks.entryDefaultsLoading"),
+    ).not.toBeInTheDocument());
 
     fireEvent.click(screen.getByRole("button", { name: "试一试模板" }));
 
@@ -155,12 +334,15 @@ describe("NewChatPage featured templates", () => {
     expect(screen.queryByText("prompt-suggestions")).not.toBeInTheDocument();
   });
 
-  it("clears an inserted template and returns to the empty welcome state", () => {
+  it("clears an inserted template and returns to the empty welcome state", async () => {
     render(
       <MemoryRouter initialEntries={["/agent/chat/home"]}>
         <NewChatPage />
       </MemoryRouter>,
     );
+    await waitFor(() => expect(
+      screen.queryByText("settingsPage.tasks.entryDefaultsLoading"),
+    ).not.toBeInTheDocument());
 
     fireEvent.click(screen.getByRole("button", { name: "试一试模板" }));
     mocks.clearFiles.mockClear();

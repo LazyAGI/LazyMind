@@ -44,7 +44,7 @@ func TestEphemeralConversationIsHiddenUntilPromoted(t *testing.T) {
 
 	conversation, _, err := ensureConversation(
 		context.Background(), db, "preview-chat", "Preview chat", nil, nil,
-		"u1", "User 1", map[string]any{
+		"u1", "User 1", false, "", map[string]any{
 			"ephemeral": true, "source_type": "pdf_preview", "source_document_id": "doc-1",
 		},
 	)
@@ -95,7 +95,7 @@ func TestPersistentEphemeralConversationHasNoExpiry(t *testing.T) {
 
 	conversation, _, err := ensureConversation(
 		context.Background(), db, "persistent-preview", "Preview chat", nil, nil,
-		"u1", "User 1", map[string]any{
+		"u1", "User 1", false, "", map[string]any{
 			"ephemeral": true, "persistent_ephemeral": true,
 			"source_type": "pdf_preview", "source_document_id": "doc-1",
 		},
@@ -722,6 +722,9 @@ func TestBuildChatRequestBodyAcceptsMaxThinkingDepth(t *testing.T) {
 	if got := body["thinking_depth"]; got != "max" {
 		t.Fatalf("expected max thinking depth, got %#v", got)
 	}
+	if got := buildLazyChatRequest(body).Runtime.ThinkingDepth; got != "max" {
+		t.Fatalf("expected upstream max thinking depth, got %q", got)
+	}
 }
 
 func TestBuildChatHistoryExtPreservesMultimodalInput(t *testing.T) {
@@ -836,10 +839,11 @@ func TestGetConversationDetailReturnsStoredMultimodalInput(t *testing.T) {
 		},
 	}, "记住这个是王牌超")
 	if err := db.Create(&orm.Conversation{
-		ID:           "conv-1",
-		DisplayName:  "记住这个是王牌超",
-		ChannelID:    "default",
-		SearchConfig: json.RawMessage(`{}`),
+		ID:            "conv-1",
+		DisplayName:   "记住这个是王牌超",
+		ChannelID:     "default",
+		ThinkingDepth: "high",
+		SearchConfig:  json.RawMessage(`{}`),
 		BaseModel: orm.BaseModel{
 			CreateUserID:   "u1",
 			CreateUserName: "User 1",
@@ -876,6 +880,7 @@ func TestGetConversationDetailReturnsStoredMultimodalInput(t *testing.T) {
 		Conversation struct {
 			ConversationID string `json:"conversation_id"`
 			DisplayName    string `json:"display_name"`
+			ThinkingDepth  string `json:"thinking_depth"`
 		} `json:"conversation"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
@@ -886,6 +891,9 @@ func TestGetConversationDetailReturnsStoredMultimodalInput(t *testing.T) {
 	}
 	if resp.Conversation.DisplayName != "记住这个是王牌超" {
 		t.Fatalf("expected display_name preserved, got %q", resp.Conversation.DisplayName)
+	}
+	if resp.Conversation.ThinkingDepth != "high" {
+		t.Fatalf("expected thinking_depth high, got %q", resp.Conversation.ThinkingDepth)
 	}
 }
 

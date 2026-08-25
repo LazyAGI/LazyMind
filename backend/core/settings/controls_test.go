@@ -20,12 +20,13 @@ func TestLoadFeatureControlsDefaultsWhenPreferencesTableIsMissing(t *testing.T) 
 	}
 }
 
-func TestLoadFeatureControlsKeepsWorkflowsEnabledWhenTaskCenterIsOff(t *testing.T) {
+func TestLoadFeatureControlsKeepsTaskControlsIndependent(t *testing.T) {
 	db := orm.MigrateTestDB(t, &orm.UserUIPreferences{})
 	now := time.Now().UTC()
 	if err := db.Model(&orm.UserUIPreferences{}).Create(map[string]any{
 		"user_id":                  "user-1",
 		"task_center_enabled":      false,
+		"schedules_enabled":        true,
 		"skills_enabled":           true,
 		"workflows_enabled":        true,
 		"mcp_enabled":              true,
@@ -40,7 +41,7 @@ func TestLoadFeatureControlsKeepsWorkflowsEnabledWhenTaskCenterIsOff(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if controls.TaskCenterEnabled || !controls.WorkflowsEnabled {
-		t.Fatalf("task center and workflows must remain independent: %#v", controls)
+	if controls.TaskCenterEnabled || !controls.WorkflowsEnabled || !controls.SchedulesEnabled {
+		t.Fatalf("subtasks, workflows, and schedules must remain independent: %#v", controls)
 	}
 }

@@ -25,6 +25,7 @@ type uiPreferencesResponse struct {
 	DeveloperModeActive           bool   `json:"developer_mode_active"`
 	AcceptedUserAgreementVersion  string `json:"accepted_user_agreement_version"`
 	TaskCenterEnabled             bool   `json:"task_center_enabled"`
+	SchedulesEnabled              bool   `json:"schedules_enabled"`
 	SkillsEnabled                 bool   `json:"skills_enabled"`
 	WorkflowsEnabled              bool   `json:"workflows_enabled"`
 	MCPEnabled                    bool   `json:"mcp_enabled"`
@@ -38,6 +39,7 @@ type uiPreferencesPatchRequest struct {
 	DeveloperModeActive           *bool   `json:"developer_mode_active"`
 	AcceptedUserAgreementVersion  *string `json:"accepted_user_agreement_version"`
 	TaskCenterEnabled             *bool   `json:"task_center_enabled"`
+	SchedulesEnabled              *bool   `json:"schedules_enabled"`
 	SkillsEnabled                 *bool   `json:"skills_enabled"`
 	WorkflowsEnabled              *bool   `json:"workflows_enabled"`
 	MCPEnabled                    *bool   `json:"mcp_enabled"`
@@ -90,6 +92,7 @@ func PatchUIPreferences(w http.ResponseWriter, r *http.Request) {
 		req.DeveloperModeActive == nil &&
 		req.AcceptedUserAgreementVersion == nil &&
 		req.TaskCenterEnabled == nil &&
+		req.SchedulesEnabled == nil &&
 		req.SkillsEnabled == nil &&
 		req.WorkflowsEnabled == nil &&
 		req.MCPEnabled == nil &&
@@ -120,7 +123,7 @@ func PatchUIPreferences(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		if req.TaskCenterEnabled != nil && *req.TaskCenterEnabled && !currentControls.TaskCenterEnabled {
+		if req.SchedulesEnabled != nil && *req.SchedulesEnabled && !currentControls.SchedulesEnabled {
 			return scheduler.RecomputeEnabledSchedules(r.Context(), tx, userID, time.Now().UTC())
 		}
 		return nil
@@ -191,6 +194,7 @@ func LoadUserUIPreferences(ctx context.Context, db *gorm.DB, userID string) (orm
 		return orm.UserUIPreferences{
 			UserID:                 strings.TrimSpace(userID),
 			TaskCenterEnabled:      true,
+			SchedulesEnabled:       true,
 			SkillsEnabled:          true,
 			WorkflowsEnabled:       true,
 			MCPEnabled:             true,
@@ -210,6 +214,7 @@ func UpsertUserUIPreferences(ctx context.Context, db *gorm.DB, userID string, re
 		row = orm.UserUIPreferences{
 			UserID:                 userID,
 			TaskCenterEnabled:      true,
+			SchedulesEnabled:       true,
 			SkillsEnabled:          true,
 			WorkflowsEnabled:       true,
 			MCPEnabled:             true,
@@ -228,6 +233,9 @@ func UpsertUserUIPreferences(ctx context.Context, db *gorm.DB, userID string, re
 		}
 		if req.TaskCenterEnabled != nil {
 			row.TaskCenterEnabled = *req.TaskCenterEnabled
+		}
+		if req.SchedulesEnabled != nil {
+			row.SchedulesEnabled = *req.SchedulesEnabled
 		}
 		if req.SkillsEnabled != nil {
 			row.SkillsEnabled = *req.SkillsEnabled
@@ -249,6 +257,7 @@ func UpsertUserUIPreferences(ctx context.Context, db *gorm.DB, userID string, re
 			"developer_mode_active":            row.DeveloperModeActive,
 			"accepted_user_agreement_version":  row.AcceptedUserAgreementVersion,
 			"task_center_enabled":              row.TaskCenterEnabled,
+			"schedules_enabled":                row.SchedulesEnabled,
 			"skills_enabled":                   row.SkillsEnabled,
 			"workflows_enabled":                row.WorkflowsEnabled,
 			"mcp_enabled":                      row.MCPEnabled,
@@ -281,6 +290,10 @@ func UpsertUserUIPreferences(ctx context.Context, db *gorm.DB, userID string, re
 	if req.TaskCenterEnabled != nil {
 		updates["task_center_enabled"] = *req.TaskCenterEnabled
 		row.TaskCenterEnabled = *req.TaskCenterEnabled
+	}
+	if req.SchedulesEnabled != nil {
+		updates["schedules_enabled"] = *req.SchedulesEnabled
+		row.SchedulesEnabled = *req.SchedulesEnabled
 	}
 	if req.SkillsEnabled != nil {
 		updates["skills_enabled"] = *req.SkillsEnabled
@@ -336,6 +349,7 @@ func buildUIPreferencesResponse(row orm.UserUIPreferences, userPreferenceConfigu
 		DeveloperModeActive:           row.DeveloperModeActive,
 		AcceptedUserAgreementVersion:  row.AcceptedUserAgreementVersion,
 		TaskCenterEnabled:             row.TaskCenterEnabled,
+		SchedulesEnabled:              row.SchedulesEnabled,
 		SkillsEnabled:                 row.SkillsEnabled,
 		WorkflowsEnabled:              row.WorkflowsEnabled,
 		MCPEnabled:                    row.MCPEnabled,

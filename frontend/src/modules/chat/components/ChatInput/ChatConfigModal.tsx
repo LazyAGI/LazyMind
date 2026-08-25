@@ -17,6 +17,8 @@ import {
 import './ChatConfigModal.scss';
 
 interface ChatConfigPopoverProps {
+  /** Prevents opening or editing while the parent composer is unavailable. */
+  disabled?: boolean;
   /** When provided, settings are saved to the server immediately on change. */
   conversationId?: string;
   /** Initial settings to display. If not provided, fetched from server on first open. */
@@ -76,6 +78,7 @@ export function buildExecutorCatalog(
 }
 
 export default function ChatConfigPopover({
+  disabled = false,
   conversationId,
   initialSettings,
   onSave,
@@ -95,6 +98,12 @@ export default function ChatConfigPopover({
   });
   // Track whether we've already fetched defaults to avoid repeated requests.
   const fetchedRef = useRef(false);
+
+  useEffect(() => {
+    if (disabled) {
+      setOpen(false);
+    }
+  }, [disabled]);
 
   // Sync external initialSettings into local state; reset fetch cache on conversation change.
   useEffect(() => {
@@ -221,6 +230,10 @@ export default function ChatConfigPopover({
   }, [open]);
 
   function handleOpenChange(next: boolean) {
+    if (disabled) {
+      setOpen(false);
+      return;
+    }
     setOpen(next);
     if (next) {
       void ensureSettings();
@@ -430,7 +443,7 @@ export default function ChatConfigPopover({
   return (
     <Popover
       content={content}
-      open={open}
+      open={disabled ? false : open}
       onOpenChange={handleOpenChange}
       trigger="click"
       placement="topLeft"
@@ -438,10 +451,15 @@ export default function ChatConfigPopover({
       overlayClassName="chat-config-popover-overlay"
       destroyTooltipOnHide
     >
-      <div className="input-bottom-actions-left-item">
+      <button
+        type="button"
+        className="input-bottom-actions-left-item"
+        disabled={disabled}
+        aria-label={t('chat.conversationConfig')}
+      >
         <SettingOutlined style={{ marginRight: 4 }} />
         {t('chat.conversationConfig')}
-      </div>
+      </button>
     </Popover>
   );
 }
