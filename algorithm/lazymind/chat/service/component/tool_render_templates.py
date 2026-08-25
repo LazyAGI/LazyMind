@@ -5,7 +5,7 @@ from typing import Any
 # A tool selector and its localized state templates live together so additions
 # and renames cannot silently update only one of several parallel maps.
 TOOL_RENDER_PROFILES: dict[str, dict[str, Any]] = (
-{ 'kb_search': {'argument': 'query',  # noqa: E122
+{'kb_search': {'argument': 'query',  # noqa: E122
                'call': {'en': 'Using kb_search for {value}.',
                         'zh': '正在用 kb_search 检索 {value}。'},
                'success': {'en': 'kb_search completed with '
