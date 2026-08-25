@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"gorm.io/gorm"
+
+	skillmetadata "lazymind/core/skillv2/metadata"
 )
 
 func TestCreateSkillFromUploadedZip_RequiresSkillMD(t *testing.T) {
@@ -52,6 +54,61 @@ func TestCreateSkillFromUploadedZip_RequiresFrontmatterMetadata(t *testing.T) {
 			}
 			assertNoSkillTruthRows(t, db)
 		})
+	}
+}
+
+func TestCreateSkill_RejectsTooLongMetadata(t *testing.T) {
+	for _, sourceType := range []string{"uploaded_zip", "local_zip"} {
+		for name, spec := range map[string]struct {
+			skillName   string
+			description string
+		}{
+			"name": {
+				skillName:   strings.Repeat("a", skillmetadata.MaxSkillNameLength+1),
+				description: "用于阅读和总结论文的技能",
+			},
+			"description": {
+				skillName:   "论文精读",
+				description: strings.Repeat("a", skillmetadata.MaxSkillDescriptionLength+1),
+			},
+		} {
+			t.Run(sourceType+"/"+name, func(t *testing.T) {
+				db := newSkillV2TestDB(t)
+				zipPath := filepath.Join(t.TempDir(), name+".zip")
+				writeSkillZip(t, zipPath, map[string][]byte{
+					"SKILL.md": externalSkillMD(spec.skillName, spec.description),
+				})
+				uploadStore := newFakeUploadStore()
+				req := validCreateSkillRequest("upload_too_long_" + name)
+				req.Name = spec.skillName
+				req.Description = spec.description
+				if sourceType == "uploaded_zip" {
+					uploadStore.Put(UploadSession{
+						UploadID:    req.Source.UploadID,
+						OwnerUserID: "user_001",
+						State:       "completed",
+						StoredPath:  zipPath,
+						Filename:    name + ".zip",
+					})
+				} else {
+					req.Source = SourceInput{
+						Type:       "local_zip",
+						StoredPath: zipPath,
+						Filename:   name + ".zip",
+					}
+				}
+				svc := newCreateSkillValidationService(t, db, uploadStore)
+
+				_, err := svc.CreateSkill(context.Background(), req)
+				if err == nil {
+					t.Fatal("CreateSkill succeeded")
+				}
+				if !strings.Contains(err.Error(), "cannot exceed") {
+					t.Fatalf("CreateSkill error = %v, want cannot exceed", err)
+				}
+				assertNoSkillTruthRows(t, db)
+			})
+		}
 	}
 }
 
