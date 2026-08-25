@@ -6,7 +6,7 @@ status: published
 default_locale: zh-CN
 
 skill:
-  source_url: https://skillhub.cn/skills/user_141d55f7/novel-generator
+  source_url: featured/novel-generator/skill
   required_version: 1.0.0
 
 placement:
