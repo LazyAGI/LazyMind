@@ -18,6 +18,30 @@ export type GlossarySource = "user" | "ai";
 export const GLOSSARY_TERM_MAX_LENGTH = 50;
 export const GLOSSARY_ALIAS_MAX_LENGTH = 50;
 export const GLOSSARY_CONTENT_MAX_LENGTH = 300;
+export const SKILL_NAME_MAX_LENGTH = 80;
+export const SKILL_DESCRIPTION_MAX_LENGTH = 1024;
+
+export function countSkillCharacters(value: unknown): number {
+  return Array.from(typeof value === "string" ? value.trim() : "").length;
+}
+
+export function skillCharCountConfig(maxLength: number, visible = true) {
+  if (!visible) {
+    return undefined;
+  }
+  return {
+    strategy: (value: string) => countSkillCharacters(value),
+    show: ({ count }: { count: number }) => `${count}/${maxLength}`,
+  };
+}
+
+export const SKILL_CHAR_COUNT_STYLE = {
+  fontSize: 12,
+  fontWeight: 400,
+  color: '#98a2b3',
+  lineHeight: '12px',
+  fontVariantNumeric: 'tabular-nums',
+} as const;
 
 export interface BaseAsset {
   id: string;

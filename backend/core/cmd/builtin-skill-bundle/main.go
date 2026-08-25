@@ -131,9 +131,11 @@ func run(ctx context.Context, opts options, client *http.Client) error {
 		}
 	}
 	sources := make([]sourceInput, 0, len(ordinarySources.Skills)+len(ordinarySources.BundledSkills))
-	seenSources := make(map[string]struct{}, len(ordinarySources.Skills))
+	seenSources := make(map[string]struct{}, len(ordinarySources.Skills)+len(ordinarySources.BundledSkills))
 	for index := range ordinarySources.BundledSkills {
-		sources = append(sources, sourceInput{Bundled: &ordinarySources.BundledSkills[index], MarketVisible: true})
+		source := &ordinarySources.BundledSkills[index]
+		sources = append(sources, sourceInput{Bundled: source, MarketVisible: true})
+		seenSources[bundledSourceURL(source.Path)] = struct{}{}
 	}
 	for _, source := range ordinarySources.Skills {
 		sources = append(sources, sourceInput{URL: source, MarketVisible: true})
@@ -146,16 +148,21 @@ func run(ctx context.Context, opts options, client *http.Client) error {
 		if err != nil {
 			return err
 		}
-		for _, definition := range featuredDefinitions {
+		for index := range featuredDefinitions {
+			definition := &featuredDefinitions[index]
 			if definition.Status != showcase.StatusPublished {
 				continue
 			}
-			source := strings.TrimSpace(definition.Skill.SourceURL)
+			input, source, err := featuredSourceInput(definition.Skill.SourceURL, definition.Skill.RequiredVersion)
+			if err != nil {
+				return bundleFailure("featured Skill %s: %v", definition.ID, err)
+			}
 			if _, exists := seenSources[source]; exists {
 				return bundleFailure("source %s cannot be both a market Skill and a featured-only Skill", source)
 			}
 			seenSources[source] = struct{}{}
-			sources = append(sources, sourceInput{URL: source})
+			definition.Skill.SourceURL = source
+			sources = append(sources, input)
 		}
 	}
 	var lockedBySource map[string]skillbuiltin.CatalogSkill
@@ -366,6 +373,19 @@ func resolveSourceInput(source sourceInput, sourcesRoot string) (sourceSpec, err
 		Category: source.Bundled.Category, Version: source.Bundled.Version,
 		LocalPath: localPath,
 	}, nil
+}
+
+func featuredSourceInput(raw, requiredVersion string) (sourceInput, string, error) {
+	source := strings.TrimSpace(raw)
+	if _, err := resolveSource(source); err == nil {
+		return sourceInput{URL: source}, source, nil
+	}
+	cleaned, err := skillpackage.CleanPath(source)
+	if err != nil {
+		return sourceInput{}, "", bundleFailure("invalid local Skill path %q", source)
+	}
+	bundled := &bundledSource{Path: cleaned, Version: strings.TrimSpace(requiredVersion)}
+	return sourceInput{Bundled: bundled}, bundledSourceURL(cleaned), nil
 }
 
 func bundledSourceURL(relativePath string) string {
