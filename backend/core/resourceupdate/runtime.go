@@ -30,6 +30,7 @@ func Start(ctx context.Context, db *gorm.DB, stateStore state.Store, cfg Config)
 	scheduler := NewScheduler(db, cfg, workerID+"-scheduler")
 	worker := NewWorker(db, cfg, workerID+"-worker", stateStore)
 	scanner := NewScanner(db, cfg, workerID+"-scanner")
+	scanner.distributionAutoUpdater = newSkillDistributionAutoUpdater(db)
 
 	done := make(chan struct{})
 	var wg sync.WaitGroup

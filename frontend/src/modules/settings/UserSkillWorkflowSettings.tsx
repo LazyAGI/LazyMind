@@ -17,6 +17,7 @@ import {
 export type ResourceTab = "skills" | "workflows";
 
 interface UserSkillWorkflowSettingsProps {
+  taskCenterEnabled: boolean;
   skillsEnabled: boolean;
   workflowsEnabled: boolean;
   groupSaving: ResourceTab | null;
@@ -97,6 +98,7 @@ function ResourceRow({
 }
 
 export default function UserSkillWorkflowSettings({
+  taskCenterEnabled,
   skillsEnabled,
   workflowsEnabled,
   groupSaving,
@@ -196,7 +198,9 @@ export default function UserSkillWorkflowSettings({
   };
 
   const activeResources = activeTab === "skills" ? skills : workflows;
-  const activeGroupEnabled = activeTab === "skills" ? skillsEnabled : workflowsEnabled;
+  const workflowControlsAvailable = taskCenterEnabled && workflowsEnabled;
+  const workflowControlBlocked = activeTab === "workflows" && !taskCenterEnabled;
+  const activeGroupEnabled = activeTab === "skills" ? skillsEnabled : workflowControlsAvailable;
   const activeGroupSaving = groupSaving === activeTab;
   const activeGroupTotal = activeTab === "skills" ? skills.length : workflows.length;
   const activeGroupEnabledCount = activeTab === "skills" ? enabledSkillCount : enabledWorkflowCount;
@@ -242,8 +246,8 @@ export default function UserSkillWorkflowSettings({
             description={workflow.description || workflow.when_to_use}
             meta={t("settingsPage.skills.workflowMeta", { revision: workflow.revision_no })}
             enabled={workflow.enabled}
-            controlEnabled={workflowsEnabled}
-            controlLabel={t("settingsPage.skills.myWorkflows")}
+            controlEnabled={workflowControlsAvailable}
+            controlLabel={taskCenterEnabled ? t("settingsPage.skills.myWorkflows") : t("settingsPage.controls.taskCenter.title")}
             loading={saving.has(key)}
             error={rowErrors[key]}
             icon={<ApartmentOutlined />}
@@ -270,9 +274,12 @@ export default function UserSkillWorkflowSettings({
               className="settings-ref-switch"
               checked={activeGroupEnabled}
               loading={activeGroupSaving}
-              disabled={controlsDisabled || activeGroupTotal === 0}
+              disabled={controlsDisabled || activeGroupTotal === 0 || workflowControlBlocked}
               onChange={(enabled: boolean) => onGroupChange(activeTab, enabled, activeGroupEnabledCount)}
-              aria-label={t("settingsPage.skills.bulkEnableAria", { label: activeGroupLabel })}
+              aria-label={workflowControlBlocked
+                ? t("settingsPage.skills.taskCenterRequiredAria")
+                : t("settingsPage.skills.bulkEnableAria", { label: activeGroupLabel })}
+              aria-describedby={workflowControlBlocked ? "settings-workflow-task-center-required" : undefined}
             />
           </div>
         </div>
@@ -281,6 +288,10 @@ export default function UserSkillWorkflowSettings({
       {activeTab === "skills" && !skillsEnabled ? (
         <div className="settings-skill-master-notice" role="status" aria-live="polite">
           {t("settingsPage.skills.masterOffSkillNotice")}
+        </div>
+      ) : activeTab === "workflows" && !taskCenterEnabled ? (
+        <div id="settings-workflow-task-center-required" className="settings-skill-master-notice" role="status" aria-live="polite">
+          {t("settingsPage.skills.taskCenterRequiredNotice")}
         </div>
       ) : activeTab === "workflows" && !workflowsEnabled ? (
         <div className="settings-skill-master-notice" role="status" aria-live="polite">

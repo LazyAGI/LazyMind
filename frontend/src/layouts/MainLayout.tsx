@@ -20,6 +20,8 @@ import {
   BookOutlined,
   CloudOutlined,
   LinkOutlined,
+  LoginOutlined,
+  LogoutOutlined,
 } from "@ant-design/icons";
 import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import type { UserDetailResponse } from "@/api/generated/auth-client";
@@ -43,6 +45,9 @@ import {
 } from "@/utils/developerMode";
 import RecordList from "@/modules/chat/components/RecordList";
 import {
+  CHAT_CONVERSATION_FILTER_EVENT,
+  CHAT_CONVERSATION_FILTER_KEY,
+  type ChatConversationFilter,
   CHAT_NEW_RUN_IN_BACKGROUND_KEY,
   CHAT_RESUME_CONVERSATION_KEY,
   CHAT_SELECT_CONVERSATION_EVENT,
@@ -99,6 +104,16 @@ function canScrollVertically(element: HTMLElement, deltaY: number) {
   return deltaY < 0 ? element.scrollTop > 0 : element.scrollTop < maxScrollTop;
 }
 
+function readChatConversationMode(): ChatConversationFilter {
+  try {
+    return sessionStorage.getItem(CHAT_CONVERSATION_FILTER_KEY) === "task"
+      ? "task"
+      : "normal";
+  } catch {
+    return "normal";
+  }
+}
+
 interface ProfileFormValues {
   username: string;
   displayName?: string;
@@ -146,6 +161,8 @@ export default function MainLayout() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [terminalConnectionOpen, setTerminalConnectionOpen] = useState(false);
   const [sidebarSearchText, setSidebarSearchText] = useState("");
+  const [chatConversationMode, setChatConversationMode] =
+    useState<ChatConversationFilter>(readChatConversationMode);
   const [isMenuCollapsed, setIsMenuCollapsed] = useState(readStoredMainMenuCollapsed);
   const [shouldRenderMenuContent, setShouldRenderMenuContent] = useState(
     () => !readStoredMainMenuCollapsed(),
@@ -159,19 +176,28 @@ export default function MainLayout() {
     {
       key: "/settings?section=overview",
       label: t("layout.settings"),
-      icon: <SettingOutlined className="settings-popover-icon" />,
+      icon: (
+        <SettingOutlined className="settings-popover-icon" aria-hidden="true" />
+      ),
     },
     {
       key: "/settings?section=models",
       label: t("layout.modelProviderManagement"),
-      icon: <ApiOutlined className="settings-popover-icon" />,
+      icon: (
+        <ApiOutlined className="settings-popover-icon" aria-hidden="true" />
+      ),
     },
     ...(isAdminUser && !runtimeFeatures.hideEvo
       ? [
           {
             key: "/settings?section=developer",
             label: t("layout.developer"),
-            icon: <CodeOutlined className="settings-popover-icon" />,
+            icon: (
+              <CodeOutlined
+                className="settings-popover-icon"
+                aria-hidden="true"
+              />
+            ),
           },
         ]
       : []),
@@ -206,7 +232,6 @@ export default function MainLayout() {
     (import.meta.env as ImportMetaEnv & { VITE_APP_LOGO?: string })
       .VITE_APP_LOGO || "";
   const needsRestoreButtonSafeArea =
-    pathname.startsWith("/model-providers") ||
     pathname.startsWith("/cloud-documents") ||
     pathname.startsWith("/channels") ||
     pathname.startsWith("/settings") ||
@@ -378,6 +403,29 @@ export default function MainLayout() {
   }, [isMenuCollapsed]);
 
   useEffect(() => {
+    const handleFilterChange = (event: Event) => {
+      const filter = (
+        event as CustomEvent<{ filter?: ChatConversationFilter }>
+      ).detail?.filter;
+      if (filter !== "normal" && filter !== "task") {
+        return;
+      }
+      setChatConversationMode(filter);
+    };
+
+    window.addEventListener(
+      CHAT_CONVERSATION_FILTER_EVENT,
+      handleFilterChange,
+    );
+    return () => {
+      window.removeEventListener(
+        CHAT_CONVERSATION_FILTER_EVENT,
+        handleFilterChange,
+      );
+    };
+  }, []);
+
+  useEffect(() => {
     const handleConversationSelect = (event: Event) => {
       const conversationId =
         (event as CustomEvent<{ conversationId?: string }>).detail
@@ -461,6 +509,8 @@ export default function MainLayout() {
     setCurrentSidebarConversationId("");
     navigate(targetPath);
   };
+
+  const isTaskMode = chatConversationMode === "task";
 
   const renderModulePopover = (
     items: Array<{ key: string; label: string; icon: ReactNode }>,
@@ -801,17 +851,19 @@ export default function MainLayout() {
               <div className="sider-primary-action">
                 <Button
                   type="text"
-                  className="sider-new-chat-button"
+                  className={`sider-new-chat-button${!isTaskMode ? " is-active" : ""}`}
                   icon={<PlusOutlined />}
                   onClick={() => handleNewChat(false)}
+                  aria-pressed={!isTaskMode}
                 >
                   {t("layout.newChat")}
                 </Button>
                 <Button
-                  type="primary"
-                  className="sider-new-chat-button sider-new-task-button"
+                  type="text"
+                  className={`sider-new-chat-button${isTaskMode ? " is-active" : ""}`}
                   icon={<PlusOutlined />}
                   onClick={() => handleNewChat(true)}
+                  aria-pressed={isTaskMode}
                 >
                   {t("layout.newTask")}
                 </Button>
@@ -935,34 +987,58 @@ export default function MainLayout() {
                             "/settings?section=models",
                             "/settings?section=developer",
                           ].includes(item.key) && (
-                            <RightOutlined className="settings-popover-accessory" />
+                            <RightOutlined
+                              className="settings-popover-accessory"
+                              aria-hidden="true"
+                            />
                           )}
                         </Button>
                       );
                       return btn;
                     })}
                     <div className="settings-popover-language">
-                      <GlobalOutlined className="settings-popover-icon" />
+                      <GlobalOutlined
+                        className="settings-popover-icon"
+                        aria-hidden="true"
+                      />
                       <LanguageSwitcher />
                     </div>
+                    {!hideLocalUserControls && (
+                      <div
+                        className="settings-popover-separator"
+                        role="separator"
+                      />
+                    )}
                     {!hideLocalUserControls && (
                       isLoggedIn ? (
                         <Button
                           type="text"
                           role="menuitem"
-                          className="settings-popover-button"
+                          className="settings-popover-button settings-popover-button--session"
                           onClick={handleLogout}
                         >
-                          <span>{t("layout.logout")}</span>
+                          <LogoutOutlined
+                            className="settings-popover-icon"
+                            aria-hidden="true"
+                          />
+                          <span className="settings-popover-label">
+                            {t("layout.logout")}
+                          </span>
                         </Button>
                       ) : (
                         <Button
                           type="text"
                           role="menuitem"
-                          className="settings-popover-button"
+                          className="settings-popover-button settings-popover-button--session"
                           onClick={handleGoLogin}
                         >
-                          <span>{t("layout.goLogin")}</span>
+                          <LoginOutlined
+                            className="settings-popover-icon"
+                            aria-hidden="true"
+                          />
+                          <span className="settings-popover-label">
+                            {t("layout.goLogin")}
+                          </span>
                         </Button>
                       )
                     )}

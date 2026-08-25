@@ -16,6 +16,7 @@ import {
   type SkillCreateManagedOpenAPIRequest,
   type SkillDetailOpenAPIResponse,
   type SkillDraftStatusOpenAPIResponse,
+  type SkillDistributionUpgradePrepareOpenAPIResponse,
   type SkillFileOpenAPIResponse,
   type SkillListItemOpenAPIResponse,
   type SkillOrganizeOpenAPIResponse,
@@ -312,6 +313,31 @@ export interface SkillDraftStatusRecord {
   taskId: string;
 }
 
+export interface SkillDistributionConflictRecord {
+  path: string;
+  kind: string;
+}
+
+export interface SkillDistributionUpgradeStatusRecord {
+  managed: boolean;
+  updateAvailable: boolean;
+  pending: boolean;
+  currentVersion: string;
+  currentArchiveSha256: string;
+  pendingVersion: string;
+  pendingArchiveSha256: string;
+  latestVersion: string;
+  latestArchiveSha256: string;
+  conflicts: SkillDistributionConflictRecord[];
+}
+
+export interface SkillDistributionUpgradePrepareRecord {
+  draftVersion: number;
+  autoMerged: boolean;
+  conflicts: SkillDistributionConflictRecord[];
+  status: SkillDistributionUpgradeStatusRecord;
+}
+
 export const hasSkillDraftChanges = (status: SkillDraftStatusRecord): boolean =>
   status.hasUncommittedDraft || status.overlayCount > 0;
 
@@ -412,7 +438,6 @@ export interface CreateSkillPayload {
 }
 
 export interface PublishSkillToMarketPayload {
-  name: string;
   tags: string[];
   source:
     | { type: "uploaded_zip"; uploadId: string }
@@ -1302,6 +1327,67 @@ export async function getSkillDraftStatus(skillId: string): Promise<SkillDraftSt
   return normalizeDraftStatus(payload);
 }
 
+const normalizeDistributionConflicts = (value: unknown): SkillDistributionConflictRecord[] =>
+  Array.isArray(value)
+    ? value
+        .map((item) => {
+          const raw = toRawObject(item);
+          return raw
+            ? {
+                path: toStringValue(raw.path),
+                kind: toStringValue(raw.kind),
+              }
+            : null;
+        })
+        .filter((item): item is SkillDistributionConflictRecord => Boolean(item?.path))
+    : [];
+
+const normalizeDistributionUpgradeStatus = (
+  value: unknown,
+): SkillDistributionUpgradeStatusRecord => {
+  const raw = toRawObject(value) || {};
+  return {
+    managed: Boolean(raw.managed),
+    updateAvailable: Boolean(raw.update_available ?? raw.updateAvailable),
+    pending: Boolean(raw.pending),
+    currentVersion: toStringValue(raw.current_version ?? raw.currentVersion),
+    currentArchiveSha256: toStringValue(
+      raw.current_archive_sha256 ?? raw.currentArchiveSha256,
+    ),
+    pendingVersion: toStringValue(raw.pending_version ?? raw.pendingVersion),
+    pendingArchiveSha256: toStringValue(
+      raw.pending_archive_sha256 ?? raw.pendingArchiveSha256,
+    ),
+    latestVersion: toStringValue(raw.latest_version ?? raw.latestVersion),
+    latestArchiveSha256: toStringValue(
+      raw.latest_archive_sha256 ?? raw.latestArchiveSha256,
+    ),
+    conflicts: normalizeDistributionConflicts(raw.conflicts),
+  };
+};
+
+export async function getSkillDistributionUpgradeStatus(
+  skillId: string,
+): Promise<SkillDistributionUpgradeStatusRecord> {
+  const response = await skillsApi.apiCoreSkillsSkillIdDistributionUpgradeGet({ skillId });
+  return normalizeDistributionUpgradeStatus(unwrapEnvelope(response.data));
+}
+
+export async function prepareSkillDistributionUpgrade(
+  skillId: string,
+): Promise<SkillDistributionUpgradePrepareRecord> {
+  const response = await skillsApi.apiCoreSkillsSkillIdDistributionUpgradePreparePost({ skillId });
+  const raw = toRawObject(
+    unwrapEnvelope<SkillDistributionUpgradePrepareOpenAPIResponse>(response.data),
+  ) || {};
+  return {
+    draftVersion: readRawNumber(raw, ["draft_version", "draftVersion"]),
+    autoMerged: Boolean(raw.auto_merged ?? raw.autoMerged),
+    conflicts: normalizeDistributionConflicts(raw.conflicts),
+    status: normalizeDistributionUpgradeStatus(raw.status),
+  };
+}
+
 export async function writeSkillDraftText(
   skillId: string,
   options: { path: string; content: string; expectedDraftVersion: number },
@@ -1824,7 +1910,7 @@ export async function publishSkillToMarket(
 ): Promise<{ marketItemId: string; sourceSkillId: string }> {
   const response = await skillMarketApi.apiCoreSkillMarketAdminItemsPost({
     marketPublishOpenAPIRequest: {
-      name: payload.name,
+      name: "",
       tags: payload.tags,
       source:
         payload.source.type === "uploaded_zip"

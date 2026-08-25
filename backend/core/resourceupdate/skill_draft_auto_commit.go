@@ -5,13 +5,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"os"
-	"path/filepath"
 	"strings"
 
 	"gorm.io/gorm"
 
 	"lazymind/core/common/orm"
+	skilldistribution "lazymind/core/skillv2/distribution"
 	skillrevision "lazymind/core/skillv2/revision"
 	"lazymind/core/skillv2/taskguard"
 )
@@ -25,6 +24,9 @@ func (w *Worker) handleAutoCommitSkillDraft(ctx context.Context, task orm.Resour
 	}
 	if strings.TrimSpace(request.TaskID) == "" || request.DraftVersion <= 0 {
 		return permanentOutcome("invalid_request_json", "auto commit task requires task_id and draft_version")
+	}
+	if skilldistribution.IsUpgradeTaskID(request.TaskID) {
+		return taskOutcome{Status: orm.ResourceUpdateTaskStatusSkipped, ErrorCode: "distribution_upgrade_managed_separately"}
 	}
 	decision, err := taskguard.EvaluateSkillOperation(ctx, w.db, w.stateStore, taskguard.SkillOperationRequest{
 		UserID:        task.UserID,
@@ -86,12 +88,8 @@ func (w *Worker) handleAutoCommitSkillDraft(ctx context.Context, task orm.Resour
 }
 
 func newSkillV2RevisionService(db *gorm.DB) *skillrevision.Service {
-	root := strings.TrimSpace(os.Getenv("LAZYMIND_SKILL_OBJECT_ROOT"))
-	if root == "" {
-		root = filepath.Join(uploadRootForSkillV2Bridge(), "skill-objects")
-	}
 	return skillrevision.NewService(skillrevision.ServiceDeps{
 		DB:        db,
-		BlobStore: skillrevision.NewBlobStore(db, skillrevision.NewLocalObjectStore(root)),
+		BlobStore: skillrevision.NewBlobStore(db, skillrevision.NewLocalObjectStore(skillObjectRootForSkillV2Bridge())),
 	})
 }

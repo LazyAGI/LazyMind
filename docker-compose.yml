@@ -41,6 +41,10 @@ x-proxy-env: &proxy-env
 x-core-env: &core-env
   ACL_DB_DRIVER: postgres
   ACL_DB_DSN: "host=db user=root password=123456 dbname=core port=5432 sslmode=disable TimeZone=UTC"
+  # Local development may execute a dev migration that is later removed from
+  # its branch. Reconcile only unknown history in the latest open dev release;
+  # production deployments should leave this unset/false.
+  MIGRATION_RECONCILE_UNKNOWN_DEV_HISTORY: ${MIGRATION_RECONCILE_UNKNOWN_DEV_HISTORY:-true}
   LAZYMIND_PREFERENCE_INDEX_MAX_ITEMS: ${LAZYMIND_PREFERENCE_INDEX_MAX_ITEMS:-100}
   LAZYMIND_REDIS_URL: redis://test:123456@redis:6379/0
   LAZYMIND_UPLOAD_ROOT: /var/lib/lazymind/uploads
@@ -308,6 +312,7 @@ services:
       <<: *proxy-env
     volumes:
       - channel-gateway-data:/var/lib/lazymind/channel-gateway
+      - ./data/core/uploads:/var/lib/lazymind/uploads
     healthcheck:
       test: ["CMD-SHELL", "python3 -c \"import urllib.request; urllib.request.urlopen('http://localhost:8085/readyz')\" || exit 1"]
       interval: 10s
@@ -357,7 +362,7 @@ services:
       - ./data/evo:/var/lib/lazymind/evo
       - ./data/core/uploads:/var/lib/lazymind/uploads
       - ./data/subagent:/data/subagent
-      - ./skills:/skills:ro
+      - ./skills/.runtime:/skills/.runtime:ro
     expose:
       - "8000"
     extra_hosts:
@@ -403,7 +408,7 @@ services:
     volumes:
       - ./backend/core:/app
       - ./data/core/uploads:/var/lib/lazymind/uploads
-      - ./skills:/skills:ro
+      - ./skills/.runtime:/skills/.runtime:ro
     environment:
       <<: *core-env
     depends_on:
@@ -430,6 +435,7 @@ services:
       - "80"
     volumes:
       - ./workflows:/usr/share/nginx/html/workflows:ro
+      - ./skills/.runtime:/skills/.runtime:ro
     depends_on:
       kong:
         condition: service_started

@@ -10,7 +10,11 @@ import {
   FullscreenExitOutlined,
 } from '@ant-design/icons';
 import { useWorkflowSession } from '@/modules/chat/hooks/useWorkflow';
-import { useWorkflowStore } from '@/modules/chat/store/workflowPanel';
+import {
+  filterWorkflowTabs,
+  workflowTabAllowsDownload,
+  useWorkflowStore,
+} from '@/modules/chat/store/workflowPanel';
 import { useTaskCenterStore, type SubAgentTask, type TaskArtifactStream } from '@/modules/chat/store/taskCenter';
 import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
 import { WorkflowSessionApi } from '@/modules/chat/utils/request';
@@ -40,6 +44,7 @@ import { SlideThumb } from './ppt/SlideThumb';
 import { WorkflowTabActions } from './actions/WorkflowTabActions';
 import { WorkflowPanelTabActiveContext, SlotEditingContext, type SlotFooterAction } from './slotEditingContext';
 import { findWriterArtifactStream } from './writerArtifactStream';
+import { resolveCompletedContinueStep } from './workflowContinue';
 import { moveSelectedCompositePages, sameCompositePageOrder } from './compositePageReorder';
 import './WorkflowPanel.scss';
 
@@ -460,7 +465,7 @@ function getTabSlotRevisions(
   return slots.filter((s) => s.slot === artifactKey && s.selected);
 }
 
-function isStructuredWriterArtifactRevision(slot: SlotRevision): boolean {
+function isStructuredArtifactRevision(slot: SlotRevision): boolean {
   if (slot.content_type === 'json') return true;
   const raw = slot.artifact_value;
   if (!raw || typeof raw !== 'object') return false;
@@ -470,16 +475,15 @@ function isStructuredWriterArtifactRevision(slot: SlotRevision): boolean {
   return isWriterIrSource(normalized) || normalized.endsWith('.json');
 }
 
-/** Prefer the structured WriterDocument over its Markdown export when both exist. */
-function resolveWriterFinalSlotDefs(tab: TabDef, session: WorkflowSession): SlotDef[] {
-  if (session.workflow_id !== 'writer-workflow') return tab.slots;
+/** Prefer a structured sibling artifact over its Markdown export when both exist. */
+function resolvePreferredStructuredSlotDefs(tab: TabDef, session: WorkflowSession): SlotDef[] {
   const declaredSlotIds = new Set(tab.slots.map((slot) => slot.id));
 
   return tab.slots.flatMap((slotDef) => {
     if (!slotDef.id.endsWith('_md')) return [slotDef];
     const irSlotId = slotDef.id.slice(0, -3);
     const hasIRArtifact = getTabSlotRevisions(session, tab, irSlotId)
-      .some(isStructuredWriterArtifactRevision);
+      .some(isStructuredArtifactRevision);
     if (!hasIRArtifact) return [slotDef];
     if (declaredSlotIds.has(irSlotId)) return [];
 
@@ -1340,7 +1344,7 @@ function NamedTabSlot({
   const isImageList = slotDef.type === 'image' && slotDef.cardinality === 'list';
   const isDraggable = Boolean(slotDef.ordered) && !readOnly;
   const showStream = Boolean(artifactStream && (
-    revisions.length === 0 || artifactStream.state !== 'ready'
+    revisions.length === 0 || artifactStream.state === 'streaming'
   ));
 
   return (
@@ -1466,7 +1470,7 @@ function TabSlotGrid({
     const filtered = slotDefs.filter((s) => visible.has(s.id));
     return filtered.length > 0 ? filtered : slotDefs;
   };
-  const visibleSlots = resolveVisibleSlots(resolveWriterFinalSlotDefs(tab, session));
+  const visibleSlots = resolveVisibleSlots(resolvePreferredStructuredSlotDefs(tab, session));
   return (
     <div className={`workflow-panel__tab-content workflow-panel__tab-content--${tab.layout ?? 'vertical'}`}>
       {/* Hidden file input for adding new items */}
@@ -1653,8 +1657,11 @@ export function WorkflowPanel({
     };
   }, []);
 
-  const flushPendingEdits = useCallback(async (): Promise<boolean> => {
-    const flushers = [...flushFns.current.values()];
+  const flushPendingEdits = useCallback(async (flushKey?: string): Promise<boolean> => {
+    const selectedFlusher = flushKey ? flushFns.current.get(flushKey) : undefined;
+    const flushers = flushKey
+      ? (selectedFlusher ? [selectedFlusher] : [])
+      : [...flushFns.current.values()];
     if (flushers.length === 0) return true;
     const results = await Promise.all(flushers.map((flush) => flush()));
     return results.every(Boolean);
@@ -1681,11 +1688,43 @@ export function WorkflowPanel({
 
   // Restore the previously focused tab when UI loads.
   useEffect(() => {
-    const tabs: TabDef[] = ui.tabs ?? [];
+    const tabs = filterWorkflowTabs(
+      ui.tabs ?? [],
+      session?.slots ?? [],
+      ui.tab_visibility_ready_material,
+    );
     if (!tabs.length || !persistedFocusedTab) return;
     const idx = tabs.findIndex((t) => t.id === persistedFocusedTab);
     if (idx !== -1) setActiveTabIdx(idx);
-  }, [ui.tabs, persistedFocusedTab]);
+  }, [ui.tabs, ui.tab_visibility_ready_material, persistedFocusedTab, session?.slots]);
+
+  // Until the user explicitly chooses a visible tab, follow the runtime
+  // frontier. This also moves focus immediately when a skip material removes
+  // the previously selected tab.
+  useEffect(() => {
+    const tabs = filterWorkflowTabs(
+      ui.tabs ?? [],
+      session?.slots ?? [],
+      ui.tab_visibility_ready_material,
+    );
+    const focusedTabVisible = Boolean(
+      persistedFocusedTab && tabs.some((tab) => tab.id === persistedFocusedTab),
+    );
+    if (!tabs.length || focusedTabVisible || !session) return;
+    let idx = tabs.findIndex((tab) => getTabStepId(tab) === session.current_step_id);
+    if (idx === -1 && (session.status === 'completed' || session.status === 'failed')) {
+      idx = tabs.length - 1;
+    }
+    if (idx !== -1) setActiveTabIdx(idx);
+  }, [
+    ui.tabs,
+    ui.tab_visibility_ready_material,
+    persistedFocusedTab,
+    session?.current_step_id,
+    session?.session_id,
+    session?.slots,
+    session?.status,
+  ]);
 
   // Track focused tab changes.
   const handleTabChange = useCallback((idx: number, tabId: string) => {
@@ -1710,8 +1749,15 @@ export function WorkflowPanel({
 
   if (!session) return null;
 
-  const tabs: TabDef[] = ui.tabs ?? [];
+  const tabs = filterWorkflowTabs(
+    ui.tabs ?? [],
+    session.slots ?? [],
+    ui.tab_visibility_ready_material,
+  );
   const hasTabs = tabs.length > 0;
+  const visibleActiveTabIdx = hasTabs
+    ? Math.min(activeTabIdx, tabs.length - 1)
+    : 0;
   const hasIntent = true;
   const sessionReadOnly = isWorkflowSessionReadOnly(session, autoRunning);
 
@@ -1731,8 +1777,14 @@ export function WorkflowPanel({
   const buttonsDisabled = sessionBusy || actionPending;
   const dismissDisabled = dismissing || anySlotEditing || actionPending;
   const collapseDisabled = (anySlotEditing || actionPending) && !collapsed;
-  // "继续" is only shown in waiting/active; completed/failed show rollback step picker instead.
-  const showContinue = displayStatus === 'waiting' || displayStatus === 'active';
+  const completedContinueStepId = resolveCompletedContinueStep(
+    session,
+    tabs[visibleActiveTabIdx],
+  );
+  // Workflow packages may expose a follow-on action from a completed tab.
+  const showContinue = displayStatus === 'waiting'
+    || displayStatus === 'active'
+    || Boolean(completedContinueStepId);
   const showStepRollback =
     (session.status === 'completed' || session.status === 'failed')
     && Boolean(session.steps && session.steps.length > 0);
@@ -1752,11 +1804,11 @@ export function WorkflowPanel({
   const effectivePast = new Set(session.projection?.past ?? []);
   const continueDisabled = buttonsDisabled || currentStepStatus === 'failed';
 
-  async function runFooterAction(action: () => void) {
+  async function runFooterAction(action: () => void, flushKey?: string) {
     if (sessionBusy || actionPending) return;
     setActionPending(true);
     try {
-      const saved = await flushPendingEdits();
+      const saved = await flushPendingEdits(flushKey);
       if (!saved) return;
       action();
     } finally {
@@ -1765,7 +1817,10 @@ export function WorkflowPanel({
   }
 
   function handleContinue() {
-    void runFooterAction(() => onSendMessage?.(t('chat.workflowContinue')));
+    const message = completedContinueStepId
+      ? `${t('chat.workflowRollbackPrefix')}${completedContinueStepId}`
+      : t('chat.workflowContinue');
+    void runFooterAction(() => onSendMessage?.(message));
   }
 
   function handleRetry() {
@@ -1932,9 +1987,9 @@ export function WorkflowPanel({
               <React.Fragment key={tab.id}>
                 <button
                   role='tab'
-                  aria-selected={idx === activeTabIdx}
+                  aria-selected={idx === visibleActiveTabIdx}
                   aria-controls={`workflow-tab-panel-${tab.id}`}
-                  className={`workflow-panel__tab${idx === activeTabIdx ? ' workflow-panel__tab--active' : ''}${idx < activeTabIdx ? ' workflow-panel__tab--done' : ''}`}
+                  className={`workflow-panel__tab${idx === visibleActiveTabIdx ? ' workflow-panel__tab--active' : ''}${idx < visibleActiveTabIdx ? ' workflow-panel__tab--done' : ''}`}
                   onClick={() => handleTabChange(idx, tab.id)}
                   type='button'
                 >
@@ -1949,7 +2004,7 @@ export function WorkflowPanel({
                   )}
                 </button>
                 {idx < tabs.length - 1 && (
-                  <span className={`workflow-panel__tab-connector${idx < activeTabIdx ? ' workflow-panel__tab-connector--done' : ''}`} aria-hidden='true' />
+                  <span className={`workflow-panel__tab-connector${idx < visibleActiveTabIdx ? ' workflow-panel__tab-connector--done' : ''}`} aria-hidden='true' />
                 )}
               </React.Fragment>
             );
@@ -1966,10 +2021,10 @@ export function WorkflowPanel({
                 key={tab.id}
                 id={`workflow-tab-panel-${tab.id}`}
                 role='tabpanel'
-                hidden={idx !== activeTabIdx}
+                hidden={idx !== visibleActiveTabIdx}
               >
-                <WorkflowPanelTabActiveContext.Provider value={idx === activeTabIdx}>
-                <SlotDownloadContext.Provider value={idx === tabs.length - 1}>
+                <WorkflowPanelTabActiveContext.Provider value={idx === visibleActiveTabIdx}>
+                <SlotDownloadContext.Provider value={workflowTabAllowsDownload(tab, idx, tabs.length)}>
                   <TabSlotGrid
                     tab={tab}
                     session={session}
@@ -2046,7 +2101,7 @@ export function WorkflowPanel({
                         aria-disabled={actionPending || action.disabled}
                         onClick={() => {
                           if (action.flushBeforeAction) {
-                            void runFooterAction(action.onClick);
+                            void runFooterAction(action.onClick, action.flushKey);
                             return;
                           }
                           action.onClick();
@@ -2108,7 +2163,9 @@ export function WorkflowPanel({
                       ? t('chat.workflowBtnDisabledHint')
                       : anySlotEditing
                         ? t('chat.workflowContinueFlushHint')
-                        : continueLabel
+                        : completedContinueStepId
+                          ? t('chat.workflowContinueWithLatestOutline')
+                          : continueLabel
               }
             >
               {actionPending ? t('chat.workflowSavingBeforeAction') : continueLabel}

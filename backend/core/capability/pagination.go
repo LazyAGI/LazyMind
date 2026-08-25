@@ -14,6 +14,7 @@ type pageCursor struct {
 	Kind        string `json:"k"`
 	Fingerprint string `json:"f"`
 	Offset      int    `json:"o"`
+	Cursor      string `json:"c,omitempty"`
 }
 
 func encodePageToken(kind, fingerprint string, offset int) (string, error) {
@@ -40,6 +41,34 @@ func decodePageToken(token, kind, fingerprint string) (int, error) {
 		return 0, errInvalidCursor
 	}
 	return cursor.Offset, nil
+}
+
+func encodeCursorToken(kind, fingerprint, cursor string) (string, error) {
+	payload, err := json.Marshal(pageCursor{
+		Version: cursorVersion, Kind: kind, Fingerprint: fingerprint, Cursor: cursor,
+	})
+	if err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(payload), nil
+}
+
+func decodeCursorToken(token, kind, fingerprint string) (string, error) {
+	if token == "" {
+		return "", nil
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(token)
+	if err != nil {
+		return "", err
+	}
+	var cursor pageCursor
+	if err := json.Unmarshal(payload, &cursor); err != nil {
+		return "", err
+	}
+	if cursor.Version != cursorVersion || cursor.Kind != kind || cursor.Fingerprint != fingerprint || cursor.Cursor == "" {
+		return "", errInvalidCursor
+	}
+	return cursor.Cursor, nil
 }
 
 func pageFingerprint(value any) (string, error) {

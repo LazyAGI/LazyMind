@@ -86,6 +86,8 @@ runtime:
   publisher_owned_slots: [final]
   collects_knowledge: true
   completed_edit_step: f
+  completed_continue_steps: [f]
+  exclusive_tool_capabilities: [writer.create]
   clarification_fields:
     - id: topic
       label: Topic
@@ -101,7 +103,7 @@ runtime:
 		t.Fatalf("expected valid runtime policy, diagnostics=%#v", result.Diagnostics)
 	}
 	policy := result.Graph.Runtime
-	if !policy.CollectsKnowledge || policy.CompletedEditStep != "f" || len(policy.PublisherOwnedSlots) != 1 || policy.PublisherOwnedSlots[0] != "final" {
+	if !policy.CollectsKnowledge || policy.CompletedEditStep != "f" || len(policy.CompletedContinueSteps) != 1 || policy.CompletedContinueSteps[0] != "f" || len(policy.ExclusiveToolCapabilities) != 1 || policy.ExclusiveToolCapabilities[0] != "writer.create" || len(policy.PublisherOwnedSlots) != 1 || policy.PublisherOwnedSlots[0] != "final" {
 		t.Fatalf("runtime policy was not compiled: %#v", policy)
 	}
 	if len(policy.ClarificationFields) != 2 || policy.ClarificationFields[0].ID != "topic" || policy.ClarificationFields[1].Choices[1] != "Minimal" {
@@ -478,7 +480,15 @@ steps:
 }
 
 func TestBundledWorkflowsCompileForRuntime(t *testing.T) {
-	for _, workflowID := range []string{"writer-workflow", "image-workflow", "test-workflow", "ppt-workflow"} {
+	for _, workflowID := range []string{
+		"writer-workflow",
+		"image-workflow",
+		"test-workflow",
+		"ppt-workflow",
+		"bid_tech_proposal_writer",
+		"academic_research_pipeline",
+		"product_solution_delivery",
+	} {
 		root := filepath.Join("..", "..", "..", "..", "workflows", workflowID)
 		workflowYAML, err := os.ReadFile(filepath.Join(root, "workflow.yaml"))
 		if err != nil {
@@ -493,6 +503,37 @@ func TestBundledWorkflowsCompileForRuntime(t *testing.T) {
 		if !result.Valid {
 			t.Fatalf("bundled plugin %s must compile: %#v", workflowID, result.Diagnostics)
 		}
+	}
+}
+
+func TestCompilePreservesMaterialRuntimeMetadata(t *testing.T) {
+	workflow := `id: cardinality-test
+slots:
+  - {id: source, type: text, cardinality: single, external: true}
+  - {id: images, type: image, cardinality: list, ordered: true, exposed: true}
+steps:
+  - {id: render, inputs: [source], outputs: [images]}
+`
+	state := `start_route: all
+steps:
+  render:
+    inputs: [{material: source, required: true}]
+    outputs: [images]
+transitions:
+  __start__: [{to: render}]
+  render: [{to: __end__}]
+`
+	compiled := Compile(workflow, state, "scenario", ProfileRuntimeLoad)
+	if !compiled.Valid || compiled.Graph == nil {
+		t.Fatalf("diagnostics=%v", compiled.Diagnostics)
+	}
+	if compiled.Graph.MaterialCardinalities["source"] != "single" ||
+		compiled.Graph.MaterialCardinalities["images"] != "list" {
+		t.Fatalf("cardinalities=%v", compiled.Graph.MaterialCardinalities)
+	}
+	if compiled.Graph.MaterialTypes["source"] != "text" ||
+		compiled.Graph.MaterialTypes["images"] != "image" {
+		t.Fatalf("types=%v", compiled.Graph.MaterialTypes)
 	}
 }
 
@@ -668,6 +709,42 @@ func TestValidateUIDeclarativeHTMLSlideExport(t *testing.T) {
 	diagnostics := validateUI(ui, known, map[string]bool{}, specs, ProfilePublish)
 	if len(diagnostics) != 0 {
 		t.Fatalf("declarative HTML slide export should be valid: %#v", diagnostics)
+	}
+}
+
+func TestValidateUITabVisibilityAndHTMLPreview(t *testing.T) {
+	known := map[string]bool{"plan": true, "skip_prototype": true, "prototype": true}
+	specs := map[string]uiMaterialSpec{
+		"plan":           {Type: "json", Cardinality: "single"},
+		"skip_prototype": {Type: "text", Cardinality: "single"},
+		"prototype":      {Type: "file", Cardinality: "single"},
+	}
+	ui := map[string]any{
+		"tab_visibility_ready_material": "plan",
+		"slots": map[string]any{
+			"prototype": map[string]any{"widgetType": "html-preview"},
+		},
+		"tabs": []map[string]any{{
+			"id": "prototype", "hide_when_material": "skip_prototype",
+			"slots": []map[string]any{{"id": "prototype"}},
+		}},
+	}
+
+	if diagnostics := validateUI(ui, known, map[string]bool{}, specs, ProfilePublish); len(diagnostics) != 0 {
+		t.Fatalf("declarative tab visibility and HTML preview should be valid: %#v", diagnostics)
+	}
+
+	ui["tab_visibility_ready_material"] = "missing_plan"
+	ui["tabs"].([]map[string]any)[0]["hide_when_material"] = "missing_skip"
+	diagnostics := validateUI(ui, known, map[string]bool{}, specs, ProfilePublish)
+	unknownCount := 0
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Code == "E_UI_MATERIAL_UNKNOWN" {
+			unknownCount++
+		}
+	}
+	if unknownCount != 2 {
+		t.Fatalf("expected both unknown visibility materials to be rejected: %#v", diagnostics)
 	}
 }
 

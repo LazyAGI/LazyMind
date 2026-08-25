@@ -24,10 +24,11 @@ import {
   Typography,
 } from "antd";
 import type { ColumnsType } from "antd/es/table";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import moment from "moment";
 import {
   AppstoreOutlined,
+  ArrowLeftOutlined,
   DatabaseOutlined,
   DownOutlined,
   HistoryOutlined,
@@ -108,6 +109,11 @@ import {
   updateAllKnowledgeMarketItems,
   updateKnowledgeMarketItem,
 } from "@/modules/knowledge/api/knowledgeMarket";
+import {
+  clearCloudKnowledgeCreateParams,
+  getCloudKnowledgeCreateProvider,
+  isCloudKnowledgeCreateRequest,
+} from "@/modules/modelProvider/utils/cloudDocumentKnowledge";
 
 import "./index.scss";
 import "@/modules/dataSource/index.scss";
@@ -129,10 +135,11 @@ interface KnowledgePageProps {
 }
 
 const KnowledgePage: FC<KnowledgePageProps> = ({
-  modelSettingsPath = "/model-providers",
+  modelSettingsPath = "/settings?section=models",
 }) => {
   const [form] = Form.useForm();
   const navigate = useNavigate();
+  const location = useLocation();
   const { t } = useTranslation();
   const confirmRef = useRef<TypedConfirmModalRef>(null);
   const createUpdateRef = useRef<UpdateImperativeProps>(null);
@@ -173,6 +180,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       createKnowledgeRef.current?.onClose();
     },
   });
+  const cloudCreateRequestRef = useRef<string | null>(null);
   const cloudSourceRequestSeqRef = useRef(0);
   const marketRequestSeqRef = useRef(0);
   const isCloudArchiveView = sourceCategory === "cloudArchive";
@@ -185,7 +193,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         ? t("knowledge.embeddingNotReadyBannerAdmin")
         : t("knowledge.multimodalEmbeddingNotReadyBannerAdmin")}
       <a
-        href="/model-providers"
+        href={modelSettingsPath}
         style={{ marginLeft: 8, color: "#fff", textDecoration: "underline" }}
         onClick={(e: MouseEvent<HTMLAnchorElement>) => {
           e.preventDefault();
@@ -200,6 +208,39 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   ) : (
     t("knowledge.multimodalEmbeddingNotReadyBanner")
   );
+
+  useEffect(() => {
+    if (
+      syncCreateVm.cloudConnectionLoading ||
+      !isCloudKnowledgeCreateRequest(location.search) ||
+      cloudCreateRequestRef.current === location.search
+    ) {
+      return;
+    }
+
+    cloudCreateRequestRef.current = location.search;
+    const provider = getCloudKnowledgeCreateProvider(location.search);
+    setActiveView("mine");
+    setSourceCategory("cloudArchive");
+    if (provider) {
+      syncCreateVm.handleCreateFromCloudDocuments(provider);
+    } else {
+      createKnowledgeRef.current?.onOpen();
+    }
+    navigate(
+      {
+        pathname: location.pathname,
+        search: clearCloudKnowledgeCreateParams(location.search),
+      },
+      { replace: true },
+    );
+  }, [
+    location.pathname,
+    location.search,
+    navigate,
+    syncCreateVm.cloudConnectionLoading,
+    syncCreateVm.handleCreateFromCloudDocuments,
+  ]);
 
   const loadKnowledgeMarket = useCallback(async (showLoading = false) => {
     const requestId = ++marketRequestSeqRef.current;
@@ -1208,6 +1249,16 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     <div className="knowledge-list-page">
       <div className="knowledge-page-header">
         <div>
+          {new URLSearchParams(location.search).get("from") === "settings-knowledge" ? (
+            <Button
+              className="knowledge-settings-return"
+              icon={<ArrowLeftOutlined />}
+              onClick={() => navigate("/settings?section=knowledge")}
+              type="text"
+            >
+              {t("knowledge.backToKnowledgeSettings")}
+            </Button>
+          ) : null}
           <h1>{t("layout.knowledgeBase")}</h1>
           <p>{t("knowledge.pageDescription")}</p>
         </div>

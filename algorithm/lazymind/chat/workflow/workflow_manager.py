@@ -19,6 +19,7 @@ from lazymind.chat.engine.tools.intent_writer import enable_workflow_intent_scop
 from lazymind.workflow_sdk import AdvanceRequest, StepCommand, WorkflowClient, WorkflowClientError
 from lazymind.workflow_toolkit import (
     AgentWorkflowToolProjection, HostWorkflowToolkit, StepCommandInput,
+    workflow_package_input_types,
 )
 
 LOG = logging.getLogger(__name__)
@@ -51,6 +52,7 @@ def _client() -> WorkflowClient:
         str(cfg.get('user_id') or ''),
         host='lazymind',
         transport=httpx,
+        trace_context=lazyllm.get_trace_context,
     )
 
 
@@ -102,6 +104,7 @@ def _handoff_tool(
             allowed = set(frontier.get('ready_steps') or [])
             allowed.update(frontier.get('retryable_steps') or [])
             allowed.update(frontier.get('rewindable_steps') or [])
+            allowed.update(frontier.get('continue_steps') or [])
             if step_id not in allowed:
                 if state_refreshed:
                     return _result_text(_state_changed_result(frontier, [step_id]))
@@ -183,6 +186,30 @@ def _artifact_by_handle(toolkit: HostWorkflowToolkit, session_id: str,
     return matches[0]
 
 
+def _with_terminal_agent_control(result: Dict[str, Any]) -> Dict[str, Any]:
+    workflow_state = result.get('workflow_state')
+    workflow_state = workflow_state if isinstance(workflow_state, dict) else {}
+    projection = result.get('projection')
+    if not isinstance(projection, dict):
+        projection = workflow_state.get('projection')
+    projection = projection if isinstance(projection, dict) else {}
+    completed = (
+        projection.get('completed') is True
+        or workflow_state.get('status') == 'completed'
+        or result.get('status') == 'completed'
+    )
+    if not completed:
+        return result
+    return {
+        **result,
+        '_agent_control': {
+            'stop': True,
+            'reason': 'workflow_completed',
+            'final_text': '工作流已完成，最终产物已生成。',
+        },
+    }
+
+
 def _safe_session_tools(
     toolkit: HostWorkflowToolkit,
     session: Union[str, Callable[[], str]],
@@ -228,6 +255,7 @@ def _safe_session_tools(
             allowed = set(frontier.get('ready_steps') or [])
             allowed.update(frontier.get('retryable_steps') or [])
             allowed.update(frontier.get('rewindable_steps') or [])
+            allowed.update(frontier.get('continue_steps') or [])
             if not requested or any(value not in allowed for value in requested):
                 if state_refreshed:
                     return _state_changed_result(frontier, requested)
@@ -278,8 +306,8 @@ def _safe_session_tools(
                     ),
                 )
                 if state_refreshed:
-                    return {**result, **_state_refresh_notice()}
-                return result
+                    result = {**result, **_state_refresh_notice()}
+                return _with_terminal_agent_control(result)
             except WorkflowClientError as exc:
                 if exc.code != 'STATE_VERSION_CONFLICT' or attempt > 0:
                     raise
@@ -333,6 +361,7 @@ def _state_changed_result(frontier: Dict[str, Any], requested: List[str]) -> Dic
         'ready_steps': frontier.get('ready_steps') or [],
         'retryable_steps': frontier.get('retryable_steps') or [],
         'rewindable_steps': frontier.get('rewindable_steps') or [],
+        'continue_steps': frontier.get('continue_steps') or [],
         'user_notice': (
             '工作流状态已被其他执行或后台更新改变，本次没有继续提交步骤。'
             '系统已读取最新状态；请根据当前可执行步骤重新确认下一步。'
@@ -424,6 +453,17 @@ def _import_attachment(path: str) -> Dict[str, Any]:
     return asdict(value)
 
 
+def _import_text_binding(material_id: str, value: str) -> Dict[str, Any]:
+    from lazymind.chat.workflow.file_adapter import LazyMindHostFileAdapter
+    from lazymind.config import config
+    cfg = _agentic_config()
+    safe_name = re.sub(r'[^0-9A-Za-z_.-]+', '_', material_id).strip('._') or 'input'
+    resource = LazyMindHostFileAdapter(
+        str(config['core_api_url']).rstrip('/'), str(cfg.get('user_id') or ''), transport=httpx,
+    ).import_text(f'{safe_name}.txt', str(value))
+    return asdict(resource)
+
+
 def _conversation_has_attachments() -> bool:
     cfg = _agentic_config()
     if any(str(value or '').strip() for value in (cfg.get('files') or [])):
@@ -434,6 +474,12 @@ def _conversation_has_attachments() -> bool:
         for values in history.values()
         if isinstance(values, list)
     )
+
+
+def _resolve_workflow_attachment(reference: str) -> tuple[Optional[str], Optional[str]]:
+    """Resolve a file binding without loading attachment tooling for scalar launches."""
+    from lazymind.chat.engine.subagent.tools import _resolve_attachment
+    return _resolve_attachment(reference)
 
 
 def _clean_workflow_text(value: Any) -> str:
@@ -735,6 +781,7 @@ def build_workflow_discovery_context(
         if name in used_names:
             continue
         used_names.add(name)
+
         activations.append(activation)
         items.append({
             'workflow_ref': activation['workflow_ref'],
@@ -798,9 +845,27 @@ def _workflow_trigger_tools(
             continue
         used_names.add(name)
 
+        package_hint: Dict[str, Any] = {}
+        input_types_hint: Dict[str, str] = {
+            str(field['id']): 'text'
+            for field in _runtime_clarification_fields(item.get('runtime'))
+        }
+        # An explicitly selected Workflow can afford one package read before
+        # the model call so its complete typed input contract is visible. In
+        # discovery mode avoid N package reads: declared clarification fields
+        # provide the scalar trigger shape, and the selected package is read
+        # authoritatively only when its trigger is called.
+        if allowed_refs:
+            try:
+                package_hint = _client().get_workflow(workflow_id, revision_id).result
+                input_types_hint = workflow_package_input_types(package_hint)
+            except Exception as exc:
+                LOG.debug('Could not preload Workflow %s input contract: %s', workflow_id, exc)
+
         def make_trigger(
             bound_id: str, bound_ref: str, bound_revision: str, bound_query: str,
-            bound_clarification_answer: bool,
+            bound_clarification_answer: bool, bound_package: Optional[Dict[str, Any]],
+            supports_scalar_bindings: bool,
         ) -> Any:
             def run_trigger(
                 input_bindings: Optional[Dict[str, str]] = None,
@@ -843,18 +908,37 @@ def _workflow_trigger_tools(
                             'instruction': 'Read the current Ready frontier and continue execution.',
                         },
                     }
+                client = _client()
+                package = bound_package or client.get_workflow(bound_id, bound_revision).result
+                input_types = workflow_package_input_types(package)
                 resolved_bindings: Dict[str, Any] = {}
                 for material_id, attachment_ref in (input_bindings or {}).items():
-                    from lazymind.chat.engine.subagent.tools import _resolve_attachment
-                    path, error = _resolve_attachment(attachment_ref)
-                    if error or not path:
+                    binding = str(attachment_ref or '').strip()
+                    if not binding:
+                        raise WorkflowClientError(
+                            'WORKFLOW_INPUT_EMPTY', f'Input {material_id} is empty.',
+                        )
+                    material_type = input_types.get(str(material_id), '')
+                    if material_type in {'text', 'json'}:
+                        resolved_bindings[material_id] = _import_text_binding(
+                            str(material_id), binding,
+                        )
+                        continue
+                    # Attachment resolution pulls in the full attachment/vision
+                    # stack. Keep scalar-only Workflow launches independent of
+                    # those optional dependencies and load it only for a file
+                    # (or legacy untyped) material.
+                    path, error = _resolve_workflow_attachment(binding)
+                    if material_type in {'file', 'image'} and (error or not path):
                         raise WorkflowClientError(
                             'ATTACHMENT_NOT_SELECTED',
                             error or 'The referenced conversation attachment was not found.',
                         )
-                    resolved_bindings[material_id] = _import_attachment(path)
-                client = _client()
-                package = client.get_workflow(bound_id, bound_revision).result
+                    resolved_bindings[material_id] = (
+                        _import_attachment(path)
+                        if path and not error and material_type in {'', 'file', 'image'}
+                        else _import_text_binding(str(material_id), binding)
+                    )
                 toolkit = HostWorkflowToolkit(
                     _client,
                     allowed_workflow_ids=[bound_id],
@@ -908,6 +992,9 @@ def _workflow_trigger_tools(
                 rewindable_steps = step_ids(
                     projection.get('rewindable') or projection.get('rewindable_steps')
                 )
+                continue_steps = step_ids(
+                    projection.get('continue') or projection.get('continue_steps')
+                )
                 return {
                     **prepared,
                     'status': 'prepared',
@@ -930,11 +1017,12 @@ def _workflow_trigger_tools(
                     'blocked_steps': blocked_steps,
                     'retryable_steps': retryable_steps,
                     'rewindable_steps': rewindable_steps,
+                    'continue_steps': continue_steps,
                     'next_action': {
                         'tool': 'advance_step',
                         'instruction': (
                             'Call advance_step using only exact members of ready_steps, '
-                            'retryable_steps, or rewindable_steps; Runtime resolves the operation.'
+                            'retryable_steps, rewindable_steps, or continue_steps; Runtime resolves the operation.'
                         ),
                     },
                 }
@@ -944,6 +1032,13 @@ def _workflow_trigger_tools(
                     request_context: Optional[str] = None,
                 ) -> Dict[str, Any]:
                     """Initialize with optional attachments and a merged clarified request."""
+                    return run_trigger(input_bindings, request_context)
+            elif supports_scalar_bindings:
+                def bound_trigger(
+                    input_bindings: Optional[Dict[str, str]] = None,
+                    request_context: Optional[str] = None,
+                ) -> Dict[str, Any]:
+                    """Initialize with scalar bindings and a merged clarified request."""
                     return run_trigger(input_bindings, request_context)
             else:
                 def bound_trigger(request_context: Optional[str] = None) -> Dict[str, Any]:
@@ -962,19 +1057,30 @@ def _workflow_trigger_tools(
             revision_id,
             trigger_query,
             trigger_query != str(current_query or '').strip(),
+            package_hint,
+            any(kind in {'text', 'json'} for kind in input_types_hint.values()),
         )
 
         trigger_workflow.__name__ = name
         description = str(item.get('tool_description') or '').strip()
+        input_contract = (
+            ' Exact external material IDs and types: '
+            + ', '.join(
+                f'{material_id} ({material_type})'
+                for material_id, material_type in sorted(input_types_hint.items())
+            )
+            + '. Use these exact IDs as input_bindings keys.'
+            if input_types_hint else ''
+        )
         attachment_guidance = (
-            ' input_bindings may map material IDs only to exact filenames listed in '
-            'the conversation attachments; omit it for generation or web-search flows.'
+            ' File/image input_bindings use exact filenames listed in conversation attachments; '
+            'text/json input_bindings use literal values, never filesystem paths.'
             if attachments_available else
-            ' No user attachments are available; start without input bindings so the '
-            'Workflow can generate from text or collect images itself.'
+            ' No user attachments are available: do not bind file materials, but pass literal '
+            'values for required text/json input_bindings.'
         )
         trigger_workflow.__doc__ = (
-            description + attachment_guidance
+            description + input_contract + attachment_guidance
             + ' If this turn follows startup clarification, request_context must merge the '
             'original request with every clarification answer; otherwise omit it.'
         )
@@ -1185,7 +1291,7 @@ def resolve_workflow_injection(
                 'A completed Session is not immutable. When the current user query asks to '
                 'revise, delete, fix, or regenerate an existing Workflow output, do not '
                 'write replacement content in chat and do not use generic file/artifact '
-                'tools. Call get_ready_steps, select the matching exact rewindable_steps '
+                'tools. Call get_ready_steps, select the matching exact rewindable_steps or continue_steps '
                 'target, and call advance_step so Runtime starts a new step attempt and '
                 'publishes a new Workflow artifact revision. '
             )
@@ -1274,7 +1380,7 @@ def resolve_workflow_injection(
             + 'Workflow step requires human approval, execute it with advance_step_and_hand_off so '
             + 'the Host stops after execution for output review. Do not ask whether to execute it, '
             + 'and do not merely announce that later steps will run. For recovery, '
-            + 'use only exact retryable_steps or rewindable_steps returned by Runtime.\n'
+            + 'use only exact retryable_steps, rewindable_steps, or continue_steps returned by Runtime.\n'
             + json.dumps({
                 'current_query': current_query,
                 'allowed_workflow_refs': sorted(allowed_refs),

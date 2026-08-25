@@ -63,3 +63,17 @@ type KnowledgeDocumentReader interface {
 type KnowledgeSearcher interface {
 	SearchKnowledge(context.Context, InvocationContext, SearchKnowledgeInput) (SearchKnowledgeResult, error)
 }
+
+type CloudDocumentReader interface {
+	ListCloudDocuments(context.Context, InvocationContext, CloudDocumentListQuery) (CloudDocumentListPage, error)
+	GetCloudDocument(context.Context, InvocationContext, GetCloudDocumentInput) (GetCloudDocumentResult, error)
+	SearchCloudDocuments(context.Context, InvocationContext, SearchCloudDocumentsInput) (SearchCloudDocumentsResult, error)
+}
+type CloudDocumentListQuery struct {
+	Keyword, Status string
+	Offset, Limit   int
+}
+type CloudDocumentListPage struct {
+	Items []CloudDocumentSource
+	Total int64
+}

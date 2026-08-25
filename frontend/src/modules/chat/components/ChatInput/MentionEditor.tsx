@@ -69,6 +69,9 @@ export interface MentionEditorRef {
   getMentions: () => ChatMention[];
 }
 
+const isImeComposingEvent = (event: React.KeyboardEvent<HTMLElement>) =>
+  event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229;
+
 const groups: Array<{
   type: CandidateType;
   shortcut: string;
@@ -497,6 +500,9 @@ const MentionEditor = forwardRef<MentionEditorRef, {
         onCompositionEnd={() => { onCompositionChange(false); refreshQuery(); }}
         onPaste={onPaste}
         onKeyDown={(event) => {
+          if (isImeComposingEvent(event)) {
+            return;
+          }
           if (query) {
             if (event.key === "ArrowDown" || event.key === "ArrowUp") {
               event.preventDefault();

@@ -1,6 +1,9 @@
+import { StopOutlined } from "@ant-design/icons";
 import { Alert } from "antd";
 import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
+
+import "./index.scss";
 
 const KNOWN_CODES = new Set([
   "invalid_request",
@@ -72,11 +75,16 @@ export default function RunStatusCard({
     return null;
   }
   const description = runStatusDescription(terminal, t);
+  const isCancelled = terminal.status === "cancelled";
+  const className = isCancelled
+    ? "chat-run-status-card chat-run-status-card--cancelled"
+    : "chat-run-status-card";
   return (
     <Alert
-      className="chat-run-status-card"
-      type={terminal.status === "cancelled" ? "warning" : "error"}
+      className={className}
+      type={isCancelled ? "warning" : "error"}
       showIcon
+      icon={isCancelled ? <StopOutlined aria-hidden="true" /> : undefined}
       message={t(`chat.runStatus.${terminal.status}`)}
       description={description}
     />

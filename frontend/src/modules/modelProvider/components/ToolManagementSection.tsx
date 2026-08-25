@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   Button,
   Checkbox,
@@ -84,6 +84,59 @@ const resolveAllowedMcpToolIds = (server: McpServerAsset, tools: McpToolAsset[])
   const allowedToolSet = new Set(server.allowedTools);
   return toolIds.filter((toolId) => allowedToolSet.has(toolId));
 };
+
+interface ManagedToolSummaryProps {
+  fallback: string;
+  primary?: string;
+  secondary?: string;
+}
+
+export function ManagedToolSummary({ fallback, primary, secondary }: ManagedToolSummaryProps) {
+  const summaryRef = useRef<HTMLParagraphElement>(null);
+  const [overflowing, setOverflowing] = useState(false);
+  const visibleText = primary || secondary || fallback;
+  const tooltipText = [primary, secondary].filter(Boolean).join("\n") || fallback;
+
+  useLayoutEffect(() => {
+    const summary = summaryRef.current;
+    if (!summary) return;
+
+    const measure = () => {
+      setOverflowing(
+        summary.scrollHeight > summary.clientHeight + 1
+        || summary.scrollWidth > summary.clientWidth + 1,
+      );
+    };
+    measure();
+
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(summary);
+    return () => observer.disconnect();
+  }, [visibleText]);
+
+  const summary = (
+    <span
+      className="model-provider-service-summary-wrap"
+      tabIndex={overflowing ? 0 : undefined}
+    >
+      <p ref={summaryRef} className="model-provider-service-summary">
+        {visibleText}
+      </p>
+    </span>
+  );
+
+  if (!overflowing) return summary;
+  return (
+    <Tooltip
+      title={<div className="model-provider-tool-popover-content">{tooltipText}</div>}
+      classNames={{ root: "model-provider-tool-popover" }}
+      placement="bottomLeft"
+    >
+      {summary}
+    </Tooltip>
+  );
+}
 
 export default function ToolManagementSection({ description, initialQuery = "", layout = "default", refreshToken = 0, title, view }: ToolManagementSectionProps) {
   const { t, i18n } = useTranslation();
@@ -421,19 +474,12 @@ export default function ToolManagementSection({ description, initialQuery = "", 
   }, [mcpToolDraftIds, mcpToolTarget, refreshMcpServers, t]);
 
   const renderManagedToolSummary = (primary?: string, secondary?: string) => {
-    const text = [primary, secondary].filter(Boolean).join("\n");
     return (
-      <Tooltip
-        title={text ? <div className="model-provider-tool-popover-content">{text}</div> : undefined}
-        overlayClassName="model-provider-tool-popover"
-        placement="topLeft"
-      >
-        <span className="model-provider-service-summary-wrap">
-          <p className="model-provider-service-summary">
-            {primary || secondary || t("common.noData")}
-          </p>
-        </span>
-      </Tooltip>
+      <ManagedToolSummary
+        fallback={t("common.noData")}
+        primary={primary}
+        secondary={secondary}
+      />
     );
   };
 

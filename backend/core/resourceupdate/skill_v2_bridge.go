@@ -143,14 +143,17 @@ func skillV2CurrentContent(ctx context.Context, db *gorm.DB, userID, skillName s
 }
 
 func newSkillV2Service(db *gorm.DB) *skillservice.SkillService {
-	root := strings.TrimSpace(os.Getenv("LAZYMIND_SKILL_OBJECT_ROOT"))
-	if root == "" {
-		root = filepath.Join(uploadRootForSkillV2Bridge(), "skill-objects")
-	}
 	return skillservice.NewSkillService(skillservice.SkillServiceDeps{
 		DB:        db,
-		BlobStore: skillservice.NewBlobStore(db, skillservice.NewLocalObjectStore(root)),
+		BlobStore: skillservice.NewBlobStore(db, skillservice.NewLocalObjectStore(skillObjectRootForSkillV2Bridge())),
 	})
+}
+
+func skillObjectRootForSkillV2Bridge() string {
+	if root := strings.TrimSpace(os.Getenv("LAZYMIND_SKILL_OBJECT_ROOT")); root != "" {
+		return strings.TrimRight(root, "/")
+	}
+	return filepath.Join(uploadRootForSkillV2Bridge(), "skill-objects")
 }
 
 func uploadRootForSkillV2Bridge() string {

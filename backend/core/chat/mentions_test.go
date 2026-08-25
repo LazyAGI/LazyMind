@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/workflow"
 )
 
 func TestParseChatMentionsDeduplicatesByTypeAndResource(t *testing.T) {
@@ -95,6 +96,59 @@ func TestApplyChatMentionsRejectsWorkflowWhenWorkflowControlIsPaused(t *testing.
 	}
 }
 
+func TestMergeMentionedWorkflowsAllowsManualAndRejectsPaused(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.UserWorkflowSetting{})
+	setting := orm.UserWorkflowSetting{
+		UserID: "user-1", WorkflowRef: "builtin:image-workflow", Enabled: true,
+		CallMode: workflow.WorkflowCallModeManual, UpdatedAt: time.Now().UTC(),
+	}
+	if err := db.Create(&setting).Error; err != nil {
+		t.Fatal(err)
+	}
+	selected, builtins, err := mergeMentionedWorkflows(
+		context.Background(), db.DB, "user-1", []string{"builtin:image-workflow"}, nil,
+	)
+	if err != nil || len(selected) != 0 || len(builtins) != 1 || builtins[0] != "image-workflow" {
+		t.Fatalf("manual mention selected=%#v builtins=%#v err=%v", selected, builtins, err)
+	}
+	if err := db.Model(&orm.UserWorkflowSetting{}).
+		Where("user_id=? AND plugin_ref=?", "user-1", "builtin:image-workflow"). // workflow-naming: persistence
+		Updates(map[string]any{"enabled": false, "call_mode": workflow.WorkflowCallModeDisabled}).Error; err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = mergeMentionedWorkflows(
+		context.Background(), db.DB, "user-1", []string{"builtin:image-workflow"}, nil,
+	)
+	if err == nil || !strings.Contains(err.Error(), "workflow is paused") {
+		t.Fatalf("paused workflow mention error = %v", err)
+	}
+}
+
+func TestApplyWorkflowContextCallModeClearsPausedSession(t *testing.T) {
+	db := orm.MigrateTestDB(t, &orm.UserWorkflowSetting{})
+	if err := db.Create(&orm.UserWorkflowSetting{
+		UserID: "user-1", WorkflowRef: "builtin:image-workflow", Enabled: false,
+		CallMode: workflow.WorkflowCallModeDisabled, UpdatedAt: time.Now().UTC(),
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	reqBody := map[string]any{"workflow_context": map[string]any{
+		"session_id": "session-1", "workflow_id": "image-workflow",
+		"workflow_ref": "builtin:image-workflow", "current_step": "generate",
+		"workflow_mode": "dynamic", "workflow_preflight": map[string]any{"status": "ready"},
+	}}
+	if err := applyWorkflowContextCallMode(db.DB, "user-1", reqBody); err != nil {
+		t.Fatal(err)
+	}
+	contextValue := reqBody["workflow_context"].(map[string]any)
+	if contextValue["session_id"] != nil || contextValue["workflow_ref"] != nil || contextValue["current_step"] != nil {
+		t.Fatalf("paused workflow context still active: %#v", contextValue)
+	}
+	if contextValue["workflow_mode"] != "dynamic" || contextValue["workflow_preflight"] == nil {
+		t.Fatalf("non-runtime workflow context was not preserved: %#v", contextValue)
+	}
+}
+
 func TestConversationWorkflowBindingSurvivesFollowUpAndClearsAtSessionEnd(t *testing.T) {
 	db := orm.MigrateTestDB(t, &orm.Conversation{}, &orm.WorkflowSession{})
 	now := time.Now().UTC()
@@ -149,6 +203,12 @@ func TestExplicitWorkflowMentionOverridesDisabledConversationToggle(t *testing.T
 	bound, err := readConversationWorkflowBinding(context.Background(), db.DB, "conversation-1")
 	if err != nil || bound != "builtin:test-workflow" {
 		t.Fatalf("persisted binding=%q err=%v", bound, err)
+	}
+
+	refs, err = resolveConversationWorkflowBinding(context.Background(), db.DB, "conversation-1",
+		nil, nil, false, true)
+	if err != nil || len(refs) != 1 || refs[0] != "builtin:test-workflow" {
+		t.Fatalf("disabled follow-up must preserve explicit binding refs=%v err=%v", refs, err)
 	}
 }
 

@@ -2,6 +2,7 @@ from unittest.mock import MagicMock, patch
 
 import lazyllm
 import pytest
+from lazyllm.tools.agent import ToolExecutionError
 from pydantic import ValidationError
 from lazyllm.tools.agent.toolsManager import ToolManager
 from lazymind.chat.engine.subagent.tools import (
@@ -42,14 +43,14 @@ def test_save_artifacts_schema_rejects_content_instead_of_value():
 
 
 def test_save_artifacts_runtime_error_shows_copyable_value_example():
-    result = save_artifacts([{
-        'key': 'preview_html',
-        'content': '<html></html>',
-    }])  # type: ignore[typeddict-item]
+    with pytest.raises(ToolExecutionError) as captured:
+        save_artifacts([{
+            'key': 'preview_html',
+            'content': '<html></html>',
+        }])  # type: ignore[typeddict-item]
 
-    assert result['success'] is False
-    assert 'uses content' in result['error']['reason']
-    assert '"value":"<actual content>"' in result['error']['reason']
+    assert 'uses content' in str(captured.value)
+    assert '"value":"<actual content>"' in str(captured.value)
 
 
 def test_sort_order_uses_durable_slot_order_during_workflow_rewind():
@@ -82,9 +83,7 @@ def test_ppt_preview_slots_reject_direct_model_saves():
         'lazymind.chat.engine.subagent.tools.require_context',
         return_value=ctx,
     ):
-        result = _save_artifact(
-            'preview_html', '<html></html>', content_type='text',
-        )
-
-    assert result['success'] is False
-    assert 'publisher-owned' in result['error']['reason']
+        with pytest.raises(ToolExecutionError, match='publisher-owned'):
+            _save_artifact(
+                'preview_html', '<html></html>', content_type='text',
+            )

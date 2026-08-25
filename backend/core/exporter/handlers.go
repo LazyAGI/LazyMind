@@ -64,7 +64,7 @@ func capabilityPayload(editable bool) map[string]any {
 	if !editable {
 		editableFormat["dependency"] = map[string]any{
 			"id":           "editable-ppt-dependency",
-			"settings_url": "/model-providers/tools#editable-ppt-dependency",
+			"settings_url": "/settings?section=system_tools#editable-ppt-dependency",
 		}
 	}
 	return map[string]any{

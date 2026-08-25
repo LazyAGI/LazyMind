@@ -89,7 +89,16 @@ func writerWriteBackState(
 			return info
 		}
 		binding, hasBinding = writerProviderBindingFromArtifact(sourceValue)
+		if !hasBinding && writerArtifactIsUnboundIR(sourceValue) {
+			binding, hasBinding = writerProviderBindingFromArtifact(draftValue)
+			if !hasBinding {
+				info.State = writerWriteBackInitialDelivery
+			}
+		}
 		if !hasBinding {
+			if writerArtifactIsMarkdown(draftValue) {
+				info.State = writerWriteBackInitialDelivery
+			}
 			return info
 		}
 	} else {
@@ -164,7 +173,7 @@ func writerSlotRevisionSynced(changeSource string, value json.RawMessage) bool {
 	if changeSource == "provider_sync" {
 		return true
 	}
-	if changeSource != "ai" {
+	if changeSource != "ai" && changeSource != "host" {
 		return false
 	}
 	resolved, ok := resolveWriterArtifact(value)
@@ -223,9 +232,20 @@ func resolveWriterArtifact(value json.RawMessage) (json.RawMessage, bool) {
 
 func writerArtifactIsMarkdown(value json.RawMessage) bool {
 	var artifact struct {
-		Path string `json:"path"`
+		Schema string          `json:"schema"`
+		Data   json.RawMessage `json:"data"`
+		Path   string          `json:"path"`
 	}
-	if json.Unmarshal(value, &artifact) != nil || artifact.Path == "" {
+	if json.Unmarshal(value, &artifact) != nil {
+		return false
+	}
+	if artifact.Schema == "text/markdown" {
+		var markdown string
+		if json.Unmarshal(artifact.Data, &markdown) == nil && strings.TrimSpace(markdown) != "" {
+			return true
+		}
+	}
+	if artifact.Path == "" {
 		return false
 	}
 	path := filepath.Clean(artifact.Path)
@@ -235,6 +255,29 @@ func writerArtifactIsMarkdown(value json.RawMessage) bool {
 	}
 	content, err := os.ReadFile(path)
 	return err == nil && strings.TrimSpace(string(content)) != ""
+}
+
+func writerArtifactIsUnboundIR(value json.RawMessage) bool {
+	resolved, ok := resolveWriterArtifact(value)
+	if !ok {
+		return false
+	}
+	var envelope struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if json.Unmarshal(resolved, &envelope) != nil {
+		return false
+	}
+	document := resolved
+	if len(envelope.Data) > 0 {
+		document = envelope.Data
+	}
+	var valueDocument struct {
+		DocumentID      string         `json:"document_id"`
+		ProviderBinding map[string]any `json:"provider_binding"`
+	}
+	return json.Unmarshal(document, &valueDocument) == nil && valueDocument.DocumentID != "" &&
+		len(valueDocument.ProviderBinding) == 0
 }
 
 func writerArtifactPathAllowed(path string) bool {

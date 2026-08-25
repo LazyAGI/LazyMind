@@ -69,22 +69,14 @@ export default function SkillAdminPublishModal({
 
     setSubmitting(true);
     try {
-      const name =
-        (publishMethod === "file"
-          ? selectedFile?.name.replace(/\.(zip|tgz|tar|gz)$/i, "")
-          : normalizedRepoUrl.split("/").filter(Boolean).pop()?.replace(/[-_]/g, " ")) ||
-        t("admin.memorySkillAdminPublishDefaultName");
-
       if (publishMethod === "file" && selectedFile) {
         const upload = await uploadSkillTempFile(selectedFile);
         await publishSkillToMarket({
-          name,
           tags,
           source: { type: "uploaded_zip", uploadId: upload.uploadId },
         });
       } else {
         await publishSkillToMarket({
-          name,
           tags,
           source: { type: "url", url: normalizedRepoUrl },
         });

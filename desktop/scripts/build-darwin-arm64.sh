@@ -134,6 +134,10 @@ prune_runtime_app() {
   else
     remove_generated_path "${app_root}/algorithm/lazyllm/docs"
   fi
+  remove_generated_path "${app_root}/skills/.runtime"
+  remove_generated_path "${app_root}/skills/research"
+  remove_generated_path "${app_root}/skills/review"
+  remove_generated_path "${app_root}/skills/search"
   remove_generated_path "${app_root}/backend/core/core"
 }
 
@@ -207,6 +211,10 @@ rsync -a --delete \
   --exclude "local/runtime" \
   --exclude "desktop/build" \
   --exclude "desktop/cache" \
+  --exclude "skills/.runtime" \
+  --exclude "skills/research" \
+  --exclude "skills/review" \
+  --exclude "skills/search" \
   --exclude "node_modules" \
   --exclude "__pycache__" \
   --exclude ".pytest_cache" \
@@ -224,6 +232,22 @@ rsync -a --delete \
 
 prune_runtime_app "${RUNTIME_ROOT}/app"
 assert_desktop_runtime_app "${RUNTIME_ROOT}/app"
+
+echo "==> Materializing offline Skill packages and featured catalog"
+BUILTIN_SKILL_BUNDLE_ARGS=(
+  run ./cmd/builtin-skill-bundle
+  --sources "${ROOT}/skills/builtin-sources.yaml"
+  --lock "${ROOT}/skills/builtin-skills.lock.json"
+  --cache "${ROOT}/desktop/cache/builtin-skills"
+  --output "${RUNTIME_ROOT}/builtin-skills"
+  --featured-sources "${ROOT}/skills/featured"
+  --featured-output "${RUNTIME_ROOT}/featured-skills"
+)
+if [[ "${RELEASE_BUILD}" == "true" ]]; then
+  BUILTIN_SKILL_BUNDLE_ARGS+=(--frozen-lockfile)
+fi
+(cd "${ROOT}/backend/core" && "${GO_BIN}" "${BUILTIN_SKILL_BUNDLE_ARGS[@]}")
+
 TRUSTED_LOCAL_MODE=false
 if [[ "${LAZYMIND_TRUSTED_LOCAL_MODE:-}" == "true" ]]; then
   TRUSTED_LOCAL_MODE=true

@@ -32,6 +32,9 @@ func TestMergeChunksToFirstChunk_Single(t *testing.T) {
 	if got.Seq != 1 {
 		t.Fatalf("seq: got %d, want 1", got.Seq)
 	}
+	if got.DeltaMode != ChatDeltaModeReplace {
+		t.Fatalf("delta mode: got %q, want %q", got.DeltaMode, ChatDeltaModeReplace)
+	}
 }
 
 // TestMergeChunksToFirstChunk_Multiple concatenates deltas and reasoning from all chunks.
@@ -57,6 +60,9 @@ func TestMergeChunksToFirstChunk_Multiple(t *testing.T) {
 	}
 	if len(got.Sources) != 1 {
 		t.Fatalf("sources: got %d, want 1", len(got.Sources))
+	}
+	if got.DeltaMode != ChatDeltaModeReplace {
+		t.Fatalf("delta mode: got %q, want %q", got.DeltaMode, ChatDeltaModeReplace)
 	}
 }
 

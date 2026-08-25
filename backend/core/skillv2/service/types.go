@@ -68,6 +68,14 @@ type CreateSkillRequest struct {
 	AutoEvo               bool
 	IsEnabled             *bool
 	Source                SourceInput
+	Distribution          *DistributionSource
+}
+
+type DistributionSource struct {
+	BuiltinUID    string
+	Version       string
+	ArchiveSHA256 string
+	TreeSHA256    string
 }
 
 type CreateSkillResponse struct {

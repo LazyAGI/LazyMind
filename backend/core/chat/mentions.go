@@ -312,15 +312,19 @@ func resolveConversationWorkflowBinding(
 		}
 		return currentRefs, nil
 	}
-	if !enabled {
-		if persist {
-			return nil, writeConversationWorkflowBinding(ctx, db, conversationID, "")
-		}
-		return nil, nil
-	}
 	boundRef, err := readConversationWorkflowBinding(ctx, db, conversationID)
 	if err != nil {
 		return nil, err
+	}
+	// New user conversations intentionally start with general Workflow discovery
+	// disabled. An explicit @workflow mention is nevertheless an affirmative
+	// selection, and its exact binding must survive clarification turns before a
+	// Session exists. Otherwise an ask_user answer arrives without a mention, the
+	// bound trigger disappears, and ChatAgent falls back to unrelated tools/skills.
+	// Keep only the explicitly bound Workflow enabled here; applyWorkflowSelection
+	// will continue to restrict the request to this single ref.
+	if !enabled && boundRef == "" {
+		return nil, nil
 	}
 	for _, ref := range excludedRefs {
 		if ref == boundRef {
@@ -573,6 +577,13 @@ func mergeMentionedWorkflows(ctx context.Context, db *gorm.DB, userID string, re
 	selected := make([]map[string]any, 0, len(refs))
 	var forcedBuiltins []string
 	for _, ref := range refs {
+		callMode, err := workflow.UserWorkflowCallMode(db, userID, ref)
+		if err != nil {
+			return nil, nil, fmt.Errorf("load workflow call mode: %w", err)
+		}
+		if callMode == workflow.WorkflowCallModeDisabled {
+			return nil, nil, fmt.Errorf("workflow is paused: %s", ref)
+		}
 		if strings.HasPrefix(ref, "builtin:") {
 			forcedBuiltins = append(forcedBuiltins, strings.TrimPrefix(ref, "builtin:"))
 			continue
@@ -593,6 +604,32 @@ func mergeMentionedWorkflows(ctx context.Context, db *gorm.DB, userID string, re
 		selected = append(selected, map[string]any{"workflow_ref": row.WorkflowRef, "workflow_id": row.WorkflowID, "name": row.Name, "description": row.Description, "when_to_use": row.WhenToUse, "source_type": row.SourceType, "remote_root": "remote://" + row.RelativeRoot, "revision_id": row.HeadRevisionID, "revision_no": row.Version, "tree_hash": row.TreeHash})
 	}
 	return selected, forcedBuiltins, nil
+}
+
+func applyWorkflowContextCallMode(db *gorm.DB, userID string, reqBody map[string]any) error {
+	workflowContext, ok := reqBody["workflow_context"].(map[string]any)
+	if !ok || workflowContext == nil {
+		return nil
+	}
+	workflowRef := strings.TrimSpace(fmt.Sprint(workflowContext["workflow_ref"]))
+	if workflowRef == "" {
+		return nil
+	}
+	callMode, err := workflow.UserWorkflowCallMode(db, userID, workflowRef)
+	if err != nil {
+		return fmt.Errorf("load active workflow call mode: %w", err)
+	}
+	if callMode != workflow.WorkflowCallModeDisabled {
+		return nil
+	}
+	for _, key := range []string{
+		"session_id", "workflow_id", "current_step", "workflow_ref",
+		"revision_id", "revision_no", "tree_hash", "remote_root", "runtime",
+	} {
+		delete(workflowContext, key)
+	}
+	reqBody["workflow_context"] = workflowContext
+	return nil
 }
 
 // applyWorkflowSelection is the single catalog/allowlist assembly path used by
@@ -619,6 +656,9 @@ func applyWorkflowSelection(
 		delete(reqBody, "allowed_workflow_refs")
 		delete(reqBody, "workflow_activations")
 		return nil
+	}
+	if err := applyWorkflowContextCallMode(db, userID, reqBody); err != nil {
+		return err
 	}
 	if len(mentionedRefs) > 1 {
 		return fmt.Errorf("at most one workflow mention is allowed per turn")

@@ -27,3 +27,13 @@
     }
   }
 }
+
+.knowledge-segment-content {
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+
+  > div {
+    height: 100%;
+  }
+}

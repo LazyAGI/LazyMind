@@ -53,7 +53,9 @@ func TestMaintenanceTaskStatusIsScopedToCurrentUser(t *testing.T) {
 func TestSkillOrganizeDraftConflictDoesNotCallAlgorithm(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	testutil.SeedSkillWithRevision(t, db, "skill2", "rev2")
 	setSkillOrganizeCategory(t, db, "skill1", "internal", "internal/论文精读")
+	setSkillOrganizeCategory(t, db, "skill2", "internal", "internal/辅助技能")
 	testutil.SeedTextBlob(t, db, "draft_hash", "draft")
 	testutil.SeedDraftEntry(t, db, "skill1", "SKILL.md", "upsert", "file", "draft_hash")
 	oldDB := store.DB()
@@ -71,7 +73,7 @@ func TestSkillOrganizeDraftConflictDoesNotCallAlgorithm(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/api/core/skill_organize", strings.NewReader(`{
 		"requestid":"org_test",
-		"skills":["skills/internal/论文精读"]
+		"skills":["skills/internal/论文精读","skills/internal/辅助技能"]
 	}`))
 	req.Header.Set("X-User-Id", "user_001")
 	rec := httptest.NewRecorder()

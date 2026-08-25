@@ -44,10 +44,11 @@ type ChatMessage struct {
 }
 
 type DatasetFilters struct {
-	Subject    []string `json:"subject,omitempty"`
-	DatasetIDs []string `json:"kb_id,omitempty"`
-	Tags       []string `json:"tags,omitempty"`
-	Creators   []string `json:"creator,omitempty"`
+	Subject     []string `json:"subject,omitempty"`
+	DatasetIDs  []string `json:"kb_id,omitempty"`
+	DocumentIDs []string `json:"doc_id,omitempty"`
+	Tags        []string `json:"tags,omitempty"`
+	Creators    []string `json:"creator,omitempty"`
 }
 
 type LazyChatRequest struct {
@@ -601,12 +602,13 @@ func datasetFiltersFromAny(v any) *DatasetFilters {
 		return nil
 	}
 	filters := &DatasetFilters{
-		Subject:    stringSlice(m["subject"]),
-		DatasetIDs: stringSlice(m["kb_id"]),
-		Tags:       stringSlice(m["tags"]),
-		Creators:   stringSlice(m["creator"]),
+		Subject:     stringSlice(m["subject"]),
+		DatasetIDs:  stringSlice(m["kb_id"]),
+		DocumentIDs: stringSlice(m["doc_id"]),
+		Tags:        stringSlice(m["tags"]),
+		Creators:    stringSlice(m["creator"]),
 	}
-	if len(filters.Subject) == 0 && len(filters.DatasetIDs) == 0 && len(filters.Tags) == 0 && len(filters.Creators) == 0 {
+	if len(filters.Subject) == 0 && len(filters.DatasetIDs) == 0 && len(filters.DocumentIDs) == 0 && len(filters.Tags) == 0 && len(filters.Creators) == 0 {
 		return nil
 	}
 	return filters

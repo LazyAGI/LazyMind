@@ -41,10 +41,86 @@ export interface WriterDocument {
   [key: string]: unknown;
 }
 
+const WRITER_SYSTEM_ANCHOR_RE = /^<a\s+id=(["'])block-[^"']+\1\s*(?:\/>|>\s*<\/a>)$/i;
+
+/** System anchors stay in the IR for numbering/reference round trips, but are not user content. */
+export function isWriterSystemAnchorBlock(block: WriterBlock): boolean {
+  return block.type === 'paragraph'
+    && WRITER_SYSTEM_ANCHOR_RE.test(block.content?.trim() ?? '');
+}
+
+export type WriterHeadingLevel = 1 | 2 | 3 | 4 | 5 | 6;
+
+export interface WriterOutlineItem {
+  nodeId: string;
+  title: string;
+  level: WriterHeadingLevel;
+}
+
+export interface WriterReferenceTarget {
+  nodeId: string;
+  label: string;
+  type: string;
+}
+
+export interface WriterInternalReference {
+  targetNodeId: string;
+  displayText?: string;
+}
+
+export function writerHeadingLevel(block: WriterBlock): WriterHeadingLevel {
+  const raw = Number(block.numbering?.level ?? 2);
+  if (!Number.isFinite(raw)) return 2;
+  return Math.min(6, Math.max(1, Math.trunc(raw))) as WriterHeadingLevel;
+}
+
+/** Collects headings in document order for the client-side table of contents. */
+export function collectWriterOutline(blocks: WriterBlock[]): WriterOutlineItem[] {
+  const items: WriterOutlineItem[] = [];
+
+  const visit = (current: WriterBlock[]) => {
+    current.forEach((block) => {
+      const title = block.content?.trim() ?? '';
+      if (block.type === 'heading' && title) {
+        items.push({
+          nodeId: block.node_id,
+          title,
+          level: writerHeadingLevel(block),
+        });
+      }
+      if (block.children?.length) visit(block.children);
+    });
+  };
+
+  visit(blocks);
+  return items;
+}
+
+/** Numbered IR blocks that can be addressed by an internal_ref span. */
+export function collectWriterReferenceTargets(blocks: WriterBlock[]): WriterReferenceTarget[] {
+  const targets: WriterReferenceTarget[] = [];
+  const visit = (current: WriterBlock[]) => {
+    current.forEach((block) => {
+      if (['heading', 'image', 'table', 'code'].includes(block.type)) {
+        targets.push({
+          nodeId: block.node_id,
+          label: block.content?.trim() || block.node_id,
+          type: block.type,
+        });
+      }
+      if (block.children?.length) visit(block.children);
+    });
+  };
+  visit(blocks);
+  return targets;
+}
+
 interface WriterMediaAsset {
   media_asset_id?: unknown;
   source_type?: unknown;
   uri?: unknown;
+  local_path?: unknown;
+  meta?: unknown;
 }
 
 interface WriterMediaAssetLibrary {
@@ -57,26 +133,17 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-/**
- * Supplies the local path for a legacy Feishu image only when the current
- * session has exactly one generated image. This makes existing documents
- * renderable without writing to Feishu and never guesses between multiple
- * media assets.
- */
+/** Restores renderable paths for legacy Feishu image blocks without changing provider state. */
 export function restoreLegacyWriterImageReference(
   document: WriterDocument,
   mediaLibrary: unknown,
 ): WriterDocument {
   const library = asRecord(mediaLibrary) as WriterMediaAssetLibrary | undefined;
-  const generatedAssets = Object.values(library?.assets ?? {}).filter((asset) => {
+  const assets = Object.values(library?.assets ?? {});
+  const generatedAssets = assets.filter((asset) => {
     const uri = typeof asset.uri === 'string' ? asset.uri.trim() : '';
     return asset.source_type === 'image_generation' && uri !== '';
   });
-  if (generatedAssets.length !== 1) return document;
-
-  const asset = generatedAssets[0];
-  const path = typeof asset.uri === 'string' ? asset.uri.trim() : '';
-  const assetID = typeof asset.media_asset_id === 'string' ? asset.media_asset_id : '';
   let changed = false;
 
   const restoreBlocks = (blocks: WriterBlock[]): WriterBlock[] => blocks.map((block) => {
@@ -84,6 +151,10 @@ export function restoreLegacyWriterImageReference(
     const mediaReference = block.references?.find((reference) => reference.type === 'media_asset');
     const rawBlock = asRecord(asRecord(block.provider_payload)?.raw_block);
     const image = asRecord(rawBlock?.image);
+    const providerBinding = asRecord(block.provider_binding);
+    const providerBlockID = typeof providerBinding?.block_id === 'string'
+      ? providerBinding.block_id.trim()
+      : '';
     const isLegacyFeishuImage = block.type === 'image'
       && typeof image?.token === 'string'
       && image.token.trim() !== '';
@@ -94,6 +165,31 @@ export function restoreLegacyWriterImageReference(
     if (!isLegacyFeishuImage || hasLocalPath) {
       return children === block.children ? block : { ...block, children };
     }
+
+    const sourceAssets = assets.filter((asset) => {
+      const meta = asRecord(asset.meta);
+      const assetBlockID = typeof meta?.provider_block_id === 'string'
+        ? meta.provider_block_id.trim()
+        : '';
+      return asset.source_type === 'input_resource'
+        && meta?.provider === 'feishu'
+        && meta?.origin === 'source_document'
+        && providerBlockID !== ''
+        && assetBlockID === providerBlockID;
+    });
+    const asset = sourceAssets.length === 1
+      ? sourceAssets[0]
+      : generatedAssets.length === 1 ? generatedAssets[0] : undefined;
+    if (!asset) {
+      return children === block.children ? block : { ...block, children };
+    }
+    const localPath = typeof asset.local_path === 'string' ? asset.local_path.trim() : '';
+    const uri = typeof asset.uri === 'string' ? asset.uri.trim() : '';
+    const path = asset.source_type === 'input_resource' ? localPath || uri : uri || localPath;
+    if (!path) {
+      return children === block.children ? block : { ...block, children };
+    }
+    const assetID = typeof asset.media_asset_id === 'string' ? asset.media_asset_id : '';
     changed = true;
     return {
       ...block,
@@ -357,6 +453,26 @@ export function getWriterSpanStyles(span: WriterSpan): string[] {
   return [];
 }
 
+export function getWriterInternalReference(
+  span: WriterSpan,
+): WriterInternalReference | undefined {
+  const style = isRecord(span.style)
+    ? span.style
+    : isRecord(span.stype)
+      ? span.stype
+      : undefined;
+  const link = style && isRecord(style.link) ? style.link : undefined;
+  if (link?.type !== 'internal_ref' || typeof link.target_node_id !== 'string') {
+    return undefined;
+  }
+  const targetNodeId = link.target_node_id.trim();
+  if (!targetNodeId) return undefined;
+  return {
+    targetNodeId,
+    ...(typeof link.display_text === 'string' ? { displayText: link.display_text } : {}),
+  };
+}
+
 function writerStyleMap(span: WriterSpan): Record<string, unknown> {
   const source = span.style ?? span.stype;
   if (isRecord(source)) return { ...source };
@@ -392,6 +508,39 @@ export function normalizeWriterDocumentForSync(
     ...document,
     blocks: document.blocks.map(normalizeWriterBlockForSync),
   };
+}
+
+/** Restore the user-authored label after the backend materializes an internal reference number. */
+export function restoreWriterInternalReferenceDisplayText(
+  document: WriterDocument,
+): WriterDocument {
+  let changed = false;
+  const restoreBlocks = (blocks: WriterBlock[]): WriterBlock[] => blocks.map((block) => {
+    const children = block.children?.length ? restoreBlocks(block.children) : block.children;
+    let spans = block.spans;
+    let spansChanged = false;
+    if (spans?.length) {
+      spans = spans.map((span) => {
+        const reference = getWriterInternalReference(span);
+        if (reference?.displayText === undefined || reference.displayText === span.text) return span;
+        spansChanged = true;
+        return { ...span, text: reference.displayText };
+      });
+    }
+    if (!spansChanged && children === block.children) return block;
+    changed = true;
+    return {
+      ...block,
+      ...(spansChanged && spans ? {
+        spans,
+        content: spans.map((span) => span.text).join(''),
+      } : {}),
+      children,
+    };
+  });
+
+  const blocks = restoreBlocks(document.blocks);
+  return changed ? { ...document, blocks } : document;
 }
 
 /** Semantic equality for WriterDocument, ignoring object identity. */
@@ -867,6 +1016,158 @@ export function applyWriterBlockSpanColor(
       ...sliceWriterSpans(sourceSpans, safeEnd, contentLength),
     ]);
     return { ...block, spans };
+  });
+  return result.changed ? { ...document, blocks: result.blocks } : document;
+}
+
+function withWriterInternalReference(
+  span: WriterSpan,
+  targetNodeId: string,
+): WriterSpan {
+  const key = span.style === undefined && span.stype !== undefined ? 'stype' : 'style';
+  return {
+    ...span,
+    [key]: {
+      ...writerStyleMap(span),
+      link: {
+        type: 'internal_ref',
+        target_node_id: targetNodeId,
+        display_text: span.text,
+      },
+    },
+  };
+}
+
+function writerSpanWithDisplayText(span: WriterSpan): WriterSpan {
+  const displayText = getWriterInternalReference(span)?.displayText;
+  return displayText !== undefined && displayText !== span.text
+    ? { ...span, text: displayText }
+    : span;
+}
+
+function writerBlockDisplaySpans(block: WriterBlock): WriterSpan[] {
+  const sourceSpans = block.spans?.length
+    && block.spans.map((span) => span.text).join('') === (block.content ?? '')
+    ? block.spans
+    : spanForEditedContent(block, block.content ?? '');
+  return sourceSpans.map(writerSpanWithDisplayText);
+}
+
+function writerSpanWithCurrentReferenceDisplayText(span: WriterSpan): WriterSpan {
+  const reference = getWriterInternalReference(span);
+  if (!reference) return span;
+  const key = isRecord(span.style)
+    ? 'style'
+    : isRecord(span.stype)
+      ? 'stype'
+      : undefined;
+  if (!key) return span;
+  const styles = span[key] as Record<string, unknown>;
+  const link = isRecord(styles.link) ? styles.link : undefined;
+  if (!link || link.display_text === span.text) return span;
+  return {
+    ...span,
+    [key]: {
+      ...styles,
+      link: { ...link, display_text: span.text },
+    },
+  };
+}
+
+function withoutWriterInternalReference(span: WriterSpan): WriterSpan {
+  if (!getWriterInternalReference(span)) return span;
+  const key = span.style === undefined && span.stype !== undefined ? 'stype' : 'style';
+  const nextStyles = writerStyleMap(span);
+  delete nextStyles.link;
+  return { ...span, [key]: nextStyles };
+}
+
+/** Apply an IR internal reference to the selected source-text range. */
+export function applyWriterBlockInternalReference(
+  document: WriterDocument,
+  nodeId: string,
+  start: number,
+  end: number,
+  targetNodeId: string,
+): WriterDocument {
+  if (!targetNodeId || start < 0 || end <= start) return document;
+  const result = replaceBlockInTree(document.blocks, nodeId, (block) => {
+    if (block.type === 'document' || block.editable === false) return block;
+    const contentLength = Array.from(block.content ?? '').length;
+    const safeStart = Math.min(start, contentLength);
+    const safeEnd = Math.min(end, contentLength);
+    if (safeEnd <= safeStart) return block;
+
+    const sourceSpans = block.spans?.length
+      && block.spans.map((span) => span.text).join('') === (block.content ?? '')
+      ? block.spans
+      : spanForEditedContent(block, block.content ?? '');
+    const spans = mergeAdjacentWriterSpans([
+      ...sliceWriterSpans(sourceSpans, 0, safeStart),
+      ...sliceWriterSpans(sourceSpans, safeStart, safeEnd).map(
+        (span) => withWriterInternalReference(span, targetNodeId),
+      ),
+      ...sliceWriterSpans(sourceSpans, safeEnd, contentLength),
+    ]);
+    return { ...block, spans };
+  });
+  return result.changed ? { ...document, blocks: result.blocks } : document;
+}
+
+/** Whether any text in the selected range carries an IR internal reference. */
+export function writerBlockRangeHasInternalReference(
+  block: WriterBlock,
+  start: number,
+  end: number,
+): boolean {
+  if (start < 0 || end <= start) return false;
+  const sourceSpans = writerBlockDisplaySpans(block);
+  const contentLength = sourceSpans.reduce(
+    (total, span) => total + Array.from(span.text).length,
+    0,
+  );
+  const safeStart = Math.min(start, contentLength);
+  const safeEnd = Math.min(end, contentLength);
+  if (safeEnd <= safeStart) return false;
+  return sliceWriterSpans(sourceSpans, safeStart, safeEnd)
+    .some((span) => getWriterInternalReference(span) !== undefined);
+}
+
+/** Remove internal-reference styling from the selected text without changing its wording. */
+export function removeWriterBlockInternalReference(
+  document: WriterDocument,
+  nodeId: string,
+  start: number,
+  end: number,
+): WriterDocument {
+  if (start < 0 || end <= start) return document;
+  const result = replaceBlockInTree(document.blocks, nodeId, (block) => {
+    if (block.type === 'document' || block.editable === false) return block;
+    const sourceSpans = writerBlockDisplaySpans(block);
+    const displayContent = sourceSpans.map((span) => span.text).join('');
+    const contentLength = Array.from(displayContent).length;
+    const safeStart = Math.min(start, contentLength);
+    const safeEnd = Math.min(end, contentLength);
+    if (safeEnd <= safeStart) return block;
+
+    const displaySpansInRange = (rangeStart: number, rangeEnd: number) => (
+      sliceWriterSpans(sourceSpans, rangeStart, rangeEnd)
+        .map(writerSpanWithCurrentReferenceDisplayText)
+    );
+    let removed = false;
+    const selectedSpans = displaySpansInRange(safeStart, safeEnd).map((span) => {
+      const nextSpan = withoutWriterInternalReference(span);
+      if (nextSpan !== span) removed = true;
+      return nextSpan;
+    });
+    if (!removed) return block;
+
+    const spans = mergeAdjacentWriterSpans([
+      ...displaySpansInRange(0, safeStart),
+      ...selectedSpans,
+      ...displaySpansInRange(safeEnd, contentLength),
+    ]);
+    return { ...block, content: displayContent, spans };
   });
   return result.changed ? { ...document, blocks: result.blocks } : document;
 }

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -40,6 +41,7 @@ type Adapter struct {
 	self           string
 	bridge         *mcpbridge.Bridge
 	home           string
+	hostID         string
 }
 
 type SetupGuide struct {
@@ -113,17 +115,17 @@ func New(kind Kind, binary, self string, bridge *mcpbridge.Bridge) (*Adapter, er
 	if err != nil {
 		return nil, fmt.Errorf("resolve LazyMind executable: %w", err)
 	}
-	home := strings.TrimSpace(os.Getenv("LAZYMIND_HOME"))
-	if home != "" {
-		home, err = filepath.Abs(home)
-		if err != nil {
-			return nil, fmt.Errorf("resolve LAZYMIND_HOME: %w", err)
-		}
-		home = filepath.Clean(home)
+	home, err := agentexec.LazyMindHome()
+	if err != nil {
+		return nil, err
+	}
+	hostID, err := agentexec.PersistentHostID()
+	if err != nil {
+		return nil, fmt.Errorf("resolve LazyMind Agent Host identity: %w", err)
 	}
 	return &Adapter{
 		kind: kind, definition: def, binary: resolvedBinary, discoveryError: discoveryError,
-		version: version, self: resolvedSelf, bridge: bridge, home: home,
+		version: version, self: resolvedSelf, bridge: bridge, home: home, hostID: hostID,
 	}, nil
 }
 
@@ -138,6 +140,7 @@ func (a *Adapter) StatusWithProbe(probe mcpbridge.ProbeResult, probeErr error) S
 		Mode: "managed", Installed: a.discoveryError == nil, Version: a.version,
 	}
 	var problems []string
+	currentConfiguration := false
 	if a.discoveryError != nil {
 		problems = append(problems, a.discoveryError.Error())
 	} else {
@@ -146,16 +149,19 @@ func (a *Adapter) StatusWithProbe(probe mcpbridge.ProbeResult, probeErr error) S
 			problems = append(problems, fmt.Sprintf("build %s setup instructions: %v", a.definition.displayName, err))
 		} else {
 			status.Setup = &guide
-			state, stateErr := readManagedConfig(a.kind, guide.ConfigPath, a.self, a.home)
+			state, stateErr := readManagedConfig(a.kind, guide.ConfigPath, a.self, a.home, a.hostID)
 			if stateErr != nil {
 				problems = append(problems, fmt.Sprintf("read %s MCP configuration: %v", a.definition.displayName, stateErr))
 			} else {
 				status.Configured = state.configured
 				status.Owned = state.owned
+				currentConfiguration = state.current
 				status.Command = state.command
 				status.Arguments = append([]string(nil), state.arguments...)
 				if state.configured && !state.owned {
 					problems = append(problems, "an MCP server named `lazymind` already exists and is not managed by this LazyMind installation")
+				} else if state.configured && !state.current {
+					problems = append(problems, "LazyMind MCP configuration needs a provider identity upgrade; reconnect from LazyMind settings")
 				}
 			}
 		}
@@ -167,7 +173,7 @@ func (a *Adapter) StatusWithProbe(probe mcpbridge.ProbeResult, probeErr error) S
 		status.Endpoint = probe.Endpoint
 		status.Tools = probe.Tools
 	}
-	status.Ready = status.Installed && status.ServiceReady && status.Configured && status.Owned
+	status.Ready = status.Installed && status.ServiceReady && status.Configured && status.Owned && currentConfiguration
 	status.ReadinessError = strings.Join(problems, "; ")
 	return status
 }
@@ -180,7 +186,7 @@ func (a *Adapter) Connect(ctx context.Context) (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
-	state, err := readManagedConfig(a.kind, guide.ConfigPath, a.self, a.home)
+	state, err := readManagedConfig(a.kind, guide.ConfigPath, a.self, a.home, a.hostID)
 	if err != nil {
 		return Status{}, fmt.Errorf("read %s MCP configuration: %w", a.definition.displayName, err)
 	}
@@ -190,13 +196,13 @@ func (a *Adapter) Connect(ctx context.Context) (Status, error) {
 	if _, err := a.bridge.Probe(ctx); err != nil {
 		return Status{}, fmt.Errorf("LazyMind MCP preflight failed: %w", err)
 	}
-	if !state.configured {
-		if err := writeManagedConfig(a.kind, guide.ConfigPath, a.self, a.home); err != nil {
+	if !state.configured || !state.current {
+		if err := writeManagedConfig(a.kind, guide.ConfigPath, a.self, a.home, a.hostID); err != nil {
 			return Status{}, fmt.Errorf("configure %s MCP: %w", a.definition.displayName, err)
 		}
 	}
 	status := a.Status(ctx)
-	if !status.Configured || !status.Owned {
+	if !status.Configured || !status.Owned || !status.Ready {
 		return Status{}, fmt.Errorf("%s did not persist the expected LazyMind MCP configuration", a.definition.displayName)
 	}
 	return status, nil
@@ -210,7 +216,7 @@ func (a *Adapter) Disconnect(ctx context.Context) (Status, error) {
 	if err != nil {
 		return Status{}, err
 	}
-	state, err := readManagedConfig(a.kind, guide.ConfigPath, a.self, a.home)
+	state, err := readManagedConfig(a.kind, guide.ConfigPath, a.self, a.home, a.hostID)
 	if err != nil {
 		return Status{}, fmt.Errorf("read %s MCP configuration: %w", a.definition.displayName, err)
 	}
@@ -226,9 +232,11 @@ func (a *Adapter) Disconnect(ctx context.Context) (Status, error) {
 }
 
 func (a *Adapter) setupGuide() (SetupGuide, error) {
-	environment := map[string]string(nil)
+	environment := map[string]string{
+		"LAZYMIND_AGENT_PROVIDER": string(a.kind), "LAZYMIND_AGENT_HOST_ID": a.hostID,
+	}
 	if a.home != "" {
-		environment = map[string]string{"LAZYMIND_HOME": a.home}
+		environment["LAZYMIND_HOME"] = a.home
 	}
 	stdio := stdioMCPDefinition{
 		Type: "stdio", Command: a.self, Args: []string{"mcp", "proxy"}, Env: environment,
@@ -366,8 +374,16 @@ func dshProfilePatch(self string, environment map[string]string) string {
 		"        command: " + strconv.Quote(self),
 		"        args: ['mcp', 'proxy']",
 	}
-	if home := environment["LAZYMIND_HOME"]; home != "" {
-		lines = append(lines, "        env:", "          LAZYMIND_HOME: "+strconv.Quote(home))
+	if len(environment) > 0 {
+		lines = append(lines, "        env:")
+		keys := make([]string, 0, len(environment))
+		for key := range environment {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		for _, key := range keys {
+			lines = append(lines, "          "+key+": "+strconv.Quote(environment[key]))
+		}
 	}
 	lines = append(lines, "        failOnStartupError: true")
 	return strings.Join(lines, "\n") + "\n"

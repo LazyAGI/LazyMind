@@ -19,6 +19,7 @@ import (
 )
 
 const (
+	minSkillOrganizeSkills        = 2
 	maxSkillOrganizeSkills        = 20
 	skillOrganizeBaseDir          = "skills"
 	skillOrganizeInternalCategory = "internal"
@@ -68,6 +69,12 @@ func SubmitSkillOrganize(w http.ResponseWriter, r *http.Request) {
 		}, http.StatusBadRequest)
 		return
 	}
+	if len(normalized.Skills) < minSkillOrganizeSkills {
+		common.ReplyErrWithData(w, "at least two internal skills are required", map[string]any{
+			"code": "skill_organize_insufficient_internal_skills",
+		}, http.StatusBadRequest)
+		return
+	}
 	internalSkills, skillIDs, err := resolveInternalSkillOrganizeSelection(r.Context(), db, userID, normalized.Skills)
 	if err != nil {
 		replyServiceError(w, err)
@@ -76,6 +83,12 @@ func SubmitSkillOrganize(w http.ResponseWriter, r *http.Request) {
 	if len(internalSkills) == 0 {
 		common.ReplyErrWithData(w, "no internal skills selected", map[string]any{
 			"code": "skill_organize_no_internal_skills",
+		}, http.StatusBadRequest)
+		return
+	}
+	if len(internalSkills) < minSkillOrganizeSkills {
+		common.ReplyErrWithData(w, "at least two internal skills are required", map[string]any{
+			"code": "skill_organize_insufficient_internal_skills",
 		}, http.StatusBadRequest)
 		return
 	}
