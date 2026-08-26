@@ -236,6 +236,82 @@ def test_selected_workflow_declares_missing_only_startup_clarification():
     assert 'context-specific suggested answers' in contribution.runtime_context
 
 
+def test_startup_clarification_subset_policy_uses_only_declared_recipe_choices():
+    runtime = {
+        'clarification_fields': [{
+            'id': 'visual_style',
+            'label': '风格',
+            'question': '请选择视觉风格',
+            'type': 'single',
+            'choice_policy': 'subset',
+            'choices': [
+                '赛博朋克｜霓虹暗底、HUD 信息轨道',
+                '未来主义｜银白蓝紫、流线造型',
+                '商务经典｜深蓝灰、稳重结构',
+            ],
+        }],
+    }
+
+    contribution = resolve_workflow_injection(
+        None,
+        current_query='生成游戏介绍 PPT',
+        workflow_catalog=[{
+            'workflow_ref': 'builtin:ppt-workflow',
+            'workflow_id': 'ppt-workflow',
+            'revision_id': 'revision-1',
+            'runtime': runtime,
+        }],
+        allowed_workflow_refs=['builtin:ppt-workflow'],
+        workflow_activations=[{
+            'workflow_ref': 'builtin:ppt-workflow',
+            'workflow_id': 'ppt-workflow',
+            'revision_id': 'revision-1',
+            'tool_name': 'trigger_ppt_workflow',
+        }],
+    )
+
+    assert 'choice_policy=subset' in contribution.runtime_context
+    assert 'copy them verbatim' in contribution.runtime_context
+    assert '赛博朋克｜霓虹暗底、HUD 信息轨道' in contribution.runtime_context
+
+
+def test_startup_clarification_seed_choices_accept_explicit_freeform_value():
+    runtime = {
+        'clarification_fields': [{
+            'id': 'slide_count',
+            'label': '页数',
+            'question': '希望生成多少页？',
+            'type': 'single',
+            'choice_policy': 'seed',
+            'choices': ['3 页', '5 页', '8 页', '10 页'],
+        }],
+    }
+
+    contribution = resolve_workflow_injection(
+        None,
+        current_query='生成四页赛博朋克风格的 PPT',
+        workflow_catalog=[{
+            'workflow_ref': 'builtin:ppt-workflow',
+            'workflow_id': 'ppt-workflow',
+            'revision_id': 'revision-1',
+            'runtime': runtime,
+        }],
+        allowed_workflow_refs=['builtin:ppt-workflow'],
+        workflow_activations=[{
+            'workflow_ref': 'builtin:ppt-workflow',
+            'workflow_id': 'ppt-workflow',
+            'revision_id': 'revision-1',
+            'tool_name': 'trigger_ppt_workflow',
+        }],
+    )
+
+    assert 'choice_policy=seed' in contribution.runtime_context
+    assert 'explicit free-form value in the request counts as present' in (
+        contribution.runtime_context
+    )
+    assert 'never ask that field again' in contribution.runtime_context
+
+
 def test_startup_clarification_is_single_shot_and_default_trigger_merges_context():
     runtime = {
         'clarification_fields': [
@@ -617,6 +693,51 @@ def test_dynamic_trigger_defaults_request_context_to_current_query():
 
     assert result['request_context'] == 'run the selected workflow'
     toolkit.advance_step.assert_not_called()
+
+
+def test_dynamic_trigger_preserves_exact_query_instead_of_model_paraphrase():
+    toolkit = MagicMock()
+    toolkit.prepare_workflow.return_value = {
+        'session_id': 'session-1', 'state_version': 1,
+        'ready_steps': ['analyze_subject'],
+    }
+    original = '搜索一张哈兰德的照片，然后给他球衣画上必胜两个字'
+    paraphrase = '生成一张哈兰德在球场上的写实照片，球衣印有必胜'
+    with patch('lazymind.chat.workflow.workflow_manager._client') as client_factory, patch(
+        'lazymind.chat.workflow.workflow_manager.HostWorkflowToolkit', return_value=toolkit,
+    ):
+        client_factory.return_value.get_workflow.return_value.result = {
+            'workflow_id': 'image-workflow', 'revision_id': 'revision-1',
+        }
+        client_factory.return_value.get_state.return_value = {
+            'session_id': 'session-1', 'state_version': 1,
+            'projection': {'reachable': ['analyze_subject'], 'ready': ['analyze_subject']},
+        }
+        contribution = resolve_workflow_injection(
+            None,
+            current_query=original,
+            workflow_catalog=[{
+                'workflow_ref': 'builtin:image-workflow',
+                'workflow_id': 'image-workflow',
+                'revision_id': 'revision-1',
+            }],
+            allowed_workflow_refs=['builtin:image-workflow'],
+            workflow_activations=[{
+                'workflow_ref': 'builtin:image-workflow',
+                'workflow_id': 'image-workflow',
+                'revision_id': 'revision-1',
+                'tool_name': 'trigger_image_workflow',
+            }],
+        )
+
+        result = _tool(contribution, 'trigger_image_workflow')(
+            request_context=paraphrase,
+        )
+
+    assert result['request_context'] == original
+    toolkit.prepare_workflow.assert_called_once_with(
+        'image-workflow', input_bindings={}, request_context=original,
+    )
 
 
 def test_dynamic_trigger_returns_waiting_without_advancing_when_no_step_is_ready():

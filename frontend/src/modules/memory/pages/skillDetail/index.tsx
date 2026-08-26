@@ -13,7 +13,14 @@ import {
   getSkillAssetDetail,
   patchSkillAsset,
 } from "../../skillApi";
-import { type StructuredAsset } from "../../shared";
+import {
+  SKILL_CHAR_COUNT_STYLE,
+  SKILL_DESCRIPTION_MAX_LENGTH,
+  SKILL_NAME_MAX_LENGTH,
+  countSkillCharacters,
+  skillCharCountConfig,
+  type StructuredAsset,
+} from "../../shared";
 
 export default function MemorySkillDetailPage() {
   const { itemId = "" } = useParams();
@@ -43,6 +50,11 @@ export default function MemorySkillDetailPage() {
   );
   const skill = detail || cachedSkill;
   const canEditSkillDetail = Boolean(skill) && !skill?.readonly;
+  const titleDraftLength = countSkillCharacters(titleDraft);
+  const descriptionDraftLength = countSkillCharacters(descriptionDraft);
+  const titleTooLong = titleDraftLength > SKILL_NAME_MAX_LENGTH;
+  const descriptionTooLong =
+    descriptionDraftLength > SKILL_DESCRIPTION_MAX_LENGTH;
 
   const buildMetadataPatchPayload = (asset: StructuredAsset, overrides: Record<string, unknown> = {}) =>
     buildSkillUpdatePayload({
@@ -144,6 +156,14 @@ export default function MemorySkillDetailPage() {
       message.warning(`${t("common.pleaseInput")}${t("admin.memoryName")}`);
       return;
     }
+    if (titleTooLong) {
+      message.warning(
+        t("admin.memorySkillNameMaxLength", {
+          count: SKILL_NAME_MAX_LENGTH,
+        }),
+      );
+      return;
+    }
     if (nextName === skill.name) {
       setIsTitleEditing(false);
       return;
@@ -157,6 +177,7 @@ export default function MemorySkillDetailPage() {
       message.success(t("common.saveSuccess"));
     } catch (error) {
       console.error("Save skill title failed:", error);
+      message.error(getLocalizedErrorMessage(error));
     } finally {
       setTitleSaving(false);
     }
@@ -167,6 +188,14 @@ export default function MemorySkillDetailPage() {
       return;
     }
     const nextDescription = descriptionDraft.trim();
+    if (descriptionTooLong) {
+      message.warning(
+        t("admin.memorySkillDescriptionMaxLength", {
+          count: SKILL_DESCRIPTION_MAX_LENGTH,
+        }),
+      );
+      return;
+    }
     if (nextDescription === (skill.description || "").trim()) {
       setIsDescriptionEditing(false);
       return;
@@ -183,6 +212,7 @@ export default function MemorySkillDetailPage() {
       message.success(t("common.saveSuccess"));
     } catch (error) {
       console.error("Save skill description failed:", error);
+      message.error(getLocalizedErrorMessage(error));
     } finally {
       setDescriptionSaving(false);
     }
@@ -190,10 +220,13 @@ export default function MemorySkillDetailPage() {
 
   const skillTitleNode = skill ? (
     isTitleEditing ? (
-      <div className="memory-skill-detail-title-edit">
+      <div className="memory-skill-detail-title-edit memory-char-count">
         <Input
           size="small"
           value={titleDraft}
+          status={titleTooLong ? "error" : undefined}
+          styles={{ count: SKILL_CHAR_COUNT_STYLE }}
+          count={skillCharCountConfig(SKILL_NAME_MAX_LENGTH)}
           onChange={(event) => setTitleDraft(event.target.value)}
           onPressEnter={() => void handleSaveTitleEdit()}
         />
@@ -205,6 +238,7 @@ export default function MemorySkillDetailPage() {
             size="small"
             type="primary"
             loading={titleSaving}
+            disabled={titleTooLong}
             onClick={() => void handleSaveTitleEdit()}
           >
             {t("common.save")}
@@ -237,10 +271,13 @@ export default function MemorySkillDetailPage() {
       <div className="memory-skill-detail-header">
       <div className="memory-skill-detail-description-row">
         {isDescriptionEditing ? (
-          <div className="memory-skill-detail-description-edit">
+          <div className="memory-skill-detail-description-edit memory-char-count">
             <Input.TextArea
               value={descriptionDraft}
-              autoSize={{ minRows: 1, maxRows: 3 }}
+              autoSize={{ minRows: 2, maxRows: 6 }}
+              status={descriptionTooLong ? "error" : undefined}
+              styles={{ count: SKILL_CHAR_COUNT_STYLE }}
+              count={skillCharCountConfig(SKILL_DESCRIPTION_MAX_LENGTH)}
               onChange={(event) => setDescriptionDraft(event.target.value)}
             />
             <Space size={6}>
@@ -251,6 +288,7 @@ export default function MemorySkillDetailPage() {
                 size="small"
                 type="primary"
                 loading={descriptionSaving}
+                disabled={descriptionTooLong}
                 onClick={() => void handleSaveDescriptionEdit()}
               >
                 {t("common.save")}
@@ -327,6 +365,7 @@ export default function MemorySkillDetailPage() {
             key={packageReloadKey}
             skillId={skill.id}
             canEdit={canEditSkillDetail}
+            autoUpdateEnabled={Boolean(skill.autoEvo)}
             t={t}
             onSkillUpdated={handleSkillUpdated}
           />

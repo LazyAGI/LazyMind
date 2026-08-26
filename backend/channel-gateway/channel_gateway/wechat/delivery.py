@@ -3,14 +3,17 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from channel_gateway.common.domain.channel import ClaimedOutbound
+from channel_gateway.common.domain.channel import ClaimedInbound, ClaimedOutbound
 from channel_gateway.common.domain.outbound import (
-    OutboundRenderer,
     inline_artifact_bytes,
 )
 from channel_gateway.common.ports.core import StaticAssetClient
 from channel_gateway.wechat.credentials import WeChatCredentialStore
 from channel_gateway.wechat.domain import WeChatError
+from channel_gateway.wechat.interaction import (
+    WeChatPresentationRenderer,
+    WeChatReplyStream,
+)
 from channel_gateway.wechat.ports import WeChatDeliveryClient
 
 
@@ -20,13 +23,21 @@ class WeChatDeliveryProvider:
         *,
         client: WeChatDeliveryClient,
         credentials: WeChatCredentialStore,
-        renderer: OutboundRenderer,
+        renderer: WeChatPresentationRenderer,
         lazymind: StaticAssetClient,
     ):
         self._client = client
         self._credentials = credentials
         self._renderer = renderer
         self._lazymind = lazymind
+
+    def open_stream(self, message: ClaimedInbound) -> WeChatReplyStream:
+        account = self._credentials.load_runtime_account(message.account_id)
+        return WeChatReplyStream(
+            message=message,
+            client=self._client,
+            credentials=dict(account['credentials']),
+        )
 
     def render(self, message: ClaimedOutbound) -> list[dict[str, Any]]:
         return self._renderer.render(message)

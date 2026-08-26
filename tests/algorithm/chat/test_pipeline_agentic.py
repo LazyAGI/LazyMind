@@ -49,6 +49,14 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch):
         def _prepare_tool_context(self, _query, _history):
             return None
 
+        def _model_facing_prefix(self):
+            return {
+                'system_prompt': '',
+                'tool_definitions': [],
+                'skills_prompt': '',
+                'skill_prompt_parts': [],
+            }
+
     monkeypatch.setattr(chat_service, 'AutoModel', lambda model, config=False: f'{model}:{config}')
     monkeypatch.setattr(chat_service.lazyllm.tools.agent, 'ReactAgent', FakeAgent)
     monkeypatch.setattr(
@@ -84,7 +92,6 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch):
             agent={
                 'disabled_tools': [
                     'kb',
-                    'temp_kb',
                     'wikipedia',
                     'arxiv',
                     'sciverse',

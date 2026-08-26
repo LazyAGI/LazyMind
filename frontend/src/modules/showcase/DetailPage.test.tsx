@@ -45,6 +45,7 @@ function task(id: string, title: string, resultTitle: string, template = "generi
 function showcaseCase(tasks: ReturnType<typeof task>[]): ShowcaseCase {
   return {
     id: "demo",
+    source_url: "https://skillhub.example/demo",
     title: "Card title",
     description: "Card description",
     detail_title: "Configured detail title",
@@ -85,8 +86,22 @@ describe("Showcase DetailPage", () => {
     renderDetail();
 
     expect(await screen.findByText("Configured detail title")).toBeInTheDocument();
+    const sourceLink = screen.getByRole("link", { name: "Configured detail title" });
+    expect(sourceLink).toHaveAttribute("href", "https://skillhub.example/demo");
+    expect(sourceLink).toHaveAttribute("target", "_blank");
+    expect(sourceLink).toHaveAttribute("rel", "noreferrer");
     expect(screen.queryByText("showcase.chooseTask")).not.toBeInTheDocument();
     expect(await screen.findByText("Single result")).toBeInTheDocument();
+  });
+
+  it("does not render an internal Skill source as a link", async () => {
+    const item = showcaseCase([task("single", "Single", "Single result")]);
+    item.source_url = "builtin://featured/market-researcher/skill";
+    getShowcaseCaseMock.mockResolvedValue(item);
+    renderDetail();
+
+    expect(await screen.findByRole("heading", { name: "Configured detail title" })).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: "Configured detail title" })).not.toBeInTheDocument();
   });
 
   it("switches replay and result content for a multi-task experience", async () => {

@@ -370,7 +370,7 @@ func fireSchedules(ctx context.Context, db *gorm.DB, _ string) {
 		if err != nil {
 			continue
 		}
-		if !controls.TaskCenterEnabled {
+		if !controls.SchedulesEnabled {
 			_ = RecomputeEnabledSchedules(ctx, db, s.UserID, now)
 			continue
 		}
@@ -387,6 +387,10 @@ func fireSchedules(ctx context.Context, db *gorm.DB, _ string) {
 }
 
 func fireOne(ctx context.Context, db *gorm.DB, s orm.UserSchedule, firedAt time.Time) {
+	controls, err := settings.LoadFeatureControls(ctx, db, s.UserID)
+	if err != nil || !controls.SchedulesEnabled {
+		return
+	}
 	scheduledAt := s.NextRunAt.UTC()
 	// Compute next run time first so we can CAS before creating any records.
 	next, err := nextCronTime(s.CronExpr, s.Timezone)
@@ -492,6 +496,7 @@ func createTaskConversation(ctx context.Context, db *gorm.DB, userID, promptTemp
 		EnableWorkflow: &enableWorkflow,
 		WorkflowMode:   &workflowMode,
 		EnableSubagent: &enableSubagent,
+		ThinkingDepth:  "high",
 		BaseModel: orm.BaseModel{
 			CreateUserID: userID,
 			CreatedAt:    now,
@@ -771,8 +776,8 @@ func EnableScheduleHandler(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "query task center settings failed", http.StatusInternalServerError)
 		return
 	}
-	if !controls.TaskCenterEnabled {
-		common.ReplyErr(w, "task center is paused in settings", http.StatusConflict)
+	if !controls.SchedulesEnabled {
+		common.ReplyErr(w, "scheduled tasks are paused in settings", http.StatusConflict)
 		return
 	}
 	// Recompute next_run_at from now so the schedule fires at the correct future time.
@@ -906,8 +911,8 @@ func RunNowHandler(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "query task center settings failed", http.StatusInternalServerError)
 		return
 	}
-	if !controls.TaskCenterEnabled {
-		common.ReplyErr(w, "task center is paused in settings", http.StatusConflict)
+	if !controls.SchedulesEnabled {
+		common.ReplyErr(w, "scheduled tasks are paused in settings", http.StatusConflict)
 		return
 	}
 	var s orm.UserSchedule

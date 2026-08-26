@@ -9,8 +9,11 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
+
+	skilldistribution "lazymind/core/skillv2/distribution"
 )
 
 type LocalObjectStore struct {
@@ -42,6 +45,18 @@ func (s *LocalObjectStore) URL(key string) string {
 		return ""
 	}
 	return localObjectFileURL(filepath.Join(s.root, filepath.FromSlash(key)))
+}
+
+func (s *LocalObjectStore) Get(ctx context.Context, key string) ([]byte, error) {
+	if s == nil {
+		return nil, fmt.Errorf("object store is nil")
+	}
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	default:
+	}
+	return os.ReadFile(filepath.Join(s.root, filepath.FromSlash(key)))
 }
 
 func localObjectFileURL(localPath string) string {
@@ -144,3 +159,34 @@ func (s *BlobStore) DeleteBlob(ctx context.Context, tx *gorm.DB, hash string) er
 	}
 	return tx.Where("hash = ?", hash).Delete(&skillBlobRow{}).Error
 }
+
+func (s *BlobStore) StoreDistributionBlob(ctx context.Context, tx *gorm.DB, path string, data []byte, now time.Time) (skilldistribution.Blob, error) {
+	info, err := s.Put(ctx, tx, path, data, distributionClock{now: now})
+	if err != nil {
+		return skilldistribution.Blob{}, err
+	}
+	return skilldistribution.Blob{Hash: info.Hash, Size: info.Size, Mime: info.Mime, FileType: info.FileType, Binary: info.Binary}, nil
+}
+
+func (s *BlobStore) ReadDistributionBlob(ctx context.Context, tx *gorm.DB, hash string) ([]byte, error) {
+	if tx == nil {
+		tx = s.db
+	}
+	var row skillBlobRow
+	if err := tx.WithContext(ctx).Where("hash = ?", hash).Take(&row).Error; err != nil {
+		return nil, err
+	}
+	if !row.Binary {
+		return append([]byte(nil), row.Content...), nil
+	}
+	if row.StorageKey == nil || strings.TrimSpace(*row.StorageKey) == "" {
+		return nil, fmt.Errorf("binary blob storage key missing for %s", hash)
+	}
+	return s.objects.Get(ctx, *row.StorageKey)
+}
+
+type distributionClock struct {
+	now time.Time
+}
+
+func (clock distributionClock) Now() time.Time { return clock.now }

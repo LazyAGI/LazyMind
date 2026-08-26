@@ -29,6 +29,10 @@ func NewTestDB(t *testing.T) *TestDB {
 		&SkillBlobRow{},
 		&SkillRevisionRow{},
 		&SkillRevisionEntryRow{},
+		&orm.SkillDistributionArtifact{},
+		&orm.SkillDistributionEntry{},
+		&orm.SkillDistributionBinding{},
+		&orm.SkillRevisionDistribution{},
 		&SkillDraftRow{},
 		&SkillDraftEntryRow{},
 		&SkillDraftReviewSessionRow{},
@@ -68,6 +72,10 @@ func ResetSkillTables(t *testing.T, db *TestDB) {
 	t.Helper()
 
 	for _, table := range []string{
+		"skill_revision_distributions",
+		"skill_distribution_bindings",
+		"skill_distribution_entries",
+		"skill_distribution_artifacts",
 		"skill_draft_entries",
 		"skill_draft_review_action_items",
 		"skill_draft_review_action_batches",

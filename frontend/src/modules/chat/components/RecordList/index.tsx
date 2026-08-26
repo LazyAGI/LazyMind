@@ -4,6 +4,7 @@ import {
   DownOutlined,
   FilterOutlined,
   FolderOutlined,
+  FilePdfOutlined,
   MoreOutlined,
 } from "@ant-design/icons";
 import classnames from "classnames";
@@ -510,6 +511,10 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
 
     function renderItemText(params: { item: Conversation; selected: boolean }) {
       const { item, selected } = params;
+      const source = item as Conversation & {
+        source_type?: string;
+        source_display_name?: string;
+      };
       return (
         <div
           className={classnames("record", { selected })}
@@ -530,6 +535,11 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           <Tooltip title={item.display_name}>
             <span className="title">{item.display_name}</span>
           </Tooltip>
+          {source.source_type === "pdf_preview" ? (
+            <Tooltip title={source.source_display_name || t("knowledge.pdfChatSavedSource")}>
+              <FilePdfOutlined className="record-source-icon" aria-label={t("knowledge.pdfChatSavedSource")} />
+            </Tooltip>
+          ) : null}
           <span className="update-time">
             {dayjs(item.update_time).format("MM/DD")}
           </span>
@@ -618,6 +628,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           open={Boolean(archiveItem)}
           conversationId={archiveItem?.conversation_id}
           title={archiveItem?.display_name}
+          itemKind={(archiveItem as (Conversation & { is_task_conv?: boolean }) | null)?.is_task_conv ? "task" : "dialog"}
           onCancel={() => setArchiveItem(null)}
           onArchived={() => {
             const archived = archiveItem;

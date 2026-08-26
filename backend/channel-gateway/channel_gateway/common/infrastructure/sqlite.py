@@ -138,8 +138,8 @@ def _translate(statement: str) -> str:
     )
     sql = re.sub(r'ARRAY\[\?\]', '?', sql, flags=re.IGNORECASE)
     sql = re.sub(
-        r'metadata\s+@>\s+\?',
-        'json_contains(metadata, ?) = 1',
+        r'(metadata|provider_context)\s+@>\s+\?',
+        r'json_contains(\1, ?) = 1',
         sql,
         flags=re.IGNORECASE,
     )

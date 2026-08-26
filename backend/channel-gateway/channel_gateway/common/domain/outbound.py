@@ -373,10 +373,7 @@ class OutboundRenderer:
                     }
                 )
                 continue
-            rendered.extend(
-                {'kind': 'text', 'text': chunk}
-                for chunk in self._split_text(part.text)
-            )
+            rendered.extend(self.text_parts(part.text))
         for artifact in self._artifacts(message.metadata):
             source = str(artifact.get('source') or '')
             kind = str(artifact.get('kind') or '')
@@ -409,11 +406,14 @@ class OutboundRenderer:
                 rendered.append(rendered_part)
         source_text = self._source_text(message.metadata)
         if source_text:
-            rendered.extend(
-                {'kind': 'text', 'text': chunk}
-                for chunk in self._split_text(source_text)
-            )
+            rendered.extend(self.text_parts(source_text))
         return rendered
+
+    def text_parts(self, text: str) -> list[dict[str, str]]:
+        return [
+            {'kind': 'text', 'text': chunk}
+            for chunk in self._split_text(text)
+        ]
 
     def _split_text(self, text: str) -> Iterable[str]:
         remaining = text.strip()

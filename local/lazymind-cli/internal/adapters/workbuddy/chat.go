@@ -21,6 +21,7 @@ type ChatRunner struct {
 	binary string
 	self   string
 	home   string
+	auth   string
 }
 
 func (r *ChatRunner) Sessions(ctx context.Context) ([]chatagent.NativeSession, error) {
@@ -36,7 +37,20 @@ func NewChatRunner(binary string) (*ChatRunner, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &ChatRunner{binary: resolved, self: self, home: home}, nil
+	return &ChatRunner{binary: resolved, self: self, home: home, auth: authFile()}, nil
+}
+
+func (r *ChatRunner) Availability() (bool, string) {
+	info, err := os.Stat(r.auth)
+	if err != nil || info.IsDir() || info.Size() == 0 {
+		return false, "CodeBuddy Code is not signed in; start `codebuddy` and run `/login`"
+	}
+	return true, ""
+}
+
+func authFile() string {
+	root, _ := os.UserConfigDir()
+	return filepath.Join(root, "CodeBuddyExtension", "Data", "Public", "auth", "Tencent-Cloud.coding-copilot.info")
 }
 
 func findBinary(configured string) (string, error) {

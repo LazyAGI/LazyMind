@@ -88,6 +88,47 @@ def test_workflow_file_slot_rejects_text(tmp_path):
     assert _validate_declared_artifact_type(ctx, 'enhanced_image_output', 'file') is None
 
 
+@pytest.mark.parametrize(
+    ('declared', 'actual'),
+    [('image', 'text'), ('text', 'json'), ('json', 'text')],
+)
+def test_workflow_typed_slot_rejects_mismatched_artifact(tmp_path, declared, actual):
+    ctx = _context(str(tmp_path))
+    ctx.params['output_slot_types'] = {'enhanced_image_output': declared}
+
+    error = _validate_declared_artifact_type(ctx, 'enhanced_image_output', actual)
+
+    assert error
+    assert f'declared as a {declared} slot' in error
+
+
+def test_get_artifact_returns_remote_image_with_caption(tmp_path):
+    ctx = _context(str(tmp_path))
+    ctx.params.update({
+        'remote_inputs': {
+            'raw_source_image': {
+                'path': 'https://images.example.test/haaland.png',
+                'caption': 'validated source',
+            },
+        },
+        'remote_input_types': {'raw_source_image': 'image'},
+        'remote_input_value_slots': ['raw_source_image'],
+    })
+    set_context(ctx)
+    lazyllm.globals['agentic_config'] = {'workflow_session_id': 'session-1'}
+
+    artifact = get_artifact('raw_source_image')['artifacts'][0]
+
+    assert artifact == {
+        'slot': 'raw_source_image',
+        'content_type': 'image',
+        'value': {
+            'path': 'https://images.example.test/haaland.png',
+            'caption': 'validated source',
+        },
+    }
+
+
 def test_get_artifact_preserves_remote_list_input_order(tmp_path):
     paths = [str(tmp_path / 'one.png'), str(tmp_path / 'two.png')]
     ctx = _context(str(tmp_path))

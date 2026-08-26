@@ -482,7 +482,11 @@ function isDefaultProviderBaseUrl(provider: Pick<ProviderOption, "baseUrl">, bas
   return normalizeBaseUrlForCompare(baseUrl) === normalizeBaseUrlForCompare(provider.baseUrl);
 }
 
-export default function ModelProviderPage() {
+interface ModelProviderPageProps {
+  onConfigurationChanged?: () => void | Promise<void>;
+}
+
+export default function ModelProviderPage({ onConfigurationChanged }: ModelProviderPageProps) {
   const { t, i18n } = useTranslation();
   const currentLanguage = i18n.resolvedLanguage || i18n.language || "zh-CN";
   const [providerConfigForm] = Form.useForm<ProviderConfigFormValues>();
@@ -516,9 +520,6 @@ export default function ModelProviderPage() {
     ? `${verifyGroupModal.provider.id}:${verifyGroupModal.group.id}`
     : "";
   const verifyGroupBusy = activeVerifyKey ? Boolean(verifyingGroupIds[activeVerifyKey]) : false;
-  const verifyApiKeyRequired = verifyGroupModal
-    ? isDefaultProviderBaseUrl(verifyGroupModal.provider, verifyGroupModal.group.baseUrl)
-    : false;
   const baseUrlChanged = configProvider
     ? !isDefaultProviderBaseUrl(
         configProvider,
@@ -735,6 +736,7 @@ export default function ModelProviderPage() {
       message.success(apiKey
         ? t("modelProvider.message.groupVerifiedAndSaved", { name: nextGroup.name })
         : t("modelProvider.message.groupSaved", { name: nextGroup.name }));
+      void onConfigurationChanged?.();
 
       setConfigModal(null);
       providerConfigForm.resetFields();
@@ -761,7 +763,7 @@ export default function ModelProviderPage() {
     }
 
     const requestApiKey = normalizeFormText(apiKey) || normalizeFormText(verifyApiKeyInputRef.current?.input?.value);
-    if (!requestApiKey && isDefaultProviderBaseUrl(provider, group.baseUrl)) {
+    if (!requestApiKey) {
       message.warning(t("modelProvider.message.fillApiKeyBeforeVerify"));
       return;
     }
@@ -776,8 +778,8 @@ export default function ModelProviderPage() {
       const payload: Record<string, unknown> = {
         provider_name: provider.name,
         base_url: group.baseUrl,
+        api_key: requestApiKey,
         dry_run: false,
-        ...(requestApiKey ? { api_key: requestApiKey } : {}),
       };
       // The new SenseNova platform URL requires a model name for connectivity check.
       if (isSensenovaProvider(provider) && isSensenovaNewBaseUrl(group.baseUrl)) {
@@ -813,6 +815,7 @@ export default function ModelProviderPage() {
       );
       if (isVerified) {
         message.success(t("modelProvider.message.groupVerified"));
+        void onConfigurationChanged?.();
         return;
       }
       message.error(localizeErrorCode("2000509"));
@@ -884,6 +887,7 @@ export default function ModelProviderPage() {
         return next;
       });
       message.success(t("modelProvider.message.groupRemoved", { name: group.name }));
+      void onConfigurationChanged?.();
     } catch (error) {
     }
   };
@@ -912,6 +916,7 @@ export default function ModelProviderPage() {
         return next;
       });
       message.success(t("modelProvider.message.providerRemoved", { name: provider.name }));
+      void onConfigurationChanged?.();
     } catch (error) {
     }
   };
@@ -1033,6 +1038,7 @@ export default function ModelProviderPage() {
         )
       );
       message.success(t("modelProvider.message.modelAdded"));
+      void onConfigurationChanged?.();
       closeCustomModelModal();
     } catch (error) {
     }
@@ -1063,6 +1069,7 @@ export default function ModelProviderPage() {
         )
       );
       message.success(t("modelProvider.message.modelDeleted"));
+      void onConfigurationChanged?.();
     } catch (error) {
     }
   };
@@ -1454,14 +1461,14 @@ export default function ModelProviderPage() {
             </div>
           ) : null}
           <Form.Item
-            extra={t(verifyApiKeyRequired ? "modelProvider.verifyApiKeyExtra" : "modelProvider.verifyApiKeyCustomExtra")}
+            extra={t("modelProvider.verifyApiKeyExtra")}
             label="API Key"
             name="apiKey"
             normalize={(value: string | undefined) => value?.trim()}
-            required={verifyApiKeyRequired}
+            required
             rules={[
               {
-                required: verifyApiKeyRequired,
+                required: true,
                 message: t("modelProvider.validation.apiKeyRequired"),
               },
               { max: 512, message: t("modelProvider.validation.apiKeyMax") },
@@ -1476,7 +1483,7 @@ export default function ModelProviderPage() {
             <Input.Password
               autoComplete="off"
               maxLength={512}
-              placeholder={t(verifyApiKeyRequired ? "modelProvider.verifyApiKeyPlaceholder" : "modelProvider.apiKeyOptionalPlaceholder")}
+              placeholder={t("modelProvider.verifyApiKeyPlaceholder")}
               ref={verifyApiKeyInputRef}
               visibilityToggle={false}
             />

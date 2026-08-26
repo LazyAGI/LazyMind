@@ -2,10 +2,12 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
 import re
 import threading
 import time
 from html import escape as escape_xml
+from pathlib import Path
 import sys
 from typing import Any, Dict, List, Optional, Union
 from uuid import uuid4
@@ -44,6 +46,7 @@ from lazymind.chat.service.component import (
     collect_query_appendices,
     collect_system_prompt_appendices,
     filter_tools,
+    is_workflow_rewind_action,
     normalize_history_for_agent,
 )
 from lazymind.chat.engine.agent_runtime import (
@@ -57,9 +60,10 @@ from lazymind.chat.engine.agent_runtime import (
     estimate_context_usage,
     render_context_markdown,
     report_to_dict,
+    attach_window_budget,
     render_attachment_content,
 )
-from lazymind.chat.engine.tools.chat_artifact import chat_agent_workspace
+from lazymind.chat.engine.tools.local_file.workspace import chat_agent_workspace
 from lazymind.chat.engine.tools.intent_writer import (
     build_intentwrite_tool,
     render_intent_section,
@@ -274,6 +278,14 @@ def _normalize_kb_id_filter(raw_kb_id: Any) -> str | list[str] | None:
     return None
 
 
+def _normalize_document_filter(filters: Dict[str, Any]) -> None:
+    """Translate the public doc_id filter to LazyLLM's RAG metadata key."""
+    raw_doc_id = filters.pop('doc_id', None)
+    normalized = _normalize_kb_id_filter(raw_doc_id)
+    if normalized:
+        filters['docid'] = normalized
+
+
 def _active_skills_from_history(
     history: list[dict[str, Any]],
     available_skills: list[str] | None,
@@ -390,15 +402,24 @@ def _should_register_subagent_tools(
     )
 
 
+def _build_chat_workspace_read_tools() -> list:
+    """Read-only file tools that remain safe during bound Workflow turns."""
+    from lazymind.chat.engine.tools.local_file.workspace import (
+        grep,
+        read_file,
+    )
+    return [grep, read_file]
+
+
 def _build_chat_artifact_tools() -> list:
     """Workspace and artifact tools for the main ChatAgent."""
-    from lazymind.chat.engine.tools.chat_artifact import (
+    from lazymind.chat.engine.tools.local_file.workspace import (
         list_dir,
-        read_file,
         save_chat_artifact,
         write_file,
     )
-    return [save_chat_artifact, read_file, write_file, list_dir]
+    grep, read_file = _build_chat_workspace_read_tools()
+    return [save_chat_artifact, grep, read_file, write_file, list_dir]
 
 
 def _build_user_attachment_tools(has_files: bool) -> list:
@@ -488,7 +509,13 @@ def _task_profile_inputs(request: ChatRequest) -> dict[str, Any]:
     )
     return {
         'query': user_input.strip(),
-        'history': normalize_history_for_agent(list(request.message.history or [])),
+        'history': normalize_history_for_agent(
+            list(request.message.history or []),
+            compact_workflow_receipts=is_workflow_rewind_action(
+                user_input,
+                request.workflow.workflow_context,
+            ),
+        ),
         'intent': request.conversation.intent_context,
         'has_attachments': bool(request.message.files),
         'explicit_resources': explicit_resources,
@@ -524,9 +551,179 @@ def _resolve_task_profile_with_model(
     )
 
 
+def _context_preview_status(
+    model_context: Any,
+    *,
+    llm_enhanced: bool,
+    task_profile: Any = None,
+) -> dict[str, Any]:
+    covered_through_seq = int(model_context.get('covered_through_seq') or 0) \
+        if isinstance(model_context, dict) else 0
+    has_runtime_summary = bool(
+        isinstance(model_context, dict)
+        and str(model_context.get('summary_text') or '').strip()
+        and covered_through_seq > 0
+    )
+    requires_llm = bool(
+        not llm_enhanced and task_profile and task_profile.routing_review_required
+    )
+    return {
+        'preview_accuracy': (
+            'llm_enhanced' if llm_enhanced
+            else 'rule_only' if requires_llm
+            else 'deterministic'
+        ),
+        'requires_llm': requires_llm,
+        'llm_reason': task_profile.routing_review_reason if requires_llm else '',
+        'compression_applied': has_runtime_summary,
+        'compression_covered_through_seq': covered_through_seq if has_runtime_summary else 0,
+    }
+
+
+_UPLOAD_PREVIEW_SUFFIXES = frozenset({
+    '.pdf', '.doc', '.docx', '.pptx',
+})
+
+
+def _uploaded_document_names(
+    files: Any,
+    current_turn_seq: Optional[int] = None,
+) -> List[str]:
+    names: List[str] = []
+    seen: set[str] = set()
+    if not isinstance(files, dict):
+        return names
+    if current_turn_seq is None:
+        path_groups = list(files.values())
+    else:
+        path_groups = [files.get(str(current_turn_seq)) or files.get(current_turn_seq) or []]
+    for paths in path_groups:
+        for raw in paths or []:
+            path = str(raw).split('?', 1)[0]
+            if Path(path).suffix.lower() not in _UPLOAD_PREVIEW_SUFFIXES:
+                continue
+            name = os.path.basename(path)
+            if not name or name in seen:
+                continue
+            seen.add(name)
+            names.append(name)
+    return names
+
+
+def _pending_parse_upload_names(request: ChatRequest) -> List[str]:
+    files = getattr(request.message, 'files', None)
+    seq = request.message.current_turn_seq
+    if seq is None and isinstance(files, dict):
+        int_keys = [int(key) for key in files if str(key).isdigit()]
+        seq = max(int_keys) if int_keys else None
+    names = _uploaded_document_names(files, current_turn_seq=seq)
+    if not names:
+        return []
+    conversation_id = str(request.conversation.conversation_id or '').strip()
+    if not conversation_id:
+        return names
+    try:
+        from lazymind.chat.engine.tools.local_file.store import FileResourceStore
+        store = FileResourceStore(chat_agent_workspace(
+            str(request.conversation.user_id or '0'),
+            conversation_id,
+        ))
+        ready = {
+            str(item.get('display_name') or '')
+            for item in store.load_index()
+            if str(item.get('parse_status') or '') == 'ready'
+        }
+        return [name for name in names if name not in ready]
+    except Exception:
+        return names
+
+
+def _parse_upload_event_frames(
+    translator: AgentEventFrameTranslator,
+    names: List[str],
+    *,
+    phase: str,
+):
+    call_id = 'parse_uploads'
+    if phase == 'start':
+        events = translator.feed({
+            'tag': 'tool_calls',
+            'tool_calls': [{
+                'id': call_id,
+                'function': {
+                    'name': 'parse_uploaded_files',
+                    'arguments': {'files': names},
+                },
+            }],
+        })
+    else:
+        events = translator.feed({
+            'tag': 'tool_results',
+            'tool_results': [{
+                'id': call_id,
+                'name': 'parse_uploaded_files',
+                'result': {
+                    'success': True,
+                    'files': names,
+                    'total': len(names),
+                },
+            }],
+        })
+    return list(events)
+
+
+async def _run_chat_with_parse_status(
+    request: ChatRequest,
+    **kwargs: Any,
+) -> Union[Dict[str, Any], StreamingResponse]:
+    names = _pending_parse_upload_names(request)
+    inspect = bool(
+        request.runtime.context_usage_preview or request.runtime.context_prompt_export
+    )
+    if not names or inspect:
+        return await _handle_chat_impl(request, **kwargs)
+
+    query = str(request.message.query or '')
+    session_id = request.conversation.session_id
+    started = time.time()
+    translator = AgentEventFrameTranslator(query=query, run_id='parse-uploads')
+
+    async def gen():
+        think = (
+            f'正在解析上传文档：{"、".join(names[:5])}'
+            if any('\u4e00' <= ch <= '\u9fff' for ch in query)
+            else f'Parsing uploaded documents: {", ".join(names[:5])}'
+        )
+        if len(names) > 5:
+            think = f'{think} (+{len(names) - 5})'
+        yield log_and_emit_frame(
+            {'think': think, 'text': None, 'sources': []},
+            round(time.time() - started, 3),
+            query,
+            session_id,
+            tag='PARSE_UPLOAD',
+        )
+        for frame in _parse_upload_event_frames(translator, names, phase='start'):
+            yield log_and_emit_frame(
+                frame, round(time.time() - started, 3), query, session_id, tag='PARSE_UPLOAD',
+            )
+        response = await _handle_chat_impl(request, **kwargs)
+        for frame in _parse_upload_event_frames(translator, names, phase='done'):
+            yield log_and_emit_frame(
+                frame, round(time.time() - started, 3), query, session_id, tag='PARSE_UPLOAD',
+            )
+        if isinstance(response, StreamingResponse):
+            async for chunk in response.body_iterator:
+                yield chunk
+            return
+        yield sse_line(response_payload(200, 'success', response, time.time() - started))
+
+    return StreamingResponse(gen(), media_type='text/event-stream')
+
+
 async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingResponse]:
     if not _cfg['dynamic_prompt_modules']:
-        return await _handle_chat_impl(request)
+        return await _run_chat_with_parse_status(request)
 
     inputs = _task_profile_inputs(request)
     provisional = resolve_task_profile(
@@ -540,7 +737,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         or str((request.workflow.workflow_context or {}).get('workflow_ref') or '').strip()
     )
     if has_explicit_workflow or not provisional.routing_review_required:
-        return await _handle_chat_impl(request, task_profile_override=provisional)
+        return await _run_chat_with_parse_status(request, task_profile_override=provisional)
 
     raw_query = str(request.message.query or '')
     filter_query, _ = _normalize_cite_message_query_for_agent(raw_query)
@@ -556,7 +753,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
         else check_sensitive_content(filter_query)
     )
     if sensitive_match is not None:
-        return await _handle_chat_impl(
+        return await _run_chat_with_parse_status(
             request,
             task_profile_override=provisional,
             sensitive_match_override=sensitive_match,
@@ -585,7 +782,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
             )
             await asyncio.sleep(0.08)
         profile = await routing_task
-        response = await _handle_chat_impl(
+        response = await _run_chat_with_parse_status(
             request,
             task_profile_override=profile,
             sensitive_match_override=sensitive_match,
@@ -608,7 +805,7 @@ async def handle_chat(request: ChatRequest) -> Union[Dict[str, Any], StreamingRe
                 ).strip(),
                 session_id=request.conversation.session_id,
             )
-        return await _handle_chat_impl(
+        return await _run_chat_with_parse_status(
             request,
             task_profile_override=profile,
             sensitive_match_override=sensitive_match,
@@ -701,6 +898,7 @@ async def _handle_chat_impl(
             flat_files.extend(files_map[seq_key])
     resolved_files = validate_and_resolve_files(flat_files)
     filters['kb_id'] = _normalize_kb_id_filter(filters.get('kb_id'))
+    _normalize_document_filter(filters)
     explicit_resource_payload = explicit_resources.model_dump()
     selected_kb_ids = filters.get('kb_id')
     if selected_kb_ids and not explicit_resource_payload['knowledge_base_ids']:
@@ -712,7 +910,19 @@ async def _handle_chat_impl(
         explicit_resource_payload['workflow_refs'] = [active_workflow_ref]
 
     raw_history = list(message.history) if isinstance(message.history, list) else []
-    agent_history = normalize_history_for_agent(raw_history)
+    compact_rewind_history = is_workflow_rewind_action(
+        language_query,
+        workflow.workflow_context,
+    )
+    if compact_rewind_history:
+        LOG.info(
+            '[ChatServer] [WORKFLOW_REWIND_HISTORY_COMPACTION] '
+            f'[sid={conversation.session_id}] [query={language_query}]'
+        )
+    agent_history = normalize_history_for_agent(
+        raw_history,
+        compact_workflow_receipts=compact_rewind_history,
+    )
     translator = AgentEventFrameTranslator(query=query, run_id=run_id)
 
     agentic_config = {
@@ -725,6 +935,8 @@ async def _handle_chat_impl(
         'filters': filters if RAG_MODE and filters else {},
         'files': resolved_files,
         'history_files_per_turn': files_map,
+        'current_turn_seq': message.current_turn_seq,
+        'model_context': request.model_context or {},
         'databases': retrieval.databases or [],
         'dataset': retrieval.dataset,
         'local_fs_sources': retrieval.local_fs_sources or [],
@@ -790,6 +1002,24 @@ async def _handle_chat_impl(
     inject_tool_config(runtime.tool_config)
     _inject_reader_config(runtime.ocr_config)
     lazyllm.globals['agentic_config'] = agentic_config
+
+    file_catalog = ''
+    try:
+        from lazymind.chat.engine.tools.local_file.ingest import ingest_upload_pdfs
+        from lazymind.chat.engine.tools.local_file.store import (
+            FileResourceStore,
+            render_file_resource_catalog,
+        )
+        if conversation_id and not is_context_inspection:
+            store = FileResourceStore(chat_agent_workspace(user_id or '0', conversation_id))
+            ingest_upload_pdfs(files_map, current_turn_seq=_eff_current_seq, store=store)
+            file_catalog = render_file_resource_catalog(store, current_turn_seq=_eff_current_seq)
+            agentic_config['file_resources'] = [
+                item.get('file_id') for item in store.load_index() if item.get('file_id')
+            ]
+            lazyllm.globals['agentic_config'] = agentic_config
+    except Exception as exc:
+        LOG.warning(f'[ChatServer] file resource ingest skipped: {exc}')
 
     memory_context = None
     if personalization.use_memory:
@@ -913,7 +1143,12 @@ async def _handle_chat_impl(
         normalize_attachments(files_map, _eff_current_seq),
         role=AgentRole.CHAT,
         current_turn_seq=_eff_current_seq,
+        skip_pdf=True,
     )
+    if file_catalog:
+        attachment_content = (
+            f'{file_catalog}\n\n{attachment_content}' if attachment_content else file_catalog
+        )
 
     disabled = set(agent.disabled_tools or [])
     active_configs = [] if workflow_turn_is_bound else filter_tools(
@@ -1002,10 +1237,12 @@ async def _handle_chat_impl(
     )
     ask_user_tools = _build_ask_user_tool() if allow_ask_user else []
     ask_user_configs = [ASK_USER_TOOL_CONFIG] if ask_user_tools else []
-    # Generic chat files are not Workflow artifacts. Keeping save_chat_artifact
-    # available on a bound Workflow turn lets the model claim success after
-    # writing an isolated file while the selected Workflow preview is unchanged.
-    artifact_tools = [] if workflow_turn_is_bound else _build_chat_artifact_tools()
+    # Bound Workflows own mutation, but read-only workspace tools remain available
+    # so compacted tool results and referenced attachments can still be inspected.
+    workspace_read_tools = _build_chat_workspace_read_tools()
+    artifact_tools = (
+        workspace_read_tools if workflow_turn_is_bound else _build_chat_artifact_tools()
+    )
     workspace = chat_agent_workspace(user_id or '0', conversation_id)
     skill_listing_tools = (
         [] if workflow_turn_is_bound
@@ -1023,12 +1260,12 @@ async def _handle_chat_impl(
     )
     if active_workflow_tool_isolation:
         # An active workflow owns mutation of its artifacts. Generic execution tools
-        # would create side artifacts outside the workflow lineage (for example a
-        # standalone generated image), so expose only workflow control/query tools.
+        # would create side artifacts outside the workflow lineage, so expose only
+        # workflow control/query tools plus read-only workspace inspection.
         # The Workflow's declarative rerun_when metadata still decides the owning step.
         active_configs = []
         attachment_configs = []
-        all_tools = [intentwriter, *ask_user_tools, *workflow_tools]
+        all_tools = [intentwriter, *ask_user_tools, *workflow_tools, *workspace_read_tools]
         LOG.info(
             '[ChatServer] [ACTIVE_WORKFLOW_TOOL_ISOLATION] [sid=%s] '
             '[workflow_id=%s] [outcome=%s] [tools=%s]',
@@ -1181,7 +1418,7 @@ async def _handle_chat_impl(
             f'Use `{workspace}` as the default working directory for generated and intermediate files. '
             'Trusted local mode is active: when the user requests it, you may read and write absolute local '
             'paths outside this workspace and use `shell_tool` to run local commands. Keep relative paths '
-            'inside the default workspace. Use `read_file`, `write_file`, and `list_dir` for file operations, '
+            'inside the default workspace. Use `read_file`, `grep`, `write_file`, and `list_dir` for file operations, '
             'then publish completed downloadable files with `save_chat_artifact`.'
         )
     else:
@@ -1189,7 +1426,7 @@ async def _handle_chat_impl(
             f'Use `{workspace}` as the single working directory for all generated and intermediate files. '
             'When a skill requires an output directory, create it under this workspace and pass its absolute '
             'path to skill scripts. Treat files outside this workspace as read-only inputs. Use `read_file`, '
-            '`write_file`, and `list_dir` to inspect and update workspace files, then publish completed files '
+            '`grep`, `write_file`, and `list_dir` to inspect and update workspace files, then publish completed files '
             'with `save_chat_artifact`.'
         )
     prompt_builder.system(
@@ -1298,6 +1535,8 @@ async def _handle_chat_impl(
             keep_full_turns=_cfg['agentic_keep_full_turns'],
             fs=FS,
             skills_dir=','.join(filter(None, [_cfg['skill_fs_url'], workflow_skill_dir])),
+            llm_config=runtime.llm_config or {},
+
             max_retries={
                 'low': _cfg['agentic_max_rounds_low'],
                 'medium': _cfg['agentic_max_rounds_medium'],
@@ -1306,8 +1545,10 @@ async def _handle_chat_impl(
             }.get(thinking_depth, _cfg['agentic_max_rounds_medium']),
             tool_failure_limits={
                 'url_fetch': 2,
-                'kb_search': 2,
+                'grep': 2,
+                'read_file': 2,
                 'kb_tmp_search': 2,
+                'kb_search': 2,
                 'list_knowledge_bases': 2,
                 'list_knowledge_base_documents': 2,
                 'aggregate_knowledge_base_documents': 2,
@@ -1334,20 +1575,12 @@ async def _handle_chat_impl(
                     ])
                 return {'prompt_markdown': prompt_markdown}
             report = await estimate_context_usage(plan, agent_context)
-            report_data = report_to_dict(report)
-            llm_enhanced = runtime.context_preview_allow_llm_routing
-            requires_llm = bool(
-                not llm_enhanced and task_profile and task_profile.routing_review_required
-            )
-            report_data.update({
-                'preview_accuracy': (
-                    'llm_enhanced' if llm_enhanced
-                    else 'rule_only' if requires_llm
-                    else 'deterministic'
-                ),
-                'requires_llm': requires_llm,
-                'llm_reason': task_profile.routing_review_reason if requires_llm else '',
-            })
+            report_data = attach_window_budget(report_to_dict(report), runtime.llm_config or {})
+            report_data.update(_context_preview_status(
+                request.model_context or {},
+                llm_enhanced=runtime.context_preview_allow_llm_routing,
+                task_profile=task_profile,
+            ))
             return report_data
         finally:
             lazyllm.globals._init_sid(sid=lazyllm_session_id)

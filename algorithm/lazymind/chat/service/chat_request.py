@@ -82,6 +82,8 @@ class ChatRequest(BaseModel):
     personalization: ChatPersonalizationOptions = Field(default_factory=ChatPersonalizationOptions)
     agent: ChatAgentOptions = Field(default_factory=ChatAgentOptions)
     workflow: ChatWorkflowOptions = Field(default_factory=ChatWorkflowOptions)
+    model_context: Optional[Dict[str, Any]] = None
+
     explicit_resource_bindings: ExplicitResourceBindingsOptions = Field(
         default_factory=ExplicitResourceBindingsOptions,
     )

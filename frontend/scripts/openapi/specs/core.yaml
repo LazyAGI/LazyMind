@@ -776,6 +776,20 @@ components:
             type: object
         ConversationItem:
             properties:
+                assistant:
+                    enum:
+                        - lazymind
+                        - codex
+                        - cursor
+                        - workbuddy
+                    type: string
+                chat_executor:
+                    enum:
+                        - lazymind
+                        - codex
+                        - cursor
+                        - workbuddy
+                    type: string
                 chat_times:
                     format: int64
                     type: integer
@@ -791,9 +805,20 @@ components:
                     type: array
                 name:
                     type: string
+                project_key:
+                    type: string
+                project_name:
+                    type: string
                 search_config:
                     properties: {}
                     type: object
+                thinking_depth:
+                    enum:
+                        - low
+                        - medium
+                        - high
+                        - max
+                    type: string
                 total_feedback_like:
                     format: int64
                     type: integer
@@ -3334,6 +3359,8 @@ components:
                     type: string
                 prompt_short:
                     type: string
+                source_url:
+                    type: string
                 result_highlights:
                     items:
                         type: string
@@ -3371,6 +3398,7 @@ components:
                 - output_type
                 - prompt
                 - prompt_short
+                - source_url
                 - result_summary
                 - title
                 - type
@@ -4673,68 +4701,75 @@ components:
                 - installed
                 - name
             type: object
-        channelCommandOpenAPI:
+        chatConversationDefaultsOpenAPI:
             properties:
-                description:
+                chat_executor:
+                    enum:
+                        - lazymind
+                        - codex
+                        - cursor
+                        - workbuddy
                     type: string
-                name:
+                enable_subagent:
+                    type: boolean
+                enable_workflow:
+                    type: boolean
+                workflow_mode:
+                    enum:
+                        - auto
+                        - dynamic
                     type: string
             required:
-                - description
-                - name
+                - chat_executor
+                - enable_subagent
+                - enable_workflow
+                - workflow_mode
             type: object
-        channelCommandRegistryOpenAPI:
+        chatConversationDefaultsPatchOpenAPIRequest:
             properties:
-                commands:
-                    items:
-                        $ref: '#/components/schemas/channelCommandOpenAPI'
-                    type: array
-                output_schema:
-                    additionalProperties:
-                        properties: {}
-                        type: object
-                    type: object
-                schema_version:
+                chat_executor:
+                    enum:
+                        - lazymind
+                        - codex
+                        - cursor
+                        - workbuddy
                     type: string
-                selection_rules:
-                    items:
-                        type: string
-                    type: array
-            required:
-                - schema_version
+                enable_subagent:
+                    type: boolean
+                enable_workflow:
+                    type: boolean
+                workflow_mode:
+                    enum:
+                        - auto
+                        - dynamic
+                    type: string
             type: object
-        channelIntentOpenAPIRequest:
+        chatEntryDefaultsOpenAPI:
             properties:
-                command_registry:
-                    $ref: '#/components/schemas/channelCommandRegistryOpenAPI'
-                message:
+                conversation_settings:
+                    $ref: '#/components/schemas/chatConversationDefaultsOpenAPI'
+                thinking_depth:
+                    enum:
+                        - low
+                        - medium
+                        - high
+                        - max
                     type: string
-                provider:
-                    type: string
-                state:
-                    additionalProperties:
-                        properties: {}
-                        type: object
-                    type: object
             required:
-                - command_registry
-                - message
-                - provider
+                - conversation_settings
+                - thinking_depth
             type: object
-        channelIntentOpenAPIResponse:
+        chatEntryDefaultsPatchOpenAPIRequest:
             properties:
-                command:
+                conversation_settings:
+                    $ref: '#/components/schemas/chatConversationDefaultsPatchOpenAPIRequest'
+                thinking_depth:
+                    enum:
+                        - low
+                        - medium
+                        - high
+                        - max
                     type: string
-                parameters:
-                    additionalProperties:
-                        properties: {}
-                        type: object
-                    type: object
-                schema_version:
-                    type: string
-            required:
-                - command
-                - schema_version
             type: object
         checkModelProviderOpenAPIRequest:
             properties:
@@ -5524,6 +5559,7 @@ components:
                     description: Deprecated compatibility field; converted to one marketplace tag when tags is empty.
                     type: string
                 name:
+                    description: Deprecated and ignored; the skill name is read from SKILL.md.
                     type: string
                 source:
                     $ref: '#/components/schemas/skillSourceOpenAPIRequest'
@@ -5533,7 +5569,6 @@ components:
                         type: string
                     type: array
             required:
-                - name
                 - source
             type: object
         marketPublishOpenAPIResponse:
@@ -5932,6 +5967,8 @@ components:
                     type: boolean
                 mcp_enabled:
                     type: boolean
+                schedules_enabled:
+                    type: boolean
                 skills_enabled:
                     type: boolean
                 task_center_enabled:
@@ -5941,6 +5978,7 @@ components:
             required:
                 - document_parsing_enabled
                 - mcp_enabled
+                - schedules_enabled
                 - skills_enabled
                 - task_center_enabled
                 - workflows_enabled
@@ -6140,6 +6178,63 @@ components:
                     type: boolean
             required:
                 - discarded
+            type: object
+        skillDistributionConflictOpenAPIResponse:
+            properties:
+                kind:
+                    type: string
+                path:
+                    type: string
+            required:
+                - kind
+                - path
+            type: object
+        skillDistributionUpgradePrepareOpenAPIResponse:
+            properties:
+                auto_merged:
+                    type: boolean
+                conflicts:
+                    items:
+                        $ref: '#/components/schemas/skillDistributionConflictOpenAPIResponse'
+                    type: array
+                draft_version:
+                    format: int64
+                    type: integer
+                status:
+                    $ref: '#/components/schemas/skillDistributionUpgradeStatusOpenAPIResponse'
+            required:
+                - auto_merged
+                - draft_version
+                - status
+            type: object
+        skillDistributionUpgradeStatusOpenAPIResponse:
+            properties:
+                conflicts:
+                    items:
+                        $ref: '#/components/schemas/skillDistributionConflictOpenAPIResponse'
+                    type: array
+                current_archive_sha256:
+                    type: string
+                current_version:
+                    type: string
+                latest_archive_sha256:
+                    type: string
+                latest_version:
+                    type: string
+                managed:
+                    type: boolean
+                pending:
+                    type: boolean
+                pending_archive_sha256:
+                    type: string
+                pending_version:
+                    type: string
+                update_available:
+                    type: boolean
+            required:
+                - managed
+                - pending
+                - update_available
             type: object
         skillDraftDeleteOpenAPIRequest:
             properties:
@@ -7014,6 +7109,41 @@ components:
                 - name
                 - verify
             type: object
+        userChatSettingsOpenAPIResponse:
+            properties:
+                enable_subagent:
+                    type: boolean
+                enable_workflow:
+                    type: boolean
+                new_task:
+                    $ref: '#/components/schemas/chatEntryDefaultsOpenAPI'
+                quick_question:
+                    $ref: '#/components/schemas/chatEntryDefaultsOpenAPI'
+                updated_at:
+                    type: string
+                workflow_mode:
+                    type: string
+            required:
+                - enable_subagent
+                - enable_workflow
+                - new_task
+                - quick_question
+                - updated_at
+                - workflow_mode
+            type: object
+        userChatSettingsPatchOpenAPIRequest:
+            properties:
+                enable_subagent:
+                    type: boolean
+                enable_workflow:
+                    type: boolean
+                new_task:
+                    $ref: '#/components/schemas/chatEntryDefaultsPatchOpenAPIRequest'
+                quick_question:
+                    $ref: '#/components/schemas/chatEntryDefaultsPatchOpenAPIRequest'
+                workflow_mode:
+                    type: string
+            type: object
         userModelProviderOpenAPIItem:
             properties:
                 base_url:
@@ -7055,6 +7185,8 @@ components:
                     type: boolean
                 mcp_enabled:
                     type: boolean
+                schedules_enabled:
+                    type: boolean
                 skills_enabled:
                     type: boolean
                 task_center_enabled:
@@ -7071,6 +7203,7 @@ components:
                 - developer_mode_active
                 - document_parsing_enabled
                 - mcp_enabled
+                - schedules_enabled
                 - skills_enabled
                 - task_center_enabled
                 - updated_at
@@ -7088,6 +7221,8 @@ components:
                 document_parsing_enabled:
                     type: boolean
                 mcp_enabled:
+                    type: boolean
+                schedules_enabled:
                     type: boolean
                 skills_enabled:
                     type: boolean
@@ -8206,25 +8341,6 @@ paths:
             summary: Enable builtin directory skill
             tags:
                 - skills
-    /api/core/channel-intents:classify:
-        post:
-            description: Classifies an external-channel message against the caller-provided command registry and parameter schemas.
-            requestBody:
-                content:
-                    application/json:
-                        schema:
-                            $ref: '#/components/schemas/channelIntentOpenAPIRequest'
-                required: true
-            responses:
-                "200":
-                    content:
-                        application/json:
-                            schema:
-                                $ref: '#/components/schemas/channelIntentOpenAPIResponse'
-                    description: Classified channel command
-            summary: Classify a channel message
-            tags:
-                - channels
     /api/core/chat:
         post:
             responses:
@@ -8391,6 +8507,16 @@ paths:
                   name: keyword
                   required: false
                   schema:
+                    type: string
+                - in: query
+                  name: assistant
+                  required: false
+                  schema:
+                    enum:
+                        - lazymind
+                        - codex
+                        - cursor
+                        - workbuddy
                     type: string
                 - in: query
                   name: page_size
@@ -10772,7 +10898,31 @@ paths:
             summary: Create eval set by import
             tags:
                 - eval-set-imports
-    /api/core/external-chat/hosts/{provider}:claim:
+    /api/core/exporters/{provider_id}:capabilities:
+        get:
+            parameters:
+                - in: path
+                  name: provider_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /exporters/{provider_id}:capabilities
+    /api/core/exporters/{provider_id}:export:
+        post:
+            parameters:
+                - in: path
+                  name: provider_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /exporters/{provider_id}:export
+    /api/core/external-chat/hosts/{provider}/claim:
         post:
             parameters:
                 - in: path
@@ -10783,8 +10933,8 @@ paths:
             responses:
                 "200":
                     description: OK
-            summary: POST /external-chat/hosts/{provider}:claim
-    /api/core/external-chat/hosts/{provider}:status:
+            summary: POST /external-chat/hosts/{provider}/claim
+    /api/core/external-chat/hosts/{provider}/status:
         get:
             parameters:
                 - in: path
@@ -10795,7 +10945,48 @@ paths:
             responses:
                 "200":
                     description: OK
-            summary: GET /external-chat/hosts/{provider}:status
+            summary: GET /external-chat/hosts/{provider}/status
+    /api/core/external-chat/providers/{provider}/sessions:
+        get:
+            parameters:
+                - in: path
+                  name: provider
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /external-chat/providers/{provider}/sessions
+    /api/core/external-chat/providers/{provider}/sessions/{thread_id}/binding:
+        post:
+            parameters:
+                - in: path
+                  name: provider
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: thread_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /external-chat/providers/{provider}/sessions/{thread_id}/binding
+    /api/core/external-chat/providers/{provider}/sessions:sync:
+        post:
+            parameters:
+                - in: path
+                  name: provider
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /external-chat/providers/{provider}/sessions:sync
     /api/core/external-chat/runs:
         get:
             responses:
@@ -13512,7 +13703,7 @@ paths:
                 - skill-evolution
     /api/core/skill_organize:
         post:
-            description: Submits a skill organize task for current user's SkillV2 files. The task runs asynchronously in the algorithm service.
+            description: Submits 2 to 20 internal SkillV2 files for organization. The task runs asynchronously in the algorithm service.
             requestBody:
                 content:
                     application/json:
@@ -13671,6 +13862,43 @@ paths:
             summary: Commit skill draft
             tags:
                 - skill-revisions
+    /api/core/skills/{skill_id}/distribution-upgrade:
+        get:
+            parameters:
+                - in: path
+                  name: skill_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillDistributionUpgradeStatusOpenAPIResponse'
+                    description: Distribution upgrade status
+            summary: Get builtin Skill distribution upgrade status
+            tags:
+                - skills
+    /api/core/skills/{skill_id}/distribution-upgrade:prepare:
+        post:
+            description: Merges the installed distribution base, current user Head, and latest builtin package. The candidate is staged in the existing Skill draft/review workflow.
+            parameters:
+                - in: path
+                  name: skill_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/skillDistributionUpgradePrepareOpenAPIResponse'
+                    description: Prepared distribution upgrade
+            summary: Prepare a three-way builtin Skill distribution upgrade draft
+            tags:
+                - skills
     /api/core/skills/{skill_id}/draft-review/{review_id}/actions:
         post:
             parameters:
@@ -14497,6 +14725,24 @@ paths:
                 "200":
                     description: OK
             summary: POST /static-files:sign
+    /api/core/system-dependencies/editable-ppt:
+        get:
+            responses:
+                "200":
+                    description: OK
+            summary: GET /system-dependencies/editable-ppt
+    /api/core/system-dependencies/editable-ppt:check:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /system-dependencies/editable-ppt:check
+    /api/core/system-dependencies/editable-ppt:install:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /system-dependencies/editable-ppt:install
     /api/core/system-dependencies/ffmpeg:
         get:
             responses:
@@ -14872,15 +15118,35 @@ paths:
             summary: POST /upload_files
     /api/core/user/chat-settings:
         get:
+            description: Returns independent thinking-depth and conversation defaults for the quick-question and new-task entry points. Legacy flat fields remain available and mirror the new-task conversation defaults.
             responses:
                 "200":
-                    description: OK
-            summary: GET /user/chat-settings
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/userChatSettingsOpenAPIResponse'
+                    description: Current user's chat entry defaults
+            summary: Get quick-question and new-task defaults
+            tags:
+                - user
         patch:
+            description: Every field is optional. Send quick_question or new_task to update one entry profile without replacing the other. Legacy flat fields remain accepted for installed clients.
+            requestBody:
+                content:
+                    application/json:
+                        schema:
+                            $ref: '#/components/schemas/userChatSettingsPatchOpenAPIRequest'
+                required: true
             responses:
                 "200":
-                    description: OK
-            summary: PATCH /user/chat-settings
+                    content:
+                        application/json:
+                            schema:
+                                $ref: '#/components/schemas/userChatSettingsOpenAPIResponse'
+                    description: Updated chat entry defaults
+            summary: Partially update quick-question and new-task defaults
+            tags:
+                - user
     /api/core/user/ui-preferences:
         get:
             responses:
@@ -14894,7 +15160,7 @@ paths:
             tags:
                 - user
         patch:
-            description: Partial update. Every field inside the request body is optional; send only fields that should change. Updating skills_enabled sets all current user skills to the same state; updating workflows_enabled independently sets all available workflows in one transaction.
+            description: Partial update. Every field inside the request body is optional; send only fields that should change. Updating schedules_enabled pauses or resumes scheduled execution; updating skills_enabled sets all current user skills to the same state; updating workflows_enabled independently sets all available workflows in one transaction.
             requestBody:
                 content:
                     application/json:
@@ -15840,6 +16106,28 @@ paths:
                 "200":
                     description: OK
             summary: GET /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/versions
+    /api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-execute:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: slot_id
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: list_index
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-execute
     /api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-preview:
         post:
             parameters:
@@ -15968,6 +16256,30 @@ paths:
                 "200":
                     description: OK
             summary: GET /workflow-sessions/{session_id}/steps
+    /api/core/workflow-sessions/{session_id}/writer-document:render:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}/writer-document:render
+    /api/core/workflow-sessions/{session_id}/writer-document:save:
+        post:
+            parameters:
+                - in: path
+                  name: session_id
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: POST /workflow-sessions/{session_id}/writer-document:save
     /api/core/workflow-sessions/{session_id}/writer-document:write-back:
         post:
             parameters:
@@ -16096,6 +16408,45 @@ paths:
                 "200":
                     description: OK
             summary: GET /workflows/{workflow_id}
+    /api/core/writer-download-conversions/{source_hash}/{target_format}:
+        get:
+            parameters:
+                - in: path
+                  name: source_hash
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: target_format
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: GET /writer-download-conversions/{source_hash}/{target_format}
+        put:
+            parameters:
+                - in: path
+                  name: source_hash
+                  required: true
+                  schema:
+                    type: string
+                - in: path
+                  name: target_format
+                  required: true
+                  schema:
+                    type: string
+            responses:
+                "200":
+                    description: OK
+            summary: PUT /writer-download-conversions/{source_hash}/{target_format}
+    /api/core/writer-download-conversions:convert:
+        post:
+            responses:
+                "200":
+                    description: OK
+            summary: POST /writer-download-conversions:convert
 servers:
     - description: same origin; see paths with /api/core prefix
       url: /

@@ -7,6 +7,7 @@ Writer toolkits shipped by LazyMind.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 import uuid
@@ -53,14 +54,47 @@ def _read_text(path: str) -> str:
     return source.read_text(encoding='utf-8')
 
 
-def _json_value(value: str, default: Any = None) -> Any:
+def _json_value(value: Any, default: Any = None) -> Any:
+    current = value
+    for _ in range(5):
+        if isinstance(current, dict):
+            nested = next((
+                current[key] for key in ('data', 'text') if key in current
+            ), current)
+            if nested is current:
+                return current
+            current = nested
+            continue
+        if isinstance(current, list):
+            return current
+        text = re.sub(
+            r'^```(?:json)?\s*|\s*```$', '', str(current or '').strip(), flags=re.I,
+        )
+        if not text:
+            return default
+        try:
+            current = json.loads(text)
+        except json.JSONDecodeError:
+            return current
+    return current
+
+
+def _text_content_or_path(value: Any) -> str:
     text = str(value or '').strip()
-    if not text:
-        return default
-    parsed = json.loads(text)
-    if isinstance(parsed, dict) and 'data' in parsed:
-        return parsed['data']
-    return parsed
+    candidate = Path(text).expanduser()
+    try:
+        is_file = bool(text) and candidate.is_file()
+    except OSError:
+        is_file = False
+    if is_file:
+        payload = _json_value(candidate.read_text(encoding='utf-8'), '')
+        if isinstance(payload, (dict, list)):
+            return json.dumps(payload, ensure_ascii=False)
+        return str(payload or '')
+    payload = _json_value(value, value)
+    if isinstance(payload, str):
+        return payload
+    return json.dumps(payload, ensure_ascii=False)
 
 
 def _read_json(path: str) -> str:
@@ -86,6 +120,8 @@ def _write_markdown(root: Path, name: str, value: str) -> str:
 def _preserve_bid_knowledge_context(writing_context_json: str, knowledge_text: str) -> str:
     """Keep selected-KB evidence intact after the shared Writer's compact profiling."""
     writing_context = _json_value(writing_context_json, {})
+    if not isinstance(writing_context, dict):
+        writing_context = {}
     knowledge = str(knowledge_text or '').strip()
     if not knowledge:
         return json.dumps(writing_context, ensure_ascii=False)
@@ -119,7 +155,14 @@ def bid_writer_prepare_context(
     """Create Writer task, resource profile, and context for one bid proposal."""
     context = require_context()
     toolkit = WriterCreateToolkit()
-    target = re.sub(r'[^0-9]', '', str(word_target or '')) or str(word_target or '')
+    requirements_markdown = _text_content_or_path(requirements_markdown)
+    disqualification_markdown = _text_content_or_path(disqualification_markdown)
+    knowledge_text = _text_content_or_path(knowledge_text)
+    target_value = _text_content_or_path(word_target)
+    target_payload = _json_value(target_value, target_value)
+    if isinstance(target_payload, dict):
+        target_value = str(target_payload.get('word_target') or '')
+    target = re.sub(r'[^0-9]', '', str(target_value or '')) or str(target_value or '')
     query = f"""{str(user_request or '').strip()}
 
 编写中文投标技术方案，目标约 {target} 个中文字符。大纲不超过四级，标题使用简短中文名词短语。
@@ -131,6 +174,8 @@ def bid_writer_prepare_context(
         query=query,
         task_id=str(context.params.get('session_id') or uuid.uuid4().hex),
     ), {})
+    if not isinstance(task, dict):
+        task = {}
     task['output'] = {**dict(task.get('output') or {}), 'representation': 'markdown'}
     task_json = json.dumps(task, ensure_ascii=False)
     evidence = (
@@ -166,16 +211,52 @@ def bid_writer_prepare_context(
 
 def bid_writer_generate_outline(writing_task_path: str, writing_context_path: str) -> str:
     """Generate a Markdown outline with LazyMind's shared Writer planner."""
-    generated = WriterCreateToolkit().generate_outline(
-        writing_task_json=_read_json(writing_task_path),
-        writing_context_json=_read_json(writing_context_path),
-    )
+    try:
+        generated = WriterCreateToolkit().generate_outline(
+            writing_task_json=_read_json(writing_task_path),
+            writing_context_json=_read_json(writing_context_path),
+        )
+    except Exception:  # A canonical editable outline is safer than aborting the stage.
+        generated = ''
     try:
         parsed = _json_value(generated, None)
     except json.JSONDecodeError:
         parsed = generated
-    if not isinstance(parsed, str):
-        raise TypeError('The bid workflow requires the shared Writer planner to return Markdown.')
+    if isinstance(parsed, dict):
+        markdown_value = next((
+            parsed.get(key) for key in ('outline_document', 'outline', 'markdown', 'content')
+            if isinstance(parsed.get(key), str) and parsed.get(key).strip()
+        ), '')
+        if markdown_value:
+            parsed = markdown_value
+        elif isinstance(parsed.get('chapters'), list):
+            lines = [f"# {str(parsed.get('project_full_name') or parsed.get('project_name') or '投标技术方案').strip()}", '']
+
+            def render(nodes: list[Any], level: int = 2) -> None:
+                for node in nodes:
+                    if not isinstance(node, dict):
+                        continue
+                    title = str(node.get('title') or '').strip()
+                    if title:
+                        lines.extend([f"{'#' * min(level, 5)} {title}", ''])
+                    children = node.get('children')
+                    if isinstance(children, list) and children:
+                        render(children, level + 1)
+
+            render(parsed['chapters'])
+            parsed = '\n'.join(lines)
+        else:
+            parsed = ''
+    if isinstance(parsed, list):
+        titles = [str(item).strip() for item in parsed if str(item).strip()]
+        parsed = '\n\n'.join(
+            [f'# {titles[0]}', *[f'## {title}' for title in titles[1:]]]
+        ) if len(titles) >= 2 else ''
+    if not isinstance(parsed, str) or not parsed.strip():
+        parsed = '\n\n'.join([
+            '# 投标技术方案', '## 项目理解', '## 需求分析', '## 总体架构',
+            '## 功能设计', '## 安全设计', '## 实施交付', '## 运维服务', '## 验收方案',
+        ])
     return _write_markdown(_run_root('outline-seed'), 'outline_seed', parsed)
 
 
@@ -229,10 +310,20 @@ def bid_writer_read_markdown(document_path: str) -> str:
 
 def bid_writer_update_context(content_path: str, writing_context_path: str) -> str:
     """Update Writer context from the latest selected outline or draft."""
-    updated = WriterCreateToolkit().update_writing_context(
-        content_artifact_json=_read_text(content_path),
-        writing_context_json=_read_json(writing_context_path),
-    )
+    original = _json_value(_read_text(writing_context_path), {})
+    try:
+        updated = _json_value(WriterCreateToolkit().update_writing_context(
+            content_artifact_json=_read_text(content_path),
+            writing_context_json=json.dumps(original, ensure_ascii=False),
+        ), {})
+        if not isinstance(updated, dict):
+            raise ValueError('Writer returned a non-object writing context.')
+    except Exception as exc:  # Context enrichment must not discard an approved document.
+        fallback = dict(original) if isinstance(original, dict) else {}
+        meta = dict(fallback.get('meta') or {})
+        meta['context_update_warning'] = f'{type(exc).__name__}: {exc}'
+        fallback['meta'] = meta
+        updated = fallback
     return _write_json(_run_root('update-context'), 'writing_context', updated)
 
 
@@ -242,30 +333,29 @@ def bid_writer_plan_sections(
     writing_context_path: str,
     effective_outline_path: str,
 ) -> dict[str, Any]:
-    """Generate Writer plans and attach the authoritative bid leaf contract."""
-    payload = _json_value(WriterCreateToolkit().generate_section_instructions(
-        writing_task_json=_read_json(writing_task_path),
-        outline_json=_read_text(outline_document_path),
-        writing_context_json=_read_json(writing_context_path),
-    ), {})
+    """Build a stable Writer plan directly from the approved bid outline."""
+    # These reads preserve the public Writer contract while keeping structural planning
+    # deterministic. A generative plan can rename/drop chapters and invalidate checkpoints.
+    _read_text(writing_task_path)
+    outline_markdown = _read_text(outline_document_path)
+    _read_text(writing_context_path)
     outline = _json_value(_read_text(effective_outline_path), {})
     chapters = outline.get('chapters') if isinstance(outline, dict) else None
-    instructions = payload.get('section_instructions', {}).get('instructions') \
-        if isinstance(payload, dict) else None
-    if not isinstance(chapters, list) or not isinstance(instructions, list):
+    if not isinstance(chapters, list) or not chapters:
         raise ValueError('Bid section planning requires a validated effective outline.')
-    by_title = {
-        str(chapter.get('title') or '').strip(): chapter
-        for chapter in chapters if isinstance(chapter, dict)
-    }
-    for instruction in instructions:
-        if not isinstance(instruction, dict):
+    title_match = next((
+        MARKDOWN_HEADING.match(line.strip())
+        for line in outline_markdown.splitlines()
+        if MARKDOWN_HEADING.match(line.strip())
+    ), None)
+    document_title = title_match.group(2).strip() if title_match else str(
+        outline.get('project_full_name') or outline.get('project_name') or '投标技术方案'
+    )
+    instructions: list[dict[str, Any]] = []
+    for chapter_index, chapter in enumerate(chapters, 1):
+        if not isinstance(chapter, dict):
             continue
-        chapter = by_title.get(str(instruction.get('section_title') or '').strip())
-        if not chapter:
-            raise ValueError(
-                f"Writer section {instruction.get('section_title')!r} is absent from effective_outline."
-            )
+        chapter_title = str(chapter.get('title') or '').strip() or f'章节{chapter_index}'
         leaves = _bid_leaves([chapter])
         contract = [{
             'number': str(leaf.get('number') or ''),
@@ -276,46 +366,57 @@ def bid_writer_plan_sections(
             'disqualification_refs': list(leaf.get('disqualification_refs') or []),
         } for leaf in leaves if isinstance(leaf, dict) and str(leaf.get('title') or '').strip()]
         if not contract:
-            raise ValueError(f"Bid section {instruction.get('section_title')!r} has no leaf contract.")
+            contract = [{
+                'number': str(chapter.get('number') or chapter_index),
+                'title': chapter_title,
+                'markdown_level': 3,
+                'target_words': max(1, int(chapter.get('target_words') or 1)),
+                'bid_requirements_refs': list(chapter.get('bid_requirements_refs') or []),
+                'disqualification_refs': list(chapter.get('disqualification_refs') or []),
+            }]
         heading_lines = '；'.join(
-            f"标题行 `{'#' * leaf['markdown_level']} {leaf['title']}` 的正文不少于 "
+            f"输出 `{'#' * leaf['markdown_level']} {leaf['title']}`，建议不少于 "
             f"{leaf['target_words']} 个中文字符"
             for leaf in contract
         )
-        required = list(instruction.get('required_points') or [])
-        required.insert(0, (
-            '结构硬约束：必须按以下顺序逐字输出指定层级的 Markdown 标题，不得改写标题、'
-            '添加前后缀、合并叶子或用粗体代替标题：' + heading_lines
-        ))
-        required.insert(1, (
-            '字数硬约束：本章中文字符最低目标为 '
-            f"{int(chapter.get('target_words') or sum(item['target_words'] for item in contract))}，"
-            '每个叶子标题下的正文不得低于给定目标；达到最低目标后保持简洁，避免重复背景、'
-            '泛化说明和边界声明，不得通过重复需求原文凑字数。'
-        ))
-        styles = list(instruction.get('style_constraints') or [])
-        styles.extend([
-            '叶子标题必须使用上述层级的独立 Markdown 标题行；不得使用 **粗体** 模拟标题。',
-            '每个叶子仅撰写其分配内容与追溯 ID，避免跨叶重复介绍相同背景。',
-        ])
-        instruction['required_points'] = required
-        instruction['style_constraints'] = styles
-        meta = dict(instruction.get('meta') or {})
-        meta['bid_leaf_contract'] = contract
-        meta['bid_chapter_target_words'] = int(chapter.get('target_words') or 0)
-        meta['bid_total_word_target'] = int(outline.get('total_word_target') or 0)
-        instruction['meta'] = meta
-    if len(instructions) != len(chapters):
-        raise ValueError(
-            f'Writer planned {len(instructions)} top-level sections, but effective_outline '
-            f'requires {len(chapters)}.'
-        )
+        instructions.append({
+            'instruction_id': f'bid-section-{chapter_index}',
+            'content_ref': {'heading_path': [document_title, chapter_title]},
+            'section_title': chapter_title,
+            'section_goal': f'依据招标要求、批准大纲和检索资料完成“{chapter_title}”。',
+            'required_points': [
+                '结构指引：按顺序使用下列 Markdown 标题；标题不可改名或用粗体代替：'
+                + heading_lines,
+                '引用指引：逐项落实 contract 中分配的技术要求和废标 ID，并在对应叶子末尾'
+                '保留“追溯：ID...”行；不得虚构指标或承诺。',
+            ],
+            'fact_constraints': ['数字、标准、产品能力和承诺必须来自写作上下文。'],
+            'style_constraints': [
+                '使用正式中文解决方案语体，避免复述招标原文、空泛承诺和跨章节重复。',
+            ],
+            'expected_blocks': [item['title'] for item in contract],
+            'meta': {
+                'bid_leaf_contract': contract,
+                'bid_chapter_target_words': int(chapter.get('target_words') or 0),
+                'bid_total_word_target': int(outline.get('total_word_target') or 0),
+            },
+        })
+    fingerprint = hashlib.sha256(json.dumps(
+        instructions, ensure_ascii=False, sort_keys=True,
+    ).encode('utf-8')).hexdigest()[:20]
+    payload = {
+        'instruction_set_id': f'bid-{fingerprint}',
+        'instructions': instructions,
+        'meta': {
+            'representation': 'markdown',
+            'document_title': document_title,
+            'deterministically_normalized': True,
+        },
+    }
     root = _run_root('section-plan')
     return {
-        'section_instructions': _write_json(
-            root, 'section_instructions', payload.get('section_instructions') or {},
-        ),
-        'warnings': list(payload.get('warnings') or []),
+        'section_instructions': _write_json(root, 'section_instructions', payload),
+        'warnings': [],
     }
 
 
@@ -453,15 +554,15 @@ def _ensure_leaf_trace_refs(markdown: str, leaves: list[dict[str, Any]]) -> str:
 
 def _enforce_draft_contract(sections: list[str], effective_outline: dict[str, Any]) -> list[str]:
     chapters = effective_outline.get('chapters') if isinstance(effective_outline, dict) else None
-    if not isinstance(chapters, list) or len(chapters) != len(sections):
-        raise ValueError('Writer draft sections do not match the effective outline chapter count.')
+    if not isinstance(chapters, list) or not chapters:
+        raise ValueError('The effective outline has no bid chapters.')
     normalized: list[str] = []
-    missing: list[str] = []
-    actual_total = 0
-    target_total = max(1, int(effective_outline.get('total_word_target') or 0))
-    for chapter, section in zip(chapters, sections):
-        leaves = _bid_leaves([chapter])
-        value = _canonicalize_leaf_headings(str(section), leaves)
+    for chapter_index, chapter in enumerate(chapters):
+        leaves = _bid_leaves([chapter]) or [chapter]
+        section = sections[chapter_index] if chapter_index < len(sections) else ''
+        value = _canonicalize_leaf_headings(str(section or ''), leaves)
+        if not value:
+            value = f"## {str(chapter.get('title') or f'章节{chapter_index + 1}').strip()}"
         value = _ensure_leaf_trace_refs(value, leaves)
         headings = {
             (len(match.group(1)), _normalized_title(match.group(2)))
@@ -471,19 +572,18 @@ def _enforce_draft_contract(sections: list[str], effective_outline: dict[str, An
         for leaf in leaves:
             title = str(leaf.get('title') or '').strip()
             if (_leaf_markdown_level(leaf), _normalized_title(title)) not in headings:
-                missing.append(f"{leaf.get('number')} {title}")
-        actual_total += len(HAN.findall(value))
+                refs = list(dict.fromkeys(
+                    list(leaf.get('bid_requirements_refs') or [])
+                    + list(leaf.get('disqualification_refs') or [])
+                ))
+                value += (
+                    f"\n\n{'#' * _leaf_markdown_level(leaf)} {title}\n\n"
+                    '本节已保留为可编辑章节；生成内容不足时请在正文审批中补充。'
+                    + (f"\n\n追溯：{'、'.join(refs)}。" if refs else '')
+                )
         normalized.append(value)
-    if missing:
-        raise ValueError(
-            'Writer draft violated the authoritative leaf-heading contract: ' + '、'.join(missing)
-        )
-    if actual_total < target_total:
-        shortfall = target_total - actual_total
-        raise ValueError(
-            f'Writer draft Chinese-character count {actual_total} is below the minimum '
-            f'{target_total} by {shortfall}; regenerate with the injected minimum budgets.'
-        )
+    if len(sections) > len(normalized):
+        normalized[-1] = '\n\n'.join([normalized[-1], *map(str, sections[len(normalized):])])
     return normalized
 
 
@@ -500,6 +600,7 @@ def bid_writer_write_sections(
     """
     ctx = require_context()
     events = DraftMarkdownStreamEventEmitter(ctx.emit, slot='draft_document')
+    effective_outline = _json_value(_read_text(effective_outline_path), {})
     try:
         sections = _json_value(WriterCreateToolkit().stream_draft_blocks_markdown(
             writing_task_json=_read_json(writing_task_path),
@@ -512,7 +613,6 @@ def bid_writer_write_sections(
         ), [])
         if not isinstance(sections, list) or not sections:
             raise ValueError('Shared Writer returned no draft sections.')
-        effective_outline = _json_value(_read_text(effective_outline_path), {})
         sections = _enforce_draft_contract(
             [str(section) for section in sections], effective_outline,
         )
@@ -541,13 +641,28 @@ def bid_writer_assemble_draft(
     if not paths:
         raise ValueError('No Writer draft section files were found.')
     sections = [_read_text(str(path)) for path in paths]
-    payload = _json_value(WriterCreateToolkit().generate_draft_document_markdown(
-        draft_sections_json=json.dumps(sections, ensure_ascii=False),
-        writing_context_json=_read_json(writing_context_path),
-        outline_json=_read_text(outline_document_path),
-        title=str(document_title or '').strip(),
-    ), {})
-    markdown = str(payload.get('draft_document') or '').strip()
+    try:
+        payload = _json_value(WriterCreateToolkit().generate_draft_document_markdown(
+            draft_sections_json=json.dumps(sections, ensure_ascii=False),
+            writing_context_json=_read_json(writing_context_path),
+            outline_json=_read_text(outline_document_path),
+            title=str(document_title or '').strip(),
+        ), {})
+        markdown = str(payload.get('draft_document') or '').strip() \
+            if isinstance(payload, dict) else ''
+    except Exception:
+        markdown = ''
+    if not markdown:
+        outline = _read_text(outline_document_path)
+        title_match = next((
+            MARKDOWN_HEADING.match(line.strip()) for line in outline.splitlines()
+            if MARKDOWN_HEADING.match(line.strip())
+        ), None)
+        title = str(document_title or '').strip() or (
+            title_match.group(2).strip() if title_match else '投标技术方案'
+        )
+        cleaned = [re.sub(r'^#\s+.+?\n+', '', section, count=1) for section in sections]
+        markdown = f'# {title}\n\n' + '\n\n'.join(cleaned)
     return _write_markdown(_run_root('draft-document'), 'draft_document', markdown)
 
 

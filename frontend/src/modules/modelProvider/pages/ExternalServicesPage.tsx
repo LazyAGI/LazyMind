@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Alert, AutoComplete, Button, Empty, Form, Input, Modal, Space, Spin, Tag, Tooltip, message } from "antd";
 import {
   CloudServerOutlined,
@@ -527,6 +527,116 @@ function ExternalServiceLogo({ service }: { service: ExternalServiceConfig }) {
   );
 }
 
+interface ExternalServiceCardProps {
+  ariaLabel: string;
+  onOpen: (service: ExternalServiceConfig) => void;
+  service: ExternalServiceConfig;
+  statusLabel: string;
+}
+
+export function ExternalServiceCard({
+  ariaLabel,
+  onOpen,
+  service,
+  statusLabel,
+}: ExternalServiceCardProps) {
+  const summaryRef = useRef<HTMLParagraphElement>(null);
+  const [summaryOverflowing, setSummaryOverflowing] = useState(false);
+  const overflowAware = service.category === "parsing";
+
+  useLayoutEffect(() => {
+    if (!overflowAware) return;
+    const summary = summaryRef.current;
+    if (!summary) return;
+
+    const measure = () => {
+      setSummaryOverflowing(
+        summary.scrollHeight > summary.clientHeight + 1
+        || summary.scrollWidth > summary.clientWidth + 1,
+      );
+    };
+    measure();
+    const deferredMeasure = window.setTimeout(measure, 0);
+    window.addEventListener("resize", measure);
+
+    const observer = typeof ResizeObserver === "undefined"
+      ? undefined
+      : new ResizeObserver(measure);
+    observer?.observe(summary);
+    return () => {
+      window.clearTimeout(deferredMeasure);
+      window.removeEventListener("resize", measure);
+      observer?.disconnect();
+    };
+  }, [overflowAware, service.summary]);
+
+  const summary = (
+    <span className="model-provider-service-summary-wrap">
+      <p
+        className="model-provider-service-summary"
+        ref={overflowAware ? summaryRef : undefined}
+      >
+        {service.summary}
+      </p>
+    </span>
+  );
+  const card = (
+    <button
+      aria-label={ariaLabel}
+      className="model-provider-service-card"
+      onClick={() => onOpen(service)}
+      type="button"
+    >
+      <ExternalServiceLogo service={service} />
+      <div className="model-provider-service-card-copy">
+        <div>
+          <div className="model-provider-service-title-row">
+            <h4>{service.name}</h4>
+            <Tag
+              className="model-provider-service-status"
+              color={
+                service.status === "configured"
+                  ? "success"
+                  : service.status === "tbd"
+                    ? "warning"
+                    : "default"
+              }
+            >
+              {statusLabel}
+            </Tag>
+          </div>
+          {overflowAware ? (
+            summary
+          ) : (
+            <Tooltip placement="topLeft" title={service.summary}>
+              {summary}
+            </Tooltip>
+          )}
+        </div>
+      </div>
+      <span className="model-provider-service-card-arrow" aria-hidden="true">
+        <RightOutlined />
+      </span>
+    </button>
+  );
+
+  if (!overflowAware) return card;
+  return (
+    <Tooltip
+      classNames={{ root: "model-provider-tool-popover" }}
+      placement="bottomLeft"
+      trigger={["hover", "focus"]}
+      title={
+        summaryOverflowing
+          ? <div className="model-provider-tool-popover-content">{service.summary}</div>
+          : undefined
+      }
+    >
+      {card}
+    </Tooltip>
+  );
+}
+
 interface ExternalServicesPageProps {
   includeMcp?: boolean;
   includeBuiltinTools?: boolean;
@@ -1052,42 +1162,13 @@ export default function ExternalServicesPage({
         {visibleServices.length ? (
           <div className="model-provider-service-grid">
             {visibleServices.map((service) => (
-              <button
-                aria-label={t("modelProvider.external.configModalTitle", { name: service.name })}
-                className="model-provider-service-card"
+              <ExternalServiceCard
+                ariaLabel={t("modelProvider.external.configModalTitle", { name: service.name })}
                 key={service.key}
-                onClick={() => openConfigModal(service)}
-                type="button"
-              >
-                <ExternalServiceLogo service={service} />
-                <div className="model-provider-service-card-copy">
-                  <div>
-                    <div className="model-provider-service-title-row">
-                      <h4>{service.name}</h4>
-                      <Tag
-                        className="model-provider-service-status"
-                        color={
-                          service.status === "configured"
-                            ? "success"
-                            : service.status === "tbd"
-                              ? "warning"
-                              : "default"
-                        }
-                      >
-                        {t(`modelProvider.external.status.${service.status}`)}
-                      </Tag>
-                    </div>
-                    <Tooltip placement="topLeft" title={service.summary}>
-                      <span className="model-provider-service-summary-wrap">
-                        <p className="model-provider-service-summary">{service.summary}</p>
-                      </span>
-                    </Tooltip>
-                  </div>
-                </div>
-                <span className="model-provider-service-card-arrow" aria-hidden="true">
-                  <RightOutlined />
-                </span>
-              </button>
+                onOpen={openConfigModal}
+                service={service}
+                statusLabel={t(`modelProvider.external.status.${service.status}`)}
+              />
             ))}
           </div>
         ) : (

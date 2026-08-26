@@ -31,21 +31,31 @@ func catalogFailure(format string, args ...any) error {
 }
 
 type CatalogSkill struct {
-	Key           string   `json:"key"`
-	UID           string   `json:"uid"`
-	SourceURL     string   `json:"source_url"`
-	ResolvedURL   string   `json:"resolved_url"`
-	Version       string   `json:"version"`
-	Name          string   `json:"name"`
-	Description   string   `json:"description"`
-	Category      string   `json:"category"`
-	Tags          []string `json:"tags,omitempty"`
-	MarketVisible *bool    `json:"market_visible,omitempty"`
-	Content       string   `json:"content,omitempty"`
-	ArchiveSHA256 string   `json:"archive_sha256"`
-	TreeSHA256    string   `json:"tree_sha256"`
-	ArchiveSize   int64    `json:"archive_size"`
-	PackageFile   string   `json:"package_file"`
+	Key                 string         `json:"key"`
+	UID                 string         `json:"uid"`
+	SourceURL           string         `json:"source_url"`
+	ResolvedURL         string         `json:"resolved_url"`
+	Version             string         `json:"version"`
+	Name                string         `json:"name"`
+	Description         string         `json:"description"`
+	Category            string         `json:"category"`
+	Tags                []string       `json:"tags,omitempty"`
+	MarketVisible       *bool          `json:"market_visible,omitempty"`
+	Content             string         `json:"content,omitempty"`
+	OriginArchiveSHA256 string         `json:"origin_archive_sha256,omitempty"`
+	OriginTreeSHA256    string         `json:"origin_tree_sha256,omitempty"`
+	OriginArchiveSize   int64          `json:"origin_archive_size,omitempty"`
+	PatchSetSHA256      string         `json:"patch_set_sha256,omitempty"`
+	AppliedPatches      []CatalogPatch `json:"applied_patches,omitempty"`
+	ArchiveSHA256       string         `json:"archive_sha256"`
+	TreeSHA256          string         `json:"tree_sha256"`
+	ArchiveSize         int64          `json:"archive_size"`
+	PackageFile         string         `json:"package_file"`
+}
+
+type CatalogPatch struct {
+	ID     string `json:"id"`
+	SHA256 string `json:"sha256"`
 }
 
 func CatalogPath() string {
@@ -103,6 +113,9 @@ func LoadCatalog(catalogPath string) (Catalog, error) {
 		entry.PackageFile = strings.TrimSpace(entry.PackageFile)
 		entry.ArchiveSHA256 = strings.ToLower(strings.TrimSpace(entry.ArchiveSHA256))
 		entry.TreeSHA256 = strings.ToLower(strings.TrimSpace(entry.TreeSHA256))
+		entry.OriginArchiveSHA256 = strings.ToLower(strings.TrimSpace(entry.OriginArchiveSHA256))
+		entry.OriginTreeSHA256 = strings.ToLower(strings.TrimSpace(entry.OriginTreeSHA256))
+		entry.PatchSetSHA256 = strings.ToLower(strings.TrimSpace(entry.PatchSetSHA256))
 		if entry.Key == "" || entry.UID == "" || entry.SourceURL == "" || entry.ResolvedURL == "" || entry.Version == "" || entry.Name == "" || entry.Description == "" || entry.Category == "" || entry.PackageFile == "" {
 			return Catalog{}, catalogFailure("builtin skill catalog entry %d is incomplete", i)
 		}
@@ -125,11 +138,53 @@ func LoadCatalog(catalogPath string) (Catalog, error) {
 		if entry.ArchiveSize <= 0 {
 			return Catalog{}, catalogFailure("builtin skill %s has invalid archive size", entry.UID)
 		}
+		if err := validatePatchProvenance(entry); err != nil {
+			return Catalog{}, catalogFailure("builtin skill %s: %v", entry.UID, err)
+		}
 		if _, err := resolvePackagePath(catalogPath, entry.PackageFile); err != nil {
 			return Catalog{}, catalogFailure("builtin skill %s: %v", entry.UID, err)
 		}
 	}
 	return catalog, nil
+}
+
+func validatePatchProvenance(entry *CatalogSkill) error {
+	hasProvenance := entry.OriginArchiveSHA256 != "" || entry.OriginTreeSHA256 != "" || entry.OriginArchiveSize != 0 || entry.PatchSetSHA256 != "" || len(entry.AppliedPatches) > 0
+	if !hasProvenance {
+		return nil
+	}
+	if len(entry.AppliedPatches) == 0 || entry.OriginArchiveSize <= 0 {
+		return catalogFailure("patch provenance is incomplete")
+	}
+	for name, value := range map[string]string{
+		"origin archive sha256": entry.OriginArchiveSHA256,
+		"origin tree sha256":    entry.OriginTreeSHA256,
+		"patch set sha256":      entry.PatchSetSHA256,
+	} {
+		if len(value) != sha256.Size*2 {
+			return catalogFailure("%s is invalid", name)
+		}
+		if _, err := hex.DecodeString(value); err != nil {
+			return catalogFailure("%s is invalid: %v", name, err)
+		}
+	}
+	seen := make(map[string]bool, len(entry.AppliedPatches))
+	for index := range entry.AppliedPatches {
+		patch := &entry.AppliedPatches[index]
+		patch.ID = strings.TrimSpace(patch.ID)
+		patch.SHA256 = strings.ToLower(strings.TrimSpace(patch.SHA256))
+		if patch.ID == "" || len(patch.SHA256) != sha256.Size*2 {
+			return catalogFailure("applied patch %d is invalid", index)
+		}
+		if _, err := hex.DecodeString(patch.SHA256); err != nil {
+			return catalogFailure("applied patch %s has invalid sha256: %v", patch.ID, err)
+		}
+		if seen[patch.ID] {
+			return catalogFailure("duplicate applied patch %s", patch.ID)
+		}
+		seen[patch.ID] = true
+	}
+	return nil
 }
 
 func catalogPackages(catalogPath string) ([]Package, error) {
@@ -170,10 +225,11 @@ func catalogPackageByUID(catalogPath, uid string) (Package, bool, error) {
 		if err := verifyArchive(archivePath, entry.ArchiveSHA256, entry.ArchiveSize); err != nil {
 			return Package{}, false, catalogFailure("builtin skill %s: %v", uid, err)
 		}
-		files, err := skillpackage.ReadZip(archivePath)
+		pkg, err := skillpackage.ReadZip(archivePath)
 		if err != nil {
 			return Package{}, false, err
 		}
+		files := pkg.Files
 		if _, ok := files["SKILL.md"]; !ok {
 			return Package{}, false, catalogFailure("builtin skill %s missing SKILL.md", uid)
 		}
@@ -190,6 +246,7 @@ func packageFromCatalog(entry CatalogSkill, archivePath string, files map[string
 		Description:   entry.Description,
 		Version:       entry.Version,
 		SHA256:        entry.ArchiveSHA256,
+		TreeSHA256:    entry.TreeSHA256,
 		SourceURL:     entry.SourceURL,
 		ArchivePath:   archivePath,
 		Tags:          append([]string(nil), entry.Tags...),

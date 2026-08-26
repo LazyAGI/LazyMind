@@ -234,6 +234,7 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 		field.Label = strings.TrimSpace(field.Label)
 		field.Question = strings.TrimSpace(field.Question)
 		field.Type = strings.ToLower(strings.TrimSpace(field.Type))
+		field.ChoicePolicy = strings.ToLower(strings.TrimSpace(field.ChoicePolicy))
 		if field.Type == "" {
 			field.Type = "text"
 		}
@@ -281,6 +282,14 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 			result.Diagnostics = append(result.Diagnostics, diag(
 				"E_RUNTIME_CLARIFICATION_CHOICES_REQUIRED", "error", path+".choices",
 				"single and multiple runtime clarification fields require choices",
+			))
+		}
+		switch field.ChoicePolicy {
+		case "", "seed", "subset", "fixed":
+		default:
+			result.Diagnostics = append(result.Diagnostics, diag(
+				"E_RUNTIME_CLARIFICATION_CHOICE_POLICY_INVALID", "error", path+".choice_policy",
+				"runtime clarification field choice_policy must be seed, subset, or fixed",
 			))
 		}
 	}

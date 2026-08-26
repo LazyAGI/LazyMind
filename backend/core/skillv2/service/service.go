@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"path"
 	"sort"
 	"strings"
@@ -17,6 +18,7 @@ import (
 	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
 
+	skilldistribution "lazymind/core/skillv2/distribution"
 	skillmetadata "lazymind/core/skillv2/metadata"
 	skillsearch "lazymind/core/skillv2/search"
 	skillpackage "lazymind/core/skillv2/skillpackage"
@@ -46,15 +48,17 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 	req.Name = strings.TrimSpace(req.Name)
 	req.Category = strings.TrimSpace(req.Category)
 	req.Description = strings.TrimSpace(req.Description)
-	files, sourceRefType, sourceRefID, err := s.filesFromSource(ctx, req.OwnerUserID, req.Source)
+	skillID := newID()
+	pkg, sourceRefType, sourceRefID, err := s.filesFromSource(ctx, req.OwnerUserID, req.Source)
 	if err != nil {
 		return CreateSkillResponse{}, err
 	}
+	files := pkg.Files
 	if err := validateSkillFiles(files); err != nil {
 		return CreateSkillResponse{}, err
 	}
 	if isExternalImportSource(req.Source.Type) {
-		meta, err := skillmetadata.FromFiles(files)
+		meta, err := resolveExternalMetadata(pkg, skillID)
 		if err != nil {
 			return CreateSkillResponse{}, err
 		}
@@ -69,8 +73,10 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 	if err := validateSkillIdentity(req.Name, req.Category); err != nil {
 		return CreateSkillResponse{}, err
 	}
+	if err := validateSkillDescription(req.Description); err != nil {
+		return CreateSkillResponse{}, err
+	}
 
-	skillID := newID()
 	revisionID := newID()
 	now := s.clock.Now()
 	tags, _ := json.Marshal(req.Tags)
@@ -121,6 +127,14 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 		}); err != nil {
 			return err
 		}
+		if req.Distribution != nil {
+			if err := skilldistribution.BindInitialTx(ctx, tx, skilldistribution.InitialBinding{
+				SkillID: skillID, RevisionID: revisionID, BuiltinUID: req.Distribution.BuiltinUID,
+				Version: req.Distribution.Version, ArchiveSHA256: req.Distribution.ArchiveSHA256, TreeSHA256: req.Distribution.TreeSHA256,
+			}, now); err != nil {
+				return err
+			}
+		}
 		if err := s.resetDraft(tx, skillID, revisionID); err != nil {
 			return err
 		}
@@ -144,7 +158,7 @@ func isExternalImportSource(sourceType string) bool {
 func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (PatchSkillResponse, error) {
 	if req.Name != nil {
 		name := strings.TrimSpace(*req.Name)
-		if err := validatePathSegment(name); err != nil {
+		if err := validateSkillName(name); err != nil {
 			return PatchSkillResponse{}, err
 		}
 		req.Name = &name
@@ -158,6 +172,9 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 	}
 	if req.Description != nil {
 		description := strings.TrimSpace(*req.Description)
+		if err := validateSkillDescription(description); err != nil {
+			return PatchSkillResponse{}, err
+		}
 		req.Description = &description
 	}
 	var out PatchSkillResponse
@@ -289,10 +306,11 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 		if draftEntries > 0 {
 			return fmt.Errorf("cannot replace source while draft overlay exists")
 		}
-		files, sourceRefType, sourceRefID, err := s.filesFromSource(ctx, skill.OwnerUserID, *req.Source)
+		pkg, sourceRefType, sourceRefID, err := s.filesFromSource(ctx, skill.OwnerUserID, *req.Source)
 		if err != nil {
 			return err
 		}
+		files := pkg.Files
 		if err := validateSkillFiles(files); err != nil {
 			return err
 		}
@@ -301,7 +319,7 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 		nextDescription := skill.Description
 		externalImport := isExternalImportSource(req.Source.Type)
 		if externalImport {
-			meta, err := skillmetadata.FromFiles(files)
+			meta, err := resolveExternalMetadata(pkg, skill.ID)
 			if err != nil {
 				return err
 			}
@@ -321,6 +339,12 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 			if err := validateSkillPackageMetadata(nextName, nextCategory, nextDescription, files); err != nil {
 				return err
 			}
+		}
+		if err := validateSkillIdentity(nextName, nextCategory); err != nil {
+			return err
+		}
+		if err := validateSkillDescription(nextDescription); err != nil {
+			return err
 		}
 		parentID := ""
 		if skill.HeadRevisionID != nil {
@@ -512,6 +536,11 @@ func (s *SkillService) deleteSkillGraphTx(ctx context.Context, tx *gorm.DB, skil
 	if err := tx.Model(&skillRevisionRow{}).Where("skill_id = ?", skillID).Pluck("id", &revisions).Error; err != nil {
 		return err
 	}
+	if tx.Migrator().HasTable("skill_distribution_bindings") {
+		if err := skilldistribution.DeleteBindingTx(ctx, tx, skillID, revisions); err != nil {
+			return err
+		}
+	}
 	if len(revisions) > 0 {
 		if err := tx.Where("revision_id IN ?", revisions).Delete(&skillRevisionEntryRow{}).Error; err != nil {
 			return err
@@ -601,6 +630,15 @@ func skillBlobReferenced(tx *gorm.DB, hash string) (bool, error) {
 	}
 	if revisionRefs > 0 {
 		return true, nil
+	}
+	if tx.Migrator().HasTable("skill_distribution_entries") {
+		var distributionRefs int64
+		if err := tx.Table("skill_distribution_entries").Where("blob_hash = ?", hash).Count(&distributionRefs).Error; err != nil {
+			return false, err
+		}
+		if distributionRefs > 0 {
+			return true, nil
+		}
 	}
 	var draftRefs int64
 	if err := tx.Model(&skillDraftEntryRow{}).Where("blob_hash = ?", hash).Count(&draftRefs).Error; err != nil {
@@ -740,6 +778,9 @@ func (s *SkillService) DiscardDraft(ctx context.Context, req DiscardDraftRequest
 		if skill.HeadRevisionID == nil {
 			return s.deleteSkillGraphTx(ctx, tx, req.SkillID, req.UserID)
 		}
+		if err := skilldistribution.CancelPendingTx(ctx, tx, req.SkillID, s.clock.Now()); err != nil {
+			return err
+		}
 		if err := tx.Where("skill_id = ?", req.SkillID).Delete(&skillDraftEntryRow{}).Error; err != nil {
 			return err
 		}
@@ -798,6 +839,11 @@ func markDraftReviewSessions(tx *gorm.DB, skillID, status, userID string, now ti
 
 func (s *SkillService) ApplyAutoEvoDraft(ctx context.Context, req AutoEvoDraftRequest) error {
 	return s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if _, pending, err := skilldistribution.PendingRefTx(ctx, tx, req.SkillID); err != nil {
+			return err
+		} else if pending {
+			return skilldistribution.ErrUpgradeDraftActive
+		}
 		if err := tx.Where("skill_id = ?", req.SkillID).Delete(&skillDraftEntryRow{}).Error; err != nil {
 			return err
 		}
@@ -817,6 +863,11 @@ func (s *SkillService) ApplyAutoEvoDraft(ctx context.Context, req AutoEvoDraftRe
 func (s *SkillService) AcceptReview(ctx context.Context, req AcceptReviewRequest) (AcceptReviewResponse, error) {
 	var out AcceptReviewResponse
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if _, pending, err := skilldistribution.PendingRefTx(ctx, tx, req.SkillID); err != nil {
+			return err
+		} else if pending {
+			return skilldistribution.ErrUpgradeDraftActive
+		}
 		revisionID, err := s.commitFilesAsNewHead(ctx, tx, req.SkillID, req.UserID, "review_accept", req.Files)
 		if err != nil {
 			return err
@@ -937,49 +988,76 @@ func (s *SkillService) entriesFromFiles(ctx context.Context, tx *gorm.DB, revisi
 	return entries, hashTree(entries), nil
 }
 
-func (s *SkillService) filesFromSource(ctx context.Context, ownerUserID string, source SourceInput) (map[string][]byte, string, string, error) {
+type sourcePackage struct {
+	Files           map[string][]byte
+	PackageRoot     string
+	ArchiveFilename string
+}
+
+func (s *SkillService) filesFromSource(ctx context.Context, ownerUserID string, source SourceInput) (sourcePackage, string, string, error) {
 	switch source.Type {
 	case "uploaded_zip":
 		if s.uploadStore == nil {
-			return nil, "", "", fmt.Errorf("upload store is not configured")
+			return sourcePackage{}, "", "", fmt.Errorf("upload store is not configured")
 		}
 		session, err := s.uploadStore.Get(ctx, source.UploadID)
 		if err != nil {
-			return nil, "", "", err
+			return sourcePackage{}, "", "", err
 		}
 		if session.OwnerUserID != ownerUserID {
-			return nil, "", "", fmt.Errorf("upload belongs to another user")
+			return sourcePackage{}, "", "", fmt.Errorf("upload belongs to another user")
 		}
 		if session.State != "completed" {
-			return nil, "", "", fmt.Errorf("upload is not completed")
+			return sourcePackage{}, "", "", fmt.Errorf("upload is not completed")
 		}
-		files, err := skillpackage.ReadZip(session.StoredPath)
-		return files, "upload", source.UploadID, err
+		pkg, err := skillpackage.ReadZip(session.StoredPath)
+		return sourcePackage{Files: pkg.Files, PackageRoot: pkg.PackageRoot, ArchiveFilename: session.Filename}, "upload", source.UploadID, err
 	case "local_zip":
 		if strings.TrimSpace(source.StoredPath) == "" {
-			return nil, "", "", fmt.Errorf("stored_path required")
+			return sourcePackage{}, "", "", fmt.Errorf("stored_path required")
 		}
-		files, err := skillpackage.ReadZip(source.StoredPath)
-		return files, "local_zip", source.Filename, err
+		pkg, err := skillpackage.ReadZip(source.StoredPath)
+		return sourcePackage{Files: pkg.Files, PackageRoot: pkg.PackageRoot, ArchiveFilename: source.Filename}, "local_zip", source.Filename, err
 	case "builtin_zip":
 		if strings.TrimSpace(source.StoredPath) == "" {
-			return nil, "", "", fmt.Errorf("stored_path required")
+			return sourcePackage{}, "", "", fmt.Errorf("stored_path required")
 		}
-		files, err := skillpackage.ReadZip(source.StoredPath)
-		return files, "builtin_package", source.Filename, err
+		pkg, err := skillpackage.ReadZip(source.StoredPath)
+		return sourcePackage{Files: pkg.Files, PackageRoot: pkg.PackageRoot, ArchiveFilename: source.Filename}, "builtin_package", source.Filename, err
 	case "url":
 		if s.downloader == nil {
-			return nil, "", "", fmt.Errorf("downloader is not configured")
+			return sourcePackage{}, "", "", fmt.Errorf("downloader is not configured")
 		}
-		zipPath, err := s.downloader.Download(ctx, source.URL)
+		downloaded, err := s.downloader.Download(ctx, source.URL)
 		if err != nil {
-			return nil, "", "", err
+			return sourcePackage{}, "", "", err
 		}
-		files, err := skillpackage.ReadZip(zipPath)
-		ensureURLImportDefaults(files)
-		return files, "url", source.URL, err
+		if downloaded.Cleanup != nil {
+			defer downloaded.Cleanup()
+		}
+		pkg, err := skillpackage.ReadZip(downloaded.Path)
+		if err != nil {
+			return sourcePackage{}, "", "", err
+		}
+		if source.PathPrefix != "" {
+			prefix, err := cleanSkillPath(source.PathPrefix)
+			if err != nil {
+				return sourcePackage{}, "", "", err
+			}
+			pkg.Files, err = filesFromSkillSubdirectory(pkg.Files, prefix)
+			if err != nil {
+				return sourcePackage{}, "", "", err
+			}
+			pkg.PackageRoot = path.Base(prefix)
+		}
+		ensureURLImportDefaults(pkg.Files)
+		sourceRef := source.SourceURL
+		if sourceRef == "" {
+			sourceRef = source.URL
+		}
+		return sourcePackage{Files: pkg.Files, PackageRoot: pkg.PackageRoot, ArchiveFilename: archiveFilenameFromURL(source.URL)}, "url", sourceRef, nil
 	default:
-		return nil, "", "", fmt.Errorf("unsupported source type %q", source.Type)
+		return sourcePackage{}, "", "", fmt.Errorf("unsupported source type %q", source.Type)
 	}
 }
 
@@ -992,6 +1070,51 @@ func ensureURLImportDefaults(files map[string][]byte) {
 	}
 }
 
+func filesFromSkillSubdirectory(files map[string][]byte, prefix string) (map[string][]byte, error) {
+	prefix, err := cleanSkillPath(prefix)
+	if err != nil {
+		return nil, err
+	}
+	selected := make(map[string][]byte)
+	prefixWithSlash := prefix + "/"
+	for filePath, data := range files {
+		if strings.HasPrefix(filePath, prefixWithSlash) {
+			selected[strings.TrimPrefix(filePath, prefixWithSlash)] = data
+		}
+	}
+	if _, ok := selected["SKILL.md"]; !ok {
+		return nil, fmt.Errorf("skill package must contain SKILL.md")
+	}
+	return selected, nil
+}
+
+func resolveExternalMetadata(pkg sourcePackage, skillID string) (skillmetadata.Metadata, error) {
+	content, ok := pkg.Files["SKILL.md"]
+	if !ok {
+		return skillmetadata.Metadata{}, fmt.Errorf("skill package must contain SKILL.md")
+	}
+	resolved, err := skillmetadata.Resolve(content, pkg.PackageRoot, archiveStem(pkg.ArchiveFilename), "lazymind-skill-"+skillID)
+	if err != nil {
+		return skillmetadata.Metadata{}, err
+	}
+	return resolved.Metadata, nil
+}
+
+func archiveStem(filename string) string {
+	filename = strings.TrimSpace(path.Base(strings.ReplaceAll(filename, `\`, "/")))
+	if strings.EqualFold(path.Ext(filename), ".zip") {
+		filename = filename[:len(filename)-len(path.Ext(filename))]
+	}
+	return strings.TrimSpace(filename)
+}
+
+func archiveFilenameFromURL(rawURL string) string {
+	parsed, err := url.Parse(strings.TrimSpace(rawURL))
+	if err != nil {
+		return ""
+	}
+	return path.Base(parsed.Path)
+}
 func cleanSkillPath(name string) (string, error) {
 	if name == "" || strings.HasPrefix(name, "/") || strings.Contains(name, `\`) || strings.Contains(name, "//") {
 		return "", fmt.Errorf("unsafe path %q", name)
@@ -1022,13 +1145,30 @@ func validatePathSegment(segment string) error {
 }
 
 func validateSkillIdentity(name, category string) error {
-	if err := validatePathSegment(name); err != nil {
+	if err := validateSkillName(name); err != nil {
+		if skillmetadata.IsNameLengthError(err) {
+			return err
+		}
 		return fmt.Errorf("invalid skill name: %w", err)
 	}
 	if err := validatePathSegment(category); err != nil {
 		return fmt.Errorf("invalid category: %w", err)
 	}
 	return nil
+}
+
+func validateSkillName(name string) error {
+	if err := validatePathSegment(name); err != nil {
+		return err
+	}
+	return skillmetadata.ValidateNameLength(name)
+}
+
+func validateSkillDescription(description string) error {
+	if strings.TrimSpace(description) == "" {
+		return fmt.Errorf("description required")
+	}
+	return skillmetadata.ValidateDescriptionLength(description)
 }
 
 func validateSkillFiles(files map[string][]byte) error {
@@ -1050,6 +1190,9 @@ type skillMDMetadata struct {
 }
 
 func validateSkillPackageMetadata(name, category, description string, files map[string][]byte) error {
+	if err := validateSkillDescription(description); err != nil {
+		return err
+	}
 	content := string(files["SKILL.md"])
 	meta, ok, err := parseSkillMDMetadata(content)
 	if err != nil {
@@ -1552,6 +1695,9 @@ func markPendingSkillDraftAuto(ctx context.Context, tx *gorm.DB, skillID string,
 			return nil
 		}
 		return err
+	}
+	if skilldistribution.IsUpgradeTaskID(draft.TaskID) {
+		return nil
 	}
 	var count int64
 	if err := tx.WithContext(ctx).Model(&skillDraftEntryRow{}).Where("skill_id = ?", skillID).Count(&count).Error; err != nil {

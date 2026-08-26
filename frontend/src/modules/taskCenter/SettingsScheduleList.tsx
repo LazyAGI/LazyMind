@@ -9,11 +9,11 @@ import type { Schedule } from './api';
 import { describeCron } from './ScheduleList';
 
 interface SettingsScheduleListProps {
-  masterEnabled: boolean;
+  schedulesEnabled: boolean;
   onChanged?: () => void | Promise<void>;
 }
 
-export default function SettingsScheduleList({ masterEnabled, onChanged }: SettingsScheduleListProps) {
+export default function SettingsScheduleList({ schedulesEnabled, onChanged }: SettingsScheduleListProps) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const [schedules, setSchedules] = useState<Schedule[]>([]);
@@ -107,9 +107,9 @@ export default function SettingsScheduleList({ masterEnabled, onChanged }: Setti
     {!loading && !loadError && !schedules.length ? <div className="settings-schedule-empty"><Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description={t('settingsPage.tasks.empty')} /></div> : null}
     {!loading && !loadError && schedules.length ? <div className="settings-schedule-list">
       {schedules.map((schedule) => {
-        const effectiveEnabled = masterEnabled && schedule.enabled;
-        const statusText = !masterEnabled && schedule.enabled
-          ? t('settingsPage.tasks.pausedWithCenter')
+        const effectiveEnabled = schedulesEnabled && schedule.enabled;
+        const statusText = !schedulesEnabled && schedule.enabled
+          ? t('settingsPage.tasks.pausedWithSchedules')
           : effectiveEnabled
             ? t('settingsPage.running')
             : t('settingsPage.disabled');
@@ -124,12 +124,12 @@ export default function SettingsScheduleList({ masterEnabled, onChanged }: Setti
             <h3>{scheduleName(schedule)}</h3>
             <p>{describeCron(schedule.cron_expr, (key) => t(key))}{nextRunText}</p>
           </div>
-          <Tag className={`settings-schedule-status ${effectiveEnabled ? 'is-running' : !masterEnabled && schedule.enabled ? 'is-suspended' : 'is-disabled'}`}>{statusText}</Tag>
+          <Tag className={`settings-schedule-status ${effectiveEnabled ? 'is-running' : !schedulesEnabled && schedule.enabled ? 'is-suspended' : 'is-disabled'}`}>{statusText}</Tag>
           <Switch
             className="settings-ref-switch"
             checked={schedule.enabled}
             loading={updatingID === schedule.id}
-            disabled={!masterEnabled || Boolean(updatingID)}
+            disabled={!schedulesEnabled || Boolean(updatingID)}
             onChange={(checked: boolean) => requestScheduleState(schedule, checked)}
             aria-label={t('settingsPage.tasks.enableAria', { name: scheduleName(schedule) })}
           />

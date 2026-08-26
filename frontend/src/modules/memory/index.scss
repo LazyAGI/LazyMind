@@ -2016,6 +2016,54 @@
   }
 }
 
+.memory-char-count {
+  .ant-input-data-count {
+    min-width: 4.5em;
+    text-align: right;
+    pointer-events: none;
+  }
+
+  .ant-input-textarea-show-count {
+    display: block;
+    border: 1px solid #d9d9d9;
+    border-radius: 6px;
+    background: #fff;
+    padding-bottom: 16px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+
+    &:hover {
+      border-color: #4096ff;
+    }
+
+    &:focus-within {
+      border-color: #1677ff;
+      box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.12);
+    }
+
+    &:has(textarea.ant-input-status-error) {
+      border-color: #ff4d4f;
+
+      &:focus-within {
+        box-shadow: 0 0 0 2px rgba(255, 77, 79, 0.12);
+      }
+    }
+
+    textarea.ant-input {
+      border: 0 !important;
+      box-shadow: none !important;
+      background: transparent;
+      padding-bottom: 0 !important;
+      margin-bottom: 0;
+    }
+
+    .ant-input-data-count,
+    &::after {
+      bottom: 3px;
+      inset-inline-end: 11px;
+    }
+  }
+}
+
 .memory-form-field-full {
   grid-column: 1 / -1;
 }
@@ -3284,7 +3332,9 @@
     min-width: 0;
     width: 100%;
 
-    .ant-input {
+    .ant-input,
+    .ant-input-affix-wrapper,
+    .ant-input-outlined {
       flex: 1;
       min-width: 160px;
       max-width: 360px;
@@ -3331,7 +3381,7 @@
 .memory-skill-detail-description-edit {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
   min-width: 0;
 }
@@ -3954,6 +4004,12 @@
     box-shadow: inset 3px 0 0 #ff4d4f;
   }
 
+  &.is-pending {
+    padding-top: 38px;
+    background: rgba(22, 119, 255, 0.025);
+    box-shadow: inset 0 0 0 1px rgba(22, 119, 255, 0.12);
+  }
+
   .memory-diff-line {
     padding: 2px 8px 2px 28px;
   }
@@ -3982,6 +4038,7 @@
 
 .memory-skill-diff-inline-hunk.is-reviewable:hover .memory-skill-diff-inline-hunk-actions,
 .memory-skill-diff-inline-hunk.is-reviewable:focus-within .memory-skill-diff-inline-hunk-actions,
+.memory-skill-diff-inline-hunk.is-pending .memory-skill-diff-inline-hunk-actions,
 .memory-skill-diff-inline-hunk.is-accepted .memory-skill-diff-inline-hunk-actions,
 .memory-skill-diff-inline-hunk.is-rejected .memory-skill-diff-inline-hunk-actions {
   opacity: 1;
@@ -4152,7 +4209,7 @@
 
 .memory-version-list-item {
   width: 100%;
-  min-height: 72px;
+  min-height: 88px;
   border: 1px solid #e5ebf3;
   border-radius: 12px;
   background: #ffffff;
@@ -4206,6 +4263,16 @@
     color: #667085;
     font-size: 12px;
     line-height: 1.45;
+  }
+
+  small {
+    display: -webkit-box;
+    overflow: hidden;
+    color: #475467;
+    font-size: 11px;
+    line-height: 1.45;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
   }
 }
 
@@ -4290,6 +4357,12 @@
     text-overflow: ellipsis;
     white-space: nowrap;
   }
+
+  small {
+    color: #667085;
+    font-size: 12px;
+    line-height: 1.45;
+  }
 }
 
 .memory-version-detail-tabs {
@@ -4303,6 +4376,41 @@
   .ant-tabs-tabpane {
     min-height: 0;
     flex: 1;
+  }
+}
+
+.memory-version-diff-view {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+
+  .memory-version-skill-package {
+    min-height: 360px;
+    height: calc(100vh - 330px);
+    height: calc(100dvh - 330px);
+  }
+}
+
+.memory-version-compare-banner {
+  border: 1px solid #d6e4ff;
+  border-radius: 12px;
+  background: #f5f8ff;
+  padding: 10px 12px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  strong {
+    flex: 0 0 auto;
+    color: #175cd3;
+    font-size: 14px;
+  }
+
+  span {
+    color: #475467;
+    font-size: 12px;
+    line-height: 1.45;
   }
 }
 
@@ -4449,9 +4557,19 @@
   }
 
   .memory-version-list-panel {
-    max-height: 42vh;
+    max-height: 230px;
     border-right: 0;
     border-bottom: 1px solid #e5ebf3;
+  }
+
+  .memory-version-list {
+    flex-direction: row;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .memory-version-list-item {
+    min-width: 230px;
   }
 
   .memory-version-detail-panel {
@@ -4473,6 +4591,17 @@
     height: auto;
     grid-template-columns: 1fr;
     grid-template-rows: minmax(160px, 32vh) minmax(320px, 1fr);
+  }
+
+  .memory-version-diff-view .memory-version-skill-package {
+    min-height: 480px;
+    height: auto;
+  }
+
+  .memory-version-compare-banner {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 4px;
   }
 
   .memory-version-skill-tree {

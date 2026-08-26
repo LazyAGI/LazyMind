@@ -22,7 +22,7 @@ _KNOWLEDGE_SEARCH_METHODS = {
     'kb_get_window_nodes',
     'kb_keyword_search',
 }
-_KNOWLEDGE_FUNCTIONS = {'kb_tmp_search'}
+_KNOWLEDGE_FUNCTIONS: set[str] = set()
 _PAGE_FUNCTIONS = {'url_fetch'}
 
 

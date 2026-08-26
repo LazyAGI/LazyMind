@@ -15,6 +15,7 @@ import (
 	"gorm.io/gorm"
 
 	skilldiff "lazymind/core/skillv2/diff"
+	skilldistribution "lazymind/core/skillv2/distribution"
 	skillmetadata "lazymind/core/skillv2/metadata"
 	skillsearch "lazymind/core/skillv2/search"
 	skillservice "lazymind/core/skillv2/service"
@@ -318,13 +319,24 @@ func (s *Service) Commit(ctx context.Context, req CommitRequest) (CommitResponse
 		if err != nil {
 			return err
 		}
+		changeSource := "draft_review"
+		sourceRefType, sourceRefID := "", ""
+		if pending, ok, err := skilldistribution.PendingRefTx(ctx, tx, req.SkillID); err != nil {
+			return err
+		} else if ok {
+			changeSource = "distribution_upgrade"
+			sourceRefType = "builtin_package"
+			sourceRefID = pending.ArchiveSHA256
+		}
 		commit, err := versionfs.NewEngine(versionfs.EngineDeps{DB: s.db, Store: reviewVersionStore{service: s}, Clock: s.clock}).CommitEntriesTx(ctx, tx, versionfs.CommitEntriesRequest{
 			ResourceID:             req.SkillID,
 			UserID:                 req.UserID,
 			ParentRevisionID:       session.BaseRevisionID,
 			ExpectedHeadRevisionID: session.BaseRevisionID,
 			ExpectedDraftVersion:   session.DraftVersionAtStart,
-			ChangeSource:           "draft_review",
+			ChangeSource:           changeSource,
+			SourceRefType:          sourceRefType,
+			SourceRefID:            sourceRefID,
 			Entries:                toVersionEntries(finalEntries),
 		})
 		if err != nil {
@@ -423,7 +435,10 @@ func (s reviewVersionStore) CreateRevision(ctx context.Context, tx *gorm.DB, rev
 		ParentRevisionID: &parent,
 		RevisionNo:       revision.RevisionNo,
 		TreeHash:         revision.TreeHash,
+		Message:          revision.Message,
 		ChangeSource:     revision.ChangeSource,
+		SourceRefType:    revision.SourceRefType,
+		SourceRefID:      revision.SourceRefID,
 		CreatedBy:        nullableString(revision.CreatedBy),
 		CreatedAt:        revision.CreatedAt,
 	}
@@ -484,14 +499,20 @@ func (s reviewVersionStore) AfterCommit(ctx context.Context, tx *gorm.DB, revisi
 	if err := skillmetadata.SyncPublished(ctx, tx, revision.ResourceID, entries, revision.CreatedAt); err != nil {
 		return err
 	}
-	return skillsearch.RebuildSkillTx(ctx, tx, revision.ResourceID, revision.CreatedAt)
+	if err := skillsearch.RebuildSkillTx(ctx, tx, revision.ResourceID, revision.CreatedAt); err != nil {
+		return err
+	}
+	return skilldistribution.PromotePendingTx(ctx, tx, revision.ResourceID, revision.ID, revision.CreatedAt)
 }
 
 func (s reviewVersionStore) AfterRollback(ctx context.Context, tx *gorm.DB, skillID string, revisionID string, entries map[string]versionfs.Entry, now time.Time) error {
 	if err := skillmetadata.SyncPublished(ctx, tx, skillID, entries, now); err != nil {
 		return err
 	}
-	return skillsearch.RebuildSkillTx(ctx, tx, skillID, now)
+	if err := skillsearch.RebuildSkillTx(ctx, tx, skillID, now); err != nil {
+		return err
+	}
+	return skilldistribution.RebindForRevisionTx(ctx, tx, skillID, revisionID, now)
 }
 
 func (s reviewVersionStore) ListBlobHashes(ctx context.Context, tx *gorm.DB) ([]string, error) {
@@ -948,6 +969,15 @@ func blobReferenced(tx *gorm.DB, hash string) (bool, error) {
 	if revisionRefs > 0 {
 		return true, nil
 	}
+	if tx.Migrator().HasTable("skill_distribution_entries") {
+		var distributionRefs int64
+		if err := tx.Table("skill_distribution_entries").Where("blob_hash = ?", hash).Count(&distributionRefs).Error; err != nil {
+			return false, err
+		}
+		if distributionRefs > 0 {
+			return true, nil
+		}
+	}
 	var draftRefs int64
 	if err := tx.Model(&skillDraftEntryRow{}).Where("blob_hash = ?", hash).Count(&draftRefs).Error; err != nil {
 		return false, err
@@ -1263,7 +1293,10 @@ type skillRevisionRow struct {
 	ParentRevisionID *string   `gorm:"column:parent_revision_id;type:varchar(36)"`
 	RevisionNo       int64     `gorm:"column:revision_no;not null"`
 	TreeHash         string    `gorm:"column:tree_hash;type:text;not null"`
+	Message          string    `gorm:"column:message;type:text"`
 	ChangeSource     string    `gorm:"column:change_source;type:text;not null;default:'draft_commit'"`
+	SourceRefType    string    `gorm:"column:source_ref_type;type:text;not null;default:''"`
+	SourceRefID      string    `gorm:"column:source_ref_id;type:text;not null;default:''"`
 	CreatedBy        *string   `gorm:"column:created_by;type:text"`
 	CreatedAt        time.Time `gorm:"column:created_at;not null"`
 }

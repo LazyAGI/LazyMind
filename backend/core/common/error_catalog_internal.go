@@ -494,6 +494,7 @@ func init() {
 		"synchronized baseline is not bound to a feishu document",
 		"current writerdocument feishu binding does not match baseline",
 		"task center is paused in settings",
+		"scheduled tasks are paused in settings",
 		"skills and plugins are paused in settings", "workflows are paused in settings",
 		"document parsing is paused in settings",
 	} {

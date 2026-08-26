@@ -10,6 +10,7 @@ import (
 	"runtime"
 	"sort"
 	"strings"
+	"time"
 
 	"lazymind/agentconnector/internal/agentcatalog"
 	"lazymind/agentconnector/internal/agentexec"
@@ -17,6 +18,11 @@ import (
 )
 
 const maxEventBytes = 4 << 20
+
+const (
+	statusTimeout = 5 * time.Second
+	loginTimeout  = 2 * time.Minute
+)
 
 type ChatRunner struct {
 	binary string
@@ -61,6 +67,28 @@ func findBinary(configured string) (string, error) {
 		return "", errors.New("Cursor Agent CLI is not installed; install it from https://cursor.com/docs/cli/installation")
 	}
 	return resolved, nil
+}
+
+func Login(ctx context.Context, binary string) error {
+	resolved, err := findBinary(binary)
+	if err != nil {
+		return err
+	}
+	loginCtx, cancel := context.WithTimeout(ctx, loginTimeout)
+	defer cancel()
+	_, err = agentexec.Run(loginCtx, resolved, "login")
+	return err
+}
+
+func (r *ChatRunner) Availability() (bool, string) {
+	ctx, cancel := context.WithTimeout(context.Background(), statusTimeout)
+	defer cancel()
+	status, err := agentexec.Run(ctx, r.binary, "status")
+	if err != nil || strings.Contains(strings.ToLower(status), "not logged in") ||
+		strings.Contains(strings.ToLower(status), "not authenticated") {
+		return false, "Cursor Agent CLI is not signed in; run `cursor-agent login`"
+	}
+	return true, ""
 }
 
 func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chatagent.Event) error) error {

@@ -24,9 +24,22 @@ EMBED_INDEX_KWARGS = [
 ]
 
 
+def apply_local_model_config_override(resolved_path):
+    """Prefer gitignored runtime_models.local.yaml next to an inner config."""
+    if not resolved_path:
+        return resolved_path
+    path = Path(resolved_path)
+    if path.name != 'runtime_models.inner.yaml':
+        return str(path)
+    local = path.with_name('runtime_models.local.yaml')
+    return str(local) if local.is_file() else str(path)
+
+
 def _model_config_path_post_action(resolved_path):
-    if not resolved_path: return
-    lazyllm.config['auto_model_config_map_path'] = str(resolved_path)
+    path = apply_local_model_config_override(resolved_path)
+    if not path:
+        return
+    lazyllm.config['auto_model_config_map_path'] = str(path)
 
 
 def _require_positive_config_value(env_name):
@@ -232,6 +245,8 @@ config.add('episode_hit_saturation', int, 10, 'EPISODE_HIT_SATURATION')
 config.add('web_search_timeout', int, 10, 'WEB_SEARCH_TIMEOUT', description='Web search request timeout in seconds.')
 config.add('url_fetch_max_length', int, 4000, 'URL_FETCH_MAX_LENGTH',
            description='Maximum readable text length returned by url_fetch.')
+config.add('url_fetch_pdf_max_bytes', int, 100 * 1024 * 1024, 'URL_FETCH_PDF_MAX_BYTES',
+           description='Maximum PDF download size for url_fetch ingestion.')
 config.add('max_retries', int, 20, 'MAX_RETRIES', description='Max retries for agentic function call loop.')
 config.add('agentic_max_rounds_low', int, 6, 'AGENTIC_MAX_ROUNDS_LOW',
            description='Maximum ChatAgent ReAct rounds in low thinking-depth mode.')
@@ -244,11 +259,148 @@ config.add('agentic_tool_limit_wait_timeout', float, 120, 'AGENTIC_TOOL_LIMIT_WA
 config.add('agentic_expanded_max_rounds', int, 200, 'AGENTIC_EXPANDED_MAX_ROUNDS',
            description='Maximum ReAct rounds for one ChatAgent invocation after the user continues.')
 config.add('agentic_workspace', str, './workspace', 'AGENTIC_WORKSPACE',
-           description='Workspace directory for agentic tools.')
+           description=(
+               'Root for the main-agent conversation workspace '
+               '(chat-artifacts/<user>/<conv>/). Deployments should set this to the same '
+               'value as LAZYMIND_SUBAGENT_WORKSPACE so unpublished working files and '
+               'tool spills persist next to published artifacts.'
+           ))
 config.add('trusted_local_mode', bool, False, 'TRUSTED_LOCAL_MODE',
            description='Allow agents to access host paths outside their workspace and use local command tools.')
-config.add('agentic_keep_full_turns', int, 0, 'AGENTIC_KEEP_FULL_TURNS',
-           description='Number of full turns retained in agentic history; 0 disables rolling compaction.')
+config.add('agentic_keep_full_turns', int, 2, 'AGENTIC_KEEP_FULL_TURNS',
+           description='Number of recent tool results kept intact during context compression.')
+# Context compression knobs (process-level via LAZYMIND_*). Master switch gates all
+# strategies. Code defaults are ON; local .env may set them false until validated.
+# Summary strategy gates with context_compression_enabled AND
+# context_summary_compression_enabled. Do not put flags in request payload,
+# llm_config, or runtime_models YAML.
+config.add(
+    'context_compression_enabled',
+    bool,
+    True,
+    'CONTEXT_COMPRESSION_ENABLED',
+    description=(
+        'Master switch for ChatAgent context compression '
+        '(deterministic tool-result prune/compact and summary).'
+    ),
+)
+config.add('context_compression_default_max_input_tokens', int, 64000,
+           'CONTEXT_COMPRESSION_DEFAULT_MAX_INPUT_TOKENS',
+           description=(
+               'Fallback max input tokens when llm_config/catalog does not provide one.'
+           ))
+config.add('context_compression_trigger_ratio', float, 0.9, 'CONTEXT_COMPRESSION_TRIGGER_RATIO',
+           description='Compress when estimated tokens reach this fraction of the effective input budget.')
+config.add('context_compression_target_ratio', float, 0.45, 'CONTEXT_COMPRESSION_TARGET_RATIO',
+           description='Target fraction of the effective input budget after compression.')
+config.add('context_compression_reserved_output_tokens', int, 8192,
+           'CONTEXT_COMPRESSION_RESERVED_OUTPUT_TOKENS',
+           description='Tokens reserved for model output when computing the effective input budget.')
+config.add(
+    'context_prune_cache_amortization_calls',
+    int,
+    2,
+    'CONTEXT_PRUNE_CACHE_AMORTIZATION_CALLS',
+    description='Maximum future model calls used to amortize deterministic prune cache disruption.',
+)
+config.add(
+    'context_prune_cached_token_cost_ratio',
+    float,
+    0.25,
+    'CONTEXT_PRUNE_CACHED_TOKEN_COST_RATIO',
+    description='Estimated relative cost of invalidating one previously cached prompt token.',
+)
+config.add(
+    'context_prune_min_reclaim_ratio',
+    float,
+    0.05,
+    'CONTEXT_PRUNE_MIN_RECLAIM_RATIO',
+    description=(
+        'Minimum tokens a non-spill prune must reclaim, as a fraction of the '
+        'effective input budget. Ignored when the result is already at or below '
+        'target_tokens. Otherwise the required floor is min(ratio * budget, '
+        'remaining gap to target, context_prune_min_reclaim_tokens_cap). '
+        '0 disables the proportional floor.'
+    ),
+)
+config.add(
+    'context_prune_min_reclaim_tokens_cap',
+    int,
+    20000,
+    'CONTEXT_PRUNE_MIN_RECLAIM_TOKENS_CAP',
+    description=(
+        'Upper bound on the proportional min-reclaim floor, applied before the '
+        'remaining-target-gap cap.'
+    ),
+)
+config.add(
+    'context_compression_spill_bytes',
+    int,
+    16384,
+    'CONTEXT_COMPRESSION_SPILL_BYTES',
+    description=(
+        'Offload a tool result to the chat workspace when its UTF-8 size exceeds this '
+        'many bytes, even if it is inside the keep_recent window.'
+    ),
+)
+config.add(
+    'context_summary_compression_enabled',
+    bool,
+    True,
+    'CONTEXT_SUMMARY_COMPRESSION_ENABLED',
+    description=(
+        'Enable LLM summary compression after deterministic prune when still over '
+        'target. Requires context_compression_enabled.'
+    ),
+)
+config.add(
+    'context_summary_keep_recent_ratio',
+    float,
+    0.10,
+    'CONTEXT_SUMMARY_KEEP_RECENT_RATIO',
+    description='Max fraction of effective input budget kept as uncompressed recent Tail.',
+)
+config.add(
+    'context_summary_min_recent_user_turns',
+    int,
+    1,
+    'CONTEXT_SUMMARY_MIN_RECENT_USER_TURNS',
+    description='Minimum recent user turns (1-3) kept intact in the Tail.',
+)
+config.add(
+    'context_summary_required_overshoot_reclaim_ratio',
+    float,
+    0.80,
+    'CONTEXT_SUMMARY_REQUIRED_OVERSHOOT_RECLAIM_RATIO',
+    description='Required fraction of target overshoot reclaimed when fixed context makes target unreachable.',
+)
+config.add(
+    'context_summary_max_output_to_replaced_ratio',
+    float,
+    0.30,
+    'CONTEXT_SUMMARY_MAX_OUTPUT_TO_REPLACED_RATIO',
+    description='Maximum summary output tokens as a fraction of the replaced history span.',
+)
+config.add(
+    'context_compression_event_path',
+    str,
+    '',
+    'CONTEXT_COMPRESSION_EVENT_PATH',
+    description=(
+        'Deprecated alias for agent_lab_event_path. Prefer LAZYMIND_AGENT_LAB_EVENT_PATH.'
+    ),
+)
+config.add(
+    'agent_lab_event_path',
+    str,
+    '',
+    'AGENT_LAB_EVENT_PATH',
+    description=(
+        'Optional JSONL path for agent-lab runtime telemetry '
+        '(turns, tools, file reads, harness, prune, summary). Empty disables writing.'
+    ),
+)
+
 config.add('dynamic_prompt_modules', bool, True, 'DYNAMIC_PROMPT_MODULES',
            description='Enable per-turn task profiling and progressive prompt-module disclosure.')
 config.add('agentic_stream_chunk_size', int, 24, 'AGENTIC_STREAM_CHUNK_SIZE',
@@ -263,6 +415,13 @@ config.add('review_debug', bool, False, 'REVIEW_DEBUG', description='Enable revi
 config.add('milvus_uri', str, None, 'MILVUS_URI', description='Milvus vector store URI (required).')
 config.add('mineru_backend', str, 'pipeline', 'MINERU_BACKEND', description='MinerU processing backend.')
 config.add('mineru_server_port', int, 8000, 'MINERU_SERVER_PORT', description='MinerU server port.')
+config.add(
+    'ocr_server_url',
+    str,
+    '',
+    'OCR_SERVER_URL',
+    description='Local OCR endpoint when the user has not selected a frontend OCR provider.',
+)
 config.add('ocr_cache_dir', str, os.path.join(config['shared_upload_dir'], '.image_cache'), 'OCR_CACHE_DIR',
            description='OCR cache root for parsed results and images.')
 config.add('reader_use_cache', bool, True, 'READER_USE_CACHE',

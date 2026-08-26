@@ -118,6 +118,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "GET", "/dataset/algos", []string{"document.read"}, doc.ListAlgos)
 	handleAPI(r, "GET", "/dataset/tags", []string{"document.read"}, doc.AllDatasetTags)
 	handleAPI(r, "GET", "/datasets", []string{"document.read"}, doc.ListDatasets)
+	handleAPI(r, "POST", "/internal/datasets/usage:batch", nil, doc.InternalBatchDatasetUsage)
 	handleAPI(r, "POST", "/datasets", []string{"document.write"}, doc.CreateDataset)
 	handleAPI(r, "GET", "/datasets/{dataset}", []string{"document.read"}, doc.GetDataset)
 	handleAPI(r, "DELETE", "/datasets/{dataset}", []string{"document.write"}, doc.DeleteDataset)
@@ -285,6 +286,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/conversations/{conversation_id}:stop", []string{"qa.write"}, chat.StopChatGeneration)
 	handleAPI(r, "POST", "/conversations/{conversation_id}:toolLimitDecision", []string{"qa.write"}, chat.DecideToolLimit)
 	handleAPI(r, "GET", "/conversations/{conversation_id}:status", []string{"qa.read"}, chat.GetChatStatus)
+	handleAPI(r, "POST", "/conversations/{conversation_id}:promote", []string{"qa.write"}, chat.PromoteConversation)
 	handleAPI(r, "GET", "/chat/executors", []string{"qa.read"}, chat.ListChatExecutors)
 	handleAPI(r, "GET", "/external-chat/hosts/{provider}/status", []string{"qa.read"}, chat.ExternalChatHostStatus)
 	handleAPI(r, "GET", "/external-chat/providers/{provider}/sessions", []string{"qa.read"}, chat.ListExternalAgentSessions)
@@ -368,7 +370,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "DELETE", "/automation-groups/{group_id}", []string{"qa.write"}, scheduler.DeleteGroupHandler)
 	handleAPI(r, "POST", "/automation-groups:batch-create", []string{"qa.write"}, scheduler.BatchCreateHandler)
 
-	// ----- User Chat Settings (global workflow/subagent defaults) -----
+	// ----- User Chat Settings (quick-question/new-task defaults) -----
 	handleAPI(r, "GET", "/user/chat-settings", []string{"qa.read"}, chat.GetChatSettings)
 	handleAPI(r, "PATCH", "/user/chat-settings", []string{"qa.write"}, chat.PatchChatSettings)
 	// Legal consent is a login prerequisite and must not depend on optional QA permissions.
@@ -509,6 +511,8 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/skills", []string{"qa.write"}, skillv2handler.Create)
 	handleAPI(r, "GET", "/builtin-skills", []string{"qa.read"}, skillv2handler.ListBuiltinSkills)
 	handleAPI(r, "POST", "/builtin-skills/{builtin_skill_uid}:enable", []string{"qa.write"}, skillv2handler.EnableBuiltinSkill)
+	handleAPI(r, "GET", "/skills/{skill_id}/distribution-upgrade", []string{"qa.read"}, skillv2handler.DistributionUpgradeStatus)
+	handleAPI(r, "POST", "/skills/{skill_id}/distribution-upgrade:prepare", []string{"qa.write"}, skillv2handler.PrepareDistributionUpgrade)
 	handleAPI(r, "GET", "/skills/{skill_id}:shares", []string{"qa.read"}, skillv2handler.ListShareTargets)
 	handleAPI(r, "GET", "/skill-shares/incoming", []string{"qa.read"}, skillv2handler.IncomingShares)
 	handleAPI(r, "GET", "/skill-shares/outgoing", []string{"qa.read"}, skillv2handler.OutgoingShares)
@@ -602,6 +606,7 @@ func registerAllRoutes(r *mux.Router) {
 	handleAPI(r, "POST", "/conversations:setChatHistory", []string{"qa.write"}, chat.SetChatHistory)
 	handleAPI(r, "POST", "/conversations:feedBackChatHistory", []string{"qa.write"}, chat.FeedBackChatHistory)
 	handleAPI(r, "PATCH", "/conversations/{name}:ask-answers", []string{"qa.write"}, chat.SaveAskAnswers)
+	handleAPI(r, "PATCH", "/conversations:editable-block", []string{"qa.write"}, chat.PatchEditableBlock)
 
 	handleAPI(r, "GET", "/conversation:switchStatus", []string{"qa.read"}, chat.GetMultiAnswersSwitchStatus)
 	handleAPI(r, "POST", "/conversation:switchStatus", []string{"qa.write"}, chat.SetMultiAnswersSwitchStatus)

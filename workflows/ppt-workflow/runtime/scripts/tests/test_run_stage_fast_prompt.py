@@ -9,12 +9,63 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
+import yaml
+
 
 SCRIPT_DIR = Path(__file__).resolve().parents[1]
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 import run_stage  # noqa: E402
+
+
+class StyleRenderingRecipeTest(unittest.TestCase):
+    def test_recipe_catalog_covers_every_declared_style_once(self) -> None:
+        recipes = json.loads(
+            run_stage._STYLE_RENDERING_RECIPES_PATH.read_text(encoding='utf-8')
+        )
+        ids = [
+            style_id
+            for family in recipes['families'].values()
+            for style_id in family['style_ids']
+        ]
+        self.assertEqual(sorted(ids), list(range(1, 69)))
+        self.assertEqual(len(ids), len(set(ids)))
+
+    def test_cyberpunk_recipe_adds_specific_export_safe_direction(self) -> None:
+        style = run_stage._attach_style_rendering_recipe({
+            'design_style': {'id': 10, 'name_zh': '赛博朋克'},
+            'palette': {
+                'primary': '#EC407A',
+                'accent': '#00FFFF',
+                'neutral': '#0D0D1A',
+            },
+        })
+
+        direction = style['art_direction']
+        self.assertEqual(direction['family'], 'technology_cinematic')
+        self.assertIn('Cyberpunk:', direction['style_signature'])
+        self.assertTrue(direction['export_safe_effects'])
+        self.assertTrue(direction['forbidden_effects'])
+        self.assertIn('small centered banner', direction['composition'][0])
+
+    def test_workflow_ask_uses_recipe_options_as_a_ranked_subset(self) -> None:
+        recipes = json.loads(
+            run_stage._STYLE_RENDERING_RECIPES_PATH.read_text(encoding='utf-8')
+        )
+        workflow_path = Path(__file__).resolve().parents[3] / 'workflow.yaml'
+        workflow = yaml.safe_load(workflow_path.read_text(encoding='utf-8'))
+        style_field = next(
+            field for field in workflow['runtime']['clarification_fields']
+            if field['id'] == 'visual_style'
+        )
+
+        self.assertEqual(style_field['choice_policy'], 'subset')
+        self.assertEqual(
+            style_field['choices'],
+            [option['label'] for option in recipes['ask_options']],
+        )
+        self.assertIn('2-4', style_field['question'])
 
 
 class OutlineReferenceImageRepairTest(unittest.TestCase):
@@ -205,6 +256,8 @@ class PagePromptModeTest(unittest.TestCase):
             self.assertIn(brief, query)
             self.assertIn("VISUAL DESIGN CONTRACT (JSON)", query)
             self.assertIn("#2563EB", query)
+            self.assertIn('"art_direction"', query)
+            self.assertIn('export-safe-style-recipe-v1', query)
             self.assertIn("shared by every slide", query)
 
     def test_editable_brief_passes_collected_image_and_repairs_omission(self) -> None:
