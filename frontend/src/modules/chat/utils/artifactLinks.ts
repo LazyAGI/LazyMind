@@ -45,8 +45,6 @@ export function getArtifactFilename(artifact: ConversationArtifact): string {
   );
 }
 
-export const ARTIFACT_DOWNLOAD_HINT = "点击下载";
-
 export function getArtifactSignSource(artifact: ConversationArtifact): string {
   const value = artifact.value || {};
   if (artifact.content_type !== "file" && artifact.content_type !== "image") {

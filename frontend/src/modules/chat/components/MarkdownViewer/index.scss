@@ -1,13 +1,45 @@
 .rag-markdown a.md-file-link,
 .rag-markdown span.md-file-link {
   color: var(--color-accent-fg);
-  text-decoration: underline;
+  text-decoration: none;
   cursor: pointer;
   word-break: break-all;
 }
 
+.rag-markdown a.md-file-link:hover {
+  text-decoration: underline;
+  text-decoration-style: dashed;
+  text-underline-offset: 3px;
+}
+
 .rag-markdown span.md-file-link.md-file-link--pending {
   cursor: progress;
+}
+
+.md-file-link-dropdown {
+  .ant-dropdown-menu {
+    min-width: 168px;
+    padding: 6px;
+    border: 1px solid rgb(0 0 0 / 6%);
+    border-radius: 10px;
+    box-shadow: 0 8px 28px rgb(15 23 42 / 12%);
+  }
+
+  .ant-dropdown-menu-item {
+    border-radius: 6px;
+    padding: 7px 12px;
+    color: #1f1f1f;
+    font-size: 14px;
+    line-height: 22px;
+  }
+
+  .ant-dropdown-menu-item:hover {
+    background: #f5f5f5;
+  }
+
+  .ant-dropdown-menu-item-divider {
+    margin: 4px 8px;
+  }
 }
 
 .md-source-chip {

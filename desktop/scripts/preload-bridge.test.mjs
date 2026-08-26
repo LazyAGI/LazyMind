@@ -50,6 +50,9 @@ test("maps bridge methods to their exact IPC channels and arguments", async () =
     ["selectFolder", [], "lazymind:selectFolder", []],
     ["selectExecutable", [], "lazymind:selectExecutable", []],
     ["exportDiagnostics", [], "lazymind:exportDiagnostics", []],
+    ["showItemInFolder", [{ source: "/static-files/a.txt" }], "lazymind:showItemInFolder", [{ source: "/static-files/a.txt" }]],
+    ["saveFileAs", [{ source: "https://x/a", filename: "a.txt" }], "lazymind:saveFileAs", [{ source: "https://x/a", filename: "a.txt" }]],
+    ["downloadFile", [{ source: "https://x/a", filename: "a.txt" }], "lazymind:downloadFile", [{ source: "https://x/a", filename: "a.txt" }]],
     ["startupDiagnostics", [], "lazymind:startupDiagnostics", []],
     ["copyStartupLogs", [], "lazymind:copyStartupLogs", []],
   ];
@@ -57,6 +60,7 @@ test("maps bridge methods to their exact IPC channels and arguments", async () =
     const result = await bridge[method](...args);
     assert.deepEqual(result, { channel, arguments: expectedArgs });
   }
+  assert.equal(bridge.platform, process.platform);
   bridge.notifyAppReady();
   assert.deepEqual(ipc.sends, [["lazymind:renderer-ready"]]);
 });

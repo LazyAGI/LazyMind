@@ -4,7 +4,8 @@ import remarkMath from "remark-math";
 import rehypeKatex from "rehype-katex";
 import classnames from "classnames";
 import "katex/dist/katex.min.css";
-import { Image, Popover, Tooltip } from "antd";
+import { Dropdown, Image, Popover, message } from "antd";
+import type { MenuProps } from "antd";
 import rehypeSanitize from "rehype-sanitize";
 import { useTranslation } from "react-i18next";
 import "../../../../components/MarkdownViewer/markdown.scss";
@@ -13,10 +14,13 @@ import {
   createContext,
   isValidElement,
   memo,
+  useCallback,
   useContext,
   useEffect,
   useMemo,
   useState,
+  type MouseEvent,
+  type ReactNode,
 } from "react";
 import { customSchema } from "./config";
 import rehypeRaw from "rehype-raw";
@@ -30,8 +34,6 @@ import {
   type ConversationArtifact,
 } from "@/modules/chat/store/taskCenter";
 import {
-  ARTIFACT_DOWNLOAD_HINT,
-  appendDownloadParam,
   conversationHasFileIdLink,
   findArtifactByFileId,
   getArtifactFilename,
@@ -42,6 +44,13 @@ import {
   isInlineDownloadableArtifact,
   normalizeArtifactFileLinks,
 } from "@/modules/chat/utils/artifactLinks";
+import {
+  downloadArtifactFile,
+  isAppleDesktopPlatform,
+  revealArtifactFile,
+  saveArtifactFileAs,
+} from "@/modules/chat/utils/artifactFileActions";
+import { hasDesktopFileBridge } from "@/runtime/desktopBridge";
 import HtmlBlock from "./HtmlBlock";
 import MermaidBlock from "./MermaidBlock";
 import EditableBlock from "./EditableBlock";
@@ -320,6 +329,105 @@ function inlineArtifactBlobType(artifact: ConversationArtifact): string {
     : "text/plain;charset=utf-8";
 }
 
+function ArtifactFileLink({
+  children,
+  href,
+  filename,
+  pending,
+}: {
+  children: ReactNode;
+  href: string;
+  filename: string;
+  pending?: boolean;
+}) {
+  const { t } = useTranslation();
+  const desktop = hasDesktopFileBridge();
+  const ready = Boolean(href) && !pending;
+
+  const runAction = useCallback(
+    async (action: () => Promise<unknown>, failedKey: string) => {
+      try {
+        await action();
+      } catch (error) {
+        console.error(error);
+        message.error(t(failedKey));
+      }
+    },
+    [t],
+  );
+
+  const items = useMemo<MenuProps["items"]>(() => {
+    return [
+      {
+        key: "reveal",
+        disabled: !ready || !desktop,
+        label: isAppleDesktopPlatform()
+          ? t("chat.fileShowInFinder")
+          : t("chat.fileShowInFolder"),
+        onClick: () => {
+          void runAction(
+            () => revealArtifactFile(href, filename),
+            "chat.fileRevealFailed",
+          );
+        },
+      },
+      { type: "divider" },
+      {
+        key: "saveAs",
+        disabled: !ready,
+        label: t("chat.fileSaveAs"),
+        onClick: () => {
+          void runAction(
+            () => saveArtifactFileAs(href, filename),
+            "chat.fileSaveFailed",
+          );
+        },
+      },
+      {
+        key: "download",
+        disabled: !ready,
+        label: t("chat.fileDownload"),
+        onClick: () => {
+          void runAction(
+            () => downloadArtifactFile(href, filename),
+            "chat.fileDownloadFailed",
+          );
+        },
+      },
+    ];
+  }, [desktop, filename, href, ready, runAction, t]);
+
+  const content = pending || !href ? (
+    <span className="md-file-link md-file-link--pending">{children}</span>
+  ) : (
+    <a
+      className="md-file-link"
+      href={href}
+      download={filename || undefined}
+      rel="noreferrer"
+      onClick={(event: MouseEvent<HTMLAnchorElement>) => {
+        event.preventDefault();
+        void runAction(
+          () => downloadArtifactFile(href, filename),
+          "chat.fileDownloadFailed",
+        );
+      }}
+    >
+      {children}
+    </a>
+  );
+
+  return (
+    <Dropdown
+      trigger={["contextMenu"]}
+      menu={{ items }}
+      overlayClassName="md-file-link-dropdown"
+    >
+      {content}
+    </Dropdown>
+  );
+}
+
 const LinkComponent = (props: any) => {
   const { isStreaming, markSources, artifacts } = useContext(
     MarkdownRenderContext,
@@ -333,7 +441,6 @@ const LinkComponent = (props: any) => {
   const artifactFilename = linkedArtifact
     ? getArtifactFilename(linkedArtifact)
     : "";
-  const artifactDownloadHint = linkedArtifact ? ARTIFACT_DOWNLOAD_HINT : "";
   const artifactSignSource = linkedArtifact
     ? getArtifactSignSource(linkedArtifact)
     : "";
@@ -372,8 +479,7 @@ const LinkComponent = (props: any) => {
       setResolvedHref("");
       const applySignedUrl = (url: string) => {
         if (cancelled) return;
-        const resolved = url ? appendDownloadParam(url) : "";
-        setResolvedHref(isBrowserDownloadHref(resolved) ? resolved : "");
+        setResolvedHref(isBrowserDownloadHref(url) ? url : "");
       };
       resolveMarkdownImageUrlAsync(artifactSignSource)
         .then(applySignedUrl)
@@ -463,43 +569,34 @@ const LinkComponent = (props: any) => {
   }
 
   if (artifactFileId) {
-    if (!resolvedHref) {
-      return (
-        <Tooltip
-          title={artifactDownloadHint || undefined}
-          mouseEnterDelay={0.1}
-        >
-          <span className="md-file-link md-file-link--pending">
-            {props.children}
-          </span>
-        </Tooltip>
-      );
-    }
-    const isBlobHref = resolvedHref.startsWith("blob:");
     return (
-      <Tooltip title={artifactDownloadHint} mouseEnterDelay={0.1}>
-        <a
-          className="md-file-link"
-          href={resolvedHref}
-          target={isBlobHref ? undefined : "_blank"}
-          rel={isBlobHref ? undefined : "noreferrer"}
-          download={artifactFilename || undefined}
-        >
-          {props.children}
-        </a>
-      </Tooltip>
+      <ArtifactFileLink
+        href={resolvedHref}
+        filename={artifactFilename}
+        pending={!resolvedHref}
+      >
+        {props.children}
+      </ArtifactFileLink>
+    );
+  }
+
+  if (managedFile) {
+    return (
+      <ArtifactFileLink
+        href={resolvedHref}
+        filename={basenameFromPath(href)}
+        pending={!resolvedHref}
+      >
+        {props.children}
+      </ArtifactFileLink>
     );
   }
 
   return (
     <a
-      href={managedFile && resolvedHref
-        ? appendDownloadParam(resolvedHref)
-        : resolvedHref || undefined}
+      href={resolvedHref || undefined}
       target="_blank"
       rel="noreferrer"
-      download={managedFile ? basenameFromPath(href) : undefined}
-      aria-disabled={managedFile && !resolvedHref}
     >
       {props.children}
     </a>
