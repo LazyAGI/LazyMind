@@ -62,6 +62,31 @@ def test_small_target_allocates_positive_leaf_targets_with_exact_total():
     assert result['normalized_outline']['chapters'][0]['target_words'] == 1000
 
 
+def test_bid_outline_repairs_relative_headings_and_missing_trace_mappings():
+    tools = _load_pipeline_tools()
+    candidate = tools._bid_outline_from_markdown(
+        '# 测试项目投标技术方案\n\n### 总体架构与建设思路\n\n##### 安全审计设计\n',
+        '备用标题',
+    )
+
+    result = tools.validate_and_allocate_outline(
+        json.dumps(json.dumps({'data': candidate}, ensure_ascii=False), ensure_ascii=False),
+        '### BG-001\n背景要求\n### SEC-001\n安全要求',
+        '### D-001\n不得缺少审计能力',
+        '1000',
+    )
+
+    assert result['valid'] is True
+    assert result['normalized_outline']['total_word_target'] == 1000
+    leaves = tools._leaves(result['normalized_outline']['chapters'])
+    assert sum(int(item['target_words']) for item in leaves) == 1000
+    assert {ref for item in leaves for ref in item['bid_requirements_refs']} == {
+        'BG-001', 'SEC-001',
+    }
+    assert {ref for item in leaves for ref in item['disqualification_refs']} == {'D-001'}
+    assert any('自动分配' in warning for warning in result['warnings'])
+
+
 def test_writer_image_placeholder_is_embedded_in_place_without_duplication(monkeypatch):
     builder = _load_document_builder()
     embedded_titles = []

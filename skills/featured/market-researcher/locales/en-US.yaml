@@ -1,0 +1,134 @@
+locale: en-US
+
+classification:
+  category: Research & analysis
+  tags:
+    - Industry research
+    - Competitive analysis
+    - Comparable companies
+
+presentation:
+  card:
+    title: Market and industry research expert
+    description: Use web research or supplied materials to analyze industries, competition, comparable companies, opportunities, and risks
+    output_type: report
+    output_label: Market research report
+    cover_asset: cover
+    result_summary: Support findings with sources, data dates, reproducible calculations, and explicit evidence boundaries
+  detail:
+    title: Market and industry research expert
+    description: Conduct industry research, competitive monitoring, and company comparison with source verification, deterministic calculations, Mermaid charts, and structured reports.
+    attachment_hint: Industry brief, research reports, company list, financial dataset, or source links (optional)
+
+tasks:
+  - id: sector-research
+    selector:
+      title: Industry landscape research
+      description: Analyze market boundaries, size, value chain, growth drivers, competition, and risks
+      output_label: Industry research report
+    launch:
+      prompt_short: Build an evidence-traceable industry landscape report.
+      prompt: Complete an industry landscape study from the industry or segment, region, target period, and research objective I provide. Define the industry and statistical scope, then analyze market size and trends, segments, value chain and profit pools, growth drivers, competition, major risks, and open questions. Prioritize reliable direct sources and record data dates. Ask only for missing conditions that would materially change the conclusion. If web or structured-data capabilities are insufficient, downgrade transparently and list the evidence still required rather than inventing numbers.
+    replay:
+      steps:
+        - title: Define the research scope
+          description: Confirm industry boundaries, region, period, objective, and statistical definitions
+        - title: Discover and verify evidence
+          description: Search by evidence question and record direct sources, dates, definitions, and conflicts
+        - title: Analyze industry and competition
+          description: Connect market size, value chain, profit pools, drivers, barriers, and risks
+        - title: Deliver the research report
+          description: Present findings, sources, data gaps, and ongoing monitoring indicators
+    result:
+      template: generic_report_v1
+      eyebrow: Industry research report
+      title: Industry landscape, competition, opportunities, and risks
+      summary: Build a traceable and reproducible research view from explicit market boundaries and evidence definitions
+      highlights:
+        - Market boundaries, size, trends, and segments
+        - Value chain, profit pools, drivers, and risks
+        - Competitive landscape, sources, and open questions
+
+  - id: competitive-landscape
+    selector:
+      title: Competitive landscape
+      description: Map participants, strategic groups, share definitions, barriers, and change signals
+      output_label: Competitive landscape report
+    launch:
+      prompt_short: Analyze a market's participants, positioning, barriers, and competitive changes.
+      prompt: Complete a competitive-landscape analysis from the industry, region, target period, and company scope I provide. Distinguish direct competitors, substitutes, and value-chain controllers; build a participant map and strategic groups; verify market-share or covered-sample definitions; compare products, customers, channels, costs, technology, and capital intensity; and pair every proposed barrier with supporting and falsifying evidence. Do not infer market rank from search rank. Preserve gaps and reduce conclusion strength when evidence is insufficient.
+    replay:
+      steps:
+        - title: Define the competitive unit
+          description: Verify customer need, value-chain role, region, period, and comparison boundary
+        - title: Build the participant map
+          description: Identify direct rivals, substitutes, entrants, and controlling nodes
+        - title: Compare positioning and barriers
+          description: Analyze strategic groups, competitive mechanisms, evidence, and falsification signals
+        - title: Deliver the competitive view
+          description: Summarize landscape changes, key risks, and indicators to monitor
+    result:
+      template: generic_report_v1
+      eyebrow: Competitive landscape report
+      title: Market participants, strategic groups, and competitive barriers
+      summary: Explain positioning, competitive mechanisms, and change using consistent boundaries and verifiable evidence
+      highlights:
+        - Participant map and strategic groups
+        - Share definitions, competitive mechanisms, and comparison matrix
+        - Barrier evidence, falsification signals, and monitoring indicators
+
+  - id: comparable-companies
+    selector:
+      title: Comparable-company analysis
+      description: Align peer, period, and metric definitions to compare operations and valuation multiples
+      output_label: Comparable-company analysis
+    launch:
+      prompt_short: Compare my selected companies on consistent operating and valuation definitions.
+      prompt: Complete a comparable-company analysis from the company set, valuation date, financial period, and metrics I provide. Explain the core peer group and exclusions, align currency, units, periods, and accounting definitions, and run deterministic statistics when at least two companies have structured values. Disclose valid observations and exclusions, then compare operations, valuation and expectations, risks, and evidence completeness separately. Do not force a unified investment ranking unless I provide an accepted ranking method and weights. Cite direct sources and data dates for every external number.
+    replay:
+      steps:
+        - title: Select the peer set
+          description: Explain inclusion and exclusion by business, region, model, stage, and risk
+        - title: Standardize the data
+          description: Align valuation date, financial period, currency, units, and adjustments
+        - title: Run deterministic calculations
+          description: Calculate sample statistics while preserving inputs, valid observations, and exclusions
+        - title: Form dimension-level conclusions
+          description: Compare operations, valuation, risk, and evidence completeness with limitations
+    result:
+      template: generic_report_v1
+      eyebrow: Comparable-company analysis
+      title: Consistent operating-metric and valuation comparison
+      summary: Produce reproducible calculations on a consistent peer set without unsupported aggregate ranking
+      highlights:
+        - Peer selection and data standardization
+        - Sample statistics, operating metrics, and valuation multiples
+        - Risk, evidence completeness, and conclusion boundaries
+
+  - id: closed-data-analysis
+    selector:
+      title: Closed-data analysis
+      description: Use only supplied data for deterministic calculations, dimension-level comparison, and controlled charts
+      output_label: Controlled data analysis
+    launch:
+      prompt_short: Analyze only the data I provide without adding external facts.
+      prompt: Treat my supplied data as a closed dataset. Do not browse or add external facts. Limit the work to restating inputs, deterministic calculations, column-by-column comparison, and data-gap disclosure. When at least two companies have structured values, run the comparable-statistics script. If I request a chart, output controlled Mermaid only when its data can match the adjacent table exactly. Do not infer correlation, causality, or market-pricing logic from cross-sectional ordering, and do not produce an aggregate ranking without user-approved weights.
+    replay:
+      steps:
+        - title: Lock the permitted dataset
+          description: Admit only user inputs and deterministic results returned by successful scripts
+        - title: Run reproducible calculations
+          description: Calculate sample statistics while preserving raw inputs, valid observations, and exclusions
+        - title: Compare by dimension
+          description: Report column ordering without inferring correlation, causality, or aggregate superiority
+        - title: Deliver the bounded conclusion
+          description: Separate facts, calculations, qualitative scenarios, and fields that still need data
+    result:
+      template: generic_report_v1
+      eyebrow: Controlled data analysis
+      title: Deterministic calculation and comparison of a closed dataset
+      summary: Produce reproducible results from supplied data only and state the limits on external inference
+      highlights:
+        - Input facts and deterministic sample statistics
+        - Dimension-level ordering and controlled Mermaid charts
+        - Qualitative scenarios, data gaps, and bounded conclusions

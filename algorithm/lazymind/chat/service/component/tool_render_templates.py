@@ -6,25 +6,28 @@ from typing import Any
 # and renames cannot silently update only one of several parallel maps.
 TOOL_RENDER_PROFILES: dict[str, dict[str, Any]] = (
 {'kb_search': {'argument': 'query',  # noqa: E122
-               'call': {'en': 'Checking {value} in the knowledge base for relevant '
-                              'material.',
-                        'zh': '正在知识库中检索与 {value} 相关的知识。'},
-               'success': {'en': 'Knowledge base search completed with '
+               'call': {'en': 'Using kb_search for {value}.',
+                        'zh': '正在用 kb_search 检索 {value}。'},
+               'success': {'en': 'kb_search completed with '
                                  '{result.total} relevant items.',
-                           'zh': '知识库检索完成，共找到 {result.total} 条相关内容。'},
-               'failure': {'en': 'Knowledge base results for {value} could not be '
-                                 'found.',
-                           'zh': '未能找到 {value} 的知识库结果。'}},
- 'kb_tmp_search': {'argument': 'query',
-                   'call': {'en': 'Checking attached files for material related to '
-                                  '{value}.',
-                            'zh': '正在附件中检索与 {value} 相关的内容。'},
-                   'success': {'en': 'Attachment search completed with '
+                           'zh': 'kb_search 完成，共找到 {result.total} 条相关内容。'},
+               'failure': {'en': 'kb_search could not find results for {value}.',
+                           'zh': 'kb_search 未能找到 {value} 的结果。'}},
+ 'kb_tmp_search': {'argument': 'semantic_query',
+                   'call': {'en': 'Using kb_tmp_search for {value}.',
+                            'zh': '正在用 kb_tmp_search 检索 {value}。'},
+                   'success': {'en': 'kb_tmp_search completed with '
                                      '{result.total} relevant items.',
-                               'zh': '附件检索完成，共找到 {result.total} 条相关内容。'},
-                   'failure': {'en': 'Attached file results for {value} could not '
-                                     'be found.',
-                               'zh': '未能找到 {value} 的附件检索结果。'}},
+                               'zh': 'kb_tmp_search 完成，共找到 {result.total} 条相关内容。'},
+                   'failure': {'en': 'kb_tmp_search could not find results for {value}.',
+                               'zh': 'kb_tmp_search 未能找到 {value} 的结果。'}},
+ 'parse_uploaded_files': {'argument': 'files',
+                          'call': {'en': 'Parsing uploaded documents: {value}.',
+                                   'zh': '正在解析上传文档：{value}。'},
+                          'success': {'en': 'Finished parsing {result.total} uploaded document(s).',
+                                      'zh': '已完成 {result.total} 个上传文档的解析。'},
+                          'failure': {'en': 'Uploaded documents could not be parsed.',
+                                      'zh': '未能完成上传文档解析。'}},
  'kb_get_parent_node': {'argument': 'node_id',
                         'call': {'en': 'Loading surrounding context for {value} '
                                        'before continuing now.',
@@ -46,16 +49,14 @@ TOOL_RENDER_PROFILES: dict[str, dict[str, Any]] = (
                                            'could not be expanded.',
                                      'zh': '未能扩展 {value} 附近的相关片段。'}},
  'kb_keyword_search': {'argument': 'keyword',
-                       'call': {'en': 'Searching target documents with {value} as '
-                                      'the keyword.',
-                                'zh': '正在目标文档中搜索关键词 {value}。'},
-                       'success': {'en': 'Keyword {value} search completed with '
+                       'call': {'en': 'Using kb_keyword_search for {value}.',
+                                'zh': '正在用 kb_keyword_search 搜索 {value}。'},
+                       'success': {'en': 'kb_keyword_search completed with '
                                          '{result.total} document segments.',
-                                   'zh': '关键词 {value} 检索完成，共找到 {result.total} '
+                                   'zh': 'kb_keyword_search 完成，共找到 {result.total} '
                                          '条文档片段。'},
-                       'failure': {'en': 'Document results for keyword {value} '
-                                         'could not be found.',
-                                   'zh': '未能找到关键词 {value} 的文档结果。'}},
+                       'failure': {'en': 'kb_keyword_search could not find {value}.',
+                                   'zh': 'kb_keyword_search 未能找到 {value}。'}},
  'calculator': {'argument': 'expression',
                 'call': {'en': 'Evaluating the expression {value}.',
                          'zh': '正在计算表达式 {value}。'},
@@ -65,8 +66,8 @@ TOOL_RENDER_PROFILES: dict[str, dict[str, Any]] = (
                 'failure': {'en': 'Expression {value} could not be evaluated.',
                             'zh': '未能计算表达式 {value}。'}},
  'search_provider_search': {'argument': 'query',
-                            'call': {'en': 'Searching {brand} for {value}.',
-                                     'zh': '正在使用 {brand} 搜索 {value}。'},
+                            'call': {'en': 'Using {brand} search for {value}.',
+                                     'zh': '正在用 {brand} 搜索 {value}。'},
                             'success': {'en': '{brand} search for {value} returned '
                                               '{count} results.',
                                         'zh': '已找到 {value} 的 {count} 条 {brand} '
@@ -344,6 +345,13 @@ TOOL_RENDER_PROFILES: dict[str, dict[str, Any]] = (
                             'zh': '技能 {value} 的预定义脚本已成功运行。'},
                 'failure': {'en': 'Skill helper script at {value} did not finish.',
                             'zh': '技能 {value} 的预定义脚本未能运行完成。'}},
+ 'grep': {'argument': 'pattern',
+          'call': {'en': 'Using grep for {value}.',
+                   'zh': '正在用 grep 搜索 {value}。'},
+          'success': {'en': 'grep found matching lines for {value}.',
+                      'zh': 'grep 已找到 {value} 的匹配行。'},
+          'failure': {'en': 'grep could not search for {value}.',
+                      'zh': 'grep 未能检索 {value}。'}},
  'read_file': {'argument': 'path',
                'call': {'en': 'Reading file content from {value} for review now.',
                         'zh': '正在读取文件 {value}。'},

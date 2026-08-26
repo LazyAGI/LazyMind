@@ -1324,14 +1324,12 @@ export function useChatConversation({
 
     streamManager.setActiveConversation(id || null);
     if (id) {
-      const cachedList = conversationMessagesCache.current.get(id);
-      if (cachedList && cachedList.length > 0) {
-        messageListRef.current = cachedList;
-        setMessageList(cachedList);
-      } else {
-        messageListRef.current = list;
-        setMessageList(list);
-      }
+      // `list` was just loaded from the server and is authoritative. Reusing a
+      // cached list here makes A -> B -> A navigation display the previous pane.
+      conversationMessagesCache.current.set(id, list);
+      streamManager.saveMessageList(id, list);
+      messageListRef.current = list;
+      setMessageList(list);
     } else {
       messageListRef.current = list;
       setMessageList(list);

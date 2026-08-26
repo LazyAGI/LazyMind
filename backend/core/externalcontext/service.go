@@ -17,6 +17,7 @@ import (
 	"gorm.io/gorm/clause"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/settings"
 )
 
 var (
@@ -660,6 +661,7 @@ func (s *Service) ensureConversation(
 	if label == "" {
 		label = activityLabel(source.Provider, source.ThreadID)
 	}
+	policy := settings.LoadConversationExecutionPolicy(ctx, s.db, owner)
 	var conversation orm.Conversation
 	err := s.db.WithContext(ctx).Where("id = ?", binding.ConversationID).Take(&conversation).Error
 	if err == nil {
@@ -669,6 +671,15 @@ func (s *Service) ensureConversation(
 		updates := map[string]any{
 			"deleted_at": nil, "archived_at": nil, "archive_folder_id": nil,
 			"chat_executor": chatExecutor(source.Provider), "updated_at": now,
+		}
+		if conversation.EnableWorkflow == nil {
+			updates["enable_plugin"] = policy.EnableWorkflow
+		}
+		if conversation.WorkflowMode == nil {
+			updates["plugin_mode"] = policy.WorkflowMode // workflow-naming: persistence
+		}
+		if conversation.EnableSubagent == nil {
+			updates["enable_subagent"] = policy.EnableSubagent
 		}
 		if strings.HasPrefix(conversation.DisplayName, activityLabel(source.Provider, source.ThreadID)) ||
 			(source.Message != "" && conversation.ChatTimes <= 1) {
@@ -689,7 +700,9 @@ func (s *Service) ensureConversation(
 		ID: binding.ConversationID, DisplayName: label,
 		ChannelID: "default", SearchConfig: json.RawMessage(`{}`), Ext: ext,
 		Models: json.RawMessage(`[]`), ChatExecutor: chatExecutor(source.Provider),
-		BaseModel: orm.BaseModel{CreateUserID: owner, CreateUserName: owner, CreatedAt: now, UpdatedAt: now},
+		EnableWorkflow: &policy.EnableWorkflow, WorkflowMode: &policy.WorkflowMode,
+		EnableSubagent: &policy.EnableSubagent,
+		BaseModel:      orm.BaseModel{CreateUserID: owner, CreateUserName: owner, CreatedAt: now, UpdatedAt: now},
 	}
 	return s.db.WithContext(ctx).Create(&conversation).Error
 }

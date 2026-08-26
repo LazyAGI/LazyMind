@@ -77,13 +77,12 @@ def test_repeated_exact_failure_respects_consecutive_failure_limit():
     guard = ToolCallGuard(manager, {'url_fetch': 2})
 
     guard([_call('url_fetch', {'url': 'https://one.example'})])
-    guard([_call('url_fetch', {'url': 'https://one.example'})])
     blocked = guard([_call('url_fetch', {'url': 'https://one.example'})])
 
-    assert len(manager.calls) == 2
+    assert len(manager.calls) == 1
     assert blocked[0]['ok'] is False
     assert '[Repeated Tool Failure]' in blocked[0]['value']
-    assert set(blocked[0]) == {'ok', 'value'}
+    assert 'already failed' in blocked[0]['value']
 
 
 def test_different_parameter_guesses_are_blocked_after_consecutive_failures():
@@ -142,15 +141,11 @@ def test_failure_can_be_retried_by_agent_until_failure_limit():
     assert first == [failure]
     assert len(manager.calls) == 1
 
-    second = guard([call])
-
-    assert second == [failure]
-    assert len(manager.calls) == 2
-
     blocked = guard([call])
 
     assert '[Repeated Tool Failure]' in blocked[0]['value']
-    assert len(manager.calls) == 2
+    assert 'already failed' in blocked[0]['value']
+    assert len(manager.calls) == 1
 
 
 def test_guard_preserves_failure_message():

@@ -16,7 +16,8 @@ def test_find_user_attachment_accepts_remote_url_without_local_file():
     finally:
         lazyllm.globals['agentic_config'] = old_config or {}
 
-    payload = result
+    payload = result['result']
+    assert result['success'] is True
     assert payload['status'] == 'ok'
     assert payload['filename'] == 'image_0_bear.png'
     assert payload['url'] == 'https://filecdn-images.xingyeai.com/tool/edit_images/image_0_bear.png'
@@ -42,7 +43,8 @@ def test_find_user_attachment_remaps_docker_upload_marker(tmp_path, monkeypatch)
     finally:
         lazyllm.globals['agentic_config'] = old_config or {}
 
-    payload = result
+    payload = result['result']
+    assert result['success'] is True
     assert payload['status'] == 'ok'
     assert payload['path'] == str(image.resolve())
     assert payload['url'].startswith('/static-files/signed?')

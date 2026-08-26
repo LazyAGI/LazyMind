@@ -307,29 +307,33 @@ test-hermetic-check:
 test-hermetic:
 	@./tests/test-hermetic-run.sh
 
+# Host `go` if present; otherwise the same Docker golang image used by lazymind-cli-build.
+_GOLANG_IMAGE := $(DOCKER_MIRROR)golang:1.25.11
+define _run_builtin_skill_bundle
+	@if command -v "$(GO)" >/dev/null 2>&1; then \
+		cd backend/core && $(GO) run ./cmd/builtin-skill-bundle $(1); \
+	else \
+		echo "🔨 Host Go not found; running builtin-skill-bundle in Docker..."; \
+		docker run --rm \
+			--user "$$(id -u):$$(id -g)" \
+			-e CGO_ENABLED=0 \
+			-e GOCACHE=/tmp/go-cache -e GOMODCACHE=/tmp/go-mod \
+			-e GOPROXY="$(GOPROXY)" -e GOSUMDB="$(GOSUMDB)" \
+			-e HOME=/tmp \
+			-v "$(CURDIR):/src" -w /src/backend/core \
+			"$(_GOLANG_IMAGE)" \
+			go run ./cmd/builtin-skill-bundle $(2); \
+	fi
+endef
+
 featured-check:
-	@cd backend/core && $(GO) run ./cmd/builtin-skill-bundle \
-		--check-featured \
-		--featured-sources "$(CURDIR)/skills/featured"
+	$(call _run_builtin_skill_bundle,--check-featured --featured-sources "$(CURDIR)/skills/featured",--check-featured --featured-sources /src/skills/featured)
 
 skills-build:
-	@cd backend/core && $(GO) run ./cmd/builtin-skill-bundle \
-		--sources "$(CURDIR)/skills/builtin-sources.yaml" \
-		--lock "$(CURDIR)/skills/builtin-skills.lock.json" \
-		--cache "$(CURDIR)/skills/.runtime/cache" \
-		--output "$(CURDIR)/skills/.runtime/builtin-skills" \
-		--featured-sources "$(CURDIR)/skills/featured" \
-		--featured-output "$(CURDIR)/skills/.runtime/featured-skills"
+	$(call _run_builtin_skill_bundle,--sources "$(CURDIR)/skills/builtin-sources.yaml" --lock "$(CURDIR)/skills/builtin-skills.lock.json" --cache "$(CURDIR)/skills/.runtime/cache" --output "$(CURDIR)/skills/.runtime/builtin-skills" --featured-sources "$(CURDIR)/skills/featured" --featured-output "$(CURDIR)/skills/.runtime/featured-skills",--sources /src/skills/builtin-sources.yaml --lock /src/skills/builtin-skills.lock.json --cache /src/skills/.runtime/cache --output /src/skills/.runtime/builtin-skills --featured-sources /src/skills/featured --featured-output /src/skills/.runtime/featured-skills)
 
 skills-materialize:
-	@cd backend/core && $(GO) run ./cmd/builtin-skill-bundle \
-		--sources "$(CURDIR)/skills/builtin-sources.yaml" \
-		--lock "$(CURDIR)/skills/builtin-skills.lock.json" \
-		--cache "$(CURDIR)/skills/.runtime/cache" \
-		--output "$(CURDIR)/skills/.runtime/builtin-skills" \
-		--featured-sources "$(CURDIR)/skills/featured" \
-		--featured-output "$(CURDIR)/skills/.runtime/featured-skills" \
-		--frozen-lockfile
+	$(call _run_builtin_skill_bundle,--sources "$(CURDIR)/skills/builtin-sources.yaml" --lock "$(CURDIR)/skills/builtin-skills.lock.json" --cache "$(CURDIR)/skills/.runtime/cache" --output "$(CURDIR)/skills/.runtime/builtin-skills" --featured-sources "$(CURDIR)/skills/featured" --featured-output "$(CURDIR)/skills/.runtime/featured-skills" --frozen-lockfile,--sources /src/skills/builtin-sources.yaml --lock /src/skills/builtin-skills.lock.json --cache /src/skills/.runtime/cache --output /src/skills/.runtime/builtin-skills --featured-sources /src/skills/featured --featured-output /src/skills/.runtime/featured-skills --frozen-lockfile)
 
 # Only mineru has build:; paddleocr/milvus/opensearch use image: only, so only needed for up.
 _need_mineru := $(filter 1 true TRUE yes YES on ON,$(LAZYMIND_DEPLOY_MINERU))

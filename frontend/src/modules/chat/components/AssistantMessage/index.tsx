@@ -536,6 +536,11 @@ const AssistantMessage = (props: any) => {
       hideCiteButton();
       return;
     }
+    // Editable writing blocks expose Cite in their own selection toolbar.
+    if (element.closest(".md-editable-block")) {
+      hideCiteButton();
+      return;
+    }
 
     // Prefer line boxes from getClientRects(): cross-block / wrapped selections
     // make getBoundingClientRect() as wide as the container, pushing the button right.

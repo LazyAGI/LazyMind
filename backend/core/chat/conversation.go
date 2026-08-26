@@ -258,8 +258,10 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		}
 		initialConversationSettings["chat_executor"] = normalized
 	}
+	runInBackground, _ := raw["run_in_background"].(bool)
+	requestedThinkingDepth, _ := raw["thinking_depth"].(string)
 
-	conversationRecord, seq, err := ensureConversation(r.Context(), db, convID, displayName, searchConfigJSON, modelsJSON, userID, userName, initialConversationSettings)
+	conversationRecord, seq, err := ensureConversation(r.Context(), db, convID, displayName, searchConfigJSON, modelsJSON, userID, userName, runInBackground, requestedThinkingDepth, initialConversationSettings)
 	if err != nil {
 		if errors.Is(err, errConversationInTrash) {
 			common.ReplyErr(w, err.Error(), http.StatusConflict)
@@ -307,6 +309,12 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 	if len(dbDisabledTools) > 0 {
 		// A setting-level pause must not be bypassed by an explicit @tool mention.
 		resourceContext.DisabledTools = mergeDisabledToolNames(resourceContext.DisabledTools, dbDisabledTools)
+	}
+	if target.IsRegeneration {
+		if err := clearModelContext(r.Context(), db, convID); err != nil {
+			common.ReplyErr(w, "failed to invalidate compressed context", http.StatusInternalServerError)
+			return
+		}
 	}
 	reqBody := buildChatRequestBody(r.Context(), db, convID, sessionID, query, upstreamHistories, raw, resourceContext, userID, target.Seq)
 	executor, validExecutor := normalizeChatExecutor(conversationRecord.ChatExecutor)
@@ -1555,6 +1563,7 @@ func GetConversationDetail(w http.ResponseWriter, r *http.Request) {
 			"workflow_mode":         c.WorkflowMode,
 			"enable_subagent":       c.EnableSubagent,
 			"chat_executor":         c.ChatExecutor,
+			"thinking_depth":        c.ThinkingDepth,
 			"assistant":             source.Assistant,
 			"project_key":           source.ProjectKey,
 			"project_name":          source.ProjectName,

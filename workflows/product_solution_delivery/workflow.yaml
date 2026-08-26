@@ -51,19 +51,14 @@ tool_scripts:
   - path: scripts/tools.py
     functions:
       - load_product_skill_contract
+      - load_product_stage_inputs
       - normalize_product_parameters
-      - write_product_artifact
+      - write_product_artifact_file
   - path: scripts/writer_bridge.py
     functions:
-      - product_writer_prepare_context
       - profile_product_materials
-      - product_writer_generate_outline
-      - product_writer_read_markdown
-      - validate_product_outline
-      - product_writer_update_context
-      - product_writer_plan_sections
-      - product_writer_write_sections
-      - product_writer_assemble_draft
+      - product_writer_generate_outline_from_inputs
+      - product_writer_generate_document_from_inputs
       - product_writer_revise_markdown
       - product_writer_preview_selection_rewrite
 
