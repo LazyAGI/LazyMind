@@ -64,7 +64,7 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 		if cardinality != "list" {
 			cardinality = "single"
 		}
-		listIndex, appendList, err := artifactListIndex(tx, attempt, artifact, cardinality)
+		listIndex, _, err := artifactListIndex(tx, attempt, artifact, cardinality)
 		if err != nil {
 			return err
 		}
@@ -94,7 +94,11 @@ func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, art
 		if err := tx.Create(&row).Error; err != nil {
 			return err
 		}
-		if appendList {
+		// Keep list membership durable even when a package publisher supplies an
+		// explicit list_index. appendArtifactListOrder is idempotent, so ordinary
+		// replacements remain in place while first-time explicit indices become
+		// visible to clients that derive sort_order from the durable slot order.
+		if cardinality == "list" {
 			if err := appendArtifactListOrder(tx, attempt.SessionID, artifact.Slot, *listIndex, now); err != nil {
 				return err
 			}

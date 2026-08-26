@@ -536,8 +536,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const [addMenuOpen, setAddMenuOpen] = useState(false);
     const [knowledgeToolsEnabled, setKnowledgeToolsEnabled] = useState<{
       kb: boolean | null;
-      temp_kb: boolean | null;
-    }>({ kb: null, temp_kb: null });
+    }>({ kb: null });
     const disabledNoticeId = useId();
     const previousSessionIdRef = useRef<string | undefined>(undefined);
     const hasSentMessageRef = useRef(false);
@@ -559,7 +558,6 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         );
         setKnowledgeToolsEnabled({
           kb: toolsByID.get("kb") ?? null,
-          temp_kb: toolsByID.get("temp_kb") ?? null,
         });
       } catch {
         // Keep entries usable until the authoritative state can be read.
@@ -568,7 +566,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
 
     const handleToolAvailabilityChanged = useCallback((event: Event) => {
       const change = (event as CustomEvent<ToolAvailabilityChange>).detail;
-      if (change?.id === "kb" || change?.id === "temp_kb") {
+      if (change?.id === "kb") {
         setKnowledgeToolsEnabled((current) => ({
           ...current,
           [change.id]: change.enabled,
@@ -590,12 +588,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     }, [handleToolAvailabilityChanged, refreshKnowledgeToolAvailability]);
 
     const knowledgeBaseEnabled = knowledgeToolsEnabled.kb !== false;
-    const temporaryFileSearchEnabled = knowledgeToolsEnabled.temp_kb !== false;
     const knowledgeBaseDisabledReason = "知识库检索已在设置中停用";
-    const temporaryFileSearchDisabledReason = "临时文件检索已在设置中停用";
-    const uploadTypes = temporaryFileSearchEnabled
-      ? allowedUploadTypes
-      : allowedImageTypes;
+    const uploadTypes = allowedUploadTypes;
 
     const debouncedSaveInput = useMemo(
       () =>
@@ -640,17 +634,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
             }
             return;
           }
-          const uploadableFiles = temporaryFileSearchEnabled
-            ? files
-            : files.filter((file) => {
-              const suffix = file.name.substring(file.name.lastIndexOf(".")).toLowerCase();
-              return allowedImageTypes.includes(suffix);
-            });
-          if (uploadableFiles.length !== files.length) {
-            message.warning(`${temporaryFileSearchDisabledReason}，仅支持上传图片`);
-          }
-          if (uploadableFiles.length > 0) {
-            fileListRef.current?.uploadFiles(uploadableFiles);
+          if (files.length > 0) {
+            fileListRef.current?.uploadFiles(files);
           }
         },
       }),
@@ -659,8 +644,6 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         clearMultiData,
         disabled,
         disabledReason,
-        temporaryFileSearchDisabledReason,
-        temporaryFileSearchEnabled,
       ],
     );
 
@@ -1058,11 +1041,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
           e.stopPropagation();
 
           if (invalidFiles.length > 0) {
-            message.warning(temporaryFileSearchEnabled
-              ? t("chat.unsupportedFileType", {
-                types: t("chat.supportedUploadTypeSummary"),
-              })
-              : `${temporaryFileSearchDisabledReason}，仅支持上传图片`);
+            message.warning(t("chat.unsupportedFileType", {
+              types: t("chat.supportedUploadTypeSummary"),
+            }));
           }
 
           if (files.length > 0) {
@@ -1100,8 +1081,6 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         disabledReason,
         fileList.length,
         t,
-        temporaryFileSearchDisabledReason,
-        temporaryFileSearchEnabled,
         uploadTypes,
       ],
     );
@@ -1235,11 +1214,6 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       classNames={{ root: "chat-add-resource-popover" }}
                       content={
                         <div className="chat-add-resource-menu">
-                          <Tooltip
-                            title={temporaryFileSearchEnabled
-                              ? undefined
-                              : `${temporaryFileSearchDisabledReason}，仅支持上传图片`}
-                          >
                             <button
                               type="button"
                               onClick={() => {
@@ -1255,11 +1229,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                               }}
                             >
                               <PaperClipOutlined />
-                              {temporaryFileSearchEnabled
-                                ? t("chat.addAttachment")
-                                : "添加图片"}
+                              {t("chat.addAttachment")}
                             </button>
-                          </Tooltip>
                           <Tooltip title={knowledgeBaseEnabled ? undefined : knowledgeBaseDisabledReason}>
                             <span className="chat-add-resource-menu-tooltip-anchor">
                               <button

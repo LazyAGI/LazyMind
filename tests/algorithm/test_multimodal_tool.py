@@ -17,7 +17,9 @@ def test_vision_extractor_rejects_pdf_before_vlm(monkeypatch, tmp_path):
     with pytest.raises(ToolExecutionError, match='only supports image files') as captured:
         multimodal.vision_extractor(str(pdf))
 
-    assert 'kb_tmp_search' in str(captured.value)
+    message = str(captured.value)
+    assert 'grep then read_file' in message
+    assert 'kb_tmp_search' in message
 
 
 def test_run_image_model_uses_declared_role(monkeypatch):

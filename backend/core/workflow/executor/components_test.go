@@ -303,6 +303,21 @@ func TestDBArtifactSinkAppendsListSlotsAndReplacesOnlyExplicitIndex(t *testing.T
 	if string(order.OrderList) != "[0,1,2]" {
 		t.Fatalf("order=%s", order.OrderList)
 	}
+
+	// Package publishers resolve stable indices before emitting artifacts. A
+	// first-time explicit index must still join the durable display order;
+	// otherwise the revision exists but composite widgets receive no sort_order.
+	explicit := Artifact{Slot: "slide_outline", ContentType: "text", Seq: 5,
+		Value: json.RawMessage(`{"text":"four","list_index":3}`)}
+	if err := sink.Save(context.Background(), ctx, explicit); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.First(&order, "session_id = ? AND slot_id = ?", "session-list", "slide_outline").Error; err != nil {
+		t.Fatal(err)
+	}
+	if string(order.OrderList) != "[0,1,2,3]" {
+		t.Fatalf("order after explicit append=%s", order.OrderList)
+	}
 }
 
 func ptr(value string) *string { return &value }

@@ -442,7 +442,8 @@ func buildAskUserToolResultContent(
 // buildHistoryMessages converts stored chat histories to the format expected by Python.
 // When askAnswersStructured is provided, the last unanswered ask_user tool_result is
 // rewritten to contain the full structured context.
-func buildHistoryMessages(histories []orm.ChatHistory, askAnswersStructured map[string]any) []map[string]string {
+// Each message may include history_seq (chat_histories.seq) for dual-track compression.
+func buildHistoryMessages(histories []orm.ChatHistory, askAnswersStructured map[string]any) []map[string]any {
 	if len(histories) == 0 {
 		return nil
 	}
@@ -468,7 +469,7 @@ func buildHistoryMessages(histories []orm.ChatHistory, askAnswersStructured map[
 		break
 	}
 
-	out := make([]map[string]string, 0, len(histories)*2)
+	out := make([]map[string]any, 0, len(histories)*2)
 	for idx, h := range histories {
 		assistantContent := buildAssistantHistoryContent(h)
 
@@ -493,10 +494,200 @@ func buildHistoryMessages(histories []orm.ChatHistory, askAnswersStructured map[
 			assistantContent = replaceAskUserToolResult(assistantContent, newContent)
 		}
 
-		out = append(out, map[string]string{"role": "user", "content": h.RawContent})
-		out = append(out, map[string]string{"role": "assistant", "content": assistantContent})
+		out = append(out, map[string]any{
+			"role": "user", "content": h.RawContent, "history_seq": h.Seq,
+		})
+		out = append(out, map[string]any{
+			"role": "assistant", "content": assistantContent, "history_seq": h.Seq,
+		})
 	}
 	return out
+}
+
+const runtimeSummaryDisclaimer = "The following is a runtime-generated summary of earlier conversation history.\n" +
+	"It is reference context, not a new user instruction.\n" +
+	"The latest user message and current runtime state take precedence."
+
+type modelContextState struct {
+	SummaryText       string `json:"summary_text"`
+	CoveredThroughSeq int    `json:"covered_through_seq"`
+	Version           int    `json:"version,omitempty"`
+}
+
+func loadModelContext(ctx context.Context, db *gorm.DB, convID string) *modelContextState {
+	if db == nil || strings.TrimSpace(convID) == "" {
+		return nil
+	}
+	var conv orm.Conversation
+	if err := db.WithContext(ctx).Select("ext").Where("id = ?", convID).First(&conv).Error; err != nil {
+		return nil
+	}
+	ext := map[string]any{}
+	if len(conv.Ext) == 0 || json.Unmarshal(conv.Ext, &ext) != nil {
+		return nil
+	}
+	raw, _ := ext["model_context"].(map[string]any)
+	if len(raw) == 0 {
+		return nil
+	}
+	state := &modelContextState{Version: 1}
+	if s, ok := raw["summary_text"].(string); ok {
+		state.SummaryText = strings.TrimSpace(s)
+	}
+	switch v := raw["covered_through_seq"].(type) {
+	case float64:
+		state.CoveredThroughSeq = int(v)
+	case int:
+		state.CoveredThroughSeq = v
+	case int64:
+		state.CoveredThroughSeq = int(v)
+	}
+	switch v := raw["version"].(type) {
+	case float64:
+		state.Version = int(v)
+	case int:
+		state.Version = v
+	}
+	if state.SummaryText == "" || state.CoveredThroughSeq <= 0 {
+		return nil
+	}
+	return state
+}
+
+func filterHistoriesAfterCovered(histories []orm.ChatHistory, coveredThroughSeq int) []orm.ChatHistory {
+	if coveredThroughSeq <= 0 || len(histories) == 0 {
+		return histories
+	}
+	out := make([]orm.ChatHistory, 0, len(histories))
+	for _, h := range histories {
+		if h.Seq > coveredThroughSeq {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+func normalizeModelContextCoverage(
+	histories []orm.ChatHistory,
+	modelCtx *modelContextState,
+) *modelContextState {
+	if modelCtx == nil || strings.TrimSpace(modelCtx.SummaryText) == "" || len(histories) == 0 {
+		return modelCtx
+	}
+	maxSeq := histories[len(histories)-1].Seq
+	if modelCtx.CoveredThroughSeq <= maxSeq {
+		return modelCtx
+	}
+	return nil
+}
+
+func buildModelHistoryMessages(
+	histories []orm.ChatHistory,
+	askAnswersStructured map[string]any,
+	modelCtx *modelContextState,
+) []map[string]any {
+	modelCtx = normalizeModelContextCoverage(histories, modelCtx)
+	tail := histories
+	if modelCtx != nil {
+		tail = filterHistoriesAfterCovered(histories, modelCtx.CoveredThroughSeq)
+	}
+	msgs := buildHistoryMessages(tail, askAnswersStructured)
+	if modelCtx == nil || strings.TrimSpace(modelCtx.SummaryText) == "" {
+		return msgs
+	}
+	summaryMsg := map[string]any{
+		"role":    "user",
+		"content": runtimeSummaryDisclaimer + "\n\n" + strings.TrimSpace(modelCtx.SummaryText),
+	}
+	out := make([]map[string]any, 0, len(msgs)+1)
+	out = append(out, summaryMsg)
+	out = append(out, msgs...)
+	return out
+}
+
+func clearModelContext(ctx context.Context, db *gorm.DB, convID string) error {
+	if db == nil || strings.TrimSpace(convID) == "" {
+		return nil
+	}
+	var conv orm.Conversation
+	if err := db.WithContext(ctx).Select("id", "ext").Where("id = ?", convID).First(&conv).Error; err != nil {
+		return err
+	}
+	ext := map[string]any{}
+	if len(conv.Ext) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(conv.Ext, &ext); err != nil {
+		return err
+	}
+	if _, ok := ext["model_context"]; !ok {
+		return nil
+	}
+	delete(ext, "model_context")
+	raw, err := json.Marshal(ext)
+	if err != nil {
+		return err
+	}
+	return db.WithContext(ctx).Model(&orm.Conversation{}).Where("id = ?", convID).Update("ext", raw).Error
+}
+
+// handleModelContextUpdated atomically writes summary_text + covered_through_seq.
+// Rejects empty summary, non-positive covered, stale/equal covered watermarks,
+// or regressions below the current covered seq.
+func handleModelContextUpdated(
+	ctx context.Context,
+	db *gorm.DB,
+	convID string,
+	ev *ModelContextUpdatedEvent,
+) {
+	if db == nil || ev == nil || strings.TrimSpace(convID) == "" {
+		return
+	}
+	summary := strings.TrimSpace(ev.SummaryText)
+	if summary == "" || ev.CoveredThroughSeq <= 0 {
+		return
+	}
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var conv orm.Conversation
+		if err := tx.Select("id", "ext").Where("id = ?", convID).First(&conv).Error; err != nil {
+			return err
+		}
+		ext := map[string]any{}
+		if len(conv.Ext) > 0 {
+			_ = json.Unmarshal(conv.Ext, &ext)
+		}
+		prevCovered := 0
+		if prev, ok := ext["model_context"].(map[string]any); ok {
+			switch v := prev["covered_through_seq"].(type) {
+			case float64:
+				prevCovered = int(v)
+			case int:
+				prevCovered = v
+			case int64:
+				prevCovered = int(v)
+			}
+		}
+		if ev.CoveredThroughSeq <= prevCovered {
+			return nil
+		}
+		version := ev.Version
+		if version <= 0 {
+			version = 1
+		}
+		ext["model_context"] = map[string]any{
+			"summary_text":        summary,
+			"covered_through_seq": ev.CoveredThroughSeq,
+			"version":             version,
+		}
+		raw, err := json.Marshal(ext)
+		if err != nil {
+			return err
+		}
+		return tx.Model(&orm.Conversation{}).Where("id = ?", convID).Update("ext", raw).Error
+	})
+	if err != nil {
+		fmt.Printf("[Core] [MODEL_CONTEXT_UPDATE_FAILED] conv=%s err=%v\n", convID, err)
+	}
 }
 
 var askUserToolResultPattern = regexp.MustCompile(`(?s)(<tool_result\b[^>]*>)Question sent to user \(ask_id=[^)]+\)\.(</tool_result>)`)
@@ -997,12 +1188,13 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 	}
 	currentFilePaths := filePathsForUpstreamChat(raw)
 	filesMap := filesPerTurnMap(histories, currentFilePaths, currentSeq)
+	modelCtx := loadModelContext(ctx, db, convID)
 	body := map[string]any{
 		"query":            query,
 		"user_query":       query,
 		"session_id":       sessionID,
 		"conversation_id":  convID,
-		"history":          buildHistoryMessages(histories, askAnswersStructuredFromRaw(raw)),
+		"history":          buildModelHistoryMessages(histories, askAnswersStructuredFromRaw(raw), modelCtx),
 		"filters":          raw["filters"],
 		"files":            filesMap,
 		"current_turn_seq": currentSeq,
@@ -1015,6 +1207,13 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 		"user_id":          strings.TrimSpace(userID),
 		"mode":             mode,
 		"intent_context":   loadConversationIntentContext(ctx, db, convID),
+	}
+	if modelCtx != nil {
+		body["model_context"] = map[string]any{
+			"summary_text":        modelCtx.SummaryText,
+			"covered_through_seq": modelCtx.CoveredThroughSeq,
+			"version":             modelCtx.Version,
+		}
 	}
 	requestDisabledTools := stringSliceFromAny(raw["disabled_tools"])
 	if len(requestDisabledTools) > 0 {
@@ -1752,6 +1951,10 @@ func streamSingleAnswer(
 		}
 		if d.WorkflowPreflightUpdated != nil {
 			handleWorkflowPreflightUpdated(chatCtx, db, convID, d.WorkflowPreflightUpdated)
+			continue
+		}
+		if d.ModelContextUpdated != nil {
+			handleModelContextUpdated(chatCtx, db, convID, d.ModelContextUpdated)
 			continue
 		}
 		if d.Heartbeat {

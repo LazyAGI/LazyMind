@@ -586,6 +586,15 @@ def _tool_result_preview(tool_name: str, result: Any, value: str = '', language:
     if (
         isinstance(business_value, dict)
         and business_value.get('total') == 0
+        and _tool_name_is(tool_name, 'grep')
+    ):
+        return _ensure_trailing_newline(
+            '文件中没有找到匹配行。' if language == 'zh' else
+            'No matching lines were found in the file.'
+        )
+    if (
+        isinstance(business_value, dict)
+        and business_value.get('total') == 0
         and _tool_name_starts(tool_name, 'kb_')
     ):
         msg = _resolve_tool_key(tool_name, _KB_EMPTY_RESULT_MESSAGES)

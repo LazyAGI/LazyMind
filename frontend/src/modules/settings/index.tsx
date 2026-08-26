@@ -759,6 +759,7 @@ export default function SettingsPage() {
                 <TaskEntryDefaults
                   subtasksEnabled={Boolean(overview?.controls.task_center_enabled)}
                   workflowsEnabled={Boolean(overview?.controls.workflows_enabled)}
+                  onConnectExecutors={() => selectSection("assistants")}
                 />
               </>,
             },
