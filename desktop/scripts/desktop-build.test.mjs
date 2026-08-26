@@ -474,6 +474,18 @@ test("packaged macOS app runs installation warmup once before its normal window"
   );
 });
 
+test("macOS first-launch warmup shows preparation UI instead of only a Dock icon", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  assert.match(
+    source,
+    /function createInstallationWarmupWindow\(\)[\s\S]*new BrowserWindow\(browserWindowOptions\(true\)\)[\s\S]*loadURL\(`data:text\/html/,
+  );
+  assert.match(
+    source,
+    /runMacInstallationWarmupIfNeeded\(\)[\s\S]*createInstallationWarmupWindow\(\)[\s\S]*runInstallerWarmup\(\)[\s\S]*disposeInstallationWarmupWindow/,
+  );
+});
+
 test("Desktop does not create the Chat window after quitting or moving to background", () => {
   const source = readFileSync(electronMainScript, "utf8");
   const start = source.indexOf("async function createWindow()");

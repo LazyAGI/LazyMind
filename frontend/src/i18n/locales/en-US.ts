@@ -1744,6 +1744,8 @@ const enUS = {
       writingToFeishu: "Writing...",
       writeBackSuccess: "Written back to Feishu",
       writeBackFailed: "Write-back failed. Please retry.",
+      feishuConfigurationRequired:
+        "No usable Feishu authorization is available. Your content has been preserved. Check the Feishu configuration and try again.",
       openFeishuDocument: "Open Feishu document",
       localVersion: "Local v{{version}}",
       localHistory: "Local history",

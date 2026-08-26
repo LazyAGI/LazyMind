@@ -332,6 +332,7 @@ export interface TabDef {
   id: string;
   /** Optional workflow step id represented by this tab. Falls back to id when omitted. */
   step_id?: string;
+  status_step_ids?: string[];
   label: string;
   layout?: 'grid' | 'list' | 'vertical' | 'composite' | 'horizontal';
   slots: SlotDef[];

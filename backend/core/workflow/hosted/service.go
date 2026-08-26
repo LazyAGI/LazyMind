@@ -41,6 +41,7 @@ type Submission struct {
 	ErrorCode   string              `json:"error_code,omitempty"`
 	ExecutorRef string              `json:"executor_ref,omitempty"`
 	Artifacts   []executor.Artifact `json:"artifacts,omitempty"`
+	Control     *executor.Control   `json:"control,omitempty"`
 }
 
 type SubmissionResult struct {
@@ -194,6 +195,7 @@ func (s *Service) Submit(ctx context.Context, owner, sessionID, attemptID string
 	}
 	resultJSON, err := json.Marshal(executor.Result{
 		Summary: strings.TrimSpace(submission.Summary), ExecutorRef: strings.TrimSpace(submission.ExecutorRef),
+		Control: submission.Control,
 	})
 	if err != nil {
 		return SubmissionResult{}, &ProtocolError{Code: "INVALID_RESULT", Message: "execution result cannot be encoded", Cause: err}

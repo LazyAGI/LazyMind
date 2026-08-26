@@ -290,6 +290,35 @@ func TestRAGServicesDoNotWaitBeforeStarting(t *testing.T) {
 	}
 }
 
+func TestInstallerWarmupDoesNotWaitForExcludedProcessorWorker(t *testing.T) {
+	normal := ragReadinessChecks(RuntimeConfig{})
+	warmup := ragReadinessChecks(RuntimeConfig{MaintenanceMode: installerWarmupMaintenanceMode})
+
+	if !hasRAGReadinessLabel(normal, "processor-worker") {
+		t.Fatal("normal runtime must wait for processor-worker")
+	}
+	if hasRAGReadinessLabel(warmup, "processor-worker") {
+		t.Fatal("installer warmup must not wait for excluded processor-worker")
+	}
+}
+
+func TestWarmupChatCapabilityDoesNotWaitForProcessorWorker(t *testing.T) {
+	t.Setenv(installerWarmupSkipProcessorWorkerEnvVar, "true")
+	checks := ragReadinessChecks(RuntimeConfig{})
+	if hasRAGReadinessLabel(checks, "processor-worker") {
+		t.Fatal("warmup Chat capability must skip processor-worker readiness")
+	}
+}
+
+func hasRAGReadinessLabel(checks []ragReadinessCheck, label string) bool {
+	for _, check := range checks {
+		if check.label == label {
+			return true
+		}
+	}
+	return false
+}
+
 func TestAlgorithmServiceEnvUsesRuntimeDataPaths(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)

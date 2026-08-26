@@ -412,12 +412,14 @@ func init() {
 	registerAdditionalError("delete archive folder failed", http.StatusInternalServerError, 2002122)
 	registerAdditionalError("codex tcp bridge token is required", http.StatusServiceUnavailable, 2002284)
 	registerAdditionalError("writer download conversion is too large", http.StatusRequestEntityTooLarge, 2002285)
-	registerAdditionalError("slot must be source_document, outline_document, or draft_document", http.StatusBadRequest, 2002286)
+	registerAdditionalError("slot must be source_document, outline_document, flat_draft_document, or draft_document", http.StatusBadRequest, 2002286)
 	registerAdditionalError("active", http.StatusNotFound, 2002287)
-	registerAdditionalError("slot must be outline_document or draft_document", http.StatusBadRequest, 2002288)
+	registerAdditionalError("slot must be outline_document, flat_draft_document, or draft_document", http.StatusBadRequest, 2002288)
 	registerAdditionalError("invalid document", http.StatusBadRequest, 2002289)
 	registerAdditionalError("decode attempt result", http.StatusInternalServerError, 2002290)
 	registerAdditionalErrorPattern("control.next_step %q is not a reachable choice from %q", "Workflow next step is not reachable", http.StatusInternalServerError, 2002291)
+	registerAdditionalErrorPattern("current %s revision is already synchronized", "Conflict", http.StatusConflict, 2000107)
+	registerAdditionalErrorPattern("single-cardinality material %q has multiple distinct input bindings", "Internal server error", http.StatusInternalServerError, 2000000)
 
 	// Chat attachment, editable PPTX, and Workflow artifact errors.
 	registerAdditionalErrorPattern("resolve turn %q", "Failed to resolve chat turn attachments", http.StatusInternalServerError, 2002123)

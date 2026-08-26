@@ -75,6 +75,7 @@ func TestInstallerWarmupUsesPerProcessCapabilities(t *testing.T) {
 	chatEnv := runtimeProcessEnvironment(base, cfg, plan, chatProcessName)
 	assertEnvContains(t, chatEnv, "LAZYMIND_BACKGROUND_JOBS_ENABLED=false")
 	assertEnvContains(t, chatEnv, "LAZYMIND_ROUTER_CHILD_PROCESSES_ENABLED=false")
+	assertEnvContains(t, chatEnv, installerWarmupSkipProcessorWorkerEnvVar+"=true")
 	assertEnvContains(t, chatEnv, "PYTHONDONTWRITEBYTECODE=1")
 }
 

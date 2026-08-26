@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import asyncio
 import json
 import os
@@ -821,7 +822,12 @@ def _workflow_control_from_tool_results(
             try:
                 payload = json.loads(payload)
             except (TypeError, ValueError, json.JSONDecodeError):
-                continue
+                try:
+                    payload = ast.literal_eval(payload)
+                except (SyntaxError, ValueError):
+                    continue
+        if isinstance(payload, dict) and payload.get('ok') is True:
+            payload = payload.get('value')
         if not isinstance(payload, dict) or not isinstance(payload.get('control'), dict):
             continue
         next_step = str(payload['control'].get('next_step') or '').strip()

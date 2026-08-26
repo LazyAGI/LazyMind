@@ -1698,6 +1698,7 @@ const zhCN = {
       writingToFeishu: "写入中...",
       writeBackSuccess: "已写回飞书",
       writeBackFailed: "写回失败，请重试",
+      feishuConfigurationRequired: "未获取到可用的飞书授权，当前内容已保留。请检查飞书配置后重试。",
       openFeishuDocument: "打开飞书文档",
       localVersion: "本地 v{{version}}",
       localHistory: "本地历史",
