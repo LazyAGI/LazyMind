@@ -9,12 +9,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	skillpackage "lazymind/core/skillv2/skillpackage"
 )
 
 const (
 	CatalogSchemaVersion = 1
+	maxProviderNameRunes = 64
 )
 
 type Catalog struct {
@@ -40,6 +42,7 @@ type CatalogSkill struct {
 	Description         string         `json:"description"`
 	Category            string         `json:"category"`
 	Tags                []string       `json:"tags,omitempty"`
+	Provider            string         `json:"provider,omitempty"`
 	MarketVisible       *bool          `json:"market_visible,omitempty"`
 	Content             string         `json:"content,omitempty"`
 	OriginArchiveSHA256 string         `json:"origin_archive_sha256,omitempty"`
@@ -110,6 +113,11 @@ func LoadCatalog(catalogPath string) (Catalog, error) {
 		entry.Name = strings.TrimSpace(entry.Name)
 		entry.Description = strings.TrimSpace(entry.Description)
 		entry.Category = strings.TrimSpace(entry.Category)
+		provider, err := NormalizeProviderName(entry.Provider)
+		if err != nil {
+			return Catalog{}, catalogFailure("builtin skill %s: %v", entry.UID, err)
+		}
+		entry.Provider = provider
 		entry.PackageFile = strings.TrimSpace(entry.PackageFile)
 		entry.ArchiveSHA256 = strings.ToLower(strings.TrimSpace(entry.ArchiveSHA256))
 		entry.TreeSHA256 = strings.ToLower(strings.TrimSpace(entry.TreeSHA256))
@@ -248,11 +256,24 @@ func packageFromCatalog(entry CatalogSkill, archivePath string, files map[string
 		SHA256:        entry.ArchiveSHA256,
 		TreeSHA256:    entry.TreeSHA256,
 		SourceURL:     entry.SourceURL,
+		Provider:      entry.Provider,
 		ArchivePath:   archivePath,
 		Tags:          append([]string(nil), entry.Tags...),
 		MarketVisible: CatalogSkillMarketVisible(entry),
 		Files:         files,
 	}
+}
+
+// NormalizeProviderName validates the optional attribution shown by the Skill Plaza.
+func NormalizeProviderName(raw string) (string, error) {
+	provider := strings.TrimSpace(raw)
+	if strings.ContainsAny(provider, "\r\n\t") {
+		return "", catalogFailure("provider must be a single-line label")
+	}
+	if utf8.RuneCountInString(provider) > maxProviderNameRunes {
+		return "", catalogFailure("provider exceeds %d characters", maxProviderNameRunes)
+	}
+	return provider, nil
 }
 
 func CatalogSkillMarketVisible(entry CatalogSkill) bool {

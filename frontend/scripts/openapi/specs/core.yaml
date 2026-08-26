@@ -4694,6 +4694,8 @@ components:
                     type: string
                 name:
                     type: string
+                provider:
+                    type: string
             required:
                 - builtin_skill_uid
                 - category

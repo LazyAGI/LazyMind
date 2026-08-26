@@ -1665,17 +1665,7 @@ func TestOpenAPISpecIncludesLocaleHeaderForLocalizedCatalogs(t *testing.T) {
 }
 
 func TestOpenAPIShowcaseCaseIncludesSkillSourceURL(t *testing.T) {
-	r := mux.NewRouter()
-	registerAllRoutes(r)
-	specJSON, err := buildOpenAPISpecFromRouter(r)
-	if err != nil {
-		t.Fatalf("build openapi spec: %v", err)
-	}
-	var spec map[string]any
-	if err := json.Unmarshal(specJSON, &spec); err != nil {
-		t.Fatalf("decode openapi spec: %v", err)
-	}
-	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
+	schemas := generatedOpenAPISchemas(t)
 	schema := schemas["ShowcaseCase"].(map[string]any)
 	properties := schema["properties"].(map[string]any)
 	if sourceURL, ok := properties["source_url"].(map[string]any); !ok || sourceURL["type"] != "string" {
@@ -1688,6 +1678,36 @@ func TestOpenAPIShowcaseCaseIncludesSkillSourceURL(t *testing.T) {
 		}
 	}
 	t.Fatal("ShowcaseCase source_url is not required")
+}
+
+func generatedOpenAPISchemas(t *testing.T) map[string]any {
+	t.Helper()
+	r := mux.NewRouter()
+	registerAllRoutes(r)
+	specJSON, err := buildOpenAPISpecFromRouter(r)
+	if err != nil {
+		t.Fatalf("build openapi spec: %v", err)
+	}
+	var spec map[string]any
+	if err := json.Unmarshal(specJSON, &spec); err != nil {
+		t.Fatalf("decode openapi spec: %v", err)
+	}
+	return spec["components"].(map[string]any)["schemas"].(map[string]any)
+}
+
+func TestOpenAPIBuiltinSkillIncludesOptionalProvider(t *testing.T) {
+	schemas := generatedOpenAPISchemas(t)
+	schema := schemas["builtinSkillOpenAPIResponse"].(map[string]any)
+	properties := schema["properties"].(map[string]any)
+	provider, ok := properties["provider"].(map[string]any)
+	if !ok || provider["type"] != "string" {
+		t.Fatalf("builtin provider = %#v, want optional string", properties["provider"])
+	}
+	for _, name := range schema["required"].([]any) {
+		if name == "provider" {
+			t.Fatal("builtin provider must remain optional for old catalogs")
+		}
+	}
 }
 
 func TestOpenAPISpecIncludesMCPOperations(t *testing.T) {

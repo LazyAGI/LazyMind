@@ -44,8 +44,32 @@ type options struct {
 type sourceList struct {
 	SchemaVersion int             `yaml:"schema_version"`
 	PatchCatalog  string          `yaml:"patch_catalog,omitempty"`
-	Skills        []string        `yaml:"skills"`
+	Skills        []remoteSource  `yaml:"skills"`
 	BundledSkills []bundledSource `yaml:"bundled_skills,omitempty"`
+}
+
+type remoteSource struct {
+	SourceURL string `yaml:"source_url"`
+	Provider  string `yaml:"provider,omitempty"`
+}
+
+func (source *remoteSource) UnmarshalYAML(node *yaml.Node) error {
+	if node.Kind == yaml.ScalarNode {
+		source.SourceURL = node.Value
+		return nil
+	}
+	if node.Kind != yaml.MappingNode {
+		return bundleFailure("skill source must be a URL string or mapping")
+	}
+	for index := 0; index < len(node.Content); index += 2 {
+		switch node.Content[index].Value {
+		case "source_url", "provider":
+		default:
+			return bundleFailure("skill source field %s is not supported", node.Content[index].Value)
+		}
+	}
+	type rawRemoteSource remoteSource
+	return node.Decode((*rawRemoteSource)(source))
 }
 
 type bundledSource struct {
@@ -53,6 +77,7 @@ type bundledSource struct {
 	Path     string `yaml:"path"`
 	Category string `yaml:"category"`
 	Version  string `yaml:"version"`
+	Provider string `yaml:"provider,omitempty"`
 }
 
 type sourceSpec struct {
@@ -64,6 +89,7 @@ type sourceSpec struct {
 	UID          string
 	Category     string
 	Version      string
+	Provider     string
 	LocalPath    string
 }
 
@@ -72,6 +98,7 @@ type sourceInput struct {
 	Bundled       *bundledSource
 	MarketVisible bool
 	FallbackName  string
+	Provider      string
 }
 
 type packageMeta struct {
@@ -145,8 +172,8 @@ func run(ctx context.Context, opts options, client *http.Client) error {
 		seenSources[bundledSourceURL(source.Path)] = struct{}{}
 	}
 	for _, source := range ordinarySources.Skills {
-		sources = append(sources, sourceInput{URL: source, MarketVisible: true})
-		seenSources[source] = struct{}{}
+		sources = append(sources, sourceInput{URL: source.SourceURL, MarketVisible: true, Provider: source.Provider})
+		seenSources[source.SourceURL] = struct{}{}
 	}
 	var featuredDefinitions []showcase.FeaturedDefinition
 	featuredCount := 0
@@ -363,8 +390,9 @@ func loadSources(path string) (sourceList, error) {
 		raw.PatchCatalog = cleaned
 	}
 	seenSources := make(map[string]struct{}, len(raw.Skills)+len(raw.BundledSkills))
-	for index, value := range raw.Skills {
-		source := strings.TrimSpace(value)
+	for index := range raw.Skills {
+		entry := &raw.Skills[index]
+		source := strings.TrimSpace(entry.SourceURL)
 		if source == "" {
 			return sourceList{}, bundleFailure("source URL cannot be empty")
 		}
@@ -372,7 +400,12 @@ func loadSources(path string) (sourceList, error) {
 			return sourceList{}, bundleFailure("duplicate source URL %s", source)
 		}
 		seenSources[source] = struct{}{}
-		raw.Skills[index] = source
+		provider, err := skillbuiltin.NormalizeProviderName(entry.Provider)
+		if err != nil {
+			return sourceList{}, bundleFailure("source %s: %v", source, err)
+		}
+		entry.SourceURL = source
+		entry.Provider = provider
 	}
 	seenUIDs := make(map[string]struct{}, len(raw.BundledSkills))
 	for index := range raw.BundledSkills {
@@ -381,6 +414,11 @@ func loadSources(path string) (sourceList, error) {
 		source.Path = filepath.ToSlash(strings.TrimSpace(source.Path))
 		source.Category = strings.TrimSpace(source.Category)
 		source.Version = strings.TrimSpace(source.Version)
+		provider, err := skillbuiltin.NormalizeProviderName(source.Provider)
+		if err != nil {
+			return sourceList{}, bundleFailure("bundled skill %d: %v", index, err)
+		}
+		source.Provider = provider
 		cleanedPath, err := skillpackage.CleanPath(source.Path)
 		if err != nil || source.UID == "" || source.Category == "" || source.Version == "" {
 			return sourceList{}, bundleFailure("bundled skill %d requires a valid uid, path, category, and version", index)
@@ -406,6 +444,7 @@ func resolveSourceInput(source sourceInput, sourcesRoot string) (sourceSpec, err
 			return sourceSpec{}, err
 		}
 		spec.FallbackName = source.FallbackName
+		spec.Provider = source.Provider
 		return spec, nil
 	}
 	localPath := filepath.Join(sourcesRoot, filepath.FromSlash(source.Bundled.Path))
@@ -418,6 +457,7 @@ func resolveSourceInput(source sourceInput, sourcesRoot string) (sourceSpec, err
 		SourceURL: sourceURL, ResolvedURL: sourceURL, Identity: sourceURL,
 		Key: filepath.Base(source.Bundled.Path), UID: source.Bundled.UID,
 		Category: source.Bundled.Category, Version: source.Bundled.Version,
+		Provider:  source.Bundled.Provider,
 		LocalPath: localPath, FallbackName: source.FallbackName,
 	}, nil
 }
@@ -621,6 +661,7 @@ func inspectEntry(spec sourceSpec, archivePath string, files map[string][]byte, 
 		Description:   resolved.Description,
 		Category:      category,
 		Tags:          resolved.Tags,
+		Provider:      spec.Provider,
 		Content:       string(resolved.Content),
 		ArchiveSHA256: hash,
 		TreeSHA256:    treeHash,
@@ -807,7 +848,7 @@ func materializeFrozen(ctx context.Context, client *http.Client, spec sourceSpec
 }
 
 func validateFrozenEntry(current, locked skillbuiltin.CatalogSkill) error {
-	if current.UID != locked.UID || current.Version != locked.Version || current.ArchiveSHA256 != locked.ArchiveSHA256 || current.TreeSHA256 != locked.TreeSHA256 || current.ArchiveSize != locked.ArchiveSize {
+	if current.UID != locked.UID || current.Version != locked.Version || current.Provider != locked.Provider || current.ArchiveSHA256 != locked.ArchiveSHA256 || current.TreeSHA256 != locked.TreeSHA256 || current.ArchiveSize != locked.ArchiveSize {
 		return bundleFailure("final package metadata changed")
 	}
 	if current.OriginArchiveSHA256 != locked.OriginArchiveSHA256 || current.OriginTreeSHA256 != locked.OriginTreeSHA256 || current.OriginArchiveSize != locked.OriginArchiveSize || current.PatchSetSHA256 != locked.PatchSetSHA256 {
