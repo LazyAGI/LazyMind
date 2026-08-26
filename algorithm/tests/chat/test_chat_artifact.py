@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from lazymind.chat.engine.tools import chat_artifact
+from lazymind.chat.engine.tools.local_file import workspace as chat_artifact
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 
 
@@ -100,7 +100,7 @@ def test_workspace_file_tools_share_chat_agent_workspace(tmp_path, monkeypatch):
     workspace = Path(chat_artifact.chat_agent_workspace('user-1', 'conversation-1'))
     assert written['status'] == 'ok'
     assert Path(written['path']) == workspace / 'bid_output' / 'outline.json'
-    assert loaded['content'] == '{"chapters": []}'
+    assert '{"chapters": []}' in loaded['result']['text']
     assert listing['entries'] == ['outline.json']
 
 

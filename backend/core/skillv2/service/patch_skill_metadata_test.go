@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"gorm.io/gorm"
+
+	skillmetadata "lazymind/core/skillv2/metadata"
 )
 
 func TestPatchSkillMetadata_RewritesSkillFrontmatter(t *testing.T) {
@@ -72,6 +74,40 @@ func TestPatchSkillMetadata_RewritesSkillFrontmatter(t *testing.T) {
 	}
 	if !strings.HasSuffix(file.Content, "# 论文精读\n") {
 		t.Fatalf("body changed: %q", file.Content)
+	}
+}
+
+func TestPatchSkillMetadata_RejectsTooLongMetadata(t *testing.T) {
+	for name, req := range map[string]PatchSkillRequest{
+		"name": {
+			Name: stringPtr(strings.Repeat("a", skillmetadata.MaxSkillNameLength+1)),
+		},
+		"description": {
+			Description: stringPtr(strings.Repeat("a", skillmetadata.MaxSkillDescriptionLength+1)),
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			db := newSkillV2TestDB(t)
+			seedSkillWithHeadRevision(t, db, "skill1", "rev1")
+			svc := NewSkillService(SkillServiceDeps{
+				DB:        db,
+				BlobStore: NewBlobStore(db, NewLocalObjectStore(t.TempDir())),
+				Clock:     fixedClock(),
+			})
+			req.SkillID = "skill1"
+			req.UserID = "user_001"
+
+			_, err := svc.PatchSkill(context.Background(), req)
+			if err == nil {
+				t.Fatal("PatchSkill succeeded")
+			}
+			if !strings.Contains(err.Error(), "cannot exceed") {
+				t.Fatalf("PatchSkill error = %v, want cannot exceed", err)
+			}
+			if got := countRows(t, db, "skill_revisions", "skill_id = ?", "skill1"); got != 1 {
+				t.Fatalf("skill_revisions count = %d, want 1", got)
+			}
+		})
 	}
 }
 

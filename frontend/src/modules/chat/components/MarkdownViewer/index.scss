@@ -160,6 +160,15 @@
   background: var(--color-canvas-default);
 }
 
+.md-editable-block {
+  overflow: hidden;
+  border: 1px solid var(--color-border-muted);
+  border-radius: 12px;
+  margin: 12px 0 16px;
+  background: var(--color-canvas-default);
+
+}
+
 .md-html-block {
   margin: 12px 0 16px;
   border-radius: 12px;

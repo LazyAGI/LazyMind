@@ -8,6 +8,7 @@ import DefaultModelConfigPanel, {
 interface DefaultServicesPageProps {
   onConfigureCloudService: (service: CloudServiceSlotKey) => void;
   onConfigureProviders: () => void;
+  onModelSelectionChanged: () => void | Promise<void>;
 }
 
 interface SetupAvailability {
@@ -25,6 +26,7 @@ const loadingSetupAvailability: SetupAvailability = {
 export default function DefaultServicesPage({
   onConfigureCloudService,
   onConfigureProviders,
+  onModelSelectionChanged,
 }: DefaultServicesPageProps) {
   const [setupAvailability, setSetupAvailability] = useState<SetupAvailability>(loadingSetupAvailability);
   const latestRequest = useRef(0);
@@ -69,6 +71,7 @@ export default function DefaultServicesPage({
         modelProviderSetupState={setupAvailability.modelProvider}
         onConfigureCloudService={onConfigureCloudService}
         onConfigureProviders={onConfigureProviders}
+        onModelSelectionChanged={onModelSelectionChanged}
         onRetrySetup={() => void checkSetupAvailability()}
       />
     </div>

@@ -15,6 +15,20 @@ interface RenderPdfProps {
   className?: string;
   style?: React.CSSProperties;
   gapBackground?: string;
+  onAskSelection?: (selection: PdfTextSelection) => void;
+  askSelectionLabel?: string;
+}
+
+export interface PdfTextSelection {
+  text: string;
+  page: number;
+  bbox?: [number, number, number, number];
+}
+
+interface SelectionAction {
+  selection: PdfTextSelection;
+  left: number;
+  top: number;
 }
 
 const GAP = 20;
@@ -33,6 +47,8 @@ export default function RenderPdf({
   className,
   gapBackground = GAP_BACKGROUND,
   style,
+  onAskSelection,
+  askSelectionLabel = "向 LazyMind 提问",
 }: RenderPdfProps) {
   const [numPages, setNumPages] = useState(1);
   const [pdfLoaded, setPdfLoaded] = useState(false);
@@ -43,6 +59,8 @@ export default function RenderPdf({
   >({});
   const pageRefs = useRef<(HTMLDivElement | null)[]>([]);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const [selectionAction, setSelectionAction] =
+    useState<SelectionAction | null>(null);
 
   const [viewportHeight, setViewportHeight] = useState(0);
   const [containerWidth, setContainerWidth] = useState(0);
@@ -94,6 +112,53 @@ export default function RenderPdf({
       return;
     }
     setScrollTop(containerRef.current.scrollTop);
+    setSelectionAction(null);
+  };
+
+  const updateSelectionAction = () => {
+    if (!onAskSelection || !containerRef.current) {
+      return;
+    }
+    const selection = window.getSelection();
+    const text = selection?.toString().trim() || "";
+    if (!selection || selection.rangeCount === 0 || selection.isCollapsed || !text) {
+      setSelectionAction(null);
+      return;
+    }
+    const range = selection.getRangeAt(0);
+    if (!containerRef.current.contains(range.commonAncestorContainer)) {
+      setSelectionAction(null);
+      return;
+    }
+    const selectionRect = range.getBoundingClientRect();
+    const startElement = range.startContainer instanceof Element
+      ? range.startContainer
+      : range.startContainer.parentElement;
+    const pageElement = startElement?.closest<HTMLElement>("[data-pdf-page-index]");
+    const selectedPageIndex = Number(pageElement?.dataset.pdfPageIndex ?? 0);
+    const pageRect = pageElement?.getBoundingClientRect();
+    const pageSize = pageSizesMap[selectedPageIndex];
+    let bbox: PdfTextSelection["bbox"];
+    if (pageRect && pageSize && pageRect.width > 0 && pageRect.height > 0) {
+      const scaleX = pageSize.width / pageRect.width;
+      const scaleY = pageSize.height / pageRect.height;
+      bbox = [
+        Math.max(0, selectionRect.left - pageRect.left) * scaleX,
+        Math.max(0, selectionRect.top - pageRect.top) * scaleY,
+        Math.min(pageRect.width, selectionRect.right - pageRect.left) * scaleX,
+        Math.min(pageRect.height, selectionRect.bottom - pageRect.top) * scaleY,
+      ];
+    }
+    const containerRect = containerRef.current.getBoundingClientRect();
+    setSelectionAction({
+      selection: { text, page: selectedPageIndex + 1, bbox },
+      left: containerRef.current.scrollLeft + Math.min(
+        Math.max(selectionRect.left - containerRect.left + selectionRect.width / 2, 72),
+        containerRect.width - 72,
+      ),
+      top: containerRef.current.scrollTop
+        + Math.max(selectionRect.top - containerRect.top - 44, 8),
+    });
   };
 
   const pageHeightsPx = useMemo(() => {
@@ -381,6 +446,7 @@ export default function RenderPdf({
     return (
       <div
         key={`page_${index + 1}`}
+        data-pdf-page-index={index}
         ref={(el) => (pageRefs.current[index] = el)}
         style={{
           position: "absolute",
@@ -397,7 +463,7 @@ export default function RenderPdf({
         <Page
           pageNumber={index + 1}
           width={pageWidthPx}
-          renderTextLayer={false}
+          renderTextLayer={Boolean(onAskSelection)}
           renderAnnotationLayer={false}
           onRenderSuccess={() => {
             tryHighlightAfterRender(index);
@@ -451,6 +517,7 @@ export default function RenderPdf({
       className={className}
       ref={containerRef}
       onScroll={onScroll}
+      onMouseUp={updateSelectionAction}
       style={{
         overflow: "auto",
         height: "calc(100vh - 220px)",
@@ -459,6 +526,36 @@ export default function RenderPdf({
         ...style,
       }}
     >
+      {selectionAction ? (
+        <button
+          type="button"
+          aria-label={askSelectionLabel}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => {
+            onAskSelection?.(selectionAction.selection);
+            window.getSelection()?.removeAllRanges();
+            setSelectionAction(null);
+          }}
+          style={{
+            position: "absolute",
+            zIndex: 30,
+            left: selectionAction.left,
+            top: selectionAction.top,
+            transform: "translateX(-50%)",
+            border: 0,
+            borderRadius: 8,
+            padding: "8px 12px",
+            background: "#1677ff",
+            color: "#fff",
+            boxShadow: "0 4px 16px rgba(0, 0, 0, 0.2)",
+            cursor: "pointer",
+            fontSize: 13,
+            whiteSpace: "nowrap",
+          }}
+        >
+          {askSelectionLabel}
+        </button>
+      ) : null}
       <Document
         file={fileData}
         renderMode={renderMode}

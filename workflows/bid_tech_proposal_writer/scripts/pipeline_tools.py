@@ -24,6 +24,7 @@ ILLEGAL_TITLE = re.compile(r'[\\/:*?"<>|\r\n\t]')
 HAN = re.compile(r'[\u3400-\u4dbf\u4e00-\u9fff]')
 REQ_ID = re.compile(r'\b(?:BG|FUNC|PERF|SEC|SVC|IMPL)-\d{3}\b')
 DISQ_ID = re.compile(r'\bD-\d{3}\b')
+MARKDOWN_HEADING = re.compile(r'^(#{1,6})\s+(.+?)\s*$')
 NUMBER_PATTERN = re.compile(
     r'(?:[<>≤≥]=?\s*)?\d+(?:\.\d+)?\s*(?:%|秒|毫秒|分钟|小时|天|个|人|台|套|年|月|'
     r'MB|GB|TB|Mbps|Gbps|TPS|QPS|万元|元|级|次|并发|工作日)?', re.I,
@@ -466,15 +467,27 @@ def extract_disqualification_items(raw_text: str) -> dict[str, Any]:
 
 
 def _json_object(value: Any, name: str) -> dict[str, Any]:
-    if isinstance(value, dict):
-        return json.loads(json.dumps(value, ensure_ascii=False))
-    try:
-        parsed = json.loads(str(value))
-    except (TypeError, json.JSONDecodeError) as exc:
-        raise ValueError(f'{name} must be a valid JSON object.') from exc
-    if not isinstance(parsed, dict):
-        raise ValueError(f'{name} must be a JSON object.')
-    return parsed
+    current = value
+    for _ in range(5):
+        if isinstance(current, dict):
+            nested = next((
+                current[key] for key in ('data', 'outline', 'normalized_outline')
+                if key in current
+            ), current)
+            if nested is current:
+                return json.loads(json.dumps(current, ensure_ascii=False))
+            current = nested
+            continue
+        text = re.sub(
+            r'^```(?:json)?\s*|\s*```$', '', str(current or '').strip(), flags=re.I,
+        )
+        if not text:
+            break
+        try:
+            current = json.loads(text)
+        except (TypeError, json.JSONDecodeError) as exc:
+            raise ValueError(f'{name} must be a valid JSON object.') from exc
+    raise ValueError(f'{name} must be a JSON object.')
 
 
 def _target_number(value: Any) -> int:
@@ -539,7 +552,7 @@ def normalize_bid_parameters(output_format: str, word_target: str,
 
 def _walk_chapters(chapters: list[Any], parent_number: str = '', expected_level: int = 1,
                    ancestry: tuple[str, ...] = ()) -> Iterable[tuple[dict[str, Any], tuple[str, ...]]]:
-    for index, raw in enumerate(chapters, 1):
+    for raw in chapters:
         if not isinstance(raw, dict):
             continue
         yield raw, ancestry
@@ -588,25 +601,33 @@ def validate_and_allocate_outline(outline_json: str, requirements_markdown: str,
                 'errors': ['chapters must be a non-empty list'], 'warnings': []}
     errors: list[str] = []
     warnings: list[str] = []
-    expected_numbers: dict[int, int] = {}
 
     def visit(nodes: list[Any], parent: str = '', level: int = 1) -> None:
         for index, raw in enumerate(nodes, 1):
             if not isinstance(raw, dict):
-                errors.append(f'{parent or "root"} 第 {index} 项不是对象')
-                continue
+                raw = {'title': str(raw or '').strip() or f'章节{index}', 'children': []}
+                nodes[index - 1] = raw
+                warnings.append(f'{parent or "root"} 第 {index} 项已从标量修复为章节对象')
             number = str(index) if not parent else f'{parent}.{index}'
-            raw_level = int(raw.get('level') or level)
+            try:
+                raw_level = int(raw.get('level') or level)
+            except (TypeError, ValueError):
+                raw_level = level
             raw_number = str(raw.get('number') or number)
-            title = re.sub(r'\s+', '', str(raw.get('title') or ''))
+            title = re.sub(r'\s+', ' ', str(raw.get('title') or '')).strip()
             if raw_level != level or level > 4:
-                errors.append(f'{raw_number or number} level 应为 {level} 且不得超过 4')
+                warnings.append(f'{raw_number or number} level 已归一化为 {min(level, 4)}')
             if raw_number != number:
-                errors.append(f'{raw_number or "(空)"} 编号应为 {number}')
+                warnings.append(f'{raw_number or "(空)"} 编号已归一化为 {number}')
             if not title:
-                errors.append(f'{number} 标题为空')
-            elif ILLEGAL_TITLE.search(title) or len(title) >= 10:
-                errors.append(f'{number} 标题“{title}”必须少于 10 字且无非法字符')
+                title = f'章节{number}'
+                warnings.append(f'{number} 空标题已自动补全')
+            cleaned_title = ILLEGAL_TITLE.sub(' ', title).strip()
+            if cleaned_title != title:
+                warnings.append(f'{number} 标题中的非法字符已替换')
+            if len(cleaned_title) >= 10:
+                warnings.append(f'{number} 标题“{cleaned_title}”较长，但不阻断执行')
+            title = cleaned_title or f'章节{number}'
             raw['level'], raw['number'], raw['title'] = level, number, title
             raw.setdefault('bid_requirements_refs', [])
             raw.setdefault('disqualification_refs', [])
@@ -614,15 +635,19 @@ def validate_and_allocate_outline(outline_json: str, requirements_markdown: str,
             if children is None:
                 raw['children'] = []
             elif not isinstance(children, list):
-                errors.append(f'{number} children 必须是数组')
+                warnings.append(f'{number} children 不是数组，已按叶子章节处理')
                 raw['children'] = []
             elif children:
-                visit(children, number, level + 1)
+                if level >= 4:
+                    warnings.append(f'{number} 超过四级的子章节已提升并合并到第四级')
+                    raw['children'] = []
+                else:
+                    visit(children, number, level + 1)
 
     visit(chapters)
     leaves = _leaves(chapters)
     if len(leaves) > 30:
-        errors.append(f'叶子章节 {len(leaves)} 个，超过 30 个上限')
+        warnings.append(f'叶子章节 {len(leaves)} 个，超过建议上限 30，但不阻断执行')
     if len(leaves) < 3:
         warnings.append(f'叶子章节仅 {len(leaves)} 个，正文颗粒度可能不足')
 
@@ -663,26 +688,59 @@ def validate_and_allocate_outline(outline_json: str, requirements_markdown: str,
     for leaf in leaves:
         req_refs = leaf.get('bid_requirements_refs')
         disq_refs = leaf.get('disqualification_refs')
-        if not isinstance(req_refs, list) or not all(isinstance(item, str) for item in req_refs):
-            errors.append(f"{leaf.get('number')} bid_requirements_refs 必须是字符串数组")
-            req_refs = []
-        if not isinstance(disq_refs, list) or not all(isinstance(item, str) for item in disq_refs):
-            errors.append(f"{leaf.get('number')} disqualification_refs 必须是字符串数组")
-            disq_refs = []
+        if not isinstance(req_refs, list):
+            req_refs = REQ_ID.findall(str(req_refs or ''))
+            warnings.append(f"{leaf.get('number')} 技术要求引用已归一化为数组")
+        if not isinstance(disq_refs, list):
+            disq_refs = DISQ_ID.findall(str(disq_refs or ''))
+            warnings.append(f"{leaf.get('number')} 废标引用已归一化为数组")
+        req_refs = list(dict.fromkeys(
+            ref for item in req_refs for ref in REQ_ID.findall(str(item or ''))
+        ))
+        disq_refs = list(dict.fromkeys(
+            ref for item in disq_refs for ref in DISQ_ID.findall(str(item or ''))
+        ))
         unknown_req = set(req_refs) - required_ids
         unknown_disq = set(disq_refs) - disq_ids
         if unknown_req:
-            errors.append(f"{leaf.get('number')} 引用了不存在的需求 ID：{', '.join(sorted(unknown_req))}")
+            warnings.append(
+                f"{leaf.get('number')} 已移除不存在的需求 ID：{', '.join(sorted(unknown_req))}"
+            )
         if unknown_disq:
-            errors.append(f"{leaf.get('number')} 引用了不存在的废标 ID：{', '.join(sorted(unknown_disq))}")
+            warnings.append(
+                f"{leaf.get('number')} 已移除不存在的废标 ID：{', '.join(sorted(unknown_disq))}"
+            )
+        req_refs = [ref for ref in req_refs if ref in required_ids]
+        disq_refs = [ref for ref in disq_refs if ref in disq_ids]
+        leaf['bid_requirements_refs'] = req_refs
+        leaf['disqualification_refs'] = disq_refs
         mapped_req.update(req_refs)
         mapped_disq.update(disq_refs)
     missing_req = sorted(required_ids - mapped_req)
     missing_disq = sorted(disq_ids - mapped_disq)
-    if missing_req:
-        errors.append('未映射技术要求 ID：' + ', '.join(missing_req))
-    if missing_disq:
-        errors.append('未映射废标 ID：' + ', '.join(missing_disq))
+    if leaves:
+        def assign(refs: list[str], field: str) -> None:
+            for ref in refs:
+                prefix = ref.split('-', 1)[0]
+                keywords = next((item[2] for item in TOPICS if item[0] == prefix), ())
+                ranked = sorted(
+                    enumerate(leaves),
+                    key=lambda item: (
+                        -sum(word in str(item[1].get('title') or '') for word in keywords),
+                        len(item[1].get(field) or []), item[0],
+                    ),
+                )
+                selected = ranked[0][1]
+                selected.setdefault(field, []).append(ref)
+
+        if missing_req:
+            assign(missing_req, 'bid_requirements_refs')
+            warnings.append('未映射技术要求 ID 已按章节语义自动分配：' + ', '.join(missing_req))
+        if missing_disq:
+            assign(missing_disq, 'disqualification_refs')
+            warnings.append('未映射废标 ID 已自动分配至最相关章节：' + ', '.join(missing_disq))
+        mapped_req.update(missing_req)
+        mapped_disq.update(missing_disq)
 
     valid = not errors
     lines = ['# 大纲检查报告', '', f"## {'PASS' if valid else 'FAIL'}", '',
@@ -991,6 +1049,96 @@ def _workflow_artifact_payload(path: str) -> Any:
         if 'text' in value:
             return value['text']
     return value
+
+
+def _bid_outline_from_markdown(markdown: str, fallback_title: str) -> dict[str, Any]:
+    """Project editable Markdown onto the bid outline schema deterministically."""
+    headings = [
+        (len(match.group(1)), match.group(2).strip())
+        for line in str(markdown or '').splitlines()
+        if (match := MARKDOWN_HEADING.match(line.strip()))
+    ]
+    if headings and headings[0][0] == 1:
+        document_title = headings[0][1]
+        body = headings[1:]
+    else:
+        document_title = str(fallback_title or '投标技术方案').strip()
+        body = headings
+    if not body:
+        body = [(2, title) for title in (
+            '项目理解', '需求分析', '总体架构', '功能设计',
+            '安全设计', '实施交付', '运维服务', '验收方案',
+        )]
+
+    base = min(level for level, _ in body)
+    roots: list[dict[str, Any]] = []
+    stack: list[dict[str, Any]] = []
+    previous_level = 1
+    for raw_level, raw_title in body:
+        level = min(4, max(1, raw_level - base + 1), previous_level + 1)
+        previous_level = level
+        title = re.sub(r'^\s*(?:第[^章]{1,8}章|\d+(?:\.\d+)*[、.．]?)\s*', '', raw_title)
+        title = ILLEGAL_TITLE.sub(' ', title).strip() or f'章节{len(roots) + 1}'
+        node: dict[str, Any] = {
+            'title': title,
+            'level': level,
+            'number': '',
+            'target_words': 1,
+            'bid_requirements_refs': [],
+            'disqualification_refs': [],
+            'children': [],
+        }
+        while len(stack) >= level:
+            stack.pop()
+        if level == 1 or not stack:
+            node['level'] = 1
+            roots.append(node)
+            stack = [node]
+        else:
+            stack[-1]['children'].append(node)
+            stack.append(node)
+
+    return {
+        '$schema': 'bid-tech-proposal/outline.schema.json',
+        'project_name': document_title,
+        'project_full_name': document_title,
+        'color_scheme': 'blue',
+        'chapters': roots,
+    }
+
+
+def normalize_bid_outline_from_inputs(outline_document_path: str) -> dict[str, Any]:
+    """Normalize the approved outline using bound input paths, not model-copied JSON.
+
+    This wrapper keeps large requirement bodies and machine JSON outside the SubAgent
+    prompt. Markdown headings are the sole structural source of truth; trace IDs and word
+    allocations are deterministically rebuilt from the current Attempt inputs.
+    """
+    from lazymind.chat.engine.subagent.context import require_context
+
+    inputs = require_context().params.get('remote_inputs') or {}
+    required = ['technical_requirements', 'disqualification_items', 'generation_parameters']
+    missing = [slot for slot in required if not str(inputs.get(slot) or '').strip()]
+    if missing:
+        raise ValueError('Required outline input paths are missing: ' + ', '.join(missing))
+    parameters = _workflow_artifact_payload(inputs['generation_parameters'])
+    if not isinstance(parameters, dict):
+        parameters = _json_object(parameters, 'generation_parameters')
+    markdown = str(_workflow_artifact_payload(outline_document_path) or '')
+    candidate = _bid_outline_from_markdown(
+        markdown,
+        str(parameters.get('project_name') or parameters.get('project_full_name') or ''),
+    )
+    return validate_and_allocate_outline(
+        outline_json=candidate,
+        requirements_markdown=str(
+            _workflow_artifact_payload(inputs['technical_requirements']) or ''
+        ),
+        disqualification_markdown=str(
+            _workflow_artifact_payload(inputs['disqualification_items']) or ''
+        ),
+        word_target=str(parameters.get('word_target') or ''),
+    )
 
 
 def validate_proposal_from_inputs() -> dict[str, Any]:

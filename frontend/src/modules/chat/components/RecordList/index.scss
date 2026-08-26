@@ -115,6 +115,13 @@
 
     cursor: pointer;
 
+    .record-source-icon {
+      flex: 0 0 auto;
+      margin-left: 5px;
+      color: var(--color-primary);
+      font-size: 13px;
+    }
+
     &::before {
       position: absolute;
       left: 4px;

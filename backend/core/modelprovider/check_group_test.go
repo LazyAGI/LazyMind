@@ -34,10 +34,26 @@ func TestCheckGroupRequiresRequestAPIKey(t *testing.T) {
 			wantStatus:  http.StatusBadRequest,
 		},
 		{
+			name:        "omitted key is rejected for custom base url",
+			requestBody: `{"provider_name":"Qwen","base_url":"https://models.example.com/v1","dry_run":false}`,
+			wantStatus:  http.StatusBadRequest,
+		},
+		{
+			name:        "empty key is rejected for custom base url",
+			requestBody: `{"provider_name":"Qwen","base_url":"https://models.example.com/v1","api_key":"","dry_run":false}`,
+			wantStatus:  http.StatusBadRequest,
+		},
+		{
 			name:        "provided key takes precedence",
 			requestBody: `{"provider_name":"Qwen","base_url":"https://dashscope.aliyuncs.com/","api_key":"request-key","dry_run":false}`,
 			wantStatus:  http.StatusOK,
 			wantAPIKey:  "request-key",
+		},
+		{
+			name:        "provided key verifies a custom base url",
+			requestBody: `{"provider_name":"Qwen","base_url":"https://models.example.com/v1","api_key":"custom-request-key","dry_run":false}`,
+			wantStatus:  http.StatusOK,
+			wantAPIKey:  "custom-request-key",
 		},
 	}
 

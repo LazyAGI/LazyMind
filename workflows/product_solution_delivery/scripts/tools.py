@@ -29,13 +29,15 @@ STAGE_SKILLS = {
 STAGE_ORDER = tuple(STAGE_SKILLS)
 TEXT_STAGES = {"direction", "design", "prd", "review", "handoff"}
 STAGE_ALIASES = {
-    "direction": {"direction", "产品方向", "方向梳理"},
-    "competitive": {"competitive", "competitor", "竞品", "竞品与生态位", "生态位"},
-    "design": {"design", "产品方案", "产品设计", "方案设计"},
-    "prd": {"prd", "需求文档"},
-    "prototype": {"prototype", "交互原型", "原型"},
-    "review": {"review", "方案评审", "产品评审", "评审"},
-    "handoff": {"handoff", "研发交付", "开发交付"},
+    "direction": {"direction", "shape-product-direction", "产品方向", "方向梳理"},
+    "competitive": {
+        "competitive", "competitor", "analyze-competitors", "竞品", "竞品与生态位", "生态位",
+    },
+    "design": {"design", "product-design-full-cycle", "产品方案", "产品设计", "方案设计"},
+    "prd": {"prd", "write-prd", "需求文档"},
+    "prototype": {"prototype", "build-product-prototype", "交互原型", "原型"},
+    "review": {"review", "review-product-artifact", "方案评审", "产品评审", "评审"},
+    "handoff": {"handoff", "prepare-development-handoff", "研发交付", "开发交付"},
 }
 ROUTER_REFERENCES = (
     "references/stage-registry.md",
@@ -1340,21 +1342,24 @@ def normalize_product_parameters(
 
 def load_product_skill_contract(
     stage_id: str,
-    include_source_snapshots: bool = False,
 ) -> dict[str, Any]:
-    """Load the exact packaged router or stage contract without calling a model."""
+    """Load one compact packaged router or stage contract without calling a model."""
 
-    normalized = str(stage_id or "").strip().lower()
+    raw_stage = str(stage_id or "").strip().lower().replace("_", "-")
+    normalized = next((
+        key for key, aliases in STAGE_ALIASES.items() if raw_stage in aliases
+    ), raw_stage)
     if normalized not in {"router", *STAGE_SKILLS}:
         raise ValueError(f"Unsupported stage_id: {stage_id!r}")
 
     resources = _resource_files()
-    paths = ["SKILL.md", *ROUTER_REFERENCES]
     skill_name = "product-solution-delivery"
-    if normalized != "router":
+    if normalized == "router":
+        paths = ["SKILL.md", *ROUTER_REFERENCES]
+    else:
         skill_name = STAGE_SKILLS[normalized]
         child_prefix = f"children/{skill_name}"
-        paths.append(f"{child_prefix}/SKILL.md")
+        paths = [f"{child_prefix}/SKILL.md"]
         references = sorted(
             path
             for path in resources
@@ -1362,7 +1367,7 @@ def load_product_skill_contract(
         )
         for path in references:
             relative_parts = Path(path).parts
-            if not include_source_snapshots and "source-snapshots" in relative_parts:
+            if "source-snapshots" in relative_parts:
                 continue
             paths.append(path)
 
@@ -1388,6 +1393,123 @@ def load_product_skill_contract(
             else "embedded://product-solution-delivery"
         ),
         "contract_text": "".join(sections).lstrip(),
+    }
+
+
+PRODUCT_STAGE_INPUT_SLOTS = {
+    "competitive": (
+        "execution_plan", "research_evidence", "material_digest", "direction_document",
+    ),
+    "prototype": ("execution_plan", "material_digest", "design_document", "prd_document"),
+    "delivery": (
+        "execution_plan", "direction_document", "competitive_analysis", "design_document",
+        "prd_document", "prototype", "review_document", "handoff_document",
+    ),
+}
+
+
+def _bound_artifact_payload(value: Any) -> Any:
+    current = value
+    for _ in range(5):
+        if isinstance(current, dict):
+            nested = next((
+                current[key] for key in ("data", "text") if key in current
+            ), current)
+            if nested is current:
+                return current
+            current = nested
+            continue
+        if isinstance(current, list):
+            return current
+        text = str(current or "").strip()
+        if not text:
+            return ""
+        try:
+            candidate = Path(text).expanduser().resolve()
+            if candidate.is_file():
+                current = candidate.read_text(encoding="utf-8")
+                continue
+        except OSError:
+            pass
+        try:
+            current = json.loads(text)
+        except json.JSONDecodeError:
+            return text
+    return current
+
+
+def _bound_artifact_descriptor(value: Any) -> dict[str, Any]:
+    """Describe a delivery input without loading its potentially large document body."""
+    current = value
+    descriptor: dict[str, Any] = {"present": True}
+    for _ in range(6):
+        if isinstance(current, dict):
+            for key in ("filename", "content_type", "seq", "revision", "version"):
+                if current.get(key) not in (None, ""):
+                    descriptor[key] = current[key]
+            if current.get("path"):
+                current = current["path"]
+                continue
+            nested = next((
+                current[key] for key in ("value", "data", "text") if key in current
+            ), None)
+            if nested is None:
+                descriptor.setdefault("content_type", "json")
+                descriptor["size_bytes"] = len(json.dumps(current, ensure_ascii=False))
+                return descriptor
+            current = nested
+            continue
+        if isinstance(current, list):
+            descriptor.setdefault("content_type", "list")
+            descriptor["item_count"] = len(current)
+            return descriptor
+        text = str(current or "").strip()
+        try:
+            candidate = Path(text).expanduser().resolve()
+            if candidate.is_file():
+                descriptor.setdefault("filename", candidate.name)
+                descriptor.setdefault("content_type", candidate.suffix.lstrip(".") or "file")
+                descriptor["size_bytes"] = candidate.stat().st_size
+                return descriptor
+        except OSError:
+            pass
+        descriptor.setdefault("content_type", "text")
+        descriptor["size_bytes"] = len(text.encode("utf-8"))
+        return descriptor
+    descriptor.setdefault("content_type", "unknown")
+    return descriptor
+
+
+def load_product_stage_inputs(stage_id: str) -> dict[str, Any]:
+    """Read only the immutable materials bound to one non-Writer product stage."""
+    raw = str(stage_id or "").strip().lower().replace("_", "-")
+    normalized = next((
+        key for key, aliases in STAGE_ALIASES.items() if raw in aliases
+    ), raw)
+    if normalized not in PRODUCT_STAGE_INPUT_SLOTS:
+        raise ValueError(
+            "stage_id must be competitive, prototype, or delivery for bound material loading"
+        )
+    context = require_context()
+    remote = (context.params or {}).get("remote_inputs") or {}
+    if not isinstance(remote, dict):
+        remote = {}
+    materials = {
+        slot: (
+            _bound_artifact_descriptor(remote[slot])
+            if normalized == "delivery" and slot != "execution_plan"
+            else _bound_artifact_payload(remote[slot])
+        )
+        for slot in PRODUCT_STAGE_INPUT_SLOTS[normalized]
+        if remote.get(slot) not in (None, "", [])
+    }
+    return {
+        "stage_id": normalized,
+        "materials": materials,
+        "available_slots": list(materials),
+        "missing_optional_slots": [
+            slot for slot in PRODUCT_STAGE_INPUT_SLOTS[normalized] if slot not in materials
+        ],
     }
 
 
@@ -1441,11 +1563,17 @@ def _validate_competitive_report(content: str) -> list[str]:
     for marker in ("<!doctype html", "<title", 'name="viewport"', "<table", "<svg", "<details"):
         if marker not in lowered:
             errors.append(f"competitive report missing {marker}")
-    for marker in ("我与竞品", "生态位", "定位", "产品方案"):
-        if marker not in content:
-            errors.append(f"competitive report missing section: {marker}")
-    if content.count("href=") < 2:
-        errors.append("competitive report needs at least two source links")
+    semantic_sections = {
+        "竞品对比": ("我与竞品", "竞品对比", "竞争对比", "能力对比", "对比矩阵"),
+        "生态位": ("生态位", "生态地图", "生态定位"),
+        "定位": ("定位", "差异化", "位置图"),
+        "产品启示": ("产品方案", "产品启示", "方案启示", "产品策略", "设计启示"),
+    }
+    for label, alternatives in semantic_sections.items():
+        if not any(marker in content for marker in alternatives):
+            errors.append(f"competitive report missing semantic section: {label}")
+    # Source links are evidence-dependent. Requiring arbitrary href values when retrieval
+    # returned no sources encourages the model to invent URLs merely to satisfy validation.
     if re.search(r"__+[A-Z0-9_]+__+|\bTODO\b|【[^】]+】", content):
         errors.append("competitive report contains unresolved placeholders")
     return errors
@@ -1493,3 +1621,17 @@ def write_product_artifact(
         "sha256": hashlib.sha256(output_path.read_bytes()).hexdigest(),
         "validation": validation,
     }
+
+
+def write_product_artifact_file(
+    filename: str,
+    content: str,
+    validate_as: str = "none",
+) -> str:
+    """Write a product HTML artifact and return only its exact saveable file path.
+
+    Lightweight validation remains diagnostic and non-blocking. Human approval is the quality
+    gate; a semantic wording variation must not force full-document regeneration or hide the file.
+    """
+    result = write_product_artifact(filename, content, validate_as)
+    return str(result["path"])
