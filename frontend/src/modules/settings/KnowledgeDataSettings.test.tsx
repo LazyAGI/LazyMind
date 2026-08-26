@@ -1,6 +1,6 @@
 import { createRef } from "react";
 import type { AnchorHTMLAttributes } from "react";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import KnowledgeDataSettings from "./KnowledgeDataSettings";
@@ -27,6 +27,8 @@ vi.mock("react-i18next", () => ({
       if (key === "settingsPage.knowledge.groups.retrieval.kb.description") {
         return "知识库广场、知识库中查找文档、统计信息和相关片段，用于基于资料回答问题。";
       }
+      if (key === "settingsPage.enabled") return "已启用";
+      if (key === "settingsPage.disabled") return "已停用";
       if (key === "settingsPage.knowledge.openConfigAria") return `打开${values?.name}配置`;
       return key;
     },
@@ -167,5 +169,35 @@ describe("KnowledgeDataSettings", () => {
 
     fireEvent.click(parsingSwitch);
     expect(onDocumentParsingChange).toHaveBeenCalledWith(true, expect.anything());
+  });
+
+  it("describes the document parsing master switch as a status instead of a provider count", async () => {
+    const props = {
+      controlsDisabled: false,
+      documentParsingSaving: false,
+      headingRef: createRef<HTMLHeadingElement>(),
+      onDocumentParsingChange: vi.fn(),
+    };
+    const { rerender } = render(<KnowledgeDataSettings
+      {...props}
+      documentParsingEnabled={false}
+    />);
+
+    let parsingSwitch = await screen.findByRole("switch", { name: "settingsPage.knowledge.documentParsingAria" });
+    let parsingHeader = parsingSwitch.closest(".settings-knowledge-group-head");
+    expect(parsingHeader).not.toBeNull();
+    expect(within(parsingHeader!).getByText("已停用")).toBeInTheDocument();
+    expect(within(parsingHeader!).queryByText(/0\s*\/\s*1/)).not.toBeInTheDocument();
+
+    rerender(<KnowledgeDataSettings
+      {...props}
+      documentParsingEnabled
+    />);
+
+    parsingSwitch = screen.getByRole("switch", { name: "settingsPage.knowledge.documentParsingAria" });
+    parsingHeader = parsingSwitch.closest(".settings-knowledge-group-head");
+    expect(parsingHeader).not.toBeNull();
+    expect(within(parsingHeader!).getByText("已启用")).toBeInTheDocument();
+    expect(within(parsingHeader!).queryByText(/1\s*\/\s*1/)).not.toBeInTheDocument();
   });
 });

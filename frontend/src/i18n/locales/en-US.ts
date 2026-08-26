@@ -7230,8 +7230,6 @@ const enUS = {
       title: "Knowledge & data",
       description: "Manage retrieval tools, document processing, knowledge bases, and external data connections. Switches apply directly to runtime capabilities.",
       enabledCount: "{{enabled}} / {{registered}} enabled",
-      parsingEnabledCount: "1 / 1 enabled",
-      parsingDisabledCount: "0 / 1 enabled",
       loadFailed: "Failed to load tool status",
       loadFailedDesc: "Unable to read tool status. No capabilities were changed.",
       empty: "Backend returned no manageable knowledge & data tools",
@@ -7359,6 +7357,7 @@ const enUS = {
 
     developer: {
       enableTitle: "Enable developer mode",
+      disableTitle: "Disable developer mode",
       enableDesc: "Activate tool management, algorithm leap, internal IDs, and full execution traces.",
       modeAria: "Developer mode",
     },

@@ -64,6 +64,8 @@ interface RecoverySettingsProps {
   headingRef: RefObject<HTMLHeadingElement>;
 }
 
+const RETENTION_REFRESH_INTERVAL_MS = 60_000;
+
 function useDebouncedValue<T>(value: T, delay = 300) {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
@@ -138,7 +140,13 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
   const [trashLoading, setTrashLoading] = useState(true);
   const [trashError, setTrashError] = useState(false);
   const [trashRevision, setTrashRevision] = useState(0);
+  const [retentionNow, setRetentionNow] = useState(() => Date.now());
   const latestTrashRequest = useRef(0);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setRetentionNow(Date.now()), RETENTION_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -245,7 +253,7 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
   const formatTime = (value?: string) => value ? new Date(value).toLocaleString(locale, { hour12: false }) : "—";
   const retentionText = (expiresAt?: string) => {
     if (!expiresAt) return t("settingsPage.recovery.retentionUnknown");
-    const days = Math.max(0, Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 86_400_000));
+    const days = Math.max(0, Math.ceil((new Date(expiresAt).getTime() - retentionNow) / 86_400_000));
     return days === 0
       ? t("settingsPage.recovery.expiresToday")
       : t("settingsPage.recovery.daysRemaining", { count: days });

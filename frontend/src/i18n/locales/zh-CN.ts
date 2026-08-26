@@ -7001,8 +7001,6 @@ const zhCN = {
       title: "知识与数据",
       description: "集中管理检索工具、文档处理服务、知识库和外部数据连接；开关状态直接作用于实际运行能力。",
       enabledCount: "{{enabled}} / {{registered}} 已启用",
-      parsingEnabledCount: "1 / 1 已启用",
-      parsingDisabledCount: "0 / 1 已启用",
       loadFailed: "工具状态加载失败",
       loadFailedDesc: "无法读取工具状态，页面未对任何能力做出修改。",
       empty: "当前后端未返回可管理的知识与数据工具",
@@ -7130,6 +7128,7 @@ const zhCN = {
 
     developer: {
       enableTitle: "启用开发者模式",
+      disableTitle: "关闭开发者模式",
       enableDesc: "激活工具管理、算法跃迁、内部 ID 和完整执行过程。",
       modeAria: "开发者模式",
     },

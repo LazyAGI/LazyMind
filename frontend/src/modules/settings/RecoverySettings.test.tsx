@@ -1,5 +1,5 @@
 import { createRef } from "react";
-import { fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import RecoverySettings from "./RecoverySettings";
@@ -80,6 +80,7 @@ vi.mock("react-i18next", () => ({
       };
       if (key === "settingsPage.recovery.itemCount") return `${values?.count} 项`;
       if (key === "settingsPage.recovery.conversationCount") return `${values?.count} 个会话`;
+      if (key === "settingsPage.recovery.daysRemaining") return `${values?.count} 天后自动清理`;
       return labels[key] || key;
     },
   }),
@@ -168,6 +169,44 @@ describe("RecoverySettings", () => {
     expect(screen.getByRole("tab", { name: /已归档/ })).toHaveAttribute("aria-selected", "false");
     expect(screen.getByRole("tab", { name: "技能" })).toHaveAttribute("aria-selected", "true");
     await waitFor(() => expect(mocks.listSkillTrash).toHaveBeenCalled());
+  });
+
+  it("updates the remaining retention days without reloading the page", async () => {
+    mocks.listSkillTrash.mockResolvedValue({
+      items: [{
+        skillId: "skill-1",
+        name: "实时清理技能",
+        description: "",
+        deletedAt: "2026-08-25T00:00:00Z",
+        trashExpiresAt: "2026-08-27T00:00:00Z",
+      }],
+      total: 1,
+      page: 1,
+      pageSize: 12,
+      categories: [],
+    });
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(new Date("2026-08-25T00:00:00Z").getTime());
+    let refreshRetention: (() => void) | undefined;
+    const intervalSpy = vi.spyOn(window, "setInterval").mockImplementation((handler: TimerHandler, timeout?: number) => {
+      if (timeout === 60_000) refreshRetention = handler as () => void;
+      return 1;
+    });
+    const view = render(<RecoverySettings headingRef={createRef<HTMLHeadingElement>()} />);
+
+    try {
+      expect(await screen.findAllByText("2 天后自动清理")).toHaveLength(1);
+      const requestCount = mocks.listSkillTrash.mock.calls.length;
+
+      nowSpy.mockReturnValue(new Date("2026-08-26T00:00:01Z").getTime());
+      act(() => refreshRetention?.());
+
+      expect(screen.getAllByText("1 天后自动清理")).toHaveLength(1);
+      expect(mocks.listSkillTrash).toHaveBeenCalledTimes(requestCount);
+    } finally {
+      view.unmount();
+      intervalSpy.mockRestore();
+      nowSpy.mockRestore();
+    }
   });
 
   it("switches trash categories without losing the page", async () => {

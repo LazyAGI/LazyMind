@@ -327,6 +327,27 @@ function serviceMatchesKeyword(service: ExternalServiceConfig, keyword: string) 
   );
 }
 
+export function renderExternalServiceDescription(description: string) {
+  const parts = description.split(/(https?:\/\/[^\s，。；、）)]+)/g);
+
+  return parts.map((part, index) => {
+    if (/^https?:\/\//.test(part)) {
+      return (
+        <a
+          href={part}
+          key={`${part}-${index}`}
+          rel="noreferrer"
+          target="_blank"
+        >
+          {part}
+        </a>
+      );
+    }
+
+    return <span key={`${part}-${index}`}>{part}</span>;
+  });
+}
+
 function getBaseUrlPresetLabelKey(serviceName: string, presetKey?: string) {
   if (normalizeProviderName(serviceName) !== "mineru") {
     return undefined;
@@ -1262,7 +1283,7 @@ export default function ExternalServicesPage({
                     {t(`modelProvider.external.status.${activeServiceDisplayStatus}`)}
                   </Tag>
                 </div>
-                <p>{activeService.description}</p>
+                <p>{renderExternalServiceDescription(activeService.description)}</p>
               </div>
             </div>
             <Form form={form} layout="vertical">
