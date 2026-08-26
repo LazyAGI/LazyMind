@@ -1,5 +1,4 @@
 import { isDesktopRuntime } from "./mode";
-import { AgentAppsAuth } from "@/components/auth";
 import {
   assistantBridgeFetch,
   syncLocalAssistantSession,
@@ -169,6 +168,15 @@ async function callAgentIntegration(
   }
 }
 
+async function syncCurrentLocalAssistantSession() {
+  const { AgentAppsAuth } = await import("@/components/auth");
+  await syncLocalAssistantSession(
+    AgentAppsAuth.getUserInfo(),
+    window.location.origin,
+    ACTION_TIMEOUT_MS,
+  );
+}
+
 export async function agentIntegrationStatuses(): Promise<DesktopAgentIntegrationStatusesResult> {
   const bridge = getDesktopBridge();
   if (bridge?.agentIntegrationStatuses) {
@@ -182,7 +190,7 @@ export async function agentIntegrationStatuses(): Promise<DesktopAgentIntegratio
     }
   }
   try {
-    await syncLocalAssistantSession(AgentAppsAuth.getUserInfo(), window.location.origin, ACTION_TIMEOUT_MS);
+    await syncCurrentLocalAssistantSession();
     const response = await assistantBridgeFetch("/agents", undefined, STATUS_TIMEOUT_MS);
     const payload = await response.json().catch(() => ({})) as {
       agents?: Partial<Record<DesktopAgent, DesktopAgentIntegrationStatus>>;
@@ -201,7 +209,7 @@ export async function agentIntegrationAction(agent: DesktopAgent, action: Deskto
     return callAgentIntegration((value) => value.agentIntegrationAction!(agent, action));
   }
   try {
-    await syncLocalAssistantSession(AgentAppsAuth.getUserInfo(), window.location.origin, ACTION_TIMEOUT_MS);
+    await syncCurrentLocalAssistantSession();
     return callLocalAssistantBridge(
       `/agents/${encodeURIComponent(agent)}/${action}`,
       { method: "POST" },
