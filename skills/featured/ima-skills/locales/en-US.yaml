@@ -1,0 +1,51 @@
+locale: en-US
+
+classification:
+  category: Knowledge management
+  tags:
+    - IMA
+    - Knowledge base
+    - Note management
+    - Retrieval
+
+presentation:
+  card:
+    title: IMA knowledge management
+    description: Organize materials, capture notes, and build a searchable, reusable personal knowledge base
+    output_type: report
+    output_label: Knowledge management plan
+    cover_asset: cover
+    result_summary: Turn scattered materials into a structured knowledge base for search, linking, and reuse
+  detail:
+    title: IMA knowledge management
+    description: "Help you organize documents, web pages, notes, and ideas into a living knowledge base that is easier to remember, find, and reuse. Source: Tencent IMA; adapted for LazyMind."
+    attachment_hint: Notes, documents, web links, research materials, or an existing knowledge-base outline
+
+tasks:
+  - id: knowledge-management
+    selector:
+      title: Build a knowledge base
+      description: Organize materials into categories, tags, links, and retrieval paths
+      output_label: Knowledge-base organization plan
+    launch:
+      prompt_short: Organize these materials into a clear personal knowledge base.
+      prompt: Build a clear, maintainable knowledge base from the documents, notes, web pages, or material lists I provide. Complete classification, a tagging system, key summaries, knowledge links, retrieval questions, and follow-up update advice. If the materials are incomplete, ask first for missing sources or intended uses.
+    replay:
+      steps:
+        - title: Collect the materials
+          description: Gather notes, documents, web pages, and items waiting to be organized
+        - title: Extract the structure
+          description: Identify themes, hierarchy, tags, and key knowledge points
+        - title: Connect related knowledge
+          description: Link related materials, concepts, and reusable conclusions
+        - title: Deliver the system
+          description: Produce a knowledge-base outline, retrieval questions, and maintenance advice
+    result:
+      template: generic_report_v1
+      eyebrow: Knowledge management plan
+      title: A searchable personal knowledge-base structure
+      summary: Turn scattered materials into a knowledge system that can be accumulated, searched, and reused
+      highlights:
+        - Categories, tags, and summary structure
+        - Knowledge links and retrieval questions
+        - Long-term maintenance and reuse advice
