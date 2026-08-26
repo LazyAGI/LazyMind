@@ -12,8 +12,50 @@ import (
 	"strings"
 	"testing"
 
+	skillmetadata "lazymind/core/skillv2/metadata"
 	"lazymind/core/skillv2/testutil"
 )
+
+func TestRemoteFSExternalSkillMDReturnsStrictRuntimeViewWithoutChangingBlob(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	original := []byte("---\nversion: 1.0.0\n---\n# Runtime skill\n\nUseful runtime description.\n")
+	if err := db.Model(&testutil.SkillRow{}).Where("id = ?", "skill1").Updates(map[string]any{
+		"category":      skillmetadata.ExternalCategory,
+		"skill_name":    "runtime-skill",
+		"description":   "Useful runtime description.",
+		"relative_root": skillmetadata.ExternalCategory + "/runtime-skill",
+	}).Error; err != nil {
+		t.Fatalf("configure external skill: %v", err)
+	}
+	if err := db.Model(&testutil.SkillBlobRow{}).Where("hash = ?", "h_skill_rev1").Updates(map[string]any{
+		"content": original,
+		"size":    len(original),
+	}).Error; err != nil {
+		t.Fatalf("replace original SKILL.md blob: %v", err)
+	}
+	handler := NewHandler(HandlerDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
+
+	rec := httptest.NewRecorder()
+	handler.Content(rec, httptest.NewRequest(http.MethodGet, remoteContentURL("skills/external/runtime-skill/SKILL.md", "user_001", "task1", ""), nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("content status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	meta, err := skillmetadata.ParseRequired(rec.Body.Bytes())
+	if err != nil {
+		t.Fatalf("runtime SKILL.md is not strictly valid: %v", err)
+	}
+	if meta.Name != "runtime-skill" || meta.Description != "Useful runtime description." || !strings.Contains(rec.Body.String(), "# Runtime skill") {
+		t.Fatalf("runtime SKILL.md = %q", rec.Body.String())
+	}
+	var blob testutil.SkillBlobRow
+	if err := db.Where("hash = ?", "h_skill_rev1").Take(&blob).Error; err != nil {
+		t.Fatalf("query original blob: %v", err)
+	}
+	if !bytes.Equal(blob.Content, original) {
+		t.Fatalf("stored SKILL.md changed: %q", blob.Content)
+	}
+}
 
 func TestRemoteFSWriteText_IsVisibleInSameTask(t *testing.T) {
 	db := testutil.NewTestDB(t)

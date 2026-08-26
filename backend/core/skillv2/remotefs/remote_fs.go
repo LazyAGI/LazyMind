@@ -23,6 +23,7 @@ import (
 	"gorm.io/gorm"
 
 	skillhttperr "lazymind/core/skillv2/httperr"
+	skillmetadata "lazymind/core/skillv2/metadata"
 	"lazymind/core/skillv2/revision"
 	skillsearch "lazymind/core/skillv2/search"
 	skillservice "lazymind/core/skillv2/service"
@@ -581,6 +582,13 @@ func (h *Handler) readContent(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		writeHTTPError(w, err)
 		return
+	}
+	if parsed.relPath == skill.SkillMDPath && skill.Category == skillmetadata.ExternalCategory {
+		data, err = skillmetadata.EffectiveDocument(data, skill.SkillName, skill.Description)
+		if err != nil {
+			writeHTTPError(w, err)
+			return
+		}
 	}
 	switch r.URL.Query().Get("encoding") {
 	case "base64":

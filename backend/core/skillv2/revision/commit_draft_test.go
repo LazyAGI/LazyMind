@@ -158,6 +158,46 @@ func TestCommitDraft_InvalidFrontmatterRollsBackAndKeepsDraft(t *testing.T) {
 	}
 }
 
+func TestCommitDraft_ExternalSkillAllowsMissingMetadataAndKeepsStoredIdentity(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	if err := db.Model(&testutil.SkillRow{}).Where("id = ?", "skill1").Updates(map[string]any{
+		"category":      "external",
+		"skill_name":    "fallback-skill",
+		"description":   "Stored fallback description",
+		"relative_root": "external/fallback-skill",
+	}).Error; err != nil {
+		t.Fatalf("configure external skill: %v", err)
+	}
+	original := "---\nversion: 1.0.0\n---\n# Skill\n\nDraft body remains readable.\n"
+	testutil.SeedTextBlob(t, db, "h_external_partial", original)
+	testutil.SeedDraftEntry(t, db, "skill1", "SKILL.md", "upsert", "file", "h_external_partial")
+	service := NewService(ServiceDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
+
+	resp, err := service.CommitDraft(context.Background(), CommitDraftRequest{SkillID: "skill1", UserID: "user_001", DraftVersion: 1})
+	if err != nil {
+		t.Fatalf("CommitDraft returned error: %v", err)
+	}
+	var skill testutil.SkillRow
+	if err := db.Where("id = ?", "skill1").Take(&skill).Error; err != nil {
+		t.Fatalf("query skill: %v", err)
+	}
+	if skill.SkillName != "fallback-skill" || skill.Description != "Stored fallback description" || skill.RelativeRoot != "external/fallback-skill" {
+		t.Fatalf("fallback metadata changed: %#v", skill)
+	}
+	var entry testutil.SkillRevisionEntryRow
+	if err := db.Where("revision_id = ? AND path = ?", resp.RevisionID, "SKILL.md").Take(&entry).Error; err != nil || entry.BlobHash == nil {
+		t.Fatalf("query committed SKILL.md entry: entry=%#v err=%v", entry, err)
+	}
+	var blob testutil.SkillBlobRow
+	if err := db.Where("hash = ?", *entry.BlobHash).Take(&blob).Error; err != nil {
+		t.Fatalf("query committed SKILL.md blob: %v", err)
+	}
+	if string(blob.Content) != original {
+		t.Fatalf("committed SKILL.md = %q, want %q", blob.Content, original)
+	}
+}
+
 func TestCommitDraft_RejectsEmptyCommit(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")

@@ -19,6 +19,7 @@ import (
 
 	"lazymind/core/showcase"
 	skillbuiltin "lazymind/core/skillv2/builtin"
+	skillmetadata "lazymind/core/skillv2/metadata"
 	skillpackage "lazymind/core/skillv2/skillpackage"
 )
 
@@ -170,7 +171,7 @@ func TestRunAppliesPatchToDownloadedSkillAndFreezesProvenance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := string(packageFiles["script.py"]); got != "print('patched')\n" {
+	if got := string(packageFiles.Files["script.py"]); got != "print('patched')\n" {
 		t.Fatalf("patched script = %q", got)
 	}
 
@@ -234,7 +235,7 @@ skills: []
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := string(packageFiles["references/guide.md"]); got != "patched guide\n" || len(entry.AppliedPatches) != 1 {
+	if got := string(packageFiles.Files["references/guide.md"]); got != "patched guide\n" || len(entry.AppliedPatches) != 1 {
 		t.Fatalf("patched guide = %q, provenance = %#v", got, entry.AppliedPatches)
 	}
 	opts.Output = filepath.Join(root, "runtime-frozen", "builtin-skills")
@@ -272,6 +273,18 @@ func TestRunCanPatchInvalidSkillMetadataBeforeStrictInspection(t *testing.T) {
 	catalog := readCatalog(t, filepath.Join(opts.Output, "catalog.json"))
 	if len(catalog.Skills) != 1 || catalog.Skills[0].Name != "repaired" || catalog.Skills[0].Version != "1.0.0" {
 		t.Fatalf("repaired catalog = %#v", catalog)
+	}
+	entry := catalog.Skills[0]
+	patched, err := skillpackage.ReadZip(filepath.Join(opts.Output, filepath.FromSlash(entry.PackageFile)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta, err := skillmetadata.ParseRequired(patched.Files["SKILL.md"])
+	if err != nil || meta.Name != "repaired" || meta.Description != "repaired skill" {
+		t.Fatalf("patched SKILL.md metadata = %#v, err=%v", meta, err)
+	}
+	if string(files["SKILL.md"]) != "---\nname: broken\n---\n# Broken\n" || entry.OriginTreeSHA256 != originTree || len(entry.AppliedPatches) != 1 {
+		t.Fatalf("source or patch provenance changed: source=%q catalog=%#v", files["SKILL.md"], entry)
 	}
 }
 
@@ -378,7 +391,7 @@ func TestRunBuildsFeaturedCatalogFromLocalDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(packageFiles["references/guide.md"]) != "guide\n" {
+	if string(packageFiles.Files["references/guide.md"]) != "guide\n" {
 		t.Fatalf("package files = %#v", packageFiles)
 	}
 	featuredCatalog := readFeaturedCatalog(t, filepath.Join(opts.FeaturedOutput, "catalog.json"))

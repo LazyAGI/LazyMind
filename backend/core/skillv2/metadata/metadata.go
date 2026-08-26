@@ -31,6 +31,13 @@ type Metadata struct {
 	Tags        []string
 }
 
+type Parsed struct {
+	Metadata
+	Body           string
+	HasName        bool
+	HasDescription bool
+}
+
 type LengthError struct {
 	Field string
 	Max   int
@@ -54,18 +61,32 @@ type frontmatter struct {
 }
 
 func ParseRequired(content []byte) (Metadata, error) {
+	parsed, err := Parse(content)
+	if err != nil {
+		return Metadata{}, err
+	}
+	if !parsed.HasName {
+		return Metadata{}, fmt.Errorf("SKILL.md frontmatter field \"name\" is required")
+	}
+	if !parsed.HasDescription {
+		return Metadata{}, fmt.Errorf("SKILL.md frontmatter field \"description\" is required")
+	}
+	return parsed.Metadata, nil
+}
+
+func Parse(content []byte) (Parsed, error) {
 	normalized := strings.ReplaceAll(string(content), "\r\n", "\n")
 	if !strings.HasPrefix(normalized, "---\n") {
-		return Metadata{}, fmt.Errorf("SKILL.md frontmatter is required")
+		return Parsed{Body: normalized}, nil
 	}
 	rest := strings.TrimPrefix(normalized, "---\n")
 	idx := strings.Index(rest, "\n---")
 	if idx < 0 {
-		return Metadata{}, fmt.Errorf("SKILL.md frontmatter closing separator is required")
+		return Parsed{}, fmt.Errorf("SKILL.md frontmatter closing separator is required")
 	}
 	var raw frontmatter
 	if err := yaml.Unmarshal([]byte(rest[:idx]), &raw); err != nil {
-		return Metadata{}, fmt.Errorf("invalid SKILL.md frontmatter: %w", err)
+		return Parsed{}, fmt.Errorf("invalid SKILL.md frontmatter: %w", err)
 	}
 	meta := Metadata{
 		Name:        strings.TrimSpace(raw.Name),
@@ -74,22 +95,100 @@ func ParseRequired(content []byte) (Metadata, error) {
 		Category:    strings.TrimSpace(raw.Category),
 		Tags:        compact(raw.Tags),
 	}
-	if meta.Name == "" {
-		return Metadata{}, fmt.Errorf("SKILL.md frontmatter field \"name\" is required")
+	if meta.Name != "" {
+		if err := validatePathSegment(meta.Name); err != nil {
+			return Parsed{}, fmt.Errorf("invalid SKILL.md frontmatter field \"name\": %w", err)
+		}
+		if err := ValidateNameLength(meta.Name); err != nil {
+			return Parsed{}, err
+		}
 	}
-	if err := validatePathSegment(meta.Name); err != nil {
-		return Metadata{}, fmt.Errorf("invalid SKILL.md frontmatter field \"name\": %w", err)
+	if meta.Description != "" {
+		if err := ValidateDescriptionLength(meta.Description); err != nil {
+			return Parsed{}, err
+		}
 	}
-	if err := ValidateNameLength(meta.Name); err != nil {
-		return Metadata{}, err
+	body := strings.TrimPrefix(rest[idx+len("\n---"):], "\n")
+	return Parsed{
+		Metadata:       meta,
+		Body:           body,
+		HasName:        meta.Name != "",
+		HasDescription: meta.Description != "",
+	}, nil
+}
+
+func FirstBodyParagraph(body string) string {
+	lines := strings.Split(strings.ReplaceAll(body, "\r\n", "\n"), "\n")
+	paragraph := make([]string, 0)
+	started := false
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !started {
+			if trimmed == "" || isMarkdownHeading(trimmed) {
+				continue
+			}
+			started = true
+		}
+		if trimmed == "" {
+			break
+		}
+		paragraph = append(paragraph, trimmed)
 	}
-	if meta.Description == "" {
-		return Metadata{}, fmt.Errorf("SKILL.md frontmatter field \"description\" is required")
+	text := strings.Join(strings.Fields(strings.Join(paragraph, " ")), " ")
+	runes := []rune(text)
+	if len(runes) > 100 {
+		return string(runes[:100]) + "…"
 	}
-	if err := ValidateDescriptionLength(meta.Description); err != nil {
-		return Metadata{}, err
+	return text
+}
+
+func EffectiveDocument(content []byte, name, description string) ([]byte, error) {
+	if _, err := ParseRequired(content); err == nil {
+		return content, nil
 	}
-	return meta, nil
+	parsed, err := Parse(content)
+	if err != nil {
+		return nil, err
+	}
+	metadata := map[string]any{}
+	normalized := strings.ReplaceAll(string(content), "\r\n", "\n")
+	if strings.HasPrefix(normalized, "---\n") {
+		rest := strings.TrimPrefix(normalized, "---\n")
+		idx := strings.Index(rest, "\n---")
+		if idx < 0 {
+			return nil, fmt.Errorf("SKILL.md frontmatter closing separator is required")
+		}
+		if err := yaml.Unmarshal([]byte(rest[:idx]), &metadata); err != nil {
+			return nil, fmt.Errorf("invalid SKILL.md frontmatter: %w", err)
+		}
+	}
+	if !parsed.HasName {
+		metadata["name"] = strings.TrimSpace(name)
+	}
+	if !parsed.HasDescription {
+		metadata["description"] = strings.TrimSpace(description)
+	}
+	frontmatter, err := yaml.Marshal(metadata)
+	if err != nil {
+		return nil, err
+	}
+	effective := []byte(fmt.Sprintf("---\n%s---\n%s", frontmatter, parsed.Body))
+	if _, err := ParseRequired(effective); err != nil {
+		return nil, err
+	}
+	return effective, nil
+}
+
+func isMarkdownHeading(line string) bool {
+	line = strings.TrimLeft(line, " \t")
+	count := 0
+	for count < len(line) && line[count] == '#' {
+		count++
+	}
+	if count == 0 || count > 6 || count >= len(line) {
+		return false
+	}
+	return line[count] == ' ' || line[count] == '\t'
 }
 
 func ValidateNameLength(name string) error {
@@ -132,24 +231,56 @@ func FromFiles(files map[string][]byte) (Metadata, error) {
 }
 
 func FromEntries(ctx context.Context, tx *gorm.DB, entries map[string]versionfs.Entry) (Metadata, error) {
+	content, err := skillMDContent(ctx, tx, entries)
+	if err != nil {
+		return Metadata{}, err
+	}
+	return ParseRequired(content)
+}
+
+func skillMDContent(ctx context.Context, tx *gorm.DB, entries map[string]versionfs.Entry) ([]byte, error) {
 	entry, ok := entries["SKILL.md"]
 	if !ok || entry.EntryType != versionfs.EntryTypeFile || strings.TrimSpace(entry.BlobHash) == "" {
-		return Metadata{}, fmt.Errorf("skill package must contain SKILL.md")
+		return nil, fmt.Errorf("skill package must contain SKILL.md")
 	}
 	var blob orm.SkillV2Blob
 	if err := tx.WithContext(ctx).Where("hash = ?", entry.BlobHash).Take(&blob).Error; err != nil {
-		return Metadata{}, err
+		return nil, err
 	}
 	if blob.Binary || blob.StorageBackend != "postgres" {
-		return Metadata{}, fmt.Errorf("SKILL.md must be a text file")
+		return nil, fmt.Errorf("SKILL.md must be a text file")
 	}
-	return ParseRequired(blob.Content)
+	return blob.Content, nil
 }
 
 func FromRevision(ctx context.Context, tx *gorm.DB, revisionID string) (Metadata, error) {
+	entries, err := entriesFromRevision(ctx, tx, revisionID)
+	if err != nil {
+		return Metadata{}, err
+	}
+	return FromEntries(ctx, tx, entries)
+}
+
+func FromRevisionWithFallback(ctx context.Context, tx *gorm.DB, revisionID string, fallback Metadata) (Metadata, error) {
+	entries, err := entriesFromRevision(ctx, tx, revisionID)
+	if err != nil {
+		return Metadata{}, err
+	}
+	content, err := skillMDContent(ctx, tx, entries)
+	if err != nil {
+		return Metadata{}, err
+	}
+	effective, err := EffectiveDocument(content, fallback.Name, fallback.Description)
+	if err != nil {
+		return Metadata{}, err
+	}
+	return ParseRequired(effective)
+}
+
+func entriesFromRevision(ctx context.Context, tx *gorm.DB, revisionID string) (map[string]versionfs.Entry, error) {
 	var rows []orm.SkillV2RevisionEntry
 	if err := tx.WithContext(ctx).Where("revision_id = ?", revisionID).Find(&rows).Error; err != nil {
-		return Metadata{}, err
+		return nil, err
 	}
 	entries := make(map[string]versionfs.Entry, len(rows))
 	for _, row := range rows {
@@ -168,11 +299,29 @@ func FromRevision(ctx context.Context, tx *gorm.DB, revisionID string) (Metadata
 			Mode:      row.Mode,
 		}
 	}
-	return FromEntries(ctx, tx, entries)
+	return entries, nil
 }
 
 func SyncPublished(ctx context.Context, tx *gorm.DB, skillID string, entries map[string]versionfs.Entry, now time.Time) error {
-	meta, err := FromEntries(ctx, tx, entries)
+	var skill orm.SkillV2Skill
+	if err := tx.WithContext(ctx).Where("id = ? AND deleted_at IS NULL", skillID).Take(&skill).Error; err != nil {
+		return err
+	}
+	content, err := skillMDContent(ctx, tx, entries)
+	if err != nil {
+		return err
+	}
+	if skill.Category == ExternalCategory {
+		parsed, err := Parse(content)
+		if err != nil {
+			return err
+		}
+		if !parsed.HasName || !parsed.HasDescription {
+			return nil
+		}
+		return Sync(ctx, tx, skillID, parsed.Metadata, now)
+	}
+	meta, err := ParseRequired(content)
 	if err != nil {
 		return err
 	}
@@ -180,11 +329,11 @@ func SyncPublished(ctx context.Context, tx *gorm.DB, skillID string, entries map
 }
 
 func SyncRevision(ctx context.Context, tx *gorm.DB, skillID, revisionID string, now time.Time) error {
-	meta, err := FromRevision(ctx, tx, revisionID)
+	entries, err := entriesFromRevision(ctx, tx, revisionID)
 	if err != nil {
 		return err
 	}
-	return Sync(ctx, tx, skillID, meta, now)
+	return SyncPublished(ctx, tx, skillID, entries, now)
 }
 
 func Sync(ctx context.Context, tx *gorm.DB, skillID string, meta Metadata, now time.Time) error {

@@ -217,11 +217,11 @@ func run(ctx context.Context, opts options, client *http.Client) error {
 			entry = locked
 			archivePath, appliedPatches, err = materializeFrozen(ctx, client, spec, locked, opts.Cache, patchCatalog)
 			if err == nil {
-				files, readErr := skillpackage.ReadZip(archivePath)
+				pkg, readErr := skillpackage.ReadZip(archivePath)
 				if readErr != nil {
 					err = readErr
 				} else {
-					entry.Content = string(files["SKILL.md"])
+					entry.Content = string(pkg.Files["SKILL.md"])
 				}
 			}
 		} else {
@@ -463,10 +463,11 @@ func inspectOrigin(archivePath string) (originPackage, error) {
 	if err != nil {
 		return originPackage{}, err
 	}
-	files, err := skillpackage.ReadZip(archivePath)
+	pkg, err := skillpackage.ReadZip(archivePath)
 	if err != nil {
 		return originPackage{}, err
 	}
+	files := pkg.Files
 	return originPackage{
 		ArchivePath: archivePath,
 		Files:       files,
@@ -534,10 +535,11 @@ func inspectEntry(spec sourceSpec, archivePath string) (skillbuiltin.CatalogSkil
 	if err != nil {
 		return skillbuiltin.CatalogSkill{}, err
 	}
-	files, err := skillpackage.ReadZip(archivePath)
+	pkg, err := skillpackage.ReadZip(archivePath)
 	if err != nil {
 		return skillbuiltin.CatalogSkill{}, err
 	}
+	files := pkg.Files
 	content, ok := files["SKILL.md"]
 	if !ok {
 		return skillbuiltin.CatalogSkill{}, bundleFailure("skill package must contain SKILL.md")
@@ -766,10 +768,11 @@ func validateFrozenEntry(current, locked skillbuiltin.CatalogSkill) error {
 }
 
 func validateLockedArchive(path string, locked skillbuiltin.CatalogSkill) error {
-	files, err := skillpackage.ReadZip(path)
+	pkg, err := skillpackage.ReadZip(path)
 	if err != nil {
 		return err
 	}
+	files := pkg.Files
 	if skillpackage.TreeHash(files) != locked.TreeSHA256 {
 		return bundleFailure("package tree does not match frozen lock")
 	}

@@ -55,6 +55,41 @@ func TestCreateSkillFromURL_CreatesInitialRevision(t *testing.T) {
 	assertBlobRouting(t, db, resp.HeadRevisionID)
 }
 
+func TestCreateSkillFromURL_FallsBackToURLFilename(t *testing.T) {
+	db := newSkillV2TestDB(t)
+	zipPath := filepath.Join(t.TempDir(), "download.zip")
+	original := []byte("# URL Skill\n\nImported from a URL without frontmatter.\n")
+	writeSkillZip(t, zipPath, map[string][]byte{"SKILL.md": original})
+	svc := NewSkillService(SkillServiceDeps{
+		DB:         db,
+		Downloader: NewFakeZipDownloader(map[string]string{"https://example.test/releases/url-fallback.zip": zipPath}),
+		BlobStore:  NewBlobStore(db, NewLocalObjectStore(t.TempDir())),
+		Clock:      fixedClock(),
+	})
+
+	resp, err := svc.CreateSkill(context.Background(), CreateSkillRequest{
+		OwnerUserID:  "user_001",
+		CreateUserID: "user_001",
+		Source: SourceInput{
+			Type: "url",
+			URL:  "https://example.test/releases/url-fallback.zip",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateSkill from URL returned error: %v", err)
+	}
+	var imported testSkillV2SkillRow
+	if err := db.Where("id = ?", resp.SkillID).Take(&imported).Error; err != nil {
+		t.Fatalf("query URL imported skill: %v", err)
+	}
+	if imported.SkillName != "url-fallback" || imported.Description != "Imported from a URL without frontmatter." || imported.Category != "external" {
+		t.Fatalf("URL fallback metadata = %#v", imported)
+	}
+	if blob := getBlobByPath(t, db, resp.HeadRevisionID, "SKILL.md"); string(blob.Content) != string(original) {
+		t.Fatalf("stored URL SKILL.md = %q, want %q", blob.Content, original)
+	}
+}
+
 func TestCreateSkillFromURL_DownloadFailureDoesNotCreateSkill(t *testing.T) {
 	db := newSkillV2TestDB(t)
 	downloader := NewFakeZipDownloader(map[string]string{})
@@ -252,6 +287,36 @@ func TestReplaceSkillContentFromUploadedZip_CreatesNewRevision(t *testing.T) {
 	}
 	assertInitialReplacementRevision(t, db, "skill1", resp.HeadRevisionID)
 	assertDraftInitialized(t, db, "skill1", resp.HeadRevisionID)
+}
+
+func TestReplaceSkillContentFromUploadedZip_KeepsFallbackMetadataAndRawSkillMD(t *testing.T) {
+	db := newSkillV2TestDB(t)
+	seedSkillWithHeadRevision(t, db, "skill1", "rev1")
+	zipPath := filepath.Join(t.TempDir(), "replacement-fallback.zip")
+	original := []byte("---\ndescription: Replacement description\n---\n# Replacement\n")
+	writeSkillZip(t, zipPath, map[string][]byte{"replacement-root/SKILL.md": original})
+	uploadStore := newFakeUploadStore()
+	uploadStore.Put(UploadSession{UploadID: "upload_replace_fallback", OwnerUserID: "user_001", State: "completed", StoredPath: zipPath, Filename: "replacement.zip"})
+	svc := NewSkillService(SkillServiceDeps{DB: db, UploadStore: uploadStore, BlobStore: NewBlobStore(db, NewLocalObjectStore(t.TempDir())), Clock: fixedClock()})
+
+	resp, err := svc.PatchSkill(context.Background(), PatchSkillRequest{
+		SkillID: "skill1",
+		UserID:  "user_001",
+		Source:  &SourceInput{Type: "uploaded_zip", UploadID: "upload_replace_fallback"},
+	})
+	if err != nil {
+		t.Fatalf("PatchSkill source replacement returned error: %v", err)
+	}
+	var replaced testSkillV2SkillRow
+	if err := db.Where("id = ?", "skill1").Take(&replaced).Error; err != nil {
+		t.Fatalf("query replaced skill: %v", err)
+	}
+	if replaced.SkillName != "replacement-root" || replaced.Description != "Replacement description" || replaced.Category != "external" {
+		t.Fatalf("replacement fallback metadata = %#v", replaced)
+	}
+	if blob := getBlobByPath(t, db, resp.HeadRevisionID, "SKILL.md"); string(blob.Content) != string(original) {
+		t.Fatalf("stored replacement SKILL.md = %q, want %q", blob.Content, original)
+	}
 }
 
 func TestReplaceSkillContent_RejectsWhenDraftExists(t *testing.T) {
