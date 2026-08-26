@@ -513,7 +513,10 @@ func WriteBackWriterDocument(w http.ResponseWriter, r *http.Request) {
 	}
 	credential := toolConfig["feishu"]
 	if credential == nil {
-		common.ReplyErr(w, "Feishu authorization required", http.StatusUnauthorized)
+		common.ReplyErrWithData(w, "invalid request", map[string]any{
+			"status":   "feishu_configuration_required",
+			"provider": "feishu",
+		}, http.StatusBadRequest)
 		return
 	}
 	syncRequest := algo.WriterDocumentSyncRequest{

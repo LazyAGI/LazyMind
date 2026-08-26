@@ -4,10 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/gorilla/mux"
+
 	"lazymind/core/common/orm"
+	"lazymind/core/store"
 )
 
 func TestWriterSyncStatus(t *testing.T) {
@@ -22,6 +27,72 @@ func TestWriterSyncStatus(t *testing.T) {
 		if got := writerSyncStatus(input); got != want {
 			t.Errorf("writerSyncStatus(%d) = %d, want %d", input, got, want)
 		}
+	}
+}
+
+func TestWriteBackWriterDocumentRequiresFeishuConfiguration(t *testing.T) {
+	authService := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"data":{"items":[]}}`))
+	}))
+	t.Cleanup(authService.Close)
+	t.Setenv("LAZYMIND_AUTH_SERVICE_URL", authService.URL)
+
+	db := orm.MigrateTestDB(t,
+		&orm.WorkflowSession{},
+		&orm.WorkflowSlotRevision{},
+		&orm.UserModelProvider{},
+		&orm.UserModelProviderGroup{},
+		&orm.UserSelectedProvider{},
+	)
+	store.Init(db.DB, db.DB, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	now := time.Now().UTC()
+	if err := db.Create(&orm.WorkflowSession{
+		ID: "session", ConversationID: "conversation", WorkflowID: "writer-workflow",
+		Status: "completed", CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatalf("seed writer session: %v", err)
+	}
+	seedWriterRevision(
+		t, db, "draft-1", "draft_document", 1, true, "ai",
+		json.RawMessage(`{"schema":"text/markdown","data":"# Draft\n\nBody"}`),
+	)
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/core/workflow-sessions/session/writer-document:write-back",
+		strings.NewReader(`{"base_revision":1}`),
+	)
+	req.Header.Set("X-User-Id", "user-1")
+	req = mux.SetURLVars(req, map[string]string{"session_id": "session"})
+	recorder := httptest.NewRecorder()
+
+	WriteBackWriterDocument(recorder, req)
+
+	if recorder.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body=%s", recorder.Code, http.StatusBadRequest, recorder.Body.String())
+	}
+	var response struct {
+		Data struct {
+			Status   string `json:"status"`
+			Provider string `json:"provider"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(recorder.Body).Decode(&response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response.Data.Status != "feishu_configuration_required" || response.Data.Provider != "feishu" {
+		t.Fatalf("unexpected response data: %+v", response.Data)
+	}
+	var revisionCount int64
+	if err := db.Model(&orm.WorkflowSlotRevision{}).
+		Where("session_id = ?", "session").Count(&revisionCount).Error; err != nil {
+		t.Fatalf("count writer revisions: %v", err)
+	}
+	if revisionCount != 1 {
+		t.Fatalf("revision count = %d, want 1", revisionCount)
 	}
 }
 

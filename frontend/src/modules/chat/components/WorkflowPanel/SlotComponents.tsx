@@ -2334,7 +2334,9 @@ function useRegisterWriterWriteBack({
 }) {
   const tabActive = useContext(WorkflowPanelTabActiveContext);
   const { registerFooterAction } = useContext(SlotEditingContext);
-  const [status, setStatus] = useState<'idle' | 'loading' | 'success' | 'error' | 'conflict'>('idle');
+  const [status, setStatus] = useState<
+    'idle' | 'loading' | 'success' | 'error' | 'conflict' | 'feishu-configuration-required'
+  >('idle');
   const writeBackUrl = serverWriteBackUrl;
 
   const writeBack = useCallback(async () => {
@@ -2365,9 +2367,17 @@ function useRegisterWriterWriteBack({
       setStatus('success');
       onSuccess?.(result.revision, result.document);
     } catch (error) {
-      if ((error as { response?: { status?: number } })?.response?.status === 409) {
+      const errorResponse = (error as {
+        response?: {
+          status?: number;
+          data?: { data?: { status?: string } };
+        };
+      })?.response;
+      if (errorResponse?.status === 409) {
         setStatus('conflict');
         onConflict?.();
+      } else if (errorResponse?.data?.data?.status === 'feishu_configuration_required') {
+        setStatus('feishu-configuration-required');
       } else {
         setStatus('error');
       }
@@ -2393,14 +2403,20 @@ function useRegisterWriterWriteBack({
       },
       statusText: status === 'success' || (synced && status === 'idle')
         ? tr('chat.writerIR.writeBackSuccess')
-        : status === 'error'
-          ? tr('chat.writerIR.writeBackFailed')
-          : status === 'conflict'
-            ? tr('chat.writerIR.revisionConflict')
-          : undefined,
+        : status === 'feishu-configuration-required'
+          ? tr('chat.writerIR.feishuConfigurationRequired')
+          : status === 'error'
+            ? tr('chat.writerIR.writeBackFailed')
+            : status === 'conflict'
+              ? tr('chat.writerIR.revisionConflict')
+              : undefined,
       statusTone: status === 'success' || (synced && status === 'idle')
         ? 'success'
-        : status === 'error' || status === 'conflict' ? 'error' : undefined,
+        : status === 'error'
+          || status === 'conflict'
+          || status === 'feishu-configuration-required'
+          ? 'error'
+          : undefined,
       statusLink: writeBackUrl
         ? { href: writeBackUrl, label: tr('chat.writerIR.openFeishuDocument') }
         : undefined,
