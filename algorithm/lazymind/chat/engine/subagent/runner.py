@@ -14,6 +14,10 @@ from typing import Any, Dict, List, Optional
 
 import lazyllm
 from lazyllm import LOG, AutoModel
+from lazyllm.tools.agent.base import (
+    TOOL_OBSERVATION_KEY,
+    attachable_tool_observation,
+)
 from lazyllm.tools.tool_config_inject import inject_tool_config
 
 from lazymind.chat.engine.agent_runtime import (
@@ -27,6 +31,7 @@ from lazymind.chat.engine.agent_runtime import (
     make_cancel_stop_condition,
 )
 from lazymind.chat.engine.prompts import add_standard_system_sections
+from lazymind.chat.engine.tools.local_file.workspace import grep, read_file
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 from lazymind.chat.service.component.tool_registry import (
     ATTACHMENT_EDIT_TOOL_CONFIG,
@@ -301,6 +306,8 @@ def _build_subagent_tools(
         subagent_tools.get_artifact,
         subagent_tools.list_artifacts,
         subagent_tools.list_knowledge_bases,
+        grep,
+        read_file,
         subagent_tools.find_artifact,
     ]
     if include_artifact_writes:
@@ -481,6 +488,7 @@ def _build_subagent_plan(
     tools: List[Any],
     tool_prompt_appendices: Dict[str, List[str]],
     resume: bool = False,
+    llm_config: Optional[Dict[str, Any]] = None,
 ) -> AgentRunPlan:
     builder = PromptBuilder.for_role(AgentRole.SUBAGENT)
     add_standard_system_sections(
@@ -563,7 +571,32 @@ def _build_subagent_plan(
     attachment_section = render_attachment_content(
         normalize_attachments(history_files_per_turn),
         role=AgentRole.SUBAGENT,
+        skip_pdf=True,
     )
+    file_catalog = ''
+    attachment_context = _attachment_context(ctx.params)
+    conversation_id = str(
+        getattr(ctx, 'conversation_id', '')
+        or ctx.params.get('conversation_id')
+        or attachment_context.get('conversation_id')
+        or ''
+    ).strip()
+    user_id = str(attachment_context.get('user_id') or '').strip()
+    if conversation_id:
+        try:
+            from lazymind.chat.engine.tools.local_file.store import (
+                FileResourceStore,
+                render_file_resource_catalog,
+            )
+            from lazymind.chat.engine.tools.local_file.workspace import chat_agent_workspace
+            store = FileResourceStore(chat_agent_workspace(user_id or '0', conversation_id))
+            file_catalog = render_file_resource_catalog(store)
+        except Exception:
+            file_catalog = ''
+    if file_catalog:
+        attachment_section = (
+            f'{file_catalog}\n\n{attachment_section}' if attachment_section else file_catalog
+        )
     builder.runtime(
         'subagent_attachments', 'User Attachments', attachment_section,
         'request.attachments', priority=40, content_kind='reference',
@@ -672,6 +705,7 @@ def _build_subagent_plan(
         execution_options=AgentExecutionOptions(
             extra_stop_condition=make_cancel_stop_condition(),
             max_retries=max(1, int(_cfg['agentic_expanded_max_rounds']) - 1),
+            llm_config=llm_config or {},
         ),
     )
 
@@ -1002,6 +1036,7 @@ async def run_subagent_stream(
                 runtime_configs + attachment_configs,
             ),
             resume=resume,
+            llm_config=model_config,
         )
 
         step_seq = db.max_step_seq(task_id) + 1 if resume else 0
@@ -1490,11 +1525,16 @@ def _rebuild_history_from_steps(db: SubAgentDB, task_id: str) -> List[Dict[str, 
                     history.pop()
                 break
             for r in valid:
-                history.append({
+                result = r.get('result', '')
+                tool_msg = {
                     'role': 'tool',
                     'tool_call_id': r.get('tool_call_id'),
                     'name': r.get('name', ''),
-                    'content': str(r.get('result', '')),
-                })
+                    'content': str(result),
+                }
+                observation = attachable_tool_observation(result)
+                if observation is not None:
+                    tool_msg[TOOL_OBSERVATION_KEY] = observation
+                history.append(tool_msg)
             pending_ids = set()
     return history

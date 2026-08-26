@@ -259,8 +259,8 @@ func (h RemoteHandler) SaveArtifact(w http.ResponseWriter, r *http.Request) {
 		remoteReply(w, 422, nil, "OUTPUT_SLOT_UNDECLARED", "artifact slot is not declared by the step")
 		return
 	}
-	if ctx.DeclaredOutputTypes[body.Slot] == "file" && body.ContentType != "file" && body.ContentType != "file_list" {
-		remoteReply(w, 422, nil, "OUTPUT_TYPE_MISMATCH", "file slot requires file or file_list content type")
+	if err := validateDeclaredArtifactType(ctx, body); err != nil {
+		remoteReply(w, 422, nil, "OUTPUT_TYPE_MISMATCH", err.Error())
 		return
 	}
 	if err := h.Artifacts.Save(r.Context(), ctx, body); err != nil {

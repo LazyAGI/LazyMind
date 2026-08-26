@@ -35,8 +35,23 @@
 2. `CREATE_ANIMATED_MEME`：固定 `mode=animated_meme`、`delivery=animated`、`count=1`，执行视频生成和 GIF 转换。
 3. `CREATE_MEME_PACK`：固定 `mode=meme_pack`，每个 item 必须是不同交流状态；静态最多 12 个，动态最多 5 个。
 
-即使用户没有说“表情包”，只要是新生成静态图并要求精确文案/字幕、文字位置、颜色、描边或字号，
-也必须进入 `CREATE_STATIC_MEME`；不能直接交给生图/编辑模型写字。
+即使用户没有说“表情包”，只要静态结果明确要求后加精确文案/字幕、文字位置、颜色、描边或字号，
+也必须进入 `CREATE_STATIC_MEME`；这条规则同样覆盖“上传/搜索底图 + 修改画面 + 配字幕”的组合请求。
+生图/编辑模型只完成无字底图或非文字视觉修改，随后由 `meme_add_caption` 确定性排字。若文字明确
+属于球衣印字、招牌、雕刻、纹身等场景内实体的一部分，则仍按普通编辑处理，不属于后加字幕。
+
+### CREATE_STATIC_MEME（编辑底图后配字幕）示例
+
+```
+用户: [已上传小狗照片] 给小狗做成敬礼的手势，然后配上字幕“收到!”
+
+1. analyze_subject — WORKFLOW: CREATE_STATIC_MEME；NEXT_STEPS 包含 collect_materials、
+   optimize_prompt、generate_image，不进入 enhance_image
+2. collect_materials — 上传图保存到 material_images，作为权威编辑底图
+3. optimize_prompt — image_prompt 只描述“让小狗做敬礼手势”并禁止文字；caption 精确保留“收到!”
+4. generate_image — image_editor 先完成敬礼动作 → meme_add_caption 后加字幕 →
+   只保存 meme_static_output
+```
 
 Meme 媒体模型只负责生成无字底图/视频，不负责写字。每个 item 默认使用
 `caption_box=[0.15,0.75,0.85,0.93]`（左、上、右、下的 0–1 归一化坐标）；
@@ -136,7 +151,7 @@ Meme 媒体模型只负责生成无字底图/视频，不负责写字。每个 i
 9. 编辑类请求（FIND_AND_EDIT / EDIT_UPLOAD）禁止 advance 到 `generate_image`。
 10. optimize_prompt 完成后：生成类（含三种 Meme 路由及旧版 CREATE_ANIMATED / ANIMATE_UPLOAD）→ `generate_image`；编辑类 → `enhance_image`。
 11. EDIT_UPLOAD / ANIMATE_UPLOAD：collect_materials 负责确认上传原图，再 optimize → 对应终点步骤。
-12. 表情包最终交付物优先：单张静态选 CREATE_STATIC_MEME，单张动态选
+12. 表情包和显式后加字幕的最终交付物优先：单张静态选 CREATE_STATIC_MEME，单张动态选
     CREATE_ANIMATED_MEME，多状态/一套选 CREATE_MEME_PACK。即使同时说「找一张」或上传图片，
     也**不要**判成 FIND_AND_EDIT；仍走 `generate_image` 后结束。
     collect 若搜到底图，保存为 `image_output`；generate 步有底图则带 `urls` 做图生视频；

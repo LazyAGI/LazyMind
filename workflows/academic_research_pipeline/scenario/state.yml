@@ -80,10 +80,23 @@ steps:
       Execute the investigation stage adapted from deep-research Phase 2. This is the only
       external retrieval stage. Use two independent channels when available:
 
+      Retrieve generation_parameters, research_question_brief and methodology_blueprint in
+      one parallel tool turn with get_artifact(key=<material key>, start_line=1, end_line=400).
+      Do not call read_file, find_artifact, grep or list_artifacts for Workflow inputs, and do
+      not retry an input through alternate paths after get_artifact returns its content.
+
       A. Academic internet retrieval: call academic_search with distinct, single-intent
          queries derived from the primary RQ, concepts, method and counter-evidence needs.
-         Continue with as many useful queries as the research coverage requires; there is no
-         fixed successful-query limit. Never repeat an identical query merely because it
+         Treat a target of at most 2000 words/Chinese characters, or an explicit smoke-test,
+         simple-test or token-saving request, as light retrieval. For light retrieval, make
+         exactly one parallel academic-search turn containing 2–4 distinct queries, with at
+         most 3 results per query and include_content=false. Register 4–8 deduplicated useful
+         metadata/abstract records, then stop academic retrieval. Do not call meta_search,
+         get_content, get_contents or any other enrichment/search tool afterward; a short paper
+         does not justify full-text enrichment in this stage. Never register more than 8 academic
+         records in light retrieval, even when coverage is imperfect.
+         For other tasks, stop when every research sub-question has useful evidence and a new batch
+         adds no new theme or stronger source. Never repeat an identical query merely because it
          failed. When a concrete provider repeatedly returns transport errors or rate limits,
          stop retrying that unhealthy provider, preserve the failures in search_log, and use
          another provider if the runtime exposes one.
@@ -94,8 +107,9 @@ steps:
 
       B. Selected knowledge bases: if this conversation has one or more selected knowledge
          bases, use kb_search through the kb framework for complementary queries needed to
-         cover the research question. Never
-         enumerate knowledge bases, call list_knowledge_bases, guess kb_ids or override the
+         cover the research question. In light retrieval, query KB only for still-uncovered
+         concepts once and keep at most 2 useful KB records in addition to the academic registry.
+         Never enumerate knowledge bases, call list_knowledge_bases, guess kb_ids or override the
          runtime filters. If none is selected, record that fact and continue.
 
       Consolidate only actual returned metadata/content. Assign stable IDs SRC-001... to
@@ -132,8 +146,11 @@ steps:
 
       Execute source verification and cross-source synthesis, adapted from deep-research
       Phases 2–3. Treat literature_evidence as the closed source registry for this run.
-      Retrieve Workflow materials with get_artifact using material keys only, at most once per
-      needed range. Never pass a filesystem path as a get_artifact key.
+      Retrieve every required Workflow material in one parallel tool turn with
+      get_artifact(key=<material key>, start_line=1, end_line=600). Supplying the line range is
+      mandatory because an unbounded call may return only a file reference. Never call
+      read_file, find_artifact, grep or list_artifacts for Workflow inputs, never pass a
+      filesystem path as an artifact key, and do not retry content already returned.
 
       Produce annotated_bibliography in the requested citation style. For each SRC/KB item,
       preserve its evidence ID and returned metadata, summarize relevance, identify evidence
@@ -142,16 +159,25 @@ steps:
       silently upgraded to verified. Do not create a conventional reference entry when the
       registry lacks enough metadata; retain it as an unresolved evidence note instead.
 
+      When generation_parameters indicates light retrieval, keep each bibliography item to
+      its returned citation metadata plus one compact relevance/quality/limitation paragraph.
+      Do not reproduce full abstracts or the search log. Save annotated_bibliography immediately
+      in its own save_artifacts call before composing the synthesis.
+
       Produce research_synthesis with themes, areas of convergence, contradictions,
       alternative explanations, evidence-quality comparisons, research gaps, and a
       claim-evidence map. Every externally grounded statement must carry one or more exact
       SRC-NNN/KB-NNN IDs. Separate source findings, your synthesis and proposed research
       design. Explicitly state limitations when the corpus is empty or retrieval-bounded.
+      For a light task, keep this synthesis proportionate to the requested paper (normally no
+      more than about 1200 Chinese characters or 800 English words). Save research_synthesis in
+      a separate save_artifacts call; do not batch both long Markdown values into one JSON call.
 
       Then call academic_writer_prepare_context using the complete user request, generation
       parameters, RQ brief, method blueprint, annotated bibliography, synthesis and exact
-      literature evidence. Save its returned writing_task, resource_profiles and
-      writing_context paths with content_type="file"; never save path strings as text.
+      literature evidence exactly once. Do not retrieve any input again before this call. Save
+      its returned writing_task, resource_profiles and writing_context paths together with
+      content_type="file"; never save path strings as text.
     tools: [academic_writer_prepare_context]
     inputs:
       - {material: generation_parameters, required: true}
@@ -180,6 +206,10 @@ steps:
       Generate or revise one editable academic outline through LazyMind Writer. Retrieve the
       latest writing_task, writing_context, literature_evidence, generation_parameters and
       outline_document when present. Save every Writer path with content_type="file".
+
+      Writer tools consume file paths. Resolve only the paths actually required by the selected
+      mode, at most once per material, and pass them directly to the tools. Never call read_file,
+      grep or list_artifacts, and never inspect a Writer-generated Markdown path before saving it.
 
       First generation: call academic_writer_generate_outline. Targeted rerun: call
       academic_writer_revise_markdown with document_slot="outline_document" and the latest
@@ -233,6 +263,10 @@ steps:
       it as a Workflow material or treat it as a second editable outline. Save the returned report
       as effective_outline_check_report. Registered evidence remains globally available through the
       locked Writer context; per-chapter evidence IDs are guidance, not an authorization boundary.
+
+      All Writer inputs are Workflow-bound file paths. Pass those paths directly to the business
+      tools and never call read_file, get_artifact with a returned path, grep or list_artifacts.
+      Do not inspect returned section or draft files before saving their paths.
 
       For first generation: update context from the latest outline, call
       academic_writer_plan_sections with the same approved Markdown and temporary contract, call
@@ -301,8 +335,10 @@ steps:
       and summary as the deterministic baseline for structure, length and registered-ID
       checks. Structure is evaluated against the user-approved outline_document: a conventional
       section absent from that outline is a visible warning, not a deterministic failure. Read the
-      latest draft for semantic review with get_artifact(key="draft_document"). Never pass a JSON
-      input or a filesystem path to a Markdown reader.
+      latest draft for semantic review exactly once with
+      get_artifact(key="draft_document", start_line=1, end_line=1200). Do not retrieve any other
+      input: the audit tool already resolves evidence, parameters and the approved outline.
+      Never pass a JSON input or a filesystem path to a Markdown reader.
 
       Extend the baseline report with coverage-bounded semantic checks:
       1. reference existence/metadata status from literature_evidence;
@@ -343,6 +379,11 @@ steps:
       Journal-Fit, Methodology, Domain, Cross-disciplinary Perspective, Devil's Advocate.
       Save reviewer_configuration explaining each scope; role separation is not described as
       statistical independence.
+
+      Retrieve the five required Workflow materials once in one parallel tool turn with
+      get_artifact(key=<material key>, start_line=1, end_line=1200). Never call read_file,
+      find_artifact, grep or list_artifacts, and never retrieve a second range merely because
+      earlier context was summarized. Review only the returned bounded material.
 
       Produce five ordered review_reports. Each report must cite exact manuscript headings or
       excerpts, give criterion status (MEETS/PARTLY_MEETS/DOES_NOT_MEET/NOT_ASSESSED), classify
@@ -387,6 +428,10 @@ steps:
       feedback_path=revision_roadmap and only the user's current explicit choices in
       user_instruction. The business tool reads the feedback file itself; do not copy the roadmap
       into tool arguments or build a second revision instruction in the Agent.
+
+      Resolve required Workflow file paths once and pass them directly to Writer. Apart from one
+      bounded get_artifact call for revision_roadmap when needed to write revision_response, never
+      read Workflow or Writer files and never retry them through alternate paths.
 
       Do not accept feedback sycophantically. For every roadmap item record ADDRESSED,
       PARTIALLY_ADDRESSED, AUTHOR_DISAGREES (with evidence), or ACKNOWLEDGED_LIMITATION in
@@ -433,6 +478,10 @@ steps:
       Do not treat the response letter as proof and do not introduce a new review yardstick.
       Record genuinely new Critical/Major issues separately with evidence.
 
+      Retrieve the five required Workflow materials once in one parallel tool turn with
+      get_artifact(key=<material key>, start_line=1, end_line=1200). Never call read_file,
+      find_artifact, grep or list_artifacts and do not retrieve additional ranges.
+
       Save re_review_report with the full traceability matrix. Call
       normalize_academic_review_decision once with the proposed decision wording, and save its
       returned token unchanged as re_review_decision. ACCEPT requires no
@@ -466,6 +515,9 @@ steps:
       user_instruction. The business tool reads the report itself; do not copy it into tool
       arguments or build a second instruction. Address only verified residual issues; no scope
       expansion, invented evidence or new methods/results.
+
+      Resolve the required Workflow file paths once and pass them directly to the business tool.
+      Never read their contents or retry them through read_file, get_artifact, grep or listing.
 
       Save exact returned file paths under second_revision_task, second_revision_locate_result,
       second_revision_modify_plan, second_revision_set and second_revision_result. Save the
@@ -503,8 +555,9 @@ steps:
       Execute academic-pipeline Stage 4.5 as a fresh mandatory check, not a copy of Stage 2.5.
       Call audit_academic_manuscript_from_inputs(stage="final") exactly once; it selects the
       latest available second revision, first revision or draft from this Attempt. When semantic
-      review needs manuscript text, use get_artifact with the selected material key, never a path
-      and never a JSON input. Repeat the
+      review needs manuscript text, use one bounded get_artifact call with the selected material
+      key and start_line=1, end_line=1200, never a path and never a JSON input. Do not retrieve
+      any other input because the audit tool already resolved it. Repeat the
       complete semantic five-phase audit and seven AI research failure modes from fresh
       inputs, including any newly introduced citation or claim drift. Preserve the approved
       outline distinction between missing approved headings (failure) and conventional headings
@@ -549,6 +602,9 @@ steps:
       save_artifacts call. Do not copy full manuscript content or binary data through the
       model, do not store a path as text, and do not claim PDF/LaTeX/Pandoc output that this
       adapted workflow did not produce.
+
+      The builder resolves every Workflow input itself. Do not call get_artifact, read_file,
+      find_artifact, grep or list_artifacts before or after the builder call.
     tools: [compose_academic_paper_from_inputs]
     inputs:
       - {material: generation_parameters, required: true}
@@ -580,8 +636,10 @@ steps:
       with its deep-research, academic-paper and academic-paper-reviewer contracts, and point
       to the package SOURCE.md for the mapping and unsupported features.
 
-      Read each required Workflow material once with a sufficiently broad line range. Do not
-      re-read the same range merely to restate details already collected.
+      Retrieve each required text/JSON Workflow material once in one parallel tool turn with
+      get_artifact(key=<material key>, start_line=1, end_line=1000). Never read final_paper or
+      another binary/file delivery artifact; use delivery_metadata for delivered filenames.
+      Do not call read_file, find_artifact, grep or list_artifacts and do not re-read any range.
 
       Do not invent token counts, elapsed time, review independence, search coverage,
       plagiarism clearance or institutional authorization. Save one complete Markdown text
@@ -595,7 +653,7 @@ steps:
       - {material: revision_response, required: true}
       - {material: re_review_report, required: true}
       - {material: final_integrity_report, required: true}
-      - {material: final_paper, required: true}
+      - {material: delivery_metadata, required: true}
     outputs:
       - {material: process_record}
     acceptance_criteria: |

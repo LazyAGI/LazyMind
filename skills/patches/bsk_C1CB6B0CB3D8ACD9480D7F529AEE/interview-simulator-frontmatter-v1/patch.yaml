@@ -1,0 +1,12 @@
+schema_version: 1
+id: interview-simulator/add-required-frontmatter-v1
+description: Add the SKILL.md metadata required by LazyMind without changing the upstream source archive
+target:
+  uid: bsk_C1CB6B0CB3D8ACD9480D7F529AEE
+  version: 1.0.0
+  origin_tree_sha256: 4afb2807b9e4794019bfcf1cf8b442c8a22835d35b5cac7aacdc7f3b0edcd836
+operations:
+  - op: upsert
+    path: SKILL.md
+    file: files/SKILL.md
+    before_sha256: 02f3f0a81577dc8ec91c0d1218ca7bf482ffbe42970305ab742d595415e667ef

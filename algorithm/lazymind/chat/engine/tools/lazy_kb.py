@@ -103,14 +103,27 @@ class KBToolkit:
 
 
 def kb_tmp_search(
-    query: str,
-    retriever_topk: Optional[int] = None,
-    rerank_topk: Optional[int] = None,
-    k_max: Optional[int] = None,
-    files: Optional[List[str]] = None,
+    semantic_query: Optional[str] = None,
+    grep_patterns: Optional[List[str]] = None,
+    top_k: int = 10,
 ) -> Any:
-    """Search attached temporary uploaded files with the temporary document retriever."""
+    """Locate passages in this conversation's uploaded documents.
+
+    Use for user-uploaded PDFs, Word/PPT, and prose text (txt/md). After hits,
+    call read_file on the returned target and line. Do not use for knowledge
+    bases, url_fetch web PDFs, workspace drafts, desktop folders, or source
+    code — use kb_* tools or grep for those.
+
+    At least one of semantic_query or grep_patterns is required. Refine
+    grep_patterns across later calls; parsed text is reused. Each grep pattern
+    is a literal substring or regular expression (same rules as grep).
+
+    Args:
+        semantic_query: Optional natural-language question over uploaded files.
+        grep_patterns: Optional list of search strings (regex or literal).
+        top_k: Maximum hits to return (default 10, max 30).
+    """
     from lazymind.chat.runtime_loader import ensure_rag_runtime
     return ensure_rag_runtime().kb_tmp_search(
-        query, retriever_topk, rerank_topk, k_max, files,
+        semantic_query, grep_patterns, top_k,
     )
