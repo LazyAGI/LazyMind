@@ -10,6 +10,7 @@ setuptools<81
 
 beautifulsoup4
 openpyxl==3.1.5
+xlrd==2.0.1
 python-docx
 pillow
 lxml

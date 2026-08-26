@@ -1,0 +1,70 @@
+schema_version: 2
+id: ui-new
+type: work
+version: 1.0.0
+status: published
+default_locale: zh-CN
+
+skill:
+  source_url: https://skillhub.cn/skills/user_865e3592/ui-new
+  required_version: 0.0.0+e8cd7d5ce137
+
+placement:
+  home: true
+  gallery: true
+  order: 20
+
+classification:
+  category: 设计创作
+  tags:
+    - UI设计
+    - 界面设计
+    - 交互体验
+    - 设计系统
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+
+presentation:
+  card:
+    title: UI 设计
+    description: 从需求理解到高保真界面，生成简约、规范、可落地的产品界面方案
+    output_type: images
+    output_label: UI 设计方案
+    cover_asset: cover
+    result_summary: 输出界面结构、视觉规范、组件建议和高保真页面方向
+  detail:
+    title: UI 设计
+    description: 根据产品目标、用户场景和业务约束，梳理信息架构、交互路径和视觉规范，生成可继续迭代的界面设计方案。来源：https://skillhub.cn/skills/user_865e3592/ui-new，经 LazyMind 适配。
+    attachment_hint: 产品需求、现有页面截图、品牌规范或参考案例
+
+tasks:
+  - id: ui-design
+    selector:
+      title: 界面设计方案
+      description: 将产品想法转化为信息清晰、视觉统一的界面方案
+      output_label: UI 设计方案
+    launch:
+      prompt_short: 根据我的产品需求，设计一套简约直观的 UI 界面方案。
+      prompt: 请根据我提供的产品目标、目标用户、核心流程、品牌调性和参考页面，设计一套简约直观的 UI 界面方案。请先澄清缺失的关键约束，再输出信息架构、主要页面布局、视觉风格、组件规范、交互状态和可交付的高保真设计建议。
+    replay:
+      steps:
+        - title: 理解需求
+          description: 明确业务目标、用户场景、核心任务和约束条件
+        - title: 梳理结构
+          description: 规划信息架构、页面层级和关键操作路径
+        - title: 定义视觉
+          description: 确定配色、字体、组件、间距和状态规范
+        - title: 输出方案
+          description: 形成页面设计说明、高保真方向和落地建议
+    result:
+      template: generic_report_v1
+      eyebrow: UI 设计方案
+      title: 简约直观的产品界面设计
+      summary: 交付从信息架构到视觉规范的完整 UI 方案，便于继续设计或实现
+      highlights:
+        - 页面结构与核心用户流程
+        - 视觉系统、组件和交互状态
+        - 高保真界面方向与实现建议

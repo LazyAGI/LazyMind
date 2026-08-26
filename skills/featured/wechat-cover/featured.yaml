@@ -1,0 +1,70 @@
+schema_version: 2
+id: wechat-cover
+type: work
+version: 1.0.0
+status: published
+default_locale: zh-CN
+
+skill:
+  source_url: https://skillhub.cn/skills/user_8d36cde0/wechat-cover
+  required_version: 1.3.1
+
+placement:
+  home: true
+  gallery: true
+  order: 21
+
+classification:
+  category: 设计创作
+  tags:
+    - 公众号封面
+    - 爆款标题
+    - 内容营销
+    - 封面设计
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+
+presentation:
+  card:
+    title: 公众号爆款封面设计
+    description: 分析文章主题与传播卖点，生成多版高转化公众号封面方案
+    output_type: images
+    output_label: 封面方案
+    cover_asset: cover
+    result_summary: 输出标题卖点、视觉方向、配色建议和多版封面创意
+  detail:
+    title: 公众号爆款封面设计
+    description: 根据文章主题、摘要和目标读者，提炼核心卖点，参考高传播封面规律，生成适合公众号使用的封面设计方案。来源：https://github.com/tomorrow140/wechat-cover-designer，经 LazyMind 适配。
+    attachment_hint: 文章标题、正文摘要、目标读者、账号定位或参考封面
+
+tasks:
+  - id: cover-design
+    selector:
+      title: 爆款封面方案
+      description: 围绕文章内容生成可直接制作的公众号封面创意
+      output_label: 公众号封面方案
+    launch:
+      prompt_short: 根据我的文章内容，生成多版公众号爆款封面设计方案。
+      prompt: 请根据我提供的文章标题、正文摘要、账号定位和目标读者，分析核心卖点与传播情绪，生成多版公众号爆款封面设计方案。请包含标题表达、视觉主体、构图布局、配色建议、字体风格、适用场景和一键制作提示；信息不足时先询问关键资料。
+    replay:
+      steps:
+        - title: 输入主题
+          description: 读取文章标题、摘要、读者和账号定位
+        - title: 分析卖点
+          description: 提炼传播钩子、情绪价值和标题表达方式
+        - title: 生成方案
+          description: 输出多版封面构图、配色、人物和文字策略
+        - title: 应用预览
+          description: 给出公众号尺寸适配、修改建议和制作提示
+    result:
+      template: generic_report_v1
+      eyebrow: 公众号封面方案
+      title: 多版高转化封面创意
+      summary: 形成标题、构图、配色和制作提示完整配套的封面设计方案
+      highlights:
+        - 核心卖点与爆款标题表达
+        - 多版封面视觉方向
+        - 公众号尺寸适配和落地制作提示

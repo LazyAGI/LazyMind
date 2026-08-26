@@ -82,6 +82,21 @@
       "package_file": "packages/bsk_01K0M8SCV7PAPERSEARCH9Q2X3A4B.zip"
     },
     {
+      "key": "humanizer",
+      "uid": "bsk_01K3G4HUMANIZERCHAT001A2B3C",
+      "source_url": "builtin://chat/humanizer",
+      "resolved_url": "builtin://chat/humanizer",
+      "version": "1.0.0",
+      "name": "humanizer",
+      "description": "识别并去除中文或英文文本中的 AI 写作腔、机器感和模板化生成痕迹。适用于用户希望减少文本中的 AI 痕迹、ChatGPT 或机器人腔，使其更像人类自然表达，或审查文本中的 AI 写作模式；可覆盖“去 AI 味”“humanize”“remove the AI tone”“make it sound less AI-written”等相关或语义相近的表述。不要仅因用户要求普通润色、改写、校对、翻译、缩写、扩写、口语化、语气调整或“更自然”而使用。",
+      "category": "chat",
+      "market_visible": true,
+      "archive_sha256": "30141e5638e958734f364492f0dc741a1e7fab093223c6fd6a226ee48504b0ef",
+      "tree_sha256": "649b9449f73991ac5e950cba0cde76ca67a6236a0ef76d9e38ded25fe258d7a5",
+      "archive_size": 13298,
+      "package_file": "packages/bsk_01K3G4HUMANIZERCHAT001A2B3C.zip"
+    },
+    {
       "key": "structured-longform-writing",
       "uid": "bsk_E1A2FD55C759A485672BA6B94328",
       "source_url": "builtin://writing/structured-longform-writing",
@@ -124,6 +139,58 @@
       "package_file": "packages/bsk_01L0D6G4R4M8V2K7Q9C5X3H0EP.zip"
     },
     {
+      "key": "user_290ac21c/find-skill-skillhub",
+      "uid": "bsk_1D28C8C76BBD0551F53AAB437A8B",
+      "source_url": "https://skillhub.cn/skills/user_290ac21c/find-skill-skillhub",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40user_290ac21c%2Ffind-skill-skillhub",
+      "version": "1.0.2",
+      "name": "find-skill-skillhub",
+      "description": "在 SkillHub 平台查找/搜索 Skill 技能。基于 skills 列表接口，支持关键词分词搜索、一级标签（一级分类）筛选、以及二者组合检索。当用户说『找个 xxx 技能』『有没有处理 PDF 的 skill』『SkillHub 上搜一下 xxx』『按分类看技能』『办公效率类有哪些技能』『推荐一个做数据分析的 skill』『这个需求有现成技能吗』等需要在 SkillHub 上发现/检索/推荐 Skill 的场景时使用本技能。",
+      "category": "external",
+      "market_visible": true,
+      "archive_sha256": "809538897b3f2b931959c73dad47a07a631ae411c1b85f6725571745335e84c7",
+      "tree_sha256": "4b80c4834a51dfdaa0cf9231cfcd74e4049ad93ba3f85a98defd0ea4e1bfb027",
+      "archive_size": 14051,
+      "package_file": "packages/bsk_1D28C8C76BBD0551F53AAB437A8B.zip"
+    },
+    {
+      "key": "chat-eq-reply",
+      "uid": "bsk_2BDE2388F7E15A43C0559AC4DFC0",
+      "source_url": "https://skillhub.cn/skills/chat-eq-reply",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=chat-eq-reply",
+      "version": "3.5.0",
+      "name": "chat-eq-reply",
+      "description": "高情商聊天回复助手。当用户需要帮忙回复各种一对一文本沟通场景中的消息时使用此技能——包括恋爱暧昧、追求搭讪、女追男、相亲、职场沟通、朋友社交、家人沟通、商务客户、社交破冰等场景。根据对方原话、关系类型和具体场景，生成可直接复制发送的多风格高情商回复。触发词包括但不限于：帮我回一下这句、对方说了这句话该怎么回、高情商回复、怎么回她/他、这句话怎么接、聊天冷场了、对方回消息很冷淡、帮我分析一下对方这句话、这句话什么意思怎么回、怎么拒绝、怎么回复领导、怎么跟同事说、怎么追男生、女生主动撩、怎么约男生出来、相亲怎么聊、相亲后怎么跟进、被放鸽子怎么回、朋友介绍对象、报价谈判、合同条款怎么谈、异地恋怎么维系、被拉黑怎么挽回、面试后怎么跟进、婆媳关系怎么处、客户要回扣怎么回、相亲没感觉怎么拒绝、同事竞争晋升、被说不合适怎么回、对方翻旧账、忘纪念日怎么办、被群里公开怼怎么回、怎么提加薪、跨部门推不动怎么办、朋友不还钱怎么开口、不想去婚礼怎么回、朋友让免费干活、过年亲戚催问、父母不理解工作、伴侣不愿回老家、客户要免费试用、竞品更便宜、老客户要折扣、甲方频繁改需求、怎么加陌生人微信、群聊怎么接话、新同事吃饭聊什么、兴趣群破冰。适用于社恐、恋爱、职场、相亲、日常聊天等场景。",
+      "category": "external",
+      "market_visible": false,
+      "archive_sha256": "8171e4246e79b9cdfcf1d64fa7f55e04c0697d45b040e89d9d29d949f8e60deb",
+      "tree_sha256": "34e6ac62a65f50b7c88b56c82eb86b518663877ac09ccbeb802d9920bfe819f9",
+      "archive_size": 82484,
+      "package_file": "packages/bsk_2BDE2388F7E15A43C0559AC4DFC0.zip"
+    },
+    {
+      "key": "skill",
+      "uid": "bsk_6ACDCFC9A48A7A276D31323C0D65",
+      "source_url": "builtin://featured/data-report/skill",
+      "resolved_url": "builtin://featured/data-report/skill",
+      "version": "0.1.0",
+      "name": "data-report",
+      "description": "Turns CSV, Excel, or JSON data into a polished visual report page.",
+      "category": "data",
+      "tags": [
+        "data",
+        "report",
+        "chart",
+        "数据",
+        "报告"
+      ],
+      "market_visible": false,
+      "archive_sha256": "9b3b093c949ebb40d9e66e090ae28fe1b127480b5a45df2eb13e97454eb3d5fc",
+      "tree_sha256": "64a98a17b2b913bbc2e40fb3590c4eea0251ff9173df3700cfad76c23785c2d6",
+      "archive_size": 7674,
+      "package_file": "packages/bsk_6ACDCFC9A48A7A276D31323C0D65.zip"
+    },
+    {
       "key": "user_7c4df347/gaokao-volunteer-advisor",
       "uid": "bsk_C8C501AEDCEC9283F2C9F9F59AD8",
       "source_url": "https://skillhub.cn/skills/user_7c4df347/gaokao-volunteer-advisor",
@@ -137,6 +204,73 @@
       "tree_sha256": "6b410460510e4963ccbf0e731f9da01918d15f5f95dfaf26670a6e455ebda88e",
       "archive_size": 27164,
       "package_file": "packages/bsk_C8C501AEDCEC9283F2C9F9F59AD8.zip"
+    },
+    {
+      "key": "ima-skills",
+      "uid": "bsk_584E8BDE0615EEB04AEBCC4FB3BE",
+      "source_url": "https://skillhub.cn/skills/ima-skills",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=ima-skills",
+      "version": "1.1.9",
+      "name": "ima-skill",
+      "description": "统一的 IMA OpenAPI 技能，支持笔记管理和知识库操作。\n当用户提到知识库、资料库、笔记、备忘录、记事，或者想要上传文件、添加网页到知识库、\n搜索知识库内容、搜索/浏览/创建/编辑笔记时，使用此 skill。\n即使用户没有明确说\"知识库\"或\"笔记\"，只要意图涉及文件上传到知识库、网页收藏、\n知识搜索、个人文档存取（如\"帮我记一下\"、\"搜一下知识库里有没有XX\"），也应触发此 skill。",
+      "category": "external",
+      "market_visible": false,
+      "archive_sha256": "16d40e9341135d66c5e36975c8e6a63b71712309fa265dbcf6c421ea87fd3154",
+      "tree_sha256": "bc63bc0c4ab13d7344c9f04aac1cdb8d49ecf63493c00a8dab228dcd5411f5dc",
+      "archive_size": 38984,
+      "package_file": "packages/bsk_584E8BDE0615EEB04AEBCC4FB3BE.zip"
+    },
+    {
+      "key": "user_6d79eef2/k12-smart-teacher",
+      "uid": "bsk_8540F063D5202C3CE7D9B6F93366",
+      "source_url": "https://skillhub.cn/skills/user_6d79eef2/k12-smart-teacher",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40user_6d79eef2%2Fk12-smart-teacher",
+      "version": "1.0.4",
+      "name": "k12-smart-teacher",
+      "description": "K12智能老师辅导系统，支持作业批改、错题分析、举一反三练习生成。覆盖小学/初中/高中全学段，语文/数学/英语/物理/化学/生物/历史/地理/政治九大学科；每科内置4个高频主题，统一生成基础/提高/挑战三层练习。可生成Markdown/JSON练习文件，安装python-docx后可生成Word文档。",
+      "category": "external",
+      "tags": [
+        "K12教育",
+        "作业批改",
+        "错题分析",
+        "练习生成",
+        "智能辅导"
+      ],
+      "market_visible": false,
+      "archive_sha256": "96947b675aa49a65625bfc791519d4f4518bd2d619fec29453b63782269aec4c",
+      "tree_sha256": "1aef731597db76401e1732845581c241068ecd6e30e458ad5343767f67158af5",
+      "archive_size": 49861,
+      "package_file": "packages/bsk_8540F063D5202C3CE7D9B6F93366.zip"
+    },
+    {
+      "key": "user_865e3592/ui-new",
+      "uid": "bsk_2D6763090EDB32C4012562C7CB4E",
+      "source_url": "https://skillhub.cn/skills/user_865e3592/ui-new",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40user_865e3592%2Fui-new",
+      "version": "0.0.0+e8cd7d5ce137",
+      "name": "ui-design-system",
+      "description": "专业UI生成与现有界面优化技能。当用户请求生成UI界面、设计页面、优化现有界面、创建组件库、设计系统、App界面、Web界面、Dashboard、Landing Page、或任何涉及视觉交互设计时必须触发此技能。参考Google Material Design、Apple HIG、以及Pinterest级别审美标准，输出大气简约、高级美学的UI代码。即使用户只是说\"帮我做个界面\"、\"优化一下UI\"、\"设计一个页面\"也必须触发。",
+      "category": "external",
+      "market_visible": false,
+      "archive_sha256": "476089e335dfe94328f28d7ed6de739ca83097d91d593817a7a15f3f4dc9121b",
+      "tree_sha256": "e8cd7d5ce137dfc15c92c2c497c901ea159edf9be0f4ad709d6fc96cfb44f758",
+      "archive_size": 16659,
+      "package_file": "packages/bsk_2D6763090EDB32C4012562C7CB4E.zip"
+    },
+    {
+      "key": "user_8d36cde0/wechat-cover",
+      "uid": "bsk_3D73909CE1B5E0E9207253BA8446",
+      "source_url": "https://skillhub.cn/skills/user_8d36cde0/wechat-cover",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40user_8d36cde0%2Fwechat-cover",
+      "version": "1.3.1",
+      "name": "wechat-cover",
+      "description": "公众号爆款封面AI设计工具。基于全网每日收录的10w+文章数据，获取同赛道爆款封面视觉元素，通过AI分析总结高转化视觉规律，生成贴合文章内容、符合平台流量审美的封面设计方案。当用户设计公众号封面、生成封面方案、查询爆款封面规律时使用。触发词：公众号封面、封面设计、爆款封面、封面方案、封面生图。",
+      "category": "design",
+      "market_visible": false,
+      "archive_sha256": "d1803dcb4e004aea485a44f8de0e1df789a6f4203ff5331fbdc8dab482db174a",
+      "tree_sha256": "fab80d38e3df9c5e2d67c3c7a5bd7b43b23c1a2a3987c1159dd057f0fd1af202",
+      "archive_size": 22021,
+      "package_file": "packages/bsk_3D73909CE1B5E0E9207253BA8446.zip"
     },
     {
       "key": "user_fd308b11/hot-news-summary",
@@ -184,28 +318,6 @@
       "package_file": "packages/bsk_C1CB6B0CB3D8ACD9480D7F529AEE.zip"
     },
     {
-      "key": "user_6d79eef2/k12-smart-teacher",
-      "uid": "bsk_8540F063D5202C3CE7D9B6F93366",
-      "source_url": "https://skillhub.cn/skills/user_6d79eef2/k12-smart-teacher",
-      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40user_6d79eef2%2Fk12-smart-teacher",
-      "version": "1.0.4",
-      "name": "k12-smart-teacher",
-      "description": "K12智能老师辅导系统，支持作业批改、错题分析、举一反三练习生成。覆盖小学/初中/高中全学段，语文/数学/英语/物理/化学/生物/历史/地理/政治九大学科；每科内置4个高频主题，统一生成基础/提高/挑战三层练习。可生成Markdown/JSON练习文件，安装python-docx后可生成Word文档。",
-      "category": "external",
-      "tags": [
-        "K12教育",
-        "作业批改",
-        "错题分析",
-        "练习生成",
-        "智能辅导"
-      ],
-      "market_visible": false,
-      "archive_sha256": "96947b675aa49a65625bfc791519d4f4518bd2d619fec29453b63782269aec4c",
-      "tree_sha256": "1aef731597db76401e1732845581c241068ecd6e30e458ad5343767f67158af5",
-      "archive_size": 49861,
-      "package_file": "packages/bsk_8540F063D5202C3CE7D9B6F93366.zip"
-    },
-    {
       "key": "skill",
       "uid": "bsk_D9126B2E88201F74F8728E46A1C2",
       "source_url": "builtin://featured/market-researcher/skill",
@@ -246,6 +358,36 @@
       "package_file": "packages/bsk_1E1AE354017CAB635F423BC76790.zip"
     },
     {
+      "key": "user_1a7e2e57/cangjie-distill",
+      "uid": "bsk_85D8CC6C1D0107F230363950DC79",
+      "source_url": "https://skillhub.cn/skills/user_1a7e2e57/cangjie-distill",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40user_1a7e2e57%2Fcangjie-distill",
+      "version": "1.0.0",
+      "name": "cangjie-skill",
+      "description": "Distill a book into a coherent set of executable skills. Use when the user asks to \"拆书\" / \"蒸馏一本书\" / \"把 XX 书做成 skill\" / \"turn a book into skills\" — i.e. wants a book's frameworks, principles, and methodologies extracted into atomic, reusable Claude skills that an agent can invoke in real-world situations. NOT for simple summarization, book reviews, or role-playing as the author (that is nuwa-skill's job).",
+      "category": "external",
+      "market_visible": false,
+      "archive_sha256": "fc308c32156358cfa05decc3eaa82d8a6f2aeeed3b3b3f5140a9f9acf69657d4",
+      "tree_sha256": "24b003a9ad6ee712bf4759c59f9a6f0b420f23e68b852523476c7fde337fd7ce",
+      "archive_size": 30557,
+      "package_file": "packages/bsk_85D8CC6C1D0107F230363950DC79.zip"
+    },
+    {
+      "key": "user_5b28ea14/smart-charts",
+      "uid": "bsk_FFB9D957F2E7E6045A01B28AA5D1",
+      "source_url": "https://skillhub.cn/skills/user_5b28ea14/smart-charts",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40user_5b28ea14%2Fsmart-charts",
+      "version": "6.2.1",
+      "name": "smart-charts",
+      "description": "Intelligent chart generation and data analysis skill. Reads user-supplied data files (CSV/Excel/JSON), analyzes data characteristics with LLM assistance, auto-recommends and generates interactive ECharts visualizations. Use when the user asks to analyze data, generate charts, create visualizations, or work with tabular data files.",
+      "category": "external",
+      "market_visible": false,
+      "archive_sha256": "8b0a8082021633dd12c298b7878cbfb579f956858d812deb5bd41253660d8d24",
+      "tree_sha256": "3e11d139172c812f178c8b0e1f9de6ad906d5293ca83d127095ce2db03e8a937",
+      "archive_size": 401375,
+      "package_file": "packages/bsk_FFB9D957F2E7E6045A01B28AA5D1.zip"
+    },
+    {
       "key": "skill",
       "uid": "bsk_3DAD0016C2AC0817C61F3533A3EB",
       "source_url": "builtin://featured/xiaohongshu-copywriter/skill",
@@ -259,6 +401,21 @@
       "tree_sha256": "de940e3328b9dabb0501df4246ca8dca2bb7bb8527faeef68a6aae3f81e1d763",
       "archive_size": 14796,
       "package_file": "packages/bsk_3DAD0016C2AC0817C61F3533A3EB.zip"
+    },
+    {
+      "key": "user_865e3592/poster",
+      "uid": "bsk_0A4FA4EEC9DC0A7987E7A285CD70",
+      "source_url": "https://skillhub.cn/skills/user_865e3592/poster",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40user_865e3592%2Fposter",
+      "version": "0.0.0+6e8ecaa3c33f",
+      "name": "algorithmic-poster-philosophy",
+      "description": "当用户提到海报、视觉设计、品牌视觉、排版系统、极简风格、设计哲学、美学方案，或说\"帮我做张海报\"时，必须触发此技能。该技能先构建一套设计哲学（Algorithmic Philosophy），再基于该哲学用 show_widget 生成可渲染的 SVG 海报 artifact。即使用户没有明确提到\"哲学\"或\"系统\"，只要涉及视觉设计或海报生成，都应触发。适用于品牌视觉、作品集封面、极简主义海报、AI 生成艺术、任何需要系统性美学表达的场景。",
+      "category": "external",
+      "market_visible": false,
+      "archive_sha256": "27e6d9ae55e0cc20953b2aea1ad7dc0c734f0e7890866f913b07d8074a7bd42c",
+      "tree_sha256": "6e8ecaa3c33fb40ada4b04231c6f4ead4560e6ee4e6e4528683826e382e57a3b",
+      "archive_size": 3365,
+      "package_file": "packages/bsk_0A4FA4EEC9DC0A7987E7A285CD70.zip"
     }
   ]
 }

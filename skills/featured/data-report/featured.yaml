@@ -1,0 +1,126 @@
+schema_version: 2
+id: data-report
+type: work
+version: 0.1.0
+status: published
+default_locale: zh-CN
+
+skill:
+  source_url: featured/data-report/skill
+  required_version: 0.1.0
+
+placement:
+  home: true
+  gallery: true
+  order: 13
+
+classification:
+  category: 数据分析
+  tags:
+    - 数据报告
+    - Excel 分析
+    - CSV 分析
+    - 可视化报告
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+
+presentation:
+  card:
+    title: 数据可视化报告
+    description: 上传 Excel 或 CSV，一键生成包含指标、图表和洞察的分析报告
+    output_type: dashboard
+    output_label: 数据分析报告
+    cover_asset: cover
+    result_summary: 从原始表格生成可浏览的 KPI、趋势图、结构分析和业务结论
+  detail:
+    title: 数据可视化报告
+    description: 源自千问办公内置 Skill。上传 Excel 或 CSV 表格，一键生成包含 KPI、图表、明细表和分析洞察的可视化数据报告。
+    attachment_hint: Excel、CSV 或 JSON 数据文件
+
+tasks:
+  - id: executive-report
+    selector:
+      title: 综合经营报告
+      description: 汇总核心指标、趋势、结构和异常变化
+      output_label: 经营分析报告
+    launch:
+      prompt_short: 根据我上传的数据生成一份综合经营分析报告。
+      prompt: 请读取我上传的 Excel 或 CSV，识别业务口径和关键指标，生成包含 KPI 卡片、趋势图、结构对比、异常说明和行动建议的可视化 HTML 报告。不要编造缺失数据；字段含义不明确时先向我确认。
+    replay:
+      steps:
+        - title: 读取并校验数据
+          description: 检查字段、类型、时间范围、缺失值和异常值
+        - title: 计算核心指标
+          description: 汇总规模、增长、效率和结构性指标
+        - title: 构建可视化报告
+          description: 编排 KPI、趋势、对比和明细模块
+        - title: 提炼业务洞察
+          description: 说明关键变化、风险和可执行建议
+    result:
+      template: generic_report_v1
+      eyebrow: 经营分析报告
+      title: 核心指标与经营洞察
+      summary: 将表格数据转化为可浏览的指标看板、趋势分析和行动建议
+      highlights:
+        - KPI 与同比环比变化
+        - 趋势、结构和异常分析
+        - 业务结论与行动建议
+
+  - id: trend-report
+    selector:
+      title: 趋势分析报告
+      description: 聚焦时间序列、增长率和异常拐点
+      output_label: 趋势分析报告
+    launch:
+      prompt_short: 分析我上传数据中的趋势、增长和异常变化。
+      prompt: 请读取我上传的数据，围绕时间维度分析关键指标趋势、增长率、周期性和异常拐点，使用合适图表并生成可浏览的 HTML 报告，同时明确数据范围和判断限制。
+    replay:
+      steps:
+        - title: 对齐时间口径
+          description: 确认时间粒度、指标定义和可比区间
+        - title: 计算变化指标
+          description: 计算增长率、移动变化和主要拐点
+        - title: 绘制趋势图表
+          description: 用折线图和对比图呈现关键变化
+        - title: 输出趋势结论
+          description: 总结增长、下滑、波动和后续关注点
+    result:
+      template: generic_report_v1
+      eyebrow: 趋势分析报告
+      title: 指标趋势、增长与异常
+      summary: 聚焦时间序列变化，呈现增长区间、拐点和需要关注的异常
+      highlights:
+        - 时间范围与指标口径
+        - 增长率和关键拐点
+        - 异常变化与关注建议
+
+  - id: dimension-report
+    selector:
+      title: 多维对比报告
+      description: 比较区域、渠道、产品或人群的表现差异
+      output_label: 多维分析报告
+    launch:
+      prompt_short: 对我上传的数据做多维度对比分析。
+      prompt: 请读取我上传的表格，识别区域、渠道、产品或用户等维度，对关键指标进行分组汇总、排名和贡献分析，生成包含对比图表、明细和结论的可视化 HTML 报告。
+    replay:
+      steps:
+        - title: 识别分析维度
+          description: 确认可用于分组比较的业务字段
+        - title: 聚合与排名
+          description: 计算分组指标、贡献占比和排名
+        - title: 展示结构差异
+          description: 使用对比图和明细表呈现差距
+        - title: 形成优化建议
+          description: 识别高低表现分组和潜在改善方向
+    result:
+      template: generic_report_v1
+      eyebrow: 多维分析报告
+      title: 分组表现与贡献结构
+      summary: 比较不同业务维度的表现、贡献和改善机会
+      highlights:
+        - 分组指标与排名
+        - 贡献结构和表现差距
+        - 高低表现分组的行动建议

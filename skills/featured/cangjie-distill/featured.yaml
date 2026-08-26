@@ -1,0 +1,126 @@
+schema_version: 2
+id: cangjie-distill
+type: work
+version: 1.0.0
+status: published
+default_locale: zh-CN
+
+skill:
+  source_url: https://skillhub.cn/skills/user_1a7e2e57/cangjie-distill
+  required_version: 1.0.0
+
+placement:
+  home: true
+  gallery: true
+  order: 14
+
+classification:
+  category: 知识创作
+  tags:
+    - 拆书
+    - 方法论
+    - Skill 创作
+    - 知识蒸馏
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+
+presentation:
+  card:
+    title: 仓颉拆书成技能
+    description: 从一本书中提炼可执行的方法论，并整理成可复用 Skill
+    output_type: document
+    output_label: Skill 方案
+    cover_asset: cover
+    result_summary: 把书中的原则、框架和步骤拆成原子能力，形成可落地的 Skill 设计
+  detail:
+    title: 仓颉拆书成技能
+    description: 面向完整书籍或重点章节，提炼可迁移的方法论、触发场景和执行步骤，生成结构化的可复用 Skill。
+    attachment_hint: 书籍 PDF、章节文本、读书笔记或目标方法说明
+
+tasks:
+  - id: distill-book
+    selector:
+      title: 整本书蒸馏
+      description: 将一本书拆成一组相互衔接的可执行能力
+      output_label: Skill 能力集
+    launch:
+      prompt_short: 把我提供的这本书蒸馏成一组可执行 Skill。
+      prompt: 请阅读我提供的书籍或完整笔记，识别可迁移的原则、框架和决策方法，将其拆成边界清晰、可独立触发又能组合使用的 Skill。输出每个 Skill 的适用场景、输入、步骤、约束和预期产出，不要只做内容摘要。
+    replay:
+      steps:
+        - title: 建立全书结构
+          description: 识别核心问题、论证主线和章节关系
+        - title: 提炼方法单元
+          description: 区分观点、原则、框架和可执行动作
+        - title: 设计 Skill 边界
+          description: 定义触发条件、输入输出、步骤和约束
+        - title: 形成能力集
+          description: 输出可独立使用且相互衔接的 Skill 方案
+    result:
+      template: generic_report_v1
+      eyebrow: Skill 能力集
+      title: 从书籍方法论到可执行技能
+      summary: 将核心框架拆成具有明确触发条件、步骤和交付物的能力集合
+      highlights:
+        - 全书方法论地图
+        - 原子 Skill 清单与边界
+        - 触发条件、步骤和组合关系
+
+  - id: distill-chapter
+    selector:
+      title: 章节方法提炼
+      description: 从重点章节提炼一项可立即使用的方法
+      output_label: 方法执行卡
+    launch:
+      prompt_short: 从这个章节提炼一项可以立即使用的方法。
+      prompt: 请分析我提供的章节，找出其中最有迁移价值的方法，区分原理与操作，将其整理成包含适用场景、前置条件、逐步动作、检查项和常见误区的执行卡。
+    replay:
+      steps:
+        - title: 识别章节目标
+          description: 确认章节试图解决的真实问题
+        - title: 分离原理与动作
+          description: 提取关键原则、判断标准和操作步骤
+        - title: 补齐执行条件
+          description: 明确输入、约束、检查项和失败模式
+        - title: 输出方法卡
+          description: 形成可直接调用和复用的结构化方法
+    result:
+      template: generic_report_v1
+      eyebrow: 方法执行卡
+      title: 章节核心方法与执行步骤
+      summary: 从章节内容中提炼一项边界清晰、可立即应用的方法
+      highlights:
+        - 适用问题与触发条件
+        - 原理、步骤和检查项
+        - 常见误区与失败处理
+
+  - id: skill-draft
+    selector:
+      title: 生成 Skill 草案
+      description: 把已提炼的方法写成标准 SKILL.md 草案
+      output_label: SKILL.md 草案
+    launch:
+      prompt_short: 把这套方法写成一份标准 SKILL.md 草案。
+      prompt: 请将我提供的方法论整理为标准 SKILL.md 草案，包含准确的名称、触发描述、适用和不适用范围、输入要求、执行流程、质量检查及必要参考资料。保持原方法的边界，不加入来源中没有依据的能力。
+    replay:
+      steps:
+        - title: 核对方法边界
+          description: 明确该能力解决什么问题以及不处理什么
+        - title: 设计触发描述
+          description: 写出能被模型可靠识别的使用场景
+        - title: 编排执行流程
+          description: 将方法转换为可遵循的步骤和检查点
+        - title: 输出 Skill 草案
+          description: 生成结构完整、可继续评审的 SKILL.md
+    result:
+      template: generic_report_v1
+      eyebrow: SKILL.md 草案
+      title: 可复用方法 Skill 设计
+      summary: 将方法论转换为具有清晰触发条件、步骤和质量标准的 Skill 草案
+      highlights:
+        - 名称与触发描述
+        - 使用边界和输入要求
+        - 执行步骤与质量检查
