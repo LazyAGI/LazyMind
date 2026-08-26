@@ -172,6 +172,25 @@ class TaskArtifactOutboxRepository(Protocol):
         ...
 
 
+class TaskStatusOutboxRepository(Protocol):
+    def sync_task_status_outbound(
+        self,
+        *,
+        parent: ClaimedOutbound,
+        part_index: int,
+        text: str,
+    ) -> str:
+        ...
+
+
+class TaskFollowupOutboxRepository(
+    TaskArtifactOutboxRepository,
+    TaskStatusOutboxRepository,
+    Protocol,
+):
+    pass
+
+
 class DeliveryProvider(Protocol):
     def render(self, message: ClaimedOutbound) -> list[dict[str, Any]]:
         ...

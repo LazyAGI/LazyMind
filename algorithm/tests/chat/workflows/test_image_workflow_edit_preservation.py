@@ -45,3 +45,17 @@ def test_enhance_acceptance_criteria_requires_edit_scope_and_preservation():
 
     assert 'smallest sufficient edit scope' in criteria
     assert 'protect all unrequested' in criteria
+
+
+def test_image_workflow_fails_closed_on_missing_route_or_edit_source():
+    steps = _load_state()['steps']
+    collect = steps['collect_materials']['prompt']
+    optimize = steps['optimize_prompt']['prompt']
+    enhance = steps['enhance_image']['prompt']
+
+    assert 'ROUTING INPUT GUARD' in collect
+    assert 'not save material_summary' in collect.lower()
+    assert 'never turn a failure report into a successful output' in collect
+    assert 'Never infer a meme route from stale examples or prior tasks' in optimize
+    assert 'If raw_source_image is absent' in optimize
+    assert 'Never save a BLOCKED/failure message into enhanced_image_output' in enhance

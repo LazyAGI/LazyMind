@@ -2,88 +2,138 @@ package codex
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 
 	"lazymind/agentconnector/internal/agentcatalog"
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/chatagent"
-	"lazymind/agentconnector/internal/codexcontrol"
 )
+
+const maxCodexEventBytes = 4 << 20
 
 const codexRecoveryPrompt = `The previous process for this same LazyMind turn was interrupted. Continue the existing user request from this Codex thread; do not start the task again. Before any LazyMind write, inspect the current Workflow/session/artifact state through the lazymind MCP server and reuse completed work. Do not create a duplicate Workflow session or repeat a completed step. Finish with one final user-facing answer.`
 
-// ChatRunner is the Codex anti-corruption adapter. It translates only the
-// documented `codex exec --json` event stream into the host-neutral protocol.
 type ChatRunner struct {
-	binary  string
-	control *codexcontrol.Controller
+	binary string
+	self   string
+	home   string
+}
+
+func NewChatRunner(binary string) (*ChatRunner, error) {
+	if err := CleanupLegacyControl(); err != nil {
+		return nil, fmt.Errorf("clean up legacy Codex control configuration: %w", err)
+	}
+	resolved, err := FindBinary(binary)
+	if err != nil {
+		return nil, err
+	}
+	self, home, err := agentexec.ConnectorRuntime()
+	if err != nil {
+		return nil, err
+	}
+	return &ChatRunner{binary: resolved, self: self, home: home}, nil
+}
+
+func (r *ChatRunner) Availability() (bool, string) {
+	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
+	defer cancel()
+	if _, err := agentexec.Run(ctx, r.binary, "login", "status"); err != nil {
+		return false, "Codex CLI is not signed in; run `codex login`"
+	}
+	return true, ""
 }
 
 func (r *ChatRunner) Sessions(ctx context.Context) ([]chatagent.NativeSession, error) {
 	return agentcatalog.CodexSessions(ctx)
 }
 
-func NewChatRunner(binary string) (*ChatRunner, error) {
-	return NewChatRunnerWithControl(binary, nil)
-}
-
-func NewChatRunnerWithControl(binary string, control *codexcontrol.Controller) (*ChatRunner, error) {
-	resolved, err := FindBinary(binary)
-	if err != nil {
-		return nil, err
-	}
-	return &ChatRunner{binary: resolved, control: control}, nil
-}
-
-func (r *ChatRunner) Availability() (bool, string) {
-	if r == nil || r.control == nil {
-		return false, codexcontrol.ErrUnavailable.Error()
-	}
-	status := r.control.Status()
-	if !status.Ready {
-		if status.LastError != "" {
-			return false, status.LastError
-		}
-		return false, codexcontrol.ErrUnavailable.Error()
-	}
-	return true, ""
-}
-
 func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chatagent.Event) error) error {
 	if r == nil || strings.TrimSpace(r.binary) == "" {
 		return errors.New("Codex CLI is unavailable")
 	}
-	if r.control == nil {
-		return codexcontrol.ErrUnavailable
+	workspace, err := agentexec.EnsureConversationWorkspace(run.ConversationID)
+	if err != nil {
+		return err
 	}
-	prompt, applicationContext := strings.TrimSpace(run.Query), codexApplicationContext(run.Prompt)
-	if prompt == "" {
-		prompt = run.Prompt
-		applicationContext = ""
+	arguments := []string{"exec"}
+	policy := []string{
+		"--config", `sandbox_mode="workspace-write"`,
+		"--config", `approval_policy="on-request"`,
+		"--config", `approvals_reviewer="auto_review"`,
 	}
+	mcpConfig := []string{
+		"--config", fmt.Sprintf("mcp_servers.%s.command=%q", serverName, r.self),
+		"--config", fmt.Sprintf(`mcp_servers.%s.args=["mcp","proxy"]`, serverName),
+		"--config", fmt.Sprintf("mcp_servers.%s.env.LAZYMIND_HOME=%q", serverName, r.home),
+		"--config", fmt.Sprintf("mcp_servers.%s.env.LAZYMIND_EXTERNAL_REF=%q", serverName, run.RunID),
+		"--config", fmt.Sprintf("mcp_servers.%s.env.LAZYMIND_CONVERSATION_ID=%q", serverName, run.ConversationID),
+		"--config", fmt.Sprintf("mcp_servers.%s.env.LAZYMIND_EXTERNAL_LEASE=%q", serverName, run.LeaseToken),
+		"--config", fmt.Sprintf("mcp_servers.%s.env.LAZYMIND_EXTERNAL_HOST=%q", serverName, run.HostID),
+	}
+	resume := (run.Action == "resume" || run.Action == "recover" || run.Action == "regenerate") && strings.TrimSpace(run.ProviderThreadID) != ""
+	if resume {
+		arguments = append(arguments, "resume")
+		arguments = append(arguments, policy...)
+		arguments = append(arguments, mcpConfig...)
+		arguments = append(arguments, "--json", "--skip-git-repo-check", "--ignore-user-config", run.ProviderThreadID, "-")
+	} else {
+		arguments = append(arguments, policy...)
+		arguments = append(arguments, mcpConfig...)
+		arguments = append(arguments, "--json", "--skip-git-repo-check", "--ignore-user-config", "-C", workspace, "-")
+	}
+	prompt := run.Prompt
 	if run.Action == "recover" {
-		applicationContext = strings.TrimSpace(applicationContext + "\n\n" + codexRecoveryPrompt)
+		prompt = strings.TrimSpace(run.Prompt + "\n\n" + codexRecoveryPrompt)
 	}
-	workspace := ""
-	if strings.TrimSpace(run.ProviderThreadID) == "" {
-		var err error
-		workspace, err = agentexec.EnsureConversationWorkspace(run.ConversationID)
-		if err != nil {
-			return err
+	sawTurnCompleted, sawMessage := false, false
+	err = (agentexec.StreamCommand{
+		Binary: r.binary, Arguments: arguments, Environment: agentexec.SafeEnvironment(
+			"LAZYMIND_EXTERNAL_REF="+run.RunID, "LAZYMIND_EXTERNAL_LEASE="+run.LeaseToken,
+			"LAZYMIND_EXTERNAL_HOST="+run.HostID,
+			"LAZYMIND_CONVERSATION_ID="+run.ConversationID),
+		Stdin: strings.NewReader(prompt), MaxLineBytes: maxCodexEventBytes,
+	}).Run(ctx, func(line []byte) error {
+		var envelope struct {
+			Type     string          `json:"type"`
+			ThreadID string          `json:"thread_id"`
+			Item     json.RawMessage `json:"item"`
 		}
-	}
-	return r.control.Execute(ctx, run.ProviderThreadID, workspace, run.HistoryID, prompt, applicationContext, func(event codexcontrol.SessionEvent) error {
-		return emit(chatagent.Event{
-			Type: event.Type, Text: event.Text, ProviderThreadID: event.ThreadID,
-		})
+		if json.Unmarshal(line, &envelope) != nil {
+			return nil
+		}
+		switch envelope.Type {
+		case "thread.started":
+			if strings.TrimSpace(envelope.ThreadID) != "" {
+				return emit(chatagent.Event{Type: "thread_started", ProviderThreadID: envelope.ThreadID})
+			}
+		case "item.completed":
+			var item struct {
+				Type string `json:"type"`
+				Text string `json:"text"`
+			}
+			if json.Unmarshal(envelope.Item, &item) == nil && item.Type == "agent_message" && item.Text != "" {
+				sawMessage = true
+				return emit(chatagent.Event{Type: "message", Text: item.Text})
+			}
+		case "turn.completed":
+			if !sawTurnCompleted {
+				sawTurnCompleted = true
+				return emit(chatagent.Event{Type: "turn_completed"})
+			}
+		}
+		return nil
 	})
-}
-
-func codexApplicationContext(prompt string) string {
-	const marker = "\nCurrent user request:\n"
-	if index := strings.LastIndex(prompt, marker); index >= 0 {
-		return strings.TrimSpace(prompt[:index])
+	if err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		return fmt.Errorf("Codex failed: %w", err)
 	}
-	return strings.TrimSpace(prompt)
+	if !sawTurnCompleted || !sawMessage {
+		return errors.New("Codex ended without a completed response")
+	}
+	return nil
 }

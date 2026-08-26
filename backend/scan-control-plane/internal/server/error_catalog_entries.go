@@ -304,4 +304,6 @@ func init() {
 	registerError("document state insert was not visible", "DOCUMENT_STATE_INSERT_NOT_VISIBLE", "Inserted document state is not visible", http.StatusInternalServerError)
 	registerError("document not found", "DOCUMENT_NOT_FOUND", "Document not found", http.StatusNotFound)
 	registerError("parse task not found", "TASK_NOT_FOUND", "Task not found", http.StatusNotFound)
+	registerError("core internal token is not configured", "CORE_INTERNAL_TOKEN_NOT_CONFIGURED", "Core internal token is not configured", http.StatusInternalServerError)
+	registerError("batch get dataset usage", "DATASET_USAGE_BATCH_FAILED", "Failed to query dataset usage", http.StatusBadGateway)
 }

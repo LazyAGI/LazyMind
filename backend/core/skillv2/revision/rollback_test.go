@@ -41,6 +41,39 @@ func TestRollback_MovesHeadWithoutCreatingRevision(t *testing.T) {
 	}
 }
 
+func TestRollback_ExternalIncompleteSkillMDKeepsRuntimeMetadata(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	partial := "---\nversion: 1.0.0\n---\n# Original skill\n\nOriginal body.\n"
+	if err := db.Model(&testutil.SkillBlobRow{}).Where("hash = ?", "h_skill_rev1").Updates(map[string]any{"content": []byte(partial), "size": len(partial)}).Error; err != nil {
+		t.Fatalf("configure incomplete original blob: %v", err)
+	}
+	if err := db.Model(&testutil.SkillRow{}).Where("id = ?", "skill1").Updates(map[string]any{
+		"category":      "external",
+		"skill_name":    "fallback-skill",
+		"description":   "Fallback description",
+		"relative_root": "external/fallback-skill",
+	}).Error; err != nil {
+		t.Fatalf("configure external skill: %v", err)
+	}
+	seedSecondRevision(t, db, "skill1", "rev1", "rev2")
+	if err := db.Model(&testutil.SkillRow{}).Where("id = ?", "skill1").Update("relative_root", "external/论文精读-v2").Error; err != nil {
+		t.Fatalf("restore external root after seed: %v", err)
+	}
+	service := NewService(ServiceDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
+
+	if _, err := service.Rollback(context.Background(), RollbackRequest{SkillID: "skill1", UserID: "user_001", TargetRevisionID: "rev1"}); err != nil {
+		t.Fatalf("Rollback returned error: %v", err)
+	}
+	var skill testutil.SkillRow
+	if err := db.Where("id = ?", "skill1").Take(&skill).Error; err != nil {
+		t.Fatalf("query rolled back skill: %v", err)
+	}
+	if skill.Category != "external" || skill.SkillName != "论文精读-v2" || skill.Description != "第二版描述" || skill.RelativeRoot != "external/论文精读-v2" {
+		t.Fatalf("rollback changed retained metadata: %#v", skill)
+	}
+}
+
 func TestRollback_CommitCreatesNextRevisionFromRolledBackHead(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")

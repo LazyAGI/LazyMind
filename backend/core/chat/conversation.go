@@ -310,6 +310,12 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 		// A setting-level pause must not be bypassed by an explicit @tool mention.
 		resourceContext.DisabledTools = mergeDisabledToolNames(resourceContext.DisabledTools, dbDisabledTools)
 	}
+	if target.IsRegeneration {
+		if err := clearModelContext(r.Context(), db, convID); err != nil {
+			common.ReplyErr(w, "failed to invalidate compressed context", http.StatusInternalServerError)
+			return
+		}
+	}
 	reqBody := buildChatRequestBody(r.Context(), db, convID, sessionID, query, upstreamHistories, raw, resourceContext, userID, target.Seq)
 	executor, validExecutor := normalizeChatExecutor(conversationRecord.ChatExecutor)
 	if !validExecutor {
@@ -521,6 +527,7 @@ func ChatConversations(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	recordDatasetUsageForChat(r.Context(), raw, reqBody, userID, userName, target.IsRegeneration)
 	historyExt := buildChatHistoryExtWithTrail(raw, displayQuery, histories, target)
 	if err := applyChatAttachmentConversion(r.Context(), reqBody); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "prepare chat attachments failed", err), http.StatusBadGateway)

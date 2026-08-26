@@ -28,13 +28,34 @@ def test_image_workflow_declares_three_canonical_meme_routes():
     assert 'CREATE_MEME_PACK' in prompt
     assert 'Explicit multi-item meme/reaction/sticker pack → CREATE_MEME_PACK' in prompt
     assert 'One explicit animated meme/reaction/chat sticker → CREATE_ANIMATED_MEME' in prompt
-    assert 'image requiring exact display text/text layout → CREATE_STATIC_MEME' in prompt
-    assert 'Never classify a new-image request with exact display text as CREATE_NEW' in prompt
+    assert 'HIGHEST-PRIORITY POST-CAPTION/SUBTITLE OVERRIDE' in prompt
+    assert 'Explicit static post-caption/subtitle' in prompt
+    assert 'Never classify a static request with explicit post-caption/subtitle text' in prompt
 
     when_to_use = workflow['when_to_use']
     assert 'HIGHEST-PRIORITY TEXT-OVERLAY RULE' in when_to_use
     assert 'even when the user never says meme/表情包' in when_to_use
-    assert 'do not use built-in image_generator/image_editor directly' in when_to_use
+    assert 'Do not send the caption text to built-in image_generator/image_editor directly' in when_to_use
+
+
+def test_static_subtitle_after_source_edit_routes_to_caption_postprocessor():
+    workflow = _load_workflow()
+    state = _load_state()
+    analyze_prompt = state['steps']['analyze_subject']['prompt']
+    optimize_prompt = state['steps']['optimize_prompt']['prompt']
+    optimize_contract = optimize_prompt + '\n' + state['steps']['optimize_prompt']['acceptance_criteria']
+    generate_prompt = state['steps']['generate_image']['prompt']
+
+    assert '给上传的小狗做敬礼手势，然后配上字幕‘收到!’' in workflow['when_to_use']
+    assert 'first perform the' in analyze_prompt
+    assert 'non-text visual edit, then add the exact caption with meme_add_caption' in analyze_prompt
+    assert 'painted, printed,' in analyze_prompt
+    assert 'engraved, or otherwise integrated into a physical object/scene region' in analyze_prompt
+    assert '给这个小狗做敬礼手势，然后配上字幕‘收到!’' in optimize_contract
+    assert 'caption is exactly "收到!"' in optimize_contract
+    assert 'caption text must not be delegated to image_editor' in optimize_contract
+    assert 'image_editor performs only the requested non-text visual change' in generate_prompt
+    assert 'call meme_add_caption exactly once' in generate_prompt
 
 
 def test_analyze_can_skip_material_collection_by_semantic_judgment():

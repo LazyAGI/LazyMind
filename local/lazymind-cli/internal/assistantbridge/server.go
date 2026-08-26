@@ -16,24 +16,28 @@ import (
 	"time"
 
 	"lazymind/agentconnector/internal/adapters/codex"
+	cursoradapter "lazymind/agentconnector/internal/adapters/cursor"
 	"lazymind/agentconnector/internal/adapters/mcpclient"
-	"lazymind/agentconnector/internal/codexcontrol"
+	"lazymind/agentconnector/internal/agentintegration"
+	"lazymind/agentconnector/internal/credentials"
+	"lazymind/agentconnector/internal/executorpolicy"
 	"lazymind/agentconnector/internal/mcpbridge"
 )
 
-const DefaultAddress = codexcontrol.DefaultAddress
+const DefaultAddress = "127.0.0.1:19091"
 
 type Server struct {
 	address string
 	bridge  *mcpbridge.Bridge
-	control *codexcontrol.Controller
+	store   *credentials.Store
+	policy  *executorpolicy.Store
 	mu      sync.Mutex
 	stop    context.CancelFunc
 }
 
-func New(address string, bridge *mcpbridge.Bridge) (*Server, error) {
-	if bridge == nil {
-		return nil, errors.New("MCP bridge is required")
+func New(address string, bridge *mcpbridge.Bridge, store *credentials.Store, policy *executorpolicy.Store) (*Server, error) {
+	if bridge == nil || store == nil || policy == nil {
+		return nil, errors.New("MCP bridge, credential store, and execution policy are required")
 	}
 	address = strings.TrimSpace(address)
 	if address == "" {
@@ -47,11 +51,7 @@ func New(address string, bridge *mcpbridge.Bridge) (*Server, error) {
 	if host != "localhost" && (ip == nil || !ip.IsLoopback()) {
 		return nil, errors.New("Assistant Bridge must listen on the loopback interface")
 	}
-	control, err := codexcontrol.New()
-	if err != nil {
-		return nil, err
-	}
-	return &Server{address: address, bridge: bridge, control: control}, nil
+	return &Server{address: address, bridge: bridge, store: store, policy: policy}, nil
 }
 
 func Start(ctx context.Context, address string) (map[string]any, error) {
@@ -198,38 +198,91 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("GET /v1/agents", s.handleAgentStatuses)
 	mux.HandleFunc("GET /v1/agents/{agent}", s.handleAgentStatus)
 	mux.HandleFunc("POST /v1/agents/{agent}/{action}", s.handleAgentAction)
+	mux.HandleFunc("GET /v1/executors", s.handleExecutorPolicies)
+	mux.HandleFunc("POST /v1/executors/{provider}/{action}", s.handleExecutorPolicyAction)
+	mux.HandleFunc("POST /v1/session", s.handleSession)
+	mux.HandleFunc("DELETE /v1/session", s.handleSession)
 	mux.HandleFunc("POST /v1/shutdown", func(writer http.ResponseWriter, _ *http.Request) {
 		writeJSON(writer, http.StatusOK, map[string]any{"ok": true})
 		go s.stop()
 	})
-	s.control.RegisterRoutes(mux)
 	return s.allowLocalBrowser(mux)
 }
 
-func (s *Server) CodexControl() *codexcontrol.Controller { return s.control }
+func (s *Server) handleExecutorPolicies(writer http.ResponseWriter, _ *http.Request) {
+	statuses, err := s.policy.Statuses()
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"executors": statuses})
+}
 
-func (s *Server) handleAgentStatuses(writer http.ResponseWriter, request *http.Request) {
-	probe, probeErr := s.bridge.Probe(request.Context())
-	statuses := make(map[string]any, 5)
-	codexAdapter, err := codex.NewWithControl("", "", s.bridge, s.address, s.control)
+func (s *Server) handleExecutorPolicyAction(writer http.ResponseWriter, request *http.Request) {
+	action := strings.ToLower(strings.TrimSpace(request.PathValue("action")))
+	if action != "enable" && action != "disable" {
+		writeJSON(writer, http.StatusNotFound, map[string]string{"error": "unsupported executor action"})
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	status, err := s.policy.SetEnabled(request.PathValue("provider"), action == "enable")
 	if err != nil {
 		writeError(writer, err)
 		return
 	}
-	statuses["codex"], err = codexAdapter.StatusWithProbe(request.Context(), probe, probeErr)
-	if err != nil {
-		writeError(writer, err)
-		return
-	}
-	for _, agent := range []string{string(mcpclient.Cursor), string(mcpclient.WorkBuddy), string(mcpclient.TRAEWork), string(mcpclient.DeepSeekHarness)} {
-		adapter, adapterErr := s.mcpClient(agent)
-		if adapterErr != nil {
-			writeError(writer, adapterErr)
+	writeJSON(writer, http.StatusOK, status)
+}
+
+func (s *Server) handleSession(writer http.ResponseWriter, request *http.Request) {
+	if request.Method == http.MethodDelete {
+		if err := s.store.Clear(); err != nil {
+			writeError(writer, err)
 			return
 		}
-		statuses[agent] = adapter.StatusWithProbe(probe, probeErr)
+		writeJSON(writer, http.StatusOK, map[string]bool{"ok": true})
+		return
+	}
+	var value credentials.Credentials
+	if err := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 1<<20)).Decode(&value); err != nil {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid LazyMind session"})
+		return
+	}
+	if origin := strings.TrimSpace(request.Header.Get("Origin")); origin != "" && !sameOrigin(origin, value.ServerURL) {
+		writeJSON(writer, http.StatusForbidden, map[string]string{"error": "LazyMind session server does not match the page origin"})
+		return
+	}
+	if err := s.store.Save(value); err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (s *Server) handleAgentStatuses(writer http.ResponseWriter, request *http.Request) {
+	statuses, err := Statuses(request.Context(), s.bridge)
+	if err != nil {
+		writeError(writer, err)
+		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"agents": statuses})
+}
+
+func Statuses(ctx context.Context, bridge *mcpbridge.Bridge) (map[string]agentintegration.Status, error) {
+	statuses := make(map[string]agentintegration.Status, 5)
+	codexAdapter, err := codex.New("", "", bridge)
+	if err != nil {
+		return nil, err
+	}
+	statuses["codex"] = codexAdapter.Status(ctx)
+	for _, agent := range []string{string(mcpclient.Cursor), string(mcpclient.WorkBuddy), string(mcpclient.TRAEWork), string(mcpclient.DeepSeekHarness)} {
+		adapter, err := newMCPClient(agent, bridge)
+		if err != nil {
+			return nil, err
+		}
+		statuses[agent] = adapter.Status(ctx)
+	}
+	return statuses, nil
 }
 
 func (s *Server) handleAgentStatus(writer http.ResponseWriter, request *http.Request) {
@@ -243,7 +296,7 @@ func (s *Server) handleAgentStatus(writer http.ResponseWriter, request *http.Req
 
 func (s *Server) handleAgentAction(writer http.ResponseWriter, request *http.Request) {
 	action := strings.ToLower(strings.TrimSpace(request.PathValue("action")))
-	if action != "connect" && action != "disconnect" {
+	if action != "connect" && action != "disconnect" && action != "login" {
 		writeJSON(writer, http.StatusNotFound, map[string]string{"error": "unsupported Assistant action"})
 		return
 	}
@@ -257,49 +310,71 @@ func (s *Server) handleAgentAction(writer http.ResponseWriter, request *http.Req
 	writeJSON(writer, http.StatusOK, status)
 }
 
-func (s *Server) agentStatus(ctx context.Context, agent string) (any, error) {
+func (s *Server) agentStatus(ctx context.Context, agent string) (agentintegration.Status, error) {
 	agent = strings.ToLower(strings.TrimSpace(agent))
 	if agent == "codex" {
-		adapter, err := codex.NewWithControl("", "", s.bridge, s.address, s.control)
+		adapter, err := codex.New("", "", s.bridge)
 		if err != nil {
-			return nil, err
+			return agentintegration.Status{}, err
 		}
-		return adapter.Status(ctx)
+		return adapter.Status(ctx), nil
 	}
 	adapter, err := s.mcpClient(agent)
 	if err != nil {
-		return nil, err
+		return agentintegration.Status{}, err
 	}
 	return adapter.Status(ctx), nil
 }
 
-func (s *Server) agentAction(ctx context.Context, agent, action string) (any, error) {
+func (s *Server) agentAction(ctx context.Context, agent, action string) (agentintegration.Status, error) {
 	agent = strings.ToLower(strings.TrimSpace(agent))
 	if agent == "codex" {
-		adapter, err := codex.NewWithControl("", "", s.bridge, s.address, s.control)
+		adapter, err := codex.New("", "", s.bridge)
 		if err != nil {
-			return nil, err
+			return agentintegration.Status{}, err
 		}
-		if action == "connect" {
-			return adapter.Connect(ctx)
+		switch action {
+		case "connect":
+			return adapter.Connect(ctx), nil
+		case "disconnect":
+			return adapter.Disconnect(ctx), nil
+		case "login":
+			return adapter.Login(ctx), nil
+		default:
+			return agentintegration.Status{}, fmt.Errorf("unsupported Codex action %q", action)
 		}
-		return adapter.Disconnect(ctx)
 	}
 	adapter, err := s.mcpClient(agent)
 	if err != nil {
-		return nil, err
+		return agentintegration.Status{}, err
 	}
-	if action == "connect" {
-		return adapter.Connect(ctx)
+	switch action {
+	case "connect":
+		return adapter.Connect(ctx), nil
+	case "disconnect":
+		return adapter.Disconnect(ctx), nil
+	case "login":
+		if agent != string(mcpclient.Cursor) {
+			return agentintegration.Status{}, fmt.Errorf("unsupported %s action %q", agent, action)
+		}
+		if err := cursoradapter.Login(ctx, ""); err != nil {
+			return agentintegration.Status{}, err
+		}
+		return adapter.Status(ctx), nil
+	default:
+		return agentintegration.Status{}, fmt.Errorf("unsupported %s action %q", agent, action)
 	}
-	return adapter.Disconnect(ctx)
 }
 
 func (s *Server) mcpClient(agent string) (*mcpclient.Adapter, error) {
+	return newMCPClient(agent, s.bridge)
+}
+
+func newMCPClient(agent string, bridge *mcpbridge.Bridge) (*mcpclient.Adapter, error) {
 	kind := mcpclient.Kind(agent)
 	switch kind {
 	case mcpclient.Cursor, mcpclient.WorkBuddy, mcpclient.TRAEWork, mcpclient.DeepSeekHarness:
-		return mcpclient.New(kind, "", "", s.bridge)
+		return mcpclient.New(kind, "", bridge)
 	default:
 		return nil, fmt.Errorf("unsupported Assistant %q", agent)
 	}
@@ -315,7 +390,7 @@ func (s *Server) allowLocalBrowser(next http.Handler) http.Handler {
 		if origin != "" {
 			writer.Header().Set("Access-Control-Allow-Origin", origin)
 			writer.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-			writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
 			writer.Header().Set("Vary", "Origin")
 		}
 		if request.Method == http.MethodOptions {
@@ -337,6 +412,13 @@ func localOrigin(value string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+func sameOrigin(left, right string) bool {
+	leftURL, leftErr := url.Parse(left)
+	rightURL, rightErr := url.Parse(right)
+	return leftErr == nil && rightErr == nil &&
+		strings.EqualFold(leftURL.Scheme, rightURL.Scheme) && strings.EqualFold(leftURL.Host, rightURL.Host)
 }
 
 func writeError(writer http.ResponseWriter, err error) {

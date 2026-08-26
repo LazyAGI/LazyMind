@@ -327,6 +327,7 @@ def _build_brief_page_query(
 
 
 _STYLE_DIMENSIONS_PATH = SKILL_DIR.parent.parent / "reference" / "style_dimensions.json"
+_STYLE_RENDERING_RECIPES_PATH = SKILL_DIR / "references" / "style_rendering_recipes.json"
 
 
 def _load_style_dimensions() -> dict | None:
@@ -338,6 +339,71 @@ def _load_style_dimensions() -> dict | None:
         return _load_json(_STYLE_DIMENSIONS_PATH)
     except Exception:
         return None
+
+
+def _load_style_rendering_recipes() -> dict | None:
+    """Load export-safe visual recipes used by outline and page generation."""
+    if not _STYLE_RENDERING_RECIPES_PATH.exists():
+        return None
+    try:
+        data = _load_json(_STYLE_RENDERING_RECIPES_PATH)
+    except Exception:
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _attach_style_rendering_recipe(data: dict) -> dict:
+    """Attach deterministic art direction without weakening export rules.
+
+    The catalog triple controls identity and colors.  This recipe adds the
+    missing composition/material/image guidance that a page generator needs to
+    produce visibly different styles.  It is static rather than model-authored,
+    so every page in a deck receives the same export-safe design language.
+    """
+    result = dict(data) if isinstance(data, dict) else {}
+    recipes = _load_style_rendering_recipes()
+    if recipes is None:
+        return result
+
+    try:
+        style_id = int((result.get("design_style") or {}).get("id"))
+    except (TypeError, ValueError, AttributeError):
+        style_id = 0
+
+    layers: list[dict] = []
+    common = recipes.get("common")
+    if isinstance(common, dict):
+        layers.append(common)
+    family_name = ""
+    for name, family in (recipes.get("families") or {}).items():
+        if not isinstance(family, dict):
+            continue
+        ids = family.get("style_ids") or []
+        if style_id in ids:
+            family_name = str(name)
+            layers.append({key: value for key, value in family.items() if key != "style_ids"})
+            break
+    override = (recipes.get("overrides") or {}).get(str(style_id))
+    if isinstance(override, dict):
+        layers.append(override)
+
+    art_direction: dict = {
+        "source": "export-safe-style-recipe-v1",
+        "family": family_name or "general",
+    }
+    for layer in layers:
+        for key, value in layer.items():
+            if isinstance(value, dict) and isinstance(art_direction.get(key), dict):
+                art_direction[key] = {**art_direction[key], **value}
+            else:
+                art_direction[key] = value
+    result["art_direction"] = art_direction
+    return result
+
+
+def _load_deck_style(deck: Path) -> dict:
+    """Load a style contract and enrich older decks with current recipes."""
+    return _attach_style_rendering_recipe(_load_json(deck / "style_spec.json"))
 
 
 def _repair_style_triple(data: dict, dims: dict) -> tuple[dict, list[str]]:
@@ -475,6 +541,7 @@ def _normalize_style_sample(sample: dict, index: int, dims: dict | None) -> tupl
     repair_notes: list[str] = []
     if dims is not None:
         style_spec, repair_notes = _repair_style_triple(style_spec, dims)
+    style_spec = _attach_style_rendering_recipe(style_spec)
     if repair_notes:
         style_spec["_repairs"] = repair_notes
     return {
@@ -763,7 +830,7 @@ def _select_style_sample(deck: Path, sample_id: str) -> int:
             break
     if selected is None:
         return _fail(f"style sample {sample_id!r} not found")
-    style_spec = selected.get("style_spec") or {}
+    style_spec = _attach_style_rendering_recipe(selected.get("style_spec") or {})
     style_spec["_selected_sample"] = {
         "sample_id": selected.get("sample_id"),
         "label": selected.get("label"),
@@ -850,7 +917,7 @@ def cmd_style(deck: Path, sample_id: str | None = None) -> int:
         "info_pack_document_digest": ip.get("document_digest"),
     }, ensure_ascii=False, indent=2)
     try:
-        raw = llm(system_prompt, user_prompt)
+        raw = llm(system_prompt, user_prompt, request_name='style')
         data = _parse_json_loose(raw)
     except (ModelClientError, json.JSONDecodeError) as e:
         return _fail(f"style: {e}")
@@ -859,6 +926,7 @@ def cmd_style(deck: Path, sample_id: str | None = None) -> int:
     dims = _load_style_dimensions()
     if dims is not None:
         data, repair_notes = _repair_style_triple(data, dims)
+    data = _attach_style_rendering_recipe(data)
     if repair_notes:
         data["_repairs"] = repair_notes
 
@@ -886,7 +954,7 @@ def cmd_style_samples(deck: Path) -> int:
         "info_pack_document_digest": ip.get("document_digest"),
     }, ensure_ascii=False, indent=2)
     try:
-        raw = llm(system_prompt, user_prompt)
+        raw = llm(system_prompt, user_prompt, request_name='style-samples')
         data = _parse_json_loose(raw)
     except (ModelClientError, json.JSONDecodeError) as e:
         return _fail(f"style-samples: {e}")
@@ -1051,7 +1119,7 @@ def _ensure_outline_reference_images(
 def cmd_outline(deck: Path) -> int:
     tp = _load_json(deck / "task_pack.json")
     ip = _load_json(deck / "info_pack.json")
-    style = _load_json(deck / "style_spec.json")
+    style = _load_deck_style(deck)
     system_prompt = _load_prompt("outline.md")
     raw_docs = _excerpt_raw_docs(ip, max_chars=4000)
 
@@ -1436,7 +1504,7 @@ def cmd_page_html(deck: Path, page_no: int) -> int:
     data and makes a single HTML-generator LLM call.  The legacy two-call
     rewrite path remains available through PPT_PAGE_PROMPT_MODE=llm-rewrite.
     """
-    style = _load_json(deck / "style_spec.json")
+    style = _load_deck_style(deck)
     outline = _load_json(deck / "outline.json")
     plan = _load_json(deck / "asset_plan.json")
     ip = _load_json(deck / "info_pack.json")
@@ -1549,6 +1617,7 @@ def cmd_page_html(deck: Path, page_no: int) -> int:
             rewritten_query = llm(
                 rewrite_system,
                 json.dumps(rewrite_user_payload, ensure_ascii=False, indent=2),
+                request_name=f'page-html-rewrite:{page_no}',
             )
         except ModelClientError as e:
             return _fail(f"page-html rewrite p{page_no}: {e}", page_no=page_no)
@@ -1592,7 +1661,7 @@ def cmd_page_html_from_brief(deck: Path, page_no: int, brief: str) -> int:
     if not brief_text:
         return _fail(f'page-html brief p{page_no}: empty brief', page_no=page_no)
 
-    style = _load_json(deck / 'style_spec.json')
+    style = _load_deck_style(deck)
     outline = _load_json(deck / 'outline.json')
     plan = _load_json(deck / 'asset_plan.json')
     ip = _load_json(deck / 'info_pack.json')
@@ -1661,7 +1730,11 @@ def _write_page_html_from_query(
 
     gen_system = _load_prompt('page_html.md')
     try:
-        html = llm(gen_system, rewritten_query)
+        html = llm(
+            gen_system,
+            rewritten_query,
+            request_name=f'page-html:{page_no}',
+        )
     except ModelClientError as e:
         return _fail(f'page-html p{page_no}: {e}', page_no=page_no)
 
@@ -1684,7 +1757,11 @@ def _write_page_html_from_query(
             'not be a CSS background, and must not be covered by a dark/gradient overlay.'
         )
         try:
-            html = llm(gen_system, repair_query)
+            html = llm(
+                gen_system,
+                repair_query,
+                request_name=f'page-html-image-repair:{page_no}',
+            )
         except ModelClientError as e:
             return _fail(f'page-html image repair p{page_no}: {e}', page_no=page_no)
         html = _sanitize_page_html(html)
@@ -1875,7 +1952,11 @@ def cmd_refine_page(deck: Path, page_no: int) -> int:
         f"{review}"
     )
     try:
-        refined = llm(apply_system, apply_user)
+        refined = llm(
+            apply_system,
+            apply_user,
+            request_name=f'refine-page:{page_no}',
+        )
     except ModelClientError as e:
         return _fail(f"refine p{page_no} apply: {e}", page_no=page_no)
 

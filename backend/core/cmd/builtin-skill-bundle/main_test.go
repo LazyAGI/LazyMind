@@ -19,6 +19,7 @@ import (
 
 	"lazymind/core/showcase"
 	skillbuiltin "lazymind/core/skillv2/builtin"
+	skillmetadata "lazymind/core/skillv2/metadata"
 	skillpackage "lazymind/core/skillv2/skillpackage"
 )
 
@@ -170,7 +171,7 @@ func TestRunAppliesPatchToDownloadedSkillAndFreezesProvenance(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := string(packageFiles["script.py"]); got != "print('patched')\n" {
+	if got := string(packageFiles.Files["script.py"]); got != "print('patched')\n" {
 		t.Fatalf("patched script = %q", got)
 	}
 
@@ -234,7 +235,7 @@ skills: []
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := string(packageFiles["references/guide.md"]); got != "patched guide\n" || len(entry.AppliedPatches) != 1 {
+	if got := string(packageFiles.Files["references/guide.md"]); got != "patched guide\n" || len(entry.AppliedPatches) != 1 {
 		t.Fatalf("patched guide = %q, provenance = %#v", got, entry.AppliedPatches)
 	}
 	opts.Output = filepath.Join(root, "runtime-frozen", "builtin-skills")
@@ -272,6 +273,113 @@ func TestRunCanPatchInvalidSkillMetadataBeforeStrictInspection(t *testing.T) {
 	catalog := readCatalog(t, filepath.Join(opts.Output, "catalog.json"))
 	if len(catalog.Skills) != 1 || catalog.Skills[0].Name != "repaired" || catalog.Skills[0].Version != "1.0.0" {
 		t.Fatalf("repaired catalog = %#v", catalog)
+	}
+	entry := catalog.Skills[0]
+	patched, err := skillpackage.ReadZip(filepath.Join(opts.Output, filepath.FromSlash(entry.PackageFile)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta, err := skillmetadata.ParseRequired(patched.Files["SKILL.md"])
+	if err != nil || meta.Name != "repaired" || meta.Description != "repaired skill" {
+		t.Fatalf("patched SKILL.md metadata = %#v, err=%v", meta, err)
+	}
+	if string(files["SKILL.md"]) != "---\nname: broken\n---\n# Broken\n" || entry.OriginTreeSHA256 != originTree || len(entry.AppliedPatches) != 1 {
+		t.Fatalf("source or patch provenance changed: source=%q catalog=%#v", files["SKILL.md"], entry)
+	}
+}
+
+func TestRunFallsBackMetadataWithoutSkillMDPatchAndFreezes(t *testing.T) {
+	files := map[string][]byte{
+		"SKILL.md": []byte("---\nversion: 1.2.3\n---\n# Demo\n\nUseful bundled description.\n"),
+	}
+	archive := makeSkillZipFromFiles(t, files)
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(archive)), ContentLength: int64(len(archive)), Header: make(http.Header)}, nil
+	})}
+	root := t.TempDir()
+	sourceURL := "https://example.test/demo.zip"
+	sources := filepath.Join(root, "sources.yaml")
+	if err := os.WriteFile(sources, []byte("schema_version: 1\nskills:\n  - "+sourceURL+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts := options{Sources: sources, Lock: filepath.Join(root, "lock.json"), Cache: filepath.Join(root, "cache"), Output: filepath.Join(root, "runtime", "builtin-skills")}
+	if err := run(context.Background(), opts, client); err != nil {
+		t.Fatal(err)
+	}
+	normal := readCatalog(t, filepath.Join(opts.Output, "catalog.json")).Skills[0]
+	originHash := sha256.Sum256(archive)
+	if normal.Name != "demo" || normal.Description != "Useful bundled description." || normal.ArchiveSHA256 != hex.EncodeToString(originHash[:]) || normal.TreeSHA256 != skillpackage.TreeHash(files) || len(normal.AppliedPatches) != 0 {
+		t.Fatalf("fallback catalog = %#v", normal)
+	}
+	meta, err := skillmetadata.ParseRequired([]byte(normal.Content))
+	if err != nil || meta.Name != normal.Name || meta.Description != normal.Description {
+		t.Fatalf("catalog runtime content = %q, metadata=%#v, err=%v", normal.Content, meta, err)
+	}
+	pkg, err := skillpackage.ReadZip(filepath.Join(opts.Output, filepath.FromSlash(normal.PackageFile)))
+	if err != nil || !bytes.Equal(pkg.Files["SKILL.md"], files["SKILL.md"]) {
+		t.Fatalf("packaged SKILL.md changed: pkg=%#v err=%v", pkg, err)
+	}
+
+	opts.Output = filepath.Join(root, "runtime-frozen", "builtin-skills")
+	opts.FrozenLockfile = true
+	if err := run(context.Background(), opts, http.DefaultClient); err != nil {
+		t.Fatalf("frozen fallback build failed: %v", err)
+	}
+	frozen := readCatalog(t, filepath.Join(opts.Output, "catalog.json")).Skills[0]
+	if frozen.Name != normal.Name || frozen.Description != normal.Description || frozen.Content != normal.Content || frozen.ArchiveSHA256 != normal.ArchiveSHA256 || frozen.TreeSHA256 != normal.TreeSHA256 {
+		t.Fatalf("frozen catalog = %#v, normal = %#v", frozen, normal)
+	}
+}
+
+func TestRunRejectsInvalidSkillMDPatchInsteadOfFallingBack(t *testing.T) {
+	files := map[string][]byte{"SKILL.md": []byte("---\nname: original\n---\n# Demo\n\nUseful description.\n")}
+	archive := makeSkillZipFromFiles(t, files)
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(archive)), ContentLength: int64(len(archive)), Header: make(http.Header)}, nil
+	})}
+	root := t.TempDir()
+	sourceURL := "https://example.test/invalid-patch.zip"
+	spec, err := resolveSource(sourceURL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	version := "0.0.0+" + skillpackage.TreeHash(files)[:12]
+	writeSinglePatch(t, root, resolvedSkillUID(spec), version, files, "SKILL.md", "---\nname: patched\n---\n# Patched\n")
+	sources := filepath.Join(root, "sources.yaml")
+	if err := os.WriteFile(sources, []byte("schema_version: 1\npatch_catalog: patches/catalog.yaml\nskills:\n  - "+sourceURL+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	err = run(context.Background(), options{Sources: sources, Lock: filepath.Join(root, "lock.json"), Cache: filepath.Join(root, "cache"), Output: filepath.Join(root, "runtime", "builtin-skills")}, client)
+	if err == nil || !strings.Contains(err.Error(), "description") {
+		t.Fatalf("invalid SKILL.md patch error = %v", err)
+	}
+}
+
+func TestRunUsesFeaturedDefinitionIDForFallbackName(t *testing.T) {
+	files := map[string][]byte{"SKILL.md": []byte("---\nversion: 1.2.3\n---\n# Demo\n\nFeatured fallback description.\n")}
+	archive := makeSkillZipFromFiles(t, files)
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(archive)), ContentLength: int64(len(archive)), Header: make(http.Header)}, nil
+	})}
+	root := t.TempDir()
+	featuredSources := filepath.Join(root, "featured")
+	featuredDir := filepath.Join(featuredSources, "demo")
+	writeTestPNG(t, filepath.Join(featuredDir, "assets", "cover.png"))
+	definition := strings.Replace(testFeaturedDefinition("https://example.test/skill.zip", "1.2.3"), "id: demo-featured", "id: demo", 1)
+	if err := os.WriteFile(filepath.Join(featuredDir, "featured.yaml"), []byte(definition), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	sources := filepath.Join(root, "sources.yaml")
+	if err := os.WriteFile(sources, []byte("schema_version: 1\nskills: []\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts := options{Sources: sources, Lock: filepath.Join(root, "lock.json"), Cache: filepath.Join(root, "cache"), Output: filepath.Join(root, "runtime", "builtin-skills"), FeaturedSources: featuredSources, FeaturedOutput: filepath.Join(root, "runtime", "featured-skills")}
+	if err := run(context.Background(), opts, client); err != nil {
+		t.Fatal(err)
+	}
+	entry := readCatalog(t, filepath.Join(opts.Output, "catalog.json")).Skills[0]
+	if entry.Name != "demo" {
+		t.Fatalf("featured fallback name = %q, want demo", entry.Name)
 	}
 }
 
@@ -378,7 +486,7 @@ func TestRunBuildsFeaturedCatalogFromLocalDirectory(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(packageFiles["references/guide.md"]) != "guide\n" {
+	if string(packageFiles.Files["references/guide.md"]) != "guide\n" {
 		t.Fatalf("package files = %#v", packageFiles)
 	}
 	featuredCatalog := readFeaturedCatalog(t, filepath.Join(opts.FeaturedOutput, "catalog.json"))

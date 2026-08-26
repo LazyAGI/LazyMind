@@ -74,6 +74,51 @@ func TestMarketInstall_CopiesSkillTreeForUser(t *testing.T) {
 	}
 }
 
+func TestMarketInstall_CopiesExternalFallbackSkill(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "market_skill", "market_rev1")
+	original := []byte("---\nversion: 1.0.0\n---\n# Fallback skill\n\nOriginal body.\n")
+	if err := db.Model(&testutil.SkillRow{}).Where("id = ?", "market_skill").Updates(map[string]any{
+		"category":      "external",
+		"skill_name":    "fallback-skill",
+		"description":   "Fallback description",
+		"relative_root": "external/fallback-skill",
+	}).Error; err != nil {
+		t.Fatalf("configure source skill: %v", err)
+	}
+	if err := db.Model(&testutil.SkillBlobRow{}).Where("hash = ?", "h_skill_market_rev1").Updates(map[string]any{"content": original, "size": len(original)}).Error; err != nil {
+		t.Fatalf("configure source SKILL.md: %v", err)
+	}
+	testutil.MustCreate(t, db, &testutil.SkillMarketItemRow{ID: "market_item1", SourceSkillID: "market_skill", Status: "published", CreatedAt: testutil.TimeFixture(), UpdatedAt: testutil.TimeFixture()})
+	service := NewService(ServiceDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
+
+	resp, err := service.Install(context.Background(), InstallRequest{MarketItemID: "market_item1", UserID: "user_002", UserName: "李四"})
+	if err != nil {
+		t.Fatalf("Install returned error: %v", err)
+	}
+	var copied testutil.SkillRow
+	if err := db.Where("id = ?", resp.SkillID).Take(&copied).Error; err != nil {
+		t.Fatalf("query installed skill: %v", err)
+	}
+	if copied.Category != "external" || copied.SkillName != "fallback-skill" || copied.Description != "Fallback description" {
+		t.Fatalf("installed fallback metadata = %#v", copied)
+	}
+	if copied.HeadRevisionID == nil {
+		t.Fatal("installed skill has no revision")
+	}
+	var entry testutil.SkillRevisionEntryRow
+	if err := db.Where("revision_id = ? AND path = ?", *copied.HeadRevisionID, "SKILL.md").Take(&entry).Error; err != nil || entry.BlobHash == nil {
+		t.Fatalf("query installed SKILL.md entry: entry=%#v err=%v", entry, err)
+	}
+	var blob testutil.SkillBlobRow
+	if err := db.Where("hash = ?", *entry.BlobHash).Take(&blob).Error; err != nil {
+		t.Fatalf("query installed SKILL.md blob: %v", err)
+	}
+	if string(blob.Content) != string(original) {
+		t.Fatalf("installed SKILL.md = %q, want %q", blob.Content, original)
+	}
+}
+
 func TestMarketInstall_RestoresTrashedInstalledSkill(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	testutil.SeedSkillWithRevision(t, db, "market_skill", "market_rev1")

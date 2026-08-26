@@ -101,6 +101,7 @@ type ListSourcesRequest struct {
 	SourceIDs []string
 	Keyword   string
 	Status    string
+	OrderBy   string
 	Page      int
 	PageSize  int
 }

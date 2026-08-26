@@ -39,8 +39,9 @@ func upstreamTotalTimeout() time.Duration {
 }
 
 type ChatMessage struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string `json:"role"`
+	Content    string `json:"content"`
+	HistorySeq int    `json:"history_seq,omitempty"`
 }
 
 type DatasetFilters struct {
@@ -52,14 +53,16 @@ type DatasetFilters struct {
 }
 
 type LazyChatRequest struct {
-	Message           ChatMessageOptions         `json:"message"`
-	Conversation      ChatConversationOptions    `json:"conversation"`
-	Retrieval         ChatRetrievalOptions       `json:"retrieval,omitempty"`
-	Runtime           ChatRuntimeOptions         `json:"runtime,omitempty"`
-	Personalization   ChatPersonalizationOptions `json:"personalization,omitempty"`
-	Agent             ChatAgentOptions           `json:"agent,omitempty"`
-	Workflow          ChatWorkflowOptions        `json:"workflow,omitempty"`
-	ExplicitResources ExplicitResourceBindings   `json:"explicit_resource_bindings,omitempty"`
+	Message         ChatMessageOptions         `json:"message"`
+	Conversation    ChatConversationOptions    `json:"conversation"`
+	Retrieval       ChatRetrievalOptions       `json:"retrieval,omitempty"`
+	Runtime         ChatRuntimeOptions         `json:"runtime,omitempty"`
+	Personalization ChatPersonalizationOptions `json:"personalization,omitempty"`
+	Agent           ChatAgentOptions           `json:"agent,omitempty"`
+	Workflow        ChatWorkflowOptions        `json:"workflow,omitempty"`
+	ModelContext    map[string]any             `json:"model_context,omitempty"`
+
+	ExplicitResources ExplicitResourceBindings `json:"explicit_resource_bindings,omitempty"`
 }
 
 type ExplicitResourceBindings struct {
@@ -142,6 +145,7 @@ type LazyChatData struct {
 	ToolLimitPending         *ToolLimitPendingEvent         `json:"tool_limit_pending,omitempty"`
 	IntentUpdated            *IntentUpdatedEvent            `json:"intent_updated,omitempty"`
 	WorkflowPreflightUpdated *WorkflowPreflightUpdatedEvent `json:"workflow_preflight_updated,omitempty"`
+	ModelContextUpdated      *ModelContextUpdatedEvent      `json:"model_context_updated,omitempty"`
 	Heartbeat                bool                           `json:"heartbeat,omitempty"`
 	ToolCallTurns            int64                          `json:"tool_call_turns"`
 	RuntimeEvent             *ChatRuntimeEvent              `json:"runtime_event,omitempty"`
@@ -222,7 +226,16 @@ type WorkflowPreflightUpdatedEvent struct {
 	Snapshot map[string]any `json:"snapshot,omitempty"`
 }
 
+// ModelContextUpdatedEvent persists dual-track compression state on the conversation.
+// summary_text and covered_through_seq must be applied together (atomic ext write).
+type ModelContextUpdatedEvent struct {
+	SummaryText       string `json:"summary_text"`
+	CoveredThroughSeq int    `json:"covered_through_seq"`
+	Version           int    `json:"version,omitempty"`
+}
+
 // LazyChatResponse is one line emitted by the algorithm chat stream.
+
 type LazyChatResponse struct {
 	Code int          `json:"code"`
 	Msg  string       `json:"msg"`
@@ -367,6 +380,7 @@ type UpstreamStreamChunk struct {
 	ToolLimitPending         *ToolLimitPendingEvent         `json:"tool_limit_pending,omitempty"`
 	IntentUpdated            *IntentUpdatedEvent            `json:"intent_updated,omitempty"`
 	WorkflowPreflightUpdated *WorkflowPreflightUpdatedEvent `json:"workflow_preflight_updated,omitempty"`
+	ModelContextUpdated      *ModelContextUpdatedEvent      `json:"model_context_updated,omitempty"`
 	Heartbeat                bool                           `json:"heartbeat,omitempty"`
 	ToolCallTurns            int64                          `json:"tool_call_turns"`
 	ExternalEventSequence    int64                          `json:"external_event_sequence,omitempty"`
@@ -533,6 +547,9 @@ func buildLazyChatRequest(body map[string]any) *LazyChatRequest {
 			Mentions:         stringMapSlice(bindings["mentions"]),
 		}
 	}
+	if modelContext, ok := body["model_context"].(map[string]any); ok && len(modelContext) > 0 {
+		req.ModelContext = modelContext
+	}
 	// current_turn_seq is an int in the body map. JSON numbers decode as float64.
 	switch v := body["current_turn_seq"].(type) {
 	case int:
@@ -578,6 +595,17 @@ func chatMessagesFromAny(v any) []ChatMessage {
 
 	rawAny, ok := v.([]any)
 	if !ok {
+		// Also accept []map[string]any from buildChatRequestBody.
+		if typed, ok := v.([]map[string]any); ok {
+			messages := make([]ChatMessage, 0, len(typed))
+			for _, m := range typed {
+				messages = append(messages, chatMessageFromMap(m))
+			}
+			if len(messages) == 0 {
+				return nil
+			}
+			return messages
+		}
 		return nil
 	}
 	messages := make([]ChatMessage, 0, len(rawAny))
@@ -586,14 +614,29 @@ func chatMessagesFromAny(v any) []ChatMessage {
 		if m == nil {
 			continue
 		}
-		role, _ := m["role"].(string)
-		content, _ := m["content"].(string)
-		messages = append(messages, ChatMessage{Role: role, Content: content})
+		messages = append(messages, chatMessageFromMap(m))
 	}
 	if len(messages) == 0 {
 		return nil
 	}
 	return messages
+}
+
+func chatMessageFromMap(m map[string]any) ChatMessage {
+	role, _ := m["role"].(string)
+	content, _ := m["content"].(string)
+	msg := ChatMessage{Role: role, Content: content}
+	switch seq := m["history_seq"].(type) {
+	case int:
+		msg.HistorySeq = seq
+	case int32:
+		msg.HistorySeq = int(seq)
+	case int64:
+		msg.HistorySeq = int(seq)
+	case float64:
+		msg.HistorySeq = int(seq)
+	}
+	return msg
 }
 
 func datasetFiltersFromAny(v any) *DatasetFilters {
@@ -897,6 +940,7 @@ func upstreamStreamChunkFromData(data LazyChatData) UpstreamStreamChunk {
 		ToolLimitPending:         data.ToolLimitPending,
 		IntentUpdated:            data.IntentUpdated,
 		WorkflowPreflightUpdated: data.WorkflowPreflightUpdated,
+		ModelContextUpdated:      data.ModelContextUpdated,
 		Heartbeat:                data.Heartbeat,
 		ToolCallTurns:            data.ToolCallTurns,
 		RuntimeEvent:             data.RuntimeEvent,

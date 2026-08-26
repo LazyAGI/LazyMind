@@ -133,9 +133,9 @@ class RemoteWorkflowExecutor:
                 params['output_slot_types'] = output_types
             input_types = dict(context.get('declared_input_types') or {})
             direct_value_slots = sorted(self._direct_input_value_slots(context))
-            # Workflow bindings are typed execution inputs, not user uploads. External
-            # scalar parameters stay as values; files and durable upstream artifacts use
-            # fenced local paths. Keep both forms out of attachment-only tools.
+            # Workflow bindings are typed execution inputs, not user uploads. Scalar
+            # values and public image references stay typed values; only binary inputs
+            # use fenced local paths. Keep all forms out of attachment-only tools.
             params['remote_inputs'] = inputs
             params['remote_input_types'] = input_types
             params['remote_input_value_slots'] = direct_value_slots
@@ -240,9 +240,9 @@ class RemoteWorkflowExecutor:
         if not isinstance(input_types, dict) or not isinstance(bindings, dict):
             return set()
         return {
-            str(material) for material, binding in bindings.items()
-            if str(input_types.get(str(material)) or '').strip().lower() in {'text', 'json'}
-            and cls._input_resource_binding(binding)
+            str(material) for material in bindings
+            if str(input_types.get(str(material)) or '').strip().lower()
+            in {'text', 'json', 'image'}
         }
 
     @staticmethod
@@ -251,12 +251,43 @@ class RemoteWorkflowExecutor:
         try:
             text = content.decode('utf-8')
         except UnicodeDecodeError as exc:
+            if material_type == 'image':
+                return None
             raise ValueError('scalar Workflow input must be valid UTF-8') from exc
+        parsed: Any = None
+        parsed_ok = False
+        try:
+            parsed = json.loads(text)
+            parsed_ok = True
+        except json.JSONDecodeError:
+            pass
         if material_type == 'json':
-            try:
-                return json.loads(text)
-            except json.JSONDecodeError as exc:
-                raise ValueError('json Workflow input must contain valid JSON') from exc
+            if not parsed_ok:
+                raise ValueError('json Workflow input must contain valid JSON')
+            # Durable JSON artifacts use {"data": ...} as their storage envelope.
+            if isinstance(parsed, dict) and 'data' in parsed:
+                return parsed['data']
+            return parsed
+        if material_type == 'text':
+            # Durable text artifacts use {"text": ...}; external text resources
+            # remain ordinary UTF-8 strings even when their contents look like JSON.
+            mime_type = str(item.get('mime_type') or '').lower()
+            if mime_type == 'application/json' and isinstance(parsed, dict):
+                if isinstance(parsed.get('text'), str):
+                    return parsed['text']
+                if 'data' in parsed and isinstance(parsed['data'], str):
+                    return parsed['data']
+            return text
+        if material_type == 'image':
+            # Public image artifacts are sent by Core as a small JSON reference;
+            # uploaded images are binary and must still be materialized locally.
+            if isinstance(parsed, dict):
+                path = parsed.get('path') or parsed.get('image_url') or parsed.get('url')
+                if isinstance(path, str) and path.strip():
+                    value = dict(parsed)
+                    value['path'] = path.strip()
+                    return value
+            return None
         return text
 
     async def _resolve_inputs(self, client: httpx.AsyncClient, attempt: str, lease: str,
@@ -269,11 +300,16 @@ class RemoteWorkflowExecutor:
             value = await self.runtime.input(client, attempt, lease, str(material))
             is_list = isinstance(value.get('items'), list)
             items = value.get('items') if is_list else [value]
-            if str(material) in direct_slots:
-                material_type = str(input_types.get(str(material)) or 'text').strip().lower()
+            material_type = str(input_types.get(str(material)) or '').strip().lower()
+            if str(material) in direct_slots and material_type in {'text', 'json'}:
                 values = [self._decode_input_value(item, material_type) for item in items]
                 result[str(material)] = values if is_list else values[0]
                 continue
+            if material_type == 'image':
+                references = [self._decode_input_value(item, material_type) for item in items]
+                if all(reference is not None for reference in references):
+                    result[str(material)] = references if is_list else references[0]
+                    continue
             paths = []
             list_root = root
             if is_list:
@@ -283,6 +319,11 @@ class RemoteWorkflowExecutor:
             else:
                 list_root.mkdir(parents=True, exist_ok=True)
             for index, item in enumerate(items, start=1):
+                if material_type == 'image':
+                    image_reference = self._decode_input_value(item, material_type)
+                    if image_reference is not None:
+                        paths.append(image_reference)
+                        continue
                 name = pathlib.Path(str(item.get('name') or material)).name or str(material)
                 if is_list:
                     name = f'{index:04d}_{name}'

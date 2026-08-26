@@ -1,5 +1,5 @@
 ARG DOCKER_MIRROR=docker.m.daocloud.io/library/
-FROM ${DOCKER_MIRROR}golang:1.25.11 AS build
+FROM ${DOCKER_MIRROR}golang:1.25.11 AS build-base
 WORKDIR /app
 
 ARG GOPROXY=https://goproxy.cn,direct
@@ -11,9 +11,21 @@ COPY backend/core/go.mod backend/core/go.sum ./
 RUN go mod download
 
 COPY backend/core/ ./
+
+FROM build-base AS build
 RUN CGO_ENABLED=0 go build -o /core .
 
-FROM ${DOCKER_MIRROR}alpine:3.19
+FROM build-base AS skill-bundler-build
+RUN CGO_ENABLED=0 go build -o /builtin-skill-bundle ./cmd/builtin-skill-bundle
+
+FROM ${DOCKER_MIRROR}alpine:3.19 AS skill-bundler
+ARG ALPINE_MIRROR=https://mirrors.aliyun.com/alpine
+RUN sed -i "s|https://dl-cdn.alpinelinux.org/alpine|${ALPINE_MIRROR}|g" /etc/apk/repositories \
+    && apk add --no-cache ca-certificates
+COPY --from=skill-bundler-build /builtin-skill-bundle /usr/local/bin/builtin-skill-bundle
+ENTRYPOINT ["/usr/local/bin/builtin-skill-bundle"]
+
+FROM ${DOCKER_MIRROR}alpine:3.19 AS runtime
 ARG ALPINE_MIRROR=https://mirrors.aliyun.com/alpine
 RUN sed -i "s|https://dl-cdn.alpinelinux.org/alpine|${ALPINE_MIRROR}|g" /etc/apk/repositories \
     && apk add --no-cache ca-certificates wget tzdata git

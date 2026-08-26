@@ -207,8 +207,7 @@ export default function ChatConfigPopover({
     const refresh = async () => {
       try {
         const response = await ConversationSettingsApi().listChatExecutors();
-        const payload = (response.data as any)?.data ?? response.data;
-        const values = Array.isArray(payload?.executors) ? payload.executors : [];
+        const values = response.data.data.executors;
         if (active) {
           setExecutors(
             values.filter(

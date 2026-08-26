@@ -70,6 +70,85 @@ func TestParseRequiredRejectsTooLongFields(t *testing.T) {
 	}
 }
 
+func TestParseAllowsMissingMetadataAndFindsFirstBodyParagraph(t *testing.T) {
+	parsed, err := Parse([]byte("---\nversion: 1.2.3\n---\n# Skill\n\nFirst useful paragraph\ncontinues here.\n\nSecond paragraph.\n"))
+	if err != nil {
+		t.Fatalf("Parse returned error: %v", err)
+	}
+	if parsed.HasName || parsed.HasDescription || parsed.Version != "1.2.3" {
+		t.Fatalf("Parse result = %#v", parsed)
+	}
+	if got := FirstBodyParagraph(parsed.Body); got != "First useful paragraph continues here." {
+		t.Fatalf("FirstBodyParagraph = %q", got)
+	}
+}
+
+func TestEffectiveDocumentUsesMetadataOnlyForRuntimeView(t *testing.T) {
+	original := []byte("---\nversion: 1.2.3\n---\n# Skill\n\nA useful runtime description.\n")
+	effective, err := EffectiveDocument(original, "runtime-skill", "A useful runtime description.")
+	if err != nil {
+		t.Fatalf("EffectiveDocument returned error: %v", err)
+	}
+	meta, err := ParseRequired(effective)
+	if err != nil {
+		t.Fatalf("runtime view is not strictly valid: %v", err)
+	}
+	if meta.Name != "runtime-skill" || meta.Description != "A useful runtime description." || meta.Version != "1.2.3" {
+		t.Fatalf("runtime metadata = %#v", meta)
+	}
+	if !strings.Contains(string(effective), "# Skill") {
+		t.Fatalf("runtime view lost body: %q", effective)
+	}
+	if string(original) != "---\nversion: 1.2.3\n---\n# Skill\n\nA useful runtime description.\n" {
+		t.Fatalf("EffectiveDocument mutated original: %q", original)
+	}
+
+	complete := []byte("---\nname: source-skill\ndescription: Source description\n---\n# Source\n")
+	unchanged, err := EffectiveDocument(complete, "ignored", "ignored")
+	if err != nil {
+		t.Fatalf("EffectiveDocument complete returned error: %v", err)
+	}
+	if string(unchanged) != string(complete) {
+		t.Fatalf("complete document changed: %q", unchanged)
+	}
+}
+
+func TestResolveWithFallbackPrefersPresentFieldsAndRetainsMissingStoredField(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  string
+		wantName string
+		wantDesc string
+	}{
+		{
+			name:     "name only",
+			content:  "---\nname: evolved-name\n---\n# Skill\n\nNew body.\n",
+			wantName: "evolved-name",
+			wantDesc: "Stored description",
+		},
+		{
+			name:     "description only",
+			content:  "---\ndescription: Evolved description\n---\n# Skill\n",
+			wantName: "stored-name",
+			wantDesc: "Evolved description",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolved, err := ResolveWithFallback([]byte(tt.content), Metadata{Name: "stored-name", Description: "Stored description"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resolved.Name != tt.wantName || resolved.Description != tt.wantDesc {
+				t.Fatalf("resolved metadata = %#v", resolved.Metadata)
+			}
+			if _, err := ParseRequired(resolved.Content); err != nil {
+				t.Fatalf("runtime content is not strict: %v", err)
+			}
+		})
+	}
+}
+
 func TestIsNameLengthError(t *testing.T) {
 	nameErr := ValidateNameLength(strings.Repeat("a", MaxSkillNameLength+1))
 	if !IsNameLengthError(nameErr) {

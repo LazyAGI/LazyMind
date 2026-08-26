@@ -1028,6 +1028,8 @@ model_providers:
           type: llm
           max_input_tokens: "256K"
         - name: sensenova-u1-fast
+          type: text2image
+        - name: sensenova-u1.5-lite
           type: image_editing
 
     - name: SiliconFlow

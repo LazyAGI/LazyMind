@@ -111,6 +111,8 @@ export interface ContextUsageReport {
   estimated_tokens: number;
   max_input_tokens?: number;
   estimated_ratio?: number;
+  compression_applied?: boolean;
+  compression_covered_through_seq?: number;
   categories: ContextUsageCategory[];
   estimation_version: string;
   preview_accuracy?: "deterministic" | "rule_only" | "llm_enhanced";
@@ -1058,6 +1060,12 @@ export interface ChatExecutorDescriptor {
   unavailable_reason?: string;
 }
 
+interface ChatExecutorsResponse {
+  code: number;
+  message: string;
+  data: { executors: ChatExecutorDescriptor[] };
+}
+
 export interface ConversationRuntimeSettings {
   workflow_mode?: 'dynamic' | 'auto';
   enable_subagent?: boolean;
@@ -1266,7 +1274,7 @@ export function ConversationSettingsApi() {
       );
     },
     listChatExecutors(options?: RawAxiosRequestConfig) {
-      return axiosInstance.get<{ executors: ChatExecutorDescriptor[] }>(
+      return axiosInstance.get<ChatExecutorsResponse>(
         `${coreApiBaseUrl}/chat/executors`,
         options,
       );
