@@ -4,6 +4,7 @@ type: work
 version: 1.0.0
 status: published
 default_locale: zh-CN
+provider: WorkBuddy / 千问办公
 
 skill:
   source_url: featured/market-researcher/skill

@@ -4,9 +4,11 @@ type: work
 version: 1.0.0
 status: published
 default_locale: zh-CN
+provider: SkillHub
 
 skill:
   source_url: https://skillhub.cn/skills/user_865e3592/ui-new
+  category: design
   required_version: 0.0.0+e8cd7d5ce137
 
 placement:

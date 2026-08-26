@@ -1671,13 +1671,23 @@ func TestOpenAPIShowcaseCaseIncludesSkillSourceURL(t *testing.T) {
 	if sourceURL, ok := properties["source_url"].(map[string]any); !ok || sourceURL["type"] != "string" {
 		t.Fatalf("ShowcaseCase source_url = %#v, want required string", properties["source_url"])
 	}
+	if provider, ok := properties["provider"].(map[string]any); !ok || provider["type"] != "string" {
+		t.Fatalf("ShowcaseCase provider = %#v, want required string", properties["provider"])
+	}
 	required := schema["required"].([]any)
+	foundSourceURL := false
+	foundProvider := false
 	for _, field := range required {
-		if field == "source_url" {
-			return
+		switch field {
+		case "source_url":
+			foundSourceURL = true
+		case "provider":
+			foundProvider = true
 		}
 	}
-	t.Fatal("ShowcaseCase source_url is not required")
+	if !foundSourceURL || !foundProvider {
+		t.Fatalf("ShowcaseCase required fields = %#v", required)
+	}
 }
 
 func generatedOpenAPISchemas(t *testing.T) map[string]any {

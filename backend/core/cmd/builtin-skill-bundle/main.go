@@ -25,6 +25,7 @@ import (
 	skillmetadata "lazymind/core/skillv2/metadata"
 	skillpackage "lazymind/core/skillv2/skillpackage"
 	skillpatch "lazymind/core/skillv2/skillpatch"
+	"lazymind/core/sourceprovider"
 	"lazymind/core/workflow/graphengine"
 )
 
@@ -50,6 +51,7 @@ type sourceList struct {
 
 type remoteSource struct {
 	SourceURL string `yaml:"source_url"`
+	Category  string `yaml:"category,omitempty"`
 	Provider  string `yaml:"provider,omitempty"`
 }
 
@@ -63,7 +65,7 @@ func (source *remoteSource) UnmarshalYAML(node *yaml.Node) error {
 	}
 	for index := 0; index < len(node.Content); index += 2 {
 		switch node.Content[index].Value {
-		case "source_url", "provider":
+		case "source_url", "category", "provider":
 		default:
 			return bundleFailure("skill source field %s is not supported", node.Content[index].Value)
 		}
@@ -98,6 +100,7 @@ type sourceInput struct {
 	Bundled       *bundledSource
 	MarketVisible bool
 	FallbackName  string
+	Category      string
 	Provider      string
 }
 
@@ -172,7 +175,7 @@ func run(ctx context.Context, opts options, client *http.Client) error {
 		seenSources[bundledSourceURL(source.Path)] = struct{}{}
 	}
 	for _, source := range ordinarySources.Skills {
-		sources = append(sources, sourceInput{URL: source.SourceURL, MarketVisible: true, Provider: source.Provider})
+		sources = append(sources, sourceInput{URL: source.SourceURL, MarketVisible: true, Category: source.Category, Provider: source.Provider})
 		seenSources[source.SourceURL] = struct{}{}
 	}
 	var featuredDefinitions []showcase.FeaturedDefinition
@@ -193,7 +196,7 @@ func run(ctx context.Context, opts options, client *http.Client) error {
 			if definition.Type == showcase.TypeWorkflow {
 				continue
 			}
-			input, source, err := featuredSourceInput(definition.Skill.SourceURL, definition.Skill.RequiredVersion, definition.ID)
+			input, source, err := featuredSourceInput(definition.Skill.SourceURL, definition.Skill.RequiredVersion, definition.ID, definition.Skill.Category)
 			if err != nil {
 				return bundleFailure("featured Skill %s: %v", definition.ID, err)
 			}
@@ -400,11 +403,12 @@ func loadSources(path string) (sourceList, error) {
 			return sourceList{}, bundleFailure("duplicate source URL %s", source)
 		}
 		seenSources[source] = struct{}{}
-		provider, err := skillbuiltin.NormalizeProviderName(entry.Provider)
+		provider, err := sourceprovider.Normalize(entry.Provider)
 		if err != nil {
 			return sourceList{}, bundleFailure("source %s: %v", source, err)
 		}
 		entry.SourceURL = source
+		entry.Category = strings.TrimSpace(entry.Category)
 		entry.Provider = provider
 	}
 	seenUIDs := make(map[string]struct{}, len(raw.BundledSkills))
@@ -414,7 +418,7 @@ func loadSources(path string) (sourceList, error) {
 		source.Path = filepath.ToSlash(strings.TrimSpace(source.Path))
 		source.Category = strings.TrimSpace(source.Category)
 		source.Version = strings.TrimSpace(source.Version)
-		provider, err := skillbuiltin.NormalizeProviderName(source.Provider)
+		provider, err := sourceprovider.Normalize(source.Provider)
 		if err != nil {
 			return sourceList{}, bundleFailure("bundled skill %d: %v", index, err)
 		}
@@ -444,6 +448,7 @@ func resolveSourceInput(source sourceInput, sourcesRoot string) (sourceSpec, err
 			return sourceSpec{}, err
 		}
 		spec.FallbackName = source.FallbackName
+		spec.Category = source.Category
 		spec.Provider = source.Provider
 		return spec, nil
 	}
@@ -462,16 +467,17 @@ func resolveSourceInput(source sourceInput, sourcesRoot string) (sourceSpec, err
 	}, nil
 }
 
-func featuredSourceInput(raw, requiredVersion, fallbackName string) (sourceInput, string, error) {
+func featuredSourceInput(raw, requiredVersion, fallbackName, category string) (sourceInput, string, error) {
 	source := strings.TrimSpace(raw)
+	category = strings.TrimSpace(category)
 	if _, err := resolveSource(source); err == nil {
-		return sourceInput{URL: source, FallbackName: fallbackName}, source, nil
+		return sourceInput{URL: source, FallbackName: fallbackName, Category: category}, source, nil
 	}
 	cleaned, err := skillpackage.CleanPath(source)
 	if err != nil {
 		return sourceInput{}, "", bundleFailure("invalid local Skill path %q", source)
 	}
-	bundled := &bundledSource{Path: cleaned, Version: strings.TrimSpace(requiredVersion)}
+	bundled := &bundledSource{Path: cleaned, Category: category, Version: strings.TrimSpace(requiredVersion)}
 	return sourceInput{Bundled: bundled, FallbackName: fallbackName}, bundledSourceURL(cleaned), nil
 }
 

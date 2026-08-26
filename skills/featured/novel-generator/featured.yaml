@@ -4,6 +4,7 @@ type: chat
 version: 1.0.0
 status: published
 default_locale: zh-CN
+provider: WorkBuddy
 
 skill:
   source_url: featured/novel-generator/skill

@@ -4,6 +4,7 @@ type: work
 version: 1.0.0
 status: published
 default_locale: zh-CN
+provider: GitHub
 
 skill:
   source_url: https://skillhub.cn/skills/user_8d36cde0/wechat-cover

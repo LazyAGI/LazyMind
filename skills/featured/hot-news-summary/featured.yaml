@@ -4,9 +4,11 @@ type: work
 version: 1.0.2
 status: published
 default_locale: zh-CN
+provider: SkillHub
 
 skill:
   source_url: https://skillhub.cn/skills/user_fd308b11/hot-news-summary
+  category: search
 
 placement:
   home: true

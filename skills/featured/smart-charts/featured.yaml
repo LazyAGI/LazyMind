@@ -4,9 +4,11 @@ type: work
 version: 6.2.1
 status: published
 default_locale: zh-CN
+provider: WorkBuddy
 
 skill:
   source_url: https://skillhub.cn/skills/user_5b28ea14/smart-charts
+  category: data
   required_version: 6.2.1
 
 placement:

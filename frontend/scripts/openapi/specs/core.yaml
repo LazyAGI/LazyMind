@@ -3359,6 +3359,8 @@ components:
                     type: string
                 prompt_short:
                     type: string
+                provider:
+                    type: string
                 source_url:
                     type: string
                 result_highlights:
@@ -3399,6 +3401,7 @@ components:
                 - output_type
                 - prompt
                 - prompt_short
+                - provider
                 - source_url
                 - result_summary
                 - title

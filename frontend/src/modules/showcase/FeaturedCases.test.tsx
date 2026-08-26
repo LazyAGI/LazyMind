@@ -55,4 +55,27 @@ describe("FeaturedCases", () => {
     expect(screen.getByText("Workflow")).toBeInTheDocument();
     expect(screen.queryByText("Chat skill")).not.toBeInTheDocument();
   });
+
+  it("limits the home preview and leaves the full list behind View More", async () => {
+    listShowcaseCasesMock.mockResolvedValue({
+      cases: Array.from({ length: 9 }, (_, index) => ({
+        id: `work-${index + 1}`,
+        title: `Work ${index + 1}`,
+        type: "work",
+        featured: true,
+      })),
+      categories: [],
+      total: 9,
+    } as never);
+
+    render(<MemoryRouter><FeaturedCases type="work" /></MemoryRouter>);
+
+    expect(await screen.findByText("Work 1")).toBeInTheDocument();
+    expect(screen.getByText("Work 8")).toBeInTheDocument();
+    expect(screen.queryByText("Work 9")).not.toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /查看更多/ })).toHaveAttribute(
+      "href",
+      "/agent/chat/cases?type=work",
+    );
+  });
 });

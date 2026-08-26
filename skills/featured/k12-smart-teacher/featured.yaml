@@ -4,9 +4,11 @@ type: work
 version: 1.0.4
 status: published
 default_locale: zh-CN
+provider: SkillHub
 
 skill:
   source_url: https://skillhub.cn/skills/user_6d79eef2/k12-smart-teacher
+  category: education
   required_version: 1.0.4
 
 placement:

@@ -9,14 +9,13 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"unicode/utf8"
 
 	skillpackage "lazymind/core/skillv2/skillpackage"
+	"lazymind/core/sourceprovider"
 )
 
 const (
 	CatalogSchemaVersion = 1
-	maxProviderNameRunes = 64
 )
 
 type Catalog struct {
@@ -113,7 +112,7 @@ func LoadCatalog(catalogPath string) (Catalog, error) {
 		entry.Name = strings.TrimSpace(entry.Name)
 		entry.Description = strings.TrimSpace(entry.Description)
 		entry.Category = strings.TrimSpace(entry.Category)
-		provider, err := NormalizeProviderName(entry.Provider)
+		provider, err := sourceprovider.Normalize(entry.Provider)
 		if err != nil {
 			return Catalog{}, catalogFailure("builtin skill %s: %v", entry.UID, err)
 		}
@@ -262,18 +261,6 @@ func packageFromCatalog(entry CatalogSkill, archivePath string, files map[string
 		MarketVisible: CatalogSkillMarketVisible(entry),
 		Files:         files,
 	}
-}
-
-// NormalizeProviderName validates the optional attribution shown by the Skill Plaza.
-func NormalizeProviderName(raw string) (string, error) {
-	provider := strings.TrimSpace(raw)
-	if strings.ContainsAny(provider, "\r\n\t") {
-		return "", catalogFailure("provider must be a single-line label")
-	}
-	if utf8.RuneCountInString(provider) > maxProviderNameRunes {
-		return "", catalogFailure("provider exceeds %d characters", maxProviderNameRunes)
-	}
-	return provider, nil
 }
 
 func CatalogSkillMarketVisible(entry CatalogSkill) bool {

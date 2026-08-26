@@ -399,7 +399,8 @@ func loadSelectedModels(ctx context.Context, db *gorm.DB, userID string) ([]sele
 			"JOIN user_model_provider_groups g ON "+
 				"g.id = m.user_model_provider_group_id AND "+
 				"g.create_user_id = usm.user_id AND "+
-				"g.deleted_at IS NULL",
+				"g.deleted_at IS NULL AND g.is_verified = ?",
+			true,
 		).
 		Where("usm.user_id = ?", strings.TrimSpace(userID)).
 		Order("usm.model_type ASC").

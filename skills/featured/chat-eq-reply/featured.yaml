@@ -4,9 +4,11 @@ type: chat
 version: 1.0.0
 status: published
 default_locale: zh-CN
+provider: SkillHub
 
 skill:
   source_url: https://skillhub.cn/skills/chat-eq-reply
+  category: communication
   required_version: 3.5.0
 
 placement:

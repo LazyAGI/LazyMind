@@ -4,9 +4,11 @@ type: work
 version: 1.0.0
 status: published
 default_locale: zh-CN
+provider: SkillHub
 
 skill:
   source_url: https://skillhub.cn/skills/user_1a7e2e57/cangjie-distill
+  category: writing
   required_version: 1.0.0
 
 placement:
