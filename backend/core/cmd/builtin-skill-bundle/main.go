@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -24,6 +25,7 @@ import (
 	skillmetadata "lazymind/core/skillv2/metadata"
 	skillpackage "lazymind/core/skillv2/skillpackage"
 	skillpatch "lazymind/core/skillv2/skillpatch"
+	"lazymind/core/workflow/graphengine"
 )
 
 const maxArchiveBytes = 64 << 20
@@ -108,7 +110,10 @@ func run(ctx context.Context, opts options, client *http.Client) error {
 		if err != nil {
 			return err
 		}
-		fmt.Printf("Validated %d featured Skills\n", len(definitions))
+		if err := validateFeaturedWorkflowBindings(definitions, opts.FeaturedSources); err != nil {
+			return err
+		}
+		fmt.Printf("Validated %d featured capabilities\n", len(definitions))
 		return nil
 	}
 	if opts.Sources == "" || opts.Lock == "" || opts.Cache == "" || opts.Output == "" {
@@ -148,9 +153,15 @@ func run(ctx context.Context, opts options, client *http.Client) error {
 		if err != nil {
 			return err
 		}
+		if err := validateFeaturedWorkflowBindings(featuredDefinitions, opts.FeaturedSources); err != nil {
+			return err
+		}
 		for index := range featuredDefinitions {
 			definition := &featuredDefinitions[index]
 			if definition.Status != showcase.StatusPublished {
+				continue
+			}
+			if definition.Type == showcase.TypeWorkflow {
 				continue
 			}
 			input, source, err := featuredSourceInput(definition.Skill.SourceURL, definition.Skill.RequiredVersion)
@@ -269,6 +280,10 @@ func run(ctx context.Context, opts options, client *http.Client) error {
 			if definition.Status != showcase.StatusPublished {
 				continue
 			}
+			if definition.Type == showcase.TypeWorkflow {
+				compiledDefinitions = append(compiledDefinitions, definition)
+				continue
+			}
 			entry, ok := entriesBySource[definition.Skill.SourceURL]
 			if !ok {
 				return bundleFailure("featured Skill %s source was not bundled", definition.ID)
@@ -290,7 +305,41 @@ func run(ctx context.Context, opts options, client *http.Client) error {
 		}
 		featuredCount = len(compiledDefinitions)
 	}
-	fmt.Printf("Bundled %d builtin Skills and %d featured Skills\n", len(catalog.Skills), featuredCount)
+	fmt.Printf("Bundled %d builtin Skills and %d featured capabilities\n", len(catalog.Skills), featuredCount)
+	return nil
+}
+
+func validateFeaturedWorkflowBindings(definitions []showcase.FeaturedDefinition, featuredSources string) error {
+	workflowRoot := filepath.Join(filepath.Dir(filepath.Dir(filepath.Clean(featuredSources))), "workflows")
+	for _, definition := range definitions {
+		if definition.Type != showcase.TypeWorkflow {
+			continue
+		}
+		workflowID := strings.TrimPrefix(strings.TrimSpace(definition.Workflow.WorkflowRef), "builtin:")
+		packageRoot := filepath.Join(workflowRoot, workflowID)
+		workflowYAML, err := os.ReadFile(filepath.Join(packageRoot, "workflow.yaml"))
+		if err != nil {
+			return bundleFailure("featured Workflow %s: read workflow.yaml: %v", definition.ID, err)
+		}
+		stateYAML, err := os.ReadFile(filepath.Join(packageRoot, "scenario", "state.yml"))
+		if err != nil {
+			return bundleFailure("featured Workflow %s: read scenario/state.yml: %v", definition.ID, err)
+		}
+		var metadata struct {
+			ID string `yaml:"id"`
+		}
+		if err := yaml.Unmarshal(workflowYAML, &metadata); err != nil || strings.TrimSpace(metadata.ID) != workflowID {
+			return bundleFailure("featured Workflow %s: workflow id must match %s", definition.ID, workflowID)
+		}
+		scenario, err := os.ReadFile(filepath.Join(packageRoot, "scenario", "scenario.md"))
+		if err != nil && !errors.Is(err, os.ErrNotExist) {
+			return bundleFailure("featured Workflow %s: read scenario/scenario.md: %v", definition.ID, err)
+		}
+		compiled := graphengine.Compile(string(workflowYAML), string(stateYAML), string(scenario), graphengine.ProfilePublish)
+		if !compiled.Valid || compiled.Graph == nil {
+			return bundleFailure("featured Workflow %s: invalid Workflow package: %v", definition.ID, compiled.Diagnostics)
+		}
+	}
 	return nil
 }
 

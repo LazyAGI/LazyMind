@@ -164,7 +164,7 @@ func TestLoadSourceDirectoryRejectsUnknownFieldsAndInvalidAssets(t *testing.T) {
 		body := strings.Replace(validFeaturedYAML("demo", false), "type: chat", "type: agent", 1)
 		writeFeaturedSource(t, root, "demo", body)
 		_, err := LoadSourceDirectory(root)
-		if err == nil || !strings.Contains(err.Error(), "type must be chat or work") {
+		if err == nil || !strings.Contains(err.Error(), "type must be chat, work, or workflow") {
 			t.Fatalf("error = %v", err)
 		}
 	})
@@ -177,6 +177,45 @@ func TestLoadSourceDirectoryRejectsUnknownFieldsAndInvalidAssets(t *testing.T) {
 			t.Fatalf("error = %v", err)
 		}
 	})
+}
+
+func TestCompileCatalogBuildsWorkflowCapabilityWithoutSkillBinding(t *testing.T) {
+	root := t.TempDir()
+	body := strings.Replace(validFeaturedYAML("test-workflow", false), "type: chat", "type: workflow", 1)
+	body = strings.Replace(
+		body,
+		"skill:\n  source_url: https://example.test/test-workflow.zip\n",
+		"workflow:\n  workflow_ref: builtin:test-workflow\n",
+		1,
+	)
+	writeFeaturedSource(t, root, "test-workflow", body)
+
+	definitions, err := LoadSourceDirectory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := CompileCatalog(definitions, filepath.Join(t.TempDir(), "featured-skills"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := catalog.ShowcaseCases("zh-CN")
+	if len(cases) != 1 || cases[0].Type != TypeWorkflow || cases[0].WorkflowRef != "builtin:test-workflow" {
+		t.Fatalf("workflow cases = %#v", cases)
+	}
+	if cases[0].BuiltinSkillUID != "" || cases[0].SourceURL != "" {
+		t.Fatalf("Workflow capability unexpectedly contains a Skill binding: %#v", cases[0])
+	}
+}
+
+func TestLoadSourceDirectoryRejectsMixedSkillAndWorkflowBindings(t *testing.T) {
+	root := t.TempDir()
+	body := strings.Replace(validFeaturedYAML("demo", false), "type: chat", "type: workflow", 1)
+	body = strings.Replace(body, "placement:\n", "workflow:\n  workflow_ref: builtin:test-workflow\nplacement:\n", 1)
+	writeFeaturedSource(t, root, "demo", body)
+	_, err := LoadSourceDirectory(root)
+	if err == nil || !strings.Contains(err.Error(), "requires workflow and forbids skill") {
+		t.Fatalf("error = %v", err)
+	}
 }
 
 func TestLoadSourceDirectoryAcceptsLocalSkillSource(t *testing.T) {

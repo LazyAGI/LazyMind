@@ -2318,7 +2318,7 @@ export interface ShareSkillOpenAPIRequest {
 }
 export interface ShowcaseCase {
     'attachment_hint'?: string;
-    'builtin_skill_uid': string;
+    'builtin_skill_uid'?: string;
     'category': string;
     'description': string;
     'detail_description': string;
@@ -2340,6 +2340,7 @@ export interface ShowcaseCase {
     'tasks'?: Array<ShowcaseCaseTask>;
     'title': string;
     'type': string;
+    'workflow_ref'?: string;
 }
 export interface ShowcaseCaseListResponse {
     'cases'?: Array<ShowcaseCase>;

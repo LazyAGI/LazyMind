@@ -126,6 +126,7 @@ services:
         <<: *mirror-args
     volumes:
       - ./skills:/workspace/skills
+      - ./workflows:/workspace/workflows:ro
 
   kong:
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-kong:${LAZYMIND_IMAGE_TAG:-latest}
