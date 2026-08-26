@@ -36,7 +36,7 @@ presentation:
     result_summary: 以来源、数据日期和可复核计算支撑研究结论，并明确证据边界
   detail:
     title: 市场与行业研究专家
-    description: 来源：WorkBuddy market-researcher 与千问办公（Qwen Work）equity-research，经 LazyMind 融合适配。面向行业研究、竞争监测和公司比较，完成资料检索、来源核验、确定性计算、Mermaid 图表与结构化报告交付。
+    description: 面向行业研究、竞争监测和公司比较，完成资料检索、来源核验、确定性计算、Mermaid 图表与结构化报告交付。来源：WorkBuddy 与千问办公，经 LazyMind 融合适配。
     attachment_hint: 行业说明、研究报告、公司名单、财务数据表或来源链接（可选）
 
 tasks:
