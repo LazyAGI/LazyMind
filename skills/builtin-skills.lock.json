@@ -83,7 +83,7 @@
       "resolved_url": "builtin://writing/structured-longform-writing",
       "version": "1.0.0",
       "name": "structured-longform-writing",
-      "description": "来源：千问办公（Qwen Office）structured-longform-writing，经 LazyMind 适配。Use for structured long-form writing, including blogs, reports, proposals, plans, PRDs, competitive analyses, research summaries, technical design docs, internal briefings, and decision documents. Trigger when the user asks to write, draft, expand, organize, polish into, or turn rough notes, attachments, webpages, knowledge-base results, or gathered materials into a complete long-form document. Do not use for simple rewriting, one-paragraph summaries, title brainstorming, short messages, translation-only tasks, or purely creative fiction.",
+      "description": "Use for structured long-form writing, including blogs, reports, proposals, plans, PRDs, competitive analyses, research summaries, technical design docs, internal briefings, and decision documents. Trigger when the user asks to write, draft, expand, organize, polish into, or turn rough notes, attachments, webpages, knowledge-base results, or gathered materials into a complete long-form document. Do not use for simple rewriting, one-paragraph summaries, title brainstorming, short messages, translation-only tasks, or purely creative fiction. 来源：千问办公，经 LazyMind 适配。",
       "category": "writing",
       "tags": [
         "long-form-writing",
@@ -91,9 +91,9 @@
         "proposal"
       ],
       "market_visible": true,
-      "archive_sha256": "9e3530706c0dec4e2c8f72c9bec47ea71cc5e943c5079cb9233bdaf44f449dca",
-      "tree_sha256": "0395f7a5dca04f84a4c77eb958a7d059b41ad26c7e70690beed1ac8aa2636d94",
-      "archive_size": 30166,
+      "archive_sha256": "0d5cd585fd438ba1393ac831e55448ac8f710fc16a0e8100b39e0c9cd51a9e3a",
+      "tree_sha256": "fe8817735ccdf89458bdb2d8b7932a6a4ab715f44d9c2587aca73257cb92b73d",
+      "archive_size": 30155,
       "package_file": "packages/bsk_E1A2FD55C759A485672BA6B94328.zip"
     },
     {
