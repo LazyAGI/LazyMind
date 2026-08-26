@@ -9,10 +9,13 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
 	"strings"
 	"testing"
 
 	skillmetadata "lazymind/core/skillv2/metadata"
+	skillservice "lazymind/core/skillv2/service"
+	skillpackage "lazymind/core/skillv2/skillpackage"
 	"lazymind/core/skillv2/testutil"
 )
 
@@ -54,6 +57,39 @@ func TestRemoteFSExternalSkillMDReturnsStrictRuntimeViewWithoutChangingBlob(t *t
 	}
 	if !bytes.Equal(blob.Content, original) {
 		t.Fatalf("stored SKILL.md changed: %q", blob.Content)
+	}
+}
+
+func TestRemoteFSBuiltinSkillMDReturnsStrictRuntimeViewWithoutChangingBlob(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	original := []byte("---\nversion: 1.0.0\n---\n# Runtime skill\n\nUseful runtime description.\n")
+	archivePath, err := skillpackage.WriteZip(map[string][]byte{"SKILL.md": original}, t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(archivePath)
+	created, err := skillservice.NewSkillService(skillservice.SkillServiceDeps{DB: db.DB, BlobStore: skillservice.NewBlobStore(db.DB, skillservice.NewLocalObjectStore(t.TempDir()))}).CreateSkill(context.Background(), skillservice.CreateSkillRequest{
+		OwnerUserID: "user_001", CreateUserID: "user_001", Name: "runtime-skill", Category: "research", Description: "Useful runtime description.", OriginBuiltinSkillUID: "bsk_runtime_skill",
+		Source: skillservice.SourceInput{Type: "builtin_zip", StoredPath: archivePath, Filename: "bsk_runtime_skill.zip"},
+	})
+	if err != nil {
+		t.Fatalf("install builtin Skill: %v", err)
+	}
+	handler := NewHandler(HandlerDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
+	rec := httptest.NewRecorder()
+	handler.Content(rec, httptest.NewRequest(http.MethodGet, remoteContentURL("skills/research/runtime-skill/SKILL.md", "user_001", "task1", ""), nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("content status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if _, err := skillmetadata.ParseRequired(rec.Body.Bytes()); err != nil {
+		t.Fatalf("runtime SKILL.md is not strictly valid: %v", err)
+	}
+	var skill testutil.SkillRow
+	if err := db.Where("id = ?", created.SkillID).Take(&skill).Error; err != nil {
+		t.Fatal(err)
+	}
+	if skill.OriginBuiltinSkillUID != "bsk_runtime_skill" {
+		t.Fatalf("installed skill = %#v", skill)
 	}
 }
 

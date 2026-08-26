@@ -38,6 +38,12 @@ type Parsed struct {
 	HasDescription bool
 }
 
+type Resolved struct {
+	Metadata
+	Content      []byte
+	UsedFallback bool
+}
+
 type LengthError struct {
 	Field string
 	Max   int
@@ -142,6 +148,39 @@ func FirstBodyParagraph(body string) string {
 	return text
 }
 
+func Resolve(content []byte, fallbackNames ...string) (Resolved, error) {
+	parsed, err := Parse(content)
+	if err != nil {
+		return Resolved{}, err
+	}
+	if parsed.HasName && parsed.HasDescription {
+		return Resolved{Metadata: parsed.Metadata, Content: content}, nil
+	}
+	name := parsed.Name
+	if !parsed.HasName {
+		for _, candidate := range fallbackNames {
+			candidate = strings.TrimSpace(candidate)
+			if ValidateName(candidate) == nil {
+				name = candidate
+				break
+			}
+		}
+	}
+	description := parsed.Description
+	if !parsed.HasDescription {
+		description = FirstBodyParagraph(parsed.Body)
+	}
+	effective, err := EffectiveDocument(content, name, description)
+	if err != nil {
+		return Resolved{}, err
+	}
+	meta, err := ParseRequired(effective)
+	if err != nil {
+		return Resolved{}, err
+	}
+	return Resolved{Metadata: meta, Content: effective, UsedFallback: true}, nil
+}
+
 func EffectiveDocument(content []byte, name, description string) ([]byte, error) {
 	if _, err := ParseRequired(content); err == nil {
 		return content, nil
@@ -196,6 +235,17 @@ func ValidateNameLength(name string) error {
 		return &LengthError{Field: "name", Max: MaxSkillNameLength}
 	}
 	return nil
+}
+
+func ValidateName(name string) error {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return fmt.Errorf("name required")
+	}
+	if err := validatePathSegment(name); err != nil {
+		return err
+	}
+	return ValidateNameLength(name)
 }
 
 func ValidateDescriptionLength(description string) error {
@@ -311,7 +361,7 @@ func SyncPublished(ctx context.Context, tx *gorm.DB, skillID string, entries map
 	if err != nil {
 		return err
 	}
-	if skill.Category == ExternalCategory {
+	if skill.Category == ExternalCategory || strings.TrimSpace(skill.OriginBuiltinSkillUID) != "" {
 		parsed, err := Parse(content)
 		if err != nil {
 			return err

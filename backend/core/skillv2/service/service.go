@@ -1093,31 +1093,11 @@ func resolveExternalMetadata(pkg sourcePackage, skillID string) (skillmetadata.M
 	if !ok {
 		return skillmetadata.Metadata{}, fmt.Errorf("skill package must contain SKILL.md")
 	}
-	parsed, err := skillmetadata.Parse(content)
+	resolved, err := skillmetadata.Resolve(content, pkg.PackageRoot, archiveStem(pkg.ArchiveFilename), "lazymind-skill-"+skillID)
 	if err != nil {
 		return skillmetadata.Metadata{}, err
 	}
-	name := parsed.Name
-	if !parsed.HasName {
-		name = strings.TrimSpace(pkg.PackageRoot)
-		if err := validateSkillName(name); err != nil {
-			name = archiveStem(pkg.ArchiveFilename)
-		}
-		if err := validateSkillName(name); err != nil {
-			name = "lazymind-skill-" + skillID
-		}
-	}
-	description := parsed.Description
-	if !parsed.HasDescription {
-		description = skillmetadata.FirstBodyParagraph(parsed.Body)
-	}
-	if err := validateSkillName(name); err != nil {
-		return skillmetadata.Metadata{}, fmt.Errorf("invalid SKILL.md frontmatter field \"name\": %w", err)
-	}
-	if err := validateSkillDescription(description); err != nil {
-		return skillmetadata.Metadata{}, err
-	}
-	return skillmetadata.Metadata{Name: name, Description: description}, nil
+	return resolved.Metadata, nil
 }
 
 func archiveStem(filename string) string {

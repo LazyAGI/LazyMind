@@ -583,7 +583,7 @@ func (h *Handler) readContent(w http.ResponseWriter, r *http.Request) {
 		writeHTTPError(w, err)
 		return
 	}
-	if parsed.relPath == skill.SkillMDPath && skill.Category == skillmetadata.ExternalCategory {
+	if parsed.relPath == skill.SkillMDPath && (skill.Category == skillmetadata.ExternalCategory || skill.OriginBuiltinSkillUID != "") {
 		data, err = skillmetadata.EffectiveDocument(data, skill.SkillName, skill.Description)
 		if err != nil {
 			writeHTTPError(w, err)
@@ -1356,32 +1356,33 @@ type systemClock struct{}
 func (systemClock) Now() time.Time { return time.Now() }
 
 type skillRow struct {
-	ID                 string     `gorm:"column:id;type:varchar(36);primaryKey"`
-	OwnerUserID        string     `gorm:"column:owner_user_id;type:text;not null"`
-	OwnerUserName      string     `gorm:"column:owner_user_name;type:text;not null;default:''"`
-	CreateUserID       string     `gorm:"column:create_user_id;type:text;not null"`
-	CreateUserName     string     `gorm:"column:create_user_name;type:text;not null;default:''"`
-	Category           string     `gorm:"column:category;type:text;not null"`
-	SkillName          string     `gorm:"column:skill_name;type:text;not null"`
-	Description        string     `gorm:"column:description;type:text"`
-	Tags               []byte     `gorm:"column:tags;type:json"`
-	RelativeRoot       string     `gorm:"column:relative_root;type:text;not null"`
-	SkillMDPath        string     `gorm:"column:skill_md_path;type:text;not null;default:'SKILL.md'"`
-	HeadRevisionID     *string    `gorm:"column:head_revision_id;type:varchar(36)"`
-	Version            int64      `gorm:"column:version;not null;default:1"`
-	AutoEvo            bool       `gorm:"column:auto_evo;not null;default:false"`
-	AutoEvoApplyStatus string     `gorm:"column:auto_evo_apply_status;type:text;not null;default:'idle'"`
-	AutoEvoGeneration  int64      `gorm:"column:auto_evo_generation;not null;default:0"`
-	AutoEvoStartedAt   *time.Time `gorm:"column:auto_evo_started_at"`
-	AutoEvoFinishedAt  *time.Time `gorm:"column:auto_evo_finished_at"`
-	AutoEvoError       string     `gorm:"column:auto_evo_error;type:text;not null;default:''"`
-	IsEnabled          bool       `gorm:"column:is_enabled;not null;default:true"`
-	UpdateStatus       string     `gorm:"column:update_status;type:text;not null;default:'up_to_date'"`
-	Ext                []byte     `gorm:"column:ext;type:json"`
-	DeletedAt          *time.Time `gorm:"column:deleted_at"`
-	DeletedBy          *string    `gorm:"column:deleted_by;type:text"`
-	CreatedAt          time.Time  `gorm:"column:created_at;not null"`
-	UpdatedAt          time.Time  `gorm:"column:updated_at;not null"`
+	ID                    string     `gorm:"column:id;type:varchar(36);primaryKey"`
+	OwnerUserID           string     `gorm:"column:owner_user_id;type:text;not null"`
+	OwnerUserName         string     `gorm:"column:owner_user_name;type:text;not null;default:''"`
+	CreateUserID          string     `gorm:"column:create_user_id;type:text;not null"`
+	CreateUserName        string     `gorm:"column:create_user_name;type:text;not null;default:''"`
+	Category              string     `gorm:"column:category;type:text;not null"`
+	SkillName             string     `gorm:"column:skill_name;type:text;not null"`
+	Description           string     `gorm:"column:description;type:text"`
+	Tags                  []byte     `gorm:"column:tags;type:json"`
+	RelativeRoot          string     `gorm:"column:relative_root;type:text;not null"`
+	SkillMDPath           string     `gorm:"column:skill_md_path;type:text;not null;default:'SKILL.md'"`
+	HeadRevisionID        *string    `gorm:"column:head_revision_id;type:varchar(36)"`
+	Version               int64      `gorm:"column:version;not null;default:1"`
+	AutoEvo               bool       `gorm:"column:auto_evo;not null;default:false"`
+	AutoEvoApplyStatus    string     `gorm:"column:auto_evo_apply_status;type:text;not null;default:'idle'"`
+	AutoEvoGeneration     int64      `gorm:"column:auto_evo_generation;not null;default:0"`
+	AutoEvoStartedAt      *time.Time `gorm:"column:auto_evo_started_at"`
+	AutoEvoFinishedAt     *time.Time `gorm:"column:auto_evo_finished_at"`
+	AutoEvoError          string     `gorm:"column:auto_evo_error;type:text;not null;default:''"`
+	IsEnabled             bool       `gorm:"column:is_enabled;not null;default:true"`
+	OriginBuiltinSkillUID string     `gorm:"column:origin_builtin_skill_uid;type:text;not null;default:''"`
+	UpdateStatus          string     `gorm:"column:update_status;type:text;not null;default:'up_to_date'"`
+	Ext                   []byte     `gorm:"column:ext;type:json"`
+	DeletedAt             *time.Time `gorm:"column:deleted_at"`
+	DeletedBy             *string    `gorm:"column:deleted_by;type:text"`
+	CreatedAt             time.Time  `gorm:"column:created_at;not null"`
+	UpdatedAt             time.Time  `gorm:"column:updated_at;not null"`
 }
 
 func (skillRow) TableName() string { return "skills" }
