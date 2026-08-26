@@ -1,0 +1,101 @@
+schema_version: 2
+id: ppt-workflow
+type: workflow
+version: 1.0.0
+status: published
+default_locale: zh-CN
+
+workflow:
+  workflow_ref: builtin:ppt-workflow
+
+placement:
+  home: true
+  gallery: true
+  order: 23
+
+classification:
+  category: PPT 制作
+  tags:
+    - 演示文稿
+    - HTML 幻灯片
+    - 资料检索
+    - 演讲备注
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+
+presentation:
+  card:
+    title: AI PPT 规划与生成
+    description: 从主题、受众和风格出发，收集素材、生成可编辑大纲与逐页 HTML 幻灯片
+    output_type: slides
+    output_label: PPT 预览
+    cover_asset: cover
+    result_summary: 用逐页大纲驱动自由布局的 HTML 幻灯片，并配套演讲备注和页面级修改能力
+  detail:
+    title: 从演示目标到完整幻灯片
+    description: 分析目标和受众，优先利用上传资料与知识库，补齐必要事实与图片，生成逐页大纲、HTML 预览和丰富演讲备注；完成后可继续修改或删除指定页面。
+    attachment_hint: 汇报材料、数据表、品牌素材或参考文档（可选）
+
+tasks:
+  - id: annual-review
+    selector:
+      title: 个人年度总结 PPT
+      description: 把年度经历、成果与复盘整理成有叙事主线的演示文稿
+      output_label: 年度总结幻灯片
+    launch:
+      prompt_short: 根据我的年度记录制作一份个人年度总结 PPT。
+      prompt: 请制作一份 8 页个人年度总结 PPT，面向我的团队和直属主管，采用“轻商务/现代商务”风格。围绕年度关键词、重要经历、关键成果、能力成长、难忘时刻、复盘思考和下一年度计划建立清晰叙事。优先使用我上传的年度记录和已选知识库；只有存在具体资料缺口时才联网补充，并清楚区分事实与假设。请生成逐页可编辑大纲、完整 HTML 幻灯片和每页较丰富的演讲备注。
+    replay:
+      steps:
+        - title: 分析演示需求
+          description: 锁定主题、八页篇幅、目标受众、视觉风格和内容约束
+        - title: 收集资料与视觉素材
+          description: 优先使用上传资料和知识库，仅为明确缺口检索网页或图片
+        - title: 生成逐页大纲
+          description: 为每页建立标题、内容要点、叙事作用和顺序
+        - title: 生成 HTML 幻灯片
+          description: 按最新版大纲绘制自由布局页面并保存演讲备注
+        - title: 预览与继续修改
+          description: 在卡片中翻页预览，并支持后续定向修改或删除页面
+    result:
+      template: generic_report_v1
+      eyebrow: PPT 演示交付
+      title: 有完整叙事与演讲备注的年度总结
+      summary: 将年度材料组织为可预览、可逐页修改的 HTML 幻灯片
+      highlights:
+        - 受众、页数和风格约束分析
+        - 逐页可编辑内容大纲
+        - 自由布局 HTML 幻灯片
+        - 每页演讲备注与页面级修改
+
+  - id: proposal-deck
+    selector:
+      title: 客户方案汇报
+      description: 把产品和解决方案材料组织成面向客户的结构化提案
+      output_label: 客户提案 PPT
+    launch:
+      prompt_short: 根据产品资料制作一份面向客户的解决方案汇报 PPT。
+      prompt: 请根据我提供的产品和客户材料，制作一份 10 页解决方案汇报 PPT，目标受众为客户业务与技术负责人，采用“商务经典”风格。请围绕客户挑战、目标、总体方案、核心能力、架构、实施路径、预期价值、风险控制和下一步行动组织内容。优先使用上传材料和已选知识库，缺少关键事实时明确标注，不要编造客户数据。交付逐页大纲、完整 HTML 幻灯片和演讲备注。
+    replay:
+      steps:
+        - title: 明确客户与汇报目标
+          description: 提炼受众关切、演示目标、篇幅和商务风格
+        - title: 整理方案证据
+          description: 汇总客户材料、产品能力、架构素材和证据缺口
+        - title: 编排提案故事线
+          description: 从客户挑战推进到方案、价值、风险和下一步
+        - title: 生成并预览页面
+          description: 输出逐页 HTML 和演讲备注并支持定向调整
+    result:
+      template: generic_report_v1
+      eyebrow: 客户提案 PPT
+      title: 从客户挑战到实施行动的方案演示
+      summary: 将产品和客户材料转化为结构清晰、证据受控的提案幻灯片
+      highlights:
+        - 客户关切与汇报目标
+        - 方案故事线和逐页结构
+        - 架构、价值与实施页面
+        - HTML 预览和演讲备注

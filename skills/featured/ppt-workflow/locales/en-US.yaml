@@ -1,0 +1,83 @@
+locale: en-US
+
+classification:
+  category: Presentation design
+  tags:
+    - Presentations
+    - HTML slides
+    - Material research
+    - Speaker notes
+
+presentation:
+  card:
+    title: AI presentation planner
+    description: Start from topic, audience, and style, then collect materials and generate an editable outline with page-level HTML slides
+    output_type: slides
+    output_label: Presentation preview
+    cover_asset: cover
+    result_summary: Drive free-form HTML slides from a page outline, with rich speaker notes and page-level revision
+  detail:
+    title: From presentation goal to complete slides
+    description: Analyze the audience, prioritize uploads and knowledge sources, fill concrete evidence and image gaps, and generate a page outline, HTML previews, and detailed notes that remain editable after delivery.
+    attachment_hint: Briefing notes, data, brand assets, or reference documents (optional)
+
+tasks:
+  - id: annual-review
+    selector:
+      title: Personal annual review
+      description: Turn yearly experiences, outcomes, and reflections into a coherent presentation
+      output_label: Annual-review slides
+    launch:
+      prompt_short: Create a personal annual-review presentation from my yearly notes.
+      prompt: Create an eight-slide personal annual-review presentation for my team and direct manager in a light, modern business style. Build a clear narrative around annual themes, major experiences, key outcomes, capability growth, memorable moments, reflection, and next-year plans. Prefer my uploads and selected knowledge base; use the web only for a concrete gap, and distinguish facts from assumptions. Generate an editable page outline, complete HTML slides, and substantive speaker notes for every page.
+    replay:
+      steps:
+        - title: Analyze presentation needs
+          description: Lock the topic, eight-page length, audience, visual style, and constraints
+        - title: Collect content and visuals
+          description: Prefer uploads and knowledge sources, searching only for explicit gaps
+        - title: Build the page outline
+          description: Define each page's title, points, narrative role, and order
+        - title: Generate HTML slides
+          description: Render free-form pages from the latest outline and save speaker notes
+        - title: Preview and refine
+          description: Flip through the deck and continue with targeted page edits or deletion
+    result:
+      template: generic_report_v1
+      eyebrow: Presentation delivery
+      title: An annual review with a complete narrative and notes
+      summary: Turn yearly material into previewable, page-editable HTML slides
+      highlights:
+        - Audience, page-count, and style analysis
+        - Editable page-level outline
+        - Free-form HTML slides
+        - Speaker notes and page-level revisions
+
+  - id: proposal-deck
+    selector:
+      title: Customer solution deck
+      description: Organize product and solution material into a structured client proposal
+      output_label: Customer proposal deck
+    launch:
+      prompt_short: Create a customer-facing solution presentation from my product materials.
+      prompt: Using my product and customer materials, create a ten-slide solution presentation for customer business and technical stakeholders in a classic business style. Structure it around customer challenges, goals, overall solution, core capabilities, architecture, implementation path, expected value, risk controls, and next actions. Prefer uploads and the selected knowledge base, label critical gaps, and do not invent customer data. Deliver a page outline, complete HTML slides, and speaker notes.
+    replay:
+      steps:
+        - title: Define audience and objective
+          description: Extract stakeholder concerns, presentation goal, length, and business style
+        - title: Organize solution evidence
+          description: Consolidate customer context, product capabilities, architecture assets, and gaps
+        - title: Build the proposal story
+          description: Move from customer challenges through solution, value, risk, and action
+        - title: Generate and preview pages
+          description: Deliver page-level HTML and notes with targeted revision support
+    result:
+      template: generic_report_v1
+      eyebrow: Customer proposal deck
+      title: A solution story from customer challenge to implementation action
+      summary: Convert product and customer evidence into a clear, controlled proposal presentation
+      highlights:
+        - Stakeholder concerns and presentation goals
+        - Proposal story and page structure
+        - Architecture, value, and implementation pages
+        - HTML previews and speaker notes

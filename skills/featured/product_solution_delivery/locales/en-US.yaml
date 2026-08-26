@@ -1,0 +1,236 @@
+locale: en-US
+
+classification:
+  category: Product design
+  tags:
+    - Product direction
+    - Competitive analysis
+    - PRD
+    - Interactive prototype
+    - Engineering handoff
+
+presentation:
+  card:
+    title: Product solution and engineering handoff
+    description: Run product direction, competitive analysis, solution design, PRD, prototype, review, and handoff as selected stages
+    output_type: web
+    output_label: Product delivery package
+    cover_asset: cover
+    result_summary: Use one prunable workflow for a deep single stage or a continuous path from product problem to engineering handoff
+  detail:
+    title: Seven-stage product design workflow
+    description: Select a single stage, a continuous range, or all seven stages with explicit authorization. Text artifacts remain editable, reports and prototypes are previewable, and delivery preserves versions, dependencies, and gaps.
+    attachment_hint: Product context, competitor material, existing solution/PRD, design samples, or artifacts to review (optional by stage)
+
+tasks:
+  - id: direction
+    selector:
+      title: Product direction
+      description: Compare direction choices from target users and core jobs, then design validation
+      output_label: Product-direction brief
+    launch:
+      prompt_short: Define the direction, scope, and validation plan for “InsightDesk.”
+      prompt: Run only the Product Direction stage at full depth, target about 3,000 Chinese characters, and use the default structure. Design “InsightDesk,” a competitive-research agent for 5–20 person B2B SaaS product teams. Product managers compare three competitors weekly and submit findings for lead review; fragmented sources, poor traceability, and version confusion are unvalidated problems. Compare a team review workbench with a personal research assistant. Define users, core job, value, scope, non-goals, validation methods, and supporting or opposing signals. Use public information and human confirmation only, and do not treat the case assumptions as research facts.
+    replay:
+      steps:
+        - title: Normalize goal and scope
+          description: Confirm the product goal, single-stage range, depth, length, and default structure
+        - title: Map users and jobs
+          description: Separate users, contexts, core jobs, and unvalidated problems
+        - title: Compare direction options
+          description: Evaluate the team workbench and personal assistant with explicit tradeoffs
+        - title: Define scope and non-goals
+          description: Set MVP capabilities, human controls, data boundaries, and exclusions
+        - title: Build the validation route
+          description: Deliver an editable direction brief with support, opposition, and stop signals
+    result:
+      template: generic_report_v1
+      eyebrow: Product-direction brief
+      title: From product idea to a testable direction
+      summary: Use user jobs, option comparison, boundaries, and validation signals to guide the next investment
+      highlights:
+        - Target users and core jobs
+        - Two direction options and decision evidence
+        - MVP scope, non-goals, and validation route
+
+  - id: competitive
+    selector:
+      title: Competitive landscape
+      description: Compare direct products, adjacent platforms, and manual alternatives with public evidence
+      output_label: Competitive landscape report
+    launch:
+      prompt_short: Analyze the competitor set, ecosystem position, and positioning options for “InsightDesk.”
+      prompt: Run only Competitive Landscape at full depth; set text length to not-applicable and sample choice to not-required. Evaluate a competitive-research and review workbench for B2B SaaS product teams. Verify public official information about Manus, Perplexity Research, and Dify, and include search-plus-spreadsheet-plus-document workflows and the status quo. Compare research organization, evidence traceability, process control, collaborative review, and version delivery. Produce a matrix, ecosystem groups, positioning candidates, and evidence gaps. Date every source, separate official facts from inference and unknowns, and do not invent a superiority score.
+    replay:
+      steps:
+        - title: Define competitive boundaries
+          description: Set the user job, participant types, dimensions, and time period
+        - title: Retrieve and verify evidence
+          description: Prefer official sources and record access dates and evidence gaps
+        - title: Build ecosystem groups
+          description: Separate research tools, builder platforms, manual stacks, and the status quo
+        - title: Compare differences and limits
+          description: Show current coverage, unknowns, and test requirements on one basis
+        - title: Form positioning candidates
+          description: Deliver a self-contained HTML report with testable positioning options
+    result:
+      template: generic_report_v1
+      eyebrow: Competitive landscape
+      title: Competitors and alternatives with sources and boundaries
+      summary: Explain the competitor set, differences, gaps, and positioning on one user job and real evidence
+      highlights:
+        - Competitors, adjacent platforms, and manual alternatives
+        - Dated comparison matrix
+        - Ecosystem groups, positioning hypotheses, and gaps
+
+  - id: design
+    selector:
+      title: Product solution
+      description: Design core objects, task flow, information architecture, permissions, and recovery
+      output_label: Product design solution
+    launch:
+      prompt_short: Design the complete mechanism, flow, and key interactions for “InsightDesk.”
+      prompt: Run only Product Solution at full depth, target about 5,000 Chinese characters, and use the default structure. Design a competitive-research agent for B2B SaaS product teams. A product manager confirms scope before public-source research, conclusions link to dated evidence, a lead approves or returns reports, members are read-only, and revising an approved version creates a new draft. Cover users, scenarios, value proposition, task/evidence/conclusion/version objects, information architecture, pages, interactions, permissions, pause/resume, cancel, source loss, evidence conflicts, trust mechanisms, and metrics. Mark business rules as proposals pending confirmation.
+    replay:
+      steps:
+        - title: Normalize stage input
+          description: Lock product goal, stage scope, target length, and default structure
+        - title: Define objects and flow
+          description: Model tasks, evidence, conclusions, report versions, and their states
+        - title: Design information architecture
+          description: Organize pages, navigation, and actions around user jobs
+        - title: Add control and recovery
+          description: Cover permission, pause, cancellation, failure, conflict, and version protection
+        - title: Deliver the product solution
+          description: Produce an editable outline, full document, and metric validation design
+    result:
+      template: generic_report_v1
+      eyebrow: Product design solution
+      title: A complete mechanism for a reviewable research workbench
+      summary: Keep tasks, evidence, conclusions, and versions consistent across flow, interface, and human control
+      highlights:
+        - Four core objects and state relationships
+        - Information architecture, pages, and interactions
+        - Permissions, recovery, and trust mechanisms
+
+  - id: prd
+    selector:
+      title: PRD
+      description: Expand the product baseline into functional rules, acceptance scenarios, and traceability
+      output_label: PRD draft
+    launch:
+      prompt_short: Write an MVP PRD for “InsightDesk” with functional rules and acceptance scenarios.
+      prompt: >-
+        Run only PRD at full depth, target about 6,000 Chinese characters, and use the default structure. Baseline: a B2B SaaS product manager researches three competitors weekly, a lead reviews, and members are read-only. Objects are task, evidence, conclusion, and report version. Scope is confirmed before research, conclusions link to sources and dates, conflicts are explicit, returns require reasons, approved versions cannot be overwritten, and exports bind to a version. Define goals, non-goals, permission matrix, fields and states, 12 functional rules, 18 independently executable acceptance scenarios, traceability, failures, analytics, non-functional requirements, and open decisions. Do not claim unexecuted tests passed.
+    replay:
+      steps:
+        - title: Establish the baseline
+          description: Lock goals, scope, roles, objects, and version rules
+        - title: Write functional rules
+          description: Convert the design into numbered, traceable requirements
+        - title: Design acceptance scenarios
+          description: Cover happy paths, failures, permissions, idempotency, and version protection
+        - title: Build traceability
+          description: Link requirements, pages, states, acceptance, and open decisions
+        - title: Deliver an editable PRD
+          description: Produce outline checks, full sections, and explicit open items
+    result:
+      template: generic_report_v1
+      eyebrow: MVP PRD
+      title: A requirements document with functional, page, and acceptance traceability
+      summary: Turn product rules into a reviewable, executable PRD without claiming unrun tests passed
+      highlights:
+        - Permission matrix, fields, and states
+        - 12 functional rules and 18 acceptance designs
+        - Page, requirement, and acceptance traceability
+
+  - id: prototype
+    selector:
+      title: Interactive prototype
+      description: Build a clickable single-file HTML concept covering primary and recovery paths
+      output_label: Interactive HTML prototype
+    launch:
+      prompt_short: Build a directly usable single-file HTML concept for “InsightDesk.”
+      prompt: Run only Interactive Prototype at full depth; set text length to not-applicable and sample choice to not-required. If upstream files are absent, I authorize a gap-labeled draft from this baseline. A product manager enters a research question and three competitors, confirms the plan, watches research, and submits a report; a lead approves or returns with a reason, and members are read-only. Support pause, resume, cancel, failed-source retry, and version history; approved versions cannot be overwritten. Use fictional data in a light workbench, include validation, button states, role feedback, and recovery paths, embed CSS and scripts, reset on refresh, and state that frontend role switching is not production security.
+    replay:
+      steps:
+        - title: Confirm prototype scope
+          description: Lock pages, roles, tasks, states, and concept-validation limits
+        - title: Map rules to screens
+          description: Connect planning, process, evidence, review, and version rules to UI
+        - title: Build the clickable path
+          description: Implement creation, confirmation, execution, report, and history in embedded scripts
+        - title: Add failures and feedback
+          description: Cover empty input, denied actions, pause, cancel, source failure, and retry
+        - title: Deliver a self-contained prototype
+          description: Output previewable single-file HTML with reviewer tasks
+    result:
+      template: generic_report_v1
+      eyebrow: Interactive prototype
+      title: A concept prototype covering primary, role, and recovery paths
+      summary: Validate interface behavior and rule mapping in self-contained HTML without pretending it is production
+      highlights:
+        - Planning, process, review, and version screens
+        - Clickable main path and role feedback
+        - Validation, failure, pause, cancel, and retry
+
+  - id: review
+    selector:
+      title: Product review
+      description: Review existing artifacts for consistency, coverage, risk, and engineering gates
+      output_label: Product review report
+    launch:
+      prompt_short: Review the “InsightDesk” baseline for formal engineering readiness.
+      prompt: >-
+        Run only Product Review at full depth, target about 4,000 Chinese characters, and use the default structure. If upstream files are absent, I authorize a gap-labeled review from this text. Baseline: a product manager researches three competitors, a lead reviews, members are read-only, only public sources are used, conclusions link to evidence, and approved versions create new drafts when changed. One conflict exists: design requires a new task when scope changes during a run, while requirements allow direct competitor changes. Roles and scope are unaccepted, retention policy and source feasibility/performance/cost are unverified, and no runnable prototype exists. Deliver review scope, coverage matrix, severity-ranked findings, impact, fixes, retests, and engineering gates. Separate confirmed gaps from risks requiring tests and do not invent a pass.
+    replay:
+      steps:
+        - title: Lock review objects
+          description: Review only supplied artifacts and text without pretending missing files were inspected
+        - title: Check consistency and coverage
+          description: Compare product, requirements, pages, states, and acceptance rules
+        - title: Record ranked findings
+          description: Give evidence, impact, fix, and retest for every finding
+        - title: Separate defects and risks
+          description: Distinguish confirmed conflicts from feasibility, performance, and cost risks
+        - title: Judge engineering gates
+          description: Deliver an editable review report and pre-engineering blockers
+    result:
+      template: generic_report_v1
+      eyebrow: Product review report
+      title: Rule conflicts, coverage gaps, and engineering readiness
+      summary: Use located evidence and retest methods to separate confirmed gaps, decisions, and untested risks
+      highlights:
+        - Consistency and coverage matrix
+        - Ranked findings, impacts, and fixes
+        - Engineering gates and blockers
+
+  - id: handoff
+    selector:
+      title: Engineering handoff
+      description: Organize version baseline, specification index, traceability, resource gaps, and confirmations
+      output_label: Engineering handoff package
+    launch:
+      prompt_short: Organize the “InsightDesk” baseline into an engineering handoff draft.
+      prompt: Run only Engineering Handoff at full depth, target about 5,000 Chinese characters, and use the default structure. If upstream files are absent, I authorize a gap-labeled draft from this baseline. The goal is a three-competitor research workflow for a B2B SaaS product manager, with lead review and read-only members. Objects are tasks, evidence, conclusions, and report versions; pages are plan, process, review, and versions. Scope includes confirmation, public-source collection, evidence linking, report generation, pause/resume, cancellation, retry, review return, version approval, new drafts, read-only access, and version-bound export. Deliver version and specification indexes, FR/AC/page traceability, state and handoff flows, resource gaps, risks, readiness judgment, and role checklists. Do not invent links, hashes, approvals, owners, schedules, or technical conclusions.
+    replay:
+      steps:
+        - title: Organize the version baseline
+          description: List actual inputs, artifact states, versions, and missing files
+        - title: Consolidate product specifications
+          description: Align roles, objects, pages, functions, and states
+        - title: Build delivery traceability
+          description: Map functional requirements, acceptance, pages, and open decisions
+        - title: Check readiness and blockers
+          description: Expose resources, dependencies, risks, and unverified technical conditions
+        - title: Deliver confirmation checklists
+          description: Provide actionable checks by role while preserving unknowns
+    result:
+      template: generic_report_v1
+      eyebrow: Engineering handoff package
+      title: An engineering handoff draft with version baseline and traceability
+      summary: Consolidate specifications, acceptance, resources, and open items without inventing missing engineering conclusions
+      highlights:
+        - Artifact index and version baseline
+        - FR, AC, page, and state traceability
+        - Resource gaps, risks, and role checklists
