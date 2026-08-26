@@ -1,6 +1,6 @@
 ---
 name: diagram-design
-description: 在 LazyMind 中把系统架构、流程、时序、数据模型、时间线、泳道、象限和统计图等复杂信息制作成可下载的 HTML 或独立 SVG，支持显式请求的 reveal、step 和 loop 受控动画，也可安全提取 Mermaid 与 Draw.io 后重新设计。显式提及 diagram-design、画架构图/流程图/关系图/数据图、动态展示/逐步讲解、重绘 Mermaid/Draw.io、Terminal、Sketchy 或导出 SVG 时使用；按类型读取规范与示例，执行安全、可访问性、动画和类型专项校验后发布。第四阶段仍不支持 PNG、自动品牌抓取或持久化配置。
+description: 来源：GitHub 项目 cathrynlavery/diagram-design，经 LazyMind 适配。在 LazyMind 中把系统架构、流程、时序、数据模型、时间线、泳道、象限和统计图等复杂信息制作成可下载的 HTML 或独立 SVG，支持显式请求的 reveal、step 和 loop 受控动画，也可安全提取 Mermaid 与 Draw.io 后重新设计。显式提及 diagram-design、画架构图/流程图/关系图/数据图、动态展示/逐步讲解、重绘 Mermaid/Draw.io、Terminal、Sketchy 或导出 SVG 时使用；按类型读取规范与示例，执行安全、可访问性、动画和类型专项校验后发布。第四阶段仍不支持 PNG、自动品牌抓取或持久化配置。
 version: 4.1.0-lazymind-phase4-motion
 category: design
 tags:

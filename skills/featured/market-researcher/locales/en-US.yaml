@@ -17,7 +17,7 @@ presentation:
     result_summary: Support findings with sources, data dates, reproducible calculations, and explicit evidence boundaries
   detail:
     title: Market and industry research expert
-    description: Conduct industry research, competitive monitoring, and company comparison with source verification, deterministic calculations, Mermaid charts, and structured reports.
+    description: Adapted for LazyMind from WorkBuddy market-researcher and Qwen Work equity-research. Conduct industry research, competitive monitoring, and company comparison with source verification, deterministic calculations, Mermaid charts, and structured reports.
     attachment_hint: Industry brief, research reports, company list, financial dataset, or source links (optional)
 
 tasks:
