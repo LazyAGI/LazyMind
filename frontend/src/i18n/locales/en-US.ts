@@ -508,6 +508,17 @@ const enUS = {
       modelAdded: "Model added",
       modelDeleted: "Model deleted",
     },
+    autoSelection: {
+      title: "Automatic model configuration",
+      configured: "Models configured for you: {{models}}",
+      missing: "No {{types}} model for {{provider}} was found in the database. See the {{provider}} documentation.",
+      modelType: {
+        llm: "LLM",
+        vlm: "VLM",
+        embed_main: "embedding",
+        image_generator: "text-to-image",
+      },
+    },
     noModelSelectedForShare: "Please select a model before enabling sharing",
     noCloudServiceSelectedForShare: "Please select a cloud service configuration before enabling sharing",
     shareOn: "Sharing enabled",

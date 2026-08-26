@@ -7,7 +7,7 @@ Usage:
     python run_stage.py outline         --deck-dir <deck>
     python run_stage.py asset-plan      --deck-dir <deck>
     python run_stage.py page-html       --deck-dir <deck> --page N
-    python run_stage.py batch-page-html    --deck-dir <deck> [--concurrency 4]
+    python run_stage.py batch-page-html    --deck-dir <deck> [--concurrency 2]
     python run_stage.py refine-page        --deck-dir <deck> --page N
     python run_stage.py batch-refine-page  --deck-dir <deck> [--concurrency 4]
     python run_stage.py export             --deck-dir <deck>
@@ -2148,7 +2148,7 @@ def build_parser() -> argparse.ArgumentParser:
     sp.add_argument("--deck-dir", type=Path, required=True)
     sp.add_argument("--page", type=int, required=True)
 
-    # Batch / concurrent variants (default concurrency=4). Each fans out its
+    # Batch / concurrent refinement (default concurrency=4). It fans out its
     # per-item work across a thread pool so LLM / VLM wait times overlap.
     for name in ("batch-refine-page",):
         sp = sub.add_parser(name)
@@ -2158,8 +2158,8 @@ def build_parser() -> argparse.ArgumentParser:
 
     sp = sub.add_parser("batch-page-html")
     sp.add_argument("--deck-dir", type=Path, required=True)
-    sp.add_argument("--concurrency", type=int, default=4,
-                    help="max parallel workers (default 4, clamped to 1-16)")
+    sp.add_argument("--concurrency", type=int, default=2,
+                    help="max parallel workers (default 2, clamped to 1-16)")
     sp.add_argument("--start-page", type=int, default=None,
                     help="first page to process (1-based, inclusive)")
     sp.add_argument("--end-page", type=int, default=None,

@@ -221,6 +221,51 @@ def _materialize_document_text(path: str, workspace: str) -> str:
     return str(parsed_path)
 
 
+def _workflow_workspace_target(
+    target: str,
+    *,
+    allow_directory: bool,
+    store: FileResourceStore,
+) -> Optional[ResolvedTextResource]:
+    """Resolve a read-only path inside the current trusted Workflow Attempt workspace."""
+    cfg = _agentic_config()
+    if cfg.get('agent_type') != 'workflow_step':
+        return None
+    raw_workspace = str(cfg.get('workflow_workspace_path') or '').strip()
+    if not raw_workspace:
+        return None
+    workspace = os.path.realpath(raw_workspace)
+    candidate = materialize_local_path(target)
+    if not candidate or not os.path.isabs(candidate):
+        return None
+    resolved = os.path.realpath(candidate)
+    try:
+        inside_workspace = os.path.commonpath((workspace, resolved)) == workspace
+    except ValueError:
+        inside_workspace = False
+    if not inside_workspace:
+        return None
+    if os.path.isdir(resolved):
+        if not allow_directory:
+            raise ValueError('target must resolve to a text file')
+        return ResolvedTextResource(
+            target=target,
+            path=resolved,
+            display_name=os.path.basename(resolved),
+            kind='workspace',
+            workspace=workspace,
+        )
+    if not os.path.isfile(resolved):
+        raise ValueError(f"target '{target}' was not found")
+    return _resolved_from_local_file(
+        resolved,
+        os.path.basename(resolved),
+        target,
+        workspace,
+        store,
+    )
+
+
 def _resolve_file_resource(
     store: FileResourceStore,
     target: str,
@@ -297,6 +342,14 @@ def resolve_text_target(
             workspace,
             store,
         )
+
+    workflow_target = _workflow_workspace_target(
+        key,
+        allow_directory=allow_directory,
+        store=store,
+    )
+    if workflow_target:
+        return workflow_target
 
     _, resolved = _resolve_workspace_path(key, user_id, conversation_id)
     if os.path.isdir(resolved):

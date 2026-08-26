@@ -483,6 +483,17 @@ const zhCN = {
       modelAdded: "模型已添加",
       modelDeleted: "模型已删除",
     },
+    autoSelection: {
+      title: "模型自动配置结果",
+      configured: "已帮您配置模型 {{models}}",
+      missing: "数据库中未发现供应商 {{provider}} 的 {{types}} 模型，请去 {{provider}} 官网查看文档",
+      modelType: {
+        llm: "大模型",
+        vlm: "VLM",
+        embed_main: "向量",
+        image_generator: "文生图",
+      },
+    },
     noModelSelectedForShare: "请先选择模型后再设置分享",
     noCloudServiceSelectedForShare: "请先选择云服务配置后再设置分享",
     shareOn: "已开启分享",

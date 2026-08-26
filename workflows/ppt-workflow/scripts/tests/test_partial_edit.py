@@ -98,6 +98,36 @@ class DeckInitializationTests(unittest.TestCase):
 
 
 class PartialEditTests(unittest.TestCase):
+    def test_agent_llm_call_propagates_default_and_explicit_timeout(self):
+        model = mock.Mock()
+        shared = mock.Mock(return_value='generated')
+        model.share.return_value = shared
+        lazyllm_module = mock.Mock()
+        lazyllm_module.AutoModel.return_value = model
+        components_module = mock.Mock()
+        components_module.ChatPrompter.return_value = object()
+
+        with mock.patch.dict(
+            'sys.modules',
+            {'lazyllm': lazyllm_module, 'lazyllm.components': components_module},
+        ), mock.patch.dict(
+            TOOLS.os.environ, {'LAZYMIND_PPT_LLM_TIMEOUT': '300'}, clear=False,
+        ):
+            self.assertEqual(TOOLS._agent_llm_call('system', 'user'), 'generated')
+            self.assertEqual(
+                TOOLS._agent_llm_call('system', 'user', timeout=75),
+                'generated',
+            )
+
+        self.assertEqual(
+            shared.call_args_list[0],
+            mock.call('user', timeout=300.0, max_retries=1),
+        )
+        self.assertEqual(
+            shared.call_args_list[1],
+            mock.call('user', timeout=75.0, max_retries=1),
+        )
+
     def test_add_item_below_clones_structure_and_assigns_fresh_ids(self):
         selection = {
             'type': 'ppt_html',

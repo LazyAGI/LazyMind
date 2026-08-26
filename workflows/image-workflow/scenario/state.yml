@@ -518,8 +518,8 @@ steps:
                  ]
                }}
              ])
-         The items length must equal count. Stop after this save; do not execute the generic
-         prompt-only save below.
+         The items length must equal count. After this save, do not execute the generic
+         prompt-only save below; continue to the route-selection call in step 8.
       6. For KB_STYLE, faithfully translate the KB findings in material_summary into visual prompt
          language, including the described color palette, brushwork, composition, medium, mood,
          and other style traits. Do not require material_images when the KB text is sufficient.
@@ -529,7 +529,14 @@ steps:
               'value': <prompt or edit instruction>}
            ])
 
-      Stop after saving. Do not output anything else.
+      8. After the required artifacts are saved, call select_image_route exactly once with the
+         exact workflow_routing text. This terminal tool owns the branch decision: FIND_AND_EDIT
+         and EDIT_UPLOAD go only to enhance_image; every supported generation, animation, and
+         meme route goes only to generate_image. Never choose the next step yourself.
+    tools:
+      - select_image_route
+    terminal_tools:
+      - select_image_route
     inputs:
       - material: subject_analysis
         required: true
@@ -564,6 +571,8 @@ steps:
       A static request such as "给这个小狗做敬礼手势，然后配上字幕‘收到!’" must produce a
       CREATE_STATIC_MEME plan whose image_prompt contains only the salute-pose edit and whose
       caption is exactly "收到!"; the caption text must not be delegated to image_editor.
+      select_image_route must return the sole control.next_step after all required artifacts
+      are saved; edit routes select enhance_image and all other supported routes select generate_image.
 
   generate_image:
     label: Generate Image

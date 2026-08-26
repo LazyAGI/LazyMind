@@ -1234,3 +1234,23 @@ CREATE TABLE IF NOT EXISTS dataset_user_states (
 
 CREATE UNIQUE INDEX IF NOT EXISTS uk_dataset_user_states_user_dataset
     ON dataset_user_states (create_user_id, dataset_id);
+
+-- +migrate Dialect postgres
+ALTER TABLE public.default_models
+    ADD COLUMN IF NOT EXISTS free_auto_select_priority INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE public.default_models
+    ADD COLUMN IF NOT EXISTS free_auto_select_base_urls TEXT NOT NULL DEFAULT '';
+ALTER TABLE public.user_model_provider_group_models
+    ADD COLUMN IF NOT EXISTS free_auto_select_priority INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE public.user_model_provider_group_models
+    ADD COLUMN IF NOT EXISTS free_auto_select_base_urls TEXT NOT NULL DEFAULT '';
+
+-- +migrate Dialect sqlite
+ALTER TABLE default_models
+    ADD COLUMN free_auto_select_priority INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE default_models
+    ADD COLUMN free_auto_select_base_urls TEXT NOT NULL DEFAULT '';
+ALTER TABLE user_model_provider_group_models
+    ADD COLUMN free_auto_select_priority INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE user_model_provider_group_models
+    ADD COLUMN free_auto_select_base_urls TEXT NOT NULL DEFAULT '';

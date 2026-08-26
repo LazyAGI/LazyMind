@@ -1,0 +1,74 @@
+schema_version: 2
+id: bid_tech_proposal_writer
+type: workflow
+version: 1.0.0
+status: published
+default_locale: zh-CN
+
+workflow:
+  workflow_ref: builtin:bid_tech_proposal_writer
+
+placement:
+  home: true
+  gallery: true
+  order: 21
+
+classification:
+  category: 商务交付
+  tags:
+    - 投标文件
+    - 技术方案
+    - 合规检查
+    - Word 导出
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+
+presentation:
+  card:
+    title: 投标技术方案编写
+    description: 解析招标文件和废标项，生成可追溯大纲、完整技术标、架构图与 Word 正稿
+    output_type: document
+    output_label: 投标技术方案
+    cover_asset: cover
+    result_summary: 将招标原文、技术要求、风险条款和知识库证据闭环到技术标正文与最终校验
+  detail:
+    title: 从招标文件到技术标正稿
+    description: 九步完成招标文件解析、技术要求与废标项提取、资料检索、大纲和正文审批、架构与效果图、Markdown 或 Word 导出及结果校验。
+    attachment_hint: 中文招标文件（推荐 DOCX 或 PDF，也支持 TXT、Markdown、HTML、RTF）
+
+tasks:
+  - id: write-technical-bid
+    selector:
+      title: 编写完整技术标
+      description: 根据招标文件形成逐条响应、图文完整且可下载的技术方案
+      output_label: 技术标正稿
+    launch:
+      prompt_short: 根据我上传的招标文件，编写一份完整、可追溯的投标技术方案。
+      prompt: 请根据我上传的中文招标文件运行完整的投标技术方案编写流程，最终导出 DOCX，目标总字数 10000 字，并使用内置默认投标样式。请保留招标原文结构，提取技术要求和明确废标项，按不同证据主题检索当前已选知识库，生成并审批章节大纲与完整正文，再制作一张架构图和不少于五张差异化效果图。所有指标、标准、政策和产品能力只能来自招标文件或我提供的材料，不得编造；最终逐项检查技术要求覆盖、废标风险、字数、图像与交付文件。
+    replay:
+      steps:
+        - title: 解析招标文件
+          description: 保留标题、编号、表格和来源元数据并规范化生成参数
+        - title: 提取要求与废标项
+          description: 并行建立稳定技术要求 ID 和高风险条款清单
+        - title: 检索参考资料
+          description: 围绕招标要求从已选知识库补充带来源证据
+        - title: 审批大纲与正文
+          description: 生成可编辑大纲和完整正文并经过两个人工确认点
+        - title: 生成方案配图
+          description: 用本地渲染生成架构图和多张差异化功能效果图
+        - title: 导出并校验
+          description: 生成 Markdown 或 Word 正稿并检查覆盖、篇幅和文件完整性
+    result:
+      template: generic_report_v1
+      eyebrow: 技术标交付
+      title: 招标要求逐项闭环的技术方案正稿
+      summary: 从原文解析到最终校验，让每项技术响应和风险处置都有可追溯依据
+      highlights:
+        - 技术要求与废标项稳定 ID 池
+        - 可编辑大纲、正文和知识库证据
+        - 架构图与 5–10 张差异化效果图
+        - Markdown 或正式 DOCX 技术方案

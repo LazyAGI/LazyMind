@@ -473,6 +473,8 @@ def _build_agentic_config(
             'workflow_id': params.get('workflow_id', ''),
             'workflow_session_id': params.get('session_id', ''),
             'workflow_step': params.get('step_id', ''),
+            # Trusted execution-spec boundary used only by read-only local file tools.
+            'workflow_workspace_path': str(task.get('workspace_path') or '').strip(),
         })
     # Prefer the launched workflow session id whenever present so artifact tools work
     # even if parent_agentic_config carried a stale empty workflow_session_id.

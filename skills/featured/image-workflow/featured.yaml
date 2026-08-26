@@ -1,0 +1,128 @@
+schema_version: 2
+id: image-workflow
+type: workflow
+version: 1.0.0
+status: published
+default_locale: zh-CN
+
+workflow:
+  workflow_ref: builtin:image-workflow
+
+placement:
+  home: true
+  gallery: true
+  order: 22
+
+classification:
+  category: 图片设计
+  tags:
+    - 图片生成
+    - 图片编辑
+    - 动态 GIF
+    - 表情包
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+
+presentation:
+  card:
+    title: 创意图片与表情包
+    description: 分析需求、收集参考、优化提示词，完成图片生成、局部编辑与静态或动态表情包
+    output_type: images
+    output_label: 图片候选方案
+    cover_asset: cover
+    result_summary: 在同一工作流中动态路由文生图、找图编辑、上传图修改、GIF 和多状态表情包
+  detail:
+    title: AI 图片生成、编辑与表情包
+    description: 根据任务依赖决定是否搜索或读取参考素材，随后优化生成或编辑指令，并交付普通图片、静态字幕图、动画 GIF 或成套表情包。
+    attachment_hint: 视觉需求、参考图片、待编辑底图或风格资料（按任务可选）
+
+tasks:
+  - id: meme-pack
+    selector:
+      title: 多状态表情包套装
+      description: 围绕同一角色生成一套风格统一、状态不同的聊天表情
+      output_label: 表情包套装
+    launch:
+      prompt_short: 生成一套风格统一的打工人聊天表情包。
+      prompt: 请生成一套 6 张风格统一的打工人聊天表情包，保持同一个 Q 版办公室角色，分别表达“好的”“在吗”“辛苦了”“谢谢老板”“不想上班”“晚安”六种交流状态。每张画面先生成无字底图，再用确定性排字把对应中文放在底部居中，确保文字准确、高对比、没有水印；最终按顺序交付整套静态表情包。
+    replay:
+      steps:
+        - title: 分析角色与状态
+          description: 锁定统一角色、六种交流意图和静态套装路由
+        - title: 规划提示词与排字
+          description: 为每个状态设计无字画面、字幕框和高对比样式
+        - title: 批量生成无字底图
+          description: 逐项生成一致角色与风格的视觉素材
+        - title: 确定性添加字幕
+          description: 自动计算字号、换行和居中位置并准确写入中文
+        - title: 交付有序套装
+          description: 按用户指定顺序保存和展示全部表情包
+    result:
+      template: generic_report_v1
+      eyebrow: 表情包套装
+      title: 同一角色的六种聊天状态
+      summary: 统一角色和画风，以确定性后处理保证每张字幕准确可读
+      highlights:
+        - 统一角色与视觉风格
+        - 六种不同交流状态
+        - 无字生成与确定性排字分离
+        - 有序图片列表交付
+
+  - id: find-and-edit
+    selector:
+      title: 联网找图再编辑
+      description: 搜索可用底图，核验后按指定要求完成局部修改
+      output_label: 编辑后图片
+    launch:
+      prompt_short: 先找一张合适的产品图，再按我的要求完成视觉编辑。
+      prompt: 请先搜索并核验一张构图清晰的银色智能手表产品图，保留产品主体、视角和材质，只把表带替换为精细的银色金属链式表带；匹配原图光线、透视和阴影，不添加文字、品牌标识或其他物体，并交付编辑后的高清图片。
+    replay:
+      steps:
+        - title: 分析编辑目标
+          description: 明确保留项、修改项和找图编辑路由
+        - title: 搜索并核验底图
+          description: 获取少量候选图并确认可访问、主体与构图适用
+        - title: 优化编辑指令
+          description: 锁定产品、视角、材质、光影和禁止变化项
+        - title: 执行局部编辑
+          description: 仅替换表带并保持其他视觉内容不变
+    result:
+      template: generic_report_v1
+      eyebrow: 图片编辑结果
+      title: 保持产品一致性的局部材质替换
+      summary: 从可验证底图出发，以明确不变量完成局部编辑
+      highlights:
+        - 搜索与底图有效性校验
+        - 精确局部修改指令
+        - 光线、透视与主体一致性
+
+  - id: animated-sticker
+    selector:
+      title: 动态 GIF 表情
+      description: 生成首帧与自然动作，再转换为适合聊天使用的 GIF
+      output_label: 动态表情包
+    launch:
+      prompt_short: 做一个会挥手说“收到”的动态聊天表情。
+      prompt: 请制作一个单张动态聊天表情包：Q 版小猫面向镜头自然挥手，动作循环平滑，画面简洁、主体清晰。先生成无字视频并转换为 GIF，再在底部居中添加准确的中文“收到”，使用白字黑色描边并保持高对比；不要让视频模型直接生成文字，不要添加水印或品牌标识。
+    replay:
+      steps:
+        - title: 分析动画意图
+          description: 确认角色、动作、循环方式和动态表情路由
+        - title: 优化首帧与运动提示
+          description: 分离无字视觉、运动描述和字幕排版要求
+        - title: 生成视频并转 GIF
+          description: 创建自然循环动作并转换为聊天友好的动图
+        - title: 逐帧添加字幕
+          description: 在归一化字幕框内稳定写入准确文字
+    result:
+      template: generic_report_v1
+      eyebrow: 动态表情包
+      title: 平滑循环、字幕准确的聊天 GIF
+      summary: 通过视频生成、GIF 转换与逐帧排字交付动态表情
+      highlights:
+        - 独立的首帧与运动提示
+        - 视频到 GIF 的动画链路
+        - 精确中文逐帧排字

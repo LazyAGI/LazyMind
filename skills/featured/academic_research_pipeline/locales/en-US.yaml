@@ -1,0 +1,56 @@
+locale: en-US
+
+classification:
+  category: Research writing
+  tags:
+    - Academic research
+    - Literature search
+    - Peer review
+    - Paper writing
+
+presentation:
+  card:
+    title: Academic research and paper writing
+    description: Move from research questions and evidence to a full paper, peer review, revision, and Word delivery
+    output_type: document
+    output_label: Academic paper
+    cover_asset: cover
+    result_summary: Produce an editable, reviewable paper backed by a closed evidence registry and five review perspectives
+  detail:
+    title: From academic research to paper delivery
+    description: Connect research design, scholarly and knowledge-base retrieval, evidence synthesis, editable outlining and drafting, integrity checks, five-perspective review, revision, and formatted delivery.
+    attachment_hint: Research materials, references, data notes, or a selected knowledge base (optional)
+
+tasks:
+  - id: full-paper
+    selector:
+      title: Complete academic paper
+      description: Complete retrieval, writing, review, revision, and delivery from a research topic
+      output_label: Paper and research record
+    launch:
+      prompt_short: Write a traceable Chinese academic paper on generative AI for personalized learning.
+      prompt: Run the complete academic research and paper-writing workflow. Study “mechanisms and practical paths for generative AI to support personalized learning” as a literature review of about 8,000 Chinese characters, use GB/T 7714 citations, and export DOCX. Prefer available academic search, my supplied materials, and the selected knowledge base. Bind every external claim to a real source; when retrieval is unavailable or evidence is insufficient, preserve that limitation instead of inventing citations. Complete outline and draft approvals, five-perspective peer review, necessary revisions, final integrity checks, and delivery.
+    replay:
+      steps:
+        - title: Design the research question and method
+          description: Define scope, paper type, method, and unavailable checks
+        - title: Retrieve and register evidence
+          description: Build a traceable closed evidence registry from scholarly and knowledge sources
+        - title: Synthesize literature and gaps
+          description: Verify sources and expose consensus, conflicts, limitations, and gaps
+        - title: Build the outline and manuscript
+          description: Produce a full draft through an editable outline and section writing
+        - title: Review and revise
+          description: Combine five review perspectives and resolve the revision roadmap item by item
+        - title: Validate and deliver
+          description: Rerun integrity checks and deliver the paper with its process record
+    result:
+      template: generic_report_v1
+      eyebrow: Academic paper delivery
+      title: A complete, evidence-traceable academic paper
+      summary: Support the manuscript from research design through final review with registered evidence and explicit boundaries
+      highlights:
+        - Research question, methodology blueprint, and search log
+        - Annotated bibliography, evidence synthesis, and editable manuscript
+        - Five-perspective peer review and itemized revision
+        - Markdown or DOCX paper plus process record

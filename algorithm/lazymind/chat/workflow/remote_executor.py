@@ -15,6 +15,7 @@ import pathlib
 import re
 import threading
 from typing import Any, Dict, Optional
+from urllib.parse import urlparse
 
 import httpx
 
@@ -233,6 +234,50 @@ class RemoteWorkflowExecutor:
             )
         return False
 
+    @staticmethod
+    def _artifact_binding(value: Any) -> bool:
+        if isinstance(value, dict):
+            return value.get('source_type') == 'artifact'
+        if isinstance(value, list) and value:
+            return all(
+                isinstance(item, dict) and item.get('source_type') == 'artifact'
+                for item in value
+            )
+        return False
+
+    @classmethod
+    def _infer_artifact_input_type(cls, binding: Any, items: list[Dict[str, Any]]) -> str:
+        """Recover typed artifact envelopes from older Core context responses."""
+        if not cls._artifact_binding(binding) or not items:
+            return ''
+        values = []
+        for item in items:
+            if str(item.get('mime_type') or '').lower() != 'application/json':
+                return ''
+            try:
+                value = json.loads(base64.b64decode(str(item.get('content_base64') or '')))
+            except (ValueError, TypeError, json.JSONDecodeError):
+                return ''
+            if not isinstance(value, dict):
+                return ''
+            values.append(value)
+        if all(isinstance(value.get('text'), str) for value in values):
+            return 'text'
+        if all('data' in value for value in values):
+            return 'json'
+        image_suffixes = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.tif', '.tiff'}
+        paths = [
+            value.get('path') or value.get('image_url') or value.get('url')
+            for value in values
+        ]
+        if all(
+            isinstance(path, str)
+            and pathlib.Path(urlparse(path).path).suffix.lower() in image_suffixes
+            for path in paths
+        ):
+            return 'image'
+        return ''
+
     @classmethod
     def _direct_input_value_slots(cls, context: Dict[str, Any]) -> set[str]:
         input_types = context.get('declared_input_types') or {}
@@ -296,12 +341,22 @@ class RemoteWorkflowExecutor:
         root = pathlib.Path(workspace) / 'inputs'
         direct_slots = self._direct_input_value_slots(context)
         input_types = context.get('declared_input_types') or {}
-        for material in (context.get('inputs') or {}):
+        if not isinstance(input_types, dict):
+            input_types = {}
+        bindings = context.get('inputs') or {}
+        for material, binding in bindings.items():
             value = await self.runtime.input(client, attempt, lease, str(material))
             is_list = isinstance(value.get('items'), list)
             items = value.get('items') if is_list else [value]
             material_type = str(input_types.get(str(material)) or '').strip().lower()
-            if str(material) in direct_slots and material_type in {'text', 'json'}:
+            inferred_type = ''
+            if not material_type:
+                inferred_type = self._infer_artifact_input_type(binding, items)
+                if inferred_type:
+                    material_type = inferred_type
+                    input_types[str(material)] = inferred_type
+                    context['declared_input_types'] = input_types
+            if (str(material) in direct_slots or inferred_type) and material_type in {'text', 'json'}:
                 values = [self._decode_input_value(item, material_type) for item in items]
                 result[str(material)] = values if is_list else values[0]
                 continue

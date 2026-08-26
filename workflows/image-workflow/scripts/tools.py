@@ -21,6 +21,7 @@ import json
 import logging
 import os
 from pathlib import Path
+import re
 from typing import Any, List, Optional, Tuple
 import unicodedata
 import uuid
@@ -69,6 +70,40 @@ _LATIN_FONT_CANDIDATES = (
     '/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf',
     '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf',
 )
+
+_IMAGE_ROUTE_TARGETS = {
+    'FIND_AND_EDIT': 'enhance_image',
+    'EDIT_UPLOAD': 'enhance_image',
+    'CREATE_NEW': 'generate_image',
+    'KB_STYLE': 'generate_image',
+    'REFERENCE_GENERATE': 'generate_image',
+    'CREATE_ANIMATED': 'generate_image',
+    'ANIMATE_UPLOAD': 'generate_image',
+    'CREATE_STATIC_MEME': 'generate_image',
+    'CREATE_ANIMATED_MEME': 'generate_image',
+    'CREATE_MEME_PACK': 'generate_image',
+}
+
+
+def select_image_route(workflow_routing: str) -> dict[str, Any]:
+    """Return the only valid post-optimization branch from the routing artifact."""
+    matches = re.findall(
+        r'^\s*WORKFLOW\s*:\s*([A-Z][A-Z0-9_]*)\s*$',
+        str(workflow_routing or ''),
+        flags=re.MULTILINE,
+    )
+    if len(matches) != 1:
+        raise ValueError('workflow_routing must contain exactly one WORKFLOW: <route> line')
+    route = matches[0]
+    next_step = _IMAGE_ROUTE_TARGETS.get(route)
+    if not next_step:
+        raise ValueError(f'unsupported image workflow route: {route}')
+    return {
+        'status': 'ok',
+        'workflow': route,
+        'next_step': next_step,
+        'control': {'next_step': next_step},
+    }
 
 
 def _pick_search_engine():
