@@ -37,7 +37,7 @@ presentation:
     result_summary: 将零散资料转为结构化知识库，并支持检索、关联和高效输出
   detail:
     title: IMA 知识管理
-    description: 帮助你整理文档、网页、笔记和灵感，建立可持续更新的知识库，让资料更容易被记住、找到和复用。
+    description: 帮助你整理文档、网页、笔记和灵感，建立可持续更新的知识库，让资料更容易被记住、找到和复用。来源：腾讯 IMA，经 LazyMind 适配。
     attachment_hint: 笔记、文档、网页链接、研究资料或现有知识库目录
 
 tasks:

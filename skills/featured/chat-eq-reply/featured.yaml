@@ -37,7 +37,7 @@ presentation:
     result_summary: 输出多种语气版本，帮助你在不同关系和场景下妥帖表达
   detail:
     title: 高情商聊天回复助手
-    description: 识别对方真实语气、关系距离和场景目标，生成温柔、幽默、直接或高情商等不同风格的聊天回复。
+    description: 识别对方真实语气、关系距离和场景目标，生成温柔、幽默、直接或高情商等不同风格的聊天回复。来源：https://skillhub.cn/skills/chat-eq-reply，经 LazyMind 适配。
     attachment_hint: 对方原话、聊天背景、你希望达到的目的和关系类型
 
 tasks:

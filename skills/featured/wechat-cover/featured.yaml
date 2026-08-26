@@ -37,7 +37,7 @@ presentation:
     result_summary: 输出标题卖点、视觉方向、配色建议和多版封面创意
   detail:
     title: 公众号爆款封面设计
-    description: 根据文章主题、摘要和目标读者，提炼核心卖点，参考高传播封面规律，生成适合公众号使用的封面设计方案。
+    description: 根据文章主题、摘要和目标读者，提炼核心卖点，参考高传播封面规律，生成适合公众号使用的封面设计方案。来源：https://github.com/tomorrow140/wechat-cover-designer，经 LazyMind 适配。
     attachment_hint: 文章标题、正文摘要、目标读者、账号定位或参考封面
 
 tasks:
