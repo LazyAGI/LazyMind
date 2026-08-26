@@ -1441,5 +1441,6 @@
   "2002303": { "en-US": "The editable block changed; refresh and retry", "zh-CN": "可编辑内容已发生变化，请刷新后重试" },
   "2002304": { "en-US": "Failed to save the editable block", "zh-CN": "保存可编辑内容失败" },
   "2002305": { "en-US": "Skill name cannot exceed 80 characters", "zh-CN": "技能名称不能超过 80 个字符" },
-  "2002306": { "en-US": "Skill description cannot exceed 1024 characters", "zh-CN": "技能描述不能超过 1024 个字符" }
+  "2002306": { "en-US": "Skill description cannot exceed 1024 characters", "zh-CN": "技能描述不能超过 1024 个字符" },
+  "2002307": { "en-US": "Failed to invalidate compressed context", "zh-CN": "清除压缩上下文失败" }
 }

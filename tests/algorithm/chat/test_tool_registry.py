@@ -11,6 +11,7 @@ from lazymind.chat.service.component.tool_registry import (
     collect_system_prompt_appendices,
     filter_tools,
     get_all_tool_groups,
+    tool_is_active,
 )
 
 
@@ -80,7 +81,7 @@ def test_wikipedia_remains_available_without_web_provider():
     assert 'wikipedia' in _active_tool_names()
 
 
-def test_registry_key_source_activates_function_tool():
+def test_temp_kb_activates_when_files_are_present():
     from lazyllm.tools.agent.toolsManager import ToolManager
 
     assert 'temp_kb' not in _active_tool_names()
@@ -101,9 +102,29 @@ def test_registry_key_source_activates_function_tool():
     assert group['methods'] == [
         {
             'name': 'kb_tmp_search',
-            'summary': 'Search attached temporary uploaded files with the temporary document retriever.',
+            'summary': 'Locate passages in this conversation\'s uploaded documents.',
         }
     ]
+
+
+def test_registry_key_source_activates_function_tool():
+    def gated_tool() -> None:
+        return None
+
+    cfg = ToolConfig(
+        name='gated',
+        label='gated',
+        description='gated',
+        tool=(
+            gated_tool,
+            lambda: (lazyllm.globals.get('agentic_config') or {}).get('files'),
+        ),
+        module='retrieval',
+    )
+
+    assert tool_is_active(cfg) is False
+    lazyllm.globals['agentic_config'] = {'files': ['tmp-a.md']}
+    assert tool_is_active(cfg) is True
 
 
 def test_catalog_exposes_modules_without_registering_module_gateways():
