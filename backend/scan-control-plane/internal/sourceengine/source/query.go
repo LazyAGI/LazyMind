@@ -4,8 +4,11 @@ import (
 	"context"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
+	"time"
 
+	"github.com/lazymind/scan_control_plane/internal/coreclient"
 	"github.com/lazymind/scan_control_plane/internal/sourceengine/connector"
 	scheduleengine "github.com/lazymind/scan_control_plane/internal/sourceengine/schedule"
 	store "github.com/lazymind/scan_control_plane/internal/store/source"
@@ -18,9 +21,17 @@ func (e *DefaultEngine) ListSources(ctx context.Context, req ListSourcesRequest)
 	if req.PageSize <= 0 {
 		req.PageSize = 20
 	}
+	req.OrderBy = normalizeSourceOrderBy(req.OrderBy)
 	records, total, err := e.repo.ListSources(ctx, storeListSourcesRequest(req))
 	if err != nil {
 		return ListSourcesResponse{}, mapStoreError(err)
+	}
+	if isDatasetUsageOrder(req.OrderBy) {
+		records, err = e.sortRecordsByDatasetUsage(ctx, req, records)
+		if err != nil {
+			return ListSourcesResponse{}, mapStoreError(err)
+		}
+		records = paginateSourceRecords(records, req.Page, req.PageSize)
 	}
 	items := make([]SourceListItemResponse, 0, len(records))
 	for _, record := range records {
@@ -37,9 +48,104 @@ func storeListSourcesRequest(req ListSourcesRequest) store.SourceListRequest {
 		SourceIDs: req.SourceIDs,
 		Keyword:   req.Keyword,
 		Status:    req.Status,
+		OrderBy:   req.OrderBy,
 		Page:      req.Page,
 		PageSize:  req.PageSize,
 	}
+}
+
+func normalizeSourceOrderBy(orderBy string) string {
+	switch strings.TrimSpace(orderBy) {
+	case "latest_updated", "most_used", "recent_used":
+		return strings.TrimSpace(orderBy)
+	default:
+		return ""
+	}
+}
+
+func isDatasetUsageOrder(orderBy string) bool {
+	return orderBy == "most_used" || orderBy == "recent_used"
+}
+
+func (e *DefaultEngine) sortRecordsByDatasetUsage(ctx context.Context, req ListSourcesRequest, records []store.SourceListRecord) ([]store.SourceListRecord, error) {
+	if len(records) == 0 {
+		return records, nil
+	}
+	usageMap := map[string]coreclient.DatasetUsage{}
+	datasetIDs := datasetIDsFromSourceListRecords(records)
+	if e.datasetUsage != nil && len(datasetIDs) > 0 {
+		usage, err := e.datasetUsage.BatchGetDatasetUsage(ctx, req.CallerID, datasetIDs)
+		if err != nil {
+			return nil, fmt.Errorf("batch get dataset usage: %w", err)
+		}
+		usageMap = usage
+	}
+	sort.SliceStable(records, func(i, j int) bool {
+		leftUsage := usageMap[records[i].Source.DatasetID]
+		rightUsage := usageMap[records[j].Source.DatasetID]
+		leftUpdated := sourceLatestUpdated(records[i])
+		rightUpdated := sourceLatestUpdated(records[j])
+		if req.OrderBy == "most_used" {
+			if leftUsage.UsageCount != rightUsage.UsageCount {
+				return leftUsage.UsageCount > rightUsage.UsageCount
+			}
+			if !leftUpdated.Equal(rightUpdated) {
+				return leftUpdated.After(rightUpdated)
+			}
+			return records[i].Source.SourceID < records[j].Source.SourceID
+		}
+		leftRecent := sourceRecentUsedAt(records[i], leftUsage)
+		rightRecent := sourceRecentUsedAt(records[j], rightUsage)
+		if !leftRecent.Equal(rightRecent) {
+			return leftRecent.After(rightRecent)
+		}
+		return records[i].Source.SourceID < records[j].Source.SourceID
+	})
+	return records, nil
+}
+
+func datasetIDsFromSourceListRecords(records []store.SourceListRecord) []string {
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(records))
+	for _, record := range records {
+		id := strings.TrimSpace(record.Source.DatasetID)
+		if id == "" {
+			continue
+		}
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
+}
+
+func sourceLatestUpdated(record store.SourceListRecord) time.Time {
+	if record.LastSuccessAt != nil {
+		return *record.LastSuccessAt
+	}
+	return record.Source.UpdatedAt
+}
+
+func sourceRecentUsedAt(record store.SourceListRecord, usage coreclient.DatasetUsage) time.Time {
+	latest := sourceLatestUpdated(record)
+	if usage.LastUsedAt != nil && usage.LastUsedAt.After(latest) {
+		return *usage.LastUsedAt
+	}
+	return latest
+}
+
+func paginateSourceRecords(records []store.SourceListRecord, page, pageSize int) []store.SourceListRecord {
+	offset := (page - 1) * pageSize
+	if offset >= len(records) {
+		return nil
+	}
+	end := offset + pageSize
+	if end > len(records) {
+		end = len(records)
+	}
+	return records[offset:end]
 }
 
 func (e *DefaultEngine) attachAuthConnectionStatuses(ctx context.Context, req ListSourcesRequest, items []SourceListItemResponse) {

@@ -14,9 +14,13 @@ func TestReadZipNormalizesSingleRootAndHashesDeterministically(t *testing.T) {
 		"wrapped/SKILL.md":       "---\nname: demo\ndescription: demo\n---\n",
 		"wrapped/scripts/run.py": "print('ok')\n",
 	})
-	files, err := ReadZip(zipPath)
+	pkg, err := ReadZip(zipPath)
 	if err != nil {
 		t.Fatal(err)
+	}
+	files := pkg.Files
+	if pkg.PackageRoot != "wrapped" {
+		t.Fatalf("PackageRoot = %q, want wrapped", pkg.PackageRoot)
 	}
 	if string(files["SKILL.md"]) == "" || string(files["scripts/run.py"]) == "" {
 		t.Fatalf("unexpected normalized files: %#v", files)
@@ -34,9 +38,13 @@ func TestReadZipNormalizesRepositoryRootWithoutRootSkillMD(t *testing.T) {
 		"repository-ref/skills/target/SKILL.md": "content",
 		"repository-ref/skills/other/SKILL.md":  "other",
 	})
-	files, err := ReadZip(zipPath)
+	pkg, err := ReadZip(zipPath)
 	if err != nil {
 		t.Fatal(err)
+	}
+	files := pkg.Files
+	if pkg.PackageRoot != "repository-ref" {
+		t.Fatalf("PackageRoot = %q, want repository-ref", pkg.PackageRoot)
 	}
 	if string(files["skills/target/SKILL.md"]) != "content" || string(files["repository-ref/skills/target/SKILL.md"]) != "" {
 		t.Fatalf("unexpected normalized files: %#v", files)
@@ -51,9 +59,13 @@ func TestReadZipIgnoresSystemMetadataAndNormalizesRoot(t *testing.T) {
 		"__MACOSX/wrapped/._SKILL.md": "macOS metadata",
 		"wrapped/Thumbs.db":           "windows thumbnail",
 	})
-	files, err := ReadZip(zipPath)
+	pkg, err := ReadZip(zipPath)
 	if err != nil {
 		t.Fatal(err)
+	}
+	files := pkg.Files
+	if pkg.PackageRoot != "wrapped" {
+		t.Fatalf("PackageRoot = %q, want wrapped", pkg.PackageRoot)
 	}
 	if string(files["SKILL.md"]) == "" || string(files["scripts/run.py"]) == "" {
 		t.Fatalf("unexpected normalized files: %#v", files)
@@ -85,7 +97,7 @@ func TestReadZipRejectsUnsafeAndOversizedEntries(t *testing.T) {
 	}
 }
 
-func TestReadZipRejectsDuplicatePath(t *testing.T) {
+func TestReadZipRejectsDuplicateAndSymlinkEntries(t *testing.T) {
 	zipPath := filepath.Join(t.TempDir(), "duplicate.zip")
 	file, err := os.Create(zipPath)
 	if err != nil {
@@ -107,39 +119,33 @@ func TestReadZipRejectsDuplicatePath(t *testing.T) {
 	if err := file.Close(); err != nil {
 		t.Fatal(err)
 	}
-
-	_, err = ReadZip(zipPath)
-	if err == nil || !strings.Contains(err.Error(), "duplicate path") {
-		t.Fatalf("error = %v, want duplicate path error", err)
+	if _, err := ReadZip(zipPath); err == nil || !strings.Contains(err.Error(), "duplicate path") {
+		t.Fatalf("duplicate ReadZip error = %v", err)
 	}
-}
 
-func TestReadZipRejectsSymlink(t *testing.T) {
-	zipPath := filepath.Join(t.TempDir(), "symlink.zip")
-	file, err := os.Create(zipPath)
+	symlinkPath := filepath.Join(t.TempDir(), "symlink.zip")
+	symlinkFile, err := os.Create(symlinkPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	writer := zip.NewWriter(file)
-	header := &zip.FileHeader{Name: "link"}
+	symlinkWriter := zip.NewWriter(symlinkFile)
+	header := &zip.FileHeader{Name: "SKILL.md"}
 	header.SetMode(os.ModeSymlink | 0o777)
-	entry, err := writer.CreateHeader(header)
+	entry, err := symlinkWriter.CreateHeader(header)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := entry.Write([]byte("SKILL.md")); err != nil {
+	if _, err := entry.Write([]byte("target")); err != nil {
 		t.Fatal(err)
 	}
-	if err := writer.Close(); err != nil {
+	if err := symlinkWriter.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if err := file.Close(); err != nil {
+	if err := symlinkFile.Close(); err != nil {
 		t.Fatal(err)
 	}
-
-	_, err = ReadZip(zipPath)
-	if err == nil || !strings.Contains(err.Error(), "cannot contain symlink") {
-		t.Fatalf("error = %v, want symlink error", err)
+	if _, err := ReadZip(symlinkPath); err == nil || !strings.Contains(err.Error(), "symlink") {
+		t.Fatalf("symlink ReadZip error = %v", err)
 	}
 }
 
@@ -171,8 +177,8 @@ func TestWriteZipIsDeterministicAndReadable(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(read["scripts/run.py"], files["scripts/run.py"]) {
-		t.Fatalf("archive content = %q", read["scripts/run.py"])
+	if !bytes.Equal(read.Files["scripts/run.py"], files["scripts/run.py"]) {
+		t.Fatalf("archive content = %q", read.Files["scripts/run.py"])
 	}
 }
 

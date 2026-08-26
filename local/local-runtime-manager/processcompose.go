@@ -289,6 +289,7 @@ func runtimeProcessEnvironment(base []string, cfg RuntimeConfig, plan runtimePro
 		overrides = append(overrides,
 			"LAZYMIND_BACKGROUND_JOBS_ENABLED=false",
 			"LAZYMIND_ROUTER_CHILD_PROCESSES_ENABLED=false",
+			installerWarmupSkipProcessorWorkerEnvVar+"=true",
 		)
 	}
 	return withEnvOverrides(env, overrides...)

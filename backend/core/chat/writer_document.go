@@ -33,7 +33,8 @@ type writerDocumentSyncBody struct {
 }
 
 type writerDocumentWriteBackBody struct {
-	BaseRevision int `json:"base_revision"`
+	BaseRevision int    `json:"base_revision"`
+	Slot         string `json:"slot"`
 	// Legacy client fields remain accepted, but the selected server-side
 	// revision and synchronized baseline are authoritative.
 	SourceDocument  json.RawMessage `json:"source_document"`
@@ -66,7 +67,7 @@ func writerDocumentSlot(slot string) (string, bool) {
 	if slot == "" {
 		return "draft_document", true
 	}
-	return slot, slot == "outline_document" || slot == "draft_document"
+	return slot, slot == "outline_document" || slot == "flat_draft_document" || slot == "draft_document"
 }
 
 func writerDocumentRenderSlot(slot string) (string, bool) {
@@ -245,7 +246,7 @@ func RenderWriterDocument(w http.ResponseWriter, r *http.Request) {
 	}
 	slot, ok := writerDocumentRenderSlot(body.Slot)
 	if !ok {
-		common.ReplyErr(w, "slot must be source_document, outline_document, or draft_document", http.StatusBadRequest)
+		common.ReplyErr(w, "slot must be source_document, outline_document, flat_draft_document, or draft_document", http.StatusBadRequest)
 		return
 	}
 	db := store.DB()
@@ -314,7 +315,7 @@ func SaveWriterDocument(w http.ResponseWriter, r *http.Request) {
 	}
 	slot, ok := writerDocumentSlot(body.Slot)
 	if !ok {
-		common.ReplyErr(w, "slot must be outline_document or draft_document", http.StatusBadRequest)
+		common.ReplyErr(w, "slot must be outline_document, flat_draft_document, or draft_document", http.StatusBadRequest)
 		return
 	}
 	db := store.DB()
@@ -461,6 +462,11 @@ func WriteBackWriterDocument(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "base_revision must be greater than zero", http.StatusBadRequest)
 		return
 	}
+	slot, ok := writerDocumentSlot(body.Slot)
+	if !ok || slot == "outline_document" {
+		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
+		return
+	}
 	db := store.DB()
 	if db == nil {
 		common.ReplyErr(w, "store not initialized", http.StatusInternalServerError)
@@ -477,9 +483,9 @@ func WriteBackWriterDocument(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "writer session not found", http.StatusNotFound)
 		return
 	}
-	draft, err := loadSelectedWriterArtifact(ctx, db, sessionID, "draft_document")
+	draft, err := loadSelectedWriterArtifact(ctx, db, sessionID, slot)
 	if err != nil {
-		common.ReplyErr(w, "active draft_document not found", http.StatusNotFound)
+		common.ReplyErr(w, "active "+slot+" not found", http.StatusNotFound)
 		return
 	}
 	if draft.Revision.Revision != body.BaseRevision {
@@ -494,7 +500,7 @@ func WriteBackWriterDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if writerArtifactRevisionSynced(draft) {
-		common.ReplyErrWithData(w, "current draft_document revision is already synchronized", map[string]any{
+		common.ReplyErrWithData(w, fmt.Sprintf("current %s revision is already synchronized", slot), map[string]any{
 			"status": "already_synced", "current_revision": draft.Revision.Revision,
 		}, http.StatusConflict)
 		return
@@ -507,13 +513,20 @@ func WriteBackWriterDocument(w http.ResponseWriter, r *http.Request) {
 	}
 	credential := toolConfig["feishu"]
 	if credential == nil {
-		common.ReplyErr(w, "Feishu authorization required", http.StatusUnauthorized)
+		common.ReplyErrWithData(w, "invalid request", map[string]any{
+			"status":   "feishu_configuration_required",
+			"provider": "feishu",
+		}, http.StatusBadRequest)
 		return
 	}
 	syncRequest := algo.WriterDocumentSyncRequest{
 		WorkflowID: session.WorkflowID, RevisionID: session.WorkflowRevisionID,
 		TreeHash: session.WorkflowTreeHash, UserID: userID,
 		ToolConfig: map[string]any{"feishu": credential},
+	}
+	mediaSlot := "resolved_media_assets"
+	if slot == "flat_draft_document" {
+		mediaSlot = "flat_resolved_media_assets"
 	}
 	if activeDraft.Format == "markdown" {
 		target, targetErr := loadSelectedWriterArtifact(ctx, db, sessionID, "target_document")
@@ -529,7 +542,7 @@ func WriteBackWriterDocument(w http.ResponseWriter, r *http.Request) {
 		}
 		syncRequest.MarkdownContent = activeDraft.Markdown
 		syncRequest.Title = activeDraft.Title
-		mediaAssets, mediaErr := loadSelectedWriterArtifact(ctx, db, sessionID, "resolved_media_assets")
+		mediaAssets, mediaErr := loadSelectedWriterArtifact(ctx, db, sessionID, mediaSlot)
 		if mediaErr == nil {
 			syncRequest.MediaAssets, mediaErr = writerArtifactData(mediaAssets.Value, false)
 			if mediaErr != nil {
@@ -546,7 +559,7 @@ func WriteBackWriterDocument(w http.ResponseWriter, r *http.Request) {
 			common.ReplyErr(w, "invalid current WriterDocument: "+normalizeErr.Error(), http.StatusBadRequest)
 			return
 		}
-		mediaAssets, mediaErr := loadSelectedWriterArtifact(ctx, db, sessionID, "resolved_media_assets")
+		mediaAssets, mediaErr := loadSelectedWriterArtifact(ctx, db, sessionID, mediaSlot)
 		if mediaErr == nil {
 			syncRequest.MediaAssets, mediaErr = writerArtifactData(mediaAssets.Value, false)
 			if mediaErr != nil {
@@ -560,7 +573,9 @@ func WriteBackWriterDocument(w http.ResponseWriter, r *http.Request) {
 		if writerDocumentIsUnbound(revisedDocument) {
 			syncRequest.RevisedDocument = revisedDocument
 		} else {
-			baseline, baselineErr := loadWriterWriteBackBaseline(ctx, db, sessionID, draft.Revision.Revision)
+			baseline, baselineErr := loadWriterWriteBackBaseline(
+				ctx, db, sessionID, slot, draft.Revision.Revision,
+			)
 			if baselineErr != nil {
 				common.ReplyErrWithData(w, "initial Feishu write-back has not completed", map[string]any{
 					"status": "baseline_not_found", "current_revision": draft.Revision.Revision,
@@ -687,12 +702,13 @@ func loadLatestSyncedWriterArtifact(
 	ctx context.Context,
 	db *gorm.DB,
 	sessionID string,
+	slot string,
 	beforeRevision int,
 ) (*selectedWriterArtifact, error) {
 	var revisions []orm.WorkflowSlotRevision
 	if err := db.WithContext(ctx).
 		Where("session_id = ? AND slot_id = ? AND list_index IS NULL AND revision < ?",
-			sessionID, "draft_document", beforeRevision).
+			sessionID, slot, beforeRevision).
 		Order("revision DESC").
 		Find(&revisions).Error; err != nil {
 		return nil, err
@@ -716,9 +732,10 @@ func loadWriterWriteBackBaseline(
 	ctx context.Context,
 	db *gorm.DB,
 	sessionID string,
+	slot string,
 	beforeRevision int,
 ) (*selectedWriterArtifact, error) {
-	baseline, err := loadLatestSyncedWriterArtifact(ctx, db, sessionID, beforeRevision)
+	baseline, err := loadLatestSyncedWriterArtifact(ctx, db, sessionID, slot, beforeRevision)
 	if err == nil || !errors.Is(err, gorm.ErrRecordNotFound) {
 		return baseline, err
 	}

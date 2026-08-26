@@ -225,10 +225,11 @@ func catalogPackageByUID(catalogPath, uid string) (Package, bool, error) {
 		if err := verifyArchive(archivePath, entry.ArchiveSHA256, entry.ArchiveSize); err != nil {
 			return Package{}, false, catalogFailure("builtin skill %s: %v", uid, err)
 		}
-		files, err := skillpackage.ReadZip(archivePath)
+		pkg, err := skillpackage.ReadZip(archivePath)
 		if err != nil {
 			return Package{}, false, err
 		}
+		files := pkg.Files
 		if _, ok := files["SKILL.md"]; !ok {
 			return Package{}, false, catalogFailure("builtin skill %s missing SKILL.md", uid)
 		}
