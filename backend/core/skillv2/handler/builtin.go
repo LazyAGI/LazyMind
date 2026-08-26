@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path"
 	"sort"
 	"strings"
+	"time"
 
 	"gorm.io/gorm"
 
@@ -26,19 +28,13 @@ func ListBuiltinSkills(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userID := strings.TrimSpace(common.UserID(r))
-	installed := map[string]string{}
+	var rows []orm.SkillV2Skill
 	if userID != "" {
-		var rows []orm.SkillV2Skill
 		if err := db.WithContext(r.Context()).
-			Where("owner_user_id = ? AND origin_builtin_skill_uid <> '' AND deleted_at IS NULL", userID).
+			Where("owner_user_id = ? AND deleted_at IS NULL", userID).
 			Order("created_at ASC").Find(&rows).Error; err != nil {
 			replyServiceError(w, err)
 			return
-		}
-		for _, row := range rows {
-			if _, exists := installed[row.OriginBuiltinSkillUID]; !exists {
-				installed[row.OriginBuiltinSkillUID] = row.ID
-			}
 		}
 	}
 
@@ -50,6 +46,7 @@ func ListBuiltinSkills(w http.ResponseWriter, r *http.Request) {
 	packages = visibleBuiltinPackages(packages)
 	items := make([]map[string]any, 0, len(packages))
 	for _, pkg := range packages {
+		installedID := matchingInstalledSkillID(rows, pkg)
 		items = append(items, map[string]any{
 			"builtin_skill_uid":  pkg.UID,
 			"name":               pkg.Name,
@@ -58,8 +55,8 @@ func ListBuiltinSkills(w http.ResponseWriter, r *http.Request) {
 			"tags":               pkg.Tags,
 			"version":            pkg.Version,
 			"content":            string(pkg.Files["SKILL.md"]),
-			"installed":          installed[pkg.UID] != "",
-			"installed_skill_id": installed[pkg.UID],
+			"installed":          installedID != "",
+			"installed_skill_id": installedID,
 		})
 	}
 	common.ReplyOK(w, map[string]any{"items": items, "total": len(items)})
@@ -131,6 +128,13 @@ func EnableBuiltinSkill(w http.ResponseWriter, r *http.Request) {
 		replyError(w, "builtin skill not found", http.StatusNotFound)
 		return
 	}
+	if claimedID, claimed, err := claimLegacyBuiltinInstall(r, db, userID, pkg); err != nil {
+		replyServiceError(w, err)
+		return
+	} else if claimed {
+		replyBuiltinSkillDetail(w, r, newSkillService(db), claimedID, userID)
+		return
+	}
 	source := skillservice.SourceInput{}
 	if pkg.ArchivePath != "" {
 		source = skillservice.SourceInput{
@@ -166,10 +170,96 @@ func EnableBuiltinSkill(w http.ResponseWriter, r *http.Request) {
 			replyBuiltinSkillDetail(w, r, service, existingID, userID)
 			return
 		}
+		if claimedID, claimed, claimErr := claimLegacyBuiltinInstall(r, db, userID, pkg); claimErr != nil {
+			replyServiceError(w, claimErr)
+			return
+		} else if claimed {
+			replyBuiltinSkillDetail(w, r, service, claimedID, userID)
+			return
+		}
 		replyServiceError(w, err)
 		return
 	}
 	replyBuiltinSkillDetail(w, r, service, resp.SkillID, userID)
+}
+
+func claimLegacyBuiltinInstall(r *http.Request, db *gorm.DB, userID string, pkg skillbuiltin.Package) (string, bool, error) {
+	if strings.TrimSpace(pkg.Category) == "" || strings.TrimSpace(pkg.Name) == "" {
+		return "", false, nil
+	}
+	var rows []orm.SkillV2Skill
+	if err := db.WithContext(r.Context()).
+		Where("owner_user_id = ? AND deleted_at IS NULL", userID).
+		Order("created_at ASC").
+		Find(&rows).Error; err != nil {
+		return "", false, err
+	}
+	existing, ok := matchingLegacyInstalledSkill(rows, pkg)
+	if !ok {
+		return "", false, nil
+	}
+	claimed, err := markBuiltinInstallClaimed(r, db, userID, existing, pkg)
+	if err != nil {
+		return "", false, err
+	}
+	return existing.ID, claimed, nil
+}
+
+func matchingInstalledSkillID(rows []orm.SkillV2Skill, pkg skillbuiltin.Package) string {
+	uid := strings.TrimSpace(pkg.UID)
+	if uid != "" {
+		for _, row := range rows {
+			if strings.TrimSpace(row.OriginBuiltinSkillUID) == uid {
+				return row.ID
+			}
+		}
+	}
+	if row, ok := matchingLegacyInstalledSkill(rows, pkg); ok {
+		return row.ID
+	}
+	return ""
+}
+
+func matchingLegacyInstalledSkill(rows []orm.SkillV2Skill, pkg skillbuiltin.Package) (orm.SkillV2Skill, bool) {
+	category := strings.TrimSpace(pkg.Category)
+	name := strings.TrimSpace(pkg.Name)
+	if category == "" || name == "" {
+		return orm.SkillV2Skill{}, false
+	}
+	relativeRoot := path.Join(category, name)
+	for _, row := range rows {
+		if strings.TrimSpace(row.RelativeRoot) == relativeRoot {
+			return row, true
+		}
+	}
+	for _, row := range rows {
+		if strings.TrimSpace(row.Category) == category && strings.TrimSpace(row.SkillName) == name {
+			return row, true
+		}
+	}
+	return orm.SkillV2Skill{}, false
+}
+
+func markBuiltinInstallClaimed(r *http.Request, db *gorm.DB, userID string, existing orm.SkillV2Skill, pkg skillbuiltin.Package) (bool, error) {
+	updates := map[string]any{
+		"is_enabled":    true,
+		"update_status": "up_to_date",
+		"updated_at":    time.Now(),
+	}
+	if strings.TrimSpace(existing.OriginBuiltinSkillUID) == "" {
+		updates["origin_builtin_skill_uid"] = pkg.UID
+	}
+	if strings.TrimSpace(pkg.Description) != "" {
+		updates["description"] = pkg.Description
+	}
+	result := db.WithContext(r.Context()).
+		Model(&orm.SkillV2Skill{}).
+		Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", existing.ID, userID).
+		Updates(updates)
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return true, nil
 }
 
 func installedBuiltinSkillID(r *http.Request, db *gorm.DB, userID, uid string) string {

@@ -2,7 +2,9 @@ package handler
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -14,6 +16,7 @@ import (
 
 	skillbuiltin "lazymind/core/skillv2/builtin"
 	skillservice "lazymind/core/skillv2/service"
+	skillpackage "lazymind/core/skillv2/skillpackage"
 	"lazymind/core/skillv2/testutil"
 	"lazymind/core/store"
 )
@@ -110,7 +113,169 @@ func TestEnableBuiltinSkillReusesAndEnablesExistingInstall(t *testing.T) {
 	}
 }
 
+func TestEnableBuiltinSkillClaimsLegacySameNameInstall(t *testing.T) {
+	uid := "bsk_wechat_cover"
+	files := map[string][]byte{
+		"SKILL.md": []byte("---\nname: wechat-cover\ndescription: WeChat cover designer\ncategory: design\nversion: 1.3.1\n---\n# WeChat Cover\n"),
+	}
+	useBuiltinCatalogWithPackage(t, skillbuiltin.CatalogSkill{
+		Key: "wechat-cover", UID: uid, SourceURL: "https://skillhub.cn/skills/user_8d36cde0/wechat-cover", ResolvedURL: "https://example.test/wechat-cover.zip",
+		Version: "1.3.1", Name: "wechat-cover", Description: "WeChat cover designer", Category: "design", Content: string(files["SKILL.md"]),
+		PackageFile: "packages/wechat-cover.zip",
+	}, files)
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	if err := db.Model(&testutil.SkillRow{}).Where("id = ?", "skill1").Updates(map[string]any{
+		"category":                 "design",
+		"skill_name":               "wechat-cover",
+		"relative_root":            "design/wechat-cover",
+		"origin_builtin_skill_uid": "",
+		"is_enabled":               false,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	req := httptest.NewRequest(http.MethodPost, "/api/core/builtin-skills/"+uid+":enable", nil)
+	req = mux.SetURLVars(req, map[string]string{"builtin_skill_uid": uid})
+	req.Header.Set("X-User-Id", "user_001")
+	req.Header.Set("X-User-Name", "张三")
+	rec := httptest.NewRecorder()
+	EnableBuiltinSkill(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s, want 200", rec.Code, rec.Body.String())
+	}
+	var row testutil.SkillRow
+	if err := db.Where("id = ?", "skill1").Take(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	if row.OriginBuiltinSkillUID != uid || !row.IsEnabled {
+		t.Fatalf("legacy install was not claimed and enabled: %#v", row)
+	}
+	if got := testutil.CountRows(t, db, "skills", "owner_user_id = ? AND category = ? AND skill_name = ? AND deleted_at IS NULL", "user_001", "design", "wechat-cover"); got != 1 {
+		t.Fatalf("active wechat-cover skill count = %d, want 1", got)
+	}
+}
+
+func TestEnableBuiltinSkillReusesSamePathInstallWithDifferentOrigin(t *testing.T) {
+	uid := "bsk_wechat_cover"
+	files := map[string][]byte{
+		"SKILL.md": []byte("---\nname: wechat-cover\ndescription: WeChat cover designer\ncategory: design\nversion: 1.3.1\n---\n# WeChat Cover\n"),
+	}
+	useBuiltinCatalogWithPackage(t, skillbuiltin.CatalogSkill{
+		Key: "wechat-cover", UID: uid, SourceURL: "https://skillhub.cn/skills/user_8d36cde0/wechat-cover", ResolvedURL: "https://example.test/wechat-cover.zip",
+		Version: "1.3.1", Name: "wechat-cover", Description: "WeChat cover designer", Category: "design", Content: string(files["SKILL.md"]),
+		PackageFile: "packages/wechat-cover.zip",
+	}, files)
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	if err := db.Model(&testutil.SkillRow{}).Where("id = ?", "skill1").Updates(map[string]any{
+		"category":                 "design",
+		"skill_name":               "wechat-cover",
+		"relative_root":            "design/wechat-cover",
+		"origin_builtin_skill_uid": "bsk_previous_wechat_cover",
+		"is_enabled":               false,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	req := httptest.NewRequest(http.MethodPost, "/api/core/builtin-skills/"+uid+":enable", nil)
+	req = mux.SetURLVars(req, map[string]string{"builtin_skill_uid": uid})
+	req.Header.Set("X-User-Id", "user_001")
+	req.Header.Set("X-User-Name", "张三")
+	rec := httptest.NewRecorder()
+	EnableBuiltinSkill(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s, want 200", rec.Code, rec.Body.String())
+	}
+	var row testutil.SkillRow
+	if err := db.Where("id = ?", "skill1").Take(&row).Error; err != nil {
+		t.Fatal(err)
+	}
+	if row.OriginBuiltinSkillUID != "bsk_previous_wechat_cover" || !row.IsEnabled {
+		t.Fatalf("same-path install was not reused and enabled: %#v", row)
+	}
+	if got := testutil.CountRows(t, db, "skills", "owner_user_id = ? AND relative_root = ? AND deleted_at IS NULL", "user_001", "design/wechat-cover"); got != 1 {
+		t.Fatalf("active design/wechat-cover skill count = %d, want 1", got)
+	}
+}
+
+func TestListBuiltinSkillsTreatsCompatibleInstallAsInstalled(t *testing.T) {
+	uid := "bsk_wechat_cover"
+	useBuiltinCatalog(t, skillbuiltin.Catalog{SchemaVersion: skillbuiltin.CatalogSchemaVersion, Skills: []skillbuiltin.CatalogSkill{{
+		Key: "wechat-cover", UID: uid, SourceURL: "https://example.test/wechat-cover.zip", ResolvedURL: "https://example.test/wechat-cover.zip",
+		Version: "1.3.1", Name: "wechat-cover", Description: "WeChat cover designer", Category: "design", Content: "# WeChat Cover",
+		ArchiveSHA256: strings.Repeat("a", 64), TreeSHA256: strings.Repeat("b", 64), ArchiveSize: 1, PackageFile: "packages/wechat-cover.zip",
+	}}})
+
+	for _, tc := range []struct {
+		name   string
+		origin string
+	}{
+		{name: "legacy empty origin", origin: ""},
+		{name: "same path different origin", origin: "bsk_previous_wechat_cover"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			testutil.MustCreate(t, db, &testutil.SkillRow{
+				ID:                    "skill1",
+				OwnerUserID:           "user_001",
+				CreateUserID:          "user_001",
+				Category:              "design",
+				SkillName:             "wechat-cover",
+				OriginBuiltinSkillUID: tc.origin,
+				RelativeRoot:          "design/wechat-cover",
+			})
+			store.Init(db.DB, nil, nil)
+			t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+			req := httptest.NewRequest(http.MethodGet, "/api/core/builtin-skills", nil)
+			req.Header.Set("X-User-Id", "user_001")
+			rec := httptest.NewRecorder()
+			ListBuiltinSkills(rec, req)
+			if rec.Code != http.StatusOK {
+				t.Fatalf("status=%d body=%s, want 200", rec.Code, rec.Body.String())
+			}
+			var response struct {
+				Data struct {
+					Items []struct {
+						UID              string `json:"builtin_skill_uid"`
+						Installed        bool   `json:"installed"`
+						InstalledSkillID string `json:"installed_skill_id"`
+					} `json:"items"`
+				} `json:"data"`
+			}
+			if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+				t.Fatalf("decode response: %v", err)
+			}
+			if len(response.Data.Items) != 1 {
+				t.Fatalf("items = %#v, want 1", response.Data.Items)
+			}
+			item := response.Data.Items[0]
+			if item.UID != uid || !item.Installed || item.InstalledSkillID != "skill1" {
+				t.Fatalf("compatible install was not listed as installed: %#v", item)
+			}
+		})
+	}
+}
+
 func useBuiltinCatalog(t *testing.T, catalog skillbuiltin.Catalog) {
+	t.Helper()
+	writeBuiltinCatalog(t, catalog, nil)
+}
+
+func useBuiltinCatalogWithPackage(t *testing.T, entry skillbuiltin.CatalogSkill, files map[string][]byte) {
+	t.Helper()
+	writeBuiltinCatalog(t, skillbuiltin.Catalog{
+		SchemaVersion: skillbuiltin.CatalogSchemaVersion,
+		Skills:        []skillbuiltin.CatalogSkill{entry},
+	}, files)
+}
+
+func writeBuiltinCatalog(t *testing.T, catalog skillbuiltin.Catalog, files map[string][]byte) {
 	t.Helper()
 	root := t.TempDir()
 	workingDirectory := filepath.Join(root, "backend", "core")
@@ -118,7 +283,23 @@ func useBuiltinCatalog(t *testing.T, catalog skillbuiltin.Catalog) {
 		t.Fatal(err)
 	}
 	catalogDirectory := filepath.Join(root, "skills", ".runtime", "builtin-skills")
-	if err := os.MkdirAll(catalogDirectory, 0o755); err != nil {
+	if files != nil {
+		if len(catalog.Skills) != 1 {
+			t.Fatal("package files require exactly one catalog skill")
+		}
+		entry := catalog.Skills[0]
+		zipPath := filepath.Join(catalogDirectory, filepath.FromSlash(entry.PackageFile))
+		testutil.WriteSkillZip(t, zipPath, files)
+		body, err := os.ReadFile(zipPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sum := sha256.Sum256(body)
+		entry.ArchiveSHA256 = fmt.Sprintf("%x", sum[:])
+		entry.ArchiveSize = int64(len(body))
+		entry.TreeSHA256 = skillpackage.TreeHash(files)
+		catalog.Skills[0] = entry
+	} else if err := os.MkdirAll(catalogDirectory, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	body, err := json.Marshal(catalog)
