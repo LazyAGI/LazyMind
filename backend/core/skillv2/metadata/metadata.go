@@ -149,6 +149,10 @@ func FirstBodyParagraph(body string) string {
 }
 
 func Resolve(content []byte, fallbackNames ...string) (Resolved, error) {
+	return ResolveWithFallback(content, Metadata{}, fallbackNames...)
+}
+
+func ResolveWithFallback(content []byte, fallback Metadata, fallbackNames ...string) (Resolved, error) {
 	parsed, err := Parse(content)
 	if err != nil {
 		return Resolved{}, err
@@ -158,7 +162,8 @@ func Resolve(content []byte, fallbackNames ...string) (Resolved, error) {
 	}
 	name := parsed.Name
 	if !parsed.HasName {
-		for _, candidate := range fallbackNames {
+		candidates := append([]string{fallback.Name}, fallbackNames...)
+		for _, candidate := range candidates {
 			candidate = strings.TrimSpace(candidate)
 			if ValidateName(candidate) == nil {
 				name = candidate
@@ -168,7 +173,10 @@ func Resolve(content []byte, fallbackNames ...string) (Resolved, error) {
 	}
 	description := parsed.Description
 	if !parsed.HasDescription {
-		description = FirstBodyParagraph(parsed.Body)
+		description = strings.TrimSpace(fallback.Description)
+		if description == "" {
+			description = FirstBodyParagraph(parsed.Body)
+		}
 	}
 	effective, err := EffectiveDocument(content, name, description)
 	if err != nil {
@@ -320,11 +328,11 @@ func FromRevisionWithFallback(ctx context.Context, tx *gorm.DB, revisionID strin
 	if err != nil {
 		return Metadata{}, err
 	}
-	effective, err := EffectiveDocument(content, fallback.Name, fallback.Description)
+	resolved, err := ResolveWithFallback(content, fallback)
 	if err != nil {
 		return Metadata{}, err
 	}
-	return ParseRequired(effective)
+	return resolved.Metadata, nil
 }
 
 func entriesFromRevision(ctx context.Context, tx *gorm.DB, revisionID string) (map[string]versionfs.Entry, error) {
@@ -362,14 +370,11 @@ func SyncPublished(ctx context.Context, tx *gorm.DB, skillID string, entries map
 		return err
 	}
 	if skill.Category == ExternalCategory || strings.TrimSpace(skill.OriginBuiltinSkillUID) != "" {
-		parsed, err := Parse(content)
+		resolved, err := ResolveWithFallback(content, Metadata{Name: skill.SkillName, Description: skill.Description})
 		if err != nil {
 			return err
 		}
-		if !parsed.HasName || !parsed.HasDescription {
-			return nil
-		}
-		return Sync(ctx, tx, skillID, parsed.Metadata, now)
+		return Sync(ctx, tx, skillID, resolved.Metadata, now)
 	}
 	meta, err := ParseRequired(content)
 	if err != nil {

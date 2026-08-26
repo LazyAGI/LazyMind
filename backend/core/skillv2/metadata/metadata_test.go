@@ -113,6 +113,42 @@ func TestEffectiveDocumentUsesMetadataOnlyForRuntimeView(t *testing.T) {
 	}
 }
 
+func TestResolveWithFallbackPrefersPresentFieldsAndRetainsMissingStoredField(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  string
+		wantName string
+		wantDesc string
+	}{
+		{
+			name:     "name only",
+			content:  "---\nname: evolved-name\n---\n# Skill\n\nNew body.\n",
+			wantName: "evolved-name",
+			wantDesc: "Stored description",
+		},
+		{
+			name:     "description only",
+			content:  "---\ndescription: Evolved description\n---\n# Skill\n",
+			wantName: "stored-name",
+			wantDesc: "Evolved description",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			resolved, err := ResolveWithFallback([]byte(tt.content), Metadata{Name: "stored-name", Description: "Stored description"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if resolved.Name != tt.wantName || resolved.Description != tt.wantDesc {
+				t.Fatalf("resolved metadata = %#v", resolved.Metadata)
+			}
+			if _, err := ParseRequired(resolved.Content); err != nil {
+				t.Fatalf("runtime content is not strict: %v", err)
+			}
+		})
+	}
+}
+
 func TestIsNameLengthError(t *testing.T) {
 	nameErr := ValidateNameLength(strings.Repeat("a", MaxSkillNameLength+1))
 	if !IsNameLengthError(nameErr) {

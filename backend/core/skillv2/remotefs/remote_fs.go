@@ -584,11 +584,12 @@ func (h *Handler) readContent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if parsed.relPath == skill.SkillMDPath && (skill.Category == skillmetadata.ExternalCategory || skill.OriginBuiltinSkillUID != "") {
-		data, err = skillmetadata.EffectiveDocument(data, skill.SkillName, skill.Description)
-		if err != nil {
-			writeHTTPError(w, err)
+		resolved, resolveErr := skillmetadata.ResolveWithFallback(data, skillmetadata.Metadata{Name: skill.SkillName, Description: skill.Description})
+		if resolveErr != nil {
+			writeHTTPError(w, resolveErr)
 			return
 		}
+		data = resolved.Content
 	}
 	switch r.URL.Query().Get("encoding") {
 	case "base64":

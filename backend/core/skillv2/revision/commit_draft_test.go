@@ -198,6 +198,71 @@ func TestCommitDraft_ExternalSkillAllowsMissingMetadataAndKeepsStoredIdentity(t 
 	}
 }
 
+func TestCommitDraft_ExternalSkillUpdatesPresentPartialMetadata(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  string
+		wantName string
+		wantDesc string
+		wantRoot string
+	}{
+		{
+			name:     "name only",
+			content:  "---\nname: evolved-name\n---\n# Skill\n\nUpdated body.\n",
+			wantName: "evolved-name",
+			wantDesc: "Stored fallback description",
+			wantRoot: "external/evolved-name",
+		},
+		{
+			name:     "description only",
+			content:  "---\ndescription: Evolved description\n---\n# Skill\n",
+			wantName: "fallback-skill",
+			wantDesc: "Evolved description",
+			wantRoot: "external/fallback-skill",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := testutil.NewTestDB(t)
+			testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+			if err := db.Model(&testutil.SkillRow{}).Where("id = ?", "skill1").Updates(map[string]any{
+				"category":      "external",
+				"skill_name":    "fallback-skill",
+				"description":   "Stored fallback description",
+				"relative_root": "external/fallback-skill",
+			}).Error; err != nil {
+				t.Fatalf("configure external skill: %v", err)
+			}
+			testutil.SeedTextBlob(t, db, "h_external_partial", tt.content)
+			testutil.SeedDraftEntry(t, db, "skill1", "SKILL.md", "upsert", "file", "h_external_partial")
+			service := NewService(ServiceDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
+
+			resp, err := service.CommitDraft(context.Background(), CommitDraftRequest{SkillID: "skill1", UserID: "user_001", DraftVersion: 1})
+			if err != nil {
+				t.Fatalf("CommitDraft returned error: %v", err)
+			}
+			var skill testutil.SkillRow
+			if err := db.Where("id = ?", "skill1").Take(&skill).Error; err != nil {
+				t.Fatal(err)
+			}
+			if skill.SkillName != tt.wantName || skill.Description != tt.wantDesc || skill.RelativeRoot != tt.wantRoot {
+				t.Fatalf("synchronized metadata = %#v", skill)
+			}
+			var entry testutil.SkillRevisionEntryRow
+			if err := db.Where("revision_id = ? AND path = ?", resp.RevisionID, "SKILL.md").Take(&entry).Error; err != nil || entry.BlobHash == nil {
+				t.Fatalf("committed SKILL.md entry: %#v err=%v", entry, err)
+			}
+			var blob testutil.SkillBlobRow
+			if err := db.Where("hash = ?", *entry.BlobHash).Take(&blob).Error; err != nil {
+				t.Fatal(err)
+			}
+			if string(blob.Content) != tt.content {
+				t.Fatalf("committed SKILL.md = %q, want %q", blob.Content, tt.content)
+			}
+		})
+	}
+}
+
 func TestCommitDraft_RejectsEmptyCommit(t *testing.T) {
 	db := testutil.NewTestDB(t)
 	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
