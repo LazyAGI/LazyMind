@@ -97,6 +97,7 @@ runtime:
       label: Style
       question: Which visual style should be used?
       type: single
+      choice_policy: subset
       choices: [Professional, Minimal]`, 1)
 	result := Compile(workflowYAML, validState, "", ProfilePublish)
 	if !result.Valid {
@@ -106,7 +107,7 @@ runtime:
 	if !policy.CollectsKnowledge || policy.CompletedEditStep != "f" || len(policy.CompletedContinueSteps) != 1 || policy.CompletedContinueSteps[0] != "f" || len(policy.ExclusiveToolCapabilities) != 1 || policy.ExclusiveToolCapabilities[0] != "writer.create" || len(policy.PublisherOwnedSlots) != 1 || policy.PublisherOwnedSlots[0] != "final" {
 		t.Fatalf("runtime policy was not compiled: %#v", policy)
 	}
-	if len(policy.ClarificationFields) != 2 || policy.ClarificationFields[0].ID != "topic" || policy.ClarificationFields[1].Choices[1] != "Minimal" {
+	if len(policy.ClarificationFields) != 2 || policy.ClarificationFields[0].ID != "topic" || policy.ClarificationFields[1].Choices[1] != "Minimal" || policy.ClarificationFields[1].ChoicePolicy != "subset" {
 		t.Fatalf("runtime clarification fields were not compiled: %#v", policy.ClarificationFields)
 	}
 }
@@ -118,6 +119,7 @@ runtime:
     - id: style
       question: ""
       type: select
+      choice_policy: anything
     - id: style
       question: Duplicate
       type: single`, 1)
@@ -131,6 +133,7 @@ runtime:
 		"E_RUNTIME_CLARIFICATION_TYPE_INVALID",
 		"E_RUNTIME_CLARIFICATION_ID_DUPLICATE",
 		"E_RUNTIME_CLARIFICATION_CHOICES_REQUIRED",
+		"E_RUNTIME_CLARIFICATION_CHOICE_POLICY_INVALID",
 	} {
 		if !codes[code] {
 			t.Fatalf("expected %s, diagnostics=%#v", code, result.Diagnostics)

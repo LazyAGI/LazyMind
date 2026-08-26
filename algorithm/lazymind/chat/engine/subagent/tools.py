@@ -247,7 +247,8 @@ def _save_artifact(key: str, value: Any, content_type: str = 'text',
                    source_tool: Optional[str] = None,
                    sort_order: Optional[int] = None,
                    caption: Optional[str] = None,
-                   *, internal_publish: bool = False) -> Dict[str, Any]:
+                   *, internal_publish: bool = False,
+                   publisher_list_index: Optional[int] = None) -> Dict[str, Any]:
     """Save one output artifact produced by this SubAgent.
 
     File-type values must be local absolute paths; the framework copies them into the
@@ -327,9 +328,22 @@ def _save_artifact(key: str, value: Any, content_type: str = 'text',
     built, actual_ct = _build_artifact_value(value, ct)
     if source_tool:
         built['_source_tool'] = str(source_tool)
+    # A package publisher may already have resolved the durable list index from
+    # one consistent order snapshot. This avoids races when it emits several
+    # ordered artifacts in one tool call before Core has processed the earlier
+    # events. Model-facing callers must continue to use sort_order.
+    if publisher_list_index is not None:
+        if not internal_publish:
+            raise ToolExecutionError(
+                'publisher_list_index is reserved for package publisher tools.',
+            )
+        if int(publisher_list_index) < 0:
+            raise ToolExecutionError('publisher_list_index must be >= 0.')
+        built['list_index'] = int(publisher_list_index)
+
     # Translate sort_order → list_index via Go core API.
     out_of_range_warning: Optional[str] = None
-    if sort_order is not None:
+    if sort_order is not None and publisher_list_index is None:
         list_index, resolve_err = _resolve_list_index_from_sort_order(key, sort_order)
         if list_index is not None:
             built['list_index'] = list_index
