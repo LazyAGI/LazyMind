@@ -490,6 +490,7 @@ export interface BuiltinSkillOpenAPIResponse {
     'installed': boolean;
     'installed_skill_id'?: string;
     'name': string;
+    'provider'?: string;
 }
 export interface BulkUpdateServerEnabledRequest {
     'enabled'?: boolean;
@@ -2332,6 +2333,7 @@ export interface ShowcaseCase {
     'output_type': string;
     'prompt': string;
     'prompt_short': string;
+    'provider': string;
     'source_url': string;
     'result_highlights'?: Array<string>;
     'result_summary': string;

@@ -103,6 +103,79 @@ func TestCreateUserActiveThreadActivation_Duplicate(t *testing.T) {
 	}
 }
 
+func TestReconcileThreadFlowStatusPersistsTerminalAndReleasesActive(t *testing.T) {
+	db := newAgentTestDB(t)
+	now := time.Now().UTC()
+	if err := db.DB.Create(&orm.AgentThread{
+		ThreadID: "thread-1", CurrentTaskID: "repair", Status: "running",
+		CreateUserID: "u1", CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DB.Create(&orm.AgentUserActiveThread{
+		UserID: "u1", ThreadID: "thread-1", Status: userActiveThreadStatusActive,
+		LeaseUntil: now, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if err := reconcileThreadFlowStatus(db.DB, "thread-1", &threadFlowStatusResponse{
+		Status: "failed", CurrentStep: "repair",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var thread orm.AgentThread
+	if err := db.DB.First(&thread, "thread_id = ?", "thread-1").Error; err != nil {
+		t.Fatal(err)
+	}
+	if thread.Status != "failed" || thread.CurrentTaskID != "" {
+		t.Fatalf("unexpected reconciled thread: %#v", thread)
+	}
+	var active orm.AgentUserActiveThread
+	if err := db.DB.First(&active, "user_id = ?", "u1").Error; err != nil {
+		t.Fatal(err)
+	}
+	if active.Status != userActiveThreadStatusFinished {
+		t.Fatalf("terminal flow must finish active reservation: %#v", active)
+	}
+}
+
+func TestReconcileThreadFlowStatusKeepsNonTerminalActive(t *testing.T) {
+	db := newAgentTestDB(t)
+	now := time.Now().UTC()
+	if err := db.DB.Create(&orm.AgentThread{
+		ThreadID: "thread-1", Status: "created", CreateUserID: "u1",
+		CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.DB.Create(&orm.AgentUserActiveThread{
+		UserID: "u1", ThreadID: "thread-1", Status: userActiveThreadStatusActive,
+		LeaseUntil: now, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := reconcileThreadFlowStatus(db.DB, "thread-1", &threadFlowStatusResponse{
+		Status: "running", CurrentStep: "eval",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var thread orm.AgentThread
+	if err := db.DB.First(&thread, "thread_id = ?", "thread-1").Error; err != nil {
+		t.Fatal(err)
+	}
+	if thread.Status != "running" || thread.CurrentTaskID != "eval" {
+		t.Fatalf("unexpected reconciled thread: %#v", thread)
+	}
+	var active orm.AgentUserActiveThread
+	if err := db.DB.First(&active, "user_id = ?", "u1").Error; err != nil {
+		t.Fatal(err)
+	}
+	if active.Status != userActiveThreadStatusActive {
+		t.Fatalf("non-terminal flow must stay active: %#v", active)
+	}
+}
+
 // TestActivateUserThread upserts an active row, replacing any existing status.
 func TestActivateUserThread(t *testing.T) {
 	db := newAgentTestDB(t)

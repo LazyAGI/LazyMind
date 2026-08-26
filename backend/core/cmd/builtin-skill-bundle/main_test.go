@@ -93,6 +93,7 @@ bundled_skills:
     path: research/local-demo
     category: research
     version: 1.0.0
+    provider: WorkBuddy
 skills: []
 `), 0o644); err != nil {
 		t.Fatal(err)
@@ -107,7 +108,7 @@ skills: []
 		t.Fatal(err)
 	}
 	catalog := readCatalog(t, filepath.Join(opts.Output, "catalog.json"))
-	if len(catalog.Skills) != 1 || catalog.Skills[0].UID != "bsk_local_demo" || catalog.Skills[0].SourceURL != "builtin://research/local-demo" || !skillbuiltin.CatalogSkillMarketVisible(catalog.Skills[0]) {
+	if len(catalog.Skills) != 1 || catalog.Skills[0].UID != "bsk_local_demo" || catalog.Skills[0].SourceURL != "builtin://research/local-demo" || catalog.Skills[0].Provider != "WorkBuddy" || !skillbuiltin.CatalogSkillMarketVisible(catalog.Skills[0]) {
 		t.Fatalf("catalog = %#v", catalog)
 	}
 	opts.Output = filepath.Join(root, "runtime-frozen", "builtin-skills")
@@ -121,6 +122,32 @@ skills: []
 	opts.Output = filepath.Join(root, "runtime-changed", "builtin-skills")
 	if err := run(context.Background(), opts, http.DefaultClient); err == nil {
 		t.Fatal("frozen build accepted a changed bundled Skill")
+	}
+}
+
+func TestRunAcceptsRemoteSourceMappingWithCategoryAndProvider(t *testing.T) {
+	archive := makeSkillZip(t)
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(archive)), ContentLength: int64(len(archive)), Header: make(http.Header)}, nil
+	})}
+	root := t.TempDir()
+	sources := filepath.Join(root, "sources.yaml")
+	if err := os.WriteFile(sources, []byte("schema_version: 1\nskills:\n  - source_url: https://example.test/demo.zip\n    category: search\n    provider: SkillHub\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	opts := options{Sources: sources, Lock: filepath.Join(root, "lock.json"), Cache: filepath.Join(root, "cache"), Output: filepath.Join(root, "runtime", "builtin-skills")}
+	if err := run(context.Background(), opts, client); err != nil {
+		t.Fatal(err)
+	}
+	entry := readCatalog(t, filepath.Join(opts.Output, "catalog.json")).Skills[0]
+	if entry.Category != "search" || entry.Provider != "SkillHub" {
+		t.Fatalf("category/provider = %q/%q", entry.Category, entry.Provider)
+	}
+
+	opts.Output = filepath.Join(root, "runtime-frozen", "builtin-skills")
+	opts.FrozenLockfile = true
+	if err := run(context.Background(), opts, http.DefaultClient); err != nil {
+		t.Fatalf("frozen provider build failed: %v", err)
 	}
 }
 
@@ -378,8 +405,8 @@ func TestRunUsesFeaturedDefinitionIDForFallbackName(t *testing.T) {
 		t.Fatal(err)
 	}
 	entry := readCatalog(t, filepath.Join(opts.Output, "catalog.json")).Skills[0]
-	if entry.Name != "demo" {
-		t.Fatalf("featured fallback name = %q, want demo", entry.Name)
+	if entry.Name != "demo" || entry.Category != "Demo" {
+		t.Fatalf("featured fallback name/category = %q/%q", entry.Name, entry.Category)
 	}
 }
 
@@ -420,7 +447,7 @@ func TestRunBuildsFeaturedCatalogAndKeepsSkillOutOfMarket(t *testing.T) {
 		t.Fatal(err)
 	}
 	builtinCatalog := readCatalog(t, filepath.Join(opts.Output, "catalog.json"))
-	if len(builtinCatalog.Skills) != 1 || skillbuiltin.CatalogSkillMarketVisible(builtinCatalog.Skills[0]) {
+	if len(builtinCatalog.Skills) != 1 || builtinCatalog.Skills[0].Category != "Demo" || skillbuiltin.CatalogSkillMarketVisible(builtinCatalog.Skills[0]) {
 		t.Fatalf("builtin catalog = %#v", builtinCatalog)
 	}
 	body, err := os.ReadFile(filepath.Join(opts.FeaturedOutput, "catalog.json"))
@@ -479,7 +506,7 @@ func TestRunBuildsFeaturedCatalogFromLocalDirectory(t *testing.T) {
 		t.Fatalf("builtin catalog = %#v", builtinCatalog)
 	}
 	entry := builtinCatalog.Skills[0]
-	if entry.SourceURL != "builtin://featured/demo-featured/skill" || skillbuiltin.CatalogSkillMarketVisible(entry) {
+	if entry.SourceURL != "builtin://featured/demo-featured/skill" || entry.Category != "Demo" || skillbuiltin.CatalogSkillMarketVisible(entry) {
 		t.Fatalf("local featured entry = %#v", entry)
 	}
 	packageFiles, err := skillpackage.ReadZip(filepath.Join(opts.Output, filepath.FromSlash(entry.PackageFile)))
@@ -582,8 +609,10 @@ type: work
 version: 1.0.0
 status: published
 default_locale: zh-CN
+provider: LazyMind
 skill:
   source_url: ` + source + `
+  category: Demo
   required_version: ` + requiredVersion + `
 placement:
   home: true

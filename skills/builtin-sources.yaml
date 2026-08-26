@@ -5,33 +5,43 @@ bundled_skills:
     path: research/deep-research
     category: research
     version: 1.0.0
+    provider: LazyMind
   - uid: bsk_01JZ7Q4AJ1X9N5B2C8M6T0W3EY
     path: review/single-document-review
     category: review
     version: 1.0.0
+    provider: LazyMind
   - uid: bsk_01JZ7Q4RPN6K3Y8V1D5H2A9S0B
     path: review/systematic-document-and-literature-review
     category: review
     version: 1.0.0
+    provider: LazyMind
   - uid: bsk_01JZ7Q58M4E7C2N9X6P1D3V0KA
     path: search/paper-search
     category: search
     version: 1.0.0
+    provider: LazyMind
   - uid: bsk_01K0M8SCV7PAPERSEARCH9Q2X3A4B
     path: search/sciverse-paper-search
     category: search
     version: 1.0.0
+    provider: LazyMind
   - uid: bsk_01K3G4HUMANIZERCHAT001A2B3C
     path: chat/humanizer
     category: chat
     version: 1.0.0
+    provider: 千问办公
   - uid: bsk_E1A2FD55C759A485672BA6B94328
     path: writing/structured-longform-writing
     category: writing
     version: 1.0.0
+    provider: 千问办公
   - uid: bsk_01L0D6G4R4M8V2K7Q9C5X3H0EP
     path: design/diagram-design
     category: design
     version: 4.1.0-lazymind-phase4-motion
+    provider: GitHub
 skills:
-  - https://skillhub.cn/skills/user_290ac21c/find-skill-skillhub
+  - source_url: https://skillhub.cn/skills/user_290ac21c/find-skill-skillhub
+    category: search
+    provider: SkillHub

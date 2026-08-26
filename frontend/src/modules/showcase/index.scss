@@ -569,11 +569,17 @@
 }
 
 .showcase-gallery-grid .showcase-card-cover-image .showcase-card-image-stage {
-  inset: 0 4px;
+  inset: 0;
+  width: auto;
+  max-width: none;
+  height: auto;
+  aspect-ratio: auto;
+  transform: none;
+  box-shadow: none;
 }
 
 .showcase-gallery-grid .showcase-card-cover-image .showcase-card-image {
-  object-position: center top;
+  object-position: center;
 }
 
 .showcase-gallery-grid .showcase-card-body {

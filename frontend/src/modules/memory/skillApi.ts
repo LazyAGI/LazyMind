@@ -451,6 +451,7 @@ export interface MarketSkillRecord extends SkillAssetRecord {
   marketStatus?: string;
   installed?: boolean;
   installedSkillId?: string;
+  provider?: string;
 }
 
 export interface MarketSkillListResult {
@@ -466,6 +467,7 @@ interface BuiltinSkillListItem {
   description: string;
   category: string;
   content: string;
+  provider?: string;
   tags?: string[];
   installed?: boolean;
   installed_skill_id?: string;
@@ -1889,6 +1891,7 @@ export async function listBuiltinSkills(): Promise<MarketSkillRecord[]> {
     marketSource: "builtin",
     installed: Boolean(item.installed),
     installedSkillId: item.installed_skill_id || "",
+    provider: item.provider?.trim() || undefined,
   }));
 }
 

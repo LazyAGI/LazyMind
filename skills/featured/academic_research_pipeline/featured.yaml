@@ -4,6 +4,7 @@ type: workflow
 version: 1.0.0
 status: published
 default_locale: zh-CN
+provider: LazyMind
 
 workflow:
   workflow_ref: builtin:academic_research_pipeline
@@ -14,7 +15,7 @@ placement:
   order: 20
 
 classification:
-  category: 研究写作
+  category: workflow
   tags:
     - 学术研究
     - 文献检索

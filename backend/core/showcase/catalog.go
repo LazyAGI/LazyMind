@@ -22,6 +22,7 @@ import (
 	_ "golang.org/x/image/webp"
 	"gopkg.in/yaml.v3"
 
+	skillbuiltin "lazymind/core/skillv2/builtin"
 	skillpackage "lazymind/core/skillv2/skillpackage"
 )
 
@@ -77,6 +78,7 @@ type FeaturedDefinition struct {
 	Version        string                    `yaml:"version" json:"version"`
 	Status         string                    `yaml:"status" json:"status"`
 	DefaultLocale  string                    `yaml:"default_locale" json:"default_locale"`
+	Provider       string                    `yaml:"provider" json:"provider"`
 	Skill          *FeaturedSkillBinding     `yaml:"skill,omitempty" json:"skill,omitempty"`
 	Workflow       *FeaturedWorkflowBinding  `yaml:"workflow,omitempty" json:"workflow,omitempty"`
 	Placement      FeaturedPlacement         `yaml:"placement" json:"placement"`
@@ -91,6 +93,7 @@ type FeaturedDefinition struct {
 type FeaturedSkillBinding struct {
 	SourceURL       string `yaml:"source_url" json:"source_url"`
 	RequiredVersion string `yaml:"required_version,omitempty" json:"required_version,omitempty"`
+	Category        string `yaml:"category,omitempty" json:"-"`
 	BuiltinSkillUID string `yaml:"-" json:"builtin_skill_uid"`
 	Version         string `yaml:"-" json:"version"`
 	ArchiveSHA256   string `yaml:"-" json:"archive_sha256"`
@@ -225,6 +228,11 @@ func LoadSourceDirectory(root string) ([]FeaturedDefinition, error) {
 		if definition.ID != entry.Name() {
 			return nil, definitionFailure("%s id %q must match directory %q", filePath, definition.ID, entry.Name())
 		}
+		provider, err := skillbuiltin.NormalizeProvider(definition.Provider)
+		if err != nil {
+			return nil, definitionFailure("%s: %v", filePath, err)
+		}
+		definition.Provider = provider
 		definition.sourceDir = directory
 		if err := inspectAssets(&definition); err != nil {
 			return nil, definitionFailure("%s: %v", filePath, err)
@@ -339,6 +347,7 @@ func (c Catalog) ShowcaseCases(locale string) []ShowcaseCase {
 		cases = append(cases, ShowcaseCase{
 			ID:                definition.ID,
 			Type:              definition.Type,
+			Provider:          definition.Provider,
 			SourceURL:         sourceURL,
 			Title:             presentation.Card.Title,
 			Description:       presentation.Card.Description,
@@ -543,6 +552,13 @@ func validateDefinition(definition FeaturedDefinition, compiled bool) error {
 	}
 	if definition.Status != StatusDraft && definition.Status != StatusPublished && definition.Status != StatusDisabled {
 		return definitionFailure("invalid status %q", definition.Status)
+	}
+	provider, err := skillbuiltin.NormalizeProvider(definition.Provider)
+	if err != nil {
+		return definitionFailure("invalid provider: %v", err)
+	}
+	if definition.Status == StatusPublished && provider == "" {
+		return definitionFailure("provider is required for published definitions")
 	}
 	if _, ok := allowedFeaturedTypes[definition.Type]; !ok {
 		return definitionFailure("type must be chat, work, or workflow")

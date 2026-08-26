@@ -4,6 +4,7 @@ type: workflow
 version: 1.0.0
 status: published
 default_locale: zh-CN
+provider: LazyMind
 
 workflow:
   workflow_ref: builtin:ppt-workflow
@@ -14,7 +15,7 @@ placement:
   order: 23
 
 classification:
-  category: PPT 制作
+  category: workflow
   tags:
     - 演示文稿
     - HTML 幻灯片

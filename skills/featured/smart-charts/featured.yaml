@@ -4,9 +4,11 @@ type: work
 version: 6.2.1
 status: published
 default_locale: zh-CN
+provider: WorkBuddy
 
 skill:
   source_url: https://skillhub.cn/skills/user_5b28ea14/smart-charts
+  category: data
   required_version: 6.2.1
 
 placement:
@@ -15,7 +17,7 @@ placement:
   order: 12
 
 classification:
-  category: 数据分析
+  category: 信息分析
   tags:
     - 智能图表
     - 数据可视化

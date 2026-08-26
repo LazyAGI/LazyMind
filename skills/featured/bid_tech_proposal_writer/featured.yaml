@@ -4,6 +4,7 @@ type: workflow
 version: 1.0.0
 status: published
 default_locale: zh-CN
+provider: LazyMind
 
 workflow:
   workflow_ref: builtin:bid_tech_proposal_writer
@@ -14,7 +15,7 @@ placement:
   order: 21
 
 classification:
-  category: 商务交付
+  category: workflow
   tags:
     - 投标文件
     - 技术方案

@@ -4,6 +4,7 @@ type: work
 version: 0.1.0
 status: published
 default_locale: zh-CN
+provider: 千问办公
 
 skill:
   source_url: featured/data-report/skill
@@ -15,7 +16,7 @@ placement:
   order: 13
 
 classification:
-  category: 数据分析
+  category: 信息分析
   tags:
     - 数据报告
     - Excel 分析

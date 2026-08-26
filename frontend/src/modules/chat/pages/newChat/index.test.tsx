@@ -37,6 +37,7 @@ const entryDefaults = {
 };
 
 const featuredCase: ShowcaseCase = {
+  provider: "SkillHub",
   builtin_skill_uid: "builtin.product-design",
   id: "aiProduct",
   category: "product",

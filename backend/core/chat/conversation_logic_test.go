@@ -1410,7 +1410,7 @@ func TestBuildLazyChatRequestMapsAllFields(t *testing.T) {
 func TestBuildLLMConfigFromSelectedModels(t *testing.T) {
 	llmConfig := buildLLMConfig([]selectedRuntimeModel{
 		{ModelType: "llm", ProviderName: "OpenAI", ModelName: "gpt-4o", BaseURL: "https://api.openai.com/v1/", APIKey: "sk-from-db"},
-		{ModelType: "evo_llm", ProviderName: "OpenAI", ModelName: "gpt-4o-mini", BaseURL: "https://api.openai.com/v1/", APIKey: "sk-from-db"},
+		{ModelType: "evo_llm", TechnicalModelType: "vlm", ProviderName: "OpenAI", ModelName: "gpt-4o-mini", BaseURL: "https://api.openai.com/v1/", APIKey: "sk-from-db"},
 		{ModelType: "embed_main", ProviderName: "OpenAI", ModelName: "text-embedding-3-small", BaseURL: "https://api.openai.com/v1/", APIKey: "sk-from-db"},
 		{ModelType: "reranker", ProviderName: "OpenAI", ModelName: "rerank-multilingual-v3.0", BaseURL: "https://api.openai.com/v1/", APIKey: "sk-from-db"},
 	})

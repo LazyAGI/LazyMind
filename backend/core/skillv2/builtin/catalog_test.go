@@ -36,6 +36,7 @@ func TestCatalogListsMetadataAndLoadsVerifiedArchiveOnDemand(t *testing.T) {
 		Name:          "demo",
 		Description:   "catalog demo",
 		Category:      "external",
+		Provider:      "SkillHub",
 		Content:       files["SKILL.md"],
 		ArchiveSHA256: hex.EncodeToString(hash[:]),
 		TreeSHA256: skillpackage.TreeHash(map[string][]byte{
@@ -50,7 +51,7 @@ func TestCatalogListsMetadataAndLoadsVerifiedArchiveOnDemand(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(listed) != 1 || listed[0].Version != "1.0.0" || len(listed[0].Files) != 1 {
+	if len(listed) != 1 || listed[0].Version != "1.0.0" || listed[0].Provider != "SkillHub" || len(listed[0].Files) != 1 {
 		t.Fatalf("listed package = %#v", listed)
 	}
 	loaded, found, err := catalogPackageByUID(catalogPath, "bsk_demo")
@@ -67,6 +68,20 @@ func TestCatalogListsMetadataAndLoadsVerifiedArchiveOnDemand(t *testing.T) {
 	_, _, err = catalogPackageByUID(catalogPath, "bsk_demo")
 	if err == nil || !strings.Contains(err.Error(), "mismatch") {
 		t.Fatalf("tampered archive error = %v", err)
+	}
+}
+
+func TestLoadCatalogRejectsInvalidProvider(t *testing.T) {
+	root := t.TempDir()
+	catalogPath := filepath.Join(root, "catalog.json")
+	writeCatalog(t, catalogPath, CatalogSkill{
+		UID: "bsk_demo", Key: "demo", SourceURL: "https://example.test/demo.zip", ResolvedURL: "https://example.test/demo.zip",
+		Version: "1.0.0", Name: "demo", Description: "demo", Category: "external", Provider: "bad\nprovider",
+		ArchiveSHA256: strings.Repeat("a", 64), TreeSHA256: strings.Repeat("b", 64), ArchiveSize: 1, PackageFile: "packages/demo.zip",
+	})
+	_, err := LoadCatalog(catalogPath)
+	if err == nil || !strings.Contains(err.Error(), "single-line") {
+		t.Fatalf("error = %v", err)
 	}
 }
 

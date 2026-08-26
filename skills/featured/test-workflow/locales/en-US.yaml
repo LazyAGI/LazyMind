@@ -1,7 +1,7 @@
 locale: en-US
 
 classification:
-  category: System tools
+  category: workflow
   tags:
     - Workflow
     - Runtime

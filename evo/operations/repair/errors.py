@@ -1,6 +1,9 @@
 EXTERNAL_CHAT_FAILURE_TYPES = frozenset({
     'chat_config_error',
     'chat_http_error',
+    'chat_cancelled',
+    'chat_model_failure',
+    'chat_model_incomplete',
     'chat_protocol_error',
     'chat_runtime_error',
     'chat_timeout',

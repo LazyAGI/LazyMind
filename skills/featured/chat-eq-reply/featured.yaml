@@ -4,9 +4,11 @@ type: chat
 version: 1.0.0
 status: published
 default_locale: zh-CN
+provider: SkillHub
 
 skill:
   source_url: https://skillhub.cn/skills/chat-eq-reply
+  category: communication
   required_version: 3.5.0
 
 placement:
@@ -15,7 +17,7 @@ placement:
   order: 22
 
 classification:
-  category: 沟通表达
+  category: 内容创作
   tags:
     - 高情商回复
     - 聊天

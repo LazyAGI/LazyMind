@@ -15,6 +15,8 @@ interface FeaturedCasesProps {
   onTry?: (item: ShowcaseCase) => void;
 }
 
+const FEATURED_HOME_LIMIT = 8;
+
 export default function FeaturedCases({ type, onTry }: FeaturedCasesProps) {
   const { i18n, t } = useTranslation();
   const locale = i18n.resolvedLanguage || i18n.language;
@@ -41,7 +43,7 @@ export default function FeaturedCases({ type, onTry }: FeaturedCasesProps) {
   const featuredItems = useMemo(() => {
     return items.filter(
       (item) => item.featured && matchesShowcaseEntryType(item.type, type),
-    );
+    ).slice(0, FEATURED_HOME_LIMIT);
   }, [items, type]);
 
   if (!isLoading && featuredItems.length === 0) {

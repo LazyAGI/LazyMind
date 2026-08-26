@@ -50,7 +50,7 @@ func TestCompileCatalogBuildsLocalizedCasesAndHashedAssets(t *testing.T) {
 		t.Fatal(err)
 	}
 	cases := loaded.ShowcaseCases("en-US")
-	if len(cases) != 1 || cases[0].Type != TypeChat || cases[0].Title != "English demo" || cases[0].DetailTitle != "English detail" || cases[0].Category != "Education" || len(cases[0].Tasks) != 2 {
+	if len(cases) != 1 || cases[0].Type != TypeChat || cases[0].Provider != "LazyMind" || cases[0].Title != "English demo" || cases[0].DetailTitle != "English detail" || cases[0].Category != "Education" || len(cases[0].Tasks) != 2 {
 		t.Fatalf("cases = %#v", cases)
 	}
 	if cases[0].BuiltinSkillUID != "bsk_demo" || cases[0].SourceURL != "https://example.test/multi.zip" {
@@ -165,6 +165,15 @@ func TestLoadSourceDirectoryRejectsUnknownFieldsAndInvalidAssets(t *testing.T) {
 		writeFeaturedSource(t, root, "demo", body)
 		_, err := LoadSourceDirectory(root)
 		if err == nil || !strings.Contains(err.Error(), "type must be chat, work, or workflow") {
+			t.Fatalf("error = %v", err)
+		}
+	})
+	t.Run("missing provider", func(t *testing.T) {
+		root := t.TempDir()
+		body := strings.Replace(validFeaturedYAML("demo", false), "provider: LazyMind\n", "", 1)
+		writeFeaturedSource(t, root, "demo", body)
+		_, err := LoadSourceDirectory(root)
+		if err == nil || !strings.Contains(err.Error(), "provider is required") {
 			t.Fatalf("error = %v", err)
 		}
 	})
@@ -320,7 +329,7 @@ func validFeaturedYAML(id string, secondTask bool) string {
 	return "schema_version: 2\n" +
 		"id: " + id + "\n" +
 		"type: chat\n" +
-		"version: 1.0.0\nstatus: published\ndefault_locale: zh-CN\n" +
+		"version: 1.0.0\nstatus: published\ndefault_locale: zh-CN\nprovider: LazyMind\n" +
 		"skill:\n  source_url: https://example.test/" + id + ".zip\n" +
 		"placement:\n  home: true\n  gallery: true\n  order: 1\n" +
 		"classification:\n  category: Demo\n  tags: [demo]\n" +

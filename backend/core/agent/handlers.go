@@ -35,6 +35,20 @@ type threadListResponse struct {
 	NextPageToken string           `json:"next_page_token"`
 }
 
+func applyThreadFlowStatus(item *threadResponse, flowStatus *threadFlowStatusResponse) {
+	if item == nil || flowStatus == nil {
+		return
+	}
+	if status := strings.TrimSpace(flowStatus.Status); status != "" {
+		item.Status = status
+	}
+	if isTerminalThreadFlowStatus(flowStatus) {
+		item.CurrentTaskID = ""
+	} else if currentStep := strings.TrimSpace(flowStatus.CurrentStep); currentStep != "" {
+		item.CurrentTaskID = currentStep
+	}
+}
+
 type upstreamProxyResponse struct {
 	Body        any
 	BodyBytes   []byte
@@ -90,9 +104,11 @@ func ListThreads(w http.ResponseWriter, r *http.Request) {
 	for _, thread := range threads {
 		item := toThreadResponse(thread)
 		if upstreamStatus, ok := statusByThread[thread.ThreadID]; ok {
-			if status := strings.TrimSpace(upstreamStatus.Status); status != "" {
-				item.Status = status
+			if err := reconcileThreadFlowStatus(db, thread.ThreadID, &upstreamStatus); err != nil {
+				log.Logger.Warn().Err(err).Str("thread_id", thread.ThreadID).
+					Msg("reconcile listed thread flow status failed")
 			}
+			applyThreadFlowStatus(&item, &upstreamStatus)
 		}
 		items = append(items, item)
 	}
@@ -213,8 +229,12 @@ func GetThread(w http.ResponseWriter, r *http.Request) {
 	item := toThreadResponse(thread)
 	if flowStatus, statusErr := fetchThreadFlowStatus(r.Context(), r, threadID); statusErr != nil {
 		log.Logger.Warn().Err(statusErr).Str("thread_id", threadID).Msg("get agent thread status failed; using local thread status")
-	} else if flowStatus != nil && strings.TrimSpace(flowStatus.Status) != "" {
-		item.Status = strings.TrimSpace(flowStatus.Status)
+	} else if flowStatus != nil {
+		if err := reconcileThreadFlowStatus(db, threadID, flowStatus); err != nil {
+			log.Logger.Warn().Err(err).Str("thread_id", threadID).
+				Msg("reconcile thread flow status failed")
+		}
+		applyThreadFlowStatus(&item, flowStatus)
 	}
 	common.ReplyOK(w, map[string]any{"thread": item})
 }
@@ -291,6 +311,7 @@ func StreamThreadEventTrace(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
+	defer reconcileThreadAfterEventStream(r, threadID)
 	proxyEvoResponse(w, r, http.MethodGet, threadProxyPath(threadID, "/event-trace:stream"), cloneURLValues(r.URL.Query()), nil, "text/event-stream")
 }
 
@@ -299,6 +320,7 @@ func streamThreadEvents(w http.ResponseWriter, r *http.Request, stepID string) {
 	if !ok {
 		return
 	}
+	defer reconcileThreadAfterEventStream(r, threadID)
 	query := cloneURLValues(r.URL.Query())
 	if strings.TrimSpace(stepID) != "" {
 		if query == nil {
@@ -307,6 +329,25 @@ func streamThreadEvents(w http.ResponseWriter, r *http.Request, stepID string) {
 		query.Set("step_id", strings.TrimSpace(stepID))
 	}
 	proxyEvoResponse(w, r, http.MethodGet, threadProxyPath(threadID, "/events:stream"), query, nil, "text/event-stream")
+}
+
+func reconcileThreadAfterEventStream(r *http.Request, threadID string) {
+	db := store.DB()
+	if db == nil || r == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), 5*time.Second)
+	defer cancel()
+	flowStatus, err := fetchThreadFlowStatus(ctx, r, threadID)
+	if err != nil {
+		log.Logger.Warn().Err(err).Str("thread_id", threadID).
+			Msg("reconcile thread after event stream failed")
+		return
+	}
+	if err := reconcileThreadFlowStatus(db, threadID, flowStatus); err != nil {
+		log.Logger.Warn().Err(err).Str("thread_id", threadID).
+			Msg("persist thread status after event stream failed")
+	}
 }
 
 func ListThreadGates(w http.ResponseWriter, r *http.Request) {
@@ -554,21 +595,11 @@ func syncThreadAfterAction(ctx context.Context, r *http.Request, threadID, actio
 		}
 		return
 	}
-	updates := map[string]any{"updated_at": time.Now().UTC()}
-	if flowStatus != nil {
-		if status := strings.TrimSpace(flowStatus.Status); status != "" {
-			updates["status"] = status
-		}
-		if currentStep := strings.TrimSpace(flowStatus.CurrentStep); currentStep != "" {
-			updates["current_task_id"] = currentStep
-		}
+	if err := reconcileThreadFlowStatus(db, threadID, flowStatus); err != nil {
+		log.Logger.Warn().Err(err).Str("thread_id", threadID).Str("action", action).
+			Msg("reconcile thread status after action failed")
 	}
-	if len(updates) > 1 {
-		if err := db.Model(&orm.AgentThread{}).Where("thread_id = ?", threadID).Updates(updates).Error; err != nil {
-			log.Logger.Warn().Err(err).Str("thread_id", threadID).Str("action", action).Msg("update local thread status after action failed")
-		}
-	}
-	if action == "cancel" || isTerminalThreadFlowStatus(flowStatus) {
+	if action == "cancel" && !isTerminalThreadFlowStatus(flowStatus) {
 		if err := markUserActiveThreadFinished(db, threadID); err != nil {
 			log.Logger.Warn().Err(err).Str("thread_id", threadID).Str("action", action).Msg("mark active thread finished after action failed")
 		}

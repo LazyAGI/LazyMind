@@ -4,6 +4,7 @@ type: work
 version: 1.0.0
 status: published
 default_locale: zh-CN
+provider: WorkBuddy / 千问办公
 
 skill:
   source_url: featured/market-researcher/skill
@@ -15,7 +16,7 @@ placement:
   order: 13
 
 classification:
-  category: 调研分析
+  category: 信息分析
   tags:
     - 行业研究
     - 竞争分析

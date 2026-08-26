@@ -4,9 +4,11 @@ type: work
 version: 1.0.0
 status: published
 default_locale: zh-CN
+provider: 腾讯 IMA
 
 skill:
   source_url: https://skillhub.cn/skills/ima-skills
+  category: knowledge
   required_version: 1.1.9
 
 placement:
@@ -15,7 +17,7 @@ placement:
   order: 23
 
 classification:
-  category: 知识管理
+  category: 信息分析
   tags:
     - IMA
     - 知识库

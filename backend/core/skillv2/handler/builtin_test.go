@@ -22,7 +22,7 @@ func TestListBuiltinSkillsIncludesTemplatesAndUserInstallState(t *testing.T) {
 	uid := "bsk_demo"
 	useBuiltinCatalog(t, skillbuiltin.Catalog{SchemaVersion: skillbuiltin.CatalogSchemaVersion, Skills: []skillbuiltin.CatalogSkill{{
 		Key: "demo", UID: uid, SourceURL: "https://example.test/demo.zip", ResolvedURL: "https://example.test/demo.zip",
-		Version: "1.0.0", Name: "demo", Description: "demo skill", Category: "research", Content: "# Demo",
+		Version: "1.0.0", Name: "demo", Description: "demo skill", Category: "research", Provider: "WorkBuddy", Content: "# Demo",
 		ArchiveSHA256: strings.Repeat("a", 64), TreeSHA256: strings.Repeat("b", 64), ArchiveSize: 1, PackageFile: "packages/demo.zip",
 	}}})
 	db := testutil.NewTestDB(t)
@@ -51,6 +51,7 @@ func TestListBuiltinSkillsIncludesTemplatesAndUserInstallState(t *testing.T) {
 			Items []struct {
 				UID              string `json:"builtin_skill_uid"`
 				Content          string `json:"content"`
+				Provider         string `json:"provider"`
 				Installed        bool   `json:"installed"`
 				InstalledSkillID string `json:"installed_skill_id"`
 			} `json:"items"`
@@ -64,7 +65,7 @@ func TestListBuiltinSkillsIncludesTemplatesAndUserInstallState(t *testing.T) {
 		t.Fatalf("unexpected builtin list size: %#v", response.Data)
 	}
 	first := response.Data.Items[0]
-	if first.UID != uid || first.Content == "" || !first.Installed || first.InstalledSkillID != "installed_builtin_skill" {
+	if first.UID != uid || first.Content == "" || first.Provider != "WorkBuddy" || !first.Installed || first.InstalledSkillID != "installed_builtin_skill" {
 		t.Fatalf("unexpected first builtin item: %#v", first)
 	}
 }
