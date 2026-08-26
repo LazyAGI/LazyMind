@@ -9,13 +9,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"unicode/utf8"
 
 	skillpackage "lazymind/core/skillv2/skillpackage"
-	"lazymind/core/sourceprovider"
 )
 
 const (
 	CatalogSchemaVersion = 1
+	maxProviderNameRunes = 64
 )
 
 type Catalog struct {
@@ -29,6 +30,17 @@ func (err catalogError) Error() string { return string(err) }
 
 func catalogFailure(format string, args ...any) error {
 	return catalogError(fmt.Sprintf(format, args...))
+}
+
+func NormalizeProvider(raw string) (string, error) {
+	provider := strings.TrimSpace(raw)
+	if strings.ContainsAny(provider, "\r\n\t") {
+		return "", catalogFailure("provider must be a single-line label")
+	}
+	if utf8.RuneCountInString(provider) > maxProviderNameRunes {
+		return "", catalogFailure("provider exceeds %d characters", maxProviderNameRunes)
+	}
+	return provider, nil
 }
 
 type CatalogSkill struct {
@@ -112,7 +124,7 @@ func LoadCatalog(catalogPath string) (Catalog, error) {
 		entry.Name = strings.TrimSpace(entry.Name)
 		entry.Description = strings.TrimSpace(entry.Description)
 		entry.Category = strings.TrimSpace(entry.Category)
-		provider, err := sourceprovider.Normalize(entry.Provider)
+		provider, err := NormalizeProvider(entry.Provider)
 		if err != nil {
 			return Catalog{}, catalogFailure("builtin skill %s: %v", entry.UID, err)
 		}

@@ -8,6 +8,7 @@ from jsonpointer import JsonPointer, JsonPointerException
 from pydantic import AnyHttpUrl, TypeAdapter, ValidationError
 
 from evo.artifact_runtime import ArtifactRef
+from evo.repair_model import EvoModelConfigError, resolve_evo_model
 
 from .schemas import ConfigPatchAction, ConfigValidationIssue
 
@@ -86,9 +87,18 @@ def _semantic_issues(thread_id: str, target: str,
     elif target in {'target_config', 'candidate_config'}:
         issues.extend(_service_config_issues(target, value))
     elif target == 'eval_policy':
-        issues.extend(_role_issues('/judge_llm_config/evo_llm', value.get('judge_llm_config')))
+        if 'judge_llm_config' in value:
+            issues.append(_issue(
+                '/judge_llm_config', 'unknown_field',
+                'eval_policy must use run_config.llm_config',
+            ))
     elif target == 'repair_policy':
-        issues.extend(_role_issues('/llm_config/evo_llm', value.get('llm_config')))
+        for name in ('llm_config', 'mode', 'thread_id'):
+            if name in value:
+                issues.append(_issue(
+                    f'/{name}', 'unknown_field',
+                    f'repair_policy does not support {name}',
+                ))
         namespace = value.get('workspace_namespace')
         if namespace is not None and str(namespace) != thread_id:
             issues.append(_issue(
@@ -114,6 +124,15 @@ def _run_config_issues(thread_id: str,
     for name in ('inputs', 'llm_config'):
         if name in value and not isinstance(value[name], Mapping):
             issues.append(_issue(f'/{name}', 'invalid_type', f'{name} must be an object'))
+    llm_config = value.get('llm_config')
+    if isinstance(llm_config, Mapping):
+        for role in ('llm', 'evo_llm', 'embed_main'):
+            issues.extend(_role_issues(f'/llm_config/{role}', llm_config))
+        if isinstance(llm_config.get('evo_llm'), Mapping):
+            try:
+                resolve_evo_model(llm_config['evo_llm'])
+            except EvoModelConfigError as exc:
+                issues.append(_issue('/llm_config/evo_llm', 'invalid_value', exc.reason))
     return issues
 
 
@@ -141,10 +160,11 @@ def _service_config_issues(target: str,
     for name in ('router_chat_url', 'router_admin_url'):
         if name in value:
             issues.extend(_url_issues(f'/{name}', value[name]))
-    llm_config = value.get('llm_config')
-    if llm_config is not None:
-        for role in ('llm', 'evo_llm', 'embed_main'):
-            issues.extend(_role_issues(f'/llm_config/{role}', llm_config))
+    if 'llm_config' in value:
+        issues.append(_issue(
+            '/llm_config', 'unknown_field',
+            f'{target} must use run_config.llm_config',
+        ))
     algorithm_id = str(value.get('algorithm_id') or '').strip()
     if target == 'candidate_config' and algorithm_id and not algorithm_id.startswith('evo_'):
         issues.append(_issue(

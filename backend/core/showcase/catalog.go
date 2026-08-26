@@ -22,8 +22,8 @@ import (
 	_ "golang.org/x/image/webp"
 	"gopkg.in/yaml.v3"
 
+	skillbuiltin "lazymind/core/skillv2/builtin"
 	skillpackage "lazymind/core/skillv2/skillpackage"
-	"lazymind/core/sourceprovider"
 )
 
 const (
@@ -228,7 +228,7 @@ func LoadSourceDirectory(root string) ([]FeaturedDefinition, error) {
 		if definition.ID != entry.Name() {
 			return nil, definitionFailure("%s id %q must match directory %q", filePath, definition.ID, entry.Name())
 		}
-		provider, err := sourceprovider.Normalize(definition.Provider)
+		provider, err := skillbuiltin.NormalizeProvider(definition.Provider)
 		if err != nil {
 			return nil, definitionFailure("%s: %v", filePath, err)
 		}
@@ -553,7 +553,7 @@ func validateDefinition(definition FeaturedDefinition, compiled bool) error {
 	if definition.Status != StatusDraft && definition.Status != StatusPublished && definition.Status != StatusDisabled {
 		return definitionFailure("invalid status %q", definition.Status)
 	}
-	provider, err := sourceprovider.Normalize(definition.Provider)
+	provider, err := skillbuiltin.NormalizeProvider(definition.Provider)
 	if err != nil {
 		return definitionFailure("invalid provider: %v", err)
 	}

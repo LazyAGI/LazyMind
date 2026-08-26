@@ -25,7 +25,6 @@ import (
 	skillmetadata "lazymind/core/skillv2/metadata"
 	skillpackage "lazymind/core/skillv2/skillpackage"
 	skillpatch "lazymind/core/skillv2/skillpatch"
-	"lazymind/core/sourceprovider"
 	"lazymind/core/workflow/graphengine"
 )
 
@@ -403,7 +402,7 @@ func loadSources(path string) (sourceList, error) {
 			return sourceList{}, bundleFailure("duplicate source URL %s", source)
 		}
 		seenSources[source] = struct{}{}
-		provider, err := sourceprovider.Normalize(entry.Provider)
+		provider, err := skillbuiltin.NormalizeProvider(entry.Provider)
 		if err != nil {
 			return sourceList{}, bundleFailure("source %s: %v", source, err)
 		}
@@ -418,7 +417,7 @@ func loadSources(path string) (sourceList, error) {
 		source.Path = filepath.ToSlash(strings.TrimSpace(source.Path))
 		source.Category = strings.TrimSpace(source.Category)
 		source.Version = strings.TrimSpace(source.Version)
-		provider, err := sourceprovider.Normalize(source.Provider)
+		provider, err := skillbuiltin.NormalizeProvider(source.Provider)
 		if err != nil {
 			return sourceList{}, bundleFailure("bundled skill %d: %v", index, err)
 		}

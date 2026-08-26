@@ -165,19 +165,21 @@ async def assemble_dataset_operation(ctx: OperationContext,
         'case': each(A.EVAL_CASE, over=A.EVAL_CASE_REQUESTS),
         'dataset': one(A.EVAL_DATASET),
         'target_config': one(A.EVAL_TARGET_CONFIG),
+        'config': one(A.RUN_CONFIG),
         'approval': one(A.APPROVAL_DATASET),
     },
     outputs={'answer': partitioned(A.EVAL_RAG_ANSWER)},
     max_concurrency=4,
 )
 async def eval_answer_operation(ctx: OperationContext, case: object,
-                                dataset: object, target_config: object,
+                                dataset: object, target_config: object, config: object,
                                 approval: object
                                 ) -> OperationResult:
     return OperationResult({
         'answer': await async_answer_case(
             _mapping(case, 'case'),
             _mapping(target_config, 'target_config'),
+            _runtime_llm_config(config),
         ),
     })
 
@@ -188,18 +190,20 @@ async def eval_answer_operation(ctx: OperationContext, case: object,
         'case': each(A.EVAL_CASE, over=A.EVAL_CASE_REQUESTS),
         'answer': keyed(A.EVAL_RAG_ANSWER),
         'policy': one(A.EVAL_POLICY),
+        'config': one(A.RUN_CONFIG),
     },
     outputs={'judge': partitioned(A.EVAL_JUDGE_RESULT)},
     max_concurrency=4,
 )
 async def eval_judge_operation(ctx: OperationContext, case: object,
-                               answer: object, policy: object
+                               answer: object, policy: object, config: object
                                ) -> OperationResult:
     return OperationResult({
         'judge': judge_case(
             _mapping(case, 'case'),
             _mapping(answer, 'answer'),
             _mapping(policy, 'policy'),
+            _runtime_llm_config(config),
         ),
     })
 
@@ -382,7 +386,7 @@ async def repair_loop_operation(ctx: OperationContext, plan: object,
             _partition_values(baseline_judges, 'baseline_judges'),
             _mapping(eval_policy, 'eval_policy'),
             _mapping(candidate_config, 'candidate_config'),
-            _mapping(_mapping(config, 'config').get('llm_config'), 'llm_config'),
+            _runtime_llm_config(config),
             _mapping(policy, 'policy'),
             ctx,
             _mapping(plan, 'plan'),
@@ -444,18 +448,22 @@ async def candidate_service_operation(ctx: OperationContext, config: object,
         'case': each(A.EVAL_CASE, over=A.EVAL_CASE_REQUESTS),
         'service': one(A.ABTEST_CANDIDATE_SERVICE),
         'baseline_answer': keyed(A.EVAL_RAG_ANSWER),
+        'config': one(A.RUN_CONFIG),
     },
     outputs={'answer': partitioned(A.ABTEST_CANDIDATE_RAG_ANSWER)},
     max_concurrency=4,
 )
 async def candidate_answer_operation(ctx: OperationContext, case: object,
-                                     service: object, baseline_answer: object
+                                     service: object, baseline_answer: object,
+                                     config: object
                                      ) -> OperationResult:
     service_value = _mapping(service, 'service')
     return OperationResult({
         'answer': _mapping(baseline_answer, 'baseline_answer')
         if service_value.get('service_kind') == BASELINE_NO_CHANGE
-        else await async_candidate_rag_answer(_mapping(case, 'case'), service_value),
+        else await async_candidate_rag_answer(
+            _mapping(case, 'case'), service_value, _runtime_llm_config(config),
+        ),
     })
 
 
@@ -467,13 +475,15 @@ async def candidate_answer_operation(ctx: OperationContext, case: object,
         'policy': one(A.EVAL_POLICY),
         'service': one(A.ABTEST_CANDIDATE_SERVICE),
         'baseline_judge': keyed(A.EVAL_JUDGE_RESULT),
+        'config': one(A.RUN_CONFIG),
     },
     outputs={'judge': partitioned(A.ABTEST_CANDIDATE_JUDGE_RESULT)},
     max_concurrency=4,
 )
 async def candidate_judge_operation(ctx: OperationContext, case: object,
                                     answer: object, policy: object,
-                                    service: object, baseline_judge: object
+                                    service: object, baseline_judge: object,
+                                    config: object
                                     ) -> OperationResult:
     service_value = _mapping(service, 'service')
     return OperationResult({
@@ -483,6 +493,7 @@ async def candidate_judge_operation(ctx: OperationContext, case: object,
             _mapping(case, 'case'),
             _mapping(answer, 'answer'),
             _mapping(policy, 'policy'),
+            _runtime_llm_config(config),
         ),
     })
 
@@ -573,6 +584,11 @@ def _partition_values(value: object, name: str) -> tuple[Mapping[str, Any], ...]
     if not all(isinstance(item, Mapping) for item in values):
         raise ValueError(f'{name} must contain mappings')
     return values
+
+
+def _runtime_llm_config(config: object) -> Mapping[str, Any]:
+    run_config = _mapping(config, 'config')
+    return _mapping(run_config.get('llm_config'), 'config.llm_config')
 
 
 __all__ = [

@@ -62,14 +62,16 @@ def judge_case(
     case: Mapping[str, Any],
     rag_answer: Mapping[str, Any],
     policy: Mapping[str, Any],
+    llm_config: Mapping[str, Any],
 ) -> dict[str, Any]:
     try:
-        return validate_judge_result(judge_answer(case, rag_answer, policy))
+        return validate_judge_result(judge_answer(case, rag_answer, policy, llm_config))
     except Exception as exc:
         return validate_judge_result(judge_contract_error(case, rag_answer, policy, str(exc)))
 
 
-def judge_answer(case: Mapping[str, Any], rag_answer: Mapping[str, Any], policy: Mapping[str, Any]) -> dict[str, Any]:
+def judge_answer(case: Mapping[str, Any], rag_answer: Mapping[str, Any],
+                 policy: Mapping[str, Any], llm_config: Mapping[str, Any]) -> dict[str, Any]:
     base = {
         'case_id': str(case.get('id') or rag_answer.get('case_id') or ''),
         'case': dict(case),
@@ -99,9 +101,8 @@ def judge_answer(case: Mapping[str, Any], rag_answer: Mapping[str, Any], policy:
         return _failure(base, failure, f'{error.get("type")}: {reason}' if error.get('type') else reason)
 
     try:
-        llm_config = policy.get('judge_llm_config') if isinstance(policy.get('judge_llm_config'), Mapping) else {}
         if not isinstance(llm_config.get('evo_llm'), Mapping):
-            raise ValueError('eval.policy.judge_llm_config.evo_llm missing; eval must use core model-config injection')
+            raise ValueError('run_config.llm_config.evo_llm missing; eval must use core model-config injection')
         client = LazyLLMClient(llm_config=llm_config, model='evo_llm')
         prompt = _prompt(case, rag_answer, policy)
         error: Exception | None = None

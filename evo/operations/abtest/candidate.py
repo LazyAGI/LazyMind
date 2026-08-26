@@ -230,18 +230,21 @@ def finalize_candidate(service: Mapping[str, Any], comparison: Mapping[str, Any]
         raise
 
 
-def candidate_rag_answer(case: Mapping[str, Any], service: Mapping[str, Any]) -> dict[str, Any]:
+def candidate_rag_answer(case: Mapping[str, Any], service: Mapping[str, Any],
+                         llm_config: Mapping[str, Any]) -> dict[str, Any]:
     failure, target_config = _candidate_answer_target(case, service)
-    return failure if failure is not None else answer_case(case, target_config)
+    return failure if failure is not None else answer_case(case, target_config, llm_config)
 
 
 async def async_candidate_rag_answer(case: Mapping[str, Any],
-                                     service: Mapping[str, Any]
+                                     service: Mapping[str, Any],
+                                     llm_config: Mapping[str, Any],
                                      ) -> dict[str, Any]:
     failure, target_config = _candidate_answer_target(case, service)
     return failure if failure is not None else await async_answer_case(
         case,
         target_config,
+        llm_config,
     )
 
 

@@ -378,9 +378,8 @@ def _accept_payload(
     state.frames.append(frame)
 
     code = frame['code']
-    status = str(data.get('status') or '').upper()
-    if _code_failed(code) or status == 'FAILED':
-        message = frame.get('msg') or data.get('message') or status or f'code={code}'
+    if _code_failed(code):
+        message = frame.get('msg') or data.get('message') or f'code={code}'
         return _failed(state, target, 'chat_business_error', str(message))
 
     _extend_sources(state.sources, data.get('sources'))
@@ -399,9 +398,6 @@ def _accept_payload(
             return _normalize(target, state)
         return _failed(state, target, terminal.error_type, terminal.error_message)
 
-    if status == 'FINISHED':
-        state.finished = True
-        return _normalize(target, state)
     return None
 
 
