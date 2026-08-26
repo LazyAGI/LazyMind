@@ -13,9 +13,9 @@ from lazymind.chat.engine.attachment_reader import (
     is_chat_text_file,
     parse_attachment_content,
 )
-from lazymind.chat.engine.tools.attachment_edit import (
+from lazymind.chat.engine.tools.infra import tool_success
+from lazymind.chat.engine.tools.local_file.attachment_edit import (
     AttachmentEditDraft,
-    effective_attachment_path,
 )
 
 from lazymind.chat.service.utils.static_file_url import (
@@ -247,7 +247,8 @@ def _save_artifact(key: str, value: Any, content_type: str = 'text',
                    source_tool: Optional[str] = None,
                    sort_order: Optional[int] = None,
                    caption: Optional[str] = None,
-                   *, internal_publish: bool = False) -> Dict[str, Any]:
+                   *, internal_publish: bool = False,
+                   publisher_list_index: Optional[int] = None) -> Dict[str, Any]:
     """Save one output artifact produced by this SubAgent.
 
     File-type values must be local absolute paths; the framework copies them into the
@@ -327,9 +328,22 @@ def _save_artifact(key: str, value: Any, content_type: str = 'text',
     built, actual_ct = _build_artifact_value(value, ct)
     if source_tool:
         built['_source_tool'] = str(source_tool)
+    # A package publisher may already have resolved the durable list index from
+    # one consistent order snapshot. This avoids races when it emits several
+    # ordered artifacts in one tool call before Core has processed the earlier
+    # events. Model-facing callers must continue to use sort_order.
+    if publisher_list_index is not None:
+        if not internal_publish:
+            raise ToolExecutionError(
+                'publisher_list_index is reserved for package publisher tools.',
+            )
+        if int(publisher_list_index) < 0:
+            raise ToolExecutionError('publisher_list_index must be >= 0.')
+        built['list_index'] = int(publisher_list_index)
+
     # Translate sort_order → list_index via Go core API.
     out_of_range_warning: Optional[str] = None
-    if sort_order is not None:
+    if sort_order is not None and publisher_list_index is None:
         list_index, resolve_err = _resolve_list_index_from_sort_order(key, sort_order)
         if list_index is not None:
             built['list_index'] = list_index
@@ -1125,112 +1139,22 @@ def _resolve_attachment(
     filename: str,
     turn: Optional[int] = None,
 ) -> tuple[Optional[str], Optional[str]]:
-    """Shared file-resolution logic for read_user_attachment and find_user_attachment.
-
-    Returns (abs_path, error_message). On success, error_message is None.
-    On failure, abs_path is None.
-
-    Matching rules:
-    - If turn is provided, only look in that turn's files.
-    - If turn is omitted, search from newest turn to oldest (current first).
-    - Within a turn, files are deduped: duplicates are addressed as
-      report-1.pdf, report-2.pdf, etc. The display_name must match the
-      deduplicated name shown in the context prompt.
-    """
-    try:
-        import lazyllm
-        cfg: Dict[str, Any] = {}
-        try:
-            cfg = lazyllm.globals.get('agentic_config') or {}
-        except Exception:
-            pass
-        files: List[str] = cfg.get('files') or []
-        history_files_per_turn: Dict[str, List[str]] = cfg.get('history_files_per_turn') or {}
-    except Exception:
-        return None, 'Could not read agentic_config.'
-
-    if not files and not history_files_per_turn:
-        return None, 'No attached files found in this conversation.'
-
-    def _display_name(path: str) -> str:
-        raw = str(path or '')
-        if raw.lower().startswith(('http://', 'https://')):
-            parsed = urlparse(raw)
-            base = os.path.basename(parsed.path)
-            return base or raw
-        return os.path.basename(raw)
-
-    def _dedupe_turn(paths: List[str]) -> List[tuple[str, str]]:
-        """Return (display_name, abs_path) pairs with intra-turn dedup (no size)."""
-        seen: Dict[str, int] = {}
-        result: List[tuple[str, str]] = []
-        for path in paths:
-            base = _display_name(path)
-            name_no_ext, ext = os.path.splitext(base)
-            if base not in seen:
-                seen[base] = 0
-                display = base
-            else:
-                seen[base] += 1
-                display = f'{name_no_ext}-{seen[base]}{ext}'
-            result.append((display, path))
-        return result
-
-    target = filename.strip()
-
-    def _match_in_turn(paths: List[str]) -> Optional[str]:
-        pairs = _dedupe_turn(paths)
-        for display_name, abs_path in pairs:
-            if display_name == target or abs_path.endswith(target) or target in abs_path:
-                return abs_path
-        return None
-
-    if turn is not None:
-        turn_key = str(turn)
-        turn_paths = history_files_per_turn.get(turn_key) or []
-        # Fallback: filter files list by turn position is unreliable; use per-turn map only.
-        if not turn_paths:
-            return None, f'No files found for turn {turn}.'
-        matched = _match_in_turn(turn_paths)
-        if matched:
-            return matched, None
-        available = [os.path.basename(p) for p in turn_paths]
-        return None, (
-            f"File '{target}' not found in turn {turn}. "
-            f"Available: {', '.join(available)}"
-        )
-
-    # Search without turn: newest turn first (descending seq).
-    all_seqs = sorted(
-        (int(k) for k in history_files_per_turn if k.isdigit()),
-        reverse=True,
-    )
-    for seq in all_seqs:
-        paths = history_files_per_turn.get(str(seq)) or []
-        matched = _match_in_turn(paths)
-        if matched:
-            return matched, None
-
-    # Final fallback: scan the merged files list for partial match
-    for path in files:
-        if os.path.basename(path) == target or path.endswith(target) or target in path:
-            return path, None
-
-    all_names = [os.path.basename(p) for p in files]
-    return None, (
-        f"File '{target}' not found in attached files. "
-        f"Available: {', '.join(all_names)}"
+    """Compatibility wrapper around the shared attachment resolver."""
+    from lazymind.chat.engine.tools.local_file.resolver import resolve_attachment_path
+    return resolve_attachment_path(
+        filename,
+        turn,
+        allow_partial=True,
+        prefer_newest=True,
     )
 
 
 def read_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str, Any]:
-    """Extract text from a user-uploaded attachment (on demand only).
+    """Compatibility reader for one user-uploaded attachment.
 
-    Documents (pdf/doc/docx/pptx): OCR reader. Plain-text files: direct UTF-8 read.
-    Images: vision-model text description.
-    Do NOT call this just because a file is attached. For images used in visual tasks
-    (edit, workflow, image_generator), use find_user_attachment for path/url instead.
-    Call this when the user needs document text or a textual summary of image content.
+    Prefer grep(target, pattern) and read_file(target, offset, limit) for PDF,
+    text, and Office content. This transition tool delegates those formats to
+    the same resolver. Images still return a vision-model text description.
 
     Args:
         filename (str): The filename (basename) or display name of the attachment to read.
@@ -1241,7 +1165,7 @@ def read_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
             Omit to search from the current turn first, then historical turns newest-first.
 
     Returns:
-        Parsed text content for supported documents and images.
+        The legacy attachment envelope with bounded text and continuation metadata.
     """
     matched, err = _resolve_attachment(filename, turn)
     if err:
@@ -1260,29 +1184,45 @@ def read_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
                 'Supported: images, Office/PDF documents, and common plain-text files.'
             )
         )
-
     try:
-        import lazyllm
-        cfg: Dict[str, Any] = lazyllm.globals.get('agentic_config') or {}
-        priority = int(cfg.get('priority') or 0)
-        read_path = effective_attachment_path(matched) if is_chat_text_file(matched) else matched
-        content = parse_attachment_content(read_path, priority=priority)
-    except Exception as exc:
+        if is_chat_image_file(matched):
+            import lazyllm
+            cfg: Dict[str, Any] = lazyllm.globals.get('agentic_config') or {}
+            content = parse_attachment_content(
+                matched,
+                priority=int(cfg.get('priority') or 0),
+            )
+            return tool_success('read_user_attachment', {
+                'status': 'ok',
+                'filename': os.path.basename(matched),
+                'path': matched,
+                'kind': 'image',
+                'content': content,
+            })
+        from lazymind.chat.engine.tools.local_file.workspace import read_file
+        unified = read_file(matched, turn=turn)
+        if not unified.get('success'):
+            reason = (unified.get('error') or {}).get('reason') or 'unknown read error'
+            raise ValueError(reason)
+        payload = unified['result']
+    except Exception as e:
         raise ToolExecutionError(
-            f"Could not parse attachment '{os.path.basename(matched)}': {type(exc).__name__}: {exc}"
-        ) from exc
+            f"Could not parse '{os.path.basename(matched)}': {e}"
+        ) from e
 
-    kind = 'image' if is_chat_image_file(matched) else (
-        'text' if is_chat_text_file(matched) else 'document'
-    )
-
-    return {
+    return tool_success('read_user_attachment', {
         'status': 'ok',
         'filename': os.path.basename(matched),
         'path': matched,
-        'kind': kind,
-        'content': content,
-    }
+        'kind': 'text' if is_chat_text_file(matched) else 'document',
+        'content': payload.get('text', ''),
+        'offset': payload.get('offset'),
+        'end_line': payload.get('end_line'),
+        'total_lines': payload.get('total_lines'),
+        'eof': payload.get('eof'),
+        'next_offset': payload.get('next_offset'),
+        'footer': payload.get('footer'),
+    })
 
 
 def _publish_attachment_edit(draft: AttachmentEditDraft) -> Dict[str, Any]:
@@ -1465,7 +1405,18 @@ def find_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
         result['url'] = matched
         if not is_remote:
             result['message'] = 'Signed URL unavailable; use the local path instead.'
-    return result
+    if str(matched).split('?', 1)[0].lower().endswith('.pdf'):
+        try:
+            from lazymind.chat.engine.tools.local_file.store import FileResourceStore, workspace_for_request
+            store = FileResourceStore(workspace_for_request())
+            manifest = store.find_by_source_path(matched) or store.find_by_display_name(
+                result['filename']
+            )
+            if manifest:
+                result['file_id'] = manifest.get('file_id')
+        except Exception:
+            pass
+    return tool_success('find_user_attachment', result)
 
 
 def find_artifact(slot: str, sort_order: Optional[int] = None) -> Dict[str, Any]:

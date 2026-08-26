@@ -251,6 +251,22 @@ def test_subagent_plan_uses_200_rounds_in_max_mode(tmp_path):
     assert plan.execution_options.max_retries == 199
 
 
+def test_subagent_plan_forwards_llm_config_for_context_budget(tmp_path):
+    from lazymind.chat.engine.subagent.context import SubAgentContext
+
+    ctx = SubAgentContext(
+        task_id='task-budget', conversation_id='conv-1', agent_type='workflow_step',
+        objective='retrieve literature', params={}, workspace_path=str(tmp_path),
+        input_slots=[], output_slots=[], db=None, emit=lambda _event: None,
+    )
+    llm_config = {'llm': {'source': 'deepseek', 'model': 'deepseek-v4-flash', 'max_input_tokens': '1M'}}
+    plan = runner_mod._build_subagent_plan(
+        ctx, None, tools=[], tool_prompt_appendices={}, llm_config=llm_config,
+    )
+
+    assert plan.execution_options.llm_config == llm_config
+
+
 # ---------------------------------------------------------------------------
 # Test: task not found
 # ---------------------------------------------------------------------------
@@ -451,13 +467,40 @@ def test_rebuild_history_valid_pairs():
         {'task_id': 't1', 'seq': 0, 'role': 'assistant',
          'content': {'text': '', 'tool_calls': [{'id': 'c1', 'name': 'tool_a', 'args': {}}]}},
         {'task_id': 't1', 'seq': 1, 'role': 'tool',
-         'content': {'tool_results': [{'tool_call_id': 'c1', 'name': 'tool_a', 'result': 'res'}]}},
+         'content': {'tool_results': [{
+             'tool_call_id': 'c1',
+             'name': 'tool_a',
+             'result': {'path': '/tmp/result.txt', 'offset': 4},
+         }]}},
     ]
     history = runner_mod._rebuild_history_from_steps(db, 't1')
     assert len(history) == 2
     assert history[0]['role'] == 'assistant'
     assert history[1]['role'] == 'tool'
     assert history[1]['tool_call_id'] == 'c1'
+    assert history[1][runner_mod.TOOL_OBSERVATION_KEY] == {
+        'version': 1,
+        'ok': None,
+        'value': {'path': '/tmp/result.txt', 'offset': 4},
+        'error': '',
+    }
+
+
+def test_rebuild_history_skips_observation_for_string_tool_results():
+    db = FakeDB()
+    db.steps = [
+        {'task_id': 't1', 'seq': 0, 'role': 'assistant',
+         'content': {'text': '', 'tool_calls': [{'id': 'c1', 'name': 'tool_a', 'args': {}}]}},
+        {'task_id': 't1', 'seq': 1, 'role': 'tool',
+         'content': {'tool_results': [{
+             'tool_call_id': 'c1',
+             'name': 'tool_a',
+             'result': 'plain tool output',
+         }]}},
+    ]
+    history = runner_mod._rebuild_history_from_steps(db, 't1')
+    assert history[1]['content'] == 'plain tool output'
+    assert runner_mod.TOOL_OBSERVATION_KEY not in history[1]
 
 
 def test_rebuild_history_orphan_tool_result_dropped():

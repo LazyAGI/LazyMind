@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ipaddress
+import os
 import socket
 from typing import Any, Dict, List
 from urllib.parse import urljoin, urlparse
@@ -101,6 +102,19 @@ def decode_response_text(response: requests.Response) -> str:
         return response.content.decode('utf-8', errors='replace')
 
 
+def _response_media_type(response: requests.Response) -> str:
+    content_type = str(response.headers.get('Content-Type') or '').lower()
+    return content_type.split(';', 1)[0].strip()
+
+
+def _looks_like_pdf(response: requests.Response, url: str) -> bool:
+    media_type = _response_media_type(response)
+    if media_type == 'application/pdf':
+        return True
+    path = urlparse(url).path.lower()
+    return path.endswith('.pdf') and media_type in {'', 'application/octet-stream', 'binary/octet-stream'}
+
+
 def fetch_public_url(
     session: requests.Session,
     url: str,
@@ -109,6 +123,7 @@ def fetch_public_url(
     headers: Dict[str, str],
 ) -> requests.Response:
     current_url = validate_public_http_url(url)
+    pdf_max = coerce_web_int(_cfg['url_fetch_pdf_max_bytes'], 100 * 1024 * 1024)
     for _ in range(_MAX_REDIRECTS + 1):
         response = session.get(
             current_url,
@@ -119,7 +134,8 @@ def fetch_public_url(
         )
 
         if not response.is_redirect:
-            read_limited_response(response)
+            limit = pdf_max if _looks_like_pdf(response, current_url) else _MAX_FETCH_BYTES
+            read_limited_response(response, max_bytes=limit)
             return response
 
         location = response.headers.get('Location')
@@ -180,6 +196,59 @@ def _truncate_page_content(content: str, max_chars: int) -> tuple[str, bool]:
     return content[:max(0, max_chars - len(suffix))] + suffix, True
 
 
+def _ingest_fetched_pdf(
+    response: requests.Response,
+    *,
+    normalized_url: str,
+    final_url: str,
+    content_type: str,
+    truncated: bool,
+) -> Dict[str, Any]:
+    if truncated:
+        raise ValueError('pdf exceeds the url_fetch download size limit')
+    from pathlib import Path
+    from urllib.parse import unquote
+
+    from lazymind.chat.engine.tools.local_file.ingest import ingest_pdf_file
+
+    name = Path(unquote(urlparse(final_url).path)).name or 'download.pdf'
+    if not name.lower().endswith('.pdf'):
+        name = f'{name}.pdf'
+    import tempfile
+    with tempfile.NamedTemporaryFile(suffix='.pdf', delete=False) as tmp:
+        tmp.write(response.content or b'')
+        tmp_path = tmp.name
+    try:
+        manifest = ingest_pdf_file(
+            tmp_path,
+            source='web',
+            source_url=final_url,
+            display_name=name,
+        )
+    finally:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+    return {
+        'status': 'ok',
+        'source_status': 'pdf_ingested',
+        'url': normalized_url,
+        'final_url': final_url,
+        'status_code': response.status_code,
+        'content_type': content_type,
+        'title': name,
+        'content': '',
+        'content_truncated': False,
+        'links': [],
+        'file_id': manifest.get('file_id'),
+        'display_name': manifest.get('display_name'),
+        'pages': manifest.get('pages'),
+        'parse_status': manifest.get('parse_status'),
+        'parse_error': manifest.get('parse_error'),
+    }
+
+
 def fetch_url_content(url: str) -> Dict[str, Any]:
     normalized_url = absolute_url(url)
     if not normalized_url:
@@ -210,6 +279,14 @@ def fetch_url_content(url: str) -> Dict[str, Any]:
     media_type = content_type.split(';', 1)[0].strip()
     is_html = media_type in {'text/html', 'application/xhtml+xml'}
     is_text = media_type.startswith('text/') or media_type in _TEXT_CONTENT_TYPES
+    if _looks_like_pdf(response, final_url):
+        return _ingest_fetched_pdf(
+            response,
+            normalized_url=normalized_url,
+            final_url=final_url,
+            content_type=content_type,
+            truncated=response_truncated,
+        )
     if not is_html and not is_text:
         display_content_type = media_type or 'unknown'
         raise ValueError(f'unsupported url content type: {display_content_type}')

@@ -15,11 +15,20 @@ from lazyllm.tools.agent import (
 from lazyllm.tools.agent.base import _write_agent_data
 from lazyllm.tools.agent.file_tool import (
     list_dir as _list_dir,
-    read_file as _read_file,
     write_file as _write_file,
 )
 
 from lazymind.config import config as _cfg
+from .resolver import resolve_text_target
+from .window import (
+    RESULT_BYTE_BUDGET,
+    grep_lines,
+    load_text_lines,
+    read_lines_window,
+    utf8_size,
+)
+from lazymind.chat.engine.tools.infra import handle_tool_errors, tool_success
+
 _MAX_ARTIFACT_BYTES = 2 * 1024 * 1024
 _CHAT_FILE_DIRECTORY = 'chat-artifacts'
 
@@ -280,35 +289,123 @@ def write_file(
     )
 
 
+@handle_tool_errors
 def read_file(
-    path: str,
-    start_line: Optional[int] = None,
-    end_line: Optional[int] = None,
-    encoding: str = 'utf-8',
-    errors: str = 'replace',
-    max_chars: int = 200000,
+    target: str,
+    offset: int = 1,
+    limit: int = 2000,
+    turn: Optional[int] = None,
 ) -> Dict[str, Any]:
-    """Read a text file from the current chat workspace or an allowed host path.
+    """Read text from a PDF resource, attachment, or chat-workspace file.
+
+    Large files are always windowed by a UTF-8 byte budget. The footer is the
+    only EOF signal: continue with next_offset when present; stop at End of file.
+    After grep, pass offset near the hit line to inspect surrounding context.
 
     Args:
-        path: Workspace-relative path. In trusted local mode, absolute host paths are also allowed.
-        start_line: Optional 1-based first line.
-        end_line: Optional 1-based last line.
-        encoding: Text encoding.
-        errors: Decode error handling.
-        max_chars: Maximum returned characters.
+        target: A file resource id, unique attachment name, or workspace path.
+        offset: 1-based first line (default 1).
+        limit: Maximum lines to return (default 2000, max 4000).
+        turn: Optional 1-based conversation turn used to disambiguate attachments.
     """
-    user_id, conversation_id = _current_artifact_scope()
-    workspace, source = _resolve_workspace_path(path, user_id, conversation_id)
-    return _read_file(
-        source,
-        start_line=start_line,
-        end_line=end_line,
-        encoding=encoding,
-        errors=errors,
-        root=_file_tool_root(workspace),
-        max_chars=max_chars,
+    resolved = resolve_text_target(target, turn=turn)
+    payload = read_lines_window(
+        load_text_lines(resolved.path),
+        offset=offset,
+        limit=limit,
     )
+    payload.update({
+        'target': target,
+        'display_name': resolved.display_name,
+        'kind': resolved.kind,
+    })
+    if resolved.file_id:
+        payload['file_id'] = resolved.file_id
+    return tool_success('read_file', payload)
+
+
+@handle_tool_errors
+def grep(
+    target: str,
+    pattern: str,
+    max_results: int = 50,
+    turn: Optional[int] = None,
+) -> Dict[str, Any]:
+    """Search a PDF resource, attachment, or chat-workspace path.
+
+    After a hit, call read_file with offset near that line for surrounding
+    context. Do not treat grep snippets as the full file.
+
+    Args:
+        target: A file resource id, unique attachment name, or workspace path.
+        pattern: Literal substring or regular expression.
+        max_results: Maximum matches (default 50).
+        turn: Optional 1-based conversation turn used to disambiguate attachments.
+    """
+    resolved = resolve_text_target(target, allow_directory=True, turn=turn)
+    files: list[str] = []
+    if os.path.isfile(resolved.path):
+        files = [resolved.path]
+    elif os.path.isdir(resolved.path):
+        for root, _dirs, names in os.walk(resolved.path):
+            for name in names:
+                files.append(os.path.join(root, name))
+                if len(files) >= 200:
+                    break
+            if len(files) >= 200:
+                break
+    else:
+        raise ValueError('target must be an existing text file or workspace directory')
+    matches: list = []
+    remaining = max(1, min(int(max_results or 50), 200))
+    truncated = False
+    total = 0
+    result_bytes = 0
+    for file_path in files:
+        if str(file_path).lower().endswith('.pdf'):
+            continue
+        try:
+            text_lines = load_text_lines(file_path)
+        except (OSError, ValueError):
+            continue
+        found = grep_lines(text_lines, pattern, max_results=remaining)
+        total += int(found.get('total') or 0)
+        rel = os.path.relpath(file_path, resolved.workspace).replace('\\', '/')
+        for item in found.get('matches') or []:
+            match_target = target if len(files) == 1 else rel
+            added_bytes = utf8_size(str(item.get('text') or '')) + utf8_size(match_target) + 32
+            if matches and result_bytes + added_bytes > RESULT_BYTE_BUDGET:
+                truncated = True
+                remaining = 0
+                break
+            matches.append({'target': match_target, **item})
+            result_bytes += added_bytes
+            remaining -= 1
+            if remaining <= 0:
+                truncated = True
+                break
+        if remaining <= 0:
+            break
+        if found.get('truncated'):
+            truncated = True
+    return tool_success('grep', {
+        'pattern': pattern,
+        'target': target,
+        'display_name': resolved.display_name,
+        'kind': resolved.kind,
+        'total': total,
+        'truncated': truncated or total > len(matches),
+        'matches': matches,
+        'footer': (
+            'No matches.'
+            if total == 0
+            else f'Showing {len(matches)} of {total} matching lines.'
+        ),
+        'hint': (
+            'After a hit, call read_file(target, offset=max(1, line-20), limit=80) '
+            'for surrounding context. Read footers decide EOF, not document headings.'
+        ),
+    })
 
 
 def list_dir(path: str = '.', recursive: bool = False, max_depth: int = 5) -> Dict[str, Any]:

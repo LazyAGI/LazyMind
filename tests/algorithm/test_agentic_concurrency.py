@@ -14,7 +14,6 @@ from lazymind.chat.service import chat_service
 
 DISABLED_TOOLS_EXCEPT_CALCULATOR = [
     'kb',
-    'temp_kb',
     'wikipedia',
     'arxiv',
     'sciverse',
@@ -67,6 +66,14 @@ class _FakeAgent:
 
     def _prepare_tool_context(self, _query, _history):
         return None
+
+    def _model_facing_prefix(self):
+        return {
+            'system_prompt': '',
+            'tool_definitions': [],
+            'skills_prompt': '',
+            'skill_prompt_parts': [],
+        }
 
     def set_stop_tools(self, stop_tools):
         self.stop_tools = stop_tools

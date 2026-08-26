@@ -9,17 +9,22 @@ Framework tools reused from Chat (declare in state.yml step tools):
 Always available on every workflow step (no declaration needed):
   - find_user_attachment / read_user_attachment — locate user uploads
 
-image_search_tool searches the web for reference image URLs.
+image_search_and_validate searches and validates web image URLs in one call.
+image_search_tool remains available for compatibility and returns candidates only.
 validate_image_ref probes URL/path accessibility without downloading the full file.
 """
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from io import BytesIO
+import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, List, Tuple
+from typing import Any, List, Optional, Tuple
+import unicodedata
 import uuid
+from urllib.parse import urlparse
 
 import requests
 from lazyllm.tools.tools.search import (
@@ -45,14 +50,13 @@ _SEARCH_ENGINES = [
     TavilySearch(),
 ]
 
-_IMAGE_URL_KEYS = (
-    'contentUrl', 'content_url', 'imageUrl', 'image_url',
-    'thumbnailUrl', 'thumbnail_url', 'src', 'url',
-)
-
 _PROBE_BYTES = 8192
+_MAX_PROBE_BYTES = 2 * 1024 * 1024
 _PROBE_TIMEOUT = 20
+_VALIDATION_WORKERS = 6
 _USER_AGENT = 'Mozilla/5.0 (compatible; LazyMind/1.0; image-probe)'
+
+_DIRECT_IMAGE_EXTENSIONS = frozenset({'.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp'})
 
 _DEFAULT_CAPTION_BOX = (0.15, 0.75, 0.85, 0.93)
 _CJK_FONT_CANDIDATES = (
@@ -77,28 +81,52 @@ def _pick_search_engine():
     return None
 
 
+def _is_http_url(value: str) -> bool:
+    return str(value or '').strip().lower().startswith(('http://', 'https://'))
+
+
 def _is_image_url(value: str) -> bool:
-    lower = value.lower()
-    if not (lower.startswith('http://') or lower.startswith('https://')):
+    raw = str(value or '').strip()
+    if not _is_http_url(raw):
         return False
-    for ext in ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'):
-        if ext in lower:
-            return True
-    return any(token in lower for token in ('image', 'img', 'photo', 'pic'))
+    try:
+        suffix = Path(urlparse(raw).path).suffix.lower()
+    except ValueError:
+        return False
+    # Search result pages frequently contain words such as ``photo`` or
+    # ``image`` but return HTML. Only accept URL paths that actually identify a
+    # supported raster file; signed query parameters are deliberately ignored
+    # for classification and preserved in the returned URL.
+    return suffix in _DIRECT_IMAGE_EXTENSIONS
 
 
-def _collect_image_urls(node: Any, out: List[str], seen: set) -> None:
-    if isinstance(node, dict):
-        for key in _IMAGE_URL_KEYS:
-            raw = node.get(key)
-            if isinstance(raw, str) and _is_image_url(raw) and raw not in seen:
-                seen.add(raw)
-                out.append(raw)
-        for value in node.values():
-            _collect_image_urls(value, out, seen)
+def _collect_image_urls(
+    node: Any,
+    out: List[str],
+    seen: set,
+    image_context: bool = False,
+) -> None:
+    if isinstance(node, str):
+        candidate = node.strip()
+        if (
+            _is_http_url(candidate)
+            and (image_context or _is_image_url(candidate))
+            and candidate not in seen
+        ):
+            seen.add(candidate)
+            out.append(candidate)
+    elif isinstance(node, dict):
+        for key, value in node.items():
+            normalized_key = str(key).replace('_', '').lower()
+            child_image_context = image_context or (
+                'image' in normalized_key
+                or 'thumbnail' in normalized_key
+                or normalized_key in {'contenturl', 'src'}
+            )
+            _collect_image_urls(value, out, seen, child_image_context)
     elif isinstance(node, list):
         for item in node:
-            _collect_image_urls(item, out, seen)
+            _collect_image_urls(item, out, seen, image_context)
 
 
 def _bocha_image_urls(query: str, count: int = 5) -> List[str]:
@@ -140,7 +168,7 @@ def _tavily_image_urls(query: str, count: int = 5) -> List[str]:
         images = extra.get('images') or []
         if isinstance(images, list):
             for img in images:
-                if isinstance(img, str) and _is_image_url(img) and img not in seen:
+                if isinstance(img, str) and _is_http_url(img) and img not in seen:
                     seen.add(img)
                     urls.append(img)
     return urls[:count]
@@ -185,39 +213,53 @@ def _reject_content_type(content_type: str) -> None:
 
 def _probe_remote_image(url: str) -> Tuple[str, int, int, str]:
     headers = {'User-Agent': _USER_AGENT}
-    head = requests.head(
+    get_headers = {**headers, 'Range': f'bytes=0-{_MAX_PROBE_BYTES - 1}'}
+    resp = requests.get(
         url,
-        headers=headers,
+        headers=get_headers,
         timeout=_PROBE_TIMEOUT,
+        stream=True,
         allow_redirects=True,
     )
-    if head.status_code >= 400 or head.status_code == 405:
-        get_headers = {**headers, 'Range': f'bytes=0-{_PROBE_BYTES - 1}'}
+    if resp.status_code == 416:
+        resp.close()
         resp = requests.get(
             url,
-            headers=get_headers,
+            headers=headers,
             timeout=_PROBE_TIMEOUT,
             stream=True,
             allow_redirects=True,
         )
-    else:
-        head.raise_for_status()
-        _reject_content_type(head.headers.get('Content-Type', ''))
-        get_headers = {**headers, 'Range': f'bytes=0-{_PROBE_BYTES - 1}'}
-        resp = requests.get(
-            url,
-            headers=get_headers,
-            timeout=_PROBE_TIMEOUT,
-            stream=True,
-            allow_redirects=True,
-        )
-    resp.raise_for_status()
-    _reject_content_type(resp.headers.get('Content-Type', ''))
-    data = b''.join(resp.iter_content(1024))
-    if not _looks_like_image_bytes(data):
-        raise ValueError('response body is not a recognizable image')
-    width, height, fmt = _probe_image_dimensions(data)
-    return url, width, height, fmt
+    try:
+        resp.raise_for_status()
+        _reject_content_type(resp.headers.get('Content-Type', ''))
+        data = bytearray()
+        width, height, fmt = 0, 0, 'UNKNOWN'
+        for chunk in resp.iter_content(16 * 1024):
+            if not chunk:
+                continue
+            remaining = _MAX_PROBE_BYTES - len(data)
+            if remaining <= 0:
+                break
+            data.extend(chunk[:remaining])
+            if len(data) >= _PROBE_BYTES and _looks_like_image_bytes(data):
+                try:
+                    width, height, fmt = _probe_image_dimensions(bytes(data))
+                    break
+                except Exception:
+                    # Some JPEGs carry large metadata blocks before the frame
+                    # header. Continue incrementally instead of treating the
+                    # first 8 KiB as a definitive truncated-file failure.
+                    pass
+            if len(data) >= _MAX_PROBE_BYTES:
+                break
+        if not _looks_like_image_bytes(data):
+            raise ValueError('response body is not a recognizable image')
+        if not width or not height:
+            width, height, fmt = _probe_image_dimensions(bytes(data))
+        return str(resp.url or url), width, height, fmt
+    finally:
+        resp.close()
 
 
 def _resolve_local_file(path: str) -> str:
@@ -254,6 +296,35 @@ def _format_result(ok: bool, **fields: Any) -> str:
     return '\n'.join(lines)
 
 
+def _validate_image_candidate(url: str) -> dict[str, Any]:
+    raw = str(url or '').strip()
+    if not raw:
+        return {'status': 'invalid', 'url': raw, 'reason': 'url is required'}
+    try:
+        if raw.startswith(('http://', 'https://')):
+            ref, width, height, fmt = _probe_remote_image(raw)
+        else:
+            ref, width, height, fmt = _probe_local_image(raw)
+        result: dict[str, Any] = {
+            'status': 'ok',
+            'original_url': raw,
+            'url': ref,
+        }
+        if width and height:
+            result['width'] = width
+            result['height'] = height
+        if fmt != 'UNKNOWN':
+            result['format'] = fmt
+        return result
+    except Exception as exc:
+        return {
+            'status': 'invalid',
+            'original_url': raw,
+            'url': raw,
+            'reason': str(exc),
+        }
+
+
 def validate_image_ref(url: str) -> str:
     """Probe whether an image URL or path is accessible — no full download.
 
@@ -267,31 +338,216 @@ def validate_image_ref(url: str) -> str:
         On success: status=ok, url, optional width/height/format.
         On failure: status=invalid, reason, url.
     """
-    raw = str(url or '').strip()
-    if not raw:
-        return _format_result(False, reason='url is required')
+    result = _validate_image_candidate(url)
+    if result['status'] != 'ok':
+        return _format_result(
+            False,
+            reason=result.get('reason'),
+            url=result.get('original_url') or result.get('url'),
+        )
+    return _format_result(
+        True,
+        url=result.get('url'),
+        width=result.get('width'),
+        height=result.get('height'),
+        format=result.get('format'),
+    )
 
+
+def _append_unique_urls(
+    target: List[str],
+    values: List[str],
+    limit: int,
+    require_direct_path: bool = False,
+) -> None:
+    seen = set(target)
+    for value in values:
+        candidate = str(value or '').strip()
+        if (
+            not candidate
+            or candidate in seen
+            or not _is_http_url(candidate)
+            or (require_direct_path and not _is_image_url(candidate))
+        ):
+            continue
+        seen.add(candidate)
+        target.append(candidate)
+        if len(target) >= limit:
+            return
+
+
+def _normalize_candidate_urls(candidate_urls: Any, limit: int) -> List[str]:
+    """Normalize model-provided image candidates without changing URL bytes."""
+    raw = candidate_urls
+    if isinstance(raw, str):
+        text = raw.strip()
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            parsed = [line.strip() for line in text.splitlines() if line.strip()]
+        raw = parsed
+
+    discovered: List[str] = []
+    if isinstance(raw, list) and all(isinstance(item, str) for item in raw):
+        # A plain list is the explicit tool contract. Keep every HTTP candidate
+        # so HTML/error responses appear in the returned diagnostics instead of
+        # silently disappearing before validation.
+        discovered = [item.strip() for item in raw]
+    else:
+        # For a complete web-search payload, only descend into image-labelled
+        # fields. A normal result's generic ``url`` remains excluded unless its
+        # path is itself a direct raster filename.
+        _collect_image_urls(raw, discovered, set())
+    urls: List[str] = []
+    _append_unique_urls(urls, discovered, limit)
+    return urls
+
+
+def _search_image_candidates(query: str, limit: int) -> List[str]:
+    urls: List[str] = []
+    _append_unique_urls(urls, _tavily_image_urls(query, count=limit), limit)
+    if len(urls) < limit:
+        _append_unique_urls(urls, _bocha_image_urls(query, count=limit - len(urls)), limit)
+    if len(urls) < min(3, limit):
+        engine = _pick_search_engine()
+        if engine is not None:
+            try:
+                image_query = f'{query} reference image illustration'
+                results = engine.search(image_query)
+                fallback = [str(item.get('url') or '') for item in (results or [])]
+                _append_unique_urls(urls, fallback, limit, require_direct_path=True)
+            except Exception as exc:
+                LOG.warning('Fallback image search failed: %s', type(exc).__name__)
+    return urls[:limit]
+
+
+def _candidate_quality_key(item: dict[str, Any]) -> tuple[int, int, int]:
+    width = int(item.get('width') or 0)
+    height = int(item.get('height') or 0)
+    search_rank = int(item.get('search_rank') or 0)
+    # Search rank is the relevance signal. Resolution only separates equally
+    # relevant usable candidates, and tiny thumbnails always rank last.
+    usable_resolution = int(min(width, height) >= 512)
+    return usable_resolution, -search_rank, width * height
+
+
+def image_search_and_validate(
+    query: str,
+    target_valid: int = 3,
+    max_candidates: int = 15,
+    candidate_urls: Optional[List[str]] = None,
+) -> dict[str, Any]:
+    """Search image URLs and validate the exact candidates in one deterministic call.
+
+    Pass the direct image URLs from ``web_search(include_images=True)`` through
+    ``candidate_urls``. This tool preserves signed query parameters, rejects HTML
+    result pages, probes every candidate concurrently, and returns factual counters
+    for material reports. If no candidates are provided, it tries configured local
+    search providers as a compatibility fallback. Use ``selected[*].url`` verbatim.
+
+    Args:
+        query (str): Descriptive image-search query including subject and desired composition.
+        target_valid (int): Number of usable images to select, from 1 to 5. Default 3.
+        max_candidates (int): Maximum candidates to search and validate, from 1 to 30.
+        candidate_urls (list[str]): Exact direct-image URLs returned in web-search
+            image fields. Preserve query/signature parameters; do not pass result-page URLs.
+
+    Returns:
+        Structured search statistics, every candidate and validation reason, plus
+        up to target_valid quality-ranked entries in ``selected``.
+    """
+    normalized_query = str(query or '').strip()
+    if not normalized_query:
+        return {
+            'status': 'empty',
+            'query': normalized_query,
+            'candidate_count': 0,
+            'validated_count': 0,
+            'valid_count': 0,
+            'invalid_count': 0,
+            'selected_count': 0,
+            'selected': [],
+            'candidates': [],
+            'reason': 'query is required',
+        }
     try:
-        if raw.startswith('http://') or raw.startswith('https://'):
-            ref, width, height, fmt = _probe_remote_image(raw)
-            fields: dict[str, Any] = {'url': ref}
-            if width and height:
-                fields['width'] = width
-                fields['height'] = height
-            if fmt != 'UNKNOWN':
-                fields['format'] = fmt
-            return _format_result(True, **fields)
+        target = min(max(int(target_valid), 1), 5)
+    except (TypeError, ValueError):
+        target = 3
+    try:
+        limit = min(max(int(max_candidates), 1), 30)
+    except (TypeError, ValueError):
+        limit = 15
 
-        ref, width, height, fmt = _probe_local_image(raw)
-        fields = {'url': ref}
-        if width and height:
-            fields['width'] = width
-            fields['height'] = height
-        if fmt != 'UNKNOWN':
-            fields['format'] = fmt
-        return _format_result(True, **fields)
-    except Exception as exc:
-        return _format_result(False, reason=str(exc), url=raw)
+    urls = _normalize_candidate_urls(candidate_urls, limit)
+    candidate_source = 'provided' if urls else 'local_search'
+    if not urls:
+        urls = _search_image_candidates(normalized_query, limit)
+    LOG.info('Image search candidates query=%r urls=%s', normalized_query, urls)
+    if not urls:
+        return {
+            'status': 'empty',
+            'query': normalized_query,
+            'candidate_count': 0,
+            'validated_count': 0,
+            'valid_count': 0,
+            'invalid_count': 0,
+            'selected_count': 0,
+            'selected': [],
+            'candidates': [],
+            'reason': 'no direct image URLs found',
+            'candidate_source': candidate_source,
+        }
+
+    validations: list[dict[str, Any] | None] = [None] * len(urls)
+    workers = min(_VALIDATION_WORKERS, len(urls))
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(_validate_image_candidate, url): index
+            for index, url in enumerate(urls)
+        }
+        for future in as_completed(futures):
+            index = futures[future]
+            try:
+                validations[index] = future.result()
+            except Exception as exc:
+                validations[index] = {
+                    'status': 'invalid',
+                    'original_url': urls[index],
+                    'url': urls[index],
+                    'reason': str(exc),
+                }
+
+    candidates = [item for item in validations if isinstance(item, dict)]
+    for index, item in enumerate(candidates, start=1):
+        item['search_rank'] = index
+    valid = [item for item in candidates if item.get('status') == 'ok']
+    ranked = sorted(
+        valid,
+        key=lambda item: (
+            _candidate_quality_key(item),
+        ),
+        reverse=True,
+    )
+    selected = ranked[:target]
+    status = 'ok' if len(selected) >= target else ('partial' if selected else 'empty')
+    result = {
+        'status': status,
+        'query': normalized_query,
+        'candidate_source': candidate_source,
+        'target_valid': target,
+        'candidate_count': len(urls),
+        'validated_count': len(candidates),
+        'valid_count': len(valid),
+        'invalid_count': len(candidates) - len(valid),
+        'selected_count': len(selected),
+        'selected': selected,
+        'candidates': candidates,
+    }
+    LOG.info('Image search validation result=%s', result)
+    return result
 
 
 def image_search_tool(query: str) -> str:
@@ -309,23 +565,7 @@ def image_search_tool(query: str) -> str:
     Returns:
         A newline-separated list of image URLs.
     """
-    urls = _tavily_image_urls(query, count=5)
-    if not urls:
-        urls = _bocha_image_urls(query, count=5)
-    if not urls:
-        engine = _pick_search_engine()
-        if engine is not None:
-            try:
-                image_query = f'{query} reference image illustration'
-                results = engine.search(image_query)
-                for item in results or []:
-                    candidate = str(item.get('url') or '').strip()
-                    if _is_image_url(candidate):
-                        urls.append(candidate)
-                    if len(urls) >= 5:
-                        break
-            except Exception:
-                pass
+    urls = _search_image_candidates(query, 5)
     if not urls:
         return f'No image URLs found for "{query}". Try a more specific query.'
     return '\n'.join(urls[:5])
@@ -341,27 +581,65 @@ def _contains_cjk(text: str) -> bool:
     )
 
 
-def _caption_font_path(caption: str, requested: str = '') -> str:
-    configured = str(requested or os.getenv('LAZYMIND_MEME_FONT_PATH') or '').strip()
-    if configured:
-        path = Path(configured).expanduser()
-        if not path.is_file():
-            raise ValueError(f'caption font file not found: {configured}')
-        return str(path.resolve())
+def _font_missing_characters(font_path: str, text: str) -> List[str]:
+    """Return visible characters that Pillow would render with the .notdef box."""
+    from PIL import ImageFont
 
-    candidates = _CJK_FONT_CANDIDATES if _contains_cjk(caption) else (
-        *_CJK_FONT_CANDIDATES,
-        *_LATIN_FONT_CANDIDATES,
-    )
+    font = ImageFont.truetype(font_path, size=48)
+
+    def glyph_signature(char: str) -> tuple[Any, Any, bytes]:
+        mask = font.getmask(char, mode='L')
+        return font.getbbox(char), getattr(mask, 'size', None), bytes(mask)
+
+    # U+0378 and U+0380 are permanently unassigned Unicode code points. FreeType
+    # renders them with the font's .notdef glyph, which is the same square that
+    # users otherwise see for unsupported Chinese characters.
+    missing_signatures = {glyph_signature('\u0378'), glyph_signature('\u0380')}
+    missing: List[str] = []
+    seen: set[str] = set()
+    for char in text:
+        if char in seen or char.isspace() or unicodedata.category(char).startswith('C'):
+            continue
+        seen.add(char)
+        if glyph_signature(char) in missing_signatures:
+            missing.append(char)
+    return missing
+
+
+def _caption_font_path(caption: str) -> str:
+    candidates = list(_CJK_FONT_CANDIDATES if _contains_cjk(caption) else _LATIN_FONT_CANDIDATES)
+
+    attempted: List[str] = []
+    seen_paths: set[str] = set()
     for candidate in candidates:
-        if Path(candidate).is_file():
-            return candidate
+        path = Path(candidate).expanduser()
+        normalized = str(path.resolve()) if path.is_file() else str(path)
+        if normalized in seen_paths:
+            continue
+        seen_paths.add(normalized)
+        if not path.is_file():
+            attempted.append(f'{candidate} (missing)')
+            continue
+        try:
+            missing = _font_missing_characters(str(path), caption)
+        except (OSError, ValueError) as exc:
+            attempted.append(f'{candidate} (unreadable: {exc})')
+            continue
+        if not missing:
+            return normalized
+        attempted.append(f'{candidate} (missing glyphs: {"".join(missing)})')
+
+    attempted_summary = '; '.join(attempted)
     if _contains_cjk(caption):
         raise RuntimeError(
-            'CJK caption font is unavailable; install fonts-noto-cjk or set '
-            'LAZYMIND_MEME_FONT_PATH to a Chinese-capable .ttf/.ttc font'
+            'CJK caption font is unavailable or does not cover every caption character; '
+            'install fonts-noto-cjk or set LAZYMIND_MEME_FONT_PATH to a Chinese-capable '
+            f'.ttf/.ttc font. Tried: {attempted_summary}'
         )
-    raise RuntimeError('caption font is unavailable; install a TrueType/OpenType font')
+    raise RuntimeError(
+        'caption font is unavailable or does not cover every caption character; '
+        f'install a suitable TrueType/OpenType font. Tried: {attempted_summary}'
+    )
 
 
 def _normalize_caption_box(caption_box: List[float] | None) -> Tuple[float, float, float, float]:
@@ -439,7 +717,16 @@ def _caption_layout(
     padding = max(2, round(min(box_width, box_height) * 0.05))
     usable_width = max(1, box_width - 2 * padding)
     usable_height = max(1, box_height - 2 * padding)
-    selected_font_path = _caption_font_path(caption, font_path)
+    selected_font_path = (
+        _caption_font_path(caption)
+        if not font_path
+        else str(Path(font_path).expanduser().resolve())
+    )
+    missing = _font_missing_characters(selected_font_path, caption)
+    if missing:
+        raise RuntimeError(
+            f'caption font does not cover required characters: {"".join(missing)}'
+        )
     measure = ImageDraw.Draw(Image.new('RGBA', (width, height)))
 
     best: dict[str, Any] | None = None
@@ -495,7 +782,6 @@ def _render_caption_frame(
     caption_box: List[float] | None,
     text_color: str,
     stroke_color: str,
-    font_path: str,
     stroke_width_ratio: float,
 ) -> Tuple[Any, dict[str, Any]]:
     from PIL import ImageColor, ImageDraw
@@ -505,7 +791,7 @@ def _render_caption_frame(
         rendered.size,
         caption,
         caption_box,
-        font_path,
+        '',
         stroke_width_ratio,
     )
     draw = ImageDraw.Draw(rendered)
@@ -542,7 +828,6 @@ def meme_add_caption(
     text_color: str = '#FFFFFF',
     stroke_color: str = '#000000',
     stroke_width_ratio: float = 0.08,
-    font_path: str = '',
 ) -> dict[str, Any]:
     """Deterministically center a caption inside a normalized rectangle on a meme.
 
@@ -560,7 +845,6 @@ def meme_add_caption(
         text_color: Pillow-compatible text color, default white.
         stroke_color: Pillow-compatible outline color, default black.
         stroke_width_ratio: Outline width divided by font size, from 0.01 to 0.25.
-        font_path: Optional explicit .ttf/.ttc/.otf font path.
 
     Returns:
         Result containing local_path, signed image_url, calculated font size,
@@ -582,7 +866,7 @@ def meme_add_caption(
         for index in range(source.n_frames):
             source.seek(index)
             frame, current_layout = _render_caption_frame(
-                source.copy(), caption, caption_box, text_color, stroke_color, font_path,
+                source.copy(), caption, caption_box, text_color, stroke_color,
                 stroke_width_ratio,
             )
             if layout is None:
@@ -601,7 +885,7 @@ def meme_add_caption(
         )
     else:
         rendered, layout = _render_caption_frame(
-            source, caption, caption_box, text_color, stroke_color, font_path,
+            source, caption, caption_box, text_color, stroke_color,
             stroke_width_ratio,
         )
         rendered.save(output_path, format='PNG')

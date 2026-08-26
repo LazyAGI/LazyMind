@@ -71,6 +71,26 @@ def test_caption_layout_uses_requested_stroke_ratio():
     assert layout['stroke_width'] == max(1, round(layout['font_size'] * 0.14))
 
 
+def test_caption_font_detection_rejects_missing_cjk_glyph_boxes():
+    tools = _load_tools()
+
+    missing = tools._font_missing_characters(_dejavu_font(), '收到！')
+
+    assert missing == ['收', '到', '！']
+
+
+def test_cjk_font_selection_never_falls_back_to_dejavu(monkeypatch):
+    tools = _load_tools()
+    monkeypatch.setattr(tools, '_CJK_FONT_CANDIDATES', (_dejavu_font(),))
+
+    try:
+        tools._caption_font_path('收到！')
+    except RuntimeError as exc:
+        assert 'does not cover every caption character' in str(exc)
+    else:
+        raise AssertionError('DejaVu must not be accepted for Chinese captions')
+
+
 def test_caption_renderer_changes_only_pixels_inside_layout_box(tmp_path, monkeypatch):
     tools = _load_tools()
     source = tmp_path / 'source.png'
@@ -84,7 +104,6 @@ def test_caption_renderer_changes_only_pixels_inside_layout_box(tmp_path, monkey
         text_color='#FF0000',
         stroke_color='#0000FF',
         stroke_width_ratio=0.12,
-        font_path=_dejavu_font(),
     )
 
     assert result['success'] is True
@@ -120,7 +139,6 @@ def test_caption_renderer_applies_caption_to_every_gif_frame(tmp_path, monkeypat
     result = tools.meme_add_caption(
         str(source),
         'WOOF',
-        font_path=_dejavu_font(),
     )
 
     assert result['animated'] is True

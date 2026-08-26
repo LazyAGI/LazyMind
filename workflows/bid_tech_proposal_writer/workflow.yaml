@@ -44,6 +44,7 @@ tool_scripts:
       - extract_technical_requirements
       - extract_disqualification_items
       - validate_and_allocate_outline
+      - normalize_bid_outline_from_inputs
       - validate_proposal_from_inputs
   - path: scripts/visual_renderer.py
     functions:

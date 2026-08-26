@@ -17,7 +17,7 @@ presentation:
     result_summary: Turn a one-line premise into settings, outlines, chapters, and continuity records for sustained serialization
   detail:
     title: Serialized novel writing assistant
-    description: Support web-fiction and long-form authors with idea development, world and character design, global outlines, chapter writing, revision, and continuity checks.
+    description: Adapted for LazyMind from WorkBuddy novel-generator. Support web-fiction and long-form authors with idea development, world and character design, global outlines, chapter writing, revision, and continuity checks.
     attachment_hint: Existing premise, character notes, outline, previous chapters, or serialization state (optional)
 
 tasks:
