@@ -25,7 +25,12 @@ function isOAuthPopup({ frameName, features = "" }) {
 
 function canOpenExternally(url) {
   const target = parseUrl(url);
-  return Boolean(target && EXTERNAL_PROTOCOLS.has(target.protocol));
+  return Boolean(target && (
+    EXTERNAL_PROTOCOLS.has(target.protocol) ||
+    (target.protocol === "cursor:" &&
+      target.hostname === "anysphere.cursor-deeplink" &&
+      target.pathname === "/mcp/install")
+  ));
 }
 
 function installExternalNavigationHandler(webContents, openExternal, reportError = () => {}) {

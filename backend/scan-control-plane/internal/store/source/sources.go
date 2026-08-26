@@ -43,22 +43,42 @@ func (r *SQLRepository) ListSources(ctx context.Context, req SourceListRequest) 
 	}
 
 	var rows []sourceListORMRow
-	err := applySourceListFilters(db.Table("sources AS s").Where("s.deleted_at IS NULL"), req).
+	listQuery := applySourceListFilters(db.Table("sources AS s").Where("s.deleted_at IS NULL"), req).
 		Select(sourceListSelectSQL()).
 		Joins("LEFT JOIN source_bindings b ON b.source_id = s.source_id AND b.status <> ?", "DELETING").
 		Group("s.source_id").
-		Order("s.updated_at DESC, s.source_id").
-		Limit(pageSize).
-		Offset(offset).
-		Scan(&rows).Error
+		Order(sourceListOrderClause(req.OrderBy))
+	if !isDatasetUsageOrder(req.OrderBy) {
+		listQuery = listQuery.Limit(pageSize).Offset(offset)
+	}
+	err := listQuery.Scan(&rows).Error
 	if err != nil {
 		return nil, 0, mapSQLConstraint(err)
 	}
 	records := make([]SourceListRecord, 0, len(rows))
 	for _, row := range rows {
-		records = append(records, SourceListRecord{Source: sourceFromORM(row.source()), BindingCount: row.BindingCount})
+		records = append(records, SourceListRecord{
+			Source:        sourceFromORM(row.source()),
+			BindingCount:  row.BindingCount,
+			LastSuccessAt: row.LastSuccessAt,
+		})
 	}
 	return records, int(total), nil
+}
+
+func isDatasetUsageOrder(orderBy string) bool {
+	return orderBy == "most_used" || orderBy == "recent_used"
+}
+
+func sourceListOrderClause(orderBy string) string {
+	switch strings.TrimSpace(orderBy) {
+	case "latest_updated":
+		return "COALESCE((SELECT MAX(csc.last_success_at) FROM source_sync_checkpoints csc WHERE csc.source_id = s.source_id), s.updated_at) DESC, s.source_id"
+	case "most_used", "recent_used":
+		return "COALESCE((SELECT MAX(csc.last_success_at) FROM source_sync_checkpoints csc WHERE csc.source_id = s.source_id), s.updated_at) DESC, s.source_id"
+	default:
+		return "s.updated_at DESC, s.source_id"
+	}
 }
 
 type sourceListORMRow struct {
@@ -76,6 +96,7 @@ type sourceListORMRow struct {
 	CreatedAt         time.Time  `gorm:"column:created_at"`
 	UpdatedAt         time.Time  `gorm:"column:updated_at"`
 	BindingCount      int        `gorm:"column:binding_count"`
+	LastSuccessAt     *time.Time `gorm:"column:last_success_at"`
 }
 
 func (row sourceListORMRow) source() ormSource {
@@ -111,6 +132,7 @@ func sourceListSelectSQL() string {
 		"s.deleted_at AS deleted_at",
 		"s.created_at AS created_at",
 		"s.updated_at AS updated_at",
+		"(SELECT MAX(csc.last_success_at) FROM source_sync_checkpoints csc WHERE csc.source_id = s.source_id) AS last_success_at",
 		"COUNT(b.binding_id) AS binding_count",
 	}, ", ")
 }

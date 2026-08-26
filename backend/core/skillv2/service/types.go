@@ -28,7 +28,12 @@ type UploadStore interface {
 }
 
 type ZipDownloader interface {
-	Download(ctx context.Context, url string) (string, error)
+	Download(ctx context.Context, url string) (DownloadedZip, error)
+}
+
+type DownloadedZip struct {
+	Path    string
+	Cleanup func()
 }
 
 type SkillServiceDeps struct {
@@ -53,6 +58,8 @@ type SourceInput struct {
 	Filename   string
 	StoredPath string
 	URL        string
+	SourceURL  string
+	PathPrefix string
 }
 
 type CreateSkillRequest struct {

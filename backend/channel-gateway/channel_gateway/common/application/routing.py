@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any
 
+from channel_gateway.common.application.ask_text import parse_text_ask_answer
 from channel_gateway.common.application.intents import (
     ExactShortcutParser,
     canonicalize_command,
@@ -63,7 +64,6 @@ class ChannelCommandRouter:
     def route(
         self,
         *,
-        provider: str = '',
         account_id: str,
         external_address_hash: str,
         owner_user_id: str,
@@ -71,26 +71,47 @@ class ChannelCommandRouter:
         request_id: str,
         provider_context: dict[str, Any],
     ) -> RoutedCommand | str:
-        if provider == 'wechat':
+        continuation_catalog: dict[str, Any] = {}
+        execution = ChannelExecutionContext.from_provider_context(
+            provider_context
+        )
+        plain_text_interactions = execution.interaction_mode == 'plain_text'
+        text_selection = (
+            self._store.get_selection_context(
+                account_id,
+                external_address_hash,
+            )
+            if plain_text_interactions
+            else None
+        )
+        text_ask = (
+            parse_text_ask_answer(text, text_selection)
+            if plain_text_interactions
+            else None
+        )
+        if (
+            isinstance(text_selection, dict)
+            and text_selection.get('kind') == 'ask'
+            and text_ask is None
+        ):
+            return '回答格式不正确。请按问题提示回复选项编号或“题号: 答案”。'
+        command_action = provider_context.get('command_action')
+        selection_action = provider_context.get('selection_action')
+        structured_ask = execution.ask_answers_structured
+        if text_ask is not None:
+            execution = replace(
+                execution,
+                ask_answers_structured=text_ask,
+            )
+            provider_context['channel_execution'] = execution.to_dict()
             command = ChatCommand(
                 schema_version=SCHEMA_VERSION,
                 command='chat',
                 parameters=ChatParameters(message=text),
             )
-            return RoutedCommand(
-                command=validate_command(command, (text,)),
-                grounding_messages=(text,),
-                catalog={},
-                source='wechat_chat',
-            )
-        continuation_catalog: dict[str, Any] = {}
-        execution = ChannelExecutionContext.from_provider_context(
-            provider_context
-        )
-        command_action = provider_context.get('command_action')
-        selection_action = provider_context.get('selection_action')
-        structured_ask = execution.ask_answers_structured
-        if isinstance(command_action, dict):
+            grounding_messages = (text,)
+            routing_source = 'text_ask'
+        elif isinstance(command_action, dict):
             command = COMMAND_ADAPTER.validate_python(command_action)
             grounding_messages = (text,)
             routing_source = 'provider_action'

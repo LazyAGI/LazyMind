@@ -1010,13 +1010,29 @@ func (s *SkillService) filesFromSource(ctx context.Context, ownerUserID string, 
 		if s.downloader == nil {
 			return nil, "", "", fmt.Errorf("downloader is not configured")
 		}
-		zipPath, err := s.downloader.Download(ctx, source.URL)
+		downloaded, err := s.downloader.Download(ctx, source.URL)
 		if err != nil {
 			return nil, "", "", err
 		}
-		files, err := skillpackage.ReadZip(zipPath)
+		if downloaded.Cleanup != nil {
+			defer downloaded.Cleanup()
+		}
+		files, err := skillpackage.ReadZip(downloaded.Path)
+		if err != nil {
+			return nil, "", "", err
+		}
+		if source.PathPrefix != "" {
+			files, err = filesFromSkillSubdirectory(files, source.PathPrefix)
+			if err != nil {
+				return nil, "", "", err
+			}
+		}
 		ensureURLImportDefaults(files)
-		return files, "url", source.URL, err
+		sourceRef := source.SourceURL
+		if sourceRef == "" {
+			sourceRef = source.URL
+		}
+		return files, "url", sourceRef, nil
 	default:
 		return nil, "", "", fmt.Errorf("unsupported source type %q", source.Type)
 	}
@@ -1031,6 +1047,23 @@ func ensureURLImportDefaults(files map[string][]byte) {
 	}
 }
 
+func filesFromSkillSubdirectory(files map[string][]byte, prefix string) (map[string][]byte, error) {
+	prefix, err := cleanSkillPath(prefix)
+	if err != nil {
+		return nil, err
+	}
+	selected := make(map[string][]byte)
+	prefixWithSlash := prefix + "/"
+	for filePath, data := range files {
+		if strings.HasPrefix(filePath, prefixWithSlash) {
+			selected[strings.TrimPrefix(filePath, prefixWithSlash)] = data
+		}
+	}
+	if _, ok := selected["SKILL.md"]; !ok {
+		return nil, fmt.Errorf("skill package must contain SKILL.md")
+	}
+	return selected, nil
+}
 func cleanSkillPath(name string) (string, error) {
 	if name == "" || strings.HasPrefix(name, "/") || strings.Contains(name, `\`) || strings.Contains(name, "//") {
 		return "", fmt.Errorf("unsafe path %q", name)

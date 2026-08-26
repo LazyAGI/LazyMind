@@ -92,6 +92,7 @@ func (h *Handler) listSources(w http.ResponseWriter, r *http.Request) {
 		SourceIDs: sourceIDs,
 		Keyword:   r.URL.Query().Get("keyword"),
 		Status:    r.URL.Query().Get("status"),
+		OrderBy:   r.URL.Query().Get("order_by"),
 		Page:      parseIntQuery(r, "page"),
 		PageSize:  parseIntQuery(r, "page_size"),
 	}

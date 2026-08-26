@@ -585,6 +585,7 @@ var sensenovaNewPlatformModelNames = map[string]bool{
 	"glm-5.2":                  true,
 	"sensenova-6.7-flash-lite": true,
 	"sensenova-u1-fast":        true,
+	"sensenova-u1.5-lite":      true,
 }
 
 // seedGroupModelsFromDefaults inserts user_model_provider_group_models from default_models when the group's

@@ -29,6 +29,20 @@ func TestReadZipNormalizesSingleRootAndHashesDeterministically(t *testing.T) {
 	}
 }
 
+func TestReadZipNormalizesRepositoryRootWithoutRootSkillMD(t *testing.T) {
+	zipPath := writeZip(t, map[string]string{
+		"repository-ref/skills/target/SKILL.md": "content",
+		"repository-ref/skills/other/SKILL.md":  "other",
+	})
+	files, err := ReadZip(zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(files["skills/target/SKILL.md"]) != "content" || string(files["repository-ref/skills/target/SKILL.md"]) != "" {
+		t.Fatalf("unexpected normalized files: %#v", files)
+	}
+}
+
 func TestReadZipIgnoresSystemMetadataAndNormalizesRoot(t *testing.T) {
 	zipPath := writeZip(t, map[string]string{
 		"wrapped/SKILL.md":            "---\nname: demo\ndescription: demo\n---\n",
@@ -68,6 +82,64 @@ func TestReadZipRejectsUnsafeAndOversizedEntries(t *testing.T) {
 				t.Fatalf("error = %v, want %q", err, tt.want)
 			}
 		})
+	}
+}
+
+func TestReadZipRejectsDuplicatePath(t *testing.T) {
+	zipPath := filepath.Join(t.TempDir(), "duplicate.zip")
+	file, err := os.Create(zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := zip.NewWriter(file)
+	for _, content := range []string{"first", "second"} {
+		entry, err := writer.Create("SKILL.md")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := entry.Write([]byte(content)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = ReadZip(zipPath)
+	if err == nil || !strings.Contains(err.Error(), "duplicate path") {
+		t.Fatalf("error = %v, want duplicate path error", err)
+	}
+}
+
+func TestReadZipRejectsSymlink(t *testing.T) {
+	zipPath := filepath.Join(t.TempDir(), "symlink.zip")
+	file, err := os.Create(zipPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := zip.NewWriter(file)
+	header := &zip.FileHeader{Name: "link"}
+	header.SetMode(os.ModeSymlink | 0o777)
+	entry, err := writer.CreateHeader(header)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := entry.Write([]byte("SKILL.md")); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err = ReadZip(zipPath)
+	if err == nil || !strings.Contains(err.Error(), "cannot contain symlink") {
+		t.Fatalf("error = %v, want symlink error", err)
 	}
 }
 

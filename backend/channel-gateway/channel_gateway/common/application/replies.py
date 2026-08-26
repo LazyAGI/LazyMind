@@ -400,6 +400,7 @@ class ChannelReplyBuilder:
             'skill': '选择 Skill',
             'tool': '选择工具',
             'personalization': '选择个人习惯',
+            'workflow': '选择 Workflow',
         }
         return SelectionPresentation(
             kind='selection',

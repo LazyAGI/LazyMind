@@ -1565,6 +1565,40 @@ class GatewayStore:
             )
         return inserted
 
+    def find_inbound_by_provider_context(
+        self,
+        *,
+        provider: str,
+        account_id: str,
+        recipient_id: str,
+        expected_context: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT text, provider_context
+                FROM channel_inbox
+                WHERE provider = %s
+                  AND account_id = %s
+                  AND recipient_id = %s
+                  AND provider_context @> %s::jsonb
+                ORDER BY ingest_sequence DESC
+                LIMIT 1
+                """,
+                (
+                    provider,
+                    account_id,
+                    recipient_id,
+                    self._json(expected_context),
+                ),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            'text': str(row['text']),
+            'provider_context': self._dict(row['provider_context']),
+        }
+
     def welcome_pending(self, account_id: str) -> bool:
         with self._connect() as connection:
             row = connection.execute(
@@ -2106,6 +2140,63 @@ class GatewayStore:
             'dead': dead,
             'inflight': total - sent - dead,
         }
+
+    def sync_task_status_outbound(
+        self,
+        *,
+        parent: ClaimedOutbound,
+        part_index: int,
+        text: str,
+    ) -> str:
+        dedupe_key = f'task-status:{parent.outbox_id}:{part_index}:terminal'
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                INSERT INTO channel_outbox(
+                    id, inbox_id, account_id, dedupe_key,
+                    provider, order_key, sequence,
+                    recipient_id, provider_context, text, intent_kind,
+                    purpose, metadata, rendered_parts, status
+                )
+                VALUES(
+                    %s, NULL, %s, %s,
+                    %s, %s, 0,
+                    %s, %s::jsonb, %s, 'task_status',
+                    'task_status', %s::jsonb, %s::jsonb, 'pending'
+                )
+                ON CONFLICT(account_id, dedupe_key) DO UPDATE
+                SET text = EXCLUDED.text,
+                    rendered_parts = EXCLUDED.rendered_parts,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE channel_outbox.status = 'pending'
+                RETURNING status
+                """,
+                (
+                    f'co_{uuid.uuid4().hex}',
+                    parent.account_id,
+                    dedupe_key,
+                    parent.provider,
+                    f'task-status:{parent.outbox_id}:{part_index}',
+                    parent.recipient_id,
+                    self._json(parent.provider_context),
+                    text,
+                    self._json({
+                        'task_status': True,
+                        'parent_outbox_id': parent.outbox_id,
+                    }),
+                    self._json([{'kind': 'text', 'text': text}]),
+                ),
+            ).fetchone()
+            if row:
+                return str(row['status'])
+            existing = connection.execute(
+                """
+                SELECT status FROM channel_outbox
+                WHERE account_id = %s AND dedupe_key = %s
+                """,
+                (parent.account_id, dedupe_key),
+            ).fetchone()
+        return str(existing['status']) if existing else ''
 
     def compare_and_save_sent_task_monitor_state(
         self,

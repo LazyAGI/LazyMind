@@ -115,6 +115,18 @@ x-cache-env: &cache-env
 
 services:
 
+  skill-bundler:
+    profiles: ["tools"]
+    build:
+      network: host
+      context: .
+      dockerfile: backend/core/Dockerfile
+      target: skill-bundler
+      args:
+        <<: *mirror-args
+    volumes:
+      - ./skills:/workspace/skills
+
   kong:
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-kong:${LAZYMIND_IMAGE_TAG:-latest}
     build:

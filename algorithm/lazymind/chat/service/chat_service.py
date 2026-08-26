@@ -46,6 +46,7 @@ from lazymind.chat.service.component import (
     collect_query_appendices,
     collect_system_prompt_appendices,
     filter_tools,
+    is_workflow_rewind_action,
     normalize_history_for_agent,
 )
 from lazymind.chat.engine.agent_runtime import (
@@ -508,7 +509,13 @@ def _task_profile_inputs(request: ChatRequest) -> dict[str, Any]:
     )
     return {
         'query': user_input.strip(),
-        'history': normalize_history_for_agent(list(request.message.history or [])),
+        'history': normalize_history_for_agent(
+            list(request.message.history or []),
+            compact_workflow_receipts=is_workflow_rewind_action(
+                user_input,
+                request.workflow.workflow_context,
+            ),
+        ),
         'intent': request.conversation.intent_context,
         'has_attachments': bool(request.message.files),
         'explicit_resources': explicit_resources,
@@ -903,7 +910,19 @@ async def _handle_chat_impl(
         explicit_resource_payload['workflow_refs'] = [active_workflow_ref]
 
     raw_history = list(message.history) if isinstance(message.history, list) else []
-    agent_history = normalize_history_for_agent(raw_history)
+    compact_rewind_history = is_workflow_rewind_action(
+        language_query,
+        workflow.workflow_context,
+    )
+    if compact_rewind_history:
+        LOG.info(
+            '[ChatServer] [WORKFLOW_REWIND_HISTORY_COMPACTION] '
+            f'[sid={conversation.session_id}] [query={language_query}]'
+        )
+    agent_history = normalize_history_for_agent(
+        raw_history,
+        compact_workflow_receipts=compact_rewind_history,
+    )
     translator = AgentEventFrameTranslator(query=query, run_id=run_id)
 
     agentic_config = {

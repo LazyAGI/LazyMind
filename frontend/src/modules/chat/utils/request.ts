@@ -1060,6 +1060,12 @@ export interface ChatExecutorDescriptor {
   unavailable_reason?: string;
 }
 
+interface ChatExecutorsResponse {
+  code: number;
+  message: string;
+  data: { executors: ChatExecutorDescriptor[] };
+}
+
 export interface ConversationRuntimeSettings {
   workflow_mode?: 'dynamic' | 'auto';
   enable_subagent?: boolean;
@@ -1268,7 +1274,7 @@ export function ConversationSettingsApi() {
       );
     },
     listChatExecutors(options?: RawAxiosRequestConfig) {
-      return axiosInstance.get<{ executors: ChatExecutorDescriptor[] }>(
+      return axiosInstance.get<ChatExecutorsResponse>(
         `${coreApiBaseUrl}/chat/executors`,
         options,
       );
