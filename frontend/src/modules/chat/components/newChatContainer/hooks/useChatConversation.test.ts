@@ -66,6 +66,33 @@ describe("useChatConversation regeneration recovery", () => {
     vi.restoreAllMocks();
   });
 
+  it("uses freshly loaded history instead of a stale per-conversation cache", () => {
+    const { result } = renderHook(() =>
+      useChatConversation({
+        canChat: true,
+        setIsChatContent: vi.fn(),
+        clearStorePendingMessage: vi.fn(),
+        clearCiteMessages: vi.fn(),
+        chatInputRef: createRef<ChatInputImperativeProps>(),
+        thinkingCollapseMap: new Map(),
+        getUserEdit: () => undefined,
+        t: (key) => key,
+      }),
+    );
+    const first = [{ role: RoleTypes.ASSISTANT, delta: "cached answer" }];
+    const second = [{ role: RoleTypes.ASSISTANT, delta: "server answer" }];
+
+    act(() => {
+      result.current.replaceMessageList("conversation-1", first);
+      result.current.replaceMessageList("conversation-2", []);
+      result.current.replaceMessageList("conversation-1", second);
+    });
+
+    expect(result.current.messageList).toEqual(second);
+    expect(result.current.conversationMessagesCache.current.get("conversation-1"))
+      .toEqual(second);
+  });
+
   it("restores the previous answer and clears busy state when opening SSE rejects", async () => {
     vi.spyOn(console, "error").mockImplementation(() => {});
     const onOpenSSE = vi.fn().mockRejectedValue(new Error("open failed"));

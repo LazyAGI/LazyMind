@@ -21,6 +21,8 @@ import (
 
 	_ "golang.org/x/image/webp"
 	"gopkg.in/yaml.v3"
+
+	skillpackage "lazymind/core/skillv2/skillpackage"
 )
 
 const (
@@ -536,9 +538,8 @@ func validateDefinition(definition FeaturedDefinition, compiled bool) error {
 	if (definition.Placement.Home || definition.Placement.Gallery) && definition.Placement.Order <= 0 {
 		return definitionFailure("placement.order must be positive")
 	}
-	parsedSource, err := url.Parse(strings.TrimSpace(definition.Skill.SourceURL))
-	if err != nil || parsedSource.Host == "" || parsedSource.Scheme != "https" && parsedSource.Scheme != "http" {
-		return definitionFailure("skill.source_url must be an HTTP(S) URL")
+	if err := validateSkillSource(definition.Skill.SourceURL, compiled); err != nil {
+		return err
 	}
 	if compiled {
 		if definition.Skill.BuiltinSkillUID == "" || definition.Skill.Version == "" || len(definition.Skill.ArchiveSHA256) != sha256.Size*2 {
@@ -603,6 +604,26 @@ func validateDefinition(definition FeaturedDefinition, compiled bool) error {
 	}
 	if err := validateAssetUsage(definition); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateSkillSource(raw string, compiled bool) error {
+	source := strings.TrimSpace(raw)
+	parsed, err := url.Parse(source)
+	if err == nil && parsed.Host != "" && (parsed.Scheme == "https" || parsed.Scheme == "http") {
+		return nil
+	}
+	if compiled && strings.HasPrefix(source, "builtin://") {
+		if _, err := skillpackage.CleanPath(strings.TrimPrefix(source, "builtin://")); err == nil {
+			return nil
+		}
+	}
+	if parsed != nil && (parsed.Scheme != "" || parsed.Host != "") {
+		return definitionFailure("skill.source_url must be an HTTP(S) URL or a relative path under skills")
+	}
+	if _, err := skillpackage.CleanPath(source); err != nil {
+		return definitionFailure("skill.source_url must be an HTTP(S) URL or a relative path under skills")
 	}
 	return nil
 }

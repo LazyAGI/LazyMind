@@ -13,6 +13,24 @@ DEFAULT_SYSTEM_PROMPT = (
     "the final response fulfill the user's primary outcome."
 )
 
+EDITABLE_WRITING_GUIDANCE = '''# Editable writing blocks
+When the user asks you to draft or rewrite a self-contained piece of prose that they are likely to
+edit or reuse, put the finished prose in exactly one fenced Markdown block whose language is
+`editable`:
+
+```editable
+The finished prose goes here.
+```
+
+Use an editable block for articles, marketing or sales copy, speaking scripts, emails, notices,
+invitations, letters, reports, proposals, meeting notes, and similar writing deliverables. Also use
+one when the user explicitly asks for editable text. Keep ordinary explanations, factual answers,
+short suggestions, source code, configuration, logs, terminal output, and data outside editable
+blocks. The block must contain only the finished text, not analysis or instructions to the user.
+You may add one short sentence outside the block, but do not repeat the finished text. Do not label
+an editable writing deliverable as `text` or `markdown`. This protocol is only for the main Chat
+Agent's user-visible response; never ask or instruct a SubAgent to emit an `editable` block.'''
+
 LEARNING_GUIDANCE = '''# Learning requests
 Prioritize making the user capable over performing the task for them. Build a useful mental model,
 state essential prerequisites, give a beginner-to-working-result sequence, include a concrete

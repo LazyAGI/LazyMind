@@ -8,7 +8,7 @@ import uuid
 
 import lazyllm
 
-from lazymind.chat.engine.tools.chat_artifact import (
+from .workspace import (
     chat_agent_workspace,
     save_chat_file,
 )

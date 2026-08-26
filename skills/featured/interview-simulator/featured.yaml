@@ -1,0 +1,126 @@
+schema_version: 2
+id: interview-simulator
+type: chat
+version: 1.0.0
+status: published
+default_locale: zh-CN
+
+skill:
+  source_url: https://skillhub.cn/skills/clawhub_wscats/interview-simulator
+  required_version: 1.0.0
+
+placement:
+  home: true
+  gallery: true
+  order: 16
+
+classification:
+  category: 职业发展
+  tags:
+    - 模拟面试
+    - 面试反馈
+    - 求职准备
+    - 回答优化
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+
+presentation:
+  card:
+    title: AI 面试模拟器
+    description: 根据目标岗位连续提问、逐题评分并给出可执行的改进反馈
+    output_type: report
+    output_label: 面试反馈报告
+    cover_asset: cover
+    result_summary: 完成岗位化模拟面试，获得逐题评分、回答诊断、示范答案和训练建议
+  detail:
+    title: AI 面试模拟器
+    description: 根据目标岗位、经验和面试类型开展一问一答的模拟面试，并在每题后给出评分、反馈和改进示例。
+    attachment_hint: 简历、岗位描述、目标公司信息或重点练习方向
+
+tasks:
+  - id: role-interview
+    selector:
+      title: 岗位模拟面试
+      description: 围绕目标岗位进行完整的一问一答演练
+      output_label: 岗位面试反馈
+    launch:
+      prompt_short: 根据我的目标岗位开始一场模拟面试。
+      prompt: 请根据我提供的目标岗位、经验年限和岗位描述担任面试官。一次只问一个问题，等待我回答后从相关性、结构、证据和表达四个维度评分，给出具体反馈和更好的回答示例，再继续下一题。最后汇总优势、短板和训练计划。
+    replay:
+      steps:
+        - title: 明确面试目标
+          description: 确认岗位、级别、行业和重点考察方向
+        - title: 逐题模拟问答
+          description: 一次提出一个岗位相关问题并等待回答
+        - title: 即时评分反馈
+          description: 从内容、结构、证据和表达评估每个回答
+        - title: 汇总训练建议
+          description: 形成优势、短板和后续练习计划
+    result:
+      template: generic_report_v1
+      eyebrow: 岗位面试反馈
+      title: 模拟面试表现与提升建议
+      summary: 汇总逐题评分、关键反馈、示范回答和下一阶段训练计划
+      highlights:
+        - 逐题评分与回答诊断
+        - 更优回答示例
+        - 优势、短板和训练计划
+
+  - id: behavioral-interview
+    selector:
+      title: 行为面试训练
+      description: 使用 STAR 结构练习经历类和情境类问题
+      output_label: 行为面试反馈
+    launch:
+      prompt_short: 帮我练习行为面试和 STAR 回答。
+      prompt: 请作为行为面试官，根据我的经历和目标岗位逐题提问。每次回答后检查情境、任务、行动和结果是否完整，判断案例是否具体可信，并给出结构重写和追问建议。完成后总结我最需要补充的案例库。
+    replay:
+      steps:
+        - title: 盘点经历素材
+          description: 确认项目、挑战、协作、冲突和失败经历
+        - title: 发起行为提问
+          description: 围绕能力模型逐题追问具体案例
+        - title: 检查 STAR 结构
+          description: 评估背景、任务、行动、结果和个人贡献
+        - title: 完善案例库
+          description: 输出可复用的经历主题和补充建议
+    result:
+      template: generic_report_v1
+      eyebrow: 行为面试反馈
+      title: STAR 回答诊断与案例库
+      summary: 提升经历回答的结构、证据和岗位相关性
+      highlights:
+        - STAR 结构完整度
+        - 案例证据和个人贡献
+        - 待补充的经历案例库
+
+  - id: resume-interview
+    selector:
+      title: 简历深挖面试
+      description: 根据简历项目逐层追问职责、决策和结果
+      output_label: 简历深挖反馈
+    launch:
+      prompt_short: 根据我的简历进行项目深挖面试。
+      prompt: 请阅读我上传的简历，围绕项目经历、职责边界、关键决策、技术或业务难点和量化结果逐层追问。一次只问一个问题，每题后指出表述含糊、证据不足或可能被继续追问的部分，并帮助我形成更准确的回答。
+    replay:
+      steps:
+        - title: 识别重点经历
+          description: 找出与目标岗位最相关和最可能被追问的项目
+        - title: 逐层深挖项目
+          description: 追问职责、决策、难点、协作和结果
+        - title: 检查证据一致性
+          description: 识别含糊表述、逻辑跳跃和量化缺口
+        - title: 整理回答要点
+          description: 形成准确、具体且可验证的项目回答
+    result:
+      template: generic_report_v1
+      eyebrow: 简历深挖反馈
+      title: 项目经历问答与风险点
+      summary: 梳理重点项目的回答证据、追问风险和表达改进方向
+      highlights:
+        - 高概率追问清单
+        - 职责、决策和结果证据
+        - 含糊表述与回答优化

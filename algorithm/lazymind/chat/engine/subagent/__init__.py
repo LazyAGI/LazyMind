@@ -5,6 +5,8 @@ SUBAGENT_CORE_TOOL_NAMES = (
     'get_artifact',
     'list_artifacts',
     'list_knowledge_bases',
+    'grep',
+    'read_file',
     'read_user_attachment',
     'find_user_attachment',
     'string_replace',

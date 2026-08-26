@@ -16,6 +16,44 @@
   --writer-markdown-page-max-width: 1080px;
 }
 
+.writer-markdown-editor--chat {
+  width: 100%;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+}
+
+.writer-markdown-editor--chat .writer-markdown-editor__document-layout {
+  display: block;
+}
+
+.writer-markdown-editor--chat .writer-markdown-editor__main {
+  width: 100%;
+}
+
+.writer-markdown-editor--chat .writer-markdown-editor__surface {
+  max-height: none;
+  overflow: visible;
+}
+
+.writer-markdown-editor--chat .writer-markdown-editor__surface .mdxeditor-root-contenteditable {
+  width: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: 14px 16px;
+  text-align: left;
+}
+
+.writer-markdown-editor--chat .mdxeditor-root-contenteditable strong,
+.writer-markdown-editor--chat .mdxeditor-root-contenteditable b {
+  font-weight: 700;
+}
+
+.writer-markdown-editor--chat .mdxeditor-root-contenteditable u {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
 .writer-markdown-editor__document-layout {
   display: grid;
   grid-template-columns: 32px minmax(0, 1fr);

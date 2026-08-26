@@ -375,6 +375,8 @@ func init() {
 	registerAdditionalErrorPattern("skill package contains duplicate path %q", "Invalid skill package", http.StatusBadRequest, 2002294)
 	registerAdditionalErrorPattern("skill package file %q exceeds %d bytes", "Invalid skill package", http.StatusBadRequest, 2002294)
 	registerAdditionalErrorPattern("skill package exceeds %d uncompressed bytes", "Invalid skill package", http.StatusBadRequest, 2002294)
+	registerAdditionalErrorPattern("skill name cannot exceed %d characters", "Skill name cannot exceed 80 characters", http.StatusBadRequest, 2002305)
+	registerAdditionalErrorPattern("skill description cannot exceed %d characters", "Skill description cannot exceed 1024 characters", http.StatusBadRequest, 2002306)
 
 	// Personal recovery and archive lifecycle errors.
 	registerAdditionalError("query archive folders failed", http.StatusInternalServerError, 2002098)
@@ -581,6 +583,10 @@ func init() {
 	registerAdditionalError("installed Skill distribution baseline is unavailable", http.StatusConflict, 2002299)
 	registerAdditionalError("distribution upgrade conflicts require draft review", http.StatusConflict, 2002300)
 	registerAdditionalError("distribution upgrade draft is active", http.StatusConflict, 2002301)
+	registerAdditionalError("editable content exceeds the 2 mib limit", http.StatusBadRequest, 2002302)
+	registerAdditionalError("editable block changed; refresh and retry", http.StatusConflict, 2002303)
+	registerAdditionalError("save editable block failed", http.StatusInternalServerError, 2002304)
+	registerAdditionalError("failed to invalidate compressed context", http.StatusInternalServerError, 2002307)
 }
 
 func registerAdditionalError(message string, status, code int) {
