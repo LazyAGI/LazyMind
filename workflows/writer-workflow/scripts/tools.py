@@ -421,6 +421,30 @@ _FORBID_IMAGE_GENERATION = re.compile(
     r'(?:image|picture|photo)',
     re.IGNORECASE,
 )
+_REQUIRE_VISUALS = (
+    re.compile(
+        r'(?:必须|务必|一定要|要求).{0,12}'
+        r'(?:包含|带有|加入|添加|插入|生成|绘制|制作|提供|使用|配上|附上|'
+        r'放入|嵌入|展示).{0,8}'
+        r'(?:图片|图像|插图|配图|封面图|示意图|图表|表格)'
+        r'|(?:请|帮我|需要|想要).{0,8}'
+        r'(?:加入|添加|插入|绘制|制作|提供|配上|附上|放入|嵌入).{0,8}'
+        r'(?:图片|图像|插图|配图|封面图|示意图|图表|表格)'
+        r'|配(?:上)?\s*(?:\d+|[一二两三四五六七八九十]+)?\s*(?:张|幅|个)?\s*'
+        r'(?:图|图片|图像|插图|配图|封面图|示意图|图表)'
+        r'|(?:插入|添加|附上|嵌入|放入).{0,6}'
+        r'(?:\d+|[一二两三四五六七八九十]+)?\s*(?:张|幅|个)?\s*'
+        r'(?:图片|图像|插图|配图|封面图|示意图|图表)'
+        r'|生成\s*(?:\d+|[一二两三四五六七八九十]+)\s*(?:张|幅|个)\s*'
+        r'(?:图片|图像|插图|配图|封面图|示意图)',
+    ),
+    re.compile(
+        r'\b(?:must|require(?:s|d)?|please|need\s+to|want\s+to)\b.{0,20}'
+        r'\b(?:include|add|insert|generate|create|provide|use|show)\b.{0,20}'
+        r'\b(?:images?|pictures?|illustrations?|visuals?|charts?|diagrams?|tables?)\b',
+        re.IGNORECASE,
+    ),
+)
 
 
 def _parse_writer_request_constraints(query: str) -> dict[str, Any]:
@@ -442,9 +466,13 @@ def _parse_writer_request_constraints(query: str) -> dict[str, Any]:
     no_visuals = any(pattern.search(query or '') for pattern in _NO_VISUALS)
     require_reuse = bool(_REQUIRE_INPUT_IMAGE_REUSE.search(query or ''))
     forbid_generation = bool(_FORBID_IMAGE_GENERATION.search(query or ''))
-    if no_visuals or require_reuse or forbid_generation:
+    require_visuals = not no_visuals and (
+        require_reuse or any(pattern.search(query or '') for pattern in _REQUIRE_VISUALS)
+    )
+    if no_visuals or require_visuals or require_reuse or forbid_generation:
         constraints['visual_policy'] = {
             'allow_visuals': not no_visuals,
+            'require_visuals': require_visuals,
             'require_input_image_reuse': require_reuse,
             'allow_image_generation': not (no_visuals or require_reuse or forbid_generation),
         }
@@ -1757,6 +1785,10 @@ def writer_resolve_visual_media(
     media_assets_value = _json_loads(media_assets_json, {})
     visual_policy = (media_assets_value.get('meta') or {}).get('visual_policy') or {}
     allow_image_generation = visual_policy.get('allow_image_generation') is not False
+    require_visuals = (
+        visual_policy.get('require_visuals') is True
+        or visual_policy.get('require_input_image_reuse') is True
+    )
     acquirers = {
         'web_search': _acquire_web_search_resources,
     }
@@ -1838,7 +1870,7 @@ def writer_resolve_visual_media(
                 f'Failed to acquire visual instruction {instruction_id!r}: '
                 'no candidate could be materialized'
             )
-            if strict_required and request.get('required'):
+            if (strict_required or require_visuals) and request.get('required') is True:
                 raise RuntimeError(
                     f'{message}: {request.get("purpose") or "current visual requirement"}'
                 )
@@ -1850,10 +1882,14 @@ def writer_resolve_visual_media(
     unresolved_required = [
         str(instruction.get('need_id'))
         for instruction in (plan_data.get('instructions') or [])
-        if instruction.get('required', True) and not any(
-            asset_id in resolved_assets
-            and Path(str(resolved_assets[asset_id].get('local_path') or '')).is_file()
-            for asset_id in resolved_bindings.get(str(instruction.get('need_id')), [])
+        if (
+            (strict_required or require_visuals)
+            and instruction.get('required', False) is True
+            and not any(
+                asset_id in resolved_assets
+                and Path(str(resolved_assets[asset_id].get('local_path') or '')).is_file()
+                for asset_id in resolved_bindings.get(str(instruction.get('need_id')), [])
+            )
         )
     ]
     if unresolved_required:
