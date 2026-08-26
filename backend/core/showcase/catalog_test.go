@@ -53,7 +53,7 @@ func TestCompileCatalogBuildsLocalizedCasesAndHashedAssets(t *testing.T) {
 	if len(cases) != 1 || cases[0].Type != TypeChat || cases[0].Title != "English demo" || cases[0].DetailTitle != "English detail" || cases[0].Category != "Education" || len(cases[0].Tasks) != 2 {
 		t.Fatalf("cases = %#v", cases)
 	}
-	if cases[0].BuiltinSkillUID != "bsk_demo" {
+	if cases[0].BuiltinSkillUID != "bsk_demo" || cases[0].SourceURL != "https://example.test/multi.zip" {
 		t.Fatalf("featured case is not bound to its configured Skill: %#v", cases[0])
 	}
 	if cases[0].Tasks[1].Result.Title != "English result" || cases[0].Tasks[1].Steps[0].Title != "Analyze" {
@@ -168,6 +168,45 @@ func TestLoadSourceDirectoryRejectsUnknownFieldsAndInvalidAssets(t *testing.T) {
 			t.Fatalf("error = %v", err)
 		}
 	})
+	t.Run("unsafe local Skill source", func(t *testing.T) {
+		root := t.TempDir()
+		body := strings.Replace(validFeaturedYAML("demo", false), "https://example.test/demo.zip", "../private-skill", 1)
+		writeFeaturedSource(t, root, "demo", body)
+		_, err := LoadSourceDirectory(root)
+		if err == nil || !strings.Contains(err.Error(), "HTTP(S) URL or a relative path") {
+			t.Fatalf("error = %v", err)
+		}
+	})
+}
+
+func TestLoadSourceDirectoryAcceptsLocalSkillSource(t *testing.T) {
+	root := t.TempDir()
+	body := strings.Replace(validFeaturedYAML("demo", false), "https://example.test/demo.zip", "featured/demo/skill", 1)
+	writeFeaturedSource(t, root, "demo", body)
+	definitions, err := LoadSourceDirectory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(definitions) != 1 || definitions[0].Skill.SourceURL != "featured/demo/skill" {
+		t.Fatalf("definitions = %#v", definitions)
+	}
+}
+
+func TestCompileCatalogAcceptsNormalizedBuiltinSkillSource(t *testing.T) {
+	root := t.TempDir()
+	body := strings.Replace(validFeaturedYAML("demo", false), "https://example.test/demo.zip", "featured/demo/skill", 1)
+	writeFeaturedSource(t, root, "demo", body)
+	definitions, err := LoadSourceDirectory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	definitions[0].Skill.SourceURL = "builtin://featured/demo/skill"
+	definitions[0].Skill.BuiltinSkillUID = "bsk_demo"
+	definitions[0].Skill.Version = "1.0.0"
+	definitions[0].Skill.ArchiveSHA256 = strings.Repeat("a", 64)
+	if _, err := CompileCatalog(definitions, filepath.Join(t.TempDir(), "featured-skills")); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestLoadSourceDirectoryRejectsLocaleTaskDrift(t *testing.T) {

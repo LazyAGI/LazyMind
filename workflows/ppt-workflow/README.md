@@ -12,7 +12,7 @@ workflows/ppt-workflow/
   runtime/                    # HTML pipeline used at runtime (ONLY what we need)
     lib/model_client.py
     prompts/                  # style / outline / page-html / refine
-    references/               # html_constraints, style_catalog
+    references/               # html constraints, style catalog, export-safe rendering recipes
     scripts/run_stage.py
     scripts/export_pptx/      # Playwright DOM → editable PPTX
 ```

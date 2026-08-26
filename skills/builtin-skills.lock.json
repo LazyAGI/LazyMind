@@ -77,6 +77,46 @@
       "package_file": "packages/bsk_01K0M8SCV7PAPERSEARCH9Q2X3A4B.zip"
     },
     {
+      "key": "structured-longform-writing",
+      "uid": "bsk_E1A2FD55C759A485672BA6B94328",
+      "source_url": "builtin://writing/structured-longform-writing",
+      "resolved_url": "builtin://writing/structured-longform-writing",
+      "version": "1.0.0",
+      "name": "structured-longform-writing",
+      "description": "Use for structured long-form writing, including blogs, reports, proposals, plans, PRDs, competitive analyses, research summaries, technical design docs, internal briefings, and decision documents. Trigger when the user asks to write, draft, expand, organize, polish into, or turn rough notes, attachments, webpages, knowledge-base results, or gathered materials into a complete long-form document. Do not use for simple rewriting, one-paragraph summaries, title brainstorming, short messages, translation-only tasks, or purely creative fiction. 来源：千问办公，经 LazyMind 适配。",
+      "category": "writing",
+      "tags": [
+        "long-form-writing",
+        "report",
+        "proposal"
+      ],
+      "market_visible": true,
+      "archive_sha256": "0d5cd585fd438ba1393ac831e55448ac8f710fc16a0e8100b39e0c9cd51a9e3a",
+      "tree_sha256": "fe8817735ccdf89458bdb2d8b7932a6a4ab715f44d9c2587aca73257cb92b73d",
+      "archive_size": 30155,
+      "package_file": "packages/bsk_E1A2FD55C759A485672BA6B94328.zip"
+    },
+    {
+      "key": "diagram-design",
+      "uid": "bsk_01L0D6G4R4M8V2K7Q9C5X3H0EP",
+      "source_url": "builtin://design/diagram-design",
+      "resolved_url": "builtin://design/diagram-design",
+      "version": "4.1.0-lazymind-phase4-motion",
+      "name": "diagram-design",
+      "description": "在 LazyMind 中把系统架构、流程、时序、数据模型、时间线、泳道、象限和统计图等复杂信息制作成可下载的 HTML 或独立 SVG，支持显式请求的 reveal、step 和 loop 受控动画，也可安全提取 Mermaid 与 Draw.io 后重新设计。显式提及 diagram-design、画架构图/流程图/关系图/数据图、动态展示/逐步讲解、重绘 Mermaid/Draw.io、Terminal、Sketchy 或导出 SVG 时使用；按类型读取规范与示例，执行安全、可访问性、动画和类型专项校验后发布。第四阶段仍不支持 PNG、自动品牌抓取或持久化配置。",
+      "category": "design",
+      "tags": [
+        "architecture-diagram",
+        "flowchart",
+        "visualization"
+      ],
+      "market_visible": true,
+      "archive_sha256": "885cb8054468cff51b9f0bdc0e02ae66b7bc0305fd538277ea83e75cf26108a7",
+      "tree_sha256": "9c0c017fc8d7f7a0a6c78413682ce075a2d054c58d4e96cb26de781947b8c399",
+      "archive_size": 523143,
+      "package_file": "packages/bsk_01L0D6G4R4M8V2K7Q9C5X3H0EP.zip"
+    },
+    {
       "key": "user_7c4df347/gaokao-volunteer-advisor",
       "uid": "bsk_C8C501AEDCEC9283F2C9F9F59AD8",
       "source_url": "https://skillhub.cn/skills/user_7c4df347/gaokao-volunteer-advisor",
@@ -90,6 +130,51 @@
       "tree_sha256": "6b410460510e4963ccbf0e731f9da01918d15f5f95dfaf26670a6e455ebda88e",
       "archive_size": 27164,
       "package_file": "packages/bsk_C8C501AEDCEC9283F2C9F9F59AD8.zip"
+    },
+    {
+      "key": "user_fd308b11/hot-news-summary",
+      "uid": "bsk_1B9DC2E9E2C3E911E34E9C8EA1AA",
+      "source_url": "https://skillhub.cn/skills/user_fd308b11/hot-news-summary",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40user_fd308b11%2Fhot-news-summary",
+      "version": "0.0.0+7649628954ee",
+      "name": "hot-news-summary",
+      "description": "聚合8大平台热榜数据（微博/知乎/B站/抖音/百度/36氪/少数派/贴吧），通过结构化评分模型智能筛选10条热点，生成三层洞察点评（What/So What/Now What），支持四种点评风格（严肃分析/毒舌吐槽/投资视角/吃瓜八卦），输出群聊/知识库/可视化看板/语音播报四种格式；当用户需要了解今日热点、生成每日资讯摘要或追踪热门话题时使用",
+      "category": "external",
+      "market_visible": false,
+      "archive_sha256": "6c05f88d98b329e1d17cbe464bf97d0e02351bb09eb740022e88b4fd67178e97",
+      "tree_sha256": "7649628954ee2fdeb9895914c006a308f1285adf3067299f8cea8603258d04eb",
+      "archive_size": 13651,
+      "package_file": "packages/bsk_1B9DC2E9E2C3E911E34E9C8EA1AA.zip"
+    },
+    {
+      "key": "clawhub_wscats/interview-simulator",
+      "uid": "bsk_C1CB6B0CB3D8ACD9480D7F529AEE",
+      "source_url": "https://skillhub.cn/skills/clawhub_wscats/interview-simulator",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40clawhub_wscats%2Finterview-simulator",
+      "version": "1.0.0",
+      "name": "interview-simulator",
+      "description": "Simulate role-specific mock interviews, score each answer, and provide concrete feedback and model responses for interview preparation.",
+      "category": "external",
+      "tags": [
+        "interview",
+        "career",
+        "coaching"
+      ],
+      "market_visible": false,
+      "origin_archive_sha256": "7f50d04bb52b68bcb6a53746dd7b0b1e5ba5b537279fc05b919dbe01295836e9",
+      "origin_tree_sha256": "4afb2807b9e4794019bfcf1cf8b442c8a22835d35b5cac7aacdc7f3b0edcd836",
+      "origin_archive_size": 7027,
+      "patch_set_sha256": "a31a514a944d1c6393536a62802c1503d4635f6991c0a06cd06951de3242698b",
+      "applied_patches": [
+        {
+          "id": "interview-simulator/add-required-frontmatter-v1",
+          "sha256": "ad589f919c7345afb5810e7181ecad0bb8a87da5b5a87017b004516e46220194"
+        }
+      ],
+      "archive_sha256": "c2e36114761add53f2e3070911c866eb8d96884aee3a784a43bb6e3fee7d5c8b",
+      "tree_sha256": "bcaaedf783e933a1a30f51a15f9ca713ff27523fcdf43dd9371d66d682c39290",
+      "archive_size": 7106,
+      "package_file": "packages/bsk_C1CB6B0CB3D8ACD9480D7F529AEE.zip"
     },
     {
       "key": "user_6d79eef2/k12-smart-teacher",
@@ -112,6 +197,61 @@
       "tree_sha256": "1aef731597db76401e1732845581c241068ecd6e30e458ad5343767f67158af5",
       "archive_size": 49861,
       "package_file": "packages/bsk_8540F063D5202C3CE7D9B6F93366.zip"
+    },
+    {
+      "key": "skill",
+      "uid": "bsk_D9126B2E88201F74F8728E46A1C2",
+      "source_url": "builtin://featured/market-researcher/skill",
+      "resolved_url": "builtin://featured/market-researcher/skill",
+      "version": "1.0.0",
+      "name": "market-researcher",
+      "description": "显式挂载或提及 market-researcher 即表示用户主动选择本 Skill；无论任务是否可直接回答，第一步都必须调用 get_skill(name=\"market-researcher\")，不得套用“简单任务不加载 Skill”规则，也不得仅凭本描述作答。回复及模型自行生成的工具说明必须使用用户主要语言，工具调用前后不得播报过程。在 LazyMind 中，若广泛市场研究只有 WikipediaToolkit、ArxivSearch 和无发现能力的 url_fetch，且用户未给相关 URL，必须直接受限降级：不得调用这些窄域搜索，不得抓通用首页，不得凭记忆猜 URL。本 Skill 是完整的市场与行业研究专家，用于联网或用户资料驱动的行业/赛道研究、产业链、竞争格局、公司横向比较、可比公司估值、候选标的筛选、可复核 Mermaid 图表及研究报告；加载根文档后按路由读取 references，有两家及以上可比数值时运行估值脚本，定量制图时按受控路由直接生成简单 Mermaid 或为复杂图表运行脚本。若用户要求只依据所给数据或禁止检索，只能复述、比较和确定性计算输入，禁止推断相关性、因果、趋势、市场定价逻辑或无依据的综合优劣排名。不用于无依据实时行情预测或个性化买卖建议。",
+      "category": "research",
+      "tags": [
+        "market-research",
+        "competitive-analysis",
+        "comparable-companies"
+      ],
+      "market_visible": false,
+      "archive_sha256": "b3254edcd0565e3e1898341b711f0350f0a7487b280bd8a3846c13e80adf6452",
+      "tree_sha256": "e62bc2fc61a640b7c9b3eeec5ccd773bdcca162002c762a7e6e6f157aafe5ca3",
+      "archive_size": 55567,
+      "package_file": "packages/bsk_D9126B2E88201F74F8728E46A1C2.zip"
+    },
+    {
+      "key": "skill",
+      "uid": "bsk_1E1AE354017CAB635F423BC76790",
+      "source_url": "builtin://featured/novel-generator/skill",
+      "resolved_url": "builtin://featured/novel-generator/skill",
+      "version": "1.0.0",
+      "name": "novel-generator",
+      "description": "作为一个完整的中文网络小说与爽文连载专家，把一句话灵感扩展为创作设定、全局大纲、分卷节奏和连续章节，并通过 LazyMind 对话工作区维护角色、地点、时间线、伏笔和世界规则的一致性。用于用户要求写小说、续写章节、生成网文或爽文、设计修仙/玄幻/都市/重生/系统流/末世/网游故事、扩展创意、制作大纲、检查剧情穿帮、修订章节或继续长期连载时；短篇一次性创作可直接回答，长篇项目必须建立并更新结构化创作记忆。",
+      "category": "writing",
+      "tags": [
+        "novel-writing",
+        "serialized-fiction",
+        "creative-writing"
+      ],
+      "market_visible": false,
+      "archive_sha256": "c85078ac1ffc078766862c78c14a56837dfc6db0ae02ec76e4c067aca9a274e7",
+      "tree_sha256": "b22857ba8156de0ad833c26d7e71ed74401e12c4c28f08562fe556ab72ec916b",
+      "archive_size": 12568,
+      "package_file": "packages/bsk_1E1AE354017CAB635F423BC76790.zip"
+    },
+    {
+      "key": "skill",
+      "uid": "bsk_3DAD0016C2AC0817C61F3533A3EB",
+      "source_url": "builtin://featured/xiaohongshu-copywriter/skill",
+      "resolved_url": "builtin://featured/xiaohongshu-copywriter/skill",
+      "version": "1.0.0",
+      "name": "xiaohongshu-copywriter",
+      "description": "小红书爆款种草文案生成器。一键生成高点击率、高收藏率的小红书种草笔记，自带10套爆款标题公式、六段式正文结构、emoji排版、话题标签推荐和发布策略，适用于美妆、护肤、穿搭、美食、家居、数码、母婴等品类。当用户需要撰写小红书种草笔记、产品推广文案、小红书营销内容、种草推荐文时触发此技能。",
+      "category": "external",
+      "market_visible": false,
+      "archive_sha256": "fc97566b24189b9ab4238ded926bce4a0883bfb394a09b3b4b4fa66494cecc9e",
+      "tree_sha256": "de940e3328b9dabb0501df4246ca8dca2bb7bb8527faeef68a6aae3f81e1d763",
+      "archive_size": 14796,
+      "package_file": "packages/bsk_3DAD0016C2AC0817C61F3533A3EB.zip"
     }
   ]
 }

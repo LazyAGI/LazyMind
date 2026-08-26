@@ -24,6 +24,9 @@ vi.mock("react-i18next", () => ({
     t: (key: string, values?: Record<string, unknown>) => {
       if (key === "settingsPage.knowledge.groups.recognition.multimodal.name") return "多模态识别";
       if (key === "settingsPage.knowledge.groups.retrieval.kb.name") return "知识库";
+      if (key === "settingsPage.knowledge.groups.retrieval.kb.description") {
+        return "知识库广场、知识库中查找文档、统计信息和相关片段，用于基于资料回答问题。";
+      }
       if (key === "settingsPage.knowledge.openConfigAria") return `打开${values?.name}配置`;
       return key;
     },
@@ -119,6 +122,31 @@ describe("KnowledgeDataSettings", () => {
     fireEvent.click(knowledgeRow);
 
     expect(mocks.navigate).toHaveBeenCalledWith("/lib/knowledge/list?from=settings-knowledge");
+  });
+
+  it("uses the reviewed localized copy instead of a backend tool description", async () => {
+    mocks.listToolAssetsPage.mockResolvedValueOnce({
+      records: [{
+        id: "kb",
+        name: "知识库",
+        description: "后端旧描述",
+        isEnabled: true,
+        readonly: false,
+      }],
+    });
+
+    render(<KnowledgeDataSettings
+      controlsDisabled={false}
+      documentParsingEnabled={false}
+      documentParsingSaving={false}
+      headingRef={createRef<HTMLHeadingElement>()}
+      onDocumentParsingChange={vi.fn()}
+    />);
+
+    expect(await screen.findByText(
+      "知识库广场、知识库中查找文档、统计信息和相关片段，用于基于资料回答问题。",
+    )).toBeInTheDocument();
+    expect(screen.queryByText("后端旧描述")).not.toBeInTheDocument();
   });
 
   it("shows parsing providers inline and keeps the parsing switch in the group header", async () => {

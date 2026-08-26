@@ -26,6 +26,25 @@ func TestAttemptInputBindingIDFitsSchema(t *testing.T) {
 	}
 }
 
+func TestMergeAttemptWitnessesDeduplicatesOnlyExactBindings(t *testing.T) {
+	merged := mergeAttemptWitnesses(
+		[]graphengine.Witness{
+			{MaterialID: "source", RevisionID: "revision-1"},
+			{MaterialID: "source", RevisionID: "revision-2"},
+		},
+		[]graphengine.Witness{
+			{MaterialID: "source", RevisionID: "revision-1"},
+			{MaterialID: "source", RevisionID: "revision-1", BindAs: "fallback"},
+		},
+	)
+	if len(merged) != 3 {
+		t.Fatalf("merged witnesses = %#v, want three distinct bindings", merged)
+	}
+	if merged[0].RevisionID != "revision-1" || merged[1].RevisionID != "revision-2" || merged[2].BindAs != "fallback" {
+		t.Fatalf("merge must preserve stable order and distinct aliases: %#v", merged)
+	}
+}
+
 func setupBatchTransitionSession(t *testing.T) (*orm.DB, string) {
 	t.Helper()
 	db := newTestDB(t)

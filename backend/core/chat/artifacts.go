@@ -127,11 +127,36 @@ func legacyConversationArtifactConversationRoot(userID, conversationID string) s
 	)
 }
 
+func conversationAgentWorkspaceRoots(userID, conversationID string) []string {
+	root := strings.TrimSpace(os.Getenv("LAZYMIND_AGENTIC_WORKSPACE"))
+	if root == "" {
+		return nil
+	}
+	return []string{
+		filepath.Join(
+			root, conversationArtifactFileDirectory,
+			artifactScopeHash(userID), artifactScopeHash(conversationID),
+		),
+		filepath.Join(
+			root, conversationArtifactFileDirectory,
+			legacyArtifactScopeHash(userID), legacyArtifactScopeHash(conversationID),
+		),
+	}
+}
+
 func removeConversationArtifactFiles(userID, conversationID string) error {
-	for _, root := range []string{
+	roots := []string{
 		conversationArtifactConversationRoot(userID, conversationID),
 		legacyConversationArtifactConversationRoot(userID, conversationID),
-	} {
+	}
+	roots = append(roots, conversationAgentWorkspaceRoots(userID, conversationID)...)
+	seen := make(map[string]struct{}, len(roots))
+	for _, root := range roots {
+		root = filepath.Clean(root)
+		if _, ok := seen[root]; ok {
+			continue
+		}
+		seen[root] = struct{}{}
 		if err := os.RemoveAll(root); err != nil {
 			return err
 		}

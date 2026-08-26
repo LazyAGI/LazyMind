@@ -165,6 +165,16 @@ class ReceiverRepository(IngestionRepository, Protocol):
     ) -> None:
         ...
 
+    def find_inbound_by_provider_context(
+        self,
+        *,
+        provider: str,
+        account_id: str,
+        recipient_id: str,
+        expected_context: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        ...
+
 
 class AccountRuntime(Protocol):
     def reconcile_accounts(

@@ -20,7 +20,11 @@ import {
   RenderWord,
 } from "./renderers";
 
-import { RenderPdf, exportPdfAsImagePdf } from "@/components/ui";
+import {
+  RenderPdf,
+  exportPdfAsImagePdf,
+  type PdfTextSelection,
+} from "@/components/ui";
 import { normalizeProxyableUrl } from "@/modules/knowledge/utils/request";
 
 import "./index.scss";
@@ -34,6 +38,7 @@ interface FileViewerProps {
   fileName: string;
   segment?: Segment;
   onExportReadyChange?: (ready: boolean) => void;
+  onPdfSelection?: (selection: PdfTextSelection) => void;
 }
 
 const IMAGE_FILE_TYPES = [
@@ -270,6 +275,8 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
             fileData={pdfPreviewData}
             metadata={meta}
             content={content}
+            onAskSelection={props.onPdfSelection}
+            askSelectionLabel={t("knowledge.askPdfSelection")}
           />
         ) : null;
       case "docx":
@@ -341,7 +348,17 @@ const FileViewer = forwardRef<FileViewerRef, FileViewerProps>((props, ref) => {
           </div>
         );
       }
-  }, [fileData, pdfPreviewData, content, fileType, mediaObjectUrl, meta, props.fileName]);
+  }, [
+    content,
+    fileData,
+    fileType,
+    mediaObjectUrl,
+    meta,
+    pdfPreviewData,
+    props.fileName,
+    props.onPdfSelection,
+    t,
+  ]);
 
   const canExportImagePdf =
     fileType === "pdf" && !!fileData && !loading && !previewError;

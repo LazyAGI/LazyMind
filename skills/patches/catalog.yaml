@@ -1,0 +1,3 @@
+schema_version: 1
+patches:
+  - bsk_C1CB6B0CB3D8ACD9480D7F529AEE/interview-simulator-frontmatter-v1/patch.yaml

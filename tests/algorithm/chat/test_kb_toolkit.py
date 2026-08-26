@@ -40,28 +40,15 @@ def test_kb_citations_are_added_by_tool_result_middleware():
                 'uid': 'node-1', 'docid': 'doc-1', 'content': query,
             }]}
 
-    def temp_search(query: str):
-        """Search temporary documents.
-
-        Args:
-            query: Search query.
-        """
-        return {'items': [{
-            'uid': 'node-2', 'docid': 'doc-2', 'content': query,
-        }]}
-
-    temp_search.__name__ = 'kb_tmp_search'
-    manager = CitationResultMiddleware(ToolManager([FakeKnowledgeSearch(), temp_search]))
+    manager = CitationResultMiddleware(ToolManager([FakeKnowledgeSearch()]))
     results = manager([
         {'function': {'name': 'FakeKnowledgeSearch_kb_search', 'arguments': {'query': 'knowledge'}}},
-        {'function': {'name': 'kb_tmp_search', 'arguments': {'query': 'temporary'}}},
     ])
 
     assert results[0]['value']['items'][0]['ref'] == '[[1.1]]'
-    assert results[1]['value']['items'][0]['ref'] == '[[2.1]]'
-    assert len(state[CITATION_REFS_KEY]) == 2
+    assert len(state[CITATION_REFS_KEY]) == 1
     assert [source['source_roles'] for source in materialize_source_views(state)] == [
-        ['searched'], ['searched'],
+        ['searched'],
     ]
 
 

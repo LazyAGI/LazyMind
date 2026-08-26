@@ -36,6 +36,7 @@ def _get_document_reader():
     from lazyllm.tools.rag.readers.ocrReader import DynamicPDFReader
 
     return DynamicPDFReader(
+        ocr_url=str(_cfg['ocr_server_url'] or ''),
         image_cache_dir=_cfg['ocr_cache_dir'],
         timeout=3600,
     )

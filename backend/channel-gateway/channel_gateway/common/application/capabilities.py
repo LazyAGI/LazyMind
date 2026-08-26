@@ -660,6 +660,7 @@ class CapabilityActions:
                     'skill',
                     'tool',
                     'personalization',
+                    'workflow',
                 }
             ):
                 self._store.save_selection_snapshot(

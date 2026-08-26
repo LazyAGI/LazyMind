@@ -103,7 +103,8 @@ def _handoff_tool(
             frontier = client.get_ready_steps(selected_session_id)
             allowed = set(frontier.get('ready_steps') or [])
             allowed.update(frontier.get('retryable_steps') or [])
-            allowed.update(frontier.get('rewindable_steps') or [])
+            rewindable = set(frontier.get('rewindable_steps') or [])
+            allowed.update(rewindable)
             allowed.update(frontier.get('continue_steps') or [])
             if step_id not in allowed:
                 if state_refreshed:
@@ -148,6 +149,8 @@ def _handoff_tool(
                 result = dict(response.result)
                 if state_refreshed:
                     result.update(_state_refresh_notice())
+                if step_id in rewindable:
+                    result = _compact_transition_result(result)
                 return _result_text(result)
             except WorkflowClientError as exc:
                 if exc.code != 'STATE_VERSION_CONFLICT' or attempt > 0:
@@ -184,6 +187,48 @@ def _artifact_by_handle(toolkit: HostWorkflowToolkit, session_id: str,
             ]},
         )
     return matches[0]
+
+
+def _compact_transition_result(result: Dict[str, Any]) -> Dict[str, Any]:
+    """Keep a rewind transition receipt small and actionable.
+
+    Core returns the full authoritative projection and Workflow state so UI and
+    non-model clients can inspect them. Rewind repeats graph definitions, node
+    prompts, and attempt history that the Agent has already seen. The normal
+    forward path intentionally keeps the projection so choice-edge conditions
+    remain visible; callers use this adapter only for a rewindable target.
+    """
+    projection = result.get('projection')
+    projection = projection if isinstance(projection, dict) else {}
+    workflow_state = result.get('workflow_state')
+    workflow_state = workflow_state if isinstance(workflow_state, dict) else {}
+    compact = {
+        key: value
+        for key, value in result.items()
+        if key not in {'projection', 'workflow_state'}
+    }
+
+    frontier_fields = {
+        'ready_steps': 'ready',
+        'retryable_steps': 'retryable',
+        'rewindable_steps': 'rewindable',
+        'continue_steps': 'continue',
+    }
+    for result_key, projection_key in frontier_fields.items():
+        if result_key not in compact and projection_key in projection:
+            compact[result_key] = projection.get(projection_key) or []
+
+    completed = (
+        projection.get('completed') is True
+        or workflow_state.get('status') == 'completed'
+        or compact.get('status') == 'completed'
+    )
+    if completed:
+        compact['status'] = 'completed'
+        compact.setdefault('outcome', 'workflow_completed')
+    elif not compact.get('status') and workflow_state.get('status'):
+        compact['status'] = workflow_state['status']
+    return compact
 
 
 def _with_terminal_agent_control(result: Dict[str, Any]) -> Dict[str, Any]:
@@ -254,7 +299,8 @@ def _safe_session_tools(
             frontier = toolkit.get_ready_steps(selected_session_id)
             allowed = set(frontier.get('ready_steps') or [])
             allowed.update(frontier.get('retryable_steps') or [])
-            allowed.update(frontier.get('rewindable_steps') or [])
+            rewindable = set(frontier.get('rewindable_steps') or [])
+            allowed.update(rewindable)
             allowed.update(frontier.get('continue_steps') or [])
             if not requested or any(value not in allowed for value in requested):
                 if state_refreshed:
@@ -307,7 +353,10 @@ def _safe_session_tools(
                 )
                 if state_refreshed:
                     result = {**result, **_state_refresh_notice()}
-                return _with_terminal_agent_control(result)
+                result = _with_terminal_agent_control(result)
+                if any(value in rewindable for value in requested):
+                    result = _compact_transition_result(result)
+                return result
             except WorkflowClientError as exc:
                 if exc.code != 'STATE_VERSION_CONFLICT' or attempt > 0:
                     raise
@@ -538,12 +587,16 @@ def _runtime_clarification_fields(runtime_policy: Any) -> List[Dict[str, Any]]:
             choice for value in (raw.get('choices') or [])
             if (choice := _clean_workflow_text(value))
         ]
+        choice_policy = _clean_workflow_text(raw.get('choice_policy')).lower() or 'seed'
+        if choice_policy not in {'seed', 'subset', 'fixed'}:
+            choice_policy = 'seed'
         result.append({
             'id': field_id,
             'label': _clean_workflow_text(raw.get('label')) or field_id,
             'question': question,
             'type': question_type,
             'choices': choices,
+            'choice_policy': choice_policy,
         })
     return result
 
@@ -698,6 +751,20 @@ def _merge_startup_clarification_context(
     )
 
 
+def _is_explicit_merged_request_context(value: Any) -> bool:
+    """Recognize a caller-supplied original-request + clarification envelope."""
+    text = str(value or '').strip().lower()
+    return any(
+        first in text and second in text
+        for first, second in (
+            ('original workflow request:', 'clarification answers:'),
+            ('original request:', 'clarification answers:'),
+            ('原始需求：', '补充：'),
+            ('原始请求：', '澄清回答：'),
+        )
+    )
+
+
 def _startup_clarification_guidance(runtime_policy: Any) -> str:
     fields = _runtime_clarification_fields(runtime_policy)
     if not fields:
@@ -712,7 +779,13 @@ def _startup_clarification_guidance(runtime_policy: Any) -> str:
         'that turn. Include each '
         'declared field id in its question object. Whenever meaningful, generate 2-4 concise, '
         'context-specific suggested answers from the current request and use type=single so the '
-        'user can click one; declared choices are useful seeds, not a limit. Keep type=text only '
+        'user can click one. For choice_policy=subset, choose only the 2-4 most relevant declared '
+        'choices, copy them verbatim, and never invent or rename an option. For '
+        'choice_policy=fixed, use all declared choices verbatim. Otherwise declared choices are '
+        'useful seeds, not a limit. In particular, for choice_policy=seed, any explicit '
+        'free-form value in the request counts as present even when it is not one of the '
+        'suggested choices; preserve it exactly and never ask that field again merely because '
+        'it differs from a suggestion. Keep type=text only '
         'when responsible suggestions cannot be inferred. On the answer turn, NEVER call ask_user '
         'again or reassess fields as missing. Combine the original request, all already-known '
         'fields, and the new answers into one concise request_context and pass that value to '
@@ -871,14 +944,18 @@ def _workflow_trigger_tools(
                 input_bindings: Optional[Dict[str, str]] = None,
                 request_context: Optional[str] = None,
             ) -> Dict[str, Any]:
-                # Once startup clarification has happened, the Host-composed
-                # query is authoritative because it contains both the original
-                # request and this turn's answers. A model-supplied answer-only
-                # request_context must not discard the known topic/page count.
+                # The Host-composed query is authoritative. A clearly marked
+                # original-request + clarification envelope remains supported
+                # for callers that already merged those two sections. An
+                # ordinary model-authored paraphrase must never erase action
+                # words such as "search, then edit" before the first step.
+                supplied_context = str(request_context or '').strip()
                 effective_context = (
                     bound_query
                     if bound_clarification_answer
-                    else str(request_context or '').strip() or bound_query
+                    else supplied_context
+                    if _is_explicit_merged_request_context(supplied_context)
+                    else bound_query or supplied_context
                 )
                 if session_holder is not None:
                     # Keep the immutable launch brief available to the first
@@ -1082,7 +1159,8 @@ def _workflow_trigger_tools(
         trigger_workflow.__doc__ = (
             description + input_contract + attachment_guidance
             + ' If this turn follows startup clarification, request_context must merge the '
-            'original request with every clarification answer; otherwise omit it.'
+            'original request with every clarification answer; otherwise omit it. The Host '
+            'forwards the exact current_query and ignores model-authored paraphrases.'
         )
         tools.append(trigger_workflow)
     return tools

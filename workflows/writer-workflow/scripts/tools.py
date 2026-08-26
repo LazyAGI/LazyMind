@@ -13,7 +13,7 @@ import re
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Any, Callable, Literal, Mapping
+from typing import Any, Callable, Iterator, Literal, Mapping
 
 from lazyllm import AutoModel
 from pydantic import BaseModel, ConfigDict
@@ -24,8 +24,10 @@ from lazyllm.tools.writer.data_models import (
     ModifyPlan,
     PatchResult,
     PatchSet,
+    ShortWritingPlan,
     StringReplaceSet,
     TargetDocument,
+    VisualPlan,
     WriterDocument,
 )
 from lazyllm.tools.writer.numbering import (
@@ -37,12 +39,23 @@ from lazyllm.tools.writer.numbering import (
     materialize_ir,
     materialize_markdown,
 )
-from lazyllm.tools.writer.tools import WriterResourceTools, WriterRevisionTools
+from lazyllm.tools.writer.tools import (
+    WriterDraftingTools,
+    WriterPlanningTools,
+    WriterResourceTools,
+    WriterRevisionTools,
+)
 from lazyllm.tools.writer.tools.revision_tools import apply_patch_to_ir
 from lazyllm.tools.writer.utils import (
     load_artifact_json,
     parse_document_markdown,
     save_artifact_json,
+)
+from lazyllm.tools.tools.search import (
+    BingSearch,
+    BochaSearch,
+    GoogleSearch,
+    TavilySearch,
 )
 from lazymind.chat.engine.subagent.context import require_context
 from lazymind.chat.engine.tools.writer import (
@@ -57,7 +70,7 @@ from lazymind.chat.engine.tools.writer import (
 from lazymind.chat.engine.tools.multimodal import image_generator
 from lazymind.model_config import is_model_role_available
 
-WRITER_IMAGE_ACQUISITION_PROMPT = '''Create one professional visual for a long-form document.
+WRITER_IMAGE_ACQUISITION_PROMPT = '''Create one professional visual for a document.
 
 Visual type: {visual_type}
 The visual must communicate: {purpose}
@@ -68,6 +81,30 @@ brand logos, decorative filler, and small unreadable text. Return exactly one im
 
 
 LOG = logging.getLogger(__name__)
+
+WRITER_DEFAULT_STRUCTURE_MODE: Literal['flat', 'sectioned'] = 'sectioned'
+_WRITER_STRUCTURE_CLASSIFIER_PROMPT = '''Classify the final presentation structure for a new
+Writer document. Return exactly one JSON object and nothing else:
+{"structure_mode":"flat|sectioned|unclear"}
+
+Apply these rules in order:
+1. An explicit presentation requirement overrides length. Chapters, sections, or subheadings
+   mean sectioned. Continuous prose, or explicitly no chapters, sections, or subheadings, means
+   flat. Asking for an outline as a planning step does not by itself require sectioned output.
+2. With no explicit presentation requirement, a requested length at or below 1200 Chinese
+   characters/words means flat; above 1200 means sectioned. An unquantified short article means
+   flat and an unquantified long article means sectioned.
+3. Return unclear when presentation and length are both unclear, when explicit requirements
+   conflict, or when a mentioned length is not clearly the requested output length. Never infer
+   length from topic complexity.
+
+Examples:
+- 写一篇1000字的文章 -> flat
+- 写一篇1000字的文章，要有小标题 -> sectioned
+- 写一篇2000字的文章，不要小标题 -> flat
+- write a 900-word article with subheadings -> sectioned
+- write an article about spring -> unclear
+'''
 
 _KB_EVIDENCE_TOOL_NAMES = {
     'KBToolkit_kb_search',
@@ -85,7 +122,8 @@ class WriterCommand(BaseModel):
     action: Literal['create', 'use_outline', 'rewrite', 'revise', 'read']
     source_role: Literal['none', 'outline', 'document']
     target_stage: Literal['prepared', 'outline', 'document']
-    next_step: Literal['outline', 'write_document', '__end__']
+    next_step: Literal['outline', 'write_flat_document', 'write_document', '__end__']
+    structure_mode: Literal['flat', 'sectioned'] = 'sectioned'
     user_instruction: str
     source_ref: str | None = None
     target_ref: str | None = None
@@ -173,7 +211,7 @@ def _authoritative_writer_input_path(
         if str(remote_inputs.get(candidate) or '').strip()
     ), '')
     step_id = str((ctx.params or {}).get('step_id') or '').strip()
-    if step_id in {'outline', 'write_document'}:
+    if step_id in {'outline', 'write_flat_document', 'write_document'}:
         if require_workflow_binding and not authoritative:
             raise ValueError(
                 f'{keys[0]} is missing from authoritative workflow inputs.'
@@ -188,6 +226,59 @@ def _load_writer_command(path: str) -> WriterCommand:
     if not path:
         raise ValueError('writer_command_path is required.')
     return WriterCommand.model_validate(_read_json_file(path))
+
+
+def _writer_structure_payload(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    text = str(value or '').strip()
+    fenced = re.search(r'```(?:json)?\s*([\s\S]*?)```', text, re.IGNORECASE)
+    if fenced:
+        text = fenced.group(1).strip()
+    decoder = json.JSONDecoder()
+    objects: list[dict[str, Any]] = []
+    for match in re.finditer(r'\{', text):
+        try:
+            payload, _ = decoder.raw_decode(text, match.start())
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            objects.append(payload)
+    if not objects:
+        raise ValueError('Writer structure classifier returned no JSON object.')
+    return objects[-1]
+
+
+def writer_classify_structure(user_input: str) -> Literal['flat', 'sectioned']:
+    """Classify a new document inside prepare; uncertainty keeps the legacy route."""
+    request = str(user_input or '').strip()
+    if not request:
+        return WRITER_DEFAULT_STRUCTURE_MODE
+    try:
+        raw = AutoModel(model='llm')(
+            f'{_WRITER_STRUCTURE_CLASSIFIER_PROMPT}\nCurrent request:\n{request[:4000]}',
+            response_format={'type': 'json_object'},
+            stream_output=False,
+        )
+        structure_mode = str(
+            _writer_structure_payload(raw).get('structure_mode') or ''
+        ).strip().lower()
+    except Exception as exc:  # noqa: BLE001 - classification must fail closed.
+        LOG.warning(
+            '[Writer] Structure classification failed; defaulting to %s: %s',
+            WRITER_DEFAULT_STRUCTURE_MODE,
+            exc,
+        )
+        return WRITER_DEFAULT_STRUCTURE_MODE
+    if structure_mode == 'flat':
+        return 'flat'
+    if structure_mode == 'sectioned':
+        return 'sectioned'
+    LOG.info(
+        '[Writer] Structure classification was unclear; defaulting to %s.',
+        WRITER_DEFAULT_STRUCTURE_MODE,
+    )
+    return WRITER_DEFAULT_STRUCTURE_MODE
 
 
 def writer_resolve_command(
@@ -227,8 +318,15 @@ def writer_resolve_command(
     if target_stage == 'prepared' and action != 'read':
         raise ValueError('target_stage="prepared" requires action="read".')
 
+    structure_mode = (
+        writer_classify_structure(user_input)
+        if action == 'create' and target_stage == 'document'
+        else WRITER_DEFAULT_STRUCTURE_MODE
+    )
     if action == 'read':
         next_step = '__end__'
+    elif action == 'create' and target_stage == 'document' and structure_mode == 'flat':
+        next_step = 'write_flat_document'
     elif action == 'rewrite' or (action == 'revise' and source_role == 'document'):
         next_step = 'write_document'
     else:
@@ -239,6 +337,7 @@ def writer_resolve_command(
         source_role=source_role,
         target_stage=target_stage,
         next_step=next_step,
+        structure_mode=structure_mode,
         user_instruction=user_input,
         source_ref=source_ref or None,
         target_ref=target_ref or None,
@@ -322,6 +421,30 @@ _FORBID_IMAGE_GENERATION = re.compile(
     r'(?:image|picture|photo)',
     re.IGNORECASE,
 )
+_REQUIRE_VISUALS = (
+    re.compile(
+        r'(?:必须|务必|一定要|要求).{0,12}'
+        r'(?:包含|带有|加入|添加|插入|生成|绘制|制作|提供|使用|配上|附上|'
+        r'放入|嵌入|展示).{0,8}'
+        r'(?:图片|图像|插图|配图|封面图|示意图|图表|表格)'
+        r'|(?:请|帮我|需要|想要).{0,8}'
+        r'(?:加入|添加|插入|绘制|制作|提供|配上|附上|放入|嵌入).{0,8}'
+        r'(?:图片|图像|插图|配图|封面图|示意图|图表|表格)'
+        r'|配(?:上)?\s*(?:\d+|[一二两三四五六七八九十]+)?\s*(?:张|幅|个)?\s*'
+        r'(?:图|图片|图像|插图|配图|封面图|示意图|图表)'
+        r'|(?:插入|添加|附上|嵌入|放入).{0,6}'
+        r'(?:\d+|[一二两三四五六七八九十]+)?\s*(?:张|幅|个)?\s*'
+        r'(?:图片|图像|插图|配图|封面图|示意图|图表)'
+        r'|生成\s*(?:\d+|[一二两三四五六七八九十]+)\s*(?:张|幅|个)\s*'
+        r'(?:图片|图像|插图|配图|封面图|示意图)',
+    ),
+    re.compile(
+        r'\b(?:must|require(?:s|d)?|please|need\s+to|want\s+to)\b.{0,20}'
+        r'\b(?:include|add|insert|generate|create|provide|use|show)\b.{0,20}'
+        r'\b(?:images?|pictures?|illustrations?|visuals?|charts?|diagrams?|tables?)\b',
+        re.IGNORECASE,
+    ),
+)
 
 
 def _parse_writer_request_constraints(query: str) -> dict[str, Any]:
@@ -343,9 +466,13 @@ def _parse_writer_request_constraints(query: str) -> dict[str, Any]:
     no_visuals = any(pattern.search(query or '') for pattern in _NO_VISUALS)
     require_reuse = bool(_REQUIRE_INPUT_IMAGE_REUSE.search(query or ''))
     forbid_generation = bool(_FORBID_IMAGE_GENERATION.search(query or ''))
-    if no_visuals or require_reuse or forbid_generation:
+    require_visuals = not no_visuals and (
+        require_reuse or any(pattern.search(query or '') for pattern in _REQUIRE_VISUALS)
+    )
+    if no_visuals or require_visuals or require_reuse or forbid_generation:
         constraints['visual_policy'] = {
             'allow_visuals': not no_visuals,
+            'require_visuals': require_visuals,
             'require_input_image_reuse': require_reuse,
             'allow_image_generation': not (no_visuals or require_reuse or forbid_generation),
         }
@@ -401,6 +528,13 @@ def _read_json_file(path: str) -> Any:
     if isinstance(raw, dict) and 'data' in raw:
         return raw['data']
     return raw
+
+
+def _writer_tool_artifact_data(result: Any) -> Any:
+    path = str(result.get('artifact_path') or '').strip() if isinstance(result, dict) else ''
+    if not path:
+        raise ValueError(f'Writer tool did not return artifact_path: {result!r}')
+    return _read_json_file(path)
 
 
 def _action_artifact_data(value: Any) -> Any:
@@ -971,6 +1105,7 @@ def writer_prepare_workspace(
         'resource_profiles': resource_profiles,
         'writing_context': writing_context,
         'representation': representation,
+        'structure_mode': command.structure_mode,
         'next_step': command.next_step,
         'control': {'next_step': command.next_step},
         'warnings': media_result.get('warnings') or [],
@@ -1322,11 +1457,255 @@ def writer_generate_section_instructions(
     }
 
 
+_IMAGE_URL_KEYS = (
+    'contentUrl', 'content_url', 'imageUrl', 'image_url',
+    'thumbnailUrl', 'thumbnail_url', 'src', 'url',
+)
+
+
+def _is_image_url(value: str) -> bool:
+    lower = value.lower()
+    if not (lower.startswith('http://') or lower.startswith('https://')):
+        return False
+    for extension in ('.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg'):
+        if extension in lower:
+            return True
+    return any(token in lower for token in ('image', 'img', 'photo', 'pic'))
+
+
+def _collect_image_urls(node: Any, urls: list[str], seen: set[str]) -> None:
+    if isinstance(node, dict):
+        for key in _IMAGE_URL_KEYS:
+            value = node.get(key)
+            if isinstance(value, str) and _is_image_url(value) and value not in seen:
+                seen.add(value)
+                urls.append(value)
+        for value in node.values():
+            _collect_image_urls(value, urls, seen)
+    elif isinstance(node, list):
+        for value in node:
+            _collect_image_urls(value, urls, seen)
+
+
+def _tavily_image_urls(query: str, count: int) -> list[str]:
+    engine = TavilySearch()
+    if not engine.__key_source__():
+        return []
+    try:
+        results = engine.search(query, include_images=True, max_results=count)
+    except Exception as exc:
+        LOG.warning('[Writer] Tavily image search failed: %s', type(exc).__name__)
+        return []
+    urls: list[str] = []
+    seen: set[str] = set()
+    for item in results or []:
+        images = (item.get('extra') or {}).get('images') or []
+        for image in images:
+            if isinstance(image, str) and _is_image_url(image) and image not in seen:
+                seen.add(image)
+                urls.append(image)
+    return urls[:count]
+
+
+def _bocha_image_urls(query: str, count: int) -> list[str]:
+    engine = BochaSearch()
+    if not engine.__key_source__():
+        return []
+    try:
+        response = engine._request(
+            'POST',
+            f'{engine._base_url}/v1/web-search',
+            headers={'Content-Type': 'application/json'},
+            json={'query': query, 'count': min(max(count, 1), 20)},
+            timeout=engine._timeout,
+        )
+        payload = response.json()
+    except Exception as exc:
+        LOG.warning('[Writer] Bocha image search failed: %s', type(exc).__name__)
+        return []
+    urls: list[str] = []
+    _collect_image_urls(payload, urls, set())
+    return urls[:count]
+
+
+def _pick_search_engine() -> Any | None:
+    for search_type in (GoogleSearch, BingSearch, BochaSearch, TavilySearch):
+        try:
+            engine = search_type()
+            if engine.__key_source__():
+                return engine
+        except Exception:
+            continue
+    return None
+
+
+def _fallback_image_urls(query: str, count: int) -> list[str]:
+    engine = _pick_search_engine()
+    if engine is None:
+        return []
+    try:
+        results = engine.search(f'{query} reference image illustration')
+    except Exception as exc:
+        LOG.warning('[Writer] %s image search failed: %s', type(engine).__name__, type(exc).__name__)
+        return []
+    return [
+        str(item.get('url') or '').strip()
+        for item in results or []
+        if _is_image_url(str(item.get('url') or '').strip())
+    ][:count]
+
+
+def _acquire_web_search_resources(request: Mapping[str, Any]) -> list[dict]:
+    purpose = str(request.get('purpose') or '').strip()
+    query = ' '.join(part for part in (str(request.get('visual_type') or '').strip(), purpose) if part)
+    urls = _tavily_image_urls(query, count=5)
+    if not urls:
+        urls = _bocha_image_urls(query, count=5)
+    if not urls:
+        urls = _fallback_image_urls(query, count=5)
+    instruction_id = str(request.get('instruction_id') or uuid.uuid4().hex)
+    return [
+        {
+            'resource_id': f'web-search-{instruction_id}-{index}',
+            'resource_type': 'image',
+            'uri': url,
+            'title': purpose or url,
+            'summary': purpose,
+            'meta': {
+                'source_type': 'web_search',
+                'semantic_status': 'unverified',
+            },
+        }
+        for index, url in enumerate(urls, start=1)
+    ]
+def writer_generate_short_writing_plan(
+    writing_task_path: str,
+    writing_context_path: str,
+) -> str:
+    """Generate and persist one whole-document plan for a flat article."""
+    result = WriterPlanningTools(
+        llm=AutoModel(model='llm'),
+        artifact_store=str(_run_root('short-writing-plan-source')),
+    ).generate_short_writing_plan(
+        task=writing_task_path,
+        context=writing_context_path,
+    )
+    content = ShortWritingPlan.model_validate(
+        _writer_tool_artifact_data(result),
+    ).model_dump_json(exclude_defaults=True)
+    return _save_json_artifact(
+        'short_writing_plan',
+        content,
+        writer_schema('planning.ShortWritingPlan'),
+        directory=_run_root('short-writing-plan'),
+    )
+
+
+def writer_generate_short_visual_plan(
+    writing_task_path: str,
+    short_writing_plan_path: str,
+    writing_context_path: str,
+) -> dict:
+    """Generate and persist one strongly typed visual plan for a flat article."""
+    writing_task = _read_json_file(writing_task_path)
+    visual_policy = (writing_task.get('constraints') or {}).get('visual_policy') or {}
+    require_input_image_reuse = visual_policy.get('require_input_image_reuse') is True
+    warnings: list[str] = []
+    payload: Any = {'instructions': []}
+    if visual_policy.get('allow_visuals') is not False:
+        try:
+            result = WriterPlanningTools(
+                llm=AutoModel(model='llm'),
+                artifact_store=str(_run_root('short-visual-plan-source')),
+            ).generate_short_visual_plan(
+                task=writing_task_path,
+                short_writing_plan=short_writing_plan_path,
+                context=writing_context_path,
+            )
+            payload = _writer_tool_artifact_data(result)
+            warnings.extend((result.get('metadata') or {}).get('warnings') or [])
+        except Exception as exc:
+            if require_input_image_reuse:
+                raise RuntimeError(
+                    f'Required visual planning failed: {type(exc).__name__}: {exc}'
+                ) from exc
+            warnings.append(f'Visual planning failed: {type(exc).__name__}: {exc}')
+    visual_plan = VisualPlan.model_validate(
+        payload or {'instructions': []},
+    ).model_dump()
+    instructions = visual_plan['instructions']
+    if require_input_image_reuse and not instructions:
+        raise ValueError('Required input image reuse produced no visual plan instructions.')
+    return {
+        'visual_plan': _save_json_artifact(
+            'visual_plan',
+            json.dumps(visual_plan, ensure_ascii=False),
+            writer_schema('multimodal.VisualPlan'),
+            directory=_run_root('short-visual-plan'),
+        ),
+        'visual_need_count': len(instructions),
+        'visual_need_ids': [str(need.get('need_id') or '') for need in instructions],
+        'warnings': warnings,
+    }
+
+
+def writer_generate_short_document(
+    writing_task_path: str,
+    short_writing_plan_path: str,
+    writing_context_path: str,
+    visual_plan_path: str = '',
+    resolved_media_assets_path: str = '',
+) -> str:
+    """Generate and persist one complete flat short document."""
+    events = DraftMarkdownStreamEventEmitter(
+        require_context().emit,
+        slot='flat_draft_document',
+    )
+    try:
+        drafting = WriterDraftingTools(
+            llm=AutoModel(model='llm'),
+            artifact_store=str(_run_root('short-document-source')),
+        )
+        with drafting.stream_short_document(
+            task=writing_task_path,
+            short_writing_plan=short_writing_plan_path,
+            context=writing_context_path,
+            visual_plan=visual_plan_path or None,
+            media_assets=resolved_media_assets_path or None,
+        ) as stream:
+            for delta in stream:
+                try:
+                    events.feed(str(delta))
+                except Exception as exc:  # noqa: BLE001 - preview forwarding is best effort.
+                    LOG.warning('[Writer] Short document delta callback failed: %s', exc)
+            result = stream.result()
+        document = _writer_tool_artifact_data(result)
+        if resolved_media_assets_path and isinstance(document, str):
+            document = _fill_markdown_media_placeholders(
+                document,
+                _read_json_file(resolved_media_assets_path),
+            )
+        if isinstance(document, str) and 'media-placeholder://' in document:
+            raise ValueError('Short document contains unresolved media placeholders.')
+        path = _save_writer_document(
+            'draft_document',
+            document,
+            expected_stage='draft',
+            editable=True,
+            directory=_run_root('short-document'),
+        )
+    except Exception as exc:
+        events.abort(str(exc))
+        raise
+    events.end()
+    return path
+
+
 def _acquire_generated_image(
     request: Mapping[str, Any],
     *,
     generator: Callable[..., dict] | None = None,
-) -> dict:
+) -> list[dict]:
     visual_type = str(request.get('visual_type') or '')
     prompt = WRITER_IMAGE_ACQUISITION_PROMPT.format(
         visual_type=visual_type,
@@ -1344,7 +1723,7 @@ def _acquire_generated_image(
             local_path = str(images[0].get('local_path') or '').strip()
     if not local_path:
         raise ValueError('image_generator returned no local image path')
-    return {
+    return [{
         'resource_id': f"acquired-{request.get('instruction_id') or uuid.uuid4().hex}",
         'resource_type': 'image',
         'uri': local_path,
@@ -1356,29 +1735,36 @@ def _acquire_generated_image(
             'summary_source': 'generation_prompt',
             'semantic_status': 'unverified',
         },
-    }
+    }]
 
 
 def _acquire_visual_media(
     request: Mapping[str, Any],
-    acquirers: Mapping[str, Callable[[Mapping[str, Any]], dict]],
-) -> dict:
-    strategies = request['strategies']
+    acquirers: Mapping[str, Callable[[Mapping[str, Any]], list[dict]]],
+) -> Iterator[dict]:
+    strategies = list(request['strategies'])
     for strategy in strategies:
         acquirer = acquirers.get(strategy)
         if acquirer is None:
             continue
-        resource = dict(acquirer(request))
-        resource['meta'] = {
-            **dict(resource.get('meta') or {}),
-            'requested_strategy': strategies[0],
-            'acquisition_strategy': strategy,
-        }
-        return resource
-    raise ValueError(
-        f"no media acquirer is available for visual instruction {request.get('instruction_id')!r} "
-        f"({request.get('visual_type')}, strategies={strategies})",
-    )
+        try:
+            resources = acquirer(request)
+        except Exception as exc:
+            LOG.warning(
+                '[Writer] Failed to acquire %s for visual instruction %r: %s',
+                strategy,
+                request.get('instruction_id'),
+                type(exc).__name__,
+            )
+            continue
+        for candidate in resources:
+            resource = dict(candidate)
+            resource['meta'] = {
+                **dict(resource.get('meta') or {}),
+                'requested_strategy': strategies[0],
+                'acquisition_strategy': strategy,
+            }
+            yield resource
 
 
 def writer_resolve_visual_media(
@@ -1389,8 +1775,7 @@ def writer_resolve_visual_media(
 ) -> dict:
     """Resolve visual needs and materialize missing media through registered acquirers.
 
-    allowed_strategies_json: optional JSON list restricting acquisition strategies
-    (image_generation is the only strategy currently registered).
+    allowed_strategies_json: optional JSON list restricting acquisition strategies.
     """
     root = _run_root('resolve-media')
     media_root = root / 'media'
@@ -1400,7 +1785,13 @@ def writer_resolve_visual_media(
     media_assets_value = _json_loads(media_assets_json, {})
     visual_policy = (media_assets_value.get('meta') or {}).get('visual_policy') or {}
     allow_image_generation = visual_policy.get('allow_image_generation') is not False
-    acquirers = {}
+    require_visuals = (
+        visual_policy.get('require_visuals') is True
+        or visual_policy.get('require_input_image_reuse') is True
+    )
+    acquirers = {
+        'web_search': _acquire_web_search_resources,
+    }
     if allow_image_generation and is_model_role_available('image_generator'):
         acquirers['image_generation'] = _acquire_generated_image
     visual_plan_json = _read_json_string(visual_plan_path)
@@ -1421,8 +1812,8 @@ def writer_resolve_visual_media(
             ],
         }
     warnings = list(matched.get('warnings') or [])
-    acquired_resources = {}
-    acquired_by_purpose = {}
+    resolved_library = matched.get('media_assets') or {}
+    acquired_by_purpose: dict[tuple[str, str, tuple[str, ...]], dict] = {}
     for request in matched.get('acquisition_requests') or []:
         strategies = list(request.get('strategies') or [])
         if allow_image_generation \
@@ -1433,55 +1824,72 @@ def writer_resolve_visual_media(
         key = (
             str(request.get('visual_type') or ''),
             ' '.join(str(request.get('purpose') or '').split()).casefold(),
+            tuple(request['strategies']),
         )
-        try:
-            resource = acquired_by_purpose.get(key)
-            if resource is None:
-                resource = _acquire_visual_media(request, acquirers)
+        cached_resource = acquired_by_purpose.get(key)
+        candidate_groups: list[tuple[bool, Iterator[dict]]] = []
+        if cached_resource is not None:
+            candidate_groups.append((True, iter((cached_resource,))))
+        candidate_groups.append((False, _acquire_visual_media(request, acquirers)))
+        resolved = False
+        for from_cache, candidates in candidate_groups:
+            for resource in candidates:
+                try:
+                    outcome = _json_loads(toolkit.materialize_acquired_media(
+                        visual_plan_json=visual_plan_json,
+                        media_assets_json=json.dumps(resolved_library, ensure_ascii=False),
+                        acquired_resources_json=json.dumps({instruction_id: resource}, ensure_ascii=False),
+                        media_store=str(media_root),
+                    ), {})
+                except Exception as exc:
+                    LOG.warning(
+                        '[Writer] Failed to materialize visual instruction %r: %s',
+                        instruction_id,
+                        type(exc).__name__,
+                    )
+                    continue
+                candidate_library = outcome.get('media_assets') or {}
+                candidate_assets = candidate_library.get('assets') or {}
+                candidate_bindings = candidate_library.get('visual_need_asset_ids') or {}
+                if not any(
+                    asset_id in candidate_assets
+                    and Path(str(candidate_assets[asset_id].get('local_path') or '')).is_file()
+                    for asset_id in candidate_bindings.get(instruction_id, [])
+                ):
+                    continue
+                resolved_library = candidate_library
                 acquired_by_purpose[key] = resource
-            acquired_resources[instruction_id] = resource
-        except Exception as exc:
-            if strict_required and request.get('required'):
-                raise RuntimeError(
-                    f'Failed to acquire required visual media for {instruction_id!r}: '
-                    f'{request.get("purpose") or "current visual requirement"}: '
-                    f'{type(exc).__name__}: {exc}'
-                ) from exc
+                resolved = True
+                break
+            if resolved:
+                break
+            if from_cache:
+                acquired_by_purpose.pop(key, None)
+        if not resolved:
             message = (
                 f'Failed to acquire visual instruction {instruction_id!r}: '
-                f'{type(exc).__name__}: {exc}'
+                'no candidate could be materialized'
             )
+            if (strict_required or require_visuals) and request.get('required') is True:
+                raise RuntimeError(
+                    f'{message}: {request.get("purpose") or "current visual requirement"}'
+                )
             warnings.append(f'{message} (required={request.get("required", False)}).')
-
-    try:
-        outcome = _json_loads(toolkit.materialize_acquired_media(
-            visual_plan_json=visual_plan_json,
-            media_assets_json=json.dumps(matched.get('media_assets') or {}, ensure_ascii=False),
-            acquired_resources_json=json.dumps(acquired_resources, ensure_ascii=False),
-            media_store=str(media_root),
-        ), {})
-    except Exception as exc:
-        if strict_required:
-            raise
-        outcome = {
-            'media_assets': matched.get('media_assets') or {},
-            'warnings': [
-                f'Acquired media materialization failed: {type(exc).__name__}: {exc}',
-            ],
-        }
-    warnings.extend(outcome.get('warnings') or [])
     plan_value = _json_loads(visual_plan_json, {})
     plan_data = plan_value.get('data', plan_value) if isinstance(plan_value, dict) else plan_value
-    resolved_library = outcome.get('media_assets') or {}
     resolved_assets = resolved_library.get('assets') or {}
     resolved_bindings = resolved_library.get('visual_need_asset_ids') or {}
     unresolved_required = [
         str(instruction.get('need_id'))
         for instruction in (plan_data.get('instructions') or [])
-        if instruction.get('required', True) and not any(
-            asset_id in resolved_assets
-            and Path(str(resolved_assets[asset_id].get('local_path') or '')).is_file()
-            for asset_id in resolved_bindings.get(str(instruction.get('need_id')), [])
+        if (
+            (strict_required or require_visuals)
+            and instruction.get('required', False) is True
+            and not any(
+                asset_id in resolved_assets
+                and Path(str(resolved_assets[asset_id].get('local_path') or '')).is_file()
+                for asset_id in resolved_bindings.get(str(instruction.get('need_id')), [])
+            )
         )
     ]
     if unresolved_required:
@@ -1489,7 +1897,7 @@ def writer_resolve_visual_media(
             'Failed to resolve required visual media for: ' + ', '.join(unresolved_required)
         )
     resolved_path = save_artifact_json(
-        outcome.get('media_assets') or {},
+        resolved_library,
         str(root / 'resolved_media_assets.json'),
         schema_name=writer_schema('multimodal.MediaAssetLibrary'),
         created_by='writer-workflow-wrapper',
@@ -1519,7 +1927,7 @@ def writer_resolve_revision_media(
         visual_plan_path=visual_plan_path,
         media_assets_path=media_assets_path,
         strict_required=True,
-        allowed_strategies_json=json.dumps(['image_generation']),
+        allowed_strategies_json=json.dumps(['web_search', 'image_generation']),
     )
 
 
@@ -1552,6 +1960,7 @@ def writer_generate_draft_blocks(
             on_delta=events.feed,
             on_section_end=events.flush,
             on_progress=emit_progress,
+            on_preview_restart=events.restart,
             checkpoint_dir=checkpoint_dir,
         ), [])
         root = _run_root('draft-blocks')
@@ -1595,6 +2004,7 @@ def writer_generate_draft_blocks_markdown(
             on_delta=events.feed,
             on_section_end=events.flush,
             on_progress=emit_progress,
+            on_preview_restart=events.restart,
             checkpoint_dir=checkpoint_dir,
         ), [])
         root = _run_root('draft-sections-markdown')
@@ -1668,7 +2078,7 @@ def _fill_markdown_media_placeholders(markdown: str, resolved_media_assets: Any)
         asset_ids = need_asset_ids.get(need_id) or []
         if asset_ids:
             asset = assets.get(asset_ids[0]) or {}
-            path = str(asset.get('uri') or asset.get('local_path') or '')
+            path = str(asset.get('local_path') or asset.get('uri') or '')
             if path:
                 return f'![{caption}]({path})'
         dropped.append(need_id)
@@ -1691,6 +2101,51 @@ def _fill_markdown_media_placeholders(markdown: str, resolved_media_assets: Any)
             ', '.join(sorted(set(dropped))),
         )
     return filled
+
+
+def _drop_unregistered_markdown_images(
+    markdown: str,
+    resolved_media_assets: Any,
+) -> str:
+    assets = (resolved_media_assets or {}).get('assets') or {}
+    allowed = {
+        str(path).strip()
+        for asset in assets.values()
+        if isinstance(asset, Mapping)
+        for path in (asset.get('uri'), asset.get('local_path'))
+        if str(path or '').strip()
+    }
+    image_pattern = re.compile(r'!\[([^\]]*)\]\(([^)\n]+)\)')
+    fence: str | None = None
+    dropped: list[str] = []
+    output: list[str] = []
+
+    def replace_image(match: re.Match) -> str:
+        destination = match.group(2).strip()
+        if destination.startswith('<') and '>' in destination:
+            target = destination[1:destination.index('>')]
+        else:
+            target = destination.split(maxsplit=1)[0]
+        if target in allowed:
+            return match.group(0)
+        dropped.append(target)
+        return ''
+
+    for line in (markdown or '').splitlines(keepends=True):
+        fence_match = re.match(r'^\s*(```+|~~~+)', line)
+        if fence_match:
+            marker = fence_match.group(1)[0]
+            fence = marker if fence is None else None if fence == marker else fence
+            output.append(line)
+            continue
+        output.append(image_pattern.sub(replace_image, line) if fence is None else line)
+
+    if dropped:
+        LOG.warning(
+            '[Writer] Dropped %d unregistered Markdown image reference(s): %s',
+            len(dropped), ', '.join(sorted(set(dropped))),
+        )
+    return ''.join(output)
 
 
 def _assemble_draft_document_markdown(
@@ -1730,11 +2185,18 @@ def _assemble_draft_document_markdown(
         title=document_title,
     ), {})
     markdown = payload.get('draft_document') or ''
+    resolved_media_assets = (
+        _read_json_file(resolved_media_assets_path)
+        if resolved_media_assets_path else {}
+    )
     if resolved_media_assets_path:
         markdown = _fill_markdown_media_placeholders(
             markdown,
-            _read_json_file(resolved_media_assets_path),
+            resolved_media_assets,
         )
+    markdown = _drop_unregistered_markdown_images(
+        markdown, resolved_media_assets,
+    )
     if 'media-placeholder://' in markdown:
         raise ValueError(
             'Markdown draft contains unresolved media placeholders; '
@@ -1945,9 +2407,10 @@ def writer_preview_selection_rewrite(
         llm=AutoModel(model='llm'),
         artifact_store=str(_action_root(artifact_store, 'rewrite-preview')),
     )
-    if slot not in {'outline_document', 'draft_document'}:
+    if slot not in {'outline_document', 'flat_draft_document', 'draft_document'}:
         raise ValueError(
-            'selection rewrite requires an outline_document or draft_document slot.',
+            'selection rewrite requires an outline_document, flat_draft_document, '
+            'or draft_document slot.',
         )
     selection_type = str((selection or {}).get('type') or '')
     if isinstance(document, Mapping):
@@ -1970,7 +2433,7 @@ def writer_preview_selection_rewrite(
         candidate_path = Path(_save_writer_document(
             slot, revised,
             expected_stage='outline' if slot == 'outline_document' else None,
-            editable=slot == 'draft_document',
+            editable=slot in {'flat_draft_document', 'draft_document'},
             directory=Path(revision.artifact_store),
         ))
         result = {
@@ -1985,6 +2448,10 @@ def writer_preview_selection_rewrite(
     else:
         if selection_type != 'markdown':
             raise ValueError("Markdown artifacts require selection.type='markdown'.")
+        if slot == 'flat_draft_document':
+            instruction += (
+                '\nKeep the replacement as exactly one Markdown paragraph; do not split it.'
+            )
         replace_set = StringReplaceSet.model_validate(
             revision.build_selected_markdown_replace_set(
                 document, instruction, str(selection.get('selected_text') or ''), context,
@@ -2499,7 +2966,7 @@ def _save_draft_workspace_artifacts(result: Mapping[str, Any]) -> list[str]:
     if not entries:
         raise RuntimeError('Draft workspace produced no saveable artifacts.')
     saved = save_artifacts(entries)
-    if not saved.get('success'):
+    if saved.get('status') != 'ok':
         raise RuntimeError(f'Failed to save draft workspace artifacts: {saved!r}')
     return list(dict.fromkeys(saved_keys))
 
@@ -2826,6 +3293,159 @@ def writer_draft_workspace() -> dict:
     _persist_draft_workspace_state(state, checkpoint_path)
     _emit_writer_progress('成稿校验完成，正在保存工作区结果')
     saved_keys = _save_draft_workspace_artifacts(result)
+    state['artifacts_saved'] = True
+    state['saved_artifact_keys'] = saved_keys
+    _persist_draft_workspace_state(state, checkpoint_path, completed=True)
+    return _draft_workspace_completion(result, saved_keys)
+
+
+_FLAT_OUTPUT_SLOTS = {
+    'draft_document': 'flat_draft_document',
+    'writing_context_after_draft': 'flat_writing_context_after_draft',
+    'visual_plan': 'flat_visual_plan',
+    'resolved_media_assets': 'flat_resolved_media_assets',
+}
+
+
+def _published_flat_draft_workspace_result(
+    result: Mapping[str, Any],
+) -> dict[str, Any]:
+    published = dict(result)
+    for source, target in _FLAT_OUTPUT_SLOTS.items():
+        if source in published:
+            published[target] = published.pop(source)
+    return published
+
+
+def writer_flat_draft_workspace() -> dict:
+    """Generate one new flat document on the dedicated flat Workflow path."""
+    _emit_writer_progress('正在读取短文成稿任务与已有 checkpoint')
+    user_input = _authoritative_writer_user_input('')
+    writer_command_path = _authoritative_writer_input_path(
+        'writer_command', require_workflow_binding=True,
+    )
+    writing_task_path = _authoritative_writer_input_path(
+        'writing_task', require_workflow_binding=True,
+    )
+    writing_context_path = _authoritative_writer_input_path(
+        'writing_context', require_workflow_binding=True,
+    )
+    media_assets_path = _authoritative_writer_input_path('media_assets')
+    command = _load_writer_command(writer_command_path)
+    if command.structure_mode != 'flat':
+        raise ValueError(
+            'write_flat_document requires writer_command.structure_mode="flat".'
+        )
+    if command.target_stage != 'document' or command.action != 'create':
+        raise ValueError('write_flat_document only supports new flat document creation.')
+    if not writing_task_path or not writing_context_path:
+        raise ValueError('writing_task_path and writing_context_path are required.')
+    if user_input and command.request_fingerprint != _writer_request_fingerprint(user_input):
+        raise ValueError(
+            'writer_command belongs to a different user request; restart from prepare.'
+        )
+
+    operation = 'generate'
+    fingerprint = _draft_workspace_fingerprint(
+        operation,
+        user_input,
+        writing_task_path,
+        writing_context_path,
+        media_assets_path,
+        '',
+        '',
+        '',
+        '',
+    )
+    state, checkpoint_path = _draft_workspace_state(fingerprint)
+    result: dict[str, Any] = dict(state.get('result') or {})
+    result['operation'] = operation
+    result['writer_command'] = writer_command_path
+    if state.get('completed'):
+        _emit_writer_progress('正在复用已完成的短文成稿 checkpoint')
+        saved_keys = list(state.get('saved_artifact_keys') or [])
+        if not state.get('artifacts_saved'):
+            saved_keys = _save_draft_workspace_artifacts(
+                _published_flat_draft_workspace_result(result)
+            )
+            state['artifacts_saved'] = True
+            state['saved_artifact_keys'] = saved_keys
+            _persist_draft_workspace_state(state, checkpoint_path, completed=True)
+        return _draft_workspace_completion(result, saved_keys)
+
+    task = _read_json_file(writing_task_path)
+    representation = str((task.get('output') or {}).get('representation') or '').strip()
+    if representation not in {'markdown', 'ir'}:
+        raise ValueError(
+            "Flat short-document generation requires 'markdown' or 'ir' representation."
+        )
+    if not result.get('short_writing_plan'):
+        result['short_writing_plan'] = writer_generate_short_writing_plan(
+            writing_task_path=writing_task_path,
+            writing_context_path=writing_context_path,
+        )
+        state['result'] = result
+        _persist_draft_workspace_state(state, checkpoint_path)
+    if not result.get('visual_plan'):
+        planning = writer_generate_short_visual_plan(
+            writing_task_path=writing_task_path,
+            short_writing_plan_path=result['short_writing_plan'],
+            writing_context_path=writing_context_path,
+        )
+        result.update({
+            'visual_plan': planning['visual_plan'],
+            'visual_need_count': planning['visual_need_count'],
+            'warnings': [
+                *(result.get('warnings') or []),
+                *(planning.get('warnings') or []),
+            ],
+        })
+        state['result'] = result
+        _persist_draft_workspace_state(state, checkpoint_path)
+
+    resolved_media = str(result.get('resolved_media_assets') or '')
+    visual_need_count = int(result.get('visual_need_count') or 0)
+    if visual_need_count > 0 and not resolved_media:
+        if not media_assets_path:
+            raise ValueError(
+                'media_assets_path is required when the short draft has visual media.'
+            )
+        media = writer_resolve_visual_media(
+            visual_plan_path=result['visual_plan'],
+            media_assets_path=media_assets_path,
+        )
+        resolved_media = media['resolved_media_assets']
+        result['resolved_media_assets'] = resolved_media
+        result['warnings'] = [
+            *(result.get('warnings') or []),
+            *(media.get('warnings') or []),
+        ]
+        state['result'] = result
+        _persist_draft_workspace_state(state, checkpoint_path)
+    if not result.get('draft_document'):
+        result['draft_document'] = writer_generate_short_document(
+            writing_task_path=writing_task_path,
+            short_writing_plan_path=result['short_writing_plan'],
+            writing_context_path=writing_context_path,
+            visual_plan_path=result['visual_plan'],
+            resolved_media_assets_path=resolved_media,
+        )
+        result['representation'] = representation
+        state['result'] = result
+        _persist_draft_workspace_state(state, checkpoint_path)
+
+    if not result.get('writing_context_after_draft'):
+        _emit_writer_progress('正在更新短文成稿上下文')
+        result['writing_context_after_draft'] = writer_update_writing_context(
+            content_artifact_path=result['draft_document'],
+            writing_context_path=writing_context_path,
+        )
+    state['result'] = result
+    _persist_draft_workspace_state(state, checkpoint_path)
+    _emit_writer_progress('短文成稿校验完成，正在保存工作区结果')
+    saved_keys = _save_draft_workspace_artifacts(
+        _published_flat_draft_workspace_result(result)
+    )
     state['artifacts_saved'] = True
     state['saved_artifact_keys'] = saved_keys
     _persist_draft_workspace_state(state, checkpoint_path, completed=True)

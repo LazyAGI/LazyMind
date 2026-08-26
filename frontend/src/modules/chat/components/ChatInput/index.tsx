@@ -59,9 +59,16 @@ import { buildCitedMessageText } from "../newChatContainer/utils/citeMessage";
 // Stable empty array reference — must NOT be inline `?? []` in a zustand selector
 // because a new array on every call triggers useSyncExternalStore to fire React error #185.
 const EMPTY_DISMISSED: Array<{ session_id: string; workflow_id: string }> = [];
+const THINKING_DEPTH_LABEL_KEYS: Record<ThinkingDepth, string> = {
+  low: "chat.thinkingDepthLow",
+  medium: "chat.thinkingDepthMedium",
+  high: "chat.thinkingDepthHigh",
+  max: "chat.thinkingDepthMax",
+};
 import ShowChatFileList from "../ShowChatFileList";
 import { formatFileSize } from "@/modules/chat/utils";
 import {
+  THINKING_DEPTH_VALUES,
   useChatThinkStore,
   type ThinkingDepth,
 } from "@/modules/chat/store/chatThink";
@@ -395,6 +402,10 @@ interface ChatInputProps {
   onSkillDeposit?: () => void;
   /** Send the next message as a background task. Used by the new-task entry point. */
   runInBackground?: boolean;
+  showThinkingDepth?: boolean;
+  showSkillDeposit?: boolean;
+  showConversationConfig?: boolean;
+  fixedThinkingDepth?: ThinkingDepth;
 }
 
 export interface ShowcaseSelection {
@@ -491,6 +502,10 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       showcaseSelection,
       boundMentions = [],
       runInBackground = false,
+      showThinkingDepth = true,
+      showSkillDeposit = true,
+      showConversationConfig = true,
+      fixedThinkingDepth,
     } = props;
     const fileListRef = useRef<ImageUploadImperativeProps | null>(null);
     const knowledgeSelectorRef = useRef<ChatSelectorImperativeProps | null>(null);
@@ -504,6 +519,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
       string | null
     >(null);
     const { thinkingDepth, setThinkingDepth } = useChatThinkStore();
+    const effectiveThinkingDepth = fixedThinkingDepth ?? thinkingDepth;
     const { setNewMessage } = useChatNewMessageStore();
     const { t } = useTranslation();
     const [text, setText] = useState("");
@@ -520,8 +536,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     const [addMenuOpen, setAddMenuOpen] = useState(false);
     const [knowledgeToolsEnabled, setKnowledgeToolsEnabled] = useState<{
       kb: boolean | null;
-      temp_kb: boolean | null;
-    }>({ kb: null, temp_kb: null });
+    }>({ kb: null });
     const disabledNoticeId = useId();
     const previousSessionIdRef = useRef<string | undefined>(undefined);
     const hasSentMessageRef = useRef(false);
@@ -543,7 +558,6 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         );
         setKnowledgeToolsEnabled({
           kb: toolsByID.get("kb") ?? null,
-          temp_kb: toolsByID.get("temp_kb") ?? null,
         });
       } catch {
         // Keep entries usable until the authoritative state can be read.
@@ -552,7 +566,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
 
     const handleToolAvailabilityChanged = useCallback((event: Event) => {
       const change = (event as CustomEvent<ToolAvailabilityChange>).detail;
-      if (change?.id === "kb" || change?.id === "temp_kb") {
+      if (change?.id === "kb") {
         setKnowledgeToolsEnabled((current) => ({
           ...current,
           [change.id]: change.enabled,
@@ -574,12 +588,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
     }, [handleToolAvailabilityChanged, refreshKnowledgeToolAvailability]);
 
     const knowledgeBaseEnabled = knowledgeToolsEnabled.kb !== false;
-    const temporaryFileSearchEnabled = knowledgeToolsEnabled.temp_kb !== false;
     const knowledgeBaseDisabledReason = "知识库检索已在设置中停用";
-    const temporaryFileSearchDisabledReason = "临时文件检索已在设置中停用";
-    const uploadTypes = temporaryFileSearchEnabled
-      ? allowedUploadTypes
-      : allowedImageTypes;
+    const uploadTypes = allowedUploadTypes;
 
     const debouncedSaveInput = useMemo(
       () =>
@@ -624,17 +634,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
             }
             return;
           }
-          const uploadableFiles = temporaryFileSearchEnabled
-            ? files
-            : files.filter((file) => {
-              const suffix = file.name.substring(file.name.lastIndexOf(".")).toLowerCase();
-              return allowedImageTypes.includes(suffix);
-            });
-          if (uploadableFiles.length !== files.length) {
-            message.warning(`${temporaryFileSearchDisabledReason}，仅支持上传图片`);
-          }
-          if (uploadableFiles.length > 0) {
-            fileListRef.current?.uploadFiles(uploadableFiles);
+          if (files.length > 0) {
+            fileListRef.current?.uploadFiles(files);
           }
         },
       }),
@@ -643,8 +644,6 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         clearMultiData,
         disabled,
         disabledReason,
-        temporaryFileSearchDisabledReason,
-        temporaryFileSearchEnabled,
       ],
     );
 
@@ -900,7 +899,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
           tags: [...(chatConfig?.tags ?? [])],
           databaseBaseId: chatConfig?.databaseBaseId,
         },
-        thinking_depth: thinkingDepth,
+        thinking_depth: effectiveThinkingDepth,
         mentions: effectiveMentions,
         citeMessage: normalizedCiteMessages.join("\n\n"),
         citeMessages: normalizedCiteMessages,
@@ -1042,11 +1041,9 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
           e.stopPropagation();
 
           if (invalidFiles.length > 0) {
-            message.warning(temporaryFileSearchEnabled
-              ? t("chat.unsupportedFileType", {
-                types: t("chat.supportedUploadTypeSummary"),
-              })
-              : `${temporaryFileSearchDisabledReason}，仅支持上传图片`);
+            message.warning(t("chat.unsupportedFileType", {
+              types: t("chat.supportedUploadTypeSummary"),
+            }));
           }
 
           if (files.length > 0) {
@@ -1084,8 +1081,6 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
         disabledReason,
         fileList.length,
         t,
-        temporaryFileSearchDisabledReason,
-        temporaryFileSearchEnabled,
         uploadTypes,
       ],
     );
@@ -1219,11 +1214,6 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       classNames={{ root: "chat-add-resource-popover" }}
                       content={
                         <div className="chat-add-resource-menu">
-                          <Tooltip
-                            title={temporaryFileSearchEnabled
-                              ? undefined
-                              : `${temporaryFileSearchDisabledReason}，仅支持上传图片`}
-                          >
                             <button
                               type="button"
                               onClick={() => {
@@ -1239,11 +1229,8 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                               }}
                             >
                               <PaperClipOutlined />
-                              {temporaryFileSearchEnabled
-                                ? t("chat.addAttachment")
-                                : "添加图片"}
+                              {t("chat.addAttachment")}
                             </button>
-                          </Tooltip>
                           <Tooltip title={knowledgeBaseEnabled ? undefined : knowledgeBaseDisabledReason}>
                             <span className="chat-add-resource-menu-tooltip-anchor">
                               <button
@@ -1334,21 +1321,21 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       </span>
                     </div>
                   ) : null}
-                  <Select
-                    aria-label={t("chat.thinkingDepth")}
-                    className="chat-thinking-depth-select"
-                    size="small"
-                    variant="borderless"
-                    value={thinkingDepth}
-                    disabled={disabled || isStreaming}
-                    onChange={setThinkingDepth}
-                    options={[
-                      { value: "low", label: t("chat.thinkingDepthLow") },
-                      { value: "medium", label: t("chat.thinkingDepthMedium") },
-                      { value: "high", label: t("chat.thinkingDepthHigh") },
-                      { value: "max", label: t("chat.thinkingDepthMax") },
-                    ]}
-                  />
+                  {showThinkingDepth && (
+                    <Select
+                      aria-label={t("chat.thinkingDepth")}
+                      className="chat-thinking-depth-select"
+                      size="small"
+                      variant="borderless"
+                      value={effectiveThinkingDepth}
+                      disabled={disabled || isStreaming || Boolean(fixedThinkingDepth)}
+                      onChange={setThinkingDepth}
+                      options={THINKING_DEPTH_VALUES.map((value) => ({
+                        value,
+                        label: t(THINKING_DEPTH_LABEL_KEYS[value]),
+                      }))}
+                    />
+                  )}
                   {/* <ModelSelector sessionId={sessionId} disabled={isStreaming} /> */}
                   {showHistoryButton && openHistory && (
                     <div
@@ -1358,7 +1345,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       {t("chat.chatHistory")}
                     </div>
                   )}
-                  {isChatContent && (
+                  {showSkillDeposit && isChatContent && (
                     <Tooltip title={skillDepositTooltip}>
                       <div
                         className={`input-bottom-actions-left-item skill-deposit-action${
@@ -1384,25 +1371,18 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                       </div>
                     </Tooltip>
                   )}
-                  <ChatConfigModal
-                    key={
-                      configResetKey != null
-                        ? `config-reset-${configResetKey}`
-                        : undefined
-                    }
-                    conversationId={
-                      sessionId && !sessionId.startsWith("temp_")
-                        ? sessionId
-                        : undefined
-                    }
+                  {showConversationConfig && <ChatConfigModal
+                    key={configResetKey != null ? `config-reset-${configResetKey}` : undefined}
+                    conversationId={sessionId && !sessionId.startsWith("temp_") ? sessionId : undefined}
                     initialSettings={initialConversationSettings}
+                    disabled={disabled || isStreaming}
                     hasWorkflowSession={hasWorkflowSession}
                     onSave={(settings) => {
                       setContextRuntimeSettings(settings);
                       onConversationSettingsChange?.(settings);
                     }}
-                  />
-                  {sessionId && !sessionId.startsWith("temp_") && (
+                  />}
+                  {showConversationConfig && sessionId && !sessionId.startsWith("temp_") && (
                     <DismissedWorkflowRestoreButton conversationId={sessionId} />
                   )}
                 </div>
@@ -1424,7 +1404,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                           tags: chatConfig?.tags ?? [],
                         },
                         runtime: contextRuntimeSettings,
-                        thinkingDepth,
+                        thinkingDepth: effectiveThinkingDepth,
                       })}
                       buildRequest={() => {
                         const files = fileListRef.current?.getFiles() ?? [];
@@ -1453,7 +1433,7 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                             creator: chatConfig?.creators ?? [],
                             tags: chatConfig?.tags ?? [],
                           },
-                          thinking_depth: thinkingDepth,
+                          thinking_depth: effectiveThinkingDepth,
                           ...contextRuntimeSettings,
                         };
                       }}

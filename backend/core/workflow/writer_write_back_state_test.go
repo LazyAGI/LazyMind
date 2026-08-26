@@ -74,7 +74,7 @@ func TestEnrichWriterWriteBackSlots_MarkdownInitialDelivery(t *testing.T) {
 
 func TestEnrichWriterWriteBackSlots_InlineMarkdownInitialDelivery(t *testing.T) {
 	db := newTestDB(t)
-	draft := writerRevision("draft", "session", "draft_document", 1, "human", json.RawMessage(
+	draft := writerRevision("draft", "session", "flat_draft_document", 1, "human", json.RawMessage(
 		`{"schema":"text/markdown","data":"# Ready for Feishu\n"}`,
 	))
 	mustCreateWriterRecord(t, db.DB.Create(&draft).Error)

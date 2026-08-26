@@ -19,6 +19,7 @@ from channel_gateway.common.domain.chat import (
     CoreEvent,
     CoreRunTerminal,
     CoreStreamUpdate,
+    CoreToolProgress,
     CoreTurnResult,
 )
 from channel_gateway.common.domain.channel import sanitize_channel_text
@@ -66,6 +67,9 @@ _UNFINISHED_TOOL_PAYLOAD_RE = re.compile(
 )
 _ORPHAN_TOOL_PAYLOAD_TAG_RE = re.compile(
     r'</?(?:tool_call|tool_result)>'
+)
+_TOOL_PROGRESS_RE = re.compile(
+    r'(?s)<(tool_call|tool_result)\b[^>]*>(.*?)</\1>'
 )
 _THINKING_BLOCK_BREAK_RE = re.compile(
     r'</(?:tp|trp)>\s*<(?:tp|trp)\b[^>]*>'
@@ -139,6 +143,52 @@ def _strip_tool_payloads(value: str) -> str:
     cleaned = _TOOL_PAYLOAD_PAIR_RE.sub('', value)
     cleaned = _UNFINISHED_TOOL_PAYLOAD_RE.sub('', cleaned)
     return _ORPHAN_TOOL_PAYLOAD_TAG_RE.sub('', cleaned)
+
+
+def _tool_progress(value: str) -> tuple[CoreToolProgress, ...]:
+    calls: dict[str, str] = {}
+    latest_by_name: dict[str, str] = {}
+    events: list[CoreToolProgress] = []
+    for kind, raw_payload in _TOOL_PROGRESS_RE.findall(value):
+        try:
+            payload = json.loads(raw_payload)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(payload, dict):
+            continue
+        tool_name = str(payload.get('name') or '').strip()
+        tool_call_id = str(payload.get('id') or '').strip()
+        if kind == 'tool_call':
+            if not tool_name:
+                continue
+            tool_call_id = tool_call_id or f'tool-{len(calls) + 1}'
+            calls[tool_call_id] = tool_name
+            latest_by_name[tool_name] = tool_call_id
+            events.append(CoreToolProgress(
+                tool_call_id=tool_call_id,
+                tool_name=tool_name,
+                phase='start',
+            ))
+            continue
+        tool_name = tool_name or calls.get(tool_call_id, '')
+        tool_call_id = tool_call_id or latest_by_name.get(tool_name, '')
+        if not tool_name or not tool_call_id:
+            continue
+        raw_status = str(payload.get('status') or '').strip().lower()
+        status = (
+            raw_status
+            if raw_status in {'completed', 'failed', 'blocked'}
+            else 'failed'
+            if payload.get('error')
+            else 'completed'
+        )
+        events.append(CoreToolProgress(
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+            phase='end',
+            status=status,
+        ))
+    return tuple(events)
 
 
 def _last_thinking_boundary(value: str) -> int:
@@ -585,6 +635,7 @@ class LazyMindClient:
         history_id: str = '',
         task_created: dict[str, Any] | None = None,
     ) -> CoreStreamUpdate:
+        tool_progress = _tool_progress(raw_text)
         text = _strip_tool_payloads(raw_text)
         boundary = _last_thinking_boundary(text)
         if boundary >= 0:
@@ -603,6 +654,7 @@ class LazyMindClient:
             conversation_id=conversation_id,
             history_id=history_id,
             task_created=task_created,
+            tool_progress=tool_progress,
         )
 
     def _complete_chat_turn(

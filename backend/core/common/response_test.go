@@ -92,6 +92,7 @@ func TestErrorCodeFromHTTPStatus(t *testing.T) {
 	}{
 		{http.StatusBadRequest, ErrCodeInvalidParams},
 		{http.StatusMethodNotAllowed, ErrCodeInvalidParams},
+		{http.StatusUnprocessableEntity, ErrCodeInvalidParams},
 		{http.StatusUnauthorized, ErrCodeUnauthorized},
 		{http.StatusForbidden, ErrCodeForbidden},
 		{http.StatusNotFound, ErrCodeResourceAbsent},

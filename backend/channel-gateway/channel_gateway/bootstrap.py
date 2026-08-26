@@ -53,6 +53,7 @@ from channel_gateway.wechat.domain import (
 )
 from channel_gateway.wechat.credentials import WeChatCredentialStore
 from channel_gateway.wechat.delivery import WeChatDeliveryProvider
+from channel_gateway.wechat.interaction import WeChatPresentationRenderer
 from channel_gateway.wechat.runtime import WeChatRuntime
 from channel_gateway.wechat.service import (
     WeChatConnectionService,
@@ -250,7 +251,10 @@ def build_components(settings: Settings | None = None) -> GatewayComponents:
     wechat_delivery = WeChatDeliveryProvider(
         client=wechat_client,
         credentials=wechat_credentials,
-        renderer=OutboundRenderer(wechat_config.text_chunk_size),
+        renderer=WeChatPresentationRenderer(
+            OutboundRenderer(wechat_config.text_chunk_size),
+            store,
+        ),
         lazymind=lazymind,
     )
     feishu_delivery = FeishuDeliveryProvider(
@@ -281,6 +285,7 @@ def build_components(settings: Settings | None = None) -> GatewayComponents:
             connection=wechat_connections,
             accounts=wechat_connections,
             delivery=wechat_delivery,
+            streaming=wechat_delivery,
         ),
     )
     providers.register(

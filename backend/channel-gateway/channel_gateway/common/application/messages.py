@@ -36,7 +36,6 @@ class ChannelMessageService:
     def process(
         self,
         *,
-        provider: str = '',
         account_id: str,
         external_address_hash: str,
         owner_user_id: str,
@@ -53,7 +52,6 @@ class ChannelMessageService:
                 text=channel_error,
             )
         routed = self._router.route(
-            provider=provider,
             account_id=account_id,
             external_address_hash=external_address_hash,
             owner_user_id=owner_user_id,
@@ -79,7 +77,6 @@ class ChannelMessageService:
             on_stream(CoreStreamUpdate())
 
         return self._executor.execute(
-            provider=provider,
             command=routed.command,
             account_id=account_id,
             external_address_hash=external_address_hash,

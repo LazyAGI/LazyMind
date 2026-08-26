@@ -127,38 +127,134 @@ def test_markdown_draft_blocks_do_not_pass_resolved_media(monkeypatch, tmp_path)
     assert Path(paths[0]).read_text(encoding='utf-8') == '## 第一章\n\n正文。\n'
 
 
-def test_markdown_media_fill_uses_persistent_uri_and_drops_missing_assets():
-    tools = _load_tools_module()
+def test_wrapped_idle_timeout_restarts_section_preview_and_retries(monkeypatch):
+    from lazymind.chat.engine.tools import writer
+    from lazyllm.module.module import ModuleExecutionError
 
-    filled = tools._fill_markdown_media_placeholders(
-        '\n'.join([
-            '# Draft',
-            '',
-            '![Resolved](media-placeholder://need-1)',
-            '![Unresolved](media-placeholder://need-2)',
-            '![[Legacy]](media-placeholder://need-1)',
-            '(media-placeholder://need-3)',
-        ]),
-        {
-            'assets': {
-                'asset-1': {
-                    'uri': 'https://example.com/generated-1.png',
-                    'local_path': '/data/subagent/assets/generated-1.png',
-                },
-                'asset-2': {'uri': 'https://example.com/unmaterialized.png'},
-            },
-            'visual_need_asset_ids': {
-                'need-1': ['asset-1'],
-                'need-2': ['asset-2'],
-            },
-        },
+    complete = '## 第一章\n\n完整正文。\n'
+    emitted: list[dict] = []
+    attempts = 0
+
+    class FakeStream:
+        def __init__(self, attempt, artifact_store):
+            self.attempt, self.artifact_store = attempt, Path(artifact_store)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return None
+
+        def __iter__(self):
+            yield '## 第一章\n\n'
+            if self.attempt == 1:
+                yield '残缺正文'
+                raise ModuleExecutionError(
+                    'Draft Markdown stream was idle for 360 seconds.',
+                )
+            yield '完整正文。\n'
+
+        def result(self):
+            path = self.artifact_store / 'draft_section.md'
+            path.write_text(complete, encoding='utf-8')
+            return {'artifact_path': str(path)}
+
+    def drafting_tools(**kwargs):
+        nonlocal attempts
+        attempts += 1
+        return SimpleNamespace(
+            stream_draft_section=lambda **_kwargs: FakeStream(
+                attempts, kwargs['artifact_store'],
+            ),
+        )
+
+    monkeypatch.setenv('LAZYMIND_WRITER_SECTION_MAX_ATTEMPTS', '2')
+    monkeypatch.setattr(writer, 'AutoModel', lambda **_kwargs: object())
+    monkeypatch.setattr(writer, 'WriterDraftingTools', drafting_tools)
+    monkeypatch.setattr(writer, '_write_input_artifact', lambda *_args: '')
+
+    emitter = writer.DraftMarkdownStreamEventEmitter(emitted.append)
+    result = json.loads(writer.WriterCreateToolkit().stream_draft_blocks_markdown(
+        writing_task_json='{}',
+        section_instructions_json=json.dumps({
+            'instructions': [{
+                'instruction_id': 'section-1',
+                'content_ref': {'node_id': 'section-1'},
+                'section_title': '第一章',
+                'section_goal': '写作',
+            }],
+        }),
+        writing_context_json='{}',
+        on_delta=emitter.feed,
+        on_preview_restart=emitter.restart,
+    ))
+
+    assert attempts == 2
+    assert result == [complete.rstrip()]
+    starts = [event for event in emitted if event['type'] == 'artifact_stream_start']
+    assert len(starts) == 2
+    latest_preview = ''.join(
+        event['delta']
+        for event in emitted
+        if event['type'] == 'artifact_stream'
+        and event['stream_id'] == starts[-1]['stream_id']
     )
+    assert latest_preview == complete
 
-    assert '![Resolved](https://example.com/generated-1.png)' in filled
-    assert '![Legacy](https://example.com/generated-1.png)' in filled
+
+def test_markdown_assembly_drops_unregistered_images(monkeypatch, tmp_path):
+    tools = _load_tools_module()
+    context = SimpleNamespace(workspace_path=str(tmp_path), emit=lambda _event: None)
+    media_assets = {
+        'assets': {
+            'asset-1': {
+                'uri': 'https://example.com/generated-1.png',
+                'local_path': '/data/subagent/assets/generated-1.png',
+            },
+            'asset-2': {'uri': 'https://example.com/unmaterialized.png'},
+        },
+        'visual_need_asset_ids': {
+            'need-1': ['asset-1'],
+            'need-2': ['asset-2'],
+        },
+    }
+
+    class FakeWriterCreateToolkit:
+        def generate_draft_document_markdown(self, **kwargs):
+            sections = json.loads(kwargs['draft_sections_json'])
+            return json.dumps({'draft_document': '\n'.join(sections)})
+
+    monkeypatch.setattr(tools, 'require_context', lambda: context)
+    monkeypatch.setattr(tools, 'WriterCreateToolkit', FakeWriterCreateToolkit)
+    sections = tmp_path / 'sections'
+    sections.mkdir()
+    (sections / 'draft_section_0001.md').write_text('\n'.join([
+        '# Draft',
+        '',
+        '![Resolved](media-placeholder://need-1)',
+        '![Unresolved](media-placeholder://need-2)',
+        '![[Legacy]](media-placeholder://need-1)',
+        '(media-placeholder://need-3)',
+        '![Invalid](./images/AI-lighthouse.jpg)',
+    ]), encoding='utf-8')
+    context_path = tmp_path / 'writing_context.json'
+    context_path.write_text('{}', encoding='utf-8')
+    media_path = tmp_path / 'resolved_media_assets.json'
+    media_path.write_text(json.dumps({'data': media_assets}), encoding='utf-8')
+
+    result_path = tools._assemble_draft_document_markdown(
+        str(sections),
+        str(context_path),
+        resolved_media_assets_path=str(media_path),
+    )
+    filled = Path(result_path).read_text(encoding='utf-8')
+
+    assert '![Resolved](/data/subagent/assets/generated-1.png)' in filled
+    assert '![Legacy](/data/subagent/assets/generated-1.png)' in filled
     assert '![Unresolved](https://example.com/unmaterialized.png)' in filled
     assert 'media-placeholder://' not in filled
     assert 'media-asset://' not in filled
+    assert './images/AI-lighthouse.jpg' not in filled
 
 
 def test_markdown_revision_fills_resolved_media_placeholder(monkeypatch, tmp_path):

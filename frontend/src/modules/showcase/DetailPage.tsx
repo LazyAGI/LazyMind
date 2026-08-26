@@ -227,6 +227,8 @@ export default function DetailPage() {
   };
   const isReplayComplete = visibleSteps >= replaySteps.length;
   const activeResult = selectedTask.result;
+  const sourceURL = item.source_url.trim();
+  const hasExternalSource = /^https?:\/\//i.test(sourceURL);
 
   return (
     <main className={`showcase-page showcase-detail-page${isResultExpanded ? " is-result-expanded" : ""}${isAnimationSkipped ? " is-animation-skipped" : ""}${isReplayComplete ? " is-animation-complete" : ""}`}>
@@ -236,7 +238,18 @@ export default function DetailPage() {
           {t("showcase.detail.back")}
         </Link>
         <div className="showcase-detail-heading">
-          <h1>{item.detail_title}</h1>
+          <h1>
+            {hasExternalSource ? (
+              <a
+                className="showcase-detail-source-link"
+                href={sourceURL}
+                target="_blank"
+                rel="noreferrer"
+              >
+                {item.detail_title}
+              </a>
+            ) : item.detail_title}
+          </h1>
           <p>{item.detail_description}</p>
         </div>
         <button type="button" className="showcase-detail-try-button" onClick={startCase}>

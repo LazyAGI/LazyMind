@@ -83,6 +83,30 @@ func TestCatalogPathCandidatesCoverLocalAndDesktopLayouts(t *testing.T) {
 	}
 }
 
+func TestLoadCatalogRejectsIncompletePatchProvenance(t *testing.T) {
+	root := t.TempDir()
+	catalogPath := filepath.Join(root, "catalog.json")
+	writeCatalog(t, catalogPath, CatalogSkill{
+		UID:            "bsk_demo",
+		Key:            "demo",
+		SourceURL:      "https://example.test/demo.zip",
+		ResolvedURL:    "https://example.test/demo.zip",
+		Version:        "1.0.0",
+		Name:           "demo",
+		Description:    "demo",
+		Category:       "external",
+		ArchiveSHA256:  strings.Repeat("a", 64),
+		TreeSHA256:     strings.Repeat("b", 64),
+		ArchiveSize:    1,
+		PackageFile:    "packages/demo.zip",
+		PatchSetSHA256: strings.Repeat("c", 64),
+	})
+	_, err := LoadCatalog(catalogPath)
+	if err == nil || !strings.Contains(err.Error(), "patch provenance is incomplete") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
 func writeCatalog(t *testing.T, path string, entry CatalogSkill) {
 	t.Helper()
 	body, err := json.Marshal(Catalog{SchemaVersion: CatalogSchemaVersion, Skills: []CatalogSkill{entry}})

@@ -219,7 +219,7 @@ def load_then_stop():
 loader.ensure_rag_runtime = load_then_stop
 started = time.perf_counter()
 try:
-    kb_tmp_search("search attachment", files=["report.pdf"])
+    kb_tmp_search("search attachment")
 except RuntimeError as exc:
     assert str(exc) == "stop after loading"
 print(json.dumps({

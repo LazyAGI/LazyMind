@@ -1,6 +1,6 @@
 schema_version: 2
 id: gaokao-volunteer-advisor
-type: chat
+type: work
 version: 1.0.0
 status: published
 default_locale: zh-CN

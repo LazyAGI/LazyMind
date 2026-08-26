@@ -1978,10 +1978,14 @@ export function WorkflowPanel({
       {!collapsed && hasTabs && (
         <div className='workflow-panel__tabs' role='tablist'>
           {tabs.map((tab, idx) => {
-            const stepID = getTabStepId(tab);
+            const statusStepIds = tab.status_step_ids ?? [tab.step_id ?? tab.id];
             const step = session.steps
-              ?.filter((s) => s.step_id === stepID && s.validity !== 'stale')
-              .sort((a, b) => b.attempt - a.attempt)[0];
+              ?.filter((s) => statusStepIds.includes(s.step_id) && s.validity !== 'stale')
+              .sort((a, b) => (
+                Number(b.step_id === session.current_step_id)
+                - Number(a.step_id === session.current_step_id)
+                || b.attempt - a.attempt
+              ))[0];
             const stepStatus = step?.status;
             return (
               <React.Fragment key={tab.id}>

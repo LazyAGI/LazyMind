@@ -1,4 +1,4 @@
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { ArrowRightOutlined } from "@ant-design/icons";
 import type { ShowcaseCase } from "./api";
@@ -21,14 +21,19 @@ const COVER_CLASS_BY_OUTPUT_TYPE: Record<string, string> = {
 
 export default function CaseCard({ item, onTry }: CaseCardProps) {
   const { t } = useTranslation();
-  const navigate = useNavigate();
   const coverClass = COVER_CLASS_BY_OUTPUT_TYPE[item.output_type] || "report";
 
   return (
     <article className="showcase-card">
       <Link
         className="showcase-card-link"
-        to={`/agent/chat/cases/${encodeURIComponent(item.id)}`}
+        to={`/agent/chat/home?showcase_case=${encodeURIComponent(item.id)}`}
+        onClick={(event) => {
+          if (onTry) {
+            event.preventDefault();
+            onTry(item);
+          }
+        }}
       >
         <div className={`showcase-card-image-wrap showcase-card-cover-${coverClass}`}>
           <div className="showcase-card-image-stage">
@@ -49,22 +54,13 @@ export default function CaseCard({ item, onTry }: CaseCardProps) {
       </Link>
       <div className="showcase-card-footer">
         <span className="showcase-card-result">{item.result_summary}</span>
-        <button
-          type="button"
+        <Link
           className="showcase-detail-link"
-          onClick={() => {
-            if (onTry) {
-              onTry(item);
-              return;
-            }
-            navigate(
-              `/agent/chat/home?showcase_case=${encodeURIComponent(item.id)}`,
-            );
-          }}
+          to={`/agent/chat/cases/${encodeURIComponent(item.id)}`}
         >
-          {t("showcase.try")}
+          {t("showcase.viewDetail")}
           <ArrowRightOutlined aria-hidden="true" />
-        </button>
+        </Link>
       </div>
     </article>
   );

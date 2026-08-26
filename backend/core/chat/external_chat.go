@@ -32,9 +32,9 @@ type chatExecutorDefinition struct {
 
 var chatExecutorDefinitions = []chatExecutorDefinition{
 	{ID: ChatExecutorLazyMind, DisplayName: "LazyMind", Kind: "internal"},
-	{ID: ChatExecutorCodex, DisplayName: "Codex Desktop", Kind: "external"},
-	{ID: ChatExecutorCursor, DisplayName: "Cursor CLI", Kind: "external"},
-	{ID: ChatExecutorWorkBuddy, DisplayName: "WorkBuddy / CodeBuddy CLI", Kind: "external"},
+	{ID: ChatExecutorCodex, DisplayName: "Codex CLI", Kind: "external"},
+	{ID: ChatExecutorCursor, DisplayName: "Cursor Agent CLI", Kind: "external"},
+	{ID: ChatExecutorWorkBuddy, DisplayName: "CodeBuddy Code", Kind: "external"},
 }
 
 type externalChatJob struct {

@@ -402,7 +402,7 @@ func TestEnsureConversationUnarchivesAndRejectsTrash(t *testing.T) {
 		Updates(map[string]any{"archived_at": now}).Error; err != nil {
 		t.Fatalf("archive conversation: %v", err)
 	}
-	conversation, _, err := ensureConversation(context.Background(), db.DB, "conv-ensure", "", nil, nil, "u1", "User 1", nil)
+	conversation, _, err := ensureConversation(context.Background(), db.DB, "conv-ensure", "", nil, nil, "u1", "User 1", false, "", nil)
 	if err != nil || conversation.ArchivedAt != nil {
 		t.Fatalf("ensure archived conversation: conversation=%#v err=%v", conversation, err)
 	}
@@ -411,7 +411,7 @@ func TestEnsureConversationUnarchivesAndRejectsTrash(t *testing.T) {
 		Updates(map[string]any{"deleted_at": now}).Error; err != nil {
 		t.Fatalf("trash conversation: %v", err)
 	}
-	if _, _, err := ensureConversation(context.Background(), db.DB, "conv-ensure", "", nil, nil, "u1", "User 1", nil); !errors.Is(err, errConversationInTrash) {
+	if _, _, err := ensureConversation(context.Background(), db.DB, "conv-ensure", "", nil, nil, "u1", "User 1", false, "", nil); !errors.Is(err, errConversationInTrash) {
 		t.Fatalf("ensure trashed conversation error=%v", err)
 	}
 }

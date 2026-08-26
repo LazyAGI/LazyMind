@@ -1429,5 +1429,21 @@
   "2002291": { "en-US": "Workflow next step is not reachable", "zh-CN": "工作流下一步骤不可达" },
   "2002292": { "en-US": "Invalid external Agent source", "zh-CN": "外部 Agent 来源无效" },
   "2002293": { "en-US": "External Agent thread belongs to another user or conversation", "zh-CN": "外部 Agent 会话已属于其他用户或对话" },
-  "2002294": { "en-US": "Invalid skill package", "zh-CN": "技能包无效" }
+  "2002294": { "en-US": "Invalid skill package", "zh-CN": "技能包无效" },
+  "2002295": { "en-US": "Distribution binding is incomplete", "zh-CN": "技能分发绑定信息不完整" },
+  "2002296": { "en-US": "Distribution upgrade service is not configured", "zh-CN": "技能分发升级服务未配置" },
+  "2002297": { "en-US": "The latest builtin Skill distribution was not found", "zh-CN": "未找到最新的内置技能分发版本" },
+  "2002298": { "en-US": "Cannot prepare a distribution upgrade while a draft exists", "zh-CN": "存在草稿时无法准备技能分发升级" },
+  "2002299": { "en-US": "The installed Skill distribution baseline is unavailable", "zh-CN": "已安装技能的分发基线不可用" },
+  "2002300": { "en-US": "Distribution upgrade conflicts require draft review", "zh-CN": "技能分发升级冲突需要通过草稿审阅解决" },
+  "2002301": { "en-US": "A distribution upgrade draft is active", "zh-CN": "技能分发升级草稿正在处理中" },
+  "2002302": { "en-US": "Editable content exceeds the 2 MiB limit", "zh-CN": "可编辑内容超过 2 MiB 限制" },
+  "2002303": { "en-US": "The editable block changed; refresh and retry", "zh-CN": "可编辑内容已发生变化，请刷新后重试" },
+  "2002304": { "en-US": "Failed to save the editable block", "zh-CN": "保存可编辑内容失败" },
+  "2002305": { "en-US": "Skill name cannot exceed 80 characters", "zh-CN": "技能名称不能超过 80 个字符" },
+  "2002306": { "en-US": "Skill description cannot exceed 1024 characters", "zh-CN": "技能描述不能超过 1024 个字符" },
+  "2002307": { "en-US": "Failed to invalidate compressed context", "zh-CN": "清除压缩上下文失败" },
+  "2002308": { "en-US": "Artifact content type does not match the Workflow slot declaration", "zh-CN": "制品内容类型与工作流插槽声明不匹配" },
+  "2002310": { "en-US": "Too many dataset_ids", "zh-CN": "dataset_ids 过多" },
+  "2002311": { "en-US": "Query dataset usage failed", "zh-CN": "查询数据集使用情况失败" }
 }

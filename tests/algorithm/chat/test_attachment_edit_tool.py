@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from lazyllm.tools.agent import ToolExecutionError
 import lazymind.chat.engine.subagent.tools as attachment_tools
-import lazymind.chat.engine.tools.attachment_edit as attachment_edit
+import lazymind.chat.engine.tools.local_file.attachment_edit as attachment_edit
 import lazymind.chat.service.chat_service as chat_service
 
 

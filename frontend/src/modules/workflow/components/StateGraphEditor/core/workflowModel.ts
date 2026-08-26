@@ -215,6 +215,7 @@ export interface WorkflowRuntimePolicy {
     question: string;
     type?: 'text' | 'boolean' | 'single' | 'multiple';
     choices?: string[];
+    choice_policy?: 'seed' | 'subset' | 'fixed';
   }>;
 }
 

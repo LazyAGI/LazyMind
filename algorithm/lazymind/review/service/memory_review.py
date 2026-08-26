@@ -221,6 +221,7 @@ def review_memory(
         return_trace=False,
         prompt=' ',
         keep_full_turns=3,
+        history_compactor=lambda history, _keep=0, **_: list(history),
         fs=FS,
         enable_builtin_tools=False,
         force_summarize=True,
