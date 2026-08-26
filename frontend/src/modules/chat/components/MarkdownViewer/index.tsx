@@ -357,21 +357,7 @@ function ArtifactFileLink({
   );
 
   const items = useMemo<MenuProps["items"]>(() => {
-    return [
-      {
-        key: "reveal",
-        disabled: !ready || !desktop,
-        label: isAppleDesktopPlatform()
-          ? t("chat.fileShowInFinder")
-          : t("chat.fileShowInFolder"),
-        onClick: () => {
-          void runAction(
-            () => revealArtifactFile(href, filename),
-            "chat.fileRevealFailed",
-          );
-        },
-      },
-      { type: "divider" },
+    const fileActions: MenuProps["items"] = [
       {
         key: "saveAs",
         disabled: !ready,
@@ -394,6 +380,26 @@ function ArtifactFileLink({
           );
         },
       },
+    ];
+    if (!desktop) {
+      return fileActions;
+    }
+    return [
+      {
+        key: "reveal",
+        disabled: !ready,
+        label: isAppleDesktopPlatform()
+          ? t("chat.fileShowInFinder")
+          : t("chat.fileShowInFolder"),
+        onClick: () => {
+          void runAction(
+            () => revealArtifactFile(href, filename),
+            "chat.fileRevealFailed",
+          );
+        },
+      },
+      { type: "divider" },
+      ...(fileActions ?? []),
     ];
   }, [desktop, filename, href, ready, runAction, t]);
 
