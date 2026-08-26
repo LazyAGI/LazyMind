@@ -275,6 +275,43 @@ def test_startup_clarification_subset_policy_uses_only_declared_recipe_choices()
     assert '赛博朋克｜霓虹暗底、HUD 信息轨道' in contribution.runtime_context
 
 
+def test_startup_clarification_seed_choices_accept_explicit_freeform_value():
+    runtime = {
+        'clarification_fields': [{
+            'id': 'slide_count',
+            'label': '页数',
+            'question': '希望生成多少页？',
+            'type': 'single',
+            'choice_policy': 'seed',
+            'choices': ['3 页', '5 页', '8 页', '10 页'],
+        }],
+    }
+
+    contribution = resolve_workflow_injection(
+        None,
+        current_query='生成四页赛博朋克风格的 PPT',
+        workflow_catalog=[{
+            'workflow_ref': 'builtin:ppt-workflow',
+            'workflow_id': 'ppt-workflow',
+            'revision_id': 'revision-1',
+            'runtime': runtime,
+        }],
+        allowed_workflow_refs=['builtin:ppt-workflow'],
+        workflow_activations=[{
+            'workflow_ref': 'builtin:ppt-workflow',
+            'workflow_id': 'ppt-workflow',
+            'revision_id': 'revision-1',
+            'tool_name': 'trigger_ppt_workflow',
+        }],
+    )
+
+    assert 'choice_policy=seed' in contribution.runtime_context
+    assert 'explicit free-form value in the request counts as present' in (
+        contribution.runtime_context
+    )
+    assert 'never ask that field again' in contribution.runtime_context
+
+
 def test_startup_clarification_is_single_shot_and_default_trigger_merges_context():
     runtime = {
         'clarification_fields': [

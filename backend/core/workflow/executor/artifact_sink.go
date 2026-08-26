@@ -22,9 +22,41 @@ import (
 // report values through callbacks and never write Host-private Artifact tables.
 type DBArtifactSink struct{ DB *gorm.DB }
 
+func validateDeclaredArtifactType(attempt AttemptContext, artifact Artifact) error {
+	declared := strings.ToLower(strings.TrimSpace(attempt.DeclaredOutputTypes[artifact.Slot]))
+	actual := strings.ToLower(strings.TrimSpace(artifact.ContentType))
+	if declared == "" {
+		return nil
+	}
+	valid := actual == declared
+	if declared == "file" {
+		valid = actual == "file" || actual == "file_list"
+	} else if actual == "file" && (declared == "text" || declared == "json") {
+		// Large logical text/JSON values are intentionally offloaded by the Host.
+		// The outer artifact is then a file carrier while its metadata preserves
+		// the declared logical type. Accept only that explicit, typed carrier so a
+		// plain file cannot silently satisfy an unrelated output contract.
+		var carrier struct {
+			Type string `json:"type"`
+			Path string `json:"path"`
+		}
+		if json.Unmarshal(artifact.Value, &carrier) == nil {
+			valid = strings.EqualFold(strings.TrimSpace(carrier.Type), declared) &&
+				strings.TrimSpace(carrier.Path) != ""
+		}
+	}
+	if !valid {
+		return fmt.Errorf("artifact slot %q requires content type %q, got %q", artifact.Slot, declared, actual)
+	}
+	return nil
+}
+
 func (sink DBArtifactSink) Save(ctx context.Context, attempt AttemptContext, artifact Artifact) error {
 	if sink.DB == nil || attempt.AttemptID == "" || artifact.Slot == "" {
 		return errors.New("artifact sink requires a database, attempt and slot")
+	}
+	if err := validateDeclaredArtifactType(attempt, artifact); err != nil {
+		return err
 	}
 	now := time.Now().UTC()
 	valueID := uuid.NewString()

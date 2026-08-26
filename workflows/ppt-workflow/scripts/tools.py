@@ -3273,7 +3273,7 @@ def ppt_init_deck(
 
     Args:
         user_query (str): Full presentation request (required).
-        page_count (int): Target slide count (1-12). Default 4.
+        page_count (int): Target slide count (positive integer). Default 4.
         topic (str): Short topic; inferred from user_query when empty.
         role (str): Speaker role.
         audience (str): Target audience.
@@ -3296,7 +3296,7 @@ def ppt_init_deck(
     if not query:
         return _tool_error('ppt_init_deck', 'user_query is required')
 
-    pages = _coerce_int(page_count, 4, lo=1, hi=12)
+    pages = _coerce_int(page_count, 4, lo=1)
     mode = _coerce_str(ppt_mode, 'fast').lower()
     if mode not in ('fast', 'standard'):
         mode = 'fast'
@@ -3460,7 +3460,7 @@ def ppt_build_outline(
 
     Args:
         user_query (str): Full presentation request (required).
-        page_count (int): Target slide count (1-12). Default 4.
+        page_count (int): Target slide count (positive integer). Default 4.
         topic (str): Short topic; inferred from user_query when empty.
         role (str): Speaker role.
         audience (str): Target audience.

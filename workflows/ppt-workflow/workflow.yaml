@@ -35,9 +35,9 @@ runtime:
       type: text
     - id: slide_count
       label: 页数
-      question: 希望生成多少页？
+      question: 希望生成多少页？请输入任意正整数；下列常用页数仅供快速选择。
       type: single
-      choice_policy: fixed
+      choice_policy: seed
       choices:
         - 3 页
         - 5 页

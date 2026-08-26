@@ -206,6 +206,12 @@ steps:
       {{runtime_instruction}}
 
       Your task:
+      - ROUTING INPUT GUARD: when there is no uploaded image, workflow_routing must contain
+        one explicit `WORKFLOW: <route>` line before you do any work. If it is absent,
+        unreadable, or only exposes a file/path wrapper, stop with an execution error.
+        Do not infer a route from prior memories, examples, or unrelated artifacts, and do
+        not save material_summary (including a failure/blocking note). Leaving the required
+        output missing is intentional so Workflow Runtime marks this attempt failed.
       0. UPLOAD-FIRST OVERRIDE (highest priority):
          - User uploads are NOT workflow artifacts. Never use find_artifact/get_artifact/list_artifacts
            to discover uploaded images.
@@ -309,6 +315,10 @@ steps:
          validating the best subject photo as material_images, also save that same URL as
          image_output (first frame). Do NOT save prompt_used here.
       - Before stopping, write a concise Chinese summary (80–200 words) of what you collected:
+          - HARD SUCCESS CONDITION: for FIND_AND_EDIT / EDIT_UPLOAD, do not save this summary
+            unless one validated source has been saved as both material_images and
+            raw_source_image. If the source cannot be obtained, stop with an execution error
+            and save no material_summary; never turn a failure report into a successful output.
           - for uploaded materials: which uploads were saved (do not claim a search was performed)
           - for KB_STYLE: record the useful KB style findings, including palette, brushwork,
             composition, medium, mood, and other available visual traits; do not describe the
@@ -407,6 +417,9 @@ steps:
 
       Your task:
       1. Read WORKFLOW from workflow_routing (not from subject_analysis).
+         It must contain one explicit `WORKFLOW: <route>` line. If the route is absent,
+         unreadable, or unknown, stop with an execution error and save neither prompt_used nor
+         meme_generation_plan. Never infer a meme route from stale examples or prior tasks.
          material_summary and material_images may be empty because analyze_subject deliberately
          skipped collect_materials for a self-contained request. This is expected; do not fail,
          invent search findings, or ask to run material collection unless the requested result
@@ -437,6 +450,8 @@ steps:
            Edit scope: <the exact target region/object or requested global attribute>.
            Preserve: <all important unrequested content that must remain unchanged>.
            Do not: <specific likely collateral changes that are forbidden>.
+         If raw_source_image is absent for either edit route, stop with an execution error and
+         save no output. Do not invent a replacement generation or meme plan.
       4. For CREATE_ANIMATED or ANIMATE_UPLOAD:
          Write an English **video motion prompt** for video_generator (40–120 words).
          Describe subject, sticker/emoji aesthetic, short looping-friendly motion, and camera.
@@ -742,7 +757,10 @@ steps:
          - Else call get_artifact(key='material_images') and use the best subject photo.
          - Else use find_user_attachment for user uploads.
          - If validation is uncertain, call validate_image_ref first.
+         - If no source can be resolved, stop with an execution error and save no artifact.
+           Never save a BLOCKED/failure message into enhanced_image_output.
       2. Call validate_image_ref if not already validated. Proceed only when status is ok.
+         If validation fails, stop with an execution error and save no artifact.
       3. Treat the original user request as authoritative and prompt_used as its normalized edit
          instruction. If they conflict, follow the user's explicit request. Do not infer that the
          user wants general enhancement, beautification, cleanup, restyling, reframing, or any

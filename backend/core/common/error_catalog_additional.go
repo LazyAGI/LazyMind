@@ -589,6 +589,7 @@ func init() {
 	registerAdditionalError("editable block changed; refresh and retry", http.StatusConflict, 2002303)
 	registerAdditionalError("save editable block failed", http.StatusInternalServerError, 2002304)
 	registerAdditionalError("failed to invalidate compressed context", http.StatusInternalServerError, 2002307)
+	registerAdditionalErrorPattern("artifact slot %q requires content type %q, got %q", "Artifact content type does not match the Workflow slot declaration", http.StatusUnprocessableEntity, 2002308)
 }
 
 func registerAdditionalError(message string, status, code int) {

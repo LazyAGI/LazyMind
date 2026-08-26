@@ -1443,6 +1443,7 @@
   "2002305": { "en-US": "Skill name cannot exceed 80 characters", "zh-CN": "技能名称不能超过 80 个字符" },
   "2002306": { "en-US": "Skill description cannot exceed 1024 characters", "zh-CN": "技能描述不能超过 1024 个字符" },
   "2002307": { "en-US": "Failed to invalidate compressed context", "zh-CN": "清除压缩上下文失败" },
-  "2002308": { "en-US": "Too many dataset_ids", "zh-CN": "dataset_ids 过多" },
-  "2002309": { "en-US": "Query dataset usage failed", "zh-CN": "查询数据集使用情况失败" }
+  "2002308": { "en-US": "Artifact content type does not match the Workflow slot declaration", "zh-CN": "制品内容类型与工作流插槽声明不匹配" },
+  "2002310": { "en-US": "Too many dataset_ids", "zh-CN": "dataset_ids 过多" },
+  "2002311": { "en-US": "Query dataset usage failed", "zh-CN": "查询数据集使用情况失败" }
 }

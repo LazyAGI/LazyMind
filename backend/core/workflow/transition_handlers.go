@@ -568,6 +568,9 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 			}
 			req.Operation = resolved
 		}
+		if req.Operation == "retry" || req.Operation == "rewind" {
+			applyRecoveryIntent(session.IntentContext, &targets[0])
+		}
 		if req.Operation == "retry" {
 			var latest orm.WorkflowSessionStep
 			if err := tx.Where("session_id = ? AND step_id = ? AND validity = ?", session.ID,
@@ -739,6 +742,30 @@ func sessionIntentText(value string) string {
 		return strings.TrimSpace(intent.Text)
 	}
 	return ""
+}
+
+// applyRecoveryIntent keeps the workflow launch request authoritative when a
+// user retries or rewinds a step. The recovery command is useful execution
+// context, but it must not replace {{user_input}} and silently change the task.
+func applyRecoveryIntent(intentContext string, target *transitionTarget) {
+	if target == nil {
+		return
+	}
+	original := sessionIntentText(intentContext)
+	recovery := strings.TrimSpace(target.UserInput)
+	if original == "" {
+		return
+	}
+	target.UserInput = original
+	if recovery == "" || recovery == original {
+		return
+	}
+	instruction := "Recovery request for this rerun only: " + recovery
+	if existing := strings.TrimSpace(target.RuntimeInstruction); existing != "" {
+		target.RuntimeInstruction = existing + "\n\n" + instruction
+	} else {
+		target.RuntimeInstruction = instruction
+	}
 }
 
 func queueHostAttempt(ctx context.Context, tx *gorm.DB, session orm.WorkflowSession, target transitionTarget,

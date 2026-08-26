@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -212,6 +213,40 @@ func TestDBArtifactSinkIsIdempotentAndEmitsRevisionEvents(t *testing.T) {
 	_ = db.First(&session, "id = ?", "session-1").Error
 	if session.StateVersion != 5 {
 		t.Fatalf("state version=%d", session.StateVersion)
+	}
+}
+
+func TestDBArtifactSinkRejectsDeclaredTypeMismatch(t *testing.T) {
+	db := executorComponentDB(t)
+	sink := DBArtifactSink{DB: db}
+	ctx := AttemptContext{AttemptID: "attempt-image", SessionID: "session-image", StepID: "enhance",
+		DeclaredOutputTypes: map[string]string{"enhanced_image_output": "image"}}
+	err := sink.Save(context.Background(), ctx, Artifact{Slot: "enhanced_image_output",
+		ContentType: "text", Seq: 1, Value: json.RawMessage(`{"text":"BLOCKED"}`)})
+	if err == nil || !strings.Contains(err.Error(), `requires content type "image"`) {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDeclaredTypeAcceptsTypedOffloadedTextCarrier(t *testing.T) {
+	ctx := AttemptContext{DeclaredOutputTypes: map[string]string{"preview_html": "text"}}
+	artifact := Artifact{Slot: "preview_html", ContentType: "file", Seq: 1,
+		Value: json.RawMessage(`{"type":"text","path":"/tmp/preview.html"}`)}
+	if err := validateDeclaredArtifactType(ctx, artifact); err != nil {
+		t.Fatalf("typed text carrier rejected: %v", err)
+	}
+}
+
+func TestDeclaredTypeRejectsUntypedOffloadedFile(t *testing.T) {
+	ctx := AttemptContext{DeclaredOutputTypes: map[string]string{"preview_html": "text"}}
+	for _, value := range []json.RawMessage{
+		json.RawMessage(`{"path":"/tmp/preview.html"}`),
+		json.RawMessage(`{"type":"image","path":"/tmp/preview.html"}`),
+	} {
+		err := validateDeclaredArtifactType(ctx, Artifact{Slot: "preview_html", ContentType: "file", Value: value})
+		if err == nil || !strings.Contains(err.Error(), `requires content type "text"`) {
+			t.Fatalf("unexpected error for carrier %s: %v", value, err)
+		}
 	}
 }
 
