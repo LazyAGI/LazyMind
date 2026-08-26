@@ -36,7 +36,7 @@ presentation:
     result_summary: 从一句话灵感到可持续连载，形成设定、大纲、章节与连续性记录
   detail:
     title: 小说连载创作助手
-    description: 来源：WorkBuddy novel-generator，经 LazyMind 适配。面向网文和长篇小说作者，协助完成创意孵化、世界与人物设定、全局大纲、章节创作、续写修订和连续性检查。
+    description: 面向网文和长篇小说作者，协助完成创意孵化、世界与人物设定、全局大纲、章节创作、续写修订和连续性检查。来源：WorkBuddy，经 LazyMind 适配。
     attachment_hint: 已有灵感、人物设定、大纲、前文章节或连载状态（可选）
 
 tasks:
