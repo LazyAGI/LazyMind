@@ -2,9 +2,9 @@ package service
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -444,8 +444,8 @@ func TestRestoreSkillRejectsActiveSamePath(t *testing.T) {
 	seedSkillWithHeadRevision(t, db, "skill-reuploaded", "rev-reuploaded")
 
 	err := svc.RestoreSkill(context.Background(), RestoreSkillRequest{SkillID: "skill1", UserID: "user_001"})
-	if err == nil || !strings.Contains(err.Error(), "already exists") {
-		t.Fatalf("RestoreSkill error = %v, want already exists", err)
+	if !errors.Is(err, ErrSkillPackageExists) {
+		t.Fatalf("RestoreSkill error = %v, want ErrSkillPackageExists", err)
 	}
 	var row testSkillV2SkillRow
 	if err := db.Where("id = ?", "skill1").Take(&row).Error; err != nil {

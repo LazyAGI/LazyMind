@@ -152,20 +152,26 @@ func BindInitialTx(ctx context.Context, tx *gorm.DB, binding InitialBinding, now
 	if err := tx.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&artifact).Error; err != nil {
 		return err
 	}
-	var revisionEntries []revisionEntryRow
-	if err := tx.WithContext(ctx).Where("revision_id = ?", binding.RevisionID).Order("path ASC").Find(&revisionEntries).Error; err != nil {
+	var existingEntries int64
+	if err := tx.WithContext(ctx).Model(&artifactEntryRow{}).Where("archive_sha256 = ?", binding.ArchiveSHA256).Count(&existingEntries).Error; err != nil {
 		return err
 	}
-	entries := make([]artifactEntryRow, 0, len(revisionEntries))
-	for _, entry := range revisionEntries {
-		entries = append(entries, artifactEntryRow{
-			ArchiveSHA256: binding.ArchiveSHA256, Path: entry.Path, EntryType: entry.EntryType, BlobHash: entry.BlobHash,
-			Size: entry.Size, Mime: entry.Mime, FileType: entry.FileType, Binary: entry.Binary, Mode: entry.Mode,
-		})
-	}
-	if len(entries) > 0 {
-		if err := tx.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&entries).Error; err != nil {
+	if existingEntries == 0 {
+		var revisionEntries []revisionEntryRow
+		if err := tx.WithContext(ctx).Where("revision_id = ?", binding.RevisionID).Order("path ASC").Find(&revisionEntries).Error; err != nil {
 			return err
+		}
+		entries := make([]artifactEntryRow, 0, len(revisionEntries))
+		for _, entry := range revisionEntries {
+			entries = append(entries, artifactEntryRow{
+				ArchiveSHA256: binding.ArchiveSHA256, Path: entry.Path, EntryType: entry.EntryType, BlobHash: entry.BlobHash,
+				Size: entry.Size, Mime: entry.Mime, FileType: entry.FileType, Binary: entry.Binary, Mode: entry.Mode,
+			})
+		}
+		if len(entries) > 0 {
+			if err := tx.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&entries).Error; err != nil {
+				return err
+			}
 		}
 	}
 	row := bindingRow{
@@ -458,28 +464,39 @@ func decodeConflicts(value []byte) ([]Conflict, error) {
 }
 
 func (s *Service) storeArtifactTx(ctx context.Context, tx *gorm.DB, pkg Package, now time.Time) error {
+	return StoreArtifactTx(ctx, tx, s.blobs, pkg, now)
+}
+
+func StoreArtifactTx(ctx context.Context, tx *gorm.DB, blobs BlobStore, pkg Package, now time.Time) error {
+	if blobs == nil {
+		return failure("distribution blob store is required")
+	}
+	archiveSHA := strings.TrimSpace(pkg.ArchiveSHA256)
+	if archiveSHA == "" {
+		return failure("distribution binding is incomplete")
+	}
 	var count int64
-	if err := tx.Model(&artifactRow{}).Where("archive_sha256 = ?", pkg.ArchiveSHA256).Count(&count).Error; err != nil {
+	if err := tx.WithContext(ctx).Model(&artifactRow{}).Where("archive_sha256 = ?", archiveSHA).Count(&count).Error; err != nil {
 		return err
 	}
 	if count > 0 {
 		return nil
 	}
-	artifact := artifactRow{ArchiveSHA256: pkg.ArchiveSHA256, BuiltinSkillUID: pkg.UID, Version: pkg.Version, TreeSHA256: pkg.TreeSHA256, CreatedAt: now}
-	if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&artifact).Error; err != nil {
+	artifact := artifactRow{ArchiveSHA256: archiveSHA, BuiltinSkillUID: pkg.UID, Version: pkg.Version, TreeSHA256: pkg.TreeSHA256, CreatedAt: now}
+	if err := tx.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&artifact).Error; err != nil {
 		return err
 	}
-	entries, err := s.entriesFromFiles(ctx, tx, pkg.ArchiveSHA256, pkg.Files, now)
+	entries, err := artifactEntriesFromFiles(ctx, tx, blobs, archiveSHA, pkg.Files, now)
 	if err != nil {
 		return err
 	}
 	if len(entries) > 0 {
-		return tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&entries).Error
+		return tx.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&entries).Error
 	}
 	return nil
 }
 
-func (s *Service) entriesFromFiles(ctx context.Context, tx *gorm.DB, archiveSHA string, files map[string][]byte, now time.Time) ([]artifactEntryRow, error) {
+func artifactEntriesFromFiles(ctx context.Context, tx *gorm.DB, blobs BlobStore, archiveSHA string, files map[string][]byte, now time.Time) ([]artifactEntryRow, error) {
 	dirs := make(map[string]bool)
 	paths := sortedFilePaths(files)
 	for _, filePath := range paths {
@@ -497,7 +514,7 @@ func (s *Service) entriesFromFiles(ctx context.Context, tx *gorm.DB, archiveSHA 
 		entries = append(entries, artifactEntryRow{ArchiveSHA256: archiveSHA, Path: dir, EntryType: "dir", FileType: "unknown", Mode: 0o755})
 	}
 	for _, filePath := range paths {
-		blob, err := s.blobs.StoreDistributionBlob(ctx, tx, filePath, files[filePath], now)
+		blob, err := blobs.StoreDistributionBlob(ctx, tx, filePath, files[filePath], now)
 		if err != nil {
 			return nil, err
 		}

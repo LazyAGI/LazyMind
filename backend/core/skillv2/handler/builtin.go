@@ -9,13 +9,14 @@ import (
 	"path"
 	"sort"
 	"strings"
-	"time"
+	"unicode/utf8"
 
 	"gorm.io/gorm"
 
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
 	skillbuiltin "lazymind/core/skillv2/builtin"
+	skillmetadata "lazymind/core/skillv2/metadata"
 	skillservice "lazymind/core/skillv2/service"
 )
 
@@ -28,13 +29,20 @@ func ListBuiltinSkills(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userID := strings.TrimSpace(common.UserID(r))
-	var rows []orm.SkillV2Skill
+	installed := map[string]string{}
 	if userID != "" {
+		var rows []orm.SkillV2Skill
 		if err := db.WithContext(r.Context()).
-			Where("owner_user_id = ? AND deleted_at IS NULL", userID).
+			Where("owner_user_id = ? AND origin_builtin_skill_uid <> '' AND deleted_at IS NULL", userID).
 			Order("created_at ASC").Find(&rows).Error; err != nil {
 			replyServiceError(w, err)
 			return
+		}
+		for _, row := range rows {
+			uid := strings.TrimSpace(row.OriginBuiltinSkillUID)
+			if _, exists := installed[uid]; !exists {
+				installed[uid] = row.ID
+			}
 		}
 	}
 
@@ -46,7 +54,7 @@ func ListBuiltinSkills(w http.ResponseWriter, r *http.Request) {
 	packages = visibleBuiltinPackages(packages)
 	items := make([]map[string]any, 0, len(packages))
 	for _, pkg := range packages {
-		installedID := matchingInstalledSkillID(rows, pkg)
+		installedID := installed[strings.TrimSpace(pkg.UID)]
 		items = append(items, map[string]any{
 			"builtin_skill_uid":  pkg.UID,
 			"name":               pkg.Name,
@@ -107,12 +115,16 @@ func EnableBuiltinSkill(w http.ResponseWriter, r *http.Request) {
 		Take(&trashed).Error
 	if err == nil {
 		service := newSkillService(db)
-		if err := service.RestoreSkill(r.Context(), skillservice.RestoreSkillRequest{SkillID: trashed.ID, UserID: userID}); err != nil {
-			replyServiceError(w, err)
+		if restoreErr := service.RestoreSkill(r.Context(), skillservice.RestoreSkillRequest{SkillID: trashed.ID, UserID: userID}); restoreErr != nil {
+			if !errors.Is(restoreErr, skillservice.ErrSkillPackageExists) {
+				replyServiceError(w, restoreErr)
+				return
+			}
+			err = gorm.ErrRecordNotFound
+		} else {
+			replyBuiltinSkillDetail(w, r, service, trashed.ID, userID)
 			return
 		}
-		replyBuiltinSkillDetail(w, r, service, trashed.ID, userID)
-		return
 	}
 	if !errors.Is(err, gorm.ErrRecordNotFound) {
 		replyServiceError(w, err)
@@ -128,22 +140,25 @@ func EnableBuiltinSkill(w http.ResponseWriter, r *http.Request) {
 		replyError(w, "builtin skill not found", http.StatusNotFound)
 		return
 	}
-	if claimedID, claimed, err := claimLegacyBuiltinInstall(r, db, userID, pkg); err != nil {
+	installName, err := builtinInstallName(r, db, userID, pkg)
+	if err != nil {
 		replyServiceError(w, err)
 		return
-	} else if claimed {
-		replyBuiltinSkillDetail(w, r, newSkillService(db), claimedID, userID)
-		return
 	}
+	renamed := installName != pkg.Name
 	source := skillservice.SourceInput{}
-	if pkg.ArchivePath != "" {
+	if pkg.ArchivePath != "" && !renamed {
 		source = skillservice.SourceInput{
 			Type:       "builtin_zip",
 			StoredPath: pkg.ArchivePath,
 			Filename:   fmt.Sprintf("%s@%s#%s", pkg.UID, pkg.Version, pkg.SHA256),
 		}
 	} else {
-		zipPath, err := writeSkillPackageZip(pkg.Files)
+		files := pkg.Files
+		if renamed {
+			files = rewriteSkillPackageName(pkg.Files, installName, pkg.Category, pkg.Description)
+		}
+		zipPath, err := writeSkillPackageZip(files)
 		if err != nil {
 			replyServiceError(w, err)
 			return
@@ -153,12 +168,12 @@ func EnableBuiltinSkill(w http.ResponseWriter, r *http.Request) {
 	}
 
 	service := newSkillService(db)
-	resp, err := service.CreateSkill(r.Context(), skillservice.CreateSkillRequest{
+	req := skillservice.CreateSkillRequest{
 		OwnerUserID:           userID,
 		OwnerUserName:         userName,
 		CreateUserID:          userID,
 		CreateUserName:        userName,
-		Name:                  pkg.Name,
+		Name:                  installName,
 		Category:              pkg.Category,
 		OriginBuiltinSkillUID: pkg.UID,
 		Description:           pkg.Description,
@@ -167,102 +182,20 @@ func EnableBuiltinSkill(w http.ResponseWriter, r *http.Request) {
 		Distribution: &skillservice.DistributionSource{
 			BuiltinUID: pkg.UID, Version: pkg.Version, ArchiveSHA256: pkg.SHA256, TreeSHA256: pkg.TreeSHA256,
 		},
-	})
+	}
+	if renamed {
+		req.Distribution.OfficialFiles = pkg.Files
+	}
+	resp, err := service.CreateSkill(r.Context(), req)
 	if err != nil {
 		if existingID := installedBuiltinSkillID(r, db, userID, uid); existingID != "" {
 			replyBuiltinSkillDetail(w, r, service, existingID, userID)
-			return
-		}
-		if claimedID, claimed, claimErr := claimLegacyBuiltinInstall(r, db, userID, pkg); claimErr != nil {
-			replyServiceError(w, claimErr)
-			return
-		} else if claimed {
-			replyBuiltinSkillDetail(w, r, service, claimedID, userID)
 			return
 		}
 		replyServiceError(w, err)
 		return
 	}
 	replyBuiltinSkillDetail(w, r, service, resp.SkillID, userID)
-}
-
-func claimLegacyBuiltinInstall(r *http.Request, db *gorm.DB, userID string, pkg skillbuiltin.Package) (string, bool, error) {
-	if strings.TrimSpace(pkg.Category) == "" || strings.TrimSpace(pkg.Name) == "" {
-		return "", false, nil
-	}
-	var rows []orm.SkillV2Skill
-	if err := db.WithContext(r.Context()).
-		Where("owner_user_id = ? AND deleted_at IS NULL", userID).
-		Order("created_at ASC").
-		Find(&rows).Error; err != nil {
-		return "", false, err
-	}
-	existing, ok := matchingLegacyInstalledSkill(rows, pkg)
-	if !ok {
-		return "", false, nil
-	}
-	claimed, err := markBuiltinInstallClaimed(r, db, userID, existing, pkg)
-	if err != nil {
-		return "", false, err
-	}
-	return existing.ID, claimed, nil
-}
-
-func matchingInstalledSkillID(rows []orm.SkillV2Skill, pkg skillbuiltin.Package) string {
-	uid := strings.TrimSpace(pkg.UID)
-	if uid != "" {
-		for _, row := range rows {
-			if strings.TrimSpace(row.OriginBuiltinSkillUID) == uid {
-				return row.ID
-			}
-		}
-	}
-	if row, ok := matchingLegacyInstalledSkill(rows, pkg); ok {
-		return row.ID
-	}
-	return ""
-}
-
-func matchingLegacyInstalledSkill(rows []orm.SkillV2Skill, pkg skillbuiltin.Package) (orm.SkillV2Skill, bool) {
-	category := strings.TrimSpace(pkg.Category)
-	name := strings.TrimSpace(pkg.Name)
-	if category == "" || name == "" {
-		return orm.SkillV2Skill{}, false
-	}
-	relativeRoot := path.Join(category, name)
-	for _, row := range rows {
-		if strings.TrimSpace(row.RelativeRoot) == relativeRoot {
-			return row, true
-		}
-	}
-	for _, row := range rows {
-		if strings.TrimSpace(row.Category) == category && strings.TrimSpace(row.SkillName) == name {
-			return row, true
-		}
-	}
-	return orm.SkillV2Skill{}, false
-}
-
-func markBuiltinInstallClaimed(r *http.Request, db *gorm.DB, userID string, existing orm.SkillV2Skill, pkg skillbuiltin.Package) (bool, error) {
-	updates := map[string]any{
-		"is_enabled":    true,
-		"update_status": "up_to_date",
-		"updated_at":    time.Now(),
-	}
-	if strings.TrimSpace(existing.OriginBuiltinSkillUID) == "" {
-		updates["origin_builtin_skill_uid"] = pkg.UID
-	}
-	if strings.TrimSpace(pkg.Description) != "" {
-		updates["description"] = pkg.Description
-	}
-	result := db.WithContext(r.Context()).
-		Model(&orm.SkillV2Skill{}).
-		Where("id = ? AND owner_user_id = ? AND deleted_at IS NULL", existing.ID, userID).
-		Updates(updates)
-	if result.Error != nil {
-		return false, result.Error
-	}
-	return true, nil
 }
 
 func installedBuiltinSkillID(r *http.Request, db *gorm.DB, userID, uid string) string {
@@ -273,6 +206,84 @@ func installedBuiltinSkillID(r *http.Request, db *gorm.DB, userID, uid string) s
 		return ""
 	}
 	return existing.ID
+}
+
+func builtinInstallName(r *http.Request, db *gorm.DB, userID string, pkg skillbuiltin.Package) (string, error) {
+	base := strings.TrimSpace(pkg.Name)
+	category := strings.TrimSpace(pkg.Category)
+	if base == "" || category == "" {
+		return base, nil
+	}
+	available, err := builtinInstallNameAvailable(r, db, userID, category, base)
+	if err != nil || available {
+		return base, err
+	}
+	suffix := builtinUIDSuffix(pkg.UID)
+	for i := 0; i < 100; i++ {
+		candidate := builtinInstallNameCandidate(base, suffix, i)
+		available, err := builtinInstallNameAvailable(r, db, userID, category, candidate)
+		if err != nil {
+			return "", err
+		}
+		if available {
+			return candidate, nil
+		}
+	}
+	return "", skillservice.ErrSkillPackageExists
+}
+
+func builtinInstallNameAvailable(r *http.Request, db *gorm.DB, userID, category, name string) (bool, error) {
+	var conflicts int64
+	if err := db.WithContext(r.Context()).Model(&orm.SkillV2Skill{}).
+		Where("owner_user_id = ? AND deleted_at IS NULL AND ((category = ? AND skill_name = ?) OR relative_root = ?)", userID, category, name, path.Join(category, name)).
+		Count(&conflicts).Error; err != nil {
+		return false, err
+	}
+	return conflicts == 0, nil
+}
+
+func builtinInstallNameCandidate(base, suffix string, attempt int) string {
+	candidateSuffix := suffix
+	if attempt > 0 {
+		candidateSuffix = fmt.Sprintf("%s-%d", suffix, attempt)
+	}
+	return appendSkillNameSuffix(base, candidateSuffix)
+}
+
+func builtinUIDSuffix(uid string) string {
+	uid = strings.ToLower(strings.TrimSpace(uid))
+	uid = strings.ReplaceAll(uid, "_", "-")
+	if uid == "" {
+		return "builtin"
+	}
+	if len(uid) <= 16 {
+		return uid
+	}
+	return uid[len(uid)-16:]
+}
+
+func appendSkillNameSuffix(name, suffix string) string {
+	maxBaseRunes := skillmetadata.MaxSkillNameLength - utf8.RuneCountInString(suffix) - 1
+	if maxBaseRunes < 1 {
+		maxBaseRunes = 1
+	}
+	baseRunes := []rune(strings.TrimSpace(name))
+	if len(baseRunes) > maxBaseRunes {
+		baseRunes = baseRunes[:maxBaseRunes]
+	}
+	return fmt.Sprintf("%s-%s", string(baseRunes), suffix)
+}
+
+func rewriteSkillPackageName(files map[string][]byte, name, category, description string) map[string][]byte {
+	out := make(map[string][]byte, len(files))
+	for filePath, body := range files {
+		if filePath == "SKILL.md" {
+			out[filePath] = []byte(skillservice.RewriteSkillMDFrontmatter(string(body), name, category, description))
+			continue
+		}
+		out[filePath] = body
+	}
+	return out
 }
 
 func replyBuiltinSkillDetail(w http.ResponseWriter, r *http.Request, service *skillservice.SkillService, skillID, userID string) {

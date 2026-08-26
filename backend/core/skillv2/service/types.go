@@ -83,6 +83,7 @@ type DistributionSource struct {
 	Version       string
 	ArchiveSHA256 string
 	TreeSHA256    string
+	OfficialFiles map[string][]byte
 }
 
 type CreateSkillResponse struct {

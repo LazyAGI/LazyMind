@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"path"
@@ -29,6 +30,8 @@ const (
 	skillDraftStatusPending        = "pending"
 	skillDraftStatusAutoPending    = "auto_pending"
 )
+
+var ErrSkillPackageExists = errors.New("skill package already exists")
 
 func NewSkillService(deps SkillServiceDeps) *SkillService {
 	clock := deps.Clock
@@ -128,6 +131,15 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 			return err
 		}
 		if req.Distribution != nil {
+			if len(req.Distribution.OfficialFiles) > 0 {
+				if err := skilldistribution.StoreArtifactTx(ctx, tx, s.blobStore, skilldistribution.Package{
+					UID: req.Distribution.BuiltinUID, Version: req.Distribution.Version,
+					ArchiveSHA256: req.Distribution.ArchiveSHA256, TreeSHA256: req.Distribution.TreeSHA256,
+					Files: req.Distribution.OfficialFiles,
+				}, now); err != nil {
+					return err
+				}
+			}
 			if err := skilldistribution.BindInitialTx(ctx, tx, skilldistribution.InitialBinding{
 				SkillID: skillID, RevisionID: revisionID, BuiltinUID: req.Distribution.BuiltinUID,
 				Version: req.Distribution.Version, ArchiveSHA256: req.Distribution.ArchiveSHA256, TreeSHA256: req.Distribution.TreeSHA256,
@@ -218,7 +230,7 @@ func (s *SkillService) PatchSkill(ctx context.Context, req PatchSkillRequest) (P
 				nextCategory := valueOr(req.Category, skill.Category)
 				nextDescription := valueOr(req.Description, skill.Description)
 				files = map[string][]byte{
-					"SKILL.md": []byte(rewriteSkillMDFrontmatter(string(content), nextName, nextCategory, nextDescription)),
+					"SKILL.md": []byte(RewriteSkillMDFrontmatter(string(content), nextName, nextCategory, nextDescription)),
 				}
 				revisionID, err := s.commitFilesAsNewHead(ctx, tx, req.SkillID, req.UserID, "metadata_update", files)
 				if err != nil {
@@ -485,7 +497,7 @@ func (s *SkillService) RestoreSkill(ctx context.Context, req RestoreSkillRequest
 			return err
 		}
 		if conflicts > 0 {
-			return fmt.Errorf("skill package already exists")
+			return ErrSkillPackageExists
 		}
 		if err := tx.Model(&skillRow{}).Where("id = ? AND deleted_at IS NOT NULL", req.SkillID).Updates(map[string]any{
 			"deleted_at":       nil,
@@ -1230,25 +1242,73 @@ func parseSkillMDMetadata(content string) (skillMDMetadata, bool, error) {
 	return meta, true, nil
 }
 
-func rewriteSkillMDFrontmatter(content, name, category, description string) string {
+func RewriteSkillMDFrontmatter(content, name, category, description string) string {
 	normalized := strings.ReplaceAll(content, "\r\n", "\n")
 	body := normalized
-	metadata := map[string]any{}
+	frontmatterText := ""
+	hasFrontmatter := false
 	if strings.HasPrefix(normalized, "---\n") {
 		rest := strings.TrimPrefix(normalized, "---\n")
 		if idx := strings.Index(rest, "\n---"); idx >= 0 {
-			_ = yaml.Unmarshal([]byte(rest[:idx]), &metadata)
+			frontmatterText = rest[:idx]
 			body = strings.TrimPrefix(rest[idx+len("\n---"):], "\n")
+			hasFrontmatter = true
 		}
 	}
-	metadata["name"] = strings.TrimSpace(name)
-	metadata["category"] = strings.TrimSpace(category)
-	metadata["description"] = strings.TrimSpace(description)
-	frontmatter, err := yaml.Marshal(metadata)
+	encoded, err := encodeSkillMDFrontmatter(frontmatterText, hasFrontmatter, strings.TrimSpace(name), strings.TrimSpace(category), strings.TrimSpace(description))
 	if err != nil {
 		return content
 	}
-	return fmt.Sprintf("---\n%s---\n%s", string(frontmatter), body)
+	return fmt.Sprintf("---\n%s---\n%s", encoded, body)
+}
+
+func encodeSkillMDFrontmatter(existing string, hasFrontmatter bool, name, category, description string) (string, error) {
+	mapping := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
+	if hasFrontmatter && strings.TrimSpace(existing) != "" {
+		var root yaml.Node
+		if err := yaml.Unmarshal([]byte(existing), &root); err != nil {
+			return "", err
+		}
+		if found := yamlMappingNode(&root); found != nil {
+			mapping = found
+		}
+	}
+	setYAMLMapString(mapping, "name", name)
+	setYAMLMapString(mapping, "category", category)
+	setYAMLMapString(mapping, "description", description)
+	out, err := yaml.Marshal(mapping)
+	if err != nil {
+		return "", err
+	}
+	return string(out), nil
+}
+
+func yamlMappingNode(root *yaml.Node) *yaml.Node {
+	if root == nil {
+		return nil
+	}
+	if root.Kind == yaml.DocumentNode && len(root.Content) > 0 && root.Content[0].Kind == yaml.MappingNode {
+		return root.Content[0]
+	}
+	if root.Kind == yaml.MappingNode {
+		return root
+	}
+	return nil
+}
+
+func setYAMLMapString(mapping *yaml.Node, key, value string) {
+	for i := 0; i+1 < len(mapping.Content); i += 2 {
+		if mapping.Content[i].Value == key {
+			mapping.Content[i+1].Kind = yaml.ScalarNode
+			mapping.Content[i+1].Tag = "!!str"
+			mapping.Content[i+1].Value = value
+			return
+		}
+	}
+	mapping.Content = append(mapping.Content,
+		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: key},
+		&yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: value},
+	)
 }
 
 func (s *SkillService) nextRevisionNo(tx *gorm.DB, skillID string) (int64, error) {

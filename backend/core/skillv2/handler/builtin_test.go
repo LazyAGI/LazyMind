@@ -15,6 +15,7 @@ import (
 	"github.com/gorilla/mux"
 
 	skillbuiltin "lazymind/core/skillv2/builtin"
+	skilldistribution "lazymind/core/skillv2/distribution"
 	skillservice "lazymind/core/skillv2/service"
 	skillpackage "lazymind/core/skillv2/skillpackage"
 	"lazymind/core/skillv2/testutil"
@@ -113,97 +114,86 @@ func TestEnableBuiltinSkillReusesAndEnablesExistingInstall(t *testing.T) {
 	}
 }
 
-func TestEnableBuiltinSkillClaimsLegacySameNameInstall(t *testing.T) {
-	uid := "bsk_wechat_cover"
-	files := map[string][]byte{
-		"SKILL.md": []byte("---\nname: wechat-cover\ndescription: WeChat cover designer\ncategory: design\nversion: 1.3.1\n---\n# WeChat Cover\n"),
-	}
-	useBuiltinCatalogWithPackage(t, skillbuiltin.CatalogSkill{
-		Key: "wechat-cover", UID: uid, SourceURL: "https://skillhub.cn/skills/user_8d36cde0/wechat-cover", ResolvedURL: "https://example.test/wechat-cover.zip",
-		Version: "1.3.1", Name: "wechat-cover", Description: "WeChat cover designer", Category: "design", Content: string(files["SKILL.md"]),
-		PackageFile: "packages/wechat-cover.zip",
-	}, files)
-	db := testutil.NewTestDB(t)
-	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
-	if err := db.Model(&testutil.SkillRow{}).Where("id = ?", "skill1").Updates(map[string]any{
-		"category":                 "design",
-		"skill_name":               "wechat-cover",
-		"relative_root":            "design/wechat-cover",
-		"origin_builtin_skill_uid": "",
-		"is_enabled":               false,
-	}).Error; err != nil {
-		t.Fatal(err)
-	}
-	store.Init(db.DB, nil, nil)
-	t.Cleanup(func() { store.Init(nil, nil, nil) })
+func TestEnableBuiltinSkillInstallsDistinctBuiltinWhenSameNameExists(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		origin string
+	}{
+		{name: "legacy empty origin", origin: ""},
+		{name: "same path different origin", origin: "bsk_previous_wechat_cover"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			uid := wechatCoverCatalog(t)
+			db := testutil.NewTestDB(t)
+			testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+			if err := db.Model(&testutil.SkillRow{}).Where("id = ?", "skill1").Updates(map[string]any{
+				"category":                 "design",
+				"skill_name":               "wechat-cover",
+				"relative_root":            "design/wechat-cover",
+				"origin_builtin_skill_uid": tc.origin,
+				"is_enabled":               false,
+			}).Error; err != nil {
+				t.Fatal(err)
+			}
+			store.Init(db.DB, nil, nil)
+			t.Cleanup(func() { store.Init(nil, nil, nil) })
 
-	req := httptest.NewRequest(http.MethodPost, "/api/core/builtin-skills/"+uid+":enable", nil)
-	req = mux.SetURLVars(req, map[string]string{"builtin_skill_uid": uid})
-	req.Header.Set("X-User-Id", "user_001")
-	req.Header.Set("X-User-Name", "张三")
-	rec := httptest.NewRecorder()
-	EnableBuiltinSkill(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%s, want 200", rec.Code, rec.Body.String())
-	}
-	var row testutil.SkillRow
-	if err := db.Where("id = ?", "skill1").Take(&row).Error; err != nil {
-		t.Fatal(err)
-	}
-	if row.OriginBuiltinSkillUID != uid || !row.IsEnabled {
-		t.Fatalf("legacy install was not claimed and enabled: %#v", row)
-	}
-	if got := testutil.CountRows(t, db, "skills", "owner_user_id = ? AND category = ? AND skill_name = ? AND deleted_at IS NULL", "user_001", "design", "wechat-cover"); got != 1 {
-		t.Fatalf("active wechat-cover skill count = %d, want 1", got)
+			enableWechatCover(t, uid)
+			var existing testutil.SkillRow
+			if err := db.Where("id = ?", "skill1").Take(&existing).Error; err != nil {
+				t.Fatal(err)
+			}
+			if existing.OriginBuiltinSkillUID != tc.origin || existing.IsEnabled {
+				t.Fatalf("existing install was unexpectedly reused: %#v", existing)
+			}
+			assertRenamedWechatCoverInstall(t, db, uid, "skill1")
+		})
 	}
 }
 
-func TestEnableBuiltinSkillReusesSamePathInstallWithDifferentOrigin(t *testing.T) {
-	uid := "bsk_wechat_cover"
-	files := map[string][]byte{
-		"SKILL.md": []byte("---\nname: wechat-cover\ndescription: WeChat cover designer\ncategory: design\nversion: 1.3.1\n---\n# WeChat Cover\n"),
-	}
-	useBuiltinCatalogWithPackage(t, skillbuiltin.CatalogSkill{
-		Key: "wechat-cover", UID: uid, SourceURL: "https://skillhub.cn/skills/user_8d36cde0/wechat-cover", ResolvedURL: "https://example.test/wechat-cover.zip",
-		Version: "1.3.1", Name: "wechat-cover", Description: "WeChat cover designer", Category: "design", Content: string(files["SKILL.md"]),
-		PackageFile: "packages/wechat-cover.zip",
-	}, files)
+func TestEnableBuiltinSkillBindsDistributionWhenNameAvailable(t *testing.T) {
+	uid := wechatCoverCatalog(t)
 	db := testutil.NewTestDB(t)
-	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
-	if err := db.Model(&testutil.SkillRow{}).Where("id = ?", "skill1").Updates(map[string]any{
-		"category":                 "design",
-		"skill_name":               "wechat-cover",
-		"relative_root":            "design/wechat-cover",
-		"origin_builtin_skill_uid": "bsk_previous_wechat_cover",
-		"is_enabled":               false,
-	}).Error; err != nil {
-		t.Fatal(err)
-	}
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
 
-	req := httptest.NewRequest(http.MethodPost, "/api/core/builtin-skills/"+uid+":enable", nil)
-	req = mux.SetURLVars(req, map[string]string{"builtin_skill_uid": uid})
-	req.Header.Set("X-User-Id", "user_001")
-	req.Header.Set("X-User-Name", "张三")
-	rec := httptest.NewRecorder()
-	EnableBuiltinSkill(rec, req)
-	if rec.Code != http.StatusOK {
-		t.Fatalf("status=%d body=%s, want 200", rec.Code, rec.Body.String())
-	}
-	var row testutil.SkillRow
-	if err := db.Where("id = ?", "skill1").Take(&row).Error; err != nil {
+	enableWechatCover(t, uid)
+	var installed testutil.SkillRow
+	if err := db.Where("owner_user_id = ? AND origin_builtin_skill_uid = ? AND deleted_at IS NULL", "user_001", uid).Take(&installed).Error; err != nil {
 		t.Fatal(err)
 	}
-	if row.OriginBuiltinSkillUID != "bsk_previous_wechat_cover" || !row.IsEnabled {
-		t.Fatalf("same-path install was not reused and enabled: %#v", row)
+	if installed.SkillName != "wechat-cover" || installed.RelativeRoot != "design/wechat-cover" || !installed.IsEnabled {
+		t.Fatalf("unconflicted builtin install identity = %#v", installed)
 	}
-	if got := testutil.CountRows(t, db, "skills", "owner_user_id = ? AND relative_root = ? AND deleted_at IS NULL", "user_001", "design/wechat-cover"); got != 1 {
-		t.Fatalf("active design/wechat-cover skill count = %d, want 1", got)
+	file, err := newSkillService(db.DB).ReadFile(context.Background(), skillservice.FileRef{SkillID: installed.ID, RefType: "head", Path: "SKILL.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(file.Content, "name: wechat-cover\n") {
+		t.Fatalf("unconflicted SKILL.md name changed:\n%s", file.Content)
+	}
+	pkg, found, err := skillbuiltin.PackageByUID(uid)
+	if err != nil || !found {
+		t.Fatalf("PackageByUID(%q) found=%v err=%v", uid, found, err)
+	}
+	if got := testutil.CountRows(t, db, "skill_distribution_bindings", "skill_id = ?", installed.ID); got != 1 {
+		t.Fatalf("distribution bindings = %d, want 1", got)
+	}
+	if got := testutil.CountRows(t, db, "skill_distribution_artifacts", "archive_sha256 = ?", pkg.SHA256); got != 1 {
+		t.Fatalf("distribution artifacts = %d, want 1", got)
 	}
 }
 
-func TestListBuiltinSkillsTreatsCompatibleInstallAsInstalled(t *testing.T) {
+func TestBuiltinInstallNameCandidateSequence(t *testing.T) {
+	if got := builtinInstallNameCandidate("wechat-cover", "abc", 0); got != "wechat-cover-abc" {
+		t.Fatalf("attempt 0 = %q, want wechat-cover-abc", got)
+	}
+	if got := builtinInstallNameCandidate("wechat-cover", "abc", 1); got != "wechat-cover-abc-1" {
+		t.Fatalf("attempt 1 = %q, want wechat-cover-abc-1", got)
+	}
+}
+
+func TestListBuiltinSkillsDoesNotTreatSameNameDifferentUIDAsInstalled(t *testing.T) {
 	uid := "bsk_wechat_cover"
 	useBuiltinCatalog(t, skillbuiltin.Catalog{SchemaVersion: skillbuiltin.CatalogSchemaVersion, Skills: []skillbuiltin.CatalogSkill{{
 		Key: "wechat-cover", UID: uid, SourceURL: "https://example.test/wechat-cover.zip", ResolvedURL: "https://example.test/wechat-cover.zip",
@@ -255,11 +245,105 @@ func TestListBuiltinSkillsTreatsCompatibleInstallAsInstalled(t *testing.T) {
 				t.Fatalf("items = %#v, want 1", response.Data.Items)
 			}
 			item := response.Data.Items[0]
-			if item.UID != uid || !item.Installed || item.InstalledSkillID != "skill1" {
-				t.Fatalf("compatible install was not listed as installed: %#v", item)
+			if item.UID != uid || item.Installed || item.InstalledSkillID != "" {
+				t.Fatalf("same-name different-uid install was listed as installed: %#v", item)
 			}
 		})
 	}
+}
+
+func wechatCoverCatalog(t *testing.T) string {
+	t.Helper()
+	uid := "bsk_wechat_cover"
+	files := map[string][]byte{
+		"SKILL.md": []byte("---\nname: wechat-cover\ndescription: WeChat cover designer\ncategory: design\nversion: 1.3.1\n---\n# WeChat Cover\n"),
+	}
+	useBuiltinCatalogWithPackage(t, skillbuiltin.CatalogSkill{
+		Key: "wechat-cover", UID: uid, SourceURL: "https://skillhub.cn/skills/user_8d36cde0/wechat-cover", ResolvedURL: "https://example.test/wechat-cover.zip",
+		Version: "1.3.1", Name: "wechat-cover", Description: "WeChat cover designer", Category: "design", Content: string(files["SKILL.md"]),
+		PackageFile: "packages/wechat-cover.zip",
+	}, files)
+	return uid
+}
+
+func enableWechatCover(t *testing.T, uid string) {
+	t.Helper()
+	req := httptest.NewRequest(http.MethodPost, "/api/core/builtin-skills/"+uid+":enable", nil)
+	req = mux.SetURLVars(req, map[string]string{"builtin_skill_uid": uid})
+	req.Header.Set("X-User-Id", "user_001")
+	req.Header.Set("X-User-Name", "张三")
+	rec := httptest.NewRecorder()
+	EnableBuiltinSkill(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s, want 200", rec.Code, rec.Body.String())
+	}
+}
+
+func assertRenamedWechatCoverInstall(t *testing.T, db *testutil.TestDB, uid, occupiedID string) testutil.SkillRow {
+	t.Helper()
+	wantName := builtinInstallNameCandidate("wechat-cover", builtinUIDSuffix(uid), 0)
+	var installed testutil.SkillRow
+	if err := db.Where("owner_user_id = ? AND origin_builtin_skill_uid = ? AND deleted_at IS NULL", "user_001", uid).Take(&installed).Error; err != nil {
+		t.Fatal(err)
+	}
+	if installed.ID == occupiedID || !installed.IsEnabled {
+		t.Fatalf("builtin install did not get an independent local identity: %#v", installed)
+	}
+	if installed.SkillName != wantName || installed.RelativeRoot != "design/"+wantName {
+		t.Fatalf("install identity = name=%q root=%q, want %q", installed.SkillName, installed.RelativeRoot, wantName)
+	}
+	file, err := newSkillService(db.DB).ReadFile(context.Background(), skillservice.FileRef{SkillID: installed.ID, RefType: "head", Path: "SKILL.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(file.Content, "name: "+wantName+"\n") {
+		t.Fatalf("SKILL.md was not rewritten to %q:\n%s", wantName, file.Content)
+	}
+	pkg, found, err := skillbuiltin.PackageByUID(uid)
+	if err != nil || !found {
+		t.Fatalf("PackageByUID(%q) found=%v err=%v", uid, found, err)
+	}
+	if got := testutil.CountRows(t, db, "skill_distribution_bindings", "skill_id = ?", installed.ID); got != 1 {
+		t.Fatalf("distribution bindings = %d, want 1", got)
+	}
+	if got := testutil.CountRows(t, db, "skill_distribution_artifacts", "archive_sha256 = ?", pkg.SHA256); got != 1 {
+		t.Fatalf("distribution artifacts = %d, want 1", got)
+	}
+	artifact := distributionArtifactSkillMD(t, db, pkg.SHA256)
+	if !strings.Contains(artifact, "name: wechat-cover\n") || strings.Contains(artifact, wantName) {
+		t.Fatalf("official artifact was polluted:\n%s", artifact)
+	}
+	status, err := newDistributionService(db.DB).GetStatus(context.Background(), skilldistribution.StatusRequest{SkillID: installed.ID, UserID: "user_001"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !status.Managed || status.CurrentArchiveSHA256 != pkg.SHA256 {
+		t.Fatalf("renamed install status = %#v", status)
+	}
+	if got := testutil.CountRows(t, db, "skills", "owner_user_id = ? AND category = ? AND deleted_at IS NULL", "user_001", "design"); got != 2 {
+		t.Fatalf("active design skill count = %d, want 2", got)
+	}
+	return installed
+}
+
+func distributionArtifactSkillMD(t *testing.T, db *testutil.TestDB, archiveSHA string) string {
+	t.Helper()
+	var entry struct {
+		BlobHash *string `gorm:"column:blob_hash"`
+	}
+	if err := db.Table("skill_distribution_entries").Select("blob_hash").Where("archive_sha256 = ? AND path = ?", archiveSHA, "SKILL.md").Take(&entry).Error; err != nil {
+		t.Fatal(err)
+	}
+	if entry.BlobHash == nil {
+		t.Fatal("distribution SKILL.md blob hash is empty")
+	}
+	var blob struct {
+		Content []byte `gorm:"column:content"`
+	}
+	if err := db.Table("skill_blobs").Where("hash = ?", *entry.BlobHash).Take(&blob).Error; err != nil {
+		t.Fatal(err)
+	}
+	return string(blob.Content)
 }
 
 func useBuiltinCatalog(t *testing.T, catalog skillbuiltin.Catalog) {
@@ -381,4 +465,112 @@ func TestEnableBuiltinSkillRestoresTrashedInstall(t *testing.T) {
 	if len(trash.Items) != 0 {
 		t.Fatalf("trash after builtin reinstall = %#v, want empty", trash.Items)
 	}
+}
+
+func TestEnableBuiltinSkillReinstallsWhenTrashedBuiltinPathConflicts(t *testing.T) {
+	uid := wechatCoverCatalog(t)
+	db := testutil.NewTestDB(t)
+	testutil.RelaxSQLiteFixtureSkillUniqueIndexes(t, db.DB)
+	testutil.SeedSkillWithRevision(t, db, "trashed_builtin", "rev_trashed")
+	if err := db.Model(&testutil.SkillRow{}).Where("id = ?", "trashed_builtin").Updates(map[string]any{
+		"category":                 "design",
+		"skill_name":               "wechat-cover",
+		"relative_root":            "design/wechat-cover",
+		"origin_builtin_skill_uid": uid,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	service := skillservice.NewSkillService(skillservice.SkillServiceDeps{DB: db.DB})
+	if err := service.DeleteSkill(context.Background(), skillservice.DeleteSkillRequest{SkillID: "trashed_builtin", UserID: "user_001"}); err != nil {
+		t.Fatal(err)
+	}
+	testutil.MustCreate(t, db, &testutil.SkillRow{
+		ID:                    "active_same_name",
+		OwnerUserID:           "user_001",
+		CreateUserID:          "user_001",
+		Category:              "design",
+		SkillName:             "wechat-cover",
+		OriginBuiltinSkillUID: "bsk_other_wechat_cover",
+		RelativeRoot:          "design/wechat-cover",
+	})
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	enableWechatCover(t, uid)
+	assertRenamedWechatCoverInstall(t, db, uid, "trashed_builtin")
+}
+
+func TestEnableBuiltinSkillRenamedInstallCanPrepareOfficialUpgrade(t *testing.T) {
+	uid := wechatCoverCatalog(t)
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	if err := db.Model(&testutil.SkillRow{}).Where("id = ?", "skill1").Updates(map[string]any{
+		"category":                 "design",
+		"skill_name":               "wechat-cover",
+		"relative_root":            "design/wechat-cover",
+		"origin_builtin_skill_uid": "bsk_previous_wechat_cover",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	enableWechatCover(t, uid)
+	installed := assertRenamedWechatCoverInstall(t, db, uid, "skill1")
+	wantName := builtinInstallNameCandidate("wechat-cover", builtinUIDSuffix(uid), 0)
+
+	updated := map[string][]byte{
+		"SKILL.md": []byte("---\nname: wechat-cover\ndescription: WeChat cover designer v2\ncategory: design\nversion: 1.3.2\n---\n# WeChat Cover\n"),
+	}
+	useBuiltinCatalogWithPackage(t, skillbuiltin.CatalogSkill{
+		Key: "wechat-cover", UID: uid, SourceURL: "https://skillhub.cn/skills/user_8d36cde0/wechat-cover", ResolvedURL: "https://example.test/wechat-cover.zip",
+		Version: "1.3.2", Name: "wechat-cover", Description: "WeChat cover designer v2", Category: "design", Content: string(updated["SKILL.md"]),
+		PackageFile: "packages/wechat-cover.zip",
+	}, updated)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/core/skills/"+installed.ID+"/distribution-upgrade:prepare", nil)
+	req = mux.SetURLVars(req, map[string]string{"skill_id": installed.ID})
+	req.Header.Set("X-User-Id", "user_001")
+	req.Header.Set("X-User-Name", "张三")
+	rec := httptest.NewRecorder()
+	PrepareDistributionUpgrade(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("prepare status=%d body=%s, want 200", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Data struct {
+			AutoMerged bool  `json:"auto_merged"`
+			Conflicts  []any `json:"conflicts"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode prepare response: %v", err)
+	}
+	if !response.Data.AutoMerged || len(response.Data.Conflicts) != 0 {
+		t.Fatalf("prepare = %#v, want auto-merged without conflicts", response.Data)
+	}
+	draft := draftSkillMD(t, db, installed.ID)
+	if !strings.Contains(draft, "name: "+wantName+"\n") || !strings.Contains(draft, "WeChat cover designer v2") {
+		t.Fatalf("upgrade draft did not keep local name and apply official description:\n%s", draft)
+	}
+}
+
+func draftSkillMD(t *testing.T, db *testutil.TestDB, skillID string) string {
+	t.Helper()
+	var entry struct {
+		BlobHash *string `gorm:"column:blob_hash"`
+	}
+	if err := db.Table("skill_draft_entries").Where("skill_id = ? AND path = ?", skillID, "SKILL.md").Take(&entry).Error; err != nil {
+		t.Fatal(err)
+	}
+	if entry.BlobHash == nil {
+		t.Fatal("draft SKILL.md blob hash is empty")
+	}
+	var blob struct {
+		Content []byte `gorm:"column:content"`
+	}
+	if err := db.Table("skill_blobs").Where("hash = ?", *entry.BlobHash).Take(&blob).Error; err != nil {
+		t.Fatal(err)
+	}
+	return string(blob.Content)
 }
