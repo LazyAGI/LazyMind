@@ -1,5 +1,6 @@
 function createDesktopBridge(ipcRenderer) {
   return {
+    platform: process.platform,
     openLogsDir: () => ipcRenderer.invoke("lazymind:openLogsDir"),
     openDataDir: () => ipcRenderer.invoke("lazymind:openDataDir"),
     runtimeStatus: () => ipcRenderer.invoke("lazymind:runtimeStatus"),
@@ -12,6 +13,9 @@ function createDesktopBridge(ipcRenderer) {
     selectFolder: () => ipcRenderer.invoke("lazymind:selectFolder"),
     selectExecutable: () => ipcRenderer.invoke("lazymind:selectExecutable"),
     exportDiagnostics: () => ipcRenderer.invoke("lazymind:exportDiagnostics"),
+    showItemInFolder: (payload) => ipcRenderer.invoke("lazymind:showItemInFolder", payload),
+    saveFileAs: (payload) => ipcRenderer.invoke("lazymind:saveFileAs", payload),
+    downloadFile: (payload) => ipcRenderer.invoke("lazymind:downloadFile", payload),
     notifyAppReady: () => ipcRenderer.send("lazymind:renderer-ready"),
     startupDiagnostics: () => ipcRenderer.invoke("lazymind:startupDiagnostics"),
     copyStartupLogs: () => ipcRenderer.invoke("lazymind:copyStartupLogs"),
