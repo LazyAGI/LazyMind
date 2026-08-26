@@ -53,6 +53,7 @@ ENV_PASSTHROUGH = (
 )
 DEFAULT_MAX_RETRIES = '8'
 PATCH_STATUSES = {'verified', 'unvalidated'}
+BASELINE_NO_CHANGE = 'baseline_no_change'
 SAFE_ID = re.compile(r'[^A-Za-z0-9_.-]+')
 ALGORITHM_ID = re.compile(r'evo_[A-Za-z0-9][A-Za-z0-9_.-]{0,59}')
 
@@ -66,12 +67,24 @@ def candidate_service(
     temporary: bool = False,
 ) -> dict[str, Any]:
     patch = _candidate_patch(patch, workspace or {})
-    base = {'candidate_config': dict(config), 'patch_status': _text(patch.get('status'))}
-    if _text(patch.get('status')) not in PATCH_STATUSES:
+    patch_status = _text(patch.get('status'))
+    base = {'candidate_config': dict(config), 'patch_status': patch_status}
+    if patch_status not in PATCH_STATUSES:
         return base | _failed(
             '', '', '', '', 'invalid_repair_patch',
-            f"candidate evaluation requires final repair patch, got {_text(patch.get('status'))}",
+            f'candidate evaluation requires final repair patch, got {patch_status}',
         )
+    if patch_status == 'unvalidated' and not _text(patch.get('diff')):
+        return base | {
+            'status': 'ready',
+            'service_kind': BASELINE_NO_CHANGE,
+            'algorithm_id': _text(patch.get('algo_id')),
+            'router_chat_url': '',
+            'router_admin_url': '',
+            'code_path': '',
+            'cleanup_allowed': False,
+            'workspace_ref': _text(patch.get('workspace_ref')),
+        }
 
     algorithm_id = router_chat_url = admin_url = code_path = ''
     manager: RouterManager | None = None
@@ -266,6 +279,7 @@ def stop_candidate(service: Mapping[str, Any] | None) -> dict[str, Any]:
 def _candidate_patch(patch: Mapping[str, Any], workspace: Mapping[str, Any]) -> dict[str, Any]:
     diff = patch.get('diff')
     return {
+        'algo_id': patch.get('algo_id'),
         'status': patch.get('status'),
         'workspace_ref': _text(patch.get('workspace_ref')) or workspace.get('workspace_ref'),
         'diff': ''.join(str(value) for value in diff.values()) if isinstance(diff, Mapping) else _text(diff),

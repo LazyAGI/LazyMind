@@ -17,6 +17,8 @@ from uuid import uuid4
 import httpx
 from tenacity import AsyncRetrying, retry_if_result, stop_after_attempt, wait_random_exponential
 
+from .chat_protocol import ChatProtocolError, decode_run_terminal, terminal_has_business_payload
+
 DEFAULT_DISABLED_TOOLS = tuple(
     'calculator wikipedia web_search academic_search url_fetch multimodal image_generator image_editor '
     'vocab_learn skill_editor local_fs feishu notion '
@@ -384,6 +386,19 @@ def _accept_payload(
     _extend_sources(state.sources, data.get('sources'))
     _accept_answer_text(state, str(data.get('text') or ''))
 
+    try:
+        terminal = decode_run_terminal(data)
+    except ChatProtocolError as exc:
+        return _failed(state, target, 'chat_protocol_error', str(exc))
+    if terminal is not None:
+        if terminal_has_business_payload(data):
+            return _failed(state, target, 'chat_protocol_error',
+                           'run_finished cannot include business payload')
+        if terminal.completed:
+            state.finished = True
+            return _normalize(target, state)
+        return _failed(state, target, terminal.error_type, terminal.error_message)
+
     if status == 'FINISHED':
         state.finished = True
         return _normalize(target, state)
@@ -416,7 +431,7 @@ def _normalize(target: Mapping[str, Any], stream: Mapping[str, Any] | ChatStream
         ])
 
     if not finished:
-        return _failed({'answer': ''}, target, 'chat_protocol_error', 'stream ended before FINISHED')
+        return _failed({'answer': ''}, target, 'chat_protocol_error', 'stream ended before terminal event')
     if not answer:
         return _failed({'answer': ''}, target, 'chat_no_answer', 'stream finished without final answer text')
     if _invalid_final_answer(answer):

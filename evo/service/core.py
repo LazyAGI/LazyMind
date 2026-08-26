@@ -439,7 +439,6 @@ def _seed_values(thread_id: str, request: ThreadCreate) -> dict[str, object]:
         A.EVAL_TARGET_CONFIG: target_config,
         A.EVAL_POLICY: {'judge_llm_config': llm_config},
         A.REPAIR_POLICY: {
-            'llm_config': llm_config,
             'mode': request.mode,
             'thread_id': thread_id,
             'workspace_namespace': thread_id,

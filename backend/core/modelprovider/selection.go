@@ -36,6 +36,11 @@ var autoShareModelTypes = map[string]struct{}{
 	"embed_image": {},
 }
 
+var (
+	errSelectedModelNotFound   = errors.New("model not found in selected models")
+	errOpenCodeModelIneligible = errors.New("selected evo model is not supported by OpenCode")
+)
+
 type selectedModelUpsertItem struct {
 	ModelKey string `json:"model_key"`
 	ModelID  string `json:"model_id"`
@@ -57,6 +62,7 @@ type selectedModelItem struct {
 	Share                    bool    `json:"share" gorm:"column:share"`
 	IsEditable               bool    `json:"is_editable" gorm:"-"`
 	MaxInputTokens           *string `json:"max_input_tokens" gorm:"column:max_input_tokens"`
+	TechnicalModelType       string  `json:"-" gorm:"column:technical_model_type"`
 }
 
 type selectedModelsResponse struct {
@@ -78,22 +84,80 @@ type modelReadyResponse struct {
 	ModelName    string `json:"model_name,omitempty"`     // e.g. "text-embedding-3-small"
 }
 
-type sharedModelDetail struct {
-	UserID       string
-	UserName     string
-	ProviderName string
-	ModelName    string
+type selectedModelCandidate struct {
+	ModelID            string `gorm:"column:model_id"`
+	UserID             string `gorm:"column:user_id"`
+	UserName           string `gorm:"column:user_name"`
+	ProviderName       string `gorm:"column:provider_name"`
+	ModelName          string `gorm:"column:model_name"`
+	BaseURL            string `gorm:"column:base_url"`
+	TechnicalModelType string `gorm:"column:technical_model_type"`
+}
+
+func openCodeCandidateQuery(ctx context.Context, db *gorm.DB) *gorm.DB {
+	return db.WithContext(ctx).
+		Table("user_model_provider_group_models m").
+		Select(
+			"m.id AS model_id, m.provider_name, m.name AS model_name, "+
+				"m.model_type AS technical_model_type, g.base_url",
+		).
+		Joins("JOIN user_model_provider_groups g ON g.id = m.user_model_provider_group_id AND g.deleted_at IS NULL AND g.is_verified = ?", true).
+		Where("m.deleted_at IS NULL")
+}
+
+func (row selectedModelCandidate) isOpenCodeEligible() bool {
+	_, ok := ResolveOpenCodeModel(row.ProviderName, row.ModelName, row.BaseURL, row.TechnicalModelType)
+	return ok
+}
+
+func loadEligibleOpenCodeSelection(ctx context.Context, db *gorm.DB, userID string, sharedOnly bool) (*selectedModelCandidate, error) {
+	var rows []selectedModelCandidate
+	q := openCodeCandidateQuery(ctx, db).
+		Select(
+			"m.id AS model_id, usm.user_id, usm.user_name, "+
+				"m.provider_name, m.name AS model_name, m.model_type AS technical_model_type, g.base_url",
+		).
+		Joins("JOIN user_selected_models usm ON usm.user_model_provider_group_model_id = m.id").
+		Where("usm.model_type = ?", EvoModelKey)
+	if sharedOnly {
+		q = q.Where("usm.share = ?", true)
+	} else {
+		q = q.Where("usm.user_id = ? AND m.create_user_id = usm.user_id", userID)
+	}
+	if err := q.Order("usm.updated_at DESC").Scan(&rows).Error; err != nil {
+		return nil, err
+	}
+	for i := range rows {
+		row := &rows[i]
+		if row.isOpenCodeEligible() {
+			return row, nil
+		}
+	}
+	return nil, nil
+}
+
+func openCodeModelEligible(ctx context.Context, db *gorm.DB, modelID, userID string) (bool, error) {
+	var row selectedModelCandidate
+	err := openCodeCandidateQuery(ctx, db).
+		Where("m.id = ? AND m.create_user_id = ?", modelID, userID).
+		Limit(1).Scan(&row).Error
+	if err != nil || row.ModelID == "" {
+		return false, err
+	}
+	return row.isOpenCodeEligible(), nil
 }
 
 // getSharedModelDetail returns the detail of the active shared selection for the given model_type.
 // Returns nil (no error) if no shared selection exists.
-func getSharedModelDetail(ctx context.Context, db *gorm.DB, modelType string) (*sharedModelDetail, error) {
-	var row struct {
-		UserID       string `gorm:"column:user_id"`
-		UserName     string `gorm:"column:user_name"`
-		ProviderName string `gorm:"column:provider_name"`
-		ModelName    string `gorm:"column:model_name"`
+func getSharedModelDetail(ctx context.Context, db *gorm.DB, modelType string) (*selectedModelCandidate, error) {
+	if modelType == EvoModelKey {
+		row, err := loadEligibleOpenCodeSelection(ctx, db, "", true)
+		if err != nil || row == nil {
+			return nil, err
+		}
+		return row, nil
 	}
+	var row selectedModelCandidate
 	err := db.WithContext(ctx).
 		Table("user_selected_models usm").
 		Joins("JOIN user_model_provider_group_models m ON m.id = usm.user_model_provider_group_model_id AND m.deleted_at IS NULL").
@@ -106,12 +170,7 @@ func getSharedModelDetail(ctx context.Context, db *gorm.DB, modelType string) (*
 	if err != nil {
 		return nil, err
 	}
-	return &sharedModelDetail{
-		UserID:       row.UserID,
-		UserName:     row.UserName,
-		ProviderName: row.ProviderName,
-		ModelName:    row.ModelName,
-	}, nil
+	return &row, nil
 }
 
 // GetSelectedModels returns selected model rows for the current user.
@@ -205,6 +264,17 @@ func SetSelectedModels(w http.ResponseWriter, r *http.Request) {
 		}
 		if _, ok := modelByID[modelID]; !ok {
 			common.ReplyErr(w, "model not found", http.StatusBadRequest)
+			return
+		}
+	}
+	if modelID := selectionByType[EvoModelKey]; modelID != "" {
+		eligible, err := openCodeModelEligible(r.Context(), db, modelID, userID)
+		if err != nil {
+			common.ReplyErr(w, "validate evo model failed", http.StatusInternalServerError)
+			return
+		}
+		if !eligible {
+			common.ReplyErr(w, "selected evo model is not supported by OpenCode", http.StatusBadRequest)
 			return
 		}
 	}
@@ -314,6 +384,7 @@ func loadSelectedModels(ctx context.Context, db *gorm.DB, userID string) ([]sele
 				"m.user_model_provider_group_id, "+
 				"m.name, "+
 				"m.provider_name, "+
+				"m.model_type AS technical_model_type, "+
 				"m.max_input_tokens, "+
 				"g.name AS group_name, "+
 				"g.base_url",
@@ -336,9 +407,17 @@ func loadSelectedModels(ctx context.Context, db *gorm.DB, userID string) ([]sele
 	if err != nil {
 		return nil, err
 	}
-	for i := range out {
-		out[i].IsEditable = strings.EqualFold(strings.TrimSpace(out[i].ModelKey), "image_editing")
+	eligible := out[:0]
+	for _, item := range out {
+		item.IsEditable = strings.EqualFold(strings.TrimSpace(item.ModelKey), "image_editing")
+		if item.ModelKey == EvoModelKey {
+			if _, ok := ResolveOpenCodeModel(item.ProviderName, item.Name, item.BaseURL, item.TechnicalModelType); !ok {
+				continue
+			}
+		}
+		eligible = append(eligible, item)
 	}
+	out = eligible
 	return out, nil
 }
 
@@ -365,7 +444,6 @@ func SetSharedModel(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "missing X-User-Id", http.StatusBadRequest)
 		return
 	}
-
 	now := time.Now()
 	err := db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		// Look up the exact row by (user_id, model_type) — the unique key — so we
@@ -374,9 +452,20 @@ func SetSharedModel(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Where("user_id = ? AND model_type = ?", userID, modelKey).
 			First(&row).Error; err != nil {
 			if errors.Is(err, gorm.ErrRecordNotFound) {
-				return errors.New("not found")
+				return errSelectedModelNotFound
 			}
 			return err
+		}
+		if req.Share && modelKey == EvoModelKey {
+			eligible, err := openCodeModelEligible(
+				r.Context(), tx, row.UserModelProviderGroupModelID, userID,
+			)
+			if err != nil {
+				return err
+			}
+			if !eligible {
+				return errOpenCodeModelIneligible
+			}
 		}
 		if req.Share {
 			// Clear any existing share=true for this model_key globally first.
@@ -392,8 +481,12 @@ func SetSharedModel(w http.ResponseWriter, r *http.Request) {
 			Updates(map[string]any{"share": req.Share, "updated_at": now}).Error
 	})
 	if err != nil {
-		if err.Error() == "not found" {
+		if errors.Is(err, errSelectedModelNotFound) {
 			common.ReplyErr(w, "model not found in selected models", http.StatusNotFound)
+			return
+		}
+		if errors.Is(err, errOpenCodeModelIneligible) {
+			common.ReplyErr(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 		common.ReplyErr(w, "update share failed", http.StatusInternalServerError)
@@ -425,7 +518,7 @@ func GetModelReady(w http.ResponseWriter, r *http.Request) {
 	// Static-source roles do not require a user selection — they are always ready.
 	// A failure to reach the algorithm service is a deployment bug; surface it as
 	// 502 Bad Gateway rather than silently returning ready=false.
-	isDynamic, err := FetchRoleIsDynamic(r.Context(), modelType)
+	isDynamic, err := requiresDynamicSelection(r.Context(), modelType)
 	if err != nil {
 		common.ReplyErr(w, "algorithm service unavailable: cannot determine model source", http.StatusBadGateway)
 		return
@@ -435,22 +528,22 @@ func GetModelReady(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ownCount, err := countValidModelSelection(r.Context(), db, userID, modelType, false)
+	ownReady, err := hasValidModelSelection(r.Context(), db, userID, modelType, false)
 	if err != nil {
 		common.ReplyErr(w, "query failed", http.StatusInternalServerError)
 		return
 	}
-	if ownCount > 0 {
+	if ownReady {
 		common.ReplyOK(w, modelReadyResponse{Ready: true, Source: "own"})
 		return
 	}
 
-	sharedCount, err := countValidModelSelection(r.Context(), db, userID, modelType, true)
+	sharedReady, err := hasValidModelSelection(r.Context(), db, userID, modelType, true)
 	if err != nil {
 		common.ReplyErr(w, "query failed", http.StatusInternalServerError)
 		return
 	}
-	if sharedCount > 0 {
+	if sharedReady {
 		detail, detailErr := getSharedModelDetail(r.Context(), db, modelType)
 		if detailErr != nil {
 			common.ReplyOK(w, modelReadyResponse{Ready: true, Source: "shared"})
@@ -500,9 +593,13 @@ func maybeScheduleImageGroupLazyReset(ctx context.Context, db *gorm.DB) {
 	scheduleImageGroupLazyEmbed(ctx)
 }
 
-// countValidModelSelection counts selections whose model row still exists (not soft-deleted).
-// When sharedOnly is true, only share=true rows are counted (any user).
-func countValidModelSelection(ctx context.Context, db *gorm.DB, userID, modelType string, sharedOnly bool) (int64, error) {
+// hasValidModelSelection reports whether a non-deleted selection exists.
+// When sharedOnly is true, only share=true rows are considered.
+func hasValidModelSelection(ctx context.Context, db *gorm.DB, userID, modelType string, sharedOnly bool) (bool, error) {
+	if modelType == EvoModelKey {
+		row, err := loadEligibleOpenCodeSelection(ctx, db, userID, sharedOnly)
+		return row != nil, err
+	}
 	var count int64
 	q := db.WithContext(ctx).
 		Table("user_selected_models usm").
@@ -518,7 +615,7 @@ func countValidModelSelection(ctx context.Context, db *gorm.DB, userID, modelTyp
 		q = q.Where("usm.user_id = ?", userID)
 	}
 	err := q.Count(&count).Error
-	return count, err
+	return count > 0, err
 }
 
 // IsModelReady checks whether a model of the given model_type is available for the user.
@@ -528,23 +625,30 @@ func countValidModelSelection(ctx context.Context, db *gorm.DB, userID, modelTyp
 // An error is returned when the algorithm service is unreachable — callers should surface
 // this as a 502 rather than treating it as "not ready".
 func IsModelReady(ctx context.Context, db *gorm.DB, userID, modelType string) (bool, error) {
-	isDynamic, err := FetchRoleIsDynamic(ctx, modelType)
+	isDynamic, err := requiresDynamicSelection(ctx, modelType)
 	if err != nil {
 		return false, err
 	}
 	if !isDynamic {
 		return true, nil
 	}
-	ownCount, err := countValidModelSelection(ctx, db, userID, modelType, false)
+	ownReady, err := hasValidModelSelection(ctx, db, userID, modelType, false)
 	if err != nil {
 		return false, err
 	}
-	if ownCount > 0 {
+	if ownReady {
 		return true, nil
 	}
-	sharedCount, err := countValidModelSelection(ctx, db, userID, modelType, true)
+	sharedReady, err := hasValidModelSelection(ctx, db, userID, modelType, true)
 	if err != nil {
 		return false, err
 	}
-	return sharedCount > 0, nil
+	return sharedReady, nil
+}
+
+func requiresDynamicSelection(ctx context.Context, modelType string) (bool, error) {
+	if modelType == EvoModelKey {
+		return true, nil
+	}
+	return FetchRoleIsDynamic(ctx, modelType)
 }

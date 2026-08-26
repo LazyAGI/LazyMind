@@ -108,6 +108,9 @@ func seedAgentRuntimeModelConfig(t *testing.T, db *orm.DB, userID, role string) 
 			UpdatedAt:      now,
 		},
 	}
+	if role == "evo_llm" {
+		model.Name = "gpt-4o-mini"
+	}
 	selected := orm.UserSelectedModel{
 		UserID:                        userID,
 		UserName:                      userID,
@@ -247,7 +250,7 @@ func TestAttachThreadModelConfigProvidesRequiredThreadLLMs(t *testing.T) {
 		t.Fatalf("expected llm_config, got %#v", payload["llm_config"])
 	}
 	evoConfig, ok := llmConfig["evo_llm"].(map[string]any)
-	if !ok || evoConfig["model"] != "gpt-evo-llm" {
+	if !ok || evoConfig["model"] != "gpt-4o-mini" {
 		t.Fatalf("expected evo_llm config, got %#v", llmConfig["evo_llm"])
 	}
 	chatConfig, ok := llmConfig["llm"].(map[string]any)
