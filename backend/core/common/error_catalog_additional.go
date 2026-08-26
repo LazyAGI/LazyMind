@@ -418,6 +418,8 @@ func init() {
 	registerAdditionalError("invalid document", http.StatusBadRequest, 2002289)
 	registerAdditionalError("decode attempt result", http.StatusInternalServerError, 2002290)
 	registerAdditionalErrorPattern("control.next_step %q is not a reachable choice from %q", "Workflow next step is not reachable", http.StatusInternalServerError, 2002291)
+	registerAdditionalErrorPattern("current %s revision is already synchronized", "Conflict", http.StatusConflict, 2000107)
+	registerAdditionalErrorPattern("single-cardinality material %q has multiple distinct input bindings", "Internal server error", http.StatusInternalServerError, 2000000)
 
 	// Chat attachment, editable PPTX, and Workflow artifact errors.
 	registerAdditionalErrorPattern("resolve turn %q", "Failed to resolve chat turn attachments", http.StatusInternalServerError, 2002123)

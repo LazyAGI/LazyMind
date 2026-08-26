@@ -332,6 +332,9 @@ func retryChatCancelSignal(
 			if received {
 				return true, nil
 			}
+			if ctx.Err() != nil {
+				return false, ctx.Err()
+			}
 			if err := waitChatCancelPoll(ctx, pollInterval); err != nil {
 				return false, err
 			}

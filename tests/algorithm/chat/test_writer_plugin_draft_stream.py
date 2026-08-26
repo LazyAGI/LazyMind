@@ -171,23 +171,26 @@ def test_wrapped_idle_timeout_restarts_section_preview_and_retries(monkeypatch):
     monkeypatch.setenv('LAZYMIND_WRITER_SECTION_MAX_ATTEMPTS', '2')
     monkeypatch.setattr(writer, 'AutoModel', lambda **_kwargs: object())
     monkeypatch.setattr(writer, 'WriterDraftingTools', drafting_tools)
-    monkeypatch.setattr(
-        writer, 'SectionInstruction',
-        SimpleNamespace(model_validate=lambda value: value),
-    )
     monkeypatch.setattr(writer, '_write_input_artifact', lambda *_args: '')
 
     emitter = writer.DraftMarkdownStreamEventEmitter(emitted.append)
     result = json.loads(writer.WriterCreateToolkit().stream_draft_blocks_markdown(
         writing_task_json='{}',
-        section_instructions_json='{"instructions": [{}]}',
+        section_instructions_json=json.dumps({
+            'instructions': [{
+                'instruction_id': 'section-1',
+                'content_ref': {'node_id': 'section-1'},
+                'section_title': '第一章',
+                'section_goal': '写作',
+            }],
+        }),
         writing_context_json='{}',
         on_delta=emitter.feed,
         on_preview_restart=emitter.restart,
     ))
 
     assert attempts == 2
-    assert result == [complete]
+    assert result == [complete.rstrip()]
     starts = [event for event in emitted if event['type'] == 'artifact_stream_start']
     assert len(starts) == 2
     latest_preview = ''.join(

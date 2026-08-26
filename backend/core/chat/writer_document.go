@@ -500,7 +500,7 @@ func WriteBackWriterDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if writerArtifactRevisionSynced(draft) {
-		common.ReplyErrWithData(w, "current "+slot+" revision is already synchronized", map[string]any{
+		common.ReplyErrWithData(w, fmt.Sprintf("current %s revision is already synchronized", slot), map[string]any{
 			"status": "already_synced", "current_revision": draft.Revision.Revision,
 		}, http.StatusConflict)
 		return
