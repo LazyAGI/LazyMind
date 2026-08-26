@@ -86,14 +86,14 @@ class ConversationActions:
         thinking_depth: str | None = None,
         conversation_id_override: str | None = None,
         on_stream: Callable[[CoreStreamUpdate], None] | None = None,
-        chat_only: bool = False,
+        recover_missing_route: bool = False,
     ) -> ConversationResult:
         conversation_id = (
             conversation_id_override
             if conversation_id_override is not None
             else self._store.get_route(account_id, external_address_hash)
         )
-        if chat_only and conversation_id:
+        if recover_missing_route and conversation_id:
             try:
                 detail = self._client.get_conversation_detail(
                     owner_user_id=owner_user_id,
@@ -116,7 +116,7 @@ class ConversationActions:
                     )
                     conversation_id = None
         state = self._store.get_navigation_state(account_id, external_address_hash) or {}
-        explicit_new = not chat_only and state.get('mode') == 'new_pending'
+        explicit_new = state.get('mode') == 'new_pending'
         resolved = (
             resolved_changes
             if resolved_changes is not None
@@ -152,25 +152,23 @@ class ConversationActions:
                 else []
             )
             options = self._capabilities.turn_options(resolved, base_dataset_ids)
-            if not chat_only:
-                options = ChatOptions.from_dict(
+            options = ChatOptions.from_dict(
+                self._store.get_pending_turn(
+                    account_id,
+                    external_address_hash,
+                )
+            ).merged(options)
+        else:
+            default_ids = self._capabilities.default_dataset_ids(catalog)
+            options = self._capabilities.new_conversation_options([], default_ids)
+            options = options.merged(
+                ChatOptions.from_dict(
                     self._store.get_pending_turn(
                         account_id,
                         external_address_hash,
                     )
-                ).merged(options)
-        else:
-            default_ids = self._capabilities.default_dataset_ids(catalog)
-            options = self._capabilities.new_conversation_options([], default_ids)
-            if not chat_only:
-                options = options.merged(
-                    ChatOptions.from_dict(
-                        self._store.get_pending_turn(
-                            account_id,
-                            external_address_hash,
-                        )
-                    ),
-                )
+                ),
+            )
             if explicit_new:
                 options = options.merged(
                     ChatOptions.from_dict(
@@ -209,9 +207,6 @@ class ConversationActions:
                 if thinking_depth in {'low', 'medium', 'high', 'max'}
                 else None
             )
-            if chat_only:
-                options.workflow_mode = 'auto'
-                options.ask_answers_structured = None
             turn = self._client.chat(
                 owner_user_id=owner_user_id,
                 text=message,
@@ -221,12 +216,18 @@ class ConversationActions:
                 on_stream=on_stream,
             )
         except LazyMindHTTPError as exc:
-            if conversation_id and exc.status_code == 404:
+            if conversation_id and (
+                exc.status_code == 404
+                or (
+                    exc.status_code == 409
+                    and '2002115' in exc.message
+                )
+            ):
                 self._store.begin_new_conversation(
                     account_id,
                     external_address_hash,
                 )
-                if chat_only:
+                if recover_missing_route:
                     return self.chat(
                         account_id=account_id,
                         external_address_hash=external_address_hash,
@@ -243,10 +244,11 @@ class ConversationActions:
                         thinking_depth=thinking_depth,
                         conversation_id_override='',
                         on_stream=on_stream,
-                        chat_only=True,
+                        recover_missing_route=True,
                     )
                 raise ActionMessage(
-                    '当前会话已经不存在，已进入新会话状态；刚才的任务没有发送，请再发一次。'
+                    '当前会话已经不存在或已在回收站，已进入新会话状态；'
+                    '刚才的任务没有发送，请再发一次。'
                 ) from exc
             if (
                 exc.status_code == 409

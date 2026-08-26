@@ -74,6 +74,8 @@ const rendererReadyTimeoutMs = 30 * 1000;
 const runtimeOwnershipHandoffTimeoutMs = 30 * 1000;
 const agentHostRestartMaxDelayMs = 30 * 1000;
 const agentHostStableAfterMs = 60 * 1000;
+const agentConnectorActionTimeoutMs = 15 * 1000;
+const agentConnectorLoginTimeoutMs = 125 * 1000;
 const macInstallationWarmupMarker = macWarmupMarkerPath(app.getPath("userData"));
 const startupMetricsHistoryPath = path.join(desktopLogsDir, "startup-metrics.jsonl");
 const startupMetricsRecorder = createStartupMetricsRecorder({
@@ -454,8 +456,9 @@ function runSidecar(command, extra = [], options = {}) {
 
 function runAgentConnector(agent, action) {
   const allowedActions = {
-    codex: new Set(["connect", "status", "disconnect"]),
-    cursor: new Set(["connect", "status", "disconnect"]),
+    all: new Set(["status"]),
+    codex: new Set(["connect", "status", "disconnect", "login"]),
+    cursor: new Set(["connect", "status", "disconnect", "login"]),
     workbuddy: new Set(["connect", "status", "disconnect"]),
     traework: new Set(["connect", "status", "disconnect"]),
     "deepseek-harness": new Set(["connect", "status", "disconnect"]),
@@ -463,11 +466,42 @@ function runAgentConnector(agent, action) {
   if (!allowedActions[agent]?.has(action)) {
     return Promise.reject(new Error(`Unsupported external Agent action: ${agent}/${action}`));
   }
-  const args = ["internal", "agent", agent, action];
+  return runConnectorJSON(
+    ["internal", "agent", agent, action],
+    action === "login" ? agentConnectorLoginTimeoutMs : agentConnectorActionTimeoutMs,
+  );
+}
+
+async function runExecutorConnector(provider, action) {
+  const allowedActions = {
+    all: new Set(["status"]),
+    codex: new Set(["status", "enable", "disable"]),
+    cursor: new Set(["status", "enable", "disable"]),
+    workbuddy: new Set(["status", "enable", "disable"]),
+  };
+  if (!allowedActions[provider]?.has(action)) {
+    throw new Error(`Unsupported external executor action: ${provider}/${action}`);
+  }
+  const result = await runConnectorJSON(
+    ["internal", "executor", provider, action],
+    agentConnectorActionTimeoutMs,
+  );
+  if (action !== "status") {
+    agentHostRestartAttempts = 0;
+    if (agentHostProcess) {
+      agentHostProcess.kill();
+    } else {
+      startAgentHost();
+    }
+  }
+  return result;
+}
+
+function runConnectorJSON(args, timeout) {
   return new Promise((resolve, reject) => {
     execFile(agentConnectorPath, args, {
       env: sidecarEnv(),
-      timeout: 60_000,
+      timeout,
       windowsHide: isWindows,
     }, (error, stdout, stderr) => {
       if (error) {
@@ -1527,9 +1561,10 @@ ipcMain.on("lazymind:renderer-ready", (event) => {
 });
 
 ipcMain.handle("lazymind:runtimeStatus", () => readStatus());
-ipcMain.handle("lazymind:agentIntegrationStatus", (_event, agent) => runAgentConnector(agent, "status"));
+ipcMain.handle("lazymind:agentIntegrationStatuses", () => runAgentConnector("all", "status"));
 ipcMain.handle("lazymind:agentIntegrationAction", (_event, agent, action) => runAgentConnector(agent, action));
-ipcMain.handle("lazymind:codexIntegrationAction", (_event, action) => runAgentConnector("codex", action));
+ipcMain.handle("lazymind:executorIntegrationPolicies", () => runExecutorConnector("all", "status"));
+ipcMain.handle("lazymind:executorIntegrationAction", (_event, provider, action) => runExecutorConnector(provider, action));
 ipcMain.handle("lazymind:restartRuntime", async () => {
   await runSidecar("down");
   startRuntime();

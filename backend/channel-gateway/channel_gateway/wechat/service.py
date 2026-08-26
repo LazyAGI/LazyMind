@@ -25,6 +25,7 @@ from channel_gateway.wechat.ports import (
 
 _logger = logging.getLogger(__name__)
 _TERMINAL_STATUSES = {'connected', 'expired', 'canceled', 'failed'}
+_INVALID_SESSION_ERRORS = ('errcode=-14', 'session timeout')
 _REDIRECT_HOST_RE = re.compile(r'^[A-Za-z0-9.-]+$')
 
 
@@ -143,7 +144,9 @@ class WeChatConnectionService:
         if not created:
             return self._session_view(row)
         try:
-            qrcode, qr_payload, base_url = self._wechat.start_login()
+            qrcode, qr_payload, base_url = self._wechat.start_login(
+                self._local_tokens(owner_user_id),
+            )
         except WeChatError as exc:
             _logger.warning('wechat_start_login_failed session_id=%s error=%s', session_id, exc)
             self._store.mark_failed(
@@ -222,7 +225,9 @@ class WeChatConnectionService:
         if not refreshable:
             raise GatewayError(409, 'INVALID_STATE', '当前连接会话不能刷新二维码')
         try:
-            qrcode, qr_payload, base_url = self._wechat.start_login()
+            qrcode, qr_payload, base_url = self._wechat.start_login(
+                self._local_tokens(owner_user_id),
+            )
         except WeChatError as exc:
             _logger.warning('wechat_refresh_login_failed session_id=%s error=%s', session_id, exc)
             raise GatewayError(
@@ -502,6 +507,34 @@ class WeChatConnectionService:
             )
             if self._on_account_connected:
                 self._on_account_connected(str(account['id']))
+
+    def _local_tokens(self, owner_user_id: str) -> tuple[str, ...]:
+        tokens: list[str] = []
+        for account in self._store.list_accounts(
+            owner_user_id,
+            'wechat',
+        )[:10]:
+            last_error = str(account.get('last_error') or '').lower()
+            if any(error in last_error for error in _INVALID_SESSION_ERRORS):
+                continue
+            ciphertext = str(account.get('credentials_ciphertext') or '')
+            if not ciphertext:
+                continue
+            try:
+                credentials = self._cipher.decrypt(
+                    owner_user_id,
+                    ciphertext,
+                )
+            except Exception:
+                _logger.warning(
+                    'wechat_local_token_decrypt_failed account_id=%s',
+                    account.get('id'),
+                )
+                continue
+            token = str(credentials.get('token') or '').strip()
+            if token:
+                tokens.append(token)
+        return tuple(tokens)
 
     def _decrypt_session_state(self, row: dict[str, Any]) -> dict[str, Any]:
         ciphertext = str(row.get('provider_state_ciphertext') or '')

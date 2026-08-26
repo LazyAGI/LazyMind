@@ -77,6 +77,26 @@
       "package_file": "packages/bsk_01K0M8SCV7PAPERSEARCH9Q2X3A4B.zip"
     },
     {
+      "key": "structured-longform-writing",
+      "uid": "bsk_E1A2FD55C759A485672BA6B94328",
+      "source_url": "builtin://writing/structured-longform-writing",
+      "resolved_url": "builtin://writing/structured-longform-writing",
+      "version": "1.0.0",
+      "name": "structured-longform-writing",
+      "description": "Use for structured long-form writing, including blogs, reports, proposals, plans, PRDs, competitive analyses, research summaries, technical design docs, internal briefings, and decision documents. Trigger when the user asks to write, draft, expand, organize, polish into, or turn rough notes, attachments, webpages, knowledge-base results, or gathered materials into a complete long-form document. Do not use for simple rewriting, one-paragraph summaries, title brainstorming, short messages, translation-only tasks, or purely creative fiction. 来源：千问办公，经 LazyMind 适配。",
+      "category": "writing",
+      "tags": [
+        "long-form-writing",
+        "report",
+        "proposal"
+      ],
+      "market_visible": true,
+      "archive_sha256": "0d5cd585fd438ba1393ac831e55448ac8f710fc16a0e8100b39e0c9cd51a9e3a",
+      "tree_sha256": "fe8817735ccdf89458bdb2d8b7932a6a4ab715f44d9c2587aca73257cb92b73d",
+      "archive_size": 30155,
+      "package_file": "packages/bsk_E1A2FD55C759A485672BA6B94328.zip"
+    },
+    {
       "key": "diagram-design",
       "uid": "bsk_01L0D6G4R4M8V2K7Q9C5X3H0EP",
       "source_url": "builtin://design/diagram-design",
@@ -197,6 +217,26 @@
       "tree_sha256": "e62bc2fc61a640b7c9b3eeec5ccd773bdcca162002c762a7e6e6f157aafe5ca3",
       "archive_size": 55567,
       "package_file": "packages/bsk_D9126B2E88201F74F8728E46A1C2.zip"
+    },
+    {
+      "key": "skill",
+      "uid": "bsk_1E1AE354017CAB635F423BC76790",
+      "source_url": "builtin://featured/novel-generator/skill",
+      "resolved_url": "builtin://featured/novel-generator/skill",
+      "version": "1.0.0",
+      "name": "novel-generator",
+      "description": "作为一个完整的中文网络小说与爽文连载专家，把一句话灵感扩展为创作设定、全局大纲、分卷节奏和连续章节，并通过 LazyMind 对话工作区维护角色、地点、时间线、伏笔和世界规则的一致性。用于用户要求写小说、续写章节、生成网文或爽文、设计修仙/玄幻/都市/重生/系统流/末世/网游故事、扩展创意、制作大纲、检查剧情穿帮、修订章节或继续长期连载时；短篇一次性创作可直接回答，长篇项目必须建立并更新结构化创作记忆。",
+      "category": "writing",
+      "tags": [
+        "novel-writing",
+        "serialized-fiction",
+        "creative-writing"
+      ],
+      "market_visible": false,
+      "archive_sha256": "c85078ac1ffc078766862c78c14a56837dfc6db0ae02ec76e4c067aca9a274e7",
+      "tree_sha256": "b22857ba8156de0ad833c26d7e71ed74401e12c4c28f08562fe556ab72ec916b",
+      "archive_size": 12568,
+      "package_file": "packages/bsk_1E1AE354017CAB635F423BC76790.zip"
     }
   ]
 }

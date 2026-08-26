@@ -201,10 +201,7 @@ func normalizeRoot(files map[string][]byte) map[string][]byte {
 	for filePath, data := range files {
 		normalized[strings.TrimPrefix(filePath, prefix)] = data
 	}
-	if _, ok := normalized["SKILL.md"]; ok {
-		return normalized
-	}
-	return files
+	return normalized
 }
 
 func isIgnoredMetadata(name string) bool {

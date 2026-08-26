@@ -109,12 +109,10 @@ func (s *DatasetCatalogService) ListDatasets(ctx context.Context, req DatasetLis
 	caller := req.Caller
 	caller.UserID = firstNonEmpty(strings.TrimSpace(caller.UserID), userID)
 
-	base := s.db.WithContext(ctx).Model(&orm.Dataset{}).Where("deleted_at IS NULL")
-	orderClause := "updated_at desc"
-	if orderBy := strings.TrimSpace(req.OrderBy); orderBy != "" {
-		if ob, err := normalizeDatasetOrderBy(orderBy); err == nil {
-			orderClause = ob
-		}
+	order := resolveDatasetListOrder(req.OrderBy)
+	base := s.db.WithContext(ctx).Model(&orm.Dataset{}).Where("datasets.deleted_at IS NULL")
+	if order.usageJoin {
+		base = base.Joins("LEFT JOIN dataset_user_states dus ON dus.dataset_id = datasets.id AND dus.create_user_id = ?", userID)
 	}
 
 	groupIDs := acl.ResolveUserGroupIDs(userID)
@@ -129,9 +127,14 @@ func (s *DatasetCatalogService) ListDatasets(ctx context.Context, req DatasetLis
 
 	for hasMoreRows {
 		var rows []orm.Dataset
-		query := base.
-			Select(`id, kb_id, create_user_id, create_user_name, display_name, "desc", cover_image, created_at, updated_at, ext, type, share_type, dataset_state`).
-			Order(orderClause).
+		query := base
+		if order.usageJoin {
+			query = query.Select("datasets.*")
+		} else {
+			query = query.Select(`id, kb_id, create_user_id, create_user_name, display_name, "desc", cover_image, created_at, updated_at, ext, type, share_type, dataset_state`)
+		}
+		query = query.
+			Order(order.clause).
 			Offset(scanOffset).
 			Limit(fetchSize)
 		if err := query.Find(&rows).Error; err != nil {

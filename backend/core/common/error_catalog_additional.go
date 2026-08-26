@@ -184,6 +184,7 @@ func init() {
 	registerAdditionalError("query conversation failed", http.StatusInternalServerError, 2001469)
 	registerAdditionalError("query database connection failed", http.StatusInternalServerError, 2001470)
 	registerAdditionalError("query database connections failed", http.StatusInternalServerError, 2001471)
+	registerAdditionalError("query dataset usage failed", http.StatusInternalServerError, 2002310)
 	registerAdditionalError("query disabled tools failed", http.StatusInternalServerError, 2001472)
 	registerAdditionalError("query failed", http.StatusInternalServerError, 2001473)
 	registerAdditionalError("query group models failed", http.StatusInternalServerError, 2001474)
@@ -257,6 +258,7 @@ func init() {
 	registerAdditionalError("tool cannot be disabled", http.StatusBadRequest, 2001542)
 	registerAdditionalError("tool not found", http.StatusNotFound, 2001543)
 	registerAdditionalError("tool_name required", http.StatusBadRequest, 2001544)
+	registerAdditionalError("too many dataset_ids", http.StatusBadRequest, 2002311)
 	registerAdditionalError("transition command not found", http.StatusNotFound, 2001545)
 	registerAdditionalError("trash requires a skill package root", http.StatusBadRequest, 2001546)
 	registerAdditionalError("unsafe path", http.StatusBadRequest, 2001547)
@@ -377,6 +379,10 @@ func init() {
 	registerAdditionalErrorPattern("skill package exceeds %d uncompressed bytes", "Invalid skill package", http.StatusBadRequest, 2002294)
 	registerAdditionalErrorPattern("skill name cannot exceed %d characters", "Skill name cannot exceed 80 characters", http.StatusBadRequest, 2002305)
 	registerAdditionalErrorPattern("skill description cannot exceed %d characters", "Skill description cannot exceed 1024 characters", http.StatusBadRequest, 2002306)
+	registerAdditionalErrorPattern("github ref lookup failed with http status %d", "Invalid request", http.StatusBadRequest, 2000103)
+	registerAdditionalErrorAlias("github ref lookup failed", "Invalid request", http.StatusBadRequest, 2000103)
+	registerAdditionalErrorAlias("github ref lookup returned invalid json", "Invalid request", http.StatusBadRequest, 2000103)
+	registerAdditionalErrorPattern("skill package download exceeds %d bytes", "Invalid skill package", http.StatusBadRequest, 2002294)
 
 	// Personal recovery and archive lifecycle errors.
 	registerAdditionalError("query archive folders failed", http.StatusInternalServerError, 2002098)
@@ -587,6 +593,7 @@ func init() {
 	registerAdditionalError("editable block changed; refresh and retry", http.StatusConflict, 2002303)
 	registerAdditionalError("save editable block failed", http.StatusInternalServerError, 2002304)
 	registerAdditionalError("failed to invalidate compressed context", http.StatusInternalServerError, 2002307)
+	registerAdditionalErrorPattern("artifact slot %q requires content type %q, got %q", "Artifact content type does not match the Workflow slot declaration", http.StatusUnprocessableEntity, 2002308)
 }
 
 func registerAdditionalError(message string, status, code int) {

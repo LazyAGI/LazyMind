@@ -23,3 +23,30 @@ func TestSessionIntentTextReadsPersistedTriggerContext(t *testing.T) {
 		t.Fatalf("unexpected session intent: %q", got)
 	}
 }
+
+func TestApplyRecoveryIntentPreservesLaunchRequest(t *testing.T) {
+	target := transitionTarget{
+		UserInput:          "请重新执行步骤 collect_materials",
+		RuntimeInstruction: "Replace only the first item.",
+	}
+
+	applyRecoveryIntent(`{"text":"搜索一张哈兰德照片并在球衣上写必胜"}`, &target)
+
+	if target.UserInput != "搜索一张哈兰德照片并在球衣上写必胜" {
+		t.Fatalf("recovery replaced launch request: %q", target.UserInput)
+	}
+	want := "Replace only the first item.\n\nRecovery request for this rerun only: 请重新执行步骤 collect_materials"
+	if target.RuntimeInstruction != want {
+		t.Fatalf("unexpected runtime instruction: %q", target.RuntimeInstruction)
+	}
+}
+
+func TestApplyRecoveryIntentDoesNotDuplicateLaunchRequest(t *testing.T) {
+	target := transitionTarget{UserInput: "原始请求"}
+
+	applyRecoveryIntent(`{"text":"原始请求"}`, &target)
+
+	if target.UserInput != "原始请求" || target.RuntimeInstruction != "" {
+		t.Fatalf("unexpected target: %#v", target)
+	}
+}

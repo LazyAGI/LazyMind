@@ -233,12 +233,23 @@ def _validate_declared_artifact_type(
     content_type: str,
 ) -> Optional[str]:
     declared = (ctx.params or {}).get('output_slot_types') or {}
-    declared_type = str(declared.get(key) or '').strip() if isinstance(declared, dict) else ''
-    if declared_type == 'file' and content_type not in {'file', 'file_list'}:
+    declared_type = (
+        str(declared.get(key) or '').strip().lower()
+        if isinstance(declared, dict) else ''
+    )
+    actual_type = str(content_type or '').strip().lower()
+    if not declared_type:
+        return None
+    allowed_types = {'file', 'file_list'} if declared_type == 'file' else {declared_type}
+    if actual_type not in allowed_types:
+        allowed = ' or '.join(f'content_type="{value}"' for value in sorted(allowed_types))
+        suffix = (
+            ' Save the exact path returned by the producing tool instead of copying '
+            'its contents.' if declared_type == 'file' else ''
+        )
         return (
-            f'Artifact {key!r} is declared as a file slot and must be saved with '
-            'content_type="file" or "file_list". Save the exact path returned '
-            'by the producing tool instead of copying its contents.'
+            f'Artifact {key!r} is declared as a {declared_type} slot and must be saved '
+            f'with {allowed}.{suffix}'
         )
     return None
 
@@ -247,7 +258,8 @@ def _save_artifact(key: str, value: Any, content_type: str = 'text',
                    source_tool: Optional[str] = None,
                    sort_order: Optional[int] = None,
                    caption: Optional[str] = None,
-                   *, internal_publish: bool = False) -> Dict[str, Any]:
+                   *, internal_publish: bool = False,
+                   publisher_list_index: Optional[int] = None) -> Dict[str, Any]:
     """Save one output artifact produced by this SubAgent.
 
     File-type values must be local absolute paths; the framework copies them into the
@@ -327,9 +339,22 @@ def _save_artifact(key: str, value: Any, content_type: str = 'text',
     built, actual_ct = _build_artifact_value(value, ct)
     if source_tool:
         built['_source_tool'] = str(source_tool)
+    # A package publisher may already have resolved the durable list index from
+    # one consistent order snapshot. This avoids races when it emits several
+    # ordered artifacts in one tool call before Core has processed the earlier
+    # events. Model-facing callers must continue to use sort_order.
+    if publisher_list_index is not None:
+        if not internal_publish:
+            raise ToolExecutionError(
+                'publisher_list_index is reserved for package publisher tools.',
+            )
+        if int(publisher_list_index) < 0:
+            raise ToolExecutionError('publisher_list_index must be >= 0.')
+        built['list_index'] = int(publisher_list_index)
+
     # Translate sort_order → list_index via Go core API.
     out_of_range_warning: Optional[str] = None
-    if sort_order is not None:
+    if sort_order is not None and publisher_list_index is None:
         list_index, resolve_err = _resolve_list_index_from_sort_order(key, sort_order)
         if list_index is not None:
             built['list_index'] = list_index
@@ -544,12 +569,29 @@ def get_artifact(key: str, sort_order: Optional[int] = None, task_ref: Optional[
                     'message': f"No artifact found for key '{key}' at sort_order={sort_order}.",
                 }
             if direct_value:
-                content_type = 'json' if remote_type == 'json' else 'text'
-                artifacts = [{
-                    'slot': key,
-                    'content_type': content_type,
-                    'value': {'data': value} if content_type == 'json' else {'text': str(value)},
-                } for value in remote_values]
+                content_type = remote_type if remote_type in {'json', 'image'} else 'text'
+                artifacts = []
+                for value in remote_values:
+                    if content_type == 'json':
+                        artifact_value = {'data': value}
+                    elif content_type == 'image':
+                        if isinstance(value, dict):
+                            artifact_value = dict(value)
+                            path = (
+                                artifact_value.get('path')
+                                or artifact_value.get('image_url')
+                                or artifact_value.get('url')
+                            )
+                            artifact_value['path'] = str(path or '')
+                        else:
+                            artifact_value = {'path': str(value)}
+                    else:
+                        artifact_value = {'text': str(value)}
+                    artifacts.append({
+                        'slot': key,
+                        'content_type': content_type,
+                        'value': artifact_value,
+                    })
             else:
                 artifacts = [{
                     'slot': key, 'content_type': 'file',

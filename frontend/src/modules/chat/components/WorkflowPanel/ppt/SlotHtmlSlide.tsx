@@ -441,6 +441,7 @@ export function SlotHtmlSlide({
           terminology='edit'
           onClose={() => setSelection(null)}
           onApplied={() => undefined}
+          portalZIndex={expanded ? 2200 : undefined}
           onPreviewReady={(preview) => {
             setApplyError(undefined);
             setEditPreview(preview);

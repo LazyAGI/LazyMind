@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -82,6 +83,126 @@ func TestCreateSkillFromURL_DownloadFailureDoesNotCreateSkill(t *testing.T) {
 	if got := countRows(t, db, "skill_blobs", ""); got != 0 {
 		t.Fatalf("skill_blobs count = %d, want 0", got)
 	}
+}
+
+func TestCreateSkillFromURL_RejectsPackageWithoutSkillMD(t *testing.T) {
+	db := newSkillV2TestDB(t)
+	zipPath := filepath.Join(t.TempDir(), "missing-skill-md.zip")
+	writeSkillZip(t, zipPath, map[string][]byte{
+		"references/a.md": []byte("# 参考资料\n"),
+	})
+	svc := NewSkillService(SkillServiceDeps{
+		DB: db,
+		Downloader: NewFakeZipDownloader(map[string]string{
+			"https://example.test/missing-skill-md.zip": zipPath,
+		}),
+		BlobStore: NewBlobStore(db, NewLocalObjectStore(t.TempDir())),
+		Clock:     fixedClock(),
+	})
+
+	_, err := svc.CreateSkill(context.Background(), CreateSkillRequest{
+		OwnerUserID:  "user_001",
+		CreateUserID: "user_001",
+		Source: SourceInput{
+			Type: "url",
+			URL:  "https://example.test/missing-skill-md.zip",
+		},
+	})
+	if err == nil {
+		t.Fatal("CreateSkill succeeded for URL package without SKILL.md")
+	}
+	assertNoSkillTruthRows(t, db)
+}
+
+func TestCreateSkillFromURL_ImportsGitHubTreeSubdirectory(t *testing.T) {
+	db := newSkillV2TestDB(t)
+	zipPath := filepath.Join(t.TempDir(), "github-tree.zip")
+	writeSkillZip(t, zipPath, map[string][]byte{
+		"skills-main/skills/target/SKILL.md":            externalSkillMD("目标技能", "从 GitHub 子目录导入"),
+		"skills-main/skills/target/references/a.md":     []byte("# 目标资料\n"),
+		"skills-main/skills/target/assets/logo.png":     minimalPNGBytes(),
+		"skills-main/skills/ignored/SKILL.md":           externalSkillMD("忽略技能", "不应导入"),
+		"skills-main/skills/target/.DS_Store":           []byte("finder metadata"),
+		"__MACOSX/skills-main/skills/target/._SKILL.md": []byte("macOS metadata"),
+	})
+	archiveURL := "https://github.com/example/skills/archive/refs/heads/main.zip"
+	svc := NewSkillService(SkillServiceDeps{
+		DB: db,
+		Downloader: NewFakeZipDownloader(map[string]string{
+			archiveURL: zipPath,
+		}),
+		BlobStore: NewBlobStore(db, NewLocalObjectStore(t.TempDir())),
+		Clock:     fixedClock(),
+	})
+
+	resp, err := svc.CreateSkill(context.Background(), CreateSkillRequest{
+		OwnerUserID:    "user_001",
+		OwnerUserName:  "张三",
+		CreateUserID:   "user_001",
+		CreateUserName: "张三",
+		Source: SourceInput{
+			Type:       "url",
+			URL:        archiveURL,
+			SourceURL:  "https://github.com/example/skills/tree/main/skills/target",
+			PathPrefix: "skills/target",
+		},
+	})
+	if err != nil {
+		t.Fatalf("CreateSkill from GitHub tree URL returned error: %v", err)
+	}
+	var imported testSkillV2SkillRow
+	if err := db.Where("id = ?", resp.SkillID).Take(&imported).Error; err != nil {
+		t.Fatalf("query GitHub imported skill: %v", err)
+	}
+	if imported.SkillName != "目标技能" || imported.Description != "从 GitHub 子目录导入" {
+		t.Fatalf("GitHub imported metadata = %#v", imported)
+	}
+	assertInitialRevision(t, db, resp.SkillID, resp.HeadRevisionID)
+	assertRevisionEntries(t, db, resp.HeadRevisionID)
+	if got := countRows(t, db, "skill_revision_entries", "revision_id = ? AND path LIKE ?", resp.HeadRevisionID, "ignored/%"); got != 0 {
+		t.Fatalf("ignored subtree entry count = %d, want 0", got)
+	}
+	if got := countRows(t, db, "skill_revision_entries", "revision_id = ? AND path LIKE ?", resp.HeadRevisionID, "%DS_Store%"); got != 0 {
+		t.Fatalf("system metadata entry count = %d, want 0", got)
+	}
+}
+
+type cleanupZipDownloader struct {
+	path string
+}
+
+func (d cleanupZipDownloader) Download(context.Context, string) (DownloadedZip, error) {
+	return DownloadedZip{Path: d.path, Cleanup: func() { _ = os.Remove(d.path) }}, nil
+}
+
+func TestCreateSkillFromURL_CleansDownloadedArchiveAfterFailure(t *testing.T) {
+	db := newSkillV2TestDB(t)
+	archivePath := filepath.Join(t.TempDir(), "not-a-zip.zip")
+	if err := os.WriteFile(archivePath, []byte("not a zip"), 0o600); err != nil {
+		t.Fatalf("write downloaded archive: %v", err)
+	}
+	svc := NewSkillService(SkillServiceDeps{
+		DB:         db,
+		Downloader: cleanupZipDownloader{path: archivePath},
+		BlobStore:  NewBlobStore(db, NewLocalObjectStore(t.TempDir())),
+		Clock:      fixedClock(),
+	})
+
+	_, err := svc.CreateSkill(context.Background(), CreateSkillRequest{
+		OwnerUserID:  "user_001",
+		CreateUserID: "user_001",
+		Source: SourceInput{
+			Type: "url",
+			URL:  "https://example.test/not-a-zip.zip",
+		},
+	})
+	if err == nil {
+		t.Fatal("CreateSkill succeeded for non-zip URL")
+	}
+	if _, statErr := os.Stat(archivePath); !os.IsNotExist(statErr) {
+		t.Fatalf("downloaded archive stat error = %v, want not exist", statErr)
+	}
+	assertNoSkillTruthRows(t, db)
 }
 
 func TestReplaceSkillContentFromUploadedZip_CreatesNewRevision(t *testing.T) {
