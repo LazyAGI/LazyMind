@@ -1,0 +1,107 @@
+locale: en-US
+
+classification:
+  category: Knowledge creation
+  tags:
+    - Book distillation
+    - Methodology
+    - Skill creation
+    - Knowledge distillation
+
+presentation:
+  card:
+    title: Cangjie book-to-skill distiller
+    description: Extract executable methods from a book and turn them into reusable Skills
+    output_type: document
+    output_label: Skill design
+    cover_asset: cover
+    result_summary: Break principles, frameworks, and procedures into atomic capabilities and an actionable Skill design
+  detail:
+    title: Cangjie book-to-skill distiller
+    description: Analyze a complete book or selected chapters, extract transferable methods and execution steps, and produce a structured reusable Skill.
+    attachment_hint: A book PDF, chapter text, reading notes, or a target-method brief
+
+tasks:
+  - id: distill-book
+    selector:
+      title: Distill a complete book
+      description: Turn a book into a coherent set of executable capabilities
+      output_label: Skill set
+    launch:
+      prompt_short: Distill this book into a set of executable Skills.
+      prompt: Read the supplied book or complete notes, identify transferable principles, frameworks, and decision methods, and split them into Skills with clear boundaries that can be invoked independently or together. For each Skill, define scenarios, inputs, steps, constraints, and outputs instead of merely summarizing the book.
+    replay:
+      steps:
+        - title: Map the book
+          description: Identify the core problem, argument, and chapter relationships
+        - title: Extract method units
+          description: Separate claims, principles, frameworks, and executable actions
+        - title: Design Skill boundaries
+          description: Define triggers, inputs, outputs, steps, and constraints
+        - title: Assemble the Skill set
+          description: Produce reusable Skills that work independently and together
+    result:
+      template: generic_report_v1
+      eyebrow: Skill set
+      title: From book methodology to executable Skills
+      summary: Convert the core frameworks into capabilities with explicit triggers, steps, and deliverables
+      highlights:
+        - Methodology map of the book
+        - Atomic Skill inventory and boundaries
+        - Triggers, steps, and composition relationships
+
+  - id: distill-chapter
+    selector:
+      title: Extract a chapter method
+      description: Turn a selected chapter into one immediately useful method
+      output_label: Method playbook
+    launch:
+      prompt_short: Extract one immediately useful method from this chapter.
+      prompt: Analyze the supplied chapter, identify its most transferable method, separate principle from procedure, and organize it into a playbook with scenarios, prerequisites, step-by-step actions, checks, and common failure modes.
+    replay:
+      steps:
+        - title: Identify the chapter goal
+          description: Confirm the actual problem the chapter tries to solve
+        - title: Separate principle and action
+          description: Extract core principles, decision criteria, and procedures
+        - title: Complete execution conditions
+          description: Define inputs, constraints, checks, and failure modes
+        - title: Deliver the playbook
+          description: Produce a structured method that can be reused directly
+    result:
+      template: generic_report_v1
+      eyebrow: Method playbook
+      title: Core chapter method and execution steps
+      summary: Extract a bounded, immediately applicable method from the chapter
+      highlights:
+        - Problem scope and triggers
+        - Principles, steps, and checks
+        - Common mistakes and failure handling
+
+  - id: skill-draft
+    selector:
+      title: Generate a Skill draft
+      description: Turn an extracted method into a standard SKILL.md draft
+      output_label: SKILL.md draft
+    launch:
+      prompt_short: Turn this method into a standard SKILL.md draft.
+      prompt: Convert the supplied methodology into a standard SKILL.md draft with an accurate name, trigger description, supported and unsupported scopes, input requirements, execution flow, quality checks, and required references. Preserve the method's boundaries and do not add unsupported capabilities.
+    replay:
+      steps:
+        - title: Confirm method boundaries
+          description: Define what the capability solves and what it excludes
+        - title: Design the trigger description
+          description: Describe situations the model can recognize reliably
+        - title: Structure the workflow
+          description: Convert the method into steps and quality checks
+        - title: Deliver the Skill draft
+          description: Produce a complete SKILL.md ready for review
+    result:
+      template: generic_report_v1
+      eyebrow: SKILL.md draft
+      title: Reusable methodology Skill design
+      summary: Convert the method into a Skill with clear triggers, steps, and quality standards
+      highlights:
+        - Name and trigger description
+        - Scope and input requirements
+        - Execution steps and quality checks

@@ -615,15 +615,53 @@ async function runInstallerWarmup() {
   });
 }
 
+async function createInstallationWarmupWindow() {
+  const isChinese = app.getLocale().toLowerCase().startsWith("zh");
+  updateStartupState({
+    status: "starting",
+    phase: isChinese ? "首次启动准备" : "First-launch preparation",
+    message: isChinese
+      ? "正在准备本地运行环境，完成后将自动打开 LazyMind…"
+      : "Preparing the local runtime. LazyMind will open automatically when it is ready…",
+    error: null,
+  });
+  appendStartupLog("desktop", "showing first-launch preparation window");
+  const window = new BrowserWindow(browserWindowOptions(true));
+  startupWindow = window;
+  window.once("closed", () => {
+    if (startupWindow === window) {
+      startupWindow = undefined;
+    }
+  });
+  attachManagedClose(window);
+  await window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(loadingHTML())}`);
+  broadcastStartupDiagnostics();
+  return window;
+}
+
+function disposeInstallationWarmupWindow(window) {
+  if (window && !window.isDestroyed()) {
+    window.destroy();
+  }
+  if (startupWindow === window) {
+    startupWindow = undefined;
+  }
+}
+
 async function runMacInstallationWarmupIfNeeded() {
   const version = app.getVersion();
   if (!isMac || !isPackaged || macWarmupCompleted(macInstallationWarmupMarker, version)) {
     return;
   }
   startupMetricsRecorder.mark("macWarmupStarted");
-  await runInstallerWarmup();
-  markMacWarmupCompleted(macInstallationWarmupMarker, version);
-  startupMetricsRecorder.mark("macWarmupCompleted");
+  const warmupWindow = await createInstallationWarmupWindow();
+  try {
+    await runInstallerWarmup();
+    markMacWarmupCompleted(macInstallationWarmupMarker, version);
+    startupMetricsRecorder.mark("macWarmupCompleted");
+  } finally {
+    disposeInstallationWarmupWindow(warmupWindow);
+  }
 }
 
 function startGuard() {

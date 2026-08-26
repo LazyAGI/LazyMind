@@ -3383,8 +3383,9 @@ components:
                     type: string
                 type:
                     type: string
+                workflow_ref:
+                    type: string
             required:
-                - builtin_skill_uid
                 - category
                 - description
                 - detail_description

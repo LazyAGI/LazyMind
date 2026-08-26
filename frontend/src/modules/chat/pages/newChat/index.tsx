@@ -32,7 +32,7 @@ import { RightOutlined, ScheduleOutlined } from "@ant-design/icons";
 import { useChatThinkStore } from "@/modules/chat/store/chatThink";
 import FeaturedCases from "@/modules/showcase/FeaturedCases";
 import { getShowcaseCase, type ShowcaseCase } from "@/modules/showcase/api";
-import { useFeaturedSkillBinding } from "@/modules/showcase/useFeaturedSkillBinding";
+import { useFeaturedCapabilityBinding } from "@/modules/showcase/useFeaturedCapabilityBinding";
 import { getKnowledgeMarketItem } from "@/modules/knowledge/api/knowledgeMarket";
 
 function readRunInBackgroundMode() {
@@ -116,9 +116,9 @@ const NewChatPage = () => {
   const [showcaseCase, setShowcaseCase] = useState<ShowcaseCase | null>(null);
   const {
     mentions: showcaseBoundMentions,
-    retry: retryShowcaseSkillInstall,
-    status: showcaseSkillStatus,
-  } = useFeaturedSkillBinding(showcaseCase?.builtin_skill_uid);
+    retry: retryShowcaseCapability,
+    status: showcaseCapabilityStatus,
+  } = useFeaturedCapabilityBinding(showcaseCase);
   const showcaseCaseId = searchParams.get("showcase_case");
   const showcaseTaskId = searchParams.get("showcase_task");
   const officialKnowledgeId = searchParams.get("officialKnowledge");
@@ -154,12 +154,12 @@ const NewChatPage = () => {
   const entryDefaultsLoading = entryDefaultsStatus === "loading";
   const entryDefaultsUnavailable = entryDefaultsStatus !== "ready";
   const isChatDisabled = !modelProviderGuard.canChat;
-  const isShowcaseSkillPreparing = showcaseSkillStatus === "preparing";
-  const showcaseSkillFailed = showcaseSkillStatus === "failed";
+  const isShowcaseCapabilityPreparing = showcaseCapabilityStatus === "preparing";
+  const showcaseCapabilityFailed = showcaseCapabilityStatus === "failed";
   const isWelcomeInputDisabled =
     isChatDisabled
-    || isShowcaseSkillPreparing
-    || showcaseSkillFailed
+    || isShowcaseCapabilityPreparing
+    || showcaseCapabilityFailed
     || entryDefaultsUnavailable;
   const runtimeInitializingReason = runInBackground
     ? t("runtime.aiServiceInitializingWorkflow")
@@ -213,35 +213,35 @@ const NewChatPage = () => {
     ? t("settingsPage.tasks.entryDefaultsLoading")
     : entryDefaultsStatus === "error"
       ? t("settingsPage.tasks.entryDefaultsLoadFailed")
-      : isShowcaseSkillPreparing
-        ? t("showcase.preparingSkill")
-        : showcaseSkillFailed
-          ? t("showcase.skillInstallFailed")
+      : isShowcaseCapabilityPreparing
+        ? t("showcase.preparingCapability")
+        : showcaseCapabilityFailed
+          ? t("showcase.capabilityPrepareFailed")
           : hideSharedNoticeForRuntime
             ? undefined
             : chatDisabledReason;
   const inputDisabledDescription =
     entryDefaultsUnavailable
-    || isShowcaseSkillPreparing
-    || showcaseSkillFailed
+    || isShowcaseCapabilityPreparing
+    || showcaseCapabilityFailed
     || hideSharedNoticeForRuntime
     ? undefined
     : chatDisabledDescriptionContent;
-  const inputDisabledAction = showcaseSkillFailed ? (
-    <Button size="small" onClick={retryShowcaseSkillInstall}>
-      {t("showcase.retrySkillInstall")}
+  const inputDisabledAction = showcaseCapabilityFailed ? (
+    <Button size="small" onClick={retryShowcaseCapability}>
+      {t("showcase.retryCapabilityPrepare")}
     </Button>
-  ) : entryDefaultsUnavailable || isShowcaseSkillPreparing || hideSharedNoticeForRuntime
+  ) : entryDefaultsUnavailable || isShowcaseCapabilityPreparing || hideSharedNoticeForRuntime
     ? undefined
     : chatDisabledAction;
   const hidePreferenceConfigNotice =
     !modelProviderGuard.isConfigurationReady;
 
   useEffect(() => {
-    if (showcaseSkillStatus === "failed") {
-      message.error(t("showcase.skillInstallFailed"));
+    if (showcaseCapabilityStatus === "failed") {
+      message.error(t("showcase.capabilityPrepareFailed"));
     }
-  }, [showcaseSkillStatus, t]);
+  }, [showcaseCapabilityStatus, t]);
 
   useEffect(() => {
     if (!isChatContent) {

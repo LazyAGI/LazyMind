@@ -2,13 +2,16 @@ import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import CaseCard from "./CaseCard";
-import { listShowcaseCases, type ShowcaseCase } from "./api";
+import {
+  listShowcaseCases,
+  matchesShowcaseEntryType,
+  type ShowcaseCase,
+  type ShowcaseEntryType,
+} from "./api";
 import "./index.scss";
 
-type FeaturedSkillType = "chat" | "work";
-
 interface FeaturedCasesProps {
-  type: FeaturedSkillType;
+  type: ShowcaseEntryType;
   onTry?: (item: ShowcaseCase) => void;
 }
 
@@ -36,7 +39,9 @@ export default function FeaturedCases({ type, onTry }: FeaturedCasesProps) {
   }, [locale]);
 
   const featuredItems = useMemo(() => {
-    return items.filter((item) => item.featured && item.type === type);
+    return items.filter(
+      (item) => item.featured && matchesShowcaseEntryType(item.type, type),
+    );
   }, [items, type]);
 
   if (!isLoading && featuredItems.length === 0) {

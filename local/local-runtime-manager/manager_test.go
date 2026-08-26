@@ -616,6 +616,21 @@ func TestInstallerWarmupGeneratesReducedProcessGraph(t *testing.T) {
 			}
 		}
 	}
+	if !environmentContains(
+		parsed.Processes[chatProcessName].Environment,
+		installerWarmupSkipProcessorWorkerEnvVar+"=true",
+	) {
+		t.Fatalf("warmup Chat environment missing %s", installerWarmupSkipProcessorWorkerEnvVar)
+	}
+}
+
+func environmentContains(environment []string, want string) bool {
+	for _, item := range environment {
+		if item == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestInstallerWarmupDoesNotCreateFileWatcherImportDirectory(t *testing.T) {

@@ -33,6 +33,7 @@ const (
 	StatusDisabled  = "disabled"
 	TypeChat        = "chat"
 	TypeWork        = "work"
+	TypeWorkflow    = "workflow"
 
 	ResultTemplateGeneric = "generic_report_v1"
 	ResultTemplateProduct = "product_report_v1"
@@ -47,7 +48,7 @@ var (
 	versionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$`)
 
 	allowedAssetRoles    = map[string]struct{}{"cover": {}, "result": {}}
-	allowedFeaturedTypes = map[string]struct{}{TypeChat: {}, TypeWork: {}}
+	allowedFeaturedTypes = map[string]struct{}{TypeChat: {}, TypeWork: {}, TypeWorkflow: {}}
 	allowedAssetMIMEs    = map[string]struct{}{"image/jpeg": {}, "image/png": {}, "image/webp": {}}
 	assetMIMEByExtension = map[string]string{".jpeg": "image/jpeg", ".jpg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
 	allowedOutputTypes   = map[string]struct{}{
@@ -76,7 +77,8 @@ type FeaturedDefinition struct {
 	Version        string                    `yaml:"version" json:"version"`
 	Status         string                    `yaml:"status" json:"status"`
 	DefaultLocale  string                    `yaml:"default_locale" json:"default_locale"`
-	Skill          FeaturedSkillBinding      `yaml:"skill" json:"skill"`
+	Skill          *FeaturedSkillBinding     `yaml:"skill,omitempty" json:"skill,omitempty"`
+	Workflow       *FeaturedWorkflowBinding  `yaml:"workflow,omitempty" json:"workflow,omitempty"`
 	Placement      FeaturedPlacement         `yaml:"placement" json:"placement"`
 	Classification FeaturedClassification    `yaml:"classification" json:"classification"`
 	Assets         map[string]FeaturedAsset  `yaml:"assets" json:"assets"`
@@ -92,6 +94,10 @@ type FeaturedSkillBinding struct {
 	BuiltinSkillUID string `yaml:"-" json:"builtin_skill_uid"`
 	Version         string `yaml:"-" json:"version"`
 	ArchiveSHA256   string `yaml:"-" json:"archive_sha256"`
+}
+
+type FeaturedWorkflowBinding struct {
+	WorkflowRef string `yaml:"workflow_ref" json:"workflow_ref"`
 }
 
 type FeaturedPlacement struct {
@@ -322,10 +328,18 @@ func (c Catalog) ShowcaseCases(locale string) []ShowcaseCase {
 			})
 		}
 		firstTask := caseTasks[0]
+		sourceURL, builtinSkillUID, workflowRef := "", "", ""
+		if definition.Skill != nil {
+			sourceURL = definition.Skill.SourceURL
+			builtinSkillUID = definition.Skill.BuiltinSkillUID
+		}
+		if definition.Workflow != nil {
+			workflowRef = definition.Workflow.WorkflowRef
+		}
 		cases = append(cases, ShowcaseCase{
 			ID:                definition.ID,
 			Type:              definition.Type,
-			SourceURL:         definition.Skill.SourceURL,
+			SourceURL:         sourceURL,
 			Title:             presentation.Card.Title,
 			Description:       presentation.Card.Description,
 			DetailTitle:       presentation.Detail.Title,
@@ -342,7 +356,8 @@ func (c Catalog) ShowcaseCases(locale string) []ShowcaseCase {
 			ResultHighlights:  append([]string(nil), firstTask.Result.Highlights...),
 			Steps:             append([]ShowcaseCaseStep(nil), firstTask.Steps...),
 			Tasks:             caseTasks,
-			BuiltinSkillUID:   definition.Skill.BuiltinSkillUID,
+			BuiltinSkillUID:   builtinSkillUID,
+			WorkflowRef:       workflowRef,
 			Featured:          definition.Placement.Home,
 			FeaturedOrder:     definition.Placement.Order,
 			Gallery:           definition.Placement.Gallery,
@@ -530,7 +545,7 @@ func validateDefinition(definition FeaturedDefinition, compiled bool) error {
 		return definitionFailure("invalid status %q", definition.Status)
 	}
 	if _, ok := allowedFeaturedTypes[definition.Type]; !ok {
-		return definitionFailure("type must be chat or work")
+		return definitionFailure("type must be chat, work, or workflow")
 	}
 	if definition.Status == StatusPublished && !definition.Placement.Home && !definition.Placement.Gallery {
 		return definitionFailure("published definition must have a placement")
@@ -538,15 +553,27 @@ func validateDefinition(definition FeaturedDefinition, compiled bool) error {
 	if (definition.Placement.Home || definition.Placement.Gallery) && definition.Placement.Order <= 0 {
 		return definitionFailure("placement.order must be positive")
 	}
-	if err := validateSkillSource(definition.Skill.SourceURL, compiled); err != nil {
-		return err
-	}
-	if compiled {
-		if definition.Skill.BuiltinSkillUID == "" || definition.Skill.Version == "" || len(definition.Skill.ArchiveSHA256) != sha256.Size*2 {
-			return definitionFailure("compiled skill binding is incomplete")
+	if definition.Type == TypeWorkflow {
+		if definition.Skill != nil || definition.Workflow == nil {
+			return definitionFailure("type workflow requires workflow and forbids skill")
 		}
-		if _, err := hex.DecodeString(definition.Skill.ArchiveSHA256); err != nil {
-			return definitionFailure("invalid skill archive_sha256: %v", err)
+		if err := validateWorkflowRef(definition.Workflow.WorkflowRef); err != nil {
+			return err
+		}
+	} else {
+		if definition.Skill == nil || definition.Workflow != nil {
+			return definitionFailure("type chat or work requires skill and forbids workflow")
+		}
+		if err := validateSkillSource(definition.Skill.SourceURL, compiled); err != nil {
+			return err
+		}
+		if compiled {
+			if definition.Skill.BuiltinSkillUID == "" || definition.Skill.Version == "" || len(definition.Skill.ArchiveSHA256) != sha256.Size*2 {
+				return definitionFailure("compiled skill binding is incomplete")
+			}
+			if _, err := hex.DecodeString(definition.Skill.ArchiveSHA256); err != nil {
+				return definitionFailure("invalid skill archive_sha256: %v", err)
+			}
 		}
 	}
 	if strings.TrimSpace(definition.Classification.Category) == "" {
@@ -624,6 +651,15 @@ func validateSkillSource(raw string, compiled bool) error {
 	}
 	if _, err := skillpackage.CleanPath(source); err != nil {
 		return definitionFailure("skill.source_url must be an HTTP(S) URL or a relative path under skills")
+	}
+	return nil
+}
+
+func validateWorkflowRef(raw string) error {
+	const prefix = "builtin:"
+	workflowRef := strings.TrimSpace(raw)
+	if !strings.HasPrefix(workflowRef, prefix) || !slugPattern.MatchString(strings.TrimPrefix(workflowRef, prefix)) {
+		return definitionFailure("workflow.workflow_ref must use builtin:<workflow-id>")
 	}
 	return nil
 }

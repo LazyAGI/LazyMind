@@ -327,6 +327,51 @@
       "tree_sha256": "b22857ba8156de0ad833c26d7e71ed74401e12c4c28f08562fe556ab72ec916b",
       "archive_size": 12568,
       "package_file": "packages/bsk_1E1AE354017CAB635F423BC76790.zip"
+    },
+    {
+      "key": "user_1a7e2e57/cangjie-distill",
+      "uid": "bsk_85D8CC6C1D0107F230363950DC79",
+      "source_url": "https://skillhub.cn/skills/user_1a7e2e57/cangjie-distill",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40user_1a7e2e57%2Fcangjie-distill",
+      "version": "1.0.0",
+      "name": "cangjie-skill",
+      "description": "Distill a book into a coherent set of executable skills. Use when the user asks to \"拆书\" / \"蒸馏一本书\" / \"把 XX 书做成 skill\" / \"turn a book into skills\" — i.e. wants a book's frameworks, principles, and methodologies extracted into atomic, reusable Claude skills that an agent can invoke in real-world situations. NOT for simple summarization, book reviews, or role-playing as the author (that is nuwa-skill's job).",
+      "category": "external",
+      "market_visible": false,
+      "archive_sha256": "fc308c32156358cfa05decc3eaa82d8a6f2aeeed3b3b3f5140a9f9acf69657d4",
+      "tree_sha256": "24b003a9ad6ee712bf4759c59f9a6f0b420f23e68b852523476c7fde337fd7ce",
+      "archive_size": 30557,
+      "package_file": "packages/bsk_85D8CC6C1D0107F230363950DC79.zip"
+    },
+    {
+      "key": "user_5b28ea14/smart-charts",
+      "uid": "bsk_FFB9D957F2E7E6045A01B28AA5D1",
+      "source_url": "https://skillhub.cn/skills/user_5b28ea14/smart-charts",
+      "resolved_url": "https://api.skillhub.cn/api/v1/download?slug=%40user_5b28ea14%2Fsmart-charts",
+      "version": "6.2.1",
+      "name": "smart-charts",
+      "description": "Intelligent chart generation and data analysis skill. Reads user-supplied data files (CSV/Excel/JSON), analyzes data characteristics with LLM assistance, auto-recommends and generates interactive ECharts visualizations. Use when the user asks to analyze data, generate charts, create visualizations, or work with tabular data files.",
+      "category": "external",
+      "market_visible": false,
+      "archive_sha256": "8b0a8082021633dd12c298b7878cbfb579f956858d812deb5bd41253660d8d24",
+      "tree_sha256": "3e11d139172c812f178c8b0e1f9de6ad906d5293ca83d127095ce2db03e8a937",
+      "archive_size": 401375,
+      "package_file": "packages/bsk_FFB9D957F2E7E6045A01B28AA5D1.zip"
+    },
+    {
+      "key": "skill",
+      "uid": "bsk_3DAD0016C2AC0817C61F3533A3EB",
+      "source_url": "builtin://featured/xiaohongshu-copywriter/skill",
+      "resolved_url": "builtin://featured/xiaohongshu-copywriter/skill",
+      "version": "1.0.0",
+      "name": "xiaohongshu-copywriter",
+      "description": "小红书爆款种草文案生成器。一键生成高点击率、高收藏率的小红书种草笔记，自带10套爆款标题公式、六段式正文结构、emoji排版、话题标签推荐和发布策略，适用于美妆、护肤、穿搭、美食、家居、数码、母婴等品类。当用户需要撰写小红书种草笔记、产品推广文案、小红书营销内容、种草推荐文时触发此技能。",
+      "category": "external",
+      "market_visible": false,
+      "archive_sha256": "fc97566b24189b9ab4238ded926bce4a0883bfb394a09b3b4b4fa66494cecc9e",
+      "tree_sha256": "de940e3328b9dabb0501df4246ca8dca2bb7bb8527faeef68a6aae3f81e1d763",
+      "archive_size": 14796,
+      "package_file": "packages/bsk_3DAD0016C2AC0817C61F3533A3EB.zip"
     }
   ]
 }

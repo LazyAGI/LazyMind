@@ -1,17 +1,50 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ChatMention } from "@/modules/chat/components/ChatInput/MentionEditor";
 import { enableBuiltinSkill } from "@/modules/memory/skillApi";
+import type { ShowcaseCase } from "./api";
 
-type FeaturedSkillStatus = "idle" | "preparing" | "ready" | "failed";
+type FeaturedCapabilityBinding = Pick<
+  ShowcaseCase,
+  "type" | "title" | "builtin_skill_uid" | "workflow_ref"
+>;
+type FeaturedCapabilityStatus = "idle" | "preparing" | "ready" | "failed";
 
-export function useFeaturedSkillBinding(builtinSkillUID?: string) {
+export function useFeaturedCapabilityBinding(
+  capability?: FeaturedCapabilityBinding | null,
+) {
   const [attempt, setAttempt] = useState(0);
-  const [status, setStatus] = useState<FeaturedSkillStatus>("idle");
+  const [status, setStatus] = useState<FeaturedCapabilityStatus>("idle");
   const [mentions, setMentions] = useState<ChatMention[]>([]);
+  const capabilityType = capability?.type;
+  const capabilityTitle = capability?.title;
+  const builtinSkillUID = capability?.builtin_skill_uid;
+  const workflowRef = capability?.workflow_ref;
 
   useEffect(() => {
     let active = true;
     setMentions([]);
+
+    if (!capabilityType) {
+      setStatus("idle");
+      return () => { active = false; };
+    }
+
+    if (capabilityType === "workflow") {
+      if (!workflowRef) {
+        console.error("Prepare featured Workflow failed: missing workflow_ref");
+        setStatus("failed");
+      } else {
+        setMentions([{
+          mention_id: `featured-workflow:${workflowRef}`,
+          type: "workflow",
+          resource_id: workflowRef,
+          display_name: capabilityTitle || workflowRef,
+        }]);
+        setStatus("ready");
+      }
+      return () => { active = false; };
+    }
+
     if (!builtinSkillUID) {
       setStatus("idle");
       return () => { active = false; };
@@ -39,7 +72,7 @@ export function useFeaturedSkillBinding(builtinSkillUID?: string) {
       });
 
     return () => { active = false; };
-  }, [attempt, builtinSkillUID]);
+  }, [attempt, builtinSkillUID, capabilityTitle, capabilityType, workflowRef]);
 
   const retry = useCallback(() => setAttempt((current) => current + 1), []);
   return { mentions, retry, status };

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 
 	"lazymind/core/common/orm"
 	"lazymind/core/workflow/attempt"
@@ -112,6 +113,16 @@ func (loader DBContextLoader) LoadAttemptContext(ctx context.Context, id string)
 				loadedMaterials[binding.MaterialID] = true
 				continue
 			}
+			if !listMaterials[binding.MaterialID] {
+				current, ok := value.Inputs[binding.MaterialID].(map[string]any)
+				if ok && sameAttemptInputBinding(current, item) {
+					continue
+				}
+				return AttemptContext{}, fmt.Errorf(
+					"single-cardinality material %q has multiple distinct input bindings",
+					binding.MaterialID,
+				)
+			}
 			switch current := value.Inputs[binding.MaterialID].(type) {
 			case nil:
 				value.Inputs[binding.MaterialID] = item
@@ -123,6 +134,17 @@ func (loader DBContextLoader) LoadAttemptContext(ctx context.Context, id string)
 		}
 	}
 	return value, nil
+}
+
+func sameAttemptInputBinding(left, right map[string]any) bool {
+	for _, field := range []string{
+		"source_type", "source_id", "source_revision", "source_revision_id", "content_hash", "bind_as",
+	} {
+		if left[field] != right[field] {
+			return false
+		}
+	}
+	return true
 }
 
 func (loader DBContextLoader) loadOutputCardinality(ctx context.Context, revisionID string, outputs []string) (map[string]string, error) {
