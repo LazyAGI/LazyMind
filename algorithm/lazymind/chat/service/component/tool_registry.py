@@ -237,7 +237,10 @@ MEMORY_TOOLS_POLICY_APPENDIX: SystemPromptAppendix = {
         'or save a historical event. Do not call it merely because information seems useful. '
         'use_memory=false does not disable explicit Episode creation. Never claim that information '
         'was saved unless `MemoryTools_episode_create` or a structured memory editor '
-        '(`soul_editor` / `profile_editor` / `preference_editor`) succeeded in the current turn.',
+        '(`soul_editor` / `profile_editor` / `preference_editor`) succeeded in the current turn. '
+        'If `MemoryTools_preference_editor` reports `capacity_exceeded`, say that the new preference '
+        'was not saved and that no existing preference was deleted, overwritten, or reordered. '
+        'Never claim or imply automatic eviction or replacement of an existing preference.',
     ),
 }
 CLOUD_DOCUMENT_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
