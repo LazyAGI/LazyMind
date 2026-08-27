@@ -352,7 +352,7 @@
   "2001105": { "en-US": "model name already exists in this group", "zh-CN": "该分组中已存在同名模型" },
   "2001106": { "en-US": "prompt name already exists", "zh-CN": "提示词名称已存在" },
   "2001107": { "en-US": "share item is not pending_accept", "zh-CN": "分享项不处于待接受状态" },
-  "2001108": { "en-US": "skill already exists", "zh-CN": "技能已存在" },
+  "2001108": { "en-US": "Skill name already exists and cannot be created", "zh-CN": "技能名字已存在，无法创建" },
   "2001109": { "en-US": "skill draft version conflict", "zh-CN": "技能草稿版本冲突" },
   "2001110": { "en-US": "skill has pending remove suggestion", "zh-CN": "技能存在待处理的删除建议" },
   "2001111": { "en-US": "thread has active message stream", "zh-CN": "线程存在活跃的消息流" },

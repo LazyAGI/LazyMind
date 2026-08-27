@@ -211,11 +211,12 @@ func existingInstalledSkillID(ctx context.Context, tx *gorm.DB, marketItemID, us
 func restoreTrashedInstalledSkill(ctx context.Context, tx *gorm.DB, item skillMarketItemRow, userID string, now time.Time) (string, error) {
 	var candidate struct {
 		ID           string `gorm:"column:id"`
+		SkillName    string `gorm:"column:skill_name"`
 		RelativeRoot string `gorm:"column:relative_root"`
 	}
 	result := tx.WithContext(ctx).
 		Table("skills AS skills").
-		Select("skills.id, skills.relative_root").
+		Select("skills.id, skills.skill_name, skills.relative_root").
 		Where("skills.owner_user_id = ? AND skills.deleted_at IS NOT NULL", userID).
 		Where(`EXISTS (
 			SELECT 1 FROM skill_revisions AS revisions
@@ -236,12 +237,12 @@ func restoreTrashedInstalledSkill(ctx context.Context, tx *gorm.DB, item skillMa
 
 	var conflicts int64
 	if err := tx.WithContext(ctx).Model(&skillRow{}).
-		Where("owner_user_id = ? AND relative_root = ? AND deleted_at IS NULL AND id <> ?", userID, candidate.RelativeRoot, candidate.ID).
+		Where("owner_user_id = ? AND deleted_at IS NULL AND id <> ? AND (relative_root = ? OR skill_name = ?)", userID, candidate.ID, candidate.RelativeRoot, candidate.SkillName).
 		Count(&conflicts).Error; err != nil {
 		return "", err
 	}
 	if conflicts > 0 {
-		return "", fmt.Errorf("skill name conflict")
+		return "", fmt.Errorf("skill already exists")
 	}
 	if err := tx.WithContext(ctx).Model(&skillRow{}).
 		Where("id = ? AND owner_user_id = ? AND deleted_at IS NOT NULL", candidate.ID, userID).
@@ -690,12 +691,12 @@ func copyHeadRevision(ctx context.Context, tx *gorm.DB, sourceSkillID, ownerUser
 	}
 	var conflicts int64
 	if err := tx.Model(&skillRow{}).
-		Where("owner_user_id = ? AND category = ? AND skill_name = ? AND deleted_at IS NULL", ownerUserID, skillmetadata.ExternalCategory, meta.Name).
+		Where("owner_user_id = ? AND skill_name = ? AND deleted_at IS NULL", ownerUserID, meta.Name).
 		Count(&conflicts).Error; err != nil {
 		return "", "", err
 	}
 	if conflicts > 0 {
-		return "", "", fmt.Errorf("skill name conflict")
+		return "", "", fmt.Errorf("skill already exists")
 	}
 	var sourceRev skillRevisionRow
 	if err := tx.Where("id = ? AND skill_id = ?", *source.HeadRevisionID, source.ID).Take(&sourceRev).Error; err != nil {

@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/url"
 	"path"
@@ -86,6 +87,9 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 	}
 
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := ensureSkillIdentityAvailable(tx, req.OwnerUserID, req.Name, ""); err != nil {
+			return err
+		}
 		if err := tx.Create(&skillRow{
 			ID:                    skillID,
 			OwnerUserID:           req.OwnerUserID,
@@ -141,9 +145,42 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 		return skillsearch.RebuildSkillTx(ctx, tx, skillID, now)
 	})
 	if err != nil {
-		return CreateSkillResponse{}, err
+		return CreateSkillResponse{}, mapCreateSkillIdentityConflict(err)
 	}
 	return CreateSkillResponse{SkillID: skillID, HeadRevisionID: revisionID}, nil
+}
+
+var errSkillAlreadyExists = fmt.Errorf("skill already exists")
+
+func ensureSkillIdentityAvailable(tx *gorm.DB, ownerUserID, name, excludeID string) error {
+	query := tx.Model(&skillRow{}).Where(
+		"owner_user_id = ? AND skill_name = ? AND deleted_at IS NULL",
+		ownerUserID, name,
+	)
+	if strings.TrimSpace(excludeID) != "" {
+		query = query.Where("id <> ?", excludeID)
+	}
+	var count int64
+	if err := query.Count(&count).Error; err != nil {
+		return err
+	}
+	if count > 0 {
+		return errSkillAlreadyExists
+	}
+	return nil
+}
+
+func mapCreateSkillIdentityConflict(err error) error {
+	if err == nil || errors.Is(err, errSkillAlreadyExists) {
+		return err
+	}
+	msg := strings.ToLower(err.Error())
+	if strings.Contains(msg, "uk_skills_owner_identity") ||
+		strings.Contains(msg, "uk_skills_owner_relative_root") ||
+		(strings.Contains(msg, "unique constraint failed") && strings.Contains(msg, "skills.")) {
+		return errSkillAlreadyExists
+	}
+	return err
 }
 
 func isExternalImportSource(sourceType string) bool {
@@ -478,14 +515,8 @@ func (s *SkillService) RestoreSkill(ctx context.Context, req RestoreSkillRequest
 		if err := tx.Where("id = ? AND owner_user_id = ? AND deleted_at IS NOT NULL", req.SkillID, req.UserID).Take(&skill).Error; err != nil {
 			return err
 		}
-		var conflicts int64
-		if err := tx.Model(&skillRow{}).
-			Where("owner_user_id = ? AND relative_root = ? AND deleted_at IS NULL AND id <> ?", req.UserID, skill.RelativeRoot, req.SkillID).
-			Count(&conflicts).Error; err != nil {
+		if err := ensureSkillIdentityAvailable(tx, req.UserID, skill.SkillName, skill.ID); err != nil {
 			return err
-		}
-		if conflicts > 0 {
-			return fmt.Errorf("skill package already exists")
 		}
 		if err := tx.Model(&skillRow{}).Where("id = ? AND deleted_at IS NOT NULL", req.SkillID).Updates(map[string]any{
 			"deleted_at":       nil,

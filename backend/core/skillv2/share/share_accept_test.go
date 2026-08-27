@@ -50,6 +50,32 @@ func TestShareAccept_SourceMissingOrForbidden(t *testing.T) {
 	}
 }
 
+func TestShareAccept_RejectsDuplicateName(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "source_skill", "source_rev1")
+	testutil.SeedSkillWithRevision(t, db, "user_skill", "user_rev1")
+	if err := db.Model(&testutil.SkillRow{}).Where("id = ?", "user_skill").Updates(map[string]any{
+		"owner_user_id":    "user_002",
+		"owner_user_name":  "李四",
+		"create_user_id":   "user_002",
+		"create_user_name": "李四",
+		"category":         "personal",
+		"skill_name":       "论文精读-source_skill",
+		"relative_root":    "personal/论文精读-source_skill",
+	}).Error; err != nil {
+		t.Fatalf("seed conflicting target skill: %v", err)
+	}
+	shareID := seedShareItem(t, db, "share_conflict", "source_skill", "user_002", "pending")
+	service := NewService(ServiceDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
+
+	if _, err := service.Accept(context.Background(), AcceptRequest{ShareItemID: shareID, UserID: "user_002", UserName: "李四"}); err == nil || err.Error() != "skill already exists" {
+		t.Fatalf("Accept error = %v, want skill already exists", err)
+	}
+	if got := testutil.CountRows(t, db, "skills", "owner_user_id = ?", "user_002"); got != 1 {
+		t.Fatalf("target skill count = %d, want 1", got)
+	}
+}
+
 func seedShareItem(t *testing.T, db *testutil.TestDB, id, sourceSkillID, targetUserID, status string) string {
 	t.Helper()
 	item := map[string]any{

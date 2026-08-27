@@ -4622,9 +4622,8 @@ const zhCN = {
     memorySkillUploadUrlPlaceholderContent: "请补充该技能的说明与使用方式。",
     memorySkillUploadSuccess: "「{{name}}」已进入「我的技能」",
     memorySkillUploadFailed: "技能上传失败",
-    memorySkillUploadAlreadyExists: "技能已存在：已存在同名技能，无需重复上传。",
-    memorySkillUploadAlreadyExistsNamed:
-      "技能已存在：已存在同名技能「{{name}}」，无需重复上传。",
+    memorySkillUploadAlreadyExists: "技能名字已存在，无法创建",
+    memorySkillUploadAlreadyExistsNamed: "技能名字「{{name}}」已存在，无法创建",
     memorySkillAdminPublishButton: "管理员上架技能",
     memorySkillAdminPublishTitle: "管理员上架技能",
     memorySkillAdminPublishDesc: "上架到技能广场，供团队成员查看和安装。",

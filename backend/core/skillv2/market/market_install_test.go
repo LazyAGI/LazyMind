@@ -611,17 +611,17 @@ func TestMarketInstall_NameConflict(t *testing.T) {
 		t.Fatalf("reassign market skill owner: %v", err)
 	}
 	if err := db.Model(&testutil.SkillRow{}).Where("id = ?", "user_skill").Updates(map[string]any{
-		"category":      "external",
+		"category":      "research",
 		"skill_name":    "论文精读-market_skill",
-		"relative_root": "external/论文精读-market_skill",
+		"relative_root": "research/论文精读-market_skill",
 	}).Error; err != nil {
 		t.Fatalf("rename conflicting user skill: %v", err)
 	}
 	testutil.MustCreate(t, db, &testutil.SkillMarketItemRow{ID: "market_item1", SourceSkillID: "market_skill", Status: "published", CreatedAt: testutil.TimeFixture(), UpdatedAt: testutil.TimeFixture()})
 	service := NewService(ServiceDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
 
-	if _, err := service.Install(context.Background(), InstallRequest{MarketItemID: "market_item1", UserID: "user_001", UserName: "张三"}); err == nil {
-		t.Fatal("Install succeeded despite same category/name conflict")
+	if _, err := service.Install(context.Background(), InstallRequest{MarketItemID: "market_item1", UserID: "user_001", UserName: "张三"}); err == nil || !strings.Contains(err.Error(), "skill already exists") {
+		t.Fatalf("Install error = %v, want skill already exists across categories", err)
 	}
 	if got := testutil.CountRows(t, db, "skills", "owner_user_id = ?", "user_001"); got != 1 {
 		t.Fatalf("user skill count = %d, want 1", got)

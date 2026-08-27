@@ -4811,10 +4811,9 @@ const enUS = {
       "Add the skill description and usage guidance here.",
     memorySkillUploadSuccess: '"{{name}}" has been added to My Skills',
     memorySkillUploadFailed: "Failed to upload skill",
-    memorySkillUploadAlreadyExists:
-      "Skill already exists: a skill with the same name is already available, so it does not need to be uploaded again.",
+    memorySkillUploadAlreadyExists: "Skill name already exists and cannot be created",
     memorySkillUploadAlreadyExistsNamed:
-      'Skill already exists: "{{name}}" is already available, so it does not need to be uploaded again.',
+      'Skill name "{{name}}" already exists and cannot be created',
     memorySkillAdminPublishButton: "Publish skill (admin)",
     memorySkillAdminPublishTitle: "Publish skill to plaza",
     memorySkillAdminPublishDesc:

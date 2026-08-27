@@ -119,6 +119,15 @@ func copyHeadRevision(tx *gorm.DB, sourceSkillID, ownerUserID, ownerUserName, ch
 	if source.HeadRevisionID == nil {
 		return "", "", fmt.Errorf("source skill has no head revision")
 	}
+	var conflicts int64
+	if err := tx.Model(&skillRow{}).
+		Where("owner_user_id = ? AND skill_name = ? AND deleted_at IS NULL", ownerUserID, source.SkillName).
+		Count(&conflicts).Error; err != nil {
+		return "", "", err
+	}
+	if conflicts > 0 {
+		return "", "", fmt.Errorf("skill already exists")
+	}
 	var sourceRev skillRevisionRow
 	if err := tx.Where("id = ? AND skill_id = ?", *source.HeadRevisionID, source.ID).Take(&sourceRev).Error; err != nil {
 		return "", "", err

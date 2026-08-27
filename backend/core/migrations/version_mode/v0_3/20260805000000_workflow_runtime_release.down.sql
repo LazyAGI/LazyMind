@@ -312,3 +312,14 @@ ALTER TABLE default_models
     DROP COLUMN free_auto_select_base_urls;
 ALTER TABLE default_models
     DROP COLUMN free_auto_select_priority;
+
+-- +migrate Dialect postgres
+DROP INDEX IF EXISTS public.uk_skills_owner_identity;
+CREATE UNIQUE INDEX uk_skills_owner_identity
+    ON public.skills(owner_user_id, category, skill_name)
+    WHERE deleted_at IS NULL;
+
+-- +migrate Dialect sqlite
+DROP INDEX IF EXISTS uk_skills_owner_identity;
+CREATE UNIQUE INDEX uk_skills_owner_identity
+    ON skills(owner_user_id, category, skill_name);
