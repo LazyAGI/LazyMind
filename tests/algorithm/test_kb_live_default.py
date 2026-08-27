@@ -88,9 +88,8 @@ def test_kb_tmp_search_core_flow(monkeypatch, tmp_path):
 
     result = kb.kb_tmp_search(grep_patterns=['omega'])
 
-    assert result['success'] is True
-    assert result['result']['total'] == 1
-    assert result['result']['hits'][0]['target'] == 'tmp-a.md'
+    assert result['total'] == 1
+    assert result['hits'][0]['target'] == 'tmp-a.md'
 
 
 def test_temp_kb_runtime_registers_block_group(monkeypatch):
