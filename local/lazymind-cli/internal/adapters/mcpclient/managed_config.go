@@ -12,6 +12,7 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"lazymind/agentconnector/internal/agentexec"
+	"lazymind/agentconnector/internal/localfile"
 )
 
 type managedConfigState struct {
@@ -204,7 +205,7 @@ func writeConfigFile(path string, body []byte) error {
 	if err := temporary.Close(); err != nil {
 		return err
 	}
-	if err := replaceConfigFile(temporaryPath, path); err != nil {
+	if err := localfile.Replace(temporaryPath, path); err != nil {
 		return err
 	}
 	return os.Chmod(path, 0o600)

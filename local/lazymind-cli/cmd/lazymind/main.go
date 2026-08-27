@@ -61,6 +61,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) error {
 }
 
 func runInternal(ctx context.Context, args []string, stdout, stderr io.Writer) error {
+	if len(args) > 0 && args[0] == "binding" {
+		return runInternalBinding(args[1:], stdout, stderr)
+	}
 	if len(args) < 3 {
 		return errors.New("invalid internal command")
 	}
@@ -131,6 +134,63 @@ func runInternal(ctx context.Context, args []string, stdout, stderr io.Writer) e
 		return printJSON(stdout, status)
 	default:
 		return fmt.Errorf("unsupported external Agent %q", agent)
+	}
+}
+
+func runInternalBinding(args []string, stdout, stderr io.Writer) error {
+	if len(args) < 2 {
+		return errors.New("invalid internal binding command")
+	}
+	target := agentexec.BindingTarget(strings.ToLower(args[0]))
+	action := strings.ToLower(args[1])
+	flags := flag.NewFlagSet("internal binding "+string(target)+" "+action, flag.ContinueOnError)
+	flags.SetOutput(stderr)
+	path := flags.String("path", "", "external Agent executable path")
+	if err := flags.Parse(args[2:]); err != nil {
+		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("unexpected internal binding arguments")
+	}
+	if target == "all" {
+		if action != "status" {
+			return fmt.Errorf("unsupported all binding action %q", action)
+		}
+		bindings, err := agentexec.ExecutableBindings()
+		if err != nil {
+			return err
+		}
+		return printJSON(stdout, map[string]any{"bindings": bindings})
+	}
+	switch action {
+	case "status":
+		value, configured, err := agentexec.ExecutableBinding(target)
+		if err != nil {
+			return err
+		}
+		return printJSON(stdout, map[string]any{
+			"target": target, "configured": configured, "path": value,
+		})
+	case "set":
+		if strings.TrimSpace(*path) == "" {
+			return errors.New("--path is required")
+		}
+		value, err := agentexec.SetExecutableBinding(target, *path)
+		if err != nil {
+			return err
+		}
+		return printJSON(stdout, map[string]any{
+			"target": target, "configured": true, "path": value,
+		})
+	case "clear":
+		if err := agentexec.ClearExecutableBinding(target); err != nil {
+			return err
+		}
+		return printJSON(stdout, map[string]any{
+			"target": target, "configured": false, "path": "",
+		})
+	default:
+		return fmt.Errorf("unsupported %s binding action %q", target, action)
 	}
 }
 

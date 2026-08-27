@@ -18,6 +18,7 @@ import (
 	"lazymind/agentconnector/internal/adapters/codex"
 	cursoradapter "lazymind/agentconnector/internal/adapters/cursor"
 	"lazymind/agentconnector/internal/adapters/mcpclient"
+	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/agentintegration"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/executorpolicy"
@@ -200,6 +201,9 @@ func (s *Server) routes() http.Handler {
 	mux.HandleFunc("POST /v1/agents/{agent}/{action}", s.handleAgentAction)
 	mux.HandleFunc("GET /v1/executors", s.handleExecutorPolicies)
 	mux.HandleFunc("POST /v1/executors/{provider}/{action}", s.handleExecutorPolicyAction)
+	mux.HandleFunc("GET /v1/bindings", s.handleExecutableBindings)
+	mux.HandleFunc("PUT /v1/bindings/{target}", s.handleExecutableBinding)
+	mux.HandleFunc("DELETE /v1/bindings/{target}", s.handleExecutableBinding)
 	mux.HandleFunc("POST /v1/session", s.handleSession)
 	mux.HandleFunc("DELETE /v1/session", s.handleSession)
 	mux.HandleFunc("POST /v1/shutdown", func(writer http.ResponseWriter, _ *http.Request) {
@@ -207,6 +211,46 @@ func (s *Server) routes() http.Handler {
 		go s.stop()
 	})
 	return s.allowLocalBrowser(mux)
+}
+
+func (s *Server) handleExecutableBindings(writer http.ResponseWriter, _ *http.Request) {
+	bindings, err := agentexec.ExecutableBindings()
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{"bindings": bindings})
+}
+
+func (s *Server) handleExecutableBinding(writer http.ResponseWriter, request *http.Request) {
+	target := agentexec.BindingTarget(request.PathValue("target"))
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if request.Method == http.MethodDelete {
+		if err := agentexec.ClearExecutableBinding(target); err != nil {
+			writeError(writer, err)
+			return
+		}
+		writeJSON(writer, http.StatusOK, map[string]any{
+			"target": target, "configured": false, "path": "",
+		})
+		return
+	}
+	var input struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(http.MaxBytesReader(writer, request.Body, 4<<10)).Decode(&input); err != nil {
+		writeJSON(writer, http.StatusBadRequest, map[string]string{"error": "invalid executable binding"})
+		return
+	}
+	path, err := agentexec.SetExecutableBinding(target, input.Path)
+	if err != nil {
+		writeError(writer, err)
+		return
+	}
+	writeJSON(writer, http.StatusOK, map[string]any{
+		"target": target, "configured": true, "path": path,
+	})
 }
 
 func (s *Server) handleExecutorPolicies(writer http.ResponseWriter, _ *http.Request) {
@@ -393,7 +437,7 @@ func (s *Server) allowLocalBrowser(next http.Handler) http.Handler {
 		if origin != "" {
 			writer.Header().Set("Access-Control-Allow-Origin", origin)
 			writer.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-			writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS")
+			writer.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
 			writer.Header().Set("Vary", "Origin")
 		}
 		if request.Method == http.MethodOptions {

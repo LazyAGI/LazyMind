@@ -743,12 +743,14 @@ LazyMind 生成 Cursor 官方 `cursor://anysphere.cursor-deeplink/mcp/install` �
 “外部 Agent 使用 LazyMind MCP”和“外部 Agent 替代 LazyMind ChatAgent”是两个独立方向。完成前面的 MCP 配置后，Cursor、WorkBuddy、Raccoon、TRAE Work 和 DeepSeek Harness 可以在自己的界面调用 LazyMind；要让外部 Agent 在 LazyMind 对话界面内生成回复，还必须具备可靠的非交互运行、事件和会话恢复接口。当前只接入以下三个官方 CLI：
 
 - Codex 使用 `codex exec --json`；
-- Cursor 使用独立的 Cursor Agent CLI，当前官方主命令为 `cursor-agent`，安装后执行 `cursor-agent login`；Windows 官方支持方式为 WSL；
+- Cursor 使用独立的 Cursor Agent CLI，当前官方主命令为 `cursor-agent`，安装后执行 `cursor-agent login`；Windows 可使用官方原生安装或 WSL；
 - CodeBuddy Code 执行器使用 `codebuddy` 或 `cbc`，启动交互会话后执行 `/login`。
 
 Cursor IDE 和 WorkBuddy 已登录，不代表 Cursor Agent CLI 或 CodeBuddy Code CLI 已登录。Cursor 通过官方 `cursor-agent status` 检查，且会正确识别“退出码为 0、输出为 Not logged in”的状态；CodeBuddy Code 只检查其官方认证文件是否存在，不读取凭证内容。LazyMind 不复制或保存外部 Agent 的登录凭证。
 
 LazyMind Desktop 和 Docker Assistant Bridge 都会自动托管本机已经安装的三个 CLI；用户不需要另起 `agent host` 进程。缺失的 CLI 只会把自身注册为不可用，不影响其他 provider。然后可在 LazyMind 的对话配置中选择 Codex、Cursor 或 WorkBuddy；若对应 Host 尚未连接，界面会拒绝切换并给出提示。`lazymind agent host ...` 仅保留为开发诊断入口。
+
+Windows 自动发现会使用当前进程 PATH、最新的用户/系统 PATH、`PATHEXT`、App Execution Alias 和 App Paths，因此 LazyMind 启动后安装 CLI 也无需重启。对于自定义盘符、便携版或企业部署未注册路径的情况，Desktop 设置页可以明确定位桌面应用或 CLI；验证成功后路径保存在当前主机的 `LAZYMIND_HOME/agent-bindings.json`，可随时恢复自动检测。该文件不保存账号凭证，也不进入 Core 数据库。
 
 设置页中每个受支持的执行器都有独立的“停用/启用”开关。停用只撤销本机 LazyMind 调用该 CLI 的权限，不会退出外部 Agent、修改其登录状态或删除其凭证；再次启用后仍以该 CLI 自身的安装和登录状态为准。该权限保存在当前主机的 `~/.lazymind/executor-policy`，不进入 LazyMind 数据库，也不会在设备间同步。
 

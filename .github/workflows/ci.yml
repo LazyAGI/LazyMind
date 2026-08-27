@@ -113,6 +113,9 @@ jobs:
       - name: Test Local Runtime Manager
         working-directory: local/local-runtime-manager
         run: go test ./... -v
+      - name: Test Assistant Connector
+        working-directory: local/lazymind-cli
+        run: go test ./... -v
 
   test-desktop-shell:
     needs: [lint, doc_check]

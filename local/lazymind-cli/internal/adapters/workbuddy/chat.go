@@ -55,9 +55,6 @@ func authFile() string {
 
 func findBinary(configured string) (string, error) {
 	names := []string{"codebuddy", "cbc"}
-	if runtime.GOOS == "windows" {
-		names = []string{"codebuddy.exe", "codebuddy.cmd", "cbc.exe", "cbc.cmd"}
-	}
 	home, _ := os.UserHomeDir()
 	var candidates []string
 	if home != "" {
@@ -68,7 +65,9 @@ func findBinary(configured string) (string, error) {
 	if runtime.GOOS == "darwin" {
 		candidates = append(candidates, "/opt/homebrew/bin/codebuddy", "/usr/local/bin/codebuddy")
 	}
-	resolved, err := agentexec.Find(configured, "LAZYMIND_WORKBUDDY_AGENT_BIN", names, candidates)
+	resolved, err := agentexec.FindBound(
+		configured, "LAZYMIND_WORKBUDDY_AGENT_BIN", agentexec.CodeBuddyCLI, names, candidates,
+	)
 	if err != nil {
 		if strings.TrimSpace(configured) != "" || strings.TrimSpace(os.Getenv("LAZYMIND_WORKBUDDY_AGENT_BIN")) != "" {
 			return "", fmt.Errorf("resolve configured CodeBuddy Code CLI: %w", err)

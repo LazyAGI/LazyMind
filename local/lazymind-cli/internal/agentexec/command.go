@@ -47,11 +47,15 @@ func (spec StreamCommand) Run(ctx context.Context, handle func([]byte) error) er
 	if strings.TrimSpace(spec.Binary) == "" || handle == nil {
 		return errors.New("stream command and line handler are required")
 	}
-	command := exec.CommandContext(ctx, spec.Binary, spec.Arguments...)
+	command, invocationEnvironment, err := commandContext(ctx, spec.Binary, spec.Arguments...)
+	if err != nil {
+		return err
+	}
 	command.Dir = spec.Directory
-	command.Env = spec.Environment
-	if command.Env == nil {
-		command.Env = SafeEnvironment()
+	if spec.Environment == nil {
+		command.Env = SafeEnvironment(invocationEnvironment...)
+	} else {
+		command.Env = append(append([]string(nil), spec.Environment...), invocationEnvironment...)
 	}
 	command.Stdin = spec.Stdin
 	stdout, err := command.StdoutPipe()
@@ -141,7 +145,7 @@ func SafeEnvironment(additional ...string) []string {
 			environment = append(environment, entry)
 		}
 	}
-	return append(environment, additional...)
+	return platformSafeEnvironment(append(environment, additional...))
 }
 
 func Find(configured, environment string, names, candidates []string) (string, error) {
@@ -150,6 +154,22 @@ func Find(configured, environment string, names, candidates []string) (string, e
 		return "", err
 	}
 	return ResolveRunnable(resolved)
+}
+
+func FindBound(configured, environment string, target BindingTarget, names, candidates []string) (string, error) {
+	configured, err := configuredExecutable(configured, environment, target)
+	if err != nil {
+		return "", err
+	}
+	return Find(configured, "", names, candidates)
+}
+
+func FindBoundExecutable(configured, environment string, target BindingTarget, names, candidates []string) (string, error) {
+	configured, err := configuredExecutable(configured, environment, target)
+	if err != nil {
+		return "", err
+	}
+	return FindExecutable(configured, "", names, candidates)
 }
 
 func FindExecutable(configured, environment string, names, candidates []string) (string, error) {
@@ -162,6 +182,11 @@ func FindExecutable(configured, environment string, names, candidates []string) 
 	for _, name := range names {
 		if resolved, err := exec.LookPath(name); err == nil {
 			return ResolveExecutable(resolved)
+		}
+	}
+	for _, candidate := range platformExecutableCandidates(names) {
+		if resolved, err := ResolveExecutable(candidate); err == nil {
+			return resolved, nil
 		}
 	}
 	for _, candidate := range candidates {
@@ -190,7 +215,12 @@ func ResolveExecutable(value string) (string, error) {
 	if value == "" {
 		return "", errors.New("executable path is empty")
 	}
-	if !filepath.IsAbs(value) {
+	if resolved, handled, err := resolvePlatformExecutable(value); handled {
+		if err != nil {
+			return "", err
+		}
+		value = resolved
+	} else if !filepath.IsAbs(value) {
 		resolved, err := exec.LookPath(value)
 		if err != nil {
 			return "", err
@@ -215,8 +245,11 @@ func ResolveExecutable(value string) (string, error) {
 }
 
 func Run(ctx context.Context, binary string, arguments ...string) (string, error) {
-	command := exec.CommandContext(ctx, binary, arguments...)
-	command.Env = SafeEnvironment()
+	command, invocationEnvironment, err := commandContext(ctx, binary, arguments...)
+	if err != nil {
+		return "", err
+	}
+	command.Env = SafeEnvironment(invocationEnvironment...)
 	var stdout, stderr bytes.Buffer
 	command.Stdout = &stdout
 	command.Stderr = &stderr

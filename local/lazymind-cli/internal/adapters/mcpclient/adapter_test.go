@@ -7,15 +7,18 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
+	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/agentintegration"
 )
 
 func TestCursorStatusUsesFilesystemRequirementWithoutRunningDesktop(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("LAZYMIND_HOME", filepath.Join(home, "lazymind"))
 	adapter := testAdapter(Cursor)
 
 	status := adapter.Status(context.Background())
@@ -26,6 +29,7 @@ func TestCursorStatusUsesFilesystemRequirementWithoutRunningDesktop(t *testing.T
 	if err := os.MkdirAll(filepath.Join(home, ".cursor"), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	bindDesktopForTest(t, agentexec.CursorDesktop)
 	status = adapter.Status(context.Background())
 	if status.State != agentintegration.Ready {
 		t.Fatalf("state=%q, want ready", status.State)
@@ -55,6 +59,7 @@ func TestCursorInstallURLCarriesOneManagedStdioDefinition(t *testing.T) {
 func TestWorkBuddyUsesWorkBuddyConfiguration(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("LAZYMIND_HOME", filepath.Join(home, "lazymind"))
 	path := configPath(WorkBuddy)
 	if path != filepath.Join(home, ".workbuddy", "mcp.json") {
 		t.Fatalf("path=%q", path)
@@ -79,6 +84,7 @@ func TestRaccoonUsesDesktopConfiguration(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	bindDesktopForTest(t, agentexec.RaccoonDesktop)
 	status = adapter.Status(context.Background())
 	if status.State != agentintegration.Ready {
 		t.Fatalf("status=%#v", status)
@@ -222,6 +228,20 @@ func writeTestFile(t *testing.T, path, value string) {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(path, []byte(value), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func bindDesktopForTest(t *testing.T, target agentexec.BindingTarget) {
+	t.Helper()
+	if runtime.GOOS != "windows" {
+		return
+	}
+	path := filepath.Join(t.TempDir(), string(target)+".exe")
+	if err := os.WriteFile(path, []byte("test"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := agentexec.SetExecutableBinding(target, path); err != nil {
 		t.Fatal(err)
 	}
 }

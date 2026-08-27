@@ -499,6 +499,36 @@ async function runExecutorConnector(provider, action) {
   return result;
 }
 
+const agentBindingTargets = new Set([
+  "codex-cli", "cursor-cli", "codebuddy-cli", "cursor-desktop",
+  "workbuddy-desktop", "raccoon-desktop", "traework-desktop",
+]);
+const agentBindingActions = new Set(["status", "set", "clear"]);
+
+async function runAgentBinding(target, action, executablePath = "") {
+  if (!agentBindingTargets.has(target) || !agentBindingActions.has(action)) {
+    throw new Error(`Unsupported external Agent binding action: ${target}/${action}`);
+  }
+  const args = ["internal", "binding", target, action];
+  if (action === "set") {
+    args.push("--path", executablePath);
+  }
+  const result = await runConnectorJSON(args, agentConnectorActionTimeoutMs);
+  if (action !== "status" && target.endsWith("-cli")) {
+    agentHostRestartAttempts = 0;
+    if (agentHostProcess) {
+      agentHostProcess.kill();
+    } else {
+      startAgentHost();
+    }
+  }
+  return result;
+}
+
+function readAgentBindings() {
+  return runConnectorJSON(["internal", "binding", "all", "status"], agentConnectorActionTimeoutMs);
+}
+
 function runConnectorJSON(args, timeout) {
   return new Promise((resolve, reject) => {
     execFile(agentConnectorPath, args, {
@@ -1605,6 +1635,9 @@ ipcMain.handle("lazymind:agentIntegrationStatuses", () => runAgentConnector("all
 ipcMain.handle("lazymind:agentIntegrationAction", (_event, agent, action) => runAgentConnector(agent, action));
 ipcMain.handle("lazymind:executorIntegrationPolicies", () => runExecutorConnector("all", "status"));
 ipcMain.handle("lazymind:executorIntegrationAction", (_event, provider, action) => runExecutorConnector(provider, action));
+ipcMain.handle("lazymind:agentExecutableBindings", () => readAgentBindings());
+ipcMain.handle("lazymind:agentExecutableBind", (_event, target, executablePath) => runAgentBinding(target, "set", executablePath));
+ipcMain.handle("lazymind:agentExecutableClear", (_event, target) => runAgentBinding(target, "clear"));
 ipcMain.handle("lazymind:restartRuntime", async () => {
   await runSidecar("down");
   startRuntime();
@@ -1637,11 +1670,14 @@ ipcMain.handle("lazymind:selectFolder", async () => {
   const result = await dialog.showOpenDialog(activeWindow(), { properties: ["openDirectory"] });
   return result.canceled ? null : result.filePaths[0];
 });
-ipcMain.handle("lazymind:selectExecutable", async () => {
+ipcMain.handle("lazymind:selectExecutable", async (_event, target = "") => {
+  const agentExecutable = agentBindingTargets.has(target);
   const result = await dialog.showOpenDialog(activeWindow(), {
     properties: ["openFile"],
     filters: process.platform === "win32"
-      ? [{ name: "FFmpeg", extensions: ["exe"] }]
+      ? [agentExecutable
+        ? { name: "Agent executable", extensions: ["exe", "cmd", "bat"] }
+        : { name: "FFmpeg", extensions: ["exe"] }]
       : [{ name: "Executable", extensions: ["*"] }],
   });
   return result.canceled ? null : result.filePaths[0];

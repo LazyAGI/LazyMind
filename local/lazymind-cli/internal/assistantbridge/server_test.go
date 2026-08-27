@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"testing"
 
 	"lazymind/agentconnector/internal/agentintegration"
@@ -17,6 +18,7 @@ import (
 
 func newTestServer(t *testing.T, home string) *Server {
 	t.Helper()
+	t.Setenv("LAZYMIND_HOME", home)
 	store, err := credentials.NewStore(home, "")
 	if err != nil {
 		t.Fatal(err)
@@ -34,6 +36,39 @@ func newTestServer(t *testing.T, home string) *Server {
 		t.Fatal(err)
 	}
 	return server
+}
+
+func TestExecutableBindingCanBeSavedListedAndCleared(t *testing.T) {
+	home := t.TempDir()
+	server := newTestServer(t, home)
+	executable := filepath.Join(home, "custom-codex")
+	if err := os.WriteFile(executable, []byte("test"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	handler := server.routes()
+
+	request := httptest.NewRequest(http.MethodPut, "/v1/bindings/cursor-desktop", bytes.NewReader(
+		[]byte(`{"path":`+strconv.Quote(executable)+`}`),
+	))
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !bytes.Contains(response.Body.Bytes(), []byte(`"configured":true`)) {
+		t.Fatalf("set status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/v1/bindings", nil)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !bytes.Contains(response.Body.Bytes(), []byte(`"cursor-desktop"`)) {
+		t.Fatalf("list status=%d body=%s", response.Code, response.Body.String())
+	}
+
+	request = httptest.NewRequest(http.MethodDelete, "/v1/bindings/cursor-desktop", nil)
+	response = httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || !bytes.Contains(response.Body.Bytes(), []byte(`"configured":false`)) {
+		t.Fatalf("clear status=%d body=%s", response.Code, response.Body.String())
+	}
 }
 
 func TestStatusesDoNotLaunchDesktopAgentCandidates(t *testing.T) {

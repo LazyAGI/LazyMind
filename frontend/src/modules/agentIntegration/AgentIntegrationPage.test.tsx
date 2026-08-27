@@ -9,6 +9,10 @@ const mocks = vi.hoisted(() => ({
   executors: vi.fn(),
   executorPolicies: vi.fn(),
   executorAction: vi.fn(),
+  bindings: vi.fn(),
+  bind: vi.fn(),
+  clearBinding: vi.fn(),
+  selectExecutable: vi.fn(),
 }));
 
 vi.mock("@/runtime/desktopBridge", () => ({
@@ -16,6 +20,11 @@ vi.mock("@/runtime/desktopBridge", () => ({
   agentIntegrationAction: mocks.action,
   executorIntegrationPolicies: mocks.executorPolicies,
   executorIntegrationAction: mocks.executorAction,
+  agentExecutableBindings: mocks.bindings,
+  bindAgentExecutable: mocks.bind,
+  clearAgentExecutable: mocks.clearBinding,
+  selectExecutable: mocks.selectExecutable,
+  getDesktopPlatform: () => "win32",
 }));
 
 vi.mock("@/modules/chat/utils/request", () => ({
@@ -46,6 +55,11 @@ vi.mock("react-i18next", () => ({
       "agentIntegration.executorDisabled": "已停用",
       "agentIntegration.executorEnableSuccess": `已允许 LazyMind 使用 ${options?.agent || "Agent"}`,
       "agentIntegration.executorDisableSuccess": `已停止 LazyMind 使用 ${options?.agent || "Agent"}`,
+      "agentIntegration.locateApplication": "定位桌面应用",
+      "agentIntegration.locateCLI": "定位 CLI",
+      "agentIntegration.restoreAutoDetection": "恢复自动检测",
+      "agentIntegration.executableBindingSaved": "已保存本机程序路径",
+      "agentIntegration.executableBindingCleared": "已恢复自动检测",
       "agentIntegration.notSupported": "不支持",
       "agentIntegration.executorRequirements.codex": "需要 Codex CLI",
       "agentIntegration.executorRequirements.cursor": "需要 Cursor Agent CLI",
@@ -64,6 +78,10 @@ describe("AgentIntegrationPage", () => {
     mocks.executors.mockReset();
     mocks.executorPolicies.mockReset();
     mocks.executorAction.mockReset();
+    mocks.bindings.mockReset();
+    mocks.bind.mockReset();
+    mocks.clearBinding.mockReset();
+    mocks.selectExecutable.mockReset();
     mocks.statuses.mockResolvedValue({
       ok: true,
       data: {
@@ -84,6 +102,7 @@ describe("AgentIntegrationPage", () => {
         workbuddy: { provider: "workbuddy", enabled: true },
       },
     });
+    mocks.bindings.mockResolvedValue({ ok: true, data: {} });
   });
 
   it("loads status without triggering an integration action", async () => {
@@ -189,5 +208,54 @@ describe("AgentIntegrationPage", () => {
     await waitFor(() => expect(mocks.executorAction).toHaveBeenCalledWith("codex", "disable"));
     await waitFor(() => expect(within(codexCard as HTMLElement).getByText("已停用")).toBeInTheDocument());
     expect(within(codexCard as HTMLElement).getByRole("button", { name: /启用/ })).toBeInTheDocument();
+  });
+
+  it("binds a CLI installed outside automatically discovered locations", async () => {
+    const missing = {
+      id: "codex", display_name: "Codex CLI", kind: "external",
+      installed: false, host_online: true, available: false,
+      unavailable_reason: "Codex CLI is not installed",
+    };
+    mocks.executors.mockResolvedValue({ data: { data: { executors: [missing] } } });
+    mocks.selectExecutable.mockResolvedValue("D:\\Agents\\codex.cmd");
+    mocks.bind.mockResolvedValue({
+      ok: true,
+      data: { target: "codex-cli", configured: true, path: "D:\\Agents\\codex.cmd" },
+    });
+    mocks.bindings
+      .mockResolvedValueOnce({ ok: true, data: {} })
+      .mockResolvedValue({ ok: true, data: { "codex-cli": "D:\\Agents\\codex.cmd" } });
+
+    render(<AgentIntegrationPage />);
+
+    const codexCard = (await screen.findByRole("heading", { name: "Codex CLI" })).closest(".ant-card");
+    expect(codexCard).not.toBeNull();
+    fireEvent.click(within(codexCard as HTMLElement).getByRole("button", { name: /定位 CLI/ }));
+    await waitFor(() => expect(mocks.bind).toHaveBeenCalledWith("codex-cli", "D:\\Agents\\codex.cmd"));
+    expect(mocks.selectExecutable).toHaveBeenCalledWith("codex-cli");
+    expect(await within(codexCard as HTMLElement).findByRole("button", { name: "恢复自动检测" })).toBeInTheDocument();
+  });
+
+  it("does not offer application location when only initialization is missing", async () => {
+    mocks.statuses.mockResolvedValue({
+      ok: true,
+      data: {
+        cursor: {
+          agent: "cursor",
+          display_name: "Cursor",
+          state: "requirements_missing",
+          requirements: [
+            { id: "cursor_desktop", description: "Cursor installed", satisfied: true },
+            { id: "cursor_desktop_initialized", description: "Cursor initialized", satisfied: false },
+          ],
+        },
+      },
+    });
+
+    render(<AgentIntegrationPage />);
+
+    const cursorCard = (await screen.findByRole("heading", { name: "Cursor" })).closest(".ant-card");
+    expect(cursorCard).not.toBeNull();
+    expect(within(cursorCard as HTMLElement).queryByRole("button", { name: "定位桌面应用" })).not.toBeInTheDocument();
   });
 });

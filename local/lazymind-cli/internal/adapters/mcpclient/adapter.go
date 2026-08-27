@@ -116,10 +116,14 @@ func (a *Adapter) Disconnect(context.Context) agentintegration.Status {
 
 func (a *Adapter) status() agentintegration.Status {
 	name, _ := displayName(a.kind)
-	requirements := requirements(a.kind)
 	status := agentintegration.Status{
-		Agent: string(a.kind), DisplayName: name, Requirements: requirements,
+		Agent: string(a.kind), DisplayName: name,
 	}
+	requirements, err := requirements(a.kind)
+	if err != nil {
+		return agentintegration.Fail(status, err.Error())
+	}
+	status.Requirements = requirements
 	state, err := readManagedConfig(a.kind, configPath(a.kind), a.self, a.home, a.hostID)
 	if err != nil {
 		return agentintegration.Fail(status, err.Error())
@@ -158,38 +162,57 @@ func displayName(kind Kind) (string, error) {
 	}
 }
 
-func requirements(kind Kind) []agentintegration.Requirement {
+func requirements(kind Kind) ([]agentintegration.Requirement, error) {
 	switch kind {
 	case Cursor:
-		return []agentintegration.Requirement{{
-			ID: "cursor_desktop", Description: "Install Cursor Desktop and open it once.",
-			Satisfied: pathExists(userPath(".cursor")),
-		}}
+		return desktopRequirements(agentexec.DesktopApplication{
+			BindingTarget: agentexec.CursorDesktop, ExecutableNames: []string{"Cursor.exe"},
+			Protocols: []string{"cursor"}, DisplayNames: []string{"Cursor"},
+			StatePaths: []string{userPath(".cursor")},
+		}, "cursor_desktop", "Cursor Desktop")
 	case WorkBuddy:
-		return []agentintegration.Requirement{{
-			ID: "workbuddy_desktop", Description: "Install WorkBuddy and open it once.",
-			Satisfied: pathExists(userPath(".workbuddy")),
-		}}
+		return desktopRequirements(agentexec.DesktopApplication{
+			BindingTarget: agentexec.WorkBuddyDesktop, ExecutableNames: []string{"WorkBuddy.exe"},
+			DisplayNames: []string{"WorkBuddy"}, StatePaths: []string{userPath(".workbuddy")},
+		}, "workbuddy_desktop", "WorkBuddy")
 	case Raccoon:
-		return []agentintegration.Requirement{{
-			ID: "raccoon_desktop", Description: "Install Raccoon Desktop and open it once.",
-			Satisfied: pathExists(userPath(".box-agent", "config")),
-		}}
+		return desktopRequirements(agentexec.DesktopApplication{
+			BindingTarget:   agentexec.RaccoonDesktop,
+			ExecutableNames: []string{"Raccoon.exe", "OfficeRaccoon.exe", "办公小浣熊.exe"},
+			DisplayNames:    []string{"Raccoon", "办公小浣熊"},
+			StatePaths:      []string{userPath(".box-agent", "config")},
+		}, "raccoon_desktop", "Raccoon Desktop")
 	case TRAEWork:
-		return []agentintegration.Requirement{{
-			ID: "trae_work_desktop", Description: "Install TRAE Work and open it once.",
-			Satisfied: pathExists(filepath.Dir(traeWorkConfigPath())),
-		}}
+		return desktopRequirements(agentexec.DesktopApplication{
+			BindingTarget:   agentexec.TRAEWorkDesktop,
+			ExecutableNames: []string{"TRAE.exe", "TRAE SOLO CN.exe", "TraeWork.exe"},
+			DisplayNames:    []string{"TRAE", "TRAE Work", "TRAE SOLO CN"},
+			StatePaths:      []string{filepath.Dir(traeWorkConfigPath())},
+		}, "trae_work_desktop", "TRAE Work")
 	case DeepSeekHarness:
 		profile := filepath.Join(dshHome(), "profiles", "web", "package.json")
 		client := filepath.Join(dshHome(), "profiles", "node_modules", "@deepseek-ai", "dsh-mcp-client", "package.json")
 		return []agentintegration.Requirement{
 			{ID: "dsh_web_profile", Description: "Initialize the DeepSeek Harness web profile.", Satisfied: pathExists(profile)},
 			{ID: "dsh_mcp_client", Description: "Install @deepseek-ai/dsh-mcp-client in the web profile.", Satisfied: pathExists(client)},
-		}
+		}, nil
 	default:
-		return nil
+		return nil, nil
 	}
+}
+
+func desktopRequirements(
+	spec agentexec.DesktopApplication,
+	id, displayName string,
+) ([]agentintegration.Requirement, error) {
+	state, err := agentexec.InspectDesktopApplication(spec)
+	if err != nil {
+		return nil, err
+	}
+	return []agentintegration.Requirement{
+		{ID: id, Description: "Install " + displayName + ".", Satisfied: state.Installed},
+		{ID: id + "_initialized", Description: "Open " + displayName + " at least once.", Satisfied: state.Initialized},
+	}, nil
 }
 
 func configPath(kind Kind) string {

@@ -52,6 +52,14 @@ export type DesktopAgentIntegrationAction = "connect" | "disconnect" | "login";
 
 export type DesktopExecutorProvider = "codex" | "cursor" | "workbuddy";
 export type DesktopExecutorPolicyAction = "enable" | "disable";
+export type DesktopAgentBindingTarget =
+  | "codex-cli"
+  | "cursor-cli"
+  | "codebuddy-cli"
+  | "cursor-desktop"
+  | "workbuddy-desktop"
+  | "raccoon-desktop"
+  | "traework-desktop";
 
 export interface DesktopExecutorPolicy {
   provider: DesktopExecutorProvider;
@@ -89,6 +97,20 @@ export type DesktopExecutorPolicyResult =
   | { ok: true; data: DesktopExecutorPolicy }
   | { ok: false; reason: DesktopBridgeUnavailableReason; error?: unknown };
 
+export interface DesktopAgentExecutableBinding {
+  target: DesktopAgentBindingTarget;
+  configured: boolean;
+  path: string;
+}
+
+export type DesktopAgentExecutableBindingsResult =
+  | { ok: true; data: Partial<Record<DesktopAgentBindingTarget, string>> }
+  | { ok: false; reason: DesktopBridgeUnavailableReason; error?: unknown };
+
+export type DesktopAgentExecutableBindingResult =
+  | { ok: true; data: DesktopAgentExecutableBinding }
+  | { ok: false; reason: DesktopBridgeUnavailableReason; error?: unknown };
+
 type DesktopBridgeCommand =
   | "openLogsDir"
   | "openDataDir"
@@ -103,10 +125,13 @@ interface LazyMindDesktopBridge {
   agentIntegrationAction?: (agent: DesktopAgent, action: DesktopAgentIntegrationAction) => Promise<unknown> | unknown;
   executorIntegrationPolicies?: () => Promise<unknown> | unknown;
   executorIntegrationAction?: (provider: DesktopExecutorProvider, action: DesktopExecutorPolicyAction) => Promise<unknown> | unknown;
+  agentExecutableBindings?: () => Promise<unknown> | unknown;
+  agentExecutableBind?: (target: DesktopAgentBindingTarget, path: string) => Promise<unknown> | unknown;
+  agentExecutableClear?: (target: DesktopAgentBindingTarget) => Promise<unknown> | unknown;
   restartRuntime?: () => Promise<unknown> | unknown;
   resetRuntime?: (scope?: "kb" | "all") => Promise<unknown> | unknown;
   selectFolder?: () => Promise<string | null> | string | null;
-  selectExecutable?: () => Promise<string | null> | string | null;
+  selectExecutable?: (target?: DesktopAgentBindingTarget) => Promise<string | null> | string | null;
   exportDiagnostics?: () => Promise<string> | string;
   showItemInFolder?: (
     payload: DesktopArtifactFilePayload | string,
@@ -293,6 +318,71 @@ export async function executorIntegrationAction(
   }
 }
 
+export async function agentExecutableBindings(): Promise<DesktopAgentExecutableBindingsResult> {
+  const bridge = getDesktopBridge();
+  try {
+    let payload: unknown;
+    if (bridge?.agentExecutableBindings) {
+      payload = await bridge.agentExecutableBindings();
+    } else {
+      const response = await assistantBridgeFetch("/bindings", undefined, ACTION_TIMEOUT_MS);
+      payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(`Assistant Bridge returned HTTP ${response.status}`);
+    }
+    const bindings = (payload as {
+      bindings?: Partial<Record<DesktopAgentBindingTarget, string>>;
+    }).bindings;
+    return { ok: true, data: bindings || {} };
+  } catch (error) {
+    return { ok: false, reason: "unavailable", error };
+  }
+}
+
+export async function bindAgentExecutable(
+  target: DesktopAgentBindingTarget,
+  path: string,
+): Promise<DesktopAgentExecutableBindingResult> {
+  return changeAgentExecutable(target, path);
+}
+
+export async function clearAgentExecutable(
+  target: DesktopAgentBindingTarget,
+): Promise<DesktopAgentExecutableBindingResult> {
+  return changeAgentExecutable(target);
+}
+
+async function changeAgentExecutable(
+  target: DesktopAgentBindingTarget,
+  path?: string,
+): Promise<DesktopAgentExecutableBindingResult> {
+  const bridge = getDesktopBridge();
+  try {
+    let payload: unknown;
+    if (path !== undefined && bridge?.agentExecutableBind) {
+      payload = await bridge.agentExecutableBind(target, path);
+    } else if (path === undefined && bridge?.agentExecutableClear) {
+      payload = await bridge.agentExecutableClear(target);
+    } else {
+      const response = await assistantBridgeFetch(
+        `/bindings/${encodeURIComponent(target)}`,
+        path === undefined
+          ? { method: "DELETE" }
+          : {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ path }),
+          },
+        ACTION_TIMEOUT_MS,
+      );
+      payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error((payload as { error?: string }).error || `Assistant Bridge returned HTTP ${response.status}`);
+    }
+    return { ok: true, data: payload as DesktopAgentExecutableBinding };
+  } catch (error) {
+    return { ok: false, reason: "failed", error };
+  }
+}
+
 const STATUS_TIMEOUT_MS = 10_000;
 const ACTION_TIMEOUT_MS = 15_000;
 const LOGIN_TIMEOUT_MS = 125_000;
@@ -335,12 +425,12 @@ export function selectFolder(): Promise<string | null> {
   return Promise.resolve(bridge.selectFolder());
 }
 
-export function selectExecutable(): Promise<string | null> {
+export function selectExecutable(target?: DesktopAgentBindingTarget): Promise<string | null> {
   const bridge = getDesktopBridge();
   if (!bridge?.selectExecutable) {
     return Promise.resolve(null);
   }
-  return Promise.resolve(bridge.selectExecutable());
+  return Promise.resolve(bridge.selectExecutable(target));
 }
 
 export function exportDiagnostics(): Promise<string | null> {

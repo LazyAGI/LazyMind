@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -76,5 +77,83 @@ func TestSafeEnvironmentDropsUnrelatedServiceSecrets(t *testing.T) {
 	}
 	if values["SystemRoot"] != `C:\Windows` {
 		t.Fatalf("required Windows process environment was lost: %#v", values)
+	}
+}
+
+func TestExecutableBindingsPersistAndClear(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("LAZYMIND_HOME", home)
+	name := "codex-custom"
+	body := "#!/bin/sh\necho 1.0.0\n"
+	if runtime.GOOS == "windows" {
+		name += ".cmd"
+		body = "@echo off\r\necho 1.0.0\r\n"
+	}
+	executable := filepath.Join(t.TempDir(), name)
+	if err := os.WriteFile(executable, []byte(body), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	resolved, err := SetExecutableBinding(CodexCLI, executable)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !SameExecutable(resolved, executable) {
+		t.Fatalf("resolved=%q want=%q", resolved, executable)
+	}
+	bindings, err := ExecutableBindings()
+	if err != nil || !SameExecutable(bindings[CodexCLI], executable) {
+		t.Fatalf("bindings=%#v err=%v", bindings, err)
+	}
+	if info, err := os.Stat(filepath.Join(home, "agent-bindings.json")); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("binding file info=%v err=%v", info, err)
+	}
+	if err := ClearExecutableBinding(CodexCLI); err != nil {
+		t.Fatal(err)
+	}
+	if _, configured, err := ExecutableBinding(CodexCLI); err != nil || configured {
+		t.Fatalf("configured=%v err=%v", configured, err)
+	}
+	if _, err := SetExecutableBinding("unknown", executable); err == nil {
+		t.Fatal("unsupported binding target was accepted")
+	}
+}
+
+func TestFindBoundPrefersExplicitThenEnvironmentThenSavedPath(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("LAZYMIND_HOME", home)
+	directory := t.TempDir()
+	write := func(name string) string {
+		body := "#!/bin/sh\necho 1.0.0\n"
+		if runtime.GOOS == "windows" {
+			name += ".cmd"
+			body = "@echo off\r\necho 1.0.0\r\n"
+		}
+		path := filepath.Join(directory, name)
+		if err := os.WriteFile(path, []byte(body), 0o700); err != nil {
+			t.Fatal(err)
+		}
+		return path
+	}
+	saved := write("saved")
+	environment := write("environment")
+	explicit := write("explicit")
+	if _, err := SetExecutableBinding(CursorCLI, saved); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("TEST_CURSOR_BIN", environment)
+
+	resolved, err := FindBoundExecutable(explicit, "TEST_CURSOR_BIN", CursorCLI, nil, nil)
+	if err != nil || !SameExecutable(resolved, explicit) {
+		t.Fatalf("explicit resolved=%q err=%v", resolved, err)
+	}
+	resolved, err = FindBoundExecutable("", "TEST_CURSOR_BIN", CursorCLI, nil, nil)
+	if err != nil || !SameExecutable(resolved, environment) {
+		t.Fatalf("environment resolved=%q err=%v", resolved, err)
+	}
+	t.Setenv("TEST_CURSOR_BIN", "")
+	resolved, err = FindBoundExecutable("", "TEST_CURSOR_BIN", CursorCLI, nil, nil)
+	if err != nil || !SameExecutable(resolved, saved) {
+		t.Fatalf("saved resolved=%q err=%v", resolved, err)
 	}
 }
