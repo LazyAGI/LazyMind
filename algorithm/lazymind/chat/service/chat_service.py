@@ -106,6 +106,14 @@ def _unregister_active_session(conversation_id: str, session_id: str) -> None:
         _active_sessions.pop(conversation_id, None)
 
 
+def clear_conversation_env(conversation_id: str) -> bool:
+    """Drop session env vars when the owning conversation is deleted."""
+    key = (conversation_id or '').strip()
+    if not key:
+        return False
+    return _conversation_env_vars.pop(key, None) is not None
+
+
 _CITE_MESSAGE_PATTERN = re.compile(
     r'<cite_message>([\s\S]*?)</cite_message>\s*',
     re.IGNORECASE,

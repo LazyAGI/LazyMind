@@ -397,6 +397,7 @@ func PurgeConversation(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "purge conversation failed", http.StatusInternalServerError)
 		return
 	}
+	notifySessionEnvClear(conversationID)
 	writeConversationJSON(w, http.StatusOK, map[string]any{})
 }
 

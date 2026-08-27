@@ -7,17 +7,36 @@ from lazyllm import globals as lazyllm_globals
 from lazyllm.tools import inject_env_vars
 
 
+SESSION_ENV_TOOL_NAME = 'set_session_env'
+REDACTED_ENV_VALUE = '<redacted>'
+
 _ENV_NAME_RE = re.compile(r'^[A-Za-z_][A-Za-z0-9_]*$')
 _BLOCKED_ENV_NAMES = {
     'HOME',
     'PATH',
     'PYTHONPATH',
+    'PYTHONHOME',
+    'PYTHONSTARTUP',
+    'PYTHONEXECUTABLE',
     'LD_LIBRARY_PATH',
     'LD_PRELOAD',
     'DYLD_LIBRARY_PATH',
     'DYLD_INSERT_LIBRARIES',
     'SHELL',
     'PWD',
+    'IFS',
+    'ENV',
+    'BASH_ENV',
+    'HTTP_PROXY',
+    'HTTPS_PROXY',
+    'ALL_PROXY',
+    'NO_PROXY',
+    'FTP_PROXY',
+    'SSL_CERT_FILE',
+    'SSL_CERT_DIR',
+    'REQUESTS_CA_BUNDLE',
+    'CURL_CA_BUNDLE',
+    'SSLKEYLOGFILE',
 }
 
 
@@ -32,6 +51,17 @@ def _validate_env_name(name: str) -> str:
     return cleaned
 
 
+def redact_session_env_arguments(tool_name: str, arguments: Any) -> Any:
+    if str(tool_name or '') != SESSION_ENV_TOOL_NAME:
+        return arguments
+    if not isinstance(arguments, dict) or 'value' not in arguments:
+        return arguments
+    redacted = dict(arguments)
+    if redacted.get('value') not in (None, REDACTED_ENV_VALUE):
+        redacted['value'] = REDACTED_ENV_VALUE
+    return redacted
+
+
 def build_session_env_tool(
     conversation_env_store: MutableMapping[str, dict[str, str]],
     conversation_id: str,
@@ -39,14 +69,20 @@ def build_session_env_tool(
     """Build a ChatAgent-scoped tool for setting session environment variables."""
 
     def set_session_env(name: str, value: str) -> dict[str, Any]:
-        """Set an environment variable for the current conversation.
+        """Set an environment variable for the current conversation only.
 
-        Use this when the user provides an environment variable name and value,
-        including when they ask to configure it and continue a skill. Call this
-        before retrying or continuing `run_script`. The value is immediately
-        available to skill scripts in this conversation; do not ask the user to
-        restart the service. Do not echo the secret value in the final answer.
-        Do not use it to change system variables such as PATH, HOME, or PYTHONPATH.
+        Stored values apply only to this conversation. Other conversations,
+        including a newly opened chat, cannot read them.
+
+        When a skill or `run_script` fails because an API key, token, or env var
+        is missing: if this turn already has the name and value, call this tool
+        then immediately retry. Otherwise call `ask_user` with `type=text` for
+        the missing variable(s), preferring names from a `missing_env` tool
+        result. After the user answers, call this tool then immediately retry
+        the same skill/`run_script`. The user may also proactively provide
+        `NAME=value`; call this tool then continue the original task. Do not
+        ask the user to restart. Do not echo the secret. Do not change system
+        variables such as PATH, HOME, or PYTHONPATH.
 
         Args:
             name (str): Environment variable name, e.g. REDFOX_API_KEY.

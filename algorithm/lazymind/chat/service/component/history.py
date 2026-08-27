@@ -9,16 +9,16 @@ from lazyllm.tools.agent.base import (
     attachable_tool_observation,
 )
 
-from lazymind.chat.service.utils.citations import (
-    SOURCE_LINK_PATTERN,
-    SOURCE_REF_PATTERN,
-)
-
+from lazymind.chat.engine.tools.session_env import redact_session_env_arguments
 from lazymind.chat.service.component.tool_rendering import (
     _TOOL_CALL_TAG,
     _TOOL_PREVIEW_TAG,
     _TOOL_RESULT_PREVIEW_TAG,
     _TOOL_RESULT_TAG,
+)
+from lazymind.chat.service.utils.citations import (
+    SOURCE_LINK_PATTERN,
+    SOURCE_REF_PATTERN,
 )
 
 _HISTORY_TAG_PATTERN = re.compile(
@@ -198,6 +198,7 @@ def _parse_history_assistant_content(
             arguments = payload.get('arguments', {})
             if not isinstance(arguments, dict):
                 arguments = {}
+            arguments = redact_session_env_arguments(tool_name, arguments)
             segments.append({
                 'type': 'tool_call',
                 'id': tool_call_id,
