@@ -183,6 +183,28 @@ func TestRuntimeConfigHonorsLegacyExplicitRuntimeRoot(t *testing.T) {
 	}
 }
 
+func TestRuntimeConfigMergesDesktopExtraAllowedRoots(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	extra := filepath.Join(t.TempDir(), ".codex", "skills")
+	extraJSON, err := json.Marshal([]string{extra})
+	if err != nil {
+		t.Fatalf("marshal extra allowed roots: %v", err)
+	}
+	t.Setenv("LAZYMIND_FILE_WATCHER_EXTRA_ALLOWED_ROOTS_JSON", string(extraJSON))
+
+	cfg, _, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if len(cfg.FileWatcher.AllowedRoots) != 2 {
+		t.Fatalf("allowed roots = %#v", cfg.FileWatcher.AllowedRoots)
+	}
+	if cfg.FileWatcher.AllowedRoots[0] != cfg.FileWatcher.WatchHostDir || cfg.FileWatcher.AllowedRoots[1] != extra {
+		t.Fatalf("allowed roots = %#v", cfg.FileWatcher.AllowedRoots)
+	}
+}
+
 func TestRuntimeConfigUsesDesktopRootsAndManifestPaths(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)

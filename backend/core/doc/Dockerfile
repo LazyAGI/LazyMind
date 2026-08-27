@@ -28,7 +28,7 @@ RUN set -eu; \
     && rm -rf /var/lib/apt/lists/*
 
 COPY algorithm/requirements.txt /app/algorithm/requirements.txt
-RUN pip install --no-cache-dir 'lazyllm[rag]==1.2.2' \
+RUN pip install --no-cache-dir 'lazyllm[rag]==1.3.0a1' \
     && pip install --no-cache-dir -r /app/algorithm/requirements.txt
 
 COPY algorithm /app/algorithm

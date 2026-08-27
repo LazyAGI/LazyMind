@@ -19,6 +19,7 @@ import type { CheckboxChangeEvent } from "antd/es/checkbox";
 import type { DataNode } from "antd/es/tree";
 import {
   CheckCircleFilled,
+  FolderAddOutlined,
   FolderOpenOutlined,
   ReloadOutlined,
   SearchOutlined,
@@ -49,6 +50,7 @@ import {
   getFeishuTargetValuePath,
 } from "./feishuTargetUtils";
 import type { LocalPathRecommendation } from "../../utils/feishuTarget";
+import type { DesktopLocalFolderAccessState } from "@/runtime/desktopBridge";
 import WizardSchedulePanel from "./WizardSchedulePanel";
 
 const { Text } = Typography;
@@ -63,6 +65,8 @@ export interface WizardConnectionStepProps {
   localPathRecommendations: LocalPathRecommendation[];
   localPathRecommendationsLoading: boolean;
   localPathRecommendationsError: string;
+  localDiscoveryAccess?: DesktopLocalFolderAccessState | null;
+  localDiscoveryChoosing?: boolean;
   feishuTargetLoading: boolean;
   feishuTargetTreeData: DataNode[];
   onLoadLocalPathOptions?: (path?: string) => void;
@@ -70,6 +74,7 @@ export interface WizardConnectionStepProps {
   onLoadLocalPathChildren?: TreeSelectProps["loadData"];
   onResetLocalPathBrowseOptions?: () => void;
   onLoadLocalPathRecommendations?: () => void;
+  onChooseLocalDiscoveryLocations?: () => void;
   onLoadFeishuTargetOptions?: () => void;
   onSearchFeishuTargetOptions?: (keyword: string) => void;
   onLoadFeishuTargetChildren?: TreeSelectProps["loadData"];
@@ -85,6 +90,8 @@ export default function WizardConnectionStep({
   localPathRecommendations,
   localPathRecommendationsLoading,
   localPathRecommendationsError,
+  localDiscoveryAccess = null,
+  localDiscoveryChoosing = false,
   feishuTargetLoading,
   feishuTargetTreeData,
   onLoadLocalPathOptions,
@@ -92,6 +99,7 @@ export default function WizardConnectionStep({
   onLoadLocalPathChildren,
   onResetLocalPathBrowseOptions,
   onLoadLocalPathRecommendations,
+  onChooseLocalDiscoveryLocations,
   onLoadFeishuTargetOptions,
   onSearchFeishuTargetOptions,
   onLoadFeishuTargetChildren,
@@ -118,6 +126,11 @@ export default function WizardConnectionStep({
 
   const isLocalPathSearching = Boolean(localPathSearchValue.trim());
   const isFeishuTargetSearching = Boolean(feishuTargetSearchValue.trim());
+  const canChooseLocalDiscoveryLocations = localDiscoveryAccess?.available === true;
+  const hasLocalDiscoveryLocations = Boolean(
+    localDiscoveryAccess?.discoveryConsentGranted &&
+      localDiscoveryAccess.discoveryRoots.length > 0,
+  );
 
   useEffect(() => {
     if (!isLocalPathSearching) {
@@ -423,6 +436,28 @@ export default function WizardConnectionStep({
                         : t("common.selectAll")}
                     </Button>
                   ) : null}
+                  {canChooseLocalDiscoveryLocations ? (
+                    <Tooltip
+                      title={
+                        hasLocalDiscoveryLocations
+                          ? t("admin.dataSourceDiscoveryAddLocation")
+                          : t("admin.dataSourceDiscoveryChooseLocation")
+                      }
+                    >
+                      <Button
+                        type="text"
+                        size="small"
+                        aria-label={t("admin.dataSourceDiscoveryChooseLocation")}
+                        icon={<FolderAddOutlined />}
+                        loading={localDiscoveryChoosing}
+                        onClick={onChooseLocalDiscoveryLocations}
+                      >
+                        {hasLocalDiscoveryLocations
+                          ? t("admin.dataSourceDiscoveryAddLocation")
+                          : t("admin.dataSourceDiscoveryChooseLocation")}
+                      </Button>
+                    </Tooltip>
+                  ) : null}
                   <Tooltip
                     title={t("admin.dataSourceRecommendedPathsRefresh")}
                   >
@@ -450,43 +485,59 @@ export default function WizardConnectionStep({
                 <Text type="danger">{localPathRecommendationsError}</Text>
               ) : localPathRecommendations.length === 0 ? (
                 <Empty
+                  className="data-source-local-recommendations-empty"
                   image={Empty.PRESENTED_IMAGE_SIMPLE}
-                  description={t("admin.dataSourceRecommendedPathsEmpty")}
+                  description={
+                    hasLocalDiscoveryLocations
+                      ? t("admin.dataSourceDiscoveryEmptyAuthorized", {
+                          count: localDiscoveryAccess?.discoveryRoots.length || 0,
+                        })
+                      : canChooseLocalDiscoveryLocations
+                        ? t("admin.dataSourceDiscoveryPermissionHint")
+                        : t("admin.dataSourceRecommendedPathsEmpty")
+                  }
                 />
               ) : (
-                <div className="data-source-local-recommendations-list">
-                  {localPathRecommendations.map((item) => (
-                    <Checkbox
-                      key={item.key}
-                      className={
-                        selectedLocalPathValueSet.has(item.value)
-                          ? "is-selected"
-                          : undefined
-                      }
-                      checked={selectedLocalPathValueSet.has(item.value)}
-                      onChange={(event: CheckboxChangeEvent) =>
-                        toggleRecommendedPath(item.value, event.target.checked)
-                      }
-                    >
-                      <span className="data-source-local-recommendations-item">
-                        <span className="data-source-local-recommendations-folder">
-                          <FolderOpenOutlined />
-                        </span>
-                        <span className="data-source-local-recommendations-item-copy">
-                          <span className="data-source-local-recommendations-name">
-                            {item.title}
+                <>
+                  <div className="data-source-local-recommendations-list">
+                    {localPathRecommendations.map((item) => (
+                      <Checkbox
+                        key={item.key}
+                        className={
+                          selectedLocalPathValueSet.has(item.value)
+                            ? "is-selected"
+                            : undefined
+                        }
+                        checked={selectedLocalPathValueSet.has(item.value)}
+                        onChange={(event: CheckboxChangeEvent) =>
+                          toggleRecommendedPath(item.value, event.target.checked)
+                        }
+                      >
+                        <span className="data-source-local-recommendations-item">
+                          <span className="data-source-local-recommendations-folder">
+                            <FolderOpenOutlined />
                           </span>
-                          <span
-                            className="data-source-local-recommendations-path"
-                            title={item.path}
-                          >
-                            {item.path}
+                          <span className="data-source-local-recommendations-item-copy">
+                            <span className="data-source-local-recommendations-name">
+                              {item.title}
+                            </span>
+                            <span
+                              className="data-source-local-recommendations-path"
+                              title={item.path}
+                            >
+                              {item.path}
+                            </span>
                           </span>
                         </span>
-                      </span>
-                    </Checkbox>
-                  ))}
-                </div>
+                      </Checkbox>
+                    ))}
+                  </div>
+                  {localDiscoveryAccess?.truncated ? (
+                    <Text type="secondary" className="data-source-local-discovery-note">
+                      {t("admin.dataSourceDiscoveryScanLimited")}
+                    </Text>
+                  ) : null}
+                </>
               )}
             </div>
 

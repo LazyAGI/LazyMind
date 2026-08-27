@@ -110,6 +110,44 @@ func TestLoadDerivesPathMappingFromWatchVolumeEnv(t *testing.T) {
 	}
 }
 
+func TestLoadAllowsMultipleAllowedRootsFromJSONEnv(t *testing.T) {
+	root := t.TempDir()
+	first := filepath.Join(root, "Documents", "LazyMind")
+	second := filepath.Join(root, ".codex", "skills")
+	t.Setenv("LAZYMIND_FILE_WATCHER_ALLOWED_ROOTS_JSON", `["`+first+`","`+second+`"]`)
+	cfgPath := writeTestConfig(t, root, `${LAZYMIND_FILE_WATCHER_BASE_ROOT:-../../../data/scan}`)
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(cfg.Security.AllowedRoots) != 2 || cfg.Security.AllowedRoots[1] != second {
+		t.Fatalf("AllowedRoots = %#v", cfg.Security.AllowedRoots)
+	}
+}
+
+func TestLoadEnablesDynamicRootUpdatesOnlyFromExplicitEnv(t *testing.T) {
+	root := t.TempDir()
+	cfgPath := writeTestConfig(t, root, `${LAZYMIND_FILE_WATCHER_BASE_ROOT:-../../../data/scan}`)
+
+	cfg, err := Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.DynamicRootUpdates {
+		t.Fatal("dynamic root updates must default to disabled")
+	}
+
+	t.Setenv("LAZYMIND_FILE_WATCHER_DYNAMIC_ROOT_UPDATES", "true")
+	cfg, err = Load(cfgPath)
+	if err != nil {
+		t.Fatalf("Load() with dynamic roots error = %v", err)
+	}
+	if !cfg.DynamicRootUpdates {
+		t.Fatal("dynamic root updates should be enabled explicitly")
+	}
+}
+
 func TestLoadAllowsEmptyTenantID(t *testing.T) {
 	root := t.TempDir()
 	cfgPath := writeTestConfigWithTenant(t, root, `${LAZYMIND_FILE_WATCHER_TENANT_ID:-}`, `${LAZYMIND_FILE_WATCHER_BASE_ROOT:-../../../data/scan}`)

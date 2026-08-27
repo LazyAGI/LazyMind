@@ -75,6 +75,14 @@ func (e *DefaultTargetTreeEngine) Prewarm(ctx context.Context, req TargetTreeSea
 }
 
 func (e *DefaultTargetTreeEngine) PrewarmLocalFSRootCaches(ctx context.Context, req TargetTreeSearchRequest) error {
+	return e.buildLocalFSRootCaches(ctx, req, false)
+}
+
+func (e *DefaultTargetTreeEngine) refreshLocalFSRootCaches(ctx context.Context, req TargetTreeSearchRequest) error {
+	return e.buildLocalFSRootCaches(ctx, req, true)
+}
+
+func (e *DefaultTargetTreeEngine) buildLocalFSRootCaches(ctx context.Context, req TargetTreeSearchRequest, force bool) error {
 	if !isLocalFSTargetSearch(req) {
 		return NewError(ErrCodeInvalidRequest, "connector_type must be local_fs")
 	}
@@ -88,12 +96,27 @@ func (e *DefaultTargetTreeEngine) PrewarmLocalFSRootCaches(ctx context.Context, 
 	}
 	for _, root := range roots {
 		rootReq := localFSRootSearchRequest(req, root)
-		snapshot := e.cache.buildIfUnlocked(ctx, conn, rootReq, e.buildTargetSearchCache)
+		var snapshot targetSearchCacheSnapshot
+		if force {
+			snapshot = e.cache.rebuildIfUnlocked(ctx, conn, rootReq, e.buildTargetSearchCache)
+		} else {
+			snapshot = e.cache.buildIfUnlocked(ctx, conn, rootReq, e.buildTargetSearchCache)
+		}
 		if snapshot.status == targetSearchCacheStatusFailed && strings.TrimSpace(snapshot.lastError) != "" {
+			if isSkippableLocalFSRootCacheError(snapshot.lastError) {
+				fmt.Fprintf(os.Stdout, "target search cache local_fs root skipped target_ref=%q error=%q\n", rootReq.TargetRef, snapshot.lastError)
+				continue
+			}
 			return NewError(ErrCodeInternal, "local_fs target search cache prewarm failed: "+snapshot.lastError)
 		}
 	}
 	return nil
+}
+
+func isSkippableLocalFSRootCacheError(message string) bool {
+	normalized := strings.ToUpper(strings.TrimSpace(message))
+	code := string(connector.ErrorCodePermissionDenied)
+	return normalized == code || strings.HasPrefix(normalized, code+":")
 }
 
 func (e *DefaultTargetTreeEngine) buildTargetSearchCache(ctx context.Context, conn connector.SourceConnector, req TargetTreeSearchRequest) ([]TreeNode, bool, error) {

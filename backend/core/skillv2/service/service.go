@@ -1534,13 +1534,15 @@ func mergedDraftEntriesForSkill(ctx context.Context, tx *gorm.DB, skill skillRow
 	if baseRevisionID == "" {
 		baseRevisionID = valueOrEmpty(skill.HeadRevisionID)
 	}
-	if baseRevisionID == "" {
-		return nil, "", fmt.Errorf("skill has no base revision")
-	}
 
 	var baseEntries []skillRevisionEntryRow
-	if err := tx.WithContext(ctx).Where("revision_id = ?", baseRevisionID).Order("path ASC").Find(&baseEntries).Error; err != nil {
-		return nil, "", err
+	// A package created through RemoteFS starts as a draft without a published
+	// revision. Enabling it is its initial commit, so an empty base is valid and
+	// the draft overlays themselves form the complete revision tree.
+	if baseRevisionID != "" {
+		if err := tx.WithContext(ctx).Where("revision_id = ?", baseRevisionID).Order("path ASC").Find(&baseEntries).Error; err != nil {
+			return nil, "", err
+		}
 	}
 	entriesByPath := make(map[string]skillRevisionEntryRow, len(baseEntries))
 	for _, entry := range baseEntries {

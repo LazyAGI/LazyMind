@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"lazymind/agentconnector/internal/localfile"
 )
 
 const (
@@ -300,7 +302,7 @@ func (s *Store) saveUnlocked(value Credentials) error {
 	if err := temporary.Close(); err != nil {
 		return err
 	}
-	if err := replaceFile(temporaryPath, s.path()); err != nil {
+	if err := localfile.Replace(temporaryPath, s.path()); err != nil {
 		return err
 	}
 	return os.Chmod(s.path(), 0o600)
@@ -310,7 +312,7 @@ func (s *Store) withLock(fn func() error) error {
 	if err := os.MkdirAll(s.home, 0o700); err != nil {
 		return err
 	}
-	unlock, err := lockFile(filepath.Join(s.home, credentialFile+".lock"))
+	unlock, err := localfile.Lock(filepath.Join(s.home, credentialFile+".lock"))
 	if err != nil {
 		return fmt.Errorf("lock credentials: %w", err)
 	}

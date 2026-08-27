@@ -36,6 +36,7 @@ import {
 } from "../../utils/feishuTarget";
 import { pickScanAgent, waitForCloudSyncRun } from "../../utils/cloudSync";
 import { isKnowledgeBaseNameDuplicatedError } from "../../utils/dataSourceErrors";
+import { authorizeLocalFolders } from "@/runtime/desktopBridge";
 import type { DataSourceSaveMode, ManagementContext } from "./context";
 
 const resolveBindingIdByTargetRef = (
@@ -141,6 +142,10 @@ export function createSaveActions(ctx: ManagementContext) {
     });
 
     try {
+      const access = await authorizeLocalFolders(rootPaths);
+      if (access && !access.granted) {
+        return;
+      }
       if (isEditing) {
         const editState = await fetchSourceEditState(editingSourceId);
         await client.updateSource({

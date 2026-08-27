@@ -97,6 +97,10 @@ func (validatorStub) AllowedRoots() []string {
 	return nil
 }
 
+func (validatorStub) ReplaceAllowedRoots(roots []string) ([]string, error) {
+	return append([]string(nil), roots...), nil
+}
+
 func TestStopSourceIsIdempotent(t *testing.T) {
 	t.Parallel()
 
