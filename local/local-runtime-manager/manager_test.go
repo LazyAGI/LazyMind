@@ -187,7 +187,11 @@ func TestRuntimeConfigMergesDesktopExtraAllowedRoots(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
 	extra := filepath.Join(t.TempDir(), ".codex", "skills")
-	t.Setenv("LAZYMIND_FILE_WATCHER_EXTRA_ALLOWED_ROOTS_JSON", `["`+extra+`"]`)
+	extraJSON, err := json.Marshal([]string{extra})
+	if err != nil {
+		t.Fatalf("marshal extra allowed roots: %v", err)
+	}
+	t.Setenv("LAZYMIND_FILE_WATCHER_EXTRA_ALLOWED_ROOTS_JSON", string(extraJSON))
 
 	cfg, _, err := NewRuntimeConfig(defaultProfileValue(), repo)
 	if err != nil {
