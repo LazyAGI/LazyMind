@@ -193,15 +193,15 @@ FROM task_center_tasks WHERE plugin_session_id = ?`, sessionID).Scan(
 
 	downPath := filepath.Join(migrationDir, "20260826065814_fix_task_center_workflow_runs.down.sql")
 	execMigrationFileForDriver(t, db, downPath, "sqlite")
-	var pluginCount, backgroundCount int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM task_center_tasks WHERE task_type = 'plugin_run'`).Scan(&pluginCount); err != nil {
+	var legacyWorkflowCount, backgroundCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM task_center_tasks WHERE task_type = 'plugin_run'`).Scan(&legacyWorkflowCount); err != nil {
 		t.Fatalf("count reverted plugin rows: %v", err)
 	}
 	if err := db.QueryRow(`SELECT COUNT(*) FROM task_center_tasks WHERE task_type = 'background_chat'`).Scan(&backgroundCount); err != nil {
 		t.Fatalf("count preserved background rows: %v", err)
 	}
-	if pluginCount != 6 || backgroundCount != 1 {
-		t.Fatalf("unexpected down migration counts: plugin=%d background=%d", pluginCount, backgroundCount)
+	if legacyWorkflowCount != 6 || backgroundCount != 1 {
+		t.Fatalf("unexpected down migration counts: plugin=%d background=%d", legacyWorkflowCount, backgroundCount)
 	}
 }
 
