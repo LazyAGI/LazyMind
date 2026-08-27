@@ -18,10 +18,7 @@ export interface ChatImperativeProps {
       appendCitations?: boolean;
     },
   ) => void;
-  disconnectConversationStream?: (
-    conversationId: string,
-    options?: { persistResumeKey?: boolean },
-  ) => void;
+  disconnectConversationStream?: (conversationId: string) => void;
   uploadFiles?: (files: File[]) => void;
   openResumeSSE?: (conversationId: string) => void;
   appendAutoAdvanceTurn?: (

@@ -33,7 +33,6 @@ import {
 } from "@/utils/developerMode";
 import { allowedUploadTypes } from "@/modules/chat/components/ImageUpload";
 import {
-  CHAT_RESUME_CONVERSATION_KEY,
   CHAT_SELECT_CONVERSATION_EVENT,
   WORKFLOW_PANEL_EXPANDED_EVENT,
   WORKFLOW_PANEL_EXPANDED_STORAGE_PREFIX,
@@ -72,6 +71,7 @@ async function loadConversationHistory(conversationId: string) {
 }
 
 interface IChatLayoutProps {
+  conversationId?: string;
   setIsChatContent: (isChatContent: boolean) => void;
   initchatConfig: ChatConfig;
   setChatConfigFn: (val: ChatConfig) => void;
@@ -89,6 +89,7 @@ interface IChatLayoutProps {
 const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const { t, i18n } = useTranslation();
   const {
+    conversationId: routeConversationId,
     setIsChatContent,
     initchatConfig,
     setChatConfigFn,
@@ -214,13 +215,9 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onUp);
   }, []);
-  const [isRestoringConversation, setIsRestoringConversation] = useState(() => {
-    try {
-      return Boolean(sessionStorage.getItem(CHAT_RESUME_CONVERSATION_KEY));
-    } catch {
-      return false;
-    }
-  });
+  const [isRestoringConversation, setIsRestoringConversation] = useState(
+    Boolean(routeConversationId),
+  );
 
   const { pendingMessage, clearPendingMessage } = useChatMessageStore();
 
@@ -354,98 +351,6 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     }
     return undefined;
   }, [pendingMessage, chatEnabled, clearPendingMessage]);
-
-  useEffect(() => {
-    const conversationId = sessionStorage.getItem(CHAT_RESUME_CONVERSATION_KEY);
-    if (!conversationId) {
-      return () => {
-        loadConversationRequestRef.current += 1;
-      };
-    }
-    const requestId = ++loadConversationRequestRef.current;
-    const isCurrentRequest = () => requestId === loadConversationRequestRef.current;
-    setIsRestoringConversation(true);
-    const resolveConversationId = (id: string): Promise<string> => {
-      if (!id || !id.startsWith("temp_")) {
-        return Promise.resolve(id);
-      }
-      return ChatServiceApi()
-        .conversationServiceListConversations({ pageToken: "", pageSize: 5 })
-        .then((listRes) => {
-          const conversations = listRes?.data?.conversations ?? [];
-          const latest = conversations[0];
-          return latest?.conversation_id ?? id;
-        })
-        .catch(() => id);
-    };
-
-    const restoreConversation = async () => {
-      try {
-        let resolvedId = conversationId;
-        let isGenerating = false;
-        try {
-          resolvedId = await resolveConversationId(conversationId);
-          if (!isCurrentRequest()) return;
-          if (resolvedId !== conversationId) {
-            sessionStorage.setItem(CHAT_RESUME_CONVERSATION_KEY, resolvedId);
-          }
-          const statusRes = await ChatServiceApi()
-            .conversationServiceGetChatStatus({ conversationId: resolvedId });
-          isGenerating = !!statusRes.data?.is_generating;
-        } catch {
-          resolvedId = conversationId;
-          isGenerating = false;
-        }
-        if (!isCurrentRequest()) return;
-        setIsChatContent(true);
-        const detailRes = await ChatServiceApi()
-          .conversationServiceGetConversationDetail({
-            conversation: resolvedId,
-          });
-        if (!isCurrentRequest()) return;
-        const historyRes = await loadConversationHistory(resolvedId);
-        if (!isCurrentRequest()) return;
-        const conversation = detailRes.data.conversation;
-        const history = historyRes.data.history;
-        useChatThinkStore.getState().setThinkingDepth(
-          resolveConversationThinkingDepth(conversation),
-        );
-        const tempData = {
-          knowledgeBaseId: conversation?.search_config?.dataset_list
-            ?.map((d: any) => d.id)
-            .filter((id: string) => !!id),
-          creators: conversation?.search_config?.creators,
-          tags: conversation?.search_config?.tags,
-          databaseBaseId: conversation?.search_config?.database_ids?.[0],
-        };
-        setChatConfig(tempData);
-        setChatConfigFn(tempData);
-        setKnowledgeRefreshKey((key) => key + 1);
-        setConversationId(resolvedId);
-
-        const list = buildChatMessageListFromHistory(history, {
-          isGenerating,
-        });
-        chatRef.current?.replaceMessageList(resolvedId, list);
-        if (isGenerating) {
-          chatRef.current?.openResumeSSE?.(resolvedId);
-        } else {
-          sessionStorage.removeItem(CHAT_RESUME_CONVERSATION_KEY);
-        }
-        setIsRestoringConversation(false);
-      } catch {
-        if (!isCurrentRequest()) return;
-        setIsRestoringConversation(false);
-        setIsChatContent(false);
-        message.error(localizeErrorCode("2000509"));
-      }
-    };
-
-    void restoreConversation();
-    return () => {
-      loadConversationRequestRef.current += 1;
-    };
-  }, []);
 
   async function onOpenSSE(
     input: Query[],
@@ -667,52 +572,39 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     }
   }, [setConversationId, setChatConfigFn, setIsChatContent]);
 
+  // Route changes own conversation loading, including browser reload/back/forward.
   useEffect(() => {
-    const handleConversationSelect = (event: Event) => {
-      const detail =
-        (event as CustomEvent<{ conversationId?: string; source?: string }>)
-          .detail || {};
-      if (detail.source !== "sidebar" && detail.source !== "mention") {
-        return;
-      }
-      const conversationId = detail.conversationId || "";
-      if (!conversationId) {
-        loadConversationRequestRef.current += 1;
-        if (sessionIdRef.current) {
-          chatRef.current?.disconnectConversationStream?.(sessionIdRef.current, {
-            persistResumeKey: false,
-          });
-        }
+    const conversationId = routeConversationId || "";
+    if (!conversationId) {
+      // The layout also mounts before the first conversation receives a real ID.
+      // Nothing needs clearing until a routed/active conversation actually exists.
+      if (!sessionIdRef.current) {
         setIsRestoringConversation(false);
-        setConversationSettings(undefined);
-        setChatConfig({});
-        setChatConfigFn({});
-        chatRef.current?.createNewChat();
         return;
       }
-      if (conversationId === sessionIdRef.current) {
-        return;
-      }
-      if (sessionIdRef.current) {
-        chatRef.current?.disconnectConversationStream?.(sessionIdRef.current, {
-          persistResumeKey: false,
-        });
-      }
-      setIsChatContent(true);
-      loadConversation(conversationId);
-    };
-
-    window.addEventListener(
-      CHAT_SELECT_CONVERSATION_EVENT,
-      handleConversationSelect,
-    );
+      loadConversationRequestRef.current += 1;
+      chatRef.current?.disconnectConversationStream?.(sessionIdRef.current);
+      sessionIdRef.current = "";
+      setSessionId("");
+      setIsRestoringConversation(false);
+      setConversationSettings(undefined);
+      setChatConfig({});
+      setChatConfigFn({});
+      chatRef.current?.createNewChat();
+      return;
+    }
+    if (conversationId === sessionIdRef.current) {
+      return;
+    }
+    if (sessionIdRef.current) {
+      chatRef.current?.disconnectConversationStream?.(sessionIdRef.current);
+    }
+    setIsChatContent(true);
+    void loadConversation(conversationId);
     return () => {
-      window.removeEventListener(
-        CHAT_SELECT_CONVERSATION_EVENT,
-        handleConversationSelect,
-      );
+      loadConversationRequestRef.current += 1;
     };
-  }, [setIsChatContent, loadConversation, setChatConfigFn]);
+  }, [loadConversation, routeConversationId, setChatConfigFn, setIsChatContent]);
 
   function parseErrorData(data: string) {
     const dataObject = UIUtils.jsonParser(data) || {};

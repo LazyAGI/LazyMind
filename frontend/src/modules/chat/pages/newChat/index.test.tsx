@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { forwardRef, useImperativeHandle } from "react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import NewChatPage from "./index";
@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   getChatSettings: vi.fn(),
   clearFiles: vi.fn(),
   latestChatInputProps: null as any,
+  latestChatLayoutProps: null as any,
 }));
 
 const entryDefaults = {
@@ -132,7 +133,12 @@ vi.mock("@/modules/showcase/FeaturedCases", () => ({
   ),
 }));
 
-vi.mock("../chatLayout", () => ({ default: () => null }));
+vi.mock("../chatLayout", () => ({
+  default: (props: any) => {
+    mocks.latestChatLayoutProps = props;
+    return <div data-testid="chat-layout" />;
+  },
+}));
 vi.mock("@/modules/chat/components/PreferenceConfigNotice", () => ({
   default: () => null,
 }));
@@ -220,6 +226,7 @@ describe("NewChatPage featured templates", () => {
     mocks.getChatSettings.mockResolvedValue({ data: { data: entryDefaults } });
     mocks.clearFiles.mockReset();
     mocks.latestChatInputProps = null;
+    mocks.latestChatLayoutProps = null;
   });
 
   it("applies the configured Quick Q&A defaults to the welcome composer", async () => {
@@ -391,15 +398,20 @@ describe("NewChatPage featured templates", () => {
     });
   });
 
-  it("does not apply entry defaults while resuming an existing conversation", async () => {
-    window.sessionStorage.setItem("chat_resume_conversation_id", "conversation-1");
-
+  it("mounts an existing conversation from the detail route without applying entry defaults", async () => {
     render(
-      <MemoryRouter initialEntries={["/agent/chat/home"]}>
-        <NewChatPage />
+      <MemoryRouter initialEntries={["/agent/chat/home/conversation-1"]}>
+        <Routes>
+          <Route
+            path="/agent/chat/home/:conversationId"
+            element={<NewChatPage />}
+          />
+        </Routes>
       </MemoryRouter>,
     );
 
+    expect(screen.getByTestId("chat-layout")).toBeVisible();
+    expect(mocks.latestChatLayoutProps.conversationId).toBe("conversation-1");
     expect(mocks.setThinkingDepth).not.toHaveBeenCalled();
     await waitFor(() => expect(mocks.getChatSettings).toHaveBeenCalledOnce());
     await waitFor(() => expect(
@@ -471,6 +483,36 @@ describe("NewChatPage featured templates", () => {
       expect(mocks.latestChatInputProps.showcaseSelection.skill.value).toBeUndefined();
       expect(mocks.latestChatInputProps.showcaseSelection.task).toBeUndefined();
     });
+  });
+
+  it("unmounts a stale chat layout when starting a new chat without a route change", async () => {
+    render(
+      <MemoryRouter initialEntries={["/agent/chat/home"]}>
+        <NewChatPage />
+      </MemoryRouter>,
+    );
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("lazymind:chat-select-conversation", {
+        detail: { conversationId: "temporary-conversation", source: "sidebar" },
+      }));
+    });
+    await waitFor(() => expect(screen.getByTestId("chat-layout")).toBeVisible());
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("lazymind:chat-select-conversation", {
+        detail: { conversationId: "", source: "sidebar" },
+      }));
+    });
+
+    await waitFor(() => expect(screen.queryByTestId("chat-layout")).not.toBeInTheDocument());
+    expect(screen.getByRole("textbox", { name: "chat-input" })).toBeVisible();
+
+    act(() => {
+      mocks.latestChatInputProps.setIsChatContent(true);
+    });
+    await waitFor(() => expect(screen.getByTestId("chat-layout")).toBeVisible());
+    expect(mocks.latestChatLayoutProps.conversationId).toBe("");
   });
 
   it("keeps template controls and capability cards while the user edits the template", async () => {

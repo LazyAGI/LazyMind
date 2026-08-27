@@ -37,7 +37,7 @@ import type { AutomationGroup, BatchScheduleDraft, Schedule, Task, TaskListRespo
 import { KnowledgeBaseServiceApi } from '@/modules/chat/utils/request';
 import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
 import { axiosInstance, BASE_URL, localizeErrorCode } from '@/components/request';
-import { CHAT_RESUME_CONVERSATION_KEY, selectChatConversationFilter } from '@/modules/chat/constants/chat';
+import { getChatConversationPath, selectChatConversationFilter } from '@/modules/chat/constants/chat';
 import { taskStatusDescription } from './taskStatusDescription';
 
 /* ── KnowledgeSelect: reusable KB selector with embedding guard ────────── */
@@ -345,8 +345,7 @@ function ExpandedScheduleTasks({ scheduleId }: { scheduleId: string }) {
 
   const handleOpenConversation = (conversationId: string) => {
     selectChatConversationFilter('task');
-    sessionStorage.setItem(CHAT_RESUME_CONVERSATION_KEY, conversationId);
-    navigate('/agent/chat/home');
+    navigate(getChatConversationPath(conversationId));
   };
 
   const statusOptions = [

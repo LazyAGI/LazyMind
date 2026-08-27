@@ -7,7 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { listTasks, removeTask } from './api';
 import type { Task } from './api';
 import TaskDetail, { StatusTag, formatDate } from './TaskDetail';
-import { CHAT_RESUME_CONVERSATION_KEY, selectChatConversationFilter } from '@/modules/chat/constants/chat';
+import { getChatConversationPath, selectChatConversationFilter } from '@/modules/chat/constants/chat';
 import StateGraphModal from '@/components/StateGraphModal';
 import ArchiveConversationModal from '@/modules/chat/components/ArchiveConversationModal';
 import { unarchiveConversation } from '@/modules/settings/recoveryApi';
@@ -108,8 +108,7 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
 
   const openConversation = (id: string) => {
     selectChatConversationFilter('task');
-    sessionStorage.setItem(CHAT_RESUME_CONVERSATION_KEY, id);
-    navigate('/agent/chat/home');
+    navigate(getChatConversationPath(id));
   };
 
   const handleDelete = async (task: Task) => {
