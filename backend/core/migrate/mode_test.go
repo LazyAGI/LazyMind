@@ -123,7 +123,7 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read v0_3 aggregate down: %v", err)
 	}
-	for _, token := range []string{"enable_plugin_was_null", "DROP TABLE IF EXISTS conversation_policy_snapshot_backups", "DROP COLUMN IF EXISTS free_auto_select_priority", "DROP COLUMN IF EXISTS free_auto_select_base_urls", "ON public.skills(owner_user_id, category, skill_name)"} {
+	for _, token := range []string{"enable_plugin_was_null", "DROP TABLE IF EXISTS conversation_policy_snapshot_backups", "DROP COLUMN IF EXISTS free_auto_select_priority", "DROP COLUMN IF EXISTS free_auto_select_base_urls", "ON public.skills(owner_user_id, category, skill_name)", "AS identity_conflicts", "AS relative_root_conflicts"} {
 		if !strings.Contains(string(v03Down), token) {
 			t.Fatalf("v0_3 aggregate down is missing %s", token)
 		}
