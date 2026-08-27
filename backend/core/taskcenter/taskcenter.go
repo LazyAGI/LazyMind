@@ -333,7 +333,7 @@ func loadStepsForConversation(ctx context.Context, db *gorm.DB, convID string) [
 	if err := db.WithContext(ctx).
 		Table("sub_agent_tasks").
 		Select("title, status, current_phase, summary, output_slots").
-		Where("conversation_id = ?", convID).
+		Where("conversation_id = ? AND agent_type <> ?", convID, "workflow_step").
 		Order("seq_in_conversation ASC").
 		Find(&rows).Error; err != nil {
 		return nil

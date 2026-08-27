@@ -107,6 +107,9 @@ func TestLoadCatalogParsesAndUpserts(t *testing.T) {
 	if row.OnlineAccessURL != "https://www.modelscope.cn/datasets/simpleai/HC3-Chinese/summary" {
 		t.Fatalf("unexpected online_access_url %q", row.OnlineAccessURL)
 	}
+	if row.Version != "v2.3.0" || row.VersionDate != "2026-07-18" || row.VersionNote != "新增司法解释" {
+		t.Fatalf("unexpected version metadata: version=%q date=%q note=%q", row.Version, row.VersionDate, row.VersionNote)
+	}
 }
 
 func TestSeedCatalogRejectsInvalidItem(t *testing.T) {
@@ -183,6 +186,7 @@ func TestSeedCatalogUpdatesChangedContent(t *testing.T) {
 
 	changed := strings.Replace(testCatalog, "description: 法律知识库", "description: 更新后的法律知识库描述", 1)
 	changed = strings.Replace(changed, "online_access_url: https://www.modelscope.cn/datasets/simpleai/HC3-Chinese/summary", "online_access_url: https://www.modelscope.cn/datasets/simpleai/HC3-Chinese/summary?tab=files", 1)
+	changed = strings.Replace(changed, "version: v2.3.0", "version: v2.4.0", 1)
 	if changed == testCatalog {
 		t.Fatal("fixture replacement failed")
 	}
@@ -196,6 +200,9 @@ func TestSeedCatalogUpdatesChangedContent(t *testing.T) {
 	}
 	if second.OnlineAccessURL != "https://www.modelscope.cn/datasets/simpleai/HC3-Chinese/summary?tab=files" {
 		t.Fatalf("expected online_access_url updated, got %q", second.OnlineAccessURL)
+	}
+	if second.Version != "v2.4.0" {
+		t.Fatalf("expected version updated, got %q", second.Version)
 	}
 }
 

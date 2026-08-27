@@ -174,6 +174,7 @@ export default function KnowledgeSquare({
             { value: "all", label: t("knowledge.allStatuses") },
             { value: "uninstalled", label: t("knowledge.uninstalled") },
             { value: "installed", label: t("knowledge.installed") },
+            { value: "updatable", label: t("knowledge.updateAvailable") },
           ]}
           onChange={setStatus}
         />
@@ -201,6 +202,8 @@ export default function KnowledgeSquare({
           {visibleItems.map((item) => {
             const active = item.active || progressByItem[item.id] !== undefined;
             const progress = progressByItem[item.id];
+            const installedVersion =
+              item.installedVersion || t("knowledge.versionUnknown");
             return (
               <article
                 key={item.id}
@@ -246,9 +249,18 @@ export default function KnowledgeSquare({
                     <ClockCircleOutlined />
                     {formatDate(item.updated)}
                   </span>
+                  {item.installed ? (
+                    <span title={t("knowledge.installedVersion")}>
+                      {installedVersion}
+                    </span>
+                  ) : null}
                 </div>
                 <div className="knowledge-square-card-actions">
-                  <span className={active ? "is-update" : "is-ready"}>
+                  <span
+                    className={
+                      active || item.updateAvailable ? "is-update" : "is-ready"
+                    }
+                  >
                     <i />
                     {active
                       ? progress === undefined
@@ -257,7 +269,9 @@ export default function KnowledgeSquare({
                             progress,
                           })
                       : item.installed
-                        ? t("knowledge.available")
+                        ? item.updateAvailable
+                          ? t("knowledge.updateAvailable")
+                          : t("knowledge.upToDate")
                         : t("knowledge.uninstalled")}
                   </span>
                   <div>
@@ -357,6 +371,29 @@ export default function KnowledgeSquare({
                   <dt>{t("knowledge.updateDate")}</dt>
                   <dd>{formatDate(detailItem.updated)}</dd>
                 </div>
+                <div>
+                  <dt>{t("knowledge.latestVersion")}</dt>
+                  <dd>{detailItem.latestVersion || "-"}</dd>
+                </div>
+                {detailItem.installed ? (
+                  <div>
+                    <dt>{t("knowledge.installedVersion")}</dt>
+                    <dd>
+                      {detailItem.installedVersion ||
+                        t("knowledge.versionUnknown")}
+                    </dd>
+                  </div>
+                ) : null}
+                {detailItem.installed ? (
+                  <div>
+                    <dt>{t("knowledge.updateStatus")}</dt>
+                    <dd>
+                      {detailItem.updateAvailable
+                        ? t("knowledge.updateAvailable")
+                        : t("knowledge.upToDate")}
+                    </dd>
+                  </div>
+                ) : null}
                 {detailItem.installedAt ? (
                   <div>
                     <dt>{t("knowledge.installedAt")}</dt>

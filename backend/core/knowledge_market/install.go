@@ -134,7 +134,7 @@ func HandleInstallJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.R
 		return asyncjob.Result{ErrorCode: "package_url_missing"}, errors.New("knowledge base has no package url")
 	}
 
-	if err := setInstallState(ctx, db, payload.MarketItemID, payload.UserID, orm.InstallStateDownloading, "", nil); err != nil {
+	if err := setInstallState(ctx, db, payload.MarketItemID, payload.UserID, orm.InstallStateDownloading, "", "", nil); err != nil {
 		return asyncjob.Result{ErrorCode: asyncjob.ErrorCodeHandlerFailed}, err
 	}
 	if reporter != nil {
@@ -182,7 +182,7 @@ func HandleInstallJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.R
 	if err != nil {
 		return failInstall(ctx, db, payload, fmt.Errorf("create dataset failed: %w", err))
 	}
-	if err := setInstallState(ctx, db, payload.MarketItemID, payload.UserID, orm.InstallStateImporting, ds.ID, nil); err != nil {
+	if err := setInstallState(ctx, db, payload.MarketItemID, payload.UserID, orm.InstallStateImporting, ds.ID, "", nil); err != nil {
 		return failInstall(ctx, db, payload, err)
 	}
 
@@ -218,7 +218,7 @@ func HandleInstallJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.R
 			snapshot.Commit = commit
 		}
 	}
-	if err := setInstallState(ctx, db, payload.MarketItemID, payload.UserID, orm.InstallStateDone, ds.ID, &snapshot); err != nil {
+	if err := setInstallState(ctx, db, payload.MarketItemID, payload.UserID, orm.InstallStateDone, ds.ID, item.Version, &snapshot); err != nil {
 		return asyncjob.Result{ErrorCode: asyncjob.ErrorCodeHandlerFailed}, err
 	}
 	if reporter != nil {
@@ -268,7 +268,7 @@ func failInstall(ctx context.Context, db *gorm.DB, payload installJobPayload, er
 			clearInstallDatasetID(ctx, db, payload)
 		}
 	}
-	_ = setInstallState(ctx, db, payload.MarketItemID, payload.UserID, orm.InstallStateFailed, "", nil)
+	_ = setInstallState(ctx, db, payload.MarketItemID, payload.UserID, orm.InstallStateFailed, "", "", nil)
 	return asyncjob.Result{ErrorCode: asyncjob.ErrorCodeHandlerFailed}, err
 }
 
@@ -284,8 +284,9 @@ func clearInstallDatasetID(ctx context.Context, db *gorm.DB, payload installJobP
 // manual upsert (instead of ON CONFLICT) keeps JSON columns portable across
 // SQLite and PostgreSQL. It is shared by the install and update pipelines
 // (marketItemID/userID instead of a concrete payload type).
-func setInstallState(ctx context.Context, db *gorm.DB, marketItemID, userID string, state orm.InstallState, datasetID string, cfg *installConfig) error {
+func setInstallState(ctx context.Context, db *gorm.DB, marketItemID, userID string, state orm.InstallState, datasetID, installedVersion string, cfg *installConfig) error {
 	now := time.Now().UTC()
+	installedVersion = strings.TrimSpace(installedVersion)
 	updates := map[string]any{
 		"install_state": string(state),
 		"updated_at":    now,
@@ -295,6 +296,9 @@ func setInstallState(ctx context.Context, db *gorm.DB, marketItemID, userID stri
 	}
 	if state == orm.InstallStateDone {
 		updates["installed_at"] = now
+		if installedVersion != "" {
+			updates["installed_version"] = installedVersion
+		}
 	}
 	if cfg != nil {
 		b, err := json.Marshal(cfg)
@@ -308,12 +312,13 @@ func setInstallState(ctx context.Context, db *gorm.DB, marketItemID, userID stri
 	err := db.WithContext(ctx).Where("market_item_id = ? AND user_id = ?", marketItemID, userID).Take(&existing).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		row := orm.KnowledgeMarketInstall{
-			MarketItemID: marketItemID,
-			UserID:       userID,
-			DatasetID:    datasetID,
-			InstallState: string(state),
-			CreatedAt:    now,
-			UpdatedAt:    now,
+			MarketItemID:     marketItemID,
+			UserID:           userID,
+			InstalledVersion: installedVersion,
+			DatasetID:        datasetID,
+			InstallState:     string(state),
+			CreatedAt:        now,
+			UpdatedAt:        now,
 		}
 		if state == orm.InstallStateDone {
 			row.InstalledAt = &now

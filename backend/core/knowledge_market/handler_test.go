@@ -321,11 +321,11 @@ func TestMarketGet(t *testing.T) {
 	if _, exists := data["package_size"]; exists {
 		t.Fatal("detail must not include package_size")
 	}
-	if _, exists := data["version"]; exists {
-		t.Fatal("detail must not expose version")
+	if data["version"] != "v2.3.0" || data["version_date"] != "2026-07-18" {
+		t.Fatalf("unexpected version metadata: version=%v date=%v", data["version"], data["version_date"])
 	}
-	if _, exists := data["version_note"]; exists {
-		t.Fatal("detail must not expose version_note")
+	if data["version_note"] != "新增司法解释" {
+		t.Fatalf("version_note=%v, want catalog value", data["version_note"])
 	}
 }
 

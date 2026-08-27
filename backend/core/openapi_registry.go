@@ -1776,6 +1776,7 @@ type knowledgeMarketListItemOpenAPIResponse struct {
 	Icon            string   `json:"icon"`
 	Domain          string   `json:"domain"`
 	Tags            []string `json:"tags"`
+	Version         string   `json:"version"`
 	OnlineAccessURL string   `json:"online_access_url"`
 	DataSource      string   `json:"data_source"`
 	SortOrder       int      `json:"sort_order"`
@@ -1798,6 +1799,9 @@ type knowledgeMarketDetailOpenAPIResponse struct {
 	Icon            string   `json:"icon"`
 	Domain          string   `json:"domain"`
 	Tags            []string `json:"tags"`
+	Version         string   `json:"version"`
+	VersionDate     string   `json:"version_date"`
+	VersionNote     string   `json:"version_note"`
 	PackageURL      string   `json:"package_url"`
 	PackageRevision string   `json:"package_revision"`
 	DataSource      string   `json:"data_source"`
@@ -1913,15 +1917,16 @@ type knowledgeMarketTaskDetailOpenAPIResponse struct {
 }
 
 type knowledgeMarketInstallsOpenAPIResponseItem struct {
-	MarketItemID string `json:"market_item_id"`
-	Name         string `json:"name"`
-	Icon         string `json:"icon"`
-	Domain       string `json:"domain"`
-	InstallState string `json:"install_state"`
-	DatasetID    string `json:"dataset_id"`
-	InstalledAt  string `json:"installed_at,omitempty"`
-	UpdatedAt    string `json:"updated_at"`
-	Active       bool   `json:"active"`
+	MarketItemID     string `json:"market_item_id"`
+	Name             string `json:"name"`
+	Icon             string `json:"icon"`
+	Domain           string `json:"domain"`
+	InstallState     string `json:"install_state"`
+	InstalledVersion string `json:"installed_version"`
+	DatasetID        string `json:"dataset_id"`
+	InstalledAt      string `json:"installed_at,omitempty"`
+	UpdatedAt        string `json:"updated_at"`
+	Active           bool   `json:"active"`
 }
 
 type knowledgeMarketInstallsOpenAPIResponse struct {
@@ -3450,7 +3455,7 @@ func registeredCoreOperations() []openAPIOperation {
 			Method:      "GET",
 			Path:        "/knowledge-market/items/{market_item_id}",
 			Summary:     "Get knowledge market item details",
-			Description: "Returns the full catalog entry including download package URL/revision and sample questions. Version fields are intentionally not exposed. 404 when the item does not exist or is not published.",
+			Description: "Returns the full catalog entry including its latest version, download package URL/revision and sample questions. 404 when the item does not exist or is not published.",
 			Tags:        []string{"knowledge-market"},
 			PathParams:  knowledgeMarketItemPathParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Knowledge market item", knowledgeMarketDetailOpenAPIResponse{})},
@@ -3644,8 +3649,8 @@ func registeredCoreOperations() []openAPIOperation {
 		{
 			Method:      "GET",
 			Path:        "/model_providers/models",
-			Summary:     "List current user's models by model_type",
-			Description: "Requires query model_type (e.g. llm, vlm, or embed). Returns all non-deleted user_model_provider_group_models for the current user with that model_type across all providers and groups. Each item includes nullable max_input_tokens, the catalog model's maximum input context window expressed as a string such as 512, 128K, or 1M; custom or unknown models return null. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.",
+			Summary:     "List current user's available models",
+			Description: "Optionally filters by query model_type (e.g. llm, vlm, or embed). When omitted, returns every non-deleted model in the current user's verified provider groups. Each item includes nullable max_input_tokens, the catalog model's maximum input context window expressed as a string such as 512, 128K, or 1M; custom or unknown models return null. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.",
 			Tags:        []string{"model_providers"},
 			QueryParams: listUserModelsByModelTypeQueryParams{},
 			Responses:   map[int]openAPIResponse{200: resp("Models list", listModelProviderGroupModelsOpenAPIResponse{})},

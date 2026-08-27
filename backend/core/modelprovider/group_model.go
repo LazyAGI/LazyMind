@@ -54,7 +54,8 @@ func compatibleDBModelTypes(modelType string) []string {
 	if modelType == EvoModelKey {
 		return []string{"llm", "vlm"}
 	}
-	if modelType == "cross_modal_embed" {
+	switch modelType {
+	case "cross_modal_embed", "multimodal_embedding", "embed_image":
 		return []string{"cross_modal_embed", "multimodal_embedding", "embed_image"}
 	}
 	return []string{modelType}
@@ -257,8 +258,8 @@ func ListGroupModels(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, groupModelListResponse{Models: out})
 }
 
-// ListUserModelsByModelType lists the current user's models across all user_model_providers,
-// filtered by required query model_type. Response shape matches ListGroupModels.
+// ListUserModelsByModelType lists the current user's models across all user_model_providers.
+// When model_type is provided, results are filtered to that type. Response shape matches ListGroupModels.
 func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 	db := store.DB()
 	if db == nil {
@@ -272,24 +273,20 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 	}
 
 	modelType := strings.TrimSpace(r.URL.Query().Get("model_type"))
-	if modelType == "" {
-		common.ReplyErr(w, "model_type is required", http.StatusBadRequest)
-		return
-	}
 	keyword := strings.TrimSpace(r.URL.Query().Get("keyword"))
-
-	// Translate runtime_models.yaml role key (e.g. "evo_llm") to the lazyllm
-	// technical type (e.g. "llm") stored in user_model_provider_group_models.
-	dbModelType := modelType
-	if modelType != EvoModelKey {
-		dbModelType = resolveModelType(r.Context(), modelType)
-	}
-	dbModelTypes := compatibleDBModelTypes(dbModelType)
-
 	q := db.WithContext(r.Context()).
 		Joins("JOIN user_model_providers ON user_model_providers.id = user_model_provider_group_models.user_model_provider_id AND user_model_providers.deleted_at IS NULL AND user_model_providers.capabilities LIKE '%has_models%'").
 		Joins("JOIN user_model_provider_groups ON user_model_provider_groups.id = user_model_provider_group_models.user_model_provider_group_id AND user_model_provider_groups.create_user_id = user_model_provider_group_models.create_user_id AND user_model_provider_groups.deleted_at IS NULL AND user_model_provider_groups.is_verified = ?", true).
-		Where("user_model_provider_group_models.create_user_id = ? AND user_model_provider_group_models.deleted_at IS NULL AND user_model_provider_group_models.model_type IN ?", userID, dbModelTypes)
+		Where("user_model_provider_group_models.create_user_id = ? AND user_model_provider_group_models.deleted_at IS NULL", userID)
+	if modelType != "" {
+		// Translate runtime_models.yaml role key (e.g. "evo_llm") to the lazyllm
+		// technical type (e.g. "llm") stored in user_model_provider_group_models.
+		dbModelType := modelType
+		if modelType != EvoModelKey {
+			dbModelType = resolveModelType(r.Context(), modelType)
+		}
+		q = q.Where("user_model_provider_group_models.model_type IN ?", compatibleDBModelTypes(dbModelType))
+	}
 	if keyword != "" {
 		like := "%" + keyword + "%"
 		q = q.Where(
@@ -358,7 +355,7 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 			GroupName:                grp.name,
 			BaseURL:                  grp.baseURL,
 			IsDefault:                m.IsDefault,
-			IsEditable:               strings.EqualFold(modelType, "image_editing"),
+			IsEditable:               strings.EqualFold(m.ModelType, "image_editing"),
 			MaxInputTokens:           m.MaxInputTokens,
 		})
 	}

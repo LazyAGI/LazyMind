@@ -389,6 +389,7 @@
   overflow: visible;
   padding: 0;
 }
+.settings-integrated-surface.is-models > .model-provider-service-page { width: 100%; }
 .settings-integrated-surface.is-models .model-provider-shell {
   height: auto;
   min-height: 0;
@@ -398,6 +399,42 @@
   height: auto;
   overflow: visible;
   padding-bottom: 0;
+}
+@media (min-width: 1361px) {
+  .settings-integrated-page.is-models-page {
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    padding-bottom: 18px;
+  }
+  .settings-integrated-page.is-models-page > .settings-detail-header,
+  .settings-integrated-page.is-models-page > .settings-model-tabs { flex: 0 0 auto; }
+  .settings-integrated-page.is-models-page > .settings-integrated-surface.is-models {
+    min-height: 0;
+    display: flex;
+    flex: 1 1 auto;
+    overflow: hidden;
+  }
+  .settings-integrated-surface.is-models .model-provider-page-content {
+    min-height: 0;
+    display: flex;
+    flex: 1 1 auto;
+  }
+  .settings-integrated-surface.is-models .model-provider-shell {
+    height: 100%;
+    min-height: 0;
+    flex: 1 1 auto;
+    align-items: stretch;
+  }
+  .settings-integrated-surface.is-models .model-provider-main-panel {
+    height: auto;
+    min-height: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+  }
+  .settings-integrated-surface.is-models .model-provider-side-panel { height: auto; }
 }
 .settings-schedule-panel { margin-top: 24px; }
 .settings-schedule-heading { display: flex; align-items: center; justify-content: space-between; gap: 18px; margin-bottom: 12px; }

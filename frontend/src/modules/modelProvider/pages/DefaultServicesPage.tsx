@@ -23,6 +23,48 @@ const loadingSetupAvailability: SetupAvailability = {
   searchEngine: "loading",
 };
 
+const configurableModelTypes = [
+  "llm",
+  "embed_main",
+  "cross_modal_embed",
+  "vlm",
+  "reranker",
+  "speech_to_text",
+  "text2image",
+  "image_editing",
+  "text2video",
+  "evo_llm",
+];
+
+const silentSetupCheckOptions = { silentError: true } as never;
+
+async function listAvailableModels() {
+  try {
+    return await modelProvidersApi.apiCoreModelProvidersModelsGet(
+      {},
+      silentSetupCheckOptions,
+    );
+  } catch (error) {
+    const results = await Promise.allSettled(
+      configurableModelTypes.map((modelType) =>
+        modelProvidersApi.apiCoreModelProvidersModelsGet(
+          { modelType },
+          silentSetupCheckOptions,
+        ),
+      ),
+    );
+    const fulfilled = results.filter((result) => result.status === "fulfilled");
+    if (fulfilled.length === 0) throw error;
+    return {
+      data: {
+        models: fulfilled.flatMap((result) =>
+          unwrapModelProviderData<{ models?: unknown[] }>(result.value.data).models ?? [],
+        ),
+      },
+    };
+  }
+}
+
 export default function DefaultServicesPage({
   onConfigureCloudService,
   onConfigureProviders,
@@ -35,9 +77,15 @@ export default function DefaultServicesPage({
     const requestId = ++latestRequest.current;
     setSetupAvailability(loadingSetupAvailability);
     const [modelResult, parsingResult, searchResult] = await Promise.allSettled([
-      modelProvidersApi.apiCoreModelProvidersModelsGet({ modelType: "llm" }),
-      modelProvidersApi.apiCoreModelProvidersProviderGroupsGet({ category: "ocr" }),
-      modelProvidersApi.apiCoreModelProvidersProviderGroupsGet({ category: "search" }),
+      listAvailableModels(),
+      modelProvidersApi.apiCoreModelProvidersProviderGroupsGet(
+        { category: "ocr" },
+        silentSetupCheckOptions,
+      ),
+      modelProvidersApi.apiCoreModelProvidersProviderGroupsGet(
+        { category: "search" },
+        silentSetupCheckOptions,
+      ),
     ]);
     if (requestId !== latestRequest.current) return;
 

@@ -124,6 +124,23 @@ describe("TaskCenter display modes", () => {
     expect(document.querySelector(".ordinary-summary-list")).not.toBeInTheDocument();
   });
 
+  it("shows persisted workflow task names and reveals the full name on hover", async () => {
+    render(
+      <TaskCenter
+        sessionId="conversation-1"
+        developerMode={false}
+        workflowSteps={workflowSteps}
+      />,
+    );
+
+    expect(screen.getByText("image-workflow:analyze")).toBeInTheDocument();
+    const taskName = screen.getByText("image-workflow:collect-3");
+    fireEvent.mouseEnter(taskName);
+
+    expect(await screen.findByRole("tooltip"))
+      .toHaveTextContent("image-workflow:collect-3");
+  });
+
   it("keeps every attempt and the full execution trace in developer mode", () => {
     render(
       <TaskCenter

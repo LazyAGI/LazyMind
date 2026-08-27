@@ -7,7 +7,6 @@ import { AgentAppsAuth } from "@/components/auth";
 import ChatContainerComponent, {
   type ChatImperativeProps,
 } from "@/modules/chat/components/newChatContainer";
-import { CHAT_RESUME_CONVERSATION_KEY } from "@/modules/chat/constants/chat";
 import { Method, SSE } from "@/modules/chat/utils/sse";
 import {
   CHAT_RESUME_STREAM_URL,
@@ -63,10 +62,6 @@ export default function PdfTemporaryChat({
   useEffect(() => {
     conversationIdRef.current = conversationId;
   }, [conversationId]);
-
-  useEffect(() => () => {
-    sessionStorage.removeItem(CHAT_RESUME_CONVERSATION_KEY);
-  }, []);
 
   useEffect(() => {
     if (!conversationToLoad || !chatRef.current) return;

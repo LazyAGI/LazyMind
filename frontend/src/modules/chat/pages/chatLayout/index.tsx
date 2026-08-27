@@ -510,6 +510,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
 
   const setConversationId = useCallback((id: string) => {
     if (id === sessionIdRef.current) return;
+    sessionIdRef.current = id;
     setSessionId(id);
     window.dispatchEvent(
       new CustomEvent(CHAT_SELECT_CONVERSATION_EVENT, {
@@ -598,13 +599,15 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
     }
     if (sessionIdRef.current) {
       chatRef.current?.disconnectConversationStream?.(sessionIdRef.current);
+      setConversationId(conversationId);
+      chatRef.current?.replaceMessageList(conversationId, []);
     }
     setIsChatContent(true);
     void loadConversation(conversationId);
     return () => {
       loadConversationRequestRef.current += 1;
     };
-  }, [loadConversation, routeConversationId, setChatConfigFn, setIsChatContent]);
+  }, [loadConversation, routeConversationId, setChatConfigFn, setConversationId, setIsChatContent]);
 
   function parseErrorData(data: string) {
     const dataObject = UIUtils.jsonParser(data) || {};

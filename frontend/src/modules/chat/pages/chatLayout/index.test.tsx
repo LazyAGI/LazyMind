@@ -266,6 +266,78 @@ describe("ChatLayout conversation loading", () => {
     expect(mocks.messageError).not.toHaveBeenCalled();
   });
 
+  it("clears the previous conversation while the next route is loading", async () => {
+    const nextHistory = deferred<any>();
+    mocks.getConversationDetail.mockImplementation(
+      ({ conversation }: { conversation: string }) => Promise.resolve({
+        data: {
+          conversation: {
+            conversation_id: conversation,
+            thinking_depth: "high",
+            search_config: {},
+            settings: { chat_executor: "lazymind" },
+          },
+        },
+      }),
+    );
+    mocks.getConversationHistory.mockImplementation(
+      ({ name }: { name: string }) => name === "conversation-b"
+        ? nextHistory.promise
+        : Promise.resolve({ data: { history: [{ conversation: name }] } }),
+    );
+
+    const { rerender } = render(
+      <ChatLayout
+        conversationId="conversation-a"
+        setIsChatContent={vi.fn()}
+        initchatConfig={{}}
+        setChatConfigFn={vi.fn()}
+        canChat
+      />,
+    );
+
+    await waitFor(() => {
+      expect(mocks.replaceMessageList).toHaveBeenCalledWith(
+        "conversation-a",
+        [{ conversation: "conversation-a" }],
+      );
+    });
+    mocks.replaceMessageList.mockClear();
+
+    rerender(
+      <ChatLayout
+        conversationId="conversation-b"
+        setIsChatContent={vi.fn()}
+        initchatConfig={{}}
+        setChatConfigFn={vi.fn()}
+        canChat
+      />,
+    );
+
+    await waitFor(() => {
+      expect(mocks.disconnectConversationStream)
+        .toHaveBeenCalledWith("conversation-a");
+      expect(mocks.replaceMessageList)
+        .toHaveBeenCalledWith("conversation-b", []);
+      expect(screen.getByTestId("chat-container"))
+        .toHaveAttribute("data-session-id", "conversation-b");
+    });
+
+    await act(async () => {
+      nextHistory.resolve({
+        data: { history: [{ conversation: "conversation-b" }] },
+      });
+      await nextHistory.promise;
+    });
+
+    await waitFor(() => {
+      expect(mocks.replaceMessageList).toHaveBeenLastCalledWith(
+        "conversation-b",
+        [{ conversation: "conversation-b" }],
+      );
+    });
+  });
+
   it("invalidates the initial route request when the layout unmounts", async () => {
     const routeDetail = deferred<any>();
     mocks.getConversationDetail.mockReturnValue(routeDetail.promise);

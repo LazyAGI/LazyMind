@@ -1,4 +1,14 @@
 -- +migrate Dialect postgres
+ALTER TABLE public.task_center_tasks DROP CONSTRAINT IF EXISTS chk_tct_task_type;
+UPDATE public.task_center_tasks SET task_type = 'plugin_run' WHERE task_type = 'workflow_run';
+ALTER TABLE public.task_center_tasks
+    ADD CONSTRAINT chk_tct_task_type
+    CHECK (((task_type)::text = ANY (ARRAY[
+        'plugin_run'::text,
+        'background_chat'::text,
+        'scheduled'::text
+    ])));
+
 DROP INDEX IF EXISTS public.idx_skill_revision_distributions_archive;
 DROP TABLE IF EXISTS public.skill_revision_distributions;
 DROP INDEX IF EXISTS public.idx_skill_distribution_bindings_uid;
@@ -148,6 +158,8 @@ BEGIN
 END $$;
 
 -- +migrate Dialect sqlite
+UPDATE task_center_tasks SET task_type = 'plugin_run' WHERE task_type = 'workflow_run';
+
 DROP INDEX IF EXISTS `idx_skill_revision_distributions_archive`;
 DROP TABLE IF EXISTS `skill_revision_distributions`;
 DROP INDEX IF EXISTS `idx_skill_distribution_bindings_uid`;

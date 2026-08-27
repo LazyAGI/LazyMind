@@ -5008,6 +5008,12 @@ components:
                     type: array
                 updated_at:
                     type: string
+                version:
+                    type: string
+                version_date:
+                    type: string
+                version_note:
+                    type: string
             required:
                 - category
                 - created_at
@@ -5021,6 +5027,9 @@ components:
                 - package_url
                 - sort_order
                 - updated_at
+                - version
+                - version_date
+                - version_note
             type: object
         knowledgeMarketDomainsGroupOpenAPIResponse:
             properties:
@@ -5075,6 +5084,8 @@ components:
                     type: string
                 installed_at:
                     type: string
+                installed_version:
+                    type: string
                 market_item_id:
                     type: string
                 name:
@@ -5087,6 +5098,7 @@ components:
                 - domain
                 - icon
                 - install_state
+                - installed_version
                 - market_item_id
                 - name
                 - updated_at
@@ -5119,6 +5131,8 @@ components:
                     type: array
                 updated_at:
                     type: string
+                version:
+                    type: string
             required:
                 - category
                 - created_at
@@ -5131,6 +5145,7 @@ components:
                 - online_access_url
                 - sort_order
                 - updated_at
+                - version
             type: object
         knowledgeMarketListOpenAPIResponse:
             properties:
@@ -11420,7 +11435,7 @@ paths:
                 - knowledge-market
     /api/core/knowledge-market/items/{market_item_id}:
         get:
-            description: Returns the full catalog entry including download package URL/revision and sample questions. Version fields are intentionally not exposed. 404 when the item does not exist or is not published.
+            description: Returns the full catalog entry including its latest version, download package URL/revision and sample questions. 404 when the item does not exist or is not published.
             parameters:
                 - in: path
                   name: market_item_id
@@ -12615,7 +12630,7 @@ paths:
                 - model_providers
     /api/core/model_providers/models:
         get:
-            description: Requires query model_type (e.g. llm, vlm, or embed). Returns all non-deleted user_model_provider_group_models for the current user with that model_type across all providers and groups. Each item includes nullable max_input_tokens, the catalog model's maximum input context window expressed as a string such as 512, 128K, or 1M; custom or unknown models return null. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.
+            description: Optionally filters by query model_type (e.g. llm, vlm, or embed). When omitted, returns every non-deleted model in the current user's verified provider groups. Each item includes nullable max_input_tokens, the catalog model's maximum input context window expressed as a string such as 512, 128K, or 1M; custom or unknown models return null. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.
             parameters:
                 - in: query
                   name: model_type
@@ -12629,7 +12644,7 @@ paths:
                             schema:
                                 $ref: '#/components/schemas/listModelProviderGroupModelsOpenAPIResponse'
                     description: Models list
-            summary: List current user's models by model_type
+            summary: List current user's available models
             tags:
                 - model_providers
     /api/core/model_providers/models/ready:
