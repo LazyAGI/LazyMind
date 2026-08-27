@@ -1126,6 +1126,9 @@ class CloudOAuthService:
                 and existing.connection_id != row.connection_id
                 and not is_different_app
             ):
+                restoring_revoked_connection = (
+                    (existing.status or '').strip().upper() == 'REVOKED'
+                )
                 existing.client_id = row.client_id
                 existing.credential_ciphertext = row.credential_ciphertext
                 existing.auth_state_ciphertext = row.auth_state_ciphertext
@@ -1135,6 +1138,8 @@ class CloudOAuthService:
                 existing.scope = row.scope
                 existing.status = 'ACTIVE'
                 existing.last_error = ''
+                if restoring_revoked_connection:
+                    existing.created_at = row.created_at
                 row.status = 'REVOKED'
                 row.last_error = 'superseded by existing provider account connection'
                 CloudAuthConnectionRepository.save(db, row)
