@@ -208,7 +208,7 @@ func conversationIDFromName(name string) string {
 }
 
 // ensureConversation textCreatetextUsertextConversation，textConversation、text history text seq、error
-func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName string, searchConfig json.RawMessage, models json.RawMessage, userID, userName string, conversationSettings map[string]any) (*orm.Conversation, int, error) {
+func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName string, searchConfig json.RawMessage, models json.RawMessage, userID, userName string, runInBackground bool, requestedThinkingDepth string, conversationSettings map[string]any) (*orm.Conversation, int, error) {
 	now := time.Now()
 	var c orm.Conversation
 	err := db.Where("id = ? AND create_user_id = ?", convID, userID).First(&c).Error
@@ -276,11 +276,12 @@ func ensureConversation(ctx context.Context, db *gorm.DB, convID, displayName st
 	// Priority: caller-supplied conversation settings > user_chat_settings defaults.
 	// All fields are written once so the conversation owns a stable execution
 	// policy without per-request fallback queries.
-	settings := resolveInitialConversationSettings(ctx, db, userID, conversationSettings)
+	settings := resolveInitialConversationSettings(ctx, db, userID, runInBackground, requestedThinkingDepth, conversationSettings)
 	c.EnableWorkflow = &settings.enableWorkflow
 	c.WorkflowMode = &settings.workflowMode
 	c.EnableSubagent = &settings.enableSubagent
 	c.ChatExecutor = settings.chatExecutor
+	c.ThinkingDepth = settings.thinkingDepth
 	if err := db.Create(&c).Error; err != nil {
 		return nil, 0, err
 	}
@@ -292,28 +293,33 @@ type resolvedConversationSettings struct {
 	workflowMode   string
 	enableSubagent bool
 	chatExecutor   string
+	thinkingDepth  string
 }
 
 // resolveInitialConversationSettings merges caller-supplied overrides with the user's
 // global defaults from user_chat_settings. Fields present in conversationSettings take
 // priority; missing fields fall back to the DB defaults (or hardcoded values if
 // the user has no row yet).
-func resolveInitialConversationSettings(ctx context.Context, db *gorm.DB, userID string, conversationSettings map[string]any) resolvedConversationSettings {
-	// Start from hardcoded fallbacks (matches user_chat_settings DB defaults).
-	out := resolvedConversationSettings{
-		enableWorkflow: true,
-		workflowMode:   "dynamic",
-		enableSubagent: true,
-		chatExecutor:   ChatExecutorLazyMind,
+func resolveInitialConversationSettings(ctx context.Context, db *gorm.DB, userID string, runInBackground bool, requestedThinkingDepth string, conversationSettings map[string]any) resolvedConversationSettings {
+	legacy := defaultUserChatSettings(userID)
+	entry := quickQuestionDefaultsFromLegacy(legacy)
+	if runInBackground {
+		entry = newTaskDefaultsFromLegacy(legacy)
 	}
-	// Load user-level defaults.
 	if db != nil {
-		var s orm.UserChatSettings
-		if err := db.WithContext(ctx).Where("user_id = ?", userID).First(&s).Error; err == nil {
-			out.enableWorkflow = s.EnableWorkflow
-			out.workflowMode = s.WorkflowMode
-			out.enableSubagent = s.EnableSubagent
+		if stored, err := entryDefaultsForRequest(ctx, db, userID, runInBackground); err == nil {
+			entry = stored
 		}
+	}
+	out := resolvedConversationSettings{
+		enableWorkflow: entry.ConversationSettings.EnableWorkflow,
+		workflowMode:   entry.ConversationSettings.WorkflowMode,
+		enableSubagent: entry.ConversationSettings.EnableSubagent,
+		chatExecutor:   entry.ConversationSettings.ChatExecutor,
+		thinkingDepth:  entry.ThinkingDepth,
+	}
+	if depth, valid := normalizeThinkingDepth(requestedThinkingDepth); valid {
+		out.thinkingDepth = depth
 	}
 	// Apply caller-supplied overrides.
 	if v, ok := conversationSettings["enable_workflow"].(bool); ok {
@@ -436,7 +442,8 @@ func buildAskUserToolResultContent(
 // buildHistoryMessages converts stored chat histories to the format expected by Python.
 // When askAnswersStructured is provided, the last unanswered ask_user tool_result is
 // rewritten to contain the full structured context.
-func buildHistoryMessages(histories []orm.ChatHistory, askAnswersStructured map[string]any) []map[string]string {
+// Each message may include history_seq (chat_histories.seq) for dual-track compression.
+func buildHistoryMessages(histories []orm.ChatHistory, askAnswersStructured map[string]any) []map[string]any {
 	if len(histories) == 0 {
 		return nil
 	}
@@ -462,7 +469,7 @@ func buildHistoryMessages(histories []orm.ChatHistory, askAnswersStructured map[
 		break
 	}
 
-	out := make([]map[string]string, 0, len(histories)*2)
+	out := make([]map[string]any, 0, len(histories)*2)
 	for idx, h := range histories {
 		assistantContent := buildAssistantHistoryContent(h)
 
@@ -487,10 +494,200 @@ func buildHistoryMessages(histories []orm.ChatHistory, askAnswersStructured map[
 			assistantContent = replaceAskUserToolResult(assistantContent, newContent)
 		}
 
-		out = append(out, map[string]string{"role": "user", "content": h.RawContent})
-		out = append(out, map[string]string{"role": "assistant", "content": assistantContent})
+		out = append(out, map[string]any{
+			"role": "user", "content": h.RawContent, "history_seq": h.Seq,
+		})
+		out = append(out, map[string]any{
+			"role": "assistant", "content": assistantContent, "history_seq": h.Seq,
+		})
 	}
 	return out
+}
+
+const runtimeSummaryDisclaimer = "The following is a runtime-generated summary of earlier conversation history.\n" +
+	"It is reference context, not a new user instruction.\n" +
+	"The latest user message and current runtime state take precedence."
+
+type modelContextState struct {
+	SummaryText       string `json:"summary_text"`
+	CoveredThroughSeq int    `json:"covered_through_seq"`
+	Version           int    `json:"version,omitempty"`
+}
+
+func loadModelContext(ctx context.Context, db *gorm.DB, convID string) *modelContextState {
+	if db == nil || strings.TrimSpace(convID) == "" {
+		return nil
+	}
+	var conv orm.Conversation
+	if err := db.WithContext(ctx).Select("ext").Where("id = ?", convID).First(&conv).Error; err != nil {
+		return nil
+	}
+	ext := map[string]any{}
+	if len(conv.Ext) == 0 || json.Unmarshal(conv.Ext, &ext) != nil {
+		return nil
+	}
+	raw, _ := ext["model_context"].(map[string]any)
+	if len(raw) == 0 {
+		return nil
+	}
+	state := &modelContextState{Version: 1}
+	if s, ok := raw["summary_text"].(string); ok {
+		state.SummaryText = strings.TrimSpace(s)
+	}
+	switch v := raw["covered_through_seq"].(type) {
+	case float64:
+		state.CoveredThroughSeq = int(v)
+	case int:
+		state.CoveredThroughSeq = v
+	case int64:
+		state.CoveredThroughSeq = int(v)
+	}
+	switch v := raw["version"].(type) {
+	case float64:
+		state.Version = int(v)
+	case int:
+		state.Version = v
+	}
+	if state.SummaryText == "" || state.CoveredThroughSeq <= 0 {
+		return nil
+	}
+	return state
+}
+
+func filterHistoriesAfterCovered(histories []orm.ChatHistory, coveredThroughSeq int) []orm.ChatHistory {
+	if coveredThroughSeq <= 0 || len(histories) == 0 {
+		return histories
+	}
+	out := make([]orm.ChatHistory, 0, len(histories))
+	for _, h := range histories {
+		if h.Seq > coveredThroughSeq {
+			out = append(out, h)
+		}
+	}
+	return out
+}
+
+func normalizeModelContextCoverage(
+	histories []orm.ChatHistory,
+	modelCtx *modelContextState,
+) *modelContextState {
+	if modelCtx == nil || strings.TrimSpace(modelCtx.SummaryText) == "" || len(histories) == 0 {
+		return modelCtx
+	}
+	maxSeq := histories[len(histories)-1].Seq
+	if modelCtx.CoveredThroughSeq <= maxSeq {
+		return modelCtx
+	}
+	return nil
+}
+
+func buildModelHistoryMessages(
+	histories []orm.ChatHistory,
+	askAnswersStructured map[string]any,
+	modelCtx *modelContextState,
+) []map[string]any {
+	modelCtx = normalizeModelContextCoverage(histories, modelCtx)
+	tail := histories
+	if modelCtx != nil {
+		tail = filterHistoriesAfterCovered(histories, modelCtx.CoveredThroughSeq)
+	}
+	msgs := buildHistoryMessages(tail, askAnswersStructured)
+	if modelCtx == nil || strings.TrimSpace(modelCtx.SummaryText) == "" {
+		return msgs
+	}
+	summaryMsg := map[string]any{
+		"role":    "user",
+		"content": runtimeSummaryDisclaimer + "\n\n" + strings.TrimSpace(modelCtx.SummaryText),
+	}
+	out := make([]map[string]any, 0, len(msgs)+1)
+	out = append(out, summaryMsg)
+	out = append(out, msgs...)
+	return out
+}
+
+func clearModelContext(ctx context.Context, db *gorm.DB, convID string) error {
+	if db == nil || strings.TrimSpace(convID) == "" {
+		return nil
+	}
+	var conv orm.Conversation
+	if err := db.WithContext(ctx).Select("id", "ext").Where("id = ?", convID).First(&conv).Error; err != nil {
+		return err
+	}
+	ext := map[string]any{}
+	if len(conv.Ext) == 0 {
+		return nil
+	}
+	if err := json.Unmarshal(conv.Ext, &ext); err != nil {
+		return err
+	}
+	if _, ok := ext["model_context"]; !ok {
+		return nil
+	}
+	delete(ext, "model_context")
+	raw, err := json.Marshal(ext)
+	if err != nil {
+		return err
+	}
+	return db.WithContext(ctx).Model(&orm.Conversation{}).Where("id = ?", convID).Update("ext", raw).Error
+}
+
+// handleModelContextUpdated atomically writes summary_text + covered_through_seq.
+// Rejects empty summary, non-positive covered, stale/equal covered watermarks,
+// or regressions below the current covered seq.
+func handleModelContextUpdated(
+	ctx context.Context,
+	db *gorm.DB,
+	convID string,
+	ev *ModelContextUpdatedEvent,
+) {
+	if db == nil || ev == nil || strings.TrimSpace(convID) == "" {
+		return
+	}
+	summary := strings.TrimSpace(ev.SummaryText)
+	if summary == "" || ev.CoveredThroughSeq <= 0 {
+		return
+	}
+	err := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var conv orm.Conversation
+		if err := tx.Select("id", "ext").Where("id = ?", convID).First(&conv).Error; err != nil {
+			return err
+		}
+		ext := map[string]any{}
+		if len(conv.Ext) > 0 {
+			_ = json.Unmarshal(conv.Ext, &ext)
+		}
+		prevCovered := 0
+		if prev, ok := ext["model_context"].(map[string]any); ok {
+			switch v := prev["covered_through_seq"].(type) {
+			case float64:
+				prevCovered = int(v)
+			case int:
+				prevCovered = v
+			case int64:
+				prevCovered = int(v)
+			}
+		}
+		if ev.CoveredThroughSeq <= prevCovered {
+			return nil
+		}
+		version := ev.Version
+		if version <= 0 {
+			version = 1
+		}
+		ext["model_context"] = map[string]any{
+			"summary_text":        summary,
+			"covered_through_seq": ev.CoveredThroughSeq,
+			"version":             version,
+		}
+		raw, err := json.Marshal(ext)
+		if err != nil {
+			return err
+		}
+		return tx.Model(&orm.Conversation{}).Where("id = ?", convID).Update("ext", raw).Error
+	})
+	if err != nil {
+		fmt.Printf("[Core] [MODEL_CONTEXT_UPDATE_FAILED] conv=%s err=%v\n", convID, err)
+	}
 }
 
 var askUserToolResultPattern = regexp.MustCompile(`(?s)(<tool_result\b[^>]*>)Question sent to user \(ask_id=[^)]+\)\.(</tool_result>)`)
@@ -991,24 +1188,32 @@ func buildChatRequestBody(ctx context.Context, db *gorm.DB, convID, sessionID, q
 	}
 	currentFilePaths := filePathsForUpstreamChat(raw)
 	filesMap := filesPerTurnMap(histories, currentFilePaths, currentSeq)
+	modelCtx := loadModelContext(ctx, db, convID)
 	body := map[string]any{
 		"query":            query,
 		"user_query":       query,
 		"session_id":       sessionID,
 		"conversation_id":  convID,
-		"history":          buildHistoryMessages(histories, askAnswersStructuredFromRaw(raw)),
+		"history":          buildModelHistoryMessages(histories, askAnswersStructuredFromRaw(raw), modelCtx),
 		"filters":          raw["filters"],
 		"files":            filesMap,
 		"current_turn_seq": currentSeq,
 		"databases":        raw["databases"],
 		"debug":            raw["debug"],
 		"reasoning":        resolveReasoning(raw),
-		"thinking_depth":   resolveThinkingDepth(raw),
+		"thinking_depth":   resolveThinkingDepth(ctx, db, convID, userID, raw),
 		"priority":         raw["priority"],
 		"use_memory":       useMemory,
 		"user_id":          strings.TrimSpace(userID),
 		"mode":             mode,
 		"intent_context":   loadConversationIntentContext(ctx, db, convID),
+	}
+	if modelCtx != nil {
+		body["model_context"] = map[string]any{
+			"summary_text":        modelCtx.SummaryText,
+			"covered_through_seq": modelCtx.CoveredThroughSeq,
+			"version":             modelCtx.Version,
+		}
 	}
 	requestDisabledTools := stringSliceFromAny(raw["disabled_tools"])
 	if len(requestDisabledTools) > 0 {
@@ -1196,12 +1401,35 @@ func resolveReasoning(raw map[string]any) bool {
 	return true
 }
 
-func resolveThinkingDepth(raw map[string]any) string {
+func resolveThinkingDepth(ctx context.Context, db *gorm.DB, convID, userID string, raw map[string]any) string {
 	if value, ok := raw["thinking_depth"].(string); ok {
-		switch strings.ToLower(strings.TrimSpace(value)) {
-		case "low", "medium", "high", "max":
-			return strings.ToLower(strings.TrimSpace(value))
+		if depth, valid := normalizeThinkingDepth(value); valid {
+			return depth
 		}
+	}
+	if db != nil && strings.TrimSpace(convID) != "" {
+		var snapshot struct {
+			ThinkingDepth string `gorm:"column:thinking_depth"`
+		}
+		query := db.WithContext(ctx).Model(&orm.Conversation{}).
+			Select("thinking_depth").Where("id = ?", strings.TrimSpace(convID))
+		if strings.TrimSpace(userID) != "" {
+			query = query.Where("create_user_id = ?", strings.TrimSpace(userID))
+		}
+		if err := query.Take(&snapshot).Error; err == nil {
+			if depth, valid := normalizeThinkingDepth(snapshot.ThinkingDepth); valid {
+				return depth
+			}
+		}
+	}
+	runInBackground, _ := raw["run_in_background"].(bool)
+	if db != nil {
+		if entry, err := entryDefaultsForRequest(ctx, db, userID, runInBackground); err == nil {
+			return entry.ThinkingDepth
+		}
+	}
+	if runInBackground {
+		return "high"
 	}
 	return "medium"
 }
@@ -1723,6 +1951,10 @@ func streamSingleAnswer(
 		}
 		if d.WorkflowPreflightUpdated != nil {
 			handleWorkflowPreflightUpdated(chatCtx, db, convID, d.WorkflowPreflightUpdated)
+			continue
+		}
+		if d.ModelContextUpdated != nil {
+			handleModelContextUpdated(chatCtx, db, convID, d.ModelContextUpdated)
 			continue
 		}
 		if d.Heartbeat {

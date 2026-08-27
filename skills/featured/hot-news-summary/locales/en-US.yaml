@@ -1,0 +1,51 @@
+locale: en-US
+
+classification:
+  category: Information & analysis
+  tags:
+    - Daily hot topics
+    - Hot-list digest
+    - News analysis
+    - Topic insights
+
+presentation:
+  card:
+    title: Daily topic assistant
+    description: Aggregate hot lists, select today's key topics, and produce evidence-based three-layer insights
+    output_type: report
+    output_label: Daily hot-topic digest
+    cover_asset: cover
+    result_summary: Select valuable topics across platforms and explain what happened, why it matters, and what to watch next
+  detail:
+    title: Daily topic assistant
+    description: Aggregate hot lists from platforms such as Weibo, Zhihu, Bilibili, Douyin, Baidu, 36Kr, SSPAI, and Tieba, then produce a structured insight digest.
+    attachment_hint: Optionally provide preferred or excluded topics, commentary style, or output format
+
+tasks:
+  - id: daily-hot-topics
+    selector:
+      title: Generate today's hot-topic digest
+      description: Select topics from multi-platform hot lists, analyze their impact, and identify what to watch next
+      output_label: Today's hot-topic digest
+    launch:
+      prompt_short: Generate today's hot-topic digest for me.
+      prompt: Based on the information currently available, prepare a concise digest of today's hot topics with brief analysis of what is worth attention. If information is insufficient or sources are unavailable, state the data limitations clearly.
+    replay:
+      steps:
+        - title: Aggregate multi-platform hot lists
+          description: Fetch live hot lists from eight platforms and record platform status
+        - title: Score, select, and deduplicate
+          description: Select about ten topics using heat, cross-platform resonance, and diversity
+        - title: Generate three-layer insights
+          description: Explain what happened, why it matters, and what to watch next
+        - title: Assemble sources and report
+          description: Add source links, excerpts, search notes, and the structured digest
+    result:
+      template: generic_report_v1
+      eyebrow: Daily hot-topic digest
+      title: Today's hot topics and insights report
+      summary: Aggregate multi-platform hot lists and deliver verifiable three-layer insights, sources, and follow-up signals
+      highlights:
+        - Platform status and selected hot topics
+        - What, So What, and Now What insights for each event
+        - Source links, excerpts, search notes, and trend signals

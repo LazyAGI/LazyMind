@@ -405,8 +405,8 @@ def test_instance_toolkit_method_with_class_prefix_uses_kb_template():
         preview_value,
     )
 
-    assert '正在知识库中检索与 **LazyMind** 相关的知识。' in call_text
-    assert '知识库检索完成，共找到 **1** 条相关内容。' in result_text
+    assert '正在用 kb_search 检索 **LazyMind**。' in call_text
+    assert 'kb_search 完成，共找到 **1** 条相关内容。' in result_text
 
 
 def test_nested_cloud_supplier_method_with_class_prefix_uses_supplier_template():
@@ -605,14 +605,14 @@ def test_kb_empty_preview_uses_wrapped_business_result():
         (
             'KBToolkit_kb_search',
             {'query': 'LazyMind'},
-            '正在知识库中检索与 **LazyMind** 相关的知识。',
-            '知识库检索完成，共找到 **3** 条相关内容。',
+            '正在用 kb_search 检索 **LazyMind**。',
+            'kb_search 完成，共找到 **3** 条相关内容。',
         ),
         (
             'KBToolkit_kb_tmp_search',
-            {'query': '附件内容'},
-            '正在附件中检索与 **附件内容** 相关的内容。',
-            '附件检索完成，共找到 **3** 条相关内容。',
+            {'semantic_query': '附件内容'},
+            '正在用 kb_tmp_search 检索 **附件内容**。',
+            'kb_tmp_search 完成，共找到 **3** 条相关内容。',
         ),
         (
             'KBToolkit_kb_get_parent_node',
@@ -629,8 +629,8 @@ def test_kb_empty_preview_uses_wrapped_business_result():
         (
             'KBToolkit_kb_keyword_search',
             {'keyword': '工具调用'},
-            '正在目标文档中搜索关键词 **工具调用**。',
-            '关键词 **工具调用** 检索完成，共找到 **3** 条文档片段。',
+            '正在用 kb_keyword_search 搜索 **工具调用**。',
+            'kb_keyword_search 完成，共找到 **3** 条文档片段。',
         ),
     ],
 )

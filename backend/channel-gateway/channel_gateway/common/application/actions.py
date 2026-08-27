@@ -60,7 +60,6 @@ class ChannelActionExecutor:
     def execute(
         self,
         *,
-        provider: str = '',
         command: CommandEnvelope,
         account_id: str,
         external_address_hash: str,
@@ -85,7 +84,9 @@ class ChannelActionExecutor:
             if isinstance(command, ChatCommand):
                 parameters = command.parameters
                 text = self._conversations.chat(
-                    chat_only=provider == 'wechat',
+                    recover_missing_route=(
+                        execution.interaction_mode == 'plain_text'
+                    ),
                     message=parameters.message,
                     changes=parameters.resource_changes,
                     source_command=command,

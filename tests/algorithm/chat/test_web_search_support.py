@@ -73,3 +73,41 @@ def test_fetch_url_content_rejects_binary_resources(monkeypatch):
         assert str(exc) == 'unsupported url content type: image/jpeg'
     else:
         raise AssertionError('binary resources must not be decoded as page text')
+
+
+def test_fetch_url_content_ingests_pdf(monkeypatch):
+    response = requests.Response()
+    response.status_code = 200
+    response.url = 'https://example.test/paper.pdf'
+    response.headers['Content-Type'] = 'application/pdf'
+    response._content = b'%PDF-1.4 fake'
+    response._lazymind_response_truncated = False
+
+    monkeypatch.setattr(web_search_support, 'validate_public_http_url', lambda url: url)
+    monkeypatch.setattr(web_search_support, 'fetch_public_url', lambda *args, **kwargs: response)
+    monkeypatch.setattr(
+        web_search_support,
+        '_ingest_fetched_pdf',
+        lambda *args, **kwargs: {
+            'status': 'ok',
+            'source_status': 'pdf_ingested',
+            'url': 'https://example.test/paper.pdf',
+            'final_url': 'https://example.test/paper.pdf',
+            'status_code': 200,
+            'content_type': 'application/pdf',
+            'title': 'paper.pdf',
+            'content': '',
+            'content_truncated': False,
+            'links': [],
+            'file_id': 'fr_abc123abc123',
+            'display_name': 'paper.pdf',
+            'pages': 12,
+            'parse_status': 'ready',
+            'parse_error': None,
+        },
+    )
+
+    page = web_search_support.fetch_url_content('https://example.test/paper.pdf')
+    assert page['source_status'] == 'pdf_ingested'
+    assert page['file_id'] == 'fr_abc123abc123'
+    assert page['content'] == ''

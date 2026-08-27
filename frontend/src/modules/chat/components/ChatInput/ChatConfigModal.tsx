@@ -17,6 +17,8 @@ import {
 import './ChatConfigModal.scss';
 
 interface ChatConfigPopoverProps {
+  /** Prevents opening or editing while the parent composer is unavailable. */
+  disabled?: boolean;
   /** When provided, settings are saved to the server immediately on change. */
   conversationId?: string;
   /** Initial settings to display. If not provided, fetched from server on first open. */
@@ -76,6 +78,7 @@ export function buildExecutorCatalog(
 }
 
 export default function ChatConfigPopover({
+  disabled = false,
   conversationId,
   initialSettings,
   onSave,
@@ -95,6 +98,12 @@ export default function ChatConfigPopover({
   });
   // Track whether we've already fetched defaults to avoid repeated requests.
   const fetchedRef = useRef(false);
+
+  useEffect(() => {
+    if (disabled) {
+      setOpen(false);
+    }
+  }, [disabled]);
 
   // Sync external initialSettings into local state; reset fetch cache on conversation change.
   useEffect(() => {
@@ -198,8 +207,7 @@ export default function ChatConfigPopover({
     const refresh = async () => {
       try {
         const response = await ConversationSettingsApi().listChatExecutors();
-        const payload = (response.data as any)?.data ?? response.data;
-        const values = Array.isArray(payload?.executors) ? payload.executors : [];
+        const values = response.data.data.executors;
         if (active) {
           setExecutors(
             values.filter(
@@ -221,6 +229,10 @@ export default function ChatConfigPopover({
   }, [open]);
 
   function handleOpenChange(next: boolean) {
+    if (disabled) {
+      setOpen(false);
+      return;
+    }
     setOpen(next);
     if (next) {
       void ensureSettings();
@@ -275,25 +287,38 @@ export default function ChatConfigPopover({
           name: displayedExecutor.display_name,
         })
       : t('chat.conversationConfigExecutorLazyMindDesc');
-  const taskControlsAvailable = featureControls.loaded
-    && !featureControls.error
-    && featureControls.taskCenterEnabled;
-  const workflowControlsAvailable = taskControlsAvailable && featureControls.workflowsEnabled;
+  const featureControlsLoaded = featureControls.loaded && !featureControls.error;
+  const taskControlsAvailable = featureControlsLoaded && featureControls.taskCenterEnabled;
+  const workflowControlsAvailable = featureControlsLoaded && featureControls.workflowsEnabled;
   const executionMode = resolveWorkflowExecutionMode(
     settings,
     hasWorkflowSession,
     workflowControlsAvailable,
   );
-  const featureControlsMessage = !featureControls.loaded
+  const sharedFeatureControlsMessage = !featureControls.loaded
     ? t('chat.conversationConfigFeatureControlsLoading')
     : featureControls.error
       ? t('chat.conversationConfigFeatureControlsUnavailable')
-      : !featureControls.taskCenterEnabled
-        ? t('chat.conversationConfigTaskCenterDisabled')
-        : !featureControls.workflowsEnabled
-          ? t('chat.conversationConfigWorkflowMasterDisabled')
-          : null;
-  const featureControlsMessageId = 'chat-config-feature-controls-message';
+      : null;
+  const taskControlsMessage = sharedFeatureControlsMessage
+    ?? (!featureControls.taskCenterEnabled
+      ? t('chat.conversationConfigTaskCenterDisabled')
+      : null);
+  const workflowControlsMessage = sharedFeatureControlsMessage
+    ?? (!featureControls.workflowsEnabled
+      ? t('chat.conversationConfigWorkflowMasterDisabled')
+      : null);
+  const sharedFeatureControlsMessageId = 'chat-config-feature-controls-message';
+  const taskControlsMessageId = sharedFeatureControlsMessage
+    ? sharedFeatureControlsMessageId
+    : taskControlsMessage
+      ? 'chat-config-task-controls-message'
+      : undefined;
+  const workflowControlsMessageId = sharedFeatureControlsMessage
+    ? sharedFeatureControlsMessageId
+    : workflowControlsMessage
+      ? 'chat-config-workflow-controls-message'
+      : undefined;
 
   function handleExecutionModeChange(mode: string | number) {
     const nextMode = mode as WorkflowExecutionMode;
@@ -306,13 +331,31 @@ export default function ChatConfigPopover({
 
   const content = (
     <div className="chat-config-popover-content">
-      {featureControlsMessage ? (
+      {sharedFeatureControlsMessage ? (
         <p
-          id={featureControlsMessageId}
+          id={sharedFeatureControlsMessageId}
           className="chat-config-master-notice"
           role="status"
         >
-          {featureControlsMessage}
+          {sharedFeatureControlsMessage}
+        </p>
+      ) : null}
+      {!sharedFeatureControlsMessage && taskControlsMessage ? (
+        <p
+          id="chat-config-task-controls-message"
+          className="chat-config-master-notice"
+          role="status"
+        >
+          {taskControlsMessage}
+        </p>
+      ) : null}
+      {!sharedFeatureControlsMessage && workflowControlsMessage ? (
+        <p
+          id="chat-config-workflow-controls-message"
+          className="chat-config-master-notice"
+          role="status"
+        >
+          {workflowControlsMessage}
         </p>
       ) : null}
       <div className="chat-config-section chat-config-executor-section">
@@ -358,7 +401,7 @@ export default function ChatConfigPopover({
           value={executionMode}
           disabled={!workflowControlsAvailable}
           aria-label={t('chat.conversationConfigWorkflowExecution')}
-          aria-describedby={featureControlsMessage ? featureControlsMessageId : undefined}
+          aria-describedby={workflowControlsMessageId}
           onChange={handleExecutionModeChange}
           options={[
             { label: t('chat.conversationConfigWorkflowAuto'), value: 'auto' },
@@ -388,7 +431,7 @@ export default function ChatConfigPopover({
             checked={taskControlsAvailable && (settings?.enable_subagent ?? true)}
             disabled={!taskControlsAvailable}
             aria-label={t('chat.conversationConfigEnableSubagent')}
-            aria-describedby={featureControlsMessage ? featureControlsMessageId : undefined}
+            aria-describedby={taskControlsMessageId}
             onChange={(v: boolean) => handleChange({ enable_subagent: v })}
           />
         </div>
@@ -399,7 +442,7 @@ export default function ChatConfigPopover({
   return (
     <Popover
       content={content}
-      open={open}
+      open={disabled ? false : open}
       onOpenChange={handleOpenChange}
       trigger="click"
       placement="topLeft"
@@ -407,10 +450,15 @@ export default function ChatConfigPopover({
       overlayClassName="chat-config-popover-overlay"
       destroyTooltipOnHide
     >
-      <div className="input-bottom-actions-left-item">
+      <button
+        type="button"
+        className="input-bottom-actions-left-item"
+        disabled={disabled}
+        aria-label={t('chat.conversationConfig')}
+      >
         <SettingOutlined style={{ marginRight: 4 }} />
         {t('chat.conversationConfig')}
-      </div>
+      </button>
     </Popover>
   );
 }

@@ -44,6 +44,13 @@ TRACE_BY_TYPE = {
     'process_start_failed': 'opencode.error',
 }
 PATH_KEYS = {'file', 'path', 'filepath', 'filePath'}
+MAX_LOG_BYTES = 2 * 1024 * 1024
+ENV_PASSTHROUGH = (
+    'PATH', 'SHELL', 'USER', 'LANG', 'LC_ALL',
+    'SSL_CERT_FILE', 'SSL_CERT_DIR', 'REQUESTS_CA_BUNDLE',
+    'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY',
+    'http_proxy', 'https_proxy', 'no_proxy',
+)
 
 
 class OpenCodeRunResult(NamedTuple):
@@ -84,19 +91,23 @@ def run_opencode_streaming(
 
     with stdout_log, events_log:
         stdout_tail = ''
+        stdout_bytes = events_bytes = 0
 
         def record(event: dict[str, Any]) -> dict[str, Any]:
+            nonlocal events_bytes
             clean = _clean(event, secrets)
-            events_log.write(json.dumps(clean, ensure_ascii=False) + '\n')
-            events_log.flush()
+            events_bytes = _write_bounded(
+                events_log, json.dumps(clean, ensure_ascii=False) + '\n',
+                events_bytes, whole_line=True,
+            )
             if trace is not None:
                 _emit_trace(trace, attempt, clean)
             return clean
 
         def write_stdout(line: str) -> None:
-            nonlocal stdout_tail
+            nonlocal stdout_bytes, stdout_tail
             clean = _clean(line, secrets)
-            stdout_log.write(clean)
+            stdout_bytes = _write_bounded(stdout_log, clean, stdout_bytes)
             stdout_tail = (stdout_tail + clean)[-1000:]
 
         def fail(kind: str, message: object) -> OpenCodeRunResult:
@@ -107,8 +118,8 @@ def run_opencode_streaming(
         try:
             root = Path(workdir).resolve()
             config_path = root / 'opencode.json'
-            prompt_path.write_text(prompt, encoding='utf-8')
-            config_path.write_text(json.dumps(_opencode_json(settings), ensure_ascii=False), encoding='utf-8')
+            _write_private_text(prompt_path, prompt)
+            _write_private_text(config_path, json.dumps(_opencode_json(settings), ensure_ascii=False))
         except Exception as exc:
             if config_path is not None:
                 with suppress(OSError):
@@ -126,7 +137,7 @@ def run_opencode_streaming(
                 text=True,
                 bufsize=1,
                 cwd=str(root),
-                env=_process_env(),
+                env=_process_env(artifact_dir.parent / '_runtime'),
                 start_new_session=True,
             )
         except Exception as exc:
@@ -309,9 +320,43 @@ def _missing_config(settings: dict[str, str]) -> list[str]:
     return missing
 
 
-def _process_env() -> dict[str, str]:
-    return {key: value for key in ('HOME', 'PATH', 'SHELL', 'USER', 'LANG', 'LC_ALL', 'TMPDIR')
-            if (value := os.environ.get(key))}
+def _process_env(runtime_root: Path) -> dict[str, str]:
+    runtime_root.mkdir(parents=True, exist_ok=True)
+    directories = {
+        'HOME': runtime_root / 'home',
+        'TMPDIR': runtime_root / 'tmp',
+        'XDG_CONFIG_HOME': runtime_root / 'config',
+        'XDG_CACHE_HOME': runtime_root / 'cache',
+        'XDG_DATA_HOME': runtime_root / 'data',
+        'XDG_STATE_HOME': runtime_root / 'state',
+        'OPENCODE_CONFIG_DIR': runtime_root / 'config' / 'opencode',
+    }
+    for path in directories.values():
+        path.mkdir(parents=True, exist_ok=True)
+    env = {key: value for key in ENV_PASSTHROUGH if (value := os.environ.get(key))}
+    env.update({key: str(path) for key, path in directories.items()})
+    return env
+
+
+def _write_bounded(handle: Any, text: str, written: int, *, whole_line: bool = False) -> int:
+    remaining = MAX_LOG_BYTES - written
+    if remaining <= 0:
+        return written
+    encoded = text.encode('utf-8')
+    if whole_line and len(encoded) > remaining:
+        return written
+    chunk = encoded[:remaining].decode('utf-8', 'ignore')
+    handle.write(chunk)
+    handle.flush()
+    return written + len(chunk.encode('utf-8'))
+
+
+def _write_private_text(path: Path, text: str) -> None:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_TRUNC | getattr(os, 'O_NOFOLLOW', 0)
+    descriptor = os.open(path, flags, 0o600)
+    os.fchmod(descriptor, 0o600)
+    with os.fdopen(descriptor, 'w', encoding='utf-8') as handle:
+        handle.write(text)
 
 
 def _terminate(proc: subprocess.Popen, grace_s: float = 5.0) -> None:

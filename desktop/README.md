@@ -101,4 +101,6 @@ On Windows, all Desktop-generated files live under `%LOCALAPPDATA%\LazyMind`:
 
 Desktop does not read, migrate, or remove any legacy Electron profile outside this root. The Windows local document source is `%USERPROFILE%\Documents\LazyMind`; Desktop creates it at runtime startup and the file watcher scans it recursively.
 
+Local-folder discovery asks for consent before each parent-location selection and keeps broad search locations in Electron's profile only. Discovery uses a bounded, directory-only scan, skips the platform Desktop, Documents, Downloads, and media folders, and does not pass broad locations to the local runtime. When the user connects one or more folders, Desktop persists only the exact selected folders and updates file-watcher allowed roots dynamically without restarting the runtime. Existing `Documents\LazyMind` bindings keep their original virtual-root mapping.
+
 `desktop/build/<target>/runtime` and `desktop/dist` are generated outputs. Each build recreates its target runtime; dependency downloads continue to use the normal Go, uv/pip, pnpm, Electron, and electron-builder user caches.

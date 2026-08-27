@@ -1,0 +1,107 @@
+locale: en-US
+
+classification:
+  category: Education & growth
+  tags:
+    - Mock interviews
+    - Interview feedback
+    - Job preparation
+    - Answer improvement
+
+presentation:
+  card:
+    title: AI interview simulator
+    description: Ask role-specific questions, score each answer, and provide actionable feedback
+    output_type: report
+    output_label: Interview feedback report
+    cover_asset: cover
+    result_summary: Complete a role-specific mock interview with scores, answer diagnostics, model responses, and practice recommendations
+  detail:
+    title: AI interview simulator
+    description: Run a turn-by-turn mock interview based on the target role, experience, and interview type, with scoring, feedback, and improved examples after every answer.
+    attachment_hint: A resume, job description, target-company notes, or practice priorities
+
+tasks:
+  - id: role-interview
+    selector:
+      title: Role-specific mock interview
+      description: Practice a complete turn-by-turn interview for a target role
+      output_label: Role interview feedback
+    launch:
+      prompt_short: Start a mock interview for my target role.
+      prompt: Act as an interviewer for the target role, experience level, and job description I provide. Ask one question at a time, wait for my answer, score relevance, structure, evidence, and delivery, then provide concrete feedback and a stronger example before continuing. Finish with strengths, gaps, and a practice plan.
+    replay:
+      steps:
+        - title: Define the interview target
+          description: Confirm role, level, industry, and assessment priorities
+        - title: Run turn-by-turn questions
+          description: Ask one relevant question at a time and wait for the answer
+        - title: Score and coach immediately
+          description: Evaluate content, structure, evidence, and delivery
+        - title: Summarize practice priorities
+          description: Produce strengths, gaps, and a follow-up training plan
+    result:
+      template: generic_report_v1
+      eyebrow: Role interview feedback
+      title: Mock interview performance and improvements
+      summary: Summarize question-level scores, key feedback, model answers, and the next practice plan
+      highlights:
+        - Question-level scores and diagnostics
+        - Stronger answer examples
+        - Strengths, gaps, and practice plan
+
+  - id: behavioral-interview
+    selector:
+      title: Behavioral interview practice
+      description: Practice experience and scenario questions using STAR
+      output_label: Behavioral interview feedback
+    launch:
+      prompt_short: Help me practice behavioral interviews and STAR answers.
+      prompt: Act as a behavioral interviewer and ask one question at a time based on my experience and target role. After each answer, check the situation, task, action, and result, assess whether the example is concrete and credible, and suggest a stronger structure and follow-up questions. Finish by identifying gaps in my story bank.
+    replay:
+      steps:
+        - title: Inventory experience stories
+          description: Identify projects, challenges, collaboration, conflict, and failures
+        - title: Ask behavioral questions
+          description: Probe concrete examples against the role's competency model
+        - title: Check STAR structure
+          description: Assess context, task, action, result, and personal contribution
+        - title: Complete the story bank
+          description: Produce reusable story themes and recommendations for missing examples
+    result:
+      template: generic_report_v1
+      eyebrow: Behavioral interview feedback
+      title: STAR answer diagnosis and story bank
+      summary: Improve the structure, evidence, and role relevance of experience-based answers
+      highlights:
+        - STAR completeness
+        - Evidence and personal contribution
+        - Missing stories to prepare
+
+  - id: resume-interview
+    selector:
+      title: Resume deep dive
+      description: Probe project responsibilities, decisions, and outcomes from a resume
+      output_label: Resume deep-dive feedback
+    launch:
+      prompt_short: Run a project deep-dive interview from my resume.
+      prompt: Read my resume and probe project experience, scope of responsibility, key decisions, technical or business challenges, and measurable outcomes. Ask one question at a time, identify vague statements, weak evidence, or likely follow-ups after every answer, and help me form more precise responses.
+    replay:
+      steps:
+        - title: Identify priority experience
+          description: Find projects most relevant to the target role and likely to draw questions
+        - title: Probe projects layer by layer
+          description: Ask about ownership, decisions, challenges, collaboration, and outcomes
+        - title: Check evidence consistency
+          description: Identify vague claims, logic gaps, and missing metrics
+        - title: Organize answer points
+          description: Produce accurate, concrete, and verifiable project responses
+    result:
+      template: generic_report_v1
+      eyebrow: Resume deep-dive feedback
+      title: Project questions and risk areas
+      summary: Organize evidence, likely follow-ups, and improvements for priority projects
+      highlights:
+        - High-probability follow-up questions
+        - Evidence for ownership, decisions, and outcomes
+        - Vague claims and answer improvements

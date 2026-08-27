@@ -63,7 +63,7 @@ func TestAlgorithmPreparePythonPinsSetuptoolsForLocalVenv(t *testing.T) {
 			return CommandResult{}, nil
 		},
 		func(cmd Command) (CommandResult, error) {
-			assertCommand(t, cmd, "uv", "pip", "install", "--python", paths.AlgorithmPython, "--link-mode", "copy", "--strict", "lazyllm==1.2.2")
+			assertCommand(t, cmd, "uv", "pip", "install", "--python", paths.AlgorithmPython, "--link-mode", "copy", "--strict", "lazyllm==1.3.0a1")
 			return CommandResult{}, nil
 		},
 		func(cmd Command) (CommandResult, error) {
@@ -288,6 +288,35 @@ func TestRAGServicesDoNotWaitBeforeStarting(t *testing.T) {
 			t.Fatalf("%s dependencies: %v", service, err)
 		}
 	}
+}
+
+func TestInstallerWarmupDoesNotWaitForExcludedProcessorWorker(t *testing.T) {
+	normal := ragReadinessChecks(RuntimeConfig{})
+	warmup := ragReadinessChecks(RuntimeConfig{MaintenanceMode: installerWarmupMaintenanceMode})
+
+	if !hasRAGReadinessLabel(normal, "processor-worker") {
+		t.Fatal("normal runtime must wait for processor-worker")
+	}
+	if hasRAGReadinessLabel(warmup, "processor-worker") {
+		t.Fatal("installer warmup must not wait for excluded processor-worker")
+	}
+}
+
+func TestWarmupChatCapabilityDoesNotWaitForProcessorWorker(t *testing.T) {
+	t.Setenv(installerWarmupSkipProcessorWorkerEnvVar, "true")
+	checks := ragReadinessChecks(RuntimeConfig{})
+	if hasRAGReadinessLabel(checks, "processor-worker") {
+		t.Fatal("warmup Chat capability must skip processor-worker readiness")
+	}
+}
+
+func hasRAGReadinessLabel(checks []ragReadinessCheck, label string) bool {
+	for _, check := range checks {
+		if check.label == label {
+			return true
+		}
+	}
+	return false
 }
 
 func TestAlgorithmServiceEnvUsesRuntimeDataPaths(t *testing.T) {

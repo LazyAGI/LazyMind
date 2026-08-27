@@ -65,7 +65,6 @@ export default function SkillManagementSection() {
   // Keep a state copy only for rendering (installedSkills comparison in SkillMarketView).
   const [marketBuiltinAssets, setMarketBuiltinAssets] = useState<MarketSkillAsset[]>([]);
   const [marketCatalogLoading, setMarketCatalogLoading] = useState(false);
-  const [marketTagsLoading, setMarketTagsLoading] = useState(false);
   const [marketListPage, setMarketListPage] = useState(1);
   const [marketListPageSize, setMarketListPageSize] = useState(DEFAULT_MARKET_PAGE_SIZE);
   const [marketListTotal, setMarketListTotal] = useState(0);
@@ -250,14 +249,11 @@ export default function SkillManagementSection() {
   ]);
 
   const loadMarketTags = useCallback(async () => {
-    setMarketTagsLoading(true);
     try {
       setMarketTags(await listSkillMarketTags());
     } catch (error) {
       console.error("Load skill plaza tags failed:", error);
       setMarketTags([]);
-    } finally {
-      setMarketTagsLoading(false);
     }
   }, []);
 
@@ -790,8 +786,6 @@ export default function SkillManagementSection() {
           await refreshSkillAssets({ page: skillListPage });
           await Promise.all([loadMarketCatalog(), loadMarketTags()]);
         }}
-        tagOptions={marketTags}
-        tagsLoading={marketTagsLoading}
       />
 
       {skillView === "workflows" ? (

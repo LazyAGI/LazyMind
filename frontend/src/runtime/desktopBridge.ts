@@ -1,4 +1,7 @@
-import { isDesktopRuntime } from "./mode";
+import {
+  assistantBridgeFetch,
+  syncLocalAssistantSession,
+} from "./assistantSession";
 
 export type DesktopBridgeUnavailableReason = "unavailable" | "failed";
 
@@ -15,31 +18,72 @@ export interface DesktopRuntimeStatus {
   services?: Record<string, DesktopRuntimeServiceStatus>;
 }
 
+export interface DesktopLocalFolderRecommendation {
+  key: string;
+  value: string;
+  path: string;
+  title: string;
+  productId?: string;
+  source?: "desktop_discovery";
+}
+
+export interface DesktopLocalFolderAccessState {
+  available?: boolean;
+  canceled?: boolean;
+  discoveryConsentGranted: boolean;
+  discoveryRoots: string[];
+  allowedRoots: string[];
+  items?: DesktopLocalFolderRecommendation[];
+  scannedEntries?: number;
+  truncated?: boolean;
+  stoppedReason?: string;
+  durationMs?: number;
+}
+
+export interface DesktopLocalFolderAuthorizationResult
+  extends DesktopLocalFolderAccessState {
+  granted: boolean;
+  addedRoots: string[];
+}
+
 export type DesktopAgent = "codex" | "cursor" | "workbuddy" | "traework" | "deepseek-harness";
 
-export interface DesktopAgentSetupGuide {
-  method: "config_file" | "cursor_install_url" | "trae_config_file" | "dsh_profile_patch";
+export type DesktopAgentIntegrationState =
+  | "requirements_missing"
+  | "ready"
+  | "action_required"
+  | "enabled"
+  | "conflict"
+  | "error";
+
+export interface DesktopAgentRequirement {
+  id: string;
+  description: string;
+  satisfied: boolean;
+}
+
+export interface DesktopAgentAction {
+  kind: "open_url" | "login";
   url?: string;
-  config_path?: string;
-  configuration?: string;
 }
 
 export interface DesktopAgentIntegrationStatus {
   agent: DesktopAgent;
-  display_name?: string;
-  mode?: "managed" | "manual";
-  installed: boolean;
-  version?: string;
-  configured?: boolean;
-  owned?: boolean;
-  service_ready: boolean;
-  ready: boolean;
-  command?: string;
-  arguments?: string[];
-  endpoint?: string;
-  tools?: string[];
-  setup?: DesktopAgentSetupGuide;
-  readiness_error?: string;
+  display_name: string;
+  state: DesktopAgentIntegrationState;
+  requirements?: DesktopAgentRequirement[];
+  action?: DesktopAgentAction;
+  message?: string;
+}
+
+export type DesktopAgentIntegrationAction = "connect" | "disconnect" | "login";
+
+export type DesktopExecutorProvider = "codex" | "cursor" | "workbuddy";
+export type DesktopExecutorPolicyAction = "enable" | "disable";
+
+export interface DesktopExecutorPolicy {
+  provider: DesktopExecutorProvider;
+  enabled: boolean;
 }
 
 export type DesktopRuntimeStatusResult =
@@ -54,32 +98,71 @@ export type DesktopAgentIntegrationStatusesResult =
   | { ok: true; data: Partial<Record<DesktopAgent, DesktopAgentIntegrationStatus>> }
   | { ok: false; reason: DesktopBridgeUnavailableReason; error?: unknown };
 
+export interface DesktopArtifactFilePayload {
+  source: string;
+  filename?: string;
+  data?: ArrayBuffer;
+}
+
+export type DesktopFileActionResult =
+  | { ok: true; path?: string; canceled?: false }
+  | { ok: true; canceled: true }
+  | { ok: false; reason: DesktopBridgeUnavailableReason; error?: unknown };
+
+export type DesktopExecutorPoliciesResult =
+  | { ok: true; data: Partial<Record<DesktopExecutorProvider, DesktopExecutorPolicy>> }
+  | { ok: false; reason: DesktopBridgeUnavailableReason; error?: unknown };
+
+export type DesktopExecutorPolicyResult =
+  | { ok: true; data: DesktopExecutorPolicy }
+  | { ok: false; reason: DesktopBridgeUnavailableReason; error?: unknown };
+
 type DesktopBridgeCommand =
   | "openLogsDir"
   | "openDataDir"
   | "restartRuntime";
 
 interface LazyMindDesktopBridge {
+  platform?: string;
   openLogsDir?: () => Promise<void> | void;
   openDataDir?: () => Promise<void> | void;
   runtimeStatus?: () => Promise<unknown> | unknown;
-  agentIntegrationStatus?: (agent: DesktopAgent) => Promise<unknown> | unknown;
-  agentIntegrationAction?: (agent: DesktopAgent, action: "connect" | "disconnect") => Promise<unknown> | unknown;
-  codexIntegrationAction?: (action: "connect" | "disconnect") => Promise<unknown> | unknown;
+  agentIntegrationStatuses?: () => Promise<unknown> | unknown;
+  agentIntegrationAction?: (agent: DesktopAgent, action: DesktopAgentIntegrationAction) => Promise<unknown> | unknown;
+  executorIntegrationPolicies?: () => Promise<unknown> | unknown;
+  executorIntegrationAction?: (provider: DesktopExecutorProvider, action: DesktopExecutorPolicyAction) => Promise<unknown> | unknown;
   restartRuntime?: () => Promise<unknown> | unknown;
   resetRuntime?: (scope?: "kb" | "all") => Promise<unknown> | unknown;
+  localFolderAccessStatus?: () => Promise<DesktopLocalFolderAccessState> | DesktopLocalFolderAccessState;
+  chooseLocalDiscoveryRoots?: () => Promise<DesktopLocalFolderAccessState> | DesktopLocalFolderAccessState;
+  discoverLocalFolders?: () => Promise<DesktopLocalFolderAccessState> | DesktopLocalFolderAccessState;
+  authorizeLocalFolders?: (paths: string[]) => Promise<DesktopLocalFolderAuthorizationResult> | DesktopLocalFolderAuthorizationResult;
   selectFolder?: () => Promise<string | null> | string | null;
   selectExecutable?: () => Promise<string | null> | string | null;
   exportDiagnostics?: () => Promise<string> | string;
+  showItemInFolder?: (
+    payload: DesktopArtifactFilePayload | string,
+  ) => Promise<unknown> | unknown;
+  saveFileAs?: (
+    payload: DesktopArtifactFilePayload,
+  ) => Promise<unknown> | unknown;
+  downloadFile?: (
+    payload: DesktopArtifactFilePayload,
+  ) => Promise<unknown> | unknown;
 }
 
 function getDesktopBridge(): LazyMindDesktopBridge | undefined {
-  if (!isDesktopRuntime() || typeof window === "undefined") {
+  if (typeof window === "undefined") {
     return undefined;
   }
 
   return (window as Window & { lazymindDesktop?: LazyMindDesktopBridge })
     .lazymindDesktop;
+}
+
+export function hasDesktopFileBridge(): boolean {
+  const bridge = getDesktopBridge();
+  return Boolean(bridge?.showItemInFolder && bridge?.saveFileAs && bridge?.downloadFile);
 }
 
 async function callDesktopBridge(
@@ -142,27 +225,30 @@ async function callAgentIntegration(
   }
 }
 
-export function agentIntegrationStatus(agent: DesktopAgent): Promise<DesktopAgentIntegrationResult> {
-	const bridge = getDesktopBridge();
-	if (bridge?.agentIntegrationStatus) {
-		return callAgentIntegration((value) => value.agentIntegrationStatus!(agent));
-	}
-	return callLocalAssistantBridge(`/agents/${encodeURIComponent(agent)}`);
+async function syncCurrentLocalAssistantSession() {
+  const { AgentAppsAuth } = await import("@/components/auth");
+  await syncLocalAssistantSession(
+    AgentAppsAuth.getUserInfo(),
+    window.location.origin,
+    ACTION_TIMEOUT_MS,
+  );
 }
 
-export async function agentIntegrationStatuses(agents: DesktopAgent[]): Promise<DesktopAgentIntegrationStatusesResult> {
+export async function agentIntegrationStatuses(): Promise<DesktopAgentIntegrationStatusesResult> {
   const bridge = getDesktopBridge();
-  if (bridge?.agentIntegrationStatus) {
-    const results = await Promise.all(agents.map(async (agent) => ({ agent, result: await agentIntegrationStatus(agent) })));
-    const statuses: Partial<Record<DesktopAgent, DesktopAgentIntegrationStatus>> = {};
-    for (const { agent, result } of results) {
-      if (!result.ok) return result;
-      statuses[agent] = result.data;
+  if (bridge?.agentIntegrationStatuses) {
+    try {
+      const payload = await bridge.agentIntegrationStatuses() as {
+        agents?: Partial<Record<DesktopAgent, DesktopAgentIntegrationStatus>>;
+      };
+      return { ok: true, data: payload?.agents || {} };
+    } catch (error) {
+      return { ok: false, reason: "failed", error };
     }
-    return { ok: true, data: statuses };
   }
   try {
-    const response = await fetch(`${LOCAL_ASSISTANT_BRIDGE}/agents`);
+    await syncCurrentLocalAssistantSession();
+    const response = await assistantBridgeFetch("/agents", undefined, STATUS_TIMEOUT_MS);
     const payload = await response.json().catch(() => ({})) as {
       agents?: Partial<Record<DesktopAgent, DesktopAgentIntegrationStatus>>;
       error?: string;
@@ -174,32 +260,88 @@ export async function agentIntegrationStatuses(agents: DesktopAgent[]): Promise<
   }
 }
 
-export function agentIntegrationAction(agent: DesktopAgent, action: "connect" | "disconnect"): Promise<DesktopAgentIntegrationResult> {
-	const bridge = getDesktopBridge();
-	if (bridge?.agentIntegrationAction) {
-		return callAgentIntegration((value) => value.agentIntegrationAction!(agent, action));
-	}
-	if (agent === "codex" && bridge?.codexIntegrationAction) {
-		return callAgentIntegration((value) => value.codexIntegrationAction!(action));
-	}
-	return callLocalAssistantBridge(`/agents/${encodeURIComponent(agent)}/${action}`, { method: "POST" });
+export async function agentIntegrationAction(agent: DesktopAgent, action: DesktopAgentIntegrationAction): Promise<DesktopAgentIntegrationResult> {
+  const bridge = getDesktopBridge();
+  if (bridge?.agentIntegrationAction) {
+    return callAgentIntegration((value) => value.agentIntegrationAction!(agent, action));
+  }
+  try {
+    await syncCurrentLocalAssistantSession();
+    return callLocalAssistantBridge(
+      `/agents/${encodeURIComponent(agent)}/${action}`,
+      { method: "POST" },
+      action === "login" ? LOGIN_TIMEOUT_MS : ACTION_TIMEOUT_MS,
+    );
+  } catch (error) {
+    return { ok: false, reason: "unavailable", error };
+  }
 }
 
-export function codexIntegrationAction(action: "connect" | "disconnect"): Promise<DesktopAgentIntegrationResult> {
-	return agentIntegrationAction("codex", action);
+export async function executorIntegrationPolicies(): Promise<DesktopExecutorPoliciesResult> {
+  const bridge = getDesktopBridge();
+  try {
+    if (bridge?.executorIntegrationPolicies) {
+      const payload = await bridge.executorIntegrationPolicies() as {
+        executors?: Partial<Record<DesktopExecutorProvider, DesktopExecutorPolicy>>;
+      };
+      return { ok: true, data: payload.executors || {} };
+    }
+    const response = await assistantBridgeFetch("/executors", undefined, ACTION_TIMEOUT_MS);
+    const payload = await response.json().catch(() => ({})) as {
+      executors?: Partial<Record<DesktopExecutorProvider, DesktopExecutorPolicy>>;
+      error?: string;
+    };
+    if (!response.ok) throw new Error(payload.error || `Assistant Bridge returned HTTP ${response.status}`);
+    return { ok: true, data: payload.executors || {} };
+  } catch (error) {
+    return { ok: false, reason: "unavailable", error };
+  }
 }
 
-const LOCAL_ASSISTANT_BRIDGE = "http://127.0.0.1:19091/v1";
+export async function executorIntegrationAction(
+  provider: DesktopExecutorProvider,
+  action: DesktopExecutorPolicyAction,
+): Promise<DesktopExecutorPolicyResult> {
+  const bridge = getDesktopBridge();
+  try {
+    let payload: unknown;
+    if (bridge?.executorIntegrationAction) {
+      payload = await bridge.executorIntegrationAction(provider, action);
+    } else {
+      const response = await assistantBridgeFetch(
+        `/executors/${encodeURIComponent(provider)}/${action}`,
+        { method: "POST" },
+        ACTION_TIMEOUT_MS,
+      );
+      payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        const error = (payload as { error?: string }).error;
+        throw new Error(error || `Assistant Bridge returned HTTP ${response.status}`);
+      }
+    }
+    return { ok: true, data: payload as DesktopExecutorPolicy };
+  } catch (error) {
+    return { ok: false, reason: "unavailable", error };
+  }
+}
 
-async function callLocalAssistantBridge(path: string, init?: RequestInit): Promise<DesktopAgentIntegrationResult> {
-	try {
-		const response = await fetch(`${LOCAL_ASSISTANT_BRIDGE}${path}`, init);
-		const payload = await response.json().catch(() => ({})) as DesktopAgentIntegrationStatus & { error?: string };
-		if (!response.ok) throw new Error(payload.error || `Assistant Bridge returned HTTP ${response.status}`);
-		return { ok: true, data: payload };
-	} catch (error) {
-		return { ok: false, reason: "unavailable", error };
-	}
+const STATUS_TIMEOUT_MS = 10_000;
+const ACTION_TIMEOUT_MS = 15_000;
+const LOGIN_TIMEOUT_MS = 125_000;
+
+async function callLocalAssistantBridge(
+  path: string,
+  init?: RequestInit,
+  timeoutMs = ACTION_TIMEOUT_MS,
+): Promise<DesktopAgentIntegrationResult> {
+  try {
+    const response = await assistantBridgeFetch(path, init, timeoutMs);
+    const payload = await response.json().catch(() => ({})) as DesktopAgentIntegrationStatus & { error?: string };
+    if (!response.ok) throw new Error(payload.error || `Assistant Bridge returned HTTP ${response.status}`);
+    return { ok: true, data: payload };
+  } catch (error) {
+    return { ok: false, reason: "unavailable", error };
+  }
 }
 
 export function restartRuntime(): Promise<DesktopBridgeResult> {
@@ -225,6 +367,40 @@ export function selectFolder(): Promise<string | null> {
   return Promise.resolve(bridge.selectFolder());
 }
 
+export function localFolderAccessStatus(): Promise<DesktopLocalFolderAccessState | null> {
+  const bridge = getDesktopBridge();
+  if (!bridge?.localFolderAccessStatus) {
+    return Promise.resolve(null);
+  }
+  return Promise.resolve(bridge.localFolderAccessStatus());
+}
+
+export function chooseLocalDiscoveryRoots(): Promise<DesktopLocalFolderAccessState | null> {
+  const bridge = getDesktopBridge();
+  if (!bridge?.chooseLocalDiscoveryRoots) {
+    return Promise.resolve(null);
+  }
+  return Promise.resolve(bridge.chooseLocalDiscoveryRoots());
+}
+
+export function discoverLocalFolders(): Promise<DesktopLocalFolderAccessState | null> {
+  const bridge = getDesktopBridge();
+  if (!bridge?.discoverLocalFolders) {
+    return Promise.resolve(null);
+  }
+  return Promise.resolve(bridge.discoverLocalFolders());
+}
+
+export function authorizeLocalFolders(
+  paths: string[],
+): Promise<DesktopLocalFolderAuthorizationResult | null> {
+  const bridge = getDesktopBridge();
+  if (!bridge?.authorizeLocalFolders) {
+    return Promise.resolve(null);
+  }
+  return Promise.resolve(bridge.authorizeLocalFolders(paths));
+}
+
 export function selectExecutable(): Promise<string | null> {
   const bridge = getDesktopBridge();
   if (!bridge?.selectExecutable) {
@@ -240,3 +416,48 @@ export function exportDiagnostics(): Promise<string | null> {
   }
   return Promise.resolve(bridge.exportDiagnostics());
 }
+
+export function getDesktopPlatform(): string | undefined {
+  return getDesktopBridge()?.platform;
+}
+
+async function callDesktopFileAction(
+  method: "showItemInFolder" | "saveFileAs" | "downloadFile",
+  payload: DesktopArtifactFilePayload,
+): Promise<DesktopFileActionResult> {
+  const bridge = getDesktopBridge();
+  const handler = bridge?.[method];
+  if (!handler) {
+    return { ok: false, reason: "unavailable" };
+  }
+  try {
+    const result = (await handler.call(bridge, payload)) as
+      | { ok?: boolean; path?: string; canceled?: boolean }
+      | undefined;
+    if (result?.canceled) {
+      return { ok: true, canceled: true };
+    }
+    return { ok: true, path: result?.path };
+  } catch (error) {
+    return { ok: false, reason: "failed", error };
+  }
+}
+
+export function showItemInFolder(
+  payload: DesktopArtifactFilePayload,
+): Promise<DesktopFileActionResult> {
+  return callDesktopFileAction("showItemInFolder", payload);
+}
+
+export function saveFileAs(
+  payload: DesktopArtifactFilePayload,
+): Promise<DesktopFileActionResult> {
+  return callDesktopFileAction("saveFileAs", payload);
+}
+
+export function downloadDesktopFile(
+  payload: DesktopArtifactFilePayload,
+): Promise<DesktopFileActionResult> {
+  return callDesktopFileAction("downloadFile", payload);
+}
+

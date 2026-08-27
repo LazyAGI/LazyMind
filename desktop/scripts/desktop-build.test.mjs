@@ -474,6 +474,54 @@ test("packaged macOS app runs installation warmup once before its normal window"
   );
 });
 
+test("macOS first-launch warmup shows preparation UI instead of only a Dock icon", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  assert.match(
+    source,
+    /function createInstallationWarmupWindow\(\)[\s\S]*new BrowserWindow\(browserWindowOptions\(true\)\)[\s\S]*loadURL\(`data:text\/html/,
+  );
+  assert.match(
+    source,
+    /runMacInstallationWarmupIfNeeded\(\)[\s\S]*createInstallationWarmupWindow\(\)[\s\S]*runInstallerWarmup\(\)[\s\S]*disposeInstallationWarmupWindow/,
+  );
+});
+
+test("selected Desktop folders become dynamic allowed roots without confirmation or restart", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  const start = source.indexOf('ipcMain.handle("lazymind:authorizeLocalFolders"');
+  const end = source.indexOf('ipcMain.handle("lazymind:selectFolder"', start);
+  const handler = source.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  assert.match(handler, /replaceFileWatcherAllowedRoots\([\s\S]*saveAccessState\([\s\S]*allowedRoots/);
+  assert.doesNotMatch(handler, /showMessageBox/);
+  assert.doesNotMatch(handler, /restartRuntimeAfterFolderAccessChange/);
+});
+
+test("Desktop discovery asks for consent before choosing roots and skips protected content folders", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  const start = source.indexOf('ipcMain.handle("lazymind:chooseLocalDiscoveryRoots"');
+  const end = source.indexOf('ipcMain.handle("lazymind:discoverLocalFolders"', start);
+  const handler = source.slice(start, end);
+  assert.ok(start >= 0 && end > start);
+  assert.ok(
+    handler.indexOf("showMessageBox") < handler.indexOf("showOpenDialog"),
+    "discovery consent must be shown before the native directory picker",
+  );
+  assert.match(handler, /discoveryConsentGranted:\s*false/);
+  assert.match(
+    handler,
+    /localFolderDiscoveryExcludedRoots\(\)[\s\S]*resolveExistingDirectories\(\s*collapseRoots\([\s\S]*containsPath\(excludedRoot, candidate\)/,
+    "protected selections must be filtered before filesystem validation",
+  );
+
+  const excludedStart = source.indexOf("function localFolderDiscoveryExcludedRoots()");
+  const excludedEnd = source.indexOf("function runtimeAllowedRoots", excludedStart);
+  const excluded = source.slice(excludedStart, excludedEnd);
+  for (const name of ["desktop", "documents", "downloads", "music", "pictures", "videos"]) {
+    assert.match(excluded, new RegExp(`"${name}"`));
+  }
+});
+
 test("Desktop does not create the Chat window after quitting or moving to background", () => {
   const source = readFileSync(electronMainScript, "utf8");
   const start = source.indexOf("async function createWindow()");

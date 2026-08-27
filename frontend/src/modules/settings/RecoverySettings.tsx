@@ -30,6 +30,7 @@ import type {
   WorkflowTrashItem,
 } from "@/api/generated/core-client";
 import { useTranslation } from "react-i18next";
+import ArchiveFolderPickerModal from "@/components/ui/ArchiveFolderPickerModal";
 import {
   archiveConversation,
   createArchiveFolder,
@@ -63,6 +64,8 @@ interface RecoverySettingsProps {
   headingRef: RefObject<HTMLHeadingElement>;
 }
 
+const RETENTION_REFRESH_INTERVAL_MS = 60_000;
+
 function useDebouncedValue<T>(value: T, delay = 300) {
   const [debounced, setDebounced] = useState(value);
   useEffect(() => {
@@ -87,7 +90,7 @@ function ActionSet({ children, menuItems, busy, moreLabel }: { children: ReactNo
 
 export default function RecoverySettings({ headingRef }: RecoverySettingsProps) {
   const { t, i18n } = useTranslation();
-  const [view, setView] = useState<RecoveryView>("archive");
+  const [view, setView] = useState<RecoveryView>("trash");
   const [archiveKind, setArchiveKind] = useState<RecoveryKind>("dialog");
   const [archiveKeyword, setArchiveKeyword] = useState("");
   const debouncedArchiveKeyword = useDebouncedValue(archiveKeyword);
@@ -99,6 +102,7 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
   const [archiveError, setArchiveError] = useState(false);
   const [archiveRevision, setArchiveRevision] = useState(0);
   const [folders, setFolders] = useState<ConversationArchiveFolder[]>([]);
+  const [unfiledTotalCount, setUnfiledTotalCount] = useState(0);
   const [foldersLoading, setFoldersLoading] = useState(true);
   const [folderError, setFolderError] = useState(false);
   const [folderRevision, setFolderRevision] = useState(0);
@@ -136,7 +140,13 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
   const [trashLoading, setTrashLoading] = useState(true);
   const [trashError, setTrashError] = useState(false);
   const [trashRevision, setTrashRevision] = useState(0);
+  const [retentionNow, setRetentionNow] = useState(() => Date.now());
   const latestTrashRequest = useRef(0);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setRetentionNow(Date.now()), RETENTION_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -144,6 +154,7 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
     setFolderError(false);
     void listArchiveFolders(controller.signal).then((result) => {
       setFolders(result.folders);
+      setUnfiledTotalCount(result.unfiledTotalCount);
     }).catch((error) => {
       if (error?.name !== "CanceledError" && error?.name !== "AbortError") setFolderError(true);
     }).finally(() => {
@@ -151,6 +162,11 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
     });
     return () => controller.abort();
   }, [folderRevision]);
+
+  useEffect(() => {
+    if (!moveItem || foldersLoading || moveFolderId === "unfiled") return;
+    if (!folders.some((folder) => folder.id === moveFolderId)) setMoveFolderId("unfiled");
+  }, [folders, foldersLoading, moveFolderId, moveItem]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -237,7 +253,7 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
   const formatTime = (value?: string) => value ? new Date(value).toLocaleString(locale, { hour12: false }) : "—";
   const retentionText = (expiresAt?: string) => {
     if (!expiresAt) return t("settingsPage.recovery.retentionUnknown");
-    const days = Math.max(0, Math.ceil((new Date(expiresAt).getTime() - Date.now()) / 86_400_000));
+    const days = Math.max(0, Math.ceil((new Date(expiresAt).getTime() - retentionNow) / 86_400_000));
     return days === 0
       ? t("settingsPage.recovery.expiresToday")
       : t("settingsPage.recovery.daysRemaining", { count: days });
@@ -255,12 +271,44 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
     () => folderOptions.filter((option) => option.value !== deleteFolder?.id),
     [deleteFolder?.id, folderOptions],
   );
+  const moveFolderOptions = useMemo(() => [
+    {
+      id: "unfiled",
+      name: t("settingsPage.recovery.unfiled"),
+      count: unfiledTotalCount,
+      isDefault: true,
+    },
+    ...folders.map((folder) => ({
+      id: folder.id,
+      name: folder.name,
+      count: folder.total_count,
+      isDefault: false,
+    })),
+  ], [folders, t, unfiledTotalCount]);
+  const movePending = busyKey.startsWith("move:");
 
   const reloadArchive = () => {
     setArchiveRevision((value) => value + 1);
     setFolderRevision((value) => value + 1);
   };
   const reloadTrash = () => setTrashRevision((value) => value + 1);
+
+  const openMoveDialog = (item: ConversationRecoveryItem) => {
+    setMoveItem(item);
+    setMoveFolderId(item.folder_id || "unfiled");
+  };
+
+  const closeMoveDialog = () => {
+    if (movePending) return;
+    setMoveItem(null);
+  };
+
+  const handleMoveFolderCreated = (folder: ConversationArchiveFolder) => {
+    setFolders((current) => current.some((item) => item.id === folder.id)
+      ? current.map((item) => item.id === folder.id ? folder : item)
+      : [...current, folder]);
+    setMoveFolderId(folder.id);
+  };
 
   const saveFolder = async () => {
     const name = folderName.trim();
@@ -358,20 +406,29 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
   };
 
   const moveArchivedItem = async () => {
-    if (!moveItem) return;
+    if (!moveItem || !moveFolderId) return;
     const currentFolder = moveItem.folder_id || "unfiled";
+    const targetFolder = moveFolderOptions.find((folder) => folder.id === moveFolderId);
+    if (!targetFolder) {
+      message.warning(t("settingsPage.recovery.selectFolder"));
+      return;
+    }
     if (currentFolder === moveFolderId) {
-      message.info(t("settingsPage.recovery.alreadyInFolder"));
+      const itemName = moveItem.display_name;
+      setMoveItem(null);
+      message.info(t("settingsPage.recovery.alreadyInNamed", { name: itemName, folder: targetFolder.name }));
       return;
     }
     const key = `move:${moveItem.conversation_id}`;
+    const itemName = moveItem.display_name;
     setBusyKey(key);
     try {
       await archiveConversation(moveItem.conversation_id, moveFolderId === "unfiled" ? null : moveFolderId);
       setMoveItem(null);
       reloadArchive();
-      message.success(t("settingsPage.recovery.moved"));
+      message.success(t("settingsPage.recovery.movedNamed", { name: itemName, folder: targetFolder.name }));
     } catch {
+      setFolderRevision((value) => value + 1);
       message.error(t("settingsPage.recovery.operationFailed"));
     } finally {
       setBusyKey("");
@@ -420,7 +477,7 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
   const archivedRow = (item: ConversationRecoveryItem) => {
     const busy = busyKey.endsWith(`:${item.conversation_id}`);
     const actions: MenuProps["items"] = [
-      { key: "move", label: t("settingsPage.recovery.moveTo"), onClick: () => { setMoveItem(item); setMoveFolderId(item.folder_id || "unfiled"); } },
+      { key: "move", label: t("settingsPage.recovery.moveTo"), onClick: () => openMoveDialog(item) },
       { key: "unarchive", label: t("settingsPage.recovery.unarchive"), onClick: () => void runArchiveAction(item, "unarchive") },
       { key: "trash", danger: true, label: t("settingsPage.recovery.moveToTrash"), onClick: () => confirmArchiveTrash(item) },
     ];
@@ -428,7 +485,7 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
       <div className="recovery-name-cell"><span className="recovery-item-icon"><InboxOutlined /></span><div><strong>{item.display_name}</strong><small>{formatTime(item.archived_at)}</small></div></div>
       <time>{formatTime(item.archived_at)}</time>
       <ActionSet busy={busy} menuItems={actions} moreLabel={t("settingsPage.recovery.moreActions")}>
-        <Button disabled={busy} onClick={() => { setMoveItem(item); setMoveFolderId(item.folder_id || "unfiled"); }}>{t("settingsPage.recovery.moveTo")}</Button>
+        <Button disabled={busy} onClick={() => openMoveDialog(item)}>{t("settingsPage.recovery.moveTo")}</Button>
         <Button loading={busyKey === `unarchive:${item.conversation_id}`} disabled={busy && busyKey !== `unarchive:${item.conversation_id}`} onClick={() => void runArchiveAction(item, "unarchive")}>{t("settingsPage.recovery.unarchive")}</Button>
         <Tooltip title={t("settingsPage.recovery.moveToTrash")}><Button aria-label={t("settingsPage.recovery.moveToTrashNamed", { name: item.display_name })} danger icon={<DeleteOutlined />} disabled={busy} onClick={() => confirmArchiveTrash(item)} /></Tooltip>
       </ActionSet>
@@ -599,9 +656,24 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
         </div>)}
       </div>}
     </Modal>
-    <Modal title={t("settingsPage.recovery.moveNamed", { name: moveItem?.display_name || "" })} open={Boolean(moveItem)} okText={t("settingsPage.recovery.move")} cancelText={t("common.cancel")} confirmLoading={busyKey.startsWith("move:")} onOk={() => void moveArchivedItem()} onCancel={() => setMoveItem(null)} destroyOnHidden>
-      <div className="recovery-move-form"><Select value={moveFolderId} options={folderOptions} onChange={setMoveFolderId} aria-label={t("settingsPage.recovery.targetFolder")} /><Button icon={<FolderAddOutlined />} onClick={() => { setFolderName(""); setFolderModalOpen(true); }}>{t("settingsPage.recovery.createInline")}</Button></div>
-    </Modal>
+    <ArchiveFolderPickerModal
+      open={Boolean(moveItem)}
+      mode="move"
+      itemName={moveItem?.display_name || ""}
+      itemKind={moveItem?.kind === "task" ? "task" : "dialog"}
+      folders={folders}
+      unfiledTotalCount={unfiledTotalCount}
+      selectedFolderId={moveFolderId}
+      foldersLoading={foldersLoading}
+      folderLoadError={folderError}
+      submitting={movePending}
+      createFolder={createArchiveFolder}
+      onFolderCreated={handleMoveFolderCreated}
+      onSelectFolder={setMoveFolderId}
+      onRetry={() => setFolderRevision((value) => value + 1)}
+      onSubmit={() => void moveArchivedItem()}
+      onCancel={closeMoveDialog}
+    />
     <span className="settings-screenreader-status" role="status" aria-live="polite">{busyKey ? t("settingsPage.recovery.processing") : ""}</span>
   </>;
 }

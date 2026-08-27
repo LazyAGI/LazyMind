@@ -99,6 +99,7 @@ type TargetTreeSearchRequest struct {
 type TargetTreeRecommendationRequest struct {
 	AgentID         string         `json:"agent_id,omitempty"`
 	ProviderOptions map[string]any `json:"provider_options,omitempty"`
+	ForceRefresh    bool           `json:"force_refresh,omitempty"`
 }
 
 type SourceTreeChildrenRequest struct {

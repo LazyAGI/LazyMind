@@ -64,6 +64,8 @@ type DefaultModel struct {
 	Name                   string     `gorm:"column:name;type:varchar(512);not null;uniqueIndex:uk_default_models_provider_name,priority:2"`
 	ModelType              string     `gorm:"column:model_type;type:varchar(64);not null"`
 	MaxInputTokens         *string    `gorm:"column:max_input_tokens;type:varchar(16)"`
+	FreeAutoSelectPriority int        `gorm:"column:free_auto_select_priority;type:integer;not null;default:0"`
+	FreeAutoSelectBaseURLs string     `gorm:"column:free_auto_select_base_urls;type:text;not null;default:''"`
 	CreatedAt              time.Time  `gorm:"column:created_at;not null"`
 	UpdatedAt              time.Time  `gorm:"column:updated_at;not null"`
 	DeletedAt              *time.Time `gorm:"column:deleted_at"`
@@ -123,6 +125,8 @@ type UserModelProviderGroupModel struct {
 	Name                     string  `gorm:"column:name;type:varchar(512);not null;uniqueIndex:uk_user_model_provider_group_models_group_name,priority:2"`
 	ModelType                string  `gorm:"column:model_type;type:varchar(64);not null"`
 	MaxInputTokens           *string `gorm:"column:max_input_tokens;type:varchar(16)"`
+	FreeAutoSelectPriority   int     `gorm:"column:free_auto_select_priority;type:integer;not null;default:0"`
+	FreeAutoSelectBaseURLs   string  `gorm:"column:free_auto_select_base_urls;type:text;not null;default:''"`
 	IsDefault                bool    `gorm:"column:is_default;type:boolean;not null;default:false"`
 	BaseModel
 }

@@ -1,0 +1,100 @@
+schema_version: 2
+id: poster-design
+type: chat
+version: 0.0.0+6e8ecaa3c33f
+status: published
+default_locale: zh-CN
+provider: SkillHub
+
+skill:
+  source_url: https://skillhub.cn/skills/user_865e3592/poster
+  category: design
+  required_version: 0.0.0+6e8ecaa3c33f
+
+placement:
+  home: true
+  gallery: true
+  order: 17
+
+classification:
+  category: 设计创意
+  tags:
+    - 海报设计
+    - 视觉系统
+    - 排版
+    - 设计哲学
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+
+presentation:
+  card:
+    title: 海报设计技巧
+    description: 先建立视觉哲学，再将版式、字体、色彩和节奏落实为海报方案
+    output_type: images
+    output_label: 海报设计方案
+    cover_asset: cover
+    result_summary: 从概念和设计原则出发，形成包含视觉层级、版式与成品方向的系统方案
+  detail:
+    title: 海报设计技巧
+    description: 围绕主题建立一套一致的设计哲学，并据此规划信息层级、排版、色彩、留白和视觉节奏，形成可执行的海报方案。
+    attachment_hint: 主题、文案、尺寸、品牌素材或参考海报
+
+tasks:
+  - id: poster-concept
+    selector:
+      title: 海报概念设计
+      description: 从主题和文案建立完整的视觉哲学与版式方向
+      output_label: 海报设计方案
+    launch:
+      prompt_short: 根据我的主题和文案设计一张海报。
+      prompt: 请根据我提供的主题、核心文案、尺寸、受众和使用场景，先提出一套清晰的设计哲学，再据此设计信息层级、网格、字体、色彩、留白和视觉节奏。给出可执行的成品方案；信息不足时先询问，不要堆砌无关装饰。
+    replay:
+      steps:
+        - title: 提炼主题张力
+          description: 明确海报要传达的核心观念、情绪和受众
+        - title: 建立设计哲学
+          description: 形成统一的视觉原则、对比关系和表达逻辑
+        - title: 构建版式系统
+          description: 设计信息层级、网格、字体、色彩和留白
+        - title: 输出成品方向
+          description: 整理可渲染的视觉规范与海报方案
+    result:
+      template: generic_report_v1
+      eyebrow: 海报设计方案
+      title: 主题视觉哲学与版式系统
+      summary: 从核心概念出发形成统一、清晰且可执行的海报视觉方向
+      highlights:
+        - 核心概念与设计哲学
+        - 信息层级、网格和排版
+        - 色彩、留白和成品方向
+
+  - id: poster-critique
+    selector:
+      title: 海报诊断优化
+      description: 分析现有海报的层级、排版、色彩和视觉一致性
+      output_label: 海报优化建议
+    launch:
+      prompt_short: 帮我诊断并优化这张海报。
+      prompt: 请分析我提供的海报和使用场景，从主题表达、信息层级、对齐、字体、色彩、留白、节奏和可读性逐项诊断。说明最影响效果的问题、原因和修改优先级，并给出一套保持核心内容不变的具体优化方案。
+    replay:
+      steps:
+        - title: 识别传播目标
+          description: 确认受众、场景、观看距离和核心信息
+        - title: 检查视觉层级
+          description: 评估标题、正文、辅助信息和焦点关系
+        - title: 诊断系统一致性
+          description: 检查网格、字体、色彩、留白和视觉节奏
+        - title: 给出优化顺序
+          description: 按影响程度整理可执行的修改方案
+    result:
+      template: generic_report_v1
+      eyebrow: 海报优化建议
+      title: 视觉问题诊断与修改优先级
+      summary: 在保留核心内容的前提下提升层级、可读性和整体一致性
+      highlights:
+        - 传播目标与视觉焦点
+        - 排版、色彩和留白问题
+        - 分优先级的具体修改方案

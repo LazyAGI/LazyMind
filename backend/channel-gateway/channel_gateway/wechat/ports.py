@@ -1,11 +1,15 @@
 import datetime as dt
+from collections.abc import Callable
 from typing import Any, Protocol
 
 from channel_gateway.common.ports.providers import RuntimeLease
 
 
 class WeChatLoginClient(Protocol):
-    def start_login(self) -> tuple[str, str, str]:
+    def start_login(
+        self,
+        local_tokens: tuple[str, ...] = (),
+    ) -> tuple[str, str, str]:
         ...
 
     def poll_login_status(
@@ -33,15 +37,40 @@ class WeChatReceiverClient(Protocol):
 
     def download_media(
         self,
-        *,
         media: dict[str, Any],
-        aes_key_hint: str = '',
+        *,
+        image_aeskey: str = '',
         max_bytes: int,
-    ) -> bytes:
+        max_download_bytes: int,
+        fallback_aes_keys: tuple[str, ...] = (),
+        validate_plaintext: Callable[[bytes], bool] | None = None,
+        on_download_bytes: Callable[[int], None] | None = None,
+    ) -> tuple[bytes, str]:
         ...
 
 
 class WeChatDeliveryClient(Protocol):
+    def get_config(
+        self,
+        *,
+        base_url: str,
+        token: str,
+        to_user_id: str,
+        context_token: str,
+    ) -> dict[str, Any]:
+        ...
+
+    def send_typing(
+        self,
+        *,
+        base_url: str,
+        token: str,
+        to_user_id: str,
+        typing_ticket: str,
+        typing: bool,
+    ) -> None:
+        ...
+
     def send_text(
         self,
         *,
@@ -84,6 +113,22 @@ class WeChatDeliveryClient(Protocol):
         to_user_id: str,
         context_token: str,
         item: dict[str, Any],
+        client_id: str,
+        run_id: str,
+    ) -> None:
+        ...
+
+    def send_tool_progress(
+        self,
+        *,
+        base_url: str,
+        token: str,
+        to_user_id: str,
+        context_token: str,
+        tool_name: str,
+        tool_call_id: str,
+        status: str,
+        started: bool,
         client_id: str,
         run_id: str,
     ) -> None:

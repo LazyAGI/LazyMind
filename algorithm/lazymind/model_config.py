@@ -55,18 +55,21 @@ def is_model_role_available(role: str, *, config_path: Optional[str] = None) -> 
 def get_config_path() -> str:
     '''Return the active runtime_models config file path as a string.
 
-    Controlled entirely by LAZYMIND_MODEL_CONFIG_PATH.  Three shorthand aliases
+    Controlled entirely by LAZYMIND_MODEL_CONFIG_PATH.  Shorthand aliases
     are accepted in addition to an explicit file path:
 
         inner    → runtime_models.inner.yaml   (intranet / on-prem deployment)
         online   → runtime_models.online.yaml  (public cloud API deployment)
         dynamic  → runtime_models.yaml         (fully dynamic, key injected per request)
 
+    If inner is selected and a sibling gitignored runtime_models.local.yaml
+    exists, that file is used instead so machine overrides stay out of git.
+
     Alias resolution is handled by algorithm/config.py (Config alias mechanism),
     so config['model_config_path'] always contains the resolved absolute path.
     '''
-    from lazymind.config import config as _cfg
-    return _cfg['model_config_path']
+    from lazymind.config import apply_local_model_config_override, config as _cfg
+    return apply_local_model_config_override(_cfg['model_config_path'])
 
 
 def load_model_config(config_path: str | None = None, *, expand_env: bool = False) -> Dict[str, Any]:
@@ -218,10 +221,13 @@ def _enrich_role_types(model_config: Dict[str, Any]) -> Dict[str, Any]:
             enriched[role] = role_cfg
             continue
         merged = dict(role_cfg)
-        if not merged.get('type'):
-            entry = _role_entry(yaml_cfg.get(role))
-            if entry:
+        entry = _role_entry(yaml_cfg.get(role))
+        if entry:
+            if not merged.get('type'):
                 merged['type'] = entry.get('type')
+            yaml_tokens = entry.get('max_input_tokens')
+            if yaml_tokens is not None and 'max_input_tokens' not in merged:
+                merged['max_input_tokens'] = yaml_tokens
         enriched[role] = merged
     return enriched
 

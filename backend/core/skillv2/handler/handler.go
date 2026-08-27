@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -15,6 +16,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"gopkg.in/yaml.v3"
 	"gorm.io/gorm"
@@ -212,7 +214,7 @@ func Create(w http.ResponseWriter, r *http.Request) {
 		replyError(w, "name/category required", http.StatusBadRequest)
 		return
 	}
-	source, cleanup, err := createSkillSourceFromRequest(name, category, strings.TrimSpace(req.Description), req.Content, req.Children, req.Source)
+	source, cleanup, err := createSkillSourceFromRequest(r.Context(), name, category, strings.TrimSpace(req.Description), req.Content, req.Children, req.Source)
 	if err != nil {
 		replyError(w, err.Error(), http.StatusBadRequest)
 		return
@@ -295,7 +297,7 @@ func Patch(w http.ResponseWriter, r *http.Request) {
 	tags := compactStringSlicePtr(req.Tags)
 	var source *skillservice.SourceInput
 	if req.Source != nil {
-		converted, err := req.Source.toServiceSource()
+		converted, err := req.Source.toServiceSource(r.Context())
 		if err != nil {
 			replyError(w, err.Error(), http.StatusBadRequest)
 			return
@@ -1231,7 +1233,7 @@ func MarketEdit(w http.ResponseWriter, r *http.Request) {
 		}
 		var source *skillservice.SourceInput
 		if req.Source != nil {
-			converted, err := req.Source.toServiceSource()
+			converted, err := req.Source.toServiceSource(r.Context())
 			if err != nil {
 				replyError(w, err.Error(), http.StatusBadRequest)
 				return
@@ -1597,7 +1599,7 @@ func InternalCreate(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, map[string]any{"skill_id": resp.SkillID, "head_revision_id": resp.HeadRevisionID})
 }
 
-func (s skillSourceRequest) toServiceSource() (skillservice.SourceInput, error) {
+func (s skillSourceRequest) toServiceSource(ctx context.Context) (skillservice.SourceInput, error) {
 	sourceType := strings.TrimSpace(s.Type)
 	if sourceType == "" {
 		if strings.TrimSpace(s.UploadID) != "" {
@@ -1616,15 +1618,187 @@ func (s skillSourceRequest) toServiceSource() (skillservice.SourceInput, error) 
 		if strings.TrimSpace(s.URL) == "" {
 			return skillservice.SourceInput{}, fmt.Errorf("url required")
 		}
-		return skillservice.SourceInput{Type: "url", URL: strings.TrimSpace(s.URL)}, nil
+		downloadURL, pathPrefix, err := normalizeSkillImportURL(ctx, strings.TrimSpace(s.URL))
+		if err != nil {
+			return skillservice.SourceInput{}, err
+		}
+		return skillservice.SourceInput{Type: "url", URL: downloadURL, SourceURL: strings.TrimSpace(s.URL), PathPrefix: pathPrefix}, nil
 	default:
 		return skillservice.SourceInput{}, fmt.Errorf("unsupported source type %q", sourceType)
 	}
 }
 
-func createSkillSourceFromRequest(name, category, description, content string, children []legacyChildSkillInput, sourceReq skillSourceRequest) (skillservice.SourceInput, func(), error) {
+const githubAPIBaseURL = "https://api.github.com"
+
+func normalizeSkillImportURL(ctx context.Context, rawURL string) (string, string, error) {
+	return normalizeSkillImportURLWithResolver(ctx, rawURL, &http.Client{Timeout: 10 * time.Second}, githubAPIBaseURL)
+}
+
+func normalizeSkillImportURLWithResolver(ctx context.Context, rawURL string, client *http.Client, apiBaseURL string) (string, string, error) {
+	parsed, err := url.ParseRequestURI(rawURL)
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return "", "", skillImportURLValidationError("invalid skill import URL")
+	}
+	if parsed.Scheme != "http" && parsed.Scheme != "https" {
+		return "", "", skillImportURLValidationError("skill import URL must use HTTP or HTTPS")
+	}
+	if !strings.EqualFold(strings.TrimPrefix(parsed.Hostname(), "www."), "github.com") {
+		return rawURL, "", nil
+	}
+	if parsed.User != nil || parsed.Port() != "" || parsed.RawQuery != "" || parsed.Fragment != "" {
+		return "", "", skillImportURLValidationError("GitHub URL must not contain credentials, query, or fragment")
+	}
+	parts, err := githubURLPathParts(parsed.EscapedPath())
+	if err != nil {
+		return "", "", err
+	}
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return "", "", skillImportURLValidationError("GitHub URL must identify a repository")
+	}
+	owner := parts[0]
+	repository := strings.TrimSuffix(parts[1], ".git")
+	if !isValidGitHubName(owner) || !isValidGitHubName(repository) {
+		return "", "", skillImportURLValidationError("GitHub URL must identify a repository")
+	}
+	if ref, ok := githubArchiveRef(parts); ok {
+		return githubArchiveURL(owner, repository, ref), "", nil
+	}
+	if len(parts) == 2 {
+		ref, err := resolveGitHubDefaultBranch(ctx, client, apiBaseURL, owner, repository)
+		if err != nil {
+			return "", "", err
+		}
+		return githubArchiveURL(owner, repository, ref), "", nil
+	}
+	if len(parts) < 5 || parts[2] != "tree" {
+		return "", "", skillImportURLValidationError("GitHub URL must point to a repository root or /tree/<ref>/<skill-path>")
+	}
+	ref, pathPrefix, err := resolveGitHubTreeRef(ctx, client, apiBaseURL, owner, repository, parts[3:])
+	if err != nil {
+		return "", "", err
+	}
+	return githubArchiveURL(owner, repository, ref), pathPrefix, nil
+}
+
+func githubArchiveRef(parts []string) (string, bool) {
+	if len(parts) < 4 || parts[2] != "archive" {
+		return "", false
+	}
+	refParts := parts[3:]
+	if len(refParts) >= 3 && refParts[0] == "refs" && (refParts[1] == "heads" || refParts[1] == "tags") {
+		refParts = refParts[2:]
+	} else if len(refParts) != 1 {
+		return "", false
+	}
+	last := refParts[len(refParts)-1]
+	if !strings.HasSuffix(last, ".zip") {
+		return "", false
+	}
+	refParts[len(refParts)-1] = strings.TrimSuffix(last, ".zip")
+	if refParts[len(refParts)-1] == "" {
+		return "", false
+	}
+	return strings.Join(refParts, "/"), true
+}
+
+func githubURLPathParts(escapedPath string) ([]string, error) {
+	rawParts := strings.Split(strings.Trim(escapedPath, "/"), "/")
+	if len(rawParts) == 1 && rawParts[0] == "" {
+		return nil, skillImportURLValidationError("GitHub URL must identify a repository")
+	}
+	parts := make([]string, 0, len(rawParts))
+	for _, rawPart := range rawParts {
+		part, err := url.PathUnescape(rawPart)
+		if err != nil || part == "" || part == "." || part == ".." || strings.ContainsAny(part, `/\\`) || strings.ContainsRune(part, 0) {
+			return nil, skillImportURLValidationError("GitHub URL contains an invalid path segment")
+		}
+		parts = append(parts, part)
+	}
+	return parts, nil
+}
+
+func resolveGitHubDefaultBranch(ctx context.Context, client *http.Client, apiBaseURL, owner, repository string) (string, error) {
+	var response struct {
+		DefaultBranch string `json:"default_branch"`
+	}
+	status, err := githubAPIGet(ctx, client, apiBaseURL+"/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(repository), &response)
+	if err != nil {
+		return "", err
+	}
+	if status < 200 || status >= 300 || strings.TrimSpace(response.DefaultBranch) == "" {
+		return "", skillImportURLValidationError("GitHub repository default branch could not be resolved")
+	}
+	return response.DefaultBranch, nil
+}
+
+func resolveGitHubTreeRef(ctx context.Context, client *http.Client, apiBaseURL, owner, repository string, treeParts []string) (string, string, error) {
+	for split := len(treeParts) - 1; split > 0; split-- {
+		ref := strings.Join(treeParts[:split], "/")
+		pathPrefix := strings.Join(treeParts[split:], "/")
+		status, err := githubAPIGet(ctx, client, apiBaseURL+"/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(repository)+"/commits/"+url.PathEscape(ref), nil)
+		if err != nil {
+			return "", "", err
+		}
+		if status == http.StatusNotFound || status == http.StatusUnprocessableEntity {
+			continue
+		}
+		if status >= 200 && status < 300 {
+			return ref, pathPrefix, nil
+		}
+		return "", "", fmt.Errorf("GitHub ref lookup failed with HTTP status %d", status)
+	}
+	return "", "", skillImportURLValidationError("GitHub URL ref could not be resolved")
+}
+
+func githubAPIGet(ctx context.Context, client *http.Client, endpoint string, out any) (int, error) {
+	if client == nil {
+		client = &http.Client{Timeout: 10 * time.Second}
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return 0, err
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("User-Agent", "LazyMind-Skill-Importer")
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, fmt.Errorf("GitHub ref lookup failed: %w", err)
+	}
+	defer resp.Body.Close()
+	if out != nil && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		if err := json.NewDecoder(io.LimitReader(resp.Body, 1<<20)).Decode(out); err != nil {
+			return 0, fmt.Errorf("GitHub ref lookup returned invalid JSON: %w", err)
+		}
+	}
+	return resp.StatusCode, nil
+}
+
+func githubArchiveURL(owner, repository, ref string) string {
+	return "https://github.com/" + url.PathEscape(owner) + "/" + url.PathEscape(repository) + "/archive/" + url.PathEscape(ref) + ".zip"
+}
+
+func isValidGitHubName(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, char := range value {
+		if unicode.IsLetter(char) || unicode.IsDigit(char) || char == '-' || char == '_' || char == '.' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+type skillImportURLValidationError string
+
+func (e skillImportURLValidationError) Error() string {
+	return string(e)
+}
+
+func createSkillSourceFromRequest(ctx context.Context, name, category, description, content string, children []legacyChildSkillInput, sourceReq skillSourceRequest) (skillservice.SourceInput, func(), error) {
 	if strings.TrimSpace(content) == "" && len(children) == 0 {
-		source, err := sourceReq.toServiceSource()
+		source, err := sourceReq.toServiceSource(ctx)
 		return source, nil, err
 	}
 	files, err := legacySkillFiles(name, category, description, content, children)
@@ -1825,7 +1999,7 @@ func newMarketService(db *gorm.DB) *skillmarket.Service {
 	return skillmarket.NewService(skillmarket.ServiceDeps{
 		DB:         db,
 		BlobStore:  skillmarket.NewBlobStore(db, skillmarket.NewLocalObjectStore(skillObjectRoot())),
-		Downloader: httpZipDownloader{},
+		Downloader: marketHTTPZipDownloader{},
 	})
 }
 
@@ -2118,34 +2292,72 @@ func (s dbUploadStore) Get(ctx context.Context, uploadID string) (skillservice.U
 
 type httpZipDownloader struct{}
 
-func (httpZipDownloader) Download(ctx context.Context, rawURL string) (string, error) {
+const maxSkillDownloadBytes int64 = 20 << 20
+
+const skillArchiveDownloadTimeout = 5 * time.Minute
+
+func newSkillArchiveHTTPClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = 30 * time.Second
+	return &http.Client{
+		Transport: transport,
+		Timeout:   skillArchiveDownloadTimeout,
+	}
+}
+
+type marketHTTPZipDownloader struct{}
+
+func (marketHTTPZipDownloader) Download(ctx context.Context, rawURL string) (string, error) {
+	downloaded, err := (httpZipDownloader{}).Download(ctx, rawURL)
+	if err != nil {
+		return "", err
+	}
+	return downloaded.Path, nil
+}
+
+func (httpZipDownloader) Download(ctx context.Context, rawURL string) (skillservice.DownloadedZip, error) {
 	rawURL = strings.TrimSpace(rawURL)
 	if rawURL == "" {
-		return "", fmt.Errorf("url required")
+		return skillservice.DownloadedZip{}, fmt.Errorf("url required")
 	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
-		return "", err
+		return skillservice.DownloadedZip{}, err
 	}
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := newSkillArchiveHTTPClient()
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return skillservice.DownloadedZip{}, err
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
-		return "", fmt.Errorf("download failed: %s", resp.Status)
+		return skillservice.DownloadedZip{}, fmt.Errorf("download failed: %s", resp.Status)
 	}
 	f, err := os.CreateTemp("", "lazymind-skill-*.zip")
 	if err != nil {
-		return "", err
+		return skillservice.DownloadedZip{}, err
 	}
-	defer f.Close()
-	if _, err := io.Copy(f, resp.Body); err != nil {
+	if resp.ContentLength > maxSkillDownloadBytes {
+		_ = f.Close()
 		_ = os.Remove(f.Name())
-		return "", err
+		return skillservice.DownloadedZip{}, fmt.Errorf("skill package download exceeds %d bytes", maxSkillDownloadBytes)
 	}
-	return f.Name(), nil
+	written, err := io.Copy(f, io.LimitReader(resp.Body, maxSkillDownloadBytes+1))
+	if err != nil {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+		return skillservice.DownloadedZip{}, err
+	}
+	if written > maxSkillDownloadBytes {
+		_ = f.Close()
+		_ = os.Remove(f.Name())
+		return skillservice.DownloadedZip{}, fmt.Errorf("skill package download exceeds %d bytes", maxSkillDownloadBytes)
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(f.Name())
+		return skillservice.DownloadedZip{}, err
+	}
+	return skillservice.DownloadedZip{Path: f.Name(), Cleanup: func() { _ = os.Remove(f.Name()) }}, nil
 }
 
 func writeInlineSkillZip(content string) (string, error) {

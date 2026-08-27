@@ -66,7 +66,7 @@ func New(cfg *config.Config, log *zap.Logger) *App {
 	a.heartbeat = heartbeat
 
 	// HTTP server
-	handler := api.NewHandler(mgr, validator, stagingSvc, pathMapper, log)
+	handler := api.NewHandler(mgr, validator, stagingSvc, pathMapper, cfg.DynamicRootUpdates, log)
 	a.server = api.NewServer(cfg, handler, log)
 
 	return a

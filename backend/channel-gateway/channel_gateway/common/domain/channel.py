@@ -26,7 +26,10 @@ WELCOME_MESSAGE = """我是 LazyMind，你的个人 AI 助手。这里与 LazyMi
 
 直接发送消息即可继续。"""
 
-WECHAT_WELCOME_MESSAGE = '我是 LazyMind，你可以在这里继续对话。支持发送文字、图片和文档。'
+WECHAT_WELCOME_MESSAGE = (
+    '我是 LazyMind，你可以在这里继续对话，发送文字、语音、图片和文档。'
+    '也可以用自然语言管理会话和能力；出现选项时直接回复编号即可。'
+)
 
 
 def welcome_message(provider: str) -> str:

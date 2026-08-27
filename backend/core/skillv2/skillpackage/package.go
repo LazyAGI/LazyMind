@@ -19,10 +19,15 @@ const (
 	MaxTotalBytes = 128 << 20
 )
 
-func ReadZip(zipPath string) (map[string][]byte, error) {
+type Package struct {
+	Files       map[string][]byte
+	PackageRoot string
+}
+
+func ReadZip(zipPath string) (Package, error) {
 	reader, err := zip.OpenReader(zipPath)
 	if err != nil {
-		return nil, err
+		return Package{}, err
 	}
 	defer reader.Close()
 	return readFiles(reader.File)
@@ -126,9 +131,9 @@ func WriteZip(files map[string][]byte, directory string) (string, error) {
 	return archivePath, nil
 }
 
-func readFiles(entries []*zip.File) (map[string][]byte, error) {
+func readFiles(entries []*zip.File) (Package, error) {
 	if len(entries) > MaxFiles {
-		return nil, fmt.Errorf("skill package contains too many entries: %d > %d", len(entries), MaxFiles)
+		return Package{}, fmt.Errorf("skill package contains too many entries: %d > %d", len(entries), MaxFiles)
 	}
 	files := make(map[string][]byte, len(entries))
 	var total uint64
@@ -139,72 +144,70 @@ func readFiles(entries []*zip.File) (map[string][]byte, error) {
 		entryName := strings.TrimSuffix(entry.Name, "/")
 		name, err := CleanPath(entryName)
 		if err != nil {
-			return nil, err
+			return Package{}, err
 		}
 		if entry.Mode()&os.ModeSymlink != 0 {
-			return nil, fmt.Errorf("skill package cannot contain symlink %q", name)
+			return Package{}, fmt.Errorf("skill package cannot contain symlink %q", name)
 		}
 		if entry.FileInfo().IsDir() {
 			continue
 		}
 		if _, exists := files[name]; exists {
-			return nil, fmt.Errorf("skill package contains duplicate path %q", name)
+			return Package{}, fmt.Errorf("skill package contains duplicate path %q", name)
 		}
 		if entry.UncompressedSize64 > MaxFileBytes {
-			return nil, fmt.Errorf("skill package file %q exceeds %d bytes", name, MaxFileBytes)
+			return Package{}, fmt.Errorf("skill package file %q exceeds %d bytes", name, MaxFileBytes)
 		}
 		total += entry.UncompressedSize64
 		if total > MaxTotalBytes {
-			return nil, fmt.Errorf("skill package exceeds %d uncompressed bytes", MaxTotalBytes)
+			return Package{}, fmt.Errorf("skill package exceeds %d uncompressed bytes", MaxTotalBytes)
 		}
 		rc, err := entry.Open()
 		if err != nil {
-			return nil, err
+			return Package{}, err
 		}
 		data, readErr := io.ReadAll(io.LimitReader(rc, MaxFileBytes+1))
 		closeErr := rc.Close()
 		if readErr != nil {
-			return nil, readErr
+			return Package{}, readErr
 		}
 		if closeErr != nil {
-			return nil, closeErr
+			return Package{}, closeErr
 		}
 		if len(data) > MaxFileBytes {
-			return nil, fmt.Errorf("skill package file %q exceeds %d bytes", name, MaxFileBytes)
+			return Package{}, fmt.Errorf("skill package file %q exceeds %d bytes", name, MaxFileBytes)
 		}
 		files[name] = data
 	}
-	return normalizeRoot(files), nil
+	files, packageRoot := normalizeRoot(files)
+	return Package{Files: files, PackageRoot: packageRoot}, nil
 }
 
-func normalizeRoot(files map[string][]byte) map[string][]byte {
+func normalizeRoot(files map[string][]byte) (map[string][]byte, string) {
 	if _, ok := files["SKILL.md"]; ok {
-		return files
+		return files, ""
 	}
 	root := ""
 	for filePath := range files {
 		parts := strings.SplitN(filePath, "/", 2)
 		if len(parts) != 2 || parts[1] == "" {
-			return files
+			return files, ""
 		}
 		if root == "" {
 			root = parts[0]
 		} else if root != parts[0] {
-			return files
+			return files, ""
 		}
 	}
 	if root == "" {
-		return files
+		return files, ""
 	}
 	normalized := make(map[string][]byte, len(files))
 	prefix := root + "/"
 	for filePath, data := range files {
 		normalized[strings.TrimPrefix(filePath, prefix)] = data
 	}
-	if _, ok := normalized["SKILL.md"]; ok {
-		return normalized
-	}
-	return files
+	return normalized, root
 }
 
 func isIgnoredMetadata(name string) bool {

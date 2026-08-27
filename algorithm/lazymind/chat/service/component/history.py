@@ -4,6 +4,11 @@ import json
 import re
 from typing import Any
 
+from lazyllm.tools.agent.base import (
+    TOOL_OBSERVATION_KEY,
+    attachable_tool_observation,
+)
+
 from lazymind.chat.service.utils.citations import (
     SOURCE_LINK_PATTERN,
     SOURCE_REF_PATTERN,
@@ -22,6 +27,24 @@ _HISTORY_TAG_PATTERN = re.compile(
 )
 _WHITESPACE_BEFORE_PUNCT_PATTERN = re.compile(r'\s+([。！？，、.!?,;:])')
 _MULTI_SPACE_PATTERN = re.compile(r'[ \t]{2,}')
+_COMPACT_WORKFLOW_TOOL_RESULTS = {
+    'advance_step',
+    'advance_step_and_hand_off',
+    'get_workflow_state',
+}
+_WORKFLOW_REWIND_QUERY_PATTERNS = (
+    re.compile(r'^请重新执行步骤\s+[A-Za-z0-9_.:-]+$'),
+    re.compile(r'^Please re-run step\s+[A-Za-z0-9_.:-]+$', re.IGNORECASE),
+)
+
+
+def is_workflow_rewind_action(query: str, workflow_context: Any) -> bool:
+    """Recognize the deterministic command emitted by the Workflow rewind UI."""
+    context = workflow_context if isinstance(workflow_context, dict) else {}
+    if not str(context.get('session_id') or '').strip():
+        return False
+    normalized = str(query or '').strip()
+    return any(pattern.fullmatch(normalized) for pattern in _WORKFLOW_REWIND_QUERY_PATTERNS)
 
 
 def _history_message_content(message: dict[str, Any]) -> str:
@@ -51,6 +74,66 @@ def _sanitize_history_tool_result(result: Any) -> Any:
             sanitized[key] = _sanitize_history_tool_result(value)
         return sanitized
     return result
+
+
+def _compact_workflow_history_payload(payload: Any) -> Any:
+    """Remove authoritative graph bodies from a model-visible Workflow receipt."""
+    if not isinstance(payload, dict):
+        return payload
+    if isinstance(payload.get('value'), dict):
+        return {
+            **payload,
+            'value': _compact_workflow_history_payload(payload['value']),
+        }
+
+    projection = payload.get('projection')
+    projection = projection if isinstance(projection, dict) else {}
+    workflow_state = payload.get('workflow_state')
+    workflow_state = workflow_state if isinstance(workflow_state, dict) else {}
+    compact = {
+        key: value
+        for key, value in payload.items()
+        if key not in {'projection', 'workflow_state', 'graph', 'compiled_graph'}
+    }
+    for result_key, projection_key in (
+        ('ready_steps', 'ready'),
+        ('retryable_steps', 'retryable'),
+        ('rewindable_steps', 'rewindable'),
+        ('continue_steps', 'continue'),
+    ):
+        if result_key not in compact and projection_key in projection:
+            compact[result_key] = projection.get(projection_key) or []
+    if (
+        projection.get('completed') is True
+        or workflow_state.get('status') == 'completed'
+    ):
+        compact['status'] = 'completed'
+        compact.setdefault('outcome', 'workflow_completed')
+    elif not compact.get('status') and workflow_state.get('status'):
+        compact['status'] = workflow_state['status']
+    return compact
+
+
+def _sanitize_named_history_tool_result(
+    tool_name: str,
+    result: Any,
+    *,
+    compact_workflow_receipts: bool,
+) -> Any:
+    sanitized = _sanitize_history_tool_result(result)
+    if not compact_workflow_receipts or tool_name not in _COMPACT_WORKFLOW_TOOL_RESULTS:
+        return sanitized
+    if isinstance(sanitized, str):
+        try:
+            decoded = json.loads(sanitized)
+        except json.JSONDecodeError:
+            return sanitized
+        return json.dumps(
+            _compact_workflow_history_payload(decoded),
+            ensure_ascii=False,
+            separators=(',', ':'),
+        )
+    return _compact_workflow_history_payload(sanitized)
 
 
 def _parse_history_assistant_content(
@@ -137,6 +220,7 @@ def _append_pending_assistant(
     pending_text_parts: list[str],
     pending_tool_calls: list[dict[str, Any]],
     saw_structured_segments: bool,
+    history_seq: Any = None,
 ) -> None:
     reasoning = '\n'.join(
         part.strip() for part in pending_reasoning_parts if str(part).strip()
@@ -149,6 +233,8 @@ def _append_pending_assistant(
         msg['reasoning_content'] = reasoning
     if pending_tool_calls:
         msg['tool_calls'] = list(pending_tool_calls)
+    if history_seq is not None:
+        msg['history_seq'] = history_seq
     normalized.append(msg)
     pending_reasoning_parts.clear()
     pending_text_parts.clear()
@@ -211,6 +297,8 @@ def _drop_incomplete_tool_exchanges(
 
 def normalize_history_for_agent(
     history: list[dict[str, Any]],
+    *,
+    compact_workflow_receipts: bool = False,
 ) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     for message in history or []:
@@ -219,6 +307,7 @@ def normalize_history_for_agent(
         role = str(message.get('role') or '').strip()
         if role == 'assistant':
             content = _history_message_content(message)
+            history_seq = message.get('history_seq')
             segments = _parse_history_assistant_content(content)
 
             pending_reasoning_parts: list[str] = []
@@ -260,21 +349,33 @@ def normalize_history_for_agent(
                         pending_text_parts,
                         pending_tool_calls,
                         saw_structured_segments,
+                        history_seq=history_seq,
                     )
-                    normalized.append({
+                    sanitized_result = _sanitize_named_history_tool_result(
+                        seg['name'],
+                        seg['result'],
+                        compact_workflow_receipts=compact_workflow_receipts,
+                    )
+                    tool_msg = {
                         'role': 'tool',
                         'tool_call_id': seg['id'],
                         'name': seg['name'],
                         'content': (
-                            _sanitize_history_tool_result(seg['result'])
-                            if isinstance(seg['result'], str)
+                            sanitized_result
+                            if isinstance(sanitized_result, str)
                             else json.dumps(
-                                _sanitize_history_tool_result(seg['result']),
+                                sanitized_result,
                                 ensure_ascii=False,
                                 separators=(',', ':'),
                             )
                         ),
-                    })
+                    }
+                    observation = attachable_tool_observation(sanitized_result)
+                    if observation is not None:
+                        tool_msg[TOOL_OBSERVATION_KEY] = observation
+                    if history_seq is not None:
+                        tool_msg['history_seq'] = history_seq
+                    normalized.append(tool_msg)
 
             _append_pending_assistant(
                 normalized,
@@ -282,16 +383,23 @@ def normalize_history_for_agent(
                 pending_text_parts,
                 pending_tool_calls,
                 saw_structured_segments,
+                history_seq=history_seq,
             )
             continue
 
         if role == 'user':
             content = _history_message_content(message)
             if content:
-                normalized.append({'role': 'user', 'content': content})
+                user_msg: dict[str, Any] = {'role': 'user', 'content': content}
+                if message.get('history_seq') is not None:
+                    user_msg['history_seq'] = message.get('history_seq')
+                normalized.append(user_msg)
             continue
 
         content = _history_message_content(message)
         if content:
-            normalized.append({'role': role or 'assistant', 'content': content})
+            other: dict[str, Any] = {'role': role or 'assistant', 'content': content}
+            if message.get('history_seq') is not None:
+                other['history_seq'] = message.get('history_seq')
+            normalized.append(other)
     return _drop_incomplete_tool_exchanges(normalized)

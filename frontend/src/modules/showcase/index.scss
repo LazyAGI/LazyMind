@@ -132,7 +132,7 @@
 .showcase-featured-grid .showcase-card {
   position: relative;
   box-sizing: border-box;
-  height: 154px;
+  height: auto;
   border-color: #e8edf4;
   background: #fff;
   box-shadow: 0 4px 14px rgba(45, 63, 90, 0.045);
@@ -151,7 +151,7 @@
 
 .showcase-featured-grid .showcase-card-link {
   display: flex;
-  height: 100%;
+  min-height: 100%;
   flex-direction: column;
 }
 
@@ -181,31 +181,26 @@
 
 .showcase-featured-grid .showcase-card-image-wrap {
   order: 2;
-  height: 111px;
-  flex: 0 0 111px;
-  aspect-ratio: auto;
+  height: auto;
+  flex: 0 0 auto;
+  aspect-ratio: 3 / 2;
   background: #f2f6fb;
 }
 
 .showcase-featured-grid .showcase-card-image-stage {
-  position: absolute;
+  position: relative;
   display: flex;
-  top: 50%;
-  left: 50%;
-  width: 166.5px;
-  max-width: 100%;
-  height: auto;
-  aspect-ratio: 3 / 2;
+  width: 100%;
+  height: 100%;
   flex-direction: column;
   overflow: hidden;
-  transform: translate(-50%, -50%);
   background: #fff;
-  box-shadow: 0 8px 26px rgba(39, 61, 91, 0.16);
 }
 
 .showcase-featured-grid .showcase-card-image {
   min-height: 0;
   flex: 1;
+  object-fit: cover;
   object-position: center;
   background: #f5f7fa;
 }
@@ -574,11 +569,17 @@
 }
 
 .showcase-gallery-grid .showcase-card-cover-image .showcase-card-image-stage {
-  inset: 0 4px;
+  inset: 0;
+  width: auto;
+  max-width: none;
+  height: auto;
+  aspect-ratio: auto;
+  transform: none;
+  box-shadow: none;
 }
 
 .showcase-gallery-grid .showcase-card-cover-image .showcase-card-image {
-  object-position: center top;
+  object-position: center;
 }
 
 .showcase-gallery-grid .showcase-card-body {

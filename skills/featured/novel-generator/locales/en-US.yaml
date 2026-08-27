@@ -1,0 +1,134 @@
+locale: en-US
+
+classification:
+  category: Content creation
+  tags:
+    - Novel writing
+    - Serialized fiction
+    - Outlining & worldbuilding
+
+presentation:
+  card:
+    title: Serialized novel writing assistant
+    description: Help authors develop ideas, characters, story outlines, chapters, and long-running continuity
+    output_type: document
+    output_label: Novel writing draft
+    cover_asset: cover
+    result_summary: Turn a one-line premise into settings, outlines, chapters, and continuity records for sustained serialization
+  detail:
+    title: Serialized novel writing assistant
+    description: "Support web-fiction and long-form authors with idea development, world and character design, global outlines, chapter writing, revision, and continuity checks. Source: WorkBuddy; adapted for LazyMind."
+    attachment_hint: Existing premise, character notes, outline, previous chapters, or serialization state (optional)
+
+tasks:
+  - id: idea-development
+    selector:
+      title: Ideas and settings
+      description: Turn a one-line premise into genre, protagonist, conflict, world rules, and opening hooks
+      output_label: Novel concept brief
+    launch:
+      prompt_short: Expand my one-line novel idea into an actionable creative brief.
+      prompt: Create an author-facing novel concept brief from the premise, genre direction, or keywords I provide. Define the genre and target readership, core appeal, protagonist's starting point and desire, central conflict, world or power rules, key supporting characters, hooks for the first three chapters, and major creative risks. Do not mechanically stack popular tropes. Ask no more than three focused questions only when missing information would materially change the direction.
+    replay:
+      steps:
+        - title: Interpret the creative direction
+          description: Identify genre, target readers, tone, and differentiating appeal
+        - title: Design characters and conflict
+          description: Establish the protagonist's desire, flaw, opponents, obstacles, and cost of failure
+        - title: Establish world rules
+          description: Define social structure, capability boundaries, resources, and immutable constraints
+        - title: Build the opening plan
+          description: Deliver a logline, first-three-chapter hooks, and the first meaningful payoff
+    result:
+      template: generic_report_v1
+      eyebrow: Novel concept brief
+      title: An actionable plan from a one-line premise
+      summary: Expand an initial idea into a coherent starting point with characters, conflict, world rules, and opening rhythm
+      highlights:
+        - Working title, logline, and differentiating appeal
+        - Protagonist arc, central conflict, and world rules
+        - First-three-chapter hooks and initial payoff
+
+  - id: outline-planning
+    selector:
+      title: Global outline
+      description: Plan the main arc, volume goals, turning points, pacing, and setup resolution
+      output_label: Story outline
+    launch:
+      prompt_short: Plan a global outline and volume rhythm from my novel settings.
+      prompt: Design an actionable global novel outline from the genre, characters, world settings, and target length I provide. Include the main arc, protagonist growth arc, irreversible midpoint change, ending objective, volume goals and conflicts, key turns, staged rewards and costs, and setup and payoff windows. Preserve causal progression and varied pacing instead of listing repeated plot formulas.
+    replay:
+      steps:
+        - title: Verify core settings
+          description: Confirm the protagonist, objective, world rules, target length, and immutable boundaries
+        - title: Plan the main arc
+          description: Design the opening state, midpoint change, ending objective, and character growth
+        - title: Shape volume rhythm
+          description: Break down volume goals, escalating conflicts, staged climaxes, and costs
+        - title: Check setup and causality
+          description: Arrange turning points, payoff windows, and dependencies across the story
+    result:
+      template: generic_report_v1
+      eyebrow: Story outline
+      title: Global arc and volume-level story outline
+      summary: Build a serialization route from the main arc to volume goals, turning points, and setup resolution
+      highlights:
+        - Main story and protagonist growth arcs
+        - Volume goals, conflict escalation, and staged climaxes
+        - Turning points, setups, and payoff windows
+
+  - id: chapter-writing
+    selector:
+      title: Chapter writing
+      description: Write an opening, a new chapter, or a revised scene from settings and prior context
+      output_label: Chapter manuscript
+    launch:
+      prompt_short: Write a natural, continuous novel chapter from my settings and previous text.
+      prompt: Write a chapter from the novel settings, outline, previous chapters, and chapter objective I provide. The manuscript should have a clear scene goal, resistance, state change, and forward-driving ending. Emotional payoffs must be earned, dialogue should distinguish characters, and no character should become irrational or gain unknown information for convenience. For continuation, verify recent events and character states first. Unless I request editorial notes, keep summaries, checklists, and internal writing comments out of the final manuscript.
+    replay:
+      steps:
+        - title: Read the writing context
+          description: Verify character states, world rules, prior events, and chapter constraints
+        - title: Define the chapter mission
+          description: Set the scene goal, main obstacle, change, payoff, and ending hook
+        - title: Write the scene chain
+          description: Advance the manuscript through action, dialogue, and clear causal progression
+        - title: Run the quality check
+          description: Check characters, space and time, rules, repeated beats, and continuity conflicts
+    result:
+      template: generic_report_v1
+      eyebrow: Chapter manuscript
+      title: A novel chapter ready for continued serialization
+      summary: Deliver a chapter with a clear objective, effective conflict, consistent characters, and natural forward momentum
+      highlights:
+        - Clear scene goal, resistance, and state change
+        - Earned emotional payoff and character-specific dialogue
+        - Ending hook and continuity check
+
+  - id: continuation-review
+    selector:
+      title: Continuation and continuity
+      description: Track characters, timeline, setups, and world rules to diagnose breaks and plan what comes next
+      output_label: Continuity review and continuation plan
+    launch:
+      prompt_short: Check my serialized novel for continuity errors and plan the next chapter.
+      prompt: Review the project settings, outline, chapter manuscripts, or serialization state I provide. Check character survival and location, abilities and resource sources, timeline, world rules, character knowledge boundaries, open setups, and repeated plot beats. List traceable conflicts, their impact, and revision options, then define the next chapter's objective and hook. If I also ask for continuation, write the next chapter after the review. When the current environment cannot maintain project files, provide a compact serialization state card for reuse in the next conversation and do not claim that anything was persisted.
+    replay:
+      steps:
+        - title: Organize project state
+          description: Summarize the current volume, recent events, active characters, rules, and open setups
+        - title: Verify continuity
+          description: Check characters, time and space, abilities, resources, knowledge boundaries, and causality
+        - title: Build revision advice
+          description: Locate evidence for conflicts, explain impact, and propose minimal repairs
+        - title: Plan the next chapter
+          description: Define its objective, advancing thread, state change, and ending hook
+    result:
+      template: generic_report_v1
+      eyebrow: Continuity review
+      title: Serialization continuity review and next-step plan
+      summary: Organize reusable project state, repair key breaks, and clarify the direction of the next chapter
+      highlights:
+        - Character, timeline, rule, and setup state
+        - Traceable continuity conflicts and revision advice
+        - Next-chapter objective, advancing thread, and state card

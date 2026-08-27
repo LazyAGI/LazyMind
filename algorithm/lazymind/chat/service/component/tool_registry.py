@@ -112,15 +112,14 @@ ATTACHED_FILES_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         '- `find_user_attachment(filename, turn=N)`: get path/url to pass to image tools, '
         '`vision_extractor`, or a Host attachment importer. Prefer this for images when the task is '
         'visual (edit, generate, workflow) or you only need the file location.\n'
-        '- `read_user_attachment(filename, turn=N)`: extract TEXT — direct read for plain-text files, '
-        'local structured extraction for docx (with OCR fallback), OCR for pdf/doc/pptx, or a '
-        'text description via vision for images. Use only when you need document text or a textual '
-        'answer about image content (e.g. "what does this document say", "describe this diagram").\n'
+        '- `read_user_attachment(filename, turn=N)`: transitional compatibility reader. '
+        'Prefer `grep(target, pattern)` and `read_file(target, offset, limit)` for document text; '
+        'image descriptions remain available through this compatibility tool.\n'
         'Supported uploads: images, pdf/doc/docx/pptx, and common plain-text/code/config files.\n'
         '- Default to the current turn (marked 当前轮次) when the user says '
         '"this image / 这张图 / 这个文件" without naming a turn.\n'
-        '- For knowledge-base questions about indexed documents, you may also use '
-        '`kb_tmp_search` or other `kb_*` tools when appropriate.',
+        '- For uploaded whitelist documents, prefer `kb_tmp_search` then `read_file`. '
+        'For knowledge-base questions about indexed documents, use `kb_*` tools.',
     ),
 }
 ATTACHMENT_EDIT_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
@@ -216,7 +215,8 @@ URL_FETCH_TOOL_POLICY_APPENDIX: SystemPromptAppendix = {
         'pages, issue multiple url_fetch calls in the same tool-call turn so they can execute concurrently. '
         'Listed links are navigation candidates, not read or citable sources. '
         'When `content_truncated=true`, treat the page text as incomplete and do not conclude that omitted content '
-        'is absent.',
+        'is absent. When the URL is a PDF, url_fetch ingests it as a file resource and returns file_id; '
+        'read the document with grep then read_file(offset, limit), never from url_fetch page text.',
     ),
     'output_contract': RETRIEVAL_CITATION_OUTPUT_APPENDIX['output_contract'],
 }

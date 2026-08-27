@@ -1,0 +1,71 @@
+schema_version: 2
+id: hot-news-summary
+type: work
+version: 1.0.2
+status: published
+default_locale: zh-CN
+provider: SkillHub
+
+skill:
+  source_url: https://skillhub.cn/skills/user_fd308b11/hot-news-summary
+  category: search
+
+placement:
+  home: true
+  gallery: true
+  order: 11
+
+classification:
+  category: 信息分析
+  tags:
+    - 每日热点
+    - 热榜摘要
+    - 新闻分析
+    - 话题洞察
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+
+presentation:
+  card:
+    title: 每日话题助手
+    description: 聚合多平台热榜，筛选今日热点并生成有事实依据的三层洞察摘要
+    output_type: report
+    output_label: 每日热点摘要
+    cover_asset: cover
+    result_summary: 从多平台热榜筛选高价值话题，输出事件本质、影响链和后续关注点
+  detail:
+    title: 每日话题助手
+    description: 聚合微博、知乎、B站、抖音、百度、36氪、少数派和贴吧等平台热榜，筛选热点并生成结构化洞察摘要。
+    attachment_hint: 可选提供关注领域、排除领域、点评风格或输出格式
+
+tasks:
+  - id: daily-hot-topics
+    selector:
+      title: 生成今日热点摘要
+      description: 从多平台热榜中筛选热点，分析事件影响并给出后续关注点
+      output_label: 今日热点摘要
+    launch:
+      prompt_short: 帮我生成一份今日热点摘要。
+      prompt: 请基于当前可获取的信息整理一份今日热点简报，突出值得关注的话题和简短分析；如信息不足或来源不可用，请说明数据局限。
+    replay:
+      steps:
+        - title: 聚合多平台热榜
+          description: 抓取并汇总八个平台的实时热榜和平台状态
+        - title: 评分筛选与去重
+          description: 按热度、跨平台共振和话题多样性筛选约十条热点
+        - title: 生成三层洞察
+          description: 为每条热点提炼事件本质、影响链和后续关注点
+        - title: 整理引用与报告
+          description: 补充来源链接、摘录、检索说明并输出结构化摘要
+    result:
+      template: generic_report_v1
+      eyebrow: 每日热点摘要
+      title: 今日热点与话题洞察报告
+      summary: 聚合多平台热榜，筛选高价值话题并输出可核验的三层洞察、来源和后续关注点
+      highlights:
+        - 多平台热榜状态与热点筛选结果
+        - What、So What、Now What 三层事件洞察
+        - 来源链接、摘录、检索说明与趋势线索

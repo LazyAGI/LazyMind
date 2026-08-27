@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"net"
 	"os"
@@ -127,6 +128,7 @@ const (
 )
 
 const installerWarmupMaintenanceMode = "installer-warmup"
+const installerWarmupSkipProcessorWorkerEnvVar = "LAZYMIND_SKIP_PROCESSOR_WORKER_READINESS"
 
 type RuntimePaths struct {
 	RepoRoot                 string
@@ -286,6 +288,7 @@ type FileWatcherConfig struct {
 	AgentID       string
 	AgentToken    string
 	WatchHostDir  string
+	AllowedRoots  []string
 	HostPathStyle string
 }
 
@@ -577,6 +580,41 @@ func defaultFileWatcherWatchHostDir(defaultRoot string) string {
 		return filepath.Clean(abs)
 	}
 	return filepath.Clean(raw)
+}
+
+func fileWatcherAllowedRoots(watchHostDir string) []string {
+	roots := []string{watchHostDir}
+	raw := strings.TrimSpace(os.Getenv("LAZYMIND_FILE_WATCHER_EXTRA_ALLOWED_ROOTS_JSON"))
+	if raw != "" {
+		var extra []string
+		if json.Unmarshal([]byte(raw), &extra) == nil {
+			roots = append(roots, extra...)
+		}
+	}
+	seen := map[string]struct{}{}
+	result := make([]string, 0, len(roots))
+	for _, root := range roots {
+		cleaned := strings.TrimSpace(root)
+		if cleaned == "" {
+			continue
+		}
+		if !filepath.IsAbs(cleaned) {
+			if absolute, err := filepath.Abs(cleaned); err == nil {
+				cleaned = absolute
+			}
+		}
+		cleaned = filepath.Clean(cleaned)
+		key := cleaned
+		if runtime.GOOS == "windows" {
+			key = strings.ToLower(key)
+		}
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		result = append(result, cleaned)
+	}
+	return result
 }
 
 func defaultFileWatcherBaseRoot(runtimeRoot string) string {
@@ -891,6 +929,7 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 	}
 	milvusLiteDBPath := filepath.Clean(milvusDataDir)
 	watchHostDir := defaultFileWatcherWatchHostDir(pathLayout.LocalImportRoot)
+	allowedRoots := fileWatcherAllowedRoots(watchHostDir)
 	return RuntimeConfig{
 		Profile:            profile,
 		MaintenanceMode:    maintenanceMode,
@@ -943,6 +982,7 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 			AgentID:       envText("LAZYMIND_FILE_WATCHER_AGENT_ID", envText("LAZYMIND_SCAN_CONTROL_PLANE_LOCAL_FS_DEFAULT_AGENT_ID", "file-watcher-local-001")),
 			AgentToken:    envText("LAZYMIND_FILE_WATCHER_AGENT_TOKEN", envText("LAZYMIND_SCAN_CONTROL_PLANE_AGENT_TOKEN", "my-secret-token")),
 			WatchHostDir:  watchHostDir,
+			AllowedRoots:  allowedRoots,
 			HostPathStyle: envText("LAZYMIND_FILE_WATCHER_HOST_PATH_STYLE", defaultFileWatcherHostPathStyle()),
 		},
 		PortResolutions: ports.resolutions,

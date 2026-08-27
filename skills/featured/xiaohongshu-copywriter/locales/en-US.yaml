@@ -1,0 +1,79 @@
+locale: en-US
+
+classification:
+  category: Content creation
+  tags:
+    - Xiaohongshu
+    - Product recommendations
+    - High-performing titles
+    - Social media
+
+presentation:
+  card:
+    title: Xiaohongshu copywriter
+    description: Generate titles, body copy, tags, and publishing advice from a product, audience, and style
+    output_type: document
+    output_label: Xiaohongshu post
+    cover_asset: cover
+    result_summary: Deliver editable titles, six-part body copy, emoji formatting, topic tags, and publishing strategy
+  detail:
+    title: Xiaohongshu copywriter
+    description: "Create a natural, credible Xiaohongshu post around product benefits and a target audience, including titles, body structure, emojis, tags, and publishing advice. Source: the former 'Xiaohongshu Copywriter Plus' listing on SkillHub (the original link is no longer available), adapted for LazyMind."
+    attachment_hint: Product details, selling points, audience notes, or reference images
+
+tasks:
+  - id: product-note
+    selector:
+      title: Product recommendation post
+      description: Turn selling points and real usage scenarios into a complete post
+      output_label: Recommendation post
+    launch:
+      prompt_short: Write a Xiaohongshu product recommendation post from my product details.
+      prompt: Based on the product, key benefits, audience, usage scenarios, and preferred voice I provide, write a natural and credible Xiaohongshu recommendation post. Include several title options, a six-part body, restrained emojis, topic tags, and publishing advice. Ask for missing details and do not invent effects or personal experience.
+    replay:
+      steps:
+        - title: Understand product and audience
+          description: Confirm benefits, audience, usage scenarios, and factual boundaries
+        - title: Design title hooks
+          description: Generate titles from concrete benefits, curiosity, and situations
+        - title: Write the recommendation
+          description: Organize pain points, experience, details, and advice naturally
+        - title: Complete publishing elements
+          description: Add emojis, tags, engagement prompts, and timing advice
+    result:
+      template: generic_report_v1
+      eyebrow: Xiaohongshu recommendation post
+      title: Product experience and recommendation copy
+      summary: Deliver an editable post with titles, body copy, tags, and publishing strategy
+      highlights:
+        - Multiple title options
+        - Six-part recommendation copy
+        - Emojis, tags, and publishing advice
+
+  - id: rewrite-note
+    selector:
+      title: Rewrite and optimize a post
+      description: Improve the title, pacing, credibility, and engagement of existing copy
+      output_label: Optimized post
+    launch:
+      prompt_short: Improve this Xiaohongshu post.
+      prompt: Analyze the Xiaohongshu post I provide, preserve its facts and personal voice, and improve the title, opening hook, pacing, information density, emojis, and topic tags. Identify vague or exaggerated claims that reduce credibility and provide a complete rewrite.
+    replay:
+      steps:
+        - title: Diagnose the draft
+          description: Review its title, structure, voice, benefits, and credibility
+        - title: Restructure pacing
+          description: Improve the opening hook, paragraph order, and information density
+        - title: Adapt platform expression
+          description: Refine emojis, conversational tone, tags, and engagement prompts
+        - title: Deliver the rewrite
+          description: Produce a complete version ready for further editing
+    result:
+      template: generic_report_v1
+      eyebrow: Optimized post
+      title: More natural and engaging Xiaohongshu copy
+      summary: Improve the title, pacing, and engagement while preserving facts and personal voice
+      highlights:
+        - Draft diagnosis
+        - Title and opening-hook improvements
+        - Complete rewrite and tag suggestions

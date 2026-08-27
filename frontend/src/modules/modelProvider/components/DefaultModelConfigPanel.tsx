@@ -34,6 +34,7 @@ interface DefaultModelConfigPanelProps {
   modelProviderSetupState: SetupAvailabilityState;
   onConfigureCloudService: (service: CloudServiceSlotKey) => void;
   onConfigureProviders: () => void;
+  onModelSelectionChanged: () => void | Promise<void>;
   onRetrySetup: () => void;
 }
 
@@ -604,6 +605,7 @@ export default function DefaultModelConfigPanel({
   modelProviderSetupState,
   onConfigureCloudService,
   onConfigureProviders,
+  onModelSelectionChanged,
   onRetrySetup,
 }: DefaultModelConfigPanelProps) {
   const { t, i18n } = useTranslation();
@@ -1117,6 +1119,7 @@ export default function DefaultModelConfigPanel({
                 : undefined,
           }));
         });
+        void onModelSelectionChanged();
       })
       .catch(() => {});
   };

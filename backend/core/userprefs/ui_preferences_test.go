@@ -21,6 +21,7 @@ type uiPreferencesAPITestResponse struct {
 		DeveloperModeActive           bool   `json:"developer_mode_active"`
 		AcceptedUserAgreementVersion  string `json:"accepted_user_agreement_version"`
 		TaskCenterEnabled             bool   `json:"task_center_enabled"`
+		SchedulesEnabled              bool   `json:"schedules_enabled"`
 		SkillsEnabled                 bool   `json:"skills_enabled"`
 		WorkflowsEnabled              bool   `json:"workflows_enabled"`
 		MCPEnabled                    bool   `json:"mcp_enabled"`
@@ -62,7 +63,7 @@ func TestGetUIPreferencesDefaultsAndDerivedPreferenceStatus(t *testing.T) {
 	}
 	resp := decodeUIPreferencesResponse(t, rec)
 	if resp.Data.ChatPreferenceNoticeDismissed || resp.Data.DeveloperModeActive || resp.Data.UserPreferenceConfigured ||
-		!resp.Data.TaskCenterEnabled || !resp.Data.SkillsEnabled || !resp.Data.WorkflowsEnabled || !resp.Data.MCPEnabled ||
+		!resp.Data.TaskCenterEnabled || !resp.Data.SchedulesEnabled || !resp.Data.SkillsEnabled || !resp.Data.WorkflowsEnabled || !resp.Data.MCPEnabled ||
 		!resp.Data.DocumentParsingEnabled {
 		t.Fatalf("expected legacy flags false and feature controls true, got %#v", resp.Data)
 	}
@@ -105,7 +106,7 @@ func TestPatchUIPreferencesPreservesOtherFeatureControls(t *testing.T) {
 		t.Fatalf("expected status 200, got %d body=%s", rec.Code, rec.Body.String())
 	}
 	resp := decodeUIPreferencesResponse(t, rec)
-	if resp.Data.TaskCenterEnabled || resp.Data.MCPEnabled || !resp.Data.SkillsEnabled || resp.Data.WorkflowsEnabled ||
+	if resp.Data.TaskCenterEnabled || !resp.Data.SchedulesEnabled || resp.Data.MCPEnabled || !resp.Data.SkillsEnabled || !resp.Data.WorkflowsEnabled ||
 		!resp.Data.DocumentParsingEnabled {
 		t.Fatalf("unexpected controls after patch: %#v", resp.Data)
 	}
@@ -116,24 +117,24 @@ func TestPatchUIPreferencesPreservesOtherFeatureControls(t *testing.T) {
 	secondRec := httptest.NewRecorder()
 	PatchUIPreferences(secondRec, secondReq)
 	secondResp := decodeUIPreferencesResponse(t, secondRec)
-	if secondRec.Code != http.StatusOK || secondResp.Data.TaskCenterEnabled || secondResp.Data.MCPEnabled || secondResp.Data.SkillsEnabled ||
-		secondResp.Data.WorkflowsEnabled || !secondResp.Data.DocumentParsingEnabled {
+	if secondRec.Code != http.StatusOK || secondResp.Data.TaskCenterEnabled || !secondResp.Data.SchedulesEnabled || secondResp.Data.MCPEnabled || secondResp.Data.SkillsEnabled ||
+		!secondResp.Data.WorkflowsEnabled || !secondResp.Data.DocumentParsingEnabled {
 		t.Fatalf("feature controls should patch independently, got %#v status=%d", secondResp.Data, secondRec.Code)
 	}
 
-	thirdReq := httptest.NewRequest(http.MethodPatch, "/api/core/user/ui-preferences", strings.NewReader(`{"document_parsing_enabled":false}`))
+	thirdReq := httptest.NewRequest(http.MethodPatch, "/api/core/user/ui-preferences", strings.NewReader(`{"schedules_enabled":false}`))
 	thirdReq.Header.Set("Content-Type", "application/json")
 	thirdReq.Header.Set("X-User-Id", "u1")
 	thirdRec := httptest.NewRecorder()
 	PatchUIPreferences(thirdRec, thirdReq)
 	thirdResp := decodeUIPreferencesResponse(t, thirdRec)
-	if thirdRec.Code != http.StatusOK || thirdResp.Data.TaskCenterEnabled || thirdResp.Data.MCPEnabled || thirdResp.Data.SkillsEnabled ||
-		thirdResp.Data.WorkflowsEnabled || thirdResp.Data.DocumentParsingEnabled {
-		t.Fatalf("document parsing control should patch independently, got %#v status=%d", thirdResp.Data, thirdRec.Code)
+	if thirdRec.Code != http.StatusOK || thirdResp.Data.TaskCenterEnabled || thirdResp.Data.SchedulesEnabled || thirdResp.Data.MCPEnabled || thirdResp.Data.SkillsEnabled ||
+		!thirdResp.Data.WorkflowsEnabled || !thirdResp.Data.DocumentParsingEnabled {
+		t.Fatalf("schedules control should patch independently, got %#v status=%d", thirdResp.Data, thirdRec.Code)
 	}
 }
 
-func TestPatchUIPreferencesTaskCenterControlsWorkflowAvailability(t *testing.T) {
+func TestPatchUIPreferencesTaskControlsAreIndependent(t *testing.T) {
 	db := newUIPreferencesTestDB(t)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
@@ -159,7 +160,7 @@ func TestPatchUIPreferencesTaskCenterControlsWorkflowAvailability(t *testing.T) 
 		}
 		return decodeUIPreferencesResponse(t, rec)
 	}
-	assertWorkflowsDisabled := func() {
+	assertWorkflowSettings := func(enabled bool) {
 		t.Helper()
 		var settings []orm.UserWorkflowSetting
 		if err := db.Where("user_id = ?", "u1").Order("plugin_ref").Find(&settings).Error; err != nil {
@@ -169,29 +170,62 @@ func TestPatchUIPreferencesTaskCenterControlsWorkflowAvailability(t *testing.T) 
 			t.Fatalf("expected both available workflows to be synchronized, got %#v", settings)
 		}
 		for _, setting := range settings {
-			if setting.Enabled || setting.CallMode != workflow.WorkflowCallModeDisabled {
-				t.Fatalf("workflow should be disabled with task center off, got %#v", setting)
+			expectedCallMode := workflow.WorkflowCallModeDisabled
+			if enabled {
+				expectedCallMode = workflow.WorkflowCallModeAuto
+			}
+			if setting.Enabled != enabled || setting.CallMode != expectedCallMode {
+				t.Fatalf("workflow should be enabled=%v with call mode %s, got %#v", enabled, expectedCallMode, setting)
 			}
 		}
 	}
 
-	resp := patch(`{"task_center_enabled":false}`)
-	if resp.Data.TaskCenterEnabled || resp.Data.WorkflowsEnabled {
-		t.Fatalf("disabling task center must also disable workflows, got %#v", resp.Data)
+	resp := patch(`{"workflows_enabled":true}`)
+	if !resp.Data.TaskCenterEnabled || !resp.Data.WorkflowsEnabled || !resp.Data.SchedulesEnabled {
+		t.Fatalf("enabling workflows must preserve task center, got %#v", resp.Data)
 	}
-	assertWorkflowsDisabled()
+	assertWorkflowSettings(true)
+
+	resp = patch(`{"task_center_enabled":false}`)
+	if resp.Data.TaskCenterEnabled || !resp.Data.WorkflowsEnabled || !resp.Data.SchedulesEnabled {
+		t.Fatalf("disabling task center must preserve workflows, got %#v", resp.Data)
+	}
+	assertWorkflowSettings(true)
+
+	resp = patch(`{"workflows_enabled":false}`)
+	if resp.Data.TaskCenterEnabled || resp.Data.WorkflowsEnabled || !resp.Data.SchedulesEnabled {
+		t.Fatalf("disabling workflows must preserve task center, got %#v", resp.Data)
+	}
+	assertWorkflowSettings(false)
 
 	resp = patch(`{"workflows_enabled":true}`)
-	if resp.Data.WorkflowsEnabled {
-		t.Fatalf("workflows cannot be enabled while task center is disabled, got %#v", resp.Data)
+	if resp.Data.TaskCenterEnabled || !resp.Data.WorkflowsEnabled || !resp.Data.SchedulesEnabled {
+		t.Fatalf("workflows must be independently enabled while task center is off, got %#v", resp.Data)
 	}
-	assertWorkflowsDisabled()
+	assertWorkflowSettings(true)
+
+	resp = patch(`{"schedules_enabled":false}`)
+	if resp.Data.TaskCenterEnabled || !resp.Data.WorkflowsEnabled || resp.Data.SchedulesEnabled {
+		t.Fatalf("disabling schedules must preserve subtasks and workflows, got %#v", resp.Data)
+	}
+	assertWorkflowSettings(true)
 
 	resp = patch(`{"task_center_enabled":true}`)
-	if !resp.Data.TaskCenterEnabled || resp.Data.WorkflowsEnabled {
-		t.Fatalf("re-enabling task center must not re-enable workflows automatically, got %#v", resp.Data)
+	if !resp.Data.TaskCenterEnabled || !resp.Data.WorkflowsEnabled || resp.Data.SchedulesEnabled {
+		t.Fatalf("re-enabling task center must preserve workflows, got %#v", resp.Data)
 	}
-	assertWorkflowsDisabled()
+	assertWorkflowSettings(true)
+
+	resp = patch(`{"workflows_enabled":false}`)
+	if !resp.Data.TaskCenterEnabled || resp.Data.WorkflowsEnabled || resp.Data.SchedulesEnabled {
+		t.Fatalf("disabling workflows must not disable task center, got %#v", resp.Data)
+	}
+	assertWorkflowSettings(false)
+
+	resp = patch(`{"schedules_enabled":true}`)
+	if !resp.Data.TaskCenterEnabled || resp.Data.WorkflowsEnabled || !resp.Data.SchedulesEnabled {
+		t.Fatalf("re-enabling schedules must preserve subtasks and workflows, got %#v", resp.Data)
+	}
 }
 
 func TestPatchUIPreferencesBulkControlsSkillsAndWorkflowsIndependently(t *testing.T) {
@@ -297,7 +331,7 @@ func TestPatchUIPreferencesBulkControlsSkillsAndWorkflowsIndependently(t *testin
 	assertWorkflows(true, 2)
 }
 
-func TestReenablingTaskCenterMovesSchedulesForwardWithoutChangingHistory(t *testing.T) {
+func TestReenablingSchedulesMovesNextRunForwardWithoutChangingHistory(t *testing.T) {
 	db := newUIPreferencesTestDB(t)
 	store.Init(db.DB, nil, nil)
 	t.Cleanup(func() { store.Init(nil, nil, nil) })
@@ -309,7 +343,14 @@ func TestReenablingTaskCenterMovesSchedulesForwardWithoutChangingHistory(t *test
 	if err := db.Create(&schedule).Error; err != nil {
 		t.Fatalf("seed schedule: %v", err)
 	}
-	for _, body := range []string{`{"task_center_enabled":false}`, `{"task_center_enabled":true}`} {
+	runningTask := orm.TaskCenterTask{
+		ID: "running-task", UserID: "u1", ConversationID: "conversation-1", TaskType: "scheduled",
+		Status: "running", TriggerType: "scheduled", CreatedAt: now.Add(-30 * time.Minute), UpdatedAt: now,
+	}
+	if err := db.Create(&runningTask).Error; err != nil {
+		t.Fatalf("seed running task: %v", err)
+	}
+	for _, body := range []string{`{"schedules_enabled":false}`, `{"schedules_enabled":true}`} {
 		req := httptest.NewRequest(http.MethodPatch, "/api/core/user/ui-preferences", strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("X-User-Id", "u1")
@@ -329,6 +370,13 @@ func TestReenablingTaskCenterMovesSchedulesForwardWithoutChangingHistory(t *test
 	if saved.RunCount != schedule.RunCount || saved.LastRunAt != nil {
 		t.Fatalf("resume must not backfill or alter history: %#v", saved)
 	}
+	var preservedTask orm.TaskCenterTask
+	if err := db.Where("id = ?", runningTask.ID).Take(&preservedTask).Error; err != nil {
+		t.Fatalf("load running task: %v", err)
+	}
+	if preservedTask.Status != "running" || preservedTask.FinishedAt != nil {
+		t.Fatalf("schedules toggle must not stop an in-flight task: %#v", preservedTask)
+	}
 }
 
 func TestSettingsOverviewExposesRawAndEffectiveStates(t *testing.T) {
@@ -340,7 +388,7 @@ func TestSettingsOverviewExposesRawAndEffectiveStates(t *testing.T) {
 	}).Error; err != nil {
 		t.Fatalf("seed schedule: %v", err)
 	}
-	if err := db.Model(&orm.UserUIPreferences{}).Create(map[string]any{"user_id": "u1", "task_center_enabled": false, "skills_enabled": true, "mcp_enabled": true, "created_at": now, "updated_at": now}).Error; err != nil {
+	if err := db.Model(&orm.UserUIPreferences{}).Create(map[string]any{"user_id": "u1", "task_center_enabled": false, "schedules_enabled": false, "skills_enabled": true, "workflows_enabled": false, "mcp_enabled": true, "created_at": now, "updated_at": now}).Error; err != nil {
 		t.Fatalf("seed preferences: %v", err)
 	}
 	overview, err := buildSettingsOverview(httptest.NewRequest(http.MethodGet, "/settings/overview", nil), db.DB, "u1")
@@ -349,6 +397,9 @@ func TestSettingsOverviewExposesRawAndEffectiveStates(t *testing.T) {
 	}
 	if overview.Controls.TaskCenterEnabled {
 		t.Fatal("expected task center control to be disabled")
+	}
+	if overview.Controls.SchedulesEnabled {
+		t.Fatal("expected schedules control to be disabled")
 	}
 	var taskSection settingsOverviewSection
 	for _, section := range overview.Sections {

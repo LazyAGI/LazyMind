@@ -19,7 +19,7 @@ import (
 
 const (
 	algorithmHealthTimeout = 15 * time.Minute
-	defaultLazyLLMVersion  = "1.2.2"
+	defaultLazyLLMVersion  = "1.3.0a1"
 	tiktokenReadyFileName  = "tiktoken-gpt2.ready"
 )
 
@@ -458,26 +458,33 @@ func (m *AlgorithmServiceManager) waitForDependencies(ctx context.Context, cfg R
 }
 
 func waitForRAGReadiness(ctx context.Context, cfg RuntimeConfig, timeout time.Duration) error {
-	checks := []struct {
-		port  int
-		path  string
-		label string
-	}{
-		{cfg.Algorithm.ProcessorPort, "/ready", "processor-server"},
-		{cfg.Algorithm.DocPort, "/v1/ready", "doc-server"},
-		{cfg.Algorithm.AlgoPort, "/docs", "algo"},
-	}
-	checks = append(checks, struct {
-		port  int
-		path  string
-		label string
-	}{cfg.Algorithm.WorkerPort, "/ready", "processor-worker"})
-	for _, check := range checks {
+	for _, check := range ragReadinessChecks(cfg) {
 		if err := waitForHTTPOnly(ctx, check.port, check.path, check.label, timeout); err != nil {
 			return err
 		}
 	}
 	return waitForAlgorithmRegistration(ctx, cfg.Algorithm.ProcessorPort, timeout)
+}
+
+type ragReadinessCheck struct {
+	port  int
+	path  string
+	label string
+}
+
+func ragReadinessChecks(cfg RuntimeConfig) []ragReadinessCheck {
+	checks := []ragReadinessCheck{
+		{cfg.Algorithm.ProcessorPort, "/ready", "processor-server"},
+		{cfg.Algorithm.DocPort, "/v1/ready", "doc-server"},
+		{cfg.Algorithm.AlgoPort, "/docs", "algo"},
+	}
+	if cfg.MaintenanceMode != installerWarmupMaintenanceMode &&
+		!envBool(installerWarmupSkipProcessorWorkerEnvVar, false) {
+		checks = append(checks, ragReadinessCheck{
+			port: cfg.Algorithm.WorkerPort, path: "/ready", label: "processor-worker",
+		})
+	}
+	return checks
 }
 
 func localSegmentStorePath(paths RuntimePaths) string {

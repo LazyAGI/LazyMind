@@ -14,7 +14,12 @@ import {
   GLOSSARY_ALIAS_MAX_LENGTH,
   GLOSSARY_CONTENT_MAX_LENGTH,
   GLOSSARY_TERM_MAX_LENGTH,
+  SKILL_CHAR_COUNT_STYLE,
+  SKILL_DESCRIPTION_MAX_LENGTH,
+  SKILL_NAME_MAX_LENGTH,
   SKILL_TAG_MAX_COUNT,
+  countSkillCharacters,
+  skillCharCountConfig,
 } from "../shared";
 
 export type SkillCreateSource = "zip" | "url";
@@ -67,6 +72,34 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
   const isExternalSkillImport = Boolean(
     pendingSkillPackageFile || pendingSkillSourceUrl.trim(),
   );
+  const skillNameLength = countSkillCharacters(draft.name);
+  const skillDescriptionLength = countSkillCharacters(draft.description);
+  const skillNameTooLong = activeTab === "skills" && skillNameLength > SKILL_NAME_MAX_LENGTH;
+  const skillDescriptionTooLong =
+    activeTab === "skills" && skillDescriptionLength > SKILL_DESCRIPTION_MAX_LENGTH;
+  const skillMetadataLengthError = skillNameTooLong
+    ? t("admin.memorySkillNameMaxLength", { count: SKILL_NAME_MAX_LENGTH })
+    : skillDescriptionTooLong
+      ? t("admin.memorySkillDescriptionMaxLength", {
+          count: SKILL_DESCRIPTION_MAX_LENGTH,
+        })
+      : "";
+  const shouldDisableSkillSave =
+    !isReadOnly &&
+    activeTab === "skills" &&
+    Boolean(skillMetadataLengthError);
+
+  const handleModalOk = () => {
+    if (shouldDisableSkillSave) {
+      message.warning(skillMetadataLengthError);
+      return;
+    }
+    if (isReadOnly) {
+      closeModal();
+      return;
+    }
+    void saveDraft();
+  };
 
   const handleGlossaryAliasesChange = (value: string[]) => {
     const normalizedAliases = Array.from(
@@ -93,7 +126,11 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
       open={modalOpen}
       title={modalTitle}
       onCancel={closeModal}
-      onOk={isReadOnly ? closeModal : saveDraft}
+      onOk={handleModalOk}
+      okButtonProps={{
+        disabled: shouldDisableSkillSave,
+        title: skillMetadataLengthError || undefined,
+      }}
       confirmLoading={
         activeTab === "glossary"
           ? glossarySaving
@@ -219,11 +256,14 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
               message={t("admin.memorySkillEditMetadataHint")}
             />
           ) : null}
-          <div className="memory-form-field memory-form-field-full">
+          <div className="memory-form-field memory-form-field-full memory-char-count">
             <label>{t("admin.memoryName")}</label>
             <Input
               value={draft.name}
               readOnly={isReadOnly}
+              status={skillNameTooLong ? "error" : undefined}
+              styles={{ count: SKILL_CHAR_COUNT_STYLE }}
+              count={skillCharCountConfig(SKILL_NAME_MAX_LENGTH, !isReadOnly)}
               placeholder={t("common.pleaseInput") + t("admin.memoryName")}
               onChange={(event) =>
                 setDraft((previous: any) => ({
@@ -233,7 +273,7 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
               }
             />
           </div>
-          <div className="memory-form-field memory-form-field-full">
+          <div className="memory-form-field memory-form-field-full memory-char-count">
             <label>{t("admin.memoryDescription")}</label>
             <Input.TextArea
               rows={isSkillCreateModal ? 2 : 3}
@@ -243,6 +283,12 @@ export default function MemoryDraftModal(props: MemoryDraftModalProps) {
               }}
               value={draft.description}
               readOnly={isReadOnly}
+              status={skillDescriptionTooLong ? "error" : undefined}
+              styles={{ count: SKILL_CHAR_COUNT_STYLE }}
+              count={skillCharCountConfig(
+                SKILL_DESCRIPTION_MAX_LENGTH,
+                !isReadOnly,
+              )}
               placeholder={
                 t("common.pleaseInput") + t("admin.memoryDescription")
               }

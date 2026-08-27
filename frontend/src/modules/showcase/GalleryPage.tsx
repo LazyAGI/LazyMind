@@ -3,7 +3,11 @@ import { ArrowLeftOutlined, SearchOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
 import { Link, useSearchParams } from "react-router-dom";
 import CaseCard from "./CaseCard";
-import { listShowcaseCases, type ShowcaseCase } from "./api";
+import {
+  listShowcaseCases,
+  matchesShowcaseEntryType,
+  type ShowcaseCase,
+} from "./api";
 import "./index.scss";
 
 export default function GalleryPage() {
@@ -23,7 +27,9 @@ export default function GalleryPage() {
     const controller = new AbortController();
     listShowcaseCases({}, { signal: controller.signal })
       .then((response) => {
-        setItems((response.cases || []).filter((item) => item.gallery && (!type || item.type === type)));
+        setItems((response.cases || []).filter(
+          (item) => item.gallery && (!type || matchesShowcaseEntryType(item.type, type)),
+        ));
         setCategories(response.categories);
         setCategory((current) =>
           response.categories.includes(current)

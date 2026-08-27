@@ -18,6 +18,8 @@ from channel_gateway.common.domain.commands import (
     CommandEnvelope,
     ConversationSwitchCommand,
     ConversationSwitchParameters,
+    ConversationSettingsUpdateCommand,
+    ConversationSettingsUpdateParameters,
     IndexTarget,
     ResourceChange,
     ResourceIndexSelector,
@@ -80,6 +82,12 @@ class ExactShortcutParser:
                 evidence=value,
                 selection=selection,
             )
+        if kind == 'workflow':
+            return self._workflow_selection(
+                index=match.group(1),
+                evidence=value,
+                selection=selection,
+            )
         if kind in ('knowledge_base', 'skill', 'tool', 'personalization'):
             return self._capability_selection(
                 kind=kind,
@@ -88,6 +96,39 @@ class ExactShortcutParser:
                 selection=selection,
             )
         return None
+
+    @staticmethod
+    def _workflow_selection(
+        *,
+        index: str,
+        evidence: str,
+        selection: dict[str, Any],
+    ) -> ShortcutMatch | None:
+        items = selection.get('items')
+        position = int(index) - 1
+        if not isinstance(items, list) or not 0 <= position < len(items):
+            return None
+        item = items[position]
+        if not isinstance(item, dict):
+            return None
+        workflow_ref = str(item.get('id') or item.get('name') or '').strip()
+        if not workflow_ref:
+            return None
+        return ExactShortcutParser._match(
+            ConversationSettingsUpdateCommand(
+                schema_version=SCHEMA_VERSION,
+                command='conversation.settings.update',
+                parameters=ConversationSettingsUpdateParameters(
+                    change={
+                        'setting': 'workflow',
+                        'workflow_ref': workflow_ref,
+                        'enabled': True,
+                    },
+                    evidence=[evidence],
+                ),
+            ),
+            evidence,
+        )
 
     @staticmethod
     def _switch(index: str, evidence: str) -> ShortcutMatch:
