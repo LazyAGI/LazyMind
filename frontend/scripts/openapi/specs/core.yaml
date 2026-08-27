@@ -3355,24 +3355,12 @@ components:
                     type: string
                 output_type:
                     type: string
-                prompt:
-                    type: string
-                prompt_short:
-                    type: string
                 provider:
                     type: string
                 source_url:
                     type: string
-                result_highlights:
-                    items:
-                        type: string
-                    type: array
                 result_summary:
                     type: string
-                steps:
-                    items:
-                        $ref: '#/components/schemas/ShowcaseCaseStep'
-                    type: array
                 tags:
                     items:
                         type: string
@@ -3399,11 +3387,10 @@ components:
                 - image_url
                 - output_label
                 - output_type
-                - prompt
-                - prompt_short
                 - provider
                 - source_url
                 - result_summary
+                - tasks
                 - title
                 - type
             type: object

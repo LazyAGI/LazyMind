@@ -6,6 +6,7 @@ from typing import Any, Optional
 from lazymind.common.integrations.remote_fs import RemoteFS
 from lazymind.config import config as _cfg
 
+from .exceptions import MemoryPartialApplyError, PreferenceCapacityExceededError
 from .field_contract import validate_memory_transition
 from .paths import (
     AGENTS_ROOT,
@@ -21,6 +22,7 @@ from .paths import (
     split_reference_ref,
 )
 from .validation import (
+    PreferenceItem,
     parse_preference_items,
     validate_preference_index,
     validate_reference_content,
@@ -147,62 +149,38 @@ class MemoryStore:
         operations: list[dict[str, Any]],
         apply,
     ) -> dict[str, Any]:
-        from .result import memory_ok
-
-        loaded = self._read_document(path, label=label)
-        if not loaded.get('ok'):
-            return loaded
-        edited = apply(loaded['content'], operations, label=label)
-        if not edited.get('ok'):
-            return edited
+        loaded = self.read(path)
+        edited = apply(loaded, operations, label=label)
         stored_content = edited.get('stored_content')
         if not isinstance(stored_content, str) or not stored_content.strip():
-            from .result import memory_err
-
-            return memory_err(
-                f'{label} editor did not produce valid stored content.',
-                type='validation',
-            )
-        try:
-            _, before_visible = split_stored_memory_content(
-                loaded['content'],
-                label=label,
-            )
-            _, after_visible = split_stored_memory_content(
-                stored_content,
-                label=label,
-            )
-            before_stored = parse_yaml_mapping(loaded['content'])
-            after_stored = parse_yaml_mapping(stored_content)
-            before_metadata = {
-                key: value
-                for key, value in before_stored.items()
-                if is_internal_memory_path(key)
-            }
-            after_metadata = {
-                key: value
-                for key, value in after_stored.items()
-                if is_internal_memory_path(key)
-            }
-            if before_metadata != after_metadata:
-                raise ValueError(f'{label} internal metadata cannot be changed.')
-            validate_memory_transition(
-                parse_yaml_mapping(before_visible),
-                parse_yaml_mapping(after_visible),
-                label=label,
-            )
-        except ValueError as exc:
-            from .result import memory_err
-
-            return memory_err(str(exc), type='validation')
-
-        written = self._write_document(path, stored_content)
-        if not written.get('ok'):
-            return written
-        return memory_ok(
-            content=edited['content'],
-            operations=list(edited.get('operations') or operations),
+            raise ValueError(f'{label} editor did not produce valid stored content.')
+        _, before_visible = split_stored_memory_content(loaded, label=label)
+        _, after_visible = split_stored_memory_content(stored_content, label=label)
+        before_stored = parse_yaml_mapping(loaded)
+        after_stored = parse_yaml_mapping(stored_content)
+        before_metadata = {
+            key: value
+            for key, value in before_stored.items()
+            if is_internal_memory_path(key)
+        }
+        after_metadata = {
+            key: value
+            for key, value in after_stored.items()
+            if is_internal_memory_path(key)
+        }
+        if before_metadata != after_metadata:
+            raise ValueError(f'{label} internal metadata cannot be changed.')
+        validate_memory_transition(
+            parse_yaml_mapping(before_visible),
+            parse_yaml_mapping(after_visible),
+            label=label,
         )
+
+        self.write(path, stored_content)
+        return {
+            'content': edited['content'],
+            'operations': list(edited.get('operations') or operations),
+        }
 
     def add_preference_with_reference(
         self,
@@ -214,30 +192,21 @@ class MemoryStore:
         reason: str,
         source_kind: str,
         conversation_id: str,
-    ) -> dict[str, Any]:
+    ) -> PreferenceItem:
         from .editors.preference import add_preference_entry
-        from .result import memory_ok
 
-        loaded = self._read_document(PREFERENCE_PATH, label='preference')
-        if not loaded.get('ok'):
-            return loaded
-        current_items = len(parse_preference_items(loaded['content']))
+        loaded = self.read(PREFERENCE_PATH)
+        current_items = len(parse_preference_items(loaded))
         max_items = int(_cfg['preference_index_max_items'])
         if current_items >= max_items:
-            from .result import memory_err
-
             attempted_items = current_items + 1
-            return memory_err(
-                (
-                    'preference index capacity exceeded: '
-                    f'used_items={attempted_items} max_items={max_items}'
-                ),
-                type='capacity_exceeded',
-                used_items=attempted_items,
+            raise PreferenceCapacityExceededError(
+                current_items=current_items,
+                attempted_items=attempted_items,
                 max_items=max_items,
             )
         edited = add_preference_entry(
-            loaded['content'],
+            loaded,
             name=name,
             summary=summary,
             scenario=scenario,
@@ -246,94 +215,53 @@ class MemoryStore:
             source_kind=source_kind,
             conversation_id=conversation_id,
         )
-        if not edited.get('ok'):
-            return edited
         reference_name = edited['reference_name']
-        written_ref = self._write_document(
+        self.write(
             build_reference_path(reference_name),
             edited['reference_content'],
         )
-        if not written_ref.get('ok'):
-            return written_ref
-        written_pref = self._write_document(PREFERENCE_PATH, edited['content'])
-        if not written_pref.get('ok'):
+        try:
+            self.write(PREFERENCE_PATH, edited['content'])
+        except Exception as write_exc:
             try:
                 self.delete_reference(reference_name)
             except Exception as cleanup_exc:
-                from .result import memory_err
-
-                return memory_err(
+                raise MemoryPartialApplyError(
                     (
                         f'preference add partially applied: reference '
                         f'{reference_name!r} was created but the index write failed; '
                         f'cleanup also failed: {cleanup_exc}'
                     ),
-                    type='partial',
                     operation='add',
                     applied=['reference'],
-                    failed=['preference_index'],
+                    failed=['preference_index', 'reference_cleanup'],
                     item=edited['item'],
-                )
-            return written_pref
-        return memory_ok(item=edited['item'])
+                ) from write_exc
+            raise
+        return edited['item']
 
-    def remove_preference_with_reference(self, name: str) -> dict[str, Any]:
+    def remove_preference_with_reference(self, name: str) -> PreferenceItem:
         from .editors.preference import delete_preference_entry, reference_name_from_item
-        from .result import memory_ok
 
-        loaded = self._read_document(PREFERENCE_PATH, label='preference')
-        if not loaded.get('ok'):
-            return loaded
-        edited = delete_preference_entry(loaded['content'], name=name)
-        if not edited.get('ok'):
-            return edited
-        written = self._write_document(PREFERENCE_PATH, edited['content'])
-        if not written.get('ok'):
-            return written
+        loaded = self.read(PREFERENCE_PATH)
+        edited = delete_preference_entry(loaded, name=name)
+        self.write(PREFERENCE_PATH, edited['content'])
         reference_name = reference_name_from_item(edited['item'])
         try:
             self.delete_reference(reference_name)
         except Exception as exc:
-            from .result import memory_err
-
-            return memory_err(
+            raise MemoryPartialApplyError(
                 (
                     f'preference delete partially applied: index entry '
                     f"{edited['item'].name!r} was removed but reference "
                     f'{reference_name!r} could not be deleted: {exc}'
                 ),
-                type='partial',
                 operation='delete',
                 applied=['preference_index'],
                 failed=['reference'],
                 item=edited['item'],
-            )
-        return memory_ok(item=edited['item'])
-
-    def _read_document(self, path: str, *, label: str) -> dict[str, Any]:
-        from .result import memory_err, memory_ok
-
-        try:
-            return memory_ok(content=self.read(path))
-        except FileNotFoundError:
-            return memory_err(f'{label} document not found.', type='not_found')
-        except ValueError as exc:
-            return memory_err(str(exc), type='validation')
-        except RuntimeError as exc:
-            return memory_err(str(exc), type='store')
-
-    def _write_document(self, path: str, content: str) -> dict[str, Any]:
-        from .result import memory_err, memory_ok
-
-        try:
-            self.write(path, content)
-            return memory_ok()
-        except ValueError as exc:
-            return memory_err(str(exc), type='validation')
-        except RuntimeError as exc:
-            return memory_err(str(exc).strip(), type='store')
-        except Exception as exc:
-            return memory_err(f'failed to write {path}: {exc}', type='store')
+            ) from exc
+        return edited['item']
 
     def _require_file_path(self, path: str) -> str:
         normalized = normalize_memory_path(path)

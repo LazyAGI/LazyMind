@@ -18,7 +18,7 @@ presentation:
     result_summary: Detect fields and metric relationships, then deliver an editable, downloadable HTML chart
   detail:
     title: Smart charts
-    description: Originally built into WorkBuddy. Read CSV, Excel, or JSON data, recommend an appropriate chart, and generate an interactive downloadable HTML visualization.
+    description: Sourced from SkillHub. Read CSV, Excel, or JSON data, recommend an appropriate chart, and generate an interactive downloadable HTML visualization.
     attachment_hint: A CSV, Excel, or JSON data file
 
 tasks:

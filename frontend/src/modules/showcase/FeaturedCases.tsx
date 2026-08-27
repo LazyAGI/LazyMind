@@ -1,44 +1,21 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import CaseCard from "./CaseCard";
-import {
-  listShowcaseCases,
-  matchesShowcaseEntryType,
-  type ShowcaseCase,
-  type ShowcaseEntryType,
-} from "./api";
+import { matchesShowcaseEntryType, type ShowcaseCase, type ShowcaseEntryType } from "./api";
 import "./index.scss";
 
 interface FeaturedCasesProps {
   type: ShowcaseEntryType;
+  items: ShowcaseCase[];
+  isLoading: boolean;
   onTry?: (item: ShowcaseCase) => void;
 }
 
 const FEATURED_HOME_LIMIT = 8;
 
-export default function FeaturedCases({ type, onTry }: FeaturedCasesProps) {
-  const { i18n, t } = useTranslation();
-  const locale = i18n.resolvedLanguage || i18n.language;
-  const [items, setItems] = useState<ShowcaseCase[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    listShowcaseCases({}, { signal: controller.signal })
-      .then((response) => setItems(response.cases ?? []))
-      .catch(() => {
-        if (!controller.signal.aborted) {
-          setItems([]);
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) {
-          setIsLoading(false);
-        }
-      });
-    return () => controller.abort();
-  }, [locale]);
+export default function FeaturedCases({ type, items, isLoading, onTry }: FeaturedCasesProps) {
+  const { t } = useTranslation();
 
   const featuredItems = useMemo(() => {
     return items

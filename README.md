@@ -189,7 +189,7 @@ Use `make local-win-down` on Windows. See the [Quick Start guide](docs/quick_sta
 make up
 ```
 
-This starts both the Docker services and the host-side Assistant Bridge. Open **Settings → Assistants** to connect Codex, Cursor, WorkBuddy, TRAE Work, or DeepSeek Harness without running separate MCP configuration commands. If Docker is installed but Go is not, the bridge is cross-compiled for the host automatically inside Docker.
+This starts both the Docker services and the host-side Assistant Bridge. Open **Settings → Assistants** to connect Codex, Cursor, WorkBuddy, Raccoon, TRAE Work, or DeepSeek Harness without running separate MCP configuration commands. If Docker is installed but Go is not, the bridge is cross-compiled for the host automatically inside Docker.
 
 ### Startup Command Reference
 

@@ -65,7 +65,7 @@ export default function GalleryPage() {
     listShowcaseCases({}, { signal: controller.signal })
       .then((response) => {
         setItems((response.cases || []).filter((item) => item.gallery));
-        const availableCategories = response.categories.filter(
+        const availableCategories = (response.categories ?? []).filter(
           (item) => item !== "全部" && item !== "All",
         );
         setCategories(availableCategories);
@@ -112,7 +112,11 @@ export default function GalleryPage() {
         item.title,
         item.description,
         item.category,
-        item.prompt_short,
+        ...(item.tasks ?? []).flatMap((task) => [
+          task.title,
+          task.description,
+          task.prompt_short,
+        ]),
       ]
         .join(" ")
         .toLowerCase();

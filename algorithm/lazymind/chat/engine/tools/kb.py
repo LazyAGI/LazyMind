@@ -13,10 +13,8 @@ from lazyllm.tools.rag import Reranker, Retriever
 from lazymind.chat.engine.tools.infra import (
     get_core_api,
     get_vocab_manager,
-    handle_tool_errors,
     post_core_api,
     resolve_index,
-    tool_success,
 )
 from lazymind.chat.engine.tools._utils import (
     iter_lookup_ids,
@@ -924,7 +922,6 @@ def _tmp_merge_hits(grep_hits: List[dict], semantic_hits: List[dict], top_k: int
     return merged[:top_k]
 
 
-@handle_tool_errors
 def kb_tmp_search(
     semantic_query: Optional[str] = None,
     grep_patterns: Optional[List[str]] = None,
@@ -949,7 +946,7 @@ def kb_tmp_search(
     query = str(semantic_query or '').strip() or None
     patterns = _tmp_pattern_list(grep_patterns)
     if not query and not patterns:
-        raise ValueError('at least one of semantic_query or grep_patterns is required')
+        raise ToolExecutionError('at least one of semantic_query or grep_patterns is required')
     top_k = _tmp_clamp_top_k(top_k)
     uploads, skipped = _tmp_collect_uploads()
     docs: list[dict] = []
@@ -981,7 +978,7 @@ def kb_tmp_search(
         f'total={len(hits)} semantic={semantic_channel} '
         f'skipped_reasons={[item.get("reason") for item in skipped]}'
     )
-    return tool_success('kb_tmp_search', {
+    return {
         'semantic_query': query,
         'grep_patterns': patterns,
         'corpus': [
@@ -1006,4 +1003,4 @@ def kb_tmp_search(
             if not hits
             else f'Showing {len(hits)} locating hits. Call read_file for surrounding context.'
         ),
-    })
+    }

@@ -26,9 +26,9 @@ describe("GalleryPage", () => {
   beforeEach(() => {
     listShowcaseCasesMock.mockResolvedValue({
       cases: [
-        { id: "chat-skill", title: "Chat skill", type: "chat", category: "内容创作", gallery: true },
-        { id: "work-skill", title: "Work skill", type: "work", category: "信息分析", gallery: true },
-        { id: "workflow", title: "Workflow", type: "workflow", category: "内容创作", gallery: true },
+        { id: "chat-skill", title: "Chat skill", type: "chat", category: "内容创作", gallery: true, tasks: [] },
+        { id: "work-skill", title: "Work skill", type: "work", category: "信息分析", gallery: true, tasks: [] },
+        { id: "workflow", title: "Workflow", type: "workflow", category: "内容创作", gallery: true, tasks: [] },
       ],
       categories: ["全部", "内容创作", "信息分析"],
       total: 3,

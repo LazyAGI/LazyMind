@@ -464,7 +464,6 @@ func (c Catalog) ShowcaseCases(locale string) []ShowcaseCase {
 				Result:      task.Result,
 			})
 		}
-		firstTask := caseTasks[0]
 		sourceURL, builtinSkillUID, workflowRef := "", "", ""
 		if definition.Skill != nil {
 			sourceURL = definition.Skill.SourceURL
@@ -488,11 +487,7 @@ func (c Catalog) ShowcaseCases(locale string) []ShowcaseCase {
 			OutputLabel:       presentation.Card.OutputLabel,
 			ImageURL:          presentation.Card.ImageURL,
 			AttachmentHint:    presentation.Detail.AttachmentHint,
-			PromptShort:       firstTask.PromptShort,
-			Prompt:            firstTask.Prompt,
-			ResultSummary:     firstTask.Result.Summary,
-			ResultHighlights:  append([]string(nil), firstTask.Result.Highlights...),
-			Steps:             append([]ShowcaseCaseStep(nil), firstTask.Steps...),
+			ResultSummary:     presentation.Card.ResultSummary,
 			Tasks:             caseTasks,
 			BuiltinSkillUID:   builtinSkillUID,
 			WorkflowRef:       workflowRef,

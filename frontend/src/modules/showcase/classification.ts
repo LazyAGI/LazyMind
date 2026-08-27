@@ -20,12 +20,21 @@ export function buildShowcaseLaunchPath(
   capabilityType: string,
   taskId?: string,
 ) {
+  const params = buildShowcaseLaunchParams(caseId, capabilityType, taskId);
+  return `/agent/chat/home?${params.toString()}`;
+}
+
+export function buildShowcaseLaunchParams(
+  caseId: string,
+  capabilityType: string,
+  taskId?: string,
+) {
   const params = new URLSearchParams({ showcase_case: caseId });
   if (taskId) {
     params.set("showcase_task", taskId);
   }
   params.set(SHOWCASE_ENTRY_QUERY_PARAM, showcaseEntryType(capabilityType));
-  return `/agent/chat/home?${params.toString()}`;
+  return params;
 }
 
 export function matchesShowcaseEntryType(

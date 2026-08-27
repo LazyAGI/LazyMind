@@ -24,6 +24,15 @@ const {
 } = require("./installer-warmup");
 const { clearFrontendCaches } = require("./frontend-cache");
 const { installExternalNavigationHandler } = require("./external-navigation");
+const {
+  collapseRoots,
+  containsPath,
+  discoverRecommendedFolders,
+  loadAccessState,
+  recommendationsForExactFolders,
+  resolveExistingDirectories,
+  saveAccessState,
+} = require("./local-folder-access");
 
 const isWindows = process.platform === "win32";
 const isMac = process.platform === "darwin";
@@ -57,6 +66,13 @@ const repoRoot = process.env.LAZYMIND_DESKTOP_REPO_ROOT ||
 const explicitRuntimeRoot = process.env.LAZYMIND_DESKTOP_RUNTIME_ROOT || "";
 const desktopLogsDir = app.getPath("logs");
 const desktopCredentialIdentityPath = path.join(app.getPath("userData"), "credential-device.json");
+const localFolderAccessStatePath = path.join(app.getPath("userData"), "local-folder-access.json");
+const cursorWorkspaceStorageRoot = path.join(
+  app.getPath("appData"),
+  "Cursor",
+  "User",
+  "workspaceStorage",
+);
 const startupLogPath = path.join(desktopLogsDir, "desktop-startup.log");
 const sidecarPath = process.env.LAZYMIND_DESKTOP_SIDECAR ||
   path.join(runtimeResourcesRoot, "bin", `local-runtime-manager${isWindows ? ".exe" : ""}`);
@@ -76,6 +92,7 @@ const runtimeOwnershipHandoffTimeoutMs = 30 * 1000;
 const agentHostRestartMaxDelayMs = 30 * 1000;
 const agentHostStableAfterMs = 60 * 1000;
 const agentConnectorActionTimeoutMs = 15 * 1000;
+const agentConnectorBindingTimeoutMs = 30 * 1000;
 const agentConnectorLoginTimeoutMs = 125 * 1000;
 const macInstallationWarmupMarker = macWarmupMarkerPath(app.getPath("userData"));
 const startupMetricsHistoryPath = path.join(desktopLogsDir, "startup-metrics.jsonl");
@@ -193,6 +210,7 @@ function sidecarArgs(command, extra = []) {
 }
 
 function sidecarEnv() {
+  const localFolderAccess = loadAccessState(localFolderAccessStatePath);
   const env = {
     ...process.env,
     LAZYMIND_RUNTIME_PROFILE: "desktop",
@@ -208,6 +226,7 @@ function sidecarEnv() {
     LAZYMIND_NODE_RUN_AS_NODE: "true",
     VITE_LAZYMIND_MODE: "desktop",
     PYTHONDONTWRITEBYTECODE: "1",
+    LAZYMIND_FILE_WATCHER_EXTRA_ALLOWED_ROOTS_JSON: JSON.stringify(localFolderAccess.allowedRoots),
   };
   env.LAZYMIND_MODEL_PROVIDER_SECRET_KEY ||= deriveDesktopCredentialKey(desktopCredentialIdentity, "model-provider");
   env.LAZYMIND_MCP_SECRET_KEY ||= deriveDesktopCredentialKey(desktopCredentialIdentity, "mcp");
@@ -461,6 +480,7 @@ function runAgentConnector(agent, action) {
     codex: new Set(["connect", "status", "disconnect", "login"]),
     cursor: new Set(["connect", "status", "disconnect", "login"]),
     workbuddy: new Set(["connect", "status", "disconnect"]),
+    raccoon: new Set(["connect", "status", "disconnect"]),
     traework: new Set(["connect", "status", "disconnect"]),
     "deepseek-harness": new Set(["connect", "status", "disconnect"]),
   };
@@ -496,6 +516,36 @@ async function runExecutorConnector(provider, action) {
     }
   }
   return result;
+}
+
+const agentBindingTargets = new Set([
+  "codex-cli", "cursor-cli", "codebuddy-cli", "cursor-desktop",
+  "workbuddy-desktop", "raccoon-desktop", "traework-desktop",
+]);
+const agentBindingActions = new Set(["status", "set", "clear"]);
+
+async function runAgentBinding(target, action, executablePath = "") {
+  if (!agentBindingTargets.has(target) || !agentBindingActions.has(action)) {
+    throw new Error(`Unsupported external Agent binding action: ${target}/${action}`);
+  }
+  const args = ["internal", "binding", target, action];
+  if (action === "set") {
+    args.push("--path", executablePath);
+  }
+  const result = await runConnectorJSON(args, agentConnectorBindingTimeoutMs);
+  if (action !== "status" && target.endsWith("-cli")) {
+    agentHostRestartAttempts = 0;
+    if (agentHostProcess) {
+      agentHostProcess.kill();
+    } else {
+      startAgentHost();
+    }
+  }
+  return result;
+}
+
+function readAgentBindings() {
+  return runConnectorJSON(["internal", "binding", "all", "status"], agentConnectorActionTimeoutMs);
 }
 
 function runConnectorJSON(args, timeout) {
@@ -845,6 +895,98 @@ async function readStatus() {
   return currentStatus;
 }
 
+function localFolderAccessSnapshot() {
+  const state = loadAccessState(localFolderAccessStatePath);
+  return {
+    ...state,
+    available: true,
+    items: recommendationsForExactFolders(state.allowedRoots),
+  };
+}
+
+function localFolderDiscoveryExcludedRoots() {
+  const roots = [];
+  for (const name of ["desktop", "documents", "downloads", "music", "pictures", "videos"]) {
+    try {
+      roots.push(app.getPath(name));
+    } catch {
+      // Older Electron/platform combinations may not expose every known path.
+    }
+  }
+  return collapseRoots(roots);
+}
+
+function runtimeAllowedRoots(status) {
+  const watcher = status?.config?.fileWatcher || {};
+  return collapseRoots([
+    ...(Array.isArray(watcher.allowedRoots) ? watcher.allowedRoots : []),
+    watcher.watchHostDir,
+  ]);
+}
+
+function fileWatcherAgentToken() {
+  return process.env.LAZYMIND_FILE_WATCHER_AGENT_TOKEN ||
+    process.env.LAZYMIND_SCAN_CONTROL_PLANE_AGENT_TOKEN ||
+    "my-secret-token";
+}
+
+async function replaceFileWatcherAllowedRoots(status, roots) {
+  const port = Number(status?.config?.fileWatcher?.port || 0);
+  if (!Number.isInteger(port) || port <= 0) {
+    throw new Error("LazyMind file-watcher port is unavailable");
+  }
+  const response = await fetch(`http://127.0.0.1:${port}/api/v1/desktop/fs/allowed-roots`, {
+    method: "PUT",
+    headers: {
+      Authorization: `Bearer ${fileWatcherAgentToken()}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ roots }),
+    signal: AbortSignal.timeout(10_000),
+  });
+  const payload = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(payload?.message || `Could not update local folder access (HTTP ${response.status})`);
+  }
+  return collapseRoots(payload?.roots || roots);
+}
+
+function resolveRequestedLocalFolder(folderPath, status, accessState) {
+  const requested = String(folderPath || "").trim();
+  if (!requested) {
+    throw new Error("Folder path is required");
+  }
+
+  const discoveryRoots = accessState.discoveryRoots || [];
+  const allowedRoots = runtimeAllowedRoots(status);
+  const requestedExists = fs.existsSync(requested);
+  if (requestedExists && [...discoveryRoots, ...allowedRoots].some((root) => containsPath(root, requested))) {
+    return resolveExistingDirectories([requested])[0];
+  }
+
+  const watchHostDir = status?.config?.fileWatcher?.watchHostDir;
+  if (watchHostDir) {
+    const virtualSuffix = requested.replace(/^[/\\]+/u, "");
+    const mapped = virtualSuffix ? path.join(watchHostDir, virtualSuffix) : watchHostDir;
+    if (fs.existsSync(mapped) && allowedRoots.some((root) => containsPath(root, mapped))) {
+      return resolveExistingDirectories([mapped])[0];
+    }
+  }
+
+  const resolved = resolveExistingDirectories([requested])[0];
+  if (![...discoveryRoots, ...allowedRoots].some((root) => containsPath(root, resolved))) {
+    throw new Error(`Folder is outside the authorized discovery locations: ${resolved}`);
+  }
+  return resolved;
+}
+
+async function restartRuntimeAfterFolderAccessChange() {
+  await runSidecar("down");
+  detachRuntimeMonitor();
+  startRuntime();
+  return waitForRuntimeReady();
+}
+
 function logStartupContext() {
   appendStartupLog("desktop", `sidecar: ${sidecarPath}`);
   appendStartupLog("desktop", `resources: ${runtimeResourcesRoot}`);
@@ -1104,7 +1246,6 @@ function loadingHTML() {
       display: grid;
       place-items: center;
       padding-bottom: 76px;
-      transition: padding-bottom 180ms ease;
     }
     body.drawer-open main { padding-bottom: 450px; }
     section { width: min(500px, calc(100vw - 64px)); }
@@ -1604,10 +1745,11 @@ ipcMain.handle("lazymind:agentIntegrationStatuses", () => runAgentConnector("all
 ipcMain.handle("lazymind:agentIntegrationAction", (_event, agent, action) => runAgentConnector(agent, action));
 ipcMain.handle("lazymind:executorIntegrationPolicies", () => runExecutorConnector("all", "status"));
 ipcMain.handle("lazymind:executorIntegrationAction", (_event, provider, action) => runExecutorConnector(provider, action));
+ipcMain.handle("lazymind:agentExecutableBindings", () => readAgentBindings());
+ipcMain.handle("lazymind:agentExecutableBind", (_event, target, executablePath) => runAgentBinding(target, "set", executablePath));
+ipcMain.handle("lazymind:agentExecutableClear", (_event, target) => runAgentBinding(target, "clear"));
 ipcMain.handle("lazymind:restartRuntime", async () => {
-  await runSidecar("down");
-  startRuntime();
-  return waitForRuntimeReady();
+  return restartRuntimeAfterFolderAccessChange();
 });
 ipcMain.handle("lazymind:resetRuntime", async (_event, scope = "kb") => {
   await runSidecar("reset", ["--scope", scope]);
@@ -1632,15 +1774,139 @@ ipcMain.handle("lazymind:openDataDir", async () => {
   fs.mkdirSync(target, { recursive: true });
   await shell.openPath(target);
 });
+ipcMain.handle("lazymind:localFolderAccessStatus", () => localFolderAccessSnapshot());
+ipcMain.handle("lazymind:chooseLocalDiscoveryRoots", async () => {
+  const isChinese = app.getLocale().toLowerCase().startsWith("zh");
+  const previous = loadAccessState(localFolderAccessStatePath);
+  const consent = await dialog.showMessageBox(activeWindow(), {
+    type: "question",
+    title: isChinese ? "允许查找推荐目录" : "Allow recommended folder discovery",
+    message: isChinese
+      ? "是否允许 LazyMind 在你随后选择的位置中查找可接入目录？"
+      : "Allow LazyMind to look for folders you can connect inside the locations you choose next?",
+    detail: isChinese
+      ? "查找会限制递归深度和耗时，只识别 Cursor、Codex 等已知目录；所选父目录不会加入 allowed_roots，也不会读取或同步文件内容。桌面、文档、下载及媒体目录会被跳过。"
+      : "Discovery is bounded by depth and time and only recognizes known locations such as Cursor and Codex folders. Parent locations are not added to allowed_roots, and file contents are not read or synced. Desktop, Documents, Downloads, and media folders are skipped.",
+    buttons: [isChinese ? "继续选择" : "Choose locations", isChinese ? "取消" : "Cancel"],
+    defaultId: 0,
+    cancelId: 1,
+    noLink: true,
+  });
+  if (consent.response !== 0) {
+    const saved = saveAccessState(localFolderAccessStatePath, {
+      ...previous,
+      discoveryConsentGranted: false,
+    });
+    return { ...saved, available: true, canceled: true };
+  }
+  const result = await dialog.showOpenDialog(activeWindow(), {
+    title: isChinese ? "选择用于查找推荐目录的位置" : "Choose locations to search",
+    message: isChinese
+      ? "可一次选择多个位置。LazyMind 只会在这些位置查找可接入目录。"
+      : "You can choose multiple locations. LazyMind only searches them for folders you can connect.",
+    defaultPath: app.getPath("home"),
+    buttonLabel: isChinese ? "允许查找" : "Allow search",
+    properties: ["openDirectory", "multiSelections"],
+  });
+  if (result.canceled || result.filePaths.length === 0) {
+    const saved = saveAccessState(localFolderAccessStatePath, {
+      ...previous,
+      discoveryConsentGranted: false,
+    });
+    return { ...saved, available: true, canceled: true };
+  }
+  const excludedRoots = localFolderDiscoveryExcludedRoots();
+  const discoveryRoots = resolveExistingDirectories(
+    collapseRoots([
+      ...previous.discoveryRoots,
+      ...result.filePaths,
+    ]).filter((candidate) =>
+      !excludedRoots.some((excludedRoot) => containsPath(excludedRoot, candidate))),
+  );
+  const saved = saveAccessState(localFolderAccessStatePath, {
+    ...previous,
+    discoveryConsentGranted: true,
+    discoveryRoots,
+  });
+  return { ...saved, available: true, canceled: false };
+});
+ipcMain.handle("lazymind:discoverLocalFolders", async () => {
+  const access = loadAccessState(localFolderAccessStatePath);
+  if (!access.discoveryConsentGranted || access.discoveryRoots.length === 0) {
+    return {
+      ...access,
+      available: true,
+      items: [],
+      scannedEntries: 0,
+      truncated: false,
+      stoppedReason: "not_authorized",
+      durationMs: 0,
+    };
+  }
+  const result = await discoverRecommendedFolders({
+    roots: access.discoveryRoots,
+    cursorWorkspaceStorageRoots: [cursorWorkspaceStorageRoot],
+    excludedRoots: localFolderDiscoveryExcludedRoots(),
+  });
+  return { ...access, available: true, ...result };
+});
+ipcMain.handle("lazymind:authorizeLocalFolders", async (_event, requestedPaths) => {
+  const pathsToAuthorize = Array.isArray(requestedPaths) ? requestedPaths : [];
+  if (pathsToAuthorize.length === 0) {
+    return { granted: true, addedRoots: [], ...localFolderAccessSnapshot() };
+  }
+
+  const status = await readStatus();
+  const previous = loadAccessState(localFolderAccessStatePath);
+  const resolved = collapseRoots(
+    pathsToAuthorize.map((folderPath) =>
+      resolveRequestedLocalFolder(folderPath, status, previous)),
+  );
+  const existing = collapseRoots([
+    ...runtimeAllowedRoots(status),
+    ...previous.allowedRoots,
+  ]);
+  const addedRoots = resolved.filter((candidate) =>
+    !existing.some((root) => containsPath(root, candidate)));
+  if (addedRoots.length === 0) {
+    return { granted: true, addedRoots: [], ...localFolderAccessSnapshot() };
+  }
+
+  const allowedRoots = await replaceFileWatcherAllowedRoots(status, [
+    ...runtimeAllowedRoots(status),
+    ...previous.allowedRoots,
+    ...addedRoots,
+  ]);
+  try {
+    const saved = saveAccessState(localFolderAccessStatePath, {
+      ...previous,
+      allowedRoots,
+    });
+    return { granted: true, canceled: false, addedRoots, ...saved, available: true };
+  } catch (error) {
+    try {
+      await replaceFileWatcherAllowedRoots(status, [
+        ...runtimeAllowedRoots(status),
+        ...previous.allowedRoots,
+      ]);
+    } catch (rollbackError) {
+      appendStartupLog("error", `failed to restore local folder access after persistence failure: ${serializeError(rollbackError)}`);
+    }
+    throw error;
+  }
+});
 ipcMain.handle("lazymind:selectFolder", async () => {
   const result = await dialog.showOpenDialog(activeWindow(), { properties: ["openDirectory"] });
   return result.canceled ? null : result.filePaths[0];
 });
-ipcMain.handle("lazymind:selectExecutable", async () => {
+ipcMain.handle("lazymind:selectExecutable", async (_event, target = "") => {
+  const agentExecutable = agentBindingTargets.has(target);
   const result = await dialog.showOpenDialog(activeWindow(), {
     properties: ["openFile"],
     filters: process.platform === "win32"
-      ? [{ name: "FFmpeg", extensions: ["exe"] }]
+      ? [agentExecutable
+        ? { name: "Agent executable", extensions: ["exe", "cmd", "bat"] }
+        : { name: "FFmpeg", extensions: ["exe"] }]
       : [{ name: "Executable", extensions: ["*"] }],
   });
   return result.canceled ? null : result.filePaths[0];
