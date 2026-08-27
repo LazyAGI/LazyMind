@@ -18,7 +18,7 @@ export interface SkillTempUploadResult {
 
 export async function uploadSkillTempFile(
   file: File,
-  options?: { chunkSize?: number; timeout?: number },
+  options?: { chunkSize?: number; timeout?: number; silentError?: boolean },
 ): Promise<SkillTempUploadResult> {
   const chunkSize = options?.chunkSize ?? DEFAULT_CHUNK_SIZE;
   const timeout = options?.timeout ?? 60 * 1000;
@@ -33,7 +33,7 @@ export async function uploadSkillTempFile(
   const initResponse = await axiosInstance.post<InitUploadResponse>(
     coreApiUrl("temp/uploads:initUpload"),
     initRequest,
-    { timeout },
+    { timeout, silentError: options?.silentError } as never,
   );
 
   const { upload_id: uploadId, part_size: partSize, total_parts: totalParts } = initResponse.data;
@@ -55,7 +55,8 @@ export async function uploadSkillTempFile(
       {
         headers: { "Content-Type": "application/octet-stream" },
         timeout,
-      },
+        silentError: options?.silentError,
+      } as never,
     );
   }
 
@@ -63,7 +64,7 @@ export async function uploadSkillTempFile(
   const completeResponse = await axiosInstance.post<CompleteUploadResponse>(
     coreApiUrl(`temp/uploads/${encodeURIComponent(uploadId)}:complete`),
     completeRequest,
-    { timeout },
+    { timeout, silentError: options?.silentError } as never,
   );
 
   const storedPath = completeResponse.data.stored_path;

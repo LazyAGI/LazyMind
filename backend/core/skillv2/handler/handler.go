@@ -2294,6 +2294,17 @@ type httpZipDownloader struct{}
 
 const maxSkillDownloadBytes int64 = 20 << 20
 
+const skillArchiveDownloadTimeout = 5 * time.Minute
+
+func newSkillArchiveHTTPClient() *http.Client {
+	transport := http.DefaultTransport.(*http.Transport).Clone()
+	transport.ResponseHeaderTimeout = 30 * time.Second
+	return &http.Client{
+		Transport: transport,
+		Timeout:   skillArchiveDownloadTimeout,
+	}
+}
+
 type marketHTTPZipDownloader struct{}
 
 func (marketHTTPZipDownloader) Download(ctx context.Context, rawURL string) (string, error) {
@@ -2313,7 +2324,7 @@ func (httpZipDownloader) Download(ctx context.Context, rawURL string) (skillserv
 	if err != nil {
 		return skillservice.DownloadedZip{}, err
 	}
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := newSkillArchiveHTTPClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return skillservice.DownloadedZip{}, err

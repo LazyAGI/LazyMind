@@ -22,6 +22,7 @@ import { parseScenario, serializeScenario } from '@/modules/workflow/components/
 import { createEmptyModel } from '@/modules/workflow/components/StateGraphEditor/core/model';
 import type { WorkflowModel } from '@/modules/workflow/components/StateGraphEditor/core/workflowModel';
 import type { ScenarioData } from '@/modules/workflow/components/StateGraphEditor/ScenarioEditor';
+import i18n from '@/i18n';
 
 interface WorkflowInstalledViewProps {
   t: (key: string, options?: Record<string, unknown>) => string;
@@ -47,6 +48,7 @@ export default function WorkflowInstalledView({
   listContentRef,
 }: WorkflowInstalledViewProps) {
   const navigate = useNavigate();
+  const currentLocale = i18n.resolvedLanguage || i18n.language;
   const [draftRecords, setDraftRecords] = useState<WorkflowDraftRecord[]>([]);
   const [builtinWorkflows, setBuiltinWorkflows] = useState<BuiltinWorkflow[]>([]);
   const [callModeByRef, setCallModeByRef] = useState<Record<string, WorkflowCallMode>>({});
@@ -255,8 +257,8 @@ export default function WorkflowInstalledView({
         const status = row.generate_status;
         if (status === 'generating') return <Tag color="processing">{t('admin.memoryWorkflowStatusGenerating')}</Tag>;
         if (status === 'failed') return <Tag color="error">{t('admin.memoryWorkflowStatusFailed')}</Tag>;
-        if (row.published) return <div style={{ display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}><Tag color="success" style={{ marginInlineEnd: 0 }}>已发布</Tag><Tag style={{ marginInlineEnd: 0 }}>v{row.current_revision_no}</Tag></div>;
-        return <Tag>未发布</Tag>;
+        if (row.published) return <div style={{ display: 'flex', alignItems: 'center', gap: 4, whiteSpace: 'nowrap' }}><Tag color="success" style={{ marginInlineEnd: 0 }}>{t('admin.memoryWorkflowStatusPublished')}</Tag><Tag style={{ marginInlineEnd: 0 }}>v{row.current_revision_no}</Tag></div>;
+        return <Tag>{t('admin.memoryWorkflowStatusUnpublished')}</Tag>;
       },
     },
     {
@@ -265,7 +267,7 @@ export default function WorkflowInstalledView({
       width: 180,
       render: (_: unknown, row: WorkflowRow) => {
         if (row._type === 'builtin') return '—';
-        return <span style={{ whiteSpace: 'nowrap' }}>{new Date(row.updated_at).toLocaleString('zh-CN')}</span>;
+        return <span style={{ whiteSpace: 'nowrap' }}>{new Date(row.updated_at).toLocaleString(currentLocale)}</span>;
       },
     },
     {

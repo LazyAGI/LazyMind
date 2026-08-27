@@ -438,7 +438,6 @@ export interface CreateSkillPayload {
 }
 
 export interface PublishSkillToMarketPayload {
-  tags: string[];
   source:
     | { type: "uploaded_zip"; uploadId: string }
     | { type: "url"; url: string };
@@ -1070,7 +1069,10 @@ export async function getSkillAssetDetail(
   return normalizeSkillItem(payload, content);
 }
 
-export async function createSkillAsset(payload: CreateSkillPayload): Promise<string> {
+export async function createSkillAsset(
+  payload: CreateSkillPayload,
+  options?: { silentError?: boolean },
+): Promise<string> {
   const request: SkillCreateManagedOpenAPIRequest = {
     name: payload.name,
     description: payload.description,
@@ -1084,9 +1086,10 @@ export async function createSkillAsset(payload: CreateSkillPayload): Promise<str
         : { type: "url", url: payload.source.url },
   };
 
-  const response = await skillsApi.apiCoreSkillsPost({
-    skillCreateManagedOpenAPIRequest: request,
-  });
+  const response = await skillsApi.apiCoreSkillsPost(
+    { skillCreateManagedOpenAPIRequest: request },
+    options?.silentError ? ({ silentError: true } as never) : undefined,
+  );
   const body = unwrapEnvelope<{ skill_id?: string }>(response.data);
   return body.skill_id || "";
 }
@@ -1914,7 +1917,6 @@ export async function publishSkillToMarket(
   const response = await skillMarketApi.apiCoreSkillMarketAdminItemsPost({
     marketPublishOpenAPIRequest: {
       name: "",
-      tags: payload.tags,
       source:
         payload.source.type === "uploaded_zip"
           ? { type: "uploaded_zip", upload_id: payload.source.uploadId }
