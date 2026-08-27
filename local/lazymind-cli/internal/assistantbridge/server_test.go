@@ -79,6 +79,7 @@ func TestExecutableBindingCanBeSavedListedAndCleared(t *testing.T) {
 func TestStatusesDoNotLaunchDesktopAgentCandidates(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 	t.Setenv("PATH", "")
 	t.Setenv("LAZYMIND_HOME", filepath.Join(home, ".lazymind"))
 	t.Setenv("LAZYMIND_CODEX_BIN", "")

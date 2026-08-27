@@ -43,6 +43,9 @@ func commandContext(ctx context.Context, binary string, arguments ...string) (*e
 }
 
 func windowsPowerShell() (string, error) {
+	if candidate := lookPathIn("pwsh.exe", effectiveWindowsPath(), windowsPathExtensions()); candidate != "" {
+		return candidate, nil
+	}
 	if root := strings.TrimSpace(os.Getenv("SystemRoot")); root != "" {
 		candidate := filepath.Join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
 		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {

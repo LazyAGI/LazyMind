@@ -76,6 +76,7 @@ const runtimeOwnershipHandoffTimeoutMs = 30 * 1000;
 const agentHostRestartMaxDelayMs = 30 * 1000;
 const agentHostStableAfterMs = 60 * 1000;
 const agentConnectorActionTimeoutMs = 15 * 1000;
+const agentConnectorBindingTimeoutMs = 30 * 1000;
 const agentConnectorLoginTimeoutMs = 125 * 1000;
 const macInstallationWarmupMarker = macWarmupMarkerPath(app.getPath("userData"));
 const startupMetricsHistoryPath = path.join(desktopLogsDir, "startup-metrics.jsonl");
@@ -513,7 +514,7 @@ async function runAgentBinding(target, action, executablePath = "") {
   if (action === "set") {
     args.push("--path", executablePath);
   }
-  const result = await runConnectorJSON(args, agentConnectorActionTimeoutMs);
+  const result = await runConnectorJSON(args, agentConnectorBindingTimeoutMs);
   if (action !== "status" && target.endsWith("-cli")) {
     agentHostRestartAttempts = 0;
     if (agentHostProcess) {

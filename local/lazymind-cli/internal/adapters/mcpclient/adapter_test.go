@@ -111,7 +111,11 @@ func TestDeepSeekRequirementsCheckProfileAndMCPClient(t *testing.T) {
 func TestManagedJSONConfigPreservesOtherServersAndRemovesOnlyLazyMind(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "mcp.json")
-	self := filepath.Join(root, "bin", "lazymind")
+	selfName := "lazymind"
+	if runtime.GOOS == "windows" {
+		selfName += ".exe"
+	}
+	self := filepath.Join(root, "bin", selfName)
 	home := filepath.Join(root, "home")
 	writeTestFile(t, self, "test connector")
 	writeTestFile(t, path, `{"theme":"dark","mcpServers":{"existing":{"description":"keep","url":"https://example.com/mcp","type":"streamable_http","alwaysLoad":true,"disabled":false,"connect_timeout":15}}}`)
