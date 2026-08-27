@@ -113,6 +113,42 @@ func TestFrozenSkillHubBuildPinsAndValidatesVersionWithoutArchiveHash(t *testing
 	}
 }
 
+func TestFrozenSkillHubBuildAcceptsLockedArtifactWithoutVersionMetadata(t *testing.T) {
+	files := testSkillFiles()
+	files["SKILL.md"] = []byte("---\nname: demo\ndescription: demo skill\n---\n# Demo\n")
+	archive := makeSkillZipFromFiles(t, files)
+	sourcePath := filepath.Join(t.TempDir(), "source.zip")
+	if err := os.WriteFile(sourcePath, archive, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	spec, err := resolveSource("https://skillhub.cn/skills/demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec.FallbackName = "demo"
+	spec.FallbackVersion = "1.0.2"
+	origin, err := inspectOrigin(sourcePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	locked, _, _, err := finalizeEntry(spec, origin, t.TempDir(), skillpatch.Catalog{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(archive)), ContentLength: int64(len(archive)), Header: make(http.Header)}, nil
+	})}
+	for _, verifyArtifacts := range []bool{false, true} {
+		current, _, _, err := materializeFrozen(context.Background(), client, spec, locked, t.TempDir(), skillpatch.Catalog{}, verifyArtifacts)
+		if err != nil {
+			t.Fatalf("verify artifacts %v: %v", verifyArtifacts, err)
+		}
+		if current.Version != "1.0.2" {
+			t.Fatalf("verify artifacts %v: version = %q", verifyArtifacts, current.Version)
+		}
+	}
+}
+
 func TestRunBuildsCatalogAndFrozenModeUsesVerifiedCache(t *testing.T) {
 	archive := makeSkillZip(t)
 	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
