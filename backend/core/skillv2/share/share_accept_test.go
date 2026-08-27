@@ -59,9 +59,9 @@ func TestShareAccept_RejectsDuplicateName(t *testing.T) {
 		"owner_user_name":  "李四",
 		"create_user_id":   "user_002",
 		"create_user_name": "李四",
-		"category":         "personal",
+		"category":         "research",
 		"skill_name":       "论文精读-source_skill",
-		"relative_root":    "personal/论文精读-source_skill",
+		"relative_root":    "research/论文精读-source_skill",
 	}).Error; err != nil {
 		t.Fatalf("seed conflicting target skill: %v", err)
 	}

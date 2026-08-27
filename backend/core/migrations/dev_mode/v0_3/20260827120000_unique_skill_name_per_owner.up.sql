@@ -1,15 +1,27 @@
 -- 20260827120000_unique_skill_name_per_owner
+-- Keep identity unique per owner+category+name. SQLite also uses partial
+-- unique indexes so trashed rows do not occupy name or relative_root.
 -- +migrate Up
 -- +migrate Dialect postgres
 
 DROP INDEX IF EXISTS public.uk_skills_owner_identity;
 CREATE UNIQUE INDEX uk_skills_owner_identity
-    ON public.skills(owner_user_id, skill_name)
+    ON public.skills(owner_user_id, category, skill_name)
+    WHERE deleted_at IS NULL;
+
+DROP INDEX IF EXISTS public.uk_skills_owner_relative_root;
+CREATE UNIQUE INDEX uk_skills_owner_relative_root
+    ON public.skills(owner_user_id, relative_root)
     WHERE deleted_at IS NULL;
 
 -- +migrate Dialect sqlite
 
 DROP INDEX IF EXISTS uk_skills_owner_identity;
 CREATE UNIQUE INDEX uk_skills_owner_identity
-    ON skills(owner_user_id, skill_name)
+    ON skills(owner_user_id, category, skill_name)
+    WHERE deleted_at IS NULL;
+
+DROP INDEX IF EXISTS uk_skills_owner_relative_root;
+CREATE UNIQUE INDEX uk_skills_owner_relative_root
+    ON skills(owner_user_id, relative_root)
     WHERE deleted_at IS NULL;

@@ -398,7 +398,7 @@ func Sync(ctx context.Context, tx *gorm.DB, skillID string, meta Metadata, now t
 	}
 	var conflicts int64
 	if err := tx.WithContext(ctx).Model(&orm.SkillV2Skill{}).
-		Where("owner_user_id = ? AND skill_name = ? AND deleted_at IS NULL AND id <> ?", skill.OwnerUserID, meta.Name, skill.ID).
+		Where("owner_user_id = ? AND category = ? AND skill_name = ? AND deleted_at IS NULL AND id <> ?", skill.OwnerUserID, skill.Category, meta.Name, skill.ID).
 		Count(&conflicts).Error; err != nil {
 		return err
 	}

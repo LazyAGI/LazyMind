@@ -17,6 +17,7 @@ import (
 	"gorm.io/gorm"
 
 	"lazymind/core/common/orm"
+	"lazymind/core/skillv2/testutil"
 )
 
 func TestCreateSkillFromUploadedZip_CreatesInitialRevisionAndRoutesBlobs(t *testing.T) {
@@ -316,8 +317,95 @@ func TestCreateSkill_RejectsDuplicateIdentity(t *testing.T) {
 	if err := create("demo", "research"); !errors.Is(err, errSkillAlreadyExists) {
 		t.Fatalf("duplicate CreateSkill error = %v, want skill already exists", err)
 	}
-	if err := create("demo", "personal"); !errors.Is(err, errSkillAlreadyExists) {
-		t.Fatalf("same name in another category error = %v, want skill already exists", err)
+	if err := create("demo", "personal"); err != nil {
+		t.Fatalf("same name in another category returned error: %v", err)
+	}
+}
+
+func TestCreateSkill_RejectsNameTakenByDisabledBuiltin(t *testing.T) {
+	db := newSkillV2TestDB(t)
+	root := t.TempDir()
+	svc := NewSkillService(SkillServiceDeps{
+		DB:        db,
+		BlobStore: NewBlobStore(db, NewLocalObjectStore(root)),
+		Clock:     fixedClock(),
+	})
+	zipPath := filepath.Join(root, "builtin.zip")
+	writeSkillZip(t, zipPath, map[string][]byte{
+		"SKILL.md": []byte("---\nname: demo\ndescription: builtin skill\n---\n# Demo\n"),
+	})
+	created, err := svc.CreateSkill(context.Background(), CreateSkillRequest{
+		OwnerUserID:           "user_001",
+		CreateUserID:          "user_001",
+		Name:                  "demo",
+		Category:              "research",
+		Description:           "builtin skill",
+		OriginBuiltinSkillUID: "bsk_demo",
+		Source:                SourceInput{Type: "local_zip", StoredPath: zipPath, Filename: "builtin.zip"},
+	})
+	if err != nil {
+		t.Fatalf("create builtin skill returned error: %v", err)
+	}
+	disabled := false
+	if _, err := svc.PatchSkill(context.Background(), PatchSkillRequest{
+		SkillID:   created.SkillID,
+		UserID:    "user_001",
+		IsEnabled: &disabled,
+	}); err != nil {
+		t.Fatalf("disable builtin skill returned error: %v", err)
+	}
+	userZip := filepath.Join(root, "user.zip")
+	writeSkillZip(t, userZip, map[string][]byte{
+		"SKILL.md": []byte("---\nname: demo\ndescription: user skill\n---\n# Demo\n"),
+	})
+	if _, err := svc.CreateSkill(context.Background(), CreateSkillRequest{
+		OwnerUserID:  "user_001",
+		CreateUserID: "user_001",
+		Name:         "demo",
+		Category:     "research",
+		Description:  "user skill",
+		Source:       SourceInput{Type: "local_zip", StoredPath: userZip, Filename: "user.zip"},
+	}); !errors.Is(err, errSkillAlreadyExists) {
+		t.Fatalf("create after builtin uninstall error = %v, want skill already exists", err)
+	}
+}
+
+func TestCreateSkill_AllowsSameNameAfterUserTrash(t *testing.T) {
+	db := testutil.NewTestDB(t)
+	root := t.TempDir()
+	svc := NewSkillService(SkillServiceDeps{
+		DB:        db.DB,
+		BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(root)),
+		Clock:     fixedClock(),
+	})
+	create := func(filename string) (CreateSkillResponse, error) {
+		zipPath := filepath.Join(root, filename)
+		writeSkillZip(t, zipPath, map[string][]byte{
+			"SKILL.md": []byte("---\nname: demo\ndescription: demo skill\n---\n# Demo\n"),
+		})
+		return svc.CreateSkill(context.Background(), CreateSkillRequest{
+			OwnerUserID:  "user_001",
+			CreateUserID: "user_001",
+			Name:         "demo",
+			Category:     "research",
+			Description:  "demo skill",
+			Source:       SourceInput{Type: "local_zip", StoredPath: zipPath, Filename: filename},
+		})
+	}
+
+	first, err := create("first.zip")
+	if err != nil {
+		t.Fatalf("first CreateSkill returned error: %v", err)
+	}
+	if err := svc.TrashSkill(context.Background(), DeleteSkillRequest{SkillID: first.SkillID, UserID: "user_001"}); err != nil {
+		t.Fatalf("TrashSkill returned error: %v", err)
+	}
+	second, err := create("second.zip")
+	if err != nil {
+		t.Fatalf("recreate after trash returned error: %v", err)
+	}
+	if second.SkillID == "" || second.SkillID == first.SkillID {
+		t.Fatalf("recreate after trash skill id = %q, want a new skill", second.SkillID)
 	}
 }
 
@@ -325,7 +413,7 @@ func TestMapCreateSkillIdentityConflict(t *testing.T) {
 	if got := mapCreateSkillIdentityConflict(errSkillAlreadyExists); !errors.Is(got, errSkillAlreadyExists) {
 		t.Fatalf("mapped sentinel = %v", got)
 	}
-	sqliteErr := errors.New("UNIQUE constraint failed: skills.owner_user_id, skills.skill_name")
+	sqliteErr := errors.New("UNIQUE constraint failed: skills.owner_user_id, skills.category, skills.skill_name")
 	if got := mapCreateSkillIdentityConflict(sqliteErr); !errors.Is(got, errSkillAlreadyExists) {
 		t.Fatalf("mapped sqlite unique error = %v", got)
 	}

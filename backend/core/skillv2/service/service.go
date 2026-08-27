@@ -87,7 +87,7 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 	}
 
 	err = s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := ensureSkillIdentityAvailable(tx, req.OwnerUserID, req.Name, ""); err != nil {
+		if err := ensureSkillIdentityAvailable(tx, req.OwnerUserID, req.Category, req.Name, ""); err != nil {
 			return err
 		}
 		if err := tx.Create(&skillRow{
@@ -152,10 +152,11 @@ func (s *SkillService) CreateSkill(ctx context.Context, req CreateSkillRequest) 
 
 var errSkillAlreadyExists = fmt.Errorf("skill already exists")
 
-func ensureSkillIdentityAvailable(tx *gorm.DB, ownerUserID, name, excludeID string) error {
+func ensureSkillIdentityAvailable(tx *gorm.DB, ownerUserID, category, name, excludeID string) error {
+	relativeRoot := path.Join(category, name)
 	query := tx.Model(&skillRow{}).Where(
-		"owner_user_id = ? AND skill_name = ? AND deleted_at IS NULL",
-		ownerUserID, name,
+		"owner_user_id = ? AND deleted_at IS NULL AND ((category = ? AND skill_name = ?) OR relative_root = ?)",
+		ownerUserID, category, name, relativeRoot,
 	)
 	if strings.TrimSpace(excludeID) != "" {
 		query = query.Where("id <> ?", excludeID)
@@ -515,7 +516,7 @@ func (s *SkillService) RestoreSkill(ctx context.Context, req RestoreSkillRequest
 		if err := tx.Where("id = ? AND owner_user_id = ? AND deleted_at IS NOT NULL", req.SkillID, req.UserID).Take(&skill).Error; err != nil {
 			return err
 		}
-		if err := ensureSkillIdentityAvailable(tx, req.UserID, skill.SkillName, skill.ID); err != nil {
+		if err := ensureSkillIdentityAvailable(tx, req.UserID, skill.Category, skill.SkillName, skill.ID); err != nil {
 			return err
 		}
 		if err := tx.Model(&skillRow{}).Where("id = ? AND deleted_at IS NOT NULL", req.SkillID).Updates(map[string]any{

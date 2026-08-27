@@ -730,7 +730,7 @@ func (h *Handler) listSkills(w http.ResponseWriter, r *http.Request, userID, cat
 func (h *Handler) createEmptyPackage(ctx context.Context, tx *gorm.DB, userID string, parsed remotePath, task remoteTask) error {
 	var conflicts int64
 	if err := tx.WithContext(ctx).Model(&skillRow{}).
-		Where("owner_user_id = ? AND deleted_at IS NULL AND (relative_root = ? OR skill_name = ?)", userID, parsed.packageRoot(), parsed.skillName).
+		Where("owner_user_id = ? AND relative_root = ? AND deleted_at IS NULL", userID, parsed.packageRoot()).
 		Count(&conflicts).Error; err != nil {
 		return err
 	}
@@ -1043,7 +1043,7 @@ func (h *Handler) movePackageRoot(ctx context.Context, userID string, from, to r
 		}
 		var conflicts int64
 		if err := tx.Model(&skillRow{}).
-			Where("owner_user_id = ? AND deleted_at IS NULL AND id <> ? AND (relative_root = ? OR skill_name = ?)", userID, skill.ID, to.packageRoot(), to.skillName).
+			Where("owner_user_id = ? AND relative_root = ? AND deleted_at IS NULL AND id <> ?", userID, to.packageRoot(), skill.ID).
 			Count(&conflicts).Error; err != nil {
 			return err
 		}

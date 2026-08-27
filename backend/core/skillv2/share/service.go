@@ -121,7 +121,7 @@ func copyHeadRevision(tx *gorm.DB, sourceSkillID, ownerUserID, ownerUserName, ch
 	}
 	var conflicts int64
 	if err := tx.Model(&skillRow{}).
-		Where("owner_user_id = ? AND skill_name = ? AND deleted_at IS NULL", ownerUserID, source.SkillName).
+		Where("owner_user_id = ? AND category = ? AND skill_name = ? AND deleted_at IS NULL", ownerUserID, source.Category, source.SkillName).
 		Count(&conflicts).Error; err != nil {
 		return "", "", err
 	}

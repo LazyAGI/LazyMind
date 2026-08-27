@@ -77,14 +77,14 @@ func TestPatchSkillMetadata_RewritesSkillFrontmatter(t *testing.T) {
 	}
 }
 
-func TestPatchSkill_RejectsDuplicateNameAcrossCategories(t *testing.T) {
+func TestPatchSkill_RejectsDuplicateNameInSameCategory(t *testing.T) {
 	db := newSkillV2TestDB(t)
 	seedSkillWithHeadRevision(t, db, "skill1", "rev1")
 	seedSkillWithHeadRevision(t, db, "skill2", "rev2")
 	if err := db.Model(&testSkillV2SkillRow{}).Where("id = ?", "skill2").Updates(map[string]any{
-		"category":      "personal",
+		"category":      "research",
 		"skill_name":    "论文精读备用",
-		"relative_root": "personal/论文精读备用",
+		"relative_root": "research/论文精读备用",
 	}).Error; err != nil {
 		t.Fatalf("rename skill2 fixture: %v", err)
 	}

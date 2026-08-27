@@ -4,16 +4,16 @@ import "time"
 
 type SkillV2Skill struct {
 	ID                    string     `gorm:"column:id;type:varchar(36);primaryKey"`
-	OwnerUserID           string     `gorm:"column:owner_user_id;type:varchar(255);not null;uniqueIndex:uk_skills_owner_identity,priority:1,where:deleted_at IS NULL;uniqueIndex:uk_skills_owner_relative_root,priority:1"`
+	OwnerUserID           string     `gorm:"column:owner_user_id;type:varchar(255);not null;uniqueIndex:uk_skills_owner_identity,priority:1,where:deleted_at IS NULL;uniqueIndex:uk_skills_owner_relative_root,priority:1,where:deleted_at IS NULL"`
 	OwnerUserName         string     `gorm:"column:owner_user_name;type:varchar(255);not null;default:''"`
 	CreateUserID          string     `gorm:"column:create_user_id;type:varchar(255);not null"`
 	CreateUserName        string     `gorm:"column:create_user_name;type:varchar(255);not null;default:''"`
-	Category              string     `gorm:"column:category;type:varchar(128);not null"`
-	SkillName             string     `gorm:"column:skill_name;type:varchar(255);not null;uniqueIndex:uk_skills_owner_identity,priority:2,where:deleted_at IS NULL"`
+	Category              string     `gorm:"column:category;type:varchar(128);not null;uniqueIndex:uk_skills_owner_identity,priority:2,where:deleted_at IS NULL"`
+	SkillName             string     `gorm:"column:skill_name;type:varchar(255);not null;uniqueIndex:uk_skills_owner_identity,priority:3,where:deleted_at IS NULL"`
 	OriginBuiltinSkillUID string     `gorm:"column:origin_builtin_skill_uid;type:varchar(64);not null;default:''"`
 	Description           string     `gorm:"column:description;type:text"`
 	Tags                  []byte     `gorm:"column:tags;type:json"`
-	RelativeRoot          string     `gorm:"column:relative_root;type:varchar(1024);not null;uniqueIndex:uk_skills_owner_relative_root,priority:2"`
+	RelativeRoot          string     `gorm:"column:relative_root;type:varchar(1024);not null;uniqueIndex:uk_skills_owner_relative_root,priority:2,where:deleted_at IS NULL"`
 	SkillMDPath           string     `gorm:"column:skill_md_path;type:varchar(1024);not null;default:'SKILL.md'"`
 	HeadRevisionID        *string    `gorm:"column:head_revision_id;type:varchar(36)"`
 	Version               int64      `gorm:"column:version;not null;default:1"`
