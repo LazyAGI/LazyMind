@@ -160,7 +160,7 @@ func EnableBuiltinSkill(w http.ResponseWriter, r *http.Request) {
 	} else {
 		files := pkg.Files
 		if renamed {
-			files = rewriteSkillPackageName(pkg.Files, installName, pkg.Category, pkg.Description)
+			files = rewriteSkillPackageName(pkg.Files, installName)
 		}
 		zipPath, err := writeSkillPackageZip(files)
 		if err != nil {
@@ -278,11 +278,11 @@ func appendSkillNameSuffix(name, suffix string) string {
 	return fmt.Sprintf("%s-%s", string(baseRunes), suffix)
 }
 
-func rewriteSkillPackageName(files map[string][]byte, name, category, description string) map[string][]byte {
+func rewriteSkillPackageName(files map[string][]byte, name string) map[string][]byte {
 	out := make(map[string][]byte, len(files))
 	for filePath, body := range files {
 		if filePath == "SKILL.md" {
-			out[filePath] = []byte(skillservice.RewriteSkillMDFrontmatter(string(body), name, category, description))
+			out[filePath] = []byte(skillservice.RewriteSkillMDName(string(body), name))
 			continue
 		}
 		out[filePath] = body

@@ -1262,6 +1262,149 @@ func RewriteSkillMDFrontmatter(content, name, category, description string) stri
 	return fmt.Sprintf("---\n%s---\n%s", encoded, body)
 }
 
+func RewriteSkillMDName(content, name string) string {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return content
+	}
+	open, newline, ok := skillMDFrontmatterOpen(content)
+	if !ok {
+		return content
+	}
+	rest := content[len(open):]
+	closeSeq := newline + "---"
+	idx := strings.Index(rest, closeSeq)
+	if idx < 0 {
+		return content
+	}
+	frontmatter := rest[:idx]
+	updated, replaced := replaceFrontmatterName(frontmatter, name, newline)
+	if !replaced {
+		if frontmatter == "" {
+			updated = "name: " + name
+		} else {
+			updated = "name: " + name + newline + frontmatter
+		}
+	}
+	return open + updated + rest[idx:]
+}
+
+func skillMDFrontmatterOpen(content string) (open, newline string, ok bool) {
+	switch {
+	case strings.HasPrefix(content, "---\r\n"):
+		return "---\r\n", "\r\n", true
+	case strings.HasPrefix(content, "---\n"):
+		return "---\n", "\n", true
+	default:
+		return "", "", false
+	}
+}
+
+func replaceFrontmatterName(frontmatter, name, newline string) (string, bool) {
+	lines := strings.Split(frontmatter, newline)
+	for i, line := range lines {
+		rewritten, ok := rewriteYAMLNameLine(line, name)
+		if !ok {
+			continue
+		}
+		lines[i] = rewritten
+		return strings.Join(lines, newline), true
+	}
+	return frontmatter, false
+}
+
+func rewriteYAMLNameLine(line, name string) (string, bool) {
+	if line == "" || line[0] == ' ' || line[0] == '\t' || line[0] == '#' {
+		return "", false
+	}
+	const key = "name:"
+	if !strings.HasPrefix(line, key) {
+		return "", false
+	}
+	rest := line[len(key):]
+	space := 0
+	for space < len(rest) && (rest[space] == ' ' || rest[space] == '\t') {
+		space++
+	}
+	quote, comment, ok := splitYAMLNameScalar(rest[space:])
+	if !ok {
+		return "", false
+	}
+	return key + rest[:space] + formatYAMLName(name, quote) + comment, true
+}
+
+func splitYAMLNameScalar(value string) (quote, comment string, ok bool) {
+	if value == "" {
+		return "", "", true
+	}
+	switch value[0] {
+	case '"':
+		end := 1
+		escaped := false
+		for end < len(value) {
+			ch := value[end]
+			if escaped {
+				escaped = false
+				end++
+				continue
+			}
+			if ch == '\\' {
+				escaped = true
+				end++
+				continue
+			}
+			if ch == '"' {
+				return `"`, value[end+1:], true
+			}
+			end++
+		}
+		return "", "", false
+	case '\'':
+		end := 1
+		for end < len(value) {
+			if value[end] != '\'' {
+				end++
+				continue
+			}
+			if end+1 < len(value) && value[end+1] == '\'' {
+				end += 2
+				continue
+			}
+			return `'`, value[end+1:], true
+		}
+		return "", "", false
+	default:
+		commentStart := -1
+		for i := 0; i < len(value); i++ {
+			if value[i] != '#' {
+				continue
+			}
+			if i == 0 || value[i-1] == ' ' || value[i-1] == '\t' {
+				commentStart = i
+				for commentStart > 0 && (value[commentStart-1] == ' ' || value[commentStart-1] == '\t') {
+					commentStart--
+				}
+				break
+			}
+		}
+		if commentStart >= 0 {
+			return "", value[commentStart:], true
+		}
+		return "", "", true
+	}
+}
+
+func formatYAMLName(name, quote string) string {
+	switch quote {
+	case `"`:
+		return `"` + strings.ReplaceAll(strings.ReplaceAll(name, `\`, `\\`), `"`, `\"`) + `"`
+	case `'`:
+		return `'` + strings.ReplaceAll(name, `'`, `''`) + `'`
+	default:
+		return name
+	}
+}
+
 func encodeSkillMDFrontmatter(existing string, hasFrontmatter bool, name, category, description string) (string, error) {
 	mapping := &yaml.Node{Kind: yaml.MappingNode, Tag: "!!map"}
 	if hasFrontmatter && strings.TrimSpace(existing) != "" {

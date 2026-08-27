@@ -51,7 +51,7 @@ func TestCreateRenamedBuiltinSkillKeepsOfficialArtifact(t *testing.T) {
 	root := t.TempDir()
 	official := []byte("---\nname: demo\ndescription: demo skill\ncategory: research\n---\n# Demo\n")
 	localName := "demo-bskdemo"
-	rewritten := []byte(RewriteSkillMDFrontmatter(string(official), localName, "research", "demo skill"))
+	rewritten := []byte(RewriteSkillMDName(string(official), localName))
 	zipPath := filepath.Join(root, "renamed.zip")
 	writeSkillZip(t, zipPath, map[string][]byte{"SKILL.md": rewritten})
 	archiveSHA := strings.Repeat("a", 64)
@@ -85,6 +85,34 @@ func TestRewriteSkillMDFrontmatterPreservesFieldOrder(t *testing.T) {
 	wantPrefix := "---\nname: demo-copy\ndescription: demo skill\ncategory: research\nversion: 1.0.0\n---\n"
 	if !strings.HasPrefix(got, wantPrefix) {
 		t.Fatalf("rewritten frontmatter = %q, want prefix %q", got, wantPrefix)
+	}
+}
+
+func TestRewriteSkillMDNameOnlyChangesName(t *testing.T) {
+	original := "---\n" +
+		"name: cangjie-skill\n" +
+		"description: |\n" +
+		"  Distill a book into a coherent set of executable skills.\n" +
+		"  Use when the user asks to \"拆书\".\n" +
+		"# keep this comment\n" +
+		"license: MIT\n" +
+		"compatibility: claude\n" +
+		"---\n" +
+		"# Cangjie\n" +
+		"body line\n"
+	got := RewriteSkillMDName(original, "cangjie-skill-copy")
+	want := strings.Replace(original, "name: cangjie-skill\n", "name: cangjie-skill-copy\n", 1)
+	if got != want {
+		t.Fatalf("rewritten = %q, want %q", got, want)
+	}
+}
+
+func TestRewriteSkillMDNameKeepsCRLFQuotesAndComment(t *testing.T) {
+	original := "---\r\nname: \"demo\" # local copy\r\ndescription: 'hello world'\r\n---\r\n# Demo\r\n"
+	got := RewriteSkillMDName(original, "demo-copy")
+	want := "---\r\nname: \"demo-copy\" # local copy\r\ndescription: 'hello world'\r\n---\r\n# Demo\r\n"
+	if got != want {
+		t.Fatalf("rewritten = %q, want %q", got, want)
 	}
 }
 

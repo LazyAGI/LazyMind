@@ -267,7 +267,27 @@ func wechatCoverCatalog(t *testing.T) string {
 	return uid
 }
 
+const cangjieLikeSkillMD = "---\n" +
+	"name: cangjie-skill\n" +
+	"description: |\n" +
+	"  Distill a book into a coherent set of executable skills.\n" +
+	"  Use when the user asks to \"拆书\".\n" +
+	"# keep this comment\n" +
+	"license: MIT\n" +
+	"compatibility: claude\n" +
+	"---\n" +
+	"# Cangjie\n" +
+	"body line\n"
+
+const cangjieLikeDescription = "Distill a book into a coherent set of executable skills.\nUse when the user asks to \"拆书\".\n"
+
+const cangjieLikeUpdatedDescription = "Distill a book into a coherent set of executable skills.\nUse when the user asks to \"拆书\" / \"蒸馏一本书\".\n"
+
 func enableWechatCover(t *testing.T, uid string) {
+	enableBuiltin(t, uid)
+}
+
+func enableBuiltin(t *testing.T, uid string) {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/api/core/builtin-skills/"+uid+":enable", nil)
 	req = mux.SetURLVars(req, map[string]string{"builtin_skill_uid": uid})
@@ -499,6 +519,81 @@ func TestEnableBuiltinSkillReinstallsWhenTrashedBuiltinPathConflicts(t *testing.
 
 	enableWechatCover(t, uid)
 	assertRenamedWechatCoverInstall(t, db, uid, "trashed_builtin")
+}
+
+func TestEnableBuiltinSkillRenamedInstallKeepsComplexFrontmatterAndAutoMergesDescription(t *testing.T) {
+	uid := "bsk_cangjie_skill"
+	original := cangjieLikeSkillMD
+	files := map[string][]byte{"SKILL.md": []byte(original)}
+	useBuiltinCatalogWithPackage(t, skillbuiltin.CatalogSkill{
+		Key: "cangjie-skill", UID: uid, SourceURL: "https://skillhub.cn/skills/user_1a7e2e57/cangjie-distill",
+		ResolvedURL: "https://example.test/cangjie-skill.zip", Version: "1.0.0", Name: "cangjie-skill",
+		Description: cangjieLikeDescription, Category: "writing", Content: original, PackageFile: "packages/cangjie-skill.zip",
+	}, files)
+
+	db := testutil.NewTestDB(t)
+	testutil.SeedSkillWithRevision(t, db, "skill1", "rev1")
+	if err := db.Model(&testutil.SkillRow{}).Where("id = ?", "skill1").Updates(map[string]any{
+		"category":                 "writing",
+		"skill_name":               "cangjie-skill",
+		"relative_root":            "writing/cangjie-skill",
+		"origin_builtin_skill_uid": "bsk_previous_cangjie",
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	store.Init(db.DB, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	enableBuiltin(t, uid)
+	wantName := builtinInstallNameCandidate("cangjie-skill", builtinUIDSuffix(uid), 0)
+	var installed testutil.SkillRow
+	if err := db.Where("owner_user_id = ? AND origin_builtin_skill_uid = ? AND deleted_at IS NULL", "user_001", uid).Take(&installed).Error; err != nil {
+		t.Fatal(err)
+	}
+	file, err := newSkillService(db.DB).ReadFile(context.Background(), skillservice.FileRef{SkillID: installed.ID, RefType: "head", Path: "SKILL.md"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := strings.Replace(original, "name: cangjie-skill\n", "name: "+wantName+"\n", 1)
+	if file.Content != want {
+		t.Fatalf("conflict copy changed more than name:\ngot:\n%s\nwant:\n%s", file.Content, want)
+	}
+
+	updated := strings.Replace(original, "  Use when the user asks to \"拆书\".\n", "  Use when the user asks to \"拆书\" / \"蒸馏一本书\".\n", 1)
+	useBuiltinCatalogWithPackage(t, skillbuiltin.CatalogSkill{
+		Key: "cangjie-skill", UID: uid, SourceURL: "https://skillhub.cn/skills/user_1a7e2e57/cangjie-distill",
+		ResolvedURL: "https://example.test/cangjie-skill.zip", Version: "1.0.1", Name: "cangjie-skill",
+		Description: cangjieLikeUpdatedDescription, Category: "writing", Content: updated, PackageFile: "packages/cangjie-skill.zip",
+	}, map[string][]byte{"SKILL.md": []byte(updated)})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/core/skills/"+installed.ID+"/distribution-upgrade:prepare", nil)
+	req = mux.SetURLVars(req, map[string]string{"skill_id": installed.ID})
+	req.Header.Set("X-User-Id", "user_001")
+	req.Header.Set("X-User-Name", "张三")
+	rec := httptest.NewRecorder()
+	PrepareDistributionUpgrade(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("prepare status=%d body=%s, want 200", rec.Code, rec.Body.String())
+	}
+	var response struct {
+		Data struct {
+			AutoMerged bool  `json:"auto_merged"`
+			Conflicts  []any `json:"conflicts"`
+		} `json:"data"`
+	}
+	if err := json.NewDecoder(rec.Body).Decode(&response); err != nil {
+		t.Fatalf("decode prepare response: %v", err)
+	}
+	if !response.Data.AutoMerged || len(response.Data.Conflicts) != 0 {
+		t.Fatalf("prepare = %#v, want auto-merged without conflicts", response.Data)
+	}
+	draft := draftSkillMD(t, db, installed.ID)
+	if !strings.Contains(draft, "name: "+wantName+"\n") || !strings.Contains(draft, `"拆书" / "蒸馏一本书"`) {
+		t.Fatalf("upgrade draft did not keep local name and apply official description:\n%s", draft)
+	}
+	if strings.Contains(draft, "category:") || !strings.Contains(draft, "# keep this comment") {
+		t.Fatalf("upgrade draft restyled frontmatter:\n%s", draft)
+	}
 }
 
 func TestEnableBuiltinSkillRenamedInstallCanPrepareOfficialUpgrade(t *testing.T) {
