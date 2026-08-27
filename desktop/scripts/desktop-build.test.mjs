@@ -565,6 +565,20 @@ test("Desktop opens the home page from the sidecar readiness event with status p
   );
 });
 
+test("Desktop always starts its local runtime with automatic port allocation", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  assert.match(
+    source,
+    /LAZYMIND_LOCAL_PORTS_PINNED:\s*"false"/,
+    "packaged Desktop must treat configured ports as preferences",
+  );
+  assert.match(
+    source,
+    /status\.config\?\.portResolutions[\s\S]*loggedPortResolutions\.has\(key\)[\s\S]*port moved:/,
+    "resolved ports must be reported once in startup diagnostics",
+  );
+});
+
 test("Desktop supervises the external Agent host until the application quits", () => {
   const source = readFileSync(electronMainScript, "utf8");
   assert.match(

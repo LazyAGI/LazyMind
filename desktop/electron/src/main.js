@@ -141,6 +141,7 @@ let windowHiddenByUser = false;
 let startupLogEntries = [];
 let startupLogWriteFailed = false;
 let lastStartupError = null;
+let loggedPortResolutions = new Set();
 let startupState = {
   status: "starting",
   phase: "Initializing",
@@ -219,6 +220,7 @@ function sidecarEnv() {
     LAZYMIND_DESKTOP_OWNER_PID: String(process.pid),
     LAZYMIND_RUNTIME_RESOURCES_ROOT: runtimeResourcesRoot,
     LAZYMIND_LOCAL_NETWORK_PROFILE: "localhost",
+    LAZYMIND_LOCAL_PORTS_PINNED: "false",
     LAZYMIND_LOCAL_PROXY_ADDRESS: "127.0.0.1",
     LAZYMIND_LOCAL_AUTO_LOGIN_ALLOW_LAN: "false",
     LAZYMIND_OPENAPI_ARTIFACT_EXPORT_ENABLED: "false",
@@ -291,6 +293,7 @@ function resetStartupLogsForRun() {
   startupLogEntries = [];
   startupLogWriteFailed = false;
   lastStartupError = null;
+  loggedPortResolutions = new Set();
   try {
     ensureDesktopLogDirs();
     fs.writeFileSync(startupLogPath, "");
@@ -1163,6 +1166,17 @@ async function waitForRuntimeReady(options = {}) {
       });
       if (status.config?.portResolutions?.length) {
         for (const resolution of status.config.portResolutions) {
+          const key = [
+            resolution.name,
+            resolution.envName,
+            resolution.requestedPort,
+            resolution.resolvedPort,
+            resolution.reason,
+          ].join(":");
+          if (loggedPortResolutions.has(key)) {
+            continue;
+          }
+          loggedPortResolutions.add(key);
           appendStartupLog(
             "status",
             `port moved: ${resolution.name} ${resolution.requestedPort} -> ${resolution.resolvedPort} (${resolution.reason})`,

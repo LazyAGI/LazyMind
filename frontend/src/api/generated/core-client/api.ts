@@ -2331,15 +2331,11 @@ export interface ShowcaseCase {
     'image_url': string;
     'output_label': string;
     'output_type': string;
-    'prompt': string;
-    'prompt_short': string;
     'provider': string;
     'source_url': string;
-    'result_highlights'?: Array<string>;
     'result_summary': string;
-    'steps'?: Array<ShowcaseCaseStep>;
     'tags'?: Array<string>;
-    'tasks'?: Array<ShowcaseCaseTask>;
+    'tasks': Array<ShowcaseCaseTask>;
     'title': string;
     'type': string;
     'workflow_ref'?: string;

@@ -16,8 +16,10 @@ from lazymind.common.memory import (
     EpisodeReadError,
     EpisodeSource,
     EpisodeType,
+    MemoryPartialApplyError,
     MemoryStore,
     MemoryOperationRecord,
+    PreferenceCapacityExceededError,
     get_episode_store,
     preference_name_to_reference_name,
     split_reference_ref,
@@ -144,26 +146,62 @@ def _log_tool_exception(tool: str, exc: Exception) -> None:
     )
 
 
-def _memory_write_error(message: str) -> ToolExecutionError:
+def _memory_storage_error(message: str) -> ToolExecutionError:
     text = _visible_memory_message(message).strip()
-    return ToolExecutionError(f'Failed to write via RemoteFS: {text}')
+    return ToolExecutionError(f'Memory storage operation failed: {text}')
 
 
 def _memory_applied(**result: Any) -> Dict[str, Any]:
     return {'status': 'applied', **result}
 
 
-def _memory_result_error(tool_name: str, result: Dict[str, Any]) -> ToolExecutionError:
-    reason = _visible_memory_message(
-        result.get('error') or f'{tool_name} failed.'
+def _record_memory_editor_exception(tool_name: str, exc: Exception) -> Any:
+    mutation = False
+    ledger_result: dict[str, Any] | None = None
+
+    if isinstance(exc, PreferenceCapacityExceededError):
+        error = ToolExecutionError(
+            f'Preference capacity is full ({exc.current_items}/{exc.max_items}). '
+            'The new preference was not saved. No existing preference was deleted, '
+            'overwritten, or reordered. Ask the user to remove an existing preference '
+            'before retrying.'
+        )
+        error_code = 'capacity_exceeded'
+        ledger_result = {
+            'current_items': exc.current_items,
+            'attempted_items': exc.attempted_items,
+            'max_items': exc.max_items,
+        }
+    elif isinstance(exc, MemoryPartialApplyError):
+        mutation = True
+        error = ToolExecutionError(_visible_memory_message(str(exc)))
+        error_code = 'partial_failure'
+        ledger_result = {
+            'operation': exc.operation,
+            'applied': list(exc.applied),
+            'failed': list(exc.failed),
+        }
+        item_name = getattr(exc.item, 'name', None)
+        if item_name:
+            ledger_result['item_name'] = str(item_name)
+    elif isinstance(exc, (ValueError, FileNotFoundError)):
+        error = ToolExecutionError(_visible_memory_message(str(exc)))
+        error_code = 'invalid_arguments'
+    elif isinstance(exc, RuntimeError):
+        error = _memory_storage_error(str(exc))
+        error_code = 'storage_failed'
+    else:
+        _log_tool_exception(tool_name, exc)
+        error = _memory_storage_error(_safe_exception_message(exc))
+        error_code = 'storage_failed'
+
+    return _record_memory_operation(
+        tool_name,
+        mutation=mutation,
+        error=error,
+        error_code=error_code,
+        ledger_result=ledger_result,
     )
-    if str(result.get('type') or 'validation') == 'store':
-        return _memory_write_error(reason)
-    return ToolExecutionError(reason)
-
-
-def _memory_result_error_code(result: Dict[str, Any]) -> str:
-    return 'storage_failed' if str(result.get('type') or 'validation') == 'store' else 'invalid_arguments'
 
 
 MAX_REFERENCE_READ_COUNT = 10
@@ -428,18 +466,10 @@ class MemoryTools:
                 error_code='invalid_arguments',
             )
 
-        result = MemoryStore().apply_soul_operations(operations)
-        if not result.get('ok'):
-            return _record_memory_operation(
-                'soul_editor',
-                mutation=result.get('type') == 'partial',
-                error=_memory_result_error('soul_editor', result),
-                error_code=_memory_result_error_code(result),
-                ledger_result={
-                    key: value for key, value in result.items()
-                    if key not in {'ok', 'error', 'type', 'content'}
-                } or None,
-            )
+        try:
+            result = MemoryStore().apply_soul_operations(operations)
+        except Exception as exc:
+            return _record_memory_editor_exception('soul_editor', exc)
 
         value = _memory_applied(
             operations=list(result.get('operations') or operations),
@@ -483,18 +513,10 @@ class MemoryTools:
                 error_code='invalid_arguments',
             )
 
-        result = MemoryStore().apply_profile_operations(operations)
-        if not result.get('ok'):
-            return _record_memory_operation(
-                'profile_editor',
-                mutation=result.get('type') == 'partial',
-                error=_memory_result_error('profile_editor', result),
-                error_code=_memory_result_error_code(result),
-                ledger_result={
-                    key: value for key, value in result.items()
-                    if key not in {'ok', 'error', 'type', 'content'}
-                } or None,
-            )
+        try:
+            result = MemoryStore().apply_profile_operations(operations)
+        except Exception as exc:
+            return _record_memory_editor_exception('profile_editor', exc)
 
         value = _memory_applied(
             operations=list(result.get('operations') or operations),
@@ -594,23 +616,18 @@ class MemoryTools:
                     ),
                     error_code='missing_context',
                 )
-            result = store.add_preference_with_reference(
-                name=raw_name,
-                summary=summary,
-                scenario=scenario,
-                details=details,
-                reason=reason,
-                source_kind=source_kind,
-                conversation_id=conversation_id,
-            )
-            if not result.get('ok'):
-                return _record_memory_operation(
-                    'preference_editor',
-                    mutation=result.get('type') == 'partial',
-                    error=_memory_result_error('preference_editor', result),
-                    error_code=_memory_result_error_code(result),
+            try:
+                item = store.add_preference_with_reference(
+                    name=raw_name,
+                    summary=summary,
+                    scenario=scenario,
+                    details=details,
+                    reason=reason,
+                    source_kind=source_kind,
+                    conversation_id=conversation_id,
                 )
-            item = result['item']
+            except Exception as exc:
+                return _record_memory_editor_exception('preference_editor', exc)
             value = _memory_applied(
                 op='add',
                 name=item.name,
@@ -625,15 +642,10 @@ class MemoryTools:
                 ledger_result={'status': 'applied'},
             )
 
-        result = store.remove_preference_with_reference(raw_name)
-        if not result.get('ok'):
-            return _record_memory_operation(
-                'preference_editor',
-                mutation=result.get('type') == 'partial',
-                error=_memory_result_error('preference_editor', result),
-                error_code=_memory_result_error_code(result),
-            )
-        item = result['item']
+        try:
+            item = store.remove_preference_with_reference(raw_name)
+        except Exception as exc:
+            return _record_memory_editor_exception('preference_editor', exc)
         value = _memory_applied(
             op='delete',
             name=item.name,

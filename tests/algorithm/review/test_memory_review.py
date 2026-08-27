@@ -681,3 +681,49 @@ def test_review_memory_reports_partial_when_one_write_succeeds_and_another_fails
             'message': 'Persistent memory storage is temporarily unavailable.',
         },
     }
+
+
+def test_review_memory_reports_capacity_exceeded_as_non_retryable(monkeypatch):
+    result = _run_review_with_tool_results(monkeypatch, [
+        _tool_failure(
+            tool='preference_editor',
+            mutation=False,
+            retryable=False,
+            code='capacity_exceeded',
+        ),
+    ])
+
+    assert result.model_dump() == {
+        'status': 'failed',
+        'task_id': 'memory_review_core-task-results',
+        'outcome': 'failed',
+        'retryable': False,
+        'error': {
+            'code': 'capacity_exceeded',
+            'message': 'Preference capacity is full; the new preference was not saved.',
+        },
+    }
+
+
+def test_review_memory_reports_partial_failure_as_non_retryable(monkeypatch):
+    result = _run_review_with_tool_results(monkeypatch, [
+        _tool_failure(
+            tool='preference_editor',
+            mutation=True,
+            retryable=False,
+            code='partial_failure',
+        ),
+    ])
+
+    assert result.model_dump() == {
+        'status': 'failed',
+        'task_id': 'memory_review_core-task-results',
+        'outcome': 'partial',
+        'retryable': False,
+        'error': {
+            'code': 'partial_failure',
+            'message': (
+                'A memory operation was only partially applied and requires reconciliation.'
+            ),
+        },
+    }

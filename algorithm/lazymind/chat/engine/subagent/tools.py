@@ -13,7 +13,6 @@ from lazymind.chat.engine.attachment_reader import (
     is_chat_text_file,
     parse_attachment_content,
 )
-from lazymind.chat.engine.tools.infra import tool_success
 from lazymind.chat.engine.tools.local_file.attachment_edit import (
     AttachmentEditDraft,
 )
@@ -1193,7 +1192,7 @@ def read_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
             Omit to search from the current turn first, then historical turns newest-first.
 
     Returns:
-        The legacy attachment envelope with bounded text and continuation metadata.
+        Bounded attachment content and continuation metadata.
     """
     matched, err = _resolve_attachment(filename, turn)
     if err:
@@ -1220,25 +1219,21 @@ def read_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
                 matched,
                 priority=int(cfg.get('priority') or 0),
             )
-            return tool_success('read_user_attachment', {
+            return {
                 'status': 'ok',
                 'filename': os.path.basename(matched),
                 'path': matched,
                 'kind': 'image',
                 'content': content,
-            })
+            }
         from lazymind.chat.engine.tools.local_file.workspace import read_file
-        unified = read_file(matched, turn=turn)
-        if not unified.get('success'):
-            reason = (unified.get('error') or {}).get('reason') or 'unknown read error'
-            raise ValueError(reason)
-        payload = unified['result']
+        payload = read_file(matched, turn=turn)
     except Exception as e:
         raise ToolExecutionError(
             f"Could not parse '{os.path.basename(matched)}': {e}"
         ) from e
 
-    return tool_success('read_user_attachment', {
+    return {
         'status': 'ok',
         'filename': os.path.basename(matched),
         'path': matched,
@@ -1250,7 +1245,7 @@ def read_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
         'eof': payload.get('eof'),
         'next_offset': payload.get('next_offset'),
         'footer': payload.get('footer'),
-    })
+    }
 
 
 def _publish_attachment_edit(draft: AttachmentEditDraft) -> Dict[str, Any]:
@@ -1444,7 +1439,7 @@ def find_user_attachment(filename: str, turn: Optional[int] = None) -> Dict[str,
                 result['file_id'] = manifest.get('file_id')
         except Exception:
             pass
-    return tool_success('find_user_attachment', result)
+    return result
 
 
 def find_artifact(slot: str, sort_order: Optional[int] = None) -> Dict[str, Any]:

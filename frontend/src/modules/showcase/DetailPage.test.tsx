@@ -10,7 +10,9 @@ vi.mock("react-i18next", () => ({
     t: (key: string, values?: Record<string, string>) => values?.output || key,
   }),
 }));
-vi.mock("./api", () => ({ getShowcaseCase: vi.fn() }));
+vi.mock("./api", () => ({
+  getShowcaseCase: vi.fn(),
+}));
 
 const getShowcaseCaseMock = vi.mocked(getShowcaseCase);
 
@@ -51,14 +53,16 @@ function showcaseCase(tasks: ReturnType<typeof task>[]): ShowcaseCase {
     detail_title: "Configured detail title",
     detail_description: "Configured detail description",
     category: "Demo",
+    featured: true,
+    featured_order: 1,
     gallery: true,
     image_url: "/showcase/demo.png",
     output_label: "Report",
     output_type: "report",
-    prompt: tasks[0].prompt,
-    prompt_short: tasks[0].prompt_short,
+    provider: "SkillHub",
     result_summary: tasks[0].result.summary,
     tasks,
+    type: "chat",
   };
 }
 

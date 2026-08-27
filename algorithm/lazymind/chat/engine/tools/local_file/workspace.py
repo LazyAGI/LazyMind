@@ -27,8 +27,6 @@ from .window import (
     read_lines_window,
     utf8_size,
 )
-from lazymind.chat.engine.tools.infra import handle_tool_errors, tool_success
-
 _MAX_ARTIFACT_BYTES = 2 * 1024 * 1024
 _CHAT_FILE_DIRECTORY = 'chat-artifacts'
 
@@ -300,7 +298,22 @@ def write_file(
     )
 
 
-@handle_tool_errors
+def _resolve_text_target_for_tool(
+    target: str,
+    *,
+    allow_directory: bool = False,
+    turn: Optional[int] = None,
+):
+    try:
+        return resolve_text_target(
+            target,
+            allow_directory=allow_directory,
+            turn=turn,
+        )
+    except (ValueError, FileNotFoundError) as exc:
+        raise ToolExecutionError(str(exc)) from exc
+
+
 def read_file(
     target: str,
     offset: int = 1,
@@ -319,7 +332,7 @@ def read_file(
         limit: Maximum lines to return (default 2000, max 4000).
         turn: Optional 1-based conversation turn used to disambiguate attachments.
     """
-    resolved = resolve_text_target(target, turn=turn)
+    resolved = _resolve_text_target_for_tool(target, turn=turn)
     payload = read_lines_window(
         load_text_lines(resolved.path),
         offset=offset,
@@ -332,10 +345,9 @@ def read_file(
     })
     if resolved.file_id:
         payload['file_id'] = resolved.file_id
-    return tool_success('read_file', payload)
+    return payload
 
 
-@handle_tool_errors
 def grep(
     target: str,
     pattern: str,
@@ -353,7 +365,11 @@ def grep(
         max_results: Maximum matches (default 50).
         turn: Optional 1-based conversation turn used to disambiguate attachments.
     """
-    resolved = resolve_text_target(target, allow_directory=True, turn=turn)
+    resolved = _resolve_text_target_for_tool(
+        target,
+        allow_directory=True,
+        turn=turn,
+    )
     files: list[str] = []
     if os.path.isfile(resolved.path):
         files = [resolved.path]
@@ -366,7 +382,7 @@ def grep(
             if len(files) >= 200:
                 break
     else:
-        raise ValueError('target must be an existing text file or workspace directory')
+        raise ToolExecutionError('target must be an existing text file or workspace directory')
     matches: list = []
     remaining = max(1, min(int(max_results or 50), 200))
     truncated = False
@@ -399,7 +415,7 @@ def grep(
             break
         if found.get('truncated'):
             truncated = True
-    return tool_success('grep', {
+    return {
         'pattern': pattern,
         'target': target,
         'display_name': resolved.display_name,
@@ -416,7 +432,7 @@ def grep(
             'After a hit, call read_file(target, offset=max(1, line-20), limit=80) '
             'for surrounding context. Read footers decide EOF, not document headings.'
         ),
-    })
+    }
 
 
 def list_dir(path: str = '.', recursive: bool = False, max_depth: int = 5) -> Dict[str, Any]:
