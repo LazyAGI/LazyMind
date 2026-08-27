@@ -1,0 +1,237 @@
+<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>LazyMind · AI Writer</title>
+<style>
+*{box-sizing:border-box}html,body{height:100%;margin:0}body{font:14px Inter,"PingFang SC","Microsoft YaHei",sans-serif;color:#1f2733;background:#f5f7fa}button{font:inherit}.app{height:100vh;min-height:700px;display:grid;grid-template-columns:minmax(0,1fr) clamp(320px,27vw,440px)}.main,.rail{margin:16px 8px 16px 16px;min-width:0;display:flex;flex-direction:column;border:1px solid #dbe4f0;border-radius:12px;background:#fff;box-shadow:0 8px 28px #0f172a1a;overflow:hidden}.rail{margin-left:8px;margin-right:16px}.head{height:51px;display:flex;align-items:center;padding:0 16px;border-bottom:1px solid #f0f1f3;background:#fafafa}.name{font-size:13px;font-weight:600}.ok{margin-left:8px;padding:2px 8px;border-radius:99px;background:#e6f7ee;color:#16a34a;font-size:11px}.ha{margin-left:auto;display:flex;gap:8px}.ha button{padding:4px 8px;border:1px solid #d1d5db;border-radius:12px;background:none;color:#6b7280;font-size:12px}.steps{height:83px;display:grid;grid-template-columns:repeat(3,1fr);align-items:center;padding:8px 64px;border-bottom:1px solid #eef1f4}.step{position:relative;border:0;background:none;color:#6b7787}.step:not(:last-child):after{content:"";position:absolute;top:15px;left:58%;right:-42%;height:1px;background:#9eb6c5}.num{position:relative;z-index:1;width:30px;height:30px;margin:0 auto 7px;display:grid;place-items:center;border:1.5px solid #4b7c96;border-radius:50%;background:#fff;color:#416f88}.step.done .num{border-color:#37a16d;background:#e9f7ef;color:#258a5c}.step.active .num{border-color:#2f6bff;background:#2f6bff;color:#fff;box-shadow:0 0 0 4px #eef3ff}.step.active{color:#2f6bff;font-weight:600}.step span:last-child{display:block;font-size:12px}.body{min-height:0;flex:1;display:flex;flex-direction:column;padding:10px 14px 12px;background:#fbfcfd}.record{height:23px;color:#8c98a8;font-size:12px}.shell{position:relative;min-height:0;flex:1;display:flex;flex-direction:column;border:1px solid #d9dce3;border-radius:8px;background:#fff;overflow:hidden}.bar{height:42px;display:flex;align-items:center;padding:0 10px;border-bottom:1px solid #edf1f5}.slot{font-size:12px;font-weight:600}.meta{margin-left:8px;color:#98a2b3;font-size:11px}.actions{margin-left:auto;display:flex;gap:6px}.actions button,.dl{padding:3px 7px;border:1px solid #c4d2f5;border-radius:5px;background:#f6f9ff;color:#2f6bff;font-size:10px}.layout{min-height:0;flex:1;display:grid;grid-template-columns:176px minmax(0,1fr);gap:12px;overflow:hidden}.outline{padding:4px 12px 12px 8px;border-right:1px solid #e5eaf0;overflow:auto}.ot,.ol{width:100%;border:0;border-radius:5px;background:none;text-align:left;cursor:pointer}.ot{margin:4px 0;padding:5px 6px;color:#2563eb;font-size:13px;font-weight:600}.ol{padding:5px 6px;color:#475569;font-size:12px}.ot:hover,.ol:hover{background:#f1f5f9;color:#1d4ed8}.doc{min-width:0;min-height:0;display:flex;flex-direction:column}.display{height:35px;display:flex;justify-content:flex-end;align-items:center;padding:2px 8px 7px;border-bottom:1px solid #edf1f5;color:#64748b;font-size:12px}.widths{display:flex;margin-left:7px;padding:2px;border:1px solid #dbe3ee;border-radius:7px;background:#f8fafc}.widths button{padding:3px 9px;border:0;border-radius:5px;background:none;color:#64748b}.widths .on{background:#fff;color:#1e40af;box-shadow:0 1px 3px #0f172a1a;font-weight:600}.scroll{min-height:0;flex:1;overflow:auto}.editor{width:min(100%,780px);min-height:100%;margin:auto;padding:30px 42px 82px;outline:0;line-height:1.85}.editor.wide{width:min(100%,1080px)}.editor h1{text-align:center;font-size:27px;margin:0 0 28px}.editor h2{font-size:20px;margin:30px 0 14px}.editor h3{font-size:16px;margin:20px 0 9px}.editor p{margin:0 0 14px;text-indent:2em}.editor li{margin:5px 0}.json{white-space:pre-wrap;word-break:break-word;font:12px/1.65 ui-monospace,Menlo,monospace;background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:14px}.footer{height:38px;display:flex;align-items:center;padding:0 10px;border-top:1px solid #edf1f5;background:#fafbfc}.vbtn{padding:1px 7px;border:1px solid #e5e7eb;border-radius:10px;background:#f3f4f6;color:#6b7280;font-size:11px}.sync{margin-left:9px;color:#9ca3af;font-size:11px}.chars{margin-left:auto;color:#98a2b3;font-size:11px}.tabs{height:48px;display:grid;grid-template-columns:1fr 1fr;border-bottom:1px solid #e6ecf3}.tab{border:0;background:#fff;color:#6b7787}.tab.on{background:#eef3ff;color:#2f6bff;font-weight:600}.badge{padding:1px 5px;border-radius:9px;background:#2f6bff;color:#fff;font-size:10px}.railbody{min-height:0;flex:1;display:flex;flex-direction:column}.filters{display:flex;gap:6px;padding:10px 12px;border-bottom:1px solid #e6ecf3}.filter{padding:3px 10px;border:1px solid #e6ecf3;border-radius:99px;background:#f5f7fa;color:#6b7787;font-size:12px}.filter.on{border-color:#2f6bff;background:#eef3ff;color:#2f6bff}.list{padding:10px;overflow:auto}.card{margin-bottom:10px;padding:11px;border:1px solid #e6ecf3;border-radius:10px}.cardhead{display:flex;align-items:center;cursor:pointer}.chev{margin-right:6px;color:#8c98a8}.taskname{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:13px;font-weight:600}.count{margin-left:auto;padding:1px 6px;border-radius:8px;background:#eef3ff;color:#4774ae;font-size:10px}.green{margin-left:5px;color:#16a34a;font-size:11px}.section{margin-top:8px}.sectitle{color:#6b7787;font-size:12px}.artifact{margin-top:6px;padding:9px;border:1px solid #e5ecf5;border-radius:8px;cursor:pointer}.artifact:hover,.artifact.sel{border-color:#93b4ff;background:#f6f9ff}.arthead{display:flex}.key{min-width:0;color:#8d9ab2;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.dl{margin-left:auto}.preview{margin-top:6px;color:#3a4553;font-size:11px;line-height:1.45;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:3;overflow:hidden}.card.closed .section{display:none}.card.closed .chev{transform:rotate(-90deg)}.chat{flex:1;padding:16px;overflow:auto;background:#fafbfc}.date{text-align:center;color:#98a2b3;font-size:11px;margin-bottom:18px}.msg{display:flex;gap:9px;margin-bottom:18px}.msg.user{justify-content:flex-end}.avatar{width:28px;height:28px;display:grid;place-items:center;border-radius:8px;background:linear-gradient(145deg,#695cff,#3478ff);color:#fff;font-size:11px}.user .avatar{order:2;background:#e5e7eb;color:#667085}.bubble{max-width:86%;padding:10px 12px;border:1px solid #e6ecf3;border-radius:10px;background:#fff;line-height:1.65}.user .bubble{background:#e8f0ff}.chatinput{padding:12px;border-top:1px solid #e6ecf3}.chatbox{height:74px;padding:10px;border:1px solid #d9dce3;border-radius:10px;color:#98a2b3;font-size:12px}.toolbar{position:fixed;z-index:1200;display:none;align-items:center;gap:4px;min-height:42px;padding:5px 6px;border:1px solid #0f172a14;border-radius:12px;background:#fffffff9;box-shadow:0 1px 2px #0f172a0f,0 12px 30px #0f172a24}.toolbar.show{display:flex}.block{min-width:100px;height:30px;padding:0 8px;border:0;border-radius:8px;background:#f8fafc;color:#334155;font-size:12px;font-weight:600}.ico{width:30px;height:30px;border:0;border-radius:8px;background:none;color:#475569}.ico:hover{background:#f1f5f9}.div{width:1px;height:20px;background:#e2e8f0}.polish{height:30px;padding:0 10px;border:0;border-radius:8px;background:#eef4ff;color:#245bdb;font-size:12px;font-weight:600}.ref{height:30px;padding:0 9px;border:1px solid #e2e8f0;border-radius:8px;background:#fff;color:#475569;font-size:12px;font-weight:600}.rewrite{position:fixed;z-index:1300;display:none;width:min(420px,calc(100vw - 24px));border:1px solid #dbe3ee;border-radius:99px;background:#fff;box-shadow:0 8px 24px #0f172a1f}.rewrite.show{display:block}.rshell{display:flex;gap:6px;align-items:center;min-height:40px;padding:4px 6px 4px 14px}.rinput{flex:1;height:32px;border:0;outline:0}.submit{width:32px;height:32px;border:0;border-radius:50%;background:linear-gradient(245deg,#9462ff,#0076ff);color:#fff}.old{background:#2563eb29;border-radius:2px}.added{background:#d1fadf;color:#067647;border-radius:2px}.racts{position:absolute;right:18px;bottom:52px;z-index:6;display:none;gap:8px}.racts.show{display:flex}.racts button{padding:5px 11px;border:1px solid #cbd5e1;border-radius:6px;background:#fff;color:#334155}.racts .apply{border-color:#2563eb;background:#2563eb;color:#fff}.overlay{position:fixed;inset:0;z-index:1040;display:none;align-items:center;justify-content:center;background:#00000059}.overlay.show{display:flex}.modal{width:640px;max-width:94vw;display:flex;flex-direction:column;border:1px solid #e5e7eb;border-radius:12px;background:#fff;box-shadow:0 16px 48px #0000002e;overflow:hidden}.mhead{display:flex;justify-content:space-between;padding:10px 14px;border-bottom:1px solid #f3f4f6;font-size:15px;font-weight:600}.close{border:0;background:none;color:#9ca3af;font-size:18px}.mbody{display:flex;min-height:300px;max-height:430px}.versions{width:160px;margin:0;padding:6px 0;border-right:1px solid #f3f4f6;list-style:none}.ver{padding:8px 12px;font-size:12px}.ver.focus{background:#eff6ff}.source{padding:0 4px;border-radius:4px;background:#ede9fe;color:#5b21b6;font-size:10px}.current{padding:0 4px;border-radius:4px;background:#dcfce7;color:#166534;font-size:10px}.time{display:block;margin-top:3px;color:#9ca3af;font-size:10px}.compare{flex:1;padding:10px;overflow:auto}.diffhead{display:flex;gap:6px;margin-bottom:7px}.dlabel{padding:3px 8px;border-radius:4px;font-size:11px}.remove{background:#fef3f2;color:#b42318}.add{background:#ecfdf3;color:#027a48}.diff{border:1px solid #e5e7eb;border-radius:6px;background:#f9fafb;font:12px/1.6 ui-monospace,Menlo,monospace}.line{display:block;padding:3px 10px;white-space:pre-wrap}.same{color:#475467}.mfoot{display:flex;justify-content:flex-end;gap:10px;padding:10px 16px;border-top:1px solid #f3f4f6}.mfoot button{padding:6px 20px;border-radius:6px}.cancel{border:1px solid #d1d5db;background:#fff}.restore{border:0;background:#2563eb;color:#fff}.toast{position:fixed;left:50%;bottom:28px;z-index:1500;display:none;transform:translateX(-50%);padding:9px 14px;border-radius:8px;background:#1f2937;color:#fff}.toast.show{display:block}@media(max-width:980px){.app{grid-template-columns:1fr}.rail{position:fixed;right:0;top:0;bottom:0;width:360px;z-index:900;margin:8px}.main{margin:8px}}@media(max-width:680px){.rail{display:none}.layout{grid-template-columns:1fr}.outline{display:none}.editor{padding:24px 18px 72px}}
+</style><style>.editor.outline-doc h2,.editor.outline-doc h3{margin-left:0}.editor.outline-doc h3+ul{margin-left:0;padding-left:24px}.artifact{padding:7px 9px}.artifact .key{color:#667085;font-size:12px}.artifact:hover{border-color:#c4d2f5;background:#f6f9ff}.shell.prep-empty{flex:0 0 auto;border:0;border-radius:0;background:transparent;overflow:visible}.shell.prep-empty .bar{height:26px;padding:0;border:0;background:transparent}.shell.prep-empty .slot{color:#8c98a8;font-weight:400}.shell.prep-empty .layout{display:block;flex:0 0 72px;height:72px;border:1px dashed #d9e0e8;border-radius:6px;background:#fafbfc}.shell.prep-empty .outline,.shell.prep-empty .display,.shell.prep-empty .footer{display:none}.shell.prep-empty .doc,.shell.prep-empty .scroll{height:100%}.shell.prep-empty .editor{width:100%;height:100%;min-height:0;padding:0;display:grid;place-items:center;color:#b6c0cc}</style></head><body>
+<div class="app"><section class="main"><header class="head"><span class="name">AI 写作</span><span class="ok">已完成</span></header><nav class="steps" id="steps"></nav><div class="body"><section class="shell"><div class="layout"><aside class="outline" id="outline"></aside><div class="doc"><div class="display">页面宽度<div class="widths"><button class="on" data-w="default">默认</button><button data-w="wide">宽屏</button></div></div><div class="scroll"><article class="editor" id="editor" contenteditable="true"></article></div></div></div><footer class="footer"><button class="vbtn" id="vbtn">◴ V2</button><span class="sync">已同步 · 可点击查看历史版本和 Diff</span><span class="chars" id="chars"></span></footer><div class="racts" id="racts"><button id="reject">拒绝润色</button><button class="apply" id="accept">接受润色</button></div></section></div></section><aside class="rail"><div class="tabs"><button class="tab" data-tab="chat">◯ 对话</button><button class="tab on" data-tab="tasks">☷ 子任务 <span class="badge">3</span></button></div><div class="railbody" id="railbody"></div></aside></div>
+<div class="toolbar" id="toolbar"><button class="polish" id="polish">✎ AI 润色</button></div><form class="rewrite" id="rewrite"><div class="rshell"><input class="rinput" id="rinput" placeholder="输入润色要求（可留空）"><button class="submit">➤</button></div></form>
+<div class="overlay" id="overlay"><section class="modal"><div class="mhead">历史版本<button class="close">×</button></div><div class="mbody"><ul class="versions"><li class="ver focus" data-rev="1"><span class="source">AI</span> V1<span class="time">2026/8/26 15:46:02</span></li><li class="ver" data-rev="2"><span class="source">AI</span> V2 <span class="current">当前</span><span class="time">2026/8/26 15:47:17</span></li></ul><div class="compare" id="compare"></div></div><div class="mfoot"><button class="cancel close">取消</button><button class="restore" id="restore">↺ 设为当前版本</button></div></section></div><div class="toast" id="toast"></div>
+<script>
+const PROMPT='写一篇 3000 字左右的克苏鲁风格恐怖短篇小说，氛围压抑，结局保留未知感。';
+const OUTLINE=`# 迷雾中的低语
+## 抵达与异象
+### 雾中的访客
+- 主角来到偏僻的海岸小镇
+- 弥漫的浓雾与不自然的寂静
+- 当地人回避的目光与欲言又止的态度
+### 旧宅的发现
+- 主角租住的古老房屋
+- 阁楼上神秘的日记与素描
+- 素描中扭曲的形状与不可名状的城市轮廓
+### 夜间的声响
+- 来自地下的敲击声
+- 墙壁渗出的潮湿痕迹形成诡异的图案
+## 调查与疯狂
+### 图书馆的线索
+- 关于小镇历史的档案记录残缺
+- 发现一场被抹去的大洪水记载
+### 记忆的侵蚀
+- 镜中的倒影出现延迟与变形
+### 深入地下
+- 跟随敲击声找到隐藏的通道
+- 空气变得稠密，光线开始弯曲
+## 深渊的回响
+### 不可名状的存在
+- 在通道最深处感知到巨大的形体
+- 主角意识到自己的意识正在被延伸、被窥探
+### 真相的碎片
+- 那个存在一直在等待，等待被记住
+### 雾中消散
+- 意识被吸入无尽的深渊
+## 终章
+- 小镇依旧存在
+- 浓雾从未散去
+- 下一位访客即将抵达`;
+const DRAFT=`# 迷雾中的低语
+## 抵达与异象
+雾气像一层黏稠的幕布笼罩着埃尔斯港。下了最后一班公共汽车后，林远站在空旷的公路旁，看着车尾灯消失在灰白的迷蒙中。这辆老旧的班车每周只有三班，而他要在下周一才能离开这个地方——如果那时候他还想离开的话。
+
+他没有立刻去预订的住处，而是在镇口站了很久。雾气中，埃尔斯港的轮廓若隐若现：几座低矮的石砌建筑沿着海岸线排列，窗户里透出昏黄而微弱的灯光。空气中弥漫着海水的咸腥味，但奇怪的是，没有任何海浪拍岸的声音。这里安静得不像一个海滨小镇，甚至不像一个有人居住的地方。
+
+踏入镇子的那一刻，林远注意到几个当地人正站在街角交谈。他们转过头看向他，目光中带着一种难以名状的情绪——不是好奇，不是警惕，而是某种更复杂的东西，仿佛在审视一个已经等待很久的人。
+
+杂货店老板娘告诉他：“雾季提前了。你要是想画画，这倒是个好时候。”林远确实是个画家。这次来埃尔斯港，一半是寻找创作灵感，一半是想逃离让他窒息的都市生活。
+
+海崖屋的石墙爬满暗绿色苔藓。真正吸引他注意的，是阁楼。阁楼里满是画布和画架。一本泛黄日记的扉页写着埃德加·莫里斯：它们在雾中等待，等待被看见。被看见是一种仪式。记住它们，就是喂养它们。
+
+墙上的素描描绘着违反透视法则的建筑、由无数触手和眼睛组成的形体，以及仿佛用第四维度笔触绘制的形状。当他仔细辨认，总觉得有什么东西在画面深处注视着他。
+
+凌晨三点，来自脚下的敲击声沉闷而有节奏。潮湿水痕沿砖缝蔓延，在灰泥表面形成一只正在睁开的眼睛。林远知道自己正在接近某种危险的边界。
+
+## 调查与疯狂
+图书馆档案室弥漫着陈年纸张的霉味。关于小镇历史的记载支离破碎。一篇八十年前大洪水的报道旁，手写批注透露：洪水并非自然灾害，而是一次“献祭”。幸存者名单里，韦恩这个姓氏重复出现超过二十次。
+
+离开图书馆后，幻觉开始出现。街角出现本不该存在的建筑。起居室的镜子里，倒影保持着林远的站姿，却有错误的比例；当他侧身，倒影延迟半拍才跟上。
+
+深夜，他追随敲击声推开走廊尽头从未注意过的门。楼梯尽头的砖墙随节奏移动，墙壁无声裂开，露出向下延伸的通道。两壁刻满无法辨认的符文。空气变得浓稠，手电筒光线开始弯曲，空间正以不可能的方式折叠。
+
+## 深渊的回响
+通道到了尽头，但“尽头”这个词在此刻显得如此可笑。符文微微颤动，散发暗淡磷光。然后我看见了它。
+
+在磷光最深处，有一个形体。不是形状——形状暗示边界和轮廓，而这个东西没有边界。它既在眼前，又跨越无尽虚空。当我试图用目光丈量，意识仿佛要坠入无底深渊。
+
+它在注视我。我的恐惧、记忆，在这种注视下毫无遮掩。它不是我之外的东西，它就在意识之中，在梦境与清醒的边界上。我的思维从来不是堡垒，它的存在本身就是为了被穿越、被占据。
+
+我想起阁楼上画家的日记。那些关于雾中城市、海底居民的描写不是疯狂，而是一种警告。他也曾走过这条路，也许他的意识早已被吞噬，成为它永恒记忆的一部分。
+
+而我体内也有东西在苏醒。它在等待被记住，等待被召唤。我的名字正是召唤它的咒语。我不再是“我”，只是漫长等待中的一个环节，一种记忆的载体。
+
+意识开始模糊，像溺水，像坠入冰冷深海。最后一丝清醒中，我听见雾中有声音在呼唤，寻找下一个走进雾中的旅人。我的身体还站在入口处吗？我想知道。但我永远也不会知道了。
+
+## 终章
+雾在第三天早晨散去了一会儿。阳光短暂穿透云层，小镇钟楼敲响十二下。然后雾回来了。它更浓、更稠，带着咸涩海水气息和说不清的腐败味道。
+
+没有人提起失踪的房客。镇公所档案里多了一张登记表，少了一个名字。阁楼上的日记仍在原处，等待下一个发现它的人。
+
+镇外公路上，一辆锈迹斑斑的轿车缓缓驶来。年轻女人打开车窗，让雾气涌入车内。她觉得浓雾、寂静和被遗忘的历史，会是完美的故事素材。
+
+她在镇口路标前停下车，浓雾立刻将她包裹。她不知道自己已经被看见了。
+
+在旧宅阁楼里，一张脸正在素描本上慢慢浮现。那张脸有着和她相似的轮廓，缓缓融入纸张纤维，等待被下一双眼睛发现。
+
+而镇外的雾中，一个新的名字正在被低声念出。`;
+const REAL_DRAFT=`# 迷雾中的低语
+
+<a id="block-sec-001"></a>
+## 抵达与异象
+
+雾气像一层黏稠的幕布笼罩着埃尔斯港。下了最后一班公共汽车后，林远站在空旷的公路旁，看着车尾灯消失在灰白的迷蒙中。这辆老旧的班车每周只有三班，而他要在下周一才能离开这个地方——如果那时候他还想离开的话。
+
+他没有立刻去预订的住处，而是在镇口站了很久。雾气中，埃尔斯港的轮廓若隐若现：几座低矮的石砌建筑沿着海岸线排列，窗户里透出昏黄而微弱的灯光。空气中弥漫着海水的咸腥味，但奇怪的是，没有任何海浪拍岸的声音。这里安静得不像一个海滨小镇，甚至不像一个有人居住的地方。
+
+踏入镇子的那一刻，林远注意到几个当地人正站在街角交谈。当他的脚步声响起，那些交谈戛然而止。他们转过头看向他，目光中带着一种难以名状的情绪——不是好奇，不是警惕，而是某种更复杂的东西，仿佛在审视一个已经等待很久的人。然后他们移开视线，继续低声说着什么，手指不安地绞在一起。
+
+他试图和杂货店的老板娘搭话，想问问这个季节为什么游客这么少。女人大约五十多岁，脸上刻满风霜的痕迹。她听到这个问题时，手里的动作停顿了一瞬，然后继续整理货架，始终没有正面看他。
+
+“雾季提前了，”她终于开口，声音沙哑，“你要是想画画，这倒是个好时候。”
+
+“画画？”
+
+“上一个租海崖屋的人也是画画的。”她抬起头，目光与林远相触，又迅速移开，“你也是来画画的吧？”
+
+林远没有否认。他确实是个画家，虽然最近几个月都没有完成任何作品。这次来埃尔斯港，一半是为了寻找创作灵感，一半是想逃离让他窒息的都市生活。老板娘提到的海崖屋，正是他通过邮件预订的住所，据说曾是一位知名画家的故居。
+
+穿过几条狭窄的巷子，林远找到了那栋房子。它比照片中看起来更加古老，石墙上爬满暗绿色的苔藓，木质窗框因潮湿而微微变形。屋内的陈设保留着几十年前的风格，家具上蒙着薄薄的灰尘，但一切都被收拾得井井有条，似乎有人定期打理。
+
+然而真正吸引他注意的，是阁楼。
+
+阁楼的门虚掩着。当他推开门，一股混合着霉味和某种说不清的气息扑面而来。光线从老虎窗斜射进来，照亮了满地的画布和画架。墙上挂着几十幅未完成的素描，地面上散落着速写本和炭笔。
+
+林远蹲下身，随手翻开一本泛黄的日记。字迹潦草而急促，似乎是在极度亢奋或恐惧的状态下写下的。扉页上写着主人的名字：埃德加·莫里斯，一个他从未听说过的画家。
+
+日记的内容断断续续，夹杂着对某种“形状”和“声音”的描述。林远无法完全理解其中的含义，但有几段文字让他感到不安：
+
+*它们在雾中等待，等待被看见。被看见是一种仪式。记住它们，就是喂养它们。*
+
+*那些城市不在任何地图上，它们存在于几何之外。我试图画下它们的轮廓，但每画一笔，就感觉自己的意识被拉伸、被扭曲。*
+
+*我听到了来自地下的声音。不是敲击，而是某种节奏，像心跳，但比心跳更古老、更深邃。*
+
+林远放下日记，目光落在墙上的素描。那些画描绘的是某种他从未见过的东西——扭曲的、不可能存在的建筑，它们违反了所有透视法则；巨大的、由无数触手和眼睛组成的形体；以及一些他根本无法描述的形状，仿佛是用第四维度的笔触绘制的。
+
+最让他困扰的是那些城市轮廓。它们看起来既像是水下建筑，又像是某种有机体的表面。细节越丰富，整体就越令人不安。当他试图仔细辨认某个局部时，总感觉有什么东西在画面深处注视着他。
+
+那天晚上，林远躺在陌生的床上辗转难眠。月光穿过雾气，在天花板上投下朦胧的光斑。凌晨三点左右，他听到了一个声音——来自脚下的敲击声，沉闷而有节奏，像是有什么东西在墙壁内部移动。
+
+他起身查看，声音似乎从四面八方传来，又似乎根本不存在于任何方向。然后他注意到墙壁渗出了水痕。潮湿的痕迹沿着砖缝蔓延，在灰泥表面形成一幅诡异的图案——那是一只眼睛的形状，或者更准确地说，是一只正在睁开的眼睛。
+
+林远盯着那只墙壁上的眼睛看了很久，直到敲击声停止，直到晨光开始穿透雾气。他试图说服自己那只是老房子潮湿造成的巧合，但脑海中不断浮现阁楼上那些素描的影子，那些扭曲的城市轮廓，那些不可名状的形体。
+
+他知道自己不会在埃尔斯港找到想要的灵感。相反，他正在接近某种危险的边界——一个他或许不该跨越的门槛。
+
+<a id="block-sec-002"></a>
+## 调查与疯狂
+
+图书馆的档案室弥漫着陈年纸张的霉味。主角在落满灰尘的架子上翻找，关于小镇历史的记载支离破碎——许多页码被撕去，剩下的文字也因潮汐侵蚀而模糊难辨。
+
+在几份残存的地方报纸中，一篇关于八十年前大洪水的报道引起注意。报道本身已残缺，但旁边的手写批注透露了真相：洪水并非自然灾害，而是一次“献祭”。幸存者名单被刻意保留下来，主角逐一审视那些名字，注意到一个令人不安的模式——韦恩、韦恩、韦恩，同样的姓氏在名单上重复出现，超过二十次。
+
+名单上其他姓氏寥寥无几，仿佛那场洪水只为韦恩家族留下生路。
+
+离开图书馆后，幻觉开始出现。街角出现一座本不该存在的建筑，轮廓扭曲得违反建筑法则。主角眨眼的瞬间，街景完全改变，或者完全消失。起初他以为是疲惫和失眠作祟，直到在起居室的镜子前看到倒影。
+
+那不是镜中的自己。那个轮廓保持着主角的站姿，却有着错误的比例，像是某种拙劣的复制品。当主角侧身时，倒影延迟了半拍才跟上。更令人不安的是，倒影的头部开始缓慢地、不可名状地变形，仿佛在嘲笑他的恐惧。那一刻他才意识到，已经很久没有仔细端详自己的脸了。
+
+那天深夜，主角在阁楼被一阵有节奏的敲击声惊醒。声音从地板下方传来——不是来自楼上，而是脚下的泥土深处，仿佛有什么东西正缓慢地向上敲打。他握紧手电筒，赤脚站在走廊冰冷的木地板上，追随那规律的敲击声。
+
+敲击声引导他穿过走廊，推开尽头那扇从未注意过的门。门后是一段向下的楼梯，通向地下室的通道。楼梯的尽头被一堵看似普通的砖墙挡住，但主角发现墙面有一块砖的间隙与敲击声的节奏同步移动。当他用力按下时，墙壁无声地裂开，露出一条向下延伸的黑暗通道。
+
+通道很窄，他只能侧身挤入。两侧墙壁上刻满无法辨认的符文，它们既不是任何已知的文字，也看不出任何规律，只是重复着某种令人不安的节奏。随着他越走越深，空气变得浓稠，每一次呼吸都变得艰难。手电筒的光线开始弯曲，不再沿直线照射，而是在他周围形成诡异的阴影。他感到空间本身在扭曲，墙壁与天花板的位置感逐渐消失，仿佛整个通道正在以不可能的方式折叠。
+
+<a id="block-sec-003"></a>
+## 深渊的回响
+
+通道到了尽头，但“尽头”这个词在此刻显得如此可笑。
+
+空气变得稠密，几乎如同液体，而那些刻在墙壁上的符文——如果它们还能被称作符文的话——似乎在微微颤动，散发出暗淡的磷光。那光芒不是来自任何光源，而是来自某种超越视觉的本质。光线在这里弯曲，仿佛空间本身正在承受着什么巨大的压力。我能感受到周围的石壁在颤抖，但这种颤抖不是物理性的，而是某种更深层的震动，直接作用于意识本身。
+
+然后我看见了它。
+
+在通道的尽头，在磷光的最深处，有一个形体。不是形状——形状暗示着边界和轮廓，而这个东西没有边界，没有轮廓，或者说它的边界和轮廓超出了我能理解的维度。它就在那里，既在我眼前，又跨越无尽的虚空。我无法描述它的大小，因为当我试图用目光丈量它时，我的意识开始眩晕，仿佛要坠入某个无底的深渊。
+
+我只能感受到它的存在。那是一种压倒性的存在，一种超越了肉体感官的认知。它是巨大的——不，“巨大”这个词太过渺小。它是无限与有限的矛盾体，是在此刻与永恒之间摇摆的扭曲。它是活的，它在注视着我，而那种注视比任何实质的形体都更加可怕。
+
+因为我突然意识到，我的一切都被它看透了。不是身体上的，而是意识层面的。我脑海中浮现的所有画面、所有的恐惧、所有的记忆——它们在这个存在的注视下毫无遮掩。它不是我之外的东西，它就在我的意识之中，在我的记忆深处，在我的梦境与清醒的边界上。它在延伸我，在窥探我，而我无法阻止。
+
+那种被窥探的感觉令人窒息。不是被监视的不适，而是彻底的暴露，是意识边界的消融。我曾以为我的思维是一座堡垒，是我最后的私密空间。但现在我发现，这座堡垒从来就不存在。或者说，它的存在本身就是为了被这个存在所穿越、所占据。
+
+我想起了阁楼上那位画家的日记。那些关于雾中的城市、关于海底居民的描写，那些扭曲的画面和不可名状的素描——我一直以为那是疯狂的呓语，是某种精神疾病的症状。现在我明白了，那不是疯狂，那是一种警告，一种指引。他也曾走过这条路，也曾站在我现在站的地方。也许他逃脱了，也许他没有——也许他的意识早已被这个存在所吞噬，成为它永恒记忆的一部分。
+
+而我体内也有东西在苏醒。不是记忆——是另一种意识，另一种存在。它在我的脑海中蠕动，像是一只潜伏在深渊中的生物，终于感知到了猎物的靠近。我想起了日记中反复出现的那句话：它在等待，等待被记住，等待被召唤。而我——不，是我的名字，那个在日记扉页上被我无意间读到又在无意间忘记的名字——我的名字正是召唤它的咒语。
+
+我的名字被找到了，被使用了，被覆盖了。我不再是“我”，我只是这个存在漫长等待中的一个环节，一种记忆的载体，一段尚未完成的叙事。我感到自己的身份正在被改写，而我却无能为力。
+
+然后我感到了拉扯。
+
+不是物理性的拉扯，而是某种更深层的东西正在从我的身体中被抽离。那是意识，那是自我，那是“我”这个概念本身。它正在被拖向深渊，拖向那个跨越虚空的巨大形体，而我只能眼睁睁地看着自己消亡。
+
+不，不完全是我。我的一部分还在——我的身体还在通道入口处，我还能感觉到冰冷的石壁在我的指尖，我还能听见远处雾中的风声。但另一部分，那个我一直以为是“我”的部分，正在脱离，正在坠入。
+
+我试图抵抗，但我发现抵抗本身就是它的一部分。我的每一次挣扎都在喂养它，在加速我的消亡。也许这就是那位画家的命运。也许他也曾站在这里，试图抗拒，最终被吞噬。而他留下那些日记，不是为了警告后人，而是为了传递记忆，为了让自己的一部分能够延续。而我，就是他传递的最后一块碎片。
+
+意识开始模糊了。模糊得不像是睡眠，而像是溺水，像是坠入冰冷的深海。我无法分辨上下左右，无法分辨过去与未来，只有那个形体还在我的意识深处，跨越虚空，永恒地存在着。
+
+在最后一丝清醒中，我听见了什么。不是来自深渊，而是来自通道的入口，来自我身体所在的地方。雾中有声音在呼唤。不是画家的名字，也不是我的名字，而是某种更古老的声音，在等待，在寻找，寻找下一个会走进雾中的旅人。
+
+我的身体还站在入口处吗？还是它已经被雾吞噬，只剩下一具空洞的皮囊？
+
+我想知道。
+
+但我永远也不会知道了。
+
+<a id="block-sec-004"></a>
+## 终章
+
+雾在第三天早晨散去了一会儿。阳光短暂地穿透云层，在碎石路面上投下苍白的光斑，像是什么遗忘已久的东西偶然浮出水面。小镇的钟楼在雾气消退的间隙里敲响了十二下，声音空洞而遥远，仿佛来自另一层现实。
+
+然后雾回来了。
+
+它比之前更浓，更稠，带着咸涩的海水气息和某种说不清的腐败味道。人们重新回到街上，步履匆匆，面孔模糊。他们经过那栋旧宅时，目光会不由自主地掠过那扇紧闭的门窗，然后加快脚步。没有人提起失踪的房客，就像没有人提起那些消失在前几个十年里的人一样。镇公所的档案里多了一张登记表，少了一个名字。阁楼上的日记仍在原处，素描本摊开在某幅未完成的图画前，等待着下一个发现它的人。
+
+镇外的公路上，一辆锈迹斑斑的老式轿车正沿着蜿蜒的山道缓缓驶来。驾驶座上的年轻女人打开车窗，让雾气涌入车内。她眯起眼睛望向远处若隐若现的屋顶轮廓，嘴角浮现一丝好奇的微笑。她在找一间出租的老宅，她在信中读到过关于这地方的描述——浓雾、寂静、和一段被遗忘的历史。她觉得那会是完美的素材，适合她正在构思的那个故事。
+
+雾气越来越浓，车灯在白色中切开一道昏黄的光路。收音机里原本清晰的电台信号开始变得模糊，取而代之的是一阵低沉的嗡鸣声，像是有什么东西在很远很远的地方回应着。她的手指在方向盘上轻轻敲动，心跳莫名加快，却说不出为什么。
+
+她在镇口的路标前停下车。路标上爬满藤蔓，字迹几乎无法辨认。她下了车，浓雾立刻将她包裹。她抬头望向雾气深处，望向那座沉默的小镇，望向那些她还不知道名字的街道和房屋。
+
+她不知道自己已经被看见了。
+
+在旧宅的阁楼里，在那些摊开的素描本之间，有一张脸正在慢慢浮现。那张脸有着和她相似的轮廓，正缓缓融入纸张的纤维之中，仿佛从未存在过，却永远会在那里，等待被下一双眼睛发现。
+
+而镇外的雾中，一个新的名字正在被低声念出。
+`;
+const J=(o)=>JSON.stringify(o,null,2),PREP={writer_command:J({schema:'writer-workflow.WriterCommand',schema_version:'0.1',data:{action:'create',source_role:'none',target_stage:'document',next_step:'outline',user_instruction:'AI Writer '+PROMPT,request_fingerprint:'df5efa81017abe5589ddcc207aa905601ef15ef796c1c288ae5a60a5d4ec3db1'},meta:{created_at:'2026-08-26T15:42:10.473336+08:00'}}),writing_task:J({schema:'lazyllm.tools.writer.data_models.task.WritingTask',data:{task_id:'bd8f940f303d4003971f6b9b957e7038',query:'AI Writer '+PROMPT,task_type:'write',constraints:{target_chars:3000,max_chars:3300},output:{representation:'markdown'}}}),media_assets:J({schema:'MediaAssets',data:{items:[]}}),resource_profiles:J({schema:'ResourceProfiles',data:{profiles:[]}}),writing_context:J({schema:'WritingContext',data:{language:'zh-CN',genre:'克苏鲁恐怖短篇',tone:'氛围压抑',ending:'保留未知感'}})};
+const secs=REAL_DRAFT.split('\\n').filter(x=>!x.startsWith('<a id=')).join('\\n').split(/(?=^## )/m),data=[{id:'prepare',label:'写作准备',task:'writer-workflow:prepare',time:'15:42:10',a:[['writer_command','writer_command.json',PREP.writer_command,'JSON'],['writing_task','writing_task.json',PREP.writing_task,'JSON'],['media_assets','media_assets.json',PREP.media_assets,'JSON'],['resource_profiles','resource_profiles.json',PREP.resource_profiles,'JSON'],['writing_context','writing_context.json',PREP.writing_context,'JSON']]},{id:'outline',label:'大纲',task:'writer-workflow:outline',time:'15:42:44',a:[['outline_document','outline_document.md',OUTLINE,'Markdown'],['writing_context_after_outline','writing_context.json',J({title:'迷雾中的低语',sections:['抵达与异象','调查与疯狂','深渊的回响','终章'],target_chars:3000}),'JSON']]},{id:'write_document',label:'成稿',task:'writer-workflow:write_document',time:'15:47:17',a:[['section_instructions','section_instructions.json',J({section_count:4,instructions:['抵达与异象','调查与疯狂','深渊的回响','终章']}),'JSON'],['visual_plan','visual_plan.json',J({schema:'VisualPlan',data:{instructions:[]},meta:{created_at:'2026-08-26T15:43:49.831975+08:00'}}),'JSON'],['draft_blocks','draft_section_0001.md',secs[1],'Markdown'],['draft_blocks','draft_section_0002.md',secs[2],'Markdown'],['draft_blocks','draft_section_0003.md',secs[3],'Markdown'],['draft_blocks','draft_section_0004.md',secs[4],'Markdown'],['draft_document','draft_document.md',REAL_DRAFT.split('\\n').filter(x=>!x.startsWith('<a id=')).join('\\n'),'Markdown'],['writing_context_after_draft','writing_context.json',J({title:'迷雾中的低语',status:'completed',draft_section_count:4,target_chars:3000}),'JSON']]}];
+let si=2,ai=6,tab='tasks',range=null,pnode=null,original='',addition='',pi=0,rev=1;const $=s=>document.querySelector(s),E=s=>String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+function md(src){let o='',ul=false;for(const x of src.split('\n')){const l=x.trim();if(l.startsWith('<a id=')&&l.endsWith('</a>'))continue;if(!l){if(ul){o+='</ul>';ul=false}continue}if(l.startsWith('# ')){if(ul){o+='</ul>';ul=false}o+=`<h1>${E(l.slice(2))}</h1>`}else if(l.startsWith('## ')){if(ul){o+='</ul>';ul=false}o+=`<h2>${E(l.slice(3))}</h2>`}else if(l.startsWith('### ')){if(ul){o+='</ul>';ul=false}o+=`<h3>${E(l.slice(4))}</h3>`}else if(l.startsWith('- ')){if(!ul){o+='<ul>';ul=true}o+=`<li>${E(l.slice(2))}</li>`}else{if(ul){o+='</ul>';ul=false}o+=`<p>${E(l)}</p>`}}if(ul)o+='</ul>';return o}function cur(){return data[si].a[ai]}
+function renderSteps(){const primaryArtifact=[0,0,6];steps.innerHTML=data.map((s,i)=>`<button class="step ${i<si?'done':''} ${i===si?'active':''}" data-i="${i}"><span class="num">${i<si?'✓':i+1}</span><span>${s.label}</span></button>`).join('');document.querySelectorAll('.step').forEach(b=>b.onclick=()=>{si=+b.dataset.i;ai=primaryArtifact[si];render()})}
+function renderDoc(){const shell=document.querySelector('.shell');if(si===0){shell.classList.add('prep-empty');outline.innerHTML='';editor.classList.remove('outline-doc','wide');editor.innerHTML='<span>—</span>';editor.contentEditable=false;vbtn.style.display='none';document.querySelector('.sync').style.display='none';chars.textContent='';hide();return}shell.classList.remove('prep-empty');const a=cur();editor.innerHTML=a[3]==='Markdown'?md(a[2]):`<pre class="json">${E(a[2])}</pre>`;editor.classList.toggle('outline-doc',a[0]==='outline_document');editor.contentEditable=a[3]==='Markdown';vbtn.style.display=a[3]==='Markdown'?'inline-flex':'none';document.querySelector('.sync').style.display=a[3]==='Markdown'?'inline':'none';const hs=[...editor.querySelectorAll('h2,h3')];let chapter=0,section=0;hs.forEach(h=>{const raw=h.textContent.trim();if(h.tagName==='H2'){chapter++;section=0;h.textContent=`${chapter}. ${raw}`}else{section++;h.textContent=`${chapter}.${section} ${raw}`}});const title=(a[2].match(/^# (.+)$/m)||[])[1]||a[1];outline.innerHTML=a[3]==='Markdown'?`<button class="ot">☰　${E(title)}</button>${hs.map((h,i)=>`<button class="ol" data-h="${i}" style="padding-left:${h.tagName==='H3'?16:6}px">${E(h.textContent)}</button>`).join('')}`:'<button class="ot">☰</button><div style="padding:8px;color:#94a3b8;font-size:12px">该产物没有标题目录</div>';outline.querySelectorAll('[data-h]').forEach(b=>b.onclick=()=>hs[+b.dataset.h].scrollIntoView({behavior:'smooth'}));chars.textContent=`${editor.innerText.replace(/\s/g,'').length} 字`;hide()}
+function tasks(){railbody.innerHTML=`<div class="filters"><button class="filter on">全部</button><button class="filter">执行中</button><button class="filter">已完成</button><button class="filter">失败</button></div><div class="list">${data.map((s,i)=>`<section class="card ${i===si?'':'closed'}"><div class="cardhead"><span class="chev">⌄</span><span class="taskname">${s.task}</span><span class="count">${s.a.length} 产物</span><span class="green">● 已完成</span></div><div class="section"><div class="sectitle">⌄ 产出 (${s.a.length})</div>${s.a.map((a,j)=>`<article class="artifact" data-d="${i}:${j}" title="点击下载 ${a[1]}"><div class="arthead"><span class="key">${a[1]}</span><button class="dl">⇩ 下载</button></div></article>`).join('')}</div></section>`).join('')}</div>`;document.querySelectorAll('.cardhead').forEach(h=>h.onclick=()=>h.parentElement.classList.toggle('closed'));document.querySelectorAll('.artifact[data-d]').forEach(row=>row.onclick=()=>{const[i,j]=row.dataset.d.split(':').map(Number);dl(data[i].a[j])})}
+function chat(){railbody.innerHTML=`<div class="chat"><div class="date">08/26 15:41</div><div class="msg user"><div class="avatar">我</div><div class="bubble"><small>15:41</small><br><b>AI Writer</b><br>${PROMPT}</div></div><div class="msg"><div class="avatar">AI</div><div class="bubble"><small>15:47</small><br>已完成《迷雾中的低语》的大纲与成稿，共 4 个章节。可在“子任务”中查看每一步真实产物。</div></div></div><div class="chatinput"><div class="chatbox">请输入您的问题，支持多轮对话、图文理解等</div></div>`}
+function renderRail(){tab==='tasks'?tasks():chat();document.querySelectorAll('.tab').forEach(b=>b.classList.toggle('on',b.dataset.tab===tab))}function render(){renderSteps();renderDoc();renderRail()}function dl(a){const u=URL.createObjectURL(new Blob([a[2]],{type:'text/plain;charset=utf-8'})),x=document.createElement('a');x.href=u;x.download=a[1];x.click();setTimeout(()=>URL.revokeObjectURL(u),500)}function hide(){toolbar.classList.remove('show');rewrite.classList.remove('show')}
+function select(){if(pnode)return;const s=getSelection();if(!s.rangeCount||s.isCollapsed||!editor.contains(s.anchorNode)){toolbar.classList.remove('show');return}range=s.getRangeAt(0).cloneRange();const r=range.getBoundingClientRect();toolbar.style.left=`${Math.max(10,Math.min(innerWidth-600,r.left-10))}px`;toolbar.style.top=`${Math.max(10,r.top-52)}px`;toolbar.classList.add('show')}
+function openPolish(){if(!range)return;const r=range.getBoundingClientRect();toolbar.classList.remove('show');rewrite.style.left=`${Math.max(12,Math.min(innerWidth-432,r.left))}px`;rewrite.style.top=`${Math.max(12,r.top-52)}px`;rewrite.classList.add('show');rinput.value='';rinput.focus()}
+function gen(e){e.preventDefault();if(!range)return;const adds=['，像被一只看不见的手缓慢拖入更深的夜色','，连沉默也在潮湿的墙缝间悄然生长','，那声音仿佛从时间背面贴着他的名字爬来'];original=range.toString();addition=adds[pi++%adds.length];range.deleteContents();pnode=document.createElement('span');pnode.innerHTML=`<span class="old">${E(original)}</span><span class="added">${E(addition)}</span>`;range.insertNode(pnode);rewrite.classList.remove('show');racts.classList.add('show');getSelection().removeAllRanges()}
+function settle(ok){if(!pnode)return;pnode.replaceWith(document.createTextNode(original+(ok?addition:'')));pnode=null;racts.classList.remove('show');show(ok?'已接受 AI 润色结果':'已拒绝本次润色');chars.textContent=`${editor.innerText.replace(/\s/g,'').length} 字`}function show(t){toast.textContent=t;toast.classList.add('show');setTimeout(()=>toast.classList.remove('show'),2000)}
+function version(){if(rev===2){compare.innerHTML=`<div class="diffhead"><span class="dlabel add">V2 · 当前版本</span></div><div class="diff"><span class="line same">${E(cur()[2].slice(0,1800))}</span></div>`;restore.disabled=true;restore.style.opacity=.4}else{const p=[['− 雾气像一层薄雾笼罩着埃尔斯港。','remove'],['+ 雾气像一层黏稠的幕布笼罩着埃尔斯港。','add'],['  ……','same'],['− 目光中带着一种奇怪的情绪。','remove'],['+ 目光中带着一种难以名状的情绪。','add'],['  ……','same'],['− 那形体藏在黑暗深处。','remove'],['+ 那形体既在眼前，又跨越无尽虚空。','add'],['  ……','same'],['− 雾仍然没有散去。','remove'],['+ 而镇外的雾中，一个新的名字正在被低声念出。','add']];compare.innerHTML=`<div class="diffhead"><span class="dlabel remove">V1</span>→<span class="dlabel add">V2 当前</span></div><div class="diff">${p.map(x=>`<span class="line ${x[1]}">${E(x[0])}</span>`).join('')}</div>`;restore.disabled=false;restore.style.opacity=1}}
+const steps=$('#steps'),outline=$('#outline'),editor=$('#editor'),railbody=$('#railbody'),toolbar=$('#toolbar'),rewrite=$('#rewrite'),rinput=$('#rinput'),racts=$('#racts'),vbtn=$('#vbtn'),overlay=$('#overlay'),compare=$('#compare'),restore=$('#restore'),chars=$('#chars'),toast=$('#toast');document.querySelectorAll('.tab').forEach(b=>b.onclick=()=>{tab=b.dataset.tab;renderRail()});document.querySelectorAll('.widths button').forEach(b=>b.onclick=()=>{document.querySelectorAll('.widths button').forEach(x=>x.classList.remove('on'));b.classList.add('on');editor.classList.toggle('wide',b.dataset.w==='wide')});editor.onmouseup=()=>setTimeout(select);editor.onkeyup=select;toolbar.onmousedown=e=>e.preventDefault();$('#polish').onclick=openPolish;rewrite.onsubmit=gen;$('#reject').onclick=()=>settle(false);$('#accept').onclick=()=>settle(true);vbtn.onclick=()=>{rev=1;version();overlay.classList.add('show')};document.querySelectorAll('.close').forEach(b=>b.onclick=()=>overlay.classList.remove('show'));overlay.onclick=e=>{if(e.target===overlay)overlay.classList.remove('show')};document.querySelectorAll('.ver').forEach(v=>v.onclick=()=>{rev=+v.dataset.rev;document.querySelectorAll('.ver').forEach(x=>x.classList.toggle('focus',x===v));version()});restore.onclick=()=>{show('已切换到 V1（演示）');overlay.classList.remove('show')};render();
+</script></body></html>

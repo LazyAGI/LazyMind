@@ -29,9 +29,9 @@ describe("FeaturedCases", () => {
   beforeEach(() => {
     listShowcaseCasesMock.mockResolvedValue({
       cases: [
-        { id: "chat-skill", title: "Chat skill", type: "chat", featured: true },
-        { id: "work-skill", title: "Work skill", type: "work", featured: true },
-        { id: "workflow", title: "Workflow", type: "workflow", featured: true },
+        { id: "chat-skill", title: "Chat skill", type: "chat", featured: true, featured_order: 1 },
+        { id: "work-skill", title: "Work skill", type: "work", featured: true, featured_order: 2 },
+        { id: "workflow", title: "Workflow", type: "workflow", featured: true, featured_order: 1 },
       ],
       categories: [],
       total: 2,
@@ -46,7 +46,7 @@ describe("FeaturedCases", () => {
     expect(screen.queryByRole("radio")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /查看更多/ })).toHaveAttribute(
       "href",
-      "/agent/chat/cases?type=chat",
+      "/agent/chat/cases",
     );
 
     view.rerender(<MemoryRouter><FeaturedCases type="work" /></MemoryRouter>);
@@ -63,6 +63,7 @@ describe("FeaturedCases", () => {
         title: `Work ${index + 1}`,
         type: "work",
         featured: true,
+        featured_order: index + 1,
       })),
       categories: [],
       total: 9,
@@ -75,7 +76,23 @@ describe("FeaturedCases", () => {
     expect(screen.queryByText("Work 9")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /查看更多/ })).toHaveAttribute(
       "href",
-      "/agent/chat/cases?type=work",
+      "/agent/chat/cases",
     );
+  });
+
+  it("sorts each entry point by the resolved Featured order", async () => {
+    listShowcaseCasesMock.mockResolvedValue({
+      cases: [
+        { id: "later", title: "Later", type: "work", featured: true, featured_order: 2 },
+        { id: "first", title: "First", type: "workflow", featured: true, featured_order: 1 },
+      ],
+      categories: [],
+      total: 2,
+    } as never);
+
+    render(<MemoryRouter><FeaturedCases type="work" /></MemoryRouter>);
+
+    const cards = await screen.findAllByText(/First|Later/);
+    expect(cards.map((card) => card.textContent)).toEqual(["First", "Later"]);
   });
 });

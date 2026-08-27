@@ -1,5 +1,5 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import DetailPage from "./DetailPage";
 import { getShowcaseCase, type ShowcaseCase } from "./api";
@@ -38,6 +38,7 @@ function task(id: string, title: string, resultTitle: string, template = "generi
         }],
         deliverables: "Configured deliverables",
       } : undefined,
+      html_url: template === "html_preview_v1" ? "/showcase-assets/demo/1.0.0/preview.html" : undefined,
     },
   };
 }
@@ -59,7 +60,13 @@ function showcaseCase(tasks: ReturnType<typeof task>[]): ShowcaseCase {
     prompt_short: tasks[0].prompt_short,
     result_summary: tasks[0].result.summary,
     tasks,
+    type: "chat",
   };
+}
+
+function LocationProbe() {
+  const location = useLocation();
+  return <div>{`${location.pathname}${location.search}`}</div>;
 }
 
 function renderDetail() {
@@ -67,6 +74,7 @@ function renderDetail() {
     <MemoryRouter initialEntries={["/agent/chat/cases/demo"]}>
       <Routes>
         <Route path="/agent/chat/cases/:caseId" element={<DetailPage />} />
+        <Route path="/agent/chat/home" element={<LocationProbe />} />
       </Routes>
     </MemoryRouter>,
   );
@@ -116,6 +124,40 @@ describe("Showcase DetailPage", () => {
     expect(await screen.findByText("Second result")).toBeInTheDocument();
   });
 
+  it("launches a workflow detail in the New task entry with its selected demo", async () => {
+    const item = showcaseCase([task("single", "Single", "Single result")]);
+    item.type = "workflow";
+    getShowcaseCaseMock.mockResolvedValue(item);
+    renderDetail();
+
+    fireEvent.click(await screen.findByRole("button", { name: "showcase.try" }));
+
+    expect(await screen.findByText(
+      "/agent/chat/home?showcase_case=demo&showcase_task=single&showcase_entry=work",
+    )).toBeInTheDocument();
+  });
+
+  it("uses the mouse wheel to scroll an overflowing task list horizontally", async () => {
+    getShowcaseCaseMock.mockResolvedValue(showcaseCase([
+      task("first", "First", "First result"),
+      task("second", "Second", "Second result"),
+    ]));
+    renderDetail();
+
+    const taskList = await screen.findByRole("group", { name: "showcase.chooseTask" });
+    Object.defineProperties(taskList, {
+      clientWidth: { configurable: true, value: 300 },
+      scrollWidth: { configurable: true, value: 800 },
+      scrollLeft: { configurable: true, value: 0, writable: true },
+    });
+
+    const taskSection = taskList.closest(".showcase-detail-tasks");
+    expect(taskSection).not.toBeNull();
+    fireEvent.wheel(taskSection!, { deltaY: 120 });
+
+    expect(taskList.scrollLeft).toBe(120);
+  });
+
   it("renders product report text entirely from configured slots", async () => {
     getShowcaseCaseMock.mockResolvedValue(showcaseCase([
       task("product", "Product", "Configured product result", "product_report_v1"),
@@ -126,5 +168,18 @@ describe("Showcase DetailPage", () => {
     expect(screen.getByText("Configured metric")).toBeInTheDocument();
     expect(screen.getByText("Configured section")).toBeInTheDocument();
     expect(screen.getByText("Configured deliverables")).toBeInTheDocument();
+  });
+
+  it("renders interactive HTML results in a script-only sandbox", async () => {
+    getShowcaseCaseMock.mockResolvedValue(showcaseCase([
+      task("html", "HTML", "Interactive result", "html_preview_v1"),
+    ]));
+    renderDetail();
+
+    const preview = await screen.findByTitle("Interactive result");
+    expect(preview).toHaveAttribute("src", "/showcase-assets/demo/1.0.0/preview.html");
+    expect(preview).toHaveAttribute("sandbox", "allow-scripts");
+    expect(preview.getAttribute("sandbox")).not.toContain("allow-same-origin");
+    expect(preview.closest(".showcase-result-body")).toHaveClass("is-html-preview");
   });
 });

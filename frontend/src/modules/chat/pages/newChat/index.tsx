@@ -13,6 +13,7 @@ import {
   CHAT_NEW_RUN_IN_BACKGROUND_KEY,
   CHAT_RESUME_CONVERSATION_KEY,
   CHAT_SELECT_CONVERSATION_EVENT,
+  selectChatConversationFilter,
 } from "@/modules/chat/constants/chat";
 import { allowedUploadTypes } from "@/modules/chat/components/ImageUpload";
 import { useTranslation } from "react-i18next";
@@ -32,6 +33,12 @@ import { RightOutlined, ScheduleOutlined } from "@ant-design/icons";
 import { useChatThinkStore } from "@/modules/chat/store/chatThink";
 import FeaturedCases from "@/modules/showcase/FeaturedCases";
 import { getShowcaseCase, type ShowcaseCase } from "@/modules/showcase/api";
+import {
+  parseShowcaseEntryType,
+  showcaseEntryType,
+  SHOWCASE_ENTRY_QUERY_PARAM,
+  type ShowcaseEntryType,
+} from "@/modules/showcase/classification";
 import { useFeaturedCapabilityBinding } from "@/modules/showcase/useFeaturedCapabilityBinding";
 import { getKnowledgeMarketItem } from "@/modules/knowledge/api/knowledgeMarket";
 
@@ -80,6 +87,9 @@ const NewChatPage = () => {
   const locale = i18n.resolvedLanguage || i18n.language;
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const showcaseCaseId = searchParams.get("showcase_case");
+  const showcaseTaskId = searchParams.get("showcase_task");
+  const officialKnowledgeId = searchParams.get("officialKnowledge");
   const modelProviderGuard = useChatModelProviderGuard();
   const isAdmin = AgentAppsAuth.getUserInfo()?.role === 'system-admin';
   const getGreeting = () => {
@@ -90,7 +100,14 @@ const NewChatPage = () => {
   const [isChatContent, setIsChatContent] = useState(false);
   const [chatConfig, setChatConfig] = useState<ChatConfig>({});
   const [chatLayoutMounted, setChatLayoutMounted] = useState(false);
-  const [runInBackground, setRunInBackground] = useState(readRunInBackgroundMode);
+  const requestedShowcaseEntry = parseShowcaseEntryType(
+    searchParams.get(SHOWCASE_ENTRY_QUERY_PARAM),
+  );
+  const [runInBackground, setRunInBackground] = useState(
+    requestedShowcaseEntry
+      ? requestedShowcaseEntry === "work"
+      : readRunInBackgroundMode,
+  );
   const [entryDefaults, setEntryDefaults] = useState<ChatEntryDefaults>(
     FALLBACK_CHAT_ENTRY_DEFAULTS,
   );
@@ -99,7 +116,7 @@ const NewChatPage = () => {
   >("loading");
   const entryDefaultsRef = useRef(entryDefaults);
   entryDefaultsRef.current = entryDefaults;
-  const freshEntryRef = useRef(!hasResumedConversation());
+  const freshEntryRef = useRef(Boolean(showcaseCaseId) || !hasResumedConversation());
   const [welcomeKnowledgeRefreshKey, setWelcomeKnowledgeRefreshKey] =
     useState(0);
   const newChatInputRef = useRef<ChatInputImperativeProps>(null);
@@ -107,7 +124,7 @@ const NewChatPage = () => {
   const [pendingConversationSettings, setPendingConversationSettings] =
     useState<ConversationRuntimeSettings>(() => ({
       ...resolveChatEntryDefault(
-        readRunInBackgroundMode(),
+        runInBackground,
         FALLBACK_CHAT_ENTRY_DEFAULTS,
       ).conversation_settings,
     }));
@@ -119,9 +136,19 @@ const NewChatPage = () => {
     retry: retryShowcaseCapability,
     status: showcaseCapabilityStatus,
   } = useFeaturedCapabilityBinding(showcaseCase);
-  const showcaseCaseId = searchParams.get("showcase_case");
-  const showcaseTaskId = searchParams.get("showcase_task");
-  const officialKnowledgeId = searchParams.get("officialKnowledge");
+  const applyShowcaseEntryMode = useCallback((entryType: ShowcaseEntryType) => {
+    const nextRunInBackground = entryType === "work";
+    setRunInBackground(nextRunInBackground);
+    persistRunInBackgroundMode(nextRunInBackground);
+    selectChatConversationFilter(nextRunInBackground ? "task" : "normal");
+  }, []);
+
+  useEffect(() => {
+    if (!showcaseCaseId || !requestedShowcaseEntry || !freshEntryRef.current) {
+      return;
+    }
+    applyShowcaseEntryMode(requestedShowcaseEntry);
+  }, [applyShowcaseEntryMode, requestedShowcaseEntry, showcaseCaseId]);
 
   const loadEntryDefaults = useCallback(async (signal?: AbortSignal) => {
     setEntryDefaultsStatus("loading");
@@ -262,6 +289,7 @@ const NewChatPage = () => {
     setInputValue("");
     getShowcaseCase(showcaseCaseId, { signal: controller.signal })
       .then((item) => {
+        applyShowcaseEntryMode(showcaseEntryType(item.type));
         setShowcaseCase(item);
         setInputValue(getShowcasePrompt(item, showcaseTaskId) || "");
       })
@@ -273,7 +301,7 @@ const NewChatPage = () => {
       });
 
     return () => controller.abort();
-  }, [locale, officialKnowledgeId, showcaseCaseId, showcaseTaskId]);
+  }, [applyShowcaseEntryMode, locale, officialKnowledgeId, showcaseCaseId, showcaseTaskId]);
 
   useEffect(() => {
     if (!officialKnowledgeId || showcaseCaseId) return;
@@ -332,6 +360,7 @@ const NewChatPage = () => {
 
   useEffect(() => {
     if (
+      !showcaseCaseId &&
       sessionStorage.getItem(CHAT_RESUME_CONVERSATION_KEY) &&
       !chatLayoutMounted
     ) {
@@ -339,7 +368,7 @@ const NewChatPage = () => {
       setChatLayoutMounted(true);
       setIsChatContent(true);
     }
-  }, [chatLayoutMounted]);
+  }, [chatLayoutMounted, showcaseCaseId]);
 
   useEffect(() => {
     const handleConversationSelect = (event: Event) => {

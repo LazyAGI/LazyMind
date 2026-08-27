@@ -854,6 +854,21 @@ const zhCN = {
     searchLabel: "搜索案例",
     searchPlaceholder: "搜索案例，例如：写作、PPT、图片",
     categoryLabel: "案例分类",
+    cardTagsLabel: "能力标签",
+    filters: {
+      all: "全部",
+      taskType: "任务类型",
+      capabilityType: "能力类型",
+      technologyType: "技术类型",
+      capability: {
+        chat: "聊天",
+        work: "任务",
+      },
+      technology: {
+        skill: "技能",
+        workflow: "工作流",
+      },
+    },
     loading: "正在加载案例…",
     loadError: "案例暂时无法加载，请稍后重试。",
     noMatches: "没有找到相关案例",

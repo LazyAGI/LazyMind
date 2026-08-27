@@ -1,0 +1,19 @@
+schema_version: 1
+
+# Homepage ordering is independent for the two chat entry modes. Unknown,
+# renamed, disabled, or misplaced capability IDs are ignored automatically;
+# unlisted capabilities keep their relative placement.order order afterward.
+home:
+  chat:
+    - novel-generator
+    - chat-eq-reply
+    - interview-simulator
+    - xiaohongshu-copywriter
+    - poster-design
+  work:
+    - ppt-workflow
+    - image-workflow
+    - academic_research_pipeline
+    - product_solution_delivery
+    - bid_tech_proposal_writer
+    - writer-workflow

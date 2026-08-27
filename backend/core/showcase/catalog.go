@@ -7,9 +7,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"image"
+	_ "image/gif"
 	_ "image/jpeg"
 	_ "image/png"
 	"io"
+	"mime"
 	"net/http"
 	"net/url"
 	"os"
@@ -27,7 +29,8 @@ import (
 )
 
 const (
-	CatalogSchemaVersion = 2
+	CatalogSchemaVersion  = 2
+	orderingSchemaVersion = 1
 
 	StatusDraft     = "draft"
 	StatusPublished = "published"
@@ -38,21 +41,27 @@ const (
 
 	ResultTemplateGeneric = "generic_report_v1"
 	ResultTemplateProduct = "product_report_v1"
+	ResultTemplateHTML    = "html_preview_v1"
 
-	maxAssetBytes      = 5 << 20
-	maxExperienceBytes = 20 << 20
+	maxImageAssetBytes = 10 << 20
+	maxHTMLAssetBytes  = 20 << 20
+	maxExperienceBytes = 64 << 20
+	htmlAssetMIME      = "text/html"
+	orderingFilename   = "ordering.yaml"
 )
 
 var (
-	slugPattern    = regexp.MustCompile(`^[a-z0-9]+(?:[a-z0-9_-]*[a-z0-9])?$`)
-	localePattern  = regexp.MustCompile(`^[a-z]{2}-[A-Z]{2}$`)
-	versionPattern = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$`)
+	slugPattern               = regexp.MustCompile(`^[a-z0-9]+(?:[a-z0-9_-]*[a-z0-9])?$`)
+	localePattern             = regexp.MustCompile(`^[a-z]{2}-[A-Z]{2}$`)
+	versionPattern            = regexp.MustCompile(`^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$`)
+	htmlAssetReferencePattern = regexp.MustCompile(`\{\{asset_url:([a-z0-9]+(?:[a-z0-9_-]*[a-z0-9])?)\}\}`)
 
-	allowedAssetRoles    = map[string]struct{}{"cover": {}, "result": {}}
-	allowedFeaturedTypes = map[string]struct{}{TypeChat: {}, TypeWork: {}, TypeWorkflow: {}}
-	allowedAssetMIMEs    = map[string]struct{}{"image/jpeg": {}, "image/png": {}, "image/webp": {}}
-	assetMIMEByExtension = map[string]string{".jpeg": "image/jpeg", ".jpg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
-	allowedOutputTypes   = map[string]struct{}{
+	allowedAssetRoles      = map[string]struct{}{"cover": {}, "result": {}}
+	allowedFeaturedTypes   = map[string]struct{}{TypeChat: {}, TypeWork: {}, TypeWorkflow: {}}
+	allowedImageAssetMIMEs = map[string]struct{}{"image/gif": {}, "image/jpeg": {}, "image/png": {}, "image/webp": {}}
+	allowedAssetMIMEs      = map[string]struct{}{"image/gif": {}, "image/jpeg": {}, "image/png": {}, "image/webp": {}, htmlAssetMIME: {}}
+	assetMIMEByExtension   = map[string]string{".gif": "image/gif", ".jpeg": "image/jpeg", ".jpg": "image/jpeg", ".png": "image/png", ".webp": "image/webp", ".html": htmlAssetMIME}
+	allowedOutputTypes     = map[string]struct{}{
 		"dashboard": {}, "document": {}, "images": {}, "meeting": {},
 		"report": {}, "slides": {}, "table": {}, "web": {},
 	}
@@ -109,21 +118,32 @@ type FeaturedPlacement struct {
 	Order   int  `yaml:"order" json:"order"`
 }
 
+type featuredOrdering struct {
+	SchemaVersion int                  `yaml:"schema_version"`
+	Home          featuredHomeOrdering `yaml:"home"`
+}
+
+type featuredHomeOrdering struct {
+	Chat []string `yaml:"chat"`
+	Work []string `yaml:"work"`
+}
+
 type FeaturedClassification struct {
 	Category string   `yaml:"category" json:"category"`
 	Tags     []string `yaml:"tags,omitempty" json:"tags,omitempty"`
 }
 
 type FeaturedAsset struct {
-	File       string `yaml:"file,omitempty" json:"-"`
-	Role       string `yaml:"role" json:"role"`
-	URL        string `yaml:"-" json:"url"`
-	SHA256     string `yaml:"-" json:"sha256"`
-	MIME       string `yaml:"-" json:"mime"`
-	Size       int64  `yaml:"-" json:"size"`
-	Width      int    `yaml:"-" json:"width"`
-	Height     int    `yaml:"-" json:"height"`
-	sourcePath string
+	File         string   `yaml:"file,omitempty" json:"-"`
+	Role         string   `yaml:"role" json:"role"`
+	URL          string   `yaml:"-" json:"url"`
+	SHA256       string   `yaml:"-" json:"sha256"`
+	MIME         string   `yaml:"-" json:"mime"`
+	Size         int64    `yaml:"-" json:"size"`
+	Width        int      `yaml:"-" json:"width"`
+	Height       int      `yaml:"-" json:"height"`
+	Dependencies []string `yaml:"-" json:"dependencies,omitempty"`
+	sourcePath   string
 }
 
 type FeaturedPresentation struct {
@@ -248,18 +268,127 @@ func LoadSourceDirectory(root string) ([]FeaturedDefinition, error) {
 		definitions = append(definitions, definition)
 	}
 	sort.Slice(definitions, func(i, j int) bool { return definitions[i].ID < definitions[j].ID })
+	ordering, err := loadFeaturedOrdering(root)
+	if err != nil {
+		return nil, err
+	}
+	applyFeaturedOrdering(definitions, ordering)
 	return definitions, nil
+}
+
+func loadFeaturedOrdering(root string) (featuredOrdering, error) {
+	filePath := filepath.Join(root, orderingFilename)
+	var ordering featuredOrdering
+	if _, err := os.Stat(filePath); err != nil {
+		if os.IsNotExist(err) {
+			return featuredOrdering{}, nil
+		}
+		return featuredOrdering{}, definitionFailure("stat %s: %v", filePath, err)
+	}
+	if err := decodeYAMLFile(filePath, &ordering); err != nil {
+		return featuredOrdering{}, err
+	}
+	if ordering.SchemaVersion != orderingSchemaVersion {
+		return featuredOrdering{}, definitionFailure("%s has unsupported schema %d", filePath, ordering.SchemaVersion)
+	}
+	return ordering, nil
+}
+
+func applyFeaturedOrdering(definitions []FeaturedDefinition, ordering featuredOrdering) {
+	applyFeaturedOrderLane(definitions, ordering.Home.Chat, func(definition FeaturedDefinition) bool {
+		return definition.Type == TypeChat
+	})
+	applyFeaturedOrderLane(definitions, ordering.Home.Work, func(definition FeaturedDefinition) bool {
+		return definition.Type == TypeWork || definition.Type == TypeWorkflow
+	})
+}
+
+func applyFeaturedOrderLane(
+	definitions []FeaturedDefinition,
+	preferred []string,
+	matchesLane func(FeaturedDefinition) bool,
+) {
+	if len(preferred) == 0 {
+		return
+	}
+	byID := make(map[string]int, len(definitions))
+	for index := range definitions {
+		byID[definitions[index].ID] = index
+	}
+	assigned := make(map[string]struct{}, len(preferred))
+	nextOrder := 1
+	for _, id := range preferred {
+		index, ok := byID[id]
+		if !ok || definitions[index].Status != StatusPublished || !definitions[index].Placement.Home || !matchesLane(definitions[index]) {
+			continue
+		}
+		if _, duplicate := assigned[id]; duplicate {
+			continue
+		}
+		definitions[index].Placement.Order = nextOrder
+		assigned[id] = struct{}{}
+		nextOrder++
+	}
+	fallback := make([]int, 0, len(definitions)-len(assigned))
+	for index := range definitions {
+		definition := definitions[index]
+		if definition.Status != StatusPublished || !definition.Placement.Home || !matchesLane(definition) {
+			continue
+		}
+		if _, configured := assigned[definition.ID]; !configured {
+			fallback = append(fallback, index)
+		}
+	}
+	sort.SliceStable(fallback, func(i, j int) bool {
+		left, right := definitions[fallback[i]], definitions[fallback[j]]
+		if left.Placement.Order == right.Placement.Order {
+			return left.ID < right.ID
+		}
+		return left.Placement.Order < right.Placement.Order
+	})
+	for _, index := range fallback {
+		definitions[index].Placement.Order = nextOrder
+		nextOrder++
+	}
 }
 
 func CompileCatalog(definitions []FeaturedDefinition, outputRoot string) (Catalog, error) {
 	catalog := Catalog{SchemaVersion: CatalogSchemaVersion}
 	for _, definition := range definitions {
-		for assetID, asset := range definition.Assets {
+		assetIDs := sortedAssetIDs(definition.Assets)
+		for _, assetID := range assetIDs {
+			asset := definition.Assets[assetID]
+			if asset.MIME == htmlAssetMIME {
+				continue
+			}
 			filename := asset.SHA256[:12] + "-" + filepath.Base(asset.File)
 			relative := path.Join("assets", definition.ID, definition.Version, filename)
 			destination := filepath.Join(outputRoot, filepath.FromSlash(relative))
 			if err := copyAsset(asset.sourcePath, destination); err != nil {
 				return Catalog{}, definitionFailure("copy featured asset %s/%s: %v", definition.ID, assetID, err)
+			}
+			asset.File = ""
+			asset.sourcePath = ""
+			asset.URL = "/showcase-assets/" + strings.TrimPrefix(relative, "assets/")
+			definition.Assets[assetID] = asset
+		}
+		for _, assetID := range assetIDs {
+			asset := definition.Assets[assetID]
+			if asset.MIME != htmlAssetMIME {
+				continue
+			}
+			body, err := materializeHTMLAsset(asset, definition.Assets)
+			if err != nil {
+				return Catalog{}, definitionFailure("compile featured HTML asset %s/%s: %v", definition.ID, assetID, err)
+			}
+			hash := sha256.Sum256(body)
+			asset.SHA256 = hex.EncodeToString(hash[:])
+			asset.Size = int64(len(body))
+			filename := asset.SHA256[:12] + "-" + filepath.Base(asset.File)
+			relative := path.Join("assets", definition.ID, definition.Version, filename)
+			destination := filepath.Join(outputRoot, filepath.FromSlash(relative))
+			if err := writeAsset(body, destination); err != nil {
+				return Catalog{}, definitionFailure("write featured HTML asset %s/%s: %v", definition.ID, assetID, err)
 			}
 			asset.File = ""
 			asset.sourcePath = ""
@@ -453,23 +582,31 @@ func inspectAssets(definition *FeaturedDefinition) error {
 		if err != nil {
 			return definitionFailure("asset %s: %v", assetID, err)
 		}
-		if len(body) == 0 || len(body) > maxAssetBytes {
-			return definitionFailure("asset %s size must be between 1 and %d bytes", assetID, maxAssetBytes)
+		mimeType, _, err := mime.ParseMediaType(http.DetectContentType(body[:min(len(body), 512)]))
+		if err != nil {
+			return definitionFailure("asset %s has invalid MIME: %v", assetID, err)
+		}
+		if _, ok := allowedAssetMIMEs[mimeType]; !ok {
+			return definitionFailure("asset %s has unsupported MIME %q", assetID, mimeType)
+		}
+		limit := assetSizeLimit(mimeType)
+		if len(body) == 0 || int64(len(body)) > limit {
+			return definitionFailure("asset %s size must be between 1 and %d bytes", assetID, limit)
 		}
 		total += int64(len(body))
 		if total > maxExperienceBytes {
 			return definitionFailure("featured assets exceed %d bytes", maxExperienceBytes)
 		}
-		mimeType := http.DetectContentType(body[:min(len(body), 512)])
-		if _, ok := allowedAssetMIMEs[mimeType]; !ok {
-			return definitionFailure("asset %s has unsupported MIME %q", assetID, mimeType)
-		}
 		if assetMIMEByExtension[strings.ToLower(filepath.Ext(relative))] != mimeType {
 			return definitionFailure("asset %s file extension does not match MIME %q", assetID, mimeType)
 		}
-		config, _, err := image.DecodeConfig(bytes.NewReader(body))
-		if err != nil || config.Width < 64 || config.Height < 64 || config.Width > 8192 || config.Height > 8192 {
-			return definitionFailure("asset %s has invalid image dimensions", assetID)
+		if isImageAssetMIME(mimeType) {
+			config, _, err := image.DecodeConfig(bytes.NewReader(body))
+			if err != nil || config.Width < 64 || config.Height < 64 || config.Width > 8192 || config.Height > 8192 {
+				return definitionFailure("asset %s has invalid image dimensions", assetID)
+			}
+			asset.Width = config.Width
+			asset.Height = config.Height
 		}
 		hash := sha256.Sum256(body)
 		asset.File = relative
@@ -477,11 +614,81 @@ func inspectAssets(definition *FeaturedDefinition) error {
 		asset.SHA256 = hex.EncodeToString(hash[:])
 		asset.MIME = mimeType
 		asset.Size = int64(len(body))
-		asset.Width = config.Width
-		asset.Height = config.Height
+		definition.Assets[assetID] = asset
+	}
+	for assetID, asset := range definition.Assets {
+		if asset.MIME != htmlAssetMIME {
+			continue
+		}
+		body, err := os.ReadFile(asset.sourcePath)
+		if err != nil {
+			return definitionFailure("asset %s: %v", assetID, err)
+		}
+		seen := make(map[string]struct{})
+		for _, match := range htmlAssetReferencePattern.FindAllSubmatch(body, -1) {
+			dependencyID := string(match[1])
+			dependency, ok := definition.Assets[dependencyID]
+			if !ok {
+				return definitionFailure("HTML asset %s references missing asset %q", assetID, dependencyID)
+			}
+			if dependency.MIME == htmlAssetMIME || dependency.Role != "result" {
+				return definitionFailure("HTML asset %s dependency %q must be a non-HTML result asset", assetID, dependencyID)
+			}
+			if _, exists := seen[dependencyID]; !exists {
+				asset.Dependencies = append(asset.Dependencies, dependencyID)
+				seen[dependencyID] = struct{}{}
+			}
+		}
+		withoutValidReferences := htmlAssetReferencePattern.ReplaceAll(body, nil)
+		if bytes.Contains(withoutValidReferences, []byte("{{asset_url:")) {
+			return definitionFailure("HTML asset %s contains a malformed asset reference", assetID)
+		}
+		sort.Strings(asset.Dependencies)
 		definition.Assets[assetID] = asset
 	}
 	return nil
+}
+
+func sortedAssetIDs(assets map[string]FeaturedAsset) []string {
+	ids := make([]string, 0, len(assets))
+	for assetID := range assets {
+		ids = append(ids, assetID)
+	}
+	sort.Strings(ids)
+	return ids
+}
+
+func materializeHTMLAsset(asset FeaturedAsset, assets map[string]FeaturedAsset) ([]byte, error) {
+	body, err := os.ReadFile(asset.sourcePath)
+	if err != nil {
+		return nil, err
+	}
+	for _, dependencyID := range asset.Dependencies {
+		dependency, ok := assets[dependencyID]
+		if !ok || dependency.URL == "" {
+			return nil, definitionFailure("dependency %q has no compiled URL", dependencyID)
+		}
+		body = bytes.ReplaceAll(body, []byte("{{asset_url:"+dependencyID+"}}"), []byte(dependency.URL))
+	}
+	if match := htmlAssetReferencePattern.FindSubmatch(body); match != nil {
+		return nil, definitionFailure("unresolved asset reference %q", string(match[1]))
+	}
+	if int64(len(body)) > maxHTMLAssetBytes {
+		return nil, definitionFailure("compiled HTML exceeds %d bytes", maxHTMLAssetBytes)
+	}
+	return body, nil
+}
+
+func assetSizeLimit(mimeType string) int64 {
+	if mimeType == htmlAssetMIME {
+		return maxHTMLAssetBytes
+	}
+	return maxImageAssetBytes
+}
+
+func isImageAssetMIME(mimeType string) bool {
+	_, ok := allowedImageAssetMIMEs[mimeType]
+	return ok
 }
 
 func safeAssetPath(value string) (string, error) {
@@ -519,15 +726,21 @@ func resolveExperienceAssets(definition *FeaturedDefinition) error {
 		}
 		presentation.Card.ImageURL = cover.URL
 		for index := range tasks {
-			assetID := tasks[index].Result.ImageAsset
-			if assetID == "" {
-				continue
+			result := &tasks[index].Result
+			if result.ImageAsset != "" {
+				asset, ok := definition.Assets[result.ImageAsset]
+				if !ok {
+					return nil, definitionFailure("featured Skill %s task %s references missing result asset %q", definition.ID, tasks[index].ID, result.ImageAsset)
+				}
+				result.ImageURL = asset.URL
 			}
-			asset, ok := definition.Assets[assetID]
-			if !ok {
-				return nil, definitionFailure("featured Skill %s task %s references missing result asset %q", definition.ID, tasks[index].ID, assetID)
+			if result.HTMLAsset != "" {
+				asset, ok := definition.Assets[result.HTMLAsset]
+				if !ok {
+					return nil, definitionFailure("featured Skill %s task %s references missing HTML asset %q", definition.ID, tasks[index].ID, result.HTMLAsset)
+				}
+				result.HTMLURL = asset.URL
 			}
-			tasks[index].Result.ImageURL = asset.URL
 		}
 		return tasks, nil
 	}
@@ -606,9 +819,23 @@ func validateDefinition(definition FeaturedDefinition, compiled bool) error {
 		if _, ok := allowedAssetRoles[asset.Role]; !ok {
 			return definitionFailure("asset %s has invalid role %q", assetID, asset.Role)
 		}
+		if asset.MIME != htmlAssetMIME && len(asset.Dependencies) != 0 {
+			return definitionFailure("non-HTML asset %s must not define dependencies", assetID)
+		}
+		seenDependencies := make(map[string]struct{}, len(asset.Dependencies))
+		for _, dependencyID := range asset.Dependencies {
+			dependency, ok := definition.Assets[dependencyID]
+			if !ok || dependency.Role != "result" || dependency.MIME == htmlAssetMIME {
+				return definitionFailure("HTML asset %s has invalid dependency %q", assetID, dependencyID)
+			}
+			if _, duplicate := seenDependencies[dependencyID]; duplicate {
+				return definitionFailure("HTML asset %s has duplicate dependency %q", assetID, dependencyID)
+			}
+			seenDependencies[dependencyID] = struct{}{}
+		}
 		if compiled {
 			expectedURLPrefix := "/showcase-assets/" + definition.ID + "/" + definition.Version + "/"
-			if asset.File != "" || !strings.HasPrefix(asset.URL, expectedURLPrefix) || path.Clean(asset.URL) != asset.URL || strings.Contains(asset.URL, `\`) || len(asset.SHA256) != sha256.Size*2 || asset.Size <= 0 || asset.Size > maxAssetBytes || asset.Width <= 0 || asset.Height <= 0 {
+			if asset.File != "" || !strings.HasPrefix(asset.URL, expectedURLPrefix) || path.Clean(asset.URL) != asset.URL || strings.Contains(asset.URL, `\`) || len(asset.SHA256) != sha256.Size*2 || asset.Size <= 0 {
 				return definitionFailure("compiled asset %s is incomplete", assetID)
 			}
 			if _, err := hex.DecodeString(asset.SHA256); err != nil {
@@ -617,8 +844,18 @@ func validateDefinition(definition FeaturedDefinition, compiled bool) error {
 			if _, ok := allowedAssetMIMEs[asset.MIME]; !ok {
 				return definitionFailure("compiled asset %s has invalid MIME %q", assetID, asset.MIME)
 			}
+			if asset.Size > assetSizeLimit(asset.MIME) {
+				return definitionFailure("compiled asset %s exceeds its size limit", assetID)
+			}
 			if assetMIMEByExtension[strings.ToLower(path.Ext(asset.URL))] != asset.MIME {
 				return definitionFailure("compiled asset %s URL extension does not match MIME %q", assetID, asset.MIME)
+			}
+			if isImageAssetMIME(asset.MIME) {
+				if asset.Width < 64 || asset.Height < 64 || asset.Width > 8192 || asset.Height > 8192 {
+					return definitionFailure("compiled asset %s has invalid image dimensions", assetID)
+				}
+			} else if asset.Width != 0 || asset.Height != 0 {
+				return definitionFailure("compiled non-image asset %s has image dimensions", assetID)
 			}
 			compiledAssetBytes += asset.Size
 			if compiledAssetBytes > maxExperienceBytes {
@@ -686,6 +923,9 @@ func validateAssetUsage(definition FeaturedDefinition) error {
 		if task.Result.ImageAsset != "" {
 			used[task.Result.ImageAsset] = struct{}{}
 		}
+		if task.Result.HTMLAsset != "" {
+			used[task.Result.HTMLAsset] = struct{}{}
+		}
 	}
 	for _, content := range definition.Locales {
 		used[content.Presentation.Card.CoverAsset] = struct{}{}
@@ -693,6 +933,18 @@ func validateAssetUsage(definition FeaturedDefinition) error {
 			if task.Result.ImageAsset != "" {
 				used[task.Result.ImageAsset] = struct{}{}
 			}
+			if task.Result.HTMLAsset != "" {
+				used[task.Result.HTMLAsset] = struct{}{}
+			}
+		}
+	}
+	for assetID := range used {
+		asset, ok := definition.Assets[assetID]
+		if !ok {
+			continue
+		}
+		for _, dependencyID := range asset.Dependencies {
+			used[dependencyID] = struct{}{}
 		}
 	}
 	for assetID := range definition.Assets {
@@ -711,7 +963,7 @@ func validateExperience(presentation FeaturedPresentation, tasks []FeaturedTask,
 	if _, ok := allowedOutputTypes[card.OutputType]; !ok {
 		return definitionFailure("unsupported output_type %q", card.OutputType)
 	}
-	if asset, ok := assets[card.CoverAsset]; !ok || asset.Role != "cover" {
+	if asset, ok := assets[card.CoverAsset]; !ok || asset.Role != "cover" || !isImageAssetMIME(asset.MIME) {
 		return definitionFailure("cover_asset %q must reference a cover asset", card.CoverAsset)
 	}
 	if compiled && card.ImageURL != assets[card.CoverAsset].URL {
@@ -751,7 +1003,7 @@ func validateExperience(presentation FeaturedPresentation, tasks []FeaturedTask,
 }
 
 func validateResult(taskID string, result ShowcaseCaseResult, assets map[string]FeaturedAsset, compiled bool) error {
-	if result.Template != ResultTemplateGeneric && result.Template != ResultTemplateProduct {
+	if result.Template != ResultTemplateGeneric && result.Template != ResultTemplateProduct && result.Template != ResultTemplateHTML {
 		return definitionFailure("task %s has unsupported result template %q", taskID, result.Template)
 	}
 	if result.Eyebrow == "" || result.Title == "" || result.Summary == "" {
@@ -759,18 +1011,36 @@ func validateResult(taskID string, result ShowcaseCaseResult, assets map[string]
 	}
 	if result.ImageAsset != "" {
 		asset, ok := assets[result.ImageAsset]
-		if !ok || asset.Role != "result" {
+		if !ok || asset.Role != "result" || !isImageAssetMIME(asset.MIME) {
 			return definitionFailure("task %s image_asset %q must reference a result asset", taskID, result.ImageAsset)
 		}
 		if compiled && result.ImageURL != asset.URL {
 			return definitionFailure("task %s compiled result image URL does not match asset registry", taskID)
 		}
 	}
+	if result.HTMLAsset != "" {
+		asset, ok := assets[result.HTMLAsset]
+		if !ok || asset.Role != "result" || asset.MIME != htmlAssetMIME {
+			return definitionFailure("task %s html_asset %q must reference an HTML result asset", taskID, result.HTMLAsset)
+		}
+		if compiled && result.HTMLURL != asset.URL {
+			return definitionFailure("task %s compiled HTML URL does not match asset registry", taskID)
+		}
+	}
 	if result.Template == ResultTemplateGeneric {
-		if len(result.Highlights) == 0 || result.ProductReport != nil {
-			return definitionFailure("task %s generic result requires highlights and no product_report", taskID)
+		if len(result.Highlights) == 0 || result.ProductReport != nil || result.HTMLAsset != "" {
+			return definitionFailure("task %s generic result requires highlights and no product_report or html_asset", taskID)
 		}
 		return nil
+	}
+	if result.Template == ResultTemplateHTML {
+		if result.HTMLAsset == "" || result.ImageAsset != "" || len(result.Highlights) != 0 || result.ProductReport != nil {
+			return definitionFailure("task %s HTML result requires html_asset without generic or product fields", taskID)
+		}
+		return nil
+	}
+	if result.HTMLAsset != "" {
+		return definitionFailure("task %s product result must not define html_asset", taskID)
 	}
 	if result.ProductReport == nil || len(result.ProductReport.Metrics) == 0 || len(result.ProductReport.Sections) == 0 || result.ProductReport.Deliverables == "" {
 		return definitionFailure("task %s product result is incomplete", taskID)
@@ -829,6 +1099,13 @@ func copyAsset(source, destination string) error {
 	}
 	body, err := os.ReadFile(source)
 	if err != nil {
+		return err
+	}
+	return os.WriteFile(destination, body, 0o644)
+}
+
+func writeAsset(body []byte, destination string) error {
+	if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
 		return err
 	}
 	return os.WriteFile(destination, body, 0o644)

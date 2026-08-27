@@ -228,6 +228,81 @@ describe("NewChatPage featured templates", () => {
     });
   });
 
+  it("opens a work demo in New task mode even when Quick Q&A was active", async () => {
+    window.sessionStorage.setItem("chat_new_run_in_background", "0");
+    mocks.getShowcaseCase.mockResolvedValue({
+      ...featuredCase,
+      id: "ppt-workflow",
+      type: "workflow",
+      prompt: "生成一份演示文稿",
+    });
+
+    render(
+      <MemoryRouter initialEntries={[
+        "/agent/chat/home?showcase_case=ppt-workflow&showcase_entry=work",
+      ]}>
+        <NewChatPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "chat-input" })).toHaveValue(
+        "生成一份演示文稿",
+      );
+      expect(mocks.latestChatInputProps.runInBackground).toBe(true);
+      expect(mocks.latestChatInputProps.initialConversationSettings).toEqual(
+        entryDefaults.new_task.conversation_settings,
+      );
+    });
+    expect(window.sessionStorage.getItem("chat_new_run_in_background")).toBe("1");
+  });
+
+  it("opens a chat demo in Quick Q&A mode even when New task was active", async () => {
+    window.sessionStorage.setItem("chat_new_run_in_background", "1");
+    mocks.getShowcaseCase.mockResolvedValue(featuredCase);
+
+    render(
+      <MemoryRouter initialEntries={[
+        "/agent/chat/home?showcase_case=aiProduct&showcase_entry=chat",
+      ]}>
+        <NewChatPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "chat-input" })).toHaveValue(
+        featuredCase.prompt,
+      );
+      expect(mocks.latestChatInputProps.runInBackground).toBe(false);
+      expect(mocks.latestChatInputProps.initialConversationSettings).toEqual(
+        entryDefaults.quick_question.conversation_settings,
+      );
+    });
+    expect(window.sessionStorage.getItem("chat_new_run_in_background")).toBe("0");
+  });
+
+  it("derives the correct mode from the case type for legacy links", async () => {
+    window.sessionStorage.setItem("chat_new_run_in_background", "0");
+    mocks.getShowcaseCase.mockResolvedValue({
+      ...featuredCase,
+      id: "legacy-workflow",
+      type: "workflow",
+    });
+
+    render(
+      <MemoryRouter initialEntries={[
+        "/agent/chat/home?showcase_case=legacy-workflow",
+      ]}>
+        <NewChatPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(mocks.latestChatInputProps.runInBackground).toBe(true);
+      expect(window.sessionStorage.getItem("chat_new_run_in_background")).toBe("1");
+    });
+  });
+
   it("blocks new conversations until failed defaults can be reloaded", async () => {
     mocks.getChatSettings.mockRejectedValueOnce(new Error("offline"));
     window.sessionStorage.setItem("chat_new_run_in_background", "1");

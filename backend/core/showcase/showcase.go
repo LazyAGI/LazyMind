@@ -51,6 +51,8 @@ type ShowcaseCaseResult struct {
 	Summary       string                     `yaml:"summary" json:"summary"`
 	ImageAsset    string                     `yaml:"image_asset,omitempty" json:"image_asset,omitempty"`
 	ImageURL      string                     `yaml:"-" json:"image_url,omitempty"`
+	HTMLAsset     string                     `yaml:"html_asset,omitempty" json:"html_asset,omitempty"`
+	HTMLURL       string                     `yaml:"-" json:"html_url,omitempty"`
 	Highlights    []string                   `yaml:"highlights,omitempty" json:"highlights,omitempty"`
 	ProductReport *ShowcaseCaseProductReport `yaml:"product_report,omitempty" json:"product_report,omitempty"`
 }

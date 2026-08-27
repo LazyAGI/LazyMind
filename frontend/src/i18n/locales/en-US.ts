@@ -880,6 +880,21 @@ const enUS = {
     searchLabel: "Search cases",
     searchPlaceholder: "Search cases, for example: writing, PPT, images",
     categoryLabel: "Case categories",
+    cardTagsLabel: "Capability tags",
+    filters: {
+      all: "All",
+      taskType: "Task type",
+      capabilityType: "Capability type",
+      technologyType: "Technology type",
+      capability: {
+        chat: "Chat",
+        work: "Task",
+      },
+      technology: {
+        skill: "Skill",
+        workflow: "Workflow",
+      },
+    },
     loading: "Loading cases…",
     loadError: "Cases are temporarily unavailable. Please try again later.",
     noMatches: "No related cases found",
