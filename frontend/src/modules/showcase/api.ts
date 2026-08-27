@@ -22,6 +22,17 @@ export type {
   ShowcaseCaseTask,
 };
 
+export type ShowcaseEntryType = "chat" | "work";
+
+export function matchesShowcaseEntryType(
+  capabilityType: string,
+  entryType: ShowcaseEntryType,
+) {
+  return entryType === "chat"
+    ? capabilityType === "chat"
+    : capabilityType === "work" || capabilityType === "workflow";
+}
+
 export async function listShowcaseCases(
   params: { keyword?: string; category?: string } = {},
   options?: RawAxiosRequestConfig,

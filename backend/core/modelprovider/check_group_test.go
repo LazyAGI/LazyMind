@@ -184,6 +184,7 @@ func TestCreateGroupVerifiesSubmittedAPIKeyBeforeSaving(t *testing.T) {
 		&orm.DefaultModelProvider{},
 		&orm.UserModelProvider{},
 		&orm.UserModelProviderGroup{},
+		&orm.UserSelectedModel{},
 	); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}

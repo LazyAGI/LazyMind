@@ -146,6 +146,10 @@ def _resolve_source_file(path: str, user_id: str, conversation_id: str) -> str:
     return source
 
 
+def _file_markdown(filename: str, artifact_id: str) -> str:
+    return f'[{filename}](file_id:{artifact_id})'
+
+
 def save_chat_artifact(
     filename: str,
     content: Any,
@@ -157,6 +161,11 @@ def save_chat_artifact(
     Text and JSON values are stored directly. For any other generated attachment, use
     ``content_type='file'`` and pass its main-Agent workspace path as ``content``. Call
     once for each requested artifact. This does not create a SubAgent task.
+
+    After a successful call, mention the saved file in the final answer by copying
+    ``file_markdown`` verbatim so the filename appears as a downloadable Markdown
+    link, for example ``[notes.txt](file_id:...)``. Do not paste workspace paths,
+    unsigned URLs, or a bare filename without that link.
 
     Args:
         filename: Download filename, for example ``notes.txt``. Directory paths are rejected.
@@ -199,6 +208,7 @@ def save_chat_artifact(
         'artifact_id': artifact_id,
         'filename': safe_name,
         'content_type': normalized_type,
+        'file_markdown': _file_markdown(safe_name, artifact_id),
         'message': f"Saved downloadable artifact '{safe_name}'.",
     }
 
@@ -252,6 +262,7 @@ def save_chat_file(
         'filename': filename,
         'content_type': 'file',
         'size': size,
+        'file_markdown': _file_markdown(filename, artifact_id),
         'message': f"Saved downloadable artifact '{filename}'.",
     }
 

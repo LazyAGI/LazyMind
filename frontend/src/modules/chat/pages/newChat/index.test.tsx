@@ -37,6 +37,7 @@ const entryDefaults = {
 };
 
 const featuredCase: ShowcaseCase = {
+  provider: "SkillHub",
   builtin_skill_uid: "builtin.product-design",
   id: "aiProduct",
   category: "product",
@@ -158,8 +159,8 @@ vi.mock("@/modules/chat/store/chatThink", () => ({
 vi.mock("@/modules/showcase/api", () => ({
   getShowcaseCase: mocks.getShowcaseCase,
 }));
-vi.mock("@/modules/showcase/useFeaturedSkillBinding", () => ({
-  useFeaturedSkillBinding: () => ({
+vi.mock("@/modules/showcase/useFeaturedCapabilityBinding", () => ({
+  useFeaturedCapabilityBinding: () => ({
     mentions: [],
     retry: vi.fn(),
     status: "ready",

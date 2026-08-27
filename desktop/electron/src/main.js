@@ -1,9 +1,10 @@
-const { app, BrowserWindow, ipcMain, shell, dialog, clipboard, Menu, Tray, session } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, dialog, clipboard, Menu, Tray, session, net } = require("electron");
 const { spawn, execFile } = require("node:child_process");
 const { createHmac, randomBytes, randomUUID } = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const { resolveWindowsDesktopPaths } = require("./desktop-paths");
+const { resolveRuntimeLocalFile } = require("./runtime-local-file");
 const {
   desktopRuntimeReady,
   isRuntimeOwnershipConflict,
@@ -74,6 +75,8 @@ const rendererReadyTimeoutMs = 30 * 1000;
 const runtimeOwnershipHandoffTimeoutMs = 30 * 1000;
 const agentHostRestartMaxDelayMs = 30 * 1000;
 const agentHostStableAfterMs = 60 * 1000;
+const agentConnectorActionTimeoutMs = 15 * 1000;
+const agentConnectorLoginTimeoutMs = 125 * 1000;
 const macInstallationWarmupMarker = macWarmupMarkerPath(app.getPath("userData"));
 const startupMetricsHistoryPath = path.join(desktopLogsDir, "startup-metrics.jsonl");
 const startupMetricsRecorder = createStartupMetricsRecorder({
@@ -454,8 +457,9 @@ function runSidecar(command, extra = [], options = {}) {
 
 function runAgentConnector(agent, action) {
   const allowedActions = {
-    codex: new Set(["connect", "status", "disconnect"]),
-    cursor: new Set(["connect", "status", "disconnect"]),
+    all: new Set(["status"]),
+    codex: new Set(["connect", "status", "disconnect", "login"]),
+    cursor: new Set(["connect", "status", "disconnect", "login"]),
     workbuddy: new Set(["connect", "status", "disconnect"]),
     traework: new Set(["connect", "status", "disconnect"]),
     "deepseek-harness": new Set(["connect", "status", "disconnect"]),
@@ -463,11 +467,42 @@ function runAgentConnector(agent, action) {
   if (!allowedActions[agent]?.has(action)) {
     return Promise.reject(new Error(`Unsupported external Agent action: ${agent}/${action}`));
   }
-  const args = ["internal", "agent", agent, action];
+  return runConnectorJSON(
+    ["internal", "agent", agent, action],
+    action === "login" ? agentConnectorLoginTimeoutMs : agentConnectorActionTimeoutMs,
+  );
+}
+
+async function runExecutorConnector(provider, action) {
+  const allowedActions = {
+    all: new Set(["status"]),
+    codex: new Set(["status", "enable", "disable"]),
+    cursor: new Set(["status", "enable", "disable"]),
+    workbuddy: new Set(["status", "enable", "disable"]),
+  };
+  if (!allowedActions[provider]?.has(action)) {
+    throw new Error(`Unsupported external executor action: ${provider}/${action}`);
+  }
+  const result = await runConnectorJSON(
+    ["internal", "executor", provider, action],
+    agentConnectorActionTimeoutMs,
+  );
+  if (action !== "status") {
+    agentHostRestartAttempts = 0;
+    if (agentHostProcess) {
+      agentHostProcess.kill();
+    } else {
+      startAgentHost();
+    }
+  }
+  return result;
+}
+
+function runConnectorJSON(args, timeout) {
   return new Promise((resolve, reject) => {
     execFile(agentConnectorPath, args, {
       env: sidecarEnv(),
-      timeout: 60_000,
+      timeout,
       windowsHide: isWindows,
     }, (error, stdout, stderr) => {
       if (error) {
@@ -581,15 +616,53 @@ async function runInstallerWarmup() {
   });
 }
 
+async function createInstallationWarmupWindow() {
+  const isChinese = app.getLocale().toLowerCase().startsWith("zh");
+  updateStartupState({
+    status: "starting",
+    phase: isChinese ? "首次启动准备" : "First-launch preparation",
+    message: isChinese
+      ? "正在准备本地运行环境，完成后将自动打开 LazyMind…"
+      : "Preparing the local runtime. LazyMind will open automatically when it is ready…",
+    error: null,
+  });
+  appendStartupLog("desktop", "showing first-launch preparation window");
+  const window = new BrowserWindow(browserWindowOptions(true));
+  startupWindow = window;
+  window.once("closed", () => {
+    if (startupWindow === window) {
+      startupWindow = undefined;
+    }
+  });
+  attachManagedClose(window);
+  await window.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(loadingHTML())}`);
+  broadcastStartupDiagnostics();
+  return window;
+}
+
+function disposeInstallationWarmupWindow(window) {
+  if (window && !window.isDestroyed()) {
+    window.destroy();
+  }
+  if (startupWindow === window) {
+    startupWindow = undefined;
+  }
+}
+
 async function runMacInstallationWarmupIfNeeded() {
   const version = app.getVersion();
   if (!isMac || !isPackaged || macWarmupCompleted(macInstallationWarmupMarker, version)) {
     return;
   }
   startupMetricsRecorder.mark("macWarmupStarted");
-  await runInstallerWarmup();
-  markMacWarmupCompleted(macInstallationWarmupMarker, version);
-  startupMetricsRecorder.mark("macWarmupCompleted");
+  const warmupWindow = await createInstallationWarmupWindow();
+  try {
+    await runInstallerWarmup();
+    markMacWarmupCompleted(macInstallationWarmupMarker, version);
+    startupMetricsRecorder.mark("macWarmupCompleted");
+  } finally {
+    disposeInstallationWarmupWindow(warmupWindow);
+  }
 }
 
 function startGuard() {
@@ -1527,9 +1600,10 @@ ipcMain.on("lazymind:renderer-ready", (event) => {
 });
 
 ipcMain.handle("lazymind:runtimeStatus", () => readStatus());
-ipcMain.handle("lazymind:agentIntegrationStatus", (_event, agent) => runAgentConnector(agent, "status"));
+ipcMain.handle("lazymind:agentIntegrationStatuses", () => runAgentConnector("all", "status"));
 ipcMain.handle("lazymind:agentIntegrationAction", (_event, agent, action) => runAgentConnector(agent, action));
-ipcMain.handle("lazymind:codexIntegrationAction", (_event, action) => runAgentConnector("codex", action));
+ipcMain.handle("lazymind:executorIntegrationPolicies", () => runExecutorConnector("all", "status"));
+ipcMain.handle("lazymind:executorIntegrationAction", (_event, provider, action) => runExecutorConnector(provider, action));
 ipcMain.handle("lazymind:restartRuntime", async () => {
   await runSidecar("down");
   startRuntime();
@@ -1579,6 +1653,141 @@ ipcMain.handle("lazymind:copyStartupLogs", () => {
   clipboard.writeText(text);
   return true;
 });
+function safeArtifactFilename(name) {
+  const base = path.basename(String(name || "").replace(/[\\/]/g, "_").trim());
+  return base || "download";
+}
+
+function uniqueFilePath(dir, filename) {
+  const safe = safeArtifactFilename(filename);
+  const ext = path.extname(safe);
+  const stem = path.basename(safe, ext);
+  let dest = path.join(dir, safe);
+  let index = 1;
+  while (fs.existsSync(dest)) {
+    dest = path.join(dir, `${stem} (${index})${ext}`);
+    index += 1;
+  }
+  return dest;
+}
+
+function toNodeBuffer(data) {
+  if (data == null) {
+    return null;
+  }
+  if (Buffer.isBuffer(data)) {
+    return data;
+  }
+  if (data instanceof Uint8Array) {
+    return Buffer.from(data);
+  }
+  if (data instanceof ArrayBuffer) {
+    return Buffer.from(data);
+  }
+  return null;
+}
+
+function artifactSearchRoots() {
+  const roots = [];
+  const dataDir = currentDataDir();
+  if (dataDir) {
+    roots.push(dataDir);
+  }
+  const composeDataDir = repoRoot ? path.join(repoRoot, "data") : "";
+  if (composeDataDir && composeDataDir !== dataDir) {
+    roots.push(composeDataDir);
+  }
+  return roots;
+}
+
+async function resolveExistingArtifactPath(source) {
+  try {
+    await readStatus();
+  } catch {
+    // Keep local-file actions usable even when status refresh fails.
+  }
+  for (const root of artifactSearchRoots()) {
+    const localPath = resolveRuntimeLocalFile(root, source);
+    if (!localPath) {
+      continue;
+    }
+    try {
+      const info = await fs.promises.stat(localPath);
+      if (info.isFile()) {
+        return localPath;
+      }
+    } catch {
+      // Try the next known data root.
+    }
+  }
+  return "";
+}
+
+async function materializeArtifactFile(payload, destPath) {
+  const buffer = toNodeBuffer(payload?.data);
+  if (buffer) {
+    await fs.promises.mkdir(path.dirname(destPath), { recursive: true });
+    await fs.promises.writeFile(destPath, buffer);
+    return destPath;
+  }
+  const source = String(payload?.source || "").trim();
+  const localPath = await resolveExistingArtifactPath(source);
+  if (localPath) {
+    if (path.resolve(localPath) === path.resolve(destPath)) {
+      return destPath;
+    }
+    await fs.promises.mkdir(path.dirname(destPath), { recursive: true });
+    await fs.promises.copyFile(localPath, destPath);
+    return destPath;
+  }
+  if (!/^https?:\/\//i.test(source)) {
+    throw new Error("Artifact file is not available locally");
+  }
+  const response = await net.fetch(source);
+  if (!response.ok) {
+    throw new Error(`Failed to download artifact file (${response.status})`);
+  }
+  const bytes = Buffer.from(await response.arrayBuffer());
+  await fs.promises.mkdir(path.dirname(destPath), { recursive: true });
+  await fs.promises.writeFile(destPath, bytes);
+  return destPath;
+}
+
+ipcMain.handle("lazymind:showItemInFolder", async (_event, payload) => {
+  const source = typeof payload === "string" ? payload : String(payload?.source || "");
+  const localPath = await resolveExistingArtifactPath(source);
+  if (localPath) {
+    shell.showItemInFolder(localPath);
+    return { ok: true, path: localPath };
+  }
+  const dest = path.join(
+    app.getPath("temp"),
+    "lazymind-artifacts",
+    safeArtifactFilename(typeof payload === "object" ? payload?.filename : ""),
+  );
+  await materializeArtifactFile(payload, dest);
+  shell.showItemInFolder(dest);
+  return { ok: true, path: dest };
+});
+
+ipcMain.handle("lazymind:saveFileAs", async (_event, payload) => {
+  const filename = safeArtifactFilename(payload?.filename);
+  const result = await dialog.showSaveDialog(activeWindow(), {
+    defaultPath: filename,
+  });
+  if (result.canceled || !result.filePath) {
+    return { canceled: true };
+  }
+  await materializeArtifactFile(payload, result.filePath);
+  return { ok: true, path: result.filePath };
+});
+
+ipcMain.handle("lazymind:downloadFile", async (_event, payload) => {
+  const dest = uniqueFilePath(app.getPath("downloads"), payload?.filename);
+  await materializeArtifactFile(payload, dest);
+  return { ok: true, path: dest };
+});
+
 ipcMain.handle("lazymind:exportDiagnostics", async () => {
   const status = currentStatus || await readStatus();
   const out = path.join(desktopLogsDir, "desktop-diagnostics.json");

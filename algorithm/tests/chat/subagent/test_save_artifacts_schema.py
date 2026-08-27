@@ -87,3 +87,44 @@ def test_ppt_preview_slots_reject_direct_model_saves():
             _save_artifact(
                 'preview_html', '<html></html>', content_type='text',
             )
+
+
+def test_package_publisher_can_emit_pre_resolved_list_index():
+    ctx = MagicMock()
+    ctx.params = {'workflow_runtime': {'publisher_owned_slots': ['preview_html']}}
+    ctx.output_slots = ['preview_html']
+    ctx.next_artifact_seq.return_value = 1
+
+    with patch(
+        'lazymind.chat.engine.subagent.tools.require_context',
+        return_value=ctx,
+    ):
+        result = _save_artifact(
+            'preview_html',
+            '<html></html>',
+            content_type='text',
+            internal_publish=True,
+            publisher_list_index=3,
+        )
+
+    assert result['status'] == 'ok'
+    emitted = ctx.emit.call_args.args[0]
+    assert emitted['value']['list_index'] == 3
+
+
+def test_model_facing_save_cannot_set_publisher_list_index():
+    ctx = MagicMock()
+    ctx.params = {'workflow_runtime': {}}
+    ctx.output_slots = ['result']
+
+    with patch(
+        'lazymind.chat.engine.subagent.tools.require_context',
+        return_value=ctx,
+    ):
+        with pytest.raises(ToolExecutionError, match='reserved for package publisher'):
+            _save_artifact(
+                'result',
+                'text',
+                internal_publish=False,
+                publisher_list_index=0,
+            )

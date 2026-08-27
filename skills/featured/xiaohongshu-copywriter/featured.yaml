@@ -1,0 +1,100 @@
+schema_version: 2
+id: xiaohongshu-copywriter
+type: chat
+version: 1.0.0
+status: published
+default_locale: zh-CN
+provider: SkillHub
+
+skill:
+  source_url: featured/xiaohongshu-copywriter/skill
+  category: writing
+  required_version: 1.0.0
+
+placement:
+  home: true
+  gallery: true
+  order: 15
+
+classification:
+  category: 内容创作
+  tags:
+    - 小红书
+    - 种草文案
+    - 爆款标题
+    - 社交媒体
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+
+presentation:
+  card:
+    title: 小红书文案生成
+    description: 根据产品、受众和风格生成标题、正文、标签与发布建议
+    output_type: document
+    output_label: 小红书笔记
+    cover_asset: cover
+    result_summary: 输出可直接编辑的标题、六段式正文、Emoji 排版、话题标签和发布策略
+  detail:
+    title: 小红书文案生成
+    description: 围绕产品卖点和目标人群生成自然可信的小红书笔记，包含标题、正文结构、Emoji、标签和发布建议。来源：SkillHub 原“小红书文案生成 Plus”（原链接已失效），经 LazyMind 适配。
+    attachment_hint: 产品资料、卖点清单、目标人群或参考图片
+
+tasks:
+  - id: product-note
+    selector:
+      title: 产品种草笔记
+      description: 从卖点和真实使用场景生成完整种草内容
+      output_label: 种草笔记
+    launch:
+      prompt_short: 根据我的产品信息写一篇小红书种草笔记。
+      prompt: 请根据我提供的产品、核心卖点、目标人群、使用场景和语气偏好，生成一篇自然可信的小红书种草笔记。给出多个标题候选、六段式正文、适量 Emoji、话题标签和发布建议；缺少关键信息时先提问，不要虚构功效或体验。
+    replay:
+      steps:
+        - title: 梳理产品与受众
+          description: 确认卖点、目标人群、使用场景和表达边界
+        - title: 设计标题钩子
+          description: 结合利益点、好奇心和具体场景生成候选标题
+        - title: 编写种草正文
+          description: 按痛点、体验、细节和建议组织自然叙述
+        - title: 完善发布元素
+          description: 补充 Emoji、标签、互动引导和发布时间建议
+    result:
+      template: generic_report_v1
+      eyebrow: 小红书种草笔记
+      title: 产品体验与推荐文案
+      summary: 形成标题、正文、话题标签和发布策略齐备的可编辑笔记
+      highlights:
+        - 多个标题候选
+        - 六段式种草正文
+        - Emoji、标签和发布建议
+
+  - id: rewrite-note
+    selector:
+      title: 笔记改写优化
+      description: 优化现有文案的标题、节奏、可信度和互动性
+      output_label: 优化后笔记
+    launch:
+      prompt_short: 帮我优化这篇小红书笔记。
+      prompt: 请分析我提供的小红书笔记，保留事实和个人语气，优化标题吸引力、开头钩子、段落节奏、信息密度、Emoji 和话题标签。指出原稿中空泛、夸张或可能降低可信度的表达，并给出一版完整改写。
+    replay:
+      steps:
+        - title: 诊断现有文案
+          description: 检查标题、结构、语气、卖点和可信度
+        - title: 重构内容节奏
+          description: 调整开头钩子、段落顺序和信息密度
+        - title: 优化平台表达
+          description: 调整 Emoji、口语感、标签和互动引导
+        - title: 输出完整改稿
+          description: 交付可直接继续编辑的优化版本
+    result:
+      template: generic_report_v1
+      eyebrow: 优化后笔记
+      title: 更自然、更有吸引力的小红书文案
+      summary: 在保留事实和个人语气的前提下提升标题、节奏和互动性
+      highlights:
+        - 原稿问题诊断
+        - 标题与开头钩子优化
+        - 完整改写和标签建议

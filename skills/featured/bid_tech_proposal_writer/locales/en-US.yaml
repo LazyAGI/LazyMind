@@ -1,0 +1,56 @@
+locale: en-US
+
+classification:
+  category: workflow
+  tags:
+    - Tender document
+    - Technical proposal
+    - Compliance checks
+    - Word export
+
+presentation:
+  card:
+    title: Technical bid proposal writer
+    description: Parse tender requirements and disqualification risks, then deliver a traceable proposal with diagrams and a Word document
+    output_type: document
+    output_label: Technical bid proposal
+    cover_asset: cover
+    result_summary: Close the loop from tender text, technical requirements, risk clauses, and knowledge evidence to the final validated proposal
+  detail:
+    title: From tender document to technical proposal
+    description: Nine steps cover parsing, requirement and disqualification extraction, reference retrieval, outline and draft approval, architecture and solution visuals, Markdown or Word export, and final validation.
+    attachment_hint: Chinese tender document (DOCX or PDF recommended; TXT, Markdown, HTML, and RTF also supported)
+
+tasks:
+  - id: write-technical-bid
+    selector:
+      title: Write a complete technical bid
+      description: Turn a tender document into a fully illustrated, traceable, downloadable response
+      output_label: Final technical proposal
+    launch:
+      prompt_short: Write a complete, traceable technical bid proposal from my uploaded tender document.
+      prompt: Run the complete technical bid proposal workflow on my uploaded Chinese tender document. Export DOCX, target 10,000 Chinese characters, and use the built-in tender style. Preserve the source structure, extract technical requirements and explicit disqualification clauses, retrieve evidence from the selected knowledge base by topic, generate and approve the outline and full draft, then create one architecture diagram and at least five differentiated solution visuals. Use only metrics, standards, policies, and capabilities supported by the tender or my materials. Finally validate requirement coverage, disqualification risks, length, images, and the delivery file.
+    replay:
+      steps:
+        - title: Parse the tender
+          description: Preserve headings, numbering, tables, and source metadata while normalizing parameters
+        - title: Extract requirements and risks
+          description: Build stable technical requirement IDs and a disqualification-risk register in parallel
+        - title: Retrieve reference material
+          description: Add sourced evidence from the selected knowledge base by requirement topic
+        - title: Approve outline and draft
+          description: Produce editable outline and full draft artifacts with two human approval points
+        - title: Generate proposal visuals
+          description: Render an architecture diagram and differentiated functional visuals locally
+        - title: Export and validate
+          description: Produce Markdown or Word and verify coverage, length, images, and file integrity
+    result:
+      template: generic_report_v1
+      eyebrow: Technical bid delivery
+      title: A validated proposal mapped to every tender requirement
+      summary: Make each technical response and risk treatment traceable from source parsing through final validation
+      highlights:
+        - Stable technical-requirement and disqualification IDs
+        - Editable outline, draft, and knowledge evidence
+        - Architecture diagram plus 5–10 solution visuals
+        - Markdown or formal DOCX proposal

@@ -15,7 +15,10 @@ from channel_gateway.common.domain.channel import (
     OutboundMessage,
     welcome_message,
 )
-from channel_gateway.common.domain.chat import retainable_provider_context
+from channel_gateway.common.domain.chat import (
+    delivery_provider_context,
+    inbox_provider_context,
+)
 from channel_gateway.common.errors import (
     LazyMindHTTPError,
     RetryableLazyMindError,
@@ -147,7 +150,10 @@ class MessageWorker:
                 self._stop.wait(1.0)
 
     def _process(self, inbound: ClaimedInbound, claim_owner: str) -> None:
-        retained_context = retainable_provider_context(
+        inbox_context = inbox_provider_context(
+            inbound.provider_context
+        )
+        delivery_context = delivery_provider_context(
             inbound.provider_context
         )
         fallback = OutboundMessage(
@@ -155,7 +161,7 @@ class MessageWorker:
             account_id=inbound.account_id,
             order_key=inbound.order_key,
             recipient_id=inbound.recipient_id,
-            provider_context=retained_context,
+            provider_context=delivery_context,
             text='LazyMind 暂时无法处理这条消息，请稍后重试。',
             intent_kind='failed',
         )
@@ -179,7 +185,6 @@ class MessageWorker:
                     else None
                 )
                 result = self._messages.process(
-                    provider=inbound.provider,
                     account_id=inbound.account_id,
                     external_address_hash=inbound.external_address_hash,
                     owner_user_id=inbound.owner_user_id,
@@ -240,7 +245,7 @@ class MessageWorker:
                     inbound.inbox_id,
                     claim_owner,
                     outbound,
-                    retained_context,
+                    inbox_context,
                 ):
                     _logger.warning(
                         'channel_inbound_completion_fenced inbox_id=%s',
@@ -274,7 +279,7 @@ class MessageWorker:
                 error=exc.__class__.__name__,
                 fallback=fallback,
                 max_attempts=_MAX_PROVIDER_SIDE_EFFECT_ATTEMPTS,
-                retained_provider_context=retained_context,
+                retained_provider_context=inbox_context,
             )
         except Exception as exc:
             if stream is not None:
@@ -294,7 +299,7 @@ class MessageWorker:
                 error=exc.__class__.__name__,
                 fallback=fallback,
                 max_attempts=_inbound_attempt_limit(exc),
-                retained_provider_context=retained_context,
+                retained_provider_context=inbox_context,
             )
 
 

@@ -75,6 +75,19 @@ export $(_ENV_EXPORT_VARS)
 _COMPOSE_PROJECT_FLAG := $(if $(COMPOSE_PROJECT),-p $(COMPOSE_PROJECT),)
 _COMPOSE_DEFAULT := DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker compose $(_COMPOSE_PROJECT_FLAG)
 _COMPOSE := DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker compose $(_COMPOSE_PROJECT_FLAG)
+ifeq ($(OS),Windows_NT)
+_SKILL_BUNDLER_USER_FLAG :=
+else
+_SKILL_BUNDLER_USER_FLAG := --user "$$(id -u):$$(id -g)"
+endif
+_SKILL_BUNDLER_RUN := $(_COMPOSE_DEFAULT) --profile tools run --rm --build $(_SKILL_BUNDLER_USER_FLAG) skill-bundler
+_SKILL_BUNDLER_ARGS := \
+	--sources /workspace/skills/builtin-sources.yaml \
+	--lock /workspace/skills/builtin-skills.lock.json \
+	--cache /workspace/skills/.runtime/cache \
+	--output /workspace/skills/.runtime/builtin-skills \
+	--featured-sources /workspace/skills/featured \
+	--featured-output /workspace/skills/.runtime/featured-skills
 
 # ---------------------------------------------------------------------------
 # Scan / file-watcher process
@@ -307,33 +320,16 @@ test-hermetic-check:
 test-hermetic:
 	@./tests/test-hermetic-run.sh
 
-# Host `go` if present; otherwise the same Docker golang image used by lazymind-cli-build.
-_GOLANG_IMAGE := $(DOCKER_MIRROR)golang:1.25.11
-define _run_builtin_skill_bundle
-	@if command -v "$(GO)" >/dev/null 2>&1; then \
-		cd backend/core && $(GO) run ./cmd/builtin-skill-bundle $(1); \
-	else \
-		echo "🔨 Host Go not found; running builtin-skill-bundle in Docker..."; \
-		docker run --rm \
-			--user "$$(id -u):$$(id -g)" \
-			-e CGO_ENABLED=0 \
-			-e GOCACHE=/tmp/go-cache -e GOMODCACHE=/tmp/go-mod \
-			-e GOPROXY="$(GOPROXY)" -e GOSUMDB="$(GOSUMDB)" \
-			-e HOME=/tmp \
-			-v "$(CURDIR):/src" -w /src/backend/core \
-			"$(_GOLANG_IMAGE)" \
-			go run ./cmd/builtin-skill-bundle $(2); \
-	fi
-endef
-
 featured-check:
-	$(call _run_builtin_skill_bundle,--check-featured --featured-sources "$(CURDIR)/skills/featured",--check-featured --featured-sources /src/skills/featured)
+	@$(_SKILL_BUNDLER_RUN) \
+		--check-featured \
+		--featured-sources /workspace/skills/featured
 
 skills-build:
-	$(call _run_builtin_skill_bundle,--sources "$(CURDIR)/skills/builtin-sources.yaml" --lock "$(CURDIR)/skills/builtin-skills.lock.json" --cache "$(CURDIR)/skills/.runtime/cache" --output "$(CURDIR)/skills/.runtime/builtin-skills" --featured-sources "$(CURDIR)/skills/featured" --featured-output "$(CURDIR)/skills/.runtime/featured-skills",--sources /src/skills/builtin-sources.yaml --lock /src/skills/builtin-skills.lock.json --cache /src/skills/.runtime/cache --output /src/skills/.runtime/builtin-skills --featured-sources /src/skills/featured --featured-output /src/skills/.runtime/featured-skills)
+	@$(_SKILL_BUNDLER_RUN) $(_SKILL_BUNDLER_ARGS)
 
 skills-materialize:
-	$(call _run_builtin_skill_bundle,--sources "$(CURDIR)/skills/builtin-sources.yaml" --lock "$(CURDIR)/skills/builtin-skills.lock.json" --cache "$(CURDIR)/skills/.runtime/cache" --output "$(CURDIR)/skills/.runtime/builtin-skills" --featured-sources "$(CURDIR)/skills/featured" --featured-output "$(CURDIR)/skills/.runtime/featured-skills" --frozen-lockfile,--sources /src/skills/builtin-sources.yaml --lock /src/skills/builtin-skills.lock.json --cache /src/skills/.runtime/cache --output /src/skills/.runtime/builtin-skills --featured-sources /src/skills/featured --featured-output /src/skills/.runtime/featured-skills --frozen-lockfile)
+	@$(_SKILL_BUNDLER_RUN) $(_SKILL_BUNDLER_ARGS) --frozen-lockfile
 
 # Only mineru has build:; paddleocr/milvus/opensearch use image: only, so only needed for up.
 _need_mineru := $(filter 1 true TRUE yes YES on ON,$(LAZYMIND_DEPLOY_MINERU))
@@ -513,8 +509,9 @@ lazymind-cli-build:
 	fi
 
 assistant-bridge-start: lazymind-cli-build
+	@"$(LAZYMIND_CLI_BIN)" assistant stop >/dev/null
 	@"$(LAZYMIND_CLI_BIN)" assistant start >/dev/null
-	@echo "✅ LazyMind 助理桥接器已启动；可直接在设置 → 助理中连接本机 Agent"
+	@echo "✅ LazyMind 助理桥接器已启动；可在设置 → 外部 Agent 集成中启用本机能力"
 
 assistant-bridge-stop:
 	@if [ -x "$(LAZYMIND_CLI_BIN)" ]; then \

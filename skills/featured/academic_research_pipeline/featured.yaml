@@ -1,0 +1,75 @@
+schema_version: 2
+id: academic_research_pipeline
+type: workflow
+version: 1.0.0
+status: published
+default_locale: zh-CN
+provider: LazyMind
+
+workflow:
+  workflow_ref: builtin:academic_research_pipeline
+
+placement:
+  home: true
+  gallery: true
+  order: 20
+
+classification:
+  category: workflow
+  tags:
+    - 学术研究
+    - 文献检索
+    - 同行评审
+    - 论文写作
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+
+presentation:
+  card:
+    title: 学术研究与论文写作
+    description: 从研究问题、文献证据和论文大纲出发，完成全文、同行评审、修订与 Word 交付
+    output_type: document
+    output_label: 学术论文
+    cover_asset: cover
+    result_summary: 以闭合证据池和五视角评审支撑一篇可编辑、可复审、可下载的完整论文
+  detail:
+    title: 学术研究到论文交付
+    description: 串联研究设计、学术与知识库检索、证据综合、可编辑大纲与正文、完整性检查、五视角评审、两轮修订和格式化交付。
+    attachment_hint: 研究资料、参考文献、数据说明或已选知识库（可选）
+
+tasks:
+  - id: full-paper
+    selector:
+      title: 完整学术论文
+      description: 从研究主题开始完成检索、写作、评审、修订与交付
+      output_label: 论文与研究记录
+    launch:
+      prompt_short: 围绕生成式 AI 支持个性化学习，完成一篇证据可追溯的中文学术论文。
+      prompt: 请运行完整的学术研究与论文写作流程。研究主题为“生成式 AI 支持个性化学习的作用机制与实践路径”，论文类型为文献综述，目标正文约 8000 字，使用中文写作，引用格式采用 GB/T 7714，最终导出 DOCX。请优先使用可用学术检索、我提供的资料和当前已选知识库，所有外部主张必须关联真实来源；检索不可用或证据不足时明确保留边界，不要虚构引用。请完成大纲与正文审批、五视角同行评审、必要修订、最终完整性检查和交付。
+    replay:
+      steps:
+        - title: 设计研究问题与方法
+          description: 明确研究边界、论文类型、方法路线和不可验证事项
+        - title: 检索并注册证据
+          description: 从学术源和知识库建立可追溯的闭合证据池
+        - title: 综合文献与研究空白
+          description: 核验来源，呈现共识、矛盾、限制与研究空白
+        - title: 生成大纲与全文
+          description: 通过可编辑大纲和分章写作形成完整初稿
+        - title: 同行评审与修订
+          description: 汇总五种评审视角并逐项落实修订路线图
+        - title: 校验并交付
+          description: 重跑完整性检查并输出论文与过程记录
+    result:
+      template: generic_report_v1
+      eyebrow: 学术论文交付
+      title: 证据可追溯的完整学术论文
+      summary: 从研究设计到最终复审，以注册证据和明确边界支撑论文结论
+      highlights:
+        - 研究问题、方法蓝图与检索日志
+        - 注释书目、证据综合与可编辑全文
+        - 五视角同行评审与逐项修订
+        - Markdown 或 DOCX 正稿及过程记录

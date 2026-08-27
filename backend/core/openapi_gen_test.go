@@ -1665,6 +1665,33 @@ func TestOpenAPISpecIncludesLocaleHeaderForLocalizedCatalogs(t *testing.T) {
 }
 
 func TestOpenAPIShowcaseCaseIncludesSkillSourceURL(t *testing.T) {
+	schemas := generatedOpenAPISchemas(t)
+	schema := schemas["ShowcaseCase"].(map[string]any)
+	properties := schema["properties"].(map[string]any)
+	if sourceURL, ok := properties["source_url"].(map[string]any); !ok || sourceURL["type"] != "string" {
+		t.Fatalf("ShowcaseCase source_url = %#v, want required string", properties["source_url"])
+	}
+	if provider, ok := properties["provider"].(map[string]any); !ok || provider["type"] != "string" {
+		t.Fatalf("ShowcaseCase provider = %#v, want required string", properties["provider"])
+	}
+	required := schema["required"].([]any)
+	foundSourceURL := false
+	foundProvider := false
+	for _, field := range required {
+		switch field {
+		case "source_url":
+			foundSourceURL = true
+		case "provider":
+			foundProvider = true
+		}
+	}
+	if !foundSourceURL || !foundProvider {
+		t.Fatalf("ShowcaseCase required fields = %#v", required)
+	}
+}
+
+func generatedOpenAPISchemas(t *testing.T) map[string]any {
+	t.Helper()
 	r := mux.NewRouter()
 	registerAllRoutes(r)
 	specJSON, err := buildOpenAPISpecFromRouter(r)
@@ -1675,19 +1702,22 @@ func TestOpenAPIShowcaseCaseIncludesSkillSourceURL(t *testing.T) {
 	if err := json.Unmarshal(specJSON, &spec); err != nil {
 		t.Fatalf("decode openapi spec: %v", err)
 	}
-	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
-	schema := schemas["ShowcaseCase"].(map[string]any)
+	return spec["components"].(map[string]any)["schemas"].(map[string]any)
+}
+
+func TestOpenAPIBuiltinSkillIncludesOptionalProvider(t *testing.T) {
+	schemas := generatedOpenAPISchemas(t)
+	schema := schemas["builtinSkillOpenAPIResponse"].(map[string]any)
 	properties := schema["properties"].(map[string]any)
-	if sourceURL, ok := properties["source_url"].(map[string]any); !ok || sourceURL["type"] != "string" {
-		t.Fatalf("ShowcaseCase source_url = %#v, want required string", properties["source_url"])
+	provider, ok := properties["provider"].(map[string]any)
+	if !ok || provider["type"] != "string" {
+		t.Fatalf("builtin provider = %#v, want optional string", properties["provider"])
 	}
-	required := schema["required"].([]any)
-	for _, field := range required {
-		if field == "source_url" {
-			return
+	for _, name := range schema["required"].([]any) {
+		if name == "provider" {
+			t.Fatal("builtin provider must remain optional for old catalogs")
 		}
 	}
-	t.Fatal("ShowcaseCase source_url is not required")
 }
 
 func TestOpenAPISpecIncludesMCPOperations(t *testing.T) {

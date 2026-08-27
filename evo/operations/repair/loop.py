@@ -14,6 +14,7 @@ from evo.repair_model import EvoModelConfigError, opencode_settings
 
 from .candidate import validate_candidate_patch
 from .code_index import build_code_index
+from .failure_policy import REPEATED_FAILURE_LIMIT, attempt_failure_fingerprint, classify_worker_failure
 from .localize import localize_repair
 from .opencode import run_opencode_streaming
 from .report import read_worker_report
@@ -32,7 +33,11 @@ from .workspace import (
 )
 
 DEFAULT_SOURCE = '/app/algorithm'
-FINAL_PATCH_STATUSES = {'validated', 'exhausted_with_patch'}
+OUTCOME_VALIDATED_PATCH = 'validated_patch'
+OUTCOME_FALLBACK_PATCH = 'fallback_patch'
+OUTCOME_FALLBACK_NO_CHANGE = 'fallback_no_change'
+FALLBACK_OUTCOMES = {OUTCOME_FALLBACK_PATCH, OUTCOME_FALLBACK_NO_CHANGE}
+FINAL_PATCH_STATUSES = {OUTCOME_VALIDATED_PATCH, *FALLBACK_OUTCOMES}
 
 
 def prepare_candidate_workspace(
@@ -40,16 +45,6 @@ def prepare_candidate_workspace(
     repair_policy: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     policy = _runtime_policy(plan, repair_policy)
-    if (
-        plan.get('status') != 'planned'
-        and _text(policy.get('mode')) != 'auto'
-    ):
-        return {
-            'status': 'failed',
-            'reason': f"repair plan is not planned: {_text(plan.get('status')) or 'missing_status'}",
-            'repair_plan_ref': _plan_ref(plan),
-            'workspace_kind': 'managed_worktree',
-        }
     source = algorithm_source_root(policy.get('candidate_source_dir') or os.getenv('LAZYMIND_EVO_CHAT_SOURCE')
                                    or DEFAULT_SOURCE)
     workspace = workspace_path(policy, plan)
@@ -70,7 +65,8 @@ def prepare_candidate_workspace(
 
 async def run_repair_loop(workspace: Mapping[str, Any], cases: tuple[Mapping[str, Any], ...],
                           baseline_judges: tuple[Mapping[str, Any], ...], eval_policy: Mapping[str, Any],
-                          candidate_config: Mapping[str, Any], repair_policy: Mapping[str, Any], ctx: Any,
+                          candidate_config: Mapping[str, Any], llm_config: Mapping[str, Any],
+                          repair_policy: Mapping[str, Any], ctx: Any,
                           plan: Mapping[str, Any] | None = None,
                           trace: Any | None = None) -> dict[str, Any]:
     plan = plan if isinstance(plan, Mapping) else {}
@@ -80,11 +76,10 @@ async def run_repair_loop(workspace: Mapping[str, Any], cases: tuple[Mapping[str
     if ready.get('status') != 'ready':
         reason = _text(ready.get('reason')) or 'repair workspace is not ready'
         safe_emit(trace, 'repair.loop_completed', status='failed', terminal=True, payload={'reason': reason})
-        return _result('failed', plan, workspace, [], {}, reason, baseline_algo_id,
-                       trace_cursor(trace))
+        raise ValueError(reason)
     root = Path(str(workspace['workspace_ref'])).resolve()
     if plan.get('status') != 'planned':
-        return _finish_auto_without_patch(
+        return _finish_without_patch(
             root,
             plan,
             workspace,
@@ -92,6 +87,7 @@ async def run_repair_loop(workspace: Mapping[str, Any], cases: tuple[Mapping[str
             baseline_algo_id,
             trace,
             'repair plan is not runnable; using unchanged workspace',
+            'repair_plan_not_runnable',
         )
     case_map = {_text(case.get('id')): case for case in cases
                 if isinstance(case, Mapping) and _text(case.get('id'))}
@@ -99,20 +95,24 @@ async def run_repair_loop(workspace: Mapping[str, Any], cases: tuple[Mapping[str
                     if isinstance(judge, Mapping) and _text(judge.get('case_id'))}
     missing_validation = _validation_input_gap(plan, case_map, baseline_map)
     if missing_validation:
-        safe_emit(trace, 'repair.loop_completed', status='failed', terminal=True,
-                  payload={'reason': missing_validation})
-        return _result('failed', plan, workspace, [], {}, missing_validation, baseline_algo_id, trace_cursor(trace))
+        return _finish_without_patch(
+            root, plan, workspace, [], baseline_algo_id, trace,
+            f'{missing_validation}; using unchanged workspace',
+            'repair_validation_inputs_missing',
+        )
     index = build_code_index(root)
     localization = localize_repair(index, plan)
-    llm_config = policy.get('llm_config') if isinstance(policy.get('llm_config'), Mapping) else {}
     try:
         opencode_config = opencode_settings(llm_config.get('evo_llm'))
     except EvoModelConfigError as exc:
-        reason = exc.reason
-        safe_emit(trace, 'repair.loop_completed', status='failed', terminal=True, payload={'reason': reason})
-        return _result('failed', plan, workspace, [], {}, reason, baseline_algo_id, trace_cursor(trace))
+        safe_emit(trace, 'repair.loop_completed', status='failed', terminal=True,
+                  payload={'reason': exc.reason})
+        raise
     attempts, session_id = [], ''
     budget = _int(policy.get('repair_attempt_budget'), 10, 1, 20)
+    previous_failure, repeated_failure_count = '', 0
+    allow_fallback_patch = True
+    stop_reason_code = 'repair_attempts_exhausted'
 
     for attempt_no in range(1, budget + 1):
         safe_emit(trace, 'repair.attempt_started', status='started', attempt=attempt_no,
@@ -131,10 +131,13 @@ async def run_repair_loop(workspace: Mapping[str, Any], cases: tuple[Mapping[str
             trace=trace,
             attempt=attempt_no,
         )
-        session_id = run.session_id or session_id
         report = read_worker_report(artifact_dir / 'worker_report.json')
         diff_info = workspace_diff(root)
         worker_failure = _repair_worker_failure(run, report, diff_info)
+        failure_decision = (
+            classify_worker_failure(getattr(run, 'last_error', None) or worker_failure)
+            if worker_failure else None
+        )
         if worker_failure:
             pre = {'status': 'skipped', 'reason': 'worker_failed'}
             candidate = _rejected_candidate('worker_failed', worker_failure)
@@ -146,10 +149,16 @@ async def run_repair_loop(workspace: Mapping[str, Any], cases: tuple[Mapping[str
                     _text(pre.get('reason')) or 'pre_validation_failed',
                 )
             else:
-                candidate = await validate_candidate_patch(
-                    root, diff_info['diff'], plan, case_map, baseline_map,
-                    eval_policy, candidate_config, ctx, trace, attempt_no,
-                )
+                try:
+                    candidate = await validate_candidate_patch(
+                        root, diff_info['diff'], plan, case_map, baseline_map,
+                        eval_policy, llm_config, candidate_config, ctx, trace, attempt_no,
+                    )
+                except Exception as exc:
+                    candidate = _rejected_candidate(
+                        'candidate_infrastructure_error', type(exc).__name__,
+                        early_stop_reason='candidate_infrastructure_error',
+                    )
         status = 'validated' if candidate.get('accepted') is True else 'failed'
         attempt = {
             'attempt': attempt_no,
@@ -159,6 +168,8 @@ async def run_repair_loop(workspace: Mapping[str, Any], cases: tuple[Mapping[str
                 'last_error': getattr(run, 'last_error', None),
                 'finish_reason': getattr(run, 'finish_reason', ''),
                 'configured': bool(opencode_config),
+                'failure_reason_code': failure_decision.reason_code if failure_decision else '',
+                'retryable': failure_decision.retryable if failure_decision else None,
             },
             'worker_report': report,
             'localization': localization,
@@ -173,39 +184,68 @@ async def run_repair_loop(workspace: Mapping[str, Any], cases: tuple[Mapping[str
                   attempt=attempt_no, payload={
                       'status': status,
                       'reason': candidate.get('reason'),
+                      'failure_reason_code': failure_decision.reason_code if failure_decision else '',
                       'files_changed': diff_info['files'],
                   })
         if status == 'validated':
             safe_emit(trace, 'repair.loop_completed', status='completed', terminal=True,
-                      payload={'status': 'validated', 'attempt_count': len(attempts)})
-            return _result('validated', plan, workspace, attempts, attempt, 'validated repair patch',
-                           baseline_algo_id, trace_cursor(trace))
-        if candidate.get('early_stop_reason') == 'chat_runtime_error':
-            reason = 'candidate validation failed: chat_runtime_error'
-            safe_emit(trace, 'repair.loop_completed', status='failed', terminal=True,
-                      payload={'status': 'failed', 'attempt_count': len(attempts), 'reason': reason})
-            reset_workspace(root)
-            return _result('failed', plan, workspace, attempts, {}, reason,
-                           baseline_algo_id, trace_cursor(trace))
-    fallback = _latest_prevalidated_patch(attempts)
+                      payload={
+                          'outcome_kind': OUTCOME_VALIDATED_PATCH,
+                          'reason_code': 'validated',
+                          'attempt_count': len(attempts),
+                      })
+            return _result(
+                OUTCOME_VALIDATED_PATCH, plan, workspace, attempts, attempt,
+                'validated repair patch', baseline_algo_id, trace_cursor(trace),
+                reason_code='validated',
+            )
+
+        candidate_infra = (
+            bool(candidate.get('early_stop_reason'))
+            or candidate.get('status') == 'candidate_service_failed'
+        )
+        if candidate_infra:
+            allow_fallback_patch = False
+            stop_reason_code = _text(candidate.get('early_stop_reason')) or 'candidate_service_failed'
+            session_id = ''
+            break
+        if failure_decision and not failure_decision.retryable:
+            allow_fallback_patch = False
+            stop_reason_code = failure_decision.reason_code
+            session_id = ''
+            break
+
+        fingerprint = attempt_failure_fingerprint(
+            failure_decision.fingerprint if failure_decision else worker_failure,
+            candidate.get('reason'), diff_info.get('diff'),
+        )
+        repeated_failure_count = repeated_failure_count + 1 if fingerprint == previous_failure else 1
+        previous_failure = fingerprint
+        if repeated_failure_count >= REPEATED_FAILURE_LIMIT:
+            stop_reason_code = 'repair_repeated_no_progress'
+            break
+        session_id = (run.session_id or session_id) if diff_info.get('diff') and not worker_failure else ''
+
+    fallback = _latest_prevalidated_patch(attempts) if allow_fallback_patch else {}
     if fallback:
         try:
             reset_workspace(root)
             apply_diff(root, str(fallback.get('diff') or ''))
         except Exception as exc:
-            reason = f'exhausted patch could not be restored: {type(exc).__name__}'
-            safe_emit(trace, 'repair.loop_completed', status='failed', terminal=True,
-                      payload={'status': 'failed', 'attempt_count': len(attempts), 'reason': reason})
-            reset_workspace(root)
-            return _result('failed', plan, workspace, attempts, {}, reason, baseline_algo_id, trace_cursor(trace))
+            return _finish_without_patch(
+                root, plan, workspace, attempts, baseline_algo_id, trace,
+                f'exhausted patch could not be restored ({type(exc).__name__}); using unchanged workspace',
+                'fallback_patch_restore_failed',
+            )
         safe_emit(trace, 'repair.loop_completed', status='completed', terminal=True,
                   payload={
-                      'status': 'exhausted_with_patch',
+                      'outcome_kind': OUTCOME_FALLBACK_PATCH,
+                      'reason_code': stop_reason_code,
                       'attempt_count': len(attempts),
                       'fallback_attempt': fallback.get('attempt'),
                   })
         return _result(
-            'exhausted_with_patch',
+            OUTCOME_FALLBACK_PATCH,
             plan,
             workspace,
             attempts,
@@ -213,22 +253,13 @@ async def run_repair_loop(workspace: Mapping[str, Any], cases: tuple[Mapping[str
             'repair exhausted validation attempts; using latest pre-validated patch',
             baseline_algo_id,
             trace_cursor(trace),
+            reason_code=stop_reason_code,
         )
-    if _text(policy.get('mode')) == 'auto':
-        return _finish_auto_without_patch(
-            root,
-            plan,
-            workspace,
-            attempts,
-            baseline_algo_id,
-            trace,
-            'repair exhausted attempts; using unchanged workspace',
-        )
-    safe_emit(trace, 'repair.loop_completed', status='failed', terminal=True,
-              payload={'status': 'failed', 'attempt_count': len(attempts)})
-    reset_workspace(root)
-    return _result('failed', plan, workspace, attempts, {}, 'repair exhausted attempts without a validated patch',
-                   baseline_algo_id, trace_cursor(trace))
+    return _finish_without_patch(
+        root, plan, workspace, attempts, baseline_algo_id, trace,
+        'repair did not produce a reliable patch; using unchanged workspace',
+        stop_reason_code,
+    )
 
 
 def build_verified_patch(run_id: str, loop: Mapping[str, Any]) -> dict[str, Any]:
@@ -238,16 +269,15 @@ def build_verified_patch(run_id: str, loop: Mapping[str, Any]) -> dict[str, Any]
     attempts = loop.get('attempts') if isinstance(loop.get('attempts'), list) else []
     final = attempts[-1] if attempts and isinstance(attempts[-1], Mapping) else {}
     candidate = final.get('candidate_validation') if isinstance(final.get('candidate_validation'), Mapping) else {}
-    if status == 'validated' and candidate.get('accepted') is not True:
+    if status == OUTCOME_VALIDATED_PATCH and candidate.get('accepted') is not True:
         raise ValueError('validated repair patch requires accepted candidate validation')
     raw_diff = loop.get('winning_patch_diff')
     diff = raw_diff if isinstance(raw_diff, str) else str(raw_diff or '')
     diff_by_file = _diff_by_file(diff)
-    if not diff_by_file and (
-        status != 'exhausted_with_patch'
-        or diff.strip()
-    ):
+    if status in {OUTCOME_VALIDATED_PATCH, OUTCOME_FALLBACK_PATCH} and not diff_by_file:
         raise ValueError('final repair patch requires a non-empty diff')
+    if status == OUTCOME_FALLBACK_NO_CHANGE and diff.strip():
+        raise ValueError('fallback_no_change must not contain a diff')
     workspace_ref = _text(loop.get('workspace_ref'))
     if not workspace_ref:
         raise ValueError('final repair patch requires workspace_ref')
@@ -255,7 +285,7 @@ def build_verified_patch(run_id: str, loop: Mapping[str, Any]) -> dict[str, Any]
         'run_id': run_id,
         'algo_id': _text(loop.get('algo_id')),
         'candidate_algo_id': _text(loop.get('candidate_algo_id')),
-        'status': 'verified' if status == 'validated' else 'unvalidated',
+        'status': 'verified' if status == OUTCOME_VALIDATED_PATCH else 'unvalidated',
         'workspace_ref': workspace_ref,
         'diff': diff_by_file,
     })
@@ -264,13 +294,7 @@ def build_verified_patch(run_id: str, loop: Mapping[str, Any]) -> dict[str, Any]
 def _ready_workspace(workspace: Mapping[str, Any], plan: Mapping[str, Any],
                      repair_policy: Mapping[str, Any]) -> dict[str, str]:
     policy = _runtime_policy(plan, repair_policy)
-    if (
-        workspace.get('status') != 'ready'
-        or (
-            plan.get('status') != 'planned'
-            and _text(policy.get('mode')) != 'auto'
-        )
-    ):
+    if workspace.get('status') != 'ready':
         return {'status': 'failed', 'reason': 'repair plan is not runnable'}
     objective_hash = hashlib.sha1(json.dumps(plan.get('objective') or {}, sort_keys=True).encode()).hexdigest()[:12]
     try:
@@ -423,8 +447,10 @@ def _failed_case_feedback(analysis: Mapping[str, Any]) -> list[dict[str, Any]]:
 
 def _result(status: str, plan: Mapping[str, Any], workspace: Mapping[str, Any], attempts: list[Mapping[str, Any]],
             best: Mapping[str, Any], message: str, algo_id_value: str = '',
-            trace_cursor: Mapping[str, Any] | None = None) -> dict[str, Any]:
-    winner = best if status in FINAL_PATCH_STATUSES else {}
+            trace_cursor: Mapping[str, Any] | None = None, *, reason_code: str) -> dict[str, Any]:
+    if status not in FINAL_PATCH_STATUSES:
+        raise ValueError(f'unsupported final repair status: {status}')
+    winner = best
     candidate = winner.get('candidate_validation') if isinstance(winner.get('candidate_validation'), Mapping) else {}
     service = candidate.get('service') if isinstance(candidate.get('service'), Mapping) else {}
     diff = str(winner.get('diff') or '')
@@ -432,6 +458,8 @@ def _result(status: str, plan: Mapping[str, Any], workspace: Mapping[str, Any], 
     return {
         'id': 'repair.loop_result',
         'status': status,
+        'completion_quality': 'validated' if status == OUTCOME_VALIDATED_PATCH else 'degraded',
+        'reason_code': reason_code,
         'message': message,
         'algo_id': algo_id_value,
         'attempt_count': len(attempts),
@@ -458,7 +486,7 @@ def _latest_prevalidated_patch(attempts: list[Mapping[str, Any]]) -> Mapping[str
     return {}
 
 
-def _finish_auto_without_patch(
+def _finish_without_patch(
     root: Path,
     plan: Mapping[str, Any],
     workspace: Mapping[str, Any],
@@ -466,6 +494,7 @@ def _finish_auto_without_patch(
     baseline_algo_id: str,
     trace: Any,
     message: str,
+    reason_code: str,
 ) -> dict[str, Any]:
     safe_emit(
         trace,
@@ -473,13 +502,14 @@ def _finish_auto_without_patch(
         status='completed',
         terminal=True,
         payload={
-            'status': 'exhausted_with_patch',
+            'outcome_kind': OUTCOME_FALLBACK_NO_CHANGE,
+            'reason_code': reason_code,
             'attempt_count': len(attempts),
         },
     )
     reset_workspace(root)
     return _result(
-        'exhausted_with_patch',
+        OUTCOME_FALLBACK_NO_CHANGE,
         plan,
         workspace,
         attempts,
@@ -487,6 +517,7 @@ def _finish_auto_without_patch(
         message,
         baseline_algo_id,
         trace_cursor(trace),
+        reason_code=reason_code,
     )
 
 
@@ -515,12 +546,13 @@ def _repair_worker_failure(run: Any, report: Mapping[str, Any],
     return failure
 
 
-def _rejected_candidate(reason: str, detail: str = '') -> dict[str, Any]:
+def _rejected_candidate(reason: str, detail: str = '', **extra: Any) -> dict[str, Any]:
     return {
         'status': 'rejected',
         'accepted': False,
         'reason': reason,
         'detail': detail,
+        **extra,
     }
 
 
@@ -582,13 +614,10 @@ def _runtime_policy(plan: Mapping[str, Any], repair_policy: Mapping[str, Any] | 
         'candidate_source_dir',
         'candidate_workdir',
         'workspace_namespace',
-        'thread_id',
         'verification_commands',
         'repair_attempt_budget',
         'opencode_timeout_s',
         'max_patch_bytes',
-        'llm_config',
-        'mode',
     }
     return {
         **{key: safe[key] for key in safe_keys if key in safe},

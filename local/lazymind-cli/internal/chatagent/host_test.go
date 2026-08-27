@@ -17,6 +17,40 @@ type retryingCoreClient struct {
 
 type countingRunner struct{ calls int }
 
+type availableRunner struct{ countingRunner }
+
+func (*availableRunner) Availability() (bool, string) { return true, "" }
+
+type togglePolicy struct {
+	mu      sync.Mutex
+	enabled bool
+	changed chan struct{}
+}
+
+func newTogglePolicy(enabled bool) *togglePolicy {
+	return &togglePolicy{enabled: enabled, changed: make(chan struct{})}
+}
+
+func (p *togglePolicy) Enabled(string) (bool, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.enabled, nil
+}
+
+func (p *togglePolicy) Changes() <-chan struct{} {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.changed
+}
+
+func (p *togglePolicy) setEnabled(enabled bool) {
+	p.mu.Lock()
+	p.enabled = enabled
+	close(p.changed)
+	p.changed = make(chan struct{})
+	p.mu.Unlock()
+}
+
 type catalogRunner struct{ countingRunner }
 
 func (catalogRunner) Sessions(context.Context) ([]NativeSession, error) {
@@ -28,6 +62,8 @@ func (catalogRunner) Sessions(context.Context) ([]NativeSession, error) {
 }
 
 type blockingCoreClient struct{}
+
+type claimBlockingCoreClient struct{ started chan struct{} }
 
 type pendingMirrorCoreClient struct {
 	paths  []string
@@ -41,6 +77,12 @@ func (r *countingRunner) Run(context.Context, Run, func(Event) error) error {
 }
 
 func (blockingCoreClient) DoJSON(ctx context.Context, _, _ string, _, _ any) error {
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func (c claimBlockingCoreClient) DoJSON(ctx context.Context, _, _ string, _, _ any) error {
+	close(c.started)
 	<-ctx.Done()
 	return ctx.Err()
 }
@@ -162,6 +204,60 @@ func TestHostBoundsBlockedCoreRequestByOperationTimeout(t *testing.T) {
 	}
 	if elapsed := time.Since(started); elapsed > time.Second {
 		t.Fatalf("blocked request exceeded its operation timeout: %s", elapsed)
+	}
+}
+
+func TestHostPolicyOverridesProviderAvailability(t *testing.T) {
+	policy := newTogglePolicy(false)
+	host := &Host{runner: &availableRunner{}, provider: "codex", policy: policy}
+	host.refreshAvailability()
+	if host.ready || host.unavailableReason != executionDisabledReason {
+		t.Fatalf("disabled host ready=%v reason=%q", host.ready, host.unavailableReason)
+	}
+	policy.setEnabled(true)
+	host.refreshAvailability()
+	if !host.ready || host.unavailableReason != "" {
+		t.Fatalf("enabled host ready=%v reason=%q", host.ready, host.unavailableReason)
+	}
+}
+
+func TestHostPolicyChangeCancelsOutstandingClaim(t *testing.T) {
+	policy := newTogglePolicy(true)
+	client := claimBlockingCoreClient{started: make(chan struct{})}
+	host := &Host{api: client, provider: "cursor", policy: policy}
+	result := make(chan struct {
+		err     error
+		changed bool
+	}, 1)
+	go func() {
+		err, changed := host.claim(context.Background(), policy.Changes(), "/claim", map[string]any{}, &struct{}{})
+		result <- struct {
+			err     error
+			changed bool
+		}{err: err, changed: changed}
+	}()
+	<-client.started
+	policy.setEnabled(false)
+	select {
+	case outcome := <-result:
+		if !outcome.changed || !errors.Is(outcome.err, context.Canceled) {
+			t.Fatalf("claim err=%v changed=%v", outcome.err, outcome.changed)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("policy change did not cancel claim")
+	}
+}
+
+func TestHostObservesPolicyChangeBetweenSubscriptionAndClaim(t *testing.T) {
+	policy := newTogglePolicy(true)
+	changes := policy.Changes()
+	policy.setEnabled(false)
+	client := claimBlockingCoreClient{started: make(chan struct{})}
+	host := &Host{api: client, provider: "codex", policy: policy}
+	host.refreshAvailability()
+	err, changed := host.claim(context.Background(), changes, "/claim", map[string]any{}, &struct{}{})
+	if !changed || !errors.Is(err, context.Canceled) || host.ready {
+		t.Fatalf("claim err=%v changed=%v ready=%v", err, changed, host.ready)
 	}
 }
 

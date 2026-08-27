@@ -361,8 +361,10 @@ func StartWorkflowSession(w http.ResponseWriter, r *http.Request) {
 		if err := tx.Where("task_id = ?", taskID).First(&attempt).Error; err != nil {
 			return err
 		}
-		witnesses := append([]graphengine.Witness{}, node.Evaluation.Witnesses...)
-		witnesses = append(witnesses, graphengine.EvaluateOptional(nodeDef.OptionalInputs, materialFacts).Witnesses...)
+		witnesses := mergeAttemptWitnesses(
+			node.Evaluation.Witnesses,
+			graphengine.EvaluateOptional(nodeDef.OptionalInputs, materialFacts).Witnesses,
+		)
 		for _, witness := range witnesses {
 			revisionID := revisionIDs[witness.MaterialID]
 			if revisionID == "" {
@@ -568,6 +570,9 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 			}
 			req.Operation = resolved
 		}
+		if req.Operation == "retry" || req.Operation == "rewind" {
+			applyRecoveryIntent(session.IntentContext, &targets[0])
+		}
 		if req.Operation == "retry" {
 			var latest orm.WorkflowSessionStep
 			if err := tx.Where("session_id = ? AND step_id = ? AND validity = ?", session.ID,
@@ -631,7 +636,10 @@ func TransitionWorkflowSession(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 			}
-			evaluation.Witnesses = append(evaluation.Witnesses, graphengine.EvaluateOptional(nodeDef.OptionalInputs, snapshot.Materials).Witnesses...)
+			evaluation.Witnesses = mergeAttemptWitnesses(
+				evaluation.Witnesses,
+				graphengine.EvaluateOptional(nodeDef.OptionalInputs, snapshot.Materials).Witnesses,
+			)
 			evaluations[target.TargetStepID] = evaluation
 		}
 		if len(invalidTargets) > 0 {
@@ -741,6 +749,30 @@ func sessionIntentText(value string) string {
 	return ""
 }
 
+// applyRecoveryIntent keeps the workflow launch request authoritative when a
+// user retries or rewinds a step. The recovery command is useful execution
+// context, but it must not replace {{user_input}} and silently change the task.
+func applyRecoveryIntent(intentContext string, target *transitionTarget) {
+	if target == nil {
+		return
+	}
+	original := sessionIntentText(intentContext)
+	recovery := strings.TrimSpace(target.UserInput)
+	if original == "" {
+		return
+	}
+	target.UserInput = original
+	if recovery == "" || recovery == original {
+		return
+	}
+	instruction := "Recovery request for this rerun only: " + recovery
+	if existing := strings.TrimSpace(target.RuntimeInstruction); existing != "" {
+		target.RuntimeInstruction = existing + "\n\n" + instruction
+	} else {
+		target.RuntimeInstruction = instruction
+	}
+}
+
 func queueHostAttempt(ctx context.Context, tx *gorm.DB, session orm.WorkflowSession, target transitionTarget,
 	node graphengine.CompiledNode, now time.Time) error {
 	objective := workflowStepObjective(node.Prompt, target.Objective, target.UserInput)
@@ -802,6 +834,30 @@ func attemptInputBindingFromWitness(tx *gorm.DB, sessionID, attemptID string,
 		value.ContentHash = input.ContentHash
 	}
 	return value
+}
+
+// mergeAttemptWitnesses preserves distinct revisions and aliases while ensuring
+// one Attempt never persists the same frozen input binding twice. A material may
+// legitimately be both a readiness alternative and an optional input.
+func mergeAttemptWitnesses(groups ...[]graphengine.Witness) []graphengine.Witness {
+	type witnessKey struct {
+		materialID string
+		revisionID string
+		bindAs     string
+	}
+	seen := map[witnessKey]struct{}{}
+	merged := make([]graphengine.Witness, 0)
+	for _, group := range groups {
+		for _, witness := range group {
+			key := witnessKey{materialID: witness.MaterialID, revisionID: witness.RevisionID, bindAs: witness.BindAs}
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			merged = append(merged, witness)
+		}
+	}
+	return merged
 }
 
 // resolveAdvanceOperation keeps lifecycle vocabulary out of the model-facing

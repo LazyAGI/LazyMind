@@ -18,6 +18,7 @@ type Package struct {
 	SHA256        string
 	TreeSHA256    string
 	SourceURL     string
+	Provider      string
 	ArchivePath   string
 	Tags          []string
 	MarketVisible bool

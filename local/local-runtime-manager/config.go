@@ -127,6 +127,7 @@ const (
 )
 
 const installerWarmupMaintenanceMode = "installer-warmup"
+const installerWarmupSkipProcessorWorkerEnvVar = "LAZYMIND_SKIP_PROCESSOR_WORKER_READINESS"
 
 type RuntimePaths struct {
 	RepoRoot                 string

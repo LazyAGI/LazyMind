@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -24,7 +25,7 @@ const (
 	maxAuthBody      = 1 << 20
 )
 
-var errNotLoggedIn = errors.New("not logged in to LazyMind; run `lazymind login` for a server, or keep LazyMind Desktop running and signed in")
+var errNotLoggedIn = errors.New("not logged in to LazyMind; sign in to the local LazyMind page and try again")
 
 type Credentials struct {
 	ServerURL    string  `json:"server_url"`
@@ -83,6 +84,28 @@ func NewStore(home, server string) (*Store, error) {
 }
 
 func (s *Store) path() string { return filepath.Join(s.home, credentialFile) }
+
+func (s *Store) Save(value Credentials) error {
+	server := normalizeServerURL(value.ServerURL)
+	parsed, err := url.Parse(server)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || parsed.User != nil {
+		return errors.New("LazyMind server URL must be an HTTP(S) origin without embedded credentials")
+	}
+	if strings.TrimSpace(value.AccessToken) == "" || strings.TrimSpace(value.RefreshToken) == "" {
+		return errors.New("LazyMind access and refresh tokens are required")
+	}
+	value.ServerURL = server
+	return s.withLock(func() error { return s.saveUnlocked(value) })
+}
+
+func (s *Store) Clear() error {
+	return s.withLock(func() error {
+		if err := os.Remove(s.path()); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
+	})
+}
 
 func (s *Store) AccessToken(ctx context.Context) (string, error) {
 	var token string
@@ -240,7 +263,7 @@ func (s *Store) loadUnlocked() (Credentials, error) {
 	}
 	value.ServerURL = normalizeServerURL(value.ServerURL)
 	if value.ServerURL == "" || value.AccessToken == "" || value.RefreshToken == "" {
-		return Credentials{}, errors.New("credentials file is incomplete; run `lazymind login` again")
+		return Credentials{}, errNotLoggedIn
 	}
 	return value, nil
 }
@@ -385,6 +408,7 @@ func runtimeServerCandidates() []string {
 		seen[value] = struct{}{}
 		result = append(result, value)
 	}
+	appendURL(os.Getenv("LAZYMIND_SERVER_URL"))
 	for _, path := range runtimeStatePaths() {
 		body, err := os.ReadFile(path)
 		if err != nil {

@@ -67,10 +67,11 @@ type ShowcaseCaseTask struct {
 	Result      ShowcaseCaseResult `json:"result"`
 }
 
-// ShowcaseCase is the API view of one published Featured Skill definition.
+// ShowcaseCase is the API view of one published Featured capability definition.
 type ShowcaseCase struct {
 	ID                string             `json:"id"`
 	Type              string             `json:"type"`
+	Provider          string             `json:"provider"`
 	SourceURL         string             `json:"source_url"`
 	Title             string             `json:"title"`
 	Description       string             `json:"description"`
@@ -88,7 +89,8 @@ type ShowcaseCase struct {
 	ResultHighlights  []string           `json:"result_highlights"`
 	Steps             []ShowcaseCaseStep `json:"steps"`
 	Tasks             []ShowcaseCaseTask `json:"tasks"`
-	BuiltinSkillUID   string             `json:"builtin_skill_uid"`
+	BuiltinSkillUID   string             `json:"builtin_skill_uid,omitempty"`
+	WorkflowRef       string             `json:"workflow_ref,omitempty"`
 	Featured          bool               `json:"featured"`
 	FeaturedOrder     int                `json:"featured_order"`
 	Gallery           bool               `json:"gallery"`
@@ -178,6 +180,12 @@ func validateFeaturedBindings(catalog Catalog, builtinCatalogPath string) error 
 		byUID[entry.UID] = entry
 	}
 	for _, definition := range catalog.Cases {
+		if definition.Type == TypeWorkflow {
+			continue
+		}
+		if definition.Skill == nil {
+			return definitionFailure("featured Skill %s has no Skill binding", definition.ID)
+		}
 		entry, ok := byUID[definition.Skill.BuiltinSkillUID]
 		if !ok {
 			return definitionFailure("featured Skill %s references missing builtin Skill %s", definition.ID, definition.Skill.BuiltinSkillUID)

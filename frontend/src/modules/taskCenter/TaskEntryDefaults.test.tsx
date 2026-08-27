@@ -86,7 +86,7 @@ const card = (name: string) => screen.getByRole('heading', { name }).closest('ar
 describe('TaskEntryDefaults', () => {
   beforeEach(() => {
     mocks.getChatSettings.mockResolvedValue({ data: defaults });
-    mocks.listChatExecutors.mockResolvedValue({ data: { executors } });
+    mocks.listChatExecutors.mockResolvedValue({ data: { data: { executors } } });
     mocks.patchChatEntryDefault.mockReset().mockResolvedValue({ data: {} });
   });
 
@@ -119,7 +119,7 @@ describe('TaskEntryDefaults', () => {
 
   it('offers a connection action when an external executor is unavailable', async () => {
     const onConnect = vi.fn();
-    mocks.listChatExecutors.mockResolvedValue({ data: { executors: [{ ...executors[0], available: false, host_online: false }] } });
+    mocks.listChatExecutors.mockResolvedValue({ data: { data: { executors: [{ ...executors[0], available: false, host_online: false }] } } });
     render(<TaskEntryDefaults subtasksEnabled workflowsEnabled onConnectExecutors={onConnect} />);
 
     fireEvent.mouseDown((await within(card('新建任务默认配置')).findByRole('combobox')).parentElement as HTMLElement);

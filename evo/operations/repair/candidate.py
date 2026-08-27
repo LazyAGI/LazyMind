@@ -34,6 +34,7 @@ async def validate_candidate_patch(
     cases: Mapping[str, Mapping[str, Any]],
     baseline_judges: Mapping[str, Mapping[str, Any]],
     eval_policy: Mapping[str, Any],
+    llm_config: Mapping[str, Any],
     candidate_config: Mapping[str, Any],
     ctx: Any,
     trace: Any | None = None,
@@ -91,9 +92,9 @@ async def validate_candidate_patch(
         for case_id, case in selected.items():
             safe_emit(trace, 'candidate.case_started', status='started', attempt=attempt, payload={'case_id': case_id})
             try:
-                answer = await async_candidate_rag_answer(case, service)
+                answer = await async_candidate_rag_answer(case, service, llm_config)
                 answers[case_id] = answer
-                judges[case_id] = judge_case(case, answer, eval_policy)
+                judges[case_id] = judge_case(case, answer, eval_policy, llm_config)
             except Exception as exc:
                 safe_emit(
                     trace, 'candidate.case_completed', status='failed', attempt=attempt,

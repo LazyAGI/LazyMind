@@ -52,7 +52,24 @@ steps:
       3. Suggest a suitable artistic style (photorealistic, oil painting, anime, sticker, etc.).
       4. Note mood, lighting, and composition hints from the user text and any uploaded images.
       5. Classify the workflow internally (do NOT write routing fields into subject_analysis):
-           - CREATE_NEW — brand-new still image from scratch (text-to-image).
+         - HIGHEST-PRIORITY POST-CAPTION/SUBTITLE OVERRIDE:
+           If the requested final result is one static image and the user explicitly asks to add
+           a caption/subtitle or post-layout display text (for example, "配上字幕‘收到!’",
+           "加字幕", "add a caption", or "overlay this text"), classify it as
+           CREATE_STATIC_MEME. This override still applies when the request also uploads/searches
+           a source image or asks for a visual edit such as changing a pose: first perform the
+           non-text visual edit, then add the exact caption with meme_add_caption.
+           Do not treat text as a post-caption when the user explicitly wants it painted, printed,
+           engraved, or otherwise integrated into a physical object/scene region such as a shirt,
+           sign, cup, or tattoo; that remains FIND_AND_EDIT / EDIT_UPLOAD.
+         - HIGHEST-PRIORITY SEARCH-THEN-EDIT OVERRIDE:
+           If the original request explicitly says to find/search/get an existing image or
+           photo first and then alter it (for example, "搜一张哈兰德的照片，然后给球衣画上必胜"),
+           classify it as FIND_AND_EDIT. Preserve the user's action sequence literally.
+           It is never CREATE_NEW, REFERENCE_GENERATE, or CREATE_STATIC_MEME merely because
+           the requested edit adds exact text. Text painted onto a localized object in the
+           found source photo is an image edit, not a generated caption overlay.
+         - CREATE_NEW — brand-new still image from scratch (text-to-image).
            - KB_STYLE — user wants style/content from a selected knowledge base as reference
              (e.g. "根据知识库中的风格画图"). KB retrieval will be done in collect_materials.
            - REFERENCE_GENERATE — user wants to search/collect reference images first, then
@@ -70,23 +87,29 @@ steps:
              whose final deliverable is not a meme, reaction image, or chat sticker.
            - CREATE_STATIC_MEME — the final deliverable is one static meme, reaction image, or
              chat sticker. This wins over CREATE_NEW even when the input is only text.
-             Also use CREATE_STATIC_MEME for any request to generate a new static image with
-             exact literal overlay text, captions/subtitles/labels, or requested text position,
-             color, outline/stroke, or size. The user does not need to say meme/表情包.
+             Also use CREATE_STATIC_MEME for any static-image request with explicit post-layout
+             overlay text, captions/subtitles/labels, or requested caption position, color,
+             outline/stroke, or size, including an uploaded/searched source plus another visual
+             edit. The user does not need to say meme/表情包.
            - CREATE_ANIMATED_MEME — the final deliverable is one animated meme, reaction GIF,
              or animated chat sticker. This wins over CREATE_ANIMATED / ANIMATE_UPLOAD.
            - CREATE_MEME_PACK — the final deliverable is multiple distinct meme/reaction/sticker
              states ("一套", "整套", "系列", "多个不同状态", or an explicit count > 1).
              The pack may be static or animated; optimize_prompt records its delivery mode.
          Final-deliverable priority:
+           0. Explicit static post-caption/subtitle, including source edit + caption
+              → CREATE_STATIC_MEME (except physical-object/scene-integrated text).
+           0a. Explicitly find/search an existing image and then edit it without a post-caption
+               → FIND_AND_EDIT.
            1. Explicit multi-item meme/reaction/sticker pack → CREATE_MEME_PACK.
            2. One explicit animated meme/reaction/chat sticker → CREATE_ANIMATED_MEME.
            3. One explicit static meme/reaction/chat sticker, or one newly generated static
               image requiring exact display text/text layout → CREATE_STATIC_MEME.
            4. Generic non-meme animation keeps CREATE_ANIMATED / ANIMATE_UPLOAD.
-         Never classify a new-image request with exact display text as CREATE_NEW. Image models
-         are not responsible for rendering that text; CREATE_STATIC_MEME generates a text-free
-         base and meme_add_caption adds the exact text deterministically.
+         Never classify a static request with explicit post-caption/subtitle text as CREATE_NEW,
+         FIND_AND_EDIT, or EDIT_UPLOAD. Image models are not responsible for rendering that text;
+         CREATE_STATIC_MEME creates or edits a text-free base and meme_add_caption adds the exact
+         text deterministically afterward.
          Do NOT classify a meme request as FIND_AND_EDIT merely because it first searches for
          or uploads a character image.
       6. If the runtime instruction mentions a selected knowledge base, filters.kb_id is set,
@@ -94,6 +117,10 @@ steps:
          (unless the final deliverable is a meme or animation; those routes win).
       7. Decide whether material collection is actually needed. Make this decision from the
          request's semantic dependencies, not from a fixed subject/category keyword list.
+         - An explicit request to find/search an image is always COLLECT. Do not replace it
+           with the model's memorized knowledge or reinterpret it as direct generation.
+         - A named real person whose likeness matters is COLLECT unless the user supplied the
+           source image. Model familiarity with a celebrity is not a substitute for a source.
          - Choose COLLECT only when successful execution materially depends on information or
            media outside the request: an uploaded source/reference, selected knowledge base,
            explicit web/image search, a named real person/product/logo whose appearance matters,
@@ -156,7 +183,13 @@ steps:
       NEXT_STEPS must include collect_materials only when external/uploaded/KB/reference material
       is genuinely required. A self-contained text-only request should skip collect_materials and
       continue directly to optimize_prompt.
-      Do NOT call kb_search/web_search/image_search_tool in this step.
+      An explicit find/search-then-edit request must use WORKFLOW: FIND_AND_EDIT, include
+      collect_materials,optimize_prompt,enhance_image, and save edit_route=edit.
+      Exception: when the static final result explicitly asks for a post-caption/subtitle,
+      including a source visual edit plus caption, it must use WORKFLOW: CREATE_STATIC_MEME,
+      continue through generate_image, and must not save edit_route. Text explicitly integrated
+      into a physical object/scene remains FIND_AND_EDIT or EDIT_UPLOAD.
+      Do NOT call kb_search/web_search/image_search_tool/image_search_and_validate in this step.
       Do NOT save material_images, raw_source_image, image_output, prompt_used, or material_summary in this step.
 
   collect_materials:
@@ -173,6 +206,12 @@ steps:
       {{runtime_instruction}}
 
       Your task:
+      - ROUTING INPUT GUARD: when there is no uploaded image, workflow_routing must contain
+        one explicit `WORKFLOW: <route>` line before you do any work. If it is absent,
+        unreadable, or only exposes a file/path wrapper, stop with an execution error.
+        Do not infer a route from prior memories, examples, or unrelated artifacts, and do
+        not save material_summary (including a failure/blocking note). Leaving the required
+        output missing is intentional so Workflow Runtime marks this attempt failed.
       0. UPLOAD-FIRST OVERRIDE (highest priority):
          - User uploads are NOT workflow artifacts. Never use find_artifact/get_artifact/list_artifacts
            to discover uploaded images.
@@ -185,15 +224,16 @@ steps:
            find_user_attachment and save those uploads directly as material_images
            (sort_order=1..N, maximum 3).
          - Once any uploaded image is found, do NOT call kb_search, web_search,
-           wikipedia, image_search_tool, or validate_image_ref, and do NOT append
+           wikipedia, image_search_tool, image_search_and_validate, or validate_image_ref, and do not append
            any newly searched image to material_images.
          - For EDIT_UPLOAD / FIND_AND_EDIT, also save the first upload as raw_source_image.
          - For ANIMATE_UPLOAD / CREATE_ANIMATED / CREATE_ANIMATED_MEME, also save
            the first upload as image_output with sort_order=1.
          - For CREATE_MEME_PACK, save uploads as material_images. Also save the first
            upload as image_output only when the user explicitly requests an animated pack.
-         - For CREATE_STATIC_MEME, material_images are the character/style references;
-           do not turn them into raw_source_image.
+         - For CREATE_STATIC_MEME, material_images are the source/character/style references.
+           When the user asks to edit the upload and then add a caption, preserve the first upload
+           as the authoritative image_editor source. Do not turn it into raw_source_image.
          - Then write material_summary describing the uploaded materials and stop.
            This override applies even if workflow_routing was classified imprecisely.
       1. When there is no uploaded image, do not require or call find_user_attachment. Read
@@ -204,14 +244,14 @@ steps:
          - KB_STYLE: run kb_search first. Treat concrete KB text about palette, brushwork,
            composition, medium, mood, or other visual traits as sufficient reference material.
            Save those findings in material_summary and do NOT call web_search or
-           image_search_tool merely because the KB result contains no image.
+           image_search_and_validate merely because the KB result contains no image.
          - REFERENCE_GENERATE: collect 1–3 reference images for prompt writing.
          - FIND_AND_EDIT / EDIT_UPLOAD: prepare source image(s) for image editing.
          - CREATE_ANIMATED:
              * Parse desired sticker count N from the user request (三个→3, default 1, max 5).
              * If the user asked to find/search photo(s) first
                (e.g. "找一张XX做成动态表情包" / "找三张不同的图做成表情包"):
-               web_search / image_search_tool → validate → save material_images.
+               web_search for context → image_search_and_validate → save selected material_images.
                Also save origin(s) as image_output with sort_order:
                  - N distinct subjects/photos requested → up to N origins, sort_order=1..N
                  - Otherwise 1 origin is enough (generate will reuse it N times), sort_order=1
@@ -219,8 +259,10 @@ steps:
                skip heavy search if the text description is already clear.
          - ANIMATE_UPLOAD: confirm the uploaded source image as both material_images and
            image_output with sort_order=1 (first frame; generate will reuse it if N>1).
-         - CREATE_STATIC_MEME: collect 0–3 optional character/style references. Do not search
-           when the text request already defines the character and expression clearly.
+         - CREATE_STATIC_MEME: collect 0–3 optional source/character/style references. An explicit
+           uploaded or searched source used for a visual edit is authoritative, not merely a style
+           suggestion. Do not search when the text request already defines the character and
+           expression clearly and no source search was requested.
          - CREATE_ANIMATED_MEME: collect 0–3 optional character/style references. If an upload
            or searched character image exists, also save the first one as image_output.
          - CREATE_MEME_PACK: collect at most 3 character/style references shared by the pack.
@@ -231,19 +273,28 @@ steps:
         If the KB returns enough textual style detail to write a usable generation prompt,
         save it in material_summary and stop collection. A text-only KB result is successful;
         material_images may remain empty.
-      - For KB_STYLE, use web_search/image_search_tool only when the KB result is empty or lacks
+      - For KB_STYLE, use web_search/image_search_and_validate only when the KB result is empty or lacks
         usable visual style information, or when the user explicitly asks for image references.
-      - When web image collection is actually needed, call web_search, then image_search_tool.
-      - **Save only 1–3 validated images total** — stop as soon as you have enough.
+      - When web image collection is actually needed, call web_search once with one specific
+        visual query, include_images=true, and max_results=15. Extract only the direct URLs from
+        the returned image fields (for Tavily: the summary result's extra.images); do not use
+        ordinary result-page URLs. Then call image_search_and_validate once with that exact list
+        as candidate_urls, target_valid=3, max_candidates=15. Do not shorten, reconstruct, decode,
+        or remove query/signature parameters from any URL.
+      - **Save only 1–3 validated images total.** Use `selected[*].url` from
+        image_search_and_validate verbatim, including every query/signature parameter.
       - Only when web collection is required: if web_search is unavailable, fall back to
         wikipedia once; if both are unavailable, stop with a failure note.
-      - For web-sourced items, call image_search_tool, then validate candidates:
-          1. Call validate_image_ref(url=<candidate>) — probe only, no full download
-          2. If status is ok, save:
+      - For web-sourced items, image_search_and_validate is authoritative:
+          1. Read its exact candidate_count, validated_count, valid_count, invalid_count,
+             selected_count, selected, and candidates fields.
+          2. Save only entries from selected whose status is ok:
                save_artifacts(artifacts=[
-                 {'key': 'material_images', 'content_type': 'image', 'value': <url>}
+                 {'key': 'material_images', 'content_type': 'image',
+                  'value': <selected item url>}
                ])
-          3. If status is invalid, try the next candidate.
+          3. Never save an invalid/unvalidated candidate. Never claim selected_count is the
+             same as valid_count; a technically valid candidate may remain unselected.
         **Hard limit: at most 3 material_images.** Do not save a 4th image.
         For FIND_AND_EDIT: 1 validated image is enough if it matches the subject; 2–3 only when
         the first candidates are poor fits.
@@ -264,11 +315,18 @@ steps:
          validating the best subject photo as material_images, also save that same URL as
          image_output (first frame). Do NOT save prompt_used here.
       - Before stopping, write a concise Chinese summary (80–200 words) of what you collected:
+          - HARD SUCCESS CONDITION: for FIND_AND_EDIT / EDIT_UPLOAD, do not save this summary
+            unless one validated source has been saved as both material_images and
+            raw_source_image. If the source cannot be obtained, stop with an execution error
+            and save no material_summary; never turn a failure report into a successful output.
           - for uploaded materials: which uploads were saved (do not claim a search was performed)
           - for KB_STYLE: record the useful KB style findings, including palette, brushwork,
             composition, medium, mood, and other available visual traits; do not describe the
             absence of KB images as a failure
           - otherwise: what you searched for and key findings from web_search / wikipedia
+          - for image_search_and_validate, copy its counters exactly; never estimate or write
+            “about N”. Distinguish searched candidates, validated candidates, technically valid
+            candidates, and finally selected/saved images
           - how many material_images were saved and which one was chosen as
             raw_source_image / image_output (if any)
           - why that image fits the user's request, or note gaps (e.g. no jersey photo found)
@@ -283,7 +341,7 @@ steps:
       - multimodal
       - web_search
       - wikipedia
-      - image_search_tool
+      - image_search_and_validate
       - validate_image_ref
     inputs:
       - material: subject_analysis
@@ -359,6 +417,9 @@ steps:
 
       Your task:
       1. Read WORKFLOW from workflow_routing (not from subject_analysis).
+         It must contain one explicit `WORKFLOW: <route>` line. If the route is absent,
+         unreadable, or unknown, stop with an execution error and save neither prompt_used nor
+         meme_generation_plan. Never infer a meme route from stale examples or prior tasks.
          material_summary and material_images may be empty because analyze_subject deliberately
          skipped collect_materials for a self-contained request. This is expected; do not fail,
          invent search findings, or ask to run material collection unless the requested result
@@ -389,6 +450,8 @@ steps:
            Edit scope: <the exact target region/object or requested global attribute>.
            Preserve: <all important unrequested content that must remain unchanged>.
            Do not: <specific likely collateral changes that are forbidden>.
+         If raw_source_image is absent for either edit route, stop with an execution error and
+         save no output. Do not invent a replacement generation or meme plan.
       4. For CREATE_ANIMATED or ANIMATE_UPLOAD:
          Write an English **video motion prompt** for video_generator (40–120 words).
          Describe subject, sticker/emoji aesthetic, short looping-friendly motion, and camera.
@@ -426,6 +489,11 @@ steps:
            and a square sticker composition. It must explicitly prohibit rendered words,
            letters, captions, logos, and watermarks. Do not ask the image model to reserve a
            blank caption area; deterministic postprocessing overlays the caption afterward.
+           For CREATE_STATIC_MEME with an uploaded/searched source and an additional visual edit,
+           image_prompt must be a narrow image_editor instruction for only that non-text change.
+           Preserve the source identity, subject, background, layout, lighting, and all other
+           unrequested content. Put the exact requested subtitle only in caption: never include
+           it as text for the image model to draw inside image_prompt.
          - motion_prompt describes one short, looping-friendly causal performance for the same
            item and character; it must not invent a different state, prop, or scene. It must also
            prohibit rendered words, letters, captions, logos, and watermarks. The caption is
@@ -450,8 +518,8 @@ steps:
                  ]
                }}
              ])
-         The items length must equal count. Stop after this save; do not execute the generic
-         prompt-only save below.
+         The items length must equal count. After this save, do not execute the generic
+         prompt-only save below; continue to the route-selection call in step 8.
       6. For KB_STYLE, faithfully translate the KB findings in material_summary into visual prompt
          language, including the described color palette, brushwork, composition, medium, mood,
          and other style traits. Do not require material_images when the KB text is sufficient.
@@ -461,7 +529,14 @@ steps:
               'value': <prompt or edit instruction>}
            ])
 
-      Stop after saving. Do not output anything else.
+      8. After the required artifacts are saved, call select_image_route exactly once with the
+         exact workflow_routing text. This terminal tool owns the branch decision: FIND_AND_EDIT
+         and EDIT_UPLOAD go only to enhance_image; every supported generation, animation, and
+         meme route goes only to generate_image. Never choose the next step yourself.
+    tools:
+      - select_image_route
+    terminal_tools:
+      - select_image_route
     inputs:
       - material: subject_analysis
         required: true
@@ -493,6 +568,11 @@ steps:
       and stroke_width_ratio fields selected by the LLM. Meme media prompts must prohibit
       model-rendered text; caption_box defaults to [0.15, 0.75, 0.85, 0.93] unless the user
       requests another placement.
+      A static request such as "给这个小狗做敬礼手势，然后配上字幕‘收到!’" must produce a
+      CREATE_STATIC_MEME plan whose image_prompt contains only the salute-pose edit and whose
+      caption is exactly "收到!"; the caption text must not be delegated to image_editor.
+      select_image_route must return the sole control.next_step after all required artifacts
+      are saved; edit routes select enhance_image and all other supported routes select generate_image.
 
   generate_image:
     label: Generate Image
@@ -541,10 +621,13 @@ steps:
       === Mode 1: one static meme (CREATE_STATIC_MEME) ===
       1. Require meme_generation_plan.mode=static_meme, delivery=static, count=1 and use
          items[0].image_prompt. Do not substitute prompt_used for the item prompt.
-      2. When a character/reference image exists, call image_editor exactly once with
-         prompt=<items[0].image_prompt>, urls=[<best reference>], image_size='1024x1024',
+      2. When a source/character/reference image exists, call image_editor exactly once with
+         prompt=<items[0].image_prompt>, urls=[<authoritative uploaded/searched source when one
+         was requested, otherwise the best reference>], image_size='1024x1024',
          batch_size=1. Otherwise call image_generator once with the same prompt and size.
-      3. The generated base image must contain no words or letters. Take its local_path
+         image_editor performs only the requested non-text visual change; it must never render
+         items[0].caption.
+      3. The generated/edited base image must contain no words or letters. Take its local_path
          (preferred) or image_url and call meme_add_caption exactly once with:
            image_url=<base image path/url>, caption=<items[0].caption>,
            caption_box=<items[0].caption_box>,
@@ -553,6 +636,8 @@ steps:
            stroke_width_ratio=<items[0].caption_style.stroke_width_ratio>.
          The caption tool calculates wrapping, maximum fitting font size, and horizontal/vertical
          centering inside the rectangle. The rectangle itself is not drawn.
+         Omit font_path. The caption tool selects and validates an installed font that covers
+         every caption character; never guess a container font path or force DejaVu for CJK text.
       4. Save only meme_add_caption.local_path (preferred) or image_url to meme_static_output,
          source_tool='meme_add_caption', caption=<items[0].caption>. On the first run omit
          sort_order; on a partial retry use 1. Never save the uncaptioned base as the final meme.
@@ -570,6 +655,8 @@ steps:
         index → base-image mapping. After the base images return, emit one meme_add_caption call
         per successful item using that item's caption, caption_box, and all caption_style fields;
         these calls may be parallel.
+        Omit font_path from every meme_add_caption call; font selection and glyph validation are
+        owned by the caption tool.
         Save only successful captioned files sequentially to meme_static_output in item-index
         order with source_tool='meme_add_caption' and caption=<item.caption>. Omit sort_order on
         a first full run; use sort_order=k only when replacing item k. Static count must be 1–12.
@@ -679,7 +766,10 @@ steps:
          - Else call get_artifact(key='material_images') and use the best subject photo.
          - Else use find_user_attachment for user uploads.
          - If validation is uncertain, call validate_image_ref first.
+         - If no source can be resolved, stop with an execution error and save no artifact.
+           Never save a BLOCKED/failure message into enhanced_image_output.
       2. Call validate_image_ref if not already validated. Proceed only when status is ok.
+         If validation fails, stop with an execution error and save no artifact.
       3. Treat the original user request as authoritative and prompt_used as its normalized edit
          instruction. If they conflict, follow the user's explicit request. Do not infer that the
          user wants general enhancement, beautification, cleanup, restyling, reframing, or any

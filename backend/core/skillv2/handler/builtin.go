@@ -50,7 +50,7 @@ func ListBuiltinSkills(w http.ResponseWriter, r *http.Request) {
 	packages = visibleBuiltinPackages(packages)
 	items := make([]map[string]any, 0, len(packages))
 	for _, pkg := range packages {
-		items = append(items, map[string]any{
+		item := map[string]any{
 			"builtin_skill_uid":  pkg.UID,
 			"name":               pkg.Name,
 			"description":        pkg.Description,
@@ -60,7 +60,11 @@ func ListBuiltinSkills(w http.ResponseWriter, r *http.Request) {
 			"content":            string(pkg.Files["SKILL.md"]),
 			"installed":          installed[pkg.UID] != "",
 			"installed_skill_id": installed[pkg.UID],
-		})
+		}
+		if pkg.Provider != "" {
+			item["provider"] = pkg.Provider
+		}
+		items = append(items, item)
 	}
 	common.ReplyOK(w, map[string]any{"items": items, "total": len(items)})
 }

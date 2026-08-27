@@ -184,6 +184,7 @@ func init() {
 	registerAdditionalError("query conversation failed", http.StatusInternalServerError, 2001469)
 	registerAdditionalError("query database connection failed", http.StatusInternalServerError, 2001470)
 	registerAdditionalError("query database connections failed", http.StatusInternalServerError, 2001471)
+	registerAdditionalError("query dataset usage failed", http.StatusInternalServerError, 2002310)
 	registerAdditionalError("query disabled tools failed", http.StatusInternalServerError, 2001472)
 	registerAdditionalError("query failed", http.StatusInternalServerError, 2001473)
 	registerAdditionalError("query group models failed", http.StatusInternalServerError, 2001474)
@@ -257,6 +258,7 @@ func init() {
 	registerAdditionalError("tool cannot be disabled", http.StatusBadRequest, 2001542)
 	registerAdditionalError("tool not found", http.StatusNotFound, 2001543)
 	registerAdditionalError("tool_name required", http.StatusBadRequest, 2001544)
+	registerAdditionalError("too many dataset_ids", http.StatusBadRequest, 2002311)
 	registerAdditionalError("transition command not found", http.StatusNotFound, 2001545)
 	registerAdditionalError("trash requires a skill package root", http.StatusBadRequest, 2001546)
 	registerAdditionalError("unsafe path", http.StatusBadRequest, 2001547)
@@ -377,6 +379,10 @@ func init() {
 	registerAdditionalErrorPattern("skill package exceeds %d uncompressed bytes", "Invalid skill package", http.StatusBadRequest, 2002294)
 	registerAdditionalErrorPattern("skill name cannot exceed %d characters", "Skill name cannot exceed 80 characters", http.StatusBadRequest, 2002305)
 	registerAdditionalErrorPattern("skill description cannot exceed %d characters", "Skill description cannot exceed 1024 characters", http.StatusBadRequest, 2002306)
+	registerAdditionalErrorPattern("github ref lookup failed with http status %d", "Invalid request", http.StatusBadRequest, 2000103)
+	registerAdditionalErrorAlias("github ref lookup failed", "Invalid request", http.StatusBadRequest, 2000103)
+	registerAdditionalErrorAlias("github ref lookup returned invalid json", "Invalid request", http.StatusBadRequest, 2000103)
+	registerAdditionalErrorPattern("skill package download exceeds %d bytes", "Invalid skill package", http.StatusBadRequest, 2002294)
 
 	// Personal recovery and archive lifecycle errors.
 	registerAdditionalError("query archive folders failed", http.StatusInternalServerError, 2002098)
@@ -406,12 +412,14 @@ func init() {
 	registerAdditionalError("delete archive folder failed", http.StatusInternalServerError, 2002122)
 	registerAdditionalError("codex tcp bridge token is required", http.StatusServiceUnavailable, 2002284)
 	registerAdditionalError("writer download conversion is too large", http.StatusRequestEntityTooLarge, 2002285)
-	registerAdditionalError("slot must be source_document, outline_document, or draft_document", http.StatusBadRequest, 2002286)
+	registerAdditionalError("slot must be source_document, outline_document, flat_draft_document, or draft_document", http.StatusBadRequest, 2002286)
 	registerAdditionalError("active", http.StatusNotFound, 2002287)
-	registerAdditionalError("slot must be outline_document or draft_document", http.StatusBadRequest, 2002288)
+	registerAdditionalError("slot must be outline_document, flat_draft_document, or draft_document", http.StatusBadRequest, 2002288)
 	registerAdditionalError("invalid document", http.StatusBadRequest, 2002289)
 	registerAdditionalError("decode attempt result", http.StatusInternalServerError, 2002290)
 	registerAdditionalErrorPattern("control.next_step %q is not a reachable choice from %q", "Workflow next step is not reachable", http.StatusInternalServerError, 2002291)
+	registerAdditionalErrorPattern("current %s revision is already synchronized", "Conflict", http.StatusConflict, 2000107)
+	registerAdditionalErrorPattern("single-cardinality material %q has multiple distinct input bindings", "Internal server error", http.StatusInternalServerError, 2000000)
 
 	// Chat attachment, editable PPTX, and Workflow artifact errors.
 	registerAdditionalErrorPattern("resolve turn %q", "Failed to resolve chat turn attachments", http.StatusInternalServerError, 2002123)
@@ -587,6 +595,12 @@ func init() {
 	registerAdditionalError("editable block changed; refresh and retry", http.StatusConflict, 2002303)
 	registerAdditionalError("save editable block failed", http.StatusInternalServerError, 2002304)
 	registerAdditionalError("failed to invalidate compressed context", http.StatusInternalServerError, 2002307)
+	registerAdditionalErrorPattern("artifact slot %q requires content type %q, got %q", "Artifact content type does not match the Workflow slot declaration", http.StatusUnprocessableEntity, 2002308)
+	registerAdditionalError("selected evo model is not supported by OpenCode", http.StatusBadRequest, 2002309)
+	registerAdditionalError("model free_auto_select_priority must not be negative", http.StatusInternalServerError, 2002312)
+	registerAdditionalError("model free_auto_select_base_urls requires a positive free_auto_select_priority", http.StatusInternalServerError, 2002313)
+	registerAdditionalError("model free_auto_select_base_urls must not contain an empty URL", http.StatusInternalServerError, 2002314)
+	registerAdditionalError("marshal model free_auto_select_base_urls", http.StatusInternalServerError, 2002315)
 }
 
 func registerAdditionalError(message string, status, code int) {

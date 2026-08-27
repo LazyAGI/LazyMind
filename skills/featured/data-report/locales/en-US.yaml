@@ -1,0 +1,107 @@
+locale: en-US
+
+classification:
+  category: Information & analysis
+  tags:
+    - Data reports
+    - Excel analysis
+    - CSV analysis
+    - Visual reports
+
+presentation:
+  card:
+    title: Visual data reports
+    description: Upload Excel or CSV data and generate a report with metrics, charts, and insights
+    output_type: dashboard
+    output_label: Data analysis report
+    cover_asset: cover
+    result_summary: Turn a raw table into browsable KPIs, trends, structural analysis, and business findings
+  detail:
+    title: Visual data reports
+    description: Originally built into Qwen Office. Upload an Excel or CSV table and generate a visual report with KPIs, charts, detail tables, and analytical insights.
+    attachment_hint: An Excel, CSV, or JSON data file
+
+tasks:
+  - id: executive-report
+    selector:
+      title: Executive performance report
+      description: Summarize core metrics, trends, composition, and anomalies
+      output_label: Performance analysis report
+    launch:
+      prompt_short: Create an executive performance report from my uploaded data.
+      prompt: Read the uploaded Excel or CSV file, identify the business definitions and key metrics, and produce a visual HTML report with KPI cards, trends, structural comparisons, anomaly notes, and recommended actions. Do not invent missing data; ask me to clarify ambiguous fields.
+    replay:
+      steps:
+        - title: Read and validate data
+          description: Check fields, types, date range, missing values, and outliers
+        - title: Calculate core metrics
+          description: Summarize scale, growth, efficiency, and structural metrics
+        - title: Build the visual report
+          description: Arrange KPI, trend, comparison, and detail modules
+        - title: Extract business insights
+          description: Explain important changes, risks, and actionable recommendations
+    result:
+      template: generic_report_v1
+      eyebrow: Performance analysis report
+      title: Core metrics and business insights
+      summary: Convert table data into a browsable dashboard, trend analysis, and recommended actions
+      highlights:
+        - KPIs and period-over-period changes
+        - Trend, composition, and anomaly analysis
+        - Business conclusions and recommended actions
+
+  - id: trend-report
+    selector:
+      title: Trend analysis report
+      description: Focus on time series, growth rates, and anomalous inflection points
+      output_label: Trend analysis report
+    launch:
+      prompt_short: Analyze trends, growth, and anomalies in my uploaded data.
+      prompt: Read the uploaded data and analyze metric trends, growth rates, cycles, and anomalous inflection points over time. Use appropriate charts, produce a browsable HTML report, and state the data scope and analytical limits.
+    replay:
+      steps:
+        - title: Align time definitions
+          description: Confirm granularity, metric definitions, and comparable periods
+        - title: Calculate changes
+          description: Calculate growth rates, moving changes, and major inflection points
+        - title: Plot trends
+          description: Present important changes with line and comparison charts
+        - title: Summarize trend findings
+          description: Explain growth, decline, volatility, and what to monitor next
+    result:
+      template: generic_report_v1
+      eyebrow: Trend analysis report
+      title: Metric trends, growth, and anomalies
+      summary: Focus on time-series changes, growth intervals, inflection points, and anomalies
+      highlights:
+        - Date range and metric definitions
+        - Growth rates and key inflection points
+        - Anomalies and monitoring recommendations
+
+  - id: dimension-report
+    selector:
+      title: Multi-dimensional comparison
+      description: Compare performance across regions, channels, products, or audiences
+      output_label: Multi-dimensional report
+    launch:
+      prompt_short: Compare my uploaded data across multiple dimensions.
+      prompt: Read the uploaded table, identify dimensions such as region, channel, product, or audience, aggregate and rank key metrics, and produce a visual HTML report with comparisons, details, and conclusions.
+    replay:
+      steps:
+        - title: Identify analysis dimensions
+          description: Confirm the business fields available for grouped comparison
+        - title: Aggregate and rank
+          description: Calculate group metrics, contribution shares, and rankings
+        - title: Present structural differences
+          description: Show gaps with comparison charts and detail tables
+        - title: Form recommendations
+          description: Identify high and low performers and potential improvements
+    result:
+      template: generic_report_v1
+      eyebrow: Multi-dimensional report
+      title: Group performance and contribution
+      summary: Compare business dimensions by performance, contribution, and improvement opportunities
+      highlights:
+        - Group metrics and rankings
+        - Contribution structure and performance gaps
+        - Actions for high and low performers

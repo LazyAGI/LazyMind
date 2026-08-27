@@ -31,6 +31,18 @@
     white-space: pre-line;
   }
 
+  .agent-integration-section + .agent-integration-section {
+    margin-top: 30px;
+  }
+
+  .agent-integration-section-heading {
+    margin-bottom: 14px;
+
+    .ant-typography {
+      margin: 0 0 4px;
+    }
+  }
+
   .agent-integration-grid {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(min(100%, 300px), 1fr));
@@ -45,7 +57,7 @@
 
     .ant-card-body {
       display: flex;
-      min-height: 166px;
+      min-height: 220px;
       padding: 22px;
       flex-direction: column;
     }
@@ -109,6 +121,37 @@
     height: 7px;
     border-radius: 50%;
     background: currentColor;
+  }
+
+  .agent-integration-requirements {
+    display: grid;
+    margin-top: 18px;
+    gap: 8px;
+
+    > div {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      color: #667085;
+      font-size: 13px;
+      line-height: 20px;
+    }
+
+    .is-ready {
+      color: #16825d;
+    }
+
+    .is-missing {
+      color: #b54708;
+    }
+  }
+
+  .agent-integration-card > .ant-card-body > .ant-alert {
+    margin-top: 16px;
+  }
+
+  .agent-integration-executor-requirement {
+    margin: 18px 0 0;
   }
 
   .agent-integration-actions {

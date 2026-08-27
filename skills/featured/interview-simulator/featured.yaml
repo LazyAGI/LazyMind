@@ -4,9 +4,11 @@ type: chat
 version: 1.0.0
 status: published
 default_locale: zh-CN
+provider: SkillHub
 
 skill:
   source_url: https://skillhub.cn/skills/clawhub_wscats/interview-simulator
+  category: career
   required_version: 1.0.0
 
 placement:
@@ -15,7 +17,7 @@ placement:
   order: 16
 
 classification:
-  category: 职业发展
+  category: 教育成长
   tags:
     - 模拟面试
     - 面试反馈

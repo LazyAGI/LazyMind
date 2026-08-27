@@ -4,13 +4,28 @@ from dataclasses import dataclass, field
 from typing import Any, Literal
 
 
-def retainable_provider_context(
+CHANNEL_INBOUND_CONTEXT = 'channel_inbound'
+PROVIDER_MESSAGE_IDS = 'provider_message_ids'
+PROVIDER_ATTACHMENT_INDEX = 'attachment_index'
+PROVIDER_REFERENCES = 'references'
+
+
+def inbox_provider_context(
     provider_context: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    """Return delivery state without one-turn Core inputs or answers."""
+    """Return durable Inbox state without one-turn Core inputs or errors."""
     retained = dict(provider_context or {})
     retained.pop('channel_execution', None)
     retained.pop('channel_error', None)
+    return retained
+
+
+def delivery_provider_context(
+    provider_context: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Return only provider state needed after inbound processing."""
+    retained = inbox_provider_context(provider_context)
+    retained.pop(CHANNEL_INBOUND_CONTEXT, None)
     return retained
 
 
@@ -54,6 +69,7 @@ class ChannelExecutionContext:
     thinking_depth: Literal['low', 'medium', 'high', 'max'] | None = None
     include_capability_settings: bool = False
     include_assistant_catalog: bool = False
+    interaction_mode: Literal['default', 'plain_text'] = 'default'
 
     @classmethod
     def from_provider_context(
@@ -80,6 +96,9 @@ class ChannelExecutionContext:
         thinking_depth = str(value.get('thinking_depth') or '')
         if thinking_depth not in {'low', 'medium', 'high', 'max'}:
             thinking_depth = ''
+        interaction_mode = str(value.get('interaction_mode') or 'default')
+        if interaction_mode not in {'default', 'plain_text'}:
+            interaction_mode = 'default'
         return cls(
             attachments=attachments,
             ask_answers_structured=(
@@ -92,10 +111,11 @@ class ChannelExecutionContext:
             include_assistant_catalog=(
                 value.get('include_assistant_catalog') is True
             ),
+            interaction_mode=interaction_mode,
         )
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        value = {
             'schema_version': '1',
             'attachments': [item.to_dict() for item in self.attachments],
             'ask_answers_structured': self.ask_answers_structured,
@@ -105,6 +125,9 @@ class ChannelExecutionContext:
             ),
             'include_assistant_catalog': self.include_assistant_catalog,
         }
+        if self.interaction_mode != 'default':
+            value['interaction_mode'] = self.interaction_mode
+        return value
 
 
 @dataclass
@@ -231,6 +254,14 @@ class CoreEvent:
 
 
 @dataclass(frozen=True, slots=True)
+class CoreToolProgress:
+    tool_call_id: str
+    tool_name: str
+    phase: Literal['start', 'end']
+    status: Literal['completed', 'failed', 'blocked', 'unknown'] = 'unknown'
+
+
+@dataclass(frozen=True, slots=True)
 class CoreStreamUpdate:
     """Provider-neutral, user-visible snapshot of one streamed answer."""
 
@@ -241,6 +272,7 @@ class CoreStreamUpdate:
     history_id: str = ''
     task_created: dict[str, Any] | None = None
     task_progress: str = ''
+    tool_progress: tuple[CoreToolProgress, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

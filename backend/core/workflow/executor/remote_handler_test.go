@@ -257,6 +257,23 @@ func TestRemoteHandlerAcceptsDeclaredOptionalArtifactAndRejectsUnknown(t *testin
 	}
 }
 
+func TestRemoteHandlerRejectsTextSavedIntoImageSlot(t *testing.T) {
+	value := AttemptContext{AttemptID: "attempt-image", SessionID: "session-image", StepID: "enhance",
+		DeclaredOutputs:     []string{"enhanced_image_output"},
+		DeclaredOutputTypes: map[string]string{"enhanced_image_output": "image"}}
+	handler, _, claim := remoteHandlerFixture(t, value)
+	sink := &recordingArtifactSink{}
+	handler.Artifacts = sink
+
+	rejected := remoteHandlerRequest(handler.SaveArtifact, http.MethodPost, "/artifacts", value.AttemptID,
+		claim.LeaseToken, map[string]any{"slot": "enhanced_image_output", "content_type": "text",
+			"value": map[string]any{"text": "BLOCKED: source image missing"}})
+
+	if rejected.Code != http.StatusUnprocessableEntity || len(sink.values) != 0 {
+		t.Fatalf("status=%d body=%s saved=%#v", rejected.Code, rejected.Body.String(), sink.values)
+	}
+}
+
 func TestRemoteHandlerPersistsArtifactFileUnderCoreUploadRoot(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("LAZYMIND_UPLOAD_ROOT", root)

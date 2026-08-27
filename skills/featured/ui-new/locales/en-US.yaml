@@ -1,0 +1,51 @@
+locale: en-US
+
+classification:
+  category: Design & creativity
+  tags:
+    - UI design
+    - Interface design
+    - Interaction experience
+    - Design system
+
+presentation:
+  card:
+    title: UI design
+    description: Turn product needs into clean, consistent, production-ready interface designs
+    output_type: images
+    output_label: UI design proposal
+    cover_asset: cover
+    result_summary: Deliver information architecture, visual rules, component guidance, and high-fidelity page directions
+  detail:
+    title: UI design
+    description: "Clarify product goals, user scenarios, and business constraints, then define information architecture, interaction paths, and visual rules for an iterable interface design. Source: https://skillhub.cn/skills/user_865e3592/ui-new; adapted for LazyMind."
+    attachment_hint: Product requirements, existing screenshots, brand guidelines, or reference examples
+
+tasks:
+  - id: ui-design
+    selector:
+      title: Interface design proposal
+      description: Turn a product idea into a clear, visually consistent interface plan
+      output_label: UI design proposal
+    launch:
+      prompt_short: Design a clean, intuitive UI proposal from my product requirements.
+      prompt: Design a clean, intuitive UI proposal from the product goals, target users, core flows, brand tone, and reference pages I provide. Clarify missing constraints first, then deliver information architecture, key page layouts, visual style, component rules, interaction states, and high-fidelity design recommendations.
+    replay:
+      steps:
+        - title: Understand the requirements
+          description: Clarify business goals, user scenarios, core tasks, and constraints
+        - title: Structure the experience
+          description: Plan information architecture, page hierarchy, and key action paths
+        - title: Define the visual system
+          description: Set color, type, components, spacing, and state rules
+        - title: Deliver the proposal
+          description: Produce page design notes, high-fidelity directions, and implementation advice
+    result:
+      template: generic_report_v1
+      eyebrow: UI design proposal
+      title: A clean, intuitive product interface
+      summary: Deliver a complete UI proposal from information architecture to visual rules, ready for further design or implementation
+      highlights:
+        - Page structure and core user flows
+        - Visual system, components, and interaction states
+        - High-fidelity interface directions and implementation advice

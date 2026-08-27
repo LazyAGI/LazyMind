@@ -51,6 +51,9 @@ type groupModelListResponse struct {
 }
 
 func compatibleDBModelTypes(modelType string) []string {
+	if modelType == EvoModelKey {
+		return []string{"llm", "vlm"}
+	}
 	if modelType == "cross_modal_embed" {
 		return []string{"cross_modal_embed", "multimodal_embedding", "embed_image"}
 	}
@@ -277,7 +280,10 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 
 	// Translate runtime_models.yaml role key (e.g. "evo_llm") to the lazyllm
 	// technical type (e.g. "llm") stored in user_model_provider_group_models.
-	dbModelType := resolveModelType(r.Context(), modelType)
+	dbModelType := modelType
+	if modelType != EvoModelKey {
+		dbModelType = resolveModelType(r.Context(), modelType)
+	}
 	dbModelTypes := compatibleDBModelTypes(dbModelType)
 
 	q := db.WithContext(r.Context()).
@@ -336,6 +342,11 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 		grp, ok := groupByID[m.UserModelProviderGroupID]
 		if !ok || !grp.isVerified {
 			continue
+		}
+		if modelType == EvoModelKey {
+			if _, eligible := ResolveOpenCodeModel(m.ProviderName, m.Name, grp.baseURL, m.ModelType); !eligible {
+				continue
+			}
 		}
 		out = append(out, groupModelListItem{
 			ID:                       m.ID,

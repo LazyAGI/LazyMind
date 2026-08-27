@@ -67,6 +67,8 @@ interface ArtifactRewriteDialogProps {
   onApplied: (revision?: number) => void;
   onPreviewReady?: (preview: RewriteSelectionPreview) => void;
   terminology?: 'polish' | 'edit';
+  /** Optional layer override for selections opened inside a full-screen modal. */
+  portalZIndex?: number;
   requestPreview?: (
     instruction: string,
     selection: ArtifactRewriteSelection,
@@ -122,6 +124,7 @@ export function ArtifactRewriteDialog({
   onClose,
   onPreviewReady,
   terminology = 'polish',
+  portalZIndex,
   requestPreview: requestPreviewOverride,
 }: ArtifactRewriteDialogProps) {
   const { t } = useTranslation();
@@ -282,7 +285,7 @@ export function ArtifactRewriteDialog({
     <div
       ref={formRef}
       className={`artifact-rewrite-form artifact-rewrite-form--${formPlacement}`}
-      style={formStyle}
+      style={portalZIndex === undefined ? formStyle : { ...formStyle, zIndex: portalZIndex }}
       onKeyDown={handleKeyDown}
     >
       <div className='artifact-rewrite-form__input-shell'>
@@ -459,7 +462,7 @@ export function ArtifactRewriteInlineDiff({
         listIndex,
         preview.artifact.value,
         preview.artifact.content_type,
-        slotId === 'draft_document' ? 'draft' : 'checkpoint',
+        ['draft_document', 'flat_draft_document'].includes(slotId) ? 'draft' : 'checkpoint',
         preview.base_revision,
         { silentError: true } as never,
       );

@@ -1,0 +1,131 @@
+schema_version: 2
+id: writer-workflow
+type: workflow
+version: 1.0.0
+status: published
+default_locale: zh-CN
+provider: LazyMind
+
+workflow:
+  workflow_ref: builtin:writer-workflow
+
+placement:
+  home: true
+  gallery: true
+  order: 25
+
+classification:
+  category: workflow
+  tags:
+    - 长文写作
+    - 资料整合
+    - 可编辑大纲
+    - 文档修订
+
+assets:
+  cover:
+    file: assets/cover.jpg
+    role: cover
+
+presentation:
+  card:
+    title: AI Writer 长文写作
+    description: 读取资料与知识库，生成或复用大纲，完成可编辑长文并支持连续定向修订
+    output_type: document
+    output_label: 可编辑文档
+    cover_asset: cover
+    result_summary: 在同一 Writer 会话中处理扁平文章、结构化长文、云文档续写与局部修改
+  detail:
+    title: 从资料到完整可编辑文档
+    description: 保留原始请求和资料身份，自动判断扁平或分章节路径，生成大纲与正文，并把后续增删改、图片调整和整篇重写保存为同一文档的连续修订。
+    attachment_hint: 访谈记录、研究资料、现有大纲、Markdown/LMD 文件或飞书文档链接（可选）
+
+tasks:
+  - id: interview-article
+    selector:
+      title: 访谈整理成深度文章
+      description: 从访谈记录中提炼核心观点、代表性表达与完整故事线
+      output_label: 深度文章初稿
+    launch:
+      prompt_short: 根据我上传的访谈记录，整理成一篇可发布的深度文章。
+      prompt: 请根据我上传的访谈记录撰写一篇面向产品与技术从业者的深度文章。保留受访者的重要观点和代表性表达，提炼核心问题与冲突，建立清晰的故事线，补充准确的小标题、开头导语和结尾总结；不要虚构访谈中没有的信息。请读取原始文件、生成或复用可编辑大纲，完成全文并把结果保存为可继续修改的文档。
+    replay:
+      steps:
+        - title: 读取并画像资料
+          description: 保留原文件身份，提取访谈事实、观点、引用和素材边界
+        - title: 规划文章结构
+          description: 生成可编辑大纲并确定故事线、章节目标和证据位置
+        - title: 分章节完成写作
+          description: 根据最新版大纲生成正文并保持来源约束
+        - title: 组装可编辑文档
+          description: 形成标题、导语、正文与结尾完整的单一文档
+        - title: 支持连续修订
+          description: 后续局部修改、图片调整或重写都形成同一文档的新版本
+    result:
+      template: generic_report_v1
+      eyebrow: 深度文章交付
+      title: 从访谈素材到完整故事线
+      summary: 保留受访者观点与素材边界，交付结构清晰、可继续修改的文章初稿
+      highlights:
+        - 访谈观点、引用与资料画像
+        - 可编辑大纲和章节计划
+        - 完整长文与统一文档版本
+        - 定向修订和整篇重写能力
+
+  - id: report-from-materials
+    selector:
+      title: 资料整合成完整报告
+      description: 综合上传文件和知识库证据，形成结构化长篇报告
+      output_label: 结构化报告
+    launch:
+      prompt_short: 根据我提供的资料和知识库，写一份结构完整的分析报告。
+      prompt: 请综合我上传的材料和当前已选知识库，撰写一份面向管理层的完整分析报告。先梳理资料范围、事实和证据缺口，再生成可编辑大纲，按章节完成背景、关键发现、分析、风险与行动建议。所有事实性结论应能追溯到给定材料；信息不足时明确标注，不要补造数字或来源。最终交付可继续编辑和修订的完整文档。
+    replay:
+      steps:
+        - title: 建立写作上下文
+          description: 读取上传资料和知识来源并锁定事实边界
+        - title: 生成报告大纲
+          description: 编排背景、发现、分析、风险和建议的章节关系
+        - title: 规划并撰写章节
+          description: 为每章分配目标、证据和视觉需求后生成正文
+        - title: 交付统一文档
+          description: 组装完整报告并保留后续编辑和版本修订能力
+    result:
+      template: generic_report_v1
+      eyebrow: 分析报告
+      title: 基于给定证据的结构化长篇报告
+      summary: 从多份资料建立统一事实边界，并形成可编辑、可追溯的完整报告
+      highlights:
+        - 多来源资料画像与事实边界
+        - 可编辑大纲与章节规划
+        - 风险、行动建议和证据缺口
+        - 可持续修订的统一文档
+
+  - id: revise-document
+    selector:
+      title: 修订现有文档
+      description: 对已有 Markdown、LMD 或飞书文档执行定位修改或整篇重写
+      output_label: 文档新版本
+    launch:
+      prompt_short: 根据我的修改要求，修订现有文档并保留可追踪版本。
+      prompt: 请读取我提供的现有文档或飞书文档链接，根据我的修改要求执行修订。先定位受影响内容并生成修改计划；局部要求只修改目标段落，整篇改写则保持原文档表示形式和有效事实。不要用内容摘要替代原始文件或链接身份。将结果保存为同一文档的新版本；若是绑定的云文档，仅在工作流规则允许且我明确要求时写回。
+    replay:
+      steps:
+        - title: 绑定原始文档
+          description: 保留文件名或云文档 URL，并加载权威内容
+        - title: 定位修改目标
+          description: 区分局部修订、整篇重写和图片相关修改
+        - title: 生成并应用修改集
+          description: 只改变请求范围内的内容并保持表示形式
+        - title: 发布文档新版本
+          description: 保存可追踪修订，必要时按明确授权写回云端
+    result:
+      template: generic_report_v1
+      eyebrow: 文档修订
+      title: 可定位、可追踪的文档新版本
+      summary: 以原始文档为权威输入，按修改范围生成同一文档的下一版本
+      highlights:
+        - 原始文件或云文档身份保留
+        - 修改目标与计划可追踪
+        - 局部修订不扰动无关内容
+        - 同一文档的连续版本管理

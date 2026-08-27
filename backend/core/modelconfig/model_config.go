@@ -86,13 +86,14 @@ func LoadCloudProviderTokens(ctx context.Context, provider, userID string) ([]st
 }
 
 type SelectedRuntimeModel struct {
-	ModelType        string
-	ProviderName     string
-	ModelName        string
-	BaseURL          string
-	APIKey           string
-	APIKeyCiphertext string
-	MaxInputTokens   *string
+	ModelType          string
+	TechnicalModelType string
+	ProviderName       string
+	ModelName          string
+	BaseURL            string
+	APIKey             string
+	APIKeyCiphertext   string
+	MaxInputTokens     *string
 }
 
 // LoadMaxInputTokens returns the configured context window for a runtime model role.
@@ -131,6 +132,7 @@ func LoadLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]
 		Table("user_selected_models usm").
 		Select(
 			"usm.model_type, "+
+				"m.model_type AS technical_model_type, "+
 				"m.provider_name, "+
 				"m.name AS model_name, "+
 				"g.base_url, "+
@@ -147,13 +149,15 @@ func LoadLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]
 			"JOIN user_model_provider_groups g ON "+
 				"g.id = m.user_model_provider_group_id AND "+
 				"g.create_user_id = usm.user_id AND "+
-				"g.deleted_at IS NULL",
+				"g.deleted_at IS NULL AND g.is_verified = ?",
+			true,
 		).
 		Where("usm.user_id = ?", strings.TrimSpace(userID)).
 		Scan(&ownRows).Error
 	if err != nil {
 		return nil, err
 	}
+	ownRows = eligibleRuntimeModels(ownRows)
 	if err := decryptRuntimeModels(ownRows); err != nil {
 		return nil, err
 	}
@@ -170,6 +174,7 @@ func LoadLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]
 		Table("user_selected_models usm").
 		Select(
 			"usm.model_type, "+
+				"m.model_type AS technical_model_type, "+
 				"m.provider_name, "+
 				"m.name AS model_name, "+
 				"g.base_url, "+
@@ -184,13 +189,15 @@ func LoadLLMConfig(ctx context.Context, db *gorm.DB, userID string) (map[string]
 		Joins(
 			"JOIN user_model_provider_groups g ON "+
 				"g.id = m.user_model_provider_group_id AND "+
-				"g.deleted_at IS NULL",
+				"g.deleted_at IS NULL AND g.is_verified = ?",
+			true,
 		).
 		Where("usm.share = ?", true).
 		Scan(&sharedRows).Error
 	if err != nil {
 		return nil, err
 	}
+	sharedRows = eligibleRuntimeModels(sharedRows)
 	if err := decryptRuntimeModels(sharedRows); err != nil {
 		return nil, err
 	}
@@ -563,9 +570,23 @@ func decryptRuntimeModels(rows []SelectedRuntimeModel) error {
 	return nil
 }
 
+func eligibleRuntimeModels(rows []SelectedRuntimeModel) []SelectedRuntimeModel {
+	eligible := rows[:0]
+	for _, row := range rows {
+		if strings.EqualFold(strings.TrimSpace(row.ModelType), modelprovider.EvoModelKey) {
+			if _, ok := openCodeDescriptor(row); !ok {
+				continue
+			}
+		}
+		eligible = append(eligible, row)
+	}
+	return eligible
+}
+
 func BuildLLMConfig(rows []SelectedRuntimeModel) map[string]any {
 	out := map[string]any{}
 	for _, row := range rows {
+		role := strings.ToLower(strings.TrimSpace(row.ModelType))
 		cfg := map[string]any{
 			"source":   strings.ToLower(strings.TrimSpace(row.ProviderName)),
 			"model":    row.ModelName,
@@ -575,12 +596,25 @@ func BuildLLMConfig(rows []SelectedRuntimeModel) map[string]any {
 		if row.MaxInputTokens != nil {
 			cfg["max_input_tokens"] = *row.MaxInputTokens
 		}
-		out[strings.ToLower(strings.TrimSpace(row.ModelType))] = cfg
+		if role == modelprovider.EvoModelKey {
+			descriptor, ok := openCodeDescriptor(row)
+			if !ok {
+				continue
+			}
+			cfg["opencode"] = descriptor
+		}
+		out[role] = cfg
 	}
 	if len(out) == 0 {
 		return nil
 	}
 	return out
+}
+
+func openCodeDescriptor(row SelectedRuntimeModel) (modelprovider.OpenCodeModelDescriptor, bool) {
+	return modelprovider.ResolveOpenCodeModel(
+		row.ProviderName, row.ModelName, row.BaseURL, row.TechnicalModelType,
+	)
 }
 
 func SummarizeLLMConfigForLog(config map[string]any) string {

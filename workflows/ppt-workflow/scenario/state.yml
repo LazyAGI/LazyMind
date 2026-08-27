@@ -73,7 +73,7 @@ steps:
       - presentation goal
       - presentation topic
       - target customer / audience
-      - exact expected slide count (max 10)
+      - exact expected slide count (any positive integer)
       - communication tone
       - visual style constraints supplied by the user (for example a named
         style, color, brand guide, or reference image). Do not invent colors,
@@ -270,7 +270,7 @@ steps:
 
       ppt_build_outline — pass only these (omit unused optionals; never pass null):
            user_query=<merged request>,
-           page_count=<int 1-10>,
+           page_count=<positive integer>,
            topic=<short topic>,
            role / audience / scene=<from analysis>,
            style_hint=<ONLY visual constraints explicitly stated by the user>,
@@ -372,7 +372,7 @@ steps:
       Call ONE tool:
         ppt_generate_pages()
           — omit deck_dir to auto-find; or pass deck_dir from earlier results.
-          — concurrency=4 by default.
+          — concurrency=2 by default.
           — Internally: asset-plan → batch-page-html
             (uses each slide_outline brief, including Outline-tab edits;
              auto-publishes preview_html + notes).

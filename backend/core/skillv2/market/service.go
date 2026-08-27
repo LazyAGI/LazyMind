@@ -675,7 +675,16 @@ func copyHeadRevision(ctx context.Context, tx *gorm.DB, sourceSkillID, ownerUser
 	if source.HeadRevisionID == nil {
 		return "", "", fmt.Errorf("source skill has no head revision")
 	}
-	meta, err := skillmetadata.FromRevision(ctx, tx, *source.HeadRevisionID)
+	var meta skillmetadata.Metadata
+	var err error
+	if source.Category == skillmetadata.ExternalCategory {
+		meta, err = skillmetadata.FromRevisionWithFallback(ctx, tx, *source.HeadRevisionID, skillmetadata.Metadata{
+			Name:        source.SkillName,
+			Description: source.Description,
+		})
+	} else {
+		meta, err = skillmetadata.FromRevision(ctx, tx, *source.HeadRevisionID)
+	}
 	if err != nil {
 		return "", "", err
 	}
@@ -864,10 +873,11 @@ func (s *Service) filesFromSource(ctx context.Context, source SourceInput) (map[
 	if zipPath == "" {
 		return nil, fmt.Errorf("skill package stored path is required")
 	}
-	files, err := skillpackage.ReadZip(zipPath)
+	pkg, err := skillpackage.ReadZip(zipPath)
 	if err != nil {
 		return nil, err
 	}
+	files := pkg.Files
 	if _, ok := files["SKILL.md"]; !ok {
 		return nil, fmt.Errorf("skill package must contain SKILL.md")
 	}

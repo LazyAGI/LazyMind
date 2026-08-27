@@ -64,7 +64,7 @@ export default function SkillMarketView({
                   marketSource === "admin"
                     ? t("admin.memorySkillSourceAdmin")
                     : marketSource === "builtin"
-                      ? t("admin.memorySkillSourceBuiltin")
+                      ? item.provider || t("admin.memorySkillSourceBuiltin")
                       : t("admin.memorySkillSourcePersonal");
                 const sourceBadgeClass =
                   marketSource === "admin"

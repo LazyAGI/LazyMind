@@ -25,6 +25,7 @@ const (
 	eventRetryDelay         = 200 * time.Millisecond
 	terminalTimeout         = 10 * time.Second
 	sessionCatalogInterval  = time.Minute
+	executionDisabledReason = "Disabled in LazyMind settings"
 )
 
 type Run struct {
@@ -53,6 +54,11 @@ type Runner interface {
 
 type availabilityReporter interface {
 	Availability() (bool, string)
+}
+
+type ExecutionPolicy interface {
+	Enabled(provider string) (bool, error)
+	Changes() <-chan struct{}
 }
 
 type NativeSession struct {
@@ -94,19 +100,20 @@ type Host struct {
 	installed         bool
 	ready             bool
 	unavailableReason string
+	policy            ExecutionPolicy
 	catalogMu         sync.Mutex
 }
 
-func NewHost(api coreClient, runner Runner, provider string) (*Host, error) {
-	if api == nil || runner == nil {
-		return nil, errors.New("Core client and Agent runner are required")
+func NewHost(api coreClient, runner Runner, policy ExecutionPolicy, provider string) (*Host, error) {
+	if api == nil || runner == nil || policy == nil {
+		return nil, errors.New("Core client, Agent runner, and execution policy are required")
 	}
 	id, provider, err := newHostIdentity(provider)
 	if err != nil {
 		return nil, err
 	}
 	return &Host{
-		api: api, runner: runner, provider: provider, id: id,
+		api: api, runner: runner, policy: policy, provider: provider, id: id,
 		installed: true, ready: true,
 	}, nil
 }
@@ -122,16 +129,16 @@ func newHostIdentity(provider string) (string, string, error) {
 
 // NewUnavailableHost reports process discovery failures to Core without ever
 // claiming a Chat run. This keeps installation knowledge in the local ACL.
-func NewUnavailableHost(api coreClient, provider string, reason error) (*Host, error) {
-	if api == nil || reason == nil {
-		return nil, errors.New("Core client and unavailability reason are required")
+func NewUnavailableHost(api coreClient, policy ExecutionPolicy, provider string, reason error) (*Host, error) {
+	if api == nil || policy == nil || reason == nil {
+		return nil, errors.New("Core client, execution policy, and unavailability reason are required")
 	}
 	id, provider, err := newHostIdentity(provider)
 	if err != nil {
 		return nil, err
 	}
 	return &Host{
-		api: api, provider: provider, id: id, unavailableReason: reason.Error(),
+		api: api, policy: policy, provider: provider, id: id, unavailableReason: reason.Error(),
 	}, nil
 }
 
@@ -147,17 +154,20 @@ func (h *Host) Run(ctx context.Context) error {
 		<-catalogDone
 	}()
 	for ctx.Err() == nil {
-		if status, ok := h.runner.(availabilityReporter); ok {
-			h.ready, h.unavailableReason = status.Availability()
-		}
+		policyChanges := h.policy.Changes()
+		h.refreshAvailability()
 		var response struct {
 			Run *Run `json:"run"`
 		}
 		path := "/external-chat/hosts/" + url.PathEscape(h.provider) + "/claim"
-		if err := h.doJSON(ctx, claimRequestTimeout, http.MethodPost, path, map[string]any{
+		err, policyChanged := h.claim(ctx, policyChanges, path, map[string]any{
 			"host_id": h.id, "installed": h.installed, "ready": h.ready,
 			"unavailable_reason": h.unavailableReason,
-		}, &response); err != nil {
+		}, &response)
+		if err != nil {
+			if policyChanged {
+				continue
+			}
 			if !waitRetry(ctx) {
 				return ctx.Err()
 			}
@@ -174,10 +184,68 @@ func (h *Host) Run(ctx context.Context) error {
 		if h.runner == nil {
 			continue
 		}
+		if response.Run.Action != "finalize" {
+			enabled, policyErr := h.policy.Enabled(h.provider)
+			if policyErr != nil || !enabled {
+				message := executionDisabledReason
+				if policyErr != nil {
+					message = "Read LazyMind execution policy: " + policyErr.Error()
+				}
+				_ = h.sendTerminalEvent(ctx, *response.Run, Event{Type: "failed", Error: message})
+				continue
+			}
+		}
 		h.execute(ctx, *response.Run)
 		h.syncSessionCatalog(ctx)
 	}
 	return ctx.Err()
+}
+
+func (h *Host) refreshAvailability() {
+	if h.runner == nil {
+		h.ready = false
+		return
+	}
+	enabled, err := h.policy.Enabled(h.provider)
+	if err != nil {
+		h.ready = false
+		h.unavailableReason = "Read LazyMind execution policy: " + err.Error()
+		return
+	}
+	if !enabled {
+		h.ready = false
+		h.unavailableReason = executionDisabledReason
+		return
+	}
+	h.ready = true
+	h.unavailableReason = ""
+	if status, ok := h.runner.(availabilityReporter); ok {
+		h.ready, h.unavailableReason = status.Availability()
+	}
+}
+
+func (h *Host) claim(ctx context.Context, policyChanges <-chan struct{}, path string, input, output any) (error, bool) {
+	requestCtx, cancel := context.WithCancel(ctx)
+	done := make(chan struct{})
+	changed := make(chan struct{}, 1)
+	go func(policyChanges <-chan struct{}) {
+		select {
+		case <-policyChanges:
+			changed <- struct{}{}
+			cancel()
+		case <-done:
+		case <-ctx.Done():
+		}
+	}(policyChanges)
+	err := h.doJSON(requestCtx, claimRequestTimeout, http.MethodPost, path, input, output)
+	close(done)
+	cancel()
+	select {
+	case <-changed:
+		return err, true
+	default:
+		return err, false
+	}
 }
 
 func (h *Host) runSessionCatalog(ctx context.Context) {

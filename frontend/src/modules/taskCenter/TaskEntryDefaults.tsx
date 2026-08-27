@@ -102,8 +102,7 @@ export default function TaskEntryDefaults({
     try {
       const response = await ConversationSettingsApi().listChatExecutors({ signal });
       if (signal?.aborted) return;
-      const payload = (response.data as any)?.data ?? response.data;
-      const values = Array.isArray(payload?.executors) ? payload.executors : [];
+      const values = response.data.data.executors;
       setExecutors(values.filter(
         (item: ChatExecutorDescriptor) =>
           item && typeof item.id === 'string' && typeof item.display_name === 'string',

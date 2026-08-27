@@ -73,7 +73,7 @@ func TestValidateFeaturedBindingsRequiresExactHiddenPackage(t *testing.T) {
 	}
 	featured := Catalog{Cases: []FeaturedDefinition{{
 		ID: "advisor",
-		Skill: FeaturedSkillBinding{
+		Skill: &FeaturedSkillBinding{
 			SourceURL: entry.SourceURL, BuiltinSkillUID: entry.UID,
 			Version: entry.Version, ArchiveSHA256: entry.ArchiveSHA256,
 		},

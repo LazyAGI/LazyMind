@@ -284,3 +284,31 @@ DROP INDEX IF EXISTS `idx_knowledge_market_installs_user`;
 DROP TABLE IF EXISTS `knowledge_market_installs`;
 DROP INDEX IF EXISTS `idx_knowledge_market_items_category_status`;
 DROP TABLE IF EXISTS `knowledge_market_items`;
+
+-- +migrate Dialect postgres
+DROP INDEX IF EXISTS public.uk_dataset_user_states_user_dataset;
+DROP TABLE IF EXISTS public.dataset_user_states;
+
+-- +migrate Dialect sqlite
+DROP INDEX IF EXISTS uk_dataset_user_states_user_dataset;
+DROP TABLE IF EXISTS dataset_user_states;
+
+-- +migrate Dialect postgres
+ALTER TABLE public.user_model_provider_group_models
+    DROP COLUMN IF EXISTS free_auto_select_base_urls;
+ALTER TABLE public.user_model_provider_group_models
+    DROP COLUMN IF EXISTS free_auto_select_priority;
+ALTER TABLE public.default_models
+    DROP COLUMN IF EXISTS free_auto_select_base_urls;
+ALTER TABLE public.default_models
+    DROP COLUMN IF EXISTS free_auto_select_priority;
+
+-- +migrate Dialect sqlite
+ALTER TABLE user_model_provider_group_models
+    DROP COLUMN free_auto_select_base_urls;
+ALTER TABLE user_model_provider_group_models
+    DROP COLUMN free_auto_select_priority;
+ALTER TABLE default_models
+    DROP COLUMN free_auto_select_base_urls;
+ALTER TABLE default_models
+    DROP COLUMN free_auto_select_priority;
