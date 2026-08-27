@@ -8,7 +8,6 @@ class PreferenceCapacityExceededError(ValueError):
 
     def __init__(
         self,
-        *,
         current_items: int,
         attempted_items: int,
         max_items: int,
@@ -16,11 +15,14 @@ class PreferenceCapacityExceededError(ValueError):
         self.current_items = current_items
         self.attempted_items = attempted_items
         self.max_items = max_items
-        super().__init__(
+        super().__init__(current_items, attempted_items, max_items)
+
+    def __str__(self) -> str:
+        return (
             'preference add rejected: capacity is full; '
-            f'current_items={current_items} '
-            f'attempted_items={attempted_items} '
-            f'max_items={max_items}; the new preference was not saved '
+            f'current_items={self.current_items} '
+            f'attempted_items={self.attempted_items} '
+            f'max_items={self.max_items}; the new preference was not saved '
             'and existing preferences were unchanged'
         )
 
@@ -31,14 +33,17 @@ class MemoryPartialApplyError(RuntimeError):
     def __init__(
         self,
         message: str,
-        *,
         operation: str,
         applied: Iterable[str],
         failed: Iterable[str],
         item: Any = None,
     ) -> None:
+        self.message = str(message)
         self.operation = str(operation)
         self.applied = tuple(str(step) for step in applied)
         self.failed = tuple(str(step) for step in failed)
         self.item = item
-        super().__init__(str(message))
+        super().__init__(self.message, self.operation, self.applied, self.failed, item)
+
+    def __str__(self) -> str:
+        return self.message
