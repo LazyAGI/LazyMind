@@ -270,16 +270,16 @@
       "origin_archive_sha256": "7f50d04bb52b68bcb6a53746dd7b0b1e5ba5b537279fc05b919dbe01295836e9",
       "origin_tree_sha256": "4afb2807b9e4794019bfcf1cf8b442c8a22835d35b5cac7aacdc7f3b0edcd836",
       "origin_archive_size": 7027,
-      "patch_set_sha256": "a31a514a944d1c6393536a62802c1503d4635f6991c0a06cd06951de3242698b",
+      "patch_set_sha256": "0afc1698553d80e17f67cd1f8922f1705032bbae075b6cd3c2335fc9ad6f3385",
       "applied_patches": [
         {
           "id": "interview-simulator/add-required-frontmatter-v1",
-          "sha256": "ad589f919c7345afb5810e7181ecad0bb8a87da5b5a87017b004516e46220194"
+          "sha256": "1262e37fa1d60a3e66692dcd52603f1a29b94b77942cececb075e3ae76281a15"
         }
       ],
-      "archive_sha256": "c2e36114761add53f2e3070911c866eb8d96884aee3a784a43bb6e3fee7d5c8b",
-      "tree_sha256": "bcaaedf783e933a1a30f51a15f9ca713ff27523fcdf43dd9371d66d682c39290",
-      "archive_size": 7106,
+      "archive_sha256": "0e8f3f9a9449c7da533a8b920833028ef9cf08fb8874f2818be2a22bc366c26f",
+      "tree_sha256": "4a05b7a8a4b6ba4f909af99beb1c51411971b86141279669d981714d4436d13a",
+      "archive_size": 7103,
       "package_file": "packages/bsk_C1CB6B0CB3D8ACD9480D7F529AEE.zip"
     },
     {

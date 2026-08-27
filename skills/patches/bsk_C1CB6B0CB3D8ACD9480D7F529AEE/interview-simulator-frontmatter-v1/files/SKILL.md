@@ -2,7 +2,7 @@
 name: interview-simulator
 description: Simulate role-specific mock interviews, score each answer, and provide concrete feedback and model responses for interview preparation.
 version: 1.0.0
-category: external
+category: career
 tags:
   - interview
   - career
