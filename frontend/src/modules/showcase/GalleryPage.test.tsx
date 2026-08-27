@@ -26,9 +26,9 @@ describe("GalleryPage", () => {
   beforeEach(() => {
     listShowcaseCasesMock.mockResolvedValue({
       cases: [
-        { id: "chat-skill", title: "Chat skill", type: "chat", gallery: true },
-        { id: "work-skill", title: "Work skill", type: "work", gallery: true },
-        { id: "workflow", title: "Workflow", type: "workflow", gallery: true },
+        { id: "chat-skill", title: "Chat skill", type: "chat", gallery: true, tasks: [] },
+        { id: "work-skill", title: "Work skill", type: "work", gallery: true, tasks: [] },
+        { id: "workflow", title: "Workflow", type: "workflow", gallery: true, tasks: [] },
       ],
       categories: ["全部"],
       total: 2,

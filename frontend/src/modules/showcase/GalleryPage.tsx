@@ -30,11 +30,12 @@ export default function GalleryPage() {
         setItems((response.cases || []).filter(
           (item) => item.gallery && (!type || matchesShowcaseEntryType(item.type, type)),
         ));
-        setCategories(response.categories);
+        const responseCategories = response.categories ?? [];
+        setCategories(responseCategories);
         setCategory((current) =>
-          response.categories.includes(current)
+          responseCategories.includes(current)
             ? current
-            : response.categories[0] || "",
+            : responseCategories[0] || "",
         );
       })
       .catch(() => {
@@ -61,7 +62,11 @@ export default function GalleryPage() {
         item.title,
         item.description,
         item.category,
-        item.prompt_short,
+        ...item.tasks.flatMap((task) => [
+          task.title,
+          task.description,
+          task.prompt_short,
+        ]),
       ]
         .join(" ")
         .toLowerCase();

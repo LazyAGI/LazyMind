@@ -83,11 +83,7 @@ type ShowcaseCase struct {
 	DetailTitle       string             `json:"detail_title"`
 	DetailDescription string             `json:"detail_description"`
 	AttachmentHint    string             `json:"attachment_hint,omitempty"`
-	PromptShort       string             `json:"prompt_short"`
-	Prompt            string             `json:"prompt"`
 	ResultSummary     string             `json:"result_summary"`
-	ResultHighlights  []string           `json:"result_highlights"`
-	Steps             []ShowcaseCaseStep `json:"steps"`
 	Tasks             []ShowcaseCaseTask `json:"tasks"`
 	BuiltinSkillUID   string             `json:"builtin_skill_uid,omitempty"`
 	WorkflowRef       string             `json:"workflow_ref,omitempty"`
@@ -224,7 +220,7 @@ func matchesCaseCategory(item ShowcaseCase, category string) bool {
 }
 
 func caseSearchText(item ShowcaseCase) string {
-	values := []string{item.Title, item.Description, item.DetailTitle, item.DetailDescription, item.Category, item.PromptShort}
+	values := []string{item.Title, item.Description, item.DetailTitle, item.DetailDescription, item.Category}
 	values = append(values, item.Tags...)
 	values = append(values, item.SearchAliases...)
 	for _, task := range item.Tasks {

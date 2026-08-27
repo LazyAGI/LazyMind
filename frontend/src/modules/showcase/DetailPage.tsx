@@ -145,7 +145,9 @@ export default function DetailPage() {
   const [isAnimationSkipped, setIsAnimationSkipped] = useState(false);
   const [isResultExpanded, setIsResultExpanded] = useState(false);
   const [selectedTaskId, setSelectedTaskId] = useState("");
-  const selectedTask = item?.tasks?.find((task) => task.id === selectedTaskId) || item?.tasks?.[0];
+  const selectedTask = item
+    ? item.tasks.find((task) => task.id === selectedTaskId) ?? item.tasks[0]
+    : undefined;
   const replaySteps = selectedTask?.steps || [];
 
   useEffect(() => {
