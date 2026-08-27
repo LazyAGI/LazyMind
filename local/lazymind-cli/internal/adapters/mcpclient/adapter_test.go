@@ -64,6 +64,27 @@ func TestWorkBuddyUsesWorkBuddyConfiguration(t *testing.T) {
 	}
 }
 
+func TestRaccoonUsesDesktopConfiguration(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	path := configPath(Raccoon)
+	if path != filepath.Join(home, ".box-agent", "config", "mcp.json") {
+		t.Fatalf("path=%q", path)
+	}
+	adapter := testAdapter(Raccoon)
+	status := adapter.Status(context.Background())
+	if status.State != agentintegration.RequirementsMissing {
+		t.Fatalf("status=%#v", status)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	status = adapter.Status(context.Background())
+	if status.State != agentintegration.Ready {
+		t.Fatalf("status=%#v", status)
+	}
+}
+
 func TestDeepSeekRequirementsCheckProfileAndMCPClient(t *testing.T) {
 	root := t.TempDir()
 	t.Setenv("DSH_HOME", root)
@@ -87,7 +108,7 @@ func TestManagedJSONConfigPreservesOtherServersAndRemovesOnlyLazyMind(t *testing
 	self := filepath.Join(root, "bin", "lazymind")
 	home := filepath.Join(root, "home")
 	writeTestFile(t, self, "test connector")
-	writeTestFile(t, path, `{"theme":"dark","mcpServers":{"existing":{"command":"other","args":["serve"]}}}`)
+	writeTestFile(t, path, `{"theme":"dark","mcpServers":{"existing":{"description":"keep","url":"https://example.com/mcp","type":"streamable_http","alwaysLoad":true,"disabled":false,"connect_timeout":15}}}`)
 
 	if err := writeManagedConfig(Cursor, path, self, home, "host-1"); err != nil {
 		t.Fatal(err)
@@ -100,14 +121,19 @@ func TestManagedJSONConfigPreservesOtherServersAndRemovesOnlyLazyMind(t *testing
 		t.Fatalf("managed state=%#v", state)
 	}
 	var configured struct {
-		Theme      string                        `json:"theme"`
-		MCPServers map[string]stdioMCPDefinition `json:"mcpServers"`
+		Theme      string                     `json:"theme"`
+		MCPServers map[string]json.RawMessage `json:"mcpServers"`
 	}
 	body, _ := os.ReadFile(path)
 	if err := json.Unmarshal(body, &configured); err != nil {
 		t.Fatal(err)
 	}
-	if configured.Theme != "dark" || configured.MCPServers["existing"].Command != "other" {
+	var existing map[string]any
+	if err := json.Unmarshal(configured.MCPServers["existing"], &existing); err != nil {
+		t.Fatal(err)
+	}
+	if configured.Theme != "dark" || len(existing) != 6 || existing["description"] != "keep" ||
+		existing["url"] != "https://example.com/mcp" || existing["connect_timeout"] != float64(15) {
 		t.Fatalf("unrelated configuration changed: %#v", configured)
 	}
 	if _, err := os.Stat(path + ".lazymind-backup"); err != nil {
@@ -122,7 +148,13 @@ func TestManagedJSONConfigPreservesOtherServersAndRemovesOnlyLazyMind(t *testing
 	if err := json.Unmarshal(body, &configured); err != nil {
 		t.Fatal(err)
 	}
-	if _, exists := configured.MCPServers[serverName]; exists || configured.MCPServers["existing"].Command != "other" {
+	existing = nil
+	if err := json.Unmarshal(configured.MCPServers["existing"], &existing); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := configured.MCPServers[serverName]; exists || len(existing) != 6 ||
+		existing["description"] != "keep" || existing["url"] != "https://example.com/mcp" ||
+		existing["connect_timeout"] != float64(15) {
 		t.Fatalf("unexpected servers after disconnect: %#v", configured.MCPServers)
 	}
 }

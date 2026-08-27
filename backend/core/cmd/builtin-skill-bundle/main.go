@@ -82,25 +82,27 @@ type bundledSource struct {
 }
 
 type sourceSpec struct {
-	SourceURL    string
-	ResolvedURL  string
-	Identity     string
-	Key          string
-	FallbackName string
-	UID          string
-	Category     string
-	Version      string
-	Provider     string
-	LocalPath    string
+	SourceURL       string
+	ResolvedURL     string
+	Identity        string
+	Key             string
+	FallbackName    string
+	UID             string
+	Category        string
+	Version         string
+	FallbackVersion string
+	Provider        string
+	LocalPath       string
 }
 
 type sourceInput struct {
-	URL           string
-	Bundled       *bundledSource
-	MarketVisible bool
-	FallbackName  string
-	Category      string
-	Provider      string
+	URL             string
+	Bundled         *bundledSource
+	MarketVisible   bool
+	FallbackName    string
+	Category        string
+	Provider        string
+	RequiredVersion string
 }
 
 type packageMeta struct {
@@ -449,6 +451,19 @@ func resolveSourceInput(source sourceInput, sourcesRoot string) (sourceSpec, err
 		spec.FallbackName = source.FallbackName
 		spec.Category = source.Category
 		spec.Provider = source.Provider
+		if source.RequiredVersion != "" {
+			downloadURL, err := url.Parse(spec.ResolvedURL)
+			if err != nil {
+				return sourceSpec{}, err
+			}
+			if strings.EqualFold(downloadURL.Hostname(), "api.skillhub.cn") && downloadURL.Path == "/api/v1/download" {
+				query := downloadURL.Query()
+				query.Set("version", source.RequiredVersion)
+				downloadURL.RawQuery = query.Encode()
+				spec.ResolvedURL = downloadURL.String()
+				spec.FallbackVersion = source.RequiredVersion
+			}
+		}
 		return spec, nil
 	}
 	localPath := filepath.Join(sourcesRoot, filepath.FromSlash(source.Bundled.Path))
@@ -468,15 +483,16 @@ func resolveSourceInput(source sourceInput, sourcesRoot string) (sourceSpec, err
 
 func featuredSourceInput(raw, requiredVersion, fallbackName, category string) (sourceInput, string, error) {
 	source := strings.TrimSpace(raw)
+	requiredVersion = strings.TrimSpace(requiredVersion)
 	category = strings.TrimSpace(category)
 	if _, err := resolveSource(source); err == nil {
-		return sourceInput{URL: source, FallbackName: fallbackName, Category: category}, source, nil
+		return sourceInput{URL: source, FallbackName: fallbackName, Category: category, RequiredVersion: requiredVersion}, source, nil
 	}
 	cleaned, err := skillpackage.CleanPath(source)
 	if err != nil {
 		return sourceInput{}, "", bundleFailure("invalid local Skill path %q", source)
 	}
-	bundled := &bundledSource{Path: cleaned, Category: category, Version: strings.TrimSpace(requiredVersion)}
+	bundled := &bundledSource{Path: cleaned, Category: category, Version: requiredVersion}
 	return sourceInput{Bundled: bundled, FallbackName: fallbackName}, bundledSourceURL(cleaned), nil
 }
 
@@ -683,6 +699,9 @@ func resolvedSkillVersion(spec sourceSpec, metadataVersion string, files map[str
 		var raw packageMeta
 		_ = json.Unmarshal(files["_meta.json"], &raw)
 		version = strings.TrimSpace(raw.Version)
+	}
+	if version == "" {
+		version = strings.TrimSpace(spec.FallbackVersion)
 	}
 	if version == "" {
 		version = "0.0.0+" + treeHash[:12]

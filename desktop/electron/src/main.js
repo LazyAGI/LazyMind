@@ -461,6 +461,7 @@ function runAgentConnector(agent, action) {
     codex: new Set(["connect", "status", "disconnect", "login"]),
     cursor: new Set(["connect", "status", "disconnect", "login"]),
     workbuddy: new Set(["connect", "status", "disconnect"]),
+    raccoon: new Set(["connect", "status", "disconnect"]),
     traework: new Set(["connect", "status", "disconnect"]),
     "deepseek-harness": new Set(["connect", "status", "disconnect"]),
   };

@@ -50,6 +50,7 @@ vi.mock("react-i18next", () => ({
       "agentIntegration.executorRequirements.codex": "需要 Codex CLI",
       "agentIntegration.executorRequirements.cursor": "需要 Cursor Agent CLI",
       "agentIntegration.executorRequirements.workbuddy": "需要 CodeBuddy Code CLI",
+      "agentIntegration.executorRequirements.raccoon": "Raccoon 不支持执行器",
       "agentIntegration.executorRequirements.traework": "TRAE 不支持执行器",
       "agentIntegration.executorRequirements.deepseek-harness": "DSH 不支持执行器",
     }[key] ?? options?.defaultValue ?? key),
@@ -122,7 +123,12 @@ describe("AgentIntegrationPage", () => {
 
     expect(await screen.findByText("CodeBuddy Code")).toBeInTheDocument();
     expect(screen.getByText("需要 CodeBuddy Code CLI")).toBeInTheDocument();
-    expect(screen.getAllByText("不支持")).toHaveLength(2);
+    for (const name of ["Raccoon", "TRAE Work", "DeepSeek Harness"]) {
+      const headings = await screen.findAllByRole("heading", { name });
+      const card = headings.at(-1)?.closest(".ant-card");
+      expect(card).not.toBeNull();
+      expect(within(card as HTMLElement).getByText("不支持")).toBeInTheDocument();
+    }
   });
 
   it("waits for the local Host report instead of showing an installed CLI as missing", async () => {

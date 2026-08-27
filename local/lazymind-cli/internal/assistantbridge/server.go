@@ -269,13 +269,16 @@ func (s *Server) handleAgentStatuses(writer http.ResponseWriter, request *http.R
 }
 
 func Statuses(ctx context.Context, bridge *mcpbridge.Bridge) (map[string]agentintegration.Status, error) {
-	statuses := make(map[string]agentintegration.Status, 5)
+	statuses := make(map[string]agentintegration.Status, 6)
 	codexAdapter, err := codex.New("", "", bridge)
 	if err != nil {
 		return nil, err
 	}
 	statuses["codex"] = codexAdapter.Status(ctx)
-	for _, agent := range []string{string(mcpclient.Cursor), string(mcpclient.WorkBuddy), string(mcpclient.TRAEWork), string(mcpclient.DeepSeekHarness)} {
+	for _, agent := range []string{
+		string(mcpclient.Cursor), string(mcpclient.WorkBuddy), string(mcpclient.Raccoon),
+		string(mcpclient.TRAEWork), string(mcpclient.DeepSeekHarness),
+	} {
 		adapter, err := newMCPClient(agent, bridge)
 		if err != nil {
 			return nil, err
@@ -373,7 +376,7 @@ func (s *Server) mcpClient(agent string) (*mcpclient.Adapter, error) {
 func newMCPClient(agent string, bridge *mcpbridge.Bridge) (*mcpclient.Adapter, error) {
 	kind := mcpclient.Kind(agent)
 	switch kind {
-	case mcpclient.Cursor, mcpclient.WorkBuddy, mcpclient.TRAEWork, mcpclient.DeepSeekHarness:
+	case mcpclient.Cursor, mcpclient.WorkBuddy, mcpclient.Raccoon, mcpclient.TRAEWork, mcpclient.DeepSeekHarness:
 		return mcpclient.New(kind, "", bridge)
 	default:
 		return nil, fmt.Errorf("unsupported Assistant %q", agent)

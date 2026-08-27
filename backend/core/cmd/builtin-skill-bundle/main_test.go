@@ -36,6 +36,37 @@ func TestResolveSourceMapsNamespacedSkillHubPageToDownloadAPI(t *testing.T) {
 	}
 }
 
+func TestResolveSourceInputPinsFeaturedSkillHubRequiredVersion(t *testing.T) {
+	input, _, err := featuredSourceInput(
+		"https://skillhub.cn/skills/user_5b28ea14/smart-charts",
+		"6.2.1",
+		"smart-charts",
+		"data",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	spec, err := resolveSourceInput(input, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if spec.ResolvedURL != "https://api.skillhub.cn/api/v1/download?slug=%40user_5b28ea14%2Fsmart-charts&version=6.2.1" {
+		t.Fatalf("resolved URL = %q", spec.ResolvedURL)
+	}
+	if spec.Version != "" {
+		t.Fatalf("required version must not override package metadata, got %q", spec.Version)
+	}
+	if spec.FallbackVersion != "6.2.1" {
+		t.Fatalf("fallback version = %q", spec.FallbackVersion)
+	}
+	if got := resolvedSkillVersion(spec, "7.0.0", nil, strings.Repeat("a", 64)); got != "7.0.0" {
+		t.Fatalf("package metadata version = %q", got)
+	}
+	if got := resolvedSkillVersion(spec, "", nil, strings.Repeat("a", 64)); got != "6.2.1" {
+		t.Fatalf("versioned download fallback = %q", got)
+	}
+}
+
 func TestRunBuildsCatalogAndFrozenModeUsesVerifiedCache(t *testing.T) {
 	archive := makeSkillZip(t)
 	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {

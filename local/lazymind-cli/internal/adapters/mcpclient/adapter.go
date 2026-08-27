@@ -23,6 +23,7 @@ type Kind string
 const (
 	Cursor          Kind = "cursor"
 	WorkBuddy       Kind = "workbuddy"
+	Raccoon         Kind = "raccoon"
 	TRAEWork        Kind = "traework"
 	DeepSeekHarness Kind = "deepseek-harness"
 	serverName           = "lazymind"
@@ -146,6 +147,8 @@ func displayName(kind Kind) (string, error) {
 		return "Cursor", nil
 	case WorkBuddy:
 		return "WorkBuddy", nil
+	case Raccoon:
+		return "Raccoon", nil
 	case TRAEWork:
 		return "TRAE Work", nil
 	case DeepSeekHarness:
@@ -166,6 +169,11 @@ func requirements(kind Kind) []agentintegration.Requirement {
 		return []agentintegration.Requirement{{
 			ID: "workbuddy_desktop", Description: "Install WorkBuddy and open it once.",
 			Satisfied: pathExists(userPath(".workbuddy")),
+		}}
+	case Raccoon:
+		return []agentintegration.Requirement{{
+			ID: "raccoon_desktop", Description: "Install Raccoon Desktop and open it once.",
+			Satisfied: pathExists(userPath(".box-agent", "config")),
 		}}
 	case TRAEWork:
 		return []agentintegration.Requirement{{
@@ -190,6 +198,8 @@ func configPath(kind Kind) string {
 		return userPath(".cursor", "mcp.json")
 	case WorkBuddy:
 		return userPath(".workbuddy", "mcp.json")
+	case Raccoon:
+		return userPath(".box-agent", "config", "mcp.json")
 	case TRAEWork:
 		return traeWorkConfigPath()
 	case DeepSeekHarness:

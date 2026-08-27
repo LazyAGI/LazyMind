@@ -55,6 +55,10 @@ const AGENTS: AgentDefinition[] = [
     executorName: "CodeBuddy Code",
   },
   {
+    id: "raccoon", name: "Raccoon", icon: "/assistant-icons/raccoon.svg",
+    installURL: "https://office.xiaohuanxiong.com/download",
+  },
+  {
     id: "traework", name: "TRAE Work", icon: "/assistant-icons/traework.png",
     installURL: "https://www.trae.ai",
   },

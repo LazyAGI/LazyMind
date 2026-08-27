@@ -46,8 +46,6 @@ func IsReadOnlyTool(name string) bool {
 	}
 }
 
-type ListInput struct{}
-
 type GetInput struct {
 	WorkflowID string `json:"workflow_id" jsonschema:"required,LazyMind Workflow identifier"`
 	RevisionID string `json:"revision_id,omitempty" jsonschema:"Optional immutable revision identifier"`
@@ -101,8 +99,9 @@ type ArtifactGetResult struct {
 func Register(server *mcp.Server, client *Client) {
 	readOnly, write := annotations(true), annotations(false)
 	mcp.AddTool(server, &mcp.Tool{Name: "workflow.list", Title: "List LazyMind Workflows",
-		Description: "List published LazyMind Workflows available to this user.", Annotations: readOnly},
-		func(ctx context.Context, _ *mcp.CallToolRequest, _ ListInput) (*mcp.CallToolResult, map[string]any, error) {
+		Description: "List published LazyMind Workflows available to this user.", Annotations: readOnly,
+		InputSchema: map[string]any{"type": "object", "properties": map[string]any{}}},
+		func(ctx context.Context, _ *mcp.CallToolRequest, _ map[string]any) (*mcp.CallToolResult, map[string]any, error) {
 			value, err := client.List(ctx)
 			return nil, value, err
 		})

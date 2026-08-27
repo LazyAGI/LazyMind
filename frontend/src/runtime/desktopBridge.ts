@@ -18,7 +18,7 @@ export interface DesktopRuntimeStatus {
   services?: Record<string, DesktopRuntimeServiceStatus>;
 }
 
-export type DesktopAgent = "codex" | "cursor" | "workbuddy" | "traework" | "deepseek-harness";
+export type DesktopAgent = "codex" | "cursor" | "workbuddy" | "raccoon" | "traework" | "deepseek-harness";
 
 export type DesktopAgentIntegrationState =
   | "requirements_missing"
@@ -394,4 +394,3 @@ export function downloadDesktopFile(
 ): Promise<DesktopFileActionResult> {
   return callDesktopFileAction("downloadFile", payload);
 }
-

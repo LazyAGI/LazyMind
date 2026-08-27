@@ -59,6 +59,9 @@ func TestStatusesDoNotLaunchDesktopAgentCandidates(t *testing.T) {
 	if cursor.State != agentintegration.Ready {
 		t.Fatalf("cursor status=%#v", statuses["cursor"])
 	}
+	if _, exists := statuses["raccoon"]; !exists {
+		t.Fatal("Raccoon status is missing")
+	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatalf("status inspection launched Cursor: %v", err)
 	}

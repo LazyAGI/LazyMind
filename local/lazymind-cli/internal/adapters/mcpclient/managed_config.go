@@ -33,18 +33,15 @@ func readManagedConfig(kind Kind, path, self, home, hostID string) (managedConfi
 		return managedConfigState{}, err
 	}
 	_ = root
-	entry, exists := servers[serverName]
+	rawEntry, exists := servers[serverName]
 	if !exists {
 		return managedConfigState{}, nil
 	}
-	owned := ownedStdio(entry, self, home)
-	return managedConfigState{
-		configured: true,
-		owned:      owned,
-		current:    currentStdio(entry, self, home, hostID, kind),
-		command:    entry.Command,
-		arguments:  append([]string(nil), entry.Args...),
-	}, nil
+	var entry stdioMCPDefinition
+	if err := json.Unmarshal(rawEntry, &entry); err != nil {
+		return managedConfigState{}, fmt.Errorf("decode %s in %s: %w", serverName, path, err)
+	}
+	return stateForStdio(entry, self, home, hostID, kind), nil
 }
 
 func writeManagedConfig(kind Kind, path, self, home, hostID string) error {
@@ -55,7 +52,11 @@ func writeManagedConfig(kind Kind, path, self, home, hostID string) error {
 	if err != nil {
 		return err
 	}
-	servers[serverName] = managedStdio(self, home, hostID, kind)
+	entry, err := json.Marshal(managedStdio(self, home, hostID, kind))
+	if err != nil {
+		return err
+	}
+	servers[serverName] = entry
 	encodedServers, err := json.Marshal(servers)
 	if err != nil {
 		return err
@@ -89,9 +90,9 @@ func removeManagedConfig(kind Kind, path string) error {
 	return writeConfigFile(path, append(body, '\n'))
 }
 
-func readJSONConfig(path string) (rawMCPFile, map[string]stdioMCPDefinition, error) {
+func readJSONConfig(path string) (rawMCPFile, map[string]json.RawMessage, error) {
 	root := rawMCPFile{}
-	servers := map[string]stdioMCPDefinition{}
+	servers := map[string]json.RawMessage{}
 	body, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return root, servers, nil
@@ -124,7 +125,9 @@ func managedStdio(self, home, hostID string, kind Kind) stdioMCPDefinition {
 }
 
 func ownedStdio(entry stdioMCPDefinition, self, home string) bool {
-	if !agentexec.SameExecutable(entry.Command, self) || len(entry.Args) != 2 || entry.Args[0] != "mcp" || entry.Args[1] != "proxy" {
+	if entry.Type != "" && entry.Type != "stdio" ||
+		!agentexec.SameExecutable(entry.Command, self) || len(entry.Args) != 2 ||
+		entry.Args[0] != "mcp" || entry.Args[1] != "proxy" {
 		return false
 	}
 	configuredHome := normalizedManagedHome(entry.Env["LAZYMIND_HOME"])
@@ -143,6 +146,15 @@ func currentStdio(entry stdioMCPDefinition, self, home, hostID string, kind Kind
 		entry.Env["LAZYMIND_AGENT_PROVIDER"] == string(kind) &&
 		entry.Env["LAZYMIND_AGENT_HOST_ID"] == hostID &&
 		normalizedManagedHome(entry.Env["LAZYMIND_HOME"]) == home
+}
+
+func stateForStdio(entry stdioMCPDefinition, self, home, hostID string, kind Kind) managedConfigState {
+	owned := ownedStdio(entry, self, home)
+	return managedConfigState{
+		configured: true, owned: owned,
+		current: currentStdio(entry, self, home, hostID, kind),
+		command: entry.Command, arguments: append([]string(nil), entry.Args...),
+	}
 }
 
 func normalizedManagedHome(value string) string {
@@ -208,14 +220,7 @@ func readDSHConfig(path, self, home, hostID string) (managedConfigState, error) 
 		return managedConfigState{}, nil
 	}
 	stdio := decodeDSHStdio(entry)
-	owned := ownedStdio(stdio, self, home)
-	return managedConfigState{
-		configured: true,
-		owned:      owned,
-		current:    currentStdio(stdio, self, home, hostID, DeepSeekHarness),
-		command:    stdio.Command,
-		arguments:  append([]string(nil), stdio.Args...),
-	}, nil
+	return stateForStdio(stdio, self, home, hostID, DeepSeekHarness), nil
 }
 
 func writeDSHConfig(path, self, home, hostID string) error {
