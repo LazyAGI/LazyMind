@@ -69,11 +69,11 @@ func (c *LocalFSConnector) publicPath(path string) string {
 	if c.publicRoot == "" || cleaned == "." {
 		return cleaned
 	}
-	if c.isPublicRootPath(cleaned) {
-		return cleaned
-	}
 	if cleaned == string(filepath.Separator) {
 		return c.publicRoot
+	}
+	if c.dynamicRoots || c.isPublicRootPath(cleaned) || c.matchesAllowedPrefix(cleaned) {
+		return cleaned
 	}
 	return filepath.Join(c.publicRoot, strings.TrimPrefix(cleaned, string(filepath.Separator)))
 }
@@ -104,7 +104,11 @@ func (c *LocalFSConnector) isPublicRootPath(path string) bool {
 }
 
 func (c *LocalFSConnector) rejectOutsidePublicRoot(path string) error {
-	if c.publicRoot == "" || c.isPublicRootPath(cleanPath(path)) {
+	if c.dynamicRoots {
+		return nil
+	}
+	cleaned := cleanPath(path)
+	if c.publicRoot == "" || c.isPublicRootPath(cleaned) || c.matchesAllowedPrefix(cleaned) {
 		return nil
 	}
 	return connector.NewError(connector.ErrorCodePermissionDenied, "path is outside local_fs public root")
@@ -114,6 +118,10 @@ func (c *LocalFSConnector) pathAllowed(path string) bool {
 	if len(c.allowedPrefixes) == 0 {
 		return true
 	}
+	return c.matchesAllowedPrefix(path)
+}
+
+func (c *LocalFSConnector) matchesAllowedPrefix(path string) bool {
 	for _, prefix := range c.allowedPrefixes {
 		if path == prefix || strings.HasPrefix(path, prefix+string(filepath.Separator)) {
 			return true

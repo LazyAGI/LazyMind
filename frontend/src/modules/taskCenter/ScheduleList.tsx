@@ -115,14 +115,17 @@ function sortMonthDays(days: number[]): number[] {
   });
 }
 
-function formatMonthDays(days: number[]): string {
+type TFunc = (key: string, options?: Record<string, unknown>) => string;
+
+function formatMonthDays(days: number[], t: TFunc): string {
   const sorted = sortMonthDays(days);
   const regular = sorted.filter((day) => day > 0);
   const fromEnd = sorted.filter((day) => day < 0).map((day) => Math.abs(day));
+  const separator = t('taskCenter.scheduleListSeparator');
   return [
-    regular.length ? `${regular.join('，')}日` : '',
-    fromEnd.length ? `倒数第${fromEnd.join('，')}天` : '',
-  ].filter(Boolean).join('，');
+    regular.length ? t('taskCenter.cronMonthDays', { days: regular.join(separator) }) : '',
+    fromEnd.length ? t('taskCenter.cronMonthDaysFromEnd', { days: fromEnd.join(separator) }) : '',
+  ].filter(Boolean).join(separator);
 }
 
 function parseMonthDayField(field: string): number[] {
@@ -173,22 +176,23 @@ function capitalize(s: string) {
   return s.charAt(0).toUpperCase() + s.slice(1);
 }
 
-type TFunc = (key: string) => string;
-
 export function describeCron(cron: string, t: TFunc): string {
   const cadence = parseCadence(cron);
   const fields = cadence.cron.trim().split(/\s+/);
   if (fields.length === 5 && fields[2] !== '*') {
-    const days = formatMonthDays(parseMonthDayField(fields[2]));
-    return `每${cadence.interval > 1 ? cadence.interval : ''}月 · ${days} ${String(fields[1]).padStart(2, '0')}:${String(fields[0]).padStart(2, '0')}`;
+    const days = formatMonthDays(parseMonthDayField(fields[2]), t);
+    const time = `${String(fields[1]).padStart(2, '0')}:${String(fields[0]).padStart(2, '0')}`;
+    return cadence.interval > 1
+      ? t('taskCenter.cronMonthlyInterval', { interval: cadence.interval, days, time })
+      : t('taskCenter.cronMonthly', { days, time });
   }
   const { weekdays, time } = parseCronExpr(cron);
   const timeStr = time.format('HH:mm');
-  if (weekdays.length === 0) return t('taskCenter.cronDaily').replace('{{time}}', timeStr);
+  if (weekdays.length === 0) return t('taskCenter.cronDaily', { time: timeStr });
   const sep = t('taskCenter.weekdaySeparator');
   const labels = weekdays.map((d) => t(`taskCenter.weekdayFull${d}`)).join(sep);
-  const weekly = t('taskCenter.cronWeekdays').replace('{{days}}', labels).replace('{{time}}', timeStr);
-  return cadence.interval > 1 ? `每 ${cadence.interval} 周 · ${weekly}` : weekly;
+  const weekly = t('taskCenter.cronWeekdays', { days: labels, time: timeStr });
+  return cadence.interval > 1 ? t('taskCenter.cronWeeklyInterval', { interval: cadence.interval, schedule: weekly }) : weekly;
 }
 
 /* ────────────────────────────────────────────────
@@ -274,8 +278,8 @@ function VisualScheduler({ value, onChange }: VisualSchedulerProps) {
 
   return (
     <div className='visual-scheduler'>
-      <span>每</span><Input type='number' min={1} max={52} value={interval} onChange={(event) => { const next = Math.max(1, Number(event.target.value) || 1); setInterval(next); onChange?.(withCadence(mode === 'month' ? buildMonthlyCronExpr(monthDays, time) : buildCronExpr(weekdays, time), next, mode)); }} className='schedule-interval' />
-      <Select value={mode} onChange={emitMode} options={[{ value: 'week', label: '周' }, { value: 'month', label: '月' }]} className='schedule-unit' />
+      <span>{t('taskCenter.scheduleEvery')}</span><Input type='number' min={1} max={52} value={interval} onChange={(event) => { const next = Math.max(1, Number(event.target.value) || 1); setInterval(next); onChange?.(withCadence(mode === 'month' ? buildMonthlyCronExpr(monthDays, time) : buildCronExpr(weekdays, time), next, mode)); }} className='schedule-interval' />
+      <Select value={mode} onChange={emitMode} options={[{ value: 'week', label: t('taskCenter.scheduleWeekUnit') }, { value: 'month', label: t('taskCenter.scheduleMonthUnit') }]} className='schedule-unit' />
       {mode === 'week' ? WEEKDAY_VALUES.map((d) => (
         <Button
           key={d}
@@ -287,7 +291,7 @@ function VisualScheduler({ value, onChange }: VisualSchedulerProps) {
           {t(`taskCenter.weekdayShort${d}`)}
         </Button>
       )) : <div className='month-day-picker'>
-        <Button onClick={() => setMonthPanelOpen((open) => !open)}>{formatMonthDays(monthDays)} <span>⌄</span></Button>
+        <Button onClick={() => setMonthPanelOpen((open) => !open)}>{formatMonthDays(monthDays, t)} <span>⌄</span></Button>
         {monthPanelOpen ? <div className='month-day-panel'>{[...Array.from({ length: 31 }, (_, index) => index + 1), -4, -3, -2, -1].map((day) => <Button key={day} size='small' type={monthDays.includes(day) ? 'primary' : 'text'} onClick={() => toggleMonthDay(day)}>{day}</Button>)}</div> : null}
       </div>}
       <TimePicker
@@ -659,12 +663,12 @@ export default function ScheduleList({ active }: ScheduleListProps) {
 
   const handleBatchCreate = async () => {
     if (!batchGroupName.trim() || batchTasks.some((task) => !task.name.trim() || !task.prompt_template.trim())) {
-      message.warning('请填写任务组名称和每个任务的名称、任务内容'); return;
+      message.warning(t('taskCenter.scheduleGroupFieldsRequired')); return;
     }
     setSubmitting(true);
     try {
       await batchCreateAutomationGroup({ group: { name: batchGroupName.trim(), timezone: localTimezone.current }, tasks: batchTasks });
-      message.success('任务组和关联任务已创建'); setModalOpen(false); void fetchSchedules();
+      message.success(t('taskCenter.scheduleGroupCreateSuccess')); setModalOpen(false); void fetchSchedules();
     } finally { setSubmitting(false); }
   };
 
@@ -678,13 +682,13 @@ export default function ScheduleList({ active }: ScheduleListProps) {
     >
       <div className='schedule-card-identity'>
         <span className='schedule-icon'><CalendarOutlined /></span>
-        <div><h3>{schedule.name || schedule.prompt_template.slice(0, 24)}</h3><p>{schedule.prompt_template}</p>{schedule.dependencies?.length ? <small>收集：{schedule.dependencies.map((dependency) => schedules.find((source) => source.id === dependency.source_schedule_id)?.name?.trim() || dependency.source_name || '未命名任务').join('、')} · 上次执行至本次执行</small> : null}</div>
+        <div><h3>{schedule.name || schedule.prompt_template.slice(0, 24)}</h3><p>{schedule.prompt_template}</p>{schedule.dependencies?.length ? <small>{t('taskCenter.scheduleDependencySummary', { names: schedule.dependencies.map((dependency) => schedules.find((source) => source.id === dependency.source_schedule_id)?.name?.trim() || dependency.source_name || t('taskCenter.scheduleUnnamedTask')).join(t('taskCenter.scheduleListSeparator')) })}</small> : null}</div>
         <span className={`schedule-status-chip ${schedule.enabled ? 'enabled' : 'disabled'}`}>{schedule.enabled ? t('taskCenter.scheduleStatusEnabled') : t('taskCenter.scheduleStatusDisabled')}</span>
       </div>
       <div className='schedule-card-timing'>
         <strong><CalendarOutlined /> {describeCron(schedule.cron_expr, t)}</strong>
-        <span>{t('taskCenter.nextRunAt')}：{schedule.next_run_at ? dayjs(schedule.next_run_at).format('YYYY/MM/DD HH:mm') : '—'}</span>
-        {viewMode === 'large' && <span>{t('taskCenter.lastRun')}：{schedule.last_run_at ? dayjs(schedule.last_run_at).format('YYYY/MM/DD HH:mm') : '—'}</span>}
+        <span>{t('taskCenter.nextRunAt')}: {schedule.next_run_at ? dayjs(schedule.next_run_at).format('YYYY/MM/DD HH:mm') : '—'}</span>
+        {viewMode === 'large' && <span>{t('taskCenter.lastRun')}: {schedule.last_run_at ? dayjs(schedule.last_run_at).format('YYYY/MM/DD HH:mm') : '—'}</span>}
       </div>
       <div className='schedule-card-actions' onClick={(event) => event.stopPropagation()}>
         <label><Switch size='small' checked={schedule.enabled} onChange={(checked) => void (checked ? handleEnable(schedule.id) : handleDisable(schedule.id))} /> {schedule.enabled ? t('taskCenter.scheduleStatusEnabled') : t('taskCenter.scheduleStatusDisabled')}</label>
@@ -726,8 +730,8 @@ export default function ScheduleList({ active }: ScheduleListProps) {
       </div>
     );
     return <article className='schedule-group-card' key={group.id || 'ungrouped'} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const scheduleID = event.dataTransfer.getData('text/schedule-id'); if (scheduleID) void moveSchedule(scheduleID, group.id || undefined, items.length).then(fetchSchedules); }}>
-      <header><span className='schedule-group-icon'><AppstoreOutlined /></span><div><h3>{group.name}</h3><p>{group.remark || (group.id ? '集中管理组内的定时任务' : '尚未加入任务组的定时任务')}</p></div><span className={`schedule-status-chip ${items.some((schedule) => schedule.enabled) ? 'enabled' : 'disabled'}`}>{items.some((schedule) => schedule.enabled) ? '启用中' : '已停用'}</span></header>
-      <div className='schedule-group-meta'><span>包含 {items.length} 个任务</span><span>最近执行：{recentSchedule?.last_run_at ? dayjs(recentSchedule.last_run_at).format('MM/DD HH:mm') : '—'}</span><span>下次执行：{nextSchedule?.next_run_at ? dayjs(nextSchedule.next_run_at).format('MM/DD HH:mm') : '—'}</span></div>
+      <header><span className='schedule-group-icon'><AppstoreOutlined /></span><div><h3>{group.name}</h3><p>{group.remark || t(group.id ? 'taskCenter.scheduleGroupDescription' : 'taskCenter.scheduleUngroupedDescription')}</p></div><span className={`schedule-status-chip ${items.some((schedule) => schedule.enabled) ? 'enabled' : 'disabled'}`}>{items.some((schedule) => schedule.enabled) ? t('taskCenter.scheduleStatusEnabled') : t('taskCenter.scheduleStatusDisabled')}</span></header>
+      <div className='schedule-group-meta'><span>{t('taskCenter.scheduleGroupTaskCount', { count: items.length })}</span><span>{t('taskCenter.lastRun')}: {recentSchedule?.last_run_at ? dayjs(recentSchedule.last_run_at).format('MM/DD HH:mm') : '—'}</span><span>{t('taskCenter.nextRunAt')}: {nextSchedule?.next_run_at ? dayjs(nextSchedule.next_run_at).format('MM/DD HH:mm') : '—'}</span></div>
       <footer>
         <div className='schedule-group-task-tags'>
           {items.length > 0 ? <>
@@ -742,7 +746,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
           </> : <span>-</span>}
         </div>
         <Space size={8}>
-          <Button className='schedule-group-tasks-button' onClick={() => openGroupTasks(group.id)}>查看组内任务</Button>
+          <Button className='schedule-group-tasks-button' onClick={() => openGroupTasks(group.id)}>{t('taskCenter.scheduleViewGroupTasks')}</Button>
           <Button className='schedule-group-delete-button' danger type='default' icon={<DeleteOutlined />} aria-label={t('taskCenter.groupDelete')} onClick={() => setDeleteGroupTarget(group)}>
             {t('taskCenter.groupDelete')}
           </Button>
@@ -758,12 +762,12 @@ export default function ScheduleList({ active }: ScheduleListProps) {
   const dependencyLabel = (schedule: Schedule) => `${schedule.name || schedule.prompt_template.slice(0, 24)} · ${describeCron(schedule.cron_expr, t)}`;
   const batchDependencyOptions = (task: BatchScheduleDraft, index: number) => [
     {
-      label: '本任务组内',
+      label: t('taskCenter.scheduleThisGroup'),
       options: batchTasks.slice(0, index)
-        .map((source, sourceIndex) => ({ value: `client:${source.client_key}`, label: `${source.name || `任务 ${sourceIndex + 1}`} · ${describeCron(source.cron_expr, t)}`, disabled: scheduleFrequency(source.cron_expr) < scheduleFrequency(task.cron_expr) })),
+        .map((source, sourceIndex) => ({ value: `client:${source.client_key}`, label: `${source.name || t('taskCenter.scheduleTaskNumber', { index: sourceIndex + 1 })} · ${describeCron(source.cron_expr, t)}`, disabled: scheduleFrequency(source.cron_expr) < scheduleFrequency(task.cron_expr) })),
     },
     {
-      label: '其他已有任务',
+      label: t('taskCenter.scheduleExistingTasks'),
       options: schedules
         .map((source) => ({ value: `schedule:${source.id}`, label: dependencyLabel(source), disabled: scheduleFrequency(source.cron_expr) < scheduleFrequency(task.cron_expr) })),
     },
@@ -772,7 +776,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
   return (
     <div className='schedule-plans'>
       <div className='schedule-toolbar'>
-        <Segmented className='schedule-workspace-toggle' value={workspaceView} onChange={(value) => { const next = value as 'tasks' | 'groups'; setWorkspaceView(next); setViewMode(next === 'groups' ? 'large' : 'compact'); if (next === 'groups') setGroupFilter(undefined); }} options={[{ value: 'groups', label: '分组展示' }, { value: 'tasks', label: '逐条展示' }]} />
+        <Segmented className='schedule-workspace-toggle' value={workspaceView} onChange={(value) => { const next = value as 'tasks' | 'groups'; setWorkspaceView(next); setViewMode(next === 'groups' ? 'large' : 'compact'); if (next === 'groups') setGroupFilter(undefined); }} options={[{ value: 'groups', label: t('taskCenter.scheduleGroupedView') }, { value: 'tasks', label: t('taskCenter.scheduleIndividualView') }]} />
         <Input
           prefix={<SearchOutlined style={{ color: '#bbb' }} />}
           placeholder={t('taskCenter.scheduleSearchPlaceholder')}
@@ -797,13 +801,13 @@ export default function ScheduleList({ active }: ScheduleListProps) {
           { value: 'large', label: t('taskCenter.largeCards'), icon: <AppstoreOutlined /> },
           { value: 'compact', label: t('taskCenter.smallCards'), icon: <UnorderedListOutlined /> },
         ]} />
-        <Button type='primary' icon={<PlusOutlined />} onClick={handleOpenModal}>新建定时任务</Button>
+        <Button type='primary' icon={<PlusOutlined />} onClick={handleOpenModal}>{t('taskCenter.newSchedule')}</Button>
       </div>
       <Spin spinning={loading}>
         <section className='schedule-board'>
           {workspaceView === 'tasks' && displaySchedules.length ? (
             <div className='schedule-task-result'>
-              {groupFilter !== undefined ? <div className='schedule-filter-note'><span>正在查看：{groups.find((group) => group.id === groupFilter)?.name || '其他任务'}</span><Button type='link' onClick={() => setGroupFilter(undefined)}>查看全部</Button></div> : null}
+              {groupFilter !== undefined ? <div className='schedule-filter-note'><span>{t('taskCenter.scheduleViewingGroup', { name: groups.find((group) => group.id === groupFilter)?.name || t('taskCenter.scheduleOtherTasks') })}</span><Button type='link' onClick={() => setGroupFilter(undefined)}>{t('taskCenter.viewAll')}</Button></div> : null}
               <div className={`schedule-grid ${viewMode}`}>
               {displaySchedules.map(renderScheduleCard)}
               </div>
@@ -814,7 +818,7 @@ export default function ScheduleList({ active }: ScheduleListProps) {
                 {groups.map((group) => renderGroupCard(group))}
               </div> : null}
               {ungroupedSchedules.length ? <section className='ungrouped-schedule-section' onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); const scheduleID = event.dataTransfer.getData('text/schedule-id'); if (scheduleID) void moveSchedule(scheduleID, undefined, ungroupedSchedules.length).then(fetchSchedules); }}>
-                <header><div><h3>其他任务</h3><p>尚未加入任务组的定时任务</p></div><span>{ungroupedSchedules.length} 个任务</span></header>
+                <header><div><h3>{t('taskCenter.scheduleOtherTasks')}</h3><p>{t('taskCenter.scheduleUngroupedDescription')}</p></div><span>{t('taskCenter.scheduleGroupTaskCount', { count: ungroupedSchedules.length })}</span></header>
                 <div className={`schedule-grid ${viewMode}`}>{ungroupedSchedules.map(renderScheduleCard)}</div>
               </section> : null}
               {!groups.length && !ungroupedSchedules.length ? <Empty className='schedule-empty' description={t('taskCenter.empty')} /> : null}
@@ -873,8 +877,8 @@ export default function ScheduleList({ active }: ScheduleListProps) {
         className='schedule-create-modal'
       >
         {!editTarget ? <div className='creation-type-picker'>
-          <button type='button' className={creationType === 'task' ? 'is-selected' : ''} onClick={() => setCreationType('task')}><span><FileTextOutlined /></span><div><strong>任务</strong><small>创建一条任务，可加入任务组</small></div>{creationType === 'task' ? <CheckCircleFilled /> : null}</button>
-          <button type='button' className={creationType === 'group' ? 'is-selected' : ''} onClick={openBatchModal}><span><AppstoreOutlined /></span><div><strong>任务组</strong><small>创建任务组，并可同时添加任务</small></div>{creationType === 'group' ? <CheckCircleFilled /> : null}</button>
+          <button type='button' className={creationType === 'task' ? 'is-selected' : ''} onClick={() => setCreationType('task')}><span><FileTextOutlined /></span><div><strong>{t('taskCenter.taskFallbackGeneric')}</strong><small>{t('taskCenter.scheduleTaskCreateHint')}</small></div>{creationType === 'task' ? <CheckCircleFilled /> : null}</button>
+          <button type='button' className={creationType === 'group' ? 'is-selected' : ''} onClick={openBatchModal}><span><AppstoreOutlined /></span><div><strong>{t('taskCenter.scheduleGroup')}</strong><small>{t('taskCenter.scheduleGroupCreateHint')}</small></div>{creationType === 'group' ? <CheckCircleFilled /> : null}</button>
         </div> : null}
         {creationType === 'task' || editTarget ? <>
         <Form key={modalKey} form={form} layout='horizontal' labelCol={{ flex: '145px' }} wrapperCol={{ flex: 1 }} labelAlign='left' colon={false} size='small'>
@@ -883,15 +887,15 @@ export default function ScheduleList({ active }: ScheduleListProps) {
             label={<FieldLabel>{t('taskCenter.scheduleNameInputLabel')}</FieldLabel>}
             rules={[{ required: true, whitespace: true, message: t('taskCenter.scheduleNameRequired') }]}
           >
-            <Input placeholder='请输入任务名称' maxLength={100} />
+            <Input placeholder={t('taskCenter.scheduleNameRequired')} maxLength={100} />
           </Form.Item>
           <Form.Item name='prompt_template' label={<FieldLabel>{t('taskCenter.scheduleDescription')}</FieldLabel>} rules={[{ required: true, message: t('taskCenter.scheduleDescriptionRequired') }]}>
             <Input.TextArea rows={3} maxLength={500} showCount placeholder={t('taskCenter.scheduleDescriptionPlaceholder')} />
           </Form.Item>
-          <Form.Item name='remark' label={<FieldLabel>备注</FieldLabel>}>
+          <Form.Item name='remark' label={<FieldLabel>{t('taskCenter.scheduleRemarkOptional')}</FieldLabel>}>
             <Input placeholder={t('taskCenter.scheduleRemarkPlaceholder')} />
           </Form.Item>
-          <Form.Item label={<FieldLabel>附件</FieldLabel>}>
+          <Form.Item label={<FieldLabel>{t('taskCenter.scheduleAttachments')}</FieldLabel>}>
             <Upload
               fileList={fileList}
               maxCount={3}
@@ -926,12 +930,12 @@ export default function ScheduleList({ active }: ScheduleListProps) {
                 }
               }}
             >
-              <Space><Button size='small' icon={<UploadOutlined />}>{t('taskCenter.scheduleUploadFileBtn')}</Button><span className='field-help-inline'>最多上传 3 个文件</span></Space>
+              <Space><Button size='small' icon={<UploadOutlined />}>{t('taskCenter.scheduleUploadFileBtn')}</Button><span className='field-help-inline'>{t('taskCenter.attachmentMaxCount', { count: 3 })}</span></Space>
             </Upload>
           </Form.Item>
           <Form.Item
             name='kb_ids'
-            label={<FieldLabel>知识库</FieldLabel>}
+            label={<FieldLabel>{t('taskCenter.scheduleKbOptional')}</FieldLabel>}
             valuePropName='value'
           >
             <KnowledgeSelect
@@ -942,30 +946,30 @@ export default function ScheduleList({ active }: ScheduleListProps) {
           <Form.Item name='cron_expr' label={<FieldLabel>{t('taskCenter.scheduleExecutionTime')}</FieldLabel>} rules={[{ required: true }]}>
             <VisualScheduler />
           </Form.Item>
-          <Form.Item name='group_id' label={<FieldLabel>加入到</FieldLabel>}>
-            <Select allowClear options={groups.map((group) => ({ value: group.id, label: group.name }))} placeholder='其他任务' />
+          <Form.Item name='group_id' label={<FieldLabel>{t('taskCenter.scheduleJoinGroup')}</FieldLabel>}>
+            <Select allowClear options={groups.map((group) => ({ value: group.id, label: group.name }))} placeholder={t('taskCenter.scheduleOtherTasks')} />
           </Form.Item>
-          <Form.Item noStyle shouldUpdate={(previous, current) => previous.cron_expr !== current.cron_expr}>{({ getFieldValue }) => <Form.Item name='source_schedule_ids' label={<FieldLabel>依赖任务</FieldLabel>} extra='可选择执行更频繁或与当前任务同频的任务。每次运行会汇总自上次运行后产生的结果；若同时运行，会等待依赖任务完成。'>
-            <Select mode='multiple' allowClear optionFilterProp='label' options={schedules.filter((schedule) => schedule.id !== editTarget?.id).map((schedule) => ({ value: schedule.id, label: dependencyLabel(schedule), disabled: scheduleFrequency(schedule.cron_expr) < scheduleFrequency(getFieldValue('cron_expr') || '* * * * *') }))} placeholder='选择一个或多个依赖任务' />
+          <Form.Item noStyle shouldUpdate={(previous, current) => previous.cron_expr !== current.cron_expr}>{({ getFieldValue }) => <Form.Item name='source_schedule_ids' label={<FieldLabel>{t('taskCenter.scheduleDependencies')}</FieldLabel>} extra={t('taskCenter.scheduleDependencyHelp')}>
+            <Select mode='multiple' allowClear optionFilterProp='label' options={schedules.filter((schedule) => schedule.id !== editTarget?.id).map((schedule) => ({ value: schedule.id, label: dependencyLabel(schedule), disabled: scheduleFrequency(schedule.cron_expr) < scheduleFrequency(getFieldValue('cron_expr') || '* * * * *') }))} placeholder={t('taskCenter.scheduleDependencyPlaceholder')} />
           </Form.Item>}</Form.Item>
         </Form>
         </> : <div className='group-create-editor'>
-          <CreateFieldRow label='任务组名称' required><Input value={batchGroupName} onChange={(event) => setBatchGroupName(event.target.value)} placeholder='请输入任务组名称' maxLength={128} /></CreateFieldRow>
+          <CreateFieldRow label={t('taskCenter.scheduleGroupName')} required><Input value={batchGroupName} onChange={(event) => setBatchGroupName(event.target.value)} placeholder={t('taskCenter.scheduleGroupNameRequired')} maxLength={128} /></CreateFieldRow>
           <div className={`group-task-heading ${batchTasks.length >= 2 ? 'has-tabs' : ''}`}>
-            {batchTasks.length < 2 ? <p>组内任务</p> : null}
+            {batchTasks.length < 2 ? <p>{t('taskCenter.scheduleGroupTasks')}</p> : null}
             <Space>
-              {batchTasks.length === 1 ? <Button danger onClick={() => { setBatchTasks([]); setActiveBatchTask(''); }}>删除任务</Button> : null}
-              <Button icon={<PlusOutlined />} onClick={() => { const next = { client_key: `task_${Date.now()}`, name: '', cron_expr: buildCronExpr([1, 2, 3, 4, 5], dayjs().hour(9).minute(0)), prompt_template: '', dependencies: [] }; setBatchTasks((items) => [...items, next]); setActiveBatchTask(next.client_key); }}>添加任务</Button>
+              {batchTasks.length === 1 ? <Button danger onClick={() => { setBatchTasks([]); setActiveBatchTask(''); }}>{t('taskCenter.scheduleDeleteTask')}</Button> : null}
+              <Button icon={<PlusOutlined />} onClick={() => { const next = { client_key: `task_${Date.now()}`, name: '', cron_expr: buildCronExpr([1, 2, 3, 4, 5], dayjs().hour(9).minute(0)), prompt_template: '', dependencies: [] }; setBatchTasks((items) => [...items, next]); setActiveBatchTask(next.client_key); }}>{t('taskCenter.scheduleAddTask')}</Button>
             </Space>
           </div>
-          <Tabs className={batchTasks.length === 1 ? 'single-task-tabs' : ''} type='editable-card' activeKey={activeBatchTask} onChange={setActiveBatchTask} tabBarExtraContent={batchTasks.length >= 2 ? <Button icon={<PlusOutlined />} onClick={() => { const next = { client_key: `task_${Date.now()}`, name: '', cron_expr: buildCronExpr([1, 2, 3, 4, 5], dayjs().hour(9).minute(0)), prompt_template: '', dependencies: [] }; setBatchTasks((items) => [...items, next]); setActiveBatchTask(next.client_key); }}>添加任务</Button> : null} onEdit={(target, action) => {
+          <Tabs className={batchTasks.length === 1 ? 'single-task-tabs' : ''} type='editable-card' activeKey={activeBatchTask} onChange={setActiveBatchTask} tabBarExtraContent={batchTasks.length >= 2 ? <Button icon={<PlusOutlined />} onClick={() => { const next = { client_key: `task_${Date.now()}`, name: '', cron_expr: buildCronExpr([1, 2, 3, 4, 5], dayjs().hour(9).minute(0)), prompt_template: '', dependencies: [] }; setBatchTasks((items) => [...items, next]); setActiveBatchTask(next.client_key); }}>{t('taskCenter.scheduleAddTask')}</Button> : null} onEdit={(target, action) => {
             if (action === 'add') { const next = { client_key: `task_${Date.now()}`, name: '', cron_expr: buildCronExpr([1, 2, 3, 4, 5], dayjs().hour(9).minute(0)), prompt_template: '', dependencies: [] }; setBatchTasks((items) => [...items, next]); setActiveBatchTask(next.client_key); }
             else { const remaining = batchTasks.filter((task) => task.client_key !== target); setBatchTasks(remaining); setActiveBatchTask(remaining[0]?.client_key || ''); }
-          }} hideAdd items={batchTasks.map((task, index) => ({ key: task.client_key, label: task.name || `任务 ${index + 1}`, closable: batchTasks.length > 1, children: <section className='batch-task-card'>
-            <CreateFieldRow label='任务名称' required><Input value={task.name} onChange={(event) => setBatchTasks((items) => items.map((item) => item.client_key === task.client_key ? { ...item, name: event.target.value } : item))} placeholder='请输入任务名称' /></CreateFieldRow>
-            <CreateFieldRow label='任务描述' required><Input.TextArea value={task.prompt_template} onChange={(event) => setBatchTasks((items) => items.map((item) => item.client_key === task.client_key ? { ...item, prompt_template: event.target.value } : item))} placeholder='描述你希望系统定期执行的任务' rows={3} maxLength={500} showCount /></CreateFieldRow>
-            <CreateFieldRow label='备注'><Input value={task.remark} onChange={(event) => setBatchTasks((items) => items.map((item) => item.client_key === task.client_key ? { ...item, remark: event.target.value } : item))} placeholder='请输入备注信息' /></CreateFieldRow>
-            <CreateFieldRow label='附件'><Upload maxCount={3} accept='.png,.jpg,.jpeg,.pdf,.docx,.doc,.xlsx,.xls,.pptx,.ppt' customRequest={async ({ file, onSuccess, onError, onProgress }) => {
+          }} hideAdd items={batchTasks.map((task, index) => ({ key: task.client_key, label: task.name || t('taskCenter.scheduleTaskNumber', { index: index + 1 }), closable: batchTasks.length > 1, children: <section className='batch-task-card'>
+            <CreateFieldRow label={t('taskCenter.scheduleNameInputLabel')} required><Input value={task.name} onChange={(event) => setBatchTasks((items) => items.map((item) => item.client_key === task.client_key ? { ...item, name: event.target.value } : item))} placeholder={t('taskCenter.scheduleNameRequired')} /></CreateFieldRow>
+            <CreateFieldRow label={t('taskCenter.scheduleDescription')} required><Input.TextArea value={task.prompt_template} onChange={(event) => setBatchTasks((items) => items.map((item) => item.client_key === task.client_key ? { ...item, prompt_template: event.target.value } : item))} placeholder={t('taskCenter.scheduleDescriptionPlaceholder')} rows={3} maxLength={500} showCount /></CreateFieldRow>
+            <CreateFieldRow label={t('taskCenter.scheduleRemarkOptional')}><Input value={task.remark} onChange={(event) => setBatchTasks((items) => items.map((item) => item.client_key === task.client_key ? { ...item, remark: event.target.value } : item))} placeholder={t('taskCenter.scheduleRemarkPlaceholder')} /></CreateFieldRow>
+            <CreateFieldRow label={t('taskCenter.scheduleAttachments')}><Upload maxCount={3} accept='.png,.jpg,.jpeg,.pdf,.docx,.doc,.xlsx,.xls,.pptx,.ppt' customRequest={async ({ file, onSuccess, onError, onProgress }) => {
               setUploading(true);
               try {
                 const path = await uploadFileInChunks(file as File, { onProgress: (progress) => onProgress?.({ percent: progress.percentage }) });
@@ -976,11 +980,11 @@ export default function ScheduleList({ active }: ScheduleListProps) {
                 onError?.(error as Error);
               } finally { setUploading(false); }
             }} onRemove={(file) => { const indexToRemove = file.response ? (task.file_ids || []).indexOf(String(file.response)) : -1; if (indexToRemove >= 0) setBatchTasks((items) => items.map((item) => item.client_key === task.client_key ? { ...item, file_ids: (item.file_ids || []).filter((_, fileIndex) => fileIndex !== indexToRemove) } : item)); }}>
-              <Space><Button icon={<UploadOutlined />}>上传附件</Button><span className='field-help-inline'>最多上传 3 个文件</span></Space>
+              <Space><Button icon={<UploadOutlined />}>{t('taskCenter.scheduleUploadFileBtn')}</Button><span className='field-help-inline'>{t('taskCenter.attachmentMaxCount', { count: 3 })}</span></Space>
             </Upload></CreateFieldRow>
-            <CreateFieldRow label='知识库'><KnowledgeSelect value={task.kb_ids} onChange={(kbIDs) => setBatchTasks((items) => items.map((item) => item.client_key === task.client_key ? { ...item, kb_ids: kbIDs } : item))} options={kbOptions} embeddingReady={embeddingReady} /></CreateFieldRow>
-            <CreateFieldRow label='执行时间' required><VisualScheduler value={task.cron_expr} onChange={(cronExpr) => setBatchTasks((items) => items.map((item) => item.client_key === task.client_key ? { ...item, cron_expr: cronExpr, dependencies: (item.dependencies || []).filter((dependency) => { const internalSource = batchTasks.find((candidate) => candidate.client_key === dependency.source_client_key); const externalSource = schedules.find((candidate) => candidate.id === dependency.source_schedule_id); const source = internalSource || externalSource; return !source || scheduleFrequency(source.cron_expr) >= scheduleFrequency(cronExpr); }) } : item))} /></CreateFieldRow>
-            <CreateFieldRow label='依赖任务'><div><Select mode='multiple' allowClear optionFilterProp='label' placeholder='选择一个或多个依赖任务' value={(task.dependencies || []).map((dependency) => dependency.source_client_key ? `client:${dependency.source_client_key}` : `schedule:${dependency.source_schedule_id}`)} options={batchDependencyOptions(task, index)} onChange={(keys: string[]) => setBatchTasks((items) => items.map((item) => item.client_key === task.client_key ? { ...item, dependencies: keys.map((key) => ({ source_client_key: key.startsWith('client:') ? key.slice(7) : undefined, source_schedule_id: key.startsWith('schedule:') ? key.slice(9) : '', window_type: 'between_target_fires', content_types: ['final_answer', 'artifacts'], incomplete_policy: 'wait_then_run_with_warning', max_wait_seconds: 7200 })) } : item))} /><div className='field-help'>可选择执行更频繁或与当前任务同频的任务。每次运行会汇总自上次运行后产生的结果；若同时运行，会等待依赖任务完成。</div></div></CreateFieldRow>
+            <CreateFieldRow label={t('taskCenter.scheduleKbOptional')}><KnowledgeSelect value={task.kb_ids} onChange={(kbIDs) => setBatchTasks((items) => items.map((item) => item.client_key === task.client_key ? { ...item, kb_ids: kbIDs } : item))} options={kbOptions} embeddingReady={embeddingReady} /></CreateFieldRow>
+            <CreateFieldRow label={t('taskCenter.scheduleExecutionTime')} required><VisualScheduler value={task.cron_expr} onChange={(cronExpr) => setBatchTasks((items) => items.map((item) => item.client_key === task.client_key ? { ...item, cron_expr: cronExpr, dependencies: (item.dependencies || []).filter((dependency) => { const internalSource = batchTasks.find((candidate) => candidate.client_key === dependency.source_client_key); const externalSource = schedules.find((candidate) => candidate.id === dependency.source_schedule_id); const source = internalSource || externalSource; return !source || scheduleFrequency(source.cron_expr) >= scheduleFrequency(cronExpr); }) } : item))} /></CreateFieldRow>
+            <CreateFieldRow label={t('taskCenter.scheduleDependencies')}><div><Select mode='multiple' allowClear optionFilterProp='label' placeholder={t('taskCenter.scheduleDependencyPlaceholder')} value={(task.dependencies || []).map((dependency) => dependency.source_client_key ? `client:${dependency.source_client_key}` : `schedule:${dependency.source_schedule_id}`)} options={batchDependencyOptions(task, index)} onChange={(keys: string[]) => setBatchTasks((items) => items.map((item) => item.client_key === task.client_key ? { ...item, dependencies: keys.map((key) => ({ source_client_key: key.startsWith('client:') ? key.slice(7) : undefined, source_schedule_id: key.startsWith('schedule:') ? key.slice(9) : '', window_type: 'between_target_fires', content_types: ['final_answer', 'artifacts'], incomplete_policy: 'wait_then_run_with_warning', max_wait_seconds: 7200 })) } : item))} /><div className='field-help'>{t('taskCenter.scheduleDependencyHelp')}</div></div></CreateFieldRow>
           </section> }))} />
         </div>}
       </Modal>

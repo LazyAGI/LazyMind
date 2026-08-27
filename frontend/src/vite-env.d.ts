@@ -21,6 +21,10 @@ declare global {
       runtimeStatus?: () => Promise<unknown> | unknown;
       restartRuntime?: () => Promise<unknown> | unknown;
       resetRuntime?: (scope?: "kb" | "all") => Promise<unknown> | unknown;
+      localFolderAccessStatus?: () => Promise<unknown> | unknown;
+      chooseLocalDiscoveryRoots?: () => Promise<unknown> | unknown;
+      discoverLocalFolders?: () => Promise<unknown> | unknown;
+      authorizeLocalFolders?: (paths: string[]) => Promise<unknown> | unknown;
       selectFolder?: () => Promise<string | null> | string | null;
       exportDiagnostics?: () => Promise<string> | string;
       notifyAppReady?: () => void;

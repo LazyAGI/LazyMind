@@ -11,14 +11,12 @@ import {
 import {
   Alert,
   Button,
-  Form,
   Modal,
   Tooltip,
   Flex,
   message,
   Input,
   TablePaginationConfig,
-  Select,
   Tag,
   Space,
   Typography,
@@ -30,7 +28,6 @@ import {
   AppstoreOutlined,
   ArrowLeftOutlined,
   DatabaseOutlined,
-  DownOutlined,
   HistoryOutlined,
   PlusOutlined,
   SearchOutlined,
@@ -77,6 +74,7 @@ import { mapScanSourceToDataSource } from "@/modules/dataSource/mappers/scanSour
 import {
   getFirstScanBinding,
   getScanSourceId,
+  inferSourceKind,
   type ScanV2Binding,
   type ScanV2Source,
 } from "@/modules/dataSource/utils/scanAccessors";
@@ -95,6 +93,13 @@ import {
   type OfficialKnowledgeBase,
 } from "./knowledgeSquareData";
 import KnowledgeMarketTaskModal from "./KnowledgeMarketTaskModal";
+import KnowledgeMineFilterPopover from "./KnowledgeMineFilterPopover";
+import {
+  getKnowledgeMineOrderBy,
+  sortByDatasetOrder,
+  type KnowledgeMineCloudSource,
+  type KnowledgeMineSort,
+} from "./knowledgeMineFilters";
 import {
   isKnowledgeMarketTaskFailed,
   isKnowledgeMarketTaskTerminal,
@@ -137,7 +142,6 @@ interface KnowledgePageProps {
 const KnowledgePage: FC<KnowledgePageProps> = ({
   modelSettingsPath = "/settings?section=models",
 }) => {
-  const [form] = Form.useForm();
   const navigate = useNavigate();
   const location = useLocation();
   const { t } = useTranslation();
@@ -152,8 +156,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     total: 0,
   });
   const [dataSource, setDataSource] = useState<Dataset[] | undefined>([]);
-  // Keep a local default option to avoid label flicker while tags are loading.
-  const [tags, setTags] = useState<string[]>([ALL_TAGS]);
+  const [localTags, setLocalTags] = useState<string[]>([]);
   const [sourceCategory, setSourceCategory] = useState<SourceCategory>("local");
   const [activeView, setActiveView] = useState<KnowledgePageView>("mine");
   const [officialItems, setOfficialItems] = useState<OfficialKnowledgeBase[]>([]);
@@ -166,9 +169,18 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     Record<string, TrackedKnowledgeMarketJob>
   >({});
   const [marketProgress, setMarketProgress] = useState<Record<string, number>>({});
-  const [mineSort, setMineSort] = useState("updated");
-  const [officialSearch, setOfficialSearch] = useState("");
+  const [mineSearch, setMineSearch] = useState("");
+  const [mineLocalTag, setMineLocalTag] = useState(ALL_TAGS);
+  const [mineOfficialTag, setMineOfficialTag] = useState(ALL_TAGS);
+  const [mineSort, setMineSort] = useState<KnowledgeMineSort>("all");
+  const [mineCloudSource, setMineCloudSource] =
+    useState<KnowledgeMineCloudSource>("all");
+  const [mineFilterOpen, setMineFilterOpen] = useState(false);
   const [cloudSources, setCloudSources] = useState<DataSourceItem[]>([]);
+  const [officialDatasetOrder, setOfficialDatasetOrder] = useState<
+    string[] | null
+  >(null);
+  const [officialSortLoading, setOfficialSortLoading] = useState(false);
   const [embeddingReady, setEmbeddingReady] = useState<boolean | null>(null);
   const [multimodalEmbeddingReady, setMultimodalEmbeddingReady] = useState<
     boolean | null
@@ -181,7 +193,9 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     },
   });
   const cloudCreateRequestRef = useRef<string | null>(null);
-  const cloudSourceRequestSeqRef = useRef(0);
+  const localTagsRequestSeqRef = useRef(0);
+  const mineTableRequestSeqRef = useRef(0);
+  const officialSortRequestSeqRef = useRef(0);
   const marketRequestSeqRef = useRef(0);
   const isCloudArchiveView = sourceCategory === "cloudArchive";
   const isOfficialView = sourceCategory === "official";
@@ -273,7 +287,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   }, [loadKnowledgeMarket]);
 
   useEffect(() => {
-    getTags();
+    void getLocalTags();
     void checkEmbeddingReady();
 
     const onFeaturesChanged = () => {
@@ -287,6 +301,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     };
     document.addEventListener("visibilitychange", onVisibilityChange);
     return () => {
+      localTagsRequestSeqRef.current += 1;
       window.removeEventListener(
         MODEL_FEATURES_CHANGED_EVENT,
         onFeaturesChanged,
@@ -336,25 +351,98 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   useEffect(() => {
     if (activeView === "mine" && sourceCategory !== "official") {
       getTableData(1, pagination.pageSize);
+    } else {
+      mineTableRequestSeqRef.current += 1;
+      setLoading(false);
     }
-  }, [activeView, sourceCategory]);
+    return () => {
+      mineTableRequestSeqRef.current += 1;
+    };
+  }, [
+    activeView,
+    sourceCategory,
+    mineSearch,
+    mineLocalTag,
+    mineSort,
+    mineCloudSource,
+  ]);
 
   const loadCloudSources = useCallback(
-    async (page = 1, pageSize = 10, keyword = "") => {
-      const requestSeq = cloudSourceRequestSeqRef.current + 1;
-      cloudSourceRequestSeqRef.current = requestSeq;
+    async (
+      page = 1,
+      pageSize = 10,
+      keyword = "",
+      selectedSort: KnowledgeMineSort = "all",
+      selectedCloudSource: KnowledgeMineCloudSource = "all",
+    ) => {
+      const requestSeq = mineTableRequestSeqRef.current + 1;
+      mineTableRequestSeqRef.current = requestSeq;
       setLoading(true);
 
       try {
-        const sourcesResponse = await dataSourceScanApi.listSources({
-          page,
-          pageSize,
-          keyword: keyword.trim() || undefined,
-        });
-        const sourceList = (sourcesResponse.data.items || []) as ScanV2Source[];
-        const visibleSourceList = sourceList.filter(
-          (source) => normalizeDataSourceStatus(source.status) !== "deleted",
+        const orderBy = getKnowledgeMineOrderBy(selectedSort);
+        const scanOptions = orderBy
+          ? { params: { order_by: orderBy } }
+          : undefined;
+        const needsClientFilter = selectedCloudSource !== "all";
+
+        const sourceListPromise = (async () => {
+          let sourceList: ScanV2Source[] = [];
+          let sourceTotal = 0;
+          if (needsClientFilter) {
+            const scanPageSize = 200;
+            let scanPage = 1;
+            do {
+              const response = await dataSourceScanApi.listSources(
+                {
+                  page: scanPage,
+                  pageSize: scanPageSize,
+                  keyword: keyword.trim() || undefined,
+                },
+                scanOptions,
+              );
+              const pageItems = (response.data.items || []) as ScanV2Source[];
+              sourceList.push(...pageItems);
+              sourceTotal = Number(response.data.total || 0);
+              if (
+                pageItems.length === 0 ||
+                sourceList.length >= sourceTotal
+              ) {
+                break;
+              }
+              scanPage += 1;
+            } while (true);
+          } else {
+            const response = await dataSourceScanApi.listSources(
+              {
+                page,
+                pageSize,
+                keyword: keyword.trim() || undefined,
+              },
+              scanOptions,
+            );
+            sourceList = (response.data.items || []) as ScanV2Source[];
+            sourceTotal = Number(response.data.total || 0);
+          }
+          return { sourceList, sourceTotal };
+        })();
+
+        const { sourceList, sourceTotal } = await sourceListPromise;
+        if (mineTableRequestSeqRef.current !== requestSeq) return;
+        const filteredSourceList = sourceList.filter(
+          (source) =>
+            normalizeDataSourceStatus(source.status) !== "deleted" &&
+            (selectedCloudSource === "all" ||
+              inferSourceKind(source) === selectedCloudSource),
         );
+        const visibleSourceList = needsClientFilter
+          ? filteredSourceList.slice((page - 1) * pageSize, page * pageSize)
+          : filteredSourceList;
+        const filteredTotal = needsClientFilter
+          ? filteredSourceList.length
+          : sourceTotal;
+
+        if (mineTableRequestSeqRef.current !== requestSeq) return;
         const nextSources = await Promise.all(
           visibleSourceList.map(async (source) => {
             const sourceId = getScanSourceId(source);
@@ -382,20 +470,15 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           }),
         );
 
-        if (cloudSourceRequestSeqRef.current !== requestSeq) {
-          return;
-        }
-
+        if (mineTableRequestSeqRef.current !== requestSeq) return;
         setCloudSources(nextSources);
         setPagination({
           current: page,
           pageSize,
-          total: Number(sourcesResponse.data.total || 0),
+          total: filteredTotal,
         });
-      } catch (error) {
-        if (cloudSourceRequestSeqRef.current !== requestSeq) {
-          return;
-        }
+      } catch {
+        if (mineTableRequestSeqRef.current !== requestSeq) return;
         setCloudSources([]);
         setPagination({
           current: page,
@@ -403,7 +486,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           total: 0,
         });
       } finally {
-        if (cloudSourceRequestSeqRef.current === requestSeq) {
+        if (mineTableRequestSeqRef.current === requestSeq) {
           setLoading(false);
         }
       }
@@ -695,23 +778,111 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     [loadKnowledgeMarket, t],
   );
 
+  const loadOfficialDatasetOrder = useCallback(
+    async (selectedSort: KnowledgeMineSort) => {
+      const requestSeq = officialSortRequestSeqRef.current + 1;
+      officialSortRequestSeqRef.current = requestSeq;
+      const orderBy = getKnowledgeMineOrderBy(selectedSort);
+      if (!orderBy) {
+        setOfficialDatasetOrder(null);
+        setOfficialSortLoading(false);
+        return;
+      }
+
+      setOfficialSortLoading(true);
+      try {
+        const datasetIds: string[] = [];
+        const seenPageTokens = new Set<string>();
+        let pageToken: string | undefined;
+        do {
+          const response = await KnowledgeBaseServiceApi().datasetServiceListDatasets(
+            {
+              pageToken,
+              pageSize: 100,
+              orderBy,
+            },
+            { params: { source: "official_installed" } },
+          );
+          (response.data.datasets || []).forEach((dataset) => {
+            if (dataset.dataset_id) datasetIds.push(dataset.dataset_id);
+          });
+          const nextPageToken = response.data.next_page_token || undefined;
+          if (!nextPageToken || seenPageTokens.has(nextPageToken)) break;
+          seenPageTokens.add(nextPageToken);
+          pageToken = nextPageToken;
+        } while (pageToken);
+
+        if (officialSortRequestSeqRef.current === requestSeq) {
+          setOfficialDatasetOrder(datasetIds);
+        }
+      } catch {
+        if (officialSortRequestSeqRef.current === requestSeq) {
+          setOfficialDatasetOrder(null);
+        }
+      } finally {
+        if (officialSortRequestSeqRef.current === requestSeq) {
+          setOfficialSortLoading(false);
+        }
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    if (activeView !== "mine" || sourceCategory !== "official") {
+      officialSortRequestSeqRef.current += 1;
+      setOfficialSortLoading(false);
+      return;
+    }
+    void loadOfficialDatasetOrder(mineSort);
+  }, [activeView, loadOfficialDatasetOrder, mineSort, sourceCategory]);
+
   const installedOfficialItems = useMemo(() => {
     const items = officialItems.filter(
       (item) => {
         if (!item.installed) return false;
-        const keyword = officialSearch.trim().toLocaleLowerCase();
-        if (!keyword) return true;
-        return [item.name, item.desc, item.domain, ...item.tags]
+        if (
+          mineOfficialTag !== ALL_TAGS &&
+          !item.tags.includes(mineOfficialTag)
+        ) {
+          return false;
+        }
+        const keyword = mineSearch.trim().toLocaleLowerCase();
+        return !keyword || [item.name, item.desc, item.domain, ...item.tags]
           .join(" ")
           .toLocaleLowerCase()
           .includes(keyword);
       },
     );
-    if (mineSort === "name") {
-      return [...items].sort((a, b) => a.name.localeCompare(b.name, "zh-CN"));
+    return sortByDatasetOrder(items, officialDatasetOrder, (item) => item.datasetId);
+  }, [mineOfficialTag, mineSearch, officialDatasetOrder, officialItems]);
+
+  const officialFilterTags = useMemo(
+    () =>
+      Array.from(
+        new Set([
+          ...officialItems
+            .filter((item) => item.installed)
+            .flatMap((item) => item.tags),
+        ]),
+      ).sort((left, right) => left.localeCompare(right, "zh-CN")),
+    [officialItems],
+  );
+
+  useEffect(() => {
+    if (mineLocalTag !== ALL_TAGS && !localTags.includes(mineLocalTag)) {
+      setMineLocalTag(ALL_TAGS);
     }
-    return [...items].sort((a, b) => b.updated.localeCompare(a.updated));
-  }, [mineSort, officialItems, officialSearch]);
+  }, [localTags, mineLocalTag]);
+
+  useEffect(() => {
+    if (
+      mineOfficialTag !== ALL_TAGS &&
+      !officialFilterTags.includes(mineOfficialTag)
+    ) {
+      setMineOfficialTag(ALL_TAGS);
+    }
+  }, [mineOfficialTag, officialFilterTags]);
 
   const handleUpdateAllOfficial = useCallback(async () => {
     try {
@@ -1007,11 +1178,16 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         title: t("knowledge.source"),
         dataIndex: "source",
         width: 132,
-        render: (source: string) => (
-          <span className="knowledge-list-source is-official">
-            {source || t("knowledge.officialKnowledge")}
-          </span>
-        ),
+        render: (source: string) => {
+          const sourceLabel = source || t("knowledge.officialKnowledge");
+          return (
+            <Tooltip title={sourceLabel} placement="topLeft">
+              <span className="knowledge-list-source is-official">
+                <span className="knowledge-list-source-text">{sourceLabel}</span>
+              </span>
+            </Tooltip>
+          );
+        },
       },
       {
         title: t("knowledge.tags"),
@@ -1106,18 +1282,43 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
     ],
   );
 
-  function getTags() {
-    KnowledgeBaseServiceApi()
-      .datasetServiceAllDatasetTags()
-      .then((res) => {
-        const uniqueTags = Array.from(
-          new Set((res.data.tags || []).filter(Boolean)),
+  async function getLocalTags() {
+    const requestSeq = localTagsRequestSeqRef.current + 1;
+    localTagsRequestSeqRef.current = requestSeq;
+    const nextTags = new Set<string>();
+    const seenPageTokens = new Set<string>();
+    let pageToken: string | undefined;
+
+    try {
+      do {
+        const response = await KnowledgeBaseServiceApi().datasetServiceListDatasets(
+          { pageToken, pageSize: 100 },
+          { params: { source: "manual" } },
         );
-        setTags([ALL_TAGS, ...uniqueTags.filter((tag) => tag !== ALL_TAGS)]);
-      })
-      .catch(() => {
-        setTags([ALL_TAGS]);
-      });
+        if (localTagsRequestSeqRef.current !== requestSeq) return;
+        (response.data.datasets || []).forEach((dataset) => {
+          (dataset.tags || []).forEach((tag) => {
+            if (tag && tag !== ALL_TAGS) nextTags.add(tag);
+          });
+        });
+        const nextPageToken = response.data.next_page_token || undefined;
+        if (!nextPageToken || seenPageTokens.has(nextPageToken)) break;
+        seenPageTokens.add(nextPageToken);
+        pageToken = nextPageToken;
+      } while (pageToken);
+
+      if (localTagsRequestSeqRef.current === requestSeq) {
+        setLocalTags(
+          Array.from(nextTags).sort((left, right) =>
+            left.localeCompare(right, "zh-CN"),
+          ),
+        );
+      }
+    } catch {
+      if (localTagsRequestSeqRef.current === requestSeq) {
+        setLocalTags([]);
+      }
+    }
   }
 
   const handleSuccess = (
@@ -1143,18 +1344,24 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
   };
 
   function getTableData(page = 1, pageSize = pagination.pageSize) {
-    const values = form.getFieldsValue();
-
     if (sourceCategory === "official") {
       setLoading(false);
       return;
     }
 
     if (sourceCategory === "cloudArchive") {
-      void loadCloudSources(page, pageSize || 10, values.keyword || "");
+      void loadCloudSources(
+        page,
+        pageSize || 10,
+        mineSearch,
+        mineSort,
+        mineCloudSource,
+      );
       return;
     }
 
+    const requestSeq = mineTableRequestSeqRef.current + 1;
+    mineTableRequestSeqRef.current = requestSeq;
     const newPagination = {
       ...pagination,
       current: page,
@@ -1174,12 +1381,14 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       .datasetServiceListDatasets({
         pageToken,
         pageSize: pageSize,
-        keyword: values.keyword,
-        tags: values?.tags && values.tags !== ALL_TAGS ? [values.tags] : [],
+        orderBy: getKnowledgeMineOrderBy(mineSort),
+        keyword: mineSearch.trim() || undefined,
+        tags: mineLocalTag !== ALL_TAGS ? [mineLocalTag] : [],
       }, {
         params: { source: "manual" },
       })
       .then((res) => {
+        if (mineTableRequestSeqRef.current !== requestSeq) return;
         handleSuccess(
           (res.data.datasets as unknown as Dataset[]) || [],
           res.data.total_size || 0,
@@ -1187,10 +1396,14 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
         );
       })
       .catch(() => {
-        initData();
+        if (mineTableRequestSeqRef.current !== requestSeq) return;
+        setDataSource([]);
+        setPagination({ ...newPagination, total: 0 });
       })
       .finally(() => {
-        setLoading(false);
+        if (mineTableRequestSeqRef.current === requestSeq) {
+          setLoading(false);
+        }
       });
   }
 
@@ -1199,7 +1412,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
       .datasetServiceDeleteDataset({ dataset: id })
       .then(() => {
         message.success(t("knowledge.deleteSuccess"));
-        getTags();
+        void getLocalTags();
         getTableData();
       });
   }
@@ -1215,7 +1428,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           })
           .then(() => {
             message.success(t("knowledge.editSuccess"));
-            getTags();
+            void getLocalTags();
             getTableData();
           });
       }
@@ -1229,7 +1442,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
               ? t("knowledge.editSuccess")
               : t("knowledge.createSuccess"),
           );
-          getTags();
+          void getLocalTags();
           getTableData();
         });
     } finally {
@@ -1347,7 +1560,10 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           role="tab"
           className={activeView === "mine" ? "is-active" : ""}
           aria-selected={activeView === "mine"}
-          onClick={() => setActiveView("mine")}
+          onClick={() => {
+            setMineFilterOpen(false);
+            setActiveView("mine");
+          }}
         >
           <span className="knowledge-view-tab-icon"><DatabaseOutlined /></span>
           <span><strong>{t("knowledge.myKnowledge")}</strong><small>{t("knowledge.myKnowledgeDescription")}</small></span>
@@ -1357,7 +1573,10 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           role="tab"
           className={activeView === "square" ? "is-active" : ""}
           aria-selected={activeView === "square"}
-          onClick={() => setActiveView("square")}
+          onClick={() => {
+            setMineFilterOpen(false);
+            setActiveView("square");
+          }}
         >
           <span className="knowledge-view-tab-icon"><AppstoreOutlined /></span>
           <span><strong>{t("knowledge.knowledgeSquare")}</strong><small>{t("knowledge.knowledgeSquareDescription")}</small></span>
@@ -1391,11 +1610,9 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
                 className={sourceCategory === value ? "is-active" : ""}
                 aria-selected={sourceCategory === value}
                 onClick={() => {
-                  form.resetFields(["keyword", "tags"]);
-                  form.setFieldsValue({ tags: ALL_TAGS });
-                  setOfficialSearch("");
+                  setMineFilterOpen(false);
+                  if (value !== sourceCategory && value !== "official") initData();
                   setSourceCategory(value);
-                  if (value !== "official") initData();
                 }}
               >
                 {label}
@@ -1403,77 +1620,70 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
             ))}
           </div>
 
-          <Form
+          <div
             className={`knowledge-mine-toolbar ${isOfficialView ? "has-update-all" : ""}`}
-            form={form}
           >
-            <Form.Item name="keyword" noStyle>
-              <Input.Search
-                allowClear
-                prefix={<SearchOutlined />}
-                placeholder={
-                  isCloudArchiveView
-                    ? t("admin.dataSourceAssetSearchPlaceholder")
-                    : t("knowledge.squareSearchPlaceholder")
-                }
-                onChange={(event: ChangeEvent<HTMLInputElement>) => {
-                  if (isOfficialView) setOfficialSearch(event.target.value);
-                }}
-                onSearch={(value: string) => {
-                  form.setFieldsValue({ keyword: value ?? "" });
-                  if (isOfficialView) setOfficialSearch(value || "");
-                  else getTableData();
-                }}
-              />
-            </Form.Item>
+            <Input.Search
+              allowClear
+              prefix={<SearchOutlined />}
+              value={mineSearch}
+              placeholder={
+                isCloudArchiveView
+                  ? t("admin.dataSourceAssetSearchPlaceholder")
+                  : t("knowledge.squareSearchPlaceholder")
+              }
+              onFocus={() => setMineFilterOpen(false)}
+              onChange={(event: ChangeEvent<HTMLInputElement>) =>
+                setMineSearch(event.target.value)
+              }
+            />
             {isOfficialView ? (
               <Button
                 type="primary"
                 disabled={
-                  installedOfficialItems.length === 0 ||
+                  !officialItems.some((item) => item.installed) ||
                   Object.values(trackedMarketJobs).some(
                     (job) => job.jobType === "updateAll",
                   )
                 }
                 onClick={handleUpdateAllOfficial}
               >
-                {t("knowledge.checkAllUpdates")}
+                {t("knowledge.updateAll")}
               </Button>
             ) : null}
-            {sourceCategory === "local" ? (
-              <Form.Item name="tags" noStyle initialValue={ALL_TAGS}>
-                <Select
-                  suffixIcon={<DownOutlined />}
-                  options={tags.map((tag) => ({
-                    label: tag === ALL_TAGS ? t("knowledge.filterAndSort") : tag,
-                    value: tag,
-                  }))}
-                  onChange={() => getTableData()}
-                />
-              </Form.Item>
-            ) : (
-              <Select
-                value={mineSort}
-                suffixIcon={<DownOutlined />}
-                options={[
-                  { value: "updated", label: t("knowledge.sortByUpdated") },
-                  { value: "name", label: t("knowledge.sortByName") },
-                ]}
-                onChange={setMineSort}
-              />
-            )}
+            <KnowledgeMineFilterPopover
+              t={t}
+              tags={isOfficialView ? officialFilterTags : localTags}
+              primaryFilter={isCloudArchiveView ? "cloudSource" : "tags"}
+              open={mineFilterOpen}
+              selectedTag={
+                isOfficialView ? mineOfficialTag : mineLocalTag
+              }
+              selectedSort={mineSort}
+              selectedCloudSource={mineCloudSource}
+              onOpenChange={setMineFilterOpen}
+              onTagChange={(tag) => {
+                if (isOfficialView) setMineOfficialTag(tag);
+                else setMineLocalTag(tag);
+              }}
+              onSortChange={setMineSort}
+              onCloudSourceChange={setMineCloudSource}
+            />
             <Button
               onClick={() => {
-                form.resetFields(["keyword", "tags"]);
-                form.setFieldsValue({ tags: ALL_TAGS });
-                setOfficialSearch("");
-                setMineSort("updated");
-                if (!isOfficialView) getTableData(1, pagination.pageSize);
+                if (sourceCategory !== "local") initData();
+                setMineSearch("");
+                setMineLocalTag(ALL_TAGS);
+                setMineOfficialTag(ALL_TAGS);
+                setMineSort("all");
+                setMineCloudSource("all");
+                setSourceCategory("local");
+                setMineFilterOpen(false);
               }}
             >
               {t("common.reset")}
             </Button>
-          </Form>
+          </div>
 
           <ListPageTable
             rootClassName={`knowledge-mine-table ${isCloudArchiveView ? "data-source-asset-table" : ""}`}
@@ -1485,7 +1695,7 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
                   ? officialColumns
                   : columns) as ColumnsType<any>
             }
-            loading={isOfficialView ? officialLoading : loading}
+            loading={isOfficialView ? officialLoading || officialSortLoading : loading}
             dataSource={
               isCloudArchiveView
                 ? cloudSources

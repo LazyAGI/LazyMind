@@ -101,6 +101,18 @@ func TestBuildSelectsSQLRepositoryAndHTTPAdapters(t *testing.T) {
 	}
 }
 
+func TestLocalFSBackgroundPrewarmDisabledForDynamicDesktopRoots(t *testing.T) {
+	t.Parallel()
+
+	types := []connector.ConnectorType{localfs.ConnectorType, feishu.ConnectorType}
+	if !localFSBackgroundPrewarmEnabled(types, false) {
+		t.Fatal("ordinary Local and Docker runtimes should keep local_fs background prewarm")
+	}
+	if localFSBackgroundPrewarmEnabled(types, true) {
+		t.Fatal("Desktop dynamic roots must not prewarm protected folders in the background")
+	}
+}
+
 func TestBuildRequiresSQLBoundariesBeforeOpeningDB(t *testing.T) {
 	t.Parallel()
 
@@ -325,6 +337,8 @@ func TestConnectorRegistryWiresTempObjectStore(t *testing.T) {
 		agent,
 		"agent-default",
 		"/host/root",
+		[]string{"/host/root"},
+		false,
 		&appFeishuAuthStub{},
 		&appFeishuAPIStub{},
 		temp,

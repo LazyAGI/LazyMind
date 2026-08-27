@@ -370,6 +370,58 @@ func TestLocalFSRecommendationsUseConfiguredDirectoryName(t *testing.T) {
 	}
 }
 
+func TestLocalFSRecommendationsForceRefreshFindsNewDirectory(t *testing.T) {
+	t.Parallel()
+
+	spy := &treeConnectorSpy{
+		connectorType:  connector.ConnectorType("local_fs"),
+		supportsSearch: true,
+		childrenByNodeRef: map[string][]connector.RawObject{
+			"": {
+				rawTreeObject("/workspace", "", "workspace", false, true),
+			},
+			"/workspace": {},
+		},
+	}
+	registry, err := connector.NewDefaultConnectorRegistry(spy)
+	if err != nil {
+		t.Fatalf("create registry: %v", err)
+	}
+	engine := NewDefaultTargetTreeEngine(registry, WithTargetSearchCacheStore(newMemoryTargetSearchCacheStore()))
+
+	page, err := engine.RecommendList(context.Background(), TargetTreeRecommendationRequest{})
+	if err != nil {
+		t.Fatalf("list initial local recommendations: %v", err)
+	}
+	if len(page.Items) != 0 {
+		t.Fatalf("initial recommendations should be empty, got %+v", page.Items)
+	}
+
+	spy.childrenByNodeRef["/workspace"] = []connector.RawObject{
+		rawTreeObject("/workspace/.codex", "/workspace", ".codex", false, true),
+	}
+	spy.childrenByNodeRef["/workspace/.codex"] = []connector.RawObject{
+		rawTreeObject("/workspace/.codex/skills", "/workspace/.codex", "skills", false, true),
+	}
+	spy.childrenByNodeRef["/workspace/.codex/skills"] = nil
+
+	cachedPage, err := engine.RecommendList(context.Background(), TargetTreeRecommendationRequest{})
+	if err != nil {
+		t.Fatalf("list cached local recommendations: %v", err)
+	}
+	if len(cachedPage.Items) != 0 {
+		t.Fatalf("ordinary recommendation load should keep using the fresh cache, got %+v", cachedPage.Items)
+	}
+
+	refreshedPage, err := engine.RecommendList(context.Background(), TargetTreeRecommendationRequest{ForceRefresh: true})
+	if err != nil {
+		t.Fatalf("force refresh local recommendations: %v", err)
+	}
+	if len(refreshedPage.Items) != 1 || refreshedPage.Items[0].ObjectKey != "/workspace/.codex/skills" {
+		t.Fatalf("force refresh should find the new recommended directory, got %+v", refreshedPage.Items)
+	}
+}
+
 func TestRecommendedLocalPathRulesContainConfiguredPatternsWithoutDuplicates(t *testing.T) {
 	t.Parallel()
 
@@ -851,6 +903,81 @@ func TestLocalFSRootCachePrewarmBuildsCachesSearchCanReuse(t *testing.T) {
 	if len(spy.listRequests) != 1 {
 		t.Fatalf("search should only refresh root list and reuse subtree cache, got %d list requests", len(spy.listRequests))
 	}
+}
+
+func TestLocalFSRootCachesSkipPermissionDeniedRoot(t *testing.T) {
+	t.Parallel()
+
+	store := newMemoryTargetSearchCacheStore()
+	spy := &treeConnectorSpy{
+		connectorType:  connector.ConnectorType("local_fs"),
+		supportsSearch: true,
+		childrenByNodeRef: map[string][]connector.RawObject{
+			"": {
+				rawTreeObject("/denied", "", "denied", false, true),
+				rawTreeObject("/allowed", "", "allowed", false, true),
+			},
+			"/allowed": {
+				rawTreeObject("/allowed/.codex", "/allowed", ".codex", false, true),
+			},
+			"/allowed/.codex": {
+				rawTreeObject("/allowed/.codex/skills", "/allowed/.codex", "skills", false, true),
+			},
+			"/allowed/.codex/skills": {},
+		},
+		listErrByNodeRef: map[string]error{
+			"/denied": connector.NewError(connector.ErrorCodePermissionDenied, "operation not permitted"),
+		},
+	}
+	registry, err := connector.NewDefaultConnectorRegistry(spy)
+	if err != nil {
+		t.Fatalf("create registry: %v", err)
+	}
+	engine := NewDefaultTargetTreeEngine(registry, WithTargetSearchCacheStore(store))
+	engine.cache.delay = 0
+	req := TargetTreeSearchRequest{
+		ConnectorType: connector.ConnectorType("local_fs"),
+		TargetType:    connector.TargetType("local_path"),
+		IncludeFiles:  false,
+	}
+	if err := engine.PrewarmLocalFSRootCaches(context.Background(), req); err != nil {
+		t.Fatalf("permission denied root should not fail prewarm: %v", err)
+	}
+	deniedCalls := countListRequestsForPath(spy.listRequests, "/denied")
+
+	page, err := engine.Search(context.Background(), TargetTreeSearchRequest{
+		ConnectorType: connector.ConnectorType("local_fs"),
+		TargetType:    connector.TargetType("local_path"),
+		Keyword:       ".codex/skills",
+		PageSize:      10,
+		IncludeFiles:  false,
+	})
+	if err != nil {
+		t.Fatalf("search should continue with accessible roots: %v", err)
+	}
+	if len(page.Items) != 1 || page.Items[0].ObjectKey != "/allowed" {
+		t.Fatalf("search should return the accessible root path, got %+v", page.Items)
+	}
+	if page.CacheComplete || !strings.Contains(page.CacheError, "PERMISSION_DENIED") {
+		t.Fatalf("partial root cache should report its skipped permission error, got %+v", page)
+	}
+	if got := countListRequestsForPath(spy.listRequests, "/denied"); got != deniedCalls {
+		t.Fatalf("search retried known denied root: before=%d after=%d", deniedCalls, got)
+	}
+}
+
+func countListRequestsForPath(requests []connector.ListChildrenRequest, path string) int {
+	count := 0
+	for _, req := range requests {
+		candidate := strings.TrimSpace(req.NodeRef)
+		if candidate == "" {
+			candidate = strings.TrimSpace(req.TargetRef)
+		}
+		if candidate == path {
+			count++
+		}
+	}
+	return count
 }
 
 func TestTargetTreeSearchPathTreeWrapsFeishuOrphansWithVirtualRoots(t *testing.T) {
@@ -2626,6 +2753,7 @@ type treeConnectorSpy struct {
 	childrenSet       bool
 	children          []connector.RawObject
 	childrenByNodeRef map[string][]connector.RawObject
+	listErrByNodeRef  map[string]error
 	listErr           error
 	repeatCursor      bool
 	fetchPage         connector.RawObjectPage
@@ -2655,6 +2783,15 @@ func (c *treeConnectorSpy) ValidateTarget(context.Context, connector.ValidateTar
 
 func (c *treeConnectorSpy) ListChildren(_ context.Context, req connector.ListChildrenRequest) (connector.RawObjectPage, error) {
 	c.listRequests = append(c.listRequests, req)
+	if c.listErrByNodeRef != nil {
+		key := strings.TrimSpace(req.NodeRef)
+		if key == "" {
+			key = strings.TrimSpace(req.TargetRef)
+		}
+		if err := c.listErrByNodeRef[key]; err != nil {
+			return connector.RawObjectPage{}, err
+		}
+	}
 	if c.listErr != nil {
 		return connector.RawObjectPage{}, c.listErr
 	}
