@@ -500,7 +500,7 @@ def test_search_provider_preview_uses_query_and_business_result_count(tool_name,
         preview_value,
     )
 
-    assert f'正在使用 **{brand}** 搜索 **DeepSeek**。' in call_text
+    assert f'正在用 **{brand}** 搜索 **DeepSeek**。' in call_text
     assert f'已找到 **DeepSeek** 的 **2** 条 **{brand}** 搜索结果。' in result_text
 
 
