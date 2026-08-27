@@ -31,14 +31,15 @@ import (
 const maxArchiveBytes = 64 << 20
 
 type options struct {
-	Sources         string
-	Lock            string
-	Cache           string
-	Output          string
-	FeaturedSources string
-	FeaturedOutput  string
-	FrozenLockfile  bool
-	CheckFeatured   bool
+	Sources             string
+	Lock                string
+	Cache               string
+	Output              string
+	FeaturedSources     string
+	FeaturedOutput      string
+	FrozenLockfile      bool
+	VerifyLockArtifacts bool
+	CheckFeatured       bool
 }
 
 type sourceList struct {
@@ -126,6 +127,7 @@ func main() {
 	flag.StringVar(&opts.FeaturedSources, "featured-sources", "", "directory containing featured Skill definitions")
 	flag.StringVar(&opts.FeaturedOutput, "featured-output", "", "runtime featured Skill catalog directory")
 	flag.BoolVar(&opts.FrozenLockfile, "frozen-lockfile", false, "require sources and downloaded archives to match the lock")
+	flag.BoolVar(&opts.VerifyLockArtifacts, "verify-lock-artifacts", false, "strictly verify downloaded archive and tree hashes against the lock")
 	flag.BoolVar(&opts.CheckFeatured, "check-featured", false, "validate featured definitions and assets without downloading Skills")
 	flag.Parse()
 	if err := run(context.Background(), opts, httpClient()); err != nil {
@@ -135,6 +137,9 @@ func main() {
 }
 
 func run(ctx context.Context, opts options, client *http.Client) error {
+	if opts.VerifyLockArtifacts {
+		opts.FrozenLockfile = true
+	}
 	if opts.CheckFeatured {
 		if opts.FeaturedSources == "" {
 			return bundleFailure("featured-sources is required with check-featured")
@@ -258,7 +263,7 @@ func run(ctx context.Context, opts options, client *http.Client) error {
 			if skillbuiltin.CatalogSkillMarketVisible(locked) != source.MarketVisible {
 				return bundleFailure("distribution changed for %s", spec.SourceURL)
 			}
-			entry, archivePath, appliedPatches, err = materializeFrozen(ctx, client, spec, locked, opts.Cache, patchCatalog)
+			entry, archivePath, appliedPatches, err = materializeFrozen(ctx, client, spec, locked, opts.Cache, patchCatalog, opts.VerifyLockArtifacts)
 		} else {
 			entry, archivePath, appliedPatches, err = resolveEntry(ctx, client, spec, opts.Cache, patchCatalog)
 		}
@@ -814,16 +819,43 @@ func readBundledFiles(root string) (map[string][]byte, error) {
 	return files, nil
 }
 
-func materializeFrozen(ctx context.Context, client *http.Client, spec sourceSpec, locked skillbuiltin.CatalogSkill, cacheDir string, patchCatalog skillpatch.Catalog) (skillbuiltin.CatalogSkill, string, []skillpatch.AppliedPatch, error) {
+func materializeFrozen(ctx context.Context, client *http.Client, spec sourceSpec, locked skillbuiltin.CatalogSkill, cacheDir string, patchCatalog skillpatch.Catalog, verifyArtifacts bool) (skillbuiltin.CatalogSkill, string, []skillpatch.AppliedPatch, error) {
 	if spec.LocalPath != "" {
 		current, archivePath, appliedPatches, err := resolveBundledEntry(spec, cacheDir, patchCatalog)
 		if err != nil {
 			return skillbuiltin.CatalogSkill{}, "", nil, err
 		}
-		if err := validateFrozenEntry(current, locked); err != nil {
+		if err := validateFrozenSource(current, locked); err != nil {
 			return skillbuiltin.CatalogSkill{}, "", nil, bundleFailure("bundled skill does not match frozen lock: %v", err)
 		}
-		return current, archivePath, appliedPatches, validateLockedArchive(archivePath, locked)
+		return current, archivePath, appliedPatches, nil
+	}
+	downloadURL, err := frozenDownloadURL(spec, locked)
+	if err != nil {
+		return skillbuiltin.CatalogSkill{}, "", nil, err
+	}
+	if !verifyArtifacts && isVersionedSkillHub(spec, locked) {
+		tempPath, err := download(ctx, client, downloadURL, cacheDir)
+		if err != nil {
+			return skillbuiltin.CatalogSkill{}, "", nil, err
+		}
+		defer os.Remove(tempPath)
+		hash, _, err := fileDigest(tempPath)
+		if err != nil {
+			return skillbuiltin.CatalogSkill{}, "", nil, err
+		}
+		cachePath := filepath.Join(cacheDir, hash+".zip")
+		if err := copyFile(tempPath, cachePath); err != nil {
+			return skillbuiltin.CatalogSkill{}, "", nil, err
+		}
+		origin, err := inspectOrigin(cachePath)
+		if err != nil {
+			return skillbuiltin.CatalogSkill{}, "", nil, err
+		}
+		if err := validateDownloadedVersion(origin.Files, locked.Version); err != nil {
+			return skillbuiltin.CatalogSkill{}, "", nil, err
+		}
+		return finalizeEntry(spec, origin, cacheDir, patchCatalog)
 	}
 	expectedOriginHash := locked.ArchiveSHA256
 	expectedOriginSize := locked.ArchiveSize
@@ -835,7 +867,7 @@ func materializeFrozen(ctx context.Context, client *http.Client, spec sourceSpec
 	}
 	originPath := filepath.Join(cacheDir, expectedOriginHash+".zip")
 	if hash, size, err := fileDigest(originPath); err != nil || hash != expectedOriginHash || expectedOriginSize > 0 && size != expectedOriginSize {
-		tempPath, err := download(ctx, client, spec.ResolvedURL, cacheDir)
+		tempPath, err := download(ctx, client, downloadURL, cacheDir)
 		if err != nil {
 			return skillbuiltin.CatalogSkill{}, "", nil, err
 		}
@@ -858,6 +890,11 @@ func materializeFrozen(ctx context.Context, client *http.Client, spec sourceSpec
 	if origin.TreeHash != expectedOriginTree {
 		return skillbuiltin.CatalogSkill{}, "", nil, bundleFailure("origin package tree does not match frozen lock")
 	}
+	if isVersionedSkillHub(spec, locked) {
+		if err := validateDownloadedVersion(origin.Files, locked.Version); err != nil {
+			return skillbuiltin.CatalogSkill{}, "", nil, err
+		}
+	}
 	current, archivePath, appliedPatches, err := finalizeEntry(spec, origin, cacheDir, patchCatalog)
 	if err != nil {
 		return skillbuiltin.CatalogSkill{}, "", nil, err
@@ -869,6 +906,49 @@ func materializeFrozen(ctx context.Context, client *http.Client, spec sourceSpec
 		return skillbuiltin.CatalogSkill{}, "", nil, err
 	}
 	return current, archivePath, appliedPatches, nil
+}
+
+func frozenDownloadURL(spec sourceSpec, locked skillbuiltin.CatalogSkill) (string, error) {
+	if !strings.HasPrefix(spec.Identity, "skillhub:") {
+		return spec.ResolvedURL, nil
+	}
+	version := strings.TrimSpace(locked.Version)
+	if version == "" {
+		return "", bundleFailure("SkillHub source %s has no locked version", spec.SourceURL)
+	}
+	if strings.HasPrefix(version, "0.0.0+") {
+		return spec.ResolvedURL, nil
+	}
+	parsed, err := url.Parse(spec.ResolvedURL)
+	if err != nil {
+		return "", err
+	}
+	query := parsed.Query()
+	query.Set("version", version)
+	parsed.RawQuery = query.Encode()
+	return parsed.String(), nil
+}
+
+func isVersionedSkillHub(spec sourceSpec, locked skillbuiltin.CatalogSkill) bool {
+	return strings.HasPrefix(spec.Identity, "skillhub:") && !strings.HasPrefix(strings.TrimSpace(locked.Version), "0.0.0+")
+}
+
+func validateDownloadedVersion(files map[string][]byte, expected string) error {
+	var meta packageMeta
+	if err := json.Unmarshal(files["_meta.json"], &meta); err != nil {
+		return bundleFailure("downloaded package has invalid _meta.json: %v", err)
+	}
+	if strings.TrimSpace(meta.Version) != strings.TrimSpace(expected) {
+		return bundleFailure("downloaded package version is %q, want locked version %q", meta.Version, expected)
+	}
+	return nil
+}
+
+func validateFrozenSource(current, locked skillbuiltin.CatalogSkill) error {
+	if current.UID != locked.UID || current.Version != locked.Version || current.Provider != locked.Provider || current.Category != locked.Category || current.SourceURL != locked.SourceURL {
+		return bundleFailure("source identity metadata changed")
+	}
+	return nil
 }
 
 func validateFrozenEntry(current, locked skillbuiltin.CatalogSkill) error {

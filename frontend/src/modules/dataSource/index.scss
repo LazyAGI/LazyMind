@@ -1113,6 +1113,29 @@
   background: #ffffff;
 }
 
+.data-source-local-recommendations-empty.ant-empty {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  margin-block: 4px 0;
+  padding: 6px 2px 2px;
+  text-align: left;
+
+  .ant-empty-image {
+    width: 40px;
+    height: 32px;
+    margin: 0;
+  }
+
+  .ant-empty-description {
+    margin: 0;
+    color: #667085;
+    font-size: 12px;
+    line-height: 18px;
+  }
+}
+
 .data-source-local-recommendations-list {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -1153,6 +1176,13 @@
       flex: 1;
     }
   }
+}
+
+.data-source-local-discovery-note.ant-typography {
+  display: block;
+  margin-top: 10px;
+  font-size: 12px;
+  line-height: 1.6;
 }
 
 .data-source-local-recommendations-item {

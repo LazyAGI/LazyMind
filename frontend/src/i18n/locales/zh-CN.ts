@@ -3609,7 +3609,16 @@ const zhCN = {
     dataSourceRecommendedPathsSelected: "已选 {{selected}} 个",
     dataSourceRecommendedPathsRefresh: "重新查找推荐目录",
     dataSourceRecommendedPathsLoading: "正在扫描允许访问的目录...",
-    dataSourceRecommendedPathsEmpty: "未找到推荐目录，可继续手动选择路径",
+    dataSourceRecommendedPathsEmpty:
+      "当前服务器挂载范围内未找到推荐目录。可手动选择已挂载路径；如需扩大范围，请联系管理员调整部署挂载。",
+    dataSourceDiscoveryChooseLocation: "选择更大的查找范围",
+    dataSourceDiscoveryAddLocation: "添加查找位置",
+    dataSourceDiscoveryPermissionHint:
+      "未找到推荐目录。可选择更大的查找范围；查找只检查目录名和必要元数据，勾选接入前不会读取文件内容。",
+    dataSourceDiscoveryEmptyAuthorized:
+      "已检查 {{count}} 个授权位置，暂未找到推荐目录。可添加其他位置或手动选择路径。",
+    dataSourceDiscoveryScanLimited:
+      "本次查找已达到时间或目录数量上限，结果可能不完整。可添加更具体的查找位置。",
     dataSourceLocalDirectoryListFailedManual: "目录列表获取失败，可先手动输入路径",
     dataSourceNoScanAgentManual: "后端未返回可用扫描 Agent，暂时只能手动输入路径",
     dataSourceFeishuAuthorizeFirstBrowse: "请先完成飞书授权，再联机选择空间或文件夹",

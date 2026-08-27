@@ -3719,7 +3719,15 @@ const enUS = {
     dataSourceRecommendedPathsRefresh: "Find recommended folders again",
     dataSourceRecommendedPathsLoading: "Scanning accessible folders...",
     dataSourceRecommendedPathsEmpty:
-      "No recommended folders found. You can continue by selecting a path manually.",
+      "No recommended folders were found in the server's mounted locations. Select an existing mounted path, or ask an administrator to update the deployment mounts.",
+    dataSourceDiscoveryChooseLocation: "Choose a broader search location",
+    dataSourceDiscoveryAddLocation: "Add search location",
+    dataSourceDiscoveryPermissionHint:
+      "No recommended folders found. Choose a broader search location; discovery checks folder names and required metadata only, and does not read file contents before you connect a folder.",
+    dataSourceDiscoveryEmptyAuthorized:
+      "Checked {{count}} authorized locations and found no recommended folders. Add another location or select a path manually.",
+    dataSourceDiscoveryScanLimited:
+      "This search reached its time or folder limit, so results may be incomplete. Add a more specific search location.",
     dataSourceLocalDirectoryListFailedManual:
       "Failed to load directory list. You can enter the path manually first.",
     dataSourceNoScanAgentManual:

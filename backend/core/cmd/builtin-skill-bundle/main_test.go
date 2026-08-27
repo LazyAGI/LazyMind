@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"image"
 	"image/color"
 	"image/png"
@@ -21,6 +22,7 @@ import (
 	skillbuiltin "lazymind/core/skillv2/builtin"
 	skillmetadata "lazymind/core/skillv2/metadata"
 	skillpackage "lazymind/core/skillv2/skillpackage"
+	skillpatch "lazymind/core/skillv2/skillpatch"
 )
 
 func TestResolveSourceMapsNamespacedSkillHubPageToDownloadAPI(t *testing.T) {
@@ -64,6 +66,50 @@ func TestResolveSourceInputPinsFeaturedSkillHubRequiredVersion(t *testing.T) {
 	}
 	if got := resolvedSkillVersion(spec, "", nil, strings.Repeat("a", 64)); got != "6.2.1" {
 		t.Fatalf("versioned download fallback = %q", got)
+	}
+}
+
+func TestFrozenDownloadURLPinsSkillHubVersion(t *testing.T) {
+	spec, err := resolveSource("https://skillhub.cn/skills/user_5b28ea14/smart-charts")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := frozenDownloadURL(spec, skillbuiltin.CatalogSkill{Version: "6.2.1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "https://api.skillhub.cn/api/v1/download?slug=%40user_5b28ea14%2Fsmart-charts&version=6.2.1"
+	if got != want {
+		t.Fatalf("frozen download URL = %q, want %q", got, want)
+	}
+}
+
+func TestFrozenSkillHubBuildPinsAndValidatesVersionWithoutArchiveHash(t *testing.T) {
+	archive := makeSkillZipWithVersion(t, "1.2.3")
+	requestedURL := ""
+	client := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		requestedURL = request.URL.String()
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(archive)), ContentLength: int64(len(archive)), Header: make(http.Header)}, nil
+	})}
+	spec, err := resolveSource("https://skillhub.cn/skills/demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	locked := skillbuiltin.CatalogSkill{Version: "1.2.3", ArchiveSHA256: strings.Repeat("0", 64), ArchiveSize: 1}
+	root := t.TempDir()
+	if _, _, _, err := materializeFrozen(context.Background(), client, spec, locked, root, skillpatch.Catalog{}, false); err != nil {
+		t.Fatalf("version-pinned build rejected changed archive bytes: %v", err)
+	}
+	if !strings.Contains(requestedURL, "version=1.2.3") {
+		t.Fatalf("request URL was not version-pinned: %q", requestedURL)
+	}
+
+	wrongArchive := makeSkillZipWithVersion(t, "2.0.0")
+	wrongClient := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
+		return &http.Response{StatusCode: http.StatusOK, Body: io.NopCloser(bytes.NewReader(wrongArchive)), ContentLength: int64(len(wrongArchive)), Header: make(http.Header)}, nil
+	})}
+	if _, _, _, err := materializeFrozen(context.Background(), wrongClient, spec, locked, root, skillpatch.Catalog{}, false); err == nil || !strings.Contains(err.Error(), "want locked version") {
+		t.Fatalf("wrong downloaded version error = %v", err)
 	}
 }
 
@@ -151,8 +197,12 @@ skills: []
 		t.Fatal(err)
 	}
 	opts.Output = filepath.Join(root, "runtime-changed", "builtin-skills")
-	if err := run(context.Background(), opts, http.DefaultClient); err == nil {
-		t.Fatal("frozen build accepted a changed bundled Skill")
+	if err := run(context.Background(), opts, http.DefaultClient); err != nil {
+		t.Fatalf("frozen build rejected current bundled Skill source: %v", err)
+	}
+	changed := readCatalog(t, filepath.Join(opts.Output, "catalog.json")).Skills[0]
+	if changed.TreeSHA256 == catalog.Skills[0].TreeSHA256 {
+		t.Fatal("changed bundled Skill did not produce a new runtime tree hash")
 	}
 }
 
@@ -563,8 +613,12 @@ func TestRunBuildsFeaturedCatalogFromLocalDirectory(t *testing.T) {
 	}
 	opts.Output = filepath.Join(root, "runtime-changed", "builtin-skills")
 	opts.FeaturedOutput = filepath.Join(root, "runtime-changed", "featured-skills")
-	if err := run(context.Background(), opts, http.DefaultClient); err == nil {
-		t.Fatal("frozen build accepted a changed local Featured Skill")
+	if err := run(context.Background(), opts, http.DefaultClient); err != nil {
+		t.Fatalf("frozen build rejected current local Featured Skill source: %v", err)
+	}
+	changedEntry := readCatalog(t, filepath.Join(opts.Output, "catalog.json")).Skills[0]
+	if changedEntry.TreeSHA256 == entry.TreeSHA256 {
+		t.Fatal("changed local Featured Skill did not produce a new runtime tree hash")
 	}
 }
 
@@ -704,6 +758,13 @@ func readFeaturedCatalog(t *testing.T, path string) showcase.Catalog {
 func makeSkillZip(t *testing.T) []byte {
 	t.Helper()
 	return makeSkillZipFromFiles(t, testSkillFiles())
+}
+
+func makeSkillZipWithVersion(t *testing.T, version string) []byte {
+	t.Helper()
+	files := testSkillFiles()
+	files["_meta.json"] = []byte(fmt.Sprintf(`{"version":%q}`, version))
+	return makeSkillZipFromFiles(t, files)
 }
 
 func testSkillFiles() map[string][]byte {

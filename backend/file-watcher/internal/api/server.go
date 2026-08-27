@@ -14,7 +14,7 @@ import (
 // NewServer creates and configures the HTTP server.
 func NewServer(cfg *config.Config, handler *Handler, log *zap.Logger) *http.Server {
 	mux := http.NewServeMux()
-	registerRoutes(mux, handler, cfg.AgentToken, log)
+	registerRoutes(mux, handler, cfg, log)
 
 	return &http.Server{
 		Addr:         cfg.ListenAddr,
@@ -24,8 +24,8 @@ func NewServer(cfg *config.Config, handler *Handler, log *zap.Logger) *http.Serv
 	}
 }
 
-func registerRoutes(mux *http.ServeMux, h *Handler, token string, log *zap.Logger) {
-	auth := bearerAuth(token, log)
+func registerRoutes(mux *http.ServeMux, h *Handler, cfg *config.Config, log *zap.Logger) {
+	auth := bearerAuth(cfg.AgentToken, log)
 
 	mux.HandleFunc("/healthz", h.Healthz)
 	mux.HandleFunc("/api/v1/fs/browse", auth(h.Browse))
@@ -38,6 +38,9 @@ func registerRoutes(mux *http.ServeMux, h *Handler, token string, log *zap.Logge
 	mux.HandleFunc("/api/v1/agents/fs/list", auth(h.AgentListDir))
 	mux.HandleFunc("/api/v1/agents/fs/stat", auth(h.AgentStatPath))
 	mux.HandleFunc("/api/v1/agents/fs/export", auth(h.AgentExportFile))
+	if cfg.DynamicRootUpdates {
+		mux.HandleFunc("/api/v1/desktop/fs/allowed-roots", auth(h.ReplaceAllowedRoots))
+	}
 	mux.HandleFunc("/api/v1/sources/start", auth(h.StartSource))
 	mux.HandleFunc("/api/v1/sources/stop", auth(h.StopSource))
 }

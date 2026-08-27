@@ -13,11 +13,12 @@ import (
 
 // Handler holds all HTTP handler dependencies.
 type Handler struct {
-	manager   source.Manager
-	validator fs.PathValidator
-	staging   fs.StagingService
-	mapper    fs.PathMapper
-	log       *zap.Logger
+	manager            source.Manager
+	validator          fs.PathValidator
+	staging            fs.StagingService
+	mapper             fs.PathMapper
+	dynamicRootUpdates bool
+	log                *zap.Logger
 }
 
 // Tree POST /api/v1/fs/tree
@@ -25,11 +26,11 @@ func (h *Handler) Tree(w http.ResponseWriter, r *http.Request) {
 	writeLegacyDisabled(w, "legacy /api/v1/fs/tree is disabled; use /api/v1/agents/fs/list")
 }
 
-func NewHandler(manager source.Manager, validator fs.PathValidator, staging fs.StagingService, mapper fs.PathMapper, log *zap.Logger) *Handler {
+func NewHandler(manager source.Manager, validator fs.PathValidator, staging fs.StagingService, mapper fs.PathMapper, dynamicRootUpdates bool, log *zap.Logger) *Handler {
 	if mapper == nil {
 		mapper = fs.NewPathMapper("", nil)
 	}
-	return &Handler{manager: manager, validator: validator, staging: staging, mapper: mapper, log: log}
+	return &Handler{manager: manager, validator: validator, staging: staging, mapper: mapper, dynamicRootUpdates: dynamicRootUpdates, log: log}
 }
 
 // Healthz GET /healthz

@@ -147,12 +147,16 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
     localPathRecommendations,
     localPathRecommendationsLoading,
     localPathRecommendationsError,
+    localDiscoveryAccess,
+    localDiscoveryChoosing,
+    chooseLocalDiscoveryLocations,
     loadLocalPathRecommendations,
   } = useLocalPathTree({
     t,
     form,
     getPreferredLocalAgentId,
     recommendationsEnabled: wizardOpen && selectedType === "local",
+    autoPromptDiscovery: wizardMode === "create",
   });
 
   const getActiveFeishuAuthConnectionId = () => {
@@ -444,6 +448,9 @@ export function useSyncKnowledgeBaseCreation(options: UseSyncKnowledgeBaseCreati
     localPathRecommendations,
     localPathRecommendationsLoading,
     localPathRecommendationsError,
+    localDiscoveryAccess,
+    localDiscoveryChoosing,
+    chooseLocalDiscoveryLocations,
     loadLocalPathRecommendations,
     feishuTargetTreeData,
     feishuTargetLoading,

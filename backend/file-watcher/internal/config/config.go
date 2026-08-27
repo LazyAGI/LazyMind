@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,6 +23,7 @@ type Config struct {
 	PullInterval        time.Duration `yaml:"pull_interval"`
 	BaseRoot            string        `yaml:"base_root"`
 	HostPathStyle       string        `yaml:"host_path_style"`
+	DynamicRootUpdates  bool          `yaml:"-"`
 	PathMappings        []PathMapping `yaml:"path_mappings"`
 	LogLevel            string        `yaml:"log_level"`
 	// These directories are derived from base_root and are not read from YAML directly.
@@ -140,11 +142,19 @@ func (c *Config) expandEnvOverrides() error {
 	c.BaseRoot = strings.TrimSpace(expandEnvWithDefault(c.BaseRoot))
 	c.HostPathStyle = strings.TrimSpace(expandEnvWithDefault(c.HostPathStyle))
 	c.LogLevel = strings.TrimSpace(expandEnvWithDefault(c.LogLevel))
+	c.DynamicRootUpdates = envBool("LAZYMIND_FILE_WATCHER_DYNAMIC_ROOT_UPDATES", false)
 	if raw := strings.TrimSpace(os.Getenv("LAZYMIND_FILE_WATCHER_STAGING_RUNTIME_ROOT")); raw != "" {
 		c.Staging.ContainerRoot = filepath.Clean(raw)
 	}
 	for i := range c.Security.AllowedRoots {
 		c.Security.AllowedRoots[i] = strings.TrimSpace(expandEnvWithDefault(c.Security.AllowedRoots[i]))
+	}
+	if raw := strings.TrimSpace(os.Getenv("LAZYMIND_FILE_WATCHER_ALLOWED_ROOTS_JSON")); raw != "" {
+		var roots []string
+		if err := json.Unmarshal([]byte(raw), &roots); err != nil {
+			return fmt.Errorf("parse LAZYMIND_FILE_WATCHER_ALLOWED_ROOTS_JSON: %w", err)
+		}
+		c.Security.AllowedRoots = roots
 	}
 	for i := range c.PathMappings {
 		c.PathMappings[i].PublicRoot = strings.TrimSpace(expandEnvWithDefault(c.PathMappings[i].PublicRoot))
@@ -173,6 +183,21 @@ func (c *Config) expandEnvOverrides() error {
 		}
 	}
 	return nil
+}
+
+func envBool(name string, fallback bool) bool {
+	raw, ok := os.LookupEnv(name)
+	if !ok || strings.TrimSpace(raw) == "" {
+		return fallback
+	}
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
 }
 
 func watchVolumePathMappingFromEnv() (PathMapping, bool) {
