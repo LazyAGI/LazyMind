@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -48,7 +49,36 @@ type RuntimeManager struct {
 	milvusLite                *MilvusLiteManager
 }
 
-const startupProgressInterval = 10 * time.Second
+const (
+	startupProgressInterval         = 10 * time.Second
+	maxAutomaticPortStartupAttempts = 3
+)
+
+type startupPortConflictError struct {
+	Service string
+	Address string
+	Port    int
+	Cause   error
+}
+
+func (e *startupPortConflictError) Error() string {
+	return fmt.Sprintf(
+		"%s could not bind %s:%d because the port was claimed during startup: %v",
+		e.Service,
+		e.Address,
+		e.Port,
+		e.Cause,
+	)
+}
+
+func (e *startupPortConflictError) Unwrap() error {
+	return e.Cause
+}
+
+func isStartupPortConflict(err error) bool {
+	var conflict *startupPortConflictError
+	return errors.As(err, &conflict)
+}
 
 func NewRuntimeManager(r CommandRunner, execPath string) *RuntimeManager {
 	processCompose := NewProcessComposeManager(r, execPath)
@@ -139,6 +169,77 @@ func randomHexToken() (string, error) {
 	return hex.EncodeToString(raw), nil
 }
 
+func runtimeServiceProcessAlive(paths RuntimePaths, service string) bool {
+	registry, err := readLocalProcessRegistry(paths)
+	if err != nil {
+		return false
+	}
+	for _, record := range registry.Processes {
+		if record.Service == service && localProcessBelongsToRuntime(record, paths) && processAlive(record.PID) {
+			return true
+		}
+	}
+	return false
+}
+
+func classifyStartupPortFailure(err error, paths RuntimePaths, service, address string, port int) error {
+	if err == nil || port <= 0 || port >= 65536 {
+		return err
+	}
+	if localPortAvailableOn(address, port) || runtimeServiceProcessAlive(paths, service) {
+		return err
+	}
+	return &startupPortConflictError{
+		Service: service,
+		Address: address,
+		Port:    port,
+		Cause:   err,
+	}
+}
+
+func validateRuntimeStartPorts(cfg RuntimeConfig) error {
+	return validateRuntimeStartPortsWith(cfg, localPortAvailableOn)
+}
+
+func validateRuntimeStartPortsWith(cfg RuntimeConfig, available func(address string, port int) bool) error {
+	if err := validatePinnedLocalPorts(cfg); err != nil {
+		return err
+	}
+	if envBool(localPortsPinnedEnvVar, false) {
+		return nil
+	}
+	for _, item := range resolvedLocalPorts(cfg) {
+		if !available(item.address, item.port) {
+			return &startupPortConflictError{
+				Service: item.name,
+				Address: item.address,
+				Port:    item.port,
+				Cause:   errors.New("port became unavailable after allocation"),
+			}
+		}
+	}
+	return nil
+}
+
+func classifyAlgorithmStartupPortFailure(err error, cfg RuntimeConfig, paths RuntimePaths, plan runtimeProcessPlan) error {
+	if err == nil {
+		return nil
+	}
+	if plan.includes(milvusLiteProcessName) {
+		classified := classifyStartupPortFailure(err, paths, milvusLiteProcessName, "127.0.0.1", cfg.ModeProfile.VectorStore.Port)
+		if isStartupPortConflict(classified) {
+			return classified
+		}
+	}
+	for _, spec := range plan.AlgorithmServices {
+		classified := classifyStartupPortFailure(err, paths, spec.Name, "127.0.0.1", spec.Port)
+		if isStartupPortConflict(classified) {
+			return classified
+		}
+	}
+	return err
+}
+
 func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) (resultErr error) {
 	startupStartedAt := m.now()
 	m.startupEvent("startup.started", "startup", startupStartedAt, nil)
@@ -226,16 +327,50 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	}
 	m.startupEvent("phase.completed", "python-relocation", relocationStartedAt, nil)
 	m.progressf("desktop Python environment check completed in %s", m.now().Sub(relocationStartedAt).Round(time.Millisecond))
-	cfg = freshCfg
-	plan := buildRuntimeProcessPlan(cfg)
-	if err := validatePinnedLocalPorts(cfg); err != nil {
+	if err := ensureLazyLLMSource(ctx, m.runner, paths.RepoRoot, freshCfg.Profile); err != nil {
 		return err
 	}
+	for attempt := 1; attempt <= maxAutomaticPortStartupAttempts; attempt++ {
+		attemptCfg, attemptPaths, configErr := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
+			Profile:         cfg.Profile,
+			MaintenanceMode: cfg.MaintenanceMode,
+			OwnerToken:      cfg.OwnerToken,
+			RepoRoot:        paths.RepoRoot,
+			RuntimeRoot:     cfg.RuntimeRoot,
+			ResourcesRoot:   cfg.ResourcesRoot,
+		})
+		if configErr != nil {
+			return configErr
+		}
+		if err := ensureRuntimeDirs(attemptCfg, attemptPaths); err != nil {
+			return err
+		}
+		if err := validateRuntimeStartPorts(attemptCfg); err != nil {
+			if !isStartupPortConflict(err) || envBool(localPortsPinnedEnvVar, false) || attempt == maxAutomaticPortStartupAttempts {
+				return err
+			}
+			m.progressf("port allocation changed before startup; retrying with a fresh port map (%d/%d): %v", attempt, maxAutomaticPortStartupAttempts, err)
+			continue
+		}
+		attemptErr := m.startRuntimeAttempt(ctx, attemptCfg, attemptPaths, state)
+		if attemptErr == nil {
+			return nil
+		}
+		if !isStartupPortConflict(attemptErr) || envBool(localPortsPinnedEnvVar, false) || attempt == maxAutomaticPortStartupAttempts {
+			return attemptErr
+		}
+		m.progressf("port conflict detected during startup; cleaning up attempt %d/%d before reallocating: %v", attempt, maxAutomaticPortStartupAttempts, attemptErr)
+		if cleanupErr := m.cleanupFailedStartupAttempt(attemptCfg, attemptPaths); cleanupErr != nil {
+			return fmt.Errorf("cleanup failed startup after %w: %v", attemptErr, cleanupErr)
+		}
+	}
+	return errors.New("local runtime exhausted automatic port allocation attempts")
+}
+
+func (m *RuntimeManager) startRuntimeAttempt(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths, state RuntimeState) error {
+	plan := buildRuntimeProcessPlan(cfg)
 	m.printPortResolutionSummary(cfg)
 	if err := writeServiceEndpointFiles(paths, serviceEndpointsFromConfig(cfg)); err != nil {
-		return err
-	}
-	if err := ensureLazyLLMSource(ctx, m.runner, paths.RepoRoot, cfg.Profile); err != nil {
 		return err
 	}
 
@@ -274,21 +409,29 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err := writeRuntimeState(paths.StateFile, state); err != nil {
 		return err
 	}
-
-	m.progressf("starting process-compose supervisor on 127.0.0.1:%d", cfg.ProcessComposePort)
-	if err := m.processCompose.Up(ctx, cfg, paths); err != nil {
+	fail := func(startErr error) error {
 		state = newStateWithServiceStatus(state, cfg, "failed")
 		state.OverallStatus = "failed"
 		_ = writeRuntimeState(paths.StateFile, state)
-		return err
+		return startErr
+	}
+	allowPortRetry := true
+	classifyPortFailure := func(startErr error, service, address string, port int) error {
+		if !allowPortRetry {
+			return startErr
+		}
+		return classifyStartupPortFailure(startErr, paths, service, address, port)
+	}
+
+	m.progressf("starting process-compose supervisor on 127.0.0.1:%d", cfg.ProcessComposePort)
+	if err := m.processCompose.Up(ctx, cfg, paths); err != nil {
+		return fail(classifyPortFailure(err, processComposeServiceName, "127.0.0.1", cfg.ProcessComposePort))
 	}
 
 	m.progressf("waiting for process-compose API on 127.0.0.1:%d", cfg.ProcessComposePort)
 	if !m.waitForProcessComposeAPI(ctx, cfg.ProcessComposePort, 15*time.Second) {
-		state = newStateWithServiceStatus(state, cfg, "failed")
-		state.OverallStatus = "failed"
-		_ = writeRuntimeState(paths.StateFile, state)
-		return fmt.Errorf("process-compose API did not become ready on port %d", cfg.ProcessComposePort)
+		err := fmt.Errorf("process-compose API did not become ready on port %d", cfg.ProcessComposePort)
+		return fail(classifyPortFailure(err, processComposeServiceName, "127.0.0.1", cfg.ProcessComposePort))
 	}
 	m.progressf("process-compose API ready on 127.0.0.1:%d", cfg.ProcessComposePort)
 
@@ -302,92 +445,74 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	select {
 	case logErr := <-logErrCh:
 		if logErr != nil {
-			state = newStateWithServiceStatus(state, cfg, "failed")
-			state.OverallStatus = "failed"
-			_ = writeRuntimeState(paths.StateFile, state)
-			return logErr
+			return fail(logErr)
 		}
 	default:
 	}
 	if plan.includes(localProxyProcessName) {
 		if err := m.waitForLocalProxyHealthy(ctx, cfg.LocalProxy.Port, m.upTimeout); err != nil {
-			state = newStateWithServiceStatus(state, cfg, "failed")
-			state.OverallStatus = "failed"
-			_ = writeRuntimeState(paths.StateFile, state)
-			return err
+			return fail(classifyPortFailure(err, localProxyProcessName, cfg.LocalProxy.Address, cfg.LocalProxy.Port))
 		}
 	}
 	if cfg.Profile == "desktop" && plan.includes(frontendProcessName) {
 		if err := m.waitForFrontendHealthy(ctx, cfg.FrontendPort, m.upTimeout); err != nil {
-			state = newStateWithServiceStatus(state, cfg, "failed")
-			state.OverallStatus = "failed"
-			_ = writeRuntimeState(paths.StateFile, state)
-			return err
+			address := "127.0.0.1"
+			if cfg.NetworkProfile == "lan" {
+				address = "0.0.0.0"
+			}
+			return fail(classifyPortFailure(err, frontendProcessName, address, cfg.FrontendPort))
 		}
 	}
 	if plan.includes(authServiceProcessName) {
 		if err := m.waitForAuthServiceHealthy(ctx, cfg.AuthService.Port, m.upTimeout, paths.AuthServicePIDFile); err != nil {
-			state = newStateWithServiceStatus(state, cfg, "failed")
-			state.OverallStatus = "failed"
-			_ = writeRuntimeState(paths.StateFile, state)
-			return err
+			return fail(classifyPortFailure(err, authServiceProcessName, "127.0.0.1", cfg.AuthService.Port))
 		}
 	}
 	if cfg.Profile == "desktop" && plan.includes(frontendProcessName) && plan.includes(authServiceProcessName) {
 		m.startupCapabilityReady("home", cfg.FrontendPort)
+		// A normal Desktop may already be loading this frontend. Do not tear it
+		// down for an automatic retry after publishing the capability; occupied
+		// downstream ports were already covered by the all-service preflight.
+		allowPortRetry = cfg.MaintenanceMode == installerWarmupMaintenanceMode
 	}
 	if plan.includes(channelGatewayProcessName) {
 		if err := m.waitForChannelGatewayHealthy(ctx, cfg.ChannelGateway.Port, m.upTimeout); err != nil {
-			state = newStateWithServiceStatus(state, cfg, "failed")
-			state.OverallStatus = "failed"
-			_ = writeRuntimeState(paths.StateFile, state)
-			return err
+			return fail(classifyPortFailure(err, channelGatewayProcessName, "127.0.0.1", cfg.ChannelGateway.Port))
 		}
 	}
 	if plan.includes(coreProcessName) {
 		if err := m.waitForCoreHealthy(ctx, cfg.LocalProxy.CoreHostPort, m.upTimeout); err != nil {
-			state = newStateWithServiceStatus(state, cfg, "failed")
-			state.OverallStatus = "failed"
-			_ = writeRuntimeState(paths.StateFile, state)
-			return err
+			return fail(classifyPortFailure(err, coreProcessName, "127.0.0.1", cfg.LocalProxy.CoreHostPort))
 		}
 	}
 	if plan.includes(scanControlPlaneProcessName) {
 		if err := m.waitForScanControlPlaneHealthy(ctx, cfg.LocalProxy.ScanHostPort, m.upTimeout); err != nil {
-			state = newStateWithServiceStatus(state, cfg, "failed")
-			state.OverallStatus = "failed"
-			_ = writeRuntimeState(paths.StateFile, state)
-			return err
+			return fail(classifyPortFailure(err, scanControlPlaneProcessName, "127.0.0.1", cfg.LocalProxy.ScanHostPort))
 		}
 	}
 	if plan.includes(fileWatcherProcessName) {
 		if err := m.waitForFileWatcherHealthy(ctx, cfg.FileWatcher.Port, m.upTimeout); err != nil {
-			state = newStateWithServiceStatus(state, cfg, "failed")
-			state.OverallStatus = "failed"
-			_ = writeRuntimeState(paths.StateFile, state)
-			return err
+			return fail(classifyPortFailure(err, fileWatcherProcessName, "127.0.0.1", cfg.FileWatcher.Port))
 		}
 	}
 	if waitErr := m.waitHostAlgorithmsReady(ctx, cfg, plan.AlgorithmServices); waitErr != nil {
-		state = newStateWithServiceStatus(state, cfg, "failed")
-		state.OverallStatus = "failed"
-		_ = writeRuntimeState(paths.StateFile, state)
-		return waitErr
+		if !allowPortRetry {
+			return fail(waitErr)
+		}
+		return fail(classifyAlgorithmStartupPortFailure(waitErr, cfg, paths, plan))
 	}
 	if plan.includes(algoProcessName) {
 		if err := markAlgorithmRegistrationVersion(cfg, paths); err != nil {
-			state = newStateWithServiceStatus(state, cfg, "failed")
-			state.OverallStatus = "failed"
-			_ = writeRuntimeState(paths.StateFile, state)
-			return fmt.Errorf("record algorithm registration version: %w", err)
+			return fail(fmt.Errorf("record algorithm registration version: %w", err))
 		}
 	}
 	if plan.includes(frontendProcessName) {
 		if err := m.waitForFrontendHealthy(ctx, cfg.FrontendPort, m.upTimeout); err != nil {
-			state = newStateWithServiceStatus(state, cfg, "failed")
-			state.OverallStatus = "failed"
-			_ = writeRuntimeState(paths.StateFile, state)
-			return err
+			address := "127.0.0.1"
+			if cfg.NetworkProfile == "lan" {
+				address = "0.0.0.0"
+			}
+			return fail(classifyPortFailure(err, frontendProcessName, address, cfg.FrontendPort))
 		}
 	}
 
@@ -405,6 +530,20 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 		return m.waitForDesktopRuntimeStop(ctx, paths)
 	}
 	return nil
+}
+
+func (m *RuntimeManager) cleanupFailedStartupAttempt(cfg RuntimeConfig, paths RuntimePaths) error {
+	cleanupCtx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if processComposeSupervisorAlive(paths) {
+		if m.probeAPI(cfg.ProcessComposePort, 500*time.Millisecond) {
+			_ = m.processCompose.Down(cleanupCtx, cfg, paths, m.out, m.errOut)
+		}
+		if processComposeSupervisorAlive(paths) {
+			_ = m.stopProcessComposeSupervisor(cleanupCtx, paths)
+		}
+	}
+	return m.killStaleRuntimeProcesses(cleanupCtx, cfg, paths)
 }
 
 func (m *RuntimeManager) Warmup(ctx context.Context, cfg RuntimeConfig, paths RuntimePaths) (err error) {

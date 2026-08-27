@@ -1,6 +1,6 @@
 //go:build !windows
 
-package credentials
+package localfile
 
 import (
 	"os"
@@ -8,7 +8,7 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-func lockFile(path string) (func(), error) {
+func Lock(path string) (func(), error) {
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0o600)
 	if err != nil {
 		return nil, err
@@ -23,6 +23,6 @@ func lockFile(path string) (func(), error) {
 	}, nil
 }
 
-func replaceFile(source, destination string) error {
+func Replace(source, destination string) error {
 	return os.Rename(source, destination)
 }

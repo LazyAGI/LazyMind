@@ -10,7 +10,9 @@ vi.mock("@/components/auth", () => ({
 }));
 
 import {
+  agentExecutableBindings,
   agentIntegrationStatuses,
+  bindAgentExecutable,
   executorIntegrationAction,
   executorIntegrationPolicies,
 } from "./desktopBridge";
@@ -99,5 +101,35 @@ describe("browser Assistant Bridge session synchronization", () => {
       "http://127.0.0.1:19091/v1/executors/workbuddy/disable",
       expect.objectContaining({ method: "POST" }),
     );
+  });
+
+  it("reads host-local executable bindings without syncing account credentials", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({ bindings: { "codex-cli": "D:\\Agents\\codex.cmd" } }), { status: 200 }),
+    );
+
+    const result = await agentExecutableBindings();
+
+    expect(result).toEqual({ ok: true, data: { "codex-cli": "D:\\Agents\\codex.cmd" } });
+    expect(fetchMock.mock.calls[0][0]).toBe("http://127.0.0.1:19091/v1/bindings");
+  });
+
+  it("saves a host-local executable binding", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValueOnce(
+      new Response(JSON.stringify({
+        target: "cursor-cli", configured: true, path: "D:\\Agents\\cursor-agent.exe",
+      }), { status: 200 }),
+    );
+
+    const result = await bindAgentExecutable("cursor-cli", "D:\\Agents\\cursor-agent.exe");
+
+    expect(result).toEqual({
+      ok: true,
+      data: { target: "cursor-cli", configured: true, path: "D:\\Agents\\cursor-agent.exe" },
+    });
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(fetchMock.mock.calls[0][0]).toBe("http://127.0.0.1:19091/v1/bindings/cursor-cli");
+    expect(init.method).toBe("PUT");
+    expect(JSON.parse(String(init.body))).toEqual({ path: "D:\\Agents\\cursor-agent.exe" });
   });
 });

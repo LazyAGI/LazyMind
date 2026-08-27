@@ -1,7 +1,7 @@
 schema_version: 2
 id: poster-design
 type: chat
-version: 0.0.0+6e8ecaa3c33f
+version: 1.0.0
 status: published
 default_locale: zh-CN
 provider: SkillHub
@@ -9,7 +9,7 @@ provider: SkillHub
 skill:
   source_url: https://skillhub.cn/skills/user_865e3592/poster
   category: design
-  required_version: 0.0.0+6e8ecaa3c33f
+  required_version: 1.0.0
 
 placement:
   home: true

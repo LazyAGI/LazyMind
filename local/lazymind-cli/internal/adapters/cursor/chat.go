@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"sort"
 	"strings"
 	"time"
@@ -48,9 +47,6 @@ func NewChatRunner(binary string) (*ChatRunner, error) {
 
 func findBinary(configured string) (string, error) {
 	name := "cursor-agent"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
 	home, _ := os.UserHomeDir()
 	var candidates []string
 	if home != "" {
@@ -59,7 +55,9 @@ func findBinary(configured string) (string, error) {
 		sort.Sort(sort.Reverse(sort.StringSlice(versions)))
 		candidates = append(candidates, versions...)
 	}
-	resolved, err := agentexec.Find(configured, "LAZYMIND_CURSOR_AGENT_BIN", []string{name}, candidates)
+	resolved, err := agentexec.FindBound(
+		configured, "LAZYMIND_CURSOR_AGENT_BIN", agentexec.CursorCLI, []string{name}, candidates,
+	)
 	if err != nil {
 		if strings.TrimSpace(configured) != "" || strings.TrimSpace(os.Getenv("LAZYMIND_CURSOR_AGENT_BIN")) != "" {
 			return "", fmt.Errorf("resolve configured Cursor Agent CLI: %w", err)

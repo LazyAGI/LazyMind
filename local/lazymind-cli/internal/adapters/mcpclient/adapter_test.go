@@ -7,15 +7,18 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
+	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/agentintegration"
 )
 
 func TestCursorStatusUsesFilesystemRequirementWithoutRunningDesktop(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
+	t.Setenv("LAZYMIND_HOME", filepath.Join(home, "lazymind"))
 	adapter := testAdapter(Cursor)
 
 	status := adapter.Status(context.Background())
@@ -26,6 +29,7 @@ func TestCursorStatusUsesFilesystemRequirementWithoutRunningDesktop(t *testing.T
 	if err := os.MkdirAll(filepath.Join(home, ".cursor"), 0o700); err != nil {
 		t.Fatal(err)
 	}
+	bindDesktopForTest(t, agentexec.CursorDesktop)
 	status = adapter.Status(context.Background())
 	if status.State != agentintegration.Ready {
 		t.Fatalf("state=%q, want ready", status.State)
@@ -54,13 +58,36 @@ func TestCursorInstallURLCarriesOneManagedStdioDefinition(t *testing.T) {
 
 func TestWorkBuddyUsesWorkBuddyConfiguration(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
+	t.Setenv("LAZYMIND_HOME", filepath.Join(home, "lazymind"))
 	path := configPath(WorkBuddy)
 	if path != filepath.Join(home, ".workbuddy", "mcp.json") {
 		t.Fatalf("path=%q", path)
 	}
 	if strings.Contains(path, ".codebuddy") {
 		t.Fatalf("WorkBuddy path must not target CodeBuddy: %q", path)
+	}
+}
+
+func TestRaccoonUsesDesktopConfiguration(t *testing.T) {
+	home := t.TempDir()
+	setTestHome(t, home)
+	path := configPath(Raccoon)
+	if path != filepath.Join(home, ".box-agent", "config", "mcp.json") {
+		t.Fatalf("path=%q", path)
+	}
+	adapter := testAdapter(Raccoon)
+	status := adapter.Status(context.Background())
+	if status.State != agentintegration.RequirementsMissing {
+		t.Fatalf("status=%#v", status)
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	bindDesktopForTest(t, agentexec.RaccoonDesktop)
+	status = adapter.Status(context.Background())
+	if status.State != agentintegration.Ready {
+		t.Fatalf("status=%#v", status)
 	}
 }
 
@@ -84,10 +111,14 @@ func TestDeepSeekRequirementsCheckProfileAndMCPClient(t *testing.T) {
 func TestManagedJSONConfigPreservesOtherServersAndRemovesOnlyLazyMind(t *testing.T) {
 	root := t.TempDir()
 	path := filepath.Join(root, "mcp.json")
-	self := filepath.Join(root, "bin", "lazymind")
+	selfName := "lazymind"
+	if runtime.GOOS == "windows" {
+		selfName += ".exe"
+	}
+	self := filepath.Join(root, "bin", selfName)
 	home := filepath.Join(root, "home")
 	writeTestFile(t, self, "test connector")
-	writeTestFile(t, path, `{"theme":"dark","mcpServers":{"existing":{"command":"other","args":["serve"]}}}`)
+	writeTestFile(t, path, `{"theme":"dark","mcpServers":{"existing":{"description":"keep","url":"https://example.com/mcp","type":"streamable_http","alwaysLoad":true,"disabled":false,"connect_timeout":15}}}`)
 
 	if err := writeManagedConfig(Cursor, path, self, home, "host-1"); err != nil {
 		t.Fatal(err)
@@ -100,14 +131,19 @@ func TestManagedJSONConfigPreservesOtherServersAndRemovesOnlyLazyMind(t *testing
 		t.Fatalf("managed state=%#v", state)
 	}
 	var configured struct {
-		Theme      string                        `json:"theme"`
-		MCPServers map[string]stdioMCPDefinition `json:"mcpServers"`
+		Theme      string                     `json:"theme"`
+		MCPServers map[string]json.RawMessage `json:"mcpServers"`
 	}
 	body, _ := os.ReadFile(path)
 	if err := json.Unmarshal(body, &configured); err != nil {
 		t.Fatal(err)
 	}
-	if configured.Theme != "dark" || configured.MCPServers["existing"].Command != "other" {
+	var existing map[string]any
+	if err := json.Unmarshal(configured.MCPServers["existing"], &existing); err != nil {
+		t.Fatal(err)
+	}
+	if configured.Theme != "dark" || len(existing) != 6 || existing["description"] != "keep" ||
+		existing["url"] != "https://example.com/mcp" || existing["connect_timeout"] != float64(15) {
 		t.Fatalf("unrelated configuration changed: %#v", configured)
 	}
 	if _, err := os.Stat(path + ".lazymind-backup"); err != nil {
@@ -122,14 +158,20 @@ func TestManagedJSONConfigPreservesOtherServersAndRemovesOnlyLazyMind(t *testing
 	if err := json.Unmarshal(body, &configured); err != nil {
 		t.Fatal(err)
 	}
-	if _, exists := configured.MCPServers[serverName]; exists || configured.MCPServers["existing"].Command != "other" {
+	existing = nil
+	if err := json.Unmarshal(configured.MCPServers["existing"], &existing); err != nil {
+		t.Fatal(err)
+	}
+	if _, exists := configured.MCPServers[serverName]; exists || len(existing) != 6 ||
+		existing["description"] != "keep" || existing["url"] != "https://example.com/mcp" ||
+		existing["connect_timeout"] != float64(15) {
 		t.Fatalf("unexpected servers after disconnect: %#v", configured.MCPServers)
 	}
 }
 
 func TestForeignLazyMindEntryBecomesConflict(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	path := filepath.Join(home, ".workbuddy", "mcp.json")
 	writeTestFile(t, path, `{"mcpServers":{"lazymind":{"command":"foreign","args":["run"]}}}`)
 	adapter := testAdapter(WorkBuddy)
@@ -192,4 +234,24 @@ func writeTestFile(t *testing.T, path, value string) {
 	if err := os.WriteFile(path, []byte(value), 0o600); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func bindDesktopForTest(t *testing.T, target agentexec.BindingTarget) {
+	t.Helper()
+	if runtime.GOOS != "windows" {
+		return
+	}
+	path := filepath.Join(t.TempDir(), string(target)+".exe")
+	if err := os.WriteFile(path, []byte("test"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := agentexec.SetExecutableBinding(target, path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func setTestHome(t *testing.T, home string) {
+	t.Helper()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 }

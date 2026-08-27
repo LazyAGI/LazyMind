@@ -92,6 +92,7 @@ const runtimeOwnershipHandoffTimeoutMs = 30 * 1000;
 const agentHostRestartMaxDelayMs = 30 * 1000;
 const agentHostStableAfterMs = 60 * 1000;
 const agentConnectorActionTimeoutMs = 15 * 1000;
+const agentConnectorBindingTimeoutMs = 30 * 1000;
 const agentConnectorLoginTimeoutMs = 125 * 1000;
 const macInstallationWarmupMarker = macWarmupMarkerPath(app.getPath("userData"));
 const startupMetricsHistoryPath = path.join(desktopLogsDir, "startup-metrics.jsonl");
@@ -140,6 +141,7 @@ let windowHiddenByUser = false;
 let startupLogEntries = [];
 let startupLogWriteFailed = false;
 let lastStartupError = null;
+let loggedPortResolutions = new Set();
 let startupState = {
   status: "starting",
   phase: "Initializing",
@@ -218,6 +220,7 @@ function sidecarEnv() {
     LAZYMIND_DESKTOP_OWNER_PID: String(process.pid),
     LAZYMIND_RUNTIME_RESOURCES_ROOT: runtimeResourcesRoot,
     LAZYMIND_LOCAL_NETWORK_PROFILE: "localhost",
+    LAZYMIND_LOCAL_PORTS_PINNED: "false",
     LAZYMIND_LOCAL_PROXY_ADDRESS: "127.0.0.1",
     LAZYMIND_LOCAL_AUTO_LOGIN_ALLOW_LAN: "false",
     LAZYMIND_OPENAPI_ARTIFACT_EXPORT_ENABLED: "false",
@@ -290,6 +293,7 @@ function resetStartupLogsForRun() {
   startupLogEntries = [];
   startupLogWriteFailed = false;
   lastStartupError = null;
+  loggedPortResolutions = new Set();
   try {
     ensureDesktopLogDirs();
     fs.writeFileSync(startupLogPath, "");
@@ -479,6 +483,7 @@ function runAgentConnector(agent, action) {
     codex: new Set(["connect", "status", "disconnect", "login"]),
     cursor: new Set(["connect", "status", "disconnect", "login"]),
     workbuddy: new Set(["connect", "status", "disconnect"]),
+    raccoon: new Set(["connect", "status", "disconnect"]),
     traework: new Set(["connect", "status", "disconnect"]),
     "deepseek-harness": new Set(["connect", "status", "disconnect"]),
   };
@@ -514,6 +519,36 @@ async function runExecutorConnector(provider, action) {
     }
   }
   return result;
+}
+
+const agentBindingTargets = new Set([
+  "codex-cli", "cursor-cli", "codebuddy-cli", "cursor-desktop",
+  "workbuddy-desktop", "raccoon-desktop", "traework-desktop",
+]);
+const agentBindingActions = new Set(["status", "set", "clear"]);
+
+async function runAgentBinding(target, action, executablePath = "") {
+  if (!agentBindingTargets.has(target) || !agentBindingActions.has(action)) {
+    throw new Error(`Unsupported external Agent binding action: ${target}/${action}`);
+  }
+  const args = ["internal", "binding", target, action];
+  if (action === "set") {
+    args.push("--path", executablePath);
+  }
+  const result = await runConnectorJSON(args, agentConnectorBindingTimeoutMs);
+  if (action !== "status" && target.endsWith("-cli")) {
+    agentHostRestartAttempts = 0;
+    if (agentHostProcess) {
+      agentHostProcess.kill();
+    } else {
+      startAgentHost();
+    }
+  }
+  return result;
+}
+
+function readAgentBindings() {
+  return runConnectorJSON(["internal", "binding", "all", "status"], agentConnectorActionTimeoutMs);
 }
 
 function runConnectorJSON(args, timeout) {
@@ -1131,6 +1166,17 @@ async function waitForRuntimeReady(options = {}) {
       });
       if (status.config?.portResolutions?.length) {
         for (const resolution of status.config.portResolutions) {
+          const key = [
+            resolution.name,
+            resolution.envName,
+            resolution.requestedPort,
+            resolution.resolvedPort,
+            resolution.reason,
+          ].join(":");
+          if (loggedPortResolutions.has(key)) {
+            continue;
+          }
+          loggedPortResolutions.add(key);
           appendStartupLog(
             "status",
             `port moved: ${resolution.name} ${resolution.requestedPort} -> ${resolution.resolvedPort} (${resolution.reason})`,
@@ -1713,6 +1759,9 @@ ipcMain.handle("lazymind:agentIntegrationStatuses", () => runAgentConnector("all
 ipcMain.handle("lazymind:agentIntegrationAction", (_event, agent, action) => runAgentConnector(agent, action));
 ipcMain.handle("lazymind:executorIntegrationPolicies", () => runExecutorConnector("all", "status"));
 ipcMain.handle("lazymind:executorIntegrationAction", (_event, provider, action) => runExecutorConnector(provider, action));
+ipcMain.handle("lazymind:agentExecutableBindings", () => readAgentBindings());
+ipcMain.handle("lazymind:agentExecutableBind", (_event, target, executablePath) => runAgentBinding(target, "set", executablePath));
+ipcMain.handle("lazymind:agentExecutableClear", (_event, target) => runAgentBinding(target, "clear"));
 ipcMain.handle("lazymind:restartRuntime", async () => {
   return restartRuntimeAfterFolderAccessChange();
 });
@@ -1864,11 +1913,14 @@ ipcMain.handle("lazymind:selectFolder", async () => {
   const result = await dialog.showOpenDialog(activeWindow(), { properties: ["openDirectory"] });
   return result.canceled ? null : result.filePaths[0];
 });
-ipcMain.handle("lazymind:selectExecutable", async () => {
+ipcMain.handle("lazymind:selectExecutable", async (_event, target = "") => {
+  const agentExecutable = agentBindingTargets.has(target);
   const result = await dialog.showOpenDialog(activeWindow(), {
     properties: ["openFile"],
     filters: process.platform === "win32"
-      ? [{ name: "FFmpeg", extensions: ["exe"] }]
+      ? [agentExecutable
+        ? { name: "Agent executable", extensions: ["exe", "cmd", "bat"] }
+        : { name: "FFmpeg", extensions: ["exe"] }]
       : [{ name: "Executable", extensions: ["*"] }],
   });
   return result.canceled ? null : result.filePaths[0];

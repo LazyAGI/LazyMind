@@ -19,7 +19,7 @@ import (
 
 const (
 	algorithmHealthTimeout = 15 * time.Minute
-	defaultLazyLLMVersion  = "1.2.2"
+	defaultLazyLLMVersion  = "1.3.0a1"
 	tiktokenReadyFileName  = "tiktoken-gpt2.ready"
 )
 

@@ -320,11 +320,11 @@ type AlgorithmConfig struct {
 }
 
 type PortResolution struct {
-	Name          string
-	EnvName       string
-	RequestedPort int
-	ResolvedPort  int
-	Reason        string
+	Name          string `json:"name"`
+	EnvName       string `json:"envName,omitempty"`
+	RequestedPort int    `json:"requestedPort"`
+	ResolvedPort  int    `json:"resolvedPort"`
+	Reason        string `json:"reason"`
 }
 
 type ServiceEndpoints struct {
@@ -369,10 +369,31 @@ func firstAvailableLocalPort(start int, attempts int) int {
 type localPortAllocator struct {
 	used        map[int]struct{}
 	resolutions []PortResolution
+	err         error
+	errContext  bool
+	available   func(address string, port int) bool
 }
 
 func newLocalPortAllocator() *localPortAllocator {
-	return &localPortAllocator{used: map[int]struct{}{}}
+	return &localPortAllocator{
+		used:      map[int]struct{}{},
+		available: localPortAvailableOn,
+	}
+}
+
+func (a *localPortAllocator) Err() error {
+	return a.err
+}
+
+func (a *localPortAllocator) addErrorContext(name string) {
+	if a.err == nil || a.errContext {
+		return
+	}
+	if strings.TrimSpace(name) == "" {
+		name = "local service"
+	}
+	a.err = fmt.Errorf("allocate %s port: %w", name, a.err)
+	a.errContext = true
 }
 
 func (a *localPortAllocator) reserve(port int) int {
@@ -409,6 +430,10 @@ func (a *localPortAllocator) firstEnvOrAvailableOn(name string, envNames []strin
 				return a.reserve(requested)
 			}
 			resolved := a.availableFromOn(requested, 500, address)
+			if resolved == 0 {
+				a.addErrorContext(name)
+				return 0
+			}
 			a.resolutions = append(a.resolutions, PortResolution{
 				Name:          name,
 				EnvName:       envName,
@@ -420,6 +445,10 @@ func (a *localPortAllocator) firstEnvOrAvailableOn(name string, envNames []strin
 		}
 	}
 	resolved := a.availableFromOn(fallback, 500, address)
+	if resolved == 0 {
+		a.addErrorContext(name)
+		return 0
+	}
 	if resolved != fallback {
 		a.resolutions = append(a.resolutions, PortResolution{
 			Name:          name,
@@ -436,15 +465,26 @@ func (a *localPortAllocator) availableFrom(start int, attempts int) int {
 }
 
 func (a *localPortAllocator) availableFromOn(start int, attempts int, address string) int {
+	if a.err != nil {
+		return 0
+	}
 	for port := start; port < start+attempts && port < 65536; port++ {
 		if a.portAvailableOn(address, port) {
 			return a.reserve(port)
 		}
 	}
-	return a.reserve(start)
+	end := start + attempts - 1
+	if end > 65535 {
+		end = 65535
+	}
+	a.err = fmt.Errorf("no available local port in range %d-%d on %s", start, end, address)
+	return 0
 }
 
 func (a *localPortAllocator) availableBlockFromOn(start int, size int, attempts int, address string) int {
+	if a.err != nil {
+		return 0
+	}
 	if size <= 0 {
 		return a.availableFromOn(start, attempts, address)
 	}
@@ -463,10 +503,12 @@ func (a *localPortAllocator) availableBlockFromOn(start int, size int, attempts 
 			return port
 		}
 	}
-	for candidate := start; candidate < start+size && candidate < 65536; candidate++ {
-		a.reserve(candidate)
+	end := start + attempts + size - 2
+	if end > 65535 {
+		end = 65535
 	}
-	return start
+	a.err = fmt.Errorf("no available block of %d local ports starting in range %d-%d on %s", size, start, end, address)
+	return 0
 }
 
 func (a *localPortAllocator) portAvailable(port int) bool {
@@ -480,7 +522,7 @@ func (a *localPortAllocator) portAvailableOn(address string, port int) bool {
 	if _, ok := a.used[port]; ok {
 		return false
 	}
-	return localPortAvailableOn(address, port)
+	return a.available(address, port)
 }
 
 func (a *localPortAllocator) resolvedPort(name string, envNames []string, fallback int) int {
@@ -894,11 +936,17 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 	openSearchPort := ports.resolvedPort("opensearch", []string{localOpenSearchPortEnvVar}, defaultLocalOpenSearchPort)
 	chatPort := ports.resolvedPort("chat", []string{localChatPortEnvVar, localProxyChatHostPortEnvVar}, defaultLocalProxyChatHostPort)
 	evoPort := ports.resolvedPort("evo-api", []string{localEvoPortEnvVar, localProxyEvoHostPortEnvVar}, defaultLocalProxyEvoHostPort)
+	if err := ports.Err(); err != nil {
+		return RuntimeConfig{}, RuntimePaths{}, err
+	}
 	routerPoolFallback := defaultRouterPortPoolStart + (processComposePort-defaultProcessComposePort)*defaultRouterPortsPerInstance
 	if routerPoolFallback < 1024 || routerPoolFallback+defaultRouterPortsPerInstance-1 >= 65536 {
 		routerPoolFallback = defaultRouterPortPoolStart
 	}
 	routerPoolStart := ports.resolvedPort("router-port-pool", []string{routerPortPoolStartEnvVar}, routerPoolFallback)
+	if err := ports.Err(); err != nil {
+		return RuntimeConfig{}, RuntimePaths{}, err
+	}
 	if !envBool(localPortsPinnedEnvVar, false) {
 		for {
 			conflict := false
@@ -913,6 +961,9 @@ func NewRuntimeConfigWithOptions(opts RuntimeConfigOptions) (RuntimeConfig, Runt
 				break
 			}
 			routerPoolStart = ports.availableBlockFromOn(routerPoolStart+defaultRouterPortsPerInstance, defaultRouterPortsPerInstance, 500, "127.0.0.1")
+			if err := ports.Err(); err != nil {
+				return RuntimeConfig{}, RuntimePaths{}, err
+			}
 			ports.resolutions = append(ports.resolutions, PortResolution{
 				Name:          "router-port-pool",
 				RequestedPort: routerPoolFallback,
