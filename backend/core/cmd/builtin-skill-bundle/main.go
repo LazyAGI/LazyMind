@@ -83,25 +83,27 @@ type bundledSource struct {
 }
 
 type sourceSpec struct {
-	SourceURL    string
-	ResolvedURL  string
-	Identity     string
-	Key          string
-	FallbackName string
-	UID          string
-	Category     string
-	Version      string
-	Provider     string
-	LocalPath    string
+	SourceURL       string
+	ResolvedURL     string
+	Identity        string
+	Key             string
+	FallbackName    string
+	UID             string
+	Category        string
+	Version         string
+	FallbackVersion string
+	Provider        string
+	LocalPath       string
 }
 
 type sourceInput struct {
-	URL           string
-	Bundled       *bundledSource
-	MarketVisible bool
-	FallbackName  string
-	Category      string
-	Provider      string
+	URL             string
+	Bundled         *bundledSource
+	MarketVisible   bool
+	FallbackName    string
+	Category        string
+	Provider        string
+	RequiredVersion string
 }
 
 type packageMeta struct {
@@ -454,6 +456,19 @@ func resolveSourceInput(source sourceInput, sourcesRoot string) (sourceSpec, err
 		spec.FallbackName = source.FallbackName
 		spec.Category = source.Category
 		spec.Provider = source.Provider
+		if source.RequiredVersion != "" {
+			downloadURL, err := url.Parse(spec.ResolvedURL)
+			if err != nil {
+				return sourceSpec{}, err
+			}
+			if strings.EqualFold(downloadURL.Hostname(), "api.skillhub.cn") && downloadURL.Path == "/api/v1/download" {
+				query := downloadURL.Query()
+				query.Set("version", source.RequiredVersion)
+				downloadURL.RawQuery = query.Encode()
+				spec.ResolvedURL = downloadURL.String()
+				spec.FallbackVersion = source.RequiredVersion
+			}
+		}
 		return spec, nil
 	}
 	localPath := filepath.Join(sourcesRoot, filepath.FromSlash(source.Bundled.Path))
@@ -473,15 +488,16 @@ func resolveSourceInput(source sourceInput, sourcesRoot string) (sourceSpec, err
 
 func featuredSourceInput(raw, requiredVersion, fallbackName, category string) (sourceInput, string, error) {
 	source := strings.TrimSpace(raw)
+	requiredVersion = strings.TrimSpace(requiredVersion)
 	category = strings.TrimSpace(category)
 	if _, err := resolveSource(source); err == nil {
-		return sourceInput{URL: source, FallbackName: fallbackName, Category: category}, source, nil
+		return sourceInput{URL: source, FallbackName: fallbackName, Category: category, RequiredVersion: requiredVersion}, source, nil
 	}
 	cleaned, err := skillpackage.CleanPath(source)
 	if err != nil {
 		return sourceInput{}, "", bundleFailure("invalid local Skill path %q", source)
 	}
-	bundled := &bundledSource{Path: cleaned, Category: category, Version: strings.TrimSpace(requiredVersion)}
+	bundled := &bundledSource{Path: cleaned, Category: category, Version: requiredVersion}
 	return sourceInput{Bundled: bundled, FallbackName: fallbackName}, bundledSourceURL(cleaned), nil
 }
 
@@ -690,6 +706,9 @@ func resolvedSkillVersion(spec sourceSpec, metadataVersion string, files map[str
 		version = strings.TrimSpace(raw.Version)
 	}
 	if version == "" {
+		version = strings.TrimSpace(spec.FallbackVersion)
+	}
+	if version == "" {
 		version = "0.0.0+" + treeHash[:12]
 	}
 	return version
@@ -833,19 +852,15 @@ func materializeFrozen(ctx context.Context, client *http.Client, spec sourceSpec
 		if err != nil {
 			return skillbuiltin.CatalogSkill{}, "", nil, err
 		}
-		if err := validateDownloadedVersion(origin.Files, locked.Version); err != nil {
-			return skillbuiltin.CatalogSkill{}, "", nil, err
+		lockedHash, _, _ := lockedOriginArtifact(locked)
+		if origin.ArchiveHash != lockedHash {
+			if err := validateDownloadedVersion(origin.Files, locked.Version); err != nil {
+				return skillbuiltin.CatalogSkill{}, "", nil, err
+			}
 		}
 		return finalizeEntry(spec, origin, cacheDir, patchCatalog)
 	}
-	expectedOriginHash := locked.ArchiveSHA256
-	expectedOriginSize := locked.ArchiveSize
-	expectedOriginTree := locked.TreeSHA256
-	if len(locked.AppliedPatches) > 0 {
-		expectedOriginHash = locked.OriginArchiveSHA256
-		expectedOriginSize = locked.OriginArchiveSize
-		expectedOriginTree = locked.OriginTreeSHA256
-	}
+	expectedOriginHash, expectedOriginSize, expectedOriginTree := lockedOriginArtifact(locked)
 	originPath := filepath.Join(cacheDir, expectedOriginHash+".zip")
 	if hash, size, err := fileDigest(originPath); err != nil || hash != expectedOriginHash || expectedOriginSize > 0 && size != expectedOriginSize {
 		tempPath, err := download(ctx, client, downloadURL, cacheDir)
@@ -871,11 +886,6 @@ func materializeFrozen(ctx context.Context, client *http.Client, spec sourceSpec
 	if origin.TreeHash != expectedOriginTree {
 		return skillbuiltin.CatalogSkill{}, "", nil, bundleFailure("origin package tree does not match frozen lock")
 	}
-	if isVersionedSkillHub(spec, locked) {
-		if err := validateDownloadedVersion(origin.Files, locked.Version); err != nil {
-			return skillbuiltin.CatalogSkill{}, "", nil, err
-		}
-	}
 	current, archivePath, appliedPatches, err := finalizeEntry(spec, origin, cacheDir, patchCatalog)
 	if err != nil {
 		return skillbuiltin.CatalogSkill{}, "", nil, err
@@ -887,6 +897,13 @@ func materializeFrozen(ctx context.Context, client *http.Client, spec sourceSpec
 		return skillbuiltin.CatalogSkill{}, "", nil, err
 	}
 	return current, archivePath, appliedPatches, nil
+}
+
+func lockedOriginArtifact(locked skillbuiltin.CatalogSkill) (string, int64, string) {
+	if len(locked.AppliedPatches) > 0 {
+		return locked.OriginArchiveSHA256, locked.OriginArchiveSize, locked.OriginTreeSHA256
+	}
+	return locked.ArchiveSHA256, locked.ArchiveSize, locked.TreeSHA256
 }
 
 func frozenDownloadURL(spec sourceSpec, locked skillbuiltin.CatalogSkill) (string, error) {

@@ -1,15 +1,15 @@
 schema_version: 2
 id: smart-charts
 type: work
-version: 6.2.1
+version: 7.0.0
 status: published
 default_locale: zh-CN
-provider: WorkBuddy
+provider: SkillHub
 
 skill:
   source_url: https://skillhub.cn/skills/user_5b28ea14/smart-charts
   category: data
-  required_version: 6.2.1
+  required_version: 7.0.0
 
 placement:
   home: true
@@ -39,7 +39,7 @@ presentation:
     result_summary: 识别字段与指标关系，生成可编辑、可下载的交互式 HTML 图表
   detail:
     title: 智能图表
-    description: 源自 WorkBuddy 内置 Skill。读取 CSV、Excel 或 JSON 数据，自动推荐图表并生成可交互、可下载的 HTML 可视化。
+    description: 源自 SkillHub。读取 CSV、Excel 或 JSON 数据，自动推荐图表并生成可交互、可下载的 HTML 可视化。
     attachment_hint: CSV、Excel 或 JSON 数据文件
 
 tasks:

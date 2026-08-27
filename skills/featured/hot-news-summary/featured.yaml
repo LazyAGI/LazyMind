@@ -9,6 +9,7 @@ provider: SkillHub
 skill:
   source_url: https://skillhub.cn/skills/user_fd308b11/hot-news-summary
   category: search
+  required_version: 1.0.2
 
 placement:
   home: true

@@ -4,6 +4,7 @@ import {
   CheckCircleOutlined,
   CloseCircleOutlined,
   DisconnectOutlined,
+  FolderOpenOutlined,
   LinkOutlined,
   LoginOutlined,
   ReloadOutlined,
@@ -13,9 +14,15 @@ import type { TFunction } from "i18next";
 import {
   agentIntegrationAction,
   agentIntegrationStatuses,
+  agentExecutableBindings,
+  bindAgentExecutable,
+  clearAgentExecutable,
   executorIntegrationAction,
   executorIntegrationPolicies,
+  getDesktopPlatform,
+  selectExecutable,
   type DesktopAgent,
+  type DesktopAgentBindingTarget,
   type DesktopAgentIntegrationAction,
   type DesktopAgentIntegrationStatus,
   type DesktopAgentIntegrationState,
@@ -36,6 +43,8 @@ interface AgentDefinition {
   installURL: string;
   executorName?: string;
   executorLogin?: boolean;
+  mcpBindingTarget?: DesktopAgentBindingTarget;
+  executorBindingTarget?: DesktopAgentBindingTarget;
 }
 
 const AGENTS: AgentDefinition[] = [
@@ -43,20 +52,29 @@ const AGENTS: AgentDefinition[] = [
     id: "codex", name: "Codex", icon: "/assistant-icons/codex.png",
     installURL: "https://developers.openai.com/codex/cli",
     executorName: "Codex CLI", executorLogin: true,
+    mcpBindingTarget: "codex-cli", executorBindingTarget: "codex-cli",
   },
   {
     id: "cursor", name: "Cursor", icon: "/assistant-icons/cursor.png",
     installURL: "https://cursor.com/downloads",
     executorName: "Cursor Agent CLI", executorLogin: true,
+    mcpBindingTarget: "cursor-desktop", executorBindingTarget: "cursor-cli",
   },
   {
     id: "workbuddy", name: "WorkBuddy", icon: "/assistant-icons/workbuddy.png",
     installURL: "https://www.workbuddy.cn",
     executorName: "CodeBuddy Code",
+    mcpBindingTarget: "workbuddy-desktop", executorBindingTarget: "codebuddy-cli",
+  },
+  {
+    id: "raccoon", name: "Raccoon", icon: "/assistant-icons/raccoon.svg",
+    installURL: "https://office.xiaohuanxiong.com/download",
+    mcpBindingTarget: "raccoon-desktop",
   },
   {
     id: "traework", name: "TRAE Work", icon: "/assistant-icons/traework.png",
     installURL: "https://www.trae.ai",
+    mcpBindingTarget: "traework-desktop",
   },
   {
     id: "deepseek-harness", name: "DeepSeek Harness", icon: "/assistant-icons/deepseek.png",
@@ -78,12 +96,14 @@ const EXECUTOR_SYNC_DELAY_MS = 500;
 
 type StatusMap = Partial<Record<DesktopAgent, DesktopAgentIntegrationStatus>>;
 type ExecutorPolicyMap = Partial<Record<DesktopExecutorProvider, DesktopExecutorPolicy>>;
+type BindingMap = Partial<Record<DesktopAgentBindingTarget, string>>;
 
 export default function AgentIntegrationPage() {
   const { t } = useTranslation();
   const [statuses, setStatuses] = useState<StatusMap>({});
   const [executors, setExecutors] = useState<ChatExecutorDescriptor[]>([]);
   const [executorPolicies, setExecutorPolicies] = useState<ExecutorPolicyMap>({});
+  const [bindings, setBindings] = useState<BindingMap>({});
   const [loading, setLoading] = useState(true);
   const [action, setAction] = useState("");
   const [error, setError] = useState("");
@@ -99,6 +119,10 @@ export default function AgentIntegrationPage() {
       const policyResult = await executorIntegrationPolicies();
       if (policyResult.ok) setExecutorPolicies(policyResult.data);
       else failures.push(policyResult.error instanceof Error ? policyResult.error.message : policyResult.reason);
+
+      const bindingResult = await agentExecutableBindings();
+      if (bindingResult.ok) setBindings(bindingResult.data);
+      else failures.push(bindingResult.error instanceof Error ? bindingResult.error.message : bindingResult.reason);
 
       try {
         let values: ChatExecutorDescriptor[] = [];
@@ -160,6 +184,29 @@ export default function AgentIntegrationPage() {
     await refresh();
   };
 
+  const runBindingAction = async (target: DesktopAgentBindingTarget, clear: boolean) => {
+    let path = "";
+    if (!clear) {
+      path = await selectExecutable(target) || "";
+      if (!path) return;
+    }
+    setAction(`binding:${target}`);
+    const result = clear
+      ? await clearAgentExecutable(target)
+      : await bindAgentExecutable(target, path);
+    setAction("");
+    if (!result.ok) {
+      setError(result.error instanceof Error ? result.error.message : result.reason);
+      return;
+    }
+    message.success(t(clear
+      ? "agentIntegration.executableBindingCleared"
+      : "agentIntegration.executableBindingSaved"));
+    await refresh();
+  };
+
+  const canSelectExecutable = Boolean(getDesktopPlatform());
+
   return (
     <div className="agent-integration-page">
       <div className="agent-integration-header">
@@ -195,6 +242,10 @@ export default function AgentIntegrationPage() {
               status={statuses[agent.id]}
               busyAction={action}
               onAction={runAction}
+              bindingTarget={agent.mcpBindingTarget}
+              bindingConfigured={Boolean(agent.mcpBindingTarget && bindings[agent.mcpBindingTarget])}
+              canSelectExecutable={canSelectExecutable}
+              onBindingAction={runBindingAction}
               t={t}
             />
           ))}
@@ -213,6 +264,9 @@ export default function AgentIntegrationPage() {
               busyAction={action}
               onLogin={(agent) => runAction(agent, "login")}
               onPolicyAction={runExecutorAction}
+              bindingConfigured={Boolean(agent.executorBindingTarget && bindings[agent.executorBindingTarget])}
+              canSelectExecutable={canSelectExecutable}
+              onBindingAction={runBindingAction}
               t={t}
             />
           ))}
@@ -247,16 +301,25 @@ function MCPCard({
   status,
   busyAction,
   onAction,
+  bindingTarget,
+  bindingConfigured,
+  canSelectExecutable,
+  onBindingAction,
   t,
 }: {
   agent: (typeof AGENTS)[number];
   status?: DesktopAgentIntegrationStatus;
   busyAction: string;
   onAction: (agent: DesktopAgent, action: DesktopAgentIntegrationAction) => Promise<void>;
+  bindingTarget?: DesktopAgentBindingTarget;
+  bindingConfigured: boolean;
+  canSelectExecutable: boolean;
+  onBindingAction: (target: DesktopAgentBindingTarget, clear: boolean) => Promise<void>;
   t: TFunction;
 }) {
   const state = status?.state || "requirements_missing";
   const requirements = status?.requirements || [];
+  const installationMissing = requirements.length > 0 && !requirements[0].satisfied;
   const busy = busyAction.startsWith(`${agent.id}:`);
   const localizedNote = state === "action_required"
     ? t(`agentIntegration.mcpActionNotes.${agent.id}`, { defaultValue: "" })
@@ -321,6 +384,27 @@ function MCPCard({
             {t("agentIntegration.viewRequirements")}
           </Button>
         ) : null}
+        {bindingTarget && canSelectExecutable && installationMissing && (
+          <Button
+            icon={<FolderOpenOutlined />}
+            loading={busyAction === `binding:${bindingTarget}`}
+            disabled={busyAction !== ""}
+            onClick={() => void onBindingAction(bindingTarget, false)}
+          >
+            {t(bindingTarget.endsWith("-cli")
+              ? "agentIntegration.locateCLI"
+              : "agentIntegration.locateApplication")}
+          </Button>
+        )}
+        {bindingTarget && bindingConfigured && canSelectExecutable && (
+          <Button
+            loading={busyAction === `binding:${bindingTarget}`}
+            disabled={busyAction !== ""}
+            onClick={() => void onBindingAction(bindingTarget, true)}
+          >
+            {t("agentIntegration.restoreAutoDetection")}
+          </Button>
+        )}
       </Space>
     </Card>
   );
@@ -333,6 +417,9 @@ function ExecutorCard({
   busyAction,
   onLogin,
   onPolicyAction,
+  bindingConfigured,
+  canSelectExecutable,
+  onBindingAction,
   t,
 }: {
   agent: AgentDefinition;
@@ -341,9 +428,13 @@ function ExecutorCard({
   busyAction: string;
   onLogin: (agent: DesktopAgent) => Promise<void>;
   onPolicyAction: (provider: DesktopExecutorProvider, action: DesktopExecutorPolicyAction) => Promise<void>;
+  bindingConfigured: boolean;
+  canSelectExecutable: boolean;
+  onBindingAction: (target: DesktopAgentBindingTarget, clear: boolean) => Promise<void>;
   t: TFunction;
 }) {
   const supported = Boolean(agent.executorName);
+  const bindingTarget = agent.executorBindingTarget;
   const available = Boolean(status?.available);
   const installed = Boolean(status?.installed);
   const canLogin = enabled && supported && agent.executorLogin && installed && !available;
@@ -394,6 +485,25 @@ function ExecutorCard({
               onClick={() => void onLogin(agent.id)}
             >
               {t("agentIntegration.login")}
+            </Button>
+          )}
+          {bindingTarget && canSelectExecutable && !installed && (
+            <Button
+              icon={<FolderOpenOutlined />}
+              loading={busyAction === `binding:${bindingTarget}`}
+              disabled={busyAction !== ""}
+              onClick={() => void onBindingAction(bindingTarget, false)}
+            >
+              {t("agentIntegration.locateCLI")}
+            </Button>
+          )}
+          {bindingTarget && bindingConfigured && canSelectExecutable && (
+            <Button
+              loading={busyAction === `binding:${bindingTarget}`}
+              disabled={busyAction !== ""}
+              onClick={() => void onBindingAction(bindingTarget, true)}
+            >
+              {t("agentIntegration.restoreAutoDetection")}
             </Button>
           )}
           <Button
