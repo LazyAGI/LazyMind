@@ -4,9 +4,11 @@ type: work
 version: 1.0.0
 status: published
 default_locale: zh-CN
+provider: SkillHub
 
 skill:
   source_url: https://skillhub.cn/skills/user_7c4df347/gaokao-volunteer-advisor
+  category: education
   required_version: 1.0.0
 
 placement:
@@ -15,7 +17,7 @@ placement:
   order: 9
 
 classification:
-  category: 教育咨询
+  category: 教育成长
   tags:
     - 高考
     - 志愿填报

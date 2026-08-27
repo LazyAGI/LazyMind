@@ -316,7 +316,7 @@
       }
 
       .showcase-featured-grid .showcase-card {
-        height: clamp(108px, 13.5dvh, 137px);
+        height: auto;
       }
 
       .showcase-featured-grid .showcase-card-body {
@@ -328,59 +328,60 @@
       .showcase-featured-grid .showcase-card-image-wrap {
         min-height: 0;
         height: auto;
-        flex: 1 1 auto;
+        flex: 0 0 auto;
+        aspect-ratio: 3 / 2;
       }
 
-        .showcase-template-banner {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          gap: 16px;
-          width: calc(100% - 20px);
-          padding: 11px 14px;
-          border: 1px solid #dce8fb;
-          border-radius: 12px;
-          background: #f6f9ff;
-          color: #52647e;
-          font-size: 12px;
-          line-height: 1.5;
+      .showcase-template-banner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 16px;
+        width: calc(100% - 20px);
+        padding: 11px 14px;
+        border: 1px solid #dce8fb;
+        border-radius: 12px;
+        background: #f6f9ff;
+        color: #52647e;
+        font-size: 12px;
+        line-height: 1.5;
 
-          div {
-            display: grid;
-            gap: 2px;
-            min-width: 0;
-          }
-
-          strong {
-            overflow: hidden;
-            color: #38537d;
-            font-weight: 600;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-          }
-
-          span {
-            overflow: hidden;
-            color: #8291a8;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-          }
-
-          button {
-            flex: 0 0 auto;
-            padding: 4px 8px;
-            border: 0;
-            border-radius: 6px;
-            background: transparent;
-            color: #477be8;
-            cursor: pointer;
-            font-size: 12px;
-          }
-
-          button:hover {
-            background: #e7f0ff;
-          }
+        div {
+          display: grid;
+          gap: 2px;
+          min-width: 0;
         }
+
+        strong {
+          overflow: hidden;
+          color: #38537d;
+          font-weight: 600;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        span {
+          overflow: hidden;
+          color: #8291a8;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+
+        button {
+          flex: 0 0 auto;
+          padding: 4px 8px;
+          border: 0;
+          border-radius: 6px;
+          background: transparent;
+          color: #477be8;
+          cursor: pointer;
+          font-size: 12px;
+        }
+
+        button:hover {
+          background: #e7f0ff;
+        }
+      }
 
       .task-mode-notice {
         display: grid;

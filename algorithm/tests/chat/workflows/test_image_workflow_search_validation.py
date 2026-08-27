@@ -170,6 +170,23 @@ class ImageWorkflowSearchValidationTests(unittest.TestCase):
         self.assertIn('An explicit request to find/search an image is always COLLECT', analyze['prompt'])
         self.assertIn('must use WORKFLOW: FIND_AND_EDIT', analyze['acceptance_criteria'])
 
+    def test_route_selector_sends_integrated_text_edits_to_enhance(self):
+        self.assertEqual(
+            self.tools.select_image_route('WORKFLOW: FIND_AND_EDIT\nSKIP_STEPS: generate_image'),
+            {
+                'status': 'ok',
+                'workflow': 'FIND_AND_EDIT',
+                'next_step': 'enhance_image',
+                'control': {'next_step': 'enhance_image'},
+            },
+        )
+        self.assertEqual(
+            self.tools.select_image_route('WORKFLOW: CREATE_STATIC_MEME')['next_step'],
+            'generate_image',
+        )
+        with self.assertRaisesRegex(ValueError, 'exactly one WORKFLOW'):
+            self.tools.select_image_route('NEXT_STEPS: enhance_image')
+
 
 if __name__ == '__main__':
     unittest.main()

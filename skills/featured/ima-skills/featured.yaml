@@ -1,0 +1,72 @@
+schema_version: 2
+id: ima-skills
+type: work
+version: 1.0.0
+status: published
+default_locale: zh-CN
+provider: 腾讯 IMA
+
+skill:
+  source_url: https://skillhub.cn/skills/ima-skills
+  category: knowledge
+  required_version: 1.1.9
+
+placement:
+  home: true
+  gallery: true
+  order: 23
+
+classification:
+  category: 信息分析
+  tags:
+    - IMA
+    - 知识库
+    - 笔记管理
+    - 检索
+
+assets:
+  cover:
+    file: assets/cover.png
+    role: cover
+
+presentation:
+  card:
+    title: IMA 知识管理
+    description: 整理资料、沉淀笔记并构建可检索、可输出的个人知识库
+    output_type: report
+    output_label: 知识管理方案
+    cover_asset: cover
+    result_summary: 将零散资料转为结构化知识库，并支持检索、关联和高效输出
+  detail:
+    title: IMA 知识管理
+    description: 帮助你整理文档、网页、笔记和灵感，建立可持续更新的知识库，让资料更容易被记住、找到和复用。来源：腾讯 IMA，经 LazyMind 适配。
+    attachment_hint: 笔记、文档、网页链接、研究资料或现有知识库目录
+
+tasks:
+  - id: knowledge-management
+    selector:
+      title: 构建知识库
+      description: 整理资料结构，建立分类、标签、关联和检索路径
+      output_label: 知识库整理方案
+    launch:
+      prompt_short: 帮我整理这些资料，构建一个清晰的个人知识库。
+      prompt: 请根据我提供的文档、笔记、网页或资料目录，帮我构建一个清晰可维护的知识库。请完成资料分类、标签体系、重点摘要、知识关联、检索问题清单和后续更新建议；如果资料不完整，请先询问我补充来源或使用目标。
+    replay:
+      steps:
+        - title: 汇总资料
+          description: 收集笔记、文档、网页和待整理内容
+        - title: 提炼结构
+          description: 识别主题、层级、标签和关键知识点
+        - title: 建立关联
+          description: 连接相关资料、概念和可复用结论
+        - title: 输出体系
+          description: 生成知识库目录、检索问题和维护建议
+    result:
+      template: generic_report_v1
+      eyebrow: 知识管理方案
+      title: 可检索的个人知识库结构
+      summary: 把零散资料整理为可持续积累、检索和输出的知识体系
+      highlights:
+        - 分类目录、标签和摘要结构
+        - 知识关联与检索问题清单
+        - 长期维护和复用建议

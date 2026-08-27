@@ -115,6 +115,8 @@ model_providers:
       models:
         - name: gpt-4
           type: llm
+          free_auto_select_priority: 1
+          free_auto_select_base_urls: [https://free.example.com/v1/]
 `)
 	catalog, err := loadModelCatalog(yaml)
 	if err != nil {
@@ -129,5 +131,11 @@ model_providers:
 	}
 	if len(section.Suppliers[0].Models) != 1 || section.Suppliers[0].Models[0].Name != "gpt-4" {
 		t.Fatalf("unexpected models: %+v", section.Suppliers[0].Models)
+	}
+	model := section.Suppliers[0].Models[0]
+	if model.FreeAutoSelectPriority != 1 ||
+		len(model.FreeAutoSelectBaseURLs) != 1 ||
+		model.FreeAutoSelectBaseURLs[0] != "https://free.example.com/v1/" {
+		t.Fatalf("unexpected free auto-selection metadata: %+v", model)
 	}
 }

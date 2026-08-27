@@ -29,6 +29,18 @@ type createGroupResponse struct {
 	Name                string                  `json:"name"`
 	BaseURL             string                  `json:"base_url"`
 	Check               *CheckModelProviderData `json:"check,omitempty"`
+	AutoSelection       *autoModelSelection     `json:"auto_selection,omitempty"`
+}
+
+type autoSelectedModel struct {
+	ModelKey string `json:"model_key"`
+	Name     string `json:"name"`
+}
+
+type autoModelSelection struct {
+	ProviderName string              `json:"provider_name"`
+	Configured   []autoSelectedModel `json:"configured"`
+	Missing      []string            `json:"missing"`
 }
 
 type groupListItem struct {
@@ -238,11 +250,24 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 			DeletedAt:      nil,
 		},
 	}
+	var autoSelection *autoModelSelection
 	err = db.WithContext(r.Context()).Transaction(func(tx *gorm.DB) error {
 		if err := tx.Create(&row).Error; err != nil {
 			return err
 		}
-		return seedGroupModelsFromDefaults(tx, r.Context(), &row, &parent, baseURL, userID, userName, now)
+		seededModels, err := seedGroupModelsFromDefaults(tx, r.Context(), &row, &parent, baseURL, userID, userName, now)
+		if err != nil {
+			return err
+		}
+		if strings.EqualFold(strings.TrimSpace(parent.Category), defaultProviderCategory) {
+			autoSelection, err = autoSelectUnconfiguredProviderModels(
+				tx, userID, userName, parent.Name, baseURL, seededModels, now,
+			)
+			if err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 	if err != nil {
 		common.ReplyErr(w, "create group failed", http.StatusInternalServerError)
@@ -254,7 +279,63 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		Name:                row.Name,
 		BaseURL:             row.BaseURL,
 		Check:               checkData,
+		AutoSelection:       autoSelection,
 	})
+}
+
+func autoSelectUnconfiguredProviderModels(
+	tx *gorm.DB,
+	userID, userName, providerName, baseURL string,
+	models []orm.UserModelProviderGroupModel,
+	now time.Time,
+) (*autoModelSelection, error) {
+	result := &autoModelSelection{
+		ProviderName: providerName,
+		Configured:   make([]autoSelectedModel, 0, len(autoModelSlots)),
+		Missing:      make([]string, 0, len(autoModelSlots)),
+	}
+
+	for _, slot := range autoModelSlots {
+		selectionKeys := []string{slot.ModelKey}
+		if slot.ModelKey == "image_generator" {
+			selectionKeys = []string{"text2image", "image_editing", "image_generator"}
+		}
+		var selected orm.UserSelectedModel
+		err := tx.Where("user_id = ? AND model_type IN ?", userID, selectionKeys).Take(&selected).Error
+		if err == nil {
+			continue
+		}
+		if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, err
+		}
+		model, ok := preferredAutoModel(
+			baseURL, slot.CatalogTypes, models,
+		)
+		if !ok {
+			result.Missing = append(result.Missing, slot.ModelKey)
+			continue
+		}
+		selectionKey := slot.ModelKey
+		if slot.ModelKey == "image_generator" {
+			selectionKey = "text2image"
+			if strings.EqualFold(strings.TrimSpace(model.ModelType), "image_editing") {
+				selectionKey = "image_editing"
+			}
+		}
+		selected = orm.UserSelectedModel{
+			UserID:                        userID,
+			UserName:                      userName,
+			ModelKey:                      selectionKey,
+			UserModelProviderGroupModelID: model.ID,
+			CreatedAt:                     now,
+			UpdatedAt:                     now,
+		}
+		if err := tx.Create(&selected).Error; err != nil {
+			return nil, err
+		}
+		result.Configured = append(result.Configured, autoSelectedModel{ModelKey: slot.ModelKey, Name: model.Name})
+	}
+	return result, nil
 }
 
 // UpdateGroup updates a connection group (name, base_url, optional api_key). The target group is path group_id.
@@ -598,10 +679,10 @@ func seedGroupModelsFromDefaults(
 	parent *orm.UserModelProvider,
 	requestBaseURL, userID, userName string,
 	now time.Time,
-) error {
+) ([]orm.UserModelProviderGroupModel, error) {
 	// Providers without has_models capability (e.g. OCR, search) have no model list.
 	if !parent.HasCapability("has_models") {
-		return nil
+		return nil, nil
 	}
 
 	// Determine whether we use the new-platform subset or the full catalog.
@@ -614,9 +695,9 @@ func seedGroupModelsFromDefaults(
 		Take(&catalog).Error
 	if err != nil {
 		if errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil
+			return nil, nil
 		}
-		return err
+		return nil, err
 	}
 
 	// For the new SenseNova platform, seed only the Token Plan model subset (loaded from DB).
@@ -624,17 +705,17 @@ func seedGroupModelsFromDefaults(
 	if useNewPlatform {
 		// seed only the new-platform-specific models from default_models
 	} else if normalizeBaseURLForCompare(requestBaseURL) != normalizeBaseURLForCompare(catalog.BaseURL) {
-		return nil
+		return nil, nil
 	}
 
 	var defs []orm.DefaultModel
 	if err := tx.WithContext(ctx).
 		Where("default_model_provider_id = ? AND deleted_at IS NULL", parent.DefaultModelProviderID).
 		Find(&defs).Error; err != nil {
-		return err
+		return nil, err
 	}
 	if len(defs) == 0 {
-		return nil
+		return nil, nil
 	}
 
 	batch := make([]orm.UserModelProviderGroupModel, 0, len(defs))
@@ -650,6 +731,8 @@ func seedGroupModelsFromDefaults(
 			Name:                     d.Name,
 			ModelType:                d.ModelType,
 			MaxInputTokens:           d.MaxInputTokens,
+			FreeAutoSelectPriority:   d.FreeAutoSelectPriority,
+			FreeAutoSelectBaseURLs:   d.FreeAutoSelectBaseURLs,
 			IsDefault:                true,
 			BaseModel: orm.BaseModel{
 				CreateUserID:   userID,
@@ -661,9 +744,12 @@ func seedGroupModelsFromDefaults(
 		})
 	}
 	if len(batch) == 0 {
-		return nil
+		return nil, nil
 	}
-	return tx.WithContext(ctx).CreateInBatches(&batch, 100).Error
+	if err := tx.WithContext(ctx).CreateInBatches(&batch, 100).Error; err != nil {
+		return nil, err
+	}
+	return batch, nil
 }
 
 // isDefaultBaseURL reports whether the given base_url matches the catalog default for the provider.

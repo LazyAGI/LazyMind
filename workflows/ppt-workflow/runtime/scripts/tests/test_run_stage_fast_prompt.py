@@ -67,6 +67,17 @@ class StyleRenderingRecipeTest(unittest.TestCase):
         )
         self.assertIn('2-4', style_field['question'])
 
+    def test_slide_count_choices_are_suggestions_not_a_fixed_allowlist(self) -> None:
+        workflow_path = Path(__file__).resolve().parents[3] / 'workflow.yaml'
+        workflow = yaml.safe_load(workflow_path.read_text(encoding='utf-8'))
+        slide_count = next(
+            field for field in workflow['runtime']['clarification_fields']
+            if field['id'] == 'slide_count'
+        )
+
+        self.assertEqual(slide_count['choice_policy'], 'seed')
+        self.assertEqual(slide_count['choices'], ['3 页', '5 页', '8 页', '10 页'])
+
 
 class OutlineReferenceImageRepairTest(unittest.TestCase):
     def test_repairs_prose_only_material_reference_and_fills_other_pages(self) -> None:

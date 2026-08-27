@@ -1,0 +1,112 @@
+locale: en-US
+
+classification:
+  category: workflow
+  tags:
+    - Long-form writing
+    - Source synthesis
+    - Editable outlines
+    - Document revision
+
+presentation:
+  card:
+    title: AI Writer for long-form documents
+    description: Read sources and knowledge, generate or reuse an outline, write an editable document, and support continuous targeted revisions
+    output_type: document
+    output_label: Editable document
+    cover_asset: cover
+    result_summary: Handle flat articles, structured long-form work, cloud-document continuation, and targeted edits in one Writer session
+  detail:
+    title: From source material to a complete editable document
+    description: Preserve source identity, choose a flat or sectioned path, create an outline and draft, and save later edits, image changes, or full rewrites as revisions of the same document.
+    attachment_hint: Interview transcripts, research material, an outline, Markdown/LMD files, or a Feishu document URL (optional)
+
+tasks:
+  - id: interview-article
+    selector:
+      title: Turn interviews into a feature article
+      description: Extract core ideas, representative statements, and a coherent story from transcripts
+      output_label: Feature-article draft
+    launch:
+      prompt_short: Turn my uploaded interview transcript into a publishable feature article.
+      prompt: Write a feature article for product and technology professionals from my uploaded interview transcript. Preserve important ideas and representative statements, identify the central problem and tension, build a clear story, and add accurate subheadings, an opening lead, and a closing synthesis. Do not invent information absent from the interview. Read the original file, generate or reuse an editable outline, complete the article, and save it as a document that can be revised further.
+    replay:
+      steps:
+        - title: Read and profile sources
+          description: Preserve source identity and extract facts, views, quotations, and boundaries
+        - title: Plan article structure
+          description: Create an editable outline with the story arc, section goals, and evidence locations
+        - title: Write by section
+          description: Draft from the latest outline while preserving source constraints
+        - title: Assemble the editable document
+          description: Deliver one document with title, lead, body, and conclusion
+        - title: Support continuous revision
+          description: Save later edits, image changes, or rewrites as revisions of the same document
+    result:
+      template: generic_report_v1
+      eyebrow: Feature article delivery
+      title: From interview material to a complete story
+      summary: Preserve interview perspectives and source limits in a coherent, revisable article draft
+      highlights:
+        - Interview views, quotations, and source profile
+        - Editable outline and section plan
+        - Complete article in one document
+        - Targeted revision and full-rewrite support
+
+  - id: report-from-materials
+    selector:
+      title: Build a report from sources
+      description: Combine uploaded files and knowledge evidence into a structured long-form report
+      output_label: Structured report
+    launch:
+      prompt_short: Write a complete analytical report from my materials and knowledge base.
+      prompt: Combine my uploaded materials and selected knowledge base into a complete analytical report for management. First map source scope, facts, and evidence gaps, then create an editable outline and write background, findings, analysis, risks, and actions by section. Every factual conclusion should trace to supplied material. Mark missing information and do not invent numbers or sources. Deliver a complete document that remains editable and revisable.
+    replay:
+      steps:
+        - title: Build writing context
+          description: Read uploads and knowledge sources and lock factual boundaries
+        - title: Generate the report outline
+          description: Organize background, findings, analysis, risks, and recommendations
+        - title: Plan and write sections
+          description: Assign goals, evidence, and visual needs before drafting each section
+        - title: Deliver one document
+          description: Assemble the report and preserve editing and revision support
+    result:
+      template: generic_report_v1
+      eyebrow: Analytical report
+      title: A structured long-form report grounded in supplied evidence
+      summary: Establish one factual boundary across sources and deliver a complete, traceable report
+      highlights:
+        - Multi-source profiles and factual boundaries
+        - Editable outline and section plan
+        - Risks, actions, and evidence gaps
+        - One continuously revisable document
+
+  - id: revise-document
+    selector:
+      title: Revise an existing document
+      description: Apply targeted edits or a full rewrite to Markdown, LMD, or a Feishu document
+      output_label: New document revision
+    launch:
+      prompt_short: Revise my existing document and preserve a traceable version.
+      prompt: Read the existing document or Feishu URL I provide and apply my requested revision. Locate the affected content and build a modification plan first. A targeted request should change only the target content; a full rewrite should preserve the representation and valid facts. Do not replace the original file or URL identity with a summary. Save the result as a new revision of the same document, and write back to a bound cloud document only when workflow policy allows it and I explicitly request it.
+    replay:
+      steps:
+        - title: Bind the original document
+          description: Preserve the filename or cloud URL and load authoritative content
+        - title: Locate the revision target
+          description: Distinguish targeted edits, full rewrites, and image changes
+        - title: Generate and apply changes
+          description: Modify only the requested scope while preserving representation
+        - title: Publish a new revision
+          description: Save a traceable version and write back only with explicit authorization
+    result:
+      template: generic_report_v1
+      eyebrow: Document revision
+      title: A located, traceable new document version
+      summary: Treat the original document as authoritative and produce its next revision within the requested scope
+      highlights:
+        - Original file or cloud identity preserved
+        - Traceable target and modification plan
+        - Unrelated content remains unchanged
+        - Continuous versioning of the same document

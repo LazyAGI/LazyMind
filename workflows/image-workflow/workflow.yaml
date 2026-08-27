@@ -55,6 +55,7 @@ tool_scripts:
       - image_search_tool
       - validate_image_ref
       - meme_add_caption
+      - select_image_route
 
 steps:
   - id: analyze_subject

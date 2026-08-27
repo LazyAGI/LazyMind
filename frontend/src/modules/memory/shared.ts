@@ -58,6 +58,7 @@ export interface StructuredAsset extends BaseAsset {
   description: string;
   category: string;
   tags: string[];
+  provider?: string;
   headRevisionId?: string;
   draft?: SkillDraftSummary;
   isEnabled?: boolean;

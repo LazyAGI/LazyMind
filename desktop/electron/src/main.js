@@ -1,9 +1,10 @@
-const { app, BrowserWindow, ipcMain, shell, dialog, clipboard, Menu, Tray, session } = require("electron");
+const { app, BrowserWindow, ipcMain, shell, dialog, clipboard, Menu, Tray, session, net } = require("electron");
 const { spawn, execFile } = require("node:child_process");
 const { createHmac, randomBytes, randomUUID } = require("node:crypto");
 const fs = require("node:fs");
 const path = require("node:path");
 const { resolveWindowsDesktopPaths } = require("./desktop-paths");
+const { resolveRuntimeLocalFile } = require("./runtime-local-file");
 const {
   desktopRuntimeReady,
   isRuntimeOwnershipConflict,
@@ -1652,6 +1653,141 @@ ipcMain.handle("lazymind:copyStartupLogs", () => {
   clipboard.writeText(text);
   return true;
 });
+function safeArtifactFilename(name) {
+  const base = path.basename(String(name || "").replace(/[\\/]/g, "_").trim());
+  return base || "download";
+}
+
+function uniqueFilePath(dir, filename) {
+  const safe = safeArtifactFilename(filename);
+  const ext = path.extname(safe);
+  const stem = path.basename(safe, ext);
+  let dest = path.join(dir, safe);
+  let index = 1;
+  while (fs.existsSync(dest)) {
+    dest = path.join(dir, `${stem} (${index})${ext}`);
+    index += 1;
+  }
+  return dest;
+}
+
+function toNodeBuffer(data) {
+  if (data == null) {
+    return null;
+  }
+  if (Buffer.isBuffer(data)) {
+    return data;
+  }
+  if (data instanceof Uint8Array) {
+    return Buffer.from(data);
+  }
+  if (data instanceof ArrayBuffer) {
+    return Buffer.from(data);
+  }
+  return null;
+}
+
+function artifactSearchRoots() {
+  const roots = [];
+  const dataDir = currentDataDir();
+  if (dataDir) {
+    roots.push(dataDir);
+  }
+  const composeDataDir = repoRoot ? path.join(repoRoot, "data") : "";
+  if (composeDataDir && composeDataDir !== dataDir) {
+    roots.push(composeDataDir);
+  }
+  return roots;
+}
+
+async function resolveExistingArtifactPath(source) {
+  try {
+    await readStatus();
+  } catch {
+    // Keep local-file actions usable even when status refresh fails.
+  }
+  for (const root of artifactSearchRoots()) {
+    const localPath = resolveRuntimeLocalFile(root, source);
+    if (!localPath) {
+      continue;
+    }
+    try {
+      const info = await fs.promises.stat(localPath);
+      if (info.isFile()) {
+        return localPath;
+      }
+    } catch {
+      // Try the next known data root.
+    }
+  }
+  return "";
+}
+
+async function materializeArtifactFile(payload, destPath) {
+  const buffer = toNodeBuffer(payload?.data);
+  if (buffer) {
+    await fs.promises.mkdir(path.dirname(destPath), { recursive: true });
+    await fs.promises.writeFile(destPath, buffer);
+    return destPath;
+  }
+  const source = String(payload?.source || "").trim();
+  const localPath = await resolveExistingArtifactPath(source);
+  if (localPath) {
+    if (path.resolve(localPath) === path.resolve(destPath)) {
+      return destPath;
+    }
+    await fs.promises.mkdir(path.dirname(destPath), { recursive: true });
+    await fs.promises.copyFile(localPath, destPath);
+    return destPath;
+  }
+  if (!/^https?:\/\//i.test(source)) {
+    throw new Error("Artifact file is not available locally");
+  }
+  const response = await net.fetch(source);
+  if (!response.ok) {
+    throw new Error(`Failed to download artifact file (${response.status})`);
+  }
+  const bytes = Buffer.from(await response.arrayBuffer());
+  await fs.promises.mkdir(path.dirname(destPath), { recursive: true });
+  await fs.promises.writeFile(destPath, bytes);
+  return destPath;
+}
+
+ipcMain.handle("lazymind:showItemInFolder", async (_event, payload) => {
+  const source = typeof payload === "string" ? payload : String(payload?.source || "");
+  const localPath = await resolveExistingArtifactPath(source);
+  if (localPath) {
+    shell.showItemInFolder(localPath);
+    return { ok: true, path: localPath };
+  }
+  const dest = path.join(
+    app.getPath("temp"),
+    "lazymind-artifacts",
+    safeArtifactFilename(typeof payload === "object" ? payload?.filename : ""),
+  );
+  await materializeArtifactFile(payload, dest);
+  shell.showItemInFolder(dest);
+  return { ok: true, path: dest };
+});
+
+ipcMain.handle("lazymind:saveFileAs", async (_event, payload) => {
+  const filename = safeArtifactFilename(payload?.filename);
+  const result = await dialog.showSaveDialog(activeWindow(), {
+    defaultPath: filename,
+  });
+  if (result.canceled || !result.filePath) {
+    return { canceled: true };
+  }
+  await materializeArtifactFile(payload, result.filePath);
+  return { ok: true, path: result.filePath };
+});
+
+ipcMain.handle("lazymind:downloadFile", async (_event, payload) => {
+  const dest = uniqueFilePath(app.getPath("downloads"), payload?.filename);
+  await materializeArtifactFile(payload, dest);
+  return { ok: true, path: dest };
+});
+
 ipcMain.handle("lazymind:exportDiagnostics", async () => {
   const status = currentStatus || await readStatus();
   const out = path.join(desktopLogsDir, "desktop-diagnostics.json");

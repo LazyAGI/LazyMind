@@ -1387,6 +1387,7 @@ type builtinSkillOpenAPIResponse struct {
 	Name             string `json:"name"`
 	Description      string `json:"description"`
 	Category         string `json:"category"`
+	Provider         string `json:"provider,omitempty"`
 	Content          string `json:"content"`
 	Installed        bool   `json:"installed"`
 	InstalledSkillID string `json:"installed_skill_id,omitempty"`

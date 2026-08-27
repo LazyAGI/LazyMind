@@ -149,6 +149,22 @@ def test_generate_state_owns_three_distinct_meme_strategies():
     assert slots['meme_static_output']['ordered'] is True
 
 
+def test_optimize_step_freezes_the_only_valid_image_route():
+    workflow = _load_workflow()
+    optimize = _load_state()['steps']['optimize_prompt']
+    tool_functions = {
+        function
+        for script in workflow['tool_scripts']
+        for function in script['functions']
+    }
+
+    assert 'select_image_route' in tool_functions
+    assert optimize['tools'] == ['select_image_route']
+    assert optimize['terminal_tools'] == ['select_image_route']
+    assert 'Never choose the next step yourself' in optimize['prompt']
+    assert 'edit routes select enhance_image' in optimize['acceptance_criteria']
+
+
 def test_existing_non_meme_routes_remain_available():
     state = _load_state()
     analyze_prompt = state['steps']['analyze_subject']['prompt']
