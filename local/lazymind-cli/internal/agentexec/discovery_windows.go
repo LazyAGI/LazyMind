@@ -121,7 +121,7 @@ func appPath(name string) string {
 	keyPath := `SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\` + base
 	for _, root := range []registry.Key{registry.CURRENT_USER, registry.LOCAL_MACHINE} {
 		for _, view := range []uint32{registry.WOW64_64KEY, registry.WOW64_32KEY} {
-			if value := registryString(root, keyPath, "", view); fileExists(value) {
+			if value := commandExecutable(registryString(root, keyPath, "", view)); fileExists(value) {
 				return filepath.Clean(value)
 			}
 		}
@@ -145,7 +145,7 @@ func registryString(root registry.Key, path, name string, view uint32) string {
 			value = expanded
 		}
 	}
-	return strings.Trim(value, `"`)
+	return value
 }
 
 func uniqueWindowsPaths(values []string) []string {

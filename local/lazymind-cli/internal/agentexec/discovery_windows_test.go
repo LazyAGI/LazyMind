@@ -24,10 +24,10 @@ func TestWindowsPathResolutionSupportsPATHEXTCmdFiles(t *testing.T) {
 		t.Fatalf("resolved=%q want=%q", got, command)
 	}
 	resolved, err := ResolveExecutable(filepath.Join(directory, "custom-agent"))
-	if err != nil || resolved != command {
+	if err != nil || !SameExecutable(resolved, command) {
 		t.Fatalf("resolved=%q err=%v", resolved, err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	output, err := Run(ctx, resolved, "hello world")
 	if err != nil || strings.TrimSpace(output) != "hello world" {

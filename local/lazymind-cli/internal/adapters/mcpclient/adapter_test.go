@@ -17,7 +17,7 @@ import (
 
 func TestCursorStatusUsesFilesystemRequirementWithoutRunningDesktop(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	t.Setenv("LAZYMIND_HOME", filepath.Join(home, "lazymind"))
 	adapter := testAdapter(Cursor)
 
@@ -58,7 +58,7 @@ func TestCursorInstallURLCarriesOneManagedStdioDefinition(t *testing.T) {
 
 func TestWorkBuddyUsesWorkBuddyConfiguration(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	t.Setenv("LAZYMIND_HOME", filepath.Join(home, "lazymind"))
 	path := configPath(WorkBuddy)
 	if path != filepath.Join(home, ".workbuddy", "mcp.json") {
@@ -71,7 +71,7 @@ func TestWorkBuddyUsesWorkBuddyConfiguration(t *testing.T) {
 
 func TestRaccoonUsesDesktopConfiguration(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	path := configPath(Raccoon)
 	if path != filepath.Join(home, ".box-agent", "config", "mcp.json") {
 		t.Fatalf("path=%q", path)
@@ -167,7 +167,7 @@ func TestManagedJSONConfigPreservesOtherServersAndRemovesOnlyLazyMind(t *testing
 
 func TestForeignLazyMindEntryBecomesConflict(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestHome(t, home)
 	path := filepath.Join(home, ".workbuddy", "mcp.json")
 	writeTestFile(t, path, `{"mcpServers":{"lazymind":{"command":"foreign","args":["run"]}}}`)
 	adapter := testAdapter(WorkBuddy)
@@ -244,4 +244,10 @@ func bindDesktopForTest(t *testing.T, target agentexec.BindingTarget) {
 	if _, err := agentexec.SetExecutableBinding(target, path); err != nil {
 		t.Fatal(err)
 	}
+}
+
+func setTestHome(t *testing.T, home string) {
+	t.Helper()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 }

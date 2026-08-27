@@ -59,14 +59,6 @@ else
 fi
 
 echo ""
-echo "=== local/lazymind-cli ==="
-if command -v go &>/dev/null; then
-  (cd local/lazymind-cli && GOCACHE=/tmp/lazymind-cli-gocache go test ./... -v 2>&1) || FAILED=1
-else
-  echo "Skip (go not found)"
-fi
-
-echo ""
 echo "=== desktop shell ==="
 if command -v node &>/dev/null; then
   node --test desktop/scripts/*.test.mjs 2>&1 || FAILED=1

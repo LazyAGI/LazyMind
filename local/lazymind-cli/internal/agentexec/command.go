@@ -23,6 +23,8 @@ type cappedBuffer struct {
 	Limit int
 }
 
+const executableProbeTimeout = 15 * time.Second
+
 func (b *cappedBuffer) Write(value []byte) (int, error) {
 	original := len(value)
 	if remaining := b.Limit - b.Len(); remaining > 0 {
@@ -202,7 +204,7 @@ func ResolveRunnable(candidate string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), executableProbeTimeout)
 	defer cancel()
 	if _, err := Run(ctx, resolved, "--version"); err != nil {
 		return "", err
@@ -272,10 +274,12 @@ func SameExecutable(left, right string) bool {
 	if leftErr != nil || rightErr != nil {
 		return false
 	}
-	if runtime.GOOS == "windows" {
-		return strings.EqualFold(resolvedLeft, resolvedRight)
+	leftInfo, leftErr := os.Stat(resolvedLeft)
+	rightInfo, rightErr := os.Stat(resolvedRight)
+	if leftErr != nil || rightErr != nil {
+		return false
 	}
-	return resolvedLeft == resolvedRight
+	return os.SameFile(leftInfo, rightInfo)
 }
 
 func ConnectorRuntime() (string, string, error) {

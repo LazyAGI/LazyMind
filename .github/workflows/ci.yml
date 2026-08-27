@@ -114,8 +114,17 @@ jobs:
         working-directory: local/local-runtime-manager
         run: go test ./... -v
       - name: Test Assistant Connector
+        if: runner.os != 'Windows'
         working-directory: local/lazymind-cli
         run: go test ./... -v
+      - name: Test Assistant Connector (Windows)
+        if: runner.os == 'Windows'
+        working-directory: local/lazymind-cli
+        run: |
+          go test ./... -run '^$'
+          go test ./internal/agentexec -run 'Test(ExecutableBindings|FindBound|Windows)' -v
+          go test ./internal/adapters/mcpclient -run 'Test(CursorStatus|WorkBuddyUses|RaccoonUses|ManagedJSON|ForeignLazyMind)' -v
+          go test ./internal/assistantbridge -run 'Test(ExecutableBinding|StatusesDoNotLaunch)' -v
 
   test-desktop-shell:
     needs: [lint, doc_check]

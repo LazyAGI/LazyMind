@@ -105,7 +105,8 @@ func TestExecutableBindingsPersistAndClear(t *testing.T) {
 	if err != nil || !SameExecutable(bindings[CodexCLI], executable) {
 		t.Fatalf("bindings=%#v err=%v", bindings, err)
 	}
-	if info, err := os.Stat(filepath.Join(home, "agent-bindings.json")); err != nil || info.Mode().Perm() != 0o600 {
+	if info, err := os.Stat(filepath.Join(home, "agent-bindings.json")); err != nil ||
+		(runtime.GOOS != "windows" && info.Mode().Perm() != 0o600) {
 		t.Fatalf("binding file info=%v err=%v", info, err)
 	}
 	if err := ClearExecutableBinding(CodexCLI); err != nil {

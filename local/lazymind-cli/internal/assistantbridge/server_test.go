@@ -7,9 +7,11 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"testing"
 
+	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/agentintegration"
 	"lazymind/agentconnector/internal/credentials"
 	"lazymind/agentconnector/internal/executorpolicy"
@@ -42,6 +44,9 @@ func TestExecutableBindingCanBeSavedListedAndCleared(t *testing.T) {
 	home := t.TempDir()
 	server := newTestServer(t, home)
 	executable := filepath.Join(home, "custom-codex")
+	if runtime.GOOS == "windows" {
+		executable += ".exe"
+	}
 	if err := os.WriteFile(executable, []byte("test"), 0o700); err != nil {
 		t.Fatal(err)
 	}
@@ -84,6 +89,15 @@ func TestStatusesDoNotLaunchDesktopAgentCandidates(t *testing.T) {
 	marker := filepath.Join(home, "cursor-started")
 	if err := os.WriteFile(filepath.Join(cursorHome, "cursor.cmd"), []byte("touch "+marker), 0o700); err != nil {
 		t.Fatal(err)
+	}
+	if runtime.GOOS == "windows" {
+		desktop := filepath.Join(home, "Cursor.exe")
+		if err := os.WriteFile(desktop, []byte("test"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := agentexec.SetExecutableBinding(agentexec.CursorDesktop, desktop); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	statuses, err := Statuses(context.Background(), &mcpbridge.Bridge{})
