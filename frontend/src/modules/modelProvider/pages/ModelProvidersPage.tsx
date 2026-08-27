@@ -330,6 +330,13 @@ interface ApiGroup {
 
 interface SavedProviderGroup extends ApiGroup {
   check?: CheckModelProviderResult;
+  auto_selection?: AutoModelSelection;
+}
+
+interface AutoModelSelection {
+  provider_name: string;
+  configured: Array<{ model_key: string; name: string }>;
+  missing: string[];
 }
 
 interface CheckModelProviderResult {
@@ -736,6 +743,38 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
       message.success(apiKey
         ? t("modelProvider.message.groupVerifiedAndSaved", { name: nextGroup.name })
         : t("modelProvider.message.groupSaved", { name: nextGroup.name }));
+      if (
+        !activeConfigModal.group
+        && savedGroup.auto_selection
+        && (
+          savedGroup.auto_selection.configured.length > 0
+          || savedGroup.auto_selection.missing.length > 0
+        )
+      ) {
+        const autoSelection = savedGroup.auto_selection;
+        const missingLabels = autoSelection.missing.map((modelKey) =>
+          t(`modelProvider.autoSelection.modelType.${modelKey}`)
+        );
+        Modal.info({
+          centered: true,
+          title: t("modelProvider.autoSelection.title"),
+          content: (
+            <div className="model-provider-auto-selection-result">
+              {autoSelection.configured.length > 0 ? (
+                <p>{t("modelProvider.autoSelection.configured", {
+                  models: autoSelection.configured.map((model) => model.name).join("、"),
+                })}</p>
+              ) : null}
+              {missingLabels.length > 0 ? (
+                <p>{t("modelProvider.autoSelection.missing", {
+                  provider: autoSelection.provider_name,
+                  types: missingLabels.join("、"),
+                })}</p>
+              ) : null}
+            </div>
+          ),
+        });
+      }
       void onConfigurationChanged?.();
 
       setConfigModal(null);

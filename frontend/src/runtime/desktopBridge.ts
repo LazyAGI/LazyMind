@@ -1,4 +1,3 @@
-import { isDesktopRuntime } from "./mode";
 import {
   assistantBridgeFetch,
   syncLocalAssistantSession,
@@ -71,6 +70,17 @@ export type DesktopAgentIntegrationStatusesResult =
   | { ok: true; data: Partial<Record<DesktopAgent, DesktopAgentIntegrationStatus>> }
   | { ok: false; reason: DesktopBridgeUnavailableReason; error?: unknown };
 
+export interface DesktopArtifactFilePayload {
+  source: string;
+  filename?: string;
+  data?: ArrayBuffer;
+}
+
+export type DesktopFileActionResult =
+  | { ok: true; path?: string; canceled?: false }
+  | { ok: true; canceled: true }
+  | { ok: false; reason: DesktopBridgeUnavailableReason; error?: unknown };
+
 export type DesktopExecutorPoliciesResult =
   | { ok: true; data: Partial<Record<DesktopExecutorProvider, DesktopExecutorPolicy>> }
   | { ok: false; reason: DesktopBridgeUnavailableReason; error?: unknown };
@@ -85,6 +95,7 @@ type DesktopBridgeCommand =
   | "restartRuntime";
 
 interface LazyMindDesktopBridge {
+  platform?: string;
   openLogsDir?: () => Promise<void> | void;
   openDataDir?: () => Promise<void> | void;
   runtimeStatus?: () => Promise<unknown> | unknown;
@@ -97,15 +108,29 @@ interface LazyMindDesktopBridge {
   selectFolder?: () => Promise<string | null> | string | null;
   selectExecutable?: () => Promise<string | null> | string | null;
   exportDiagnostics?: () => Promise<string> | string;
+  showItemInFolder?: (
+    payload: DesktopArtifactFilePayload | string,
+  ) => Promise<unknown> | unknown;
+  saveFileAs?: (
+    payload: DesktopArtifactFilePayload,
+  ) => Promise<unknown> | unknown;
+  downloadFile?: (
+    payload: DesktopArtifactFilePayload,
+  ) => Promise<unknown> | unknown;
 }
 
 function getDesktopBridge(): LazyMindDesktopBridge | undefined {
-  if (!isDesktopRuntime() || typeof window === "undefined") {
+  if (typeof window === "undefined") {
     return undefined;
   }
 
   return (window as Window & { lazymindDesktop?: LazyMindDesktopBridge })
     .lazymindDesktop;
+}
+
+export function hasDesktopFileBridge(): boolean {
+  const bridge = getDesktopBridge();
+  return Boolean(bridge?.showItemInFolder && bridge?.saveFileAs && bridge?.downloadFile);
 }
 
 async function callDesktopBridge(
@@ -325,3 +350,48 @@ export function exportDiagnostics(): Promise<string | null> {
   }
   return Promise.resolve(bridge.exportDiagnostics());
 }
+
+export function getDesktopPlatform(): string | undefined {
+  return getDesktopBridge()?.platform;
+}
+
+async function callDesktopFileAction(
+  method: "showItemInFolder" | "saveFileAs" | "downloadFile",
+  payload: DesktopArtifactFilePayload,
+): Promise<DesktopFileActionResult> {
+  const bridge = getDesktopBridge();
+  const handler = bridge?.[method];
+  if (!handler) {
+    return { ok: false, reason: "unavailable" };
+  }
+  try {
+    const result = (await handler.call(bridge, payload)) as
+      | { ok?: boolean; path?: string; canceled?: boolean }
+      | undefined;
+    if (result?.canceled) {
+      return { ok: true, canceled: true };
+    }
+    return { ok: true, path: result?.path };
+  } catch (error) {
+    return { ok: false, reason: "failed", error };
+  }
+}
+
+export function showItemInFolder(
+  payload: DesktopArtifactFilePayload,
+): Promise<DesktopFileActionResult> {
+  return callDesktopFileAction("showItemInFolder", payload);
+}
+
+export function saveFileAs(
+  payload: DesktopArtifactFilePayload,
+): Promise<DesktopFileActionResult> {
+  return callDesktopFileAction("saveFileAs", payload);
+}
+
+export function downloadDesktopFile(
+  payload: DesktopArtifactFilePayload,
+): Promise<DesktopFileActionResult> {
+  return callDesktopFileAction("downloadFile", payload);
+}
+

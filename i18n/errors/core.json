@@ -1444,6 +1444,11 @@
   "2002306": { "en-US": "Skill description cannot exceed 1024 characters", "zh-CN": "技能描述不能超过 1024 个字符" },
   "2002307": { "en-US": "Failed to invalidate compressed context", "zh-CN": "清除压缩上下文失败" },
   "2002308": { "en-US": "Artifact content type does not match the Workflow slot declaration", "zh-CN": "制品内容类型与工作流插槽声明不匹配" },
+  "2002309": { "en-US": "The selected Evo model is not supported by OpenCode", "zh-CN": "所选自进化模型不受 OpenCode 支持" },
   "2002310": { "en-US": "Too many dataset_ids", "zh-CN": "dataset_ids 过多" },
-  "2002311": { "en-US": "Query dataset usage failed", "zh-CN": "查询数据集使用情况失败" }
+  "2002311": { "en-US": "Query dataset usage failed", "zh-CN": "查询数据集使用情况失败" },
+  "2002312": { "en-US": "Free-model auto-selection priority cannot be negative", "zh-CN": "免费模型自动选择优先级不能为负数" },
+  "2002313": { "en-US": "Free-model endpoint scope requires a positive auto-selection priority", "zh-CN": "免费模型端点范围要求配置正数自动选择优先级" },
+  "2002314": { "en-US": "Free-model endpoint scope cannot contain an empty URL", "zh-CN": "免费模型端点范围不能包含空 URL" },
+  "2002315": { "en-US": "Failed to encode free-model endpoint scope", "zh-CN": "编码免费模型端点范围失败" }
 }

@@ -848,7 +848,7 @@ export default function SettingsPage() {
         <div className="settings-detail-group">
           <div className="settings-detail-row">
             <div>
-              <strong>{t("settingsPage.developer.enableTitle")}</strong>
+              <strong>{t(developerActive ? "settingsPage.developer.disableTitle" : "settingsPage.developer.enableTitle")}</strong>
               <p>{t("settingsPage.developer.enableDesc")}</p>
             </div>
             <Switch

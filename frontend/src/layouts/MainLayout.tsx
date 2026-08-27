@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { ReactNode } from "react";
 import { Button, Form, Input, Layout, Modal, Popover, Spin, message } from "antd";
 import {
@@ -139,6 +139,10 @@ export default function MainLayout() {
         return "";
       }
     });
+  const currentSidebarConversationIdRef = useRef(
+    currentSidebarConversationId,
+  );
+  currentSidebarConversationIdRef.current = currentSidebarConversationId;
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileSubmitting, setProfileSubmitting] = useState(false);
@@ -431,9 +435,13 @@ export default function MainLayout() {
 
   const handleSidebarConversationRemoved = (conversation: Conversation) => {
     const conversationId = conversation.conversation_id || "";
-    if (!conversationId || conversationId !== currentSidebarConversationId) {
+    if (
+      !conversationId ||
+      conversationId !== currentSidebarConversationIdRef.current
+    ) {
       return;
     }
+    currentSidebarConversationIdRef.current = "";
     try {
       sessionStorage.removeItem(CHAT_RESUME_CONVERSATION_KEY);
     } catch {

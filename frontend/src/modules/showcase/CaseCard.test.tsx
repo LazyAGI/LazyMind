@@ -33,6 +33,7 @@ const item: ShowcaseCase = {
   image_url: "/showcase/product.png",
   output_label: "PRD",
   output_type: "document",
+  provider: "SkillHub",
   prompt: "帮我生成一份产品方案",
   prompt_short: "生成产品方案",
   result_summary: "产品需求文档",
@@ -57,6 +58,7 @@ describe("CaseCard", () => {
     fireEvent.click(screen.getByRole("link", { name: /产品设计与 PRD 生成/ }));
     expect(onTry).toHaveBeenCalledOnce();
     expect(onTry).toHaveBeenCalledWith(item);
+    expect(screen.queryByText("SkillHub")).not.toBeInTheDocument();
 
     expect(screen.getByRole("link", { name: /查看详情/ })).toHaveAttribute(
       "href",

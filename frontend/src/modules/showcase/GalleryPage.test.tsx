@@ -11,7 +11,13 @@ vi.mock("react-i18next", () => ({
   }),
 }));
 
-vi.mock("./api", () => ({ listShowcaseCases: vi.fn() }));
+vi.mock("./api", () => ({
+  listShowcaseCases: vi.fn(),
+  matchesShowcaseEntryType: (capabilityType: string, entryType: string) =>
+    entryType === "chat"
+      ? capabilityType === "chat"
+      : capabilityType === "work" || capabilityType === "workflow",
+}));
 vi.mock("./CaseCard", () => ({ default: ({ item }: { item: { title: string } }) => <div>{item.title}</div> }));
 
 const listShowcaseCasesMock = vi.mocked(listShowcaseCases);
@@ -22,6 +28,7 @@ describe("GalleryPage", () => {
       cases: [
         { id: "chat-skill", title: "Chat skill", type: "chat", gallery: true },
         { id: "work-skill", title: "Work skill", type: "work", gallery: true },
+        { id: "workflow", title: "Workflow", type: "workflow", gallery: true },
       ],
       categories: ["全部"],
       total: 2,
@@ -36,6 +43,7 @@ describe("GalleryPage", () => {
     );
 
     expect(await screen.findByText("Work skill")).toBeInTheDocument();
+    expect(screen.getByText("Workflow")).toBeInTheDocument();
     expect(screen.queryByText("Chat skill")).not.toBeInTheDocument();
   });
 });

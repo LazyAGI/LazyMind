@@ -4,6 +4,7 @@ type: chat
 version: 1.0.0
 status: published
 default_locale: zh-CN
+provider: WorkBuddy
 
 skill:
   source_url: featured/novel-generator/skill
@@ -15,7 +16,7 @@ placement:
   order: 12
 
 classification:
-  category: 写作创作
+  category: 内容创作
   tags:
     - 小说创作
     - 网文连载

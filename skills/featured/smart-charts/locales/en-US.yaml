@@ -1,0 +1,107 @@
+locale: en-US
+
+classification:
+  category: Information & analysis
+  tags:
+    - Smart charts
+    - Data visualization
+    - Excel analysis
+    - CSV analysis
+
+presentation:
+  card:
+    title: Smart charts
+    description: Upload CSV or Excel data and generate an interactive chart suited to its structure
+    output_type: dashboard
+    output_label: Interactive chart
+    cover_asset: cover
+    result_summary: Detect fields and metric relationships, then deliver an editable, downloadable HTML chart
+  detail:
+    title: Smart charts
+    description: Originally built into WorkBuddy. Read CSV, Excel, or JSON data, recommend an appropriate chart, and generate an interactive downloadable HTML visualization.
+    attachment_hint: A CSV, Excel, or JSON data file
+
+tasks:
+  - id: trend-chart
+    selector:
+      title: Trend chart
+      description: Show changes, growth, and cycles across a time series
+      output_label: Trend analysis chart
+    launch:
+      prompt_short: Create a trend analysis chart from my uploaded data.
+      prompt: Read the uploaded table, identify the time field and primary metrics, choose an appropriate line or combination chart, and deliver an interactive downloadable HTML visualization. Ask me to clarify any ambiguous fields first.
+    replay:
+      steps:
+        - title: Read the data structure
+          description: Identify field types, time range, metrics, and missing values
+        - title: Select a chart design
+          description: Match the time series and metric relationships to a suitable chart
+        - title: Generate the interactive chart
+          description: Build an ECharts page with legends, tooltips, and useful annotations
+        - title: Verify and deliver
+          description: Check value mapping, readability, and download behavior
+    result:
+      template: generic_report_v1
+      eyebrow: Trend analysis chart
+      title: Core metric trends and changes
+      summary: Present trends, growth, and notable anomalies in an interactive chart
+      highlights:
+        - Time series and core metrics
+        - Growth, volatility, and anomalies
+        - Interactive downloadable HTML
+
+  - id: comparison-chart
+    selector:
+      title: Comparison chart
+      description: Compare metrics across categories, regions, or products
+      output_label: Comparison analysis chart
+    launch:
+      prompt_short: Create a category comparison chart from my uploaded data.
+      prompt: Read the uploaded table, identify categorical dimensions and numeric metrics, choose an appropriate bar, stacked, or combination chart, highlight rankings and gaps, and deliver an interactive downloadable HTML visualization.
+    replay:
+      steps:
+        - title: Identify comparison dimensions
+          description: Confirm categories, groups, and metrics to compare
+        - title: Aggregate and sort
+          description: Group values, establish ordering, and normalize units
+        - title: Generate the comparison chart
+          description: Use clear visual encoding to emphasize differences
+        - title: Summarize findings
+          description: Explain rankings, gaps, and the most useful observations
+    result:
+      template: generic_report_v1
+      eyebrow: Comparison analysis chart
+      title: Category metrics and rankings
+      summary: Present group differences, rankings, and key findings in an interactive chart
+      highlights:
+        - Category and metric mapping
+        - Ranking and gap comparison
+        - Interactive downloadable HTML
+
+  - id: distribution-chart
+    selector:
+      title: Distribution and composition
+      description: Analyze distributions, shares, and structural patterns
+      output_label: Distribution analysis chart
+    launch:
+      prompt_short: Analyze distribution and composition in my uploaded data.
+      prompt: Read the uploaded data, identify useful distribution or composition relationships, choose a suitable histogram, scatter plot, pie chart, or treemap, explain concentrations and anomalies, and deliver an interactive downloadable HTML visualization.
+    replay:
+      steps:
+        - title: Inspect data characteristics
+          description: Identify continuous and categorical variables and their value ranges
+        - title: Select visual encodings
+          description: Match the distribution or composition to suitable charts
+        - title: Mark key findings
+          description: Emphasize concentration ranges, major shares, and anomalies
+        - title: Generate the deliverable
+          description: Produce a self-contained interactive HTML chart
+    result:
+      template: generic_report_v1
+      eyebrow: Distribution analysis chart
+      title: Data distribution and structure
+      summary: Show concentration ranges, category composition, and anomalous points
+      highlights:
+        - Distribution ranges and concentration
+        - Category composition and shares
+        - Anomalies and follow-up questions

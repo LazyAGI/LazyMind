@@ -277,6 +277,8 @@ knowledge_market_items:
       - 北京工业大学 2024 年在广东物理类的招生计划人数是多少？
 
   # ---------- 评测集接入（2026-08-18，原始文档优先） ----------
+  # 2026-08-26 新增原始文档评测集（仅改 YAML，不改源码）：
+  #   FlashRAG domainrag / UDA-QA 6 个子集（wiki_nq、wiki_feta、tat、paper、fin、tat_doc_pages）/ RepLiQA / pdfQA-Benchmark(.txt)
 
   - id: induocrbench
     category: evaluation
@@ -344,3 +346,190 @@ knowledge_market_items:
     sample_questions:
       - 某篇论文提出的方法在哪些数据集上进行了实验？
       - 某篇论文摘要中提到的核心贡献是什么？
+
+  - id: flashrag-domainrag
+    category: evaluation
+    name: FlashRAG DomainRAG 领域语料评测知识库
+    description: FlashRAG_datasets（HuggingFace RUC-NLPIR/FlashRAG_datasets）domainrag_text_corpus.jsonl 的 14,406 篇领域文档语料（约 38MB），逐行成文，适合文档检索与 RAG 评测。
+    icon: 📚
+    domain: 通用
+    tags: [评测集, RAG, 语料, 英文]
+    package_url: https://huggingface.co/datasets/RUC-NLPIR/FlashRAG_datasets/resolve/main/retrieval-corpus/domainrag_text_corpus.jsonl
+    package_revision: main
+    online_access_url: https://huggingface.co/datasets/RUC-NLPIR/FlashRAG_datasets
+    data_source: HuggingFace RUC-NLPIR/FlashRAG_datasets
+    source_adapter: generic_tabular
+    source_options:
+      input_extensions: [".jsonl"]
+      doc_mode: row
+      title_fields: ["title"]
+      title_fallback_template: "domainrag_{{seq}}"
+      document_template: |
+        # {{title}}
+
+        {{contents}}
+      display_name_template: "{{title}}.md"
+      relative_path_template: "flashrag-domainrag"
+      tags: ["flashrag", "domainrag"]
+    sample_questions:
+      - 某领域文档的核心结论是什么？
+
+  - id: uda-qa-wiki-nq
+    category: evaluation
+    name: UDA-QA 维基百科文档评测知识库（NQ 子集）
+    description: UDA-QA（HuggingFace qinchuanhui/UDA-QA）wiki_nq_docs 子集的 645 份 PDF + 645 份 HTML 维基百科原始文档（约 330MB），适合文档检索与 RAG 评测。
+    icon: 📚
+    domain: 通用
+    tags: [评测集, 维基百科, RAG, 英文]
+    package_url: https://huggingface.co/datasets/qinchuanhui/UDA-QA/resolve/main/src_doc_files/wiki_nq_docs.zip
+    package_revision: main
+    online_access_url: https://huggingface.co/datasets/qinchuanhui/UDA-QA
+    data_source: HuggingFace qinchuanhui/UDA-QA
+    source_adapter: generic_file_copy
+    source_options:
+      extensions: [".pdf", ".html"]
+      display_name_template: "{{basename}}"
+      relative_path_template: "uda-qa/wiki-nq"
+      tags: ["uda-qa", "wiki-nq"]
+    sample_questions:
+      - 某维基百科条目的主要内容是什么？
+
+  - id: uda-qa-wiki-feta
+    category: evaluation
+    name: UDA-QA 维基百科文档评测知识库（FeTaQA 子集）
+    description: UDA-QA（HuggingFace qinchuanhui/UDA-QA）wiki_feta_docs 子集的 878 份 PDF + 878 份 HTML 维基百科原始文档（约 480MB），适合文档检索与 RAG 评测。
+    icon: 📚
+    domain: 通用
+    tags: [评测集, 维基百科, RAG, 英文]
+    package_url: https://huggingface.co/datasets/qinchuanhui/UDA-QA/resolve/main/src_doc_files/wiki_feta_docs.zip
+    package_revision: main
+    online_access_url: https://huggingface.co/datasets/qinchuanhui/UDA-QA
+    data_source: HuggingFace qinchuanhui/UDA-QA
+    source_adapter: generic_file_copy
+    source_options:
+      extensions: [".pdf", ".html"]
+      display_name_template: "{{basename}}"
+      relative_path_template: "uda-qa/wiki-feta"
+      tags: ["uda-qa", "wiki-feta"]
+    sample_questions:
+      - 某维基百科条目的主要内容是什么？
+
+  - id: uda-qa-tat-docs
+    category: evaluation
+    name: UDA-QA 财报文档评测知识库（TAT 子集）
+    description: UDA-QA（HuggingFace qinchuanhui/UDA-QA）tat_docs 子集的 170 份财报 PDF（约 509MB），适合财报文档检索与数值推理评测。
+    icon: 📈
+    domain: 金融
+    tags: [评测集, 财报, 金融, 英文]
+    package_url: https://huggingface.co/datasets/qinchuanhui/UDA-QA/resolve/main/src_doc_files/tat_docs.zip
+    package_revision: main
+    online_access_url: https://huggingface.co/datasets/qinchuanhui/UDA-QA
+    data_source: HuggingFace qinchuanhui/UDA-QA
+    source_adapter: generic_file_copy
+    source_options:
+      extensions: [".pdf"]
+      display_name_template: "{{basename}}"
+      relative_path_template: "uda-qa/tat-docs"
+      tags: ["uda-qa", "tat-docs"]
+    sample_questions:
+      - 某公司财报中报告的总营收是多少？
+
+  - id: uda-qa-paper-docs
+    category: evaluation
+    name: UDA-QA 论文文档评测知识库（Paper 子集）
+    description: UDA-QA（HuggingFace qinchuanhui/UDA-QA）paper_docs 子集的 1,129 份论文 PDF（约 852MB），适合论文文档检索与 RAG 评测。
+    icon: 🧪
+    domain: 科研
+    tags: [评测集, 论文, RAG, 英文]
+    package_url: https://huggingface.co/datasets/qinchuanhui/UDA-QA/resolve/main/src_doc_files/paper_docs.zip
+    package_revision: main
+    online_access_url: https://huggingface.co/datasets/qinchuanhui/UDA-QA
+    data_source: HuggingFace qinchuanhui/UDA-QA
+    source_adapter: generic_file_copy
+    source_options:
+      extensions: [".pdf"]
+      display_name_template: "{{basename}}"
+      relative_path_template: "uda-qa/paper-docs"
+      tags: ["uda-qa", "paper-docs"]
+    sample_questions:
+      - 某篇论文提出的方法在哪些数据集上进行了实验？
+
+  - id: uda-qa-fin-docs
+    category: evaluation
+    name: UDA-QA 财报文档评测知识库（Fin 子集）
+    description: UDA-QA（HuggingFace qinchuanhui/UDA-QA）fin_docs 子集的 788 份财报 PDF（约 2.4GB），适合财报文档检索与数值推理评测。
+    icon: 📈
+    domain: 金融
+    tags: [评测集, 财报, 金融, 英文]
+    package_url: https://huggingface.co/datasets/qinchuanhui/UDA-QA/resolve/main/src_doc_files/fin_docs.zip
+    package_revision: main
+    online_access_url: https://huggingface.co/datasets/qinchuanhui/UDA-QA
+    data_source: HuggingFace qinchuanhui/UDA-QA
+    source_adapter: generic_file_copy
+    source_options:
+      extensions: [".pdf"]
+      display_name_template: "{{basename}}"
+      relative_path_template: "uda-qa/fin-docs"
+      tags: ["uda-qa", "fin-docs"]
+    sample_questions:
+      - 某公司财报中报告的总营收是多少？
+
+  - id: uda-qa-tat-doc-pages
+    category: evaluation
+    name: UDA-QA 财报文档评测知识库（TAT 页面子集）
+    description: UDA-QA（HuggingFace qinchuanhui/UDA-QA）tat_doc_pages 子集的 2,481 份财报 PDF（约 1.2GB），适合财报文档检索与数值推理评测。
+    icon: 📈
+    domain: 金融
+    tags: [评测集, 财报, 金融, 英文]
+    package_url: https://huggingface.co/datasets/qinchuanhui/UDA-QA/resolve/main/extended_qa_info/tat_doc_pages.zip
+    package_revision: main
+    online_access_url: https://huggingface.co/datasets/qinchuanhui/UDA-QA
+    data_source: HuggingFace qinchuanhui/UDA-QA
+    source_adapter: generic_file_copy
+    source_options:
+      extensions: [".pdf"]
+      display_name_template: "{{basename}}"
+      relative_path_template: "uda-qa/tat-doc-pages"
+      tags: ["uda-qa", "tat-doc-pages"]
+    sample_questions:
+      - 某公司财报中报告的总营收是多少？
+
+  - id: repliqa
+    category: evaluation
+    name: RepLiQA 虚构文档问答评测知识库
+    description: RepLiQA（HuggingFace ServiceNow/repliqa）的 17,954 份虚构文档 PDF（约 1.2GB），每文档配套 5 个问答，适合文档检索与问答评测；内容为虚构非事实性文档。
+    icon: 📄
+    domain: 科研
+    tags: [评测集, 虚构文档, RAG, 英文]
+    package_url: https://huggingface.co/datasets/ServiceNow/repliqa.git
+    package_revision: main
+    online_access_url: https://huggingface.co/datasets/ServiceNow/repliqa
+    data_source: HuggingFace ServiceNow/repliqa
+    source_adapter: generic_file_copy
+    source_options:
+      extensions: [".pdf"]
+      display_name_template: "{{basename}}"
+      relative_path_template: "repliqa"
+      tags: ["repliqa"]
+    sample_questions:
+      - 某虚构文档中描述的核心事件是什么？
+
+  - id: pdfqa-benchmark-txt
+    category: evaluation
+    name: pdfQA 文档问答评测知识库（原文 txt 子集）
+    description: pdfQA-Benchmark（HuggingFace pdfqa/pdfQA-Benchmark）01.1_Input_Files_Non_PDF 的 4,312 份真实文档提取文本（约 824MB），涵盖财报、论文、维基等，适合文档问答与 RAG 评测。
+    icon: 📄
+    domain: 通用
+    tags: [评测集, 文档问答, 英文]
+    package_url: https://huggingface.co/datasets/pdfqa/pdfQA-Benchmark.git
+    package_revision: main
+    online_access_url: https://huggingface.co/datasets/pdfqa/pdfQA-Benchmark
+    data_source: HuggingFace pdfqa/pdfQA-Benchmark
+    source_adapter: generic_file_copy
+    source_options:
+      extensions: [".txt"]
+      display_name_template: "{{basename}}"
+      relative_path_template: "pdfqa/txt"
+      tags: ["pdfqa", "文档问答"]
+    sample_questions:
+      - 某份财报文本中报告的营业收入是多少？

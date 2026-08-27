@@ -2,7 +2,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import type { ComponentProps } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { ExternalServiceCard } from "./ExternalServicesPage";
+import { ExternalServiceCard, renderExternalServiceDescription } from "./ExternalServicesPage";
 
 type Service = ComponentProps<typeof ExternalServiceCard>["service"];
 
@@ -112,5 +112,24 @@ describe("ExternalServiceCard document parsing summary", () => {
     await waitFor(() => {
       expect(document.querySelector(".ant-tooltip-placement-bottomLeft")).toBeInTheDocument();
     });
+  });
+});
+
+describe("external service configuration description", () => {
+  it("renders the MinerU API key address as an exact safe external link", () => {
+    const apiKeyUrl = "https://mineru.net/apiManage/token";
+
+    render(<p>{renderExternalServiceDescription(`获取 API Key：\n${apiKeyUrl}`)}</p>);
+
+    const link = screen.getByRole("link", { name: apiKeyUrl });
+    expect(link).toHaveAttribute("href", apiKeyUrl);
+    expect(link).toHaveAttribute("target", "_blank");
+    expect(link).toHaveAttribute("rel", "noreferrer");
+  });
+
+  it("does not turn non-HTTP schemes into links", () => {
+    render(<p>{renderExternalServiceDescription("获取 API Key：javascript:alert(1)")}</p>);
+
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });
 });

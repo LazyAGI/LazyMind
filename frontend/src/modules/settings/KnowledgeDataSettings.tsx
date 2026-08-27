@@ -247,7 +247,9 @@ export default function KnowledgeDataSettings({
             <p>{t("settingsPage.knowledge.documentParsingGroupDesc")}</p>
           </div>
           <div className="settings-knowledge-parser-controls">
-            <Tag>{documentParsingEnabled ? t("settingsPage.knowledge.parsingEnabledCount") : t("settingsPage.knowledge.parsingDisabledCount")}</Tag>
+            <Tag className={`settings-knowledge-state ${documentParsingEnabled ? "is-enabled" : "is-disabled"}`}>
+              {documentParsingEnabled ? t("settingsPage.enabled") : t("settingsPage.disabled")}
+            </Tag>
             <Switch
               aria-label={t("settingsPage.knowledge.documentParsingAria")}
               checked={documentParsingEnabled}

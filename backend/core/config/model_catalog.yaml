@@ -19,6 +19,12 @@
 # base_url rules:
 #   - Provider-level base_url must end with '/'.
 #   - Model-level base_url is not supported; all models inherit the provider's base_url.
+#
+# verified-free automatic selection:
+#   free_auto_select_priority — positive integer; lower wins within the same runtime slot.
+#                               Set only for models verified as zero-cost, not trial-credit models.
+#   free_auto_select_base_urls — optional endpoint allow-list for endpoint-specific free models.
+#                                Omit when the preference applies to every seeded endpoint.
 
 model_providers:
   capabilities: [multi_group, custom_base_url, has_models]
@@ -243,6 +249,7 @@ model_providers:
 
           3. Click Add API Key, assign a recognizable name, and copy the generated key.
       base_url: "https://open.bigmodel.cn/api/paas/v4/"
+      # Verified-free model source: https://docs.bigmodel.cn/cn/guide/start/model-overview
       models:
         - name: AutoGLM-Phone
           type: vlm
@@ -255,6 +262,7 @@ model_providers:
           max_input_tokens: "128K"
         - name: CogView-3-Flash
           type: text2image
+          free_auto_select_priority: 1
         - name: CogView-4
           type: text2image
         - name: Embedding-2
@@ -266,6 +274,7 @@ model_providers:
         - name: GLM-4-Flash-250414
           type: llm
           max_input_tokens: "128K"
+          free_auto_select_priority: 3
         - name: GLM-4-FlashX-250414
           type: llm
           max_input_tokens: "128K"
@@ -277,6 +286,7 @@ model_providers:
         - name: GLM-4.1V-Thinking-Flash
           type: vlm
           max_input_tokens: "64K"
+          free_auto_select_priority: 2
         - name: GLM-4.1V-Thinking-FlashX
           type: vlm
           max_input_tokens: "64K"
@@ -289,6 +299,7 @@ model_providers:
         - name: GLM-4.5-Flash
           type: llm
           max_input_tokens: "128K"
+          free_auto_select_priority: 2
         - name: GLM-4.6
           type: llm
           max_input_tokens: "200K"
@@ -298,18 +309,21 @@ model_providers:
         - name: GLM-4.6V-Flash
           type: vlm
           max_input_tokens: "128K"
+          free_auto_select_priority: 1
         - name: GLM-4.7
           type: llm
           max_input_tokens: "198K"
         - name: GLM-4.7-Flash
           type: llm
           max_input_tokens: "198K"
+          free_auto_select_priority: 1
         - name: GLM-4.7-FlashX
           type: llm
           max_input_tokens: "198K"
         - name: GLM-4V-Flash
           type: vlm
           max_input_tokens: "16K"
+          free_auto_select_priority: 3
         - name: GLM-5
           type: llm
           max_input_tokens: "198K"
@@ -1024,13 +1038,20 @@ model_providers:
         - name: glm-5.2
           type: llm
           max_input_tokens: "1M"
+        # Token Plan is free during public beta: https://platform.sensenova.cn/
         - name: sensenova-6.7-flash-lite
           type: llm
           max_input_tokens: "256K"
+          free_auto_select_priority: 1
+          free_auto_select_base_urls: ["https://token.sensenova.cn/v1/chat/completions/"]
         - name: sensenova-u1-fast
           type: text2image
+          free_auto_select_priority: 1
+          free_auto_select_base_urls: ["https://token.sensenova.cn/v1/chat/completions/"]
         - name: sensenova-u1.5-lite
           type: image_editing
+          free_auto_select_priority: 2
+          free_auto_select_base_urls: ["https://token.sensenova.cn/v1/chat/completions/"]
 
     - name: SiliconFlow
       description:
@@ -1061,10 +1082,14 @@ model_providers:
 
           3. Click New API Key, enter a recognizable name, and copy the generated key.
       base_url: "https://api.siliconflow.cn/v1/"
+      # Verified-free model source: https://siliconflow.cn/pricing
       models:
         - name: deepseek-ai/DeepSeek-V4-Flash
           type: llm
           max_input_tokens: "1M"
+        - name: THUDM/GLM-Z1-9B-0414
+          type: llm
+          free_auto_select_priority: 1
         - name: Pro/moonshotai/Kimi-K2.6
           type: vlm
           max_input_tokens: "256K"
@@ -1122,6 +1147,7 @@ model_providers:
         - name: Qwen/Qwen3.5-4B
           type: vlm
           max_input_tokens: "32K"
+          free_auto_select_priority: 1
         - name: deepseek-ai/DeepSeek-R1
           type: llm
           max_input_tokens: "128K"
@@ -1191,12 +1217,14 @@ model_providers:
         - name: THUDM/GLM-4.1V-9B-Thinking
           type: vlm
           max_input_tokens: "64K"
+          free_auto_select_priority: 2
         - name: tencent/Hunyuan-A13B-Instruct
           type: llm
           max_input_tokens: "128K"
         - name: deepseek-ai/DeepSeek-R1-0528-Qwen3-8B
           type: llm
           max_input_tokens: "128K"
+          free_auto_select_priority: 3
         - name: Qwen/Qwen3-32B
           type: llm
           max_input_tokens: "128K"
@@ -1206,6 +1234,7 @@ model_providers:
         - name: Qwen/Qwen3-8B
           type: llm
           max_input_tokens: "128K"
+          free_auto_select_priority: 2
         - name: ByteDance-Seed/Seed-OSS-36B-Instruct
           type: llm
           max_input_tokens: "512K"
@@ -1230,6 +1259,7 @@ model_providers:
         - name: Qwen/Qwen2.5-7B-Instruct
           type: llm
           max_input_tokens: "128K"
+          free_auto_select_priority: 4
         - name: Pro/Qwen/Qwen2.5-7B-Instruct
           type: llm
           max_input_tokens: "128K"
@@ -1247,9 +1277,11 @@ model_providers:
         - name: BAAI/bge-m3
           type: embed
           max_input_tokens: "8192"
+          free_auto_select_priority: 1
         - name: BAAI/bge-large-zh-v1.5
           type: embed
           max_input_tokens: "512"
+          free_auto_select_priority: 2
         - name: BAAI/bge-large-en-v1.5
           type: embed
           max_input_tokens: "512"
@@ -1281,6 +1313,7 @@ model_providers:
           type: text2image
         - name: Kwai-Kolors/Kolors
           type: image_editing
+          free_auto_select_priority: 1
         - name: fnlp/MOSS-TTSD-v0.5
           type: tts
         - name: FunAudioLLM/CosyVoice2-0.5B

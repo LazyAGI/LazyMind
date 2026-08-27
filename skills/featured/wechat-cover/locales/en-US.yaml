@@ -1,0 +1,51 @@
+locale: en-US
+
+classification:
+  category: Design & creativity
+  tags:
+    - WeChat covers
+    - Viral titles
+    - Content marketing
+    - Cover design
+
+presentation:
+  card:
+    title: WeChat viral cover design
+    description: Analyze the article angle and generate multiple high-converting WeChat cover concepts
+    output_type: images
+    output_label: Cover concepts
+    cover_asset: cover
+    result_summary: Deliver title hooks, visual directions, color palettes, and multiple cover concepts
+  detail:
+    title: WeChat viral cover design
+    description: "Extract the core selling points from the article topic, summary, and target readers, then generate WeChat-ready cover concepts based on high-reach visual patterns. Source: https://github.com/tomorrow140/wechat-cover-designer; adapted for LazyMind."
+    attachment_hint: Article title, summary, target readers, account positioning, or reference covers
+
+tasks:
+  - id: cover-design
+    selector:
+      title: Viral cover concepts
+      description: Generate WeChat cover ideas that can be produced directly from the article
+      output_label: WeChat cover concepts
+    launch:
+      prompt_short: Generate multiple viral WeChat cover concepts from my article.
+      prompt: Analyze the core selling points and emotional hooks from the article title, summary, account positioning, and target readers I provide, then generate multiple viral WeChat cover concepts. Include title wording, visual subject, composition, color palette, typography, use cases, and one-click production notes. Ask for missing essentials first.
+    replay:
+      steps:
+        - title: Capture the topic
+          description: Read the title, summary, readers, and account positioning
+        - title: Extract selling points
+          description: Identify hooks, emotional value, and title wording
+        - title: Generate concepts
+          description: Produce multiple cover compositions, palettes, subjects, and typography strategies
+        - title: Preview for WeChat
+          description: Provide size adaptation, revision notes, and production tips
+    result:
+      template: generic_report_v1
+      eyebrow: WeChat cover concepts
+      title: Multiple high-converting cover ideas
+      summary: Deliver a complete cover package with titles, composition, color, and production notes
+      highlights:
+        - Core selling points and viral title wording
+        - Multiple visual cover directions
+        - WeChat size adaptation and production tips

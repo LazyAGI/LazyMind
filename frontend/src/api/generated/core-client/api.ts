@@ -490,6 +490,7 @@ export interface BuiltinSkillOpenAPIResponse {
     'installed': boolean;
     'installed_skill_id'?: string;
     'name': string;
+    'provider'?: string;
 }
 export interface BulkUpdateServerEnabledRequest {
     'enabled'?: boolean;
@@ -2318,7 +2319,7 @@ export interface ShareSkillOpenAPIRequest {
 }
 export interface ShowcaseCase {
     'attachment_hint'?: string;
-    'builtin_skill_uid': string;
+    'builtin_skill_uid'?: string;
     'category': string;
     'description': string;
     'detail_description': string;
@@ -2332,6 +2333,7 @@ export interface ShowcaseCase {
     'output_type': string;
     'prompt': string;
     'prompt_short': string;
+    'provider': string;
     'source_url': string;
     'result_highlights'?: Array<string>;
     'result_summary': string;
@@ -2340,6 +2342,7 @@ export interface ShowcaseCase {
     'tasks'?: Array<ShowcaseCaseTask>;
     'title': string;
     'type': string;
+    'workflow_ref'?: string;
 }
 export interface ShowcaseCaseListResponse {
     'cases'?: Array<ShowcaseCase>;

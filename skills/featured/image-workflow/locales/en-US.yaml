@@ -1,0 +1,111 @@
+locale: en-US
+
+classification:
+  category: workflow
+  tags:
+    - Image generation
+    - Image editing
+    - Animated GIF
+    - Memes
+
+presentation:
+  card:
+    title: Creative images and meme packs
+    description: Analyze, collect references, optimize prompts, and complete generation, precise edits, or static and animated memes
+    output_type: images
+    output_label: Image candidates
+    cover_asset: cover
+    result_summary: Dynamically route text-to-image, search-and-edit, upload editing, GIF animation, and multi-state meme packs in one workflow
+  detail:
+    title: AI image generation, editing, and memes
+    description: Decide whether references are required, optimize generation or editing instructions, then deliver images, captioned stills, animated GIFs, or an ordered meme pack.
+    attachment_hint: Visual brief, references, an edit target, or style materials (optional by task)
+
+tasks:
+  - id: meme-pack
+    selector:
+      title: Multi-state meme pack
+      description: Generate a consistent character across distinct chat reactions
+      output_label: Meme pack
+    launch:
+      prompt_short: Generate a consistent office-worker chat meme pack.
+      prompt: Create a six-image chat meme pack featuring the same cute office-worker character and a consistent style. The states should mean “OK,” “Are you there?”, “Thanks for your hard work,” “Thanks, boss,” “I do not want to work,” and “Good night.” Generate each visual without text, then add the corresponding caption at the bottom center with deterministic layout, accurate wording, high contrast, and no watermark. Deliver the six static memes in order.
+    replay:
+      steps:
+        - title: Analyze character and states
+          description: Lock the shared character, six intents, and static-pack route
+        - title: Plan visuals and captions
+          description: Define text-free scenes, caption boxes, and high-contrast styling
+        - title: Generate text-free images
+          description: Produce each reaction with a consistent character and style
+        - title: Add captions deterministically
+          description: Calculate font size, wrapping, and centering for accurate captions
+        - title: Deliver the ordered pack
+          description: Save and present every meme in the requested order
+    result:
+      template: generic_report_v1
+      eyebrow: Meme pack
+      title: Six chat states with one consistent character
+      summary: Keep character and style consistent while deterministic post-processing preserves caption accuracy
+      highlights:
+        - Consistent character and visual style
+        - Six distinct communication states
+        - Separate text-free generation and caption layout
+        - Ordered image-list delivery
+
+  - id: find-and-edit
+    selector:
+      title: Search and edit an image
+      description: Find and validate a base image, then apply one precise visual change
+      output_label: Edited image
+    launch:
+      prompt_short: Find a suitable product image and make the requested visual edit.
+      prompt: Search for and validate a clear product image of a silver smartwatch. Preserve the watch body, viewpoint, and materials, and replace only the strap with a detailed silver metal-link bracelet. Match the original lighting, perspective, and shadows. Add no text, brand marks, or extra objects, and deliver the edited high-resolution image.
+    replay:
+      steps:
+        - title: Analyze the edit
+          description: Define invariants, the requested change, and the search-and-edit route
+        - title: Find and validate the base
+          description: Retrieve a small set of accessible candidates and select a usable composition
+        - title: Optimize editing instructions
+          description: Lock subject, viewpoint, material, lighting, and prohibited changes
+        - title: Apply the local edit
+          description: Replace only the strap while preserving the rest of the image
+    result:
+      template: generic_report_v1
+      eyebrow: Image edit
+      title: A precise material replacement with product consistency
+      summary: Start from a validated base and preserve explicit invariants during the edit
+      highlights:
+        - Search and image validity checks
+        - Precise local-edit instructions
+        - Subject, perspective, and lighting consistency
+
+  - id: animated-sticker
+    selector:
+      title: Animated GIF sticker
+      description: Generate a first frame and natural motion, then convert it into a chat-ready GIF
+      output_label: Animated meme
+    launch:
+      prompt_short: Create an animated waving-cat sticker that says “Got it.”
+      prompt: >-
+        Create one animated chat sticker: a cute cat faces the viewer and waves naturally in a smooth loop. Keep the composition simple and the subject clear. Generate a text-free video first, convert it to GIF, then add the exact caption “Got it” at the bottom center in white with a black outline and high contrast. Do not ask the video model to render text, and add no watermark or brand mark.
+    replay:
+      steps:
+        - title: Analyze animation intent
+          description: Confirm character, movement, looping, and the animated-meme route
+        - title: Optimize frame and motion prompts
+          description: Separate the text-free visual, movement, and caption layout
+        - title: Generate video and GIF
+          description: Create a natural loop and convert it to a chat-friendly GIF
+        - title: Caption every frame
+          description: Render exact text consistently inside the normalized caption box
+    result:
+      template: generic_report_v1
+      eyebrow: Animated meme
+      title: A smooth-loop chat GIF with an accurate caption
+      summary: Deliver an animated reaction through video generation, GIF conversion, and frame-by-frame captioning
+      highlights:
+        - Separate first-frame and motion prompts
+        - Video-to-GIF animation path
+        - Exact frame-by-frame caption layout

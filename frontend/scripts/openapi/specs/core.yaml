@@ -3359,6 +3359,8 @@ components:
                     type: string
                 prompt_short:
                     type: string
+                provider:
+                    type: string
                 source_url:
                     type: string
                 result_highlights:
@@ -3383,8 +3385,9 @@ components:
                     type: string
                 type:
                     type: string
+                workflow_ref:
+                    type: string
             required:
-                - builtin_skill_uid
                 - category
                 - description
                 - detail_description
@@ -3398,6 +3401,7 @@ components:
                 - output_type
                 - prompt
                 - prompt_short
+                - provider
                 - source_url
                 - result_summary
                 - title
@@ -4692,6 +4696,8 @@ components:
                 installed_skill_id:
                     type: string
                 name:
+                    type: string
+                provider:
                     type: string
             required:
                 - builtin_skill_uid

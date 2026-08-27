@@ -102,10 +102,10 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 		v03.Aggregate == nil || v03.Aggregate.Version != 20260805000000 {
 		t.Fatalf("unexpected v0_3 mode: %#v", v03)
 	}
-	if len(v03.Dev) != 40 {
-		t.Fatalf("v0_3 dev migration count=%d, want 40", len(v03.Dev))
+	if len(v03.Dev) != 41 {
+		t.Fatalf("v0_3 dev migration count=%d, want 41", len(v03.Dev))
 	}
-	for _, version := range []uint64{20260730100000, 20260803120000, 20260803150000, 20260803160000, 20260803220000, 20260804090000, 20260804100000, 20260805100000, 20260805120000, 20260805121000, 20260805173000, 20260806110000, 20260806120000, 20260806173000, 20260807120000, 20260807160000, 20260809203000, 20260810100000, 20260811120000, 20260811153000, 20260811173000, 20260813120000, 20260813140000, 20260813190000, 20260814110000, 20260814120000, 20260814121000, 20260815160000, 20260816120000, 20260817084853, 20260817120000, 20260818064304, 20260820190000, 20260821120000, 20260822013000, 20260822193000, 20260824120000, 20260824140000, 20260825022749, 20260825031307} {
+	for _, version := range []uint64{20260730100000, 20260803120000, 20260803150000, 20260803160000, 20260803220000, 20260804090000, 20260804100000, 20260805100000, 20260805120000, 20260805121000, 20260805173000, 20260806110000, 20260806120000, 20260806173000, 20260807120000, 20260807160000, 20260809203000, 20260810100000, 20260811120000, 20260811153000, 20260811173000, 20260813120000, 20260813140000, 20260813190000, 20260814110000, 20260814120000, 20260814121000, 20260815160000, 20260816120000, 20260817084853, 20260817120000, 20260818064304, 20260820190000, 20260821120000, 20260822013000, 20260822193000, 20260824120000, 20260824140000, 20260825022749, 20260825031307, 20260826190000} {
 		if !containsMigrationFileVersion(v03.Dev, version) {
 			t.Fatalf("v0_3 dev migrations are missing %d", version)
 		}
@@ -114,7 +114,7 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read v0_3 aggregate up: %v", err)
 	}
-	for _, token := range []string{"workflow_preparations", "workflow_outbox", "workflow_input_resources", "driver_content", "chat_executor", "thinking_depth VARCHAR(16)", "conversation_policy_snapshot_backups", "conversation.enable_plugin IS NULL", "external_chat_run_events", "external_chat_hosts", "external_agent_bindings", "conversation_archive_folders", "lease_token", "sub_agent_tasks", "sources", "plugin_step_intents", "run_id", "run_status", "run_terminal", "schedules_enabled", "quick_question_defaults", "new_task_defaults", "skill_distribution_artifacts"} {
+	for _, token := range []string{"workflow_preparations", "workflow_outbox", "workflow_input_resources", "driver_content", "chat_executor", "thinking_depth VARCHAR(16)", "conversation_policy_snapshot_backups", "conversation.enable_plugin IS NULL", "external_chat_run_events", "external_chat_hosts", "external_agent_bindings", "conversation_archive_folders", "lease_token", "sub_agent_tasks", "sources", "plugin_step_intents", "run_id", "run_status", "run_terminal", "schedules_enabled", "quick_question_defaults", "new_task_defaults", "skill_distribution_artifacts", "free_auto_select_priority", "free_auto_select_base_urls"} {
 		if !strings.Contains(string(v03Up), token) {
 			t.Fatalf("v0_3 aggregate up is missing %s", token)
 		}
@@ -123,7 +123,7 @@ func TestRepositoryStructuredMigrationCatalogLoads(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read v0_3 aggregate down: %v", err)
 	}
-	for _, token := range []string{"enable_plugin_was_null", "DROP TABLE IF EXISTS conversation_policy_snapshot_backups"} {
+	for _, token := range []string{"enable_plugin_was_null", "DROP TABLE IF EXISTS conversation_policy_snapshot_backups", "DROP COLUMN IF EXISTS free_auto_select_priority", "DROP COLUMN IF EXISTS free_auto_select_base_urls"} {
 		if !strings.Contains(string(v03Down), token) {
 			t.Fatalf("v0_3 aggregate down is missing %s", token)
 		}

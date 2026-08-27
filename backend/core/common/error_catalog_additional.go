@@ -596,6 +596,11 @@ func init() {
 	registerAdditionalError("save editable block failed", http.StatusInternalServerError, 2002304)
 	registerAdditionalError("failed to invalidate compressed context", http.StatusInternalServerError, 2002307)
 	registerAdditionalErrorPattern("artifact slot %q requires content type %q, got %q", "Artifact content type does not match the Workflow slot declaration", http.StatusUnprocessableEntity, 2002308)
+	registerAdditionalError("selected evo model is not supported by OpenCode", http.StatusBadRequest, 2002309)
+	registerAdditionalError("model free_auto_select_priority must not be negative", http.StatusInternalServerError, 2002312)
+	registerAdditionalError("model free_auto_select_base_urls requires a positive free_auto_select_priority", http.StatusInternalServerError, 2002313)
+	registerAdditionalError("model free_auto_select_base_urls must not contain an empty URL", http.StatusInternalServerError, 2002314)
+	registerAdditionalError("marshal model free_auto_select_base_urls", http.StatusInternalServerError, 2002315)
 }
 
 func registerAdditionalError(message string, status, code int) {

@@ -236,6 +236,40 @@ def test_selected_workflow_declares_missing_only_startup_clarification():
     assert 'context-specific suggested answers' in contribution.runtime_context
 
 
+def test_seed_choices_do_not_invalidate_explicit_chinese_slide_count():
+    runtime = {
+        'clarification_fields': [{
+            'id': 'slide_count',
+            'label': '页数',
+            'question': '希望生成多少页？',
+            'type': 'single',
+            'choice_policy': 'seed',
+            'choices': ['3 页', '5 页', '8 页', '10 页'],
+        }],
+    }
+    contribution = resolve_workflow_injection(
+        None,
+        current_query='生成六页赛博朋克 2077 游戏介绍',
+        workflow_catalog=[{
+            'workflow_ref': 'builtin:ppt-workflow',
+            'workflow_id': 'ppt-workflow',
+            'revision_id': 'revision-1',
+            'runtime': runtime,
+        }],
+        allowed_workflow_refs=['builtin:ppt-workflow'],
+        workflow_activations=[{
+            'workflow_ref': 'builtin:ppt-workflow',
+            'workflow_id': 'ppt-workflow',
+            'revision_id': 'revision-1',
+            'tool_name': 'trigger_ppt_workflow',
+        }],
+    )
+
+    assert '六页 and 6页 both explicitly supply a slide count' in contribution.runtime_context
+    assert 'never ask for it again merely because it is unlisted' in contribution.runtime_context
+    assert '"current_query": "生成六页赛博朋克 2077 游戏介绍"' in contribution.runtime_context
+
+
 def test_startup_clarification_subset_policy_uses_only_declared_recipe_choices():
     runtime = {
         'clarification_fields': [{

@@ -1,0 +1,51 @@
+locale: en-US
+
+classification:
+  category: Content creation
+  tags:
+    - High-EQ replies
+    - Chat
+    - Relationship communication
+    - Messaging
+
+presentation:
+  card:
+    title: High-EQ chat reply assistant
+    description: Generate natural, composed, well-judged replies in multiple tones from the conversation context
+    output_type: document
+    output_label: Reply suggestions
+    cover_asset: cover
+    result_summary: Offer multiple tone options so you can respond appropriately across relationships and situations
+  detail:
+    title: High-EQ chat reply assistant
+    description: "Read the other person's tone, relationship distance, and situational goal, then generate gentle, humorous, direct, or high-EQ chat replies. Source: https://skillhub.cn/skills/chat-eq-reply; adapted for LazyMind."
+    attachment_hint: The other person's message, chat background, your goal, and the relationship type
+
+tasks:
+  - id: eq-reply
+    selector:
+      title: High-EQ replies
+      description: Generate suitable replies for dating, work, friends, and family conversations
+      output_label: Chat reply suggestions
+    launch:
+      prompt_short: Help me write high-EQ replies from this chat.
+      prompt: Generate multiple high-EQ chat replies from the other person's message, chat background, relationship type, and the outcome I want. First judge their emotion and subtext, then provide gentle, humorous, and direct versions, and explain when each reply fits. If key context is missing, ask first.
+    replay:
+      steps:
+        - title: Understand the context
+          description: Analyze the message, emotion, relationship distance, and communication goal
+        - title: Choose a style
+          description: Match gentle, humorous, direct, or reassuring reply strategies
+        - title: Generate replies
+          description: Produce multiple natural, send-ready options that avoid awkwardness
+        - title: Flag risks
+          description: Mark wording that should not be sent and suggest next communication steps
+    result:
+      template: generic_report_v1
+      eyebrow: Chat reply suggestions
+      title: High-EQ replies in multiple tones
+      summary: Generate chat replies matched to the relationship, emotion, and goal
+      highlights:
+        - Emotion and subtext assessment
+        - Multiple tone options to choose from
+        - Sending advice and communication-risk notes

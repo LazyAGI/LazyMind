@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 
+import lazyllm
 import pytest
 
 from lazymind.chat.engine.tools.local_file import workspace as chat_artifact
@@ -18,6 +19,9 @@ def test_save_chat_artifact_emits_downloadable_event(monkeypatch):
     result = chat_artifact.save_chat_artifact('hello.txt', '你好')
 
     assert result['success'] is True
+    artifact_id = result['result']['artifact_id']
+    assert result['result']['file_markdown'] == f'[hello.txt](file_id:{artifact_id})'
+    assert 'file_markdown' in (chat_artifact.save_chat_artifact.__doc__ or '')
     assert emitted[0]['tag'] == 'artifact_created'
     assert emitted[0]['filename'] == 'hello.txt'
     assert emitted[0]['value'] == {'text': '你好'}
@@ -56,6 +60,8 @@ def test_save_chat_artifact_file_copies_to_persistent_workspace(tmp_path, monkey
     )
 
     assert result['success'] is True
+    artifact_id = result['result']['artifact_id']
+    assert result['result']['file_markdown'] == f'[report.docx](file_id:{artifact_id})'
     assert emitted[0]['content_type'] == 'file'
     assert emitted[0]['filename'] == 'report.docx'
     published = emitted[0]['value']['path']
@@ -97,6 +103,38 @@ def test_workspace_file_tools_share_chat_agent_workspace(tmp_path, monkeypatch):
     assert Path(written['path']) == workspace / 'bid_output' / 'outline.json'
     assert '{"chapters": []}' in loaded['result']['text']
     assert listing['entries'] == ['outline.json']
+
+
+def test_read_file_accepts_only_current_workflow_attempt_workspace(tmp_path, monkeypatch):
+    main_root = tmp_path / 'main'
+    workflow_workspace = tmp_path / 'workflow' / 'task-1'
+    workflow_workspace.mkdir(parents=True)
+    workflow_input = workflow_workspace / 'inputs' / 'workflow_routing.json'
+    workflow_input.parent.mkdir()
+    workflow_input.write_text('{"text":"WORKFLOW: FIND_AND_EDIT"}', encoding='utf-8')
+    outside = tmp_path / 'workflow' / 'task-2' / 'secret.txt'
+    outside.parent.mkdir(parents=True)
+    outside.write_text('secret', encoding='utf-8')
+
+    monkeypatch.setitem(chat_artifact._cfg._impl, 'agentic_workspace', str(main_root))
+    monkeypatch.setattr(
+        chat_artifact, '_current_artifact_scope', lambda: ('user-1', 'conversation-1'),
+    )
+    previous = lazyllm.globals.get('agentic_config')
+    lazyllm.globals['agentic_config'] = {
+        'agent_type': 'workflow_step',
+        'workflow_workspace_path': str(workflow_workspace),
+    }
+    try:
+        loaded = chat_artifact.read_file(str(workflow_input))
+        rejected = chat_artifact.read_file(str(outside))
+    finally:
+        lazyllm.globals['agentic_config'] = previous
+
+    assert 'WORKFLOW: FIND_AND_EDIT' in loaded['result']['text']
+    assert loaded['result']['kind'] == 'attachment_text'
+    assert rejected['success'] is False
+    assert 'current main-Agent workspace' in rejected['error']['detail']
 
 
 def test_artifact_event_translator_preserves_structured_payload():

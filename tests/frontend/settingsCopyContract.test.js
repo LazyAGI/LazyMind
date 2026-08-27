@@ -56,4 +56,16 @@ describe('settings copy contract', () => {
       'descriptionKey ? t(descriptionKey) : tool.description',
     );
   });
+
+  it('shows the developer mode action for the current switch state', () => {
+    const settingsSource = readFrontendSource('modules/settings/index.tsx');
+    const zhCN = readFrontendSource('i18n/locales/zh-CN.ts');
+    const enUS = readFrontendSource('i18n/locales/en-US.ts');
+
+    expect(settingsSource).toMatch(
+      /developerActive\s*\?\s*"settingsPage\.developer\.disableTitle"\s*:\s*"settingsPage\.developer\.enableTitle"/,
+    );
+    expect(zhCN).toContain('disableTitle: "关闭开发者模式"');
+    expect(enUS).toContain('disableTitle: "Disable developer mode"');
+  });
 });
