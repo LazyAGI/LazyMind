@@ -594,9 +594,9 @@ func (m *RuntimeManager) waitForAuthServiceHealthy(ctx context.Context, port int
 	defer deadline.Stop()
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
-	sawPIDFile := false
+	observedPID := 0
 	exitedChecks := 0
-	url := fmt.Sprintf("http://127.0.0.1:%d/health", port)
+	url := fmt.Sprintf("http://127.0.0.1:%d%s", port, authServiceHealthPath)
 	nextReport := m.now().Add(startupProgressInterval)
 	m.progressf("waiting for auth-service health: %s", url)
 	for {
@@ -604,16 +604,17 @@ func (m *RuntimeManager) waitForAuthServiceHealthy(ctx context.Context, port int
 			m.progressf("auth-service ready: %s", url)
 			return nil
 		}
-		alive, err := upLockProcessAlive(pidFile)
-		if err == nil {
-			sawPIDFile = true
-			if alive {
-				exitedChecks = 0
-			} else {
-				exitedChecks++
-			}
-		} else if sawPIDFile && os.IsNotExist(err) {
+		pid := readPIDFileQuiet(pidFile)
+		if pid > 0 && processAlive(pid) {
+			observedPID = pid
+			exitedChecks = 0
+		} else if observedPID > 0 && (pid == 0 || pid == observedPID) {
 			exitedChecks++
+		} else if pid != observedPID {
+			// A dead PID that was never observed alive belongs to an earlier
+			// runtime attempt. Ignore it while the replacement process starts.
+			observedPID = 0
+			exitedChecks = 0
 		}
 		if exitedChecks >= exitConfirmationChecks {
 			return fmt.Errorf("auth-service process exited before becoming healthy")

@@ -604,12 +604,12 @@ func TestListSourcesScansProjectedSourceFields(t *testing.T) {
 			columns: []string{
 				"source_id", "tenant_id", "created_by", "name", "dataset_id", "status",
 				"source_options_json", "include_extensions_json", "exclude_extensions_json",
-				"config_version", "deleted_at", "created_at", "updated_at", "binding_count",
+				"config_version", "deleted_at", "created_at", "updated_at", "last_success_at", "binding_count",
 			},
 			rows: [][]driver.Value{{
 				"source-1", "tenant-1", "user-1", "本地数据源", "dataset-1", "ACTIVE",
 				[]byte(`{"source_type":"local_fs"}`), []byte(`{"items":[".md"]}`), []byte(`{"items":["~$*"]}`),
-				int64(7), nil, now, now.Add(time.Minute), int64(2),
+				int64(7), nil, now, now.Add(time.Minute), now.Add(-time.Hour), int64(2),
 			}},
 		},
 	})
@@ -632,8 +632,69 @@ func TestListSourcesScansProjectedSourceFields(t *testing.T) {
 	if record.BindingCount != 2 {
 		t.Fatalf("binding count not scanned: got=%d", record.BindingCount)
 	}
+	if record.LastSuccessAt == nil || !record.LastSuccessAt.Equal(now.Add(-time.Hour)) {
+		t.Fatalf("PostgreSQL last success time was not scanned: %v", record.LastSuccessAt)
+	}
 	if record.Source.SourceOptions["source_type"] != "local_fs" {
 		t.Fatalf("source JSON options were not scanned: %#v", record.Source.SourceOptions)
+	}
+}
+
+func TestListSourcesScansSQLiteAggregatedLastSuccessAt(t *testing.T) {
+	t.Parallel()
+
+	db, err := sql.Open("sqlite", "file:"+filepath.ToSlash(filepath.Join(t.TempDir(), "scan.db"))+"?_pragma=foreign_keys(ON)")
+	if err != nil {
+		t.Fatalf("open sqlite: %v", err)
+	}
+	defer db.Close()
+
+	repo := NewSQLRepositoryWithDriver("sqlite", db)
+	if err := repo.AutoMigrate(); err != nil {
+		t.Fatalf("auto migrate sqlite: %v", err)
+	}
+	now := time.Date(2026, 8, 27, 3, 34, 9, 672288000, time.UTC)
+	if err := ormInsertSource(repo.orm, Source{
+		SourceID:          "source-1",
+		TenantID:          "tenant-1",
+		CreatedBy:         "user-1",
+		Name:              "飞书数据源",
+		DatasetID:         "dataset-1",
+		Status:            "ACTIVE",
+		SourceOptions:     JSON{"source_type": "feishu"},
+		IncludeExtensions: JSON{},
+		ExcludeExtensions: JSON{},
+		ConfigVersion:     1,
+		CreatedAt:         now.Add(-time.Hour),
+		UpdatedAt:         now,
+	}); err != nil {
+		t.Fatalf("insert sqlite source: %v", err)
+	}
+	if err := ormUpsertCheckpoint(repo.orm, SyncCheckpoint{
+		SourceID:          "source-1",
+		BindingID:         "binding-1",
+		BindingGeneration: 1,
+		LastSuccessAt:     &now,
+		LastError:         JSON{},
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	}); err != nil {
+		t.Fatalf("insert sqlite checkpoint: %v", err)
+	}
+
+	records, total, err := repo.ListSources(context.Background(), SourceListRequest{
+		TenantID: "tenant-1",
+		Page:     1,
+		PageSize: 10,
+	})
+	if err != nil {
+		t.Fatalf("list sqlite sources: %v", err)
+	}
+	if total != 1 || len(records) != 1 {
+		t.Fatalf("unexpected sqlite list result: total=%d records=%d", total, len(records))
+	}
+	if records[0].LastSuccessAt == nil || !records[0].LastSuccessAt.Equal(now) {
+		t.Fatalf("SQLite last success time was not scanned: %v", records[0].LastSuccessAt)
 	}
 }
 

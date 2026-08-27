@@ -411,7 +411,9 @@ func (m *ProcessComposeManager) ProbeAPI(port int, timeout time.Duration) bool {
 		return false
 	}
 	defer resp.Body.Close()
-	return resp.StatusCode < 500
+	return (resp.StatusCode >= 200 && resp.StatusCode < 400) ||
+		resp.StatusCode == http.StatusUnauthorized ||
+		resp.StatusCode == http.StatusForbidden
 }
 
 func (m *ProcessComposeManager) EnsureBinary(ctx context.Context, paths RuntimePaths) error {
