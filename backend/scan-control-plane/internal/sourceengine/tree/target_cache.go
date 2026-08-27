@@ -167,13 +167,21 @@ func (c *targetSearchCache) build(ctx context.Context, key string, conn connecto
 }
 
 func (c *targetSearchCache) buildIfUnlocked(ctx context.Context, conn connector.SourceConnector, req TargetTreeSearchRequest, build func(context.Context, connector.SourceConnector, TargetTreeSearchRequest) ([]TreeNode, bool, error)) targetSearchCacheSnapshot {
+	return c.buildIfUnlockedMode(ctx, conn, req, false, build)
+}
+
+func (c *targetSearchCache) rebuildIfUnlocked(ctx context.Context, conn connector.SourceConnector, req TargetTreeSearchRequest, build func(context.Context, connector.SourceConnector, TargetTreeSearchRequest) ([]TreeNode, bool, error)) targetSearchCacheSnapshot {
+	return c.buildIfUnlockedMode(ctx, conn, req, true, build)
+}
+
+func (c *targetSearchCache) buildIfUnlockedMode(ctx context.Context, conn connector.SourceConnector, req TargetTreeSearchRequest, force bool, build func(context.Context, connector.SourceConnector, TargetTreeSearchRequest) ([]TreeNode, bool, error)) targetSearchCacheSnapshot {
 	if c == nil {
 		return targetSearchCacheSnapshot{status: targetSearchCacheStatusMissing}
 	}
 	key := targetSearchCacheKey(req)
 	if c.store != nil {
 		previous, hasPrevious, err := c.store.Get(ctx, key)
-		if err == nil && hasPrevious && previous.complete && !previous.stale {
+		if !force && err == nil && hasPrevious && previous.complete && !previous.stale {
 			fmt.Fprintf(os.Stdout, "target search cache prewarm skip connector=%s auth_connection_id=%s status=%s nodes=%d truncated=%t stale=%t\n", req.ConnectorType, req.AuthConnectionID, previous.status, len(previous.nodes), previous.truncated, previous.stale)
 			return previous
 		}
@@ -193,7 +201,7 @@ func (c *targetSearchCache) buildIfUnlocked(ctx context.Context, conn connector.
 	}
 	c.mu.Lock()
 	entry := c.entries[key]
-	if entry != nil && time.Now().Before(entry.expiresAt) && entry.complete && time.Now().Before(entry.staleAt) {
+	if !force && entry != nil && time.Now().Before(entry.expiresAt) && entry.complete && time.Now().Before(entry.staleAt) {
 		snapshot := entry.snapshot()
 		c.mu.Unlock()
 		return snapshot

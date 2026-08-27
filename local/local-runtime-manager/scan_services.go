@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -234,6 +235,7 @@ func (m *FileWatcherManager) Down(ctx context.Context, paths RuntimePaths) error
 }
 
 func scanControlPlaneEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
+	allowedRootsJSON, _ := json.Marshal(cfg.FileWatcher.AllowedRoots)
 	return []string{
 		"LAZYMIND_RUNTIME_MODE=local",
 		"LAZYMIND_SCAN_CONTROL_PLANE_ADDRESS=127.0.0.1",
@@ -246,6 +248,8 @@ func scanControlPlaneEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_SCAN_CONTROL_PLANE_AGENT_TOKEN=" + cfg.FileWatcher.AgentToken,
 		"LAZYMIND_SCAN_CONTROL_PLANE_LOCAL_FS_DEFAULT_AGENT_ID=" + cfg.FileWatcher.AgentID,
 		"LAZYMIND_SCAN_CONTROL_PLANE_LOCAL_FS_PUBLIC_ROOT=" + cfg.FileWatcher.WatchHostDir,
+		"LAZYMIND_SCAN_CONTROL_PLANE_LOCAL_FS_ALLOWED_ROOTS_JSON=" + string(allowedRootsJSON),
+		"LAZYMIND_SCAN_CONTROL_PLANE_DYNAMIC_LOCAL_ROOTS=" + strconv.FormatBool(cfg.Profile == "desktop"),
 		"LAZYMIND_SCAN_CONTROL_PLANE_FEISHU_BASE_URL=" + envText("LAZYMIND_SCAN_CONTROL_PLANE_FEISHU_BASE_URL", "https://open.feishu.cn"),
 		"LAZYMIND_SCAN_CONTROL_PLANE_AUTH_SERVICE_BASE_URL=http://127.0.0.1:" + strconv.Itoa(cfg.AuthService.Port),
 		"LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN=" + envText("LAZYMIND_AUTH_SERVICE_INTERNAL_TOKEN", "dev-internal-service-token"),
@@ -258,6 +262,7 @@ func scanControlPlaneEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 }
 
 func fileWatcherEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
+	allowedRootsJSON, _ := json.Marshal(cfg.FileWatcher.AllowedRoots)
 	return []string{
 		"LAZYMIND_RUNTIME_MODE=local",
 		"LAZYMIND_FILE_WATCHER_AGENT_ID=" + cfg.FileWatcher.AgentID,
@@ -271,6 +276,8 @@ func fileWatcherEnv(cfg RuntimeConfig, paths RuntimePaths) []string {
 		"LAZYMIND_FILE_WATCHER_WATCH_HOST_DIR=" + cfg.FileWatcher.WatchHostDir,
 		"LAZYMIND_FILE_WATCHER_WATCH_CONTAINER_DIR=" + cfg.FileWatcher.WatchHostDir,
 		"LAZYMIND_FILE_WATCHER_ALLOWED_ROOT=" + cfg.FileWatcher.WatchHostDir,
+		"LAZYMIND_FILE_WATCHER_ALLOWED_ROOTS_JSON=" + string(allowedRootsJSON),
+		"LAZYMIND_FILE_WATCHER_DYNAMIC_ROOT_UPDATES=" + strconv.FormatBool(cfg.Profile == "desktop"),
 	}
 }
 

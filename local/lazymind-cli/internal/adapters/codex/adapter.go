@@ -255,27 +255,11 @@ func currentEnvironment(home, hostID string) map[string]string {
 
 func findBinary(configured string) (string, error) {
 	name := "codex"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
 	home, _ := os.UserHomeDir()
 	candidates := codexCandidates(home, name)
-	if strings.TrimSpace(configured) != "" {
-		return agentexec.FindExecutable(configured, "", nil, nil)
-	}
-	if configured = strings.TrimSpace(os.Getenv("LAZYMIND_CODEX_BIN")); configured != "" {
-		return agentexec.FindExecutable(configured, "", nil, nil)
-	}
-	complete := make([]string, 0, len(candidates))
-	for _, candidate := range candidates {
-		if codexDistributionHasHost(candidate) {
-			complete = append(complete, candidate)
-		}
-	}
-	if resolved, err := agentexec.FindExecutable("", "", nil, complete); err == nil {
-		return resolved, nil
-	}
-	resolved, err := agentexec.FindExecutable("", "", []string{name}, candidates)
+	resolved, err := agentexec.FindBoundExecutable(
+		configured, "LAZYMIND_CODEX_BIN", agentexec.CodexCLI, []string{name}, candidates,
+	)
 	if err != nil {
 		return "", errors.New("Codex CLI is not installed")
 	}
@@ -310,15 +294,6 @@ func codexHome() (string, error) {
 		return "", err
 	}
 	return filepath.Join(home, ".codex"), nil
-}
-
-func codexDistributionHasHost(binary string) bool {
-	host := "codex-code-mode-host"
-	if runtime.GOOS == "windows" {
-		host += ".exe"
-	}
-	info, err := os.Stat(filepath.Join(filepath.Dir(binary), host))
-	return err == nil && !info.IsDir()
 }
 
 func FindBinary(configured string) (string, error) { return findBinary(configured) }

@@ -324,18 +324,28 @@ def ingest_pdf_file(
                 display_name=name, source=source, source_url=source_url,
                 source_path=src, turn_seq=turn_seq, _locked=True,
             )
-        if (
+        if not (
             manifest.get('parse_status') == 'failed'
             and current
             and _lease_active(current)
             and current.get('parser_id') != lease_id
         ):
-            return current
+            if current:
+                for seq in list(current.get('turn_seqs') or []) + [current.get('turn_seq')]:
+                    merge_turn_seqs(manifest, seq)
+                merge_turn_seqs(manifest, turn_seq)
+            return store.write_manifest(manifest, _locked=True)
+
+    waited = _wait_for_parse(store, file_id)
+    with store.index_lock():
+        current = store.load_manifest(file_id) or waited
         if current:
-            for seq in list(current.get('turn_seqs') or []) + [current.get('turn_seq')]:
-                merge_turn_seqs(manifest, seq)
-            merge_turn_seqs(manifest, turn_seq)
-        return store.write_manifest(manifest, _locked=True)
+            return _refresh_occurrence(
+                store, current,
+                display_name=name, source=source, source_url=source_url,
+                source_path=src, turn_seq=turn_seq, _locked=True,
+            )
+    return manifest
 
 
 def ingest_upload_pdfs(

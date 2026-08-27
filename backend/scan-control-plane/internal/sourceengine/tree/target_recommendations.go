@@ -112,6 +112,17 @@ func (e *DefaultTargetTreeEngine) recommendLocalPaths(ctx context.Context, req T
 	if len(rules) == 0 {
 		return result, nil
 	}
+	if req.ForceRefresh {
+		if err := e.refreshLocalFSRootCaches(ctx, TargetTreeSearchRequest{
+			ConnectorType:   connector.ConnectorType("local_fs"),
+			TargetType:      connector.TargetType("local_path"),
+			AgentID:         req.AgentID,
+			ProviderOptions: req.ProviderOptions,
+			IncludeFiles:    false,
+		}); err != nil {
+			return TreeNodePage{}, err
+		}
+	}
 
 	mergedRoots := make([]TreeNode, 0)
 	for _, rule := range rules {
