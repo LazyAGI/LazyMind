@@ -265,6 +265,7 @@ func openAPISchemas() map[string]any {
 		"BindingTargetRecommendationRequest": object(nil, props(
 			"agent_id", stringSchema(),
 			"provider_options", objectSchema(),
+			"force_refresh", boolSchema(),
 		)),
 
 		"ValidateBindingTargetRequest":     object([]string{"connector_type", "target_type", "target_ref"}, targetProps()),

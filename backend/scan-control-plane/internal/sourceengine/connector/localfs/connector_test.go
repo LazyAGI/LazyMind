@@ -284,6 +284,86 @@ func TestPublicRootMapsVirtualPathsForBrowseAndValidation(t *testing.T) {
 	}
 }
 
+func TestPublicRootPreservesAdditionalAllowedAbsolutePath(t *testing.T) {
+	t.Parallel()
+
+	agent := newAgentStub()
+	conn := NewLocalFSConnector(
+		agent,
+		WithDefaultAgentID("agent-default"),
+		WithPublicRoot("/host/root"),
+		WithAllowedPrefixes("/host/root", "/outside"),
+	)
+
+	target, err := conn.ValidateTarget(context.Background(), connector.ValidateTargetRequest{
+		ConnectorType: ConnectorType,
+		TargetType:    TargetTypeLocalPath,
+		TargetRef:     "/outside",
+		UserID:        "user-1",
+	})
+	if err != nil {
+		t.Fatalf("validate additional allowed target: %v", err)
+	}
+	if target.TargetRef != "/outside" || agent.lastValidatePath != "/outside" {
+		t.Fatalf("additional root should remain absolute: target=%+v agent_path=%q", target, agent.lastValidatePath)
+	}
+}
+
+func TestDynamicRootsAcceptAgentAuthorizedAbsolutePathOutsideInitialPublicRoot(t *testing.T) {
+	t.Parallel()
+
+	agent := newAgentStub()
+	conn := NewLocalFSConnector(
+		agent,
+		WithDefaultAgentID("agent-default"),
+		WithPublicRoot("/host/root"),
+		WithAllowedPrefixes("/host/root"),
+		WithDynamicRoots(true),
+	)
+
+	target, err := conn.ValidateTarget(context.Background(), connector.ValidateTargetRequest{
+		ConnectorType: ConnectorType,
+		TargetType:    TargetTypeLocalPath,
+		TargetRef:     "/outside",
+		UserID:        "user-1",
+	})
+	if err != nil {
+		t.Fatalf("validate dynamic target: %v", err)
+	}
+	if target.TargetRef != "/outside" || agent.lastValidatePath != "/outside" {
+		t.Fatalf("dynamic target should use agent-authorized absolute path: target=%+v path=%q", target, agent.lastValidatePath)
+	}
+
+	if _, err := conn.ListChildren(context.Background(), connector.ListChildrenRequest{
+		TargetType: TargetTypeLocalPath,
+		TargetRef:  target.TargetRef,
+		ListMode:   connector.ListModePage,
+		PageSize:   10,
+		AgentID:    "agent-default",
+	}); err != nil {
+		t.Fatalf("list dynamic target: %v", err)
+	}
+	if agent.lastListPath != "/outside" {
+		t.Fatalf("dynamic target list should preserve the authorized absolute path, got %q", agent.lastListPath)
+	}
+
+	if _, err := conn.FetchPage(context.Background(), connector.FetchPageRequest{
+		SourceID:          "source-1",
+		BindingID:         "binding-1",
+		BindingGeneration: 1,
+		TargetType:        TargetTypeLocalPath,
+		TargetRef:         target.TargetRef,
+		ScopeType:         connector.ScopeTypeFull,
+		PageSize:          10,
+		AgentID:           "agent-default",
+	}); err != nil {
+		t.Fatalf("fetch dynamic target: %v", err)
+	}
+	if agent.lastStatPath != "/outside" || agent.lastListPath != "/outside" {
+		t.Fatalf("dynamic target fetch should preserve the authorized absolute path, stat=%q list=%q", agent.lastStatPath, agent.lastListPath)
+	}
+}
+
 func TestPublicRootRejectsPathsOutsideMountedRoot(t *testing.T) {
 	t.Parallel()
 

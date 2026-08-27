@@ -48,6 +48,8 @@ type Components struct {
 	AgentToken                        string
 	LocalFSDefaultAgentID             string
 	LocalFSPublicRoot                 string
+	LocalFSAllowedRoots               []string
+	LocalFSDynamicRoots               bool
 	AuthConnectionClient              feishu.AuthConnectionClient
 	AdminVerifier                     access.AdminVerifier
 	FeishuClient                      feishu.FeishuClient
@@ -261,6 +263,8 @@ func buildAdapters(cfg config.Config) (Components, error) {
 		AgentToken:                        cfg.AgentToken,
 		LocalFSDefaultAgentID:             cfg.LocalFSDefaultAgentID,
 		LocalFSPublicRoot:                 cfg.LocalFSPublicRoot,
+		LocalFSAllowedRoots:               append([]string(nil), cfg.LocalFSAllowedRoots...),
+		LocalFSDynamicRoots:               cfg.LocalFSDynamicRoots,
 		AuthConnectionClient:              auth,
 		AdminVerifier:                     adminVerifier,
 		FeishuClient:                      feishuClient,
@@ -285,7 +289,7 @@ func newHandlerWithComponents(built Components) http.Handler {
 		panic("app repository is required")
 	}
 	var repo handlerRepository = built.Repository
-	registry, err := connectorRegistryFromTypes(built.ConnectorTypes, built.AgentClient, built.LocalFSDefaultAgentID, built.LocalFSPublicRoot, built.AuthConnectionClient, built.FeishuClient, built.TempObjectStore)
+	registry, err := connectorRegistryFromTypes(built.ConnectorTypes, built.AgentClient, built.LocalFSDefaultAgentID, built.LocalFSPublicRoot, built.LocalFSAllowedRoots, built.LocalFSDynamicRoots, built.AuthConnectionClient, built.FeishuClient, built.TempObjectStore)
 	if err != nil {
 		panic(err)
 	}
@@ -397,13 +401,13 @@ func (p pendingTaskPlanner) GeneratePendingTasks(ctx context.Context, sourceID, 
 	return p.planner.GeneratePendingTasksForRun(ctx, sourceID, bindingID, runID)
 }
 
-func connectorRegistryFromTypes(types []connector.ConnectorType, agent localfs.AgentClient, localFSDefaultAgentID, localFSPublicRoot string, auth feishu.AuthConnectionClient, feishuClient feishu.FeishuClient, temp worker.TempObjectStore) (*connector.DefaultConnectorRegistry, error) {
+func connectorRegistryFromTypes(types []connector.ConnectorType, agent localfs.AgentClient, localFSDefaultAgentID, localFSPublicRoot string, localFSAllowedRoots []string, localFSDynamicRoots bool, auth feishu.AuthConnectionClient, feishuClient feishu.FeishuClient, temp worker.TempObjectStore) (*connector.DefaultConnectorRegistry, error) {
 	registry, err := connector.NewDefaultConnectorRegistry()
 	if err != nil {
 		return nil, err
 	}
 	for _, connectorType := range types {
-		connector, err := connectorForType(connectorType, agent, localFSDefaultAgentID, localFSPublicRoot, auth, feishuClient, temp)
+		connector, err := connectorForType(connectorType, agent, localFSDefaultAgentID, localFSPublicRoot, localFSAllowedRoots, localFSDynamicRoots, auth, feishuClient, temp)
 		if err != nil {
 			return nil, err
 		}
@@ -414,7 +418,7 @@ func connectorRegistryFromTypes(types []connector.ConnectorType, agent localfs.A
 	return registry, nil
 }
 
-func connectorForType(connectorType connector.ConnectorType, agent localfs.AgentClient, localFSDefaultAgentID, localFSPublicRoot string, auth feishu.AuthConnectionClient, feishuClient feishu.FeishuClient, temp worker.TempObjectStore) (connector.SourceConnector, error) {
+func connectorForType(connectorType connector.ConnectorType, agent localfs.AgentClient, localFSDefaultAgentID, localFSPublicRoot string, localFSAllowedRoots []string, localFSDynamicRoots bool, auth feishu.AuthConnectionClient, feishuClient feishu.FeishuClient, temp worker.TempObjectStore) (connector.SourceConnector, error) {
 	switch connectorType {
 	case localfs.ConnectorType:
 		options := []localfs.Option{
@@ -423,6 +427,12 @@ func connectorForType(connectorType connector.ConnectorType, agent localfs.Agent
 		}
 		if localFSPublicRoot != "" {
 			options = append(options, localfs.WithPublicRoot(localFSPublicRoot))
+		}
+		if len(localFSAllowedRoots) > 0 {
+			options = append(options, localfs.WithAllowedPrefixes(localFSAllowedRoots...))
+		}
+		if localFSDynamicRoots {
+			options = append(options, localfs.WithDynamicRoots(true))
 		}
 		return localfs.NewLocalFSConnector(agent, options...), nil
 	case feishu.ConnectorType:
@@ -528,11 +538,11 @@ func buildTargetSearchCachePrewarmer(built Components, cfg config.Config) (*targ
 	}
 	auth, ok := built.AuthConnectionClient.(targetCacheConnectionLister)
 	prewarmFeishu := hasConnectorType(built.ConnectorTypes, feishu.ConnectorType) && ok
-	prewarmLocalFS := hasConnectorType(built.ConnectorTypes, localfs.ConnectorType)
+	prewarmLocalFS := localFSBackgroundPrewarmEnabled(built.ConnectorTypes, built.LocalFSDynamicRoots)
 	if !prewarmFeishu && !prewarmLocalFS {
 		return nil, nil
 	}
-	registry, err := connectorRegistryFromTypes(built.ConnectorTypes, built.AgentClient, built.LocalFSDefaultAgentID, built.LocalFSPublicRoot, built.AuthConnectionClient, built.FeishuClient, built.TempObjectStore)
+	registry, err := connectorRegistryFromTypes(built.ConnectorTypes, built.AgentClient, built.LocalFSDefaultAgentID, built.LocalFSPublicRoot, built.LocalFSAllowedRoots, built.LocalFSDynamicRoots, built.AuthConnectionClient, built.FeishuClient, built.TempObjectStore)
 	if err != nil {
 		return nil, err
 	}
@@ -548,6 +558,10 @@ func buildTargetSearchCachePrewarmer(built Components, cfg config.Config) (*targ
 		stagger:        cfg.TargetSearchCachePrewarmStagger,
 		prewarmLocalFS: prewarmLocalFS,
 	}, nil
+}
+
+func localFSBackgroundPrewarmEnabled(types []connector.ConnectorType, dynamicRoots bool) bool {
+	return hasConnectorType(types, localfs.ConnectorType) && !dynamicRoots
 }
 
 func (p *targetTreeCachePrewarmer) RunOnce(ctx context.Context) error {
@@ -647,7 +661,7 @@ func hasConnectorType(types []connector.ConnectorType, target connector.Connecto
 }
 
 func buildParseWorkerRunner(built Components, cfg config.Config) (*worker.Runner, error) {
-	registry, err := connectorRegistryFromTypes(built.ConnectorTypes, built.AgentClient, built.LocalFSDefaultAgentID, built.LocalFSPublicRoot, built.AuthConnectionClient, built.FeishuClient, built.TempObjectStore)
+	registry, err := connectorRegistryFromTypes(built.ConnectorTypes, built.AgentClient, built.LocalFSDefaultAgentID, built.LocalFSPublicRoot, built.LocalFSAllowedRoots, built.LocalFSDynamicRoots, built.AuthConnectionClient, built.FeishuClient, built.TempObjectStore)
 	if err != nil {
 		return nil, err
 	}
@@ -670,7 +684,7 @@ func buildParseWorkerRunner(built Components, cfg config.Config) (*worker.Runner
 }
 
 func buildCrawlWorker(built Components, cfg config.Config) (*crawl.RunOnceWorker, error) {
-	registry, err := connectorRegistryFromTypes(built.ConnectorTypes, built.AgentClient, built.LocalFSDefaultAgentID, built.LocalFSPublicRoot, built.AuthConnectionClient, built.FeishuClient, built.TempObjectStore)
+	registry, err := connectorRegistryFromTypes(built.ConnectorTypes, built.AgentClient, built.LocalFSDefaultAgentID, built.LocalFSPublicRoot, built.LocalFSAllowedRoots, built.LocalFSDynamicRoots, built.AuthConnectionClient, built.FeishuClient, built.TempObjectStore)
 	if err != nil {
 		return nil, err
 	}

@@ -183,6 +183,24 @@ func TestRuntimeConfigHonorsLegacyExplicitRuntimeRoot(t *testing.T) {
 	}
 }
 
+func TestRuntimeConfigMergesDesktopExtraAllowedRoots(t *testing.T) {
+	repo := t.TempDir()
+	writeComposeFixture(t, repo)
+	extra := filepath.Join(t.TempDir(), ".codex", "skills")
+	t.Setenv("LAZYMIND_FILE_WATCHER_EXTRA_ALLOWED_ROOTS_JSON", `["`+extra+`"]`)
+
+	cfg, _, err := NewRuntimeConfig(defaultProfileValue(), repo)
+	if err != nil {
+		t.Fatalf("runtime config: %v", err)
+	}
+	if len(cfg.FileWatcher.AllowedRoots) != 2 {
+		t.Fatalf("allowed roots = %#v", cfg.FileWatcher.AllowedRoots)
+	}
+	if cfg.FileWatcher.AllowedRoots[0] != cfg.FileWatcher.WatchHostDir || cfg.FileWatcher.AllowedRoots[1] != extra {
+		t.Fatalf("allowed roots = %#v", cfg.FileWatcher.AllowedRoots)
+	}
+}
+
 func TestRuntimeConfigUsesDesktopRootsAndManifestPaths(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
@@ -616,6 +634,21 @@ func TestInstallerWarmupGeneratesReducedProcessGraph(t *testing.T) {
 			}
 		}
 	}
+	if !environmentContains(
+		parsed.Processes[chatProcessName].Environment,
+		installerWarmupSkipProcessorWorkerEnvVar+"=true",
+	) {
+		t.Fatalf("warmup Chat environment missing %s", installerWarmupSkipProcessorWorkerEnvVar)
+	}
+}
+
+func environmentContains(environment []string, want string) bool {
+	for _, item := range environment {
+		if item == want {
+			return true
+		}
+	}
+	return false
 }
 
 func TestInstallerWarmupDoesNotCreateFileWatcherImportDirectory(t *testing.T) {

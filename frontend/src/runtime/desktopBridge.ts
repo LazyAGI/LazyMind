@@ -15,6 +15,34 @@ export interface DesktopRuntimeStatus {
   services?: Record<string, DesktopRuntimeServiceStatus>;
 }
 
+export interface DesktopLocalFolderRecommendation {
+  key: string;
+  value: string;
+  path: string;
+  title: string;
+  productId?: string;
+  source?: "desktop_discovery";
+}
+
+export interface DesktopLocalFolderAccessState {
+  available?: boolean;
+  canceled?: boolean;
+  discoveryConsentGranted: boolean;
+  discoveryRoots: string[];
+  allowedRoots: string[];
+  items?: DesktopLocalFolderRecommendation[];
+  scannedEntries?: number;
+  truncated?: boolean;
+  stoppedReason?: string;
+  durationMs?: number;
+}
+
+export interface DesktopLocalFolderAuthorizationResult
+  extends DesktopLocalFolderAccessState {
+  granted: boolean;
+  addedRoots: string[];
+}
+
 export type DesktopAgent = "codex" | "cursor" | "workbuddy" | "traework" | "deepseek-harness";
 
 export interface DesktopAgentSetupGuide {
@@ -68,6 +96,10 @@ interface LazyMindDesktopBridge {
   codexIntegrationAction?: (action: "connect" | "disconnect") => Promise<unknown> | unknown;
   restartRuntime?: () => Promise<unknown> | unknown;
   resetRuntime?: (scope?: "kb" | "all") => Promise<unknown> | unknown;
+  localFolderAccessStatus?: () => Promise<DesktopLocalFolderAccessState> | DesktopLocalFolderAccessState;
+  chooseLocalDiscoveryRoots?: () => Promise<DesktopLocalFolderAccessState> | DesktopLocalFolderAccessState;
+  discoverLocalFolders?: () => Promise<DesktopLocalFolderAccessState> | DesktopLocalFolderAccessState;
+  authorizeLocalFolders?: (paths: string[]) => Promise<DesktopLocalFolderAuthorizationResult> | DesktopLocalFolderAuthorizationResult;
   selectFolder?: () => Promise<string | null> | string | null;
   selectExecutable?: () => Promise<string | null> | string | null;
   exportDiagnostics?: () => Promise<string> | string;
@@ -223,6 +255,40 @@ export function selectFolder(): Promise<string | null> {
     return Promise.resolve(null);
   }
   return Promise.resolve(bridge.selectFolder());
+}
+
+export function localFolderAccessStatus(): Promise<DesktopLocalFolderAccessState | null> {
+  const bridge = getDesktopBridge();
+  if (!bridge?.localFolderAccessStatus) {
+    return Promise.resolve(null);
+  }
+  return Promise.resolve(bridge.localFolderAccessStatus());
+}
+
+export function chooseLocalDiscoveryRoots(): Promise<DesktopLocalFolderAccessState | null> {
+  const bridge = getDesktopBridge();
+  if (!bridge?.chooseLocalDiscoveryRoots) {
+    return Promise.resolve(null);
+  }
+  return Promise.resolve(bridge.chooseLocalDiscoveryRoots());
+}
+
+export function discoverLocalFolders(): Promise<DesktopLocalFolderAccessState | null> {
+  const bridge = getDesktopBridge();
+  if (!bridge?.discoverLocalFolders) {
+    return Promise.resolve(null);
+  }
+  return Promise.resolve(bridge.discoverLocalFolders());
+}
+
+export function authorizeLocalFolders(
+  paths: string[],
+): Promise<DesktopLocalFolderAuthorizationResult | null> {
+  const bridge = getDesktopBridge();
+  if (!bridge?.authorizeLocalFolders) {
+    return Promise.resolve(null);
+  }
+  return Promise.resolve(bridge.authorizeLocalFolders(paths));
 }
 
 export function selectExecutable(): Promise<string | null> {
