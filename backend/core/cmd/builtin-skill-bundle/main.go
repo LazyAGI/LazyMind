@@ -809,14 +809,6 @@ func materializeFrozen(ctx context.Context, client *http.Client, spec sourceSpec
 		if err := validateFrozenSource(current, locked); err != nil {
 			return skillbuiltin.CatalogSkill{}, "", nil, bundleFailure("bundled skill does not match frozen lock: %v", err)
 		}
-		if verifyArtifacts {
-			if err := validateFrozenEntry(current, locked); err != nil {
-				return skillbuiltin.CatalogSkill{}, "", nil, bundleFailure("bundled skill artifact does not match frozen lock: %v", err)
-			}
-			if err := validateLockedArchive(archivePath, locked); err != nil {
-				return skillbuiltin.CatalogSkill{}, "", nil, err
-			}
-		}
 		return current, archivePath, appliedPatches, nil
 	}
 	downloadURL, err := frozenDownloadURL(spec, locked)
@@ -934,8 +926,8 @@ func validateDownloadedVersion(files map[string][]byte, expected string) error {
 }
 
 func validateFrozenSource(current, locked skillbuiltin.CatalogSkill) error {
-	if current.UID != locked.UID || current.Version != locked.Version || current.Provider != locked.Provider || current.TreeSHA256 != locked.TreeSHA256 {
-		return bundleFailure("source metadata or tree changed")
+	if current.UID != locked.UID || current.Version != locked.Version || current.Provider != locked.Provider || current.Category != locked.Category || current.SourceURL != locked.SourceURL {
+		return bundleFailure("source identity metadata changed")
 	}
 	return nil
 }

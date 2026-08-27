@@ -166,8 +166,12 @@ skills: []
 		t.Fatal(err)
 	}
 	opts.Output = filepath.Join(root, "runtime-changed", "builtin-skills")
-	if err := run(context.Background(), opts, http.DefaultClient); err == nil {
-		t.Fatal("frozen build accepted a changed bundled Skill")
+	if err := run(context.Background(), opts, http.DefaultClient); err != nil {
+		t.Fatalf("frozen build rejected current bundled Skill source: %v", err)
+	}
+	changed := readCatalog(t, filepath.Join(opts.Output, "catalog.json")).Skills[0]
+	if changed.TreeSHA256 == catalog.Skills[0].TreeSHA256 {
+		t.Fatal("changed bundled Skill did not produce a new runtime tree hash")
 	}
 }
 
@@ -578,8 +582,12 @@ func TestRunBuildsFeaturedCatalogFromLocalDirectory(t *testing.T) {
 	}
 	opts.Output = filepath.Join(root, "runtime-changed", "builtin-skills")
 	opts.FeaturedOutput = filepath.Join(root, "runtime-changed", "featured-skills")
-	if err := run(context.Background(), opts, http.DefaultClient); err == nil {
-		t.Fatal("frozen build accepted a changed local Featured Skill")
+	if err := run(context.Background(), opts, http.DefaultClient); err != nil {
+		t.Fatalf("frozen build rejected current local Featured Skill source: %v", err)
+	}
+	changedEntry := readCatalog(t, filepath.Join(opts.Output, "catalog.json")).Skills[0]
+	if changedEntry.TreeSHA256 == entry.TreeSHA256 {
+		t.Fatal("changed local Featured Skill did not produce a new runtime tree hash")
 	}
 }
 
