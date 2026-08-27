@@ -561,6 +561,7 @@
   position: relative;
   z-index: 1;
   width: 100%;
+  height: 100%;
   min-height: 218px;
   display: flex;
   flex-direction: column;
@@ -751,28 +752,35 @@
 }
 
 .memory-identity-tags {
+  width: 100%;
+  min-width: 0;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   margin-top: 12px;
-  padding-right: 110px;
 
   .ant-tag {
+    max-width: 100%;
     margin: 0;
+    overflow: hidden;
     border-radius: 999px;
     background: rgba(255, 255, 255, 0.78);
     color: #596881;
     font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 
 .memory-identity-footer {
-  position: absolute;
-  right: 20px;
-  bottom: 18px;
+  width: 100%;
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex: 0 0 auto;
   gap: 8px;
+  margin-top: auto;
+  padding-top: 14px;
   color: #7c899e;
   font-size: 11px;
 }
@@ -2013,6 +2021,54 @@
     color: #111827;
     font-size: 13px;
     font-weight: 600;
+  }
+}
+
+.memory-char-count {
+  .ant-input-data-count {
+    min-width: 4.5em;
+    text-align: right;
+    pointer-events: none;
+  }
+
+  .ant-input-textarea-show-count {
+    display: block;
+    border: 1px solid #d9d9d9;
+    border-radius: 6px;
+    background: #fff;
+    padding-bottom: 16px;
+    transition: border-color 0.2s, box-shadow 0.2s;
+
+    &:hover {
+      border-color: #4096ff;
+    }
+
+    &:focus-within {
+      border-color: #1677ff;
+      box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.12);
+    }
+
+    &:has(textarea.ant-input-status-error) {
+      border-color: #ff4d4f;
+
+      &:focus-within {
+        box-shadow: 0 0 0 2px rgba(255, 77, 79, 0.12);
+      }
+    }
+
+    textarea.ant-input {
+      border: 0 !important;
+      box-shadow: none !important;
+      background: transparent;
+      padding-bottom: 0 !important;
+      margin-bottom: 0;
+    }
+
+    .ant-input-data-count,
+    &::after {
+      bottom: 3px;
+      inset-inline-end: 11px;
+    }
   }
 }
 
@@ -3284,7 +3340,9 @@
     min-width: 0;
     width: 100%;
 
-    .ant-input {
+    .ant-input,
+    .ant-input-affix-wrapper,
+    .ant-input-outlined {
       flex: 1;
       min-width: 160px;
       max-width: 360px;
@@ -3331,7 +3389,7 @@
 .memory-skill-detail-description-edit {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
   width: 100%;
   min-width: 0;
 }

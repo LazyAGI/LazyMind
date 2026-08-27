@@ -15,6 +15,7 @@ type Result struct {
 	Files          map[string][]byte
 	AppliedPatches []AppliedPatch
 	PatchSetSHA256 string
+	SkillMDPatched bool
 }
 
 func Apply(target Target, files map[string][]byte, catalog Catalog) (Result, error) {
@@ -29,6 +30,9 @@ func Apply(target Target, files map[string][]byte, catalog Catalog) (Result, err
 		for _, operation := range patch.Operations {
 			if err := applyOperation(result.Files, patch.ID, operation); err != nil {
 				return Result{}, err
+			}
+			if operation.Path == "SKILL.md" {
+				result.SkillMDPatched = true
 			}
 		}
 		result.AppliedPatches = append(result.AppliedPatches, AppliedPatch{ID: patch.ID, SHA256: patch.SHA256})

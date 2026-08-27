@@ -490,6 +490,7 @@ export interface BuiltinSkillOpenAPIResponse {
     'installed': boolean;
     'installed_skill_id'?: string;
     'name': string;
+    'provider'?: string;
 }
 export interface BulkUpdateServerEnabledRequest {
     'enabled'?: boolean;
@@ -502,27 +503,6 @@ export interface BulkUpdateServerEnabledResponse {
 }
 export interface CanResult {
     'allowed'?: boolean;
-}
-export interface ChannelCommandOpenAPI {
-    'description': string;
-    'name': string;
-}
-export interface ChannelCommandRegistryOpenAPI {
-    'commands'?: Array<ChannelCommandOpenAPI>;
-    'output_schema'?: { [key: string]: object; };
-    'schema_version': string;
-    'selection_rules'?: Array<string>;
-}
-export interface ChannelIntentOpenAPIRequest {
-    'command_registry': ChannelCommandRegistryOpenAPI;
-    'message': string;
-    'provider': string;
-    'state'?: { [key: string]: object; };
-}
-export interface ChannelIntentOpenAPIResponse {
-    'command': string;
-    'parameters'?: { [key: string]: object; };
-    'schema_version': string;
 }
 export interface ChatChunkResponse {
     'conversation_id'?: string;
@@ -545,6 +525,78 @@ export const ChatChunkResponseDeltaModeEnum = {
 } as const;
 
 export type ChatChunkResponseDeltaModeEnum = typeof ChatChunkResponseDeltaModeEnum[keyof typeof ChatChunkResponseDeltaModeEnum];
+
+export interface ChatConversationDefaultsOpenAPI {
+    'chat_executor': ChatConversationDefaultsOpenAPIChatExecutorEnum;
+    'enable_subagent': boolean;
+    'enable_workflow': boolean;
+    'workflow_mode': ChatConversationDefaultsOpenAPIWorkflowModeEnum;
+}
+
+export const ChatConversationDefaultsOpenAPIChatExecutorEnum = {
+    Lazymind: 'lazymind',
+    Codex: 'codex',
+    Cursor: 'cursor',
+    Workbuddy: 'workbuddy'
+} as const;
+
+export type ChatConversationDefaultsOpenAPIChatExecutorEnum = typeof ChatConversationDefaultsOpenAPIChatExecutorEnum[keyof typeof ChatConversationDefaultsOpenAPIChatExecutorEnum];
+export const ChatConversationDefaultsOpenAPIWorkflowModeEnum = {
+    Auto: 'auto',
+    Dynamic: 'dynamic'
+} as const;
+
+export type ChatConversationDefaultsOpenAPIWorkflowModeEnum = typeof ChatConversationDefaultsOpenAPIWorkflowModeEnum[keyof typeof ChatConversationDefaultsOpenAPIWorkflowModeEnum];
+
+export interface ChatConversationDefaultsPatchOpenAPIRequest {
+    'chat_executor'?: ChatConversationDefaultsPatchOpenAPIRequestChatExecutorEnum;
+    'enable_subagent'?: boolean;
+    'enable_workflow'?: boolean;
+    'workflow_mode'?: ChatConversationDefaultsPatchOpenAPIRequestWorkflowModeEnum;
+}
+
+export const ChatConversationDefaultsPatchOpenAPIRequestChatExecutorEnum = {
+    Lazymind: 'lazymind',
+    Codex: 'codex',
+    Cursor: 'cursor',
+    Workbuddy: 'workbuddy'
+} as const;
+
+export type ChatConversationDefaultsPatchOpenAPIRequestChatExecutorEnum = typeof ChatConversationDefaultsPatchOpenAPIRequestChatExecutorEnum[keyof typeof ChatConversationDefaultsPatchOpenAPIRequestChatExecutorEnum];
+export const ChatConversationDefaultsPatchOpenAPIRequestWorkflowModeEnum = {
+    Auto: 'auto',
+    Dynamic: 'dynamic'
+} as const;
+
+export type ChatConversationDefaultsPatchOpenAPIRequestWorkflowModeEnum = typeof ChatConversationDefaultsPatchOpenAPIRequestWorkflowModeEnum[keyof typeof ChatConversationDefaultsPatchOpenAPIRequestWorkflowModeEnum];
+
+export interface ChatEntryDefaultsOpenAPI {
+    'conversation_settings': ChatConversationDefaultsOpenAPI;
+    'thinking_depth': ChatEntryDefaultsOpenAPIThinkingDepthEnum;
+}
+
+export const ChatEntryDefaultsOpenAPIThinkingDepthEnum = {
+    Low: 'low',
+    Medium: 'medium',
+    High: 'high',
+    Max: 'max'
+} as const;
+
+export type ChatEntryDefaultsOpenAPIThinkingDepthEnum = typeof ChatEntryDefaultsOpenAPIThinkingDepthEnum[keyof typeof ChatEntryDefaultsOpenAPIThinkingDepthEnum];
+
+export interface ChatEntryDefaultsPatchOpenAPIRequest {
+    'conversation_settings'?: ChatConversationDefaultsPatchOpenAPIRequest;
+    'thinking_depth'?: ChatEntryDefaultsPatchOpenAPIRequestThinkingDepthEnum;
+}
+
+export const ChatEntryDefaultsPatchOpenAPIRequestThinkingDepthEnum = {
+    Low: 'low',
+    Medium: 'medium',
+    High: 'high',
+    Max: 'max'
+} as const;
+
+export type ChatEntryDefaultsPatchOpenAPIRequestThinkingDepthEnum = typeof ChatEntryDefaultsPatchOpenAPIRequestThinkingDepthEnum[keyof typeof ChatEntryDefaultsPatchOpenAPIRequestThinkingDepthEnum];
 
 export interface ChatRuntimeEvent {
     'data'?: object;
@@ -686,18 +738,49 @@ export interface ConversationHistoryListResponse {
     'total_size'?: number;
 }
 export interface ConversationItem {
+    'assistant'?: ConversationItemAssistantEnum;
+    'chat_executor'?: ConversationItemChatExecutorEnum;
     'chat_times'?: number;
     'conversation_id'?: string;
     'create_time'?: string;
     'display_name'?: string;
     'models'?: Array<string>;
     'name'?: string;
+    'project_key'?: string;
+    'project_name'?: string;
     'search_config'?: object;
+    'thinking_depth'?: ConversationItemThinkingDepthEnum;
     'total_feedback_like'?: number;
     'total_feedback_unlike'?: number;
     'update_time'?: string;
     'user'?: string;
 }
+
+export const ConversationItemAssistantEnum = {
+    Lazymind: 'lazymind',
+    Codex: 'codex',
+    Cursor: 'cursor',
+    Workbuddy: 'workbuddy'
+} as const;
+
+export type ConversationItemAssistantEnum = typeof ConversationItemAssistantEnum[keyof typeof ConversationItemAssistantEnum];
+export const ConversationItemChatExecutorEnum = {
+    Lazymind: 'lazymind',
+    Codex: 'codex',
+    Cursor: 'cursor',
+    Workbuddy: 'workbuddy'
+} as const;
+
+export type ConversationItemChatExecutorEnum = typeof ConversationItemChatExecutorEnum[keyof typeof ConversationItemChatExecutorEnum];
+export const ConversationItemThinkingDepthEnum = {
+    Low: 'low',
+    Medium: 'medium',
+    High: 'high',
+    Max: 'max'
+} as const;
+
+export type ConversationItemThinkingDepthEnum = typeof ConversationItemThinkingDepthEnum[keyof typeof ConversationItemThinkingDepthEnum];
+
 export interface ConversationListResponse {
     'conversations'?: Array<ConversationItem>;
     'next_page_token'?: string;
@@ -1789,7 +1872,10 @@ export interface MarketPublishOpenAPIRequest {
      * Deprecated compatibility field; converted to one marketplace tag when tags is empty.
      */
     'category'?: string;
-    'name': string;
+    /**
+     * Deprecated and ignored; the skill name is read from SKILL.md.
+     */
+    'name'?: string;
     'source': SkillSourceOpenAPIRequest;
     /**
      * Marketplace discovery tags.
@@ -2192,6 +2278,7 @@ export interface SettingsChecksOpenAPIResponse {
 export interface SettingsFeatureControlsOpenAPIResponse {
     'document_parsing_enabled': boolean;
     'mcp_enabled': boolean;
+    'schedules_enabled': boolean;
     'skills_enabled': boolean;
     'task_center_enabled': boolean;
     'workflows_enabled': boolean;
@@ -2232,7 +2319,7 @@ export interface ShareSkillOpenAPIRequest {
 }
 export interface ShowcaseCase {
     'attachment_hint'?: string;
-    'builtin_skill_uid': string;
+    'builtin_skill_uid'?: string;
     'category': string;
     'description': string;
     'detail_description': string;
@@ -2246,6 +2333,7 @@ export interface ShowcaseCase {
     'output_type': string;
     'prompt': string;
     'prompt_short': string;
+    'provider': string;
     'source_url': string;
     'result_highlights'?: Array<string>;
     'result_summary': string;
@@ -2254,6 +2342,7 @@ export interface ShowcaseCase {
     'tasks'?: Array<ShowcaseCaseTask>;
     'title': string;
     'type': string;
+    'workflow_ref'?: string;
 }
 export interface ShowcaseCaseListResponse {
     'cases'?: Array<ShowcaseCase>;
@@ -3009,6 +3098,21 @@ export interface UploadPartResponse {
     'upload_state'?: string;
     'uploaded_parts'?: number;
 }
+export interface UserChatSettingsOpenAPIResponse {
+    'enable_subagent': boolean;
+    'enable_workflow': boolean;
+    'new_task': ChatEntryDefaultsOpenAPI;
+    'quick_question': ChatEntryDefaultsOpenAPI;
+    'updated_at': string;
+    'workflow_mode': string;
+}
+export interface UserChatSettingsPatchOpenAPIRequest {
+    'enable_subagent'?: boolean;
+    'enable_workflow'?: boolean;
+    'new_task'?: ChatEntryDefaultsPatchOpenAPIRequest;
+    'quick_question'?: ChatEntryDefaultsPatchOpenAPIRequest;
+    'workflow_mode'?: string;
+}
 export interface UserInfo {
     'id'?: string;
     'name'?: string;
@@ -3029,6 +3133,7 @@ export interface UserUIPreferencesOpenAPIResponse {
     'developer_mode_active': boolean;
     'document_parsing_enabled': boolean;
     'mcp_enabled': boolean;
+    'schedules_enabled': boolean;
     'skills_enabled': boolean;
     'task_center_enabled': boolean;
     'updated_at': string;
@@ -3041,6 +3146,7 @@ export interface UserUIPreferencesPatchOpenAPIRequest {
     'developer_mode_active'?: boolean;
     'document_parsing_enabled'?: boolean;
     'mcp_enabled'?: boolean;
+    'schedules_enabled'?: boolean;
     'skills_enabled'?: boolean;
     'task_center_enabled'?: boolean;
     'workflows_enabled'?: boolean;
@@ -5705,115 +5811,6 @@ export const ApiCoreAgentThreadsThreadIdGatesStepVersionsVersionDownloadGetForma
     Json: 'json'
 } as const;
 export type ApiCoreAgentThreadsThreadIdGatesStepVersionsVersionDownloadGetFormatEnum = typeof ApiCoreAgentThreadsThreadIdGatesStepVersionsVersionDownloadGetFormatEnum[keyof typeof ApiCoreAgentThreadsThreadIdGatesStepVersionsVersionDownloadGetFormatEnum];
-
-
-/**
- * ChannelsApi - axios parameter creator
- */
-export const ChannelsApiAxiosParamCreator = function (configuration?: Configuration) {
-    return {
-        /**
-         * Classifies an external-channel message against the caller-provided command registry and parameter schemas.
-         * @summary Classify a channel message
-         * @param {ChannelIntentOpenAPIRequest} channelIntentOpenAPIRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreChannelIntentsClassifyPost: async (channelIntentOpenAPIRequest: ChannelIntentOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            // verify required parameter 'channelIntentOpenAPIRequest' is not null or undefined
-            assertParamExists('apiCoreChannelIntentsClassifyPost', 'channelIntentOpenAPIRequest', channelIntentOpenAPIRequest)
-            const localVarPath = `/api/core/channel-intents:classify`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-            localVarHeaderParameter['Content-Type'] = 'application/json';
-            localVarHeaderParameter['Accept'] = 'application/json';
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-            localVarRequestOptions.data = serializeDataIfNeeded(channelIntentOpenAPIRequest, localVarRequestOptions, configuration)
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-    }
-};
-
-/**
- * ChannelsApi - functional programming interface
- */
-export const ChannelsApiFp = function(configuration?: Configuration) {
-    const localVarAxiosParamCreator = ChannelsApiAxiosParamCreator(configuration)
-    return {
-        /**
-         * Classifies an external-channel message against the caller-provided command registry and parameter schemas.
-         * @summary Classify a channel message
-         * @param {ChannelIntentOpenAPIRequest} channelIntentOpenAPIRequest
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreChannelIntentsClassifyPost(channelIntentOpenAPIRequest: ChannelIntentOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ChannelIntentOpenAPIResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreChannelIntentsClassifyPost(channelIntentOpenAPIRequest, options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['ChannelsApi.apiCoreChannelIntentsClassifyPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-    }
-};
-
-/**
- * ChannelsApi - factory interface
- */
-export const ChannelsApiFactory = function (configuration?: Configuration, basePath?: string, axios?: AxiosInstance) {
-    const localVarFp = ChannelsApiFp(configuration)
-    return {
-        /**
-         * Classifies an external-channel message against the caller-provided command registry and parameter schemas.
-         * @summary Classify a channel message
-         * @param {ChannelsApiApiCoreChannelIntentsClassifyPostRequest} requestParameters Request parameters.
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreChannelIntentsClassifyPost(requestParameters: ChannelsApiApiCoreChannelIntentsClassifyPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<ChannelIntentOpenAPIResponse> {
-            return localVarFp.apiCoreChannelIntentsClassifyPost(requestParameters.channelIntentOpenAPIRequest, options).then((request) => request(axios, basePath));
-        },
-    };
-};
-
-/**
- * Request parameters for apiCoreChannelIntentsClassifyPost operation in ChannelsApi.
- */
-export interface ChannelsApiApiCoreChannelIntentsClassifyPostRequest {
-    readonly channelIntentOpenAPIRequest: ChannelIntentOpenAPIRequest
-}
-
-/**
- * ChannelsApi - object-oriented interface
- */
-export class ChannelsApi extends BaseAPI {
-    /**
-     * Classifies an external-channel message against the caller-provided command registry and parameter schemas.
-     * @summary Classify a channel message
-     * @param {ChannelsApiApiCoreChannelIntentsClassifyPostRequest} requestParameters Request parameters.
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreChannelIntentsClassifyPost(requestParameters: ChannelsApiApiCoreChannelIntentsClassifyPostRequest, options?: RawAxiosRequestConfig) {
-        return ChannelsApiFp(this.configuration).apiCoreChannelIntentsClassifyPost(requestParameters.channelIntentOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
-    }
-}
-
 
 
 /**
@@ -8773,12 +8770,13 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
          *
          * @summary Conversation list
          * @param {string} [keyword]
+         * @param {ApiCoreConversationsGetAssistantEnum} [assistant]
          * @param {number} [pageSize]
          * @param {string} [pageToken]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        apiCoreConversationsGet: async (keyword?: string, pageSize?: number, pageToken?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+        apiCoreConversationsGet: async (keyword?: string, assistant?: ApiCoreConversationsGetAssistantEnum, pageSize?: number, pageToken?: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             const localVarPath = `/api/core/conversations`;
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -8793,6 +8791,10 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
 
             if (keyword !== undefined) {
                 localVarQueryParameter['keyword'] = keyword;
+            }
+
+            if (assistant !== undefined) {
+                localVarQueryParameter['assistant'] = assistant;
             }
 
             if (pageSize !== undefined) {
@@ -10091,7 +10093,73 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary POST /external-chat/hosts/{provider}:claim
+         * @summary GET /exporters/{provider_id}:capabilities
+         * @param {string} providerId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreExportersProviderIdCapabilitiesGet: async (providerId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'providerId' is not null or undefined
+            assertParamExists('apiCoreExportersProviderIdCapabilitiesGet', 'providerId', providerId)
+            const localVarPath = `/api/core/exporters/{provider_id}:capabilities`
+                .replace(`{${"provider_id"}}`, encodeURIComponent(String(providerId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /exporters/{provider_id}:export
+         * @param {string} providerId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreExportersProviderIdExportPost: async (providerId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'providerId' is not null or undefined
+            assertParamExists('apiCoreExportersProviderIdExportPost', 'providerId', providerId)
+            const localVarPath = `/api/core/exporters/{provider_id}:export`
+                .replace(`{${"provider_id"}}`, encodeURIComponent(String(providerId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /external-chat/hosts/{provider}/claim
          * @param {string} provider
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -10099,7 +10167,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         apiCoreExternalChatHostsProviderClaimPost: async (provider: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'provider' is not null or undefined
             assertParamExists('apiCoreExternalChatHostsProviderClaimPost', 'provider', provider)
-            const localVarPath = `/api/core/external-chat/hosts/{provider}:claim`
+            const localVarPath = `/api/core/external-chat/hosts/{provider}/claim`
                 .replace(`{${"provider"}}`, encodeURIComponent(String(provider)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -10124,7 +10192,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
-         * @summary GET /external-chat/hosts/{provider}:status
+         * @summary GET /external-chat/hosts/{provider}/status
          * @param {string} provider
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -10132,7 +10200,7 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         apiCoreExternalChatHostsProviderStatusGet: async (provider: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
             // verify required parameter 'provider' is not null or undefined
             assertParamExists('apiCoreExternalChatHostsProviderStatusGet', 'provider', provider)
-            const localVarPath = `/api/core/external-chat/hosts/{provider}:status`
+            const localVarPath = `/api/core/external-chat/hosts/{provider}/status`
                 .replace(`{${"provider"}}`, encodeURIComponent(String(provider)));
             // use dummy base URL string because the URL constructor only accepts absolute URLs.
             const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
@@ -10142,6 +10210,109 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             }
 
             const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /external-chat/providers/{provider}/sessions
+         * @param {string} provider
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreExternalChatProvidersProviderSessionsGet: async (provider: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'provider' is not null or undefined
+            assertParamExists('apiCoreExternalChatProvidersProviderSessionsGet', 'provider', provider)
+            const localVarPath = `/api/core/external-chat/providers/{provider}/sessions`
+                .replace(`{${"provider"}}`, encodeURIComponent(String(provider)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /external-chat/providers/{provider}/sessions:sync
+         * @param {string} provider
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreExternalChatProvidersProviderSessionsSyncPost: async (provider: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'provider' is not null or undefined
+            assertParamExists('apiCoreExternalChatProvidersProviderSessionsSyncPost', 'provider', provider)
+            const localVarPath = `/api/core/external-chat/providers/{provider}/sessions:sync`
+                .replace(`{${"provider"}}`, encodeURIComponent(String(provider)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /external-chat/providers/{provider}/sessions/{thread_id}/binding
+         * @param {string} provider
+         * @param {string} threadId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreExternalChatProvidersProviderSessionsThreadIdBindingPost: async (provider: string, threadId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'provider' is not null or undefined
+            assertParamExists('apiCoreExternalChatProvidersProviderSessionsThreadIdBindingPost', 'provider', provider)
+            // verify required parameter 'threadId' is not null or undefined
+            assertParamExists('apiCoreExternalChatProvidersProviderSessionsThreadIdBindingPost', 'threadId', threadId)
+            const localVarPath = `/api/core/external-chat/providers/{provider}/sessions/{thread_id}/binding`
+                .replace(`{${"provider"}}`, encodeURIComponent(String(provider)))
+                .replace(`{${"thread_id"}}`, encodeURIComponent(String(threadId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
@@ -12283,6 +12454,93 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary POST /system-dependencies/editable-ppt:check
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSystemDependenciesEditablePptCheckPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/system-dependencies/editable-ppt:check`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /system-dependencies/editable-ppt
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSystemDependenciesEditablePptGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/system-dependencies/editable-ppt`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /system-dependencies/editable-ppt:install
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSystemDependenciesEditablePptInstallPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/system-dependencies/editable-ppt:install`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary POST /system-dependencies/ffmpeg:check
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -12751,64 +13009,6 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             }
 
             const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary GET /user/chat-settings
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreUserChatSettingsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/core/user/chat-settings`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
-            const localVarHeaderParameter = {} as any;
-            const localVarQueryParameter = {} as any;
-
-
-            setSearchParams(localVarUrlObj, localVarQueryParameter);
-            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
-            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
-
-            return {
-                url: toPathString(localVarUrlObj),
-                options: localVarRequestOptions,
-            };
-        },
-        /**
-         *
-         * @summary PATCH /user/chat-settings
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreUserChatSettingsPatch: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
-            const localVarPath = `/api/core/user/chat-settings`;
-            // use dummy base URL string because the URL constructor only accepts absolute URLs.
-            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
-            let baseOptions;
-            if (configuration) {
-                baseOptions = configuration.baseOptions;
-            }
-
-            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
@@ -14494,6 +14694,47 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary POST /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-execute
+         * @param {string} sessionId
+         * @param {string} slotId
+         * @param {string} listIndex
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionExecutePost: async (sessionId: string, slotId: string, listIndex: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionExecutePost', 'sessionId', sessionId)
+            // verify required parameter 'slotId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionExecutePost', 'slotId', slotId)
+            // verify required parameter 'listIndex' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionExecutePost', 'listIndex', listIndex)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-execute`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)))
+                .replace(`{${"slot_id"}}`, encodeURIComponent(String(slotId)))
+                .replace(`{${"list_index"}}`, encodeURIComponent(String(listIndex)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption
          * @param {string} sessionId
          * @param {string} slotId
@@ -14979,6 +15220,72 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
         },
         /**
          *
+         * @summary POST /workflow-sessions/{session_id}/writer-document:render
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdWriterDocumentRenderPost: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdWriterDocumentRenderPost', 'sessionId', sessionId)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}/writer-document:render`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}/writer-document:save
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdWriterDocumentSavePost: async (sessionId: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sessionId' is not null or undefined
+            assertParamExists('apiCoreWorkflowSessionsSessionIdWriterDocumentSavePost', 'sessionId', sessionId)
+            const localVarPath = `/api/core/workflow-sessions/{session_id}/writer-document:save`
+                .replace(`{${"session_id"}}`, encodeURIComponent(String(sessionId)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
          * @summary GET /workflows
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -15026,6 +15333,109 @@ export const DefaultApiAxiosParamCreator = function (configuration?: Configurati
             }
 
             const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary POST /writer-download-conversions:convert
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWriterDownloadConversionsConvertPost: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/writer-download-conversions:convert`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'POST', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary GET /writer-download-conversions/{source_hash}/{target_format}
+         * @param {string} sourceHash
+         * @param {string} targetFormat
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWriterDownloadConversionsSourceHashTargetFormatGet: async (sourceHash: string, targetFormat: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sourceHash' is not null or undefined
+            assertParamExists('apiCoreWriterDownloadConversionsSourceHashTargetFormatGet', 'sourceHash', sourceHash)
+            // verify required parameter 'targetFormat' is not null or undefined
+            assertParamExists('apiCoreWriterDownloadConversionsSourceHashTargetFormatGet', 'targetFormat', targetFormat)
+            const localVarPath = `/api/core/writer-download-conversions/{source_hash}/{target_format}`
+                .replace(`{${"source_hash"}}`, encodeURIComponent(String(sourceHash)))
+                .replace(`{${"target_format"}}`, encodeURIComponent(String(targetFormat)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         *
+         * @summary PUT /writer-download-conversions/{source_hash}/{target_format}
+         * @param {string} sourceHash
+         * @param {string} targetFormat
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWriterDownloadConversionsSourceHashTargetFormatPut: async (sourceHash: string, targetFormat: string, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'sourceHash' is not null or undefined
+            assertParamExists('apiCoreWriterDownloadConversionsSourceHashTargetFormatPut', 'sourceHash', sourceHash)
+            // verify required parameter 'targetFormat' is not null or undefined
+            assertParamExists('apiCoreWriterDownloadConversionsSourceHashTargetFormatPut', 'targetFormat', targetFormat)
+            const localVarPath = `/api/core/writer-download-conversions/{source_hash}/{target_format}`
+                .replace(`{${"source_hash"}}`, encodeURIComponent(String(sourceHash)))
+                .replace(`{${"target_format"}}`, encodeURIComponent(String(targetFormat)));
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PUT', ...baseOptions, ...options};
             const localVarHeaderParameter = {} as any;
             const localVarQueryParameter = {} as any;
 
@@ -15578,13 +15988,14 @@ export const DefaultApiFp = function(configuration?: Configuration) {
          *
          * @summary Conversation list
          * @param {string} [keyword]
+         * @param {ApiCoreConversationsGetAssistantEnum} [assistant]
          * @param {number} [pageSize]
          * @param {string} [pageToken]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
-        async apiCoreConversationsGet(keyword?: string, pageSize?: number, pageToken?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationListResponse>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsGet(keyword, pageSize, pageToken, options);
+        async apiCoreConversationsGet(keyword?: string, assistant?: ApiCoreConversationsGetAssistantEnum, pageSize?: number, pageToken?: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<ConversationListResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreConversationsGet(keyword, assistant, pageSize, pageToken, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreConversationsGet']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
@@ -16050,7 +16461,33 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary POST /external-chat/hosts/{provider}:claim
+         * @summary GET /exporters/{provider_id}:capabilities
+         * @param {string} providerId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreExportersProviderIdCapabilitiesGet(providerId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreExportersProviderIdCapabilitiesGet(providerId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreExportersProviderIdCapabilitiesGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /exporters/{provider_id}:export
+         * @param {string} providerId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreExportersProviderIdExportPost(providerId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreExportersProviderIdExportPost(providerId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreExportersProviderIdExportPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /external-chat/hosts/{provider}/claim
          * @param {string} provider
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -16063,7 +16500,7 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
-         * @summary GET /external-chat/hosts/{provider}:status
+         * @summary GET /external-chat/hosts/{provider}/status
          * @param {string} provider
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -16072,6 +16509,46 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreExternalChatHostsProviderStatusGet(provider, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreExternalChatHostsProviderStatusGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /external-chat/providers/{provider}/sessions
+         * @param {string} provider
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreExternalChatProvidersProviderSessionsGet(provider: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreExternalChatProvidersProviderSessionsGet(provider, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreExternalChatProvidersProviderSessionsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /external-chat/providers/{provider}/sessions:sync
+         * @param {string} provider
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreExternalChatProvidersProviderSessionsSyncPost(provider: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreExternalChatProvidersProviderSessionsSyncPost(provider, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreExternalChatProvidersProviderSessionsSyncPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /external-chat/providers/{provider}/sessions/{thread_id}/binding
+         * @param {string} provider
+         * @param {string} threadId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreExternalChatProvidersProviderSessionsThreadIdBindingPost(provider: string, threadId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreExternalChatProvidersProviderSessionsThreadIdBindingPost(provider, threadId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreExternalChatProvidersProviderSessionsThreadIdBindingPost']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -16892,6 +17369,42 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary POST /system-dependencies/editable-ppt:check
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreSystemDependenciesEditablePptCheckPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSystemDependenciesEditablePptCheckPost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreSystemDependenciesEditablePptCheckPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /system-dependencies/editable-ppt
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreSystemDependenciesEditablePptGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSystemDependenciesEditablePptGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreSystemDependenciesEditablePptGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /system-dependencies/editable-ppt:install
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreSystemDependenciesEditablePptInstallPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreSystemDependenciesEditablePptInstallPost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreSystemDependenciesEditablePptInstallPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary POST /system-dependencies/ffmpeg:check
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -17071,30 +17584,6 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreUploadFilesPost(options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreUploadFilesPost']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary GET /user/chat-settings
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreUserChatSettingsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreUserChatSettingsGet(options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreUserChatSettingsGet']?.[localVarOperationServerIndex]?.url;
-            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
-        },
-        /**
-         *
-         * @summary PATCH /user/chat-settings
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        async apiCoreUserChatSettingsPatch(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
-            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreUserChatSettingsPatch(options);
-            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
-            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreUserChatSettingsPatch']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
@@ -17757,6 +18246,21 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary POST /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-execute
+         * @param {string} sessionId
+         * @param {string} slotId
+         * @param {string} listIndex
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionExecutePost(sessionId: string, slotId: string, listIndex: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionExecutePost(sessionId, slotId, listIndex, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionExecutePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption
          * @param {string} sessionId
          * @param {string} slotId
@@ -17940,6 +18444,32 @@ export const DefaultApiFp = function(configuration?: Configuration) {
         },
         /**
          *
+         * @summary POST /workflow-sessions/{session_id}/writer-document:render
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdWriterDocumentRenderPost(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdWriterDocumentRenderPost(sessionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdWriterDocumentRenderPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}/writer-document:save
+         * @param {string} sessionId
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWorkflowSessionsSessionIdWriterDocumentSavePost(sessionId: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowSessionsSessionIdWriterDocumentSavePost(sessionId, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowSessionsSessionIdWriterDocumentSavePost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
          * @summary GET /workflows
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -17961,6 +18491,46 @@ export const DefaultApiFp = function(configuration?: Configuration) {
             const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWorkflowsWorkflowIdGet(workflowId, options);
             const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
             const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWorkflowsWorkflowIdGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary POST /writer-download-conversions:convert
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWriterDownloadConversionsConvertPost(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWriterDownloadConversionsConvertPost(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWriterDownloadConversionsConvertPost']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary GET /writer-download-conversions/{source_hash}/{target_format}
+         * @param {string} sourceHash
+         * @param {string} targetFormat
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWriterDownloadConversionsSourceHashTargetFormatGet(sourceHash: string, targetFormat: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWriterDownloadConversionsSourceHashTargetFormatGet(sourceHash, targetFormat, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWriterDownloadConversionsSourceHashTargetFormatGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         *
+         * @summary PUT /writer-download-conversions/{source_hash}/{target_format}
+         * @param {string} sourceHash
+         * @param {string} targetFormat
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreWriterDownloadConversionsSourceHashTargetFormatPut(sourceHash: string, targetFormat: string, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<void>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreWriterDownloadConversionsSourceHashTargetFormatPut(sourceHash, targetFormat, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['DefaultApi.apiCoreWriterDownloadConversionsSourceHashTargetFormatPut']?.[localVarOperationServerIndex]?.url;
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
     }
@@ -18376,7 +18946,7 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          * @throws {RequiredError}
          */
         apiCoreConversationsGet(requestParameters: DefaultApiApiCoreConversationsGetRequest = {}, options?: RawAxiosRequestConfig): AxiosPromise<ConversationListResponse> {
-            return localVarFp.apiCoreConversationsGet(requestParameters.keyword, requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(axios, basePath));
+            return localVarFp.apiCoreConversationsGet(requestParameters.keyword, requestParameters.assistant, requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -18707,7 +19277,27 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary POST /external-chat/hosts/{provider}:claim
+         * @summary GET /exporters/{provider_id}:capabilities
+         * @param {DefaultApiApiCoreExportersProviderIdCapabilitiesGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreExportersProviderIdCapabilitiesGet(requestParameters: DefaultApiApiCoreExportersProviderIdCapabilitiesGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreExportersProviderIdCapabilitiesGet(requestParameters.providerId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /exporters/{provider_id}:export
+         * @param {DefaultApiApiCoreExportersProviderIdExportPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreExportersProviderIdExportPost(requestParameters: DefaultApiApiCoreExportersProviderIdExportPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreExportersProviderIdExportPost(requestParameters.providerId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /external-chat/hosts/{provider}/claim
          * @param {DefaultApiApiCoreExternalChatHostsProviderClaimPostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -18717,13 +19307,43 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
-         * @summary GET /external-chat/hosts/{provider}:status
+         * @summary GET /external-chat/hosts/{provider}/status
          * @param {DefaultApiApiCoreExternalChatHostsProviderStatusGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
          */
         apiCoreExternalChatHostsProviderStatusGet(requestParameters: DefaultApiApiCoreExternalChatHostsProviderStatusGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreExternalChatHostsProviderStatusGet(requestParameters.provider, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /external-chat/providers/{provider}/sessions
+         * @param {DefaultApiApiCoreExternalChatProvidersProviderSessionsGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreExternalChatProvidersProviderSessionsGet(requestParameters: DefaultApiApiCoreExternalChatProvidersProviderSessionsGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreExternalChatProvidersProviderSessionsGet(requestParameters.provider, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /external-chat/providers/{provider}/sessions:sync
+         * @param {DefaultApiApiCoreExternalChatProvidersProviderSessionsSyncPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreExternalChatProvidersProviderSessionsSyncPost(requestParameters: DefaultApiApiCoreExternalChatProvidersProviderSessionsSyncPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreExternalChatProvidersProviderSessionsSyncPost(requestParameters.provider, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /external-chat/providers/{provider}/sessions/{thread_id}/binding
+         * @param {DefaultApiApiCoreExternalChatProvidersProviderSessionsThreadIdBindingPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreExternalChatProvidersProviderSessionsThreadIdBindingPost(requestParameters: DefaultApiApiCoreExternalChatProvidersProviderSessionsThreadIdBindingPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreExternalChatProvidersProviderSessionsThreadIdBindingPost(requestParameters.provider, requestParameters.threadId, options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -19335,6 +19955,33 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary POST /system-dependencies/editable-ppt:check
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSystemDependenciesEditablePptCheckPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreSystemDependenciesEditablePptCheckPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /system-dependencies/editable-ppt
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSystemDependenciesEditablePptGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreSystemDependenciesEditablePptGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /system-dependencies/editable-ppt:install
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreSystemDependenciesEditablePptInstallPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreSystemDependenciesEditablePptInstallPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary POST /system-dependencies/ffmpeg:check
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -19467,24 +20114,6 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreUploadFilesPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreUploadFilesPost(options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary GET /user/chat-settings
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreUserChatSettingsGet(options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreUserChatSettingsGet(options).then((request) => request(axios, basePath));
-        },
-        /**
-         *
-         * @summary PATCH /user/chat-settings
-         * @param {*} [options] Override http request option.
-         * @throws {RequiredError}
-         */
-        apiCoreUserChatSettingsPatch(options?: RawAxiosRequestConfig): AxiosPromise<void> {
-            return localVarFp.apiCoreUserChatSettingsPatch(options).then((request) => request(axios, basePath));
         },
         /**
          *
@@ -19987,6 +20616,16 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary POST /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-execute
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionExecutePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionExecutePost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionExecutePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionExecutePost(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption
          * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatchRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -20117,6 +20756,26 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
         },
         /**
          *
+         * @summary POST /workflow-sessions/{session_id}/writer-document:render
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdWriterDocumentRenderPostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdWriterDocumentRenderPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdWriterDocumentRenderPostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdWriterDocumentRenderPost(requestParameters.sessionId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /workflow-sessions/{session_id}/writer-document:save
+         * @param {DefaultApiApiCoreWorkflowSessionsSessionIdWriterDocumentSavePostRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWorkflowSessionsSessionIdWriterDocumentSavePost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdWriterDocumentSavePostRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWorkflowSessionsSessionIdWriterDocumentSavePost(requestParameters.sessionId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
          * @summary GET /workflows
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -20133,6 +20792,35 @@ export const DefaultApiFactory = function (configuration?: Configuration, basePa
          */
         apiCoreWorkflowsWorkflowIdGet(requestParameters: DefaultApiApiCoreWorkflowsWorkflowIdGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
             return localVarFp.apiCoreWorkflowsWorkflowIdGet(requestParameters.workflowId, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary POST /writer-download-conversions:convert
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWriterDownloadConversionsConvertPost(options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWriterDownloadConversionsConvertPost(options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary GET /writer-download-conversions/{source_hash}/{target_format}
+         * @param {DefaultApiApiCoreWriterDownloadConversionsSourceHashTargetFormatGetRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWriterDownloadConversionsSourceHashTargetFormatGet(requestParameters: DefaultApiApiCoreWriterDownloadConversionsSourceHashTargetFormatGetRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWriterDownloadConversionsSourceHashTargetFormatGet(requestParameters.sourceHash, requestParameters.targetFormat, options).then((request) => request(axios, basePath));
+        },
+        /**
+         *
+         * @summary PUT /writer-download-conversions/{source_hash}/{target_format}
+         * @param {DefaultApiApiCoreWriterDownloadConversionsSourceHashTargetFormatPutRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreWriterDownloadConversionsSourceHashTargetFormatPut(requestParameters: DefaultApiApiCoreWriterDownloadConversionsSourceHashTargetFormatPutRequest, options?: RawAxiosRequestConfig): AxiosPromise<void> {
+            return localVarFp.apiCoreWriterDownloadConversionsSourceHashTargetFormatPut(requestParameters.sourceHash, requestParameters.targetFormat, options).then((request) => request(axios, basePath));
         },
     };
 };
@@ -20345,6 +21033,8 @@ export interface DefaultApiApiCoreConversationsFeedBackChatHistoryPostRequest {
  */
 export interface DefaultApiApiCoreConversationsGetRequest {
     readonly keyword?: string
+
+    readonly assistant?: ApiCoreConversationsGetAssistantEnum
 
     readonly pageSize?: number
 
@@ -20628,6 +21318,20 @@ export interface DefaultApiApiCoreDatasetsDatasetUploadsUploadFileIdDownloadGetR
 }
 
 /**
+ * Request parameters for apiCoreExportersProviderIdCapabilitiesGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreExportersProviderIdCapabilitiesGetRequest {
+    readonly providerId: string
+}
+
+/**
+ * Request parameters for apiCoreExportersProviderIdExportPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreExportersProviderIdExportPostRequest {
+    readonly providerId: string
+}
+
+/**
  * Request parameters for apiCoreExternalChatHostsProviderClaimPost operation in DefaultApi.
  */
 export interface DefaultApiApiCoreExternalChatHostsProviderClaimPostRequest {
@@ -20639,6 +21343,29 @@ export interface DefaultApiApiCoreExternalChatHostsProviderClaimPostRequest {
  */
 export interface DefaultApiApiCoreExternalChatHostsProviderStatusGetRequest {
     readonly provider: string
+}
+
+/**
+ * Request parameters for apiCoreExternalChatProvidersProviderSessionsGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreExternalChatProvidersProviderSessionsGetRequest {
+    readonly provider: string
+}
+
+/**
+ * Request parameters for apiCoreExternalChatProvidersProviderSessionsSyncPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreExternalChatProvidersProviderSessionsSyncPostRequest {
+    readonly provider: string
+}
+
+/**
+ * Request parameters for apiCoreExternalChatProvidersProviderSessionsThreadIdBindingPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreExternalChatProvidersProviderSessionsThreadIdBindingPostRequest {
+    readonly provider: string
+
+    readonly threadId: string
 }
 
 /**
@@ -21334,6 +22061,17 @@ export interface DefaultApiApiCoreWorkflowSessionsSessionIdSlotsGetRequest {
 }
 
 /**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionExecutePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionExecutePostRequest {
+    readonly sessionId: string
+
+    readonly slotId: string
+
+    readonly listIndex: string
+}
+
+/**
  * Request parameters for apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatch operation in DefaultApi.
  */
 export interface DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatchRequest {
@@ -21453,10 +22191,42 @@ export interface DefaultApiApiCoreWorkflowSessionsSessionIdSyncSearchConfigPostR
 }
 
 /**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdWriterDocumentRenderPost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdWriterDocumentRenderPostRequest {
+    readonly sessionId: string
+}
+
+/**
+ * Request parameters for apiCoreWorkflowSessionsSessionIdWriterDocumentSavePost operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWorkflowSessionsSessionIdWriterDocumentSavePostRequest {
+    readonly sessionId: string
+}
+
+/**
  * Request parameters for apiCoreWorkflowsWorkflowIdGet operation in DefaultApi.
  */
 export interface DefaultApiApiCoreWorkflowsWorkflowIdGetRequest {
     readonly workflowId: string
+}
+
+/**
+ * Request parameters for apiCoreWriterDownloadConversionsSourceHashTargetFormatGet operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWriterDownloadConversionsSourceHashTargetFormatGetRequest {
+    readonly sourceHash: string
+
+    readonly targetFormat: string
+}
+
+/**
+ * Request parameters for apiCoreWriterDownloadConversionsSourceHashTargetFormatPut operation in DefaultApi.
+ */
+export interface DefaultApiApiCoreWriterDownloadConversionsSourceHashTargetFormatPutRequest {
+    readonly sourceHash: string
+
+    readonly targetFormat: string
 }
 
 /**
@@ -21908,7 +22678,7 @@ export class DefaultApi extends BaseAPI {
      * @throws {RequiredError}
      */
     public apiCoreConversationsGet(requestParameters: DefaultApiApiCoreConversationsGetRequest = {}, options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreConversationsGet(requestParameters.keyword, requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(this.axios, this.basePath));
+        return DefaultApiFp(this.configuration).apiCoreConversationsGet(requestParameters.keyword, requestParameters.assistant, requestParameters.pageSize, requestParameters.pageToken, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -22273,7 +23043,29 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary POST /external-chat/hosts/{provider}:claim
+     * @summary GET /exporters/{provider_id}:capabilities
+     * @param {DefaultApiApiCoreExportersProviderIdCapabilitiesGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreExportersProviderIdCapabilitiesGet(requestParameters: DefaultApiApiCoreExportersProviderIdCapabilitiesGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreExportersProviderIdCapabilitiesGet(requestParameters.providerId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /exporters/{provider_id}:export
+     * @param {DefaultApiApiCoreExportersProviderIdExportPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreExportersProviderIdExportPost(requestParameters: DefaultApiApiCoreExportersProviderIdExportPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreExportersProviderIdExportPost(requestParameters.providerId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /external-chat/hosts/{provider}/claim
      * @param {DefaultApiApiCoreExternalChatHostsProviderClaimPostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -22284,13 +23076,46 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
-     * @summary GET /external-chat/hosts/{provider}:status
+     * @summary GET /external-chat/hosts/{provider}/status
      * @param {DefaultApiApiCoreExternalChatHostsProviderStatusGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
      */
     public apiCoreExternalChatHostsProviderStatusGet(requestParameters: DefaultApiApiCoreExternalChatHostsProviderStatusGetRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreExternalChatHostsProviderStatusGet(requestParameters.provider, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /external-chat/providers/{provider}/sessions
+     * @param {DefaultApiApiCoreExternalChatProvidersProviderSessionsGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreExternalChatProvidersProviderSessionsGet(requestParameters: DefaultApiApiCoreExternalChatProvidersProviderSessionsGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreExternalChatProvidersProviderSessionsGet(requestParameters.provider, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /external-chat/providers/{provider}/sessions:sync
+     * @param {DefaultApiApiCoreExternalChatProvidersProviderSessionsSyncPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreExternalChatProvidersProviderSessionsSyncPost(requestParameters: DefaultApiApiCoreExternalChatProvidersProviderSessionsSyncPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreExternalChatProvidersProviderSessionsSyncPost(requestParameters.provider, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /external-chat/providers/{provider}/sessions/{thread_id}/binding
+     * @param {DefaultApiApiCoreExternalChatProvidersProviderSessionsThreadIdBindingPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreExternalChatProvidersProviderSessionsThreadIdBindingPost(requestParameters: DefaultApiApiCoreExternalChatProvidersProviderSessionsThreadIdBindingPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreExternalChatProvidersProviderSessionsThreadIdBindingPost(requestParameters.provider, requestParameters.threadId, options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -22966,6 +23791,36 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary POST /system-dependencies/editable-ppt:check
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreSystemDependenciesEditablePptCheckPost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreSystemDependenciesEditablePptCheckPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /system-dependencies/editable-ppt
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreSystemDependenciesEditablePptGet(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreSystemDependenciesEditablePptGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /system-dependencies/editable-ppt:install
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreSystemDependenciesEditablePptInstallPost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreSystemDependenciesEditablePptInstallPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary POST /system-dependencies/ffmpeg:check
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -23111,26 +23966,6 @@ export class DefaultApi extends BaseAPI {
      */
     public apiCoreUploadFilesPost(options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreUploadFilesPost(options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary GET /user/chat-settings
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreUserChatSettingsGet(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreUserChatSettingsGet(options).then((request) => request(this.axios, this.basePath));
-    }
-
-    /**
-     *
-     * @summary PATCH /user/chat-settings
-     * @param {*} [options] Override http request option.
-     * @throws {RequiredError}
-     */
-    public apiCoreUserChatSettingsPatch(options?: RawAxiosRequestConfig) {
-        return DefaultApiFp(this.configuration).apiCoreUserChatSettingsPatch(options).then((request) => request(this.axios, this.basePath));
     }
 
     /**
@@ -23685,6 +24520,17 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary POST /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}:action-execute
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionExecutePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionExecutePost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionExecutePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexActionExecutePost(requestParameters.sessionId, requestParameters.slotId, requestParameters.listIndex, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary PATCH /workflow-sessions/{session_id}/slots/{slot_id}/items/idx/{list_index}/caption
      * @param {DefaultApiApiCoreWorkflowSessionsSessionIdSlotsSlotIdItemsIdxListIndexCaptionPatchRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -23828,6 +24674,28 @@ export class DefaultApi extends BaseAPI {
 
     /**
      *
+     * @summary POST /workflow-sessions/{session_id}/writer-document:render
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdWriterDocumentRenderPostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdWriterDocumentRenderPost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdWriterDocumentRenderPostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdWriterDocumentRenderPost(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary POST /workflow-sessions/{session_id}/writer-document:save
+     * @param {DefaultApiApiCoreWorkflowSessionsSessionIdWriterDocumentSavePostRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWorkflowSessionsSessionIdWriterDocumentSavePost(requestParameters: DefaultApiApiCoreWorkflowSessionsSessionIdWriterDocumentSavePostRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWorkflowSessionsSessionIdWriterDocumentSavePost(requestParameters.sessionId, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
      * @summary GET /workflows
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}
@@ -23846,6 +24714,38 @@ export class DefaultApi extends BaseAPI {
     public apiCoreWorkflowsWorkflowIdGet(requestParameters: DefaultApiApiCoreWorkflowsWorkflowIdGetRequest, options?: RawAxiosRequestConfig) {
         return DefaultApiFp(this.configuration).apiCoreWorkflowsWorkflowIdGet(requestParameters.workflowId, options).then((request) => request(this.axios, this.basePath));
     }
+
+    /**
+     *
+     * @summary POST /writer-download-conversions:convert
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWriterDownloadConversionsConvertPost(options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWriterDownloadConversionsConvertPost(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary GET /writer-download-conversions/{source_hash}/{target_format}
+     * @param {DefaultApiApiCoreWriterDownloadConversionsSourceHashTargetFormatGetRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWriterDownloadConversionsSourceHashTargetFormatGet(requestParameters: DefaultApiApiCoreWriterDownloadConversionsSourceHashTargetFormatGetRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWriterDownloadConversionsSourceHashTargetFormatGet(requestParameters.sourceHash, requestParameters.targetFormat, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     *
+     * @summary PUT /writer-download-conversions/{source_hash}/{target_format}
+     * @param {DefaultApiApiCoreWriterDownloadConversionsSourceHashTargetFormatPutRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreWriterDownloadConversionsSourceHashTargetFormatPut(requestParameters: DefaultApiApiCoreWriterDownloadConversionsSourceHashTargetFormatPutRequest, options?: RawAxiosRequestConfig) {
+        return DefaultApiFp(this.configuration).apiCoreWriterDownloadConversionsSourceHashTargetFormatPut(requestParameters.sourceHash, requestParameters.targetFormat, options).then((request) => request(this.axios, this.basePath));
+    }
 }
 
 export const ApiCoreConversationsArchivedGetKindEnum = {
@@ -23853,6 +24753,13 @@ export const ApiCoreConversationsArchivedGetKindEnum = {
     Task: 'task'
 } as const;
 export type ApiCoreConversationsArchivedGetKindEnum = typeof ApiCoreConversationsArchivedGetKindEnum[keyof typeof ApiCoreConversationsArchivedGetKindEnum];
+export const ApiCoreConversationsGetAssistantEnum = {
+    Lazymind: 'lazymind',
+    Codex: 'codex',
+    Cursor: 'cursor',
+    Workbuddy: 'workbuddy'
+} as const;
+export type ApiCoreConversationsGetAssistantEnum = typeof ApiCoreConversationsGetAssistantEnum[keyof typeof ApiCoreConversationsGetAssistantEnum];
 export const ApiCoreConversationsTrashDeleteKindEnum = {
     Dialog: 'dialog',
     Task: 'task'
@@ -34754,7 +35661,7 @@ export const SkillsApiAxiosParamCreator = function (configuration?: Configuratio
             };
         },
         /**
-         * Submits a skill organize task for current user\'s SkillV2 files. The task runs asynchronously in the algorithm service.
+         * Submits 2 to 20 internal SkillV2 files for organization. The task runs asynchronously in the algorithm service.
          * @summary Submit skill organize task
          * @param {SkillOrganizeOpenAPIRequest} skillOrganizeOpenAPIRequest
          * @param {*} [options] Override http request option.
@@ -35631,7 +36538,7 @@ export const SkillsApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Submits a skill organize task for current user\'s SkillV2 files. The task runs asynchronously in the algorithm service.
+         * Submits 2 to 20 internal SkillV2 files for organization. The task runs asynchronously in the algorithm service.
          * @summary Submit skill organize task
          * @param {SkillOrganizeOpenAPIRequest} skillOrganizeOpenAPIRequest
          * @param {*} [options] Override http request option.
@@ -35968,7 +36875,7 @@ export const SkillsApiFactory = function (configuration?: Configuration, basePat
             return localVarFp.apiCoreBuiltinSkillsGet(options).then((request) => request(axios, basePath));
         },
         /**
-         * Submits a skill organize task for current user\'s SkillV2 files. The task runs asynchronously in the algorithm service.
+         * Submits 2 to 20 internal SkillV2 files for organization. The task runs asynchronously in the algorithm service.
          * @summary Submit skill organize task
          * @param {SkillsApiApiCoreSkillOrganizePostRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -36390,7 +37297,7 @@ export class SkillsApi extends BaseAPI {
     }
 
     /**
-     * Submits a skill organize task for current user\'s SkillV2 files. The task runs asynchronously in the algorithm service.
+     * Submits 2 to 20 internal SkillV2 files for organization. The task runs asynchronously in the algorithm service.
      * @summary Submit skill organize task
      * @param {SkillsApiApiCoreSkillOrganizePostRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -38479,6 +39386,71 @@ export class UploadsApi extends BaseAPI {
 export const UserApiAxiosParamCreator = function (configuration?: Configuration) {
     return {
         /**
+         * Returns independent thinking-depth and conversation defaults for the quick-question and new-task entry points. Legacy flat fields remain available and mirror the new-task conversation defaults.
+         * @summary Get quick-question and new-task defaults
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreUserChatSettingsGet: async (options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            const localVarPath = `/api/core/user/chat-settings`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'GET', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
+         * Every field is optional. Send quick_question or new_task to update one entry profile without replacing the other. Legacy flat fields remain accepted for installed clients.
+         * @summary Partially update quick-question and new-task defaults
+         * @param {UserChatSettingsPatchOpenAPIRequest} userChatSettingsPatchOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreUserChatSettingsPatch: async (userChatSettingsPatchOpenAPIRequest: UserChatSettingsPatchOpenAPIRequest, options: RawAxiosRequestConfig = {}): Promise<RequestArgs> => {
+            // verify required parameter 'userChatSettingsPatchOpenAPIRequest' is not null or undefined
+            assertParamExists('apiCoreUserChatSettingsPatch', 'userChatSettingsPatchOpenAPIRequest', userChatSettingsPatchOpenAPIRequest)
+            const localVarPath = `/api/core/user/chat-settings`;
+            // use dummy base URL string because the URL constructor only accepts absolute URLs.
+            const localVarUrlObj = new URL(localVarPath, DUMMY_BASE_URL);
+            let baseOptions;
+            if (configuration) {
+                baseOptions = configuration.baseOptions;
+            }
+
+            const localVarRequestOptions = { method: 'PATCH', ...baseOptions, ...options};
+            const localVarHeaderParameter = {} as any;
+            const localVarQueryParameter = {} as any;
+
+            localVarHeaderParameter['Content-Type'] = 'application/json';
+            localVarHeaderParameter['Accept'] = 'application/json';
+
+            setSearchParams(localVarUrlObj, localVarQueryParameter);
+            let headersFromBaseOptions = baseOptions && baseOptions.headers ? baseOptions.headers : {};
+            localVarRequestOptions.headers = {...localVarHeaderParameter, ...headersFromBaseOptions, ...options.headers};
+            localVarRequestOptions.data = serializeDataIfNeeded(userChatSettingsPatchOpenAPIRequest, localVarRequestOptions, configuration)
+
+            return {
+                url: toPathString(localVarUrlObj),
+                options: localVarRequestOptions,
+            };
+        },
+        /**
          *
          * @summary Get current user\'s UI preferences
          * @param {*} [options] Override http request option.
@@ -38509,7 +39481,7 @@ export const UserApiAxiosParamCreator = function (configuration?: Configuration)
             };
         },
         /**
-         * Partial update. Every field inside the request body is optional; send only fields that should change. Updating skills_enabled sets all current user skills to the same state; updating workflows_enabled independently sets all available workflows in one transaction.
+         * Partial update. Every field inside the request body is optional; send only fields that should change. Updating schedules_enabled pauses or resumes scheduled execution; updating skills_enabled sets all current user skills to the same state; updating workflows_enabled independently sets all available workflows in one transaction.
          * @summary Partially update current user\'s UI preferences
          * @param {UserUIPreferencesPatchOpenAPIRequest} userUIPreferencesPatchOpenAPIRequest
          * @param {*} [options] Override http request option.
@@ -38553,6 +39525,31 @@ export const UserApiFp = function(configuration?: Configuration) {
     const localVarAxiosParamCreator = UserApiAxiosParamCreator(configuration)
     return {
         /**
+         * Returns independent thinking-depth and conversation defaults for the quick-question and new-task entry points. Legacy flat fields remain available and mirror the new-task conversation defaults.
+         * @summary Get quick-question and new-task defaults
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreUserChatSettingsGet(options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<UserChatSettingsOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreUserChatSettingsGet(options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['UserApi.apiCoreUserChatSettingsGet']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
+         * Every field is optional. Send quick_question or new_task to update one entry profile without replacing the other. Legacy flat fields remain accepted for installed clients.
+         * @summary Partially update quick-question and new-task defaults
+         * @param {UserChatSettingsPatchOpenAPIRequest} userChatSettingsPatchOpenAPIRequest
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        async apiCoreUserChatSettingsPatch(userChatSettingsPatchOpenAPIRequest: UserChatSettingsPatchOpenAPIRequest, options?: RawAxiosRequestConfig): Promise<(axios?: AxiosInstance, basePath?: string) => AxiosPromise<UserChatSettingsOpenAPIResponse>> {
+            const localVarAxiosArgs = await localVarAxiosParamCreator.apiCoreUserChatSettingsPatch(userChatSettingsPatchOpenAPIRequest, options);
+            const localVarOperationServerIndex = configuration?.serverIndex ?? 0;
+            const localVarOperationServerBasePath = operationServerMap['UserApi.apiCoreUserChatSettingsPatch']?.[localVarOperationServerIndex]?.url;
+            return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
+        },
+        /**
          *
          * @summary Get current user\'s UI preferences
          * @param {*} [options] Override http request option.
@@ -38565,7 +39562,7 @@ export const UserApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Partial update. Every field inside the request body is optional; send only fields that should change. Updating skills_enabled sets all current user skills to the same state; updating workflows_enabled independently sets all available workflows in one transaction.
+         * Partial update. Every field inside the request body is optional; send only fields that should change. Updating schedules_enabled pauses or resumes scheduled execution; updating skills_enabled sets all current user skills to the same state; updating workflows_enabled independently sets all available workflows in one transaction.
          * @summary Partially update current user\'s UI preferences
          * @param {UserUIPreferencesPatchOpenAPIRequest} userUIPreferencesPatchOpenAPIRequest
          * @param {*} [options] Override http request option.
@@ -38587,6 +39584,25 @@ export const UserApiFactory = function (configuration?: Configuration, basePath?
     const localVarFp = UserApiFp(configuration)
     return {
         /**
+         * Returns independent thinking-depth and conversation defaults for the quick-question and new-task entry points. Legacy flat fields remain available and mirror the new-task conversation defaults.
+         * @summary Get quick-question and new-task defaults
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreUserChatSettingsGet(options?: RawAxiosRequestConfig): AxiosPromise<UserChatSettingsOpenAPIResponse> {
+            return localVarFp.apiCoreUserChatSettingsGet(options).then((request) => request(axios, basePath));
+        },
+        /**
+         * Every field is optional. Send quick_question or new_task to update one entry profile without replacing the other. Legacy flat fields remain accepted for installed clients.
+         * @summary Partially update quick-question and new-task defaults
+         * @param {UserApiApiCoreUserChatSettingsPatchRequest} requestParameters Request parameters.
+         * @param {*} [options] Override http request option.
+         * @throws {RequiredError}
+         */
+        apiCoreUserChatSettingsPatch(requestParameters: UserApiApiCoreUserChatSettingsPatchRequest, options?: RawAxiosRequestConfig): AxiosPromise<UserChatSettingsOpenAPIResponse> {
+            return localVarFp.apiCoreUserChatSettingsPatch(requestParameters.userChatSettingsPatchOpenAPIRequest, options).then((request) => request(axios, basePath));
+        },
+        /**
          *
          * @summary Get current user\'s UI preferences
          * @param {*} [options] Override http request option.
@@ -38596,7 +39612,7 @@ export const UserApiFactory = function (configuration?: Configuration, basePath?
             return localVarFp.apiCoreUserUiPreferencesGet(options).then((request) => request(axios, basePath));
         },
         /**
-         * Partial update. Every field inside the request body is optional; send only fields that should change. Updating skills_enabled sets all current user skills to the same state; updating workflows_enabled independently sets all available workflows in one transaction.
+         * Partial update. Every field inside the request body is optional; send only fields that should change. Updating schedules_enabled pauses or resumes scheduled execution; updating skills_enabled sets all current user skills to the same state; updating workflows_enabled independently sets all available workflows in one transaction.
          * @summary Partially update current user\'s UI preferences
          * @param {UserApiApiCoreUserUiPreferencesPatchRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -38607,6 +39623,13 @@ export const UserApiFactory = function (configuration?: Configuration, basePath?
         },
     };
 };
+
+/**
+ * Request parameters for apiCoreUserChatSettingsPatch operation in UserApi.
+ */
+export interface UserApiApiCoreUserChatSettingsPatchRequest {
+    readonly userChatSettingsPatchOpenAPIRequest: UserChatSettingsPatchOpenAPIRequest
+}
 
 /**
  * Request parameters for apiCoreUserUiPreferencesPatch operation in UserApi.
@@ -38620,6 +39643,27 @@ export interface UserApiApiCoreUserUiPreferencesPatchRequest {
  */
 export class UserApi extends BaseAPI {
     /**
+     * Returns independent thinking-depth and conversation defaults for the quick-question and new-task entry points. Legacy flat fields remain available and mirror the new-task conversation defaults.
+     * @summary Get quick-question and new-task defaults
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreUserChatSettingsGet(options?: RawAxiosRequestConfig) {
+        return UserApiFp(this.configuration).apiCoreUserChatSettingsGet(options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
+     * Every field is optional. Send quick_question or new_task to update one entry profile without replacing the other. Legacy flat fields remain accepted for installed clients.
+     * @summary Partially update quick-question and new-task defaults
+     * @param {UserApiApiCoreUserChatSettingsPatchRequest} requestParameters Request parameters.
+     * @param {*} [options] Override http request option.
+     * @throws {RequiredError}
+     */
+    public apiCoreUserChatSettingsPatch(requestParameters: UserApiApiCoreUserChatSettingsPatchRequest, options?: RawAxiosRequestConfig) {
+        return UserApiFp(this.configuration).apiCoreUserChatSettingsPatch(requestParameters.userChatSettingsPatchOpenAPIRequest, options).then((request) => request(this.axios, this.basePath));
+    }
+
+    /**
      *
      * @summary Get current user\'s UI preferences
      * @param {*} [options] Override http request option.
@@ -38630,7 +39674,7 @@ export class UserApi extends BaseAPI {
     }
 
     /**
-     * Partial update. Every field inside the request body is optional; send only fields that should change. Updating skills_enabled sets all current user skills to the same state; updating workflows_enabled independently sets all available workflows in one transaction.
+     * Partial update. Every field inside the request body is optional; send only fields that should change. Updating schedules_enabled pauses or resumes scheduled execution; updating skills_enabled sets all current user skills to the same state; updating workflows_enabled independently sets all available workflows in one transaction.
      * @summary Partially update current user\'s UI preferences
      * @param {UserApiApiCoreUserUiPreferencesPatchRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.

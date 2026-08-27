@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useState } from "react";
-import type { ReactNode, WheelEvent as ReactWheelEvent } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import type { ReactNode } from "react";
 import { Button, Form, Input, Layout, Modal, Popover, Spin, message } from "antd";
 import {
   CodeOutlined,
@@ -40,7 +40,6 @@ import LanguageSwitcher from "@/components/LanguageSwitcher";
 import {
 	DEVELOPER_ACTIVE_EVENT,
   isDeveloperModeActive,
-  persistDeveloperModeActive,
   syncDeveloperModeFromServer,
 } from "@/utils/developerMode";
 import RecordList from "@/modules/chat/components/RecordList";
@@ -90,20 +89,6 @@ function isAdminRole(role?: string) {
   );
 }
 
-function canScrollVertically(element: HTMLElement, deltaY: number) {
-  const style = window.getComputedStyle(element);
-  if (style.overflowY !== "auto" && style.overflowY !== "scroll") {
-    return false;
-  }
-
-  const maxScrollTop = element.scrollHeight - element.clientHeight;
-  if (maxScrollTop <= 1) {
-    return false;
-  }
-
-  return deltaY < 0 ? element.scrollTop > 0 : element.scrollTop < maxScrollTop;
-}
-
 function readChatConversationMode(): ChatConversationFilter {
   try {
     return sessionStorage.getItem(CHAT_CONVERSATION_FILTER_KEY) === "task"
@@ -113,7 +98,6 @@ function readChatConversationMode(): ChatConversationFilter {
     return "normal";
   }
 }
-
 interface ProfileFormValues {
   username: string;
   displayName?: string;
@@ -155,6 +139,10 @@ export default function MainLayout() {
         return "";
       }
     });
+  const currentSidebarConversationIdRef = useRef(
+    currentSidebarConversationId,
+  );
+  currentSidebarConversationIdRef.current = currentSidebarConversationId;
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileSubmitting, setProfileSubmitting] = useState(false);
@@ -187,7 +175,7 @@ export default function MainLayout() {
         <ApiOutlined className="settings-popover-icon" aria-hidden="true" />
       ),
     },
-    ...(isAdminUser && !runtimeFeatures.hideEvo
+    ...(!runtimeFeatures.hideEvo
       ? [
           {
             key: "/settings?section=developer",
@@ -249,45 +237,6 @@ export default function MainLayout() {
   ]
     .filter(Boolean)
     .join(" ");
-
-  const handleChatWheel = useCallback(
-    (event: ReactWheelEvent<HTMLDivElement>) => {
-      if (!isChatPage || event.deltaY === 0) {
-        return;
-      }
-
-      const target = event.target instanceof HTMLElement ? event.target : null;
-      const messageContainer = event.currentTarget.querySelector<HTMLElement>(
-        ".message-container",
-      );
-      if (!target || !messageContainer) {
-        return;
-      }
-
-      // The Markdown document editor owns wheel input, including when it has
-      // reached the top or bottom of its own scroll area.
-      if (target.closest(".writer-markdown-editor")) {
-        return;
-      }
-
-      let ancestor: HTMLElement | null = target;
-      while (ancestor && ancestor !== event.currentTarget) {
-        if (canScrollVertically(ancestor, event.deltaY)) {
-          return;
-        }
-        ancestor = ancestor.parentElement;
-      }
-
-      // The message list already handles its own wheel events, including
-      // nested scrollable blocks such as long thinking text.
-      if (messageContainer.contains(target)) {
-        return;
-      }
-
-      messageContainer.scrollBy({ top: event.deltaY, behavior: "auto" });
-    },
-    [isChatPage],
-  );
 
   const refreshLayoutUser = useCallback(async () => {
     if (!AgentAppsAuth.isLoggedIn()) {
@@ -355,13 +304,6 @@ export default function MainLayout() {
       window.removeEventListener(DEVELOPER_ACTIVE_EVENT, handleDeveloperModeChange);
     };
   }, [localSessionGate.enabled, refreshLayoutUser]);
-
-  useEffect(() => {
-    if (!isAdminUser && developerActive) {
-      setDeveloperActive(false);
-      void persistDeveloperModeActive(false);
-    }
-  }, [developerActive, isAdminUser]);
 
   useEffect(() => {
     if (pathname.startsWith("/self-evolution") && !canAccessSelfEvolution) {
@@ -493,9 +435,13 @@ export default function MainLayout() {
 
   const handleSidebarConversationRemoved = (conversation: Conversation) => {
     const conversationId = conversation.conversation_id || "";
-    if (!conversationId || conversationId !== currentSidebarConversationId) {
+    if (
+      !conversationId ||
+      conversationId !== currentSidebarConversationIdRef.current
+    ) {
       return;
     }
+    currentSidebarConversationIdRef.current = "";
     try {
       sessionStorage.removeItem(CHAT_RESUME_CONVERSATION_KEY);
     } catch {
@@ -812,7 +758,7 @@ export default function MainLayout() {
   }
 
   return (
-    <Layout hasSider className="main-layout" onWheelCapture={handleChatWheel}>
+    <Layout hasSider className="main-layout">
       <Sider
         width={252}
         collapsedWidth={0}

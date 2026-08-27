@@ -97,6 +97,20 @@ type PromptUserState struct {
 
 func (PromptUserState) TableName() string { return "prompt_user_states" }
 
+type DatasetUserState struct {
+	ID             string     `gorm:"column:id;type:varchar(64);primaryKey"`
+	DatasetID      string     `gorm:"column:dataset_id;type:varchar(255);not null;uniqueIndex:uk_dataset_user_states_user_dataset,priority:2"`
+	UsageCount     int64      `gorm:"column:usage_count;type:bigint;not null;default:0"`
+	LastUsedAt     *time.Time `gorm:"column:last_used_at"`
+	CreateUserID   string     `gorm:"column:create_user_id;type:varchar(255);not null;uniqueIndex:uk_dataset_user_states_user_dataset,priority:1"`
+	CreateUserName string     `gorm:"column:create_user_name;type:varchar(255);not null"`
+	CreatedAt      time.Time  `gorm:"column:created_at;not null"`
+	UpdatedAt      time.Time  `gorm:"column:updated_at;not null"`
+	DeletedAt      *time.Time `gorm:"column:deleted_at"`
+}
+
+func (DatasetUserState) TableName() string { return "dataset_user_states" }
+
 type UserDisabledTool struct {
 	ID             int64      `gorm:"column:id;primaryKey;autoIncrement"`
 	ToolName       string     `gorm:"column:tool_name;type:varchar(255);not null;uniqueIndex:uk_user_disabled_tools_user_tool,priority:2"`
@@ -128,13 +142,15 @@ type Conversation struct {
 	Model         string          `gorm:"column:model;type:varchar(64);default:''"`
 	Models        json.RawMessage `gorm:"column:models;type:json"`
 	ChatTimes     int32           `gorm:"column:chat_times;not null;default:0"`
-	// Workflow/subagent mode overrides at conversation level (NULL falls back to user_chat_settings).
+	// Workflow/subagent policy snapshot. Historical NULL values use the legacy hard defaults.
 	EnableWorkflow *bool   `gorm:"column:enable_plugin"`
 	WorkflowMode   *string `gorm:"column:plugin_mode;type:varchar(16)"`
 	EnableSubagent *bool   `gorm:"column:enable_subagent"`
 	// ChatExecutor selects the upstream Agent while the existing Chat application
 	// remains responsible for persistence, Workflow, artifacts and SSE delivery.
 	ChatExecutor string `gorm:"column:chat_executor;type:varchar(32);not null;default:'lazymind'"`
+	// ThinkingDepth snapshots the entry default selected when the conversation is created.
+	ThinkingDepth string `gorm:"column:thinking_depth;type:varchar(16);not null;default:'medium'"`
 	// IsTaskConv marks conversations created by the scheduler or task center (not user-initiated).
 	IsTaskConv         bool       `gorm:"column:is_task_conv;not null;default:false"`
 	IsEphemeral        bool       `gorm:"column:is_ephemeral;not null;default:false"`

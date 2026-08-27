@@ -1,8 +1,8 @@
 id: writer-workflow
 name: AI Writer
 description: >
-  Read source documents and knowledge, create or reuse an outline, draft a
-  structured document, revise either the outline or full text, and produce
+  Read source documents and knowledge, create a flat article or reuse an
+  outline for a structured document, revise either the outline or full text, and produce
   Markdown or WriterDocument IR according to the selected writing path. Exporting
   an IR draft as Markdown is a separate user-initiated download flow.
 
@@ -33,11 +33,13 @@ runtime:
     - writer.create
     - writer.revise
   completed_continue_steps:
+    - write_flat_document
     - write_document
 
 tool_scripts:
   - path: scripts/tools.py
     functions:
+      - writer_classify_structure
       - writer_build_writing_task
       - writer_load_local_document
       - writer_collect_available_media
@@ -51,9 +53,12 @@ tool_scripts:
       - writer_generate_rewrite_outline
       - writer_generate_rewrite_section_instructions
       - writer_generate_section_instructions
+      - writer_generate_short_writing_plan
+      - writer_generate_short_document
       - writer_resolve_visual_media
       - writer_resolve_revision_media
       - writer_generate_draft_document
+      - writer_flat_draft_workspace
       - writer_draft_workspace
       - writer_update_writing_context
       - writer_export_markdown
@@ -76,22 +81,23 @@ tool_scripts:
 
 artifact_actions:
   rewrite_selection:
-    slots: [outline_document, draft_document]
+    slots: [outline_document, flat_draft_document, draft_document]
     preview_tool: writer_preview_selection_rewrite
   sync_document:
     slots: [draft_document]
     execute_tool: writer_sync_document
   render_document:
-    slots: [source_document, outline_document, draft_document]
+    slots: [source_document, outline_document, flat_draft_document, draft_document]
     preview_tool: writer_render_document
     execute_tool: writer_render_document
   save_document:
-    slots: [outline_document, draft_document]
+    slots: [outline_document, flat_draft_document, draft_document]
     execute_tool: writer_save_document
 
 steps:
   - id: prepare
   - id: outline
+  - id: write_flat_document
   - id: write_document
 
 slots:
@@ -170,6 +176,10 @@ slots:
     label: Section Instructions
     type: file
     cardinality: single
+  - id: short_writing_plan
+    label: Short Writing Plan
+    type: file
+    cardinality: single
   - id: draft_blocks
     label: Draft Blocks
     type: file
@@ -177,6 +187,22 @@ slots:
     ordered: true
   - id: draft_document
     label: Full Draft
+    type: file
+    cardinality: single
+  - id: flat_draft_document
+    label: Flat Draft
+    type: file
+    cardinality: single
+  - id: flat_writing_context_after_draft
+    label: Writing Context After Flat Draft
+    type: file
+    cardinality: single
+  - id: flat_visual_plan
+    label: Flat Visual Plan
+    type: file
+    cardinality: single
+  - id: flat_resolved_media_assets
+    label: Flat Resolved Media
     type: file
     cardinality: single
   - id: writing_context_after_draft
@@ -213,6 +239,8 @@ ui:
       widgetType: writer-document
     draft_document:
       widgetType: writer-document
+    flat_draft_document:
+      widgetType: writer-document
   tabs:
     - id: prepare
       step_id: prepare
@@ -230,11 +258,24 @@ ui:
       completed_continue_step: write_document
 
     - id: result
-      step_id: write_document
+      status_step_ids:
+        - write_document
+        - write_flat_document
       label: Final Document
       layout: list
       slots:
         - id: draft_document
+        - id: flat_draft_document
+      composite_behavior:
+        hide_empty_columns: true
+        empty_column_scope: selected
+        mutually_exclusive:
+          - slots:
+              - draft_document
+              - flat_draft_document
+            prefer:
+              - draft_document
+              - flat_draft_document
 
 i18n:
   zh-CN:
@@ -242,6 +283,7 @@ i18n:
     steps:
       prepare: {label: 写作准备}
       outline: {label: 大纲}
+      write_flat_document: {label: 短文成稿}
       write_document: {label: 成稿}
     tabs:
       prepare: {label: 写作准备}
@@ -259,5 +301,10 @@ i18n:
       target_document: {label: 云文档目标}
       outline_document: {label: 大纲}
       section_instructions: {label: 章节规划}
+      short_writing_plan: {label: 短文写作计划}
       draft_blocks: {label: 章节草稿}
       draft_document: {label: 成稿}
+      flat_draft_document: {label: 成稿}
+      flat_writing_context_after_draft: {label: 成稿写作上下文}
+      flat_visual_plan: {label: 短文视觉规划}
+      flat_resolved_media_assets: {label: 短文已解析图片素材}

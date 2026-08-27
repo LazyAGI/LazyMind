@@ -44,6 +44,7 @@ type Components struct {
 	Repository                        *store.SQLRepository
 	CoreResource                      coreclient.ResourceClient
 	CoreClient                        coreclient.Client
+	DatasetUsageClient                coreclient.DatasetUsageClient
 	AgentClient                       localfs.AgentClient
 	AgentToken                        string
 	LocalFSDefaultAgentID             string
@@ -233,7 +234,7 @@ func applyRuntimeSchemaRepairs(db *sql.DB) error {
 }
 
 func buildAdapters(cfg config.Config) (Components, error) {
-	coreResource, coreWorker, err := buildCoreClients(cfg)
+	coreResource, coreWorker, datasetUsageClient, err := buildCoreClients(cfg)
 	if err != nil {
 		return Components{}, err
 	}
@@ -259,6 +260,7 @@ func buildAdapters(cfg config.Config) (Components, error) {
 	return Components{
 		CoreResource:                      coreResource,
 		CoreClient:                        coreWorker,
+		DatasetUsageClient:                datasetUsageClient,
 		AgentClient:                       agent,
 		AgentToken:                        cfg.AgentToken,
 		LocalFSDefaultAgentID:             cfg.LocalFSDefaultAgentID,
@@ -320,6 +322,7 @@ func newHandlerWithComponents(built Components) http.Handler {
 		coreResource,
 		scheduler,
 		sourceengine.WithAuthConnectionStatusClient(authStatusClient(built.AuthConnectionClient)),
+		sourceengine.WithDatasetUsageClient(built.DatasetUsageClient),
 		sourceengine.WithDefaultDatasetAlgo(built.DefaultDatasetAlgo),
 	)
 	taskPlanner.SetManualSyncScheduler(sourceEngine)
@@ -452,12 +455,13 @@ func enabledConnectorTypes() []connector.ConnectorType {
 	return []connector.ConnectorType{localfs.ConnectorType, feishu.ConnectorType, notion.ConnectorType}
 }
 
-func buildCoreClients(cfg config.Config) (coreclient.ResourceClient, coreclient.Client, error) {
+func buildCoreClients(cfg config.Config) (coreclient.ResourceClient, coreclient.Client, coreclient.DatasetUsageClient, error) {
 	client, err := coreclient.NewHTTPCoreClient(cfg.CoreBaseURL, nil)
 	if err != nil {
-		return nil, nil, fmt.Errorf("configure core client: %w", err)
+		return nil, nil, nil, fmt.Errorf("configure core client: %w", err)
 	}
-	return client, client, nil
+	client.SetInternalToken(cfg.AuthServiceInternalToken)
+	return client, client, client, nil
 }
 
 func buildAgentClient(cfg config.Config) (localfs.AgentClient, error) {

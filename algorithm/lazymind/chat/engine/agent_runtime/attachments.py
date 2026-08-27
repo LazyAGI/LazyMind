@@ -81,7 +81,13 @@ def render_attachment_content(
     *,
     role: AgentRole,
     current_turn_seq: Optional[int] = None,
+    skip_pdf: bool = False,
 ) -> str:
+    if skip_pdf:
+        attachments = [
+            item for item in attachments
+            if not str(item.path).split('?', 1)[0].lower().endswith('.pdf')
+        ]
     if not attachments:
         if role == AgentRole.SUBAGENT:
             return (

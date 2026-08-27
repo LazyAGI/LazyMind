@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from .event_translator import AgentEventFrameTranslator
-from .history import normalize_history_for_agent
+from .history import is_workflow_rewind_action, normalize_history_for_agent
 from .tool_registry import (
     DEFAULT_TOOLS,
     ASK_USER_TOOL_CONFIG,
@@ -42,4 +42,5 @@ __all__ = [
     'get_all_tool_groups',
     'normalize_tool_locale',
     'normalize_history_for_agent',
+    'is_workflow_rewind_action',
 ]

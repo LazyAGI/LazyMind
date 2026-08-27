@@ -411,13 +411,10 @@ class EvoService:
 
 
 def _seed_values(thread_id: str, request: ThreadCreate) -> dict[str, object]:
-    inputs = request.inputs.model_dump()
-    llm_config = dict(request.llm_config)
     target_config = {
         'router_chat_url': request.inputs.router_chat_url,
         'router_admin_url': request.inputs.router_admin_url,
         'algorithm_id': request.inputs.algorithm_id,
-        'llm_config': llm_config,
         'case_deadline_seconds': request.inputs.case_deadline_seconds,
         'first_frame_timeout_seconds': _FIRST_FRAME_TIMEOUT,
     }
@@ -426,9 +423,9 @@ def _seed_values(thread_id: str, request: ThreadCreate) -> dict[str, object]:
             'thread_id': thread_id,
             'mode': request.mode,
             'title': request.title,
-            'inputs': inputs,
+            'inputs': request.inputs.model_dump(),
             'num_case': request.inputs.num_case,
-            'llm_config': llm_config,
+            'llm_config': dict(request.llm_config),
         },
         A.CORPUS_SOURCE_CONFIG: {
             'kb_id': request.inputs.kb_id,
@@ -437,17 +434,13 @@ def _seed_values(thread_id: str, request: ThreadCreate) -> dict[str, object]:
             'min_case_count': request.inputs.num_case,
         },
         A.EVAL_TARGET_CONFIG: target_config,
-        A.EVAL_POLICY: {'judge_llm_config': llm_config},
+        A.EVAL_POLICY: {},
         A.REPAIR_POLICY: {
-            'llm_config': llm_config,
-            'mode': request.mode,
-            'thread_id': thread_id,
             'workspace_namespace': thread_id,
         },
         A.ABTEST_CANDIDATE_CONFIG: {
             'router_chat_url': request.inputs.router_chat_url,
             'router_admin_url': request.inputs.router_admin_url,
-            'llm_config': llm_config,
             'case_deadline_seconds': request.inputs.case_deadline_seconds,
             'first_frame_timeout_seconds': _FIRST_FRAME_TIMEOUT,
         },

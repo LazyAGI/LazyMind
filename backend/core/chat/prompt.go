@@ -325,10 +325,29 @@ func CreatePrompt(w http.ResponseWriter, r *http.Request) {
 	writePromptJSON(w, http.StatusOK, customPromptItem(prompt, orm.PromptUserState{}))
 }
 
+const emptySelectionPolishToken = "__LAZYMIND_DELETE_SELECTION__"
+
+func editablePolishInstruction(userInstruct string, allowEmpty bool) string {
+	if !allowEmpty {
+		return userInstruct
+	}
+	return userInstruct +
+		"\nIf the requested result is to delete the entire input, return exactly " +
+		emptySelectionPolishToken + " as the content value instead of an empty string."
+}
+
+func normalizeEditablePolishResult(polished string, allowEmpty bool) string {
+	if allowEmpty && strings.TrimSpace(polished) == emptySelectionPolishToken {
+		return ""
+	}
+	return polished
+}
+
 func PolishPrompt(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Content      string `json:"content"`
 		UserInstruct string `json:"user_instruct"`
+		AllowEmpty   bool   `json:"allow_empty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid body", err), http.StatusBadRequest)
@@ -355,6 +374,7 @@ func PolishPrompt(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "load llm config failed", http.StatusInternalServerError)
 		return
 	}
+	userInstruct = editablePolishInstruction(userInstruct, body.AllowEmpty)
 	polished, err := algo.GeneratePolish(r.Context(), algo.PolishGenerateRequest{
 		Content:      content,
 		UserInstruct: userInstruct,
@@ -364,6 +384,7 @@ func PolishPrompt(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "prompt polish failed: "+err.Error(), http.StatusBadGateway)
 		return
 	}
+	polished = normalizeEditablePolishResult(polished, body.AllowEmpty)
 	writePromptJSON(w, http.StatusOK, map[string]any{"content": polished})
 }
 

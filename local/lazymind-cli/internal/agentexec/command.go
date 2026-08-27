@@ -124,9 +124,19 @@ func SafeEnvironment(additional ...string) []string {
 		"CODEBUDDY_API_KEY": true, "CODEBUDDY_BASE_URL": true,
 		"ANTHROPIC_API_KEY": true, "ANTHROPIC_BASE_URL": true,
 	}
+	if runtime.GOOS == "windows" {
+		normalized := make(map[string]bool, len(allowed))
+		for name := range allowed {
+			normalized[strings.ToUpper(name)] = true
+		}
+		allowed = normalized
+	}
 	environment := make([]string, 0, len(allowed)+len(additional))
 	for _, entry := range os.Environ() {
 		name, _, _ := strings.Cut(entry, "=")
+		if runtime.GOOS == "windows" {
+			name = strings.ToUpper(name)
+		}
 		if allowed[name] || strings.HasPrefix(name, "LC_") {
 			environment = append(environment, entry)
 		}
@@ -135,21 +145,27 @@ func SafeEnvironment(additional ...string) []string {
 }
 
 func Find(configured, environment string, names, candidates []string) (string, error) {
+	resolved, err := FindExecutable(configured, environment, names, candidates)
+	if err != nil {
+		return "", err
+	}
+	return ResolveRunnable(resolved)
+}
+
+func FindExecutable(configured, environment string, names, candidates []string) (string, error) {
 	if strings.TrimSpace(configured) == "" && environment != "" {
 		configured = strings.TrimSpace(os.Getenv(environment))
 	}
 	if strings.TrimSpace(configured) != "" {
-		return ResolveRunnable(configured)
+		return ResolveExecutable(configured)
 	}
 	for _, name := range names {
 		if resolved, err := exec.LookPath(name); err == nil {
-			if runnable, runnableErr := ResolveRunnable(resolved); runnableErr == nil {
-				return runnable, nil
-			}
+			return ResolveExecutable(resolved)
 		}
 	}
 	for _, candidate := range candidates {
-		if resolved, err := ResolveRunnable(candidate); err == nil {
+		if resolved, err := ResolveExecutable(candidate); err == nil {
 			return resolved, nil
 		}
 	}

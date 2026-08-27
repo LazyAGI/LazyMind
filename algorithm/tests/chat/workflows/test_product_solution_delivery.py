@@ -356,6 +356,182 @@ def test_prepare_context_accepts_json_and_evidence_artifact_paths(monkeypatch, t
     assert json.loads(contract_fact['value'])['registered_evidence'] == 'KB-001 已核验材料'
 
 
+def test_prepare_context_resolves_nested_bound_inputs_and_cross_task_artifacts(
+    monkeypatch, tmp_path,
+):
+    bridge = _load_writer_bridge()
+    workspace = tmp_path / 'current-task'
+    upstream_workspace = tmp_path / 'previous-task'
+    workspace.mkdir()
+    upstream_workspace.mkdir()
+    plan = upstream_workspace / 'execution_plan.json'
+    evidence = upstream_workspace / 'research_evidence.md'
+    profiles = upstream_workspace / 'resource_profiles.json'
+    direction = upstream_workspace / 'direction_document.md'
+    plan.write_text(json.dumps({
+        'data': json.dumps({
+            'execution_plan': {
+                'stage_chain': ['product-design-full-cycle'],
+                'selected_stage': 'shape-product-direction',
+                'word_target': 1200,
+            },
+        }, ensure_ascii=False),
+    }, ensure_ascii=False), encoding='utf-8')
+    evidence.write_text(json.dumps({'text': 'KB-001 已核验资料'}), encoding='utf-8')
+    profiles.write_text(json.dumps(json.dumps({
+        'data': [{'id': 'shared-profile'}],
+    }, ensure_ascii=False), ensure_ascii=False), encoding='utf-8')
+    direction.write_text('# 已批准产品方向\n', encoding='utf-8')
+
+    class FakeToolkit:
+        def build_writing_task(self, **_kwargs):
+            return json.dumps(json.dumps({'data': {}}, ensure_ascii=False), ensure_ascii=False)
+
+        def build_resources(self, file_paths_json, **_kwargs):
+            return file_paths_json
+
+        def profile_resources(self, **_kwargs):
+            return json.dumps({'profiles': [{'id': 'approved-direction'}]})
+
+        def create_writing_context(self, **_kwargs):
+            return json.dumps({'data': json.dumps({'facts': []})})
+
+    context = types.SimpleNamespace(
+        workspace_path=str(workspace),
+        params={
+            'session_id': 'bound-session',
+            'step_id': 'build_design_outline',
+            'remote_inputs': {
+                'execution_plan': str(plan),
+                'research_evidence': str(evidence),
+                'resource_profiles': str(profiles),
+                'direction_document': str(direction),
+            },
+        },
+    )
+    monkeypatch.setattr(bridge, 'WriterCreateToolkit', FakeToolkit)
+    monkeypatch.setattr(bridge, 'require_context', lambda: context)
+
+    result = bridge.product_writer_prepare_context('生成产品方案', 'plan')
+
+    task = json.loads(Path(result['writing_task']).read_text(encoding='utf-8'))
+    combined = json.loads(Path(result['resource_profiles']).read_text(encoding='utf-8'))
+    stored_context = json.loads(Path(result['writing_context']).read_text(encoding='utf-8'))
+    contract = next(
+        item for item in stored_context['facts']
+        if item['fact_id'] == 'product-stage-contract'
+    )
+    assert task['product_parameters']['stage_id'] == 'design'
+    assert task['product_parameters']['word_target'] == 1200
+    assert combined == [{'id': 'shared-profile'}, {'id': 'approved-direction'}]
+    assert json.loads(contract['value'])['registered_evidence'] == 'KB-001 已核验资料'
+
+
+def test_source_paths_reject_unbound_file_outside_current_workspace(monkeypatch, tmp_path):
+    bridge = _load_writer_bridge()
+    workspace = tmp_path / 'current-task'
+    workspace.mkdir()
+    unbound = tmp_path / 'private.txt'
+    unbound.write_text('not a workflow input', encoding='utf-8')
+    context = types.SimpleNamespace(workspace_path=str(workspace), params={'remote_inputs': {}})
+    monkeypatch.setattr(bridge, 'require_context', lambda: context)
+
+    with pytest.raises(ValueError, match='exact bound Workflow input'):
+        bridge._source_paths([str(unbound)])
+
+
+def test_document_pipeline_uses_bound_inputs_without_agent_file_plumbing(monkeypatch, tmp_path):
+    bridge = _load_writer_bridge()
+    workspace = tmp_path / 'current-task'
+    upstream = tmp_path / 'previous-task'
+    workspace.mkdir()
+    upstream.mkdir()
+    task = upstream / 'writing_task.json'
+    outline = upstream / 'outline_document.md'
+    context_file = upstream / 'writing_context.json'
+    task.write_text('{}', encoding='utf-8')
+    outline.write_text('# 产品方向\n\n## 目标\n', encoding='utf-8')
+    context_file.write_text('{}', encoding='utf-8')
+    context = types.SimpleNamespace(
+        workspace_path=str(workspace),
+        params={
+            'step_id': 'write_direction_document',
+            'remote_inputs': {
+                'direction_task': {'value': {'path': str(task)}},
+                'direction_outline': str(outline),
+                'direction_context_approved': str(context_file),
+            },
+        },
+    )
+    calls = []
+    monkeypatch.setattr(bridge, 'require_context', lambda: context)
+    monkeypatch.setattr(
+        bridge, 'product_writer_plan_sections',
+        lambda *args: calls.append(('plan', args)) or {'section_instructions': '/out/plan.json'},
+    )
+    monkeypatch.setattr(
+        bridge, 'product_writer_write_sections',
+        lambda *args: calls.append(('write', args)) or ['/out/chapters/one.md'],
+    )
+    monkeypatch.setattr(
+        bridge, 'product_writer_assemble_draft',
+        lambda *args: calls.append(('assemble', args)) or '/out/document.md',
+    )
+    monkeypatch.setattr(
+        bridge, 'product_writer_update_context',
+        lambda *args: calls.append(('context', args)) or '/out/context.json',
+    )
+
+    result = bridge.product_writer_generate_document_from_inputs('not-the-runtime-stage')
+
+    assert [name for name, _ in calls] == ['plan', 'write', 'assemble', 'context']
+    assert calls[0][1] == (str(task), str(outline), str(context_file))
+    assert result == {
+        'section_plan': '/out/plan.json',
+        'chapter_files': ['/out/chapters/one.md'],
+        'document': '/out/document.md',
+        'writing_context': '/out/context.json',
+        'warnings': [],
+    }
+
+
+def test_outline_pipeline_keeps_bound_input_plumbing_inside_bridge(monkeypatch, tmp_path):
+    bridge = _load_writer_bridge()
+    task = tmp_path / 'task.json'
+    context_file = tmp_path / 'context.json'
+    outline = tmp_path / 'outline.md'
+    approved = tmp_path / 'approved.json'
+    for path, content in (
+        (task, '{}'), (context_file, '{}'),
+        (outline, '# 产品方向\n\n## 一句话方向\n'), (approved, '{}'),
+    ):
+        path.write_text(content, encoding='utf-8')
+    calls = []
+    monkeypatch.setattr(bridge, '_runtime_stage', lambda: 'direction')
+    monkeypatch.setattr(
+        bridge, 'product_writer_prepare_context',
+        lambda **kwargs: calls.append(('prepare', kwargs)) or {
+            'writing_task': str(task), 'writing_context': str(context_file),
+        },
+    )
+    monkeypatch.setattr(
+        bridge, 'product_writer_generate_outline',
+        lambda *args: calls.append(('generate', args)) or str(outline),
+    )
+    monkeypatch.setattr(
+        bridge, 'product_writer_update_context',
+        lambda *args: calls.append(('context', args)) or str(approved),
+    )
+
+    result = bridge.product_writer_generate_outline_from_inputs('产品目标', 'wrong-stage')
+
+    assert [name for name, _ in calls] == ['prepare', 'generate', 'context']
+    assert result['writing_task'] == str(task)
+    assert result['outline'] == str(outline)
+    assert result['approved_context'] == str(approved)
+    assert 'PASS' in result['outline_report']
+
+
 def test_embedded_contract_and_workspace_local_html_output(tmp_path):
     tools = _load_contract_tools(tmp_path)
 
@@ -374,6 +550,98 @@ def test_embedded_contract_and_workspace_local_html_output(tmp_path):
     assert result['validation']['valid'] is True
     assert output.is_relative_to(tmp_path)
     assert output.name.endswith('prototype.html')
+
+
+def test_skill_contract_accepts_source_skill_name_as_stage_alias(tmp_path):
+    tools = _load_contract_tools(tmp_path)
+
+    contract = tools.load_product_skill_contract('prepare-development-handoff')
+
+    assert contract['stage_id'] == 'handoff'
+    assert contract['skill_name'] == 'prepare-development-handoff'
+
+
+def test_stage_contract_is_compact_and_excludes_source_snapshots(tmp_path):
+    tools = _load_contract_tools(tmp_path)
+
+    contract = tools.load_product_skill_contract('competitive')
+
+    assert 'children/analyze-competitors/SKILL.md' in contract['contract_text']
+    assert 'source-snapshots' not in contract['contract_text']
+    assert '--- BEGIN SKILL.md ---' not in contract['contract_text']
+
+
+def test_non_writer_stage_loader_reads_only_bound_materials(tmp_path):
+    tools = _load_contract_tools(tmp_path)
+    evidence = tmp_path / 'evidence.json'
+    direction = tmp_path / 'direction.md'
+    evidence.write_text(json.dumps({'data': 'KB-001 已核验事实'}), encoding='utf-8')
+    direction.write_text('# 已批准方向\n', encoding='utf-8')
+    context = types.SimpleNamespace(
+        workspace_path=str(tmp_path),
+        params={'remote_inputs': {
+            'research_evidence': str(evidence),
+            'direction_document': str(direction),
+        }},
+    )
+    tools.require_context = lambda: context
+
+    result = tools.load_product_stage_inputs('competitive')
+
+    assert result['materials']['research_evidence'] == 'KB-001 已核验事实'
+    assert result['materials']['direction_document'] == '# 已批准方向'
+    assert 'material_digest' in result['missing_optional_slots']
+
+
+def test_delivery_loader_returns_metadata_without_large_document_bodies(tmp_path):
+    tools = _load_contract_tools(tmp_path)
+    document = tmp_path / 'product-design.md'
+    document.write_text('# 产品方案\n' + '正文' * 10000, encoding='utf-8')
+    context = types.SimpleNamespace(
+        workspace_path=str(tmp_path),
+        params={'remote_inputs': {
+            'execution_plan': {'stage_chain': ['design']},
+            'design_document': {
+                'value': {'path': str(document), 'filename': '方案.md'},
+                'seq': 3,
+            },
+        }},
+    )
+    tools.require_context = lambda: context
+
+    result = tools.load_product_stage_inputs('delivery')
+
+    descriptor = result['materials']['design_document']
+    assert result['materials']['execution_plan'] == {'stage_chain': ['design']}
+    assert descriptor['filename'] == '方案.md'
+    assert descriptor['seq'] == 3
+    assert descriptor['size_bytes'] == document.stat().st_size
+    assert '正文' not in json.dumps(result, ensure_ascii=False)
+
+
+def test_competitive_validation_accepts_semantic_variants_without_fake_links(tmp_path):
+    tools = _load_contract_tools(tmp_path)
+    html = '''<!doctype html><html><head><title>竞品分析</title>
+    <meta name="viewport" content="width=device-width"></head><body>
+    <h1>竞品分析</h1><h2>能力对比矩阵</h2><table><tr><td>未知</td></tr></table>
+    <h2>生态地图与差异化定位</h2><svg></svg><h2>设计启示</h2>
+    <details><summary>证据限制</summary>当前无检索来源。</details></body></html>'''
+
+    assert tools._validate_competitive_report(html) == []
+
+
+def test_product_file_writer_returns_exact_saveable_path(tmp_path):
+    tools = _load_contract_tools(tmp_path)
+
+    path = tools.write_product_artifact_file(
+        'prototype.html',
+        '<!doctype html><title>原型</title><meta name="viewport" content="width=device-width">'
+        '<h1>原型</h1><button>继续</button>',
+        'prototype',
+    )
+
+    assert isinstance(path, str)
+    assert Path(path).is_file()
 
 
 @pytest.mark.parametrize(

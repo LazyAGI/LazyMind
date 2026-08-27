@@ -677,6 +677,7 @@ function buildRepairTraceChips(
   const toolKind = getStringField(summary, ["tool_kind", "tool"]);
   const exitCode = getNumberField(summary, ["exit_code", "returncode", "exitCode"]);
   const decision = getStringField(summary, ["decision", "decision_status"]);
+  const outcomeKind = getStringField(summary, ["outcome_kind", "outcomeKind"]);
   const executionType = getStringField(summary, ["execution_type", "executionType"]);
   const command = getStringField(summary, ["command"]);
 
@@ -697,6 +698,14 @@ function buildRepairTraceChips(
   }
   if (decision) {
     chips.push(t("selfEvolutionRun.repairTraceChipDecision", { decision }));
+  }
+  const outcomeLabels: Record<string, string> = {
+    validated_patch: t("selfEvolutionRun.repairTraceOutcomeValidated"),
+    fallback_patch: t("selfEvolutionRun.repairTraceOutcomeFallbackPatch"),
+    fallback_no_change: t("selfEvolutionRun.repairTraceOutcomeFallbackNoChange"),
+  };
+  if (outcomeKind && outcomeLabels[outcomeKind]) {
+    chips.push(outcomeLabels[outcomeKind]);
   }
   return chips;
 }

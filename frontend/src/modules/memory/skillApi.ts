@@ -438,7 +438,6 @@ export interface CreateSkillPayload {
 }
 
 export interface PublishSkillToMarketPayload {
-  tags: string[];
   source:
     | { type: "uploaded_zip"; uploadId: string }
     | { type: "url"; url: string };
@@ -451,6 +450,7 @@ export interface MarketSkillRecord extends SkillAssetRecord {
   marketStatus?: string;
   installed?: boolean;
   installedSkillId?: string;
+  provider?: string;
 }
 
 export interface MarketSkillListResult {
@@ -466,6 +466,7 @@ interface BuiltinSkillListItem {
   description: string;
   category: string;
   content: string;
+  provider?: string;
   tags?: string[];
   installed?: boolean;
   installed_skill_id?: string;
@@ -1068,7 +1069,10 @@ export async function getSkillAssetDetail(
   return normalizeSkillItem(payload, content);
 }
 
-export async function createSkillAsset(payload: CreateSkillPayload): Promise<string> {
+export async function createSkillAsset(
+  payload: CreateSkillPayload,
+  options?: { silentError?: boolean },
+): Promise<string> {
   const request: SkillCreateManagedOpenAPIRequest = {
     name: payload.name,
     description: payload.description,
@@ -1082,9 +1086,10 @@ export async function createSkillAsset(payload: CreateSkillPayload): Promise<str
         : { type: "url", url: payload.source.url },
   };
 
-  const response = await skillsApi.apiCoreSkillsPost({
-    skillCreateManagedOpenAPIRequest: request,
-  });
+  const response = await skillsApi.apiCoreSkillsPost(
+    { skillCreateManagedOpenAPIRequest: request },
+    options?.silentError ? ({ silentError: true } as never) : undefined,
+  );
   const body = unwrapEnvelope<{ skill_id?: string }>(response.data);
   return body.skill_id || "";
 }
@@ -1889,6 +1894,7 @@ export async function listBuiltinSkills(): Promise<MarketSkillRecord[]> {
     marketSource: "builtin",
     installed: Boolean(item.installed),
     installedSkillId: item.installed_skill_id || "",
+    provider: item.provider?.trim() || undefined,
   }));
 }
 
@@ -1911,7 +1917,6 @@ export async function publishSkillToMarket(
   const response = await skillMarketApi.apiCoreSkillMarketAdminItemsPost({
     marketPublishOpenAPIRequest: {
       name: "",
-      tags: payload.tags,
       source:
         payload.source.type === "uploaded_zip"
           ? { type: "uploaded_zip", upload_id: payload.source.uploadId }

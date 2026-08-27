@@ -50,7 +50,7 @@ func TestCompileCatalogBuildsLocalizedCasesAndHashedAssets(t *testing.T) {
 		t.Fatal(err)
 	}
 	cases := loaded.ShowcaseCases("en-US")
-	if len(cases) != 1 || cases[0].Type != TypeChat || cases[0].Title != "English demo" || cases[0].DetailTitle != "English detail" || cases[0].Category != "Education" || len(cases[0].Tasks) != 2 {
+	if len(cases) != 1 || cases[0].Type != TypeChat || cases[0].Provider != "LazyMind" || cases[0].Title != "English demo" || cases[0].DetailTitle != "English detail" || cases[0].Category != "Education" || len(cases[0].Tasks) != 2 {
 		t.Fatalf("cases = %#v", cases)
 	}
 	if cases[0].BuiltinSkillUID != "bsk_demo" || cases[0].SourceURL != "https://example.test/multi.zip" {
@@ -164,10 +164,97 @@ func TestLoadSourceDirectoryRejectsUnknownFieldsAndInvalidAssets(t *testing.T) {
 		body := strings.Replace(validFeaturedYAML("demo", false), "type: chat", "type: agent", 1)
 		writeFeaturedSource(t, root, "demo", body)
 		_, err := LoadSourceDirectory(root)
-		if err == nil || !strings.Contains(err.Error(), "type must be chat or work") {
+		if err == nil || !strings.Contains(err.Error(), "type must be chat, work, or workflow") {
 			t.Fatalf("error = %v", err)
 		}
 	})
+	t.Run("missing provider", func(t *testing.T) {
+		root := t.TempDir()
+		body := strings.Replace(validFeaturedYAML("demo", false), "provider: LazyMind\n", "", 1)
+		writeFeaturedSource(t, root, "demo", body)
+		_, err := LoadSourceDirectory(root)
+		if err == nil || !strings.Contains(err.Error(), "provider is required") {
+			t.Fatalf("error = %v", err)
+		}
+	})
+	t.Run("unsafe local Skill source", func(t *testing.T) {
+		root := t.TempDir()
+		body := strings.Replace(validFeaturedYAML("demo", false), "https://example.test/demo.zip", "../private-skill", 1)
+		writeFeaturedSource(t, root, "demo", body)
+		_, err := LoadSourceDirectory(root)
+		if err == nil || !strings.Contains(err.Error(), "HTTP(S) URL or a relative path") {
+			t.Fatalf("error = %v", err)
+		}
+	})
+}
+
+func TestCompileCatalogBuildsWorkflowCapabilityWithoutSkillBinding(t *testing.T) {
+	root := t.TempDir()
+	body := strings.Replace(validFeaturedYAML("test-workflow", false), "type: chat", "type: workflow", 1)
+	body = strings.Replace(
+		body,
+		"skill:\n  source_url: https://example.test/test-workflow.zip\n",
+		"workflow:\n  workflow_ref: builtin:test-workflow\n",
+		1,
+	)
+	writeFeaturedSource(t, root, "test-workflow", body)
+
+	definitions, err := LoadSourceDirectory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	catalog, err := CompileCatalog(definitions, filepath.Join(t.TempDir(), "featured-skills"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	cases := catalog.ShowcaseCases("zh-CN")
+	if len(cases) != 1 || cases[0].Type != TypeWorkflow || cases[0].WorkflowRef != "builtin:test-workflow" {
+		t.Fatalf("workflow cases = %#v", cases)
+	}
+	if cases[0].BuiltinSkillUID != "" || cases[0].SourceURL != "" {
+		t.Fatalf("Workflow capability unexpectedly contains a Skill binding: %#v", cases[0])
+	}
+}
+
+func TestLoadSourceDirectoryRejectsMixedSkillAndWorkflowBindings(t *testing.T) {
+	root := t.TempDir()
+	body := strings.Replace(validFeaturedYAML("demo", false), "type: chat", "type: workflow", 1)
+	body = strings.Replace(body, "placement:\n", "workflow:\n  workflow_ref: builtin:test-workflow\nplacement:\n", 1)
+	writeFeaturedSource(t, root, "demo", body)
+	_, err := LoadSourceDirectory(root)
+	if err == nil || !strings.Contains(err.Error(), "requires workflow and forbids skill") {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestLoadSourceDirectoryAcceptsLocalSkillSource(t *testing.T) {
+	root := t.TempDir()
+	body := strings.Replace(validFeaturedYAML("demo", false), "https://example.test/demo.zip", "featured/demo/skill", 1)
+	writeFeaturedSource(t, root, "demo", body)
+	definitions, err := LoadSourceDirectory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(definitions) != 1 || definitions[0].Skill.SourceURL != "featured/demo/skill" {
+		t.Fatalf("definitions = %#v", definitions)
+	}
+}
+
+func TestCompileCatalogAcceptsNormalizedBuiltinSkillSource(t *testing.T) {
+	root := t.TempDir()
+	body := strings.Replace(validFeaturedYAML("demo", false), "https://example.test/demo.zip", "featured/demo/skill", 1)
+	writeFeaturedSource(t, root, "demo", body)
+	definitions, err := LoadSourceDirectory(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	definitions[0].Skill.SourceURL = "builtin://featured/demo/skill"
+	definitions[0].Skill.BuiltinSkillUID = "bsk_demo"
+	definitions[0].Skill.Version = "1.0.0"
+	definitions[0].Skill.ArchiveSHA256 = strings.Repeat("a", 64)
+	if _, err := CompileCatalog(definitions, filepath.Join(t.TempDir(), "featured-skills")); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func TestLoadSourceDirectoryRejectsLocaleTaskDrift(t *testing.T) {
@@ -242,7 +329,7 @@ func validFeaturedYAML(id string, secondTask bool) string {
 	return "schema_version: 2\n" +
 		"id: " + id + "\n" +
 		"type: chat\n" +
-		"version: 1.0.0\nstatus: published\ndefault_locale: zh-CN\n" +
+		"version: 1.0.0\nstatus: published\ndefault_locale: zh-CN\nprovider: LazyMind\n" +
 		"skill:\n  source_url: https://example.test/" + id + ".zip\n" +
 		"placement:\n  home: true\n  gallery: true\n  order: 1\n" +
 		"classification:\n  category: Demo\n  tags: [demo]\n" +

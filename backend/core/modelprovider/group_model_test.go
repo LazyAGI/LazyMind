@@ -17,6 +17,11 @@ func TestCompatibleDBModelTypes(t *testing.T) {
 			want:      []string{"cross_modal_embed", "multimodal_embedding", "embed_image"},
 		},
 		{
+			name:      "evo includes text and vision chat models",
+			modelType: "evo_llm",
+			want:      []string{"llm", "vlm"},
+		},
+		{
 			name:      "other model types remain exact",
 			modelType: "llm",
 			want:      []string{"llm"},

@@ -1,12 +1,15 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"path/filepath"
 	"strings"
 	"testing"
 
 	"gorm.io/gorm"
+
+	skillmetadata "lazymind/core/skillv2/metadata"
 )
 
 func TestCreateSkillFromUploadedZip_RequiresSkillMD(t *testing.T) {
@@ -32,26 +35,164 @@ func TestCreateSkillFromUploadedZip_RequiresSkillMD(t *testing.T) {
 	assertNoSkillTruthRows(t, db)
 }
 
-func TestCreateSkillFromUploadedZip_RequiresFrontmatterMetadata(t *testing.T) {
+func TestCreateSkillFromUploadedZip_FallsBackMissingMetadataWithoutRewritingSkillMD(t *testing.T) {
+	tests := []struct {
+		name        string
+		filename    string
+		entryPath   string
+		content     []byte
+		wantName    string
+		wantDesc    string
+		generatedID bool
+	}{
+		{
+			name:      "no frontmatter uses archive filename",
+			filename:  "frontmatter.zip",
+			entryPath: "SKILL.md",
+			content:   []byte("# Skill\n\nFirst useful paragraph.\n\nSecond paragraph.\n"),
+			wantName:  "frontmatter",
+			wantDesc:  "First useful paragraph.",
+		},
+		{
+			name:      "missing name uses package root",
+			filename:  "ignored.zip",
+			entryPath: "wrapped-skill/SKILL.md",
+			content:   []byte("---\ndescription: Existing description\n---\n# Skill\n"),
+			wantName:  "wrapped-skill",
+			wantDesc:  "Existing description",
+		},
+		{
+			name:      "missing description uses body",
+			filename:  "ignored.zip",
+			entryPath: "SKILL.md",
+			content:   []byte("---\nname: existing-name\n---\n# Skill\n\nDescription from the body.\n"),
+			wantName:  "existing-name",
+			wantDesc:  "Description from the body.",
+		},
+		{
+			name:        "no naming source uses generated id",
+			entryPath:   "SKILL.md",
+			content:     []byte("# Skill\n\nGenerated fallback description.\n"),
+			wantDesc:    "Generated fallback description.",
+			generatedID: true,
+		},
+		{
+			name:      "complete frontmatter remains authoritative",
+			filename:  "ignored.zip",
+			entryPath: "SKILL.md",
+			content:   externalSkillMD("source-name", "Source description"),
+			wantName:  "source-name",
+			wantDesc:  "Source description",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := newSkillV2TestDB(t)
+			zipPath := filepath.Join(t.TempDir(), "source.zip")
+			writeSkillZip(t, zipPath, map[string][]byte{tt.entryPath: tt.content})
+			uploadStore := newFakeUploadStore()
+			uploadID := "upload_missing_metadata"
+			uploadStore.Put(UploadSession{UploadID: uploadID, OwnerUserID: "user_001", State: "completed", StoredPath: zipPath, Filename: tt.filename})
+			svc := newCreateSkillValidationService(t, db, uploadStore)
+
+			resp, err := svc.CreateSkill(context.Background(), validCreateSkillRequest(uploadID))
+			if err != nil {
+				t.Fatalf("CreateSkill returned error: %v", err)
+			}
+			var skill testSkillV2SkillRow
+			if err := db.Where("id = ?", resp.SkillID).Take(&skill).Error; err != nil {
+				t.Fatalf("query skill: %v", err)
+			}
+			wantName := tt.wantName
+			if tt.generatedID {
+				wantName = "lazymind-skill-" + resp.SkillID
+			}
+			if skill.Category != skillmetadata.ExternalCategory || skill.SkillName != wantName || skill.Description != tt.wantDesc {
+				t.Fatalf("skill metadata = %#v, want category=%q name=%q description=%q", skill, skillmetadata.ExternalCategory, wantName, tt.wantDesc)
+			}
+			blob := getBlobByPath(t, db, resp.HeadRevisionID, "SKILL.md")
+			if !bytes.Equal(blob.Content, tt.content) {
+				t.Fatalf("stored SKILL.md = %q, want original %q", blob.Content, tt.content)
+			}
+		})
+	}
+}
+
+func TestCreateSkillFromUploadedZip_RejectsInvalidMetadata(t *testing.T) {
 	for name, content := range map[string][]byte{
-		"frontmatter": []byte("# Skill\n"),
-		"name":        []byte("---\ndescription: description\n---\n# Skill\n"),
-		"description": []byte("---\nname: skill\n---\n# Skill\n"),
+		"invalid yaml":     []byte("---\nname: [\n---\n# Skill\n"),
+		"invalid name":     []byte("---\nname: bad/name\ndescription: description\n---\n# Skill\n"),
+		"long name":        []byte("---\nname: " + strings.Repeat("a", skillmetadata.MaxSkillNameLength+1) + "\ndescription: description\n---\n# Skill\n"),
+		"long description": []byte("---\nname: valid-name\ndescription: " + strings.Repeat("a", skillmetadata.MaxSkillDescriptionLength+1) + "\n---\n# Skill\n"),
 	} {
 		t.Run(name, func(t *testing.T) {
 			db := newSkillV2TestDB(t)
-			zipPath := filepath.Join(t.TempDir(), name+".zip")
+			zipPath := filepath.Join(t.TempDir(), "invalid.zip")
 			writeSkillZip(t, zipPath, map[string][]byte{"SKILL.md": content})
 			uploadStore := newFakeUploadStore()
-			uploadID := "upload_missing_" + name
-			uploadStore.Put(UploadSession{UploadID: uploadID, OwnerUserID: "user_001", State: "completed", StoredPath: zipPath, Filename: name + ".zip"})
-			svc := newCreateSkillValidationService(t, db, uploadStore)
+			uploadStore.Put(UploadSession{UploadID: "upload_invalid_metadata", OwnerUserID: "user_001", State: "completed", StoredPath: zipPath, Filename: "invalid.zip"})
 
-			if _, err := svc.CreateSkill(context.Background(), validCreateSkillRequest(uploadID)); err == nil {
+			_, err := newCreateSkillValidationService(t, db, uploadStore).CreateSkill(context.Background(), validCreateSkillRequest("upload_invalid_metadata"))
+			if err == nil {
 				t.Fatal("CreateSkill succeeded")
 			}
 			assertNoSkillTruthRows(t, db)
 		})
+	}
+}
+
+func TestCreateSkill_RejectsTooLongMetadata(t *testing.T) {
+	for _, sourceType := range []string{"uploaded_zip", "local_zip"} {
+		for name, spec := range map[string]struct {
+			skillName   string
+			description string
+		}{
+			"name": {
+				skillName:   strings.Repeat("a", skillmetadata.MaxSkillNameLength+1),
+				description: "用于阅读和总结论文的技能",
+			},
+			"description": {
+				skillName:   "论文精读",
+				description: strings.Repeat("a", skillmetadata.MaxSkillDescriptionLength+1),
+			},
+		} {
+			t.Run(sourceType+"/"+name, func(t *testing.T) {
+				db := newSkillV2TestDB(t)
+				zipPath := filepath.Join(t.TempDir(), name+".zip")
+				writeSkillZip(t, zipPath, map[string][]byte{
+					"SKILL.md": externalSkillMD(spec.skillName, spec.description),
+				})
+				uploadStore := newFakeUploadStore()
+				req := validCreateSkillRequest("upload_too_long_" + name)
+				req.Name = spec.skillName
+				req.Description = spec.description
+				if sourceType == "uploaded_zip" {
+					uploadStore.Put(UploadSession{
+						UploadID:    req.Source.UploadID,
+						OwnerUserID: "user_001",
+						State:       "completed",
+						StoredPath:  zipPath,
+						Filename:    name + ".zip",
+					})
+				} else {
+					req.Source = SourceInput{
+						Type:       "local_zip",
+						StoredPath: zipPath,
+						Filename:   name + ".zip",
+					}
+				}
+				svc := newCreateSkillValidationService(t, db, uploadStore)
+
+				_, err := svc.CreateSkill(context.Background(), req)
+				if err == nil {
+					t.Fatal("CreateSkill succeeded")
+				}
+				if !strings.Contains(err.Error(), "cannot exceed") {
+					t.Fatalf("CreateSkill error = %v, want cannot exceed", err)
+				}
+				assertNoSkillTruthRows(t, db)
+			})
+		}
 	}
 }
 

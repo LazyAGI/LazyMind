@@ -92,6 +92,7 @@ x-core-db-conn: &core-db-conn
   LAZYMIND_CORE_DATABASE_URL: ${LAZYMIND_CORE_DATABASE_URL:-postgresql+psycopg://root:123456@db:5432/core}
 
 x-ocr-env: &ocr-env
+  # Local MinerU used by DynamicPDFReader only when frontend OCR is unset.
   LAZYMIND_OCR_SERVER_URL: http://mineru:8000
   LAZYMIND_MINERU_BACKEND: ${LAZYMIND_MINERU_BACKEND:-pipeline}
   LAZYLLM_MINERU_BACKEND: ${LAZYMIND_MINERU_BACKEND:-pipeline}
@@ -113,6 +114,19 @@ x-cache-env: &cache-env
   LAZYLLM_READER_USE_CACHE: ${LAZYMIND_READER_USE_CACHE:-true}
 
 services:
+
+  skill-bundler:
+    profiles: ["tools"]
+    build:
+      network: host
+      context: .
+      dockerfile: backend/core/Dockerfile
+      target: skill-bundler
+      args:
+        <<: *mirror-args
+    volumes:
+      - ./skills:/workspace/skills
+      - ./workflows:/workspace/workflows:ro
 
   kong:
     image: ${LAZYMIND_IMAGE_MIRROR:-registry.cn-hangzhou.aliyuncs.com}/lazyllm/lazymind-kong:${LAZYMIND_IMAGE_TAG:-latest}
@@ -791,7 +805,9 @@ services:
       LAZYMIND_SEGMENT_STORE_PASSWORD: ${LAZYMIND_SEGMENT_STORE_PASSWORD:-LazyRAG_OpenSearch123!}
       LAZYMIND_SHARED_UPLOAD_DIR: /var/lib/lazymind/uploads
       LAZYMIND_MOUNT_BASE_DIR: /var/lib/lazymind/uploads
-      LAZYMIND_AGENTIC_WORKSPACE: /tmp/.lazyllm_rag/agent_workspace
+      # Same root as SUBAGENT_WORKSPACE. chat_agent_workspace() adds chat-artifacts/<user>/<conv>/,
+      # so unpublished working files and tool_spills persist next to published artifacts.
+      LAZYMIND_AGENTIC_WORKSPACE: /data/subagent
       LAZYMIND_SUBAGENT_WORKSPACE: /data/subagent
       LAZYMIND_USE_INNER_MODEL: "true"
       LAZYMIND_MAX_CONCURRENCY: ${LAZYMIND_MAX_CONCURRENCY:-10}
@@ -817,6 +833,18 @@ services:
       LAZYMIND_MODEL_CONFIG_PATH: ${LAZYMIND_MODEL_CONFIG_PATH:-dynamic}
       LAZYMIND_CORE_SERVICE_URL: http://core:8000
       LAZYMIND_WORD_GROUP_APPLY_URL: ""
+      # Context compression (code default ON). Local .env may set false.
+      # Override in .env: LAZYMIND_CONTEXT_COMPRESSION_ENABLED=false
+      LAZYMIND_CONTEXT_COMPRESSION_ENABLED: ${LAZYMIND_CONTEXT_COMPRESSION_ENABLED:-true}
+      # LLM summary compression after deterministic prune (code default ON).
+      LAZYMIND_CONTEXT_SUMMARY_COMPRESSION_ENABLED: ${LAZYMIND_CONTEXT_SUMMARY_COMPRESSION_ENABLED:-true}
+      LAZYMIND_CONTEXT_SUMMARY_KEEP_RECENT_RATIO: ${LAZYMIND_CONTEXT_SUMMARY_KEEP_RECENT_RATIO:-0.10}
+      LAZYMIND_CONTEXT_SUMMARY_MIN_RECENT_USER_TURNS: ${LAZYMIND_CONTEXT_SUMMARY_MIN_RECENT_USER_TURNS:-1}
+      # Optional agent-lab runtime JSONL (turns/tools/file_read/harness/prune/summary). Empty = disabled.
+      # Example: LAZYMIND_AGENT_LAB_EVENT_PATH=/var/lib/lazymind/agent-lab/runtime/events.jsonl
+      LAZYMIND_AGENT_LAB_EVENT_PATH: ${LAZYMIND_AGENT_LAB_EVENT_PATH:-}
+      # Deprecated alias; prefer LAZYMIND_AGENT_LAB_EVENT_PATH.
+      LAZYMIND_CONTEXT_COMPRESSION_EVENT_PATH: ${LAZYMIND_CONTEXT_COMPRESSION_EVENT_PATH:-}
       LAZYMIND_ENABLE_ROUTER: ${LAZYMIND_ENABLE_ROUTER:-true}
       LAZYMIND_ROUTER_PORT_POOL_START: 18000
       LAZYMIND_ROUTER_PORT_POOL_END: 18999

@@ -19,9 +19,11 @@ import (
 )
 
 type catalogModel struct {
-	Name           string  `yaml:"name"`
-	Type           string  `yaml:"type"`
-	MaxInputTokens *string `yaml:"max_input_tokens"`
+	Name                   string   `yaml:"name"`
+	Type                   string   `yaml:"type"`
+	MaxInputTokens         *string  `yaml:"max_input_tokens"`
+	FreeAutoSelectPriority int      `yaml:"free_auto_select_priority"`
+	FreeAutoSelectBaseURLs []string `yaml:"free_auto_select_base_urls"`
 }
 
 type catalogSupplier struct {
@@ -144,9 +146,19 @@ func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName str
 		}
 		item.MaxInputTokens = &maxInputTokens
 	}
+	if item.FreeAutoSelectPriority < 0 {
+		return errors.New("model free_auto_select_priority must not be negative")
+	}
+	if item.FreeAutoSelectPriority == 0 && len(item.FreeAutoSelectBaseURLs) > 0 {
+		return errors.New("model free_auto_select_base_urls requires a positive free_auto_select_priority")
+	}
+	freeAutoSelectBaseURLs, err := encodeFreeAutoSelectBaseURLs(item.FreeAutoSelectBaseURLs)
+	if err != nil {
+		return err
+	}
 
 	var row orm.DefaultModel
-	err := tx.Where("default_model_provider_id = ? AND name = ?", providerID, name).Take(&row).Error
+	err = tx.Where("default_model_provider_id = ? AND name = ?", providerID, name).Take(&row).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		row = orm.DefaultModel{
 			ID:                     common.GenerateID(),
@@ -155,13 +167,18 @@ func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName str
 			Name:                   name,
 			ModelType:              modelType,
 			MaxInputTokens:         item.MaxInputTokens,
+			FreeAutoSelectPriority: item.FreeAutoSelectPriority,
+			FreeAutoSelectBaseURLs: freeAutoSelectBaseURLs,
 			CreatedAt:              now,
 			UpdatedAt:              now,
 		}
 		if err := tx.Create(&row).Error; err != nil {
 			return err
 		}
-		return syncDefaultModelToUserGroups(tx, now, providerID, providerName, name, modelType, item.MaxInputTokens)
+		return syncDefaultModelToUserGroups(
+			tx, now, providerID, providerName, name, modelType, item.MaxInputTokens,
+			item.FreeAutoSelectPriority, freeAutoSelectBaseURLs,
+		)
 	}
 	if err != nil {
 		return err
@@ -170,15 +187,44 @@ func upsertDefaultModel(tx *gorm.DB, now time.Time, providerID, providerName str
 	if err := tx.Model(&orm.DefaultModel{}).
 		Where("id = ?", row.ID).
 		Updates(map[string]any{
-			"provider_name":    providerName,
-			"model_type":       modelType,
-			"max_input_tokens": item.MaxInputTokens,
-			"updated_at":       now,
-			"deleted_at":       nil,
+			"provider_name":              providerName,
+			"model_type":                 modelType,
+			"max_input_tokens":           item.MaxInputTokens,
+			"free_auto_select_priority":  item.FreeAutoSelectPriority,
+			"free_auto_select_base_urls": freeAutoSelectBaseURLs,
+			"updated_at":                 now,
+			"deleted_at":                 nil,
 		}).Error; err != nil {
 		return err
 	}
-	return syncDefaultModelToUserGroups(tx, now, providerID, providerName, name, modelType, item.MaxInputTokens)
+	return syncDefaultModelToUserGroups(
+		tx, now, providerID, providerName, name, modelType, item.MaxInputTokens,
+		item.FreeAutoSelectPriority, freeAutoSelectBaseURLs,
+	)
+}
+
+func encodeFreeAutoSelectBaseURLs(values []string) (string, error) {
+	if len(values) == 0 {
+		return "", nil
+	}
+	normalized := make([]string, 0, len(values))
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		value = normalizeBaseURLForCompare(value)
+		if value == "" {
+			return "", errors.New("model free_auto_select_base_urls must not contain an empty URL")
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		normalized = append(normalized, value)
+	}
+	encoded, err := json.Marshal(normalized)
+	if err != nil {
+		return "", fmt.Errorf("marshal model free_auto_select_base_urls: %w", err)
+	}
+	return string(encoded), nil
 }
 
 // syncDefaultModelToUserGroups mirrors catalog metadata into default models already
@@ -189,15 +235,19 @@ func syncDefaultModelToUserGroups(
 	now time.Time,
 	providerID, providerName, modelName, modelType string,
 	maxInputTokens *string,
+	freeAutoSelectPriority int,
+	freeAutoSelectBaseURLs string,
 ) error {
 	providerIDs := tx.Model(&orm.UserModelProvider{}).
 		Select("id").
 		Where("default_model_provider_id = ? AND deleted_at IS NULL", providerID)
 
 	updates := map[string]any{
-		"model_type":       modelType,
-		"max_input_tokens": maxInputTokens,
-		"updated_at":       now,
+		"model_type":                 modelType,
+		"max_input_tokens":           maxInputTokens,
+		"free_auto_select_priority":  freeAutoSelectPriority,
+		"free_auto_select_base_urls": freeAutoSelectBaseURLs,
+		"updated_at":                 now,
 	}
 	if err := tx.Model(&orm.UserModelProviderGroupModel{}).
 		Where("is_default = ? AND name = ? AND user_model_provider_id IN (?) AND deleted_at IS NULL", true, modelName, providerIDs).
@@ -252,6 +302,8 @@ func syncDefaultModelToUserGroups(
 			Name:                     modelName,
 			ModelType:                modelType,
 			MaxInputTokens:           maxInputTokens,
+			FreeAutoSelectPriority:   freeAutoSelectPriority,
+			FreeAutoSelectBaseURLs:   freeAutoSelectBaseURLs,
 			IsDefault:                true,
 			BaseModel: orm.BaseModel{
 				CreateUserID:   group.CreateUserID,

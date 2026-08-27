@@ -724,6 +724,35 @@ func normalizeDatasetOrderBy(orderBy string) (string, error) {
 	}
 }
 
+type datasetListOrder struct {
+	clause    string
+	usageJoin bool
+}
+
+func resolveDatasetListOrder(orderBy string) datasetListOrder {
+	switch strings.TrimSpace(orderBy) {
+	case "latest_updated":
+		return datasetListOrder{
+			clause: "COALESCE((SELECT MAX(documents.updated_at) FROM documents WHERE documents.dataset_id = datasets.id AND documents.deleted_at IS NULL), datasets.updated_at) DESC, datasets.id DESC",
+		}
+	case "most_used":
+		return datasetListOrder{
+			clause:    "COALESCE(dus.usage_count, 0) DESC, datasets.updated_at DESC, datasets.id DESC",
+			usageJoin: true,
+		}
+	case "recent_used":
+		return datasetListOrder{
+			clause:    "CASE WHEN dus.last_used_at IS NULL OR datasets.updated_at > dus.last_used_at THEN datasets.updated_at ELSE dus.last_used_at END DESC, datasets.id DESC",
+			usageJoin: true,
+		}
+	default:
+		if ob, err := normalizeDatasetOrderBy(orderBy); err == nil {
+			return datasetListOrder{clause: ob}
+		}
+		return datasetListOrder{clause: "updated_at desc"}
+	}
+}
+
 func containsAll(have []string, want []string) bool {
 	if len(want) == 0 {
 		return true

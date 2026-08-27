@@ -12,7 +12,7 @@ from channel_gateway.common.domain.channel import ClaimedOutbound
 from channel_gateway.common.domain.outbound import is_image_content_type
 from channel_gateway.common.ports.core import TaskClient
 from channel_gateway.common.ports.messaging import (
-    TaskArtifactOutboxRepository,
+    TaskFollowupOutboxRepository,
 )
 from channel_gateway.common.ports.providers import RuntimeCredentialStore
 
@@ -21,7 +21,7 @@ _logger = logging.getLogger(__name__)
 _POLL_SECONDS = 2
 _OUTBOX_BATCH_SIZE = 100
 _MAX_ARTIFACTS = 20
-TASK_ARTIFACT_MONITOR_VERSION = 1
+TASK_ARTIFACT_MONITOR_VERSION = 2
 _TERMINAL_STATUSES = {
     'completed',
     'succeeded',
@@ -32,6 +32,8 @@ _TERMINAL_STATUSES = {
     'stopped',
     'interrupted',
 }
+_SUCCESS_STATUSES = {'completed', 'succeeded', 'success'}
+_FAILED_STATUSES = {'failed'}
 
 
 def find_task(
@@ -50,6 +52,27 @@ def find_task(
 
 def task_terminal(task: dict[str, Any]) -> bool:
     return str(task.get('status') or '').lower() in _TERMINAL_STATUSES
+
+
+def task_terminal_text(tasks: list[dict[str, Any]]) -> str:
+    lines: list[str] = []
+    for task in tasks:
+        status = str(task.get('status') or '').strip().lower()
+        if status not in _TERMINAL_STATUSES:
+            continue
+        title = str(task.get('title') or '后台任务').strip()[:200]
+        label = (
+            '已完成'
+            if status in _SUCCESS_STATUSES
+            else '执行失败'
+            if status in _FAILED_STATUSES
+            else '已停止'
+        )
+        lines.append(f'{title}：{label}')
+        summary = str(task.get('summary') or '').strip()
+        if summary:
+            lines.append(summary[:1000])
+    return '\n'.join(lines)
 
 
 def artifact_manifest_hash(artifacts: list[dict[str, str]]) -> str:
@@ -220,7 +243,7 @@ class TaskArtifactMonitor:
         self,
         *,
         provider: str,
-        store: TaskArtifactOutboxRepository,
+        store: TaskFollowupOutboxRepository,
         credentials: RuntimeCredentialStore,
         tasks: TaskClient,
     ):
@@ -323,6 +346,11 @@ class TaskArtifactMonitor:
             task = find_task(tasks_by_conversation[conversation_id], task_id)
             if task is not None:
                 selected.append(task)
+        terminal = bool(
+            len(selected) == len(bindings)
+            and selected
+            and all(task_terminal(task) for task in selected)
+        )
         artifacts, omitted = task_artifact_manifest(
             parent_outbox_id=outbound.outbox_id,
             part_index=monitor_index,
@@ -335,12 +363,20 @@ class TaskArtifactMonitor:
             artifacts=artifacts,
             provider_context=dict(outbound.provider_context),
         )
-        terminal = bool(
-            len(selected) == len(bindings)
-            and selected
-            and all(task_terminal(task) for task in selected)
+        status_delivery = (
+            self._store.sync_task_status_outbound(
+                parent=outbound,
+                part_index=monitor_index,
+                text=task_terminal_text(selected),
+            )
+            if terminal
+            else ''
         )
-        delivery_settled = terminal and delivery['inflight'] == 0
+        delivery_settled = bool(
+            terminal
+            and delivery['inflight'] == 0
+            and status_delivery in {'sent', 'dead'}
+        )
         expected_revision = int(
             monitor_state.get('monitor_revision') or 0
         )
@@ -360,6 +396,7 @@ class TaskArtifactMonitor:
                         and omitted == 0
                     ),
                     'failed_count': delivery['dead'],
+                    'status_failed': status_delivery == 'dead',
                     'omitted_count': omitted,
                     'manifest_hash': artifact_manifest_hash(artifacts),
                 },

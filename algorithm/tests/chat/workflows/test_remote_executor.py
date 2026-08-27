@@ -1,3 +1,4 @@
+import base64
 import json
 import os
 import threading
@@ -137,6 +138,125 @@ async def test_remote_executor_passes_external_scalar_inputs_as_values(tmp_path)
 
 
 @pytest.mark.asyncio
+async def test_remote_executor_unwraps_upstream_artifacts_by_declared_type(tmp_path):
+    worker = RemoteWorkflowExecutor()
+
+    class Runtime:
+        async def input(self, _client, _attempt, _lease, material):
+            values = {
+                'workflow_routing': {
+                    'text': 'WORKFLOW: FIND_AND_EDIT\nNEXT_STEPS: collect_materials',
+                },
+                'source_image': {
+                    'path': 'https://images.example.test/haaland.png',
+                    'caption': 'validated source',
+                },
+            }
+            raw = json.dumps(values[material]).encode('utf-8')
+            return {
+                'name': material + '.json',
+                'mime_type': 'application/json',
+                'content_base64': base64.b64encode(raw).decode('ascii'),
+            }
+
+    worker.runtime = Runtime()
+    context = {
+        'declared_input_types': {
+            'workflow_routing': 'text', 'source_image': 'image',
+        },
+        'inputs': {
+            'workflow_routing': {'source_type': 'artifact'},
+            'source_image': {'source_type': 'artifact'},
+        },
+    }
+    values = await worker._resolve_inputs(
+        object(), 'attempt-1', 'lease-1', context, str(tmp_path),
+    )
+
+    assert values['workflow_routing'].startswith('WORKFLOW: FIND_AND_EDIT')
+    assert values['source_image'] == {
+        'path': 'https://images.example.test/haaland.png',
+        'caption': 'validated source',
+    }
+    assert worker._direct_input_value_slots(context) == {
+        'workflow_routing', 'source_image',
+    }
+    assert not (tmp_path / 'inputs').exists()
+
+
+@pytest.mark.asyncio
+async def test_remote_executor_infers_artifact_types_when_core_omits_them(tmp_path):
+    worker = RemoteWorkflowExecutor()
+
+    class Runtime:
+        async def input(self, _client, _attempt, _lease, material):
+            values = {
+                'workflow_routing': {'text': 'WORKFLOW: FIND_AND_EDIT'},
+                'material_images': {
+                    'path': 'https://images.example.test/haaland.jpg',
+                    'caption': 'validated source',
+                },
+            }
+            raw = json.dumps(values[material]).encode('utf-8')
+            item = {
+                'name': material + '.json',
+                'mime_type': 'application/json',
+                'content_base64': base64.b64encode(raw).decode('ascii'),
+            }
+            return {'items': [item]} if material == 'material_images' else item
+
+    worker.runtime = Runtime()
+    context = {
+        'inputs': {
+            'workflow_routing': {'source_type': 'artifact'},
+            'material_images': [{'source_type': 'artifact'}],
+        },
+    }
+    values = await worker._resolve_inputs(
+        object(), 'attempt-1', 'lease-1', context, str(tmp_path),
+    )
+
+    assert values == {
+        'workflow_routing': 'WORKFLOW: FIND_AND_EDIT',
+        'material_images': [{
+            'path': 'https://images.example.test/haaland.jpg',
+            'caption': 'validated source',
+        }],
+    }
+    assert context['declared_input_types'] == {
+        'workflow_routing': 'text',
+        'material_images': 'image',
+    }
+    assert not (tmp_path / 'inputs').exists()
+
+
+@pytest.mark.asyncio
+async def test_remote_executor_materializes_binary_image_inputs(tmp_path):
+    worker = RemoteWorkflowExecutor()
+
+    class Runtime:
+        async def input(self, _client, _attempt, _lease, _material):
+            return {
+                'name': 'upload.png',
+                'mime_type': 'image/png',
+                'content_base64': base64.b64encode(b'\x89PNG\r\n').decode('ascii'),
+            }
+
+    worker.runtime = Runtime()
+    context = {
+        'declared_input_types': {'source_image': 'image'},
+        'inputs': {'source_image': {'source_type': 'input_resource'}},
+    }
+    values = await worker._resolve_inputs(
+        object(), 'attempt-1', 'lease-1', context, str(tmp_path),
+    )
+
+    path = tmp_path / 'inputs' / 'upload.png'
+    assert values['source_image'] == str(path)
+    assert path.read_bytes() == b'\x89PNG\r\n'
+
+
+@pytest.mark.asyncio
 async def test_remote_executor_materializes_every_list_input_in_order(tmp_path):
     worker = RemoteWorkflowExecutor()
 
@@ -225,11 +345,16 @@ async def test_remote_executor_keeps_workflow_inputs_out_of_user_attachments(
     assert captured['remote_input_value_slots'] == ['brief']
     assert '_attachment_context' not in captured
     agentic = runner._build_agentic_config(
-        {'conversation_id': 'conversation-1', 'objective': 'test'},
+        {
+            'conversation_id': 'conversation-1',
+            'objective': 'test',
+            'workspace_path': str(tmp_path / 'task-1'),
+        },
         captured,
         'workflow_step',
     )
     assert agentic['files'] == ['/uploads/real-user-file.txt']
+    assert agentic['workflow_workspace_path'] == str(tmp_path / 'task-1')
     assert captured['remote_inputs']['brief'] not in agentic['files']
 
 

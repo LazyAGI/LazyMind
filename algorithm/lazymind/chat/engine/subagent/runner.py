@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import asyncio
 import json
 import os
@@ -14,6 +15,10 @@ from typing import Any, Dict, List, Optional
 
 import lazyllm
 from lazyllm import LOG, AutoModel
+from lazyllm.tools.agent.base import (
+    TOOL_OBSERVATION_KEY,
+    attachable_tool_observation,
+)
 from lazyllm.tools.tool_config_inject import inject_tool_config
 
 from lazymind.chat.engine.agent_runtime import (
@@ -27,6 +32,7 @@ from lazymind.chat.engine.agent_runtime import (
     make_cancel_stop_condition,
 )
 from lazymind.chat.engine.prompts import add_standard_system_sections
+from lazymind.chat.engine.tools.local_file.workspace import grep, read_file
 from lazymind.chat.service.component.event_translator import AgentEventFrameTranslator
 from lazymind.chat.service.component.tool_registry import (
     ATTACHMENT_EDIT_TOOL_CONFIG,
@@ -301,6 +307,8 @@ def _build_subagent_tools(
         subagent_tools.get_artifact,
         subagent_tools.list_artifacts,
         subagent_tools.list_knowledge_bases,
+        grep,
+        read_file,
         subagent_tools.find_artifact,
     ]
     if include_artifact_writes:
@@ -465,6 +473,8 @@ def _build_agentic_config(
             'workflow_id': params.get('workflow_id', ''),
             'workflow_session_id': params.get('session_id', ''),
             'workflow_step': params.get('step_id', ''),
+            # Trusted execution-spec boundary used only by read-only local file tools.
+            'workflow_workspace_path': str(task.get('workspace_path') or '').strip(),
         })
     # Prefer the launched workflow session id whenever present so artifact tools work
     # even if parent_agentic_config carried a stale empty workflow_session_id.
@@ -481,6 +491,7 @@ def _build_subagent_plan(
     tools: List[Any],
     tool_prompt_appendices: Dict[str, List[str]],
     resume: bool = False,
+    llm_config: Optional[Dict[str, Any]] = None,
 ) -> AgentRunPlan:
     builder = PromptBuilder.for_role(AgentRole.SUBAGENT)
     add_standard_system_sections(
@@ -490,6 +501,7 @@ def _build_subagent_plan(
         current_query=ctx.objective,
         show_tool_status=False,
         tool_prompt_appendices=tool_prompt_appendices,
+        include_editable_writing=False,
     )
     builder.system(
         'subagent_role', 'SubAgent Role', (
@@ -502,7 +514,10 @@ def _build_subagent_plan(
             'Use the selected user-visible language for progress and the final summary. '
             'Artifact content must follow the language required by the task objective or '
             'the output slot contract; do not translate an artifact when its required '
-            'format specifies another language.'
+            'format specifies another language. '
+            'Never emit a fenced Markdown block with the language `editable`; that is a '
+            'main Chat Agent presentation protocol. Return normal summary text and persist '
+            'requested deliverables through the declared artifact tools.'
         ),
         'platform.subagent',
         priority=20,
@@ -559,7 +574,32 @@ def _build_subagent_plan(
     attachment_section = render_attachment_content(
         normalize_attachments(history_files_per_turn),
         role=AgentRole.SUBAGENT,
+        skip_pdf=True,
     )
+    file_catalog = ''
+    attachment_context = _attachment_context(ctx.params)
+    conversation_id = str(
+        getattr(ctx, 'conversation_id', '')
+        or ctx.params.get('conversation_id')
+        or attachment_context.get('conversation_id')
+        or ''
+    ).strip()
+    user_id = str(attachment_context.get('user_id') or '').strip()
+    if conversation_id:
+        try:
+            from lazymind.chat.engine.tools.local_file.store import (
+                FileResourceStore,
+                render_file_resource_catalog,
+            )
+            from lazymind.chat.engine.tools.local_file.workspace import chat_agent_workspace
+            store = FileResourceStore(chat_agent_workspace(user_id or '0', conversation_id))
+            file_catalog = render_file_resource_catalog(store)
+        except Exception:
+            file_catalog = ''
+    if file_catalog:
+        attachment_section = (
+            f'{file_catalog}\n\n{attachment_section}' if attachment_section else file_catalog
+        )
     builder.runtime(
         'subagent_attachments', 'User Attachments', attachment_section,
         'request.attachments', priority=40, content_kind='reference',
@@ -668,6 +708,7 @@ def _build_subagent_plan(
         execution_options=AgentExecutionOptions(
             extra_stop_condition=make_cancel_stop_condition(),
             max_retries=max(1, int(_cfg['agentic_expanded_max_rounds']) - 1),
+            llm_config=llm_config or {},
         ),
     )
 
@@ -783,7 +824,12 @@ def _workflow_control_from_tool_results(
             try:
                 payload = json.loads(payload)
             except (TypeError, ValueError, json.JSONDecodeError):
-                continue
+                try:
+                    payload = ast.literal_eval(payload)
+                except (SyntaxError, ValueError):
+                    continue
+        if isinstance(payload, dict) and payload.get('ok') is True:
+            payload = payload.get('value')
         if not isinstance(payload, dict) or not isinstance(payload.get('control'), dict):
             continue
         next_step = str(payload['control'].get('next_step') or '').strip()
@@ -998,6 +1044,7 @@ async def run_subagent_stream(
                 runtime_configs + attachment_configs,
             ),
             resume=resume,
+            llm_config=model_config,
         )
 
         step_seq = db.max_step_seq(task_id) + 1 if resume else 0
@@ -1486,11 +1533,16 @@ def _rebuild_history_from_steps(db: SubAgentDB, task_id: str) -> List[Dict[str, 
                     history.pop()
                 break
             for r in valid:
-                history.append({
+                result = r.get('result', '')
+                tool_msg = {
                     'role': 'tool',
                     'tool_call_id': r.get('tool_call_id'),
                     'name': r.get('name', ''),
-                    'content': str(r.get('result', '')),
-                })
+                    'content': str(result),
+                }
+                observation = attachable_tool_observation(result)
+                if observation is not None:
+                    tool_msg[TOOL_OBSERVATION_KEY] = observation
+                history.append(tool_msg)
             pending_ids = set()
     return history

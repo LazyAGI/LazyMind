@@ -112,6 +112,23 @@ func TestListUserProvidersReturnsCatalogDescriptionForRequestedLanguage(t *testi
 	if providerCount != 18 {
 		t.Fatalf("expected 18 catalog providers, got %d", providerCount)
 	}
+	var freeModel orm.DefaultModel
+	if err := db.Where("provider_name = ? AND name = ?", "SiliconFlow", "THUDM/GLM-Z1-9B-0414").
+		Take(&freeModel).Error; err != nil {
+		t.Fatalf("load catalog free model: %v", err)
+	}
+	if freeModel.FreeAutoSelectPriority != 1 || freeModel.FreeAutoSelectBaseURLs != "" {
+		t.Fatalf("unexpected catalog free auto-selection metadata: %#v", freeModel)
+	}
+	var scopedFreeModel orm.DefaultModel
+	if err := db.Where("provider_name = ? AND name = ?", "SenseNova", "sensenova-6.7-flash-lite").
+		Take(&scopedFreeModel).Error; err != nil {
+		t.Fatalf("load scoped catalog free model: %v", err)
+	}
+	if scopedFreeModel.FreeAutoSelectPriority != 1 ||
+		!strings.Contains(scopedFreeModel.FreeAutoSelectBaseURLs, "token.sensenova.cn") {
+		t.Fatalf("unexpected scoped free auto-selection metadata: %#v", scopedFreeModel)
+	}
 
 	var defaultProvider orm.DefaultModelProvider
 	if err := db.Where("name = ?", "Qwen").Take(&defaultProvider).Error; err != nil {

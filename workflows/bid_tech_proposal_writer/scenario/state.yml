@@ -153,10 +153,12 @@ steps:
       pipeline remains deterministic.
 
       Then call bid_writer_prepare_context(user_request="{{user_input}}",
-      requirements_markdown=<technical requirements>,
-      disqualification_markdown=<reviewed disqualification Markdown>,
-      word_target=<generation_parameters.word_target>,
-      knowledge_text=<knowledge_evidence>). This is the only
+      requirements_markdown=<technical_requirements artifact path>,
+      disqualification_markdown=<disqualification_items artifact path>,
+      word_target=<generation_parameters artifact path>,
+      knowledge_text=<knowledge_evidence artifact path>). Pass the bound paths directly;
+      do not copy large artifact bodies or manually parse generation_parameters in the Agent.
+      The business bridge accepts both paths and inline values for backward compatibility. This is the only
       preparation path for later outline and drafting: it delegates task construction,
       resource profiling, and writing context to LazyMind's shared Writer capability.
       Save the three returned paths as writing_task, resource_profiles, and writing_context
@@ -197,12 +199,9 @@ steps:
       bid-specific validation contract. Every Writer tool returns a real local path; save
       it with content_type="file" and never save the path string as text.
 
-      Retrieve writing_task, writing_context, knowledge_evidence, technical_requirements,
-      disqualification_items, generation_parameters, and the latest selected
-      outline_document when it exists. Use generation_parameters.word_target as the target.
-      `bid_writer_read_markdown` is only for Markdown/plain-text content. Never call it on
-      writing_task, resource_profiles, writing_context, or any other `.json` path; pass
-      those JSON file paths directly to the Writer tools that declare them as inputs.
+      Retrieve writing_task, writing_context, and the latest selected outline_document when
+      it exists. Large requirement and parameter bodies are already bound to this Attempt;
+      never read, copy, reconstruct, or pass their JSON/text through the model.
       Select exactly one mode:
 
       A. First generation or complete regeneration: call bid_writer_generate_outline with
@@ -212,32 +211,14 @@ steps:
          document_slot="outline_document". Save returned revision internals under the
          outline_* optional slots, and use its returned outline_document as the seed.
 
-      Do not execute both modes in one run. Read the selected seed with
-      bid_writer_read_markdown. Convert its heading hierarchy into a compact JSON candidate
-      with project_name, project_full_name, total_word_target, color_scheme="blue", and
-      chapters. Shared Writer Markdown reserves its single H1 for the document title: map
-      H2/H3/H4/H5 to bid chapter levels 1/2/3/4 and never turn the H1 title into a chapter.
-      The Markdown headings are authoritative for names and hierarchy; do not silently
-      restore a heading deleted by a human edit unless required to cover a source ID.
+      Do not execute both modes in one run. Call normalize_bid_outline_from_inputs exactly
+      once with outline_document_path=<the selected seed path>. This business adapter reads
+      the bound source paths directly, treats current Markdown headings as authoritative,
+      normalizes relative heading levels/numbering, allocates the confirmed target, removes
+      unknown IDs, and deterministically fills missing requirement/disqualification mappings.
+      Do not manually parse headings or retry validation in the Agent.
 
-      Follow these hard rules:
-      - maximum four levels; number values follow 1 / 1.1 / 1.1.1 / 1.1.1.1;
-      - every title is a Chinese noun phrase shorter than 10 characters and contains no
-        filesystem-illegal character;
-      - target_words applies to leaves; parent values equal the sum of descendants;
-      - use bid_requirements_refs and disqualification_refs on leaves, mapping every ID;
-      - preserve any source-mandated chapter names/order, otherwise use the software
-        project skeleton: 项目背景、需求分析、总体架构、功能设计、集成接口、实施运维、
-        售后服务、项目价值 as applicable;
-      - keep the leaf count practical for the requested total: never exceed
-        floor(word_target / 100), with 3–30 leaves overall; 12–30 is only the normal
-        range when the requested total is large enough.
-
-      Call validate_and_allocate_outline(outline_json=<candidate>,
-      requirements_markdown=<requirements>, disqualification_markdown=<items>,
-      word_target=<generation_parameters.word_target>). If valid is false, fix every
-      reported error and call again.
-      After PASS, call bid_writer_save_validated_outline with normalized_outline. This
+      Call bid_writer_save_validated_outline with the returned normalized_outline. This
       creates the canonical editable outline_document.md as clean user-facing Markdown;
       keep trace and word-allocation metadata in the structured outline artifact rather
       than HTML comments. Then call bid_writer_update_context using this canonical outline
@@ -250,9 +231,8 @@ steps:
       a new revision of the same outline_document slot; never create another visible outline.
     tools:
       - bid_writer_generate_outline
-      - bid_writer_read_markdown
       - bid_writer_revise_markdown
-      - validate_and_allocate_outline
+      - normalize_bid_outline_from_inputs
       - bid_writer_save_validated_outline
       - bid_writer_update_context
     inputs:
@@ -308,18 +288,11 @@ steps:
       writing_task, writing_context_after_outline, knowledge_evidence, technical_requirements,
       disqualification_items, generation_parameters, and the latest selected draft_document
       when one exists. Use generation_parameters.word_target for allocation and validation.
-      `bid_writer_read_markdown` is only for outline_document/draft_document and other
-      Markdown/plain-text artifacts. Never call it on writing_task, section_instructions,
-      writing_context_after_outline, or any other `.json` path; pass JSON paths directly
-      to the corresponding Writer tools.
-
-      First read outline_document with bid_writer_read_markdown. Convert its current
-      headings into a fresh structured candidate, then rebuild trace and word metadata
-      from the authoritative technical_requirements and disqualification_items. Ignore
-      the single H1 document title and map H2..H5 to chapter levels 1..4. Map every
-      requirement and D-NNN ID exactly once or more, then call validate_and_allocate_outline.
-      Fix all errors until PASS using generation_parameters.word_target. Call
-      bid_writer_save_effective_outline with the resulting normalized object, then save its
+      First call normalize_bid_outline_from_inputs exactly once with the latest selected
+      outline_document path. The adapter reads bound requirements, disqualification items,
+      and generation parameters directly and deterministically rebuilds the private contract;
+      do not read or reconstruct those JSON bodies in the Agent and do not retry validation.
+      Call bid_writer_save_effective_outline with the returned normalized_outline, then save its
       returned JSON file path as effective_outline with content_type="file" and save the
       report as effective_outline_check_report. Never save effective_outline as inline JSON,
       and never reuse the old structure when a human has changed the Markdown outline.
@@ -340,8 +313,9 @@ steps:
             writing_context_path=<the path returned by step 1>, and
             effective_outline_path=effective_outline. It delegates drafting and live preview
             to LazyMind Writer, then deterministically canonicalizes compatible heading
-            variants and rejects missing leaves or a total character count below the user's
-            minimum target. Text above the target is allowed. Save every
+            variants, preserves completed prose, and inserts visible placeholders for a
+            missing leaf instead of throwing away the draft. A short draft remains available
+            for approval and is reported by final validation; text above target is allowed. Save every
             returned path as a separate, ordered chapter_contents file artifact; never
             stringify the path list.
          4. Call bid_writer_assemble_draft with
@@ -374,16 +348,17 @@ steps:
       The effective outline is authoritative for structure. Every leaf must appear in the
       same order as one independent exact Markdown heading at its mapped H3/H4/H5 level;
       never add title suffixes, merge leaves, or replace a leaf heading with bold text.
-      Do not continue to assembly
-      when the Writer bridge reports a heading-contract or word-budget error; regenerate
-      the section draft using the already injected constraints.
+      Call the expensive section planner and drafting tool at most once in this Attempt.
+      Do not regenerate because of heading variation, missing leaf separation, or word-count
+      shortfall; deterministic adapters preserve the result and final validation reports
+      remaining quality gaps. If a real Writer/provider error occurs, keep checkpoint inputs
+      unchanged so a later retry can resume completed sections.
 
       Finally call bid_writer_update_context with the final draft_document and the refreshed
       outline context. Save its path as writing_context_after_draft. Every returned Writer
       path must be saved with content_type="file".
     tools:
-      - bid_writer_read_markdown
-      - validate_and_allocate_outline
+      - normalize_bid_outline_from_inputs
       - bid_writer_save_effective_outline
       - bid_writer_update_context
       - bid_writer_plan_sections

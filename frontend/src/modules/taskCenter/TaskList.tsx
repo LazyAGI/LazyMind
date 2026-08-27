@@ -171,6 +171,7 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
         open={Boolean(archiveTask)}
         conversationId={archiveTask?.conversation_id}
         title={archiveTask?.conversation_title || archiveTask?.title}
+        itemKind="task"
         onCancel={() => setArchiveTask(null)}
         onArchived={() => {
           const archived = archiveTask;

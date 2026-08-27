@@ -5,6 +5,8 @@ import unittest
 from pathlib import Path
 from unittest import mock
 
+from lazyllm.tools.agent import ToolExecutionError
+
 
 TOOLS_PATH = Path(__file__).resolve().parents[1] / 'tools.py'
 SPEC = importlib.util.spec_from_file_location('ppt_workflow_tools_partial_edit_test', TOOLS_PATH)
@@ -50,6 +52,15 @@ DUPLICATE_TITLE_HTML = """<!doctype html>
 </main></body></html>
 """
 
+MISSION_LIST_HTML = """<!doctype html>
+<html><head><title>Mission briefing</title><style>.mission{color:red}</style><script>ignoreMe()</script></head><body>
+<main class="slide"><section class="mission-list">
+  <div class="mission" data-el="mission-1" data-group="missions"><b data-el="mission-1-number">01</b><div><h3 data-el="mission-1-title">夜之城</h3><p data-el="mission-1-detail">霓虹与钢铁的交响</p></div></div>
+  <div class="mission" data-el="mission-2" data-group="missions"><b data-el="mission-2-number">02</b><div><h3 data-el="mission-2-title">V的传说</h3><p data-el="mission-2-detail">街头小子、合同佣兵</p></div></div>
+  <div class="mission" data-el="mission-3" data-group="missions"><b data-el="mission-3-number">03</b><div><h3 data-el="mission-3-title">开放世界</h3><p data-el="mission-3-detail">任务与自由交织</p></div></div>
+</section></main></body></html>
+"""
+
 
 def make_deck(root: Path) -> tuple[Path, Path]:
     deck = root / 'deck'
@@ -69,7 +80,108 @@ def make_deck(root: Path) -> tuple[Path, Path]:
     return deck, page
 
 
+class DeckInitializationTests(unittest.TestCase):
+    def test_page_count_is_not_capped_at_twelve(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            with mock.patch.object(TOOLS, '_conversation_root', return_value=root):
+                result = TOOLS.ppt_init_deck(
+                    user_query='生成一份季度汇报',
+                    page_count=25,
+                )
+
+            self.assertEqual(result['page_count'], 25)
+            task_pack = json.loads(
+                (Path(result['deck_dir']) / 'task_pack.json').read_text(encoding='utf-8'),
+            )
+            self.assertEqual(task_pack['params']['page_count'], 25)
+
+
 class PartialEditTests(unittest.TestCase):
+    def test_agent_llm_call_propagates_default_and_explicit_timeout(self):
+        model = mock.Mock()
+        shared = mock.Mock(return_value='generated')
+        model.share.return_value = shared
+        lazyllm_module = mock.Mock()
+        lazyllm_module.AutoModel.return_value = model
+        components_module = mock.Mock()
+        components_module.ChatPrompter.return_value = object()
+
+        with mock.patch.dict(
+            'sys.modules',
+            {'lazyllm': lazyllm_module, 'lazyllm.components': components_module},
+        ), mock.patch.dict(
+            TOOLS.os.environ, {'LAZYMIND_PPT_LLM_TIMEOUT': '300'}, clear=False,
+        ):
+            self.assertEqual(TOOLS._agent_llm_call('system', 'user'), 'generated')
+            self.assertEqual(
+                TOOLS._agent_llm_call('system', 'user', timeout=75),
+                'generated',
+            )
+
+        self.assertEqual(
+            shared.call_args_list[0],
+            mock.call('user', timeout=300.0, max_retries=1),
+        )
+        self.assertEqual(
+            shared.call_args_list[1],
+            mock.call('user', timeout=75.0, max_retries=1),
+        )
+
+    def test_add_item_below_clones_structure_and_assigns_fresh_ids(self):
+        selection = {
+            'type': 'ppt_html',
+            'page': 1,
+            'el': 'mission-3-title',
+            'selected_text': '开放世界',
+        }
+        model_output = json.dumps({
+            'op': 'insert_sibling',
+            'values': ['04', '义体改造', '打造专属战斗风格'],
+        }, ensure_ascii=False)
+        with mock.patch.object(TOOLS, '_agent_llm_call', return_value=model_output) as llm:
+            ops, old_text, new_text = TOOLS._selection_edit_ops(
+                '下面增加第四条', selection, TOOLS._HtmlTree(MISSION_LIST_HTML),
+            )
+
+        self.assertEqual(ops, [{
+            'op': 'insert_sibling',
+            'el': 'mission-3-title',
+            'scope': 'item',
+            'position': 'after',
+            'values': ['04', '义体改造', '打造专属战斗风格'],
+        }])
+        self.assertEqual(old_text, '开放世界')
+        self.assertEqual(new_text, '04 / 义体改造 / 打造专属战斗风格')
+        self.assertEqual(llm.call_args.kwargs['request_name'], 'ppt-selection-insert')
+        request = json.loads(llm.call_args.args[1])
+        self.assertIn('<title>Mission briefing</title>', request['current_page_html'])
+        self.assertIn('夜之城', request['current_page_html'])
+        self.assertIn('V的传说', request['current_page_html'])
+        self.assertNotIn('.mission{color:red}', request['current_page_html'])
+        self.assertNotIn('ignoreMe()', request['current_page_html'])
+
+        edited, applied, notes, removed = TOOLS._apply_html_ops(MISSION_LIST_HTML, ops)
+        TOOLS._validate_local_html_edit(MISSION_LIST_HTML, edited)
+        self.assertLess(edited.index('mission-3-detail'), edited.index('mission-4'))
+        self.assertIn('data-el="mission-4-number">04</b>', edited)
+        self.assertIn('data-el="mission-4-title">义体改造</h3>', edited)
+        self.assertIn('data-el="mission-4-detail">打造专属战斗风格</p>', edited)
+        self.assertEqual(edited.count('data-group="missions"'), 4)
+        self.assertEqual(len(applied), 1)
+        self.assertTrue(notes)
+        self.assertEqual(removed, [])
+
+    def test_insert_rejects_wrong_text_segment_count(self):
+        with self.assertRaisesRegex(ValueError, 'expected 3, got 1'):
+            TOOLS._apply_html_ops(MISSION_LIST_HTML, [{
+                'op': 'insert_sibling',
+                'el': 'mission-3',
+                'scope': 'item',
+                'position': 'after',
+                'values': ['04'],
+            }])
+
     def test_selection_occurrence_disambiguates_duplicate_data_el(self):
         selection = {
             'type': 'ppt_html',
@@ -365,26 +477,25 @@ class PartialEditTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             deck, page = make_deck(Path(tmp))
             read = TOOLS.ppt_read_page_html(str(deck), 1)
-            current_hash = read['result']['html_sha256']
+            current_hash = read['html_sha256']
             self.assertEqual(current_hash, TOOLS._html_sha256(PAGE_HTML))
 
-            result = TOOLS.ppt_edit_page_html(
-                str(deck), 1,
-                [{'op': 'replace_text', 'el': 'title', 'value': 'new'}],
-                expected_sha256='0' * 64,
-            )
-            self.assertFalse(result['success'])
+            with self.assertRaisesRegex(ToolExecutionError, 'page changed after'):
+                TOOLS.ppt_edit_page_html(
+                    str(deck), 1,
+                    [{'op': 'replace_text', 'el': 'title', 'value': 'new'}],
+                    expected_sha256='0' * 64,
+                )
             self.assertEqual(page.read_text(encoding='utf-8'), PAGE_HTML)
 
     def test_edit_requires_hash_from_immediately_preceding_read(self):
         with tempfile.TemporaryDirectory() as tmp:
             deck, page = make_deck(Path(tmp))
-            result = TOOLS.ppt_edit_page_html(
-                str(deck), 1,
-                [{'op': 'replace_text', 'el': 'title', 'value': 'new'}],
-            )
-            self.assertFalse(result['success'])
-            self.assertIn('expected_sha256 is required', result['error']['reason'])
+            with self.assertRaisesRegex(ToolExecutionError, 'expected_sha256 is required'):
+                TOOLS.ppt_edit_page_html(
+                    str(deck), 1,
+                    [{'op': 'replace_text', 'el': 'title', 'value': 'new'}],
+                )
             self.assertEqual(page.read_text(encoding='utf-8'), PAGE_HTML)
 
     def test_failed_publish_rolls_the_page_back(self):
@@ -397,12 +508,12 @@ class PartialEditTests(unittest.TestCase):
             with mock.patch.object(
                 TOOLS, '_publish_pages_from_disk', return_value=failed_publish,
             ) as publish:
-                result = TOOLS.ppt_edit_page_html(
-                    str(deck), 1,
-                    [{'op': 'replace_text', 'el': 'title', 'value': 'new'}],
-                    expected_sha256=TOOLS._html_sha256(PAGE_HTML),
-                )
-            self.assertFalse(result['success'])
+                with self.assertRaisesRegex(ToolExecutionError, 'edited page was not published'):
+                    TOOLS.ppt_edit_page_html(
+                        str(deck), 1,
+                        [{'op': 'replace_text', 'el': 'title', 'value': 'new'}],
+                        expected_sha256=TOOLS._html_sha256(PAGE_HTML),
+                    )
             self.assertEqual(page.read_text(encoding='utf-8'), PAGE_HTML)
             self.assertEqual(publish.call_count, 2)
 
@@ -417,6 +528,128 @@ class PartialEditTests(unittest.TestCase):
                 result = TOOLS._publish_one_page(deck, 1)
             self.assertFalse(result['ok'])
             self.assertIn('preview_html publish failed', result['error'])
+
+    def test_page_publisher_defers_later_page_when_prior_position_is_missing(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            deck, _page = make_deck(Path(tmp))
+            page_two = deck / 'pages' / 'page_002.html'
+            page_two.write_text(PAGE_HTML.replace('Old title', 'Page two'), encoding='utf-8')
+            with mock.patch.object(TOOLS, '_ui_slot_order_list', return_value=[]):
+                with mock.patch.object(TOOLS, '_save_artifact') as save:
+                    result = TOOLS._publish_one_page(deck, 2)
+            self.assertFalse(result['ok'])
+            self.assertTrue(result['deferred'])
+            self.assertIn('page 2 deferred', result['error'])
+            save.assert_not_called()
+
+    def test_multi_page_publisher_allocates_distinct_indices_from_one_snapshot(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            deck, _page = make_deck(Path(tmp))
+            page_two = deck / 'pages' / 'page_002.html'
+            page_two.write_text(PAGE_HTML.replace('Old title', 'Page two'), encoding='utf-8')
+            with mock.patch.object(TOOLS, '_ui_slot_order_list', return_value=[]):
+                with mock.patch.object(TOOLS, 'require_context'):
+                    with mock.patch.object(
+                        TOOLS, '_save_artifact', return_value={'status': 'ok'},
+                    ) as save:
+                        result = TOOLS._publish_pages_from_disk(deck)
+            self.assertEqual(result['published_count'], 2)
+            self.assertEqual(
+                [call.kwargs['publisher_list_index'] for call in save.call_args_list],
+                [0, 0, 1, 1],
+            )
+
+    def test_page_html_retry_recovers_deferred_trailing_pages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            deck, _page = make_deck(Path(tmp))
+            fake_model_client = mock.Mock()
+            fake_runtime = mock.Mock()
+            fake_runtime._capture_cmd.return_value = (0, {'status': 'ok'})
+            fake_runtime.cmd_page_html = mock.Mock()
+            with mock.patch.object(
+                TOOLS, '_load_sn_ppt_modules',
+                return_value=(fake_model_client, fake_runtime),
+            ), mock.patch.object(
+                TOOLS, '_load_slide_outline_briefs', return_value={},
+            ), mock.patch.object(
+                TOOLS, '_publish_one_page',
+                return_value={'ok': True, 'title_hint': 'Page one', 'bytes': 100},
+            ), mock.patch.object(
+                TOOLS, '_publish_ready_trailing_pages',
+                return_value=[{'page': 2, 'title_hint': 'Page two', 'bytes': 200}],
+            ) as recover:
+                result = TOOLS._run_stage_inprocess('page-html', deck, page=1)
+            self.assertEqual(result['status'], 'ok')
+            self.assertEqual(result['recovered_published'][0]['page'], 2)
+            self.assertEqual(recover.call_args.args, (deck, 1))
+            self.assertTrue(recover.call_args.kwargs['with_notes'])
+            self.assertEqual(
+                recover.call_args.kwargs['slot_orders'],
+                {'preview_html': [], 'preview_notes': []},
+            )
+
+    def test_batch_page_html_retries_failed_page_and_resumes_ordered_publish(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            deck, _page = make_deck(Path(tmp))
+            (deck / 'outline.json').write_text(json.dumps({
+                'pages': [
+                    {'page_no': 1, 'title': 'Page one'},
+                    {'page_no': 2, 'title': 'Page two'},
+                ],
+            }), encoding='utf-8')
+
+            attempts = {1: 0, 2: 0}
+
+            def capture(_command, current_deck, page_no):
+                attempts[page_no] += 1
+                if page_no == 1 and attempts[page_no] == 1:
+                    return 1, {'status': 'failed', 'error': 'HTTP 504'}
+                (current_deck / 'pages' / f'page_{page_no:03d}.html').write_text(
+                    PAGE_HTML.replace('Old title', f'Page {page_no}'),
+                    encoding='utf-8',
+                )
+                return 0, {'status': 'ok', 'page_no': page_no}
+
+            published = []
+
+            def publish(_deck, page_no, **_kwargs):
+                published.append(page_no)
+                return {
+                    'page': page_no,
+                    'ok': True,
+                    'title_hint': f'Page {page_no}',
+                    'bytes': 100,
+                }
+
+            fake_model_client = mock.Mock()
+            fake_runtime = mock.Mock()
+            fake_runtime._capture_cmd.side_effect = capture
+            fake_runtime.cmd_page_html = mock.Mock()
+            with mock.patch.object(
+                TOOLS, '_load_sn_ppt_modules',
+                return_value=(fake_model_client, fake_runtime),
+            ), mock.patch.object(
+                TOOLS, '_load_slide_outline_briefs', return_value={},
+            ), mock.patch.object(
+                TOOLS, '_ui_slot_order_list', return_value=[],
+            ), mock.patch.object(
+                TOOLS, '_publish_one_page', side_effect=publish,
+            ), mock.patch.object(
+                TOOLS.time, 'sleep', return_value=None,
+            ), mock.patch.dict(
+                TOOLS.os.environ, {'LAZYMIND_PPT_PAGE_RETRIES': '1'}, clear=False,
+            ):
+                result = TOOLS._batch_page_html_publish_progressive(
+                    deck, concurrency=1,
+                )
+
+            self.assertEqual(result['status'], 'ok')
+            self.assertEqual(result['published_count'], 2)
+            self.assertEqual(published, [1, 2])
+            self.assertEqual(attempts, {1: 2, 2: 1})
+            self.assertEqual(result['retry_count'], 1)
+            self.assertEqual(result['retries'][0]['page'], 1)
+            self.assertTrue(result['retries'][0]['ok'])
 
 
 if __name__ == '__main__':

@@ -77,6 +77,7 @@ import {
 } from "./skillApi";
 import { buildSkillZipBlob } from "./skillPackage";
 import { uploadSkillTempFile } from "./skillUpload";
+import { isSkillAlreadyExistsError } from "./skillUploadError";
 import {
   approveEvolutionSuggestion,
   batchApproveEvolutionSuggestions,
@@ -1728,7 +1729,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
       Boolean(activeProposal.after.protect)
         ? {
             key: "protect",
-            label: t("admin.memoryProtect", { defaultValue: "保护" }),
+            label: t("admin.memoryProtect"),
             before: toBoolText(Boolean(activeProposal.before.protect)),
             after: toBoolText(Boolean(activeProposal.after.protect)),
             backendSuggestionId:
@@ -1939,7 +1940,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     }
 
     const commonLabels = {
-      protect: t("admin.memoryProtect", { defaultValue: "保护" }),
+      protect: t("admin.memoryProtect"),
       content: t("admin.memoryContent"),
       yes: t("admin.memoryDiffBoolYes"),
       no: t("admin.memoryDiffBoolNo"),
@@ -2385,6 +2386,27 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     setSkillUrlImportOpen(true);
   };
 
+  const showSkillUploadError = (error: unknown, candidateName?: string) => {
+    if (!isSkillAlreadyExistsError(error)) {
+      message.error(t("admin.memorySkillUploadFailed"));
+      return;
+    }
+
+    const normalizedCandidate = candidateName?.trim().toLocaleLowerCase();
+    const existingSkill = normalizedCandidate
+      ? skillAssets.find(
+          (skill) => skill.name.trim().toLocaleLowerCase() === normalizedCandidate,
+        )
+      : undefined;
+    message.error(
+      existingSkill
+        ? t("admin.memorySkillUploadAlreadyExistsNamed", {
+            name: existingSkill.name,
+          })
+        : t("admin.memorySkillUploadAlreadyExists"),
+    );
+  };
+
   const handleConfirmSkillUrlImport = async () => {
     if (skillSaving) {
       return;
@@ -2400,14 +2422,17 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
     setSkillSaving(true);
 
     try {
-      await createSkillAsset({
-        name: t("admin.memorySkillUploadDefaultName"),
-        description: t("admin.memorySkillUploadPersonalDesc"),
-        category: "personal",
-        tags: [],
-        isEnabled: true,
-        source: { type: "url", url: trimmedUrl },
-      });
+      await createSkillAsset(
+        {
+          name: t("admin.memorySkillUploadDefaultName"),
+          description: t("admin.memorySkillUploadPersonalDesc"),
+          category: "personal",
+          tags: [],
+          isEnabled: true,
+          source: { type: "url", url: trimmedUrl },
+        },
+        { silentError: true },
+      );
       await Promise.all([refreshSkillAssets(), refreshSkillCategories()]);
       message.success(
         t("admin.memorySkillUploadSuccess", {
@@ -2416,7 +2441,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
       );
     } catch (error) {
       console.error("Import skill from URL failed:", error);
-      message.error(t("admin.memorySkillUploadFailed"));
+      showSkillUploadError(error);
     } finally {
       setSkillSaving(false);
     }
@@ -2447,22 +2472,25 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
 
     try {
       setSkillSaving(true);
-      const upload = await uploadSkillTempFile(file);
-      await createSkillAsset({
-        name: inferredName,
-        description: t("admin.memorySkillUploadPersonalDesc"),
-        category: "personal",
-        tags: [],
-        isEnabled: true,
-        source: { type: "uploaded_zip", uploadId: upload.uploadId },
-      });
+      const upload = await uploadSkillTempFile(file, { silentError: true });
+      await createSkillAsset(
+        {
+          name: inferredName,
+          description: t("admin.memorySkillUploadPersonalDesc"),
+          category: "personal",
+          tags: [],
+          isEnabled: true,
+          source: { type: "uploaded_zip", uploadId: upload.uploadId },
+        },
+        { silentError: true },
+      );
       await Promise.all([refreshSkillAssets(), refreshSkillCategories()]);
       message.success(
         t("admin.memorySkillUploadSuccess", { name: inferredName }),
       );
     } catch (error) {
       console.error("Upload skill package failed:", error);
-      message.error(t("admin.memorySkillUploadFailed"));
+      showSkillUploadError(error, inferredName);
     } finally {
       setSkillSaving(false);
     }
@@ -3896,6 +3924,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
         await Promise.all([refreshSkillAssets(), refreshSkillCategories()]);
       } catch (error) {
         console.error("Save skill draft failed:", error);
+        message.error(getLocalizedErrorMessage(error));
         return;
       } finally {
         setSkillSaving(false);
@@ -4393,7 +4422,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
                   <Tag className="memory-protect-tag" bordered={false}>
                     <LockOutlined />
                     <span>
-                      {t("admin.memoryProtect", { defaultValue: "保护" })}
+                      {t("admin.memoryProtect")}
                     </span>
                   </Tag>
                 ) : null}
@@ -4583,7 +4612,7 @@ export default function MemoryManagement({ embeddedTab }: MemoryManagementProps 
               <Tag className="memory-protect-tag" bordered={false}>
                 <LockOutlined />
                 <span>
-                  {t("admin.memoryProtect", { defaultValue: "保护" })}
+                  {t("admin.memoryProtect")}
                 </span>
               </Tag>
             ) : null}
