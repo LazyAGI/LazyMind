@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>企业级 AI Agent 开发平台选型速览</title>
+  <style>
+    :root{--canvas:#f4f6f8;--paper:#fff;--ink:#17202f;--muted:#667085;--line:#e3e8ef;--blue:#315fca;--blue-soft:#eef3ff;--green:#1f7a58;--green-soft:#eaf7f1;--amber:#a96b13;--amber-soft:#fff5e5;--purple:#7453b6;--purple-soft:#f3efff;--nav:#202938;--shadow:0 18px 48px rgba(22,31,48,.08)}
+    *{box-sizing:border-box}html,body{min-height:100%;margin:0}body{background:var(--canvas);color:var(--ink);font:14px/1.65 Inter,"PingFang SC","Microsoft YaHei",sans-serif}button{font:inherit}.app{min-height:100vh;display:grid;grid-template-columns:224px minmax(0,1fr)}
+    .sidebar{background:var(--nav);color:#dbe3ef;padding:24px 17px;display:flex;flex-direction:column}.brand{display:flex;align-items:center;gap:11px;padding:0 8px 24px;border-bottom:1px solid #344052}.mark{width:35px;height:35px;display:grid;place-items:center;border-radius:10px;background:#fff;color:#244fae;font-weight:800}.brand strong{display:block;color:#fff}.brand span{display:block;color:#8f9bae;font-size:10px;letter-spacing:.08em}.nav-label{margin:22px 9px 9px;color:#748196;font-size:10px;letter-spacing:.14em}.nav{display:grid;gap:5px}.nav button{display:flex;align-items:center;gap:10px;width:100%;padding:10px 11px;border:0;border-radius:8px;background:transparent;color:#aeb9ca;text-align:left;cursor:pointer}.nav button:before{content:"";width:7px;height:7px;border-radius:50%;background:#5d697b}.nav button.active{background:#303b4e;color:#fff}.nav button.active:before{background:#8eaeff;box-shadow:0 0 0 4px rgba(142,174,255,.12)}.scope{margin-top:auto;padding:15px;border:1px solid #3b4658;border-radius:11px;color:#aab5c5;font-size:11px}.scope b{display:block;margin-bottom:5px;color:#fff;font-size:12px}.scope span{display:block;margin-top:7px;color:#79869a}
+    .main{min-width:0}.topbar{height:66px;display:flex;align-items:center;padding:0 28px;border-bottom:1px solid var(--line);background:rgba(255,255,255,.94);position:sticky;top:0;z-index:4;backdrop-filter:blur(10px)}.topbar strong{font-size:15px}.snapshot{margin-left:10px;padding:3px 9px;border-radius:999px;background:var(--green-soft);color:var(--green);font-size:11px}.verified{margin-left:auto;display:flex;align-items:center;gap:7px;color:#5b6574;font-size:12px}.verified:before{content:"✓";width:20px;height:20px;display:grid;place-items:center;border-radius:50%;background:var(--green-soft);color:var(--green);font-weight:800}
+    .workspace{max-width:1420px;margin:auto;padding:28px;display:grid;grid-template-columns:minmax(0,1fr) 294px;gap:22px}.report{min-width:0;border:1px solid var(--line);border-radius:18px;background:var(--paper);box-shadow:var(--shadow);overflow:hidden}.hero{padding:31px 36px 26px;border-bottom:1px solid var(--line);background:linear-gradient(135deg,#fff 55%,#f2f6ff)}.eyebrow{color:var(--blue);font-size:11px;font-weight:800;letter-spacing:.14em}.hero h1{margin:7px 0 9px;font-size:30px;line-height:1.32}.hero>p{max-width:820px;margin:0;color:#596373}.thesis{margin-top:20px;padding:15px 17px;border-left:4px solid var(--blue);border-radius:0 11px 11px 0;background:#f7f9fd;font-size:15px;font-weight:650}.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:9px;margin-top:19px}.stat{padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#fff}.stat b{display:block;font-size:18px}.stat span{color:var(--muted);font-size:11px}
+    .tabs{display:flex;gap:4px;padding:13px 24px 0;border-bottom:1px solid var(--line);background:#fbfcfd}.tab{padding:11px 14px 13px;border:0;border-bottom:2px solid transparent;background:transparent;color:#727b89;cursor:pointer}.tab.active{border-color:var(--blue);color:var(--blue);font-weight:750}.panel{display:none;padding:28px 32px 36px}.panel.active{display:block}.section-head{display:flex;align-items:end;justify-content:space-between;gap:12px;margin-bottom:15px}.section-head h2{margin:0;font-size:18px}.section-head p{margin:0;color:var(--muted);font-size:11px}
+    .recommendations{display:grid;grid-template-columns:repeat(3,1fr);gap:12px}.platform{padding:17px;border:1px solid var(--line);border-radius:14px;background:#fff;position:relative;overflow:hidden}.platform:before{content:"";position:absolute;left:0;top:0;width:100%;height:4px;background:var(--blue)}.platform.baidu:before{background:var(--green)}.platform.tencent:before{background:var(--purple)}.platform-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}.platform-head h3{margin:0;font-size:15px}.fit{padding:3px 8px;border-radius:999px;background:var(--blue-soft);color:var(--blue);font-size:10px}.baidu .fit{background:var(--green-soft);color:var(--green)}.tencent .fit{background:var(--purple-soft);color:var(--purple)}.platform p{margin:0 0 12px;color:#596473;font-size:12px}.platform ul{margin:0;padding-left:18px;color:#596473;font-size:11px}.platform li{margin:5px 0}.decision-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:18px}.decision{padding:13px;border:1px solid var(--line);border-radius:11px;background:#fafbfc}.decision b{display:block;margin-bottom:5px;color:var(--blue);font-size:11px}.decision span{color:#55606f;font-size:12px}.poc{margin-top:18px;padding:15px 17px;border:1px solid #d9e2f6;border-radius:12px;background:#f4f7ff}.poc b{display:block;margin-bottom:4px}.poc span{color:#536176;font-size:12px}
+    .table-wrap{overflow:auto;border:1px solid var(--line);border-radius:13px}table{width:100%;min-width:850px;border-collapse:collapse;font-size:11px}th{padding:12px;text-align:left;background:#f7f9fc;color:#536071;font-weight:700;border-bottom:1px solid var(--line)}td{padding:13px 12px;border-bottom:1px solid var(--line);vertical-align:top;color:#505b6b}tr:last-child td{border-bottom:0}td:first-child{width:130px;color:#263348;font-weight:700}.tag{display:inline-block;margin:3px 3px 0 0;padding:2px 6px;border-radius:999px;background:#f0f3f7;color:#5f6a79;font-size:9px}.unknown{color:var(--amber);font-weight:700}.monitor{margin-top:18px;display:grid;grid-template-columns:repeat(4,1fr);gap:9px}.monitor-item{padding:13px;border:1px solid var(--line);border-radius:11px;background:#fafbfc}.monitor-item b{display:block;margin-bottom:4px;color:var(--blue);font-size:11px}.monitor-item span{font-size:11px;color:#596473}
+    .evidence-note{padding:14px 16px;border-radius:12px;background:#f7f9fc;color:#556071;font-size:12px}.source-list{display:grid;gap:9px;margin-top:15px}.source{display:grid;grid-template-columns:31px minmax(0,1fr) 72px;gap:10px;align-items:center;padding:11px 12px;border:1px solid var(--line);border-radius:10px}.source-index{width:27px;height:27px;display:grid;place-items:center;border-radius:8px;background:var(--blue-soft);color:var(--blue);font-size:10px;font-weight:800}.source a{color:#304866;text-decoration:none;font-size:12px;font-weight:650}.source p{margin:2px 0 0;color:var(--muted);font-size:10px}.source span:last-child{color:#8791a0;font-size:10px;text-align:right}.limits{margin-top:18px;padding:16px;border:1px solid #ead7b5;border-radius:12px;background:var(--amber-soft)}.limits h3{margin:0 0 8px;font-size:13px}.limits ul{margin:0;padding-left:18px;color:#70501e;font-size:11px}.limits li{margin:5px 0}
+    .rail{display:grid;align-content:start;gap:14px}.side-card{padding:18px;border:1px solid var(--line);border-radius:14px;background:#fff;box-shadow:0 10px 26px rgba(25,36,55,.05)}.side-card h3{margin:0 0 12px;font-size:14px}.fact{padding:9px 0;border-top:1px solid var(--line)}.fact:first-of-type{padding-top:0;border-top:0}.fact span{display:block;color:var(--muted);font-size:10px}.fact b{display:block;margin-top:2px;font-size:12px}.gate{background:#25334a;color:#fff;border-color:#25334a}.gate h3{color:#fff}.gate p{margin:0;color:#c5cfdd;font-size:12px}.gate ol{margin:10px 0 0;padding-left:18px;color:#fff;font-size:11px}.gate li{margin:6px 0}.legend{display:grid;gap:8px}.legend div{display:flex;gap:8px;color:#5b6675;font-size:11px}.dot{width:8px;height:8px;flex:0 0 8px;margin-top:5px;border-radius:50%;background:var(--green)}.dot.amber{background:var(--amber)}.dot.gray{background:#98a2b3}
+    @media(max-width:1080px){.app{grid-template-columns:72px minmax(0,1fr)}.sidebar{padding:20px 10px}.brand>div:last-child,.nav-label,.nav button span,.scope{display:none}.brand{justify-content:center;padding:0 0 18px}.nav button{justify-content:center}.workspace{grid-template-columns:1fr}.rail{grid-template-columns:repeat(3,1fr)}}
+    @media(max-width:760px){.app{display:block}.sidebar{display:none}.topbar{padding:0 15px}.workspace{padding:12px}.hero,.panel{padding:24px 18px}.hero h1{font-size:24px}.stats,.monitor{grid-template-columns:repeat(2,1fr)}.recommendations,.decision-grid,.rail{grid-template-columns:1fr}.source{grid-template-columns:31px 1fr}.source span:last-child{grid-column:2;text-align:left}}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand"><div class="mark">研</div><div><strong>市场研究台</strong><span>MARKET INTELLIGENCE</span></div></div>
+      <div class="nav-label">结果目录</div>
+      <nav class="nav"><button class="active" data-target="recommend"><span>选型结论</span></button><button data-target="matrix"><span>能力矩阵</span></button><button data-target="evidence"><span>证据与边界</span></button></nav>
+      <div class="scope"><b>比较边界</b>Agent 开发平台产品层<br>不评价底层 IaaS，不进行模型 API 排名，不推断市场份额。<span>历史实测结果，仅用于能力展示</span></div>
+    </aside>
+    <main class="main">
+      <header class="topbar"><strong>竞争格局分析</strong><span class="snapshot">LazyMind 实测快照</span><div class="verified">7 个官方页面已核验</div></header>
+      <div class="workspace">
+        <article class="report">
+          <section class="hero">
+            <div class="eyebrow">平台选型速览 · 2026-08-28</div>
+            <h1>企业级 AI Agent 开发平台</h1>
+            <p>聚焦阿里云百炼、百度千帆与腾讯云 ADP，以官方产品页和文档为主证据，比较定位、Agent 编排、RAG、治理安全与生态集成。</p>
+            <div class="thesis">三家均具备进入企业 POC 的平台能力，核心差异在生态与治理取向：百炼偏全模态 RAG 与阿里云协同，千帆偏搜索等工具生态与可控性，ADP 偏 AgentOps 全生命周期治理。</div>
+            <div class="stats"><div class="stat"><b>3</b><span>目标平台</span></div><div class="stat"><b>5</b><span>统一比较维度</span></div><div class="stat"><b>7</b><span>官方直接页面</span></div><div class="stat"><b>4</b><span>持续监控指标</span></div></div>
+          </section>
+          <div class="tabs"><button class="tab active" data-target="recommend">选型结论</button><button class="tab" data-target="matrix">能力矩阵</button><button class="tab" data-target="evidence">证据与边界</button></div>
+
+          <section class="panel active" id="recommend">
+            <div class="section-head"><h2>三类最适配场景</h2><p>不是简单排名，而是把需求映射到平台特征</p></div>
+            <div class="recommendations">
+              <article class="platform"><div class="platform-head"><h3>阿里云百炼</h3><span class="fit">RAG / 多模态</span></div><p>适合已在阿里云体系、以通义模型为主，并需要文档、表格、图片和音视频统一知识检索的团队。</p><ul><li>优先验证：全模态知识库效果</li><li>注意：Agent 应用能力的版本状态</li><li>待确认：私有化与混合部署细则</li></ul></article>
+              <article class="platform baidu"><div class="platform-head"><h3>百度千帆</h3><span class="fit">工具生态 / 可控</span></div><p>适合强依赖搜索、百科、地图、文档解析等工具，并重视日志、告警、审计与权限管理的团队。</p><ul><li>优先验证：独家 Skill / MCP 价值</li><li>注意：百度生态绑定程度</li><li>待确认：配额与私有化门槛</li></ul></article>
+              <article class="platform tencent"><div class="platform-head"><h3>腾讯云 ADP</h3><span class="fit">AgentOps / 治理</span></div><p>适合将大量 Agent 作为工程系统统一构建、分发、管理和使用，并强调审计、RBAC 与可观测的企业。</p><ul><li>优先验证：AgentOps 与长任务运行</li><li>注意：全模态 RAG 公开深度</li><li>待确认：连接器与混合云覆盖</li></ul></article>
+            </div>
+            <div class="section-head" style="margin-top:22px"><h2>三条选型判断</h2><p>将 POC 起点明确到一个核心需求</p></div>
+            <div class="decision-grid"><div class="decision"><b>01 RAG / 多模态刚需</b><span>优先以百炼做 POC，但需先核验生产所需功能是否已正式可用。</span></div><div class="decision"><b>02 工具生态与合规</b><span>优先核验千帆的独家工具、可观测、审计和细粒度权限。</span></div><div class="decision"><b>03 多 Agent 统一治理</b><span>优先核验 ADP 的 AgentOps、Agentic Loop 和全链路管控。</span></div></div>
+            <div class="poc"><b>建议的共同 POC</b><span>用同一份企业知识库、同一组 20 个问题和同一条需调用外部工具的长任务，比较答案准确率、权限隔离、日志可追溯性、端到端耗时与单位调用成本。</span></div>
+          </section>
+
+          <section class="panel" id="matrix">
+            <div class="section-head"><h2>五维能力矩阵</h2><p>内容来自本次已打开的官方产品页和文档</p></div>
+            <div class="table-wrap"><table><thead><tr><th>维度</th><th>阿里云百炼</th><th>百度千帆</th><th>腾讯云 ADP</th></tr></thead><tbody>
+              <tr><td>平台定位</td><td>模型服务平台延伸至应用构建<br><span class="tag">阿里云生态</span><span class="tag">快速原型</span></td><td>以 Agent 为核心的一站式企业级平台<br><span class="tag">模型 + 工具</span><span class="tag">企业服务</span></td><td>以 AgentOps 为核心的企业原生智能体平台<br><span class="tag">全生命周期</span><span class="tag">统一治理</span></td></tr>
+              <tr><td>Agent 编排</td><td>智能体应用、工作流应用、知识库与 MCP 工具调用</td><td>多智能体、自主规划、工作流 Agent、A2A 与预置子 Agent</td><td>Agentic Loop、Workflow、Multi-agent，Agent 与 Workflow 双向互调</td></tr>
+              <tr><td>知识库 / RAG</td><td>突出文档、表格、图片、音视频的全模态企业级 RAG</td><td>企业文档、PDF、网页知识库与 RAG，结合平台工具生态</td><td>LLM + RAG 与动态 Agentic RAG，强调准确性与可控性</td></tr>
+              <tr><td>安全与治理</td><td>安全白皮书、控制台与多种接入方式；部分应用能力版本状态需核验</td><td>监控、日志、告警、审计、自定义干预与细粒度权限</td><td>内容审核、敏感拦截、RBAC、操作审核、可观测与全链路留痕</td></tr>
+              <tr><td>生态集成</td><td>千问模型、应用模板、MCP 服务与阿里云产品协同</td><td>搜索、百科、地图、网盘、文库、文档解析、安全扫描等 Skill / MCP</td><td>插件、连接器、Skills、模型、提示词模板与智能工作台</td></tr>
+              <tr><td>公开资料缺口</td><td class="unknown">GA 节奏、私有化细则、多智能体稳定性</td><td class="unknown">工具配额、跨云开放性、私有化门槛</td><td class="unknown">AgentOps 版本边界、混合云、连接器覆盖</td></tr>
+            </tbody></table></div>
+            <div class="section-head" style="margin-top:22px"><h2>持续监控</h2><p>避免把一次静态比较当成长期结论</p></div>
+            <div class="monitor"><div class="monitor-item"><b>协议与编排</b><span>A2A、MCP、Agent/Workflow 互调及 GA 节奏</span></div><div class="monitor-item"><b>RAG 深度</b><span>全模态、动态检索、权限感知与实测准确率</span></div><div class="monitor-item"><b>安全与部署</b><span>审计、RBAC、认证、私有化及混合云能力</span></div><div class="monitor-item"><b>生态与案例</b><span>工具覆盖、连接器、客户案例及可复核效果</span></div></div>
+          </section>
+
+          <section class="panel" id="evidence">
+            <div class="section-head"><h2>官方来源与证据边界</h2><p>页面访问日期均为 2026-08-28</p></div>
+            <div class="evidence-note">本案例来自 LazyMind 历史实测会话。搜索摘要只用于发现线索，矩阵仅引用成功打开的官方产品页与文档。为避免过度承诺，展示结论将原输出的“已达到生产成熟度”收敛为“具备进入企业 POC 的平台能力”。</div>
+            <div class="source-list">
+              <article class="source"><span class="source-index">S1</span><div><a href="https://www.aliyun.com/product/bailian" target="_blank" rel="noreferrer">阿里云：大模型服务平台百炼产品页</a><p>定位、模型、RAG 与应用模板</p></div><span>未标注</span></article>
+              <article class="source"><span class="source-index">S2</span><div><a href="https://www.alibabacloud.com/help/zh/model-studio/application-introduction" target="_blank" rel="noreferrer">阿里云：应用类型介绍</a><p>智能体、工作流、知识库与 MCP</p></div><span>2026-07-21</span></article>
+              <article class="source"><span class="source-index">S3</span><div><a href="https://ai.baidu.com/ai-doc/AppBuilder/6lq7s8lli" target="_blank" rel="noreferrer">百度：千帆 AppBuilder 平台简介</a><p>应用开发与知识库能力</p></div><span>未标注</span></article>
+              <article class="source"><span class="source-index">S4</span><div><a href="https://cloud.baidu.com/product-s/qianfan_home" target="_blank" rel="noreferrer">百度智能云：千帆大模型平台</a><p>Agent、工具、模型与企业治理</p></div><span>未标注</span></article>
+              <article class="source"><span class="source-index">S5</span><div><a href="https://cloud.baidu.com/doc/qianfan/index.html" target="_blank" rel="noreferrer">百度智能云：千帆平台文档</a><p>平台边界与产品体系</p></div><span>未标注</span></article>
+              <article class="source"><span class="source-index">S7</span><div><a href="https://cloud.tencent.com/product/adp" target="_blank" rel="noreferrer">腾讯云：智能体开发平台 ADP 产品页</a><p>AgentOps、治理、安全与运行</p></div><span>未标注</span></article>
+              <article class="source"><span class="source-index">S8</span><div><a href="https://cloud.tencent.com/document/product/1759" target="_blank" rel="noreferrer">腾讯云：智能体开发平台文档</a><p>引擎、知识库、生态与平台功能</p></div><span>未标注</span></article>
+            </div>
+            <article class="limits"><h3>本次未核验，不能据此直接下结论</h3><ul><li>私有化部署规格、详细定价与配额、真实单位调用成本。</li><li>第三方 benchmark、安全认证证书与客户案例中的具体效果数字。</li><li>平台在同一知识库、同一任务和同一模型条件下的横向实测表现。</li></ul></article>
+          </section>
+        </article>
+        <aside class="rail">
+          <section class="side-card"><h3>选型对象</h3><div class="fact"><span>目标团队</span><b>企业产品与技术团队</b></div><div class="fact"><span>比较单元</span><b>Agent 开发平台产品层</b></div><div class="fact"><span>主要证据</span><b>官方产品页与产品文档</b></div></section>
+          <section class="side-card gate"><h3>建议的决策门</h3><p>不要直接按品牌选型，先把需求归入一条主线：</p><ol><li>全模态 RAG</li><li>工具生态与合规</li><li>AgentOps 统一治理</li></ol></section>
+          <section class="side-card"><h3>证据图例</h3><div class="legend"><div><span class="dot"></span><span>官方页面已打开核验</span></div><div><span class="dot amber"></span><span>公开资料未披露，需 POC 取证</span></div><div><span class="dot gray"></span><span>研究判断，不等于平台承诺</span></div></div></section>
+        </aside>
+      </div>
+    </main>
+  </div>
+  <script>
+    const controls=[...document.querySelectorAll('[data-target]')],panels=[...document.querySelectorAll('.panel')];
+    controls.forEach(control=>control.addEventListener('click',()=>{const id=control.dataset.target;panels.forEach(panel=>panel.classList.toggle('active',panel.id===id));controls.forEach(item=>item.classList.toggle('active',item.dataset.target===id));window.scrollTo({top:0,behavior:'smooth'});}));
+  </script>
+</body>
+</html>

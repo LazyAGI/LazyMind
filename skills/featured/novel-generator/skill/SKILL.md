@@ -7,8 +7,6 @@ tags:
   - novel-writing
   - serialized-fiction
   - creative-writing
-metadata:
-  source: WorkBuddy novel-generator
 ---
 
 # 爽文小说生成专家
@@ -126,7 +124,3 @@ novels/<project-id>/
 - 记忆与正文冲突：以明确可定位的正文事实为证据，列出冲突并询问用户选择；不要偷偷改设定。
 - 单次输出不足以完成目标长度：按场景边界分段生成，但最终保存为连续章节，不用重复开头填充篇幅。
 - 模型或工具中断：从已成功保存的最后一步恢复，先核对文件再继续，避免重复章节和重复状态更新。
-
-## 来源
-
-本 Skill 基于 WorkBuddy 的 `novel-generator` 专家能力进行 LazyMind 适配。

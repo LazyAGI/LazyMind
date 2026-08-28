@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>《午夜十分钟》开书成果</title>
+  <style>
+    :root{--paper:#fff;--canvas:#f4f5f7;--ink:#20242b;--muted:#717784;--line:#e7e8ec;--blue:#4a68d8;--blue-soft:#edf1ff;--amber:#b87925;--amber-soft:#fff5e6;--green:#2d8063;--green-soft:#eaf7f1;--shadow:0 18px 44px rgba(36,42,55,.08)}
+    *{box-sizing:border-box}html,body{height:100%;margin:0}body{background:var(--canvas);color:var(--ink);font:14px/1.6 Inter,"PingFang SC","Microsoft YaHei",sans-serif}
+    button{font:inherit}.app{min-height:100%;display:grid;grid-template-columns:218px minmax(0,1fr);background:var(--canvas)}
+    .sidebar{background:#202633;color:#dfe4ee;padding:22px 16px;display:flex;flex-direction:column;gap:26px}.brand{display:flex;align-items:center;gap:11px;padding:0 8px}.mark{width:34px;height:34px;border-radius:10px;background:#fff;color:#26304a;display:grid;place-items:center;font:700 16px Georgia,serif}.brand strong{color:#fff;font-size:15px}.brand span{display:block;color:#929bad;font-size:11px;margin-top:1px}.nav-label{padding:0 10px;color:#7f899d;font-size:11px;letter-spacing:.12em}.nav{display:grid;gap:6px}.nav-item{display:flex;align-items:center;gap:10px;padding:10px 11px;border-radius:9px;color:#aeb7c8}.nav-item i{width:7px;height:7px;border-radius:50%;background:#596377}.nav-item.active{background:#30394b;color:#fff}.nav-item.active i{background:#8ea4ff;box-shadow:0 0 0 4px rgba(142,164,255,.12)}
+    .chapters{margin-top:auto;border-top:1px solid #353d4d;padding-top:18px}.chapter{padding:9px 10px;border-radius:8px;color:#9ca6b8;font-size:12px}.chapter.active{background:#2a3241;color:#fff}.chapter b{display:block;font-size:12px}.chapter span{font-size:11px;color:#7f899d}
+    .main{min-width:0}.topbar{height:70px;background:rgba(255,255,255,.92);border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 28px;position:sticky;top:0;z-index:5;backdrop-filter:blur(12px)}.project{display:flex;align-items:center;gap:12px}.project strong{font-size:15px}.tags{display:flex;gap:6px}.tag{padding:3px 8px;border-radius:999px;background:#f2f3f6;color:#626977;font-size:11px}.saved{display:flex;align-items:center;gap:7px;color:#66706e;font-size:12px}.saved:before{content:"";width:7px;height:7px;border-radius:50%;background:#54a47f}
+    .workspace{padding:28px;display:grid;grid-template-columns:minmax(0,1fr) 286px;gap:22px;max-width:1420px;margin:auto}.document{background:var(--paper);border:1px solid var(--line);border-radius:18px;box-shadow:var(--shadow);overflow:hidden}.hero{padding:34px 38px 28px;border-bottom:1px solid var(--line);background:linear-gradient(135deg,#fff 55%,#f6f8ff)}.eyebrow{font-size:12px;font-weight:700;letter-spacing:.12em;color:var(--blue);text-transform:uppercase}.hero h1{margin:8px 0 9px;font:700 clamp(30px,4vw,46px)/1.15 Georgia,"Songti SC",serif;letter-spacing:.03em}.logline{margin:0;max-width:760px;color:#4d5563;font-size:15px}.meta{display:flex;flex-wrap:wrap;gap:9px;margin-top:20px}.meta span{border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 10px;color:#656b77;font-size:12px}
+    .tabs{display:flex;gap:5px;padding:14px 22px 0;border-bottom:1px solid var(--line);background:#fbfbfc}.tab{border:0;background:transparent;color:#747b88;padding:11px 14px 13px;cursor:pointer;border-bottom:2px solid transparent}.tab.active{color:var(--blue);border-color:var(--blue);font-weight:700}.panel{display:none;padding:28px 34px 36px}.panel.active{display:block}.section-title{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:16px}.section-title h2{margin:0;font-size:18px}.section-title p{margin:0;color:var(--muted);font-size:12px}
+    .concept-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}.card{border:1px solid var(--line);border-radius:13px;padding:17px;background:#fff}.card .kicker{font-size:11px;color:var(--muted);margin-bottom:7px}.card h3{font-size:15px;margin:0 0 7px}.card p{margin:0;color:#5f6672;font-size:13px}.card.blue{background:var(--blue-soft);border-color:#dfe5ff}.card.amber{background:var(--amber-soft);border-color:#f3e3c7}.rule{display:flex;gap:10px;margin-top:12px;padding-top:12px;border-top:1px solid rgba(70,76,90,.1)}.rule b{min-width:38px;color:#4f5867}
+    .beats{display:grid;gap:12px}.beat{display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:14px;align-items:start;padding:17px;border:1px solid var(--line);border-radius:13px}.num{width:42px;height:42px;border-radius:12px;background:var(--blue-soft);color:var(--blue);display:grid;place-items:center;font-weight:800}.beat h3{margin:0 0 4px;font-size:15px}.beat p{margin:0;color:#606875;font-size:13px}.payoff{font-size:11px;color:var(--green);background:var(--green-soft);border-radius:999px;padding:4px 8px;white-space:nowrap}
+    .manuscript{max-width:760px;margin:auto;font:16px/2.05 Georgia,"Songti SC",serif;color:#2d3138}.manuscript h2{text-align:center;font-size:23px;margin:0 0 24px}.manuscript p{margin:0 0 14px;text-indent:2em}.fade{height:85px;margin-top:-70px;position:relative;background:linear-gradient(transparent,#fff)}.read-more{position:relative;display:block;margin:0 auto;border:1px solid #cdd5ef;color:var(--blue);background:#fff;border-radius:9px;padding:8px 15px}
+    .inspector{display:grid;gap:14px;align-content:start}.side-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px;box-shadow:0 10px 28px rgba(36,42,55,.05)}.side-card h3{font-size:14px;margin:0 0 13px}.fact{padding:10px 0;border-top:1px solid var(--line)}.fact:first-of-type{border-top:0;padding-top:0}.fact span{display:block;color:var(--muted);font-size:11px}.fact b{display:block;margin-top:2px;font-size:13px}.next{background:#252d3d;color:#fff;border-color:#252d3d}.next p{color:#bbc4d5;font-size:12px;margin:0 0 12px}.prompt{background:#343e52;border-radius:9px;padding:10px 11px;color:#f3f6ff;font-size:12px}.hint{margin-top:9px;color:#8f9bb0;font-size:11px}.meter{height:7px;background:#eceef2;border-radius:9px;overflow:hidden;margin-top:7px}.meter i{display:block;height:100%;width:86%;background:linear-gradient(90deg,#6e86e7,#4a68d8);border-radius:9px}
+    @media(max-width:1050px){.app{grid-template-columns:72px minmax(0,1fr)}.sidebar{padding:20px 10px}.brand strong,.brand span,.nav-label,.nav-item span,.chapters{display:none}.brand{padding:0;justify-content:center}.nav-item{justify-content:center}.workspace{grid-template-columns:1fr}.inspector{grid-template-columns:repeat(3,1fr)}}
+    @media(max-width:760px){.app{display:block}.sidebar{display:none}.topbar{padding:0 16px}.tags{display:none}.workspace{padding:12px}.hero{padding:25px 22px}.panel{padding:22px 18px 28px}.concept-grid,.inspector{grid-template-columns:1fr}.beat{grid-template-columns:38px 1fr}.payoff{grid-column:2}.hero h1{font-size:32px}}
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand"><div class="mark">文</div><div><strong>小说创作台</strong><span>AUTHOR WORKSPACE</span></div></div>
+      <div><div class="nav-label">项目空间</div><nav class="nav"><div class="nav-item active"><i></i><span>创作总览</span></div><div class="nav-item"><i></i><span>全书大纲</span></div><div class="nav-item"><i></i><span>人物与设定</span></div><div class="nav-item"><i></i><span>章节正文</span></div></nav></div>
+      <div class="chapters"><div class="nav-label">黄金三章</div><div class="chapter active"><b>第001章 倒塌前十分钟</b><span>开篇已生成</span></div><div class="chapter"><b>第002章 被删除的订单</b><span>剧情已规划</span></div><div class="chapter"><b>第003章 第二个零点</b><span>钩子已规划</span></div></div>
+    </aside>
+    <main class="main">
+      <header class="topbar"><div class="project"><strong>午夜十分钟</strong><div class="tags"><span class="tag">都市异能</span><span class="tag">悬疑冒险</span><span class="tag">连载准备中</span></div></div><div class="saved">示例成果已保存</div></header>
+      <div class="workspace">
+        <article class="document">
+          <section class="hero"><div class="eyebrow">一句话开书 · 示例成果</div><h1>午夜十分钟</h1><p class="logline">一个只能在午夜看见未来十分钟的外卖员，每次改变结局，都要拿过去二十四小时里的一段记忆交换。</p><div class="meta"><span>目标读者：都市异能 / 悬疑爽文</span><span>叙事视角：第三人称限知</span><span>核心体验：救人、解谜、能力代价</span></div></section>
+          <div class="tabs" role="tablist"><button class="tab active" data-target="concept">开书方案</button><button class="tab" data-target="beats">黄金三章</button><button class="tab" data-target="opening">开篇正文</button></div>
+          <section class="panel active" id="concept"><div class="section-title"><h2>一页式创作方案</h2><p>从脑洞到可以开写的故事承诺</p></div><div class="concept-grid">
+            <div class="card blue"><div class="kicker">主角与起点</div><h3>程野 · 普通外卖员</h3><p>习惯在城市夹缝里解决问题，最初只想平安挣钱，却被迫成为每个午夜危机中唯一提前知道结局的人。</p></div>
+            <div class="card amber"><div class="kicker">核心能力</div><h3>预见未来十分钟</h3><p>每日仅在午夜触发一次；能够改变看到的未来，但每次使用都会随机失去过去二十四小时的一段记忆。</p><div class="rule"><b>边界</b><span>不能选择失去哪段记忆，也无法连续使用。</span></div></div>
+            <div class="card"><div class="kicker">持续冲突</div><h3>救人，还是保住自己</h3><p>程野越接近危机真相，越可能忘掉重要的人和自己追查到的证据；每次胜利都会制造新的个人损失。</p></div>
+            <div class="card"><div class="kicker">差异化爽点</div><h3>不是无代价的预知外挂</h3><p>爽感来自有限信息下的选择、行动和可见结果；能力越强，记忆缺口越危险，悬念与回报同步升级。</p></div>
+          </div></section>
+          <section class="panel" id="beats"><div class="section-title"><h2>黄金三章</h2><p>危机兑现之后，立刻抛出更大的问题</p></div><div class="beats">
+            <div class="beat"><div class="num">01</div><div><h3>倒塌前十分钟</h3><p>暴雨午夜，程野闯入即将倒塌的写字楼救出数据工程师；成功之后，他发现旧伤消失，也忘了昨天下午把关键外卖送给了谁。</p></div><span class="payoff">首次救援兑现</span></div>
+            <div class="beat"><div class="num">02</div><div><h3>被删除的订单</h3><p>平台中不存在那笔订单，获救的硬盘却记录着程野的手机号；他必须赶在警方封锁前找到自己遗失的行动轨迹。</p></div><span class="payoff">能力代价反噬</span></div>
+            <div class="beat"><div class="num">03</div><div><h3>第二个零点</h3><p>午夜再次到来，程野看到的未来里，死者竟然是“昨天的自己”；他第一次主动利用十分钟倒计时布置反击。</p></div><span class="payoff">主角开始掌控</span></div>
+          </div></section>
+          <section class="panel" id="opening"><div class="manuscript"><h2>第001章　倒塌前十分钟</h2><p>暴雨如注，砸在程野头盔上像无数颗冰雹。他抹了把脸，雨水混着汗水流进嘴角，咸涩得发苦。手机导航显示“前方50米”，可眼前这栋灰扑扑的写字楼，正发出令人心悸的呻吟——不是风声，是钢筋在扭曲，混凝土在哀鸣。</p><p>他抬头，雨水顺着安全帽檐流下，模糊了视线。午夜零点整，腕表震动。世界骤然静止。</p><p>雨滴悬在半空，霓虹灯牌的光晕凝成一片模糊的色块，连自己粗重的呼吸都消失了。只有视野中央，浮现出一行幽蓝小字：【未来10分钟·倒计时：09:59】</p><p>程野没时间惊讶。他猛地推开玻璃门，冷气裹挟着灰尘扑面而来。大堂空无一人，只有应急灯惨白的光，在湿漉漉的地砖上投下他晃动的影子。</p><p>楼梯间里，脚步声被无限放大。他数着楼层：12、13、14……每一步都踩在建筑即将崩塌的临界点上。</p></div><div class="fade"></div><button class="read-more" type="button" data-expand>展开更多正文</button></section>
+        </article>
+        <aside class="inspector">
+          <section class="side-card"><h3>作者决策</h3><div class="fact"><span>故事基调</span><b>高压危机中的克制爽感</b></div><div class="fact"><span>主角驱动力</span><b>先救人，再查清记忆缺口</b></div><div class="fact"><span>首卷承诺</span><b>破解云栖大厦异常</b></div></section>
+          <section class="side-card"><h3>开书完整度</h3><div class="fact"><span>卖点与规则</span><b>已建立</b><div class="meter"><i></i></div></div><div class="fact"><span>黄金三章</span><b>3 / 3 已规划</b></div><div class="fact"><span>开篇正文</span><b>已生成并校验</b></div></section>
+          <section class="side-card next"><h3>在同一会话继续</h3><p>首次开书后无需重新进入技能页，直接在当前对话继续创作。</p><div class="prompt">继续写第二章《被删除的订单》，沿用现有设定。</div><div class="hint">同一会话会继续维护人物、规则、时间线与伏笔。</div></section>
+        </aside>
+      </div>
+    </main>
+  </div>
+  <script>
+    const tabs=[...document.querySelectorAll('.tab')],panels=[...document.querySelectorAll('.panel')];
+    tabs.forEach(tab=>tab.addEventListener('click',()=>{tabs.forEach(x=>x.classList.toggle('active',x===tab));panels.forEach(x=>x.classList.toggle('active',x.id===tab.dataset.target));}));
+    document.querySelector('[data-expand]').addEventListener('click',e=>{document.querySelector('.fade').style.display='none';e.currentTarget.style.display='none';document.querySelector('.manuscript').insertAdjacentHTML('beforeend','<p>18楼，B区数据机房。门虚掩着，透出一线微光。程野推门而入，看见一个穿格子衬衫的年轻人背对着他，手指在键盘上翻飞，屏幕上瀑布般滚过密密麻麻的代码。</p><p>“快走！楼要塌了！”程野吼道。</p><p>年轻人头也不回：“不行，最后一组核心备份还没导完。再给我三分钟。”</p><p>倒计时：【03:17】。程野的心沉下去。他不能解释自己怎么知道，更不能碰那台电脑——三分钟后，承重柱断裂，天花板会正好覆盖整个操作台。</p>');});
+  </script>
+</body>
+</html>

@@ -1,7 +1,7 @@
 schema_version: 2
 id: novel-generator
 type: chat
-version: 1.0.0
+version: 1.2.1
 status: published
 default_locale: zh-CN
 provider: WorkBuddy
@@ -18,137 +18,126 @@ placement:
 classification:
   category: 内容创作
   tags:
-    - 小说创作
+    - 爽文生成
     - 网文连载
-    - 大纲与设定
+    - 大纲与章节
 
 assets:
   cover:
     file: assets/cover.png
     role: cover
+  idea_demo:
+    file: assets/novel-idea-demo.html
+    role: result
+  outline_demo:
+    file: assets/novel-outline-demo.html
+    role: result
+  chapter_demo:
+    file: assets/novel-chapter-demo.html
+    role: result
 
 presentation:
   card:
-    title: 小说连载创作助手
-    description: 为作者完成创意扩展、人物设定、故事大纲、章节写作与连载一致性管理
+    title: 爽文小说生成
+    description: 一句话开书、规划整书或直接创作章节，让脑洞快速变成能继续连载的正文
     output_type: document
-    output_label: 小说创作稿
+    output_label: 小说创作工作台
     cover_asset: cover
-    result_summary: 从一句话灵感到可持续连载，形成设定、大纲、章节与连续性记录
+    result_summary: 在统一作者工作台中查看真实开篇、全书大纲和章节正文
   detail:
-    title: 小说连载创作助手
-    description: 面向网文和长篇小说作者，协助完成创意孵化、世界与人物设定、全局大纲、章节创作、续写修订和连续性检查。来源：WorkBuddy，经 LazyMind 适配。
-    attachment_hint: 已有灵感、人物设定、大纲、前文章节或连载状态（可选）
+    title: 一句话开书，随时继续写爽文
+    description: 面向网文与爽文创作者，从一句话脑洞出发，完成核心卖点、人物设定、全书大纲和章节正文，维护人物状态与伏笔。来源：WorkBuddy，经 LazyMind 适配。
+    attachment_hint: 无需上传即可运行预置案例；也可替换为自己的脑洞、人物设定或已有前文
 
 tasks:
   - id: idea-development
     selector:
-      title: 创意与设定
-      description: 从一句话灵感搭建题材、主角、冲突、世界规则和开篇钩子
-      output_label: 小说创作企划
+      title: 一句话开书
+      description: 从一个脑洞生成书名、核心卖点、黄金三章和可直接阅读的开篇
+      output_label: 开书方案与正文
     launch:
-      prompt_short: 把我的一句话小说灵感扩展成一份可执行的创作方案。
-      prompt: 请根据我提供的一句话灵感、题材方向或关键词，完成一份面向作者的小说创作企划。请明确题材与目标读者、核心卖点、主角起点和欲望、主要冲突、世界或力量规则、关键配角、前三章钩子以及主要创作风险。不要机械堆叠流行元素；只有缺失信息会显著改变方向时，集中询问不超过三个关键问题。
+      prompt_short: 体验案例：把“能看见项目失败倒计时的实习生”发展成一部可直接开读的爽文。
+      prompt: |
+        请把下面的创意发展成一部具有持续追读感的爽文，并写出可直接阅读的开篇。
+
+        创意：刚入职的产品实习生林澈，能看见每个项目彻底失败前的红色倒计时。公司即将发布的 AI 助手只剩 24 小时，所有测试却显示正常；他每判断错一次，倒计时就会加速。
+
+        给出书名、一句话卖点、主角与核心规则、黄金三章安排，并创作约 1500 字的第一章。让爽点来自发现信息、做出判断和承担代价，其他角色保持合理动机。正文后附一张简短状态卡，方便在当前会话继续创作。
     replay:
       steps:
-        - title: 拆解创作方向
-          description: 识别题材、目标读者、作品基调和差异化卖点
-        - title: 设计人物与冲突
-          description: 建立主角欲望、缺陷、对手、阻力和失败代价
-        - title: 建立世界规则
-          description: 明确社会结构、能力边界、资源和不可违反的设定
-        - title: 形成开篇方案
-          description: 输出一句话梗概、前三章钩子和首个阶段回报
+        - title: 提炼爽文卖点
+          description: 识别目标读者、核心期待和区别于同类作品的记忆点
+        - title: 建立主角与规则
+          description: 明确主角欲望、初始困境、能力边界和必须承担的代价
+        - title: 设计黄金三章
+          description: 用危机、兑现和新悬念形成连续阅读动力
+        - title: 写出真实开篇
+          description: 直接交付有行动、有变化、有章末钩子的小说正文
     result:
-      template: generic_report_v1
-      eyebrow: 小说创作企划
-      title: 一句话灵感的可执行创作方案
-      summary: 将初始灵感扩展为人物、冲突、世界规则和开篇节奏完整的创作起点
-      highlights:
-        - 书名、梗概与差异化卖点
-        - 主角弧光、核心冲突与世界规则
-        - 前三章钩子与首个阶段回报
+      template: html_preview_v1
+      eyebrow: 爽文开书案例
+      title: 《午夜十分钟》创作起点
+      summary: 查看一个脑洞如何变成书名、能力规则、黄金三章和真实开篇正文。
+      html_asset: idea_demo
 
   - id: outline-planning
     selector:
-      title: 全局大纲
-      description: 规划全书主线、分卷目标、关键转折、节奏和伏笔回收
-      output_label: 故事大纲
+      title: 规划整书
+      description: 规划全书主线、分卷升级、人物成长、高潮节奏和伏笔回收
+      output_label: 全书连载大纲
     launch:
-      prompt_short: 根据我的小说设定规划全局大纲和分卷节奏。
-      prompt: 请根据我提供的题材、人物、世界设定和目标篇幅，设计一份可执行的小说全局大纲。请包含全书主线、主角成长弧、中点不可逆变化、终局目标、分卷目标与冲突、关键转折、阶段回报与代价、伏笔埋设和回收窗口；保持因果关系和节奏变化，不要把大纲写成重复桥段清单。
+      prompt_short: 体验案例：为“项目失败倒计时”的创意规划一套四卷连载路线。
+      prompt: |
+        请根据下面的创意，规划一部适合持续连载的四卷爽文。
+
+        创意：刚入职的产品实习生林澈，能看见每个项目彻底失败前的红色倒计时。公司即将发布的 AI 助手只剩 24 小时，所有测试却显示正常；他每判断错一次，倒计时就会加速。
+
+        梳理全书主线、主角成长、四卷的核心冲突与卷末钩子，并安排主要伏笔的埋设和回收。故事应逐步揭开倒计时的来源，让每次胜利带来新的代价或更大的问题。最后附一张全书状态卡，供后续章节创作沿用。
     replay:
       steps:
-        - title: 核对核心设定
-          description: 确认主角、目标、世界规则、篇幅和不可改变的边界
-        - title: 规划全书主线
-          description: 设计起点、中点变化、终局目标和人物成长弧
-        - title: 设计分卷节奏
-          description: 拆分卷级目标、冲突升级、阶段高潮与代价
-        - title: 检查伏笔与因果
-          description: 安排关键转折、伏笔回收窗口和前后依赖
+        - title: 锁定作品承诺
+          description: 确认核心卖点、主角目标、目标篇幅和不可违反的规则
+        - title: 搭建全书主线
+          description: 设计开局、中点变化、终局抉择和人物成长方向
+        - title: 拆解分卷节奏
+          description: 安排卷级目标、冲突升级、阶段高潮、回报与代价
+        - title: 校验伏笔因果
+          description: 标记伏笔首次出现、推进节点和预计回收窗口
     result:
-      template: generic_report_v1
-      eyebrow: 故事大纲
-      title: 全局主线与分卷节奏大纲
-      summary: 形成从全书主线到卷级目标、关键转折和伏笔回收的连载路线
-      highlights:
-        - 全书主线与主角成长弧
-        - 分卷目标、冲突升级和阶段高潮
-        - 关键转折、伏笔与回收窗口
+      template: html_preview_v1
+      eyebrow: 全书规划案例
+      title: 《午夜十分钟》连载路线图
+      summary: 在统一创作工作台中查看全书主线、四卷节奏、人物成长与伏笔回收。
+      html_asset: outline_demo
 
   - id: chapter-writing
     selector:
-      title: 章节创作
-      description: 根据设定与前文创作开篇、新章节，或重写指定场景
-      output_label: 章节正文
+      title: 创作一章
+      description: 给出人物、场景和本章目标，直接生成节奏完整、可阅读的章节正文
+      output_label: 小说章节正文
     launch:
-      prompt_short: 根据我的设定和前文写一章节奏自然、前后连贯的小说正文。
-      prompt: 请根据我提供的小说设定、大纲、前文章节和本章目标完成章节创作。正文应有明确的场景目标、阻力、状态变化和章末推动力；情绪回报必须有铺垫，对话体现人物差异，不让角色无故降智或获得未知信息。若是续写，请先核对最近剧情与角色状态；除非我要求编辑说明，最终正文不要混入概要、检查清单或内部创作备注。
-    replay:
-      steps:
-        - title: 读取创作上下文
-          description: 核对人物状态、世界规则、前文事件和本章约束
-        - title: 制定章节任务
-          description: 明确场景目标、主要阻力、变化、回报与结尾钩子
-        - title: 完成场景写作
-          description: 用行动、对话和因果推进正文，保持节奏与空间清晰
-        - title: 执行质量检查
-          description: 检查人物、时空、规则、重复桥段和连续性冲突
-    result:
-      template: generic_report_v1
-      eyebrow: 章节正文
-      title: 可继续连载的小说章节
-      summary: 交付目标明确、冲突有效、人物连续并自然留下后续动力的章节正文
-      highlights:
-        - 清晰的场景目标、阻力与状态变化
-        - 有铺垫的情绪回报和人物化对话
-        - 章末钩子与连续性检查
+      prompt_short: 体验案例：创作倒计时首次出现的 AI 助手上线评审会章节。
+      prompt: |
+        请根据下面的作品设定和本章场景，创作一章可直接阅读的爽文正文。
 
-  - id: continuation-review
-    selector:
-      title: 续写与一致性
-      description: 梳理角色、时间线、伏笔和世界规则，诊断穿帮并规划后续
-      output_label: 连载诊断与续写方案
-    launch:
-      prompt_short: 检查我的小说连载是否存在穿帮，并给出下一步续写方案。
-      prompt: 请根据我提供的项目设定、大纲、章节正文或连载状态，检查角色存亡与位置、能力和资源来源、时间线、世界规则、人物已知信息、开放伏笔及重复桥段。请列出可定位的冲突、影响和修订建议，并给出下一章目标与钩子；如果我同时要求续写，请在完成检查后创作下一章。当前环境无法维护项目文件时，请输出一份可供下次继续使用的精简连载状态卡，不要声称已经持久保存。
+        作品设定：产品实习生林澈能看见项目彻底失败前的红色倒计时；倒计时不提示原因，他每判断错一次，剩余时间就会加速减少。
+
+        本章场景：AI 助手上线评审会上，所有测试报告都显示通过，林澈却看见大屏上出现“23:59:59”。他没有决策权限，只能从用户反馈和异常记录中寻找证据。第一次修复看似成功，倒计时却突然减少六小时。
+
+        创作约 1500 字，写清本章目标、现实阻力、可信的小胜利、判断错误的代价和自然的章末钩子。人物不要为了衬托主角而降智。正文后附简短状态卡，记录人物状态、能力规则和开放悬念。
     replay:
       steps:
-        - title: 整理项目状态
-          description: 汇总当前卷、最近事件、活跃人物、规则和开放伏笔
-        - title: 核对连续性
-          description: 检查角色、时空、能力、资源、信息边界和剧情因果
-        - title: 形成修订建议
-          description: 定位冲突证据，说明影响并给出最小修复方案
-        - title: 规划后续章节
-          description: 明确下一章目标、推进线索、状态变化和结尾钩子
+        - title: 明确本章任务
+          description: 锁定视角人物、场景目标、主要阻力、回报与代价
+        - title: 核对创作上下文
+          description: 有前文时检查人物状态、规则、时间线和信息边界
+        - title: 完成场景链写作
+          description: 用行动、对话和因果变化推进一章完整正文
+        - title: 收束章末钩子
+          description: 检查连续性并留下具体、自然的下一章动力
     result:
-      template: generic_report_v1
-      eyebrow: 连载诊断
-      title: 连载一致性诊断与续写方案
-      summary: 整理可复用的项目状态，修复关键穿帮并明确下一章推进方向
-      highlights:
-        - 角色、时间线、规则与伏笔状态
-        - 可定位的连续性冲突和修订建议
-        - 下一章目标、推进线索与连载状态卡
+      template: html_preview_v1
+      eyebrow: 章节正文案例
+      title: 第001章《倒塌前十分钟》
+      summary: 阅读 LazyMind 实测生成的完整都市异能开篇，并查看本章任务与连续性状态。
+      html_asset: chapter_demo
