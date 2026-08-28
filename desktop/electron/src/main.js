@@ -1527,14 +1527,13 @@ function loadingHTML() {
         els.progressMeta.hidden = true;
         return;
       }
-      const totalBytes = Math.max(0, Number(progress.totalBytes || 0));
-      const completedBytes = Math.max(0, Number(progress.completedBytes || 0));
       const totalFiles = Math.max(0, Number(progress.totalFiles || 0));
       const completedFiles = Math.max(0, Number(progress.completedFiles || 0));
-      const ratio = totalBytes > 0
-        ? completedBytes / totalBytes
-        : (totalFiles > 0 ? completedFiles / totalFiles : 0);
-      const percent = Math.max(0, Math.min(100, Math.round(ratio * 100)));
+      const ratio = totalFiles > 0 ? completedFiles / totalFiles : 0;
+      const complete = totalFiles > 0 && completedFiles >= totalFiles;
+      const percent = complete
+        ? 100
+        : Math.max(0, Math.min(99, Math.floor(ratio * 100)));
       els.progressBar.classList.remove("indeterminate");
       els.progressBar.classList.add("determinate");
       els.progressBar.setAttribute("aria-valuemin", "0");

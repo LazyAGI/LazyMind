@@ -501,6 +501,9 @@ test("Desktop startup shows real bundled Python progress and transient Windows l
   assert.match(source, /Waiting for Windows to release Python files/);
   assert.match(source, /Reading bundled Python archive/);
   assert.match(source, /percent \+ "% · " \+ \(progress\.totalRoots/);
+  assert.match(source, /const ratio = totalFiles > 0 \? completedFiles \/ totalFiles : 0/);
+  assert.match(source, /const complete = totalFiles > 0 && completedFiles >= totalFiles/);
+  assert.match(source, /Math\.min\(99, Math\.floor\(ratio \* 100\)\)/);
   assert.match(source, /style\.transform = "scaleX\("/);
   assert.doesNotMatch(source, /transition:\s*width/);
 });
