@@ -60,6 +60,7 @@ import "./index.scss";
 import { downloadStream } from "@/modules/chat/utils/download";
 import ArchiveConversationModal from "../ArchiveConversationModal";
 import { unarchiveConversation } from "@/modules/settings/recoveryApi";
+import { RECOVERY_ARCHIVE_PATH } from "@/modules/settings/recoveryRoute";
 
 const EXPORT_FILE_TYPE_XLSX = "EXPORT_FILE_TYPE_XLSX";
 const SIDEBAR_SEARCH_DEBOUNCE_MS = 300;
@@ -391,7 +392,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
                 })
                 .catch(() => message.error(t("settingsPage.recovery.operationFailed")));
             }}>{t("settingsPage.recovery.undo")}</Button>
-            <Button type="link" size="small" onClick={() => navigate("/settings?section=recovery")}>{t("settingsPage.recovery.viewArchived")}</Button>
+            <Button type="link" size="small" onClick={() => navigate(RECOVERY_ARCHIVE_PATH)}>{t("settingsPage.recovery.viewArchived")}</Button>
           </span>
         ),
       });

@@ -11,6 +11,7 @@ import { getChatConversationPath, selectChatConversationFilter } from '@/modules
 import StateGraphModal from '@/components/StateGraphModal';
 import ArchiveConversationModal from '@/modules/chat/components/ArchiveConversationModal';
 import { unarchiveConversation } from '@/modules/settings/recoveryApi';
+import { RECOVERY_ARCHIVE_PATH } from '@/modules/settings/recoveryRoute';
 
 const PAGE_SIZE = 20;
 const POLL_INTERVAL_MS = 5_000;
@@ -146,7 +147,7 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
             })
             .catch(() => message.error(t('settingsPage.recovery.operationFailed')));
         }}>{t('settingsPage.recovery.undo')}</Button>
-        <Button type='link' size='small' onClick={() => navigate('/settings?section=recovery')}>{t('settingsPage.recovery.viewArchived')}</Button>
+        <Button type='link' size='small' onClick={() => navigate(RECOVERY_ARCHIVE_PATH)}>{t('settingsPage.recovery.viewArchived')}</Button>
       </span>,
     });
   };
