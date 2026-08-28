@@ -958,13 +958,13 @@ export async function organizeSkills(
   };
 }
 
-export async function getSkillOrganizeTask(
-  requestId: string,
+async function querySkillOrganizeTask(
+  params: { requestid?: string; status?: string },
   signal?: AbortSignal,
 ): Promise<SkillOrganizeTaskRecord | null> {
   const response = await axiosInstance.get(`${coreBasePath}/skill-organize/tasks`, {
     params: {
-      requestid: requestId.trim(),
+      ...params,
       page: 1,
       page_size: 1,
     },
@@ -981,6 +981,19 @@ export async function getSkillOrganizeTask(
     ...record,
     status: record.status as SkillOrganizeTaskStatus,
   };
+}
+
+export async function getSkillOrganizeTask(
+  requestId: string,
+  signal?: AbortSignal,
+): Promise<SkillOrganizeTaskRecord | null> {
+  return querySkillOrganizeTask({ requestid: requestId.trim() }, signal);
+}
+
+export async function getRunningSkillOrganizeTask(
+  signal?: AbortSignal,
+): Promise<SkillOrganizeTaskRecord | null> {
+  return querySkillOrganizeTask({ status: "running" }, signal);
 }
 
 const skillOrganizeTerminalStatuses = new Set<SkillOrganizeTaskStatus>([
