@@ -1,14 +1,13 @@
 schema_version: 2
 id: chat-eq-reply
 type: chat
-version: 1.0.0
+version: 1.1.0
 status: published
 default_locale: zh-CN
 provider: SkillHub
 
 skill:
   source_url: https://skillhub.cn/skills/chat-eq-reply
-  category: communication
   required_version: 3.5.0
 
 placement:
@@ -17,7 +16,7 @@ placement:
   order: 22
 
 classification:
-  category: 内容创作
+  category: 沟通表达
   tags:
     - 高情商回复
     - 聊天
@@ -28,45 +27,105 @@ assets:
   cover:
     file: assets/cover.png
     role: cover
+  late_reply_demo:
+    file: assets/late-reply-demo.html
+    role: result
+  leader_deadline_demo:
+    file: assets/leader-deadline-demo.html
+    role: result
+  boundary_help_demo:
+    file: assets/boundary-help-demo.html
+    role: result
 
 presentation:
   card:
     title: 高情商聊天回复助手
-    description: 根据对话语境生成自然、体面、有分寸的多风格回复
+    description: 覆盖亲密关系、职场沟通和朋友边界，生成自然有分寸的回复
     output_type: document
-    output_label: 回复建议
+    output_label: 对话回复建议
     cover_asset: cover
-    result_summary: 输出多种语气版本，帮助你在不同关系和场景下妥帖表达
+    result_summary: 查看晚回消息安抚、领导催方案、朋友临时求助 3 类真实场景
   detail:
-    title: 高情商聊天回复助手
-    description: 识别对方真实语气、关系距离和场景目标，生成温柔、幽默、直接或高情商等不同风格的聊天回复。来源：https://skillhub.cn/skills/chat-eq-reply，经 LazyMind 适配。
-    attachment_hint: 对方原话、聊天背景、你希望达到的目的和关系类型
+    title: 多场景高情商回复案例
+    description: 用亲密关系、职场沟通和朋友求助 3 个真实场景，演示如何先识别情绪和潜台词，再生成真诚、自然、不模板化的回复。
+    attachment_hint: 对方原话、关系类型、聊天背景和你希望达到的目的
 
 tasks:
-  - id: eq-reply
+  - id: late-reply-reassurance
     selector:
-      title: 高情商回复
-      description: 为恋爱、职场、朋友和家人沟通生成合适回复
-      output_label: 聊天回复建议
+      title: 晚回消息安抚
+      description: 安抚对方被忽视的不安，同时真诚解释刚才确实在忙
+      output_label: 3 个高情商回复
     launch:
-      prompt_short: 帮我根据这段聊天生成高情商回复。
-      prompt: 请根据我提供的对方原话、聊天背景、关系类型和我希望达成的目的，生成多种高情商聊天回复。请先判断对方情绪和潜台词，再给出温柔体贴、幽默风趣、直接有效等不同风格版本，并说明每种回复适合的场景；如果信息不足，请先问我关键背景。
+      prompt_short: 对方发来：“你怎么又这么晚才回我，是不是根本不想理我？”请帮我生成 3 个高情商回复，要求自然、不油腻，既能安抚对方情绪，也能解释我刚才确实在忙。语气要真诚一点，不要像模板。
+      prompt: 对方发来：“你怎么又这么晚才回我，是不是根本不想理我？”请帮我生成 3 个高情商回复，要求自然、不油腻，既能安抚对方情绪，也能解释我刚才确实在忙。语气要真诚一点，不要像模板。
     replay:
       steps:
-        - title: 理解语境
-          description: 分析对方话语、情绪、关系距离和沟通目标
-        - title: 选择风格
-          description: 匹配温柔、幽默、直接或安抚等回复策略
-        - title: 生成回复
-          description: 输出多版自然、不尴尬、可直接发送的表达
-        - title: 提醒风险
-          description: 标注不适合发送的说法和进一步沟通建议
+        - title: 读取聊天上下文
+          description: 识别“又”和“不想理我”背后的被忽视感、不安和试探
+        - title: 明确回复目标
+          description: 先承认等待带来的情绪，再说明刚才在忙，最后传递“我在意你”
+        - title: 匹配回复风格
+          description: 选择温柔真诚、幽默松弛和直球坦诚 3 种不油腻的表达
+        - title: 生成可发送话术
+          description: 输出 3 条可直接发送的回复，并补充每条适用逻辑
+        - title: 补充发送建议
+          description: 建议补一句刚才具体在忙什么，并提前告知未来可能晚回的时段
     result:
-      template: generic_report_v1
-      eyebrow: 聊天回复建议
-      title: 多风格高情商回复
-      summary: 生成贴合关系、情绪和目标的聊天回复版本
-      highlights:
-        - 对方情绪和潜台词判断
-        - 多种语气回复可选
-        - 发送建议和沟通风险提醒
+      template: html_preview_v1
+      eyebrow: 亲密关系沟通案例
+      title: 晚回消息时，如何真诚安抚对方
+      summary: 前端对话 mock 展示对方不安、3 种回复风格和后续发送建议。
+      html_asset: late_reply_demo
+  - id: leader-deadline-reply
+    selector:
+      title: 领导催方案回复
+      description: 不推锅地说明需求变更和数据核实进度，并争取修改时间
+      output_label: 4 个职场回复
+    launch:
+      prompt_short: 领导发来：“这个方案怎么还没改好？下午开会要用。”但其实是因为需求昨晚才变更，我还需要确认数据。请帮我写一个高情商回复，既不要推锅，也要说明实际情况，并争取一点修改时间。
+      prompt: 领导发来：“这个方案怎么还没改好？下午开会要用。”但其实是因为需求昨晚才变更，我还需要确认数据。请帮我写一个高情商回复，既不要推锅，也要说明实际情况，并争取一点修改时间。
+    replay:
+      steps:
+        - title: 判断职场语境
+          description: 识别领导关注的是会前可用性和确定性，而不是听解释
+        - title: 拆解真实约束
+          description: 明确需求昨晚变更、数据仍需核实、旧数据直接使用有风险
+        - title: 转换交付策略
+          description: 将“全部来不及”改成“主体会前交付，数据核实后补齐”
+        - title: 输出多种语气
+          description: 生成温柔真诚、自信边界、直球坦诚和知性分析 4 种版本
+        - title: 补充推进建议
+          description: 建议同步数据确认人和节点，必要时让领导协助协调资源
+    result:
+      template: html_preview_v1
+      eyebrow: 职场沟通案例
+      title: 领导催方案时的确定性回复
+      summary: 展示如何不推锅、不硬顶，把时间压力拆成可交付节点。
+      html_asset: leader_deadline_demo
+  - id: boundary-help-reply
+    selector:
+      title: 礼貌拒绝临时帮忙
+      description: 面对朋友临时求助，表达理解但守住时间边界
+      output_label: 3 个边界感回复
+    launch:
+      prompt_short: 朋友总是临时找我帮忙，这次又发来：“你今晚能不能帮我把 PPT 改一下？挺急的，明早就要。”但我今晚已经有安排，不想答应。请帮我回复得礼貌、有边界感，不伤关系，但也不要显得我很好拿捏。
+      prompt: 朋友总是临时找我帮忙，这次又发来：“你今晚能不能帮我把 PPT 改一下？挺急的，明早就要。”但我今晚已经有安排，不想答应。请帮我回复得礼貌、有边界感，不伤关系，但也不要显得我很好拿捏。
+    replay:
+      steps:
+        - title: 识别关系模式
+          description: 判断问题不只是这次 PPT，而是朋友习惯临时占用你的时间
+        - title: 明确拒绝边界
+          description: 不展开过多私人解释，直接说明今晚无法接下完整任务
+        - title: 保留关系温度
+          description: 给予有限替代帮助，例如只看关键页、标题或目录
+        - title: 生成回复版本
+          description: 输出温和坚定、真诚边界和轻松不失礼 3 种可发送话术
+        - title: 提醒后续分寸
+          description: 避免越解释越可协商，用“能帮到哪里”替代模糊答应
+    result:
+      template: html_preview_v1
+      eyebrow: 朋友边界案例
+      title: 临时求助时礼貌拒绝又不伤关系
+      summary: 前端 mock 展示如何既照顾关系，也让对方知道你不是随时可用。
+      html_asset: boundary_help_demo

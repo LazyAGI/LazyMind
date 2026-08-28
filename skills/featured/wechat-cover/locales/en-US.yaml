@@ -4,48 +4,105 @@ classification:
   category: Design & creativity
   tags:
     - WeChat covers
-    - Viral titles
-    - Content marketing
-    - Cover design
+    - Viral analysis
+    - Article cover
+    - Product seeding
 
 presentation:
   card:
     title: WeChat viral cover design
-    description: Analyze the article angle and generate multiple high-converting WeChat cover concepts
-    output_type: images
-    output_label: Cover concepts
+    description: Cover cases for niche trends, article visuals, and product-seeding content
+    output_type: web
+    output_label: Analysis report and covers
     cover_asset: cover
-    result_summary: Deliver title hooks, visual directions, color palettes, and multiple cover concepts
+    result_summary: Preview workplace growth, cognitive compounding, and winter sensitive-skin cover cases
   detail:
-    title: WeChat viral cover design
-    description: "Extract the core selling points from the article topic, summary, and target readers, then generate WeChat-ready cover concepts based on high-reach visual patterns. Source: https://github.com/tomorrow140/wechat-cover-designer; adapted for LazyMind."
-    attachment_hint: Article title, summary, target readers, account positioning, or reference covers
+    title: Multi-scenario WeChat cover design cases
+    description: Analyze viral cover data and produce actionable cover concepts for trend analysis, concrete articles, and marketing content.
+    attachment_hint: WeChat niche, article topic, target readers, account positioning, or reference covers
 
 tasks:
-  - id: cover-design
+  - id: workplace-cover-report
     selector:
-      title: Viral cover concepts
-      description: Generate WeChat cover ideas that can be produced directly from the article
-      output_label: WeChat cover concepts
+      title: Workplace-growth cover analysis
+      description: Analyze viral WeChat cover patterns and create 3 cover concepts
+      output_label: Analysis report and covers
     launch:
-      prompt_short: Generate multiple viral WeChat cover concepts from my article.
-      prompt: Analyze the core selling points and emotional hooks from the article title, summary, account positioning, and target readers I provide, then generate multiple viral WeChat cover concepts. Include title wording, visual subject, composition, color palette, typography, use cases, and one-click production notes. Ask for missing essentials first.
+      prompt_short: Analyze viral workplace-growth WeChat cover patterns and give me 3 cover concepts.
+      prompt: Analyze viral workplace-growth WeChat cover patterns and give me 3 cover concepts.
     replay:
       steps:
-        - title: Capture the topic
-          description: Read the title, summary, readers, and account positioning
-        - title: Extract selling points
-          description: Identify hooks, emotional value, and title wording
+        - title: Parse the niche
+          description: Confirm the topic as workplace growth, promotion, salary increase, and office-worker content
+        - title: Query viral data
+          description: Pull 50 relevant viral post records and identify 49 usable cover images
+        - title: Analyze top covers
+          description: Download the top 20 covers by views and inspect people, typography, color, and composition
+        - title: Summarize patterns
+          description: Group the covers into emotional scenes, cartoon memes, bold-title viewpoints, and atmospheric visuals
         - title: Generate concepts
-          description: Produce multiple cover compositions, palettes, subjects, and typography strategies
-        - title: Preview for WeChat
-          description: Provide size adaptation, revision notes, and production tips
+          description: Create cinematic, cartoon meme, and bold viewpoint concepts
+        - title: Deliver report and images
+          description: Produce the HTML analysis report and show generated WeChat horizontal cover images
     result:
-      template: generic_report_v1
-      eyebrow: WeChat cover concepts
-      title: Multiple high-converting cover ideas
-      summary: Deliver a complete cover package with titles, composition, color, and production notes
-      highlights:
-        - Core selling points and viral title wording
-        - Multiple visual cover directions
-        - WeChat size adaptation and production tips
+      template: html_preview_v1
+      eyebrow: WeChat cover case
+      title: Viral cover analysis for workplace growth and office-worker content
+      summary: HTML report based on 50 viral records and top-20 cover analysis, with three design concepts and three generated covers.
+      html_asset: report_demo
+  - id: cognitive-compound-cover
+    selector:
+      title: Cognitive compounding article cover
+      description: Design 3 cover concepts for a long-termism and career-cognition article
+      output_label: Report and three covers
+    launch:
+      prompt_short: Design 3 WeChat cover concepts for an article titled “After 30, what really widens the gap is not effort, but cognitive compounding.”
+      prompt: Design 3 WeChat cover concepts for an article titled “After 30, what really widens the gap is not effort, but cognitive compounding.”
+    replay:
+      steps:
+        - title: Parse article theme
+          description: Identify personal growth, workplace cognition, and long-termism as the core theme
+        - title: Expand keywords
+          description: Shift from less relevant long-termism results to cognition, growth, and career keywords
+        - title: Analyze viral covers
+          description: Use 48 valid records and inspect the top 20 covers
+        - title: Summarize styles
+          description: Group covers into infographic, cinematic, cartoon, and business-texture styles
+        - title: Generate concepts
+          description: Create three restrained but clickable directions
+        - title: Deliver report and covers
+          description: Present the HTML report and three horizontal cover images
+    result:
+      template: html_preview_v1
+      eyebrow: Article cover case
+      title: Cognitive compounding WeChat cover concepts
+      summary: HTML report and three cover concepts based on 48 valid viral records and top-20 cover analysis.
+      html_asset: cognitive_report
+  - id: sensitive-skincare-cover
+    selector:
+      title: Winter sensitive-skin cover
+      description: Analyze skincare seeding covers and produce 3 image-generation-ready concepts
+      output_label: Analysis report
+    launch:
+      prompt_short: Analyze viral covers for winter sensitive-skin skincare lists and give me 3 image-generation-ready cover concepts.
+      prompt: Analyze viral covers for winter sensitive-skin skincare lists and give me 3 image-generation-ready cover concepts.
+    replay:
+      steps:
+        - title: Parse marketing need
+          description: Confirm the need for professional, clean, trustworthy, click-friendly skincare content
+        - title: Query viral data
+          description: Search winter, sensitive skin, and skincare cover examples
+        - title: Analyze top covers
+          description: Clean script output, parse top 20 covers, and analyze visual dimensions
+        - title: Summarize patterns
+          description: Identify premium still life, authority, pain-point, product grid, and glossy ad styles
+        - title: Generate prompts
+          description: Produce three directly usable cover-generation concepts
+        - title: Deliver report and covers
+          description: Present the HTML report and three winter sensitive-skin horizontal cover images in concept order
+    result:
+      template: html_preview_v1
+      eyebrow: Product-seeding cover case
+      title: Winter sensitive-skin skincare cover analysis
+      summary: HTML report with visual pattern analysis, three image-generation-ready cover concepts, and three generated cover images.
+      html_asset: sensitive_skincare_report

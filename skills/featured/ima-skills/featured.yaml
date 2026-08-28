@@ -1,14 +1,13 @@
 schema_version: 2
 id: ima-skills
 type: work
-version: 1.0.0
+version: 1.1.0
 status: published
 default_locale: zh-CN
 provider: 腾讯 IMA
 
 skill:
   source_url: https://skillhub.cn/skills/ima-skills
-  category: knowledge
   required_version: 1.1.9
 
 placement:
@@ -17,56 +16,128 @@ placement:
   order: 23
 
 classification:
-  category: 信息分析
+  category: 知识管理
   tags:
     - IMA
     - 知识库
-    - 笔记管理
-    - 检索
+    - 网页收藏
+    - 摘要笔记
 
 assets:
   cover:
     file: assets/cover.png
     role: cover
+  note_preview:
+    file: assets/skillhub-note.png
+    role: result
+  note_search_summary:
+    file: assets/note-search-summary.html
+    role: result
+  workbuddy_trial_note:
+    file: assets/workbuddy-trial-note.png
+    role: result
 
 presentation:
   card:
     title: IMA 知识管理
-    description: 整理资料、沉淀笔记并构建可检索、可输出的个人知识库
+    description: 覆盖网页入库、笔记检索总结、新建并追加笔记的 IMA 案例
     output_type: report
-    output_label: 知识管理方案
+    output_label: IMA 知识管理结果
     cover_asset: cover
-    result_summary: 将零散资料转为结构化知识库，并支持检索、关联和高效输出
+    result_summary: 查看 SkillHub 网页入库、AI 办公自动化检索总结和 WorkBuddy 试用记录
   detail:
-    title: IMA 知识管理
-    description: 帮助你整理文档、网页、笔记和灵感，建立可持续更新的知识库，让资料更容易被记住、找到和复用。来源：腾讯 IMA，经 LazyMind 适配。
-    attachment_hint: 笔记、文档、网页链接、研究资料或现有知识库目录
+    title: IMA 知识库与笔记操作案例
+    description: 通过网页入库、笔记检索总结、新建并追加笔记 3 个案例，展示 IMA 知识库和笔记的读写、检索、摘要与归档能力。
+    attachment_hint: 网页链接、搜索关键词、目标知识库、笔记标题、分类方向和摘要要求
 
 tasks:
-  - id: knowledge-management
+  - id: skillhub-note
     selector:
-      title: 构建知识库
-      description: 整理资料结构，建立分类、标签、关联和检索路径
-      output_label: 知识库整理方案
+      title: SkillHub 文章入库摘要
+      description: 收藏网页到 IMA，并生成可长期检索的摘要笔记
+      output_label: 摘要笔记
     launch:
-      prompt_short: 帮我整理这些资料，构建一个清晰的个人知识库。
-      prompt: 请根据我提供的文档、笔记、网页或资料目录，帮我构建一个清晰可维护的知识库。请完成资料分类、标签体系、重点摘要、知识关联、检索问题清单和后续更新建议；如果资料不完整，请先询问我补充来源或使用目标。
+      prompt_short: 请把这篇网页加入我的 IMA 知识库，并为它生成一条便于以后检索的摘要笔记：https://cloud.tencent.com/developer/article/2697255。要求摘要里包含文章主题、核心观点、适合谁看、后续可检索关键词，并把它归到“AI 工具 / SkillHub / 知识管理”方向。
+      prompt: 请把这篇网页加入我的 IMA 知识库，并为它生成一条便于以后检索的摘要笔记：https://cloud.tencent.com/developer/article/2697255。要求摘要里包含文章主题、核心观点、适合谁看、后续可检索关键词，并把它归到“AI 工具 / SkillHub / 知识管理”方向。
     replay:
       steps:
-        - title: 汇总资料
-          description: 收集笔记、文档、网页和待整理内容
-        - title: 提炼结构
-          description: 识别主题、层级、标签和关键知识点
-        - title: 建立关联
-          description: 连接相关资料、概念和可复用结论
-        - title: 输出体系
-          description: 生成知识库目录、检索问题和维护建议
+        - title: 识别跨模块任务
+          description: 判断任务包含网页入知识库和创建摘要笔记两部分，并读取对应 IMA 子模块流程
+        - title: 抓取网页内容
+          description: 获取腾讯云开发者文章信息，确认主题为 2026 年值得安装的 SkillHub 提效技能推荐
+        - title: 确认归档位置
+          description: 查看用户现有知识库，选择唯一的个人知识库“早睡早起的知识库”
+        - title: 加入知识库
+          description: 调用 IMA 接口收录网页 URL，让知识库自动抓取正文入库存档
+        - title: 创建摘要笔记
+          description: 按 AI 工具 / SkillHub / 知识管理方向写入主题、核心观点、适合人群和检索关键词
+        - title: 返回完成结果
+          description: 展示入库状态、note_id、摘要结构和后续检索说明
     result:
       template: generic_report_v1
-      eyebrow: 知识管理方案
-      title: 可检索的个人知识库结构
-      summary: 把零散资料整理为可持续积累、检索和输出的知识体系
+      eyebrow: IMA 知识管理案例
+      title: 《2026年最值得安装的10个SkillHub提效技能推荐》摘要笔记
+      summary: 网页已加入 IMA 知识库，并生成包含文章主题、核心观点、适合人群和检索关键词的摘要笔记。
+      image_asset: note_preview
       highlights:
-        - 分类目录、标签和摘要结构
-        - 知识关联与检索问题清单
-        - 长期维护和复用建议
+        - 网页已归档到“早睡早起的知识库”
+        - 摘要按 AI 工具 / SkillHub / 知识管理方向组织
+        - 后续可通过 SkillHub、AI Skills、ima-skills 等关键词检索
+  - id: ai-office-note-search
+    selector:
+      title: AI 办公自动化笔记检索
+      description: 搜索 IMA 笔记，提炼反复出现的观点、工具、场景和待办
+      output_label: 结构化摘要
+    launch:
+      prompt_short: 请在我的 IMA 笔记里搜索“AI 办公自动化”相关内容，找出最相关的 5 条笔记，并帮我总结这些笔记里反复出现的观点、工具名称、适用场景和待办事项。最后输出一份结构化摘要，包含“关键结论、相关笔记、可行动建议”。
+      prompt: 请在我的 IMA 笔记里搜索“AI 办公自动化”相关内容，找出最相关的 5 条笔记，并帮我总结这些笔记里反复出现的观点、工具名称、适用场景和待办事项。最后输出一份结构化摘要，包含“关键结论、相关笔记、可行动建议”。
+    replay:
+      steps:
+        - title: 加载笔记检索模块
+          description: 读取 ima-skills 的笔记模块流程，确认按标题和正文检索的接口方式
+        - title: 扩展关键词搜索
+          description: 从“AI 办公自动化”扩展到 AI、自动化、办公、工作流和提效，避免漏掉相关笔记
+        - title: 确认笔记规模
+          description: 拉取全部笔记列表，确认当前只有 1 篇相关 SkillHub 摘要笔记
+        - title: 读取完整正文
+          description: 不编造第 2 到第 5 条笔记，而是基于唯一命中笔记做深度分析
+        - title: 检索知识库补充
+          description: 同步搜索知识库，确认同源网页仍在索引中，暂未命中更多内容
+        - title: 输出结构化摘要
+          description: 按关键结论、相关笔记、可行动建议整理最终结果
+    result:
+      template: html_preview_v1
+      eyebrow: IMA 笔记检索案例
+      title: AI 办公自动化相关笔记结构化摘要
+      summary: 展示实际检索命中、唯一相关笔记、反复观点、工具名称、适用场景和后续行动建议。
+      html_asset: note_search_summary
+  - id: workbuddy-trial-note-create
+    selector:
+      title: 新建并追加试用记录
+      description: 在 IMA 中新建 WorkBuddy 技能试用记录，并追加 ima-skills 记录
+      output_label: 新建笔记截图
+    launch:
+      prompt_short: 请帮我在 IMA 里新建一篇笔记，标题叫《WorkBuddy 技能试用记录》，内容包括今天试用的 skill、每个 skill 的用途、测试案例、预期验证点和实际表现。先创建一个基础结构，然后把下面这段内容追加进去：“ima-skills：用于连接腾讯 IMA 知识库和笔记，重点测试笔记搜索、知识库搜索、网页入库、新建笔记和追加笔记能力。”
+      prompt: 请帮我在 IMA 里新建一篇笔记，标题叫《WorkBuddy 技能试用记录》，内容包括今天试用的 skill、每个 skill 的用途、测试案例、预期验证点和实际表现。先创建一个基础结构，然后把下面这段内容追加进去：“ima-skills：用于连接腾讯 IMA 知识库和笔记，重点测试笔记搜索、知识库搜索、网页入库、新建笔记和追加笔记能力。”
+    replay:
+      steps:
+        - title: 确认写入任务
+          description: 判断任务包含新建笔记和追加内容两步，并要求中文 UTF-8 正确写入
+        - title: 读取 API 调用方式
+          description: 查看 ima-skills 写入脚本，确认 POST 请求和 clientid/apikey header 规则
+        - title: 创建基础结构
+          description: 新建《WorkBuddy 技能试用记录》，写入用途说明、记录模板和今日试用分区
+        - title: 追加试用内容
+          description: 将 ima-skills 的用途、测试案例、预期验证点和实际表现按模板补入
+        - title: 回读验证结果
+          description: 读取最终笔记内容，确认结构完整、中文无乱码、内容已落库
+    result:
+      template: generic_report_v1
+      eyebrow: IMA 笔记写入案例
+      title: 《WorkBuddy 技能试用记录》已创建并追加
+      summary: 在 IMA 中创建基础结构笔记，并追加 ima-skills 试用记录，结果截图展示笔记内容已正确落库。
+      image_asset: workbuddy_trial_note
+      highlights:
+        - "新建笔记 note_id: 7498992518703170"
+        - 基础结构包含用途说明、记录模板和今日试用分区
+        - 已追加 ima-skills 试用记录并回读验证中文无乱码

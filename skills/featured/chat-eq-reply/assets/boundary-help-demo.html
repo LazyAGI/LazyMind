@@ -1,0 +1,81 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>礼貌拒绝临时帮忙 · 高情商回复</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif;
+      color: #17332b;
+      background: linear-gradient(135deg, #ecfdf5 0%, #f8fafc 52%, #eef2ff 100%);
+    }
+    .page { min-height: 100vh; padding: 42px; display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 28px; align-items: center; }
+    .content { max-width: 900px; }
+    .eyebrow { display: inline-flex; padding: 7px 12px; border-radius: 999px; background: #d1fae5; color: #047857; font-weight: 900; font-size: 13px; }
+    h1 { margin: 18px 0 12px; font-size: 38px; line-height: 1.16; letter-spacing: 0; }
+    .lead { margin: 0 0 22px; color: #60756f; line-height: 1.85; }
+    .request { padding: 20px; border-radius: 20px; background: #fff; border: 1px solid #c7eadb; box-shadow: 0 16px 42px rgba(6, 95, 70, .08); margin-bottom: 20px; }
+    .request strong { color: #047857; }
+    .reply-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    .reply { position: relative; min-height: 310px; padding: 20px; border-radius: 20px; background: #fff; border: 1px solid #c7eadb; box-shadow: 0 18px 44px rgba(6, 95, 70, .09); overflow: hidden; }
+    .reply::before { content: ""; position: absolute; inset: 0 0 auto; height: 5px; background: #10b981; }
+    .reply:nth-child(2)::before { background: #6366f1; }
+    .reply:nth-child(3)::before { background: #f59e0b; }
+    .reply h2 { margin: 6px 0 14px; font-size: 20px; }
+    .copy { margin: 0; line-height: 1.8; color: #24342f; }
+    .meta { margin-top: 16px; padding-top: 14px; border-top: 1px solid #e2f2eb; color: #64748b; line-height: 1.65; font-size: 14px; }
+    .side { border-radius: 28px; background: #13251f; color: #e8fff5; padding: 24px; box-shadow: 0 30px 70px rgba(6, 78, 59, .22); }
+    .side h2 { margin: 0 0 16px; font-size: 24px; }
+    .chat-card { display: grid; gap: 12px; }
+    .bubble { padding: 14px 16px; border-radius: 18px; line-height: 1.7; background: rgba(255,255,255,.10); border: 1px solid rgba(255,255,255,.14); }
+    .bubble.answer { background: #d1fae5; color: #064e3b; }
+    .rule { margin-top: 18px; padding: 16px; border-radius: 16px; background: rgba(16,185,129,.14); color: #d1fae5; line-height: 1.75; }
+    @media (max-width: 980px) {
+      .page { grid-template-columns: 1fr; padding: 24px; }
+      .reply-grid { grid-template-columns: 1fr; }
+      .reply { min-height: 0; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="content">
+      <span class="eyebrow">朋友边界案例</span>
+      <h1>关系要照顾，边界也要被看见</h1>
+      <p class="lead">临时求助反复出现时，回复不需要解释太多私人安排。更稳的方式是：先表达理解，再明确今晚无法接完整任务，最后给一个真实可承受的替代帮助。</p>
+      <div class="request"><strong>对方原话：</strong>“你今晚能不能帮我把 PPT 改一下？挺急的，明早就要。”</div>
+
+      <div class="reply-grid">
+        <article class="reply">
+          <h2>温和坚定型</h2>
+          <p class="copy">我知道你挺急的，但我今晚已经有安排，没办法认真帮你改完整个 PPT。要不你先把最卡的两页发我，我晚点抽 10 分钟帮你看一下方向。</p>
+          <div class="meta">适合想保留温度，但不想接下完整任务。</div>
+        </article>
+        <article class="reply">
+          <h2>真诚边界型</h2>
+          <p class="copy">这次我今晚真的接不了，怕答应了也做不好，反而耽误你。你可以先按现有版本过一遍，我明早如果有空可以帮你看关键页。</p>
+          <div class="meta">适合对方经常临时求助，需要降低默认期待。</div>
+        </article>
+        <article class="reply">
+          <h2>轻松不失礼型</h2>
+          <p class="copy">今晚我这边已经排满了，没法临时接一个 PPT 大工程。但我可以帮你救急看标题和目录，先把最影响表达的地方稳住。</p>
+          <div class="meta">适合熟人之间，用轻松语气减少尴尬。</div>
+        </article>
+      </div>
+    </section>
+
+    <aside class="side">
+      <h2>边界回复结构</h2>
+      <div class="chat-card">
+        <div class="bubble">我知道你挺急的</div>
+        <div class="bubble answer">但我今晚已经有安排，没办法认真改完整个 PPT</div>
+        <div class="bubble">可以帮你看最卡的两页</div>
+      </div>
+      <div class="rule">不要把拒绝说成“可能有空”。边界越具体，关系越不容易被反复消耗。</div>
+    </aside>
+  </main>
+</body>
+</html>

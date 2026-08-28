@@ -4,48 +4,99 @@ classification:
   category: Design & creativity
   tags:
     - UI design
-    - Interface design
-    - Interaction experience
-    - Design system
+    - SaaS landing page
+    - mobile app
+    - CRM dashboard
 
 presentation:
   card:
     title: UI design
-    description: Turn product needs into clean, consistent, production-ready interface designs
-    output_type: images
-    output_label: UI design proposal
+    description: UI cases for a SaaS landing page, mobile app home, and desktop CRM redesign
+    output_type: web
+    output_label: UI HTML prototype
     cover_asset: cover
-    result_summary: Deliver information architecture, visual rules, component guidance, and high-fidelity page directions
+    result_summary: Preview three real design outputs for AI support tickets, AI learning, and CRM sales workflows
   detail:
-    title: UI design
-    description: "Clarify product goals, user scenarios, and business constraints, then define information architecture, interaction paths, and visual rules for an iterable interface design. Source: https://skillhub.cn/skills/user_865e3592/ui-new; adapted for LazyMind."
-    attachment_hint: Product requirements, existing screenshots, brand guidelines, or reference examples
+    title: Multi-format UI design cases
+    description: Three cases demonstrate requirement interpretation, design DNA, page structure, and high-fidelity HTML output.
+    attachment_hint: Product positioning, target users, core flows, usage scenarios, brand tone, or references
 
 tasks:
-  - id: ui-design
+  - id: ai-ticket-landing
     selector:
-      title: Interface design proposal
-      description: Turn a product idea into a clear, visually consistent interface plan
-      output_label: UI design proposal
+      title: AI ticket analysis landing page
+      description: Create a professional landing page for a small-business SaaS product
+      output_label: Landing page HTML
     launch:
-      prompt_short: Design a clean, intuitive UI proposal from my product requirements.
-      prompt: Design a clean, intuitive UI proposal from the product goals, target users, core flows, brand tone, and reference pages I provide. Clarify missing constraints first, then deliver information architecture, key page layouts, visual style, component rules, interaction states, and high-fidelity design recommendations.
+      prompt_short: Design a landing page for an AI customer-support ticket analysis SaaS for SMBs, including hero, features, workflow, value, pricing, and CTAs.
+      prompt: Design a landing page for an AI customer-support ticket analysis SaaS for SMBs, including hero, features, workflow, value, pricing, and CTAs.
     replay:
       steps:
-        - title: Understand the requirements
-          description: Clarify business goals, user scenarios, core tasks, and constraints
-        - title: Structure the experience
-          description: Plan information architecture, page hierarchy, and key action paths
-        - title: Define the visual system
-          description: Set color, type, components, spacing, and state rules
-        - title: Deliver the proposal
-          description: Produce page design notes, high-fidelity directions, and implementation advice
+        - title: Clarify positioning
+          description: Identify small-business support teams, ticket analysis, efficiency gains, and conversion goals
+        - title: Define visual direction
+          description: Use a deep-blue primary color, sky-blue accents, and restrained enterprise spacing
+        - title: Plan page modules
+          description: Arrange hero, feature cards, three-step workflow, value metrics, pricing, and final CTA
+        - title: Generate the page
+          description: Produce a previewable single-page HTML file with navigation, buttons, data cards, and pricing cards
+        - title: Check readiness
+          description: Review hierarchy, conversion path, Chinese copy, and launch placeholders
     result:
-      template: generic_report_v1
-      eyebrow: UI design proposal
-      title: A clean, intuitive product interface
-      summary: Deliver a complete UI proposal from information architecture to visual rules, ready for further design or implementation
-      highlights:
-        - Page structure and core user flows
-        - Visual system, components, and interaction states
-        - High-fidelity interface directions and implementation advice
+      template: html_preview_v1
+      eyebrow: SaaS landing page case
+      title: SmartTicket Analytics - AI Support Ticket Intelligence
+      summary: Complete HTML landing page covering hero, features, workflow, value metrics, pricing, and conversion buttons.
+      html_asset: landing_demo
+  - id: ai-learning-mobile-home
+    selector:
+      title: AI learning app home
+      description: Design a fresh mobile home screen for learners
+      output_label: Mobile home HTML
+    launch:
+      prompt_short: Design a mobile home screen for an AI learning assistant app with tasks, progress, courses, mistake review, and AI Q&A.
+      prompt: Design a mobile home screen for an AI learning assistant app with tasks, progress, courses, mistake review, and AI Q&A.
+    replay:
+      steps:
+        - title: Clarify home goals
+          description: Cover tasks, progress, courses, review, and AI Q&A
+        - title: Define learning tone
+          description: Use mint blue-green colors, whitespace, and soft cards
+        - title: Organize hierarchy
+          description: Prioritize streak, progress, tasks, and AI entry
+        - title: Generate mobile UI
+          description: Produce phone-preview HTML with interactions and tabs
+        - title: Check mobile readability
+          description: Review task states, entry weight, and Chinese typography
+    result:
+      template: html_preview_v1
+      eyebrow: Mobile app home case
+      title: “Zhiya” AI learning assistant home
+      summary: A fresh mint-blue mobile home HTML covering daily tasks, progress, courses, mistake review, and AI Q&A.
+      html_asset: learning_home_demo
+  - id: crm-customer-dashboard-redesign
+    selector:
+      title: CRM customer dashboard redesign
+      description: Redesign a dense, clear desktop CRM page for sales teams
+      output_label: Spec and CRM prototype
+    launch:
+      prompt_short: Redesign a rough customer-management dashboard with customer list, filters, statuses, follow-ups, and add-customer flow for desktop sales teams.
+      prompt: Redesign a rough customer-management dashboard with customer list, filters, statuses, follow-ups, and add-customer flow for desktop sales teams.
+    replay:
+      steps:
+        - title: Diagnose issues
+          description: Identify cluttered hierarchy, weak status rules, unclear actions, and low density
+        - title: Plan desktop layout
+          description: Use sidebar, sticky top bar, metrics, filters, table, and pagination
+        - title: Define status system
+          description: Assign colors for new, following, won, lost, and overdue risk
+        - title: Build interaction prototype
+          description: Produce HTML with filters, row actions, drawer, modal, and selection count
+        - title: Document design logic
+          description: Summarize structure, components, visual style, and key interactions
+    result:
+      template: html_preview_v1
+      eyebrow: Admin UI redesign case
+      title: CRM customer management high-fidelity prototype
+      summary: Shows the CRM customer-management design spec first, followed by the desktop high-fidelity HTML prototype.
+      html_asset: crm_design_spec_demo

@@ -1,14 +1,13 @@
 schema_version: 2
 id: ui-new
 type: work
-version: 1.0.0
+version: 1.1.0
 status: published
 default_locale: zh-CN
 provider: SkillHub
 
 skill:
   source_url: https://skillhub.cn/skills/user_865e3592/ui-new
-  category: design
   required_version: 1.0.0
 
 placement:
@@ -17,56 +16,116 @@ placement:
   order: 20
 
 classification:
-  category: 设计创意
+  category: 设计创作
   tags:
     - UI设计
-    - 界面设计
-    - 交互体验
+    - SaaS落地页
+    - 企业服务
     - 设计系统
 
 assets:
   cover:
     file: assets/cover.png
     role: cover
+  landing_demo:
+    file: assets/ai-ticket-landing.html
+    role: result
+  learning_home_demo:
+    file: assets/ai-learning-home.html
+    role: result
+  crm_design_spec_demo:
+    file: assets/crm-customer-design-spec.html
+    role: result
 
 presentation:
   card:
     title: UI 设计
-    description: 从需求理解到高保真界面，生成简约、规范、可落地的产品界面方案
-    output_type: images
-    output_label: UI 设计方案
+    description: 覆盖 SaaS 落地页、移动 App 首页和桌面后台改版的 UI 案例
+    output_type: web
+    output_label: UI HTML 原型
     cover_asset: cover
-    result_summary: 输出界面结构、视觉规范、组件建议和高保真页面方向
+    result_summary: 查看 AI 客服工单、AI 学习助手、CRM 客户后台 3 个真实设计产出
   detail:
-    title: UI 设计
-    description: 根据产品目标、用户场景和业务约束，梳理信息架构、交互路径和视觉规范，生成可继续迭代的界面设计方案。来源：https://skillhub.cn/skills/user_865e3592/ui-new，经 LazyMind 适配。
-    attachment_hint: 产品需求、现有页面截图、品牌规范或参考案例
+    title: 多类型 UI 设计案例
+    description: 用 SaaS 落地页、移动端学习 App 首页和 CRM 桌面后台 3 个案例，展示从需求理解、设计 DNA、页面结构到高保真 HTML 原型的完整产出。
+    attachment_hint: 产品定位、目标客户、核心功能、使用场景、品牌调性或参考页面
 
 tasks:
-  - id: ui-design
+  - id: ai-ticket-landing
     selector:
-      title: 界面设计方案
-      description: 将产品想法转化为信息清晰、视觉统一的界面方案
-      output_label: UI 设计方案
+      title: AI 客服工单分析落地页
+      description: 为中小企业 SaaS 产品生成专业可信的完整落地页
+      output_label: 落地页 HTML
     launch:
-      prompt_short: 根据我的产品需求，设计一套简约直观的 UI 界面方案。
-      prompt: 请根据我提供的产品目标、目标用户、核心流程、品牌调性和参考页面，设计一套简约直观的 UI 界面方案。请先澄清缺失的关键约束，再输出信息架构、主要页面布局、视觉风格、组件规范、交互状态和可交付的高保真设计建议。
+      prompt_short: 我准备做一个面向中小企业的“AI 客服工单分析”SaaS 产品，请帮我设计一个落地页 UI 方案。页面需要包含首屏、核心功能、使用流程、客户价值、价格方案和转化按钮，整体要专业可信，不要太花哨。
+      prompt: 我准备做一个面向中小企业的“AI 客服工单分析”SaaS 产品，请帮我设计一个落地页 UI 方案。页面需要包含首屏、核心功能、使用流程、客户价值、价格方案和转化按钮，整体要专业可信，不要太花哨。
     replay:
       steps:
-        - title: 理解需求
-          description: 明确业务目标、用户场景、核心任务和约束条件
-        - title: 梳理结构
-          description: 规划信息架构、页面层级和关键操作路径
-        - title: 定义视觉
-          description: 确定配色、字体、组件、间距和状态规范
-        - title: 输出方案
-          description: 形成页面设计说明、高保真方向和落地建议
+        - title: 梳理产品定位
+          description: 明确中小企业客服团队、工单分析、效率提升和可信转化这些核心目标
+        - title: 定义视觉基调
+          description: 选择深蓝主色、天蓝强调和企业级留白排版，保持专业克制
+        - title: 规划页面模块
+          description: 组织首屏、核心功能、三步流程、客户价值、价格方案和底部转化区域
+        - title: 生成完整页面
+          description: 输出可直接预览的单页 HTML，并补齐按钮、导航、数据卡片和价格卡
+        - title: 校验落地可用性
+          description: 检查信息层级、转化路径、中文展示和上线替换入口
     result:
-      template: generic_report_v1
-      eyebrow: UI 设计方案
-      title: 简约直观的产品界面设计
-      summary: 交付从信息架构到视觉规范的完整 UI 方案，便于继续设计或实现
-      highlights:
-        - 页面结构与核心用户流程
-        - 视觉系统、组件和交互状态
-        - 高保真界面方向与实现建议
+      template: html_preview_v1
+      eyebrow: SaaS 落地页案例
+      title: 智析工单 - AI 客服工单智能分析平台
+      summary: 完整 HTML 落地页，包含 Hero、核心功能、使用流程、客户价值、价格方案和转化按钮。
+      html_asset: landing_demo
+  - id: ai-learning-mobile-home
+    selector:
+      title: AI 学习助手 App 首页
+      description: 为大学生和职场人设计清爽、有学习氛围的移动端首页
+      output_label: 移动端首页 HTML
+    launch:
+      prompt_short: 我想做一个“AI 学习助手”移动端 App，首页需要展示今日学习任务、学习进度、推荐课程、错题复习入口和 AI 问答入口。请你帮我设计一版首页 UI，风格要清爽、有学习氛围，适合大学生和职场人使用。
+      prompt: 我想做一个“AI 学习助手”移动端 App，首页需要展示今日学习任务、学习进度、推荐课程、错题复习入口和 AI 问答入口。请你帮我设计一版首页 UI，风格要清爽、有学习氛围，适合大学生和职场人使用。
+    replay:
+      steps:
+        - title: 明确移动首页目标
+          description: 确认首页需要承载任务、进度、推荐课程、错题复习和 AI 问答 5 个高频入口
+        - title: 定义学习氛围
+          description: 选择薄荷蓝绿主色、大留白和软卡片，让界面清爽且适合长期使用
+        - title: 组织信息层级
+          description: 将连续打卡、学习进度、今日任务和 AI 问答按优先级排列
+        - title: 生成移动端页面
+          description: 输出手机预览样式 HTML，补齐进度环、任务勾选、横滑课程和底部 Tab
+        - title: 检查交互细节
+          description: 校验任务完成态、入口权重、中文排版和手机尺寸下的可读性
+    result:
+      template: html_preview_v1
+      eyebrow: 移动 App 首页案例
+      title: “知芽”AI 学习助手首页设计
+      summary: 清爽薄荷蓝绿风格的移动端首页 HTML，覆盖今日任务、学习进度、推荐课程、错题复习和 AI 问答入口。
+      html_asset: learning_home_demo
+  - id: crm-customer-dashboard-redesign
+    selector:
+      title: CRM 客户管理后台改版
+      description: 为销售团队重设计信息密度高、操作清晰的桌面端客户管理页
+      output_label: 方案说明与 CRM 高保真原型
+    launch:
+      prompt_short: 我有一个客户管理后台，当前页面包括客户列表、筛选条件、客户状态、跟进记录和新增客户按钮，但整体看起来很粗糙。请你帮我重新设计一个更专业、更适合销售团队日常使用的 UI 方案，要求信息密度高、操作清晰、适合桌面端，并输出页面结构、组件布局、视觉风格和关键交互说明。
+      prompt: 我有一个客户管理后台，当前页面包括客户列表、筛选条件、客户状态、跟进记录和新增客户按钮，但整体看起来很粗糙。请你帮我重新设计一个更专业、更适合销售团队日常使用的 UI 方案，要求信息密度高、操作清晰、适合桌面端，并输出页面结构、组件布局、视觉风格和关键交互说明。
+    replay:
+      steps:
+        - title: 诊断原页面问题
+          description: 识别信息堆叠、状态混乱、操作入口不清晰和单屏效率低等问题
+        - title: 规划桌面端结构
+          description: 采用侧边栏、吸顶顶栏、统计卡、筛选区、客户表格和分页的高密度布局
+        - title: 定义状态系统
+          description: 为新客户、跟进中、已成交、已流失和超期风险建立统一颜色规则
+        - title: 生成交互原型
+          description: 输出可交互 HTML，支持状态过滤、行操作、跟进抽屉、新增客户弹窗和勾选计数
+        - title: 沉淀设计说明
+          description: 总结页面结构、组件布局、视觉风格和关键交互，方便交给开发落地
+    result:
+      template: html_preview_v1
+      eyebrow: 后台系统 UI 改版案例
+      title: CRM 客户管理后台高保真原型
+      summary: 先展示 CRM 客户管理后台 UI 设计方案，再给出桌面端高保真 HTML 原型。
+      html_asset: crm_design_spec_demo

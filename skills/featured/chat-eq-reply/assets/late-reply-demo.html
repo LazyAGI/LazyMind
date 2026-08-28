@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>晚回消息安抚 · 高情商回复</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans SC", sans-serif;
+      color: #263244;
+      background: radial-gradient(circle at 18% 12%, #fff4dc 0, transparent 34%), linear-gradient(135deg, #fff8ec 0%, #f7fbff 100%);
+    }
+    .page { min-height: 100vh; padding: 44px; display: grid; grid-template-columns: 390px minmax(0, 1fr); gap: 34px; align-items: center; }
+    .phone { border-radius: 34px; background: #111827; padding: 12px; box-shadow: 0 32px 80px rgba(120, 53, 15, .22); }
+    .screen { overflow: hidden; border-radius: 26px; background: #f4f6f8; min-height: 690px; display: flex; flex-direction: column; }
+    .wechat-top { height: 58px; background: #ededed; display: grid; grid-template-columns: 40px 1fr 40px; align-items: center; padding: 0 18px; font-weight: 800; color: #1f2937; }
+    .back { font-size: 25px; line-height: 1; }
+    .who { text-align: center; }
+    .dots { text-align: right; letter-spacing: 2px; }
+    .chat { padding: 22px 18px; display: flex; flex-direction: column; gap: 18px; flex: 1; }
+    .time { align-self: center; color: #9aa3af; font-size: 12px; }
+    .msg { display: flex; gap: 10px; align-items: flex-start; }
+    .msg.me { justify-content: flex-end; }
+    .avatar { width: 34px; height: 34px; border-radius: 9px; display: grid; place-items: center; font-weight: 900; color: #fff; background: #f97316; }
+    .msg.me .avatar { background: #16a34a; order: 2; }
+    .bubble { max-width: 260px; padding: 12px 14px; border-radius: 6px 18px 18px 18px; background: #fff; line-height: 1.65; font-size: 15px; box-shadow: 0 1px 2px rgba(15, 23, 42, .05); }
+    .msg.me .bubble { border-radius: 18px 6px 18px 18px; background: #95ec69; }
+    .composer { height: 58px; background: #f7f7f7; border-top: 1px solid #e5e7eb; display: flex; align-items: center; gap: 10px; padding: 0 14px; color: #9ca3af; }
+    .input { flex: 1; height: 36px; border-radius: 6px; background: #fff; }
+    .content { max-width: 860px; }
+    .eyebrow { display: inline-flex; padding: 7px 12px; border-radius: 999px; background: #ffedd5; color: #c2410c; font-weight: 900; font-size: 13px; }
+    h1 { margin: 18px 0 12px; font-size: 38px; line-height: 1.16; letter-spacing: 0; }
+    .lead { margin: 0 0 22px; color: #667085; font-size: 16px; line-height: 1.85; }
+    .insight { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 22px; }
+    .insight div, .reply { background: rgba(255,255,255,.88); border: 1px solid #f2dcc3; border-radius: 18px; padding: 18px; box-shadow: 0 16px 42px rgba(154, 52, 18, .08); }
+    .insight strong { display: block; margin-bottom: 7px; color: #9a3412; }
+    .insight p, .reply p { margin: 0; color: #5f6b7a; line-height: 1.75; }
+    .replies { display: grid; gap: 14px; }
+    .reply { border-left: 5px solid #fb923c; }
+    .reply h2 { margin: 0 0 8px; font-size: 19px; }
+    .reply .copy { color: #1f2937; font-size: 16px; }
+    @media (max-width: 900px) {
+      .page { grid-template-columns: 1fr; padding: 24px; }
+      .phone { max-width: 390px; width: 100%; margin: 0 auto; }
+      .insight { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="phone" aria-label="微信对话预览">
+      <div class="screen">
+        <div class="wechat-top"><span class="back">‹</span><span class="who">重要的人</span><span class="dots">•••</span></div>
+        <div class="chat">
+          <div class="time">20:46</div>
+          <div class="msg"><div class="avatar">TA</div><div class="bubble">你怎么又这么晚才回我，是不是根本不想理我？</div></div>
+          <div class="msg me"><div class="avatar">我</div><div class="bubble">让你等这么久，不好意思呀。刚才一直在忙没看到消息，不是不想理你，一看到就马上回了。</div></div>
+          <div class="msg me"><div class="avatar">我</div><div class="bubble">下次如果我会忙一阵，会提前和你说，不让你一直猜。</div></div>
+        </div>
+        <div class="composer"><span>＋</span><div class="input"></div><span>😊</span><span>🎙</span></div>
+      </div>
+    </section>
+
+    <section class="content">
+      <span class="eyebrow">亲密关系沟通案例</span>
+      <h1>先接住“不安”，再解释“刚才在忙”</h1>
+      <p class="lead">这句消息的重点不在“你几点回”，而在对方担心自己被忽视。回复要同时做到三件事：承认等待、解释原因、明确在意。</p>
+
+      <div class="insight">
+        <div><strong>情绪信号</strong><p>“又”说明这是累积不满，不是一次普通催促。</p></div>
+        <div><strong>潜台词</strong><p>对方想确认自己是不是仍然重要。</p></div>
+        <div><strong>回复目标</strong><p>减少猜测，让对方看到你的在意和行动。</p></div>
+      </div>
+
+      <div class="replies">
+        <article class="reply">
+          <h2>温柔真诚型</h2>
+          <p class="copy">让你等这么久，不好意思呀。刚才一直在忙没看到消息，不是不想理你，一看到就马上回了。</p>
+          <p>适合对方情绪已经上来、需要被安抚的时候。</p>
+        </article>
+        <article class="reply">
+          <h2>幽默松弛型</h2>
+          <p class="copy">冤枉啊，刚忙完一抬头就看到你消息，第一时间就冲过来了。要是不想理你，我能这么积极来自首吗。</p>
+          <p>适合平时关系轻松、可以用自嘲化解 tension 的场景。</p>
+        </article>
+        <article class="reply">
+          <h2>直球坦诚型</h2>
+          <p class="copy">确实在忙，刚才手头一堆事没顾上看手机。但“不想理你”这事儿真不存在，忙完第一个回的就是你。</p>
+          <p>适合你想明确解释事实，又不想显得敷衍的时候。</p>
+        </article>
+      </div>
+    </section>
+  </main>
+</body>
+</html>
