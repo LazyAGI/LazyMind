@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -146,6 +147,13 @@ func TestParseCommandOptions(t *testing.T) {
 	}
 	if _, err := parseCommandOptions([]string{"force-stop", "--unknown"}); err == nil {
 		t.Fatal("unknown argument was accepted")
+	}
+	purge, err := parseCommandOptions([]string{"purge-local-data", "--install-dir", installDir})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if purge.InstallDir != filepath.Clean(installDir) {
+		t.Fatalf("purge options = %#v", purge)
 	}
 	preflight, err := parseCommandOptions([]string{
 		"preflight",
@@ -298,7 +306,7 @@ func TestPurgeLocalDataDoesNotTouchSiblingData(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := purgeLocalData(target); err != nil {
+	if err := purgeLocalData(context.Background(), target); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := os.Stat(target); !os.IsNotExist(err) {

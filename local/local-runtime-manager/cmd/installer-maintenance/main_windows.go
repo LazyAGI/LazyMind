@@ -15,6 +15,7 @@ import (
 	"unicode/utf16"
 	"unsafe"
 
+	"github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/winfile"
 	"github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/winprocess"
 	"golang.org/x/sys/windows"
 )
@@ -24,6 +25,7 @@ const (
 	runningExitCode   = 10
 	processScanLimit  = 10 * time.Second
 	processStopLimit  = 15 * time.Second
+	purgeRetryLimit   = 2 * time.Minute
 	maintenanceLogDir = "Logs"
 	registryReadTries = 6
 	registryReadDelay = 50 * time.Millisecond
@@ -98,7 +100,16 @@ func main() {
 			_, _ = fmt.Fprintln(os.Stdout, processSummary(processes))
 		}
 	case "purge-local-data":
-		if err := purgeLocalData(root); err != nil {
+		started := time.Now()
+		processes, err := forceStop(root, opts.InstallDir)
+		if err != nil {
+			logMaintenance(root, "pre-purge force-stop failed after %s: %v", time.Since(started).Round(time.Millisecond), err)
+			fatalf("stop LazyMind before purge: %v", err)
+		}
+		if len(processes) > 0 {
+			logMaintenance(root, "pre-purge force-stop completed in %s; stopped %d process(es): %s", time.Since(started).Round(time.Millisecond), len(processes), processSummary(processes))
+		}
+		if err := purgeLocalData(context.Background(), root); err != nil {
 			fatalf("purge %s: %v", root, err)
 		}
 	default:
@@ -516,7 +527,7 @@ func logMaintenance(root, format string, args ...any) {
 	_, _ = fmt.Fprintf(file, "[%s] %s\n", time.Now().UTC().Format(time.RFC3339), fmt.Sprintf(format, args...))
 }
 
-func purgeLocalData(target string) error {
+func purgeLocalData(ctx context.Context, target string) error {
 	info, err := os.Lstat(target)
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -538,11 +549,18 @@ func purgeLocalData(target string) error {
 	}
 	defer root.Close()
 	tombstone := fmt.Sprintf(".%s-uninstall-%d-%d", appDataLeaf, os.Getpid(), time.Now().UnixNano())
-	if err := root.Rename(appDataLeaf, tombstone); err != nil {
+	retryOptions := winfile.RetryOptions{MaxWait: purgeRetryLimit}
+	if err := winfile.RetryOperation(ctx, func() error {
+		return root.Rename(appDataLeaf, tombstone)
+	}, retryOptions); err != nil {
 		return fmt.Errorf("quarantine data root: %w", err)
 	}
-	if err := root.RemoveAll(tombstone); err != nil {
-		if restoreErr := root.Rename(tombstone, appDataLeaf); restoreErr != nil {
+	if err := winfile.RetryOperation(ctx, func() error {
+		return root.RemoveAll(tombstone)
+	}, retryOptions); err != nil {
+		if restoreErr := winfile.RetryOperation(ctx, func() error {
+			return root.Rename(tombstone, appDataLeaf)
+		}, retryOptions); restoreErr != nil {
 			return fmt.Errorf("delete quarantined data: %w; restore also failed: %v", err, restoreErr)
 		}
 		return fmt.Errorf("delete quarantined data: %w", err)

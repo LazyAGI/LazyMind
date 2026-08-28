@@ -2,17 +2,22 @@ package main
 
 import (
 	"archive/zip"
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
+	"time"
+
+	"github.com/mesotron7x/LazyMind/local/local-runtime-manager/internal/winfile"
 )
 
 const (
 	pythonPayloadArchiveName = "python-runtime.zip"
 	pythonPayloadMarkerName  = ".python-runtime-ready"
+	pythonPayloadRenameWait  = 10 * time.Minute
 )
 
 var pythonPayloadRoots = []string{
@@ -20,10 +25,24 @@ var pythonPayloadRoots = []string{
 	"deps/python",
 }
 
+type pythonPayloadProgress struct {
+	Stage          string
+	CompletedFiles int
+	TotalFiles     int
+	CompletedBytes uint64
+	TotalBytes     uint64
+	CompletedRoots int
+	TotalRoots     int
+	RetryAttempt   int
+	RetryElapsed   time.Duration
+}
+
+type pythonPayloadProgressFunc func(pythonPayloadProgress)
+
 // prepareBundledPythonRuntime expands the Windows installer payload on demand.
 // macOS and portable builds continue to ship expanded Python trees, so a
 // missing payload archive is intentionally a no-op.
-func prepareBundledPythonRuntime(paths RuntimePaths) error {
+func prepareBundledPythonRuntime(ctx context.Context, paths RuntimePaths, report pythonPayloadProgressFunc) error {
 	archivePath := filepath.Join(paths.ResourcesRoot, pythonPayloadArchiveName)
 	archiveIdentity, err := pythonPayloadIdentity(archivePath)
 	if os.IsNotExist(err) {
@@ -49,23 +68,51 @@ func prepareBundledPythonRuntime(paths RuntimePaths) error {
 	}
 	defer os.RemoveAll(stagingRoot)
 
-	if err := extractPythonPayload(archivePath, stagingRoot); err != nil {
+	progress, err := extractPythonPayload(archivePath, stagingRoot, report)
+	if err != nil {
 		return err
 	}
-	for _, relativeRoot := range pythonPayloadRoots {
+	progress.Stage = "installing"
+	progress.TotalRoots = len(pythonPayloadRoots)
+	if report != nil {
+		report(progress)
+	}
+	for index, relativeRoot := range pythonPayloadRoots {
 		source := filepath.Join(stagingRoot, filepath.FromSlash(relativeRoot))
 		destination := filepath.Join(paths.ResourcesRoot, filepath.FromSlash(relativeRoot))
 		if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
 			return fmt.Errorf("create bundled Python parent directory: %w", err)
 		}
-		if err := os.RemoveAll(destination); err != nil {
+		err := winfile.RetryOperation(ctx, func() error {
+			return os.RemoveAll(destination)
+		}, pythonPayloadRetryOptions(progress, report))
+		if err != nil {
 			return fmt.Errorf("replace bundled Python directory %s: %w", destination, err)
 		}
-		if err := os.Rename(source, destination); err != nil {
+		err = winfile.RetryOperation(ctx, func() error {
+			return os.Rename(source, destination)
+		}, pythonPayloadRetryOptions(progress, report))
+		if err != nil {
 			return fmt.Errorf("install bundled Python directory %s: %w", destination, err)
 		}
+		progress.Stage = "installing"
+		progress.CompletedRoots = index + 1
+		progress.RetryAttempt = 0
+		progress.RetryElapsed = 0
+		if report != nil {
+			report(progress)
+		}
 	}
-	if err := writeFileAtomically(markerPath, []byte(archiveIdentity+"\n"), 0o644); err != nil {
+	if err := writeFileAtomically(ctx, markerPath, []byte(archiveIdentity+"\n"), 0o644, func(attempt int, elapsed time.Duration) {
+		if report == nil {
+			return
+		}
+		waiting := progress
+		waiting.Stage = "waiting"
+		waiting.RetryAttempt = attempt
+		waiting.RetryElapsed = elapsed
+		report(waiting)
+	}); err != nil {
 		return fmt.Errorf("write bundled Python payload marker: %w", err)
 	}
 	// The expanded trees replace the archive. Removing it keeps the installed
@@ -74,6 +121,22 @@ func prepareBundledPythonRuntime(paths RuntimePaths) error {
 	// extraction and the next launch retries this removal.
 	_ = os.Remove(archivePath)
 	return nil
+}
+
+func pythonPayloadRetryOptions(progress pythonPayloadProgress, report pythonPayloadProgressFunc) winfile.RetryOptions {
+	return winfile.RetryOptions{
+		MaxWait: pythonPayloadRenameWait,
+		OnRetry: func(attempt int, _ error, elapsed time.Duration) {
+			if report == nil {
+				return
+			}
+			waiting := progress
+			waiting.Stage = "waiting"
+			waiting.RetryAttempt = attempt
+			waiting.RetryElapsed = elapsed
+			report(waiting)
+		},
+	}
 }
 
 func pythonPayloadRootsExist(resourcesRoot string) bool {
@@ -86,18 +149,30 @@ func pythonPayloadRootsExist(resourcesRoot string) bool {
 	return true
 }
 
-func extractPythonPayload(archivePath, stagingRoot string) error {
+func extractPythonPayload(archivePath, stagingRoot string, report pythonPayloadProgressFunc) (pythonPayloadProgress, error) {
 	reader, err := zip.OpenReader(archivePath)
 	if err != nil {
-		return fmt.Errorf("open bundled Python payload: %w", err)
+		return pythonPayloadProgress{}, fmt.Errorf("open bundled Python payload: %w", err)
 	}
 	defer reader.Close()
+
+	progress := pythonPayloadProgress{Stage: "extracting"}
+	for _, entry := range reader.File {
+		if entry.FileInfo().IsDir() {
+			continue
+		}
+		progress.TotalFiles++
+		progress.TotalBytes += entry.UncompressedSize64
+	}
+	if report != nil {
+		report(progress)
+	}
 
 	foundRoot := make(map[string]bool, len(pythonPayloadRoots))
 	for _, entry := range reader.File {
 		cleanName := path.Clean(strings.ReplaceAll(entry.Name, "\\", "/"))
 		if cleanName == "." || strings.HasPrefix(cleanName, "/") || cleanName == ".." || strings.HasPrefix(cleanName, "../") {
-			return fmt.Errorf("bundled Python payload contains unsafe path %q", entry.Name)
+			return progress, fmt.Errorf("bundled Python payload contains unsafe path %q", entry.Name)
 		}
 		allowed := false
 		for _, root := range pythonPayloadRoots {
@@ -108,32 +183,37 @@ func extractPythonPayload(archivePath, stagingRoot string) error {
 			}
 		}
 		if !allowed {
-			return fmt.Errorf("bundled Python payload contains unexpected path %q", entry.Name)
+			return progress, fmt.Errorf("bundled Python payload contains unexpected path %q", entry.Name)
 		}
 
 		destination := filepath.Join(stagingRoot, filepath.FromSlash(cleanName))
 		if entry.FileInfo().IsDir() {
 			if err := os.MkdirAll(destination, 0o755); err != nil {
-				return fmt.Errorf("create bundled Python directory: %w", err)
+				return progress, fmt.Errorf("create bundled Python directory: %w", err)
 			}
 			continue
 		}
 		if !entry.Mode().IsRegular() {
-			return fmt.Errorf("bundled Python payload contains unsupported file %q", entry.Name)
+			return progress, fmt.Errorf("bundled Python payload contains unsupported file %q", entry.Name)
 		}
 		if err := os.MkdirAll(filepath.Dir(destination), 0o755); err != nil {
-			return fmt.Errorf("create bundled Python file parent: %w", err)
+			return progress, fmt.Errorf("create bundled Python file parent: %w", err)
 		}
 		if err := extractPythonPayloadFile(entry, destination); err != nil {
-			return err
+			return progress, err
+		}
+		progress.CompletedFiles++
+		progress.CompletedBytes += entry.UncompressedSize64
+		if report != nil {
+			report(progress)
 		}
 	}
 	for _, root := range pythonPayloadRoots {
 		if !foundRoot[root] {
-			return fmt.Errorf("bundled Python payload is missing %s", root)
+			return progress, fmt.Errorf("bundled Python payload is missing %s", root)
 		}
 	}
-	return nil
+	return progress, nil
 }
 
 func extractPythonPayloadFile(entry *zip.File, destination string) error {
@@ -170,7 +250,13 @@ func pythonPayloadIdentity(filePath string) (string, error) {
 	return fmt.Sprintf("%d:%d", info.Size(), info.ModTime().UTC().UnixNano()), nil
 }
 
-func writeFileAtomically(filePath string, content []byte, mode os.FileMode) error {
+func writeFileAtomically(
+	ctx context.Context,
+	filePath string,
+	content []byte,
+	mode os.FileMode,
+	onRetry func(attempt int, elapsed time.Duration),
+) error {
 	temp, err := os.CreateTemp(filepath.Dir(filePath), ".python-runtime-marker-")
 	if err != nil {
 		return err
@@ -190,5 +276,14 @@ func writeFileAtomically(filePath string, content []byte, mode os.FileMode) erro
 	if err := os.Remove(filePath); err != nil && !os.IsNotExist(err) {
 		return err
 	}
-	return os.Rename(tempPath, filePath)
+	return winfile.RetryOperation(ctx, func() error {
+		return os.Rename(tempPath, filePath)
+	}, winfile.RetryOptions{
+		MaxWait: pythonPayloadRenameWait,
+		OnRetry: func(attempt int, _ error, elapsed time.Duration) {
+			if onRetry != nil {
+				onRetry(attempt, elapsed)
+			}
+		},
+	})
 }
