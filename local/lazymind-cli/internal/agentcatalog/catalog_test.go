@@ -261,7 +261,8 @@ func TestCursorSessionsUseTranscriptIdentityAndProjectDirectory(t *testing.T) {
 	if !transcriptContainsTool(path, "cursor", "workflow.list") {
 		t.Fatal("Cursor transcript tool call was not detected")
 	}
-	if chat, found, err := findCursorChat(context.Background(), threadID); err != nil || !found || chat.CWD != "/Users/example/LazyRAG" {
+	expectedCWD := filepath.Clean("/Users/example/LazyRAG")
+	if chat, found, err := findCursorChat(context.Background(), threadID); err != nil || !found || chat.CWD != expectedCWD {
 		t.Fatalf("chat=%#v found=%v err=%v", chat, found, err)
 	}
 	source, ok := ResolveInvocation("cursor", "workflow.list", time.Now())
@@ -269,7 +270,7 @@ func TestCursorSessionsUseTranscriptIdentityAndProjectDirectory(t *testing.T) {
 		t.Fatalf("source=%#v ok=%v", source, ok)
 	}
 	workspace, found, err := Workspace(context.Background(), "cursor", threadID)
-	if err != nil || !found || workspace != "/Users/example/LazyRAG" {
+	if err != nil || !found || workspace != expectedCWD {
 		t.Fatalf("workspace=%q found=%v err=%v", workspace, found, err)
 	}
 }
