@@ -17,7 +17,10 @@ import "../index.scss";
 import dayjs from "dayjs";
 import { useTranslation } from "react-i18next";
 import type { ChatMention } from "../../ChatInput/MentionEditor";
-import { CHAT_SELECT_CONVERSATION_EVENT } from "@/modules/chat/constants/chat";
+import {
+  CHAT_SELECT_CONVERSATION_EVENT,
+  getChatConversationPath,
+} from "@/modules/chat/constants/chat";
 import { IdentityAvatar } from "@/modules/identityAvatar";
 import type { ChatSource } from "@/modules/chat/utils/sourceAdapter";
 
@@ -43,7 +46,7 @@ function mentionHref(mention: ChatMention) {
     case "tool":
       return "/settings?section=system_tools";
     case "conversation":
-      return `/agent/chat?conversation_id=${id}`;
+      return getChatConversationPath(mention.resource_id);
     default:
       return undefined;
   }
@@ -328,7 +331,7 @@ const MessageList: React.FC<MessageListProps> = ({
 					<div className="chat-collected-input-title">
 					  {source.conversation_id ? (
 						<a
-						  href={`/agent/chat/home?conversation_id=${encodeURIComponent(source.conversation_id)}`}
+						  href={getChatConversationPath(source.conversation_id)}
 						  onClick={(event) => {
 							event.preventDefault();
 							window.dispatchEvent(new CustomEvent(CHAT_SELECT_CONVERSATION_EVENT, {

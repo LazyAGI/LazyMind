@@ -51,14 +51,14 @@ describe("GalleryPage", () => {
     render(<MemoryRouter><GalleryPage /></MemoryRouter>);
     expect(await screen.findByText("Chat skill")).toBeInTheDocument();
 
-    const capabilityFilters = screen.getByRole("group", { name: "showcase.filters.capabilityType" });
-    fireEvent.click(within(capabilityFilters).getByRole("button", { name: "showcase.filters.capability.work" }));
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "showcase.filters.capabilityType" }));
+    fireEvent.click(await screen.findByText("showcase.filters.capability.work"));
     expect(screen.queryByText("Chat skill")).not.toBeInTheDocument();
     expect(screen.getByText("Work skill")).toBeInTheDocument();
     expect(screen.getByText("Workflow")).toBeInTheDocument();
 
-    const technologyFilters = screen.getByRole("group", { name: "showcase.filters.technologyType" });
-    fireEvent.click(within(technologyFilters).getByRole("button", { name: "showcase.filters.technology.workflow" }));
+    fireEvent.mouseDown(screen.getByRole("combobox", { name: "showcase.filters.technologyType" }));
+    fireEvent.click(await screen.findByText("showcase.filters.technology.workflow"));
     expect(screen.queryByText("Work skill")).not.toBeInTheDocument();
     expect(screen.getByText("Workflow")).toBeInTheDocument();
 

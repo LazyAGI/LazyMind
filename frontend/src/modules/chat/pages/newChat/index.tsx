@@ -10,14 +10,14 @@ import ChatLayout from "../chatLayout";
 import { ChatConfig } from "@/modules/chat/components/ChatConfigs";
 import { Button, Tooltip, message } from "antd";
 import {
+  CHAT_HOME_PATH,
   CHAT_NEW_RUN_IN_BACKGROUND_KEY,
-  CHAT_RESUME_CONVERSATION_KEY,
   CHAT_SELECT_CONVERSATION_EVENT,
   selectChatConversationFilter,
 } from "@/modules/chat/constants/chat";
 import { allowedUploadTypes } from "@/modules/chat/components/ImageUpload";
 import { useTranslation } from "react-i18next";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useChatModelProviderGuard } from "@/modules/chat/hooks/useChatModelProviderGuard";
 import { AgentAppsAuth } from "@/components/auth";
 import { localizeErrorCode } from "@/components/request";
@@ -59,14 +59,6 @@ function readRunInBackgroundMode() {
   }
 }
 
-function hasResumedConversation() {
-  try {
-    return Boolean(sessionStorage.getItem(CHAT_RESUME_CONVERSATION_KEY));
-  } catch {
-    return false;
-  }
-}
-
 function persistRunInBackgroundMode(enabled: boolean) {
   try {
     sessionStorage.setItem(CHAT_NEW_RUN_IN_BACKGROUND_KEY, enabled ? "1" : "0");
@@ -86,6 +78,10 @@ const NewChatPage = () => {
   const { i18n, t } = useTranslation();
   const locale = i18n.resolvedLanguage || i18n.language;
   const navigate = useNavigate();
+  // Mount the conversation view from the route instead of browser storage.
+  const { conversationId: routeConversationId = "" } = useParams<{
+    conversationId: string;
+  }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const showcaseCaseId = searchParams.get("showcase_case");
   const showcaseTaskId = searchParams.get("showcase_task");
@@ -97,11 +93,15 @@ const NewChatPage = () => {
     return currentHour < 12 ? t("chat.greetingMorning") : t("chat.greetingAfternoon");
   };
   const [inputValue, setInputValue] = useState("");
-  const [isChatContent, setIsChatContent] = useState(false);
+  const [isChatContent, setIsChatContent] = useState(
+    Boolean(routeConversationId),
+  );
   const [chatConfig, setChatConfig] = useState<ChatConfig>({});
-  const [chatLayoutMounted, setChatLayoutMounted] = useState(false);
   const requestedShowcaseEntry = parseShowcaseEntryType(
     searchParams.get(SHOWCASE_ENTRY_QUERY_PARAM),
+  );
+  const [chatLayoutMounted, setChatLayoutMounted] = useState(
+    Boolean(routeConversationId),
   );
   const [runInBackground, setRunInBackground] = useState(
     requestedShowcaseEntry
@@ -116,7 +116,7 @@ const NewChatPage = () => {
   >("loading");
   const entryDefaultsRef = useRef(entryDefaults);
   entryDefaultsRef.current = entryDefaults;
-  const freshEntryRef = useRef(Boolean(showcaseCaseId) || !hasResumedConversation());
+  const freshEntryRef = useRef(Boolean(showcaseCaseId) || !routeConversationId);
   const [welcomeKnowledgeRefreshKey, setWelcomeKnowledgeRefreshKey] =
     useState(0);
   const newChatInputRef = useRef<ChatInputImperativeProps>(null);
@@ -410,12 +410,15 @@ const NewChatPage = () => {
     setInputValue(value);
   };
 
-  const handleSetIsChatContent = (value: boolean) => {
+  const handleSetIsChatContent = useCallback((value: boolean) => {
     freshEntryRef.current = !value;
     if (value && !chatLayoutMounted) {
       setChatLayoutMounted(true);
     }
     if (!value) {
+      // A temporary conversation may still be on /home and therefore cannot
+      // rely on a route-param change to clear the previous chat instance.
+      setChatLayoutMounted(false);
       const nextRunInBackground = readRunInBackgroundMode();
       setRunInBackground(nextRunInBackground);
       setWelcomeKnowledgeRefreshKey((key) => key + 1);
@@ -428,21 +431,20 @@ const NewChatPage = () => {
       });
       setChatConfig({});
       setSearchParams({}, { replace: true });
+      if (routeConversationId) {
+        navigate(CHAT_HOME_PATH, { replace: true });
+      }
     }
     setIsChatContent(value);
-  };
+  }, [chatLayoutMounted, navigate, routeConversationId, setSearchParams]);
 
   useEffect(() => {
-    if (
-      !showcaseCaseId &&
-      sessionStorage.getItem(CHAT_RESUME_CONVERSATION_KEY) &&
-      !chatLayoutMounted
-    ) {
+    if (routeConversationId) {
       freshEntryRef.current = false;
       setChatLayoutMounted(true);
       setIsChatContent(true);
     }
-  }, [chatLayoutMounted, showcaseCaseId]);
+  }, [routeConversationId]);
 
   useEffect(() => {
     const handleConversationSelect = (event: Event) => {
@@ -455,6 +457,7 @@ const NewChatPage = () => {
       const conversationId = detail?.conversationId || "";
       if (!conversationId) {
         freshEntryRef.current = true;
+        setChatLayoutMounted(false);
         const nextRunInBackground =
           detail?.runInBackground ?? readRunInBackgroundMode();
         setRunInBackground(nextRunInBackground);
@@ -606,6 +609,7 @@ const NewChatPage = () => {
       {chatLayoutMounted && (
         <div style={{ display: isChatContent ? "block" : "none" }}>
           <ChatLayout
+            conversationId={routeConversationId}
             setIsChatContent={handleSetIsChatContent}
             setChatConfigFn={setChatConfig}
             initchatConfig={chatConfig}

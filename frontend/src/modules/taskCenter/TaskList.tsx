@@ -7,13 +7,14 @@ import { useTranslation } from 'react-i18next';
 import { listTasks, removeTask } from './api';
 import type { Task } from './api';
 import TaskDetail, { StatusTag, formatDate } from './TaskDetail';
-import { CHAT_RESUME_CONVERSATION_KEY, selectChatConversationFilter } from '@/modules/chat/constants/chat';
+import { getChatConversationPath, selectChatConversationFilter } from '@/modules/chat/constants/chat';
 import StateGraphModal from '@/components/StateGraphModal';
 import ArchiveConversationModal from '@/modules/chat/components/ArchiveConversationModal';
 import { unarchiveConversation } from '@/modules/settings/recoveryApi';
 
 const PAGE_SIZE = 20;
 const POLL_INTERVAL_MS = 5_000;
+const TERMINAL_TASK_STATUSES = new Set(['succeeded', 'failed', 'skipped', 'canceled']);
 
 interface TaskListProps {
   active: boolean;
@@ -88,7 +89,8 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
       render: (_, task) => {
         const done = task.steps?.filter((step) => ['completed', 'succeeded'].includes(step.status)).length ?? 0;
         const count = task.steps?.length ?? 0;
-        return <div className='task-list-state'><div><StatusTag status={task.status} onClick={task.workflow_session_id ? () => setGraphTask(task) : undefined} /><span>{task.waiting_reason || (count ? t('taskCenter.stepsCompleted', { done, total: count }) : task.title || t('taskCenter.noDescription'))}</span></div>{count ? <Progress percent={Math.round(done / count * 100)} showInfo={false} size='small' /> : null}</div>;
+        const showProgress = count > 0 && !TERMINAL_TASK_STATUSES.has(task.status);
+        return <div className='task-list-state'><div><StatusTag status={task.status} onClick={task.workflow_session_id ? () => setGraphTask(task) : undefined} /><span>{task.waiting_reason || (count ? t('taskCenter.stepsCompleted', { done, total: count }) : task.title || t('taskCenter.noDescription'))}</span></div>{showProgress ? <Progress percent={Math.round(done / count * 100)} showInfo={false} size='small' /> : null}</div>;
       },
     },
     { title: t('taskCenter.time'), key: 'time', width: '20%', render: (_, task) => <div className='task-time-cell'><span>{formatDate(task.finished_at || task.updated_at)}</span><small>{t('taskCenter.createdAt')} {formatDate(task.created_at)}</small></div> },
@@ -108,8 +110,7 @@ export default function TaskList({ active, status, onStatusChange, page, onPageC
 
   const openConversation = (id: string) => {
     selectChatConversationFilter('task');
-    sessionStorage.setItem(CHAT_RESUME_CONVERSATION_KEY, id);
-    navigate('/agent/chat/home');
+    navigate(getChatConversationPath(id));
   };
 
   const handleDelete = async (task: Task) => {

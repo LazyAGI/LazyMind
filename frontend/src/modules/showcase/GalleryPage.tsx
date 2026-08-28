@@ -1,5 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeftOutlined, SearchOutlined } from "@ant-design/icons";
+import { Select } from "antd";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import CaseCard from "./CaseCard";
@@ -17,22 +18,82 @@ interface FilterOption<T extends string> {
   value: T | "";
 }
 
-function ShowcaseFilterGroup<T extends string>({
+function ShowcaseCategoryFilter({
   label,
+  moreLabel,
   options,
   value,
   onChange,
 }: {
   label: string;
-  options: Array<FilterOption<T>>;
-  value: T | "";
-  onChange: (value: T | "") => void;
+  moreLabel: string;
+  options: Array<FilterOption<string>>;
+  value: string;
+  onChange: (value: string) => void;
 }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const labelRef = useRef<HTMLSpanElement>(null);
+  const measureRef = useRef<HTMLDivElement>(null);
+  const [visibleCount, setVisibleCount] = useState(options.length);
+
+  const updateVisibleCount = useCallback(() => {
+    const container = containerRef.current;
+    const labelElement = labelRef.current;
+    const measureElement = measureRef.current;
+    if (!container || !labelElement || !measureElement) return;
+    if (container.clientWidth <= 0) {
+      setVisibleCount(options.length);
+      return;
+    }
+
+    const optionWidths = Array.from(measureElement.children).map(
+      (element) => (element as HTMLElement).offsetWidth,
+    );
+    const optionsGap = 6;
+    const groupGap = 8;
+    const moreWidth = 100;
+    const availableWidth = container.clientWidth - labelElement.offsetWidth - groupGap;
+    const totalWidth = optionWidths.reduce((total, width) => total + width, 0)
+      + Math.max(0, optionWidths.length - 1) * optionsGap;
+
+    if (totalWidth <= availableWidth) {
+      setVisibleCount(options.length);
+      return;
+    }
+
+    const inlineWidth = Math.max(0, availableWidth - moreWidth - optionsGap);
+    let usedWidth = 0;
+    let nextVisibleCount = 0;
+    for (const width of optionWidths) {
+      const nextWidth = usedWidth + (nextVisibleCount > 0 ? optionsGap : 0) + width;
+      if (nextWidth > inlineWidth) break;
+      usedWidth = nextWidth;
+      nextVisibleCount += 1;
+    }
+    setVisibleCount(Math.max(1, nextVisibleCount));
+  }, [options]);
+
+  useLayoutEffect(() => {
+    updateVisibleCount();
+    const container = containerRef.current;
+    if (!container) return undefined;
+    if (typeof ResizeObserver !== "undefined") {
+      const observer = new ResizeObserver(updateVisibleCount);
+      observer.observe(container);
+      return () => observer.disconnect();
+    }
+    window.addEventListener("resize", updateVisibleCount);
+    return () => window.removeEventListener("resize", updateVisibleCount);
+  }, [updateVisibleCount]);
+
+  const inlineOptions = options.slice(0, visibleCount);
+  const overflowOptions = options.slice(visibleCount);
+
   return (
-    <div className="showcase-filter-group">
-      <span className="showcase-filter-label">{label}</span>
+    <div className="showcase-filter-group" ref={containerRef}>
+      <span className="showcase-filter-label" ref={labelRef}>{label}</span>
       <div className="showcase-filter-options" role="group" aria-label={label}>
-        {options.map((option) => (
+        {inlineOptions.map((option) => (
           <button
             className={option.value === value ? "is-active" : ""}
             key={option.value || "all"}
@@ -44,7 +105,49 @@ function ShowcaseFilterGroup<T extends string>({
           </button>
         ))}
       </div>
+      {overflowOptions.length > 0 && (
+        <Select
+          aria-label={moreLabel}
+          className="showcase-more-filter"
+          options={overflowOptions}
+          placeholder={moreLabel}
+          popupMatchSelectWidth
+          value={overflowOptions.some((option) => option.value === value) ? value : undefined}
+          onChange={onChange}
+        />
+      )}
+      <div className="showcase-filter-measure" ref={measureRef} aria-hidden="true">
+        {options.map((option) => (
+          <button key={option.value || "all"} type="button" tabIndex={-1}>{option.label}</button>
+        ))}
+      </div>
     </div>
+  );
+}
+
+function ShowcaseSelectFilter<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: Array<FilterOption<T>>;
+  value: T | "";
+  onChange: (value: T | "") => void;
+}) {
+  return (
+    <label className="showcase-select-filter">
+      <span className="showcase-filter-label">{label}</span>
+      <Select
+        aria-label={label}
+        className="showcase-filter-select"
+        options={options}
+        popupMatchSelectWidth
+        value={value}
+        onChange={onChange}
+      />
+    </label>
   );
 }
 
@@ -100,7 +203,6 @@ export default function GalleryPage() {
     { label: t("showcase.filters.technology.skill"), value: "skill" },
     { label: t("showcase.filters.technology.workflow"), value: "workflow" },
   ], [t]);
-
   const filteredItems = useMemo(() => {
     const normalizedKeyword = keyword.trim().toLowerCase();
     return items.filter((item) => {
@@ -149,19 +251,20 @@ export default function GalleryPage() {
           />
         </label>
         <div className="showcase-filter-groups">
-          <ShowcaseFilterGroup
+          <ShowcaseCategoryFilter
             label={t("showcase.filters.taskType")}
+            moreLabel={t("showcase.filters.more")}
             options={categoryOptions}
             value={category}
             onChange={setCategory}
           />
-          <ShowcaseFilterGroup
+          <ShowcaseSelectFilter
             label={t("showcase.filters.capabilityType")}
             options={entryTypeOptions}
             value={entryType}
             onChange={setEntryType}
           />
-          <ShowcaseFilterGroup
+          <ShowcaseSelectFilter
             label={t("showcase.filters.technologyType")}
             options={technologyTypeOptions}
             value={technologyType}

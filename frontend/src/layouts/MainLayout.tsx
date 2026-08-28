@@ -23,7 +23,7 @@ import {
   LoginOutlined,
   LogoutOutlined,
 } from "@ant-design/icons";
-import { Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { matchPath, Navigate, Outlet, useLocation, useNavigate } from "react-router-dom";
 import type { UserDetailResponse } from "@/api/generated/auth-client";
 import type { Conversation } from "@/api/generated/chatbot-client";
 import { AUTH_USER_CHANGE_EVENT, AgentAppsAuth } from "@/components/auth";
@@ -47,9 +47,10 @@ import {
   CHAT_CONVERSATION_FILTER_EVENT,
   CHAT_CONVERSATION_FILTER_KEY,
   type ChatConversationFilter,
+  CHAT_HOME_PATH,
   CHAT_NEW_RUN_IN_BACKGROUND_KEY,
-  CHAT_RESUME_CONVERSATION_KEY,
   CHAT_SELECT_CONVERSATION_EVENT,
+  getChatConversationPath,
   selectChatConversationFilter,
 } from "@/modules/chat/constants/chat";
 import { runtimeFeatures } from "@/runtime/features";
@@ -120,6 +121,11 @@ export default function MainLayout() {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const [profileForm] = Form.useForm<ProfileFormValues>();
+  const pathname = location.pathname || "/agent/chat";
+  // The detail URL is the source of truth for sidebar selection across reloads.
+  const routeConversationId =
+    matchPath(`${CHAT_HOME_PATH}/:conversationId`, pathname)?.params
+      .conversationId || "";
 
   const [userInfo, setUserInfo] = useState(() => AgentAppsAuth.getUserInfo());
   const isLoggedIn = Boolean(userInfo?.token);
@@ -132,13 +138,7 @@ export default function MainLayout() {
     : t("layout.normalUser");
 
   const [currentSidebarConversationId, setCurrentSidebarConversationId] =
-    useState(() => {
-      try {
-        return sessionStorage.getItem(CHAT_RESUME_CONVERSATION_KEY) || "";
-      } catch {
-        return "";
-      }
-    });
+    useState(routeConversationId);
   const currentSidebarConversationIdRef = useRef(
     currentSidebarConversationId,
   );
@@ -157,8 +157,6 @@ export default function MainLayout() {
   );
   const [developerActive, setDeveloperActive] = useState(isDeveloperModeActive);
   const [profileDetail, setProfileDetail] = useState<UserDetailResponse | null>(null);
-
-  const pathname = location.pathname || "/agent/chat";
 
   const settingsMenuItems = [
     {
@@ -369,10 +367,24 @@ export default function MainLayout() {
 
   useEffect(() => {
     const handleConversationSelect = (event: Event) => {
-      const conversationId =
-        (event as CustomEvent<{ conversationId?: string }>).detail
-          ?.conversationId || "";
+      const detail = (
+        event as CustomEvent<{ conversationId?: string; source?: string }>
+      ).detail;
+      const conversationId = detail?.conversationId || "";
       setCurrentSidebarConversationId(conversationId);
+
+      if (
+        !pathname.startsWith(CHAT_HOME_PATH) ||
+        (detail?.source !== "chat" && detail?.source !== "mention")
+      ) {
+        return;
+      }
+      const targetPath = conversationId
+        ? getChatConversationPath(conversationId)
+        : CHAT_HOME_PATH;
+      if (pathname !== targetPath) {
+        navigate(targetPath, { replace: detail.source === "chat" });
+      }
     };
 
     window.addEventListener(
@@ -385,7 +397,12 @@ export default function MainLayout() {
         handleConversationSelect,
       );
     };
-  }, []);
+  }, [navigate, pathname]);
+
+  useEffect(() => {
+    currentSidebarConversationIdRef.current = routeConversationId;
+    setCurrentSidebarConversationId(routeConversationId);
+  }, [routeConversationId]);
 
   const toggleMenu = () => {
     setIsMenuCollapsed((prev) => !prev);
@@ -405,7 +422,6 @@ export default function MainLayout() {
   const handleNewChat = (runInBackground = false) => {
     selectChatConversationFilter(runInBackground ? "task" : "normal");
     try {
-      sessionStorage.removeItem(CHAT_RESUME_CONVERSATION_KEY);
       sessionStorage.setItem(
         CHAT_NEW_RUN_IN_BACKGROUND_KEY,
         runInBackground ? "1" : "0",
@@ -415,7 +431,7 @@ export default function MainLayout() {
     }
     setCurrentSidebarConversationId("");
     emitConversationSelection("", runInBackground);
-    navigate("/agent/chat/home");
+    navigate(CHAT_HOME_PATH);
   };
 
   const handleSidebarConversationSelected = (conversation: Conversation) => {
@@ -423,14 +439,8 @@ export default function MainLayout() {
     if (!conversationId) {
       return;
     }
-    try {
-      sessionStorage.setItem(CHAT_RESUME_CONVERSATION_KEY, conversationId);
-    } catch {
-      // ignore storage errors
-    }
     setCurrentSidebarConversationId(conversationId);
-    emitConversationSelection(conversationId);
-    navigate("/agent/chat/home");
+    navigate(getChatConversationPath(conversationId));
   };
 
   const handleSidebarConversationRemoved = (conversation: Conversation) => {
@@ -442,13 +452,9 @@ export default function MainLayout() {
       return;
     }
     currentSidebarConversationIdRef.current = "";
-    try {
-      sessionStorage.removeItem(CHAT_RESUME_CONVERSATION_KEY);
-    } catch {
-      // ignore storage errors
-    }
     setCurrentSidebarConversationId("");
     emitConversationSelection("");
+    navigate(CHAT_HOME_PATH, { replace: true });
   };
 
   const handleModuleNavigate = (targetPath: string) => {

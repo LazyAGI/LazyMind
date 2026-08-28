@@ -462,6 +462,9 @@ func TestMarketListInstalls(t *testing.T) {
 	if second["installed_at"] == nil {
 		t.Fatal("installed_at must be set on done")
 	}
+	if second["installed_version"] != "v2.5.0" {
+		t.Fatalf("installed_version=%v, want v2.5.0", second["installed_version"])
+	}
 	if _, hasPage := data["page"]; hasPage {
 		t.Fatal("installs response must not include pagination")
 	}

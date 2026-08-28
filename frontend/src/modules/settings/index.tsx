@@ -864,7 +864,7 @@ export default function SettingsPage() {
       </>;
     }
 
-    return <section className={`settings-detail-page settings-integrated-page${section === "system_tools" ? " is-system-tools-page" : section === "mcp" ? " is-mcp-page" : ""}`}>
+    return <section className={`settings-detail-page settings-integrated-page${section === "models" ? " is-models-page" : section === "system_tools" ? " is-system-tools-page" : section === "mcp" ? " is-mcp-page" : ""}`}>
       {content}
       <div className="settings-screenreader-status" role="status" aria-live="polite">
         {saving ? t("settingsPage.savingStatus") : checking ? t("settingsPage.checkingStatus") : ""}

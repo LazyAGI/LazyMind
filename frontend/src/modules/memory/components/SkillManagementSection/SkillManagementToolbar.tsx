@@ -13,6 +13,7 @@ import {
   PlusOutlined,
   UploadOutlined,
 } from "@ant-design/icons";
+import { isDesktopRuntime } from "@/runtime/mode";
 import type { SkillCreateSource } from "../MemoryDraftModal";
 import type { SkillViewMode } from "../../shared";
 
@@ -222,7 +223,7 @@ export default function SkillManagementToolbar({
       return renderInstalledActions();
     }
 
-    if (skillView === "market" && isAdmin) {
+    if (skillView === "market" && isAdmin && !isDesktopRuntime()) {
       return (
         <>
           {marketFilters}

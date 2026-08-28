@@ -142,6 +142,7 @@ services:
       KONG_PROXY_ACCESS_LOG: /dev/stdout
       KONG_PROXY_ERROR_LOG: /dev/stderr
       KONG_PLUGINS: bundled,rbac-auth
+      KONG_NGINX_WORKER_PROCESSES: "${KONG_NGINX_WORKER_PROCESSES:-4}"
     volumes:
       - ./kong.yml:/kong/kong.yml
       - ./kong/plugins/rbac-auth:/usr/local/share/lua/5.1/kong/plugins/rbac-auth

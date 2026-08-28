@@ -124,9 +124,6 @@ func MarketGet(w http.ResponseWriter, r *http.Request) {
 // listItemDTO builds the lightweight list representation of a market item.
 // tags is returned as-is for display only and never used for filtering.
 func listItemDTO(item orm.KnowledgeMarketItem) map[string]any {
-	// Version fields are intentionally not exposed: the product shows the
-	// install/update state and the user's last actual update time instead of a
-	// catalog-maintained version label.
 	return map[string]any{
 		"id":                item.ID,
 		"category":          item.Category,
@@ -135,6 +132,7 @@ func listItemDTO(item orm.KnowledgeMarketItem) map[string]any {
 		"icon":              item.Icon,
 		"domain":            item.Domain,
 		"tags":              item.Tags,
+		"version":           item.Version,
 		"online_access_url": item.OnlineAccessURL,
 		"data_source":       item.DataSource,
 		"sort_order":        item.SortOrder,
@@ -146,6 +144,8 @@ func listItemDTO(item orm.KnowledgeMarketItem) map[string]any {
 // detailDTO extends the list representation with the full detail fields.
 func detailDTO(item orm.KnowledgeMarketItem) map[string]any {
 	base := listItemDTO(item)
+	base["version_date"] = item.VersionDate
+	base["version_note"] = item.VersionNote
 	base["package_url"] = item.PackageURL
 	base["package_revision"] = item.PackageRevision
 	base["sample_questions"] = item.SampleQuestions

@@ -1,9 +1,16 @@
 import { fireEvent, render, screen } from "@testing-library/react";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import { isDesktopRuntime } from "@/runtime/mode";
 import SkillManagementToolbar from "./SkillManagementToolbar";
 
+vi.mock("@/runtime/mode", () => ({ isDesktopRuntime: vi.fn() }));
+
 describe("SkillManagementToolbar", () => {
+  beforeEach(() => {
+    vi.mocked(isDesktopRuntime).mockReturnValue(false);
+  });
+
   it("shows the three supported views without a trash tab", () => {
     const onSkillViewChange = vi.fn();
     const labels: Record<string, string> = {
@@ -40,5 +47,37 @@ describe("SkillManagementToolbar", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: "我的工作流" }));
     expect(onSkillViewChange).toHaveBeenCalledWith("workflows");
+  });
+
+  it.each([
+    { mode: "cloud", desktop: false, visible: true },
+    { mode: "desktop", desktop: true, visible: false },
+  ])("controls the admin publish action in $mode mode", ({ desktop, visible }) => {
+    vi.mocked(isDesktopRuntime).mockReturnValue(desktop);
+
+    render(
+      <SkillManagementToolbar
+        t={(key) => key === "admin.memorySkillAdminPublishButton" ? "管理员上架技能" : key}
+        skillView="market"
+        onSkillViewChange={vi.fn()}
+        installedCount={0}
+        onCreateSkill={vi.fn()}
+        organizeMode={false}
+        organizeDisabled={false}
+        organizeStatus="idle"
+        onOrganizeSkills={vi.fn()}
+        manualSkillReviewCount={0}
+        manualSkillReviewDisabled={false}
+        onSkillReviewClick={vi.fn()}
+        messageCenterCount={0}
+        onMessageCenterClick={vi.fn()}
+        showMessageCenter={false}
+        isAdmin
+        onAdminPublish={vi.fn()}
+        onNewWorkflow={vi.fn()}
+      />,
+    );
+
+    expect(Boolean(screen.queryByRole("button", { name: "管理员上架技能" }))).toBe(visible);
   });
 });

@@ -636,15 +636,7 @@ function StateMarker({
 }
 
 function publicTaskTitle(task: SubAgentTask | undefined): string {
-  if (!task) return "";
-  const title = task.title?.trim() ?? "";
-  if (
-    task.agent_type === "workflow_step" &&
-    /^[^:]+:[a-z0-9_.-]+$/i.test(title)
-  ) {
-    return "";
-  }
-  return title;
+  return task?.title?.trim() ?? "";
 }
 
 interface OrdinaryThinkingStep {
@@ -945,7 +937,11 @@ function OrdinaryTaskCard({
         <span className="ordinary-task-main">
           <span className="ordinary-task-title-row">
             <b>{t("taskCenter.ordinaryTaskLabel", { index: item.ordinal })}</b>
-            {title && <span className="ordinary-task-title">{title}</span>}
+            {title && (
+              <Tooltip title={title} placement="topLeft">
+                <span className="ordinary-task-title">{title}</span>
+              </Tooltip>
+            )}
           </span>
           <span className="ordinary-task-meta">
             {itemDurationSeconds(item) !== undefined && (

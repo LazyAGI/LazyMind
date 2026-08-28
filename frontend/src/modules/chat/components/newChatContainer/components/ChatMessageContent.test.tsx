@@ -35,3 +35,27 @@ describe("ChatMessageContent provider retry", () => {
     expect(screen.queryByText(/LazyMind/i)).not.toBeInTheDocument();
   });
 });
+
+describe("ChatMessageContent thinking duration", () => {
+  it.each([
+    [20, "20s"],
+    [60, "1m"],
+    [66, "1m6s"],
+  ])("formats %s seconds as %s", (seconds, expected) => {
+    render(
+      <ChatMessageContent
+        item={{
+          role: "assistant",
+          delta: "answer",
+          reasoning_content: "reasoning",
+          thinking_duration_s: seconds,
+        }}
+        isThinkingCollapsed={() => false}
+        onToggleThinkingCollapse={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(`chat.thinkingDone (${expected})`))
+      .toBeInTheDocument();
+  });
+});

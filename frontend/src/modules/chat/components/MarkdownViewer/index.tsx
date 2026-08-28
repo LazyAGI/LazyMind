@@ -81,6 +81,7 @@ const BARE_URL_PATTERN = /(?<!\(|\[)(https?:\/\/[^\s<>[\]"'`（）。，、；�
 // Fullwidth and CJK punctuation that should never be treated as part of a URL.
 const TRAILING_FULLWIDTH_PUNCT = /[（）。，、；：！？…—\u3000-\u303F\uFF00-\uFFEF]+$/;
 const SAFE_INLINE_IMAGE_DATA = /^data:image\/(?:png|jpe?g|gif|webp|bmp);base64,/i;
+const EDITABLE_FENCE_PATTERN = /```editable[ \t]*\r?\n[\s\S]*?\r?\n```/g;
 
 const markdownRemarkWorkflows = [[remarkGfm, { singleTilde: false }], remarkMath];
 const markdownRehypeWorkflows = [
@@ -194,6 +195,28 @@ function normalizeBareUrls(content: string) {
   });
 }
 
+function normalizeMarkdownForDisplay(content: string) {
+  const normalizeFragment = (fragment: string) =>
+    normalizeBoldBareUrls(
+      normalizeBareUrls(
+        normalizeArtifactFileLinks(
+          stripRedundantSourceUrls(normalizeSourceMarkers(fragment)),
+        ),
+      ),
+    );
+  let result = "";
+  let cursor = 0;
+
+  for (const match of content.matchAll(EDITABLE_FENCE_PATTERN)) {
+    const index = match.index ?? 0;
+    result += normalizeFragment(content.slice(cursor, index));
+    result += match[0];
+    cursor = index + match[0].length;
+  }
+
+  return result + normalizeFragment(content.slice(cursor));
+}
+
 const ImageComponent = (props: any) => {
   const { t } = useTranslation();
   const [imageLoadError, setImageLoadError] = useState(false);
@@ -284,6 +307,7 @@ const CodeComponent = (props: any) => {
 const PreComponent = (props: any) => {
   const {
     isStreaming,
+    markSources,
     conversationId,
     historyId,
     onCiteMessage,
@@ -306,6 +330,7 @@ const PreComponent = (props: any) => {
           value={code}
           conversationId={conversationId}
           historyId={historyId}
+          sources={markSources}
           onCiteSelection={onCiteMessage}
         />
       );
@@ -665,13 +690,7 @@ const MarkdownViewer = memo((props: any) => {
   } = props;
   const normalizedChildren =
     typeof children === "string"
-      ? normalizeBoldBareUrls(
-          normalizeBareUrls(
-            normalizeArtifactFileLinks(
-              stripRedundantSourceUrls(normalizeSourceMarkers(children)),
-            ),
-          ),
-        )
+      ? normalizeMarkdownForDisplay(children)
       : children;
 
   const activeConversationId = useTaskCenterStore(

@@ -35,7 +35,8 @@ export default function CaseCard({ item, onTry }: CaseCardProps) {
   return (
     <article className="showcase-card">
       <Link
-        className="showcase-card-link"
+        className="showcase-card-image-link"
+        aria-label={t("showcase.try")}
         to={buildShowcaseLaunchPath(item.id, item.type)}
         onClick={(event) => {
           if (onTry) {
@@ -49,15 +50,26 @@ export default function CaseCard({ item, onTry }: CaseCardProps) {
             <img
               className="showcase-card-image"
               src={item.image_url}
-              alt={t("showcase.resultPreviewAlt", { title: item.title })}
+              alt=""
               loading="lazy"
             />
           </div>
         </div>
-        <div className="showcase-card-body">
-          <div className="showcase-card-category">{item.category}</div>
-          <div className="showcase-card-output">{item.output_label}</div>
-          <div className="showcase-card-title-row">
+      </Link>
+      <div className="showcase-card-body">
+        <div className="showcase-card-category">{item.category}</div>
+        <div className="showcase-card-output">{item.output_label}</div>
+        <div className="showcase-card-title-row">
+          <Link
+            className="showcase-card-title-link"
+            to={buildShowcaseLaunchPath(item.id, item.type)}
+            onClick={(event) => {
+              if (onTry) {
+                event.preventDefault();
+                onTry(item);
+              }
+            }}
+          >
             <h3>{item.title}</h3>
             <span
               className={`showcase-capability-icon is-${entryType}`}
@@ -68,24 +80,21 @@ export default function CaseCard({ item, onTry }: CaseCardProps) {
                 ? <MessageOutlined aria-hidden="true" />
                 : <ScheduleOutlined aria-hidden="true" />}
             </span>
-          </div>
-          <div className="showcase-card-tags" aria-label={t("showcase.cardTagsLabel")}>
-            <span>{item.category}</span>
-            <span>{entryTypeLabel}</span>
-            <span>{technologyTypeLabel}</span>
-          </div>
-          <p>{item.description}</p>
+          </Link>
+          <Link
+            className="showcase-detail-link"
+            to={`/agent/chat/cases/${encodeURIComponent(item.id)}`}
+          >
+            {t("showcase.viewDetail")}
+            <ArrowRightOutlined aria-hidden="true" />
+          </Link>
         </div>
-      </Link>
-      <div className="showcase-card-footer">
-        <span className="showcase-card-result">{item.result_summary}</span>
-        <Link
-          className="showcase-detail-link"
-          to={`/agent/chat/cases/${encodeURIComponent(item.id)}`}
-        >
-          {t("showcase.viewDetail")}
-          <ArrowRightOutlined aria-hidden="true" />
-        </Link>
+        <div className="showcase-card-tags" aria-label={t("showcase.cardTagsLabel")}>
+          <span>{item.category}</span>
+          <span>{entryTypeLabel}</span>
+          <span>{technologyTypeLabel}</span>
+        </div>
+        <p>{item.description}</p>
       </div>
     </article>
   );

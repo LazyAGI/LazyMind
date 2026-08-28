@@ -98,6 +98,20 @@ function internalWriterReferenceLink(target: EventTarget | null): HTMLAnchorElem
     : null;
 }
 
+function sourceReferenceLink(target: EventTarget | null): HTMLAnchorElement | null {
+  return target instanceof Element
+    ? target.closest<HTMLAnchorElement>(
+      'a[href^="#source-"], a[href^="#user-content-source-"]',
+    )
+    : null;
+}
+
+function sourceReferenceId(link: HTMLAnchorElement): string {
+  const href = link.getAttribute('href') ?? '';
+  const match = /^#(?:user-content-)?source-(.+)$/.exec(href);
+  return match ? decodeURIComponent(match[1]) : '';
+}
+
 interface MarkdownSelectionRestorePoint {
   paragraphIndex: number;
   startOffset: number;
@@ -308,6 +322,21 @@ export interface MarkdownRewritePreview {
   applyPreview?: () => Promise<number | undefined>;
 }
 
+export interface MarkdownSourceReferencePresentation {
+  citationId: string;
+  label: string;
+  title: string;
+  href: string;
+  faviconUrl?: string;
+}
+
+interface MarkdownSourceReferencePopover {
+  source: MarkdownSourceReferencePresentation;
+  left: number;
+  top: number;
+  placement: 'top' | 'bottom';
+}
+
 interface MarkdownArtifactEditorProps {
   markdown: string;
   sourceRevision: number;
@@ -326,6 +355,10 @@ interface MarkdownArtifactEditorProps {
   onContentChange?: (markdown: string) => void;
   /** Chat-only action that sends the current selection to the composer as a citation. */
   onCiteSelection?: (text: string) => void;
+  /** Chat-only action that opens the source represented by an inline citation. */
+  onOpenSourceReference?: (citationId: string) => void;
+  /** Chat-only display metadata for inline source citations. */
+  sourceReferences?: MarkdownSourceReferencePresentation[];
   onRewriteSelection?: (selection: MarkdownSelection) => void;
   rewriteUnavailableReason?: string;
   rewriteDialogOpen?: boolean;
@@ -371,6 +404,8 @@ export function MarkdownArtifactEditor({
   onDownload,
   onContentChange,
   onCiteSelection,
+  onOpenSourceReference,
+  sourceReferences = [],
   onRewriteSelection,
   rewriteUnavailableReason,
   rewriteDialogOpen = false,
@@ -396,6 +431,9 @@ export function MarkdownArtifactEditor({
   const [referenceDropdownOpen, setReferenceDropdownOpen] = useState(false);
   const [rewriteLayer, setRewriteLayer] = useState<HTMLDivElement | null>(null);
   const [rewriteSelectionPinned, setRewriteSelectionPinned] = useState(false);
+  const [sourceReferencePopover, setSourceReferencePopover] = useState<
+    MarkdownSourceReferencePopover | null
+  >(null);
   const rootRef = useRef<HTMLElement>(null);
   const editorRef = useRef<MDXEditorMethods>(null);
   const referenceSelectionRef = useRef<MarkdownSelection | null>(null);
@@ -416,6 +454,11 @@ export function MarkdownArtifactEditor({
   const conflictRef = useRef(false);
   const saveChangesRef = useRef<() => Promise<boolean>>(async () => true);
   const outlineId = useId();
+  const sourceReferenceMap = useMemo(
+    () => new Map(sourceReferences.map((source) => [source.citationId, source])),
+    [sourceReferences],
+  );
+  const sourceReferencePopoverId = useId();
 
   // Lexical can hold a real empty paragraph even though Markdown cannot
   // persist one. Only persistable document changes participate in autosave;
@@ -473,6 +516,36 @@ export function MarkdownArtifactEditor({
         target.id = anchor.anchorId;
         target.dataset.writerSystemAnchor = 'true';
       });
+      if (chatPresentation) {
+        editable.querySelectorAll<HTMLAnchorElement>(
+          'a[href^="#source-"], a[href^="#user-content-source-"]',
+        ).forEach((link) => {
+          const presentation = sourceReferenceMap.get(sourceReferenceId(link));
+          const fallbackLabel = link.textContent?.trim() ?? '';
+          const label = presentation?.label || fallbackLabel;
+          link.dataset.writerSourceCitation = 'true';
+          link.dataset.writerSourceLabel = label;
+          link.dataset.writerSourceInitial = label.slice(0, 1).toUpperCase();
+          link.setAttribute('contenteditable', 'false');
+          link.setAttribute('role', 'button');
+          link.tabIndex = 0;
+          if (presentation?.faviconUrl) {
+            link.dataset.writerSourceHasIcon = 'true';
+            link.style.setProperty(
+              '--writer-source-icon',
+              `url("${presentation.faviconUrl}")`,
+            );
+          } else {
+            delete link.dataset.writerSourceHasIcon;
+            link.style.removeProperty('--writer-source-icon');
+          }
+          link.removeAttribute('title');
+          link.setAttribute(
+            'aria-label',
+            `${t('chat.references')} ${label}`.trim(),
+          );
+        });
+      }
     };
     const scheduleDomAnchors = () => {
       if (frame !== undefined) return;
@@ -496,7 +569,7 @@ export function MarkdownArtifactEditor({
       observer.disconnect();
       if (frame !== undefined) window.cancelAnimationFrame(frame);
     };
-  }, [materializedDraftMarkdown]);
+  }, [chatPresentation, materializedDraftMarkdown, sourceReferenceMap, t]);
 
   const replaceMarkdownSilently = useCallback((nextMarkdown: string) => {
     const root = rootRef.current;
@@ -1134,6 +1207,23 @@ export function MarkdownArtifactEditor({
     scrollToMarkdownTarget(target);
   }, [scrollToMarkdownTarget]);
 
+  const showSourceReferencePopover = useCallback((link: HTMLAnchorElement) => {
+    const source = sourceReferenceMap.get(sourceReferenceId(link));
+    if (!source) return;
+    const rect = link.getBoundingClientRect();
+    const placement = rect.bottom + 120 <= window.innerHeight ? 'bottom' : 'top';
+    const popoverHalfWidth = Math.min(180, Math.max(0, (window.innerWidth - 32) / 2));
+    setSourceReferencePopover({
+      source,
+      left: Math.min(
+        Math.max(rect.left + rect.width / 2, 16 + popoverHalfWidth),
+        window.innerWidth - 16 - popoverHalfWidth,
+      ),
+      top: placement === 'bottom' ? rect.bottom + 8 : rect.top - 8,
+      placement,
+    });
+  }, [sourceReferenceMap]);
+
   const selectionToolbarStyle = selectionToolbar
     ? {
       '--writer-markdown-selection-toolbar-top': `${selectionToolbar.top}px`,
@@ -1168,8 +1258,25 @@ export function MarkdownArtifactEditor({
           // the editor selection alive until MDXEditor has applied its command.
           toolbarInteractionRef.current = true;
         }
+        if (chatPresentation && onOpenSourceReference && sourceReferenceLink(event.target)) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
         if (!internalWriterReferenceLink(event.target)) return;
+        event.preventDefault();
         event.stopPropagation();
+      }}
+      onMouseOverCapture={(event) => {
+        if (!chatPresentation) return;
+        const sourceLink = sourceReferenceLink(event.target);
+        if (sourceLink) showSourceReferencePopover(sourceLink);
+      }}
+      onMouseOutCapture={(event) => {
+        if (!sourceReferenceLink(event.target)) return;
+        const nextTarget = event.relatedTarget;
+        if (nextTarget instanceof Node && sourceReferenceLink(nextTarget)) return;
+        setSourceReferencePopover(null);
       }}
       onClickCapture={(event) => {
         const target = event.target instanceof Element ? event.target : null;
@@ -1177,6 +1284,14 @@ export function MarkdownArtifactEditor({
           window.setTimeout(() => {
             toolbarInteractionRef.current = false;
           }, 0);
+        }
+        const sourceLink = chatPresentation ? sourceReferenceLink(event.target) : null;
+        if (sourceLink && onOpenSourceReference) {
+          event.preventDefault();
+          event.stopPropagation();
+          const citationId = sourceReferenceId(sourceLink);
+          if (citationId) onOpenSourceReference(citationId);
+          return;
         }
         const link = internalWriterReferenceLink(event.target);
         if (!link) return;
@@ -1206,6 +1321,7 @@ export function MarkdownArtifactEditor({
       onMouseUp={() => recordSelection()}
       onMouseMove={handleChatParagraphHover}
       onMouseLeave={(event) => {
+        setSourceReferencePopover(null);
         const nextTarget = event.relatedTarget;
         if (!(nextTarget instanceof Node) || !event.currentTarget.contains(nextTarget)) {
           cancelParagraphHover();
@@ -1214,7 +1330,49 @@ export function MarkdownArtifactEditor({
       onKeyUp={(event) => {
         if (event.key !== 'Escape') recordSelection();
       }}
+      onKeyDownCapture={(event) => {
+        if (!chatPresentation || !onOpenSourceReference) return;
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        const sourceLink = sourceReferenceLink(event.target);
+        if (!sourceLink) return;
+        event.preventDefault();
+        event.stopPropagation();
+        const citationId = sourceReferenceId(sourceLink);
+        if (citationId) onOpenSourceReference(citationId);
+      }}
     >
+      {sourceReferencePopover && (
+        <div
+          id={sourceReferencePopoverId}
+          className='writer-markdown-editor__source-popover'
+          data-placement={sourceReferencePopover.placement}
+          role='tooltip'
+          style={{
+            left: sourceReferencePopover.left,
+            top: sourceReferencePopover.top,
+          }}
+        >
+          <div className='writer-markdown-editor__source-popover-heading'>
+            <span
+              className='writer-markdown-editor__source-popover-icon'
+              data-has-icon={Boolean(sourceReferencePopover.source.faviconUrl)}
+              style={sourceReferencePopover.source.faviconUrl
+                ? {
+                  '--writer-source-popover-icon':
+                    `url("${sourceReferencePopover.source.faviconUrl}")`,
+                } as CSSProperties
+                : undefined}
+              aria-hidden='true'
+            >
+              {sourceReferencePopover.source.label.slice(0, 1).toUpperCase()}
+            </span>
+            <strong>{sourceReferencePopover.source.title}</strong>
+          </div>
+          <span className='writer-markdown-editor__source-popover-link'>
+            {sourceReferencePopover.source.href}
+          </span>
+        </div>
+      )}
       {conflict && (
         <div className='writer-markdown-editor__notice writer-markdown-editor__notice--warning' role='alert'>
           <span>{t('chat.writerMarkdown.externalUpdate')}</span>

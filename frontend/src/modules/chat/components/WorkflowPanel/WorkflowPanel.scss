@@ -62,12 +62,12 @@
 
     // A single-document tab can use the complete expanded workspace.
     .workflow-panel__tab-content--list
-      > .workflow-panel__named-slot:only-child {
+      > .workflow-panel__named-slot:only-of-type {
       flex: 1 1 0;
     }
 
     .workflow-panel__tab-content--list
-      > .workflow-panel__named-slot:only-child
+      > .workflow-panel__named-slot:only-of-type
       > [role='button'] {
       display: flex;
       flex: 1 1 0;
@@ -75,7 +75,7 @@
     }
 
     .workflow-panel__tab-content--list
-      > .workflow-panel__named-slot:only-child
+      > .workflow-panel__named-slot:only-of-type
       > [role='button']
       > .workflow-slot--artifact:not(.workflow-slot--pending):not(.workflow-slot--error) {
       flex: 1 1 0;
@@ -86,14 +86,14 @@
     // through SlotRenderer's clickable wrapper, so they need the same height
     // contract as a persisted artifact.
     .workflow-panel__tab-content--list
-      > .workflow-panel__named-slot:only-child
+      > .workflow-panel__named-slot:only-of-type
       > .workflow-slot--artifact-stream {
       flex: 1 1 0;
       min-height: 0;
     }
 
     .workflow-panel__tab-content--list
-      > .workflow-panel__named-slot:only-child
+      > .workflow-panel__named-slot:only-of-type
       .workflow-slot__artifact-body {
       flex: 1 1 0;
       min-height: 0;
@@ -104,7 +104,7 @@
     }
 
     .workflow-panel__tab-content--list
-      > .workflow-panel__named-slot:only-child
+      > .workflow-panel__named-slot:only-of-type
       .writer-markdown-editor {
       flex: 1 1 0;
       min-height: 0;
@@ -112,7 +112,7 @@
     }
 
     .workflow-panel__tab-content--list
-      > .workflow-panel__named-slot:only-child
+      > .workflow-panel__named-slot:only-of-type
       .writer-markdown-editor__document-layout {
       flex: 1 1 0;
       min-height: 0;
@@ -121,7 +121,7 @@
     }
 
     .workflow-panel__tab-content--list
-      > .workflow-panel__named-slot:only-child
+      > .workflow-panel__named-slot:only-of-type
       .writer-markdown-editor__main {
       display: flex;
       flex-direction: column;
@@ -130,7 +130,7 @@
     }
 
     .workflow-panel__tab-content--list
-      > .workflow-panel__named-slot:only-child
+      > .workflow-panel__named-slot:only-of-type
       .writer-markdown-editor__surface {
       flex: 1 1 0;
       min-height: 0;
@@ -139,10 +139,10 @@
     }
 
     .workflow-panel__tab-content--list
-      > .workflow-panel__named-slot:only-child
+      > .workflow-panel__named-slot:only-of-type
       .writer-markdown-editor__outline-rail,
     .workflow-panel__tab-content--list
-      > .workflow-panel__named-slot:only-child
+      > .workflow-panel__named-slot:only-of-type
       .writer-markdown-editor__outline {
       max-height: 100%;
     }
@@ -593,19 +593,139 @@
   }
 
   &__body {
-    overflow-y: auto;
-    max-height: 320px;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    max-height: min(44dvh, 420px);
     min-height: 80px;
     padding: 12px 16px;
-    scrollbar-width: thin;
-    scrollbar-color: #d1d5db transparent;
 
-    &::-webkit-scrollbar {
-      width: 4px;
+    > [role='tabpanel']:not([hidden]) {
+      display: flex;
+      flex: 1 1 auto;
+      flex-direction: column;
+      min-height: 0;
+      overflow: hidden;
     }
-    &::-webkit-scrollbar-thumb {
-      background: #d1d5db;
-      border-radius: 4px;
+  }
+
+  // A compact single-document preview keeps controls visible and delegates
+  // scrolling to the document surface instead of the whole workflow body.
+  &:not(.workflow-panel--expanded) {
+    .workflow-panel__body > [role='tabpanel']:not([hidden]) .workflow-panel__tab-content--list {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .workflow-panel__tab-content--list > .workflow-panel__named-slot:only-of-type {
+      flex: 1 1 auto;
+      min-height: 0;
+      overflow: hidden;
+
+      .writer-markdown-editor__display-toolbar {
+        display: none;
+      }
+
+      > [role='button'] {
+        display: flex;
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow: hidden;
+
+        > .workflow-slot--artifact:not(.workflow-slot--pending):not(.workflow-slot--error) {
+          flex: 1 1 auto;
+          min-height: 0;
+        }
+      }
+
+      .workflow-slot__artifact-body,
+      .writer-markdown-editor,
+      .writer-markdown-editor__document-layout {
+        flex: 1 1 auto;
+        min-height: 0;
+      }
+
+      .workflow-slot__artifact-body {
+        display: flex;
+        flex-direction: column;
+      }
+
+      .workflow-slot__artifact-body,
+      .writer-markdown-editor__document-layout,
+      .writer-markdown-editor__main {
+        overflow: hidden;
+      }
+
+      .workflow-slot__artifact-body,
+      .writer-markdown-editor {
+        max-height: none;
+      }
+
+      .writer-markdown-editor__document-layout {
+        grid-template-rows: minmax(0, 1fr);
+        align-items: stretch;
+      }
+
+      .writer-markdown-editor__main {
+        display: flex;
+        flex-direction: column;
+        grid-row: 1;
+        min-height: 0;
+      }
+
+      .writer-markdown-editor__outline-rail {
+        grid-row: 1;
+      }
+
+      @container writer-markdown-editor (max-width: 680px) {
+        .writer-markdown-editor__document-layout {
+          grid-template-rows: auto minmax(0, 1fr);
+        }
+
+        .writer-markdown-editor__main {
+          grid-row: 2;
+        }
+      }
+
+      .writer-markdown-editor__surface {
+        flex: 1 1 auto;
+        min-height: 0;
+        max-height: none;
+        overflow-y: auto;
+      }
+
+      .writer-markdown-editor__outline-rail,
+      .writer-markdown-editor__outline {
+        max-height: 100%;
+      }
+
+      .writer-ir {
+        flex: 1 1 auto;
+        min-height: 0;
+        grid-template-rows: minmax(0, 1fr);
+        align-items: stretch;
+        overflow: hidden;
+      }
+
+      .writer-ir__main {
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        overflow: hidden;
+      }
+
+      .writer-ir__editor-shell {
+        flex: 1 1 auto;
+        min-height: 0;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+      }
+
+      .writer-ir__outline-rail,
+      .writer-ir__outline {
+        max-height: 100%;
+      }
     }
   }
 
@@ -1380,10 +1500,11 @@
   }
 
   &__version-diff-label {
-    padding: 3px 8px;
+    padding: 4px 9px;
     font-size: 11px;
-    font-weight: 500;
-    border-radius: 4px;
+    font-weight: 600;
+    border-radius: 5px;
+    white-space: nowrap;
 
     &--remove {
       background: #fef3f2;
@@ -1406,14 +1527,35 @@
   &__version-diff-header {
     display: flex;
     align-items: center;
-    gap: 6px;
-    margin-bottom: 7px;
-    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 10px;
+    padding: 8px 10px;
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+  }
+
+  &__version-diff-side {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  &__version-diff-caption {
+    color: #64748b;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1;
   }
 
   &__version-diff-arrow {
-    font-size: 12px;
-    color: #9ca3af;
+    flex: 0 0 auto;
+    margin-top: 12px;
+    color: #2563eb;
+    font-size: 18px;
+    font-weight: 600;
+    line-height: 1;
   }
 
   &__version-diff-body {
