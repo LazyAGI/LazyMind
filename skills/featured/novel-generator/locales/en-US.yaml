@@ -31,7 +31,7 @@ tasks:
       prompt: |
         Develop the premise below into a binge-worthy web serial and write an opening readers can start immediately.
 
-        Premise: Lin Che, a newly hired product intern, can see a red countdown above every project headed for irreversible failure. The company's AI assistant has only twenty-four hours left before launch even though every test appears normal; each wrong diagnosis makes the countdown accelerate.
+        Premise: Cheng Ye, a newly hired product intern, can see a red countdown above every project headed for irreversible failure. The company's AI assistant has only twenty-four hours left before launch even though every test appears normal; each wrong diagnosis makes the countdown accelerate.
 
         Provide a title, one-line hook, protagonist and core rules, a first-three-chapter plan, and an opening chapter of about 1,500 words. Let the payoff come from discovering information, making decisions, and accepting consequences while other characters retain believable motives. End with a compact story-state card so writing can continue in the same conversation.
     replay:
@@ -61,7 +61,7 @@ tasks:
       prompt: |
         Use the premise below to plan a four-volume web serial designed for sustained serialization.
 
-        Premise: Lin Che, a newly hired product intern, can see a red countdown above every project headed for irreversible failure. The company's AI assistant has only twenty-four hours left before launch even though every test appears normal; each wrong diagnosis makes the countdown accelerate.
+        Premise: Cheng Ye, a newly hired product intern, can see a red countdown above every project headed for irreversible failure. The company's AI assistant has only twenty-four hours left before launch even though every test appears normal; each wrong diagnosis makes the countdown accelerate.
 
         Lay out the main arc, protagonist growth, each volume's core conflict and ending hook, and the planting and payoff of major setups. Gradually reveal the countdown's origin, and let every victory create a new cost or a larger problem. Finish with a full-story state card that later chapters can reuse.
     replay:
@@ -91,9 +91,9 @@ tasks:
       prompt: |
         Use the story setup and chapter situation below to write a complete, readable web-fiction chapter.
 
-        Story setup: Product intern Lin Che can see a red countdown above projects headed for irreversible failure. The countdown never reveals the cause, and each wrong diagnosis makes the remaining time fall faster.
+        Story setup: Product intern Cheng Ye can see a red countdown above projects headed for irreversible failure. The countdown never reveals the cause, and each wrong diagnosis makes the remaining time fall faster.
 
-        Chapter situation: During an AI-assistant launch review, every test report shows a pass, but Lin Che sees “23:59:59” above the screen. He has no decision authority and can only investigate user feedback and anomaly records. His first fix appears successful, yet the countdown suddenly loses six hours.
+        Chapter situation: During an AI-assistant launch review, every test report shows a pass, but Cheng Ye sees “23:59:59” above the screen. He has no decision authority and can only investigate user feedback and anomaly records. His first fix appears successful, yet the countdown suddenly loses six hours.
 
         Write about 1,500 words with a clear objective, realistic resistance, one credible small win, a cost for the wrong judgment, and a natural ending hook. Do not make other characters irrational merely to elevate the protagonist. Follow the chapter with a compact state card covering character state, capability rules, and open setups.
     replay:
