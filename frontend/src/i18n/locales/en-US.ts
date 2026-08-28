@@ -905,16 +905,17 @@ const enUS = {
     cardTagsLabel: "Capability tags",
     filters: {
       all: "All",
-      taskType: "Task type",
-      capabilityType: "Capability type",
-      technologyType: "Technology type",
+      more: "More",
+      taskType: "Scenario",
+      capabilityType: "Goal",
+      technologyType: "Capability form",
       capability: {
         chat: "Chat",
-        work: "Task",
+        work: "Get work done",
       },
       technology: {
-        skill: "Skill",
-        workflow: "Workflow",
+        skill: "Chat enhancement",
+        workflow: "Step execution",
       },
     },
     loading: "Loading cases…",
