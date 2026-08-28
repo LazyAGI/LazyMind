@@ -601,6 +601,8 @@ func init() {
 	registerAdditionalError("model free_auto_select_base_urls requires a positive free_auto_select_priority", http.StatusInternalServerError, 2002313)
 	registerAdditionalError("model free_auto_select_base_urls must not contain an empty URL", http.StatusInternalServerError, 2002314)
 	registerAdditionalError("marshal model free_auto_select_base_urls", http.StatusInternalServerError, 2002315)
+	registerAdditionalError("selection offsets do not match content", http.StatusBadRequest, 2002316)
+	registerAdditionalError("generate endpoint returned invalid editable polish content", http.StatusBadGateway, 2002317)
 }
 
 func registerAdditionalError(message string, status, code int) {
