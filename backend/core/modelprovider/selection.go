@@ -63,6 +63,7 @@ type selectedModelItem struct {
 	IsEditable               bool    `json:"is_editable" gorm:"-"`
 	MaxInputTokens           *string `json:"max_input_tokens" gorm:"column:max_input_tokens"`
 	TechnicalModelType       string  `json:"-" gorm:"column:technical_model_type"`
+	IsDefault                bool    `json:"-" gorm:"column:is_default"`
 }
 
 type selectedModelsResponse struct {
@@ -92,6 +93,7 @@ type selectedModelCandidate struct {
 	ModelName          string `gorm:"column:model_name"`
 	BaseURL            string `gorm:"column:base_url"`
 	TechnicalModelType string `gorm:"column:technical_model_type"`
+	IsDefault          bool   `gorm:"column:is_default"`
 }
 
 func openCodeCandidateQuery(ctx context.Context, db *gorm.DB) *gorm.DB {
@@ -99,14 +101,14 @@ func openCodeCandidateQuery(ctx context.Context, db *gorm.DB) *gorm.DB {
 		Table("user_model_provider_group_models m").
 		Select(
 			"m.id AS model_id, m.provider_name, m.name AS model_name, "+
-				"m.model_type AS technical_model_type, g.base_url",
+				"m.model_type AS technical_model_type, m.is_default, g.base_url",
 		).
 		Joins("JOIN user_model_provider_groups g ON g.id = m.user_model_provider_group_id AND g.deleted_at IS NULL AND g.is_verified = ?", true).
 		Where("m.deleted_at IS NULL")
 }
 
 func (row selectedModelCandidate) isOpenCodeEligible() bool {
-	_, ok := ResolveOpenCodeModel(row.ProviderName, row.ModelName, row.BaseURL, row.TechnicalModelType)
+	_, ok := ResolveOpenCodeModel(row.ProviderName, row.ModelName, row.BaseURL, row.TechnicalModelType, row.IsDefault)
 	return ok
 }
 
@@ -115,7 +117,7 @@ func loadEligibleOpenCodeSelection(ctx context.Context, db *gorm.DB, userID stri
 	q := openCodeCandidateQuery(ctx, db).
 		Select(
 			"m.id AS model_id, usm.user_id, usm.user_name, "+
-				"m.provider_name, m.name AS model_name, m.model_type AS technical_model_type, g.base_url",
+				"m.provider_name, m.name AS model_name, m.model_type AS technical_model_type, m.is_default, g.base_url",
 		).
 		Joins("JOIN user_selected_models usm ON usm.user_model_provider_group_model_id = m.id").
 		Where("usm.model_type = ?", EvoModelKey)
@@ -385,6 +387,7 @@ func loadSelectedModels(ctx context.Context, db *gorm.DB, userID string) ([]sele
 				"m.name, "+
 				"m.provider_name, "+
 				"m.model_type AS technical_model_type, "+
+				"m.is_default, "+
 				"m.max_input_tokens, "+
 				"g.name AS group_name, "+
 				"g.base_url",
@@ -412,7 +415,7 @@ func loadSelectedModels(ctx context.Context, db *gorm.DB, userID string) ([]sele
 	for _, item := range out {
 		item.IsEditable = strings.EqualFold(strings.TrimSpace(item.ModelKey), "image_editing")
 		if item.ModelKey == EvoModelKey {
-			if _, ok := ResolveOpenCodeModel(item.ProviderName, item.Name, item.BaseURL, item.TechnicalModelType); !ok {
+			if _, ok := ResolveOpenCodeModel(item.ProviderName, item.Name, item.BaseURL, item.TechnicalModelType, item.IsDefault); !ok {
 				continue
 			}
 		}

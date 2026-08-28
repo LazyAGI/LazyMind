@@ -341,7 +341,7 @@ func ListUserModelsByModelType(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 		if modelType == EvoModelKey {
-			if _, eligible := ResolveOpenCodeModel(m.ProviderName, m.Name, grp.baseURL, m.ModelType); !eligible {
+			if _, eligible := ResolveOpenCodeModel(m.ProviderName, m.Name, grp.baseURL, m.ModelType, m.IsDefault); !eligible {
 				continue
 			}
 		}

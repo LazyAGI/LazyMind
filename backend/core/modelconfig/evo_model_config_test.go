@@ -25,6 +25,22 @@ func TestBuildLLMConfigAddsOpenCodeDescriptor(t *testing.T) {
 	}
 }
 
+func TestBuildLLMConfigAddsCustomChatModelForEvo(t *testing.T) {
+	config := BuildLLMConfig([]SelectedRuntimeModel{{
+		ModelType: "evo_llm", TechnicalModelType: "llm", IsDefault: false,
+		ProviderName: "OpenAI", ModelName: "deepseek-v4-flash",
+		BaseURL: "https://gateway.example.com/v1/", APIKey: "secret",
+	}})
+	role, ok := config["evo_llm"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing custom evo_llm config: %#v", config)
+	}
+	descriptor, ok := role["opencode"].(modelprovider.OpenCodeModelDescriptor)
+	if !ok || descriptor.Model != "openai/deepseek-v4-flash" {
+		t.Fatalf("unexpected custom OpenCode descriptor: %#v", role["opencode"])
+	}
+}
+
 func TestBuildLLMConfigNormalizesOnlyOpenAIBaseURLForLazyLLM(t *testing.T) {
 	config := BuildLLMConfig([]SelectedRuntimeModel{
 		{
@@ -70,7 +86,7 @@ func TestLoadLLMConfigSkipsStaleOwnEvoAndUsesEligibleSharedSelection(t *testing.
 		&orm.UserModelProviderGroup{},
 	)
 	now := time.Now().UTC()
-	seed := func(userID, suffix, provider, model, technicalType string, shared bool) {
+	seed := func(userID, suffix, provider, model, technicalType string, isDefault, shared bool) {
 		group := orm.UserModelProviderGroup{
 			ID: "group-" + suffix, UserModelProviderID: "provider-" + suffix,
 			Name: suffix, BaseURL: "https://api.openai.com/v1/", APIKey: "sk-" + suffix,
@@ -80,7 +96,7 @@ func TestLoadLLMConfigSkipsStaleOwnEvoAndUsesEligibleSharedSelection(t *testing.
 		modelRow := orm.UserModelProviderGroupModel{
 			ID: "model-" + suffix, UserModelProviderID: group.UserModelProviderID,
 			UserModelProviderGroupID: group.ID, ProviderName: provider,
-			Name: model, ModelType: technicalType,
+			Name: model, ModelType: technicalType, IsDefault: isDefault,
 			BaseModel: orm.BaseModel{CreateUserID: userID, CreatedAt: now, UpdatedAt: now},
 		}
 		selection := orm.UserSelectedModel{
@@ -99,8 +115,8 @@ func TestLoadLLMConfigSkipsStaleOwnEvoAndUsesEligibleSharedSelection(t *testing.
 		}
 	}
 
-	seed("user-1", "stale", "OpenAI", "not-supported", "llm", false)
-	seed("admin-1", "shared", "OpenAI", "gpt-4o-mini", "vlm", true)
+	seed("user-1", "stale", "OpenAI", "not-supported", "llm", true, false)
+	seed("admin-1", "shared", "OpenAI", "gpt-4o-mini", "vlm", true, true)
 
 	config, err := LoadLLMConfig(context.Background(), db.DB, "user-1")
 	if err != nil {
