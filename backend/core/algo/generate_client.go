@@ -26,6 +26,17 @@ func GeneratePolish(ctx context.Context, req PolishGenerateRequest) (string, err
 	return generate(ctx, rewritePayload("polish", req.Content, req.UserInstruct, req.LLMConfig))
 }
 
+func GenerateEditablePolish(ctx context.Context, req RewriteRequest) (map[string]any, error) {
+	var response map[string]any
+	if err := common.ApiPost(ctx, generateURL(rewritePath), req, nil, &response, generateTimeout); err != nil {
+		return nil, err
+	}
+	if _, ok := response["content"].(string); !ok {
+		return nil, fmt.Errorf("generate endpoint returned invalid editable polish content")
+	}
+	return response, nil
+}
+
 func generateURL(path string) string {
 	return common.ChatServiceEndpoint() + path
 }

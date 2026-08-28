@@ -345,9 +345,12 @@ func normalizeEditablePolishResult(polished string, allowEmpty bool) string {
 
 func PolishPrompt(w http.ResponseWriter, r *http.Request) {
 	var body struct {
-		Content      string `json:"content"`
-		UserInstruct string `json:"user_instruct"`
-		AllowEmpty   bool   `json:"allow_empty"`
+		Content        string  `json:"content"`
+		UserInstruct   string  `json:"user_instruct"`
+		AllowEmpty     bool    `json:"allow_empty"`
+		FullContent    *string `json:"full_content"`
+		SelectionStart *int    `json:"selection_start"`
+		SelectionEnd   *int    `json:"selection_end"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		common.ReplyErr(w, fmt.Sprintf("%s: %v", "invalid body", err), http.StatusBadRequest)
@@ -375,6 +378,29 @@ func PolishPrompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userInstruct = editablePolishInstruction(userInstruct, body.AllowEmpty)
+	if body.FullContent != nil {
+		fullRunes := []rune(*body.FullContent)
+		if body.SelectionStart == nil || body.SelectionEnd == nil ||
+			*body.SelectionStart < 0 || *body.SelectionEnd <= *body.SelectionStart ||
+			*body.SelectionEnd > len(fullRunes) ||
+			string(fullRunes[*body.SelectionStart:*body.SelectionEnd]) != content {
+			common.ReplyErr(w, "selection offsets do not match content", http.StatusBadRequest)
+			return
+		}
+		result, generateErr := algo.GenerateEditablePolish(r.Context(), algo.RewriteRequest{
+			TaskType: "polish", Content: content, UserInstruct: userInstruct, LLMConfig: llmConfig,
+			FullContent: *body.FullContent, SelectionStart: body.SelectionStart, SelectionEnd: body.SelectionEnd,
+		})
+		if generateErr != nil {
+			common.ReplyErr(w, "prompt polish failed: "+generateErr.Error(), http.StatusBadGateway)
+			return
+		}
+		if value, _ := result["content"].(string); body.AllowEmpty {
+			result["content"] = normalizeEditablePolishResult(value, true)
+		}
+		writePromptJSON(w, http.StatusOK, result)
+		return
+	}
 	polished, err := algo.GeneratePolish(r.Context(), algo.PolishGenerateRequest{
 		Content:      content,
 		UserInstruct: userInstruct,
