@@ -28,29 +28,38 @@ assets:
   cover:
     file: assets/cover.png
     role: cover
+  homework_review_demo:
+    file: assets/homework-review-demo.html
+    role: result
+  graded_practice_demo:
+    file: assets/graded-practice-demo.html
+    role: result
+  printable_paper_demo:
+    file: assets/printable-paper-demo.html
+    role: result
 
 presentation:
   card:
     title: K12智能老师
-    description: 批改作业、分析错因并生成分层练习，覆盖小学到高中九大学科
+    description: 从作业批改、错因讲解到分层练习卷，查看完整的个性化学习辅导案例
     output_type: document
-    output_label: 学习辅导方案
+    output_label: 交互式学习辅导案例
     cover_asset: cover
-    result_summary: 从错题讲解到巩固练习，形成可打印、可继续调整的个性化学习材料
+    result_summary: 以五年级分数学习为例，交互查看批改过程、分步讲解、分层练习和 A4 练习卷
   detail:
     title: K12智能老师
-    description: 根据学生年级、学科、教材和作业内容，完成逐题批改、错因分析、可视化讲解与分层练习生成。
+    description: 根据学生年级、学科、教材和作业内容，完成逐题批改、错因分析、分步讲解与分层练习生成。可直接浏览五年级分数学习案例，了解从错题到可打印练习卷的完整过程。
     attachment_hint: 清晰的作业或试卷图片、年级、学科和教材版本
 
 tasks:
   - id: homework-review
     selector:
       title: 作业批改与错题辅导
-      description: 逐题检查作业，定位错因并完成讲解和巩固建议
-      output_label: 错题辅导报告
+      description: 逐题检查作业，定位错因，并查看讲解和巩固案例
+      output_label: 交互式错题辅导案例
     launch:
-      prompt_short: 批改我上传的作业，分析错题并给出针对性讲解和练习。
-      prompt: 请根据我上传的作业或试卷完成逐题批改。先确认学生年级、学科和教材版本；对每道错题说明错误原因、正确思路和关键知识点，提供容易理解的可视化讲解，并推荐适合继续学习的视频搜索关键词。最后针对薄弱点生成少量举一反三练习和答案。图片不清晰或信息不足时，请先询问关键资料。
+      prompt_short: 帮我看看这份作业，讲讲哪里做错了，再出几道文字题帮我巩固。
+      prompt: 帮我看看我上传的作业，逐题告诉我对不对，讲清楚做错的原因和正确思路，再根据我的薄弱点出几道由易到难、用完整文字说明的练习题，并附上答案。
     replay:
       steps:
         - title: 识别学科与学段
@@ -64,23 +73,20 @@ tasks:
         - title: 生成巩固练习
           description: 围绕薄弱知识点提供分层练习、答案和易错提醒
     result:
-      template: generic_report_v1
-      eyebrow: 错题辅导报告
-      title: 作业批改与个性化巩固方案
-      summary: 形成包含批改结果、错因、讲解和后续练习的完整学习材料
-      highlights:
-        - 逐题批改与薄弱知识点清单
-        - 错因分析和可视化讲解
-        - 举一反三练习、答案与学习建议
+      template: html_preview_v1
+      eyebrow: 错题辅导案例
+      title: 五年级分数应用题辅导报告
+      summary: 查看题目识别、逐题判定、通分错因、分步讲解与巩固练习的完整交互案例。
+      html_asset: homework_review_demo
 
   - id: graded-practice
     selector:
       title: 分层练习生成
-      description: 围绕指定年级、学科和知识点生成基础到挑战练习
-      output_label: 分层练习题
+      description: 围绕指定年级、学科和知识点生成基础到挑战练习案例
+      output_label: 交互式分层练习案例
     launch:
-      prompt_short: 根据年级、学科和知识点生成一套分层练习题。
-      prompt: 请根据我提供的年级、学科、教材版本和知识点，先用简短示例讲明核心方法，再生成基础、提高、挑战三个层次的练习。题量保持适中，覆盖典型题型和常见错误，最后提供答案、解析和易错提醒；如果主题超出内置题库，请先生成通用可用版本并说明还需要哪些教材信息。
+      prompt_short: 我想练习一个知识点，请帮我出一套由易到难的文字题。
+      prompt: 我想练习一个还没掌握好的知识点。请先简单讲讲方法，再给我出一套由易到难、题意用完整文字写清楚的练习题，并附上答案和解析。
     replay:
       steps:
         - title: 确认练习范围
@@ -92,23 +98,20 @@ tasks:
         - title: 生成答案解析
           description: 为每道题提供答案、关键步骤和易错提醒
     result:
-      template: generic_report_v1
-      eyebrow: 分层练习题
-      title: 基础·提高·挑战三层练习
-      summary: 输出与学生阶段和薄弱点匹配的练习、答案及解析
-      highlights:
-        - 三层难度与典型题型覆盖
-        - 标准答案和关键步骤解析
-        - 易错提醒与后续复习建议
+      template: html_preview_v1
+      eyebrow: 分层练习案例
+      title: 分数加减法基础·提高·挑战练习
+      summary: 围绕“先通分，再计算”展示三级题目、答案解析、易错提醒和下一轮练习入口。
+      html_asset: graded_practice_demo
 
   - id: printable-paper
     selector:
       title: 可打印练习卷
-      description: 将错题和知识点整理成适合打印使用的练习材料
-      output_label: 打印练习卷
+      description: 将错题和知识点整理成适合打印的学生卷与答案解析案例
+      output_label: 交互式打印练习卷案例
     launch:
-      prompt_short: 把错题和薄弱知识点整理成一份可打印练习卷。
-      prompt: 请根据我提供的错题、年级、学科和薄弱知识点，整理一份结构清晰、适合打印的练习卷。包含标题、学生信息栏、分层题目、答题区域、参考答案和解析。优先生成 Word 文档；如果当前环境缺少 Word 依赖，请自动降级为 Markdown，并明确告诉我如何继续使用或转换。
+      prompt_short: 把我做错的题整理成一份文字清楚、可以打印的练习卷。
+      prompt: 请把我这次做错的题和薄弱知识点整理成一份可以打印的练习卷，题目用完整文字写清楚，题目和答案解析分开，方便我先自己做，再对照订正。
     replay:
       steps:
         - title: 汇总学习材料
@@ -120,11 +123,8 @@ tasks:
         - title: 生成可打印文件
           description: 优先输出 Word，依赖不可用时自动降级为 Markdown
     result:
-      template: generic_report_v1
-      eyebrow: 打印练习卷
-      title: 个性化错题巩固练习卷
-      summary: 生成包含练习、答题区、答案和解析的可打印学习文件
-      highlights:
-        - 适合打印的完整试卷结构
-        - 针对薄弱知识点的分层题目
-        - Word优先与Markdown降级方案
+      template: html_preview_v1
+      eyebrow: 可打印练习卷案例
+      title: 分数加减法 A4 巩固练习卷
+      summary: 在学生卷与答案解析之间切换，查看答题区、分值、打印版式和订正说明。
+      html_asset: printable_paper_demo

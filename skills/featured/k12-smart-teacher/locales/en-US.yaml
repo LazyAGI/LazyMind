@@ -11,25 +11,25 @@ classification:
 presentation:
   card:
     title: K12 smart teacher
-    description: Review homework, explain mistakes, and generate tiered practice across nine K12 subjects
+    description: Move from homework review and mistake explanations to tiered practice papers through interactive tutoring cases
     output_type: document
-    output_label: Tutoring plan
+    output_label: Interactive tutoring cases
     cover_asset: cover
-    result_summary: Turn mistake analysis into printable, adjustable explanations and practice materials
+    result_summary: Explore a Grade 5 fractions case with review steps, worked explanations, tiered practice, and an A4 paper
   detail:
     title: K12 smart teacher
-    description: Use the student's grade, subject, curriculum, and homework to review answers, explain mistakes, and generate tiered practice.
+    description: Use the student's grade, subject, curriculum, and homework to review answers, explain mistakes, and generate tiered practice. Browse the Grade 5 fractions cases to see the complete path from a mistake to a printable paper.
     attachment_hint: Clear homework or test images, grade, subject, and curriculum version
 
 tasks:
   - id: homework-review
     selector:
       title: Homework review and tutoring
-      description: Check each answer, diagnose mistakes, and provide explanations and reinforcement
-      output_label: Mistake tutoring report
+      description: Check each answer, diagnose mistakes, and explore the explanation and reinforcement case
+      output_label: Interactive mistake-tutoring case
     launch:
-      prompt_short: Review my uploaded homework, explain the mistakes, and provide targeted practice.
-      prompt: Review the uploaded homework or test question by question. First confirm the student's grade, subject, and curriculum. For every mistake, explain the cause, correct approach, and key concept in an accessible way, and provide useful video-search keywords. Finish with a small set of transfer exercises and answers. Ask for missing details when the image or context is insufficient.
+      prompt_short: Help me check this homework, explain any mistakes, and give me a few word problems to practise.
+      prompt: Please check the homework I uploaded. Tell me whether each answer is right, explain any mistakes and the correct approach, then give me a few easy-to-hard practice questions written out in full words, with answers, based on what I need to improve.
     replay:
       steps:
         - title: Identify subject and level
@@ -43,23 +43,20 @@ tasks:
         - title: Generate reinforcement
           description: Provide tiered practice, answers, and common-error reminders
     result:
-      template: generic_report_v1
-      eyebrow: Mistake tutoring report
-      title: Homework review and personalized reinforcement plan
-      summary: Deliver review results, mistake causes, explanations, and follow-up practice
-      highlights:
-        - Question-by-question review and knowledge-gap list
-        - Mistake diagnosis and visual explanations
-        - Transfer practice, answers, and study suggestions
+      template: html_preview_v1
+      eyebrow: Mistake-tutoring case
+      title: Grade 5 fractions tutoring report
+      summary: Explore question recognition, verdicts, a common-denominator diagnosis, worked explanations, and reinforcement practice.
+      html_asset: homework_review_demo
 
   - id: graded-practice
     selector:
       title: Tiered practice generation
-      description: Generate foundation, intermediate, and challenge exercises for a target topic
-      output_label: Tiered exercises
+      description: Generate a foundation-to-challenge exercise case for a target topic
+      output_label: Interactive tiered-practice case
     launch:
-      prompt_short: Generate tiered practice for the specified grade, subject, and topic.
-      prompt: Use the grade, subject, curriculum, and topic I provide. Begin with a concise worked example, then create foundation, intermediate, and challenge exercises covering typical question types and common mistakes. Include answers, explanations, and error reminders. If the topic is outside the built-in bank, produce a useful general version and state what curriculum details would improve it.
+      prompt_short: I want to practise a topic. Please give me a set of word problems from easy to hard.
+      prompt: I want to practise a topic that I have not mastered yet. Please briefly explain the method first, then give me a set of easy-to-hard practice questions written out clearly in full words, with answers and explanations.
     replay:
       steps:
         - title: Confirm practice scope
@@ -71,23 +68,20 @@ tasks:
         - title: Generate answer explanations
           description: Provide answers, key steps, and error reminders for every question
     result:
-      template: generic_report_v1
-      eyebrow: Tiered exercises
-      title: Foundation · intermediate · challenge practice
-      summary: Produce exercises, answers, and explanations matched to the student's stage and gaps
-      highlights:
-        - Three difficulty tiers and representative question types
-        - Standard answers and key-step explanations
-        - Common-error reminders and review suggestions
+      template: html_preview_v1
+      eyebrow: Tiered-practice case
+      title: "Fractions practice: foundation · intermediate · challenge"
+      summary: Explore three levels of questions, worked answers, error reminders, and the next-practice entry point around common denominators.
+      html_asset: graded_practice_demo
 
   - id: printable-paper
     selector:
       title: Printable practice paper
-      description: Turn mistakes and learning gaps into structured printable materials
-      output_label: Printable practice paper
+      description: Turn mistakes and learning gaps into a printable student paper and answer-key case
+      output_label: Interactive printable-paper case
     launch:
-      prompt_short: Turn the mistakes and weak topics into a printable practice paper.
-      prompt: Use the mistakes, grade, subject, and weak topics I provide to create a clear printable practice paper. Include a title, student information area, tiered questions, answer space, reference answers, and explanations. Prefer a Word document. If Word dependencies are unavailable, automatically fall back to Markdown and explain how I can use or convert the file.
+      prompt_short: Turn the questions I got wrong into a clearly written printable practice paper.
+      prompt: Please turn the questions I got wrong and the topics I need to practise into a printable worksheet. Write each question out clearly in full words, and keep the questions and answers separate so I can finish it myself before checking the explanations.
     replay:
       steps:
         - title: Collect learning materials
@@ -99,11 +93,8 @@ tasks:
         - title: Create the printable file
           description: Prefer Word and automatically fall back to Markdown when needed
     result:
-      template: generic_report_v1
-      eyebrow: Printable practice paper
-      title: Personalized mistake-reinforcement paper
-      summary: Create a printable file with exercises, answer space, answers, and explanations
-      highlights:
-        - Complete structure suitable for printing
-        - Tiered questions targeting learning gaps
-        - Word-first output with Markdown fallback
+      template: html_preview_v1
+      eyebrow: Printable-paper case
+      title: Fractions A4 reinforcement paper
+      summary: Switch between the student paper and answer key to inspect answer space, scores, print layout, and correction notes.
+      html_asset: printable_paper_demo
