@@ -1,7 +1,7 @@
 locale: en-US
 
 classification:
-  category: workflow
+  category: Product development
   tags:
     - Product direction
     - Competitive analysis
@@ -44,14 +44,11 @@ tasks:
         - title: Build the validation route
           description: Deliver an editable direction brief with support, opposition, and stop signals
     result:
-      template: generic_report_v1
+      template: html_preview_v1
       eyebrow: Product-direction brief
       title: From product idea to a testable direction
       summary: Use user jobs, option comparison, boundaries, and validation signals to guide the next investment
-      highlights:
-        - Target users and core jobs
-        - Two direction options and decision evidence
-        - MVP scope, non-goals, and validation route
+      html_asset: direction_preview
 
   - id: competitive
     selector:
@@ -74,14 +71,11 @@ tasks:
         - title: Form positioning candidates
           description: Deliver a self-contained HTML report with testable positioning options
     result:
-      template: generic_report_v1
+      template: html_preview_v1
       eyebrow: Competitive landscape
       title: Competitors and alternatives with sources and boundaries
       summary: Explain the competitor set, differences, gaps, and positioning on one user job and real evidence
-      highlights:
-        - Competitors, adjacent platforms, and manual alternatives
-        - Dated comparison matrix
-        - Ecosystem groups, positioning hypotheses, and gaps
+      html_asset: competitive_preview
 
   - id: design
     selector:
@@ -104,14 +98,11 @@ tasks:
         - title: Deliver the product solution
           description: Produce an editable outline, full document, and metric validation design
     result:
-      template: generic_report_v1
+      template: html_preview_v1
       eyebrow: Product design solution
       title: A complete mechanism for a reviewable research workbench
       summary: Keep tasks, evidence, conclusions, and versions consistent across flow, interface, and human control
-      highlights:
-        - Four core objects and state relationships
-        - Information architecture, pages, and interactions
-        - Permissions, recovery, and trust mechanisms
+      html_asset: design_preview
 
   - id: prd
     selector:
@@ -135,14 +126,11 @@ tasks:
         - title: Deliver an editable PRD
           description: Produce outline checks, full sections, and explicit open items
     result:
-      template: generic_report_v1
+      template: html_preview_v1
       eyebrow: MVP PRD
       title: A requirements document with functional, page, and acceptance traceability
       summary: Turn product rules into a reviewable, executable PRD without claiming unrun tests passed
-      highlights:
-        - Permission matrix, fields, and states
-        - 12 functional rules and 18 acceptance designs
-        - Page, requirement, and acceptance traceability
+      html_asset: prd_preview
 
   - id: prototype
     selector:
@@ -165,14 +153,11 @@ tasks:
         - title: Deliver a self-contained prototype
           description: Output previewable single-file HTML with reviewer tasks
     result:
-      template: generic_report_v1
+      template: html_preview_v1
       eyebrow: Interactive prototype
       title: A concept prototype covering primary, role, and recovery paths
       summary: Validate interface behavior and rule mapping in self-contained HTML without pretending it is production
-      highlights:
-        - Planning, process, review, and version screens
-        - Clickable main path and role feedback
-        - Validation, failure, pause, cancel, and retry
+      html_asset: prototype_preview
 
   - id: review
     selector:
@@ -196,14 +181,11 @@ tasks:
         - title: Judge engineering gates
           description: Deliver an editable review report and pre-engineering blockers
     result:
-      template: generic_report_v1
+      template: html_preview_v1
       eyebrow: Product review report
       title: Rule conflicts, coverage gaps, and engineering readiness
       summary: Use located evidence and retest methods to separate confirmed gaps, decisions, and untested risks
-      highlights:
-        - Consistency and coverage matrix
-        - Ranked findings, impacts, and fixes
-        - Engineering gates and blockers
+      html_asset: review_preview
 
   - id: handoff
     selector:
@@ -226,11 +208,8 @@ tasks:
         - title: Deliver confirmation checklists
           description: Provide actionable checks by role while preserving unknowns
     result:
-      template: generic_report_v1
+      template: html_preview_v1
       eyebrow: Engineering handoff package
       title: An engineering handoff draft with version baseline and traceability
       summary: Consolidate specifications, acceptance, resources, and open items without inventing missing engineering conclusions
-      highlights:
-        - Artifact index and version baseline
-        - FR, AC, page, and state traceability
-        - Resource gaps, risks, and role checklists
+      html_asset: handoff_preview

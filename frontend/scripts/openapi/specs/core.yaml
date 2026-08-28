@@ -3451,6 +3451,10 @@ components:
                     type: string
                 image_url:
                     type: string
+                html_asset:
+                    type: string
+                html_url:
+                    type: string
                 product_report:
                     $ref: '#/components/schemas/ShowcaseCaseProductReport'
                 summary:

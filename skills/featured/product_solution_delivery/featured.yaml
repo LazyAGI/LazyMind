@@ -15,7 +15,7 @@ placement:
   order: 24
 
 classification:
-  category: workflow
+  category: 产品研发
   tags:
     - 产品方向
     - 竞品分析
@@ -27,227 +27,248 @@ assets:
   cover:
     file: assets/cover.png
     role: cover
+  direction_preview:
+    file: assets/direction.html
+    role: result
+  competitive_preview:
+    file: assets/competitive.html
+    role: result
+  design_preview:
+    file: assets/design.html
+    role: result
+  prd_preview:
+    file: assets/prd.html
+    role: result
+  prototype_preview:
+    file: assets/prototype.html
+    role: result
+  review_preview:
+    file: assets/review.html
+    role: result
+  handoff_preview:
+    file: assets/handoff.html
+    role: result
 
 presentation:
   card:
-    title: 产品方案与研发交付
-    description: 按需运行产品方向、竞品、方案、PRD、交互原型、评审和研发交付七个阶段
+    title: 产品方案交付
+    description: 以知策竞品研究 Agent 为例，贯通方向、研究、方案、需求、原型、评审与交付。
     output_type: web
     output_label: 产品交付包
     cover_asset: cover
-    result_summary: 同一可裁剪流程既支持单阶段深入，也支持从产品问题连续推进到研发交付
+    result_summary: 七阶段注册表的图文案例：35 个步骤、短提示词、完整产出与可操作概念原型，全部内嵌。
   detail:
-    title: 产品设计七阶段工作流
-    description: 从产品目标出发，按明确授权选择单阶段、连续阶段或完整七阶段链；文本产物可编辑，竞品报告与交互原型可预览，最终保留版本、依赖和缺口。
+    title: 产品方案交付
+    description: 以知策竞品研究 Agent 为例，贯通方向、研究、方案、需求、原型、评审与交付。
     attachment_hint: 产品背景、竞品资料、既有方案/PRD、设计样例或待评审产物（按阶段可选）
 
 tasks:
   - id: direction
     selector:
-      title: 产品方向
-      description: 从目标用户和核心任务中比较方向选择并设计验证路径
-      output_label: 产品方向说明
+      title: "方向梳理"
+      description: "从模糊想法中明确用户、问题、范围与验证方向。"
+      output_label: "产品方向说明"
     launch:
-      prompt_short: 为“知策”梳理产品方向、范围和验证计划。
-      prompt: 请只运行“产品方向”阶段，执行深度为 full，每份文本目标约 3000 字，使用默认结构。产品目标是为 5–20 人 B2B SaaS 产品团队设计“知策”竞品研究 Agent：产品经理每周研究三款竞品并交由负责人复核，当前待验证问题是资料分散、结论难回查和版本混乱。请比较“团队复核工作台”和“个人研究助手”两条方向，明确目标用户、核心任务、价值、范围、非目标、验证方法及支持或反对信号；只使用公开资料与人工确认，不把案例假设当成调研事实。
+      prompt_short: "为 B2B SaaS 产品团队明确竞品研究 Agent 的用户、问题、方向与验证假设。"
+      prompt: |-
+        请为“知策”梳理产品方向：它是面向 5–20 人 B2B SaaS 产品团队的竞品研究 Agent 概念。产品经理每周研究三款竞品，用搜索、表格和文档整理资料，再由负责人复核；来源分散、结论难回查和版本混乱是待验证的痛点。只考虑公开资料与人工确认，不自动对外发送。明确目标用户、核心任务、价值、范围与非目标，比较团队复核工作台和个人研究助手两条方向，给出验证方法及支持/反对信号，配用户旅程图、方向对比表和验证路线图。不要把案例设定当成调研事实。
+
+        没有参考模板，按本阶段默认结构直接完成，无需附件或预置资料；缺失细节作假设并标明。交付图文并茂的完整单文件 HTML，图表和样式内嵌，不只给提纲。
     replay:
       steps:
-        - title: 规范目标与范围
-          description: 确认产品目标、单阶段范围、深度、篇幅和默认结构
-        - title: 梳理用户与任务
-          description: 区分目标用户、使用情境、核心任务和待验证痛点
-        - title: 比较方向选项
-          description: 对比团队复核工作台与个人研究助手的价值和代价
-        - title: 划定范围与非目标
-          description: 明确首版能力、人工控制、数据边界和不做事项
-        - title: 形成验证路线
-          description: 输出可编辑方向文档和支持、反对及停止信号
+        - title: "澄清方向与问题"
+          description: "区分任务设定、痛点假设和未知"
+        - title: "梳理用户与任务"
+          description: "明确谁发起、谁复核、谁消费结果"
+        - title: "比较方向选项"
+          description: "说明候选的适用条件和代价"
+        - title: "划定范围与验证"
+          description: "固定非目标，并设计最小验证"
+        - title: "交付方向说明"
+          description: "汇总可继续设计的输入和决定状态"
     result:
-      template: generic_report_v1
+      template: html_preview_v1
       eyebrow: 产品方向说明
       title: 从产品想法到可验证方向
       summary: 以用户任务、方向对比、范围边界和验证信号决定下一步投入
-      highlights:
-        - 目标用户与核心任务
-        - 两条方向的比较与选择依据
-        - MVP 范围、非目标和验证路线
+      html_asset: direction_preview
 
   - id: competitive
     selector:
-      title: 竞品与生态位
-      description: 以公开证据比较直接竞品、相邻平台和人工替代方案
-      output_label: 竞品生态位报告
+      title: "竞品与生态位"
+      description: "对比自身与竞品，纳入替代方案，判断定位与可守性。"
+      output_label: "竞品与生态位报告"
     launch:
-      prompt_short: 分析“知策”的竞品集合、生态位和定位候选。
-      prompt: 请只运行“竞品与生态位”阶段，执行深度为 full，文本篇幅填 not-applicable，参照样例填 not-required。产品目标是评估面向 B2B SaaS 产品团队的竞品研究与复核工作台。请联网核验 Manus、Perplexity Research 和 Dify 的公开官方资料，并纳入“搜索＋表格＋文档”和维持现状等替代方案；比较研究组织、证据追溯、过程控制、协作复核和版本交付，输出比较矩阵、生态分组、定位候选和证据缺口。所有主张附来源与查阅日期，区分官方事实、分析推断与未知，不用主观总分虚构领先地位。
+      prompt_short: "围绕竞品研究与团队复核，对比知策、Manus、Perplexity 与替代方案。"
+      prompt: |-
+        请分析“知策”的竞品与生态位：它是面向 B2B SaaS 产品团队的概念产品，拟让产品经理每周手动研究三款竞品，形成带来源的报告，由负责人复核并保留确认版本。联网查阅 Manus、Perplexity Research、Dify 的公开官方资料，纳入搜索＋表格＋文档及维持现状的选择，比较研究组织、证据追溯、过程控制、协作复核、版本交付与实测缺口。输出结论、比较矩阵、生态分组图、带日期的事件时间线、证据缺口图及定位建议；为主张附来源和查阅日期，区分官方描述、分析推断与未知，不虚构评分或把知策设想当成现有优势。无法联网时明确标记未核实，不编造引用。
+
+        没有参考模板，按本阶段默认结构直接完成，无需附件或预置资料；缺失细节作假设并标明。交付图文并茂的完整单文件 HTML，图表和样式内嵌，不只给提纲。
     replay:
       steps:
-        - title: 确定竞争边界
-          description: 明确用户任务、参与者类型、比较维度和时间口径
-        - title: 检索并核验公开证据
-          description: 优先读取官方来源并记录查阅日期和证据缺口
-        - title: 建立生态分组
-          description: 区分研究工具、搭建平台、人工组合和维持现状
-        - title: 比较差异与限制
-          description: 在统一维度下展示现有覆盖、未知和待实测事项
-        - title: 形成定位候选
-          description: 输出自包含 HTML 报告和可验证的定位建议
+        - title: "确定分析边界"
+          description: "从提示词明确概念产品、用户任务和比较范围"
+        - title: "识别竞争集合"
+          description: "纳入直接、间接、替代、现状与相邻方案"
+        - title: "核验公开证据"
+          description: "查阅官方资料并记录来源、日期与能力边界"
+        - title: "分析差异与定位"
+          description: "比较任务机制，提出不同定位及反对信号"
+        - title: "输出竞品报告"
+          description: "形成生态图、时间线、建议与证据缺口"
     result:
-      template: generic_report_v1
+      template: html_preview_v1
       eyebrow: 竞品生态位
       title: 有来源、有边界的竞品与替代方案分析
       summary: 用统一任务和真实证据解释竞争集合、差异、缺口与定位候选
-      highlights:
-        - 竞品、相邻平台与人工替代方案
-        - 带来源日期的比较矩阵
-        - 生态分组、定位假设与证据缺口
+      html_asset: competitive_preview
 
   - id: design
     selector:
-      title: 产品方案
-      description: 设计核心对象、任务流程、信息架构、权限与异常恢复
-      output_label: 产品设计方案
+      title: "产品方案"
+      description: "设计产品机制、流程、信息架构、界面与异常处理。"
+      output_label: "产品方案说明"
     launch:
-      prompt_short: 设计“知策”的完整产品机制、流程与关键交互。
-      prompt: 请只运行“产品方案”阶段，执行深度为 full，每份文本目标约 5000 字，使用默认结构。产品目标是设计面向 B2B SaaS 产品团队的竞品研究 Agent：产品经理确认范围后启动公开资料研究，结论关联带日期证据，负责人复核或退回，成员只读，确认版修改时另建草稿并保留旧版。请覆盖用户与场景、价值主张、任务/证据/结论/版本四个对象、信息架构、页面和关键交互、角色权限、暂停恢复、取消、来源失效、证据冲突、信任机制及核心指标；业务规则标记为待确认提议。
+      prompt_short: "设计知策竞品研究 Agent，从公开资料研究到带来源的报告，再到人工复核与导出。"
+      prompt: |-
+        请设计“知策”：面向 B2B SaaS 产品团队的竞品研究 Agent。产品经理每周手动选择三款竞品并确认研究计划，Agent 收集公开资料，产出可追溯到证据的结论和报告；负责人复核或退回，成员只读，确认版修改时另建草稿并保留旧版。覆盖用户与场景、价值主张、任务流程、任务/证据/结论/版本四个对象、信息架构、页面与关键交互、权限、暂停恢复、取消、来源失效及证据冲突、信任机制和核心指标；配用户旅程图、流程图、结构图与关键页面示意。公开资料之外不登录私有账号，不自动外发；业务规则均为待确认提议。
+
+        没有参考模板，按本阶段默认结构直接完成，无需附件或预置资料；缺失细节作假设并标明。交付图文并茂的完整单文件 HTML，图表和样式内嵌，不只给提纲。
     replay:
       steps:
-        - title: 规范阶段输入
-          description: 锁定产品目标、方案范围、篇幅和默认结构
-        - title: 建立对象与流程
-          description: 定义任务、证据、结论和报告版本及其状态关系
-        - title: 设计信息架构
-          description: 按用户任务组织页面、导航和关键操作
-        - title: 补齐控制与异常
-          description: 覆盖权限、暂停、取消、失败、冲突和版本保护
-        - title: 输出产品方案
-          description: 交付可编辑大纲、分章正文和指标验证设计
+        - title: "解析任务描述"
+          description: "从提示词提取用户、场景与交付目标"
+        - title: "梳理任务场景"
+          description: "拆解主路径、关键分支与用户介入点"
+        - title: "设计产品结构"
+          description: "定义对象、状态、信息架构和关键界面"
+        - title: "补齐控制与异常"
+          description: "明确计划确认、权限、冲突和失败恢复"
+        - title: "输出产品方案"
+          description: "汇总机制、图示、指标与待确认项"
     result:
-      template: generic_report_v1
+      template: html_preview_v1
       eyebrow: 产品设计方案
       title: 可复核竞品研究工作台的完整产品机制
       summary: 让任务、证据、结论和版本在流程、界面与人工控制中保持一致
-      highlights:
-        - 四个核心业务对象和状态关系
-        - 信息架构、页面与关键交互
-        - 权限、异常恢复和信任机制
+      html_asset: design_preview
 
   - id: prd
     selector:
-      title: PRD
-      description: 把产品基线展开为功能规则、验收场景和追溯关系
-      output_label: PRD 草稿
+      title: "需求文档"
+      description: "将方案转成可追溯的需求规则、边界与编号验收。"
+      output_label: "产品需求文档"
     launch:
-      prompt_short: 为“知策”编写包含功能规则和验收场景的 MVP PRD。
-      prompt: 请只运行“PRD”阶段，执行深度为 full，每份文本目标约 6000 字，使用默认结构。产品基线：B2B SaaS 产品经理每周手动研究三款竞品，负责人复核，成员只读；对象为任务、证据、结论和报告版本；研究开始前确认范围，结论关联来源和日期，冲突显式标记，退回须说明原因，确认版不可覆盖，导出绑定具体版本。请写清目标与非目标、权限矩阵、对象字段与状态、12 项功能规则、18 项可独立执行的验收场景及追溯表，并补齐异常、埋点、非功能需求和待确认项；未执行的验收不得写成通过。
+      prompt_short: "将知策研究与复核机制整理成 MVP 需求草稿、功能规则和编号验收。"
+      prompt: |-
+        请为“知策”编写 MVP PRD 草稿。文字基线：B2B SaaS 产品经理每周手动研究三款竞品，负责人复核，成员只读；对象为任务、证据、结论、报告版本。研究开始前确认范围，开始后变更范围另起任务；支持暂停/继续、取消、失败重试及局部结果；结论关联来源、日期和证据，冲突显式标记；退回须说明原因，确认版不可覆盖，修订另建草稿，导出绑定具体版本。只用公开资料，不访问私有账号、不自动外发。写清目标与非目标、权限矩阵、对象字段与状态、12 项 FR 功能规则、18 项 AC 场景验收及追溯表，配主流程和状态图；补充异常、埋点、非功能需求与待确认项。规则未获业务接受，验收尚未执行，性能和成本目标未知。
+
+        没有参考模板，按本阶段默认结构直接完成，无需附件或预置资料；缺失细节作假设并标明。交付图文并茂的完整单文件 HTML，图表和样式内嵌，不只给提纲。
     replay:
       steps:
-        - title: 建立需求基线
-          description: 锁定目标、范围、角色、对象和版本规则
-        - title: 编写功能规则
-          description: 将产品机制转化为编号清晰、可追溯的功能需求
-        - title: 设计验收场景
-          description: 覆盖主路径、异常、权限、幂等和版本保护
-        - title: 建立追溯矩阵
-          description: 关联需求、页面、状态、验收和待确认决策
-        - title: 交付可编辑 PRD
-          description: 输出大纲检查、分章正文与明确的开放项
+        - title: "提取核心需求"
+          description: "从提示词提取目标、角色、主流程与约束"
+        - title: "建立需求基线"
+          description: "固定角色、对象、状态与非目标"
+        - title: "编写功能规则"
+          description: "写清触发、行为、状态变化和用户反馈"
+        - title: "补齐异常与验收"
+          description: "覆盖正常路径、失败、越权、冲突和恢复"
+        - title: "输出 PRD 草稿"
+          description: "检查一致性并列出假设和待确认事项"
     result:
-      template: generic_report_v1
+      template: html_preview_v1
       eyebrow: MVP PRD
       title: 功能、验收与页面可追溯的需求文档
       summary: 将产品规则转化为可评审、可执行但不虚报通过状态的 PRD 草稿
-      highlights:
-        - 权限矩阵、对象字段与状态
-        - 12 项功能规则与 18 项验收设计
-        - 页面、需求和验收追溯表
+      html_asset: prd_preview
 
   - id: prototype
     selector:
-      title: 交互原型
-      description: 制作可点击的单文件 HTML 概念原型并覆盖主路径与异常分支
-      output_label: 可交互 HTML 原型
+      title: "交互原型"
+      description: "把方案或 PRD 变成可操作、可走查的交互原型。"
+      output_label: "交互原型与说明"
     launch:
-      prompt_short: 为“知策”制作可直接操作的单文件 HTML 概念原型。
-      prompt: 请只运行“交互原型”阶段，执行深度为 full，文本篇幅填 not-applicable，参照样例填 not-required；若缺少必要上游文件，我授权基于以下基线生成标注缺口的草稿。基线：产品经理输入研究问题和三款竞品，确认计划后进入研究过程与报告复核；负责人可确认或填写理由退回，成员只读；支持暂停、继续、取消、来源失败重试和版本查看，确认版不可覆盖。请用虚构示例数据制作浅色工作台单文件 HTML，补齐空值校验、按钮状态、角色反馈和异常出口，样式与脚本内嵌，刷新重置，明确前端角色切换不是生产权限控制。
+      prompt_short: "用本地模拟数据体验知策的计划确认、研究、复核与版本保留。"
+      prompt: |-
+        请为“知策”制作可直接操作的单文件 HTML 概念原型。文字规格：B2B SaaS 产品经理输入研究问题和三款竞品→确认计划→研究过程→报告复核→版本查看；负责人可确认或填写理由退回，成员只读。开跑前可改范围，开始后改范围须新建任务；支持暂停/继续、取消、来源失败重试，结论能打开证据，冲突需提示；确认版不可覆盖，修改另建草稿并保留旧版。自行生成甲/乙/丙三款虚构竞品的演示数据，不联网、不接模型。用浅色工作台、过程列表、报告和证据面板展示；补齐空值校验、按钮状态、角色反馈和异常出口，提供 5 个操作任务、规则映射及覆盖限制。图表、样式与脚本内嵌，刷新重置，不把前端角色切换当成安全权限。
+
+        没有参考模板，按本阶段默认结构直接完成，无需附件或预置资料；缺失细节作假设并标明。交付图文并茂的完整单文件 HTML，图表和样式内嵌，不只给提纲。
     replay:
       steps:
-        - title: 确认原型范围
-          description: 锁定页面、角色、任务、状态和概念验证边界
-        - title: 映射规则与页面
-          description: 将计划、过程、证据、复核和版本规则映射到界面
-        - title: 搭建可点击主路径
-          description: 用内嵌脚本实现创建、确认、执行、报告和版本查看
-        - title: 补齐异常与反馈
-          description: 覆盖空值、权限拒绝、暂停取消、来源失败和重试
-        - title: 交付自包含原型
-          description: 输出可预览的单文件 HTML 和评审任务说明
+        - title: "确认原型范围"
+          description: "锁定等级、依据和验证任务"
+        - title: "映射页面与规则"
+          description: "将对象、状态和 FR 映射到屏幕"
+        - title: "搭建可点击主路径"
+          description: "让用户亲自从输入走到确认版"
+        - title: "补齐分支与恢复"
+          description: "展示暂停、失败、退回与权限反馈"
+        - title: "整理评审任务"
+          description: "交付入口、操作任务、覆盖和限制"
     result:
-      template: generic_report_v1
+      template: html_preview_v1
       eyebrow: 交互原型
       title: 覆盖主路径、角色和恢复机制的概念原型
       summary: 用自包含 HTML 验证界面行为与规则映射，而不冒充生产实现
-      highlights:
-        - 计划、过程、复核和版本四类界面
-        - 可点击主路径与多角色反馈
-        - 空值、失败、暂停、取消和重试
+      html_asset: prototype_preview
 
   - id: review
     selector:
-      title: 方案评审
-      description: 从一致性、覆盖、风险和研发门禁评审现有产品产物
-      output_label: 产品评审报告
+      title: "方案评审"
+      description: "检查指定版本的一致性、完整性与下一阶段条件。"
+      output_label: "方案评审报告"
     launch:
-      prompt_short: 评审“知策”方案基线，判断是否具备正式研发条件。
-      prompt: 请只运行“方案评审”阶段，执行深度为 full，每份文本目标约 4000 字，使用默认结构；若缺少上游文件，我授权基于以下文字生成标注缺口的评审草稿。已知基线：产品经理研究三款竞品，负责人复核、成员只读，只使用公开资料，结论关联证据，确认版修改另建草稿。当前存在一项规则冲突：方案要求运行中改范围新建任务，需求允许直接增删竞品；范围角色未正式接受，数据保留政策和来源可行性、性能、成本未验证，暂无可运行原型。请输出评审范围、覆盖矩阵、分级发现、影响、修复与复验方法以及研发就绪门槛，区分确定缺口和待实测风险，不虚构通过。
+      prompt_short: "评审知策方案、PRD 和原型，定位正式研发交付前的缺口。"
+      prompt: |-
+        请评审以下“知策”文字基线 v0.1，以能否进入正式研发为评审目标。知策供 B2B SaaS 产品经理每周研究三款竞品，负责人复核、成员只读；只用公开资料，不自动外发，结论关联证据，确认版修改另建草稿。D1 方案：开始后改研究范围须新建任务。P1 需求：运行中可直接增删竞品，未写重跑及版本处理。U1 原型范围说明：拟做计划、过程、复核、版本四屏，尚无可运行原型，空状态、权限拒绝和来源失效反馈未细化。G1 范围与角色规则未获业务接受；G2 资料保留/删除及敏感数据政策未定；G3 来源访问可行性、性能与成本未验证。仅评审这些文字，不假装看过其他文件或运行过原型。输出评审范围、规则冲突、覆盖矩阵、按严重性分级的问题与证据编号、影响、修复和复验方法，配问题分布及研发就绪门槛图；区分确定缺口与待实测风险，不改写基线、不虚构通过。
+
+        没有参考模板，按本阶段默认结构直接完成，无需附件或预置资料；缺失细节作假设并标明。交付图文并茂的完整单文件 HTML，图表和样式内嵌，不只给提纲。
     replay:
       steps:
-        - title: 锁定评审对象
-          description: 明确只评审已提供材料和文字基线，不假装检查缺失产物
-        - title: 检查一致性与覆盖
-          description: 对照产品、需求、页面、状态和验收规则
-        - title: 记录分级发现
-          description: 为每项问题给出证据、影响、修复和复验方式
-        - title: 区分缺陷与风险
-          description: 将确定冲突和需要实测的性能、成本、可行性风险分开
-        - title: 判断研发门禁
-          description: 交付可编辑评审报告和进入研发前的阻塞清单
+        - title: "锁定评审对象"
+          description: "明确具体版本与评审目标"
+        - title: "检查一致与覆盖"
+          description: "核对角色、状态、规则和验收关系"
+        - title: "记录发现与影响"
+          description: "为问题标注位置、依据和修复方式"
+        - title: "区分风险与结论"
+          description: "不把未验证假设写成确定缺陷"
+        - title: "交付评审与复验单"
+          description: "列出修复顺序和回归检查范围"
     result:
-      template: generic_report_v1
+      template: html_preview_v1
       eyebrow: 产品评审报告
       title: 规则冲突、覆盖缺口与研发就绪判断
       summary: 以可定位证据和复验方法区分确定缺口、开放决策与待实测风险
-      highlights:
-        - 一致性与覆盖矩阵
-        - 分级发现、影响和修复建议
-        - 研发就绪门槛与阻塞清单
+      html_asset: review_preview
 
   - id: handoff
     selector:
-      title: 研发交付
-      description: 整理版本基线、规格索引、追溯矩阵、资源缺口和确认清单
-      output_label: 研发交付包
+      title: "研发交付"
+      description: "整理版本、规格、验收、资源和研发就绪确认项。"
+      output_label: "研发交付整理包"
     launch:
-      prompt_short: 把“知策”产品基线整理成可评审的研发交付草稿。
-      prompt: 请只运行“研发交付”阶段，执行深度为 full，每份文本目标约 5000 字，使用默认结构；若缺少上游文件，我授权基于以下文字生成标注缺口的交付草稿。目标是 B2B SaaS 产品经理研究三款竞品、负责人复核、成员只读；对象为任务、证据、结论和报告版本，页面为计划、过程、复核和版本；功能范围包含范围确认、公开来源采集、证据关联、报告生成、暂停继续、取消、失败重试、复核退回、版本确认、新草稿、只读权限和指定版本导出。请输出版本与规格索引、FR/AC/页面追溯矩阵、状态与交接流程、资源缺口、风险、就绪判断和角色确认清单；不得伪造文件链接、哈希、审批、责任人、排期或技术结论。
+      prompt_short: "整理知策版本基线、规格、验收、依赖与研发交付确认清单。"
+      prompt: |-
+        请按以下“知策”文字基线 v0.1 整理研发交付草稿。目标：B2B SaaS 产品经理每周研究三款竞品，负责人复核，成员只读；对象为任务/证据/结论/报告版本，页面为计划/过程/复核/版本。拟议需求：FR01 范围确认、FR02 公开来源采集、FR03 证据关联、FR04 报告生成、FR05 暂停继续、FR06 取消、FR07 失败重试、FR08 复核退回、FR09 版本确认、FR10 新草稿、FR11 只读权限、FR12 指定版本导出；不登录私有账号、不自动外发，确认版不可覆盖。开放项：运行中变更范围的规则冲突待裁决；范围与角色未接受，保留删除政策未定，技术可行性/性能/成本未验证；暂无代码、可运行原型、视觉资源和已执行验收。仅以这些文字为输入，输出版本与规格索引、逐项 FR/AC/页面追溯矩阵、状态与交接流程图、资源缺口、风险、就绪判断和各角色确认清单。验收可拟定但不得称已通过；缺少的产物标记待补，不伪造文件链接、哈希、审批、责任人、排期或技术结论。
+
+        没有参考模板，按本阶段默认结构直接完成，无需附件或预置资料；缺失细节作假设并标明。交付图文并茂的完整单文件 HTML，图表和样式内嵌，不只给提纲。
     replay:
       steps:
-        - title: 整理版本基线
-          description: 列出实际输入、产物状态、版本和缺失文件
-        - title: 汇总产品规格
-          description: 统一角色、对象、页面、功能和状态定义
-        - title: 建立交付追溯
-          description: 对齐功能需求、验收、页面和开放决策
-        - title: 检查就绪与阻塞
-          description: 明确资源、依赖、风险和未验证技术条件
-        - title: 交付确认清单
-          description: 按角色给出可执行确认项并保留所有未知状态
+        - title: "整理版本基线"
+          description: "固定输入文件、版本与状态"
+        - title: "汇总产品与体验规格"
+          description: "指出实现所需规则的唯一来源"
+        - title: "建立需求验收追溯"
+          description: "连接决定、需求、页面、验收与依赖"
+        - title: "检查就绪与阻塞"
+          description: "按照原包门禁逐项判断"
+        - title: "交付确认清单"
+          description: "说明各角色需要确认什么"
     result:
-      template: generic_report_v1
+      template: html_preview_v1
       eyebrow: 研发交付包
       title: 有版本基线和追溯关系的研发交付草稿
       summary: 汇总已有规格、验收、资源和开放项，不伪造缺失工程结论
-      highlights:
-        - 产物索引与版本基线
-        - FR、AC、页面和状态追溯
-        - 资源缺口、风险和角色确认清单
+      html_asset: handoff_preview

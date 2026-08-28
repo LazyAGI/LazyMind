@@ -136,7 +136,7 @@ def test_stream_parallel_requests_see_isolated_config(monkeypatch):
     obs_by_query = {
         obs['query']
         .rsplit('### User Instruction\n\n', 1)[-1]
-        .split('\n\nATTENTION — `ask_user`', 1)[0]: obs
+        .split('\n\nATTENTION —', 1)[0]: obs
         for obs in _FakeAgent.observations
     }
     assert set(obs_by_query.keys()) == {f's_{i}' for i in range(6)}

@@ -735,7 +735,7 @@ func (h *Handler) createEmptyPackage(ctx context.Context, tx *gorm.DB, userID st
 		return err
 	}
 	if conflicts > 0 {
-		return conflict("skill package already exists")
+		return conflict("skill already exists")
 	}
 	now := h.clock.Now()
 	skillID := uuid.NewString()
@@ -1048,7 +1048,7 @@ func (h *Handler) movePackageRoot(ctx context.Context, userID string, from, to r
 			return err
 		}
 		if conflicts > 0 {
-			return conflict("target skill package already exists")
+			return conflict("skill already exists")
 		}
 		if err := tx.Model(&skillRow{}).Where("id = ? AND deleted_at IS NULL", skill.ID).Updates(map[string]any{
 			"category":      to.category,

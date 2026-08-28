@@ -345,6 +345,15 @@ TOOL_RENDER_PROFILES: dict[str, dict[str, Any]] = (
                             'zh': '技能 {value} 的预定义脚本已成功运行。'},
                 'failure': {'en': 'Skill helper script at {value} did not finish.',
                             'zh': '技能 {value} 的预定义脚本未能运行完成。'}},
+ 'set_session_env': {'argument': 'name',
+                     'call': {'en': 'Setting session environment variable {value}.',
+                              'zh': '正在配置会话环境变量 {value}。'},
+                     'success': {'en': 'Session environment variable {result.name} '
+                                       'is ready for run_script.',
+                                 'zh': '会话环境变量 {result.name} 已可用于 run_script。'},
+                     'failure': {'en': 'Session environment variable {value} could '
+                                       'not be set.',
+                                 'zh': '未能配置会话环境变量 {value}。'}},
  'grep': {'argument': 'pattern',
           'call': {'en': 'Using grep for {value}.',
                    'zh': '正在用 grep 搜索 {value}。'},

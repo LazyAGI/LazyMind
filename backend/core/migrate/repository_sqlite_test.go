@@ -160,6 +160,15 @@ func openRawSQLite(t *testing.T, dsn string) *sql.DB {
 	return db
 }
 
+func sqliteIndexSQL(t *testing.T, db *sql.DB, name string) string {
+	t.Helper()
+	var ddl string
+	if err := db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?`, name).Scan(&ddl); err != nil {
+		t.Fatalf("read SQLite index %s: %v", name, err)
+	}
+	return ddl
+}
+
 func sqliteSchemaFingerprint(t *testing.T, db *sql.DB) string {
 	t.Helper()
 	rows, err := db.Query(`SELECT type, name, sql FROM sqlite_master
@@ -527,6 +536,77 @@ FROM conversations WHERE id = ?
 	}
 	if backupTableCount != 0 {
 		t.Fatal("conversation policy rollback table should be removed by down migration")
+	}
+}
+
+func TestSkillUniqueIndexSQLiteDownRemovesTrashedDuplicates(t *testing.T) {
+	db := openRawSQLite(t, t.TempDir()+"/skill-unique-down.db")
+	if _, err := db.Exec(`
+CREATE TABLE skills (
+  id text PRIMARY KEY,
+  owner_user_id text NOT NULL,
+  category text NOT NULL,
+  skill_name text NOT NULL,
+  relative_root text NOT NULL,
+  deleted_at datetime
+);
+CREATE UNIQUE INDEX uk_skills_owner_identity
+  ON skills(owner_user_id, category, skill_name);
+CREATE UNIQUE INDEX uk_skills_owner_relative_root
+  ON skills(owner_user_id, relative_root);
+INSERT INTO skills (id, owner_user_id, category, skill_name, relative_root, deleted_at)
+VALUES
+  ('identity-original', 'user-a', 'research', 'demo', 'research/demo-old', NULL),
+  ('root-original', 'user-b', 'research', 'alpha', 'shared/root', NULL),
+  ('keep-trashed', 'user-c', 'personal', 'archived', 'personal/archived', CURRENT_TIMESTAMP);
+`); err != nil {
+		t.Fatalf("seed pre-migration skills: %v", err)
+	}
+
+	migrationDir := filepath.Join("..", "migrations", "dev_mode", "v0_3")
+	execMigrationFileForDriver(t, db, filepath.Join(migrationDir, "20260827120000_unique_skill_name_per_owner.up.sql"), "sqlite")
+	for _, name := range []string{"uk_skills_owner_identity", "uk_skills_owner_relative_root"} {
+		if sql := sqliteIndexSQL(t, db, name); !strings.Contains(strings.ToLower(sql), "deleted_at is null") {
+			t.Fatalf("up migration did not create a partial unique index for %s: %s", name, sql)
+		}
+	}
+
+	if _, err := db.Exec(`
+UPDATE skills SET deleted_at = CURRENT_TIMESTAMP WHERE id IN ('identity-original', 'root-original');
+INSERT INTO skills (id, owner_user_id, category, skill_name, relative_root, deleted_at)
+VALUES
+  ('identity-recreated', 'user-a', 'research', 'demo', 'research/demo', NULL),
+  ('root-recreated', 'user-b', 'personal', 'beta', 'shared/root', NULL);
+`); err != nil {
+		t.Fatalf("soft-delete and recreate same-name skills: %v", err)
+	}
+
+	execMigrationFileForDriver(t, db, filepath.Join(migrationDir, "20260827120000_unique_skill_name_per_owner.down.sql"), "sqlite")
+	for _, name := range []string{"uk_skills_owner_identity", "uk_skills_owner_relative_root"} {
+		if sql := sqliteIndexSQL(t, db, name); strings.Contains(strings.ToLower(sql), "deleted_at is null") {
+			t.Fatalf("down migration did not restore a full unique index for %s: %s", name, sql)
+		}
+	}
+
+	rows, err := db.Query(`SELECT id FROM skills ORDER BY id`)
+	if err != nil {
+		t.Fatalf("list skills after down: %v", err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatalf("scan skill id: %v", err)
+		}
+		got = append(got, id)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate skills after down: %v", err)
+	}
+	want := []string{"identity-recreated", "keep-trashed", "root-recreated"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("skills after down=%v, want %v", got, want)
 	}
 }
 

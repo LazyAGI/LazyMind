@@ -18,9 +18,10 @@ export default function FeaturedCases({ type, items, isLoading, onTry }: Feature
   const { t } = useTranslation();
 
   const featuredItems = useMemo(() => {
-    return items.filter(
-      (item) => item.featured && matchesShowcaseEntryType(item.type, type),
-    ).slice(0, FEATURED_HOME_LIMIT);
+    return items
+      .filter((item) => item.featured && matchesShowcaseEntryType(item.type, type))
+      .sort((left, right) => left.featured_order - right.featured_order)
+      .slice(0, FEATURED_HOME_LIMIT);
   }, [items, type]);
 
   if (!isLoading && featuredItems.length === 0) {
@@ -31,7 +32,7 @@ export default function FeaturedCases({ type, items, isLoading, onTry }: Feature
     <section className="showcase-featured" aria-labelledby="showcase-featured-title">
       <div className="showcase-featured-heading">
         <h2 id="showcase-featured-title">{t("showcase.featuredTitle")}</h2>
-        <Link className="showcase-more-link" to={`/agent/chat/cases?type=${type}`}>
+        <Link className="showcase-more-link" to="/agent/chat/cases">
           {t("showcase.viewMore")} <span aria-hidden="true">→</span>
         </Link>
       </div>

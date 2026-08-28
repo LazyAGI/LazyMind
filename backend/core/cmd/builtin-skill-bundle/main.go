@@ -670,9 +670,17 @@ func inspectEntry(spec sourceSpec, archivePath string, files map[string][]byte, 
 	}
 	treeHash := skillpackage.TreeHash(files)
 	version := resolvedSkillVersion(spec, resolved.Version, files, treeHash)
-	category := spec.Category
+	category := strings.TrimSpace(spec.Category)
+	frontmatterCategory := strings.TrimSpace(resolved.Category)
+	if category != "" && frontmatterCategory != "" && category != frontmatterCategory {
+		return skillbuiltin.CatalogSkill{}, bundleFailure(
+			"configured category %q does not match SKILL.md frontmatter category %q",
+			category,
+			frontmatterCategory,
+		)
+	}
 	if category == "" {
-		category = resolved.Category
+		category = frontmatterCategory
 	}
 	if category == "" {
 		category = "external"

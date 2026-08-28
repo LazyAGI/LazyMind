@@ -551,9 +551,9 @@ func LoadAdminEmbedConfig(ctx context.Context, db *gorm.DB) (map[string]any, err
 		return nil, err
 	}
 	cfg := map[string]any{
-		"source":   strings.ToLower(strings.TrimSpace(row.ProviderName)),
+		"source":   modelprovider.LazyLLMSource(row.ProviderName),
 		"model":    row.ModelName,
-		"base_url": row.BaseURL,
+		"base_url": modelprovider.LazyLLMBaseURL(row.ProviderName, row.BaseURL),
 		"api_key":  row.APIKey,
 	}
 	return cfg, nil
@@ -588,9 +588,9 @@ func BuildLLMConfig(rows []SelectedRuntimeModel) map[string]any {
 	for _, row := range rows {
 		role := strings.ToLower(strings.TrimSpace(row.ModelType))
 		cfg := map[string]any{
-			"source":   strings.ToLower(strings.TrimSpace(row.ProviderName)),
+			"source":   modelprovider.LazyLLMSource(row.ProviderName),
 			"model":    row.ModelName,
-			"base_url": row.BaseURL,
+			"base_url": modelprovider.LazyLLMBaseURL(row.ProviderName, row.BaseURL),
 			"api_key":  row.APIKey,
 		}
 		if row.MaxInputTokens != nil {

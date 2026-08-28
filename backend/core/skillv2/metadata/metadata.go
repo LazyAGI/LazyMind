@@ -403,7 +403,7 @@ func Sync(ctx context.Context, tx *gorm.DB, skillID string, meta Metadata, now t
 		return err
 	}
 	if conflicts > 0 {
-		return fmt.Errorf("skill name conflict")
+		return fmt.Errorf("skill already exists")
 	}
 	return tx.WithContext(ctx).Model(&orm.SkillV2Skill{}).
 		Where("id = ? AND deleted_at IS NULL", skill.ID).

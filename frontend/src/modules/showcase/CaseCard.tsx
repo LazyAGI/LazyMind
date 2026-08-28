@@ -1,6 +1,11 @@
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ArrowRightOutlined } from "@ant-design/icons";
+import { ArrowRightOutlined, MessageOutlined, ScheduleOutlined } from "@ant-design/icons";
+import {
+  buildShowcaseLaunchPath,
+  showcaseEntryType,
+  showcaseTechnologyType,
+} from "./classification";
 import type { ShowcaseCase } from "./api";
 
 interface CaseCardProps {
@@ -22,12 +27,16 @@ const COVER_CLASS_BY_OUTPUT_TYPE: Record<string, string> = {
 export default function CaseCard({ item, onTry }: CaseCardProps) {
   const { t } = useTranslation();
   const coverClass = COVER_CLASS_BY_OUTPUT_TYPE[item.output_type] || "report";
+  const entryType = showcaseEntryType(item.type);
+  const technologyType = showcaseTechnologyType(item.type);
+  const entryTypeLabel = t(`showcase.filters.capability.${entryType}`);
+  const technologyTypeLabel = t(`showcase.filters.technology.${technologyType}`);
 
   return (
     <article className="showcase-card">
       <Link
         className="showcase-card-link"
-        to={`/agent/chat/home?showcase_case=${encodeURIComponent(item.id)}`}
+        to={buildShowcaseLaunchPath(item.id, item.type)}
         onClick={(event) => {
           if (onTry) {
             event.preventDefault();
@@ -48,7 +57,23 @@ export default function CaseCard({ item, onTry }: CaseCardProps) {
         <div className="showcase-card-body">
           <div className="showcase-card-category">{item.category}</div>
           <div className="showcase-card-output">{item.output_label}</div>
-          <h3>{item.title}</h3>
+          <div className="showcase-card-title-row">
+            <h3>{item.title}</h3>
+            <span
+              className={`showcase-capability-icon is-${entryType}`}
+              role="img"
+              aria-label={entryTypeLabel}
+            >
+              {entryType === "chat"
+                ? <MessageOutlined aria-hidden="true" />
+                : <ScheduleOutlined aria-hidden="true" />}
+            </span>
+          </div>
+          <div className="showcase-card-tags" aria-label={t("showcase.cardTagsLabel")}>
+            <span>{item.category}</span>
+            <span>{entryTypeLabel}</span>
+            <span>{technologyTypeLabel}</span>
+          </div>
           <p>{item.description}</p>
         </div>
       </Link>

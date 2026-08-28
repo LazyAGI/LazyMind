@@ -30,6 +30,28 @@ func TestNormalizeBaseURLForCompare_TrimsTrailingSlashes(t *testing.T) {
 	}
 }
 
+func TestShouldSeedSenseNovaModelScopesClassicAndTokenPlan(t *testing.T) {
+	tests := []struct {
+		name         string
+		model        string
+		useTokenPlan bool
+		want         bool
+	}{
+		{name: "classic model in classic group", model: "SenseChat-5", want: true},
+		{name: "token model excluded from classic", model: "sensenova-6.7-flash-lite", want: false},
+		{name: "token model in token group", model: "sensenova-6.7-flash-lite", useTokenPlan: true, want: true},
+		{name: "classic model excluded from token", model: "SenseChat-5", useTokenPlan: true, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := shouldSeedSenseNovaModel(tt.model, tt.useTokenPlan); got != tt.want {
+				t.Fatalf("shouldSeedSenseNovaModel(%q, %v) = %v, want %v",
+					tt.model, tt.useTokenPlan, got, tt.want)
+			}
+		})
+	}
+}
+
 // --- splitAPIKeys ---
 
 // TestSplitAPIKeys_NewlineSeparated splits keys by newline.

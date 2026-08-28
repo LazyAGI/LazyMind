@@ -282,7 +282,16 @@ func syncDefaultModelToUserGroups(
 	}
 
 	for _, group := range groups {
-		if normalizeBaseURLForCompare(group.BaseURL) != catalogBaseURL {
+		groupBaseURL := normalizeBaseURLForCompare(group.BaseURL)
+		if strings.EqualFold(providerName, "SenseNova") {
+			useTokenPlan := groupBaseURL == normalizeBaseURLForCompare(sensenovaNewPlatformBaseURL)
+			if groupBaseURL != catalogBaseURL && !useTokenPlan {
+				continue
+			}
+			if !shouldSeedSenseNovaModel(modelName, useTokenPlan) {
+				continue
+			}
+		} else if groupBaseURL != catalogBaseURL {
 			continue
 		}
 		var count int64
@@ -317,6 +326,72 @@ func syncDefaultModelToUserGroups(
 		}
 	}
 	return nil
+}
+
+// reconcileSenseNovaCatalogScope removes retired classic models and keeps the classic and Token Plan
+// model subsets from leaking into each other's default-seeded groups. User-added models are preserved.
+func reconcileSenseNovaCatalogScope(
+	tx *gorm.DB,
+	providerID, catalogBaseURL string,
+	models []catalogModel,
+) error {
+	catalogNames := make(map[string]struct{}, len(models))
+	names := make([]string, 0, len(models))
+	for _, model := range models {
+		name := strings.TrimSpace(model.Name)
+		if name == "" {
+			continue
+		}
+		catalogNames[name] = struct{}{}
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		return nil
+	}
+
+	type scopedGroupModel struct {
+		ID      string `gorm:"column:id"`
+		Name    string `gorm:"column:name"`
+		BaseURL string `gorm:"column:base_url"`
+	}
+	var rows []scopedGroupModel
+	if err := tx.Table("user_model_provider_group_models m").
+		Select("m.id, m.name, g.base_url").
+		Joins("JOIN user_model_provider_groups g ON g.id = m.user_model_provider_group_id AND g.deleted_at IS NULL").
+		Joins("JOIN user_model_providers p ON p.id = m.user_model_provider_id AND p.deleted_at IS NULL").
+		Where("p.default_model_provider_id = ? AND m.is_default = ? AND m.deleted_at IS NULL", providerID, true).
+		Scan(&rows).Error; err != nil {
+		return err
+	}
+
+	classicURL := normalizeBaseURLForCompare(catalogBaseURL)
+	tokenPlanURL := normalizeBaseURLForCompare(sensenovaNewPlatformBaseURL)
+	deleteIDs := make([]string, 0)
+	for _, row := range rows {
+		groupURL := normalizeBaseURLForCompare(row.BaseURL)
+		if groupURL != classicURL && groupURL != tokenPlanURL {
+			continue
+		}
+		_, inCatalog := catalogNames[row.Name]
+		useTokenPlan := groupURL == tokenPlanURL
+		if !inCatalog || !shouldSeedSenseNovaModel(row.Name, useTokenPlan) {
+			deleteIDs = append(deleteIDs, row.ID)
+		}
+	}
+	if len(deleteIDs) > 0 {
+		if err := tx.Where("user_model_provider_group_model_id IN ?", deleteIDs).
+			Delete(&orm.UserSelectedModel{}).Error; err != nil {
+			return err
+		}
+		if err := tx.Unscoped().Where("id IN ?", deleteIDs).
+			Delete(&orm.UserModelProviderGroupModel{}).Error; err != nil {
+			return err
+		}
+	}
+
+	return tx.Unscoped().
+		Where("default_model_provider_id = ? AND name NOT IN ?", providerID, names).
+		Delete(&orm.DefaultModel{}).Error
 }
 
 // SeedModelCatalog upserts default_model_providers and default_models from the YAML catalog file.
@@ -361,6 +436,11 @@ func seedCatalog(ctx context.Context, db *gorm.DB, yamlPath, categorySuffix, for
 				}
 				for _, model := range supplier.Models {
 					if err := upsertDefaultModel(tx, now, providerID, supplier.Name, model); err != nil {
+						return err
+					}
+				}
+				if strings.EqualFold(supplier.Name, "SenseNova") {
+					if err := reconcileSenseNovaCatalogScope(tx, providerID, supplier.BaseURL, supplier.Models); err != nil {
 						return err
 					}
 				}

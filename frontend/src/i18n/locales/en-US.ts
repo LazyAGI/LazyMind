@@ -416,6 +416,11 @@ const enUS = {
     baseUrlDefaultExtra: "Base URL is required and defaults to the provider's built-in configuration.",
     baseUrlCustomOption: "Custom (enter below)",
     baseUrlSelectPlaceholder: "Select a Base URL preset",
+    privateDeploymentRedirectTitle: "Use OpenAI for self-hosted models",
+    privateDeploymentRedirectContent: "If this is a self-hosted model service, configure it under OpenAI. If it forwards the current provider's official API, save it under the current provider to keep that provider's source.",
+    goToOpenAI: "Go to OpenAI",
+    stayHere: "Save under this provider",
+    openAINotFound: "OpenAI provider was not found. Refresh and try again.",
     sensenovaClassicMode: "Classic Mode",
     sensenovaTokenPlanMode: "Token Plan Mode",
     apiKeyCustomExtra: "API Key is optional for custom Base URLs. Existing groups can keep the masked value unchanged.",
@@ -424,6 +429,7 @@ const enUS = {
     apiKeyOptionalPlaceholder: "Optional",
     verifyGroupTitle: "Verify {{name}}",
     verifyApiKeyExtra: "Used only for this connection check. The frontend will not save or display the full key again.",
+    verifyApiKeyOptionalExtra: "API Key is optional for custom Base URLs. Leave it blank to verify without authentication.",
     verifyConfiguredApiKeyExtra: "Leave blank to use the saved key for this connection check. A newly entered key is used only for this verification.",
     verifyApiKeyPlaceholder: "Enter the API Key for this verification",
     keyConfiguredStatus: "Configured key: {{preview}}",
@@ -465,6 +471,8 @@ const enUS = {
         "MiniMax general-purpose models with strong chat, human-like speech synthesis, and image generation capabilities.\n\nGet API Key:\nhttps://platform.minimaxi.com/\n\nSetup guide:\n\n1. Open the MiniMax platform and sign in or register a developer account.\n\n2. Go to Account Management -> API Keys, or the Token Plan area if applicable.\n\n3. Create a new API Key and copy it for API calls. Pay-as-you-go keys and Token Plan keys may not be interchangeable.",
       openai:
         "OpenAI's frontier model ecosystem for advanced coding, professional workflows, multimodal tasks, embeddings, speech, and agent development.\n\nGet API Key:\nhttps://platform.openai.com/api-keys\n\nSetup guide:\n\n1. Open OpenAI Platform and sign up with an email or Google account.\n\n2. After billing is configured, open API keys from the dashboard.\n\n3. Click Create new secret key, set the desired permissions, and copy the key immediately because it is shown only once.",
+      openrouter:
+        "OpenRouter provides one OpenAI-compatible API for models from multiple providers, allowing model selection with a single API key.\n\nGet API Key:\nhttps://openrouter.ai/settings/keys",
       qwen:
         "Alibaba Cloud's Qwen model family, covering text, vision, speech, embeddings, rerank, image generation, and image editing with strong China-region ecosystem support.\n\nGet API Key:\nhttps://bailian.console.aliyun.com/?apiKey=1#/api-key\n\nSetup guide:\n\n1. Open Alibaba Cloud Bailian console and sign in with an Alibaba Cloud account.\n\n2. Click your avatar and open API-KEY management.\n\n3. Click Create API-KEY and copy the generated key.",
       sensenova:
@@ -510,13 +518,15 @@ const enUS = {
     },
     autoSelection: {
       title: "Automatic model configuration",
-      configured: "Models configured for you: {{models}}",
+      freeModelWarning: "Automatically configured models may have limited performance or may no longer be available, and most features may not work as expected. Configure a high-performance model manually.",
+      configured: "Models configured for you:",
+      modelTypeSeparator: ":",
       missing: "No {{types}} model for {{provider}} was found in the database. See the {{provider}} documentation.",
       modelType: {
         llm: "LLM",
-        vlm: "VLM",
-        embed_main: "embedding",
-        image_generator: "text-to-image",
+        vlm: "Vision model",
+        embed_main: "Embedding model",
+        image_generator: "Image generation model",
       },
     },
     noModelSelectedForShare: "Please select a model before enabling sharing",
@@ -892,6 +902,21 @@ const enUS = {
     searchLabel: "Search cases",
     searchPlaceholder: "Search cases, for example: writing, PPT, images",
     categoryLabel: "Case categories",
+    cardTagsLabel: "Capability tags",
+    filters: {
+      all: "All",
+      taskType: "Task type",
+      capabilityType: "Capability type",
+      technologyType: "Technology type",
+      capability: {
+        chat: "Chat",
+        work: "Task",
+      },
+      technology: {
+        skill: "Skill",
+        workflow: "Workflow",
+      },
+    },
     loading: "Loading cases…",
     loadError: "Cases are temporarily unavailable. Please try again later.",
     noMatches: "No related cases found",
@@ -4820,10 +4845,9 @@ const enUS = {
       "Add the skill description and usage guidance here.",
     memorySkillUploadSuccess: '"{{name}}" has been added to My Skills',
     memorySkillUploadFailed: "Failed to upload skill",
-    memorySkillUploadAlreadyExists:
-      "Skill already exists: a skill with the same name is already available, so it does not need to be uploaded again.",
+    memorySkillUploadAlreadyExists: "Skill name already exists and cannot be created",
     memorySkillUploadAlreadyExistsNamed:
-      'Skill already exists: "{{name}}" is already available, so it does not need to be uploaded again.',
+      'Skill name "{{name}}" already exists and cannot be created',
     memorySkillAdminPublishButton: "Publish skill (admin)",
     memorySkillAdminPublishTitle: "Publish skill to plaza",
     memorySkillAdminPublishDesc:

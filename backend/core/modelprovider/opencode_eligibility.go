@@ -89,7 +89,7 @@ var openCodeProviders = map[string]openCodeProviderSpec{
 	},
 	"sensenova": {
 		provider: "sensenova", npm: "@ai-sdk/openai-compatible",
-		models: modelSet("DeepSeek V4 Flash", "deepseek-v4-flash"),
+		models: modelSet("deepseek-v4-flash"),
 	},
 	"siliconflow": {
 		provider: "siliconflow-cn", npm: "@ai-sdk/openai-compatible",

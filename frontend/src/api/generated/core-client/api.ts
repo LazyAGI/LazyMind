@@ -2361,6 +2361,8 @@ export interface ShowcaseCaseResult {
     'highlights'?: Array<string>;
     'image_asset'?: string;
     'image_url'?: string;
+    'html_asset'?: string;
+    'html_url'?: string;
     'product_report'?: ShowcaseCaseProductReport;
     'summary': string;
     'template': string;

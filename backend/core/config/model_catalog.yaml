@@ -586,6 +586,131 @@ model_providers:
         - name: whisper-1
           type: stt
 
+    - name: OpenRouter
+      description:
+        zh-CN: |
+          OpenRouter 通过统一的 OpenAI 兼容接口接入多家模型供应商，支持使用同一个 API Key 切换不同厂商和路由模型。
+
+          获取 API Key：
+          https://openrouter.ai/settings/keys
+
+          模型名称使用 OpenRouter 的完整模型 ID。openrouter/free 只路由到免费模型并支持按请求筛选视觉能力；openrouter/auto 可能选择收费模型。也可以在连接分组中添加 OpenRouter 模型目录里的其他模型。
+
+          内置清单覆盖 OpenAI、Anthropic、Google、DeepSeek、通义千问、智谱 GLM、Kimi、Grok、MiniMax 和 NVIDIA 等常用模型，并包含多款支持工具调用的免费模型，以及图片、视频、语音合成和语音识别模型。
+        en-US: |
+          OpenRouter provides one OpenAI-compatible API for models from multiple providers, allowing model and router selection with a single API key.
+
+          Get an API key:
+          https://openrouter.ai/settings/keys
+
+          Use the complete OpenRouter model ID. openrouter/free routes only to free models and filters for vision support when needed; openrouter/auto may select paid models. Other models from the OpenRouter catalog can be added to the connection group.
+
+          The built-in catalog covers popular models from OpenAI, Anthropic, Google, DeepSeek, Qwen, Z.AI GLM, Kimi, Grok, MiniMax, and NVIDIA, including several free models with tool-calling support plus image, video, text-to-speech, and speech-to-text models.
+      base_url: "https://openrouter.ai/api/v1/"
+      models:
+        - name: z-ai/glm-5.3-flash
+          type: llm
+          max_input_tokens: "1310720"
+          free_auto_select_priority: 1
+        - name: z-ai/glm-5.3
+          type: llm
+          max_input_tokens: "1048576"
+        - name: deepseek/deepseek-v4-pro
+          type: llm
+          max_input_tokens: "1048576"
+        - name: nvidia/nemotron-3.5-lightning:free
+          type: llm
+          max_input_tokens: "1000000"
+        - name: z-ai/glm-5.2:free
+          type: llm
+          max_input_tokens: "256000"
+        - name: openrouter/free
+          type: vlm
+          max_input_tokens: "200K"
+          free_auto_select_priority: 1
+        - name: openrouter/auto
+          type: vlm
+          max_input_tokens: "2M"
+        - name: openai/gpt-5.6-sol
+          type: vlm
+          max_input_tokens: "1050000"
+        - name: anthropic/claude-sonnet-5
+          type: vlm
+          max_input_tokens: "1000000"
+        - name: google/gemini-3.7-flash
+          type: vlm
+          max_input_tokens: "1048576"
+        - name: x-ai/grok-4.6
+          type: vlm
+          max_input_tokens: "500000"
+        - name: qwen/qwen3.8-max
+          type: vlm
+          max_input_tokens: "1000000"
+        - name: qwen/qwen3.8-flash
+          type: vlm
+          max_input_tokens: "1000000"
+        - name: moonshotai/kimi-k3
+          type: vlm
+          max_input_tokens: "1048576"
+        - name: minimax/minimax-m3
+          type: vlm
+          max_input_tokens: "1048576"
+        - name: minimax/minimax-m3:free
+          type: vlm
+          max_input_tokens: "1048576"
+        - name: deepseek/deepseek-v4-flash-vision-exp
+          type: vlm
+          max_input_tokens: "1048576"
+        - name: thinkingmachines/inkling:free
+          type: vlm
+          max_input_tokens: "1048576"
+        - name: liquid/lfm-2.5-embedding-350m:free
+          type: embed
+          max_input_tokens: "512"
+          free_auto_select_priority: 1
+        - name: bytedance-seed/seedream-4.5
+          type: text2image
+        - name: bytedance-seed/seedream-5-0-lite
+          type: text2image
+        - name: bytedance-seed/seedream-5-0-pro
+          type: text2image
+        - name: x-ai/grok-imagine-image-2.0
+          type: text2image
+        - name: qwen/qwen-image-3-pro
+          type: text2image
+        - name: openai/gpt-image-2
+          type: text2image
+        - name: alibaba/wan-3.0
+          type: text2video
+        - name: bytedance/seedance-2.0-mini
+          type: text2video
+        - name: bytedance/seedance-2.5
+          type: text2video
+        - name: black-forest-labs/flux-3-video
+          type: text2video
+        - name: runway/gen-4.5
+          type: text2video
+        - name: deepgram/flux-tts:free
+          type: tts
+        - name: fish-audio/s2.1-pro
+          type: tts
+        - name: microsoft/mai-voice-2-flash
+          type: tts
+        - name: qwen/qwen-audio-3.0-tts-flash
+          type: tts
+        - name: mistralai/voxtral-mini-tts-2603
+          type: tts
+        - name: openai/whisper-large-v3
+          type: stt
+        - name: openai/whisper-large-v3-turbo
+          type: stt
+        - name: mistralai/voxtral-small-24b-2507-stt
+          type: stt
+        - name: qwen/qwen3-asr-1.7b
+          type: stt
+        - name: deepgram/nova-3
+          type: stt
+
     - name: Qwen
       description:
         zh-CN: |
@@ -957,63 +1082,63 @@ model_providers:
 
       base_url: "https://api.sensenova.cn/compatible-mode/v1/"
       models:
-        - name: DeepSeek V4 Flash
+        - name: SenseChat-5
           type: llm
-          max_input_tokens: "1M"
+          max_input_tokens: "128K"
         - name: DeepSeek-R1
           type: llm
           max_input_tokens: "128K"
         - name: DeepSeek-R1-Distill-Qwen-14B
           type: llm
           max_input_tokens: "128K"
+        - name: DeepSeek-R1-Distill-Qwen-32B
+          type: llm
+          max_input_tokens: "128K"
         - name: DeepSeek-V3
           type: llm
           max_input_tokens: "128K"
-        - name: DeepSeek-V3-1
+        - name: Llama3-70B
           type: llm
-          max_input_tokens: "128K"
-        - name: Qwen2-5-Coder
+          max_input_tokens: "8K"
+        - name: Llama3-8B
           type: llm
-          max_input_tokens: "128K"
+          max_input_tokens: "8K"
+        - name: Qwen2-72B
+          type: llm
+          max_input_tokens: "32K"
+        - name: Qwen2-7B
+          type: llm
+          max_input_tokens: "32K"
         - name: Qwen3-235B
           type: llm
           max_input_tokens: "128K"
         - name: Qwen3-32B
           type: llm
           max_input_tokens: "128K"
-        - name: Qwen3-Coder
-          type: llm
-          max_input_tokens: "1M"
         - name: SenseChat
           type: llm
           max_input_tokens: "4K"
         - name: SenseChat-128K
           type: llm
           max_input_tokens: "128K"
-        - name: SenseChat-5
-          type: llm
-          max_input_tokens: "128K"
-        - name: SenseChat-5-1202
+        - name: SenseChat-32K
           type: llm
           max_input_tokens: "32K"
         - name: SenseChat-5-Cantonese
           type: llm
           max_input_tokens: "128K"
-        - name: SenseChat-Turbo
+        - name: SenseChat-Character
           type: llm
-          max_input_tokens: "32K"
-        - name: SenseChat-Turbo-1202
+          max_input_tokens: "4K"
+        - name: SenseChat-Character-Pro
+          type: llm
+          max_input_tokens: "4K"
+        - name: SenseChat-Turbo
           type: llm
           max_input_tokens: "32K"
         - name: SenseChat-Vision
           type: vlm
           max_input_tokens: "16K"
-        - name: SenseNova 6.7 Flash-Lite
-          type: vlm
-          max_input_tokens: "256K"
-        - name: SenseNova U1 Fast
-          type: vlm
-          max_input_tokens: "32K"
         - name: SenseNova-V6-5-Pro
           type: vlm
           max_input_tokens: "128K"
@@ -1089,7 +1214,6 @@ model_providers:
           max_input_tokens: "1M"
         - name: THUDM/GLM-Z1-9B-0414
           type: llm
-          free_auto_select_priority: 1
         - name: Pro/moonshotai/Kimi-K2.6
           type: vlm
           max_input_tokens: "256K"
@@ -1157,6 +1281,7 @@ model_providers:
         - name: deepseek-ai/DeepSeek-V3
           type: llm
           max_input_tokens: "128K"
+          free_auto_select_priority: 1
         - name: Pro/deepseek-ai/DeepSeek-V3
           type: llm
           max_input_tokens: "128K"

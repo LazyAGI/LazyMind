@@ -1,25 +1,62 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeftOutlined, SearchOutlined } from "@ant-design/icons";
 import { useTranslation } from "react-i18next";
-import { Link, useSearchParams } from "react-router-dom";
+import { Link } from "react-router-dom";
 import CaseCard from "./CaseCard";
+import { listShowcaseCases, type ShowcaseCase } from "./api";
 import {
-  listShowcaseCases,
-  matchesShowcaseEntryType,
-  type ShowcaseCase,
-} from "./api";
+  showcaseEntryType,
+  showcaseTechnologyType,
+  type ShowcaseEntryType,
+  type ShowcaseTechnologyType,
+} from "./classification";
 import "./index.scss";
+
+interface FilterOption<T extends string> {
+  label: string;
+  value: T | "";
+}
+
+function ShowcaseFilterGroup<T extends string>({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: Array<FilterOption<T>>;
+  value: T | "";
+  onChange: (value: T | "") => void;
+}) {
+  return (
+    <div className="showcase-filter-group">
+      <span className="showcase-filter-label">{label}</span>
+      <div className="showcase-filter-options" role="group" aria-label={label}>
+        {options.map((option) => (
+          <button
+            className={option.value === value ? "is-active" : ""}
+            key={option.value || "all"}
+            type="button"
+            aria-pressed={option.value === value}
+            onClick={() => onChange(option.value)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
 
 export default function GalleryPage() {
   const { i18n, t } = useTranslation();
   const locale = i18n.resolvedLanguage || i18n.language;
-  const [searchParams] = useSearchParams();
-  const requestedType = searchParams.get("type");
-  const type = requestedType === "chat" || requestedType === "work" ? requestedType : "";
   const [items, setItems] = useState<ShowcaseCase[]>([]);
   const [categories, setCategories] = useState<string[]>([]);
   const [keyword, setKeyword] = useState("");
   const [category, setCategory] = useState("");
+  const [entryType, setEntryType] = useState<ShowcaseEntryType | "">("");
+  const [technologyType, setTechnologyType] = useState<ShowcaseTechnologyType | "">("");
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
 
@@ -27,15 +64,13 @@ export default function GalleryPage() {
     const controller = new AbortController();
     listShowcaseCases({}, { signal: controller.signal })
       .then((response) => {
-        setItems((response.cases || []).filter(
-          (item) => item.gallery && (!type || matchesShowcaseEntryType(item.type, type)),
-        ));
-        const responseCategories = response.categories ?? [];
-        setCategories(responseCategories);
+        setItems((response.cases || []).filter((item) => item.gallery));
+        const availableCategories = (response.categories ?? []).filter(
+          (item) => item !== "全部" && item !== "All",
+        );
+        setCategories(availableCategories);
         setCategory((current) =>
-          responseCategories.includes(current)
-            ? current
-            : responseCategories[0] || "",
+          availableCategories.includes(current) ? current : "",
         );
       })
       .catch(() => {
@@ -49,20 +84,35 @@ export default function GalleryPage() {
         }
       });
     return () => controller.abort();
-  }, [locale, type]);
+  }, [locale]);
+
+  const categoryOptions = useMemo<Array<FilterOption<string>>>(() => [
+    { label: t("showcase.filters.all"), value: "" },
+    ...categories.map((item) => ({ label: item, value: item })),
+  ], [categories, t]);
+  const entryTypeOptions = useMemo<Array<FilterOption<ShowcaseEntryType>>>(() => [
+    { label: t("showcase.filters.all"), value: "" },
+    { label: t("showcase.filters.capability.chat"), value: "chat" },
+    { label: t("showcase.filters.capability.work"), value: "work" },
+  ], [t]);
+  const technologyTypeOptions = useMemo<Array<FilterOption<ShowcaseTechnologyType>>>(() => [
+    { label: t("showcase.filters.all"), value: "" },
+    { label: t("showcase.filters.technology.skill"), value: "skill" },
+    { label: t("showcase.filters.technology.workflow"), value: "workflow" },
+  ], [t]);
 
   const filteredItems = useMemo(() => {
     const normalizedKeyword = keyword.trim().toLowerCase();
     return items.filter((item) => {
-      const matchesCategory =
-        category === "" ||
-        category === categories[0] ||
-        item.category === category;
+      const matchesCategory = category === "" || item.category === category;
+      const matchesEntryType = entryType === "" || showcaseEntryType(item.type) === entryType;
+      const matchesTechnologyType = technologyType === ""
+        || showcaseTechnologyType(item.type) === technologyType;
       const searchable = [
         item.title,
         item.description,
         item.category,
-        ...item.tasks.flatMap((task) => [
+        ...(item.tasks ?? []).flatMap((task) => [
           task.title,
           task.description,
           task.prompt_short,
@@ -71,9 +121,11 @@ export default function GalleryPage() {
         .join(" ")
         .toLowerCase();
       return matchesCategory
+        && matchesEntryType
+        && matchesTechnologyType
         && (!normalizedKeyword || searchable.includes(normalizedKeyword));
     });
-  }, [category, categories, items, keyword]);
+  }, [category, entryType, items, keyword, technologyType]);
 
   return (
     <main className="showcase-page showcase-gallery-page">
@@ -96,18 +148,25 @@ export default function GalleryPage() {
             placeholder={t("showcase.searchPlaceholder")}
           />
         </label>
-        <div className="showcase-category-list" aria-label={t("showcase.categoryLabel")}>
-          {categories.map((item) => (
-            <button
-              className={item === category ? "is-active" : ""}
-              key={item}
-              type="button"
-              aria-pressed={item === category}
-              onClick={() => setCategory(item)}
-            >
-              {item}
-            </button>
-          ))}
+        <div className="showcase-filter-groups">
+          <ShowcaseFilterGroup
+            label={t("showcase.filters.taskType")}
+            options={categoryOptions}
+            value={category}
+            onChange={setCategory}
+          />
+          <ShowcaseFilterGroup
+            label={t("showcase.filters.capabilityType")}
+            options={entryTypeOptions}
+            value={entryType}
+            onChange={setEntryType}
+          />
+          <ShowcaseFilterGroup
+            label={t("showcase.filters.technologyType")}
+            options={technologyTypeOptions}
+            value={technologyType}
+            onChange={setTechnologyType}
+          />
         </div>
       </div>
 
