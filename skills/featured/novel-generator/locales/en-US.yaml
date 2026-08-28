@@ -3,132 +3,112 @@ locale: en-US
 classification:
   category: Content creation
   tags:
-    - Novel writing
+    - Web-fiction generation
     - Serialized fiction
-    - Outlining & worldbuilding
+    - Outlines and chapters
 
 presentation:
   card:
-    title: Serialized novel writing assistant
-    description: Help authors develop ideas, characters, story outlines, chapters, and long-running continuity
+    title: Web-fiction generator
+    description: Start from one premise, plan a full story, or write a complete chapter that can grow into a serial
     output_type: document
-    output_label: Novel writing draft
+    output_label: Novel writing workspace
     cover_asset: cover
-    result_summary: Turn a one-line premise into settings, outlines, chapters, and continuity records for sustained serialization
+    result_summary: Explore a real opening, full-story outline, and chapter manuscript in one consistent author workspace
   detail:
-    title: Serialized novel writing assistant
-    description: "Support web-fiction and long-form authors with idea development, world and character design, global outlines, chapter writing, revision, and continuity checks. Source: WorkBuddy; adapted for LazyMind."
-    attachment_hint: Existing premise, character notes, outline, previous chapters, or serialization state (optional)
+    title: Start from one premise and keep the story moving
+    description: "For web-fiction and serialized-fiction creators, turn a one-line premise into a core hook, character profiles, a full-story outline, and chapter manuscripts while tracking character states and setups. Source: WorkBuddy; adapted for LazyMind."
+    attachment_hint: No upload is required for the example; you may replace it with your own premise, character notes, or manuscript
 
 tasks:
   - id: idea-development
     selector:
-      title: Ideas and settings
-      description: Turn a one-line premise into genre, protagonist, conflict, world rules, and opening hooks
-      output_label: Novel concept brief
+      title: Start from one premise
+      description: Generate a working title, core appeal, first-three-chapter hooks, and a readable opening
+      output_label: Story launch and opening
     launch:
-      prompt_short: Expand my one-line novel idea into an actionable creative brief.
-      prompt: Create an author-facing novel concept brief from the premise, genre direction, or keywords I provide. Define the genre and target readership, core appeal, protagonist's starting point and desire, central conflict, world or power rules, key supporting characters, hooks for the first three chapters, and major creative risks. Do not mechanically stack popular tropes. Ask no more than three focused questions only when missing information would materially change the direction.
+      prompt_short: "Demo case: turn a product intern who can see project-failure countdowns into a serial readers can start immediately."
+      prompt: |
+        Develop the premise below into a binge-worthy web serial and write an opening readers can start immediately.
+
+        Premise: Cheng Ye, a newly hired product intern, can see a red countdown above every project headed for irreversible failure. The company's AI assistant has only twenty-four hours left before launch even though every test appears normal; each wrong diagnosis makes the countdown accelerate.
+
+        Provide a title, one-line hook, protagonist and core rules, a first-three-chapter plan, and an opening chapter of about 1,500 words. Let the payoff come from discovering information, making decisions, and accepting consequences while other characters retain believable motives. End with a compact story-state card so writing can continue in the same conversation.
     replay:
       steps:
-        - title: Interpret the creative direction
-          description: Identify genre, target readers, tone, and differentiating appeal
-        - title: Design characters and conflict
-          description: Establish the protagonist's desire, flaw, opponents, obstacles, and cost of failure
-        - title: Establish world rules
-          description: Define social structure, capability boundaries, resources, and immutable constraints
-        - title: Build the opening plan
-          description: Deliver a logline, first-three-chapter hooks, and the first meaningful payoff
+        - title: Distill the core appeal
+          description: Identify target readers, the promised payoff, and a memorable differentiator
+        - title: Establish protagonist and rules
+          description: Define desire, initial predicament, capability boundaries, and unavoidable cost
+        - title: Design the first three chapters
+          description: Link crisis, payoff, and renewed suspense into continuous reading momentum
+        - title: Write a real opening
+          description: Deliver a manuscript with action, change, and a forward-driving final beat
     result:
-      template: generic_report_v1
-      eyebrow: Novel concept brief
-      title: An actionable plan from a one-line premise
-      summary: Expand an initial idea into a coherent starting point with characters, conflict, world rules, and opening rhythm
-      highlights:
-        - Working title, logline, and differentiating appeal
-        - Protagonist arc, central conflict, and world rules
-        - First-three-chapter hooks and initial payoff
+      template: html_preview_v1
+      eyebrow: Web-fiction launch case
+      title: The starting point for Midnight Ten Minutes
+      summary: See one premise become a title, capability rules, first-three-chapter hooks, and a real opening manuscript.
+      html_asset: idea_demo
 
   - id: outline-planning
     selector:
-      title: Global outline
-      description: Plan the main arc, volume goals, turning points, pacing, and setup resolution
-      output_label: Story outline
+      title: Plan the full novel
+      description: Shape the main arc, volume escalation, character growth, climax rhythm, and setup resolution
+      output_label: Full serialization outline
     launch:
-      prompt_short: Plan a global outline and volume rhythm from my novel settings.
-      prompt: Design an actionable global novel outline from the genre, characters, world settings, and target length I provide. Include the main arc, protagonist growth arc, irreversible midpoint change, ending objective, volume goals and conflicts, key turns, staged rewards and costs, and setup and payoff windows. Preserve causal progression and varied pacing instead of listing repeated plot formulas.
+      prompt_short: "Demo case: plan a four-volume serialization route for the project-failure-countdown premise."
+      prompt: |
+        Use the premise below to plan a four-volume web serial designed for sustained serialization.
+
+        Premise: Cheng Ye, a newly hired product intern, can see a red countdown above every project headed for irreversible failure. The company's AI assistant has only twenty-four hours left before launch even though every test appears normal; each wrong diagnosis makes the countdown accelerate.
+
+        Lay out the main arc, protagonist growth, each volume's core conflict and ending hook, and the planting and payoff of major setups. Gradually reveal the countdown's origin, and let every victory create a new cost or a larger problem. Finish with a full-story state card that later chapters can reuse.
     replay:
       steps:
-        - title: Verify core settings
-          description: Confirm the protagonist, objective, world rules, target length, and immutable boundaries
-        - title: Plan the main arc
-          description: Design the opening state, midpoint change, ending objective, and character growth
-        - title: Shape volume rhythm
-          description: Break down volume goals, escalating conflicts, staged climaxes, and costs
-        - title: Check setup and causality
-          description: Arrange turning points, payoff windows, and dependencies across the story
+        - title: Lock the story promise
+          description: Confirm the core appeal, protagonist objective, target length, and immutable rules
+        - title: Build the main arc
+          description: Design the opening state, midpoint change, ending choice, and character growth
+        - title: Break down volume rhythm
+          description: Arrange volume goals, escalating conflict, staged climaxes, rewards, and costs
+        - title: Validate setup and causality
+          description: Mark each setup's first appearance, progress points, and expected payoff window
     result:
-      template: generic_report_v1
-      eyebrow: Story outline
-      title: Global arc and volume-level story outline
-      summary: Build a serialization route from the main arc to volume goals, turning points, and setup resolution
-      highlights:
-        - Main story and protagonist growth arcs
-        - Volume goals, conflict escalation, and staged climaxes
-        - Turning points, setups, and payoff windows
+      template: html_preview_v1
+      eyebrow: Full-story planning case
+      title: The serialization roadmap for Midnight Ten Minutes
+      summary: Explore the main arc, four-volume rhythm, character growth, and setup payoff plan in the same author workspace.
+      html_asset: outline_demo
 
   - id: chapter-writing
     selector:
-      title: Chapter writing
-      description: Write an opening, a new chapter, or a revised scene from settings and prior context
+      title: Write one chapter
+      description: Provide characters, a setting, and a chapter objective to receive a complete, readable manuscript
       output_label: Chapter manuscript
     launch:
-      prompt_short: Write a natural, continuous novel chapter from my settings and previous text.
-      prompt: Write a chapter from the novel settings, outline, previous chapters, and chapter objective I provide. The manuscript should have a clear scene goal, resistance, state change, and forward-driving ending. Emotional payoffs must be earned, dialogue should distinguish characters, and no character should become irrational or gain unknown information for convenience. For continuation, verify recent events and character states first. Unless I request editorial notes, keep summaries, checklists, and internal writing comments out of the final manuscript.
-    replay:
-      steps:
-        - title: Read the writing context
-          description: Verify character states, world rules, prior events, and chapter constraints
-        - title: Define the chapter mission
-          description: Set the scene goal, main obstacle, change, payoff, and ending hook
-        - title: Write the scene chain
-          description: Advance the manuscript through action, dialogue, and clear causal progression
-        - title: Run the quality check
-          description: Check characters, space and time, rules, repeated beats, and continuity conflicts
-    result:
-      template: generic_report_v1
-      eyebrow: Chapter manuscript
-      title: A novel chapter ready for continued serialization
-      summary: Deliver a chapter with a clear objective, effective conflict, consistent characters, and natural forward momentum
-      highlights:
-        - Clear scene goal, resistance, and state change
-        - Earned emotional payoff and character-specific dialogue
-        - Ending hook and continuity check
+      prompt_short: "Demo case: write the AI-assistant launch review chapter where the countdown first appears."
+      prompt: |
+        Use the story setup and chapter situation below to write a complete, readable web-fiction chapter.
 
-  - id: continuation-review
-    selector:
-      title: Continuation and continuity
-      description: Track characters, timeline, setups, and world rules to diagnose breaks and plan what comes next
-      output_label: Continuity review and continuation plan
-    launch:
-      prompt_short: Check my serialized novel for continuity errors and plan the next chapter.
-      prompt: Review the project settings, outline, chapter manuscripts, or serialization state I provide. Check character survival and location, abilities and resource sources, timeline, world rules, character knowledge boundaries, open setups, and repeated plot beats. List traceable conflicts, their impact, and revision options, then define the next chapter's objective and hook. If I also ask for continuation, write the next chapter after the review. When the current environment cannot maintain project files, provide a compact serialization state card for reuse in the next conversation and do not claim that anything was persisted.
+        Story setup: Product intern Cheng Ye can see a red countdown above projects headed for irreversible failure. The countdown never reveals the cause, and each wrong diagnosis makes the remaining time fall faster.
+
+        Chapter situation: During an AI-assistant launch review, every test report shows a pass, but Cheng Ye sees “23:59:59” above the screen. He has no decision authority and can only investigate user feedback and anomaly records. His first fix appears successful, yet the countdown suddenly loses six hours.
+
+        Write about 1,500 words with a clear objective, realistic resistance, one credible small win, a cost for the wrong judgment, and a natural ending hook. Do not make other characters irrational merely to elevate the protagonist. Follow the chapter with a compact state card covering character state, capability rules, and open setups.
     replay:
       steps:
-        - title: Organize project state
-          description: Summarize the current volume, recent events, active characters, rules, and open setups
-        - title: Verify continuity
-          description: Check characters, time and space, abilities, resources, knowledge boundaries, and causality
-        - title: Build revision advice
-          description: Locate evidence for conflicts, explain impact, and propose minimal repairs
-        - title: Plan the next chapter
-          description: Define its objective, advancing thread, state change, and ending hook
+        - title: Define the chapter mission
+          description: Lock the viewpoint, scene goal, main obstacle, payoff, and cost
+        - title: Verify writing context
+          description: When prior text exists, check character states, rules, timeline, and knowledge boundaries
+        - title: Write the scene chain
+          description: Advance a complete chapter through action, dialogue, and causal changes
+        - title: Land the ending hook
+          description: Check continuity and leave a specific, natural reason to read the next chapter
     result:
-      template: generic_report_v1
-      eyebrow: Continuity review
-      title: Serialization continuity review and next-step plan
-      summary: Organize reusable project state, repair key breaks, and clarify the direction of the next chapter
-      highlights:
-        - Character, timeline, rule, and setup state
-        - Traceable continuity conflicts and revision advice
-        - Next-chapter objective, advancing thread, and state card
+      template: html_preview_v1
+      eyebrow: Chapter manuscript case
+      title: Chapter 001, Ten Minutes Before Collapse
+      summary: Read the complete urban-fantasy opening generated in a LazyMind test and inspect its chapter mission and continuity state.
+      html_asset: chapter_demo

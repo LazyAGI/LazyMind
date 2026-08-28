@@ -379,6 +379,7 @@ _STRUCTURED_PARAM_KEYS = {
     SUBAGENT_ATTACHMENT_CONTEXT_KEY,
     'remote_inputs',
     'remote_input_types',
+    'remote_input_transports',
     'remote_input_value_slots',
     'partial_indices',
     'required_output_artifact_keys',
@@ -409,10 +410,13 @@ def _workflow_material_bindings_section(params: Dict[str, Any]) -> str:
     if not isinstance(remote_inputs, dict) or not remote_inputs:
         return ''
     input_types = params.get('remote_input_types') or {}
+    transports = params.get('remote_input_transports') or {}
     value_slots = set(params.get('remote_input_value_slots') or [])
     bindings: Dict[str, Any] = {}
     for slot, value in remote_inputs.items():
-        kind = 'value' if slot in value_slots else 'path'
+        kind = str(transports.get(str(slot)) or '').strip().lower()
+        if kind not in {'value', 'path', 'reference'}:
+            kind = 'value' if slot in value_slots else 'path'
         bindings[str(slot)] = {
             'type': str(input_types.get(str(slot)) or ''),
             'kind': kind,
@@ -420,7 +424,8 @@ def _workflow_material_bindings_section(params: Dict[str, Any]) -> str:
         }
     return '\n'.join((
         'These are typed Workflow material bindings, not user-uploaded attachments.',
-        'For kind=value, pass the exact value to scalar tool arguments. For kind=path, '
+        'For kind=value, pass the exact value to scalar tool arguments. For kind=reference, '
+        'preserve the exact reference object. For kind=path, '
         'pass the exact path only to file/path arguments or package tools that consume '
         'Workflow artifacts. Never substitute a path for a scalar value.',
         'Never call read_user_attachment, find_user_attachment, or attachment editing tools '

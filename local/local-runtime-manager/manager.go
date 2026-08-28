@@ -51,6 +51,7 @@ type RuntimeManager struct {
 
 const (
 	startupProgressInterval         = 10 * time.Second
+	pythonPayloadProgressInterval   = time.Second
 	maxAutomaticPortStartupAttempts = 3
 )
 
@@ -133,10 +134,22 @@ func (m *RuntimeManager) progressf(format string, args ...any) {
 }
 
 func (m *RuntimeManager) startupEvent(event, phase string, startedAt time.Time, eventErr error) {
+	m.startupEventWithDetails(event, phase, startedAt, eventErr, nil)
+}
+
+func (m *RuntimeManager) startupEventWithDetails(
+	event, phase string,
+	startedAt time.Time,
+	eventErr error,
+	details map[string]any,
+) {
 	payload := map[string]any{
 		"event":     event,
 		"phase":     phase,
 		"timestamp": m.now().UTC().Format(time.RFC3339Nano),
+	}
+	for key, value := range details {
+		payload[key] = value
 	}
 	if !startedAt.IsZero() {
 		payload["elapsedMs"] = m.now().Sub(startedAt).Milliseconds()
@@ -295,10 +308,53 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err := m.killStaleRuntimeProcesses(ctx, stateCfg, paths); err != nil {
 		return err
 	}
+	state.Runtime = cfg.Profile
+	state.Profile = cfg.Profile
+	state.OwnerToken = cfg.OwnerToken
+	state.RepoRoot = cfg.RepoRoot
+	state.ResourcesRoot = cfg.ResourcesRoot
+	state.RuntimeRoot = cfg.RuntimeRoot
+	state.Config = snapshotRuntimeConfig(stateCfg)
+	state = newStateWithServiceStatus(state, stateCfg, "stopped")
+	state.OverallStatus = "starting"
+	if err := writeRuntimeState(paths.StateFile, state); err != nil {
+		return err
+	}
+	preparationStateActive := true
+	defer func() {
+		if resultErr == nil || !preparationStateActive {
+			return
+		}
+		state = newStateWithServiceStatus(state, stateCfg, "failed")
+		state.OverallStatus = "failed"
+		_ = writeRuntimeState(paths.StateFile, state)
+	}()
 	pythonPreparationStartedAt := m.now()
 	m.progressf("checking bundled Python runtime payload")
 	m.startupEvent("phase.started", "python-payload", pythonPreparationStartedAt, nil)
-	if err := prepareBundledPythonRuntime(paths); err != nil {
+	lastPythonProgressAt := time.Time{}
+	lastPythonProgressStage := ""
+	if err := prepareBundledPythonRuntime(ctx, paths, func(progress pythonPayloadProgress) {
+		now := m.now()
+		atBoundary := progress.CompletedFiles == 0 || progress.CompletedFiles == progress.TotalFiles ||
+			progress.Stage != lastPythonProgressStage
+		if !atBoundary && !lastPythonProgressAt.IsZero() && now.Sub(lastPythonProgressAt) < pythonPayloadProgressInterval {
+			return
+		}
+		lastPythonProgressAt = now
+		lastPythonProgressStage = progress.Stage
+		m.startupEventWithDetails("phase.progress", "python-payload", pythonPreparationStartedAt, nil, map[string]any{
+			"stage":          progress.Stage,
+			"completedFiles": progress.CompletedFiles,
+			"totalFiles":     progress.TotalFiles,
+			"completedBytes": progress.CompletedBytes,
+			"totalBytes":     progress.TotalBytes,
+			"completedRoots": progress.CompletedRoots,
+			"totalRoots":     progress.TotalRoots,
+			"retryAttempt":   progress.RetryAttempt,
+			"retryElapsedMs": progress.RetryElapsed.Milliseconds(),
+		})
+	}); err != nil {
 		m.startupEvent("phase.failed", "python-payload", pythonPreparationStartedAt, err)
 		return fmt.Errorf("prepare bundled Python runtime after %s: %w", m.now().Sub(pythonPreparationStartedAt).Round(time.Millisecond), err)
 	}
@@ -330,6 +386,7 @@ func (m *RuntimeManager) Up(ctx context.Context, cfg RuntimeConfig, paths Runtim
 	if err := ensureLazyLLMSource(ctx, m.runner, paths.RepoRoot, freshCfg.Profile); err != nil {
 		return err
 	}
+	preparationStateActive = false
 	for attempt := 1; attempt <= maxAutomaticPortStartupAttempts; attempt++ {
 		attemptCfg, attemptPaths, configErr := NewRuntimeConfigWithOptions(RuntimeConfigOptions{
 			Profile:         cfg.Profile,

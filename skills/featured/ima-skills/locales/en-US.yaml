@@ -1,51 +1,114 @@
 locale: en-US
 
 classification:
-  category: Information & analysis
+  category: Knowledge management
   tags:
     - IMA
     - Knowledge base
-    - Note management
-    - Retrieval
+    - Note search
+    - Note writing
 
 presentation:
   card:
     title: IMA knowledge management
-    description: Organize materials, capture notes, and build a searchable, reusable personal knowledge base
+    description: IMA cases for web archiving, note search summaries, and note creation/appending
     output_type: report
-    output_label: Knowledge management plan
+    output_label: IMA knowledge result
     cover_asset: cover
-    result_summary: Turn scattered materials into a structured knowledge base for search, linking, and reuse
+    result_summary: Preview SkillHub web archiving, AI office-automation note search, and WorkBuddy trial-note writing
   detail:
-    title: IMA knowledge management
-    description: "Help you organize documents, web pages, notes, and ideas into a living knowledge base that is easier to remember, find, and reuse. Source: Tencent IMA; adapted for LazyMind."
-    attachment_hint: Notes, documents, web links, research materials, or an existing knowledge-base outline
+    title: IMA knowledge-base and note operation cases
+    description: Three cases demonstrate IMA read/write, search, summary, archive, and note-management capabilities.
+    attachment_hint: Web URL, search keywords, target knowledge base, note title, classification, and summary requirements
 
 tasks:
-  - id: knowledge-management
+  - id: skillhub-note
     selector:
-      title: Build a knowledge base
-      description: Organize materials into categories, tags, links, and retrieval paths
-      output_label: Knowledge-base organization plan
+      title: SkillHub article archive and summary
+      description: Save a web page to IMA and generate a durable retrieval note
+      output_label: Summary note
     launch:
-      prompt_short: Organize these materials into a clear personal knowledge base.
-      prompt: Build a clear, maintainable knowledge base from the documents, notes, web pages, or material lists I provide. Complete classification, a tagging system, key summaries, knowledge links, retrieval questions, and follow-up update advice. If the materials are incomplete, ask first for missing sources or intended uses.
+      prompt_short: "Add this web page to my IMA knowledge base and create a searchable summary note: https://cloud.tencent.com/developer/article/2697255."
+      prompt: "Add this web page to my IMA knowledge base and create a searchable summary note: https://cloud.tencent.com/developer/article/2697255."
     replay:
       steps:
-        - title: Collect the materials
-          description: Gather notes, documents, web pages, and items waiting to be organized
-        - title: Extract the structure
-          description: Identify themes, hierarchy, tags, and key knowledge points
-        - title: Connect related knowledge
-          description: Link related materials, concepts, and reusable conclusions
-        - title: Deliver the system
-          description: Produce a knowledge-base outline, retrieval questions, and maintenance advice
+        - title: Identify the cross-module task
+          description: Split the request into adding a web page to the knowledge base and creating a summary note
+        - title: Fetch web content
+          description: Read the Tencent Cloud Developer article about recommended SkillHub productivity skills for 2026
+        - title: Confirm archive location
+          description: Inspect available knowledge bases and choose the only personal knowledge base
+        - title: Add the web page
+          description: Submit the URL to IMA so the knowledge base can archive and parse the page
+        - title: Create the summary note
+          description: Write topic, key points, audience, and retrieval keywords under the requested classification
+        - title: Return completion details
+          description: Show the archive status, note id, summary structure, and future retrieval guidance
     result:
       template: generic_report_v1
-      eyebrow: Knowledge management plan
-      title: A searchable personal knowledge-base structure
-      summary: Turn scattered materials into a knowledge system that can be accumulated, searched, and reused
+      eyebrow: IMA knowledge-management case
+      title: Summary note for “10 SkillHub productivity skills worth installing in 2026”
+      summary: The web page was added to IMA and summarized into a searchable note with topic, key points, audience, and retrieval keywords.
+      image_asset: note_preview
       highlights:
-        - Categories, tags, and summary structure
-        - Knowledge links and retrieval questions
-        - Long-term maintenance and reuse advice
+        - Archived to the user's personal IMA knowledge base
+        - Organized under AI tools / SkillHub / knowledge management
+        - Searchable later by SkillHub, AI Skills, ima-skills, and related keywords
+  - id: ai-office-note-search
+    selector:
+      title: AI office-automation note search
+      description: Search IMA notes and summarize repeated viewpoints, tools, scenarios, and todos
+      output_label: Structured summary
+    launch:
+      prompt_short: Search my IMA notes for “AI office automation,” find the 5 most relevant notes, and summarize key conclusions, related notes, and actionable suggestions.
+      prompt: Search my IMA notes for “AI office automation,” find the 5 most relevant notes, and summarize key conclusions, related notes, and actionable suggestions.
+    replay:
+      steps:
+        - title: Load note search module
+          description: Read the ima-skills note-search flow and confirm title/body search calls
+        - title: Expand keywords
+          description: Search AI, automation, office, workflow, and productivity to avoid missed notes
+        - title: Confirm note scope
+          description: List all notes and confirm only one relevant SkillHub summary note exists
+        - title: Read full note
+          description: Avoid inventing missing notes and analyze the one real hit in depth
+        - title: Search knowledge base
+          description: Check whether archived web content adds more relevant material
+        - title: Output structured summary
+          description: Organize results into key conclusions, related notes, and actionable suggestions
+    result:
+      template: html_preview_v1
+      eyebrow: IMA note-search case
+      title: AI office-automation structured note summary
+      summary: Shows real search hits, the only relevant note, repeated viewpoints, tools, scenarios, and next actions.
+      html_asset: note_search_summary
+  - id: workbuddy-trial-note-create
+    selector:
+      title: Create and append trial note
+      description: Create a WorkBuddy skill trial note in IMA and append the ima-skills record
+      output_label: Note screenshot
+    launch:
+      prompt_short: Create an IMA note titled “WorkBuddy skill trial record,” build a basic structure, then append the ima-skills trial record.
+      prompt: Create an IMA note titled “WorkBuddy skill trial record,” build a basic structure, then append the ima-skills trial record.
+    replay:
+      steps:
+        - title: Confirm write task
+          description: Recognize that the request includes note creation and content appending with UTF-8 Chinese text
+        - title: Read API usage
+          description: Check the ima-skills write script and request headers
+        - title: Create base note
+          description: Create the note with purpose, template, and today's trial section
+        - title: Append trial content
+          description: Add ima-skills usage, test cases, validation points, and actual-performance placeholder
+        - title: Verify result
+          description: Read the note back to confirm structure and Chinese text correctness
+    result:
+      template: generic_report_v1
+      eyebrow: IMA note-writing case
+      title: WorkBuddy skill trial record created and appended
+      summary: Creates a structured IMA note and appends the ima-skills trial record, with screenshot evidence.
+      image_asset: workbuddy_trial_note
+      highlights:
+        - "Created note_id: 7498992518703170"
+        - Base structure includes purpose, template, and today's trial section
+        - ima-skills trial record was appended and verified without Chinese garbling

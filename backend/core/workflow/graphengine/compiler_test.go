@@ -232,9 +232,10 @@ steps:
     inputs:
       - material: revised_outline
         required: true
+        transport: path
         alternatives:
           - {material: outline}
-      - {material: style, required: false}
+      - {material: style, required: false, transport: value}
     outputs: [{material: draft}]
 `
 	result := Compile(workflowYAML, stateYAML, "", ProfilePublish)
@@ -248,6 +249,36 @@ steps:
 	if len(node.OptionalInputs) != 1 || node.OptionalInputs[0].Material != "style" {
 		t.Fatalf("unexpected optional inputs: %#v", node.OptionalInputs)
 	}
+	if node.InputTransports["revised_outline"] != "path" ||
+		node.InputTransports["outline"] != "path" || node.InputTransports["style"] != "value" {
+		t.Fatalf("unexpected input transports: %#v", node.InputTransports)
+	}
+}
+
+func TestCompileRejectsInvalidInputTransport(t *testing.T) {
+	workflow := `
+id: invalid-transport
+slots:
+  - {id: source, external: true}
+steps:
+  - {id: consume, label: Consume}
+`
+	state := `
+transitions:
+  __start__: [{to: consume}]
+  consume: [{to: __end__}]
+steps:
+  consume:
+    inputs: [{material: source, required: true, transport: stream}]
+    outputs: []
+`
+	result := Compile(workflow, state, "", ProfilePublish)
+	for _, diagnostic := range result.Diagnostics {
+		if diagnostic.Code == "E_INPUT_TRANSPORT_INVALID" {
+			return
+		}
+	}
+	t.Fatalf("expected invalid transport diagnostic: %#v", result.Diagnostics)
 }
 
 func TestCompilePreservesOptionalExternalSlot(t *testing.T) {
@@ -274,6 +305,9 @@ steps:
 	producer := result.Graph.MaterialProducers["source"]
 	if producer.Kind != "external" || !producer.Optional {
 		t.Fatalf("optional external producer was not preserved: %#v", producer)
+	}
+	if result.Graph.Nodes["start"].InputTransports != nil {
+		t.Fatalf("default auto transport must remain omitted from the graph")
 	}
 }
 

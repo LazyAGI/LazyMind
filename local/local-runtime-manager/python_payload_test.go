@@ -2,6 +2,7 @@ package main
 
 import (
 	"archive/zip"
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -39,8 +40,26 @@ func TestPrepareBundledPythonRuntimeExtractsPayloadOnce(t *testing.T) {
 		"deps/python/auth-service/Scripts/python.exe": "auth",
 	})
 	paths := RuntimePaths{ResourcesRoot: resourcesRoot}
-	if err := prepareBundledPythonRuntime(paths); err != nil {
+	var progress []pythonPayloadProgress
+	if err := prepareBundledPythonRuntime(context.Background(), paths, func(update pythonPayloadProgress) {
+		progress = append(progress, update)
+	}); err != nil {
 		t.Fatal(err)
+	}
+	if len(progress) < 4 {
+		t.Fatalf("progress updates = %#v, want extraction and installation progress", progress)
+	}
+	first := progress[0]
+	if first.Stage != "opening" || first.CompletedFiles != 0 || first.TotalFiles != 0 {
+		t.Fatalf("first progress = %#v", first)
+	}
+	second := progress[1]
+	if second.Stage != "extracting" || second.CompletedFiles != 0 || second.TotalFiles != 2 {
+		t.Fatalf("second progress = %#v", second)
+	}
+	last := progress[len(progress)-1]
+	if last.Stage != "installing" || last.CompletedFiles != 2 || last.CompletedRoots != len(pythonPayloadRoots) {
+		t.Fatalf("last progress = %#v", last)
 	}
 	pythonPath := filepath.Join(resourcesRoot, "runtimes", "python", "cpython", "python.exe")
 	if body, err := os.ReadFile(pythonPath); err != nil || string(body) != "python" {
@@ -57,7 +76,7 @@ func TestPrepareBundledPythonRuntimeExtractsPayloadOnce(t *testing.T) {
 	if err := os.WriteFile(pythonPath, []byte("kept"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if err := prepareBundledPythonRuntime(paths); err != nil {
+	if err := prepareBundledPythonRuntime(context.Background(), paths, nil); err != nil {
 		t.Fatal(err)
 	}
 	if body, err := os.ReadFile(pythonPath); err != nil || string(body) != "kept" {
@@ -72,7 +91,7 @@ func TestPrepareBundledPythonRuntimeRejectsUnsafePayloadPath(t *testing.T) {
 		"deps/python/venv/file":      "venv",
 		"../outside.txt":             "unsafe",
 	})
-	err := prepareBundledPythonRuntime(RuntimePaths{ResourcesRoot: resourcesRoot})
+	err := prepareBundledPythonRuntime(context.Background(), RuntimePaths{ResourcesRoot: resourcesRoot}, nil)
 	if err == nil || !strings.Contains(err.Error(), "unsafe path") {
 		t.Fatalf("prepare error = %v, want unsafe path", err)
 	}
@@ -82,7 +101,7 @@ func TestPrepareBundledPythonRuntimeRejectsUnsafePayloadPath(t *testing.T) {
 }
 
 func TestPrepareBundledPythonRuntimeWithoutArchiveIsNoOp(t *testing.T) {
-	if err := prepareBundledPythonRuntime(RuntimePaths{ResourcesRoot: t.TempDir()}); err != nil {
+	if err := prepareBundledPythonRuntime(context.Background(), RuntimePaths{ResourcesRoot: t.TempDir()}, nil); err != nil {
 		t.Fatal(err)
 	}
 }

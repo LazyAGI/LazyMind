@@ -62,6 +62,11 @@ export default defineConfig({
         timeout: 3 * 60 * 1000,
         proxyTimeout: 3 * 60 * 1000,
       },
+      // Local pnpm preview: serve curated assets via compose/nginx frontend.
+      "/showcase-assets": {
+        target: devProxyTarget,
+        changeOrigin: true,
+      },
     },
   },
   build: {

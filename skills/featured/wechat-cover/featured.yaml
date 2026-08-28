@@ -1,7 +1,7 @@
 schema_version: 2
 id: wechat-cover
 type: work
-version: 1.0.0
+version: 1.1.0
 status: published
 default_locale: zh-CN
 provider: GitHub
@@ -19,53 +19,146 @@ classification:
   category: 设计创意
   tags:
     - 公众号封面
-    - 爆款标题
-    - 内容营销
+    - 爆款分析
+    - 职场成长
     - 封面设计
 
 assets:
   cover:
     file: assets/cover.png
     role: cover
+  report_demo:
+    file: assets/wechat-cover-demo.html
+    role: result
+  workplace_cover_1:
+    file: assets/workplace-cover-1.png
+    role: result
+  worker_meme:
+    file: assets/worker-meme-cover.png
+    role: result
+  worker_3d:
+    file: assets/worker-3d-cover.png
+    role: result
+  cognitive_report:
+    file: assets/cognitive-compound-report.html
+    role: result
+  cognitive_cover_1:
+    file: assets/cognitive-compound-1.png
+    role: result
+  cognitive_cover_2:
+    file: assets/cognitive-compound-2.png
+    role: result
+  cognitive_cover_3:
+    file: assets/cognitive-compound-3.png
+    role: result
+  sensitive_skincare_report:
+    file: assets/sensitive-skincare-report.html
+    role: result
+  sensitive_skincare_1:
+    file: assets/sensitive-skincare-1.png
+    role: result
+  sensitive_skincare_2:
+    file: assets/sensitive-skincare-2.png
+    role: result
+  sensitive_skincare_3:
+    file: assets/sensitive-skincare-3.png
+    role: result
 
 presentation:
   card:
     title: 公众号爆款封面设计
-    description: 分析文章主题与传播卖点，生成多版高转化公众号封面方案
-    output_type: images
-    output_label: 封面方案
+    description: 覆盖赛道趋势、具体文章配图和营销种草的公众号封面案例
+    output_type: web
+    output_label: 分析报告与封面图
     cover_asset: cover
-    result_summary: 输出标题卖点、视觉方向、配色建议和多版封面创意
+    result_summary: 查看职场成长、认知复利、秋冬敏感肌 3 类真实封面分析产出
   detail:
-    title: 公众号爆款封面设计
-    description: 根据文章主题、摘要和目标读者，提炼核心卖点，参考高传播封面规律，生成适合公众号使用的封面设计方案。来源：https://github.com/tomorrow140/wechat-cover-designer，经 LazyMind 适配。
-    attachment_hint: 文章标题、正文摘要、目标读者、账号定位或参考封面
+    title: 多场景公众号封面设计案例
+    description: 围绕职场成长赛道趋势、认知复利具体文章和秋冬敏感肌营销种草，查询爆款数据、总结视觉规律，并生成可制作的公众号封面方案。
+    attachment_hint: 公众号赛道、文章主题、目标读者、账号定位或参考封面
 
 tasks:
-  - id: cover-design
+  - id: workplace-cover-report
     selector:
-      title: 爆款封面方案
-      description: 围绕文章内容生成可直接制作的公众号封面创意
-      output_label: 公众号封面方案
+      title: 职场成长爆款封面分析
+      description: 分析公众号爆款封面规律，并生成 3 套新媒体封面方案
+      output_label: 分析报告与封面图
     launch:
-      prompt_short: 根据我的文章内容，生成多版公众号爆款封面设计方案。
-      prompt: 请根据我提供的文章标题、正文摘要、账号定位和目标读者，分析核心卖点与传播情绪，生成多版公众号爆款封面设计方案。请包含标题表达、视觉主体、构图布局、配色建议、字体风格、适用场景和一键制作提示；信息不足时先询问关键资料。
+      prompt_short: 帮我分析最近公众号里“职场成长、升职加薪、打工人”赛道的爆款封面规律，并给我 3 套适合新媒体文章的封面设计方案。
+      prompt: 帮我分析最近公众号里“职场成长、升职加薪、打工人”赛道的爆款封面规律，并给我 3 套适合新媒体文章的封面设计方案。
     replay:
       steps:
-        - title: 输入主题
-          description: 读取文章标题、摘要、读者和账号定位
-        - title: 分析卖点
-          description: 提炼传播钩子、情绪价值和标题表达方式
-        - title: 生成方案
-          description: 输出多版封面构图、配色、人物和文字策略
-        - title: 应用预览
-          description: 给出公众号尺寸适配、修改建议和制作提示
+        - title: 解析赛道意图
+          description: 确认主题为职场成长、升职加薪和打工人，内容类型为新媒体文章封面
+        - title: 查询爆款数据
+          description: 拉取 50 条相关爆款文章数据，筛选出 49 张有效封面
+        - title: 分析头部封面
+          description: 下载阅读量前 20 的封面图，从人物、文字、配色、构图等维度逐张分析
+        - title: 总结视觉规律
+          description: 归纳情绪共鸣、卡通热梗、大字观点、氛围美学等 4 类高转化风格
+        - title: 生成设计方案
+          description: 输出电影感职场独白、卡通 IP 社畜共鸣、观点大字视觉冲击 3 套方案
+        - title: 交付报告与成品
+          description: 生成 HTML 分析报告，并展示三张实际生成的公众号横版封面图
     result:
-      template: generic_report_v1
-      eyebrow: 公众号封面方案
-      title: 多版高转化封面创意
-      summary: 形成标题、构图、配色和制作提示完整配套的封面设计方案
-      highlights:
-        - 核心卖点与爆款标题表达
-        - 多版封面视觉方向
-        - 公众号尺寸适配和落地制作提示
+      template: html_preview_v1
+      eyebrow: 公众号封面案例
+      title: 职场成长·升职加薪·打工人爆款封面分析报告
+      summary: 基于 50 条爆款数据和前 20 张封面分析，交付 HTML 报告、3 套设计方案和 3 张成品封面。
+      html_asset: report_demo
+  - id: cognitive-compound-cover
+    selector:
+      title: 认知复利文章封面
+      description: 为个人成长、职场认知和长期主义文章设计 3 套封面方案
+      output_label: 分析报告与三套封面
+    launch:
+      prompt_short: 我准备发一篇公众号文章，标题是《30岁以后，真正拉开差距的不是努力，而是认知复利》。内容偏个人成长、职场认知、长期主义。请基于最近爆款封面数据，帮我设计 3 套公众号封面方案，风格要有点击吸引力但不要太浮夸。
+      prompt: 我准备发一篇公众号文章，标题是《30岁以后，真正拉开差距的不是努力，而是认知复利》。内容偏个人成长、职场认知、长期主义。请基于最近爆款封面数据，帮我设计 3 套公众号封面方案，风格要有点击吸引力但不要太浮夸。
+    replay:
+      steps:
+        - title: 解析文章主题
+          description: 判断这是个人成长、职场认知和长期主义方向的深度观点文
+        - title: 扩展检索关键词
+          description: 发现“长期主义”数据偏消费软文后，扩展为认知升级、个人成长和职场相关数据
+        - title: 分析爆款封面
+          description: 基于 48 条有效数据，下载阅读量前 20 张封面并做 7 维度视觉分析
+        - title: 归纳风格类型
+          description: 汇总信息图表、电影意境、卡通插画和商务质感 4 类高频风格
+        - title: 生成封面方案
+          description: 输出知识视觉化、沉稳长期主义、克制观点大字 3 套方案
+        - title: 交付报告与图片
+          description: 展示 HTML 分析报告和 3 张认知复利主题横版封面图
+    result:
+      template: html_preview_v1
+      eyebrow: 具体文章配图案例
+      title: 《30岁以后，真正拉开差距的是认知复利》封面方案
+      summary: 基于 48 条有效爆款数据和 Top 20 封面分析，交付 HTML 报告与 3 张封面方案图。
+      html_asset: cognitive_report
+  - id: sensitive-skincare-cover
+    selector:
+      title: 秋冬敏感肌种草封面
+      description: 分析护肤清单类爆款封面，生成 3 个可直接生图方案
+      output_label: 分析报告
+    launch:
+      prompt_short: 我要做一篇小红书转公众号的种草文，主题是“秋冬敏感肌护肤清单”，希望封面看起来专业、干净、有信任感，同时能提升点击率。请查询同类爆款封面，分析视觉规律，并给我 3 个可直接生图的封面方案。
+      prompt: 我要做一篇小红书转公众号的种草文，主题是“秋冬敏感肌护肤清单”，希望封面看起来专业、干净、有信任感，同时能提升点击率。请查询同类爆款封面，分析视觉规律，并给我 3 个可直接生图的封面方案。
+    replay:
+      steps:
+        - title: 解析营销种草需求
+          description: 确认主题为秋冬敏感肌护肤清单，目标是专业、干净、有信任感并提升点击率
+        - title: 查询同类爆款数据
+          description: 使用秋冬、敏感肌、护肤关键词拉取 50 条爆款封面数据
+        - title: 处理并分析封面
+          description: 清理脚本输出后解析 Top 20，逐张下载并从文字、主体、色彩、构图等维度分析
+        - title: 汇总视觉规律
+          description: 归纳高端静物、科技权威、痛点直击、合集清单和大牌精修 5 类风格
+        - title: 生成生图方案
+          description: 输出治愈清单高端静物、专业清单科技背书、秋冬拼贴种草 3 个可生图方案
+        - title: 交付报告与成品图
+          description: 交付 HTML 报告，并按方案顺序展示 3 张秋冬敏感肌主题横版封面图
+    result:
+      template: html_preview_v1
+      eyebrow: 营销种草封面案例
+      title: 秋冬敏感肌护肤清单爆款封面分析
+      summary: 基于 50 条同类爆款数据和 Top 20 封面分析，交付视觉规律总结、3 个可直接生图的封面方案和 3 张成品封面。
+      html_asset: sensitive_skincare_report

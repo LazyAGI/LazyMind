@@ -10,9 +10,12 @@
 [![Windows](https://img.shields.io/badge/Windows-x64-0078D4?style=flat-square&logo=windows)](desktop/README.md)
 [![Local first](https://img.shields.io/badge/deployment-local--first-16a34a?style=flat-square)](docs/quick_start.md)
 
-LazyMind is an **AI Skill Runtime** for knowledge-intensive work. It connects reusable knowledge, executable Skills, observable workflows, editable artifacts, and evaluation-driven improvement in one workspace.
+LazyMind is an **AI Skill Runtime** for knowledge-intensive work: an environment that turns knowledge, expert practice, and tools into executable, recoverable tasks. It connects reusable knowledge, executable Skills, observable workflows, editable artifacts, and evaluation-driven improvement in one workspace.
 
-Instead of repeatedly uploading context, tuning prompts, and supervising every agent step, you choose the knowledge and workflow once. LazyMind then plans, executes, exposes intermediate results, and carries accepted feedback into the next run. Use it locally in **Desktop Mode** or deploy it as a shared enterprise service.
+Instead of repeatedly uploading context, tuning prompts, and supervising every agent step, you choose the knowledge and workflow once. LazyMind then plans, executes, exposes intermediate results, and carries accepted feedback into the next run. Use it locally in **Desktop Mode**, deploy it as a shared enterprise service, or provide knowledge, Skills, and Workflows to external agents such as Codex, Cursor, and WorkBuddy.
+
+- **Desktop Mode** is designed for technically capable professionals whose primary job is not programming, including solution architects, product managers, operators, testers, and content creators.
+- **Team and enterprise deployments** serve secondary development, project delivery, proposals, FDE work, and organization-wide knowledge collaboration with shared permissions, deployment, and evaluation capabilities.
 
 **[Quick start](#quick-start)** · **[Product architecture](docs/architecture.md)** · **[Build a workflow](docs/workflow-format.md)** · **[Desktop mode](desktop/README.md)**
 
@@ -24,9 +27,13 @@ Instead of repeatedly uploading context, tuning prompts, and supervising every a
 |----------|---------------|-------------|
 | **Research and review** | Search sources → retrieve evidence → compare → synthesize → review | A traceable report grounded in your documents and external sources |
 | **AI Writer** | Organize sources → outline → draft sections → revise → final review | An editable, versioned document rather than a one-shot answer |
+| **Presentations** | Clarify intent → gather sources → outline → create and revise slides → export | A PDF or PPTX with speaker notes and locally editable slides |
 | **AI Image** | Interpret intent → collect references → refine prompt → generate/edit | Images and animated stickers with the process retained |
 | **Knowledge assistant** | Connect sources → parse/OCR → hybrid retrieve → rerank → answer | Answers linked back to reusable organizational knowledge |
+| **External agent augmentation** | Connect projects and sessions → call knowledge, Skills, or Workflows → track execution | LazyMind capabilities and artifacts inside the agent you already use |
 | **Quality improvement** | Capture a bad case → evaluate → diagnose → A/B test → deploy | A verified strategy improvement, not an unchecked prompt change |
+
+For an end-to-end product video, see the [Chinese README](README.CN.md#它能交付什么).
 
 ## How LazyMind works
 
@@ -104,7 +111,35 @@ Research methods, writing processes, and domain standards can be managed as Skil
   </tr>
 </table>
 
-### 4. Improve only after evidence
+### 4. From an idea to an editable presentation
+
+The PPT Workflow carries a presentation request through research, outline approval, slide generation, review, and export. It can use the user's prompt, uploaded files, LazyMind knowledge bases, web search results, and AI-generated images as source material, and it produces speaker notes for each slide.
+
+After generation, users can reorder or remove slides and select text or elements for natural-language content and style changes. Results can be exported as PDF, image-based PPTX, or editable PPTX containing text, shapes, images, and charts.
+
+> **Image placeholder: end-to-end PPT Workflow.** Use one 16:9 screenshot showing the execution stages on the left, a real slide preview in the center, and the outline or source-material panel on the right. The stages should visibly cover research, outline, generation, review, and export.
+
+### 5. Discover ready-to-run scenarios in the Capability Center
+
+The Capability Center brings quick chat, complex tasks, and curated examples into one entry point. Users can filter by scenario, capability type, and technical tags; inspect the description, workflow, example input, and interactive result; then launch the capability in Chat or Work. Curated entries are backed by runnable Skills and installed on demand when first used.
+
+> **Image placeholder: Capability Center home and detail view.** Show category filters, at least six curated capability cards, and one detail view with a real result preview and a visible “Try it” action. The image should make clear that these are runnable capabilities rather than static examples.
+
+### 6. Read, question, and revise directly inside documents
+
+The document preview supports conversations scoped to the current document and can cite PDF selections, knowledge chunks, or partial chunk content. Temporary document conversations stay out of normal chat history unless the user chooses to promote and save them.
+
+Selections in chat answers and Writer documents can be revised by AI at the smallest relevant scope. Users review the diff, accept or reject the result, and follow citations back to the original document.
+
+> **Image placeholder: document chat and local revision pair.** Use two side-by-side screenshots: a PDF selection entering a document-scoped conversation with citations, and an AI revision diff with visible Accept and Reject actions.
+
+### 7. Give external agents the same knowledge and capabilities
+
+LazyMind can discover local projects and native task histories from Codex, Cursor, WorkBuddy, TRAE Work, DeepSeek Harness, and other agents, then create, continue, and inspect their work in one workspace. Through MCP, external agents can also use LazyMind Workflows, Skills, knowledge bases, and cloud documents without rebuilding the same task context.
+
+> **Image placeholder: external-agent collaboration.** Show a Codex or Cursor task discovered and continued inside LazyMind, including project or session selection, execution status, tool steps, and a final artifact. Avoid using only a Settings connection screen.
+
+### 8. Improve only after evidence
 
 Knowledge Ops captures what the user wants—preferences, terminology, experience, and Skills. `evo` tests how the system should improve by turning bad cases into evaluation samples and running baseline evaluation, diagnosis, repair, and A/B testing.
 
@@ -121,7 +156,7 @@ Knowledge Ops captures what the user wants—preferences, terminology, experienc
   </tr>
 </table>
 
-### 5. Start local, scale when collaboration requires it
+### 9. Start local, scale when collaboration requires it
 
 Desktop Mode uses native processes, SQLite, and Milvus Lite with platform-standard data paths. Shared deployments add Kong, JWT/RBAC, Core ACL, external Milvus/OpenSearch, and on-premises OCR. Your workflow stays recognizable across both modes.
 
@@ -211,9 +246,14 @@ See the [Colima setup guide](docs/quick_start.md#macos-use-colima-instead-of-doc
 | Area | Current capabilities |
 |------|----------------------|
 | Knowledge base | Multiple sources, OCR, vectorization, hybrid retrieval, reranking, sync management |
-| Agents | RAG chat, tool calls, subtasks, artifacts, task center |
+| Agents | RAG chat, tool calls, subtask timeline, artifacts, task center, long-context compression |
+| Content creation | AI Writer, PPT Workflow, AI Image, local revision, multi-format export |
 | Workflows | State machines, dynamic routing, automatic review, retry/rewind, visual execution, versioned artifacts |
 | Skills | Installation, organization, review, revisions, rollback, Skill → Workflow |
+| Capability Center | Curated Skills, scenario categories, interactive demos, on-demand installation |
+| Document reading | Current-document chat, PDF selection citations, source navigation, temporary conversations |
+| External agents | Local project and session discovery, task continuation, MCP access to knowledge and capabilities |
+| Tasks and conversations | Terminal states, archives, recycle bin, recovery, synchronized task and conversation status |
 | Self-evolution | Eval-set generation, evaluation, bad-case analysis, repair, deployment, A/B testing |
 | Local experience | macOS/Windows local runtime, desktop builds, platform-standard data paths |
 | Enterprise | Kong, JWT/RBAC, ACL, OAuth sources, optional external storage |
@@ -224,30 +264,59 @@ This table describes capabilities implemented in the repository today, not a fut
 
 ## Roadmap
 
-LazyMind's next phase is not about adding more isolated features. The goal is to make knowledge bases, Skills, Workflows, and self-evolution work together in complete, real-world task loops.
+LazyMind's next phase is not about adding more isolated features. The goal is to strengthen the Skill Runtime so knowledge, Skills, Workflows, and self-evolution form complete task loops both inside LazyMind and across other agents.
 
-### Near term: flagship workflows people can try immediately
+### Near term: complete the core v0.4 capabilities
 
-- **Knowledge to deliverable**: complete workflows for customer solutions, product manuals, and product research—from retrieval and planning to drafting, review, and delivery.
-- **Better local revision**: selection-based rewriting, knowledge-grounded expansion, diffs, accept/reject controls, and partial reruns from affected steps.
-- **Result delivery**: stronger Markdown, DOCX, and PDF export, shareable result pages, and initial publishing targets such as Feishu and Notion.
-- **Ready-to-run demos**: sample knowledge packs, task templates, and completed outputs so new users can experience an end-to-end workflow without preparing private data first.
-- **Desktop experience**: simpler installation, model setup, data import, and local-runtime diagnostics.
+**Skill Runtime and Desktop**
 
-### Mid term: a distribution network for knowledge and capabilities
+- **Popular Skill compatibility and evaluation**: measure installability, safety, core-flow completion, and output quality so verified Skills run without source changes and failures explain the actual cause.
+- **Curated Skill scale-up**: expand verified official Skills and reproducible demos across representative industries and tasks, using quality results as a recommendation signal.
+- **Skill → Workflow experience**: add preflight checks, progress and failure diagnosis, task recovery, and explicit association with the original Skill; let users choose either execution path.
+- **On-demand Skill and Tool retrieval**: retrieve only the capabilities relevant to a task and load full definitions after a match to reduce context and token use.
+- **Trusted local workspace**: let Desktop Work users select and authorize local folders, read or write within explicit boundaries, and review or revoke access.
+- **Browser context**: use a Chrome extension, with user authorization, to obtain the current page title, body, links, and basic metadata for complex tasks.
+- **Onboarding and task preflight**: improve model setup, dependency checks, permission guidance, failure recovery, and local-runtime diagnostics for non-developers.
 
-- **Knowledge and Skill/Workflow marketplace**: curated discovery, one-click installation, updates, dependency checks, and trusted-source information.
-- **Reusable scenario packages**: combine workflows, knowledge packs, review rules, and output formats into installable industry solutions.
-- **External agent access**: expose LazyMind knowledge and workflows to Codex, Cursor, Hermes Agent, OpenClaw, and others through MCP, CLI, OpenAPI, and SDKs.
-- **More connectors**: progressively connect collaboration, email, calendar, code, and task systems for weekly reports, research, and content workflows.
-- **Team collaboration**: improve workflow sharing, approvals, permissions, run history, and organization-level template governance.
+**External agent ecosystem**
+
+- **Complete Workflow invocation**: let Codex, Cursor, WorkBuddy, TRAE Work, DeepSeek Harness, and other supported agents submit Skills and tasks, then receive status, result files, and LazyMind task links.
+- **Unified document access**: expose local files, Feishu, Notion, and Google Drive within existing authorization boundaries and return consistent content and source metadata.
+- **Shared models and tools**: proxy authorized models and tools through LazyMind so multiple agents can reuse one configuration without receiving raw API keys.
+- **Permissions and audit**: centrally manage external-agent grants, call status, usage, and execution history.
+
+**Task and resource infrastructure**
+
+- **Unified File Resource**: cover attachments, knowledge bases, web results, MCP Resources, and every Artifact type, with on-demand reading for large content.
+- **Conversation organization**: support conversation forks, groups, and retained sub-conversations so exploratory branches remain organized and resumable.
+- **Artifact delivery**: give documents, sheets, images, code, and archives explicit completion, preview, and download states.
+- **Preference consolidation**: merge duplicate or conflicting preferences and remove low-value entries so important preferences continue to reach task context.
+
+### Mid term: connect knowledge, creation, and distribution
+
+**Knowledge sources, editing, and publishing**
+
+- **Long-form sources**: connect Obsidian, GitHub Docs/Wiki, and Yuque while improving Notion synchronization, attachments, and write-back.
+- **Unified content representation**: strengthen round-trip conversion among Markdown, Writer IR, and platform rich text, previewing format degradation without silently dropping images, code, or body content.
+- **Result delivery**: improve high-fidelity DOCX and other exports, shareable result pages, and publishing to Feishu, Notion, and WeChat Official Account drafts.
+- **Multi-channel notification and email**: deliver scheduled-task results through Feishu, WeCom, WeChat, and other channels; support email reading, task assistance, and draft generation.
+- **Scenario packages and team governance**: package Workflows, Skills, knowledge, review rules, and output formats together, with dependency, security, version, and organization controls.
+
+**Flagship scenario: evidence-driven paper research and technical writing**
+
+- Translate, explain, question, collect vocabulary, and save evidence from PDF selections, with navigation back to the original text.
+- Expand from one paper to related-paper search, import, multi-paper comparison, and literature review while distinguishing full text, abstracts, and model inference.
+- Introduce Evidence between papers and the final document, bind evidence to sections, draft incrementally, and check whether key claims are supported.
+- Reuse AI Writer for material analysis, outlining, section drafting, local evidence repair, citation verification, and export with a complete paper list.
+
+> **Image placeholder: paper reading to technical-guide workflow.** Use a horizontal flow or four-panel composition showing PDF selection reading, the paper Evidence list, multi-paper comparison, and citation-grounded writing in AI Writer. Every stage should visibly preserve source information or navigation back to the original text.
 
 ### Long term: from executable workflows to a self-evolving work system
 
 - Detect workflow and knowledge gaps from user edits, reruns, citations, and final acceptance signals.
 - Continuously evaluate and A/B test retrieval strategies, prompts, models, tools, and Workflow revisions.
 - Turn successful execution patterns into reusable Skills, templates, and organizational memory with full provenance and version history.
-- Expand across industries through horizontal task templates plus vertical knowledge packs instead of rebuilding the product for every industry.
+- Expand across industries through horizontal task templates, vertical knowledge packs, and installable scenario packages instead of rebuilding the product for every industry.
 
 The roadmap will evolve based on real workflow completion rates, output quality, human interventions, latency, and cost. Repository issues, milestones, and release notes remain the source of truth for specific releases.
 

@@ -28,18 +28,21 @@ assets:
   cover:
     file: assets/cover.png
     role: cover
+  hot_news_demo:
+    file: assets/hot-news-demo.html
+    role: result
 
 presentation:
   card:
     title: 每日话题助手
-    description: 聚合多平台热榜，筛选今日热点并生成有事实依据的三层洞察摘要
+    description: 从多平台热榜里筛出值得关注的话题，讲清发生了什么、为什么重要、接下来关注什么
     output_type: report
     output_label: 每日热点摘要
     cover_asset: cover
-    result_summary: 从多平台热榜筛选高价值话题，输出事件本质、影响链和后续关注点
+    result_summary: 查看从热榜聚合、筛选去重到三层洞察和引用整理的完整摘要案例
   detail:
     title: 每日话题助手
-    description: 聚合微博、知乎、B站、抖音、百度、36氪、少数派和贴吧等平台热榜，筛选热点并生成结构化洞察摘要。
+    description: 把微博、知乎、B站、抖音、百度、36氪、少数派和贴吧等平台的热榜信号放在一起，筛选出值得看的话题，再用“发生了什么、为什么重要、接下来关注什么”整理成有来源的摘要。
     attachment_hint: 可选提供关注领域、排除领域、点评风格或输出格式
 
 tasks:
@@ -49,8 +52,9 @@ tasks:
       description: 从多平台热榜中筛选热点，分析事件影响并给出后续关注点
       output_label: 今日热点摘要
     launch:
-      prompt_short: 帮我生成一份今日热点摘要。
-      prompt: 请基于当前可获取的信息整理一份今日热点简报，突出值得关注的话题和简短分析；如信息不足或来源不可用，请说明数据局限。
+      prompt_short: 帮我看看今天有哪些值得关注的热点。
+      prompt: >-
+        帮我基于现在能查到的信息整理一份今天的热点摘要吧。如果来源打不开、信息不够或只能看到热榜标题，请直接告诉我，不要把猜测写成事实。
     replay:
       steps:
         - title: 聚合多平台热榜
@@ -62,11 +66,8 @@ tasks:
         - title: 整理引用与报告
           description: 补充来源链接、摘录、检索说明并输出结构化摘要
     result:
-      template: generic_report_v1
+      template: html_preview_v1
       eyebrow: 每日热点摘要
       title: 今日热点与话题洞察报告
-      summary: 聚合多平台热榜，筛选高价值话题并输出可核验的三层洞察、来源和后续关注点
-      highlights:
-        - 多平台热榜状态与热点筛选结果
-        - What、So What、Now What 三层事件洞察
-        - 来源链接、摘录、检索说明与趋势线索
+      summary: 交互查看热榜聚合、评分筛选、What / So What / Now What 三层洞察、引用整理和后续关注清单；样例内容不代表实时新闻结论。
+      html_asset: hot_news_demo

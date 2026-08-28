@@ -83,7 +83,7 @@ func (c *LocalFSConnector) virtualPath(path string) string {
 		return ""
 	}
 	cleaned := cleanPath(path)
-	if c.publicRoot == "" || cleaned == "." || !c.isPublicRootPath(cleaned) {
+	if c.publicRoot == "" || c.dynamicRoots || cleaned == "." || !c.isPublicRootPath(cleaned) {
 		return cleaned
 	}
 	if cleaned == c.publicRoot {

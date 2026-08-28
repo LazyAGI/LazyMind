@@ -10,6 +10,7 @@ import type { SkillViewMode, StructuredAsset } from "../../shared";
 import type { MarketSkillAsset } from "./skillMarketMockData";
 import {
   deleteSkillMarketItem,
+  getRunningSkillOrganizeTask,
   getSkillMarketItem,
   installSkillFromMarket,
   listBuiltinSkills,
@@ -110,7 +111,18 @@ export default function SkillManagementSection() {
     handleRunManualSkillReview,
   } = useMemoryManagementOutletContext();
 
+  const refreshSkillAssetsRef = useRef(refreshSkillAssets);
+  const skillListPageRef = useRef(skillListPage);
+
   const isAdmin = isAdminRole(AgentAppsAuth.getUserInfo()?.role);
+
+  useEffect(() => {
+    refreshSkillAssetsRef.current = refreshSkillAssets;
+  }, [refreshSkillAssets]);
+
+  useEffect(() => {
+    skillListPageRef.current = skillListPage;
+  }, [skillListPage]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -413,6 +425,73 @@ export default function SkillManagementSection() {
     }
   };
 
+  const followSkillOrganize = useCallback(
+    async (requestId: string, pollingController: AbortController) => {
+      setOrganizeSubmitting(true);
+      setOrganizeStatus("running");
+
+      try {
+        const task = await waitForSkillOrganize(
+          requestId,
+          pollingController.signal,
+        );
+        if (task.status === "failed") {
+          throw new Error("Skill organize task failed");
+        }
+        if (task.status === "skipped") {
+          setOrganizeStatus("skipped");
+          return;
+        }
+        await refreshSkillAssetsRef.current({ page: skillListPageRef.current });
+        setOrganizeStatus("success");
+      } catch (error) {
+        if (pollingController.signal.aborted) {
+          return;
+        }
+        console.error("Skill organize task failed:", error);
+        setOrganizeStatus("error");
+      } finally {
+        if (organizePollingControllerRef.current === pollingController) {
+          organizePollingControllerRef.current = null;
+        }
+        if (!pollingController.signal.aborted) {
+          setOrganizeSubmitting(false);
+        }
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
+    const pollingController = new AbortController();
+    organizePollingControllerRef.current = pollingController;
+
+    void (async () => {
+      try {
+        const task = await getRunningSkillOrganizeTask(
+          pollingController.signal,
+        );
+        if (!task || pollingController.signal.aborted) {
+          if (organizePollingControllerRef.current === pollingController) {
+            organizePollingControllerRef.current = null;
+          }
+          return;
+        }
+        await followSkillOrganize(task.requestId, pollingController);
+      } catch (error) {
+        if (pollingController.signal.aborted) {
+          return;
+        }
+        if (organizePollingControllerRef.current === pollingController) {
+          organizePollingControllerRef.current = null;
+        }
+        console.error("Load running skill organize task failed:", error);
+      }
+    })();
+
+    return () => pollingController.abort();
+  }, [followSkillOrganize]);
+
   const handleOrganizeSubmit = async () => {
     const skills = [...selectedOrganizeSkills.values()].filter(
       isSkillOrganizeEligible,
@@ -441,33 +520,20 @@ export default function SkillManagementSection() {
       if (!result.requestId || !result.taskId) {
         throw new Error("Skill organize task was not accepted");
       }
-
-      const task = await waitForSkillOrganize(
-        result.requestId,
-        pollingController.signal,
-      );
-      if (task.status === "failed") {
-        throw new Error("Skill organize task failed");
-      }
-      if (task.status === "skipped") {
-        setOrganizeStatus("skipped");
+      if (pollingController.signal.aborted) {
         return;
       }
-      await refreshSkillAssets({ page: skillListPage });
-      setOrganizeStatus("success");
+      await followSkillOrganize(result.requestId, pollingController);
     } catch (error) {
       if (pollingController.signal.aborted) {
         return;
       }
-      console.error("Skill organize task failed:", error);
-      setOrganizeStatus("error");
-    } finally {
       if (organizePollingControllerRef.current === pollingController) {
         organizePollingControllerRef.current = null;
       }
-      if (!pollingController.signal.aborted) {
-        setOrganizeSubmitting(false);
-      }
+      console.error("Skill organize task failed:", error);
+      setOrganizeStatus("error");
+      setOrganizeSubmitting(false);
     }
   };
 

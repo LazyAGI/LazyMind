@@ -1081,6 +1081,36 @@ func TestStartupCapabilityReadyIncludesFrontendPort(t *testing.T) {
 	}
 }
 
+func TestStartupProgressEventIncludesPythonPayloadProgress(t *testing.T) {
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(t.TempDir(), "local-runtime-manager"))
+	var output strings.Builder
+	manager.SetOutput(&output, &output)
+
+	manager.startupEventWithDetails("phase.progress", "python-payload", time.Now(), nil, map[string]any{
+		"stage":          "extracting",
+		"completedFiles": 7,
+		"totalFiles":     10,
+		"completedBytes": 700,
+		"totalBytes":     1000,
+	})
+
+	const marker = "[startup-event] "
+	line := strings.TrimSpace(output.String())
+	if !strings.HasPrefix(line, marker) {
+		t.Fatalf("startup progress output = %q", line)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(strings.TrimPrefix(line, marker)), &payload); err != nil {
+		t.Fatalf("unmarshal startup progress event: %v", err)
+	}
+	if payload["event"] != "phase.progress" || payload["phase"] != "python-payload" || payload["stage"] != "extracting" {
+		t.Fatalf("unexpected startup progress event: %#v", payload)
+	}
+	if payload["completedFiles"] != float64(7) || payload["totalBytes"] != float64(1000) {
+		t.Fatalf("unexpected startup progress values: %#v", payload)
+	}
+}
+
 func TestStatusMigratesLegacyDockerStackState(t *testing.T) {
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)

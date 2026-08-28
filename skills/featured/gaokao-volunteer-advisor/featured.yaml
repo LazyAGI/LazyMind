@@ -27,18 +27,30 @@ assets:
   cover:
     file: assets/cover.png
     role: cover
+  volunteer_plan_demo:
+    file: assets/volunteer-plan-demo.html
+    role: result
+  rank_analysis_demo:
+    file: assets/rank-analysis-demo.html
+    role: result
+  major_selection_demo:
+    file: assets/major-selection-demo.html
+    role: result
+  admission_rules_demo:
+    file: assets/admission-rules-demo.html
+    role: result
 
 presentation:
   card:
     title: 高考志愿填报顾问
-    description: 根据成绩、位次和个人偏好，辅助完成院校专业选择与冲稳保规划
+    description: 从位次判断、专业比较到冲稳保排序，交互查看一套完整的志愿决策案例
     output_type: report
-    output_label: 志愿填报建议
+    output_label: 交互式志愿规划案例
     cover_asset: cover
-    result_summary: 从位次分析到志愿梯度，形成可继续调整的高考志愿决策参考
+    result_summary: 以演示数据串联位次分析、志愿梯度、专业适配和录取规则核查，结果可继续调整
   detail:
     title: 高考志愿填报顾问
-    description: 根据成绩、位次、选科和个人偏好，完成院校专业筛选、冲稳保规划与录取风险分析。
+    description: 根据成绩、位次、选科和个人偏好，完成院校专业筛选、冲稳保规划与录取风险分析。可直接浏览四个交互案例，了解从输入条件到志愿决策的完整过程；案例数据仅用于展示，不替代官方招生信息。
     attachment_hint: 成绩、位次、选科和院校专业意向表
 
 tasks:
@@ -48,8 +60,9 @@ tasks:
       description: 综合位次、选科和个人偏好制定冲稳保志愿方案
       output_label: 志愿填报方案
     launch:
-      prompt_short: 根据我的高考成绩、位次和个人偏好制定一份冲稳保志愿方案。
-      prompt: 请根据我提供的省份、年份、选科、分数、位次、院校层次、城市和专业偏好，制定一份高考志愿填报方案。请说明冲稳保梯度、院校专业选择依据、主要风险和后续调整建议；信息不足时先向我询问关键资料。
+      prompt_short: 我在江苏省，2025年物化地、612分、位次18420，偏好江浙沪工科，请排一份冲稳保方案。
+      prompt: >-
+        请直接根据我的以下信息生成一份完整的冲、稳、保志愿方案，不要先追问：我在江苏省，2025年，选科组合为物理/化学/地理，分数612分，全省位次18420；城市偏好为江浙沪，专业偏好为工科，优先考虑计算机、电子信息、自动化和软件工程，接受专业调剂。我的候选参考位次为：东澜大学·计算机类15800、江南理工·电子信息类16900、海州工业大学·自动化19100、宁川科技大学·软件工程20300、南浦大学·信息管理26800、岭南应用大学·数字媒体31500。请按冲2所、稳2所、保2所整理志愿顺序，说明位次匹配、专业与城市偏好、调剂和退档风险、需要核验的官方信息；这些院校和位次尚未附官方来源，请标记为待核验，不能直接当作正式录取概率或填报依据。
     replay:
       steps:
         - title: 核对考试信息
@@ -61,14 +74,11 @@ tasks:
         - title: 输出志愿方案
           description: 给出志愿顺序、选择依据、风险和调整建议
     result:
-      template: generic_report_v1
-      eyebrow: 志愿填报方案
-      title: 冲稳保志愿规划建议
-      summary: 形成包含冲稳保梯度、院校专业依据和风险提示的志愿方案
-      highlights:
-        - 分层院校与专业候选清单
-        - 冲稳保梯度和志愿顺序
-        - 退档、调剂与专业限制风险
+      template: html_preview_v1
+      eyebrow: 志愿填报案例
+      title: 从位次到冲稳保志愿清单
+      summary: 交互查看演示分数、志愿梯度、院校专业依据和风险检查；样例数据不代表官方录取结果。
+      html_asset: volunteer_plan_demo
 
   - id: rank-analysis
     selector:
@@ -76,8 +86,9 @@ tasks:
       description: 根据分数和位次判断目标院校专业的录取可能性
       output_label: 位次分析报告
     launch:
-      prompt_short: 分析我的高考位次能够报考哪些院校和专业。
-      prompt: 请根据我提供的省份、年份、选科、分数和位次进行高考录取位次分析，说明可重点关注的院校层次、专业范围及冲稳保边界；如缺少目标院校或历年数据，请先向我补充询问并明确数据局限。
+      prompt_short: 用我在江苏省的2025年物化地、612分、位次18420，分析五所目标院校的冲稳保边界。
+      prompt: >-
+        请直接根据我的以下信息分析目标院校，不要先追问：我在江苏省，2025年，选科组合为物理/化学/地理，分数612分，全省位次18420，偏好江浙沪工科。请比较这些目标院校专业及参考位次：东澜大学·计算机类15800、海州工业大学·自动化19100、宁川科技大学·软件工程20300、南浦大学·信息管理26800、岭南应用大学·数字媒体31500。请按冲、稳、保划分参考边界，解释位次区间和波动该如何阅读，并列出数据口径、招生计划、专业组和官方来源等待核验项；这些学校、位次和判断尚未完成官方核验，请不要把示意区间写成真实录取概率。
     replay:
       steps:
         - title: 确认位次口径
@@ -89,14 +100,11 @@ tasks:
         - title: 输出分析结论
           description: 总结机会、风险和需要继续核实的数据
     result:
-      template: generic_report_v1
-      eyebrow: 位次分析报告
-      title: 院校专业录取区间分析
-      summary: 以位次为核心给出目标院校专业的录取区间和风险判断
-      highlights:
-        - 位次口径与历史数据对齐
-        - 目标院校专业录取区间
-        - 数据波动和判断限制
+      template: html_preview_v1
+      eyebrow: 位次分析案例
+      title: 院校专业录取区间与风险判断
+      summary: 交互查看位次区间、历史波动和冲稳保边界，并保留数据口径与核验提示。
+      html_asset: rank_analysis_demo
 
   - id: major-selection
     selector:
@@ -104,8 +112,9 @@ tasks:
       description: 结合兴趣、学科优势和发展方向筛选专业
       output_label: 专业选择建议
     launch:
-      prompt_short: 根据我的兴趣和学科特点推荐适合的大学专业。
-      prompt: 请根据我的兴趣、学科优势、性格特点、职业倾向、选科限制和城市偏好，帮助我筛选适合的大学专业。请比较专业学习内容、能力要求、就业方向、深造路径和潜在风险，并给出进一步了解专业的方法。
+      prompt_short: 根据“物化地、数学较好、喜欢拆解问题、想留长三角”比较三类大学专业。
+      prompt: >-
+        请直接根据我的以下情况比较大学专业，不要先追问：选科组合为物理/化学/地理，喜欢拆解问题，数学基础较好，希望留在长三角，重视实习和就业弹性。请比较计算机科学与技术、临床医学、工业设计三个方向，分别说明课程内容、能力要求、培养周期、发展路径、选科或身体条件限制和需要核验的官方信息，并给出适配度排序及其局限；适配度只是解释工具，不是录取或就业承诺，请将无法核验的信息标记出来。
     replay:
       steps:
         - title: 识别个人特征
@@ -117,14 +126,11 @@ tasks:
         - title: 形成推荐清单
           description: 给出推荐优先级、理由和验证方式
     result:
-      template: generic_report_v1
-      eyebrow: 专业选择建议
-      title: 大学专业适配与发展建议
-      summary: 形成带有适配理由、学习路径和风险提示的专业推荐清单
-      highlights:
-        - 兴趣与能力适配分析
-        - 专业学习和发展路径比较
-        - 选科、身体条件和就业风险
+      template: html_preview_v1
+      eyebrow: 专业选择案例
+      title: 兴趣、能力与发展路径专业比较
+      summary: 交互比较专业适配度、课程方向、发展路径和需要继续核实的限制条件。
+      html_asset: major_selection_demo
 
   - id: admission-rules
     selector:
@@ -132,8 +138,9 @@ tasks:
       description: 解读平行志愿、投档、调剂和退档等关键规则
       output_label: 录取规则说明
     launch:
-      prompt_short: 解读我所在省份的高考志愿投档和录取规则。
-      prompt: 请解读我所在省份和对应年份的高考志愿投档录取规则，重点说明批次设置、平行志愿、投档比例、专业调剂、退档风险和特殊类型招生。请区分官方规则、一般经验和需要进一步核实的信息，并优先提示可能影响填报结果的关键限制。
+      prompt_short: 用江苏省2025年普通本科批物理类平行志愿，检查投档、调剂和退档风险。
+      prompt: >-
+        请直接根据我的以下情况生成一份录取规则与风险检查，不要先追问：我在江苏省，考试年份为2025年，普通本科批，物理类，实行平行志愿，以院校专业组为志愿单位，暂按接受专业调剂处理。请依次解释适用范围、按位次检索和投档流程、专业组录取与调剂、退档及特殊限制，并输出提交前核验清单；明确区分通用流程与必须查阅的江苏省招生规定、目标院校招生章程，无法核验的内容不要下确定结论。
     replay:
       steps:
         - title: 确认省份与年份
@@ -145,11 +152,8 @@ tasks:
         - title: 输出规则清单
           description: 整理填报前需要确认的规则和官方核验入口
     result:
-      template: generic_report_v1
-      eyebrow: 录取规则说明
-      title: 高考投档录取规则检查清单
-      summary: 将复杂录取政策整理为可执行的填报规则和风险检查清单
-      highlights:
-        - 投档与录取流程
-        - 调剂和退档风险
-        - 需从官方渠道核实的规则
+      template: html_preview_v1
+      eyebrow: 录取规则案例
+      title: 投档、调剂与退档风险检查
+      summary: 按流程查看投档规则、关键限制和待核验清单；规则内容需以对应省份官方文件为准。
+      html_asset: admission_rules_demo

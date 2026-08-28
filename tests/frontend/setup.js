@@ -15,6 +15,7 @@ export const readRepoFile = (...parts) =>
 export const frontendDockerfileSource = readFrontendFile('Dockerfile');
 export const indexHtml = readFrontendFile('index.html');
 export const localRuntimeFrontendSource = readRepoFile('local/local-runtime-manager/frontend.go');
+export const appSource = readFrontendFile('src/App.tsx');
 export const mainEntry = readFrontendFile('src/main.tsx');
 export const routerSource = readFrontendFile('src/router/index.tsx');
 export const mainLayoutSource = readFrontendFile('src/layouts/MainLayout.tsx');

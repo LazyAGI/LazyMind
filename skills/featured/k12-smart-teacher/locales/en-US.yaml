@@ -11,25 +11,26 @@ classification:
 presentation:
   card:
     title: K12 smart teacher
-    description: Review homework, explain mistakes, and generate tiered practice across nine K12 subjects
+    description: Move from homework review and mistake explanations to tiered practice papers through interactive tutoring cases
     output_type: document
-    output_label: Tutoring plan
+    output_label: Interactive tutoring cases
     cover_asset: cover
-    result_summary: Turn mistake analysis into printable, adjustable explanations and practice materials
+    result_summary: Explore a Grade 5 fractions case with review steps, worked explanations, tiered practice, and an A4 paper
   detail:
     title: K12 smart teacher
-    description: Use the student's grade, subject, curriculum, and homework to review answers, explain mistakes, and generate tiered practice.
+    description: Use the student's grade, subject, curriculum, and homework to review answers, explain mistakes, and generate tiered practice. Browse the Grade 5 fractions cases to see the complete path from a mistake to a printable paper.
     attachment_hint: Clear homework or test images, grade, subject, and curriculum version
 
 tasks:
   - id: homework-review
     selector:
       title: Homework review and tutoring
-      description: Check each answer, diagnose mistakes, and provide explanations and reinforcement
-      output_label: Mistake tutoring report
+      description: Check each answer, diagnose mistakes, and explore the explanation and reinforcement case
+      output_label: Interactive mistake-tutoring case
     launch:
-      prompt_short: Review my uploaded homework, explain the mistakes, and provide targeted practice.
-      prompt: Review the uploaded homework or test question by question. First confirm the student's grade, subject, and curriculum. For every mistake, explain the cause, correct approach, and key concept in an accessible way, and provide useful video-search keywords. Finish with a small set of transfer exercises and answers. Ask for missing details when the image or context is insufficient.
+      prompt_short: Check Xiao Yu's Grade 5 fractions homework across multiple-choice, fill-in, and written-response questions, then explain the mistakes.
+      prompt: >-
+        The student is Xiao Yu, Grade 5 semester 2, People's Education Press mathematics, topic fractions and fraction addition/subtraction. Please review this homework, identify the mistakes and weak concepts, and create targeted reinforcement practice. It contains two multiple-choice, two fill-in, and two written-response questions. Questions and student answers: 1. Multiple choice: What is 3/8 + 1/4? A. 4/12 B. 5/8 C. 7/8 D. 1/2. Student chose C. 2. Multiple choice: What is 1 − 2/5? A. 3/5 B. 2/5 C. 1/5 D. 7/5. Student chose A. 3. Fill in: 2/3 + 1/6 = ( ). Student wrote 4/9. 4. Fill in: 7/8 − 1/4 = ( ). Student wrote 5/8. 5. Written response: A student reads 1/4 of a book on the first day and 3/10 on the second day. What fraction of the book is read in total? Student wrote 4/14. 6. Written response: Tomatoes cover 3/8 of a plot and cucumbers cover 1/4; what fraction is planted with greens? Student wrote 3/8.
     replay:
       steps:
         - title: Identify subject and level
@@ -43,23 +44,21 @@ tasks:
         - title: Generate reinforcement
           description: Provide tiered practice, answers, and common-error reminders
     result:
-      template: generic_report_v1
-      eyebrow: Mistake tutoring report
-      title: Homework review and personalized reinforcement plan
-      summary: Deliver review results, mistake causes, explanations, and follow-up practice
-      highlights:
-        - Question-by-question review and knowledge-gap list
-        - Mistake diagnosis and visual explanations
-        - Transfer practice, answers, and study suggestions
+      template: html_preview_v1
+      eyebrow: Mistake-tutoring case
+      title: Grade 5 fractions tutoring report
+      summary: Explore question recognition, verdicts, a common-denominator diagnosis, worked explanations, and reinforcement practice.
+      html_asset: homework_review_demo
 
   - id: graded-practice
     selector:
       title: Tiered practice generation
-      description: Generate foundation, intermediate, and challenge exercises for a target topic
-      output_label: Tiered exercises
+      description: Generate a foundation-to-challenge exercise case for a target topic
+      output_label: Interactive tiered-practice case
     launch:
-      prompt_short: Generate tiered practice for the specified grade, subject, and topic.
-      prompt: Use the grade, subject, curriculum, and topic I provide. Begin with a concise worked example, then create foundation, intermediate, and challenge exercises covering typical question types and common mistakes. Include answers, explanations, and error reminders. If the topic is outside the built-in bank, produce a useful general version and state what curriculum details would improve it.
+      prompt_short: Create a three-level Grade 5 fractions set around “find a common denominator first.”
+      prompt: >-
+        Directly create a 20-minute tiered practice set for a Grade 5 semester 2 People's Education Press mathematics student, without asking follow-up questions about the textbook or topic. The topic is fraction addition and subtraction. Teach this method first: find a common denominator, rewrite the fractions with that denominator, add or subtract the numerators, and check whether the result can be simplified. Focus on the errors “adding unlike denominators directly” and “not subtracting from the whole 1 when finding what remains.” Organize the work into foundation, intermediate, and challenge levels, covering calculations, word problems, true-or-false reasoning, and explaining why denominators must be made common; write every question in complete language and include the answer, key steps, and an error reminder for each.
     replay:
       steps:
         - title: Confirm practice scope
@@ -71,23 +70,21 @@ tasks:
         - title: Generate answer explanations
           description: Provide answers, key steps, and error reminders for every question
     result:
-      template: generic_report_v1
-      eyebrow: Tiered exercises
-      title: Foundation · intermediate · challenge practice
-      summary: Produce exercises, answers, and explanations matched to the student's stage and gaps
-      highlights:
-        - Three difficulty tiers and representative question types
-        - Standard answers and key-step explanations
-        - Common-error reminders and review suggestions
+      template: html_preview_v1
+      eyebrow: Tiered-practice case
+      title: "Fractions practice: foundation · intermediate · challenge"
+      summary: Explore three levels of questions, worked answers, error reminders, and the next-practice entry point around common denominators.
+      html_asset: graded_practice_demo
 
   - id: printable-paper
     selector:
       title: Printable practice paper
-      description: Turn mistakes and learning gaps into structured printable materials
-      output_label: Printable practice paper
+      description: Turn mistakes and learning gaps into a printable student paper and answer-key case
+      output_label: Interactive printable-paper case
     launch:
-      prompt_short: Turn the mistakes and weak topics into a printable practice paper.
-      prompt: Use the mistakes, grade, subject, and weak topics I provide to create a clear printable practice paper. Include a title, student information area, tiered questions, answer space, reference answers, and explanations. Prefer a Word document. If Word dependencies are unavailable, automatically fall back to Markdown and explain how I can use or convert the file.
+      prompt_short: Turn Xiao Yu's three latest fraction mistakes into a Grade 5 A4 practice paper.
+      prompt: >-
+        Directly create a printable A4 mathematics paper for Xiao Yu, Grade 5 semester 2, People's Education Press, without asking follow-up questions. Sync it with the three latest mistakes: multiple-choice 3/8 + 1/4, where the student chose C instead of B; fill-in 2/3 + 1/6, where the student wrote 4/9 instead of 5/6; and written-response 1/4 + 3/10, where the student wrote 4/14 instead of 11/20. Center the paper on unlike-denominator fractions and written-response setup, with two multiple-choice, two fill-in, and two written-response questions, an advised time of 20 minutes, complete wording, and separate student paper and answer key. In the explanations, connect each latest mistake to the common-denominator step and the equation setup. Prefer a Word file; if the dependency is unavailable, fall back to Markdown and say so.
     replay:
       steps:
         - title: Collect learning materials
@@ -99,11 +96,8 @@ tasks:
         - title: Create the printable file
           description: Prefer Word and automatically fall back to Markdown when needed
     result:
-      template: generic_report_v1
-      eyebrow: Printable practice paper
-      title: Personalized mistake-reinforcement paper
-      summary: Create a printable file with exercises, answer space, answers, and explanations
-      highlights:
-        - Complete structure suitable for printing
-        - Tiered questions targeting learning gaps
-        - Word-first output with Markdown fallback
+      template: html_preview_v1
+      eyebrow: Printable-paper case
+      title: Fractions A4 reinforcement paper
+      summary: Switch between the student paper and answer key to inspect answer space, scores, print layout, and correction notes.
+      html_asset: printable_paper_demo

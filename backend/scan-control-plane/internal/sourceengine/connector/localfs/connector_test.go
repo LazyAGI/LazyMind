@@ -364,6 +364,32 @@ func TestDynamicRootsAcceptAgentAuthorizedAbsolutePathOutsideInitialPublicRoot(t
 	}
 }
 
+func TestDynamicRootsPreserveAbsolutePathInsideInitialPublicRoot(t *testing.T) {
+	t.Parallel()
+
+	publicRoot := filepath.Join(string(filepath.Separator), "host", "root")
+	if os.PathSeparator == '\\' {
+		publicRoot = `C:\host\root`
+	}
+	conn := NewLocalFSConnector(
+		newAgentStub(),
+		WithDefaultAgentID("agent-default"),
+		WithPublicRoot(publicRoot),
+		WithDynamicRoots(true),
+	)
+	path := filepath.Join(publicRoot, "sdsdsd")
+	raw := connector.RawObject{
+		ObjectRef:        path,
+		ParentRef:        filepath.Dir(path),
+		BindingTargetRef: path,
+	}
+
+	got := conn.virtualTargetObject(raw)
+	if got.ObjectRef != path || got.ParentRef != filepath.Dir(path) || got.BindingTargetRef != path {
+		t.Fatalf("dynamic root paths must remain absolute: got %+v, want %q", got, path)
+	}
+}
+
 func TestPublicRootRejectsPathsOutsideMountedRoot(t *testing.T) {
 	t.Parallel()
 

@@ -11,14 +11,14 @@ classification:
 presentation:
   card:
     title: Daily topic assistant
-    description: Aggregate hot lists, select today's key topics, and produce evidence-based three-layer insights
+    description: Find the topics worth your attention across hot lists and explain what happened, why it matters, and what to watch next
     output_type: report
     output_label: Daily hot-topic digest
     cover_asset: cover
-    result_summary: Select valuable topics across platforms and explain what happened, why it matters, and what to watch next
+    result_summary: Explore the full path from hot-list aggregation and filtering to three-layer insights and source notes
   detail:
     title: Daily topic assistant
-    description: Aggregate hot lists from platforms such as Weibo, Zhihu, Bilibili, Douyin, Baidu, 36Kr, SSPAI, and Tieba, then produce a structured insight digest.
+    description: Bring together hot-list signals from Weibo, Zhihu, Bilibili, Douyin, Baidu, 36Kr, SSPAI, and Tieba, filter the topics worth reading, and explain what happened, why it matters, and what to watch next with source notes.
     attachment_hint: Optionally provide preferred or excluded topics, commentary style, or output format
 
 tasks:
@@ -28,8 +28,9 @@ tasks:
       description: Select topics from multi-platform hot lists, analyze their impact, and identify what to watch next
       output_label: Today's hot-topic digest
     launch:
-      prompt_short: Generate today's hot-topic digest for me.
-      prompt: Based on the information currently available, prepare a concise digest of today's hot topics with brief analysis of what is worth attention. If information is insufficient or sources are unavailable, state the data limitations clearly.
+      prompt_short: Help me see which topics are worth following today.
+      prompt: >-
+        Based on what can be found right now, please prepare a digest of today's hot topics. If a source is unavailable, the information is insufficient, or only a hot-list title is visible, tell me directly and do not present guesses as facts.
     replay:
       steps:
         - title: Aggregate multi-platform hot lists
@@ -41,11 +42,8 @@ tasks:
         - title: Assemble sources and report
           description: Add source links, excerpts, search notes, and the structured digest
     result:
-      template: generic_report_v1
+      template: html_preview_v1
       eyebrow: Daily hot-topic digest
       title: Today's hot topics and insights report
-      summary: Aggregate multi-platform hot lists and deliver verifiable three-layer insights, sources, and follow-up signals
-      highlights:
-        - Platform status and selected hot topics
-        - What, So What, and Now What insights for each event
-        - Source links, excerpts, search notes, and trend signals
+      summary: Explore hot-list aggregation, filtering, What / So What / Now What insights, source notes, and follow-up questions; sample content is not a real-time news conclusion.
+      html_asset: hot_news_demo

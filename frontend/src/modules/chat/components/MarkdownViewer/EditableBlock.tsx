@@ -30,10 +30,36 @@ interface EditableBlockProps {
   onCiteSelection?: (text: string) => void;
 }
 
-function replaceSelectedText(markdown: string, selectedText: string, replacement: string) {
-  const index = markdown.indexOf(selectedText);
-  if (index < 0) throw new Error("selected text is no longer present");
-  return markdown.slice(0, index) + replacement + markdown.slice(index + selectedText.length);
+function resolveSelectionRange(markdown: string, selection: ArtifactRewriteSelection) {
+  const selectedText = selection.selectedText;
+  const paragraphText = selection.paragraph?.textContent ?? "";
+  const paragraphStart = paragraphText ? markdown.indexOf(paragraphText) : -1;
+  if (paragraphStart >= 0 && markdown.indexOf(paragraphText, paragraphStart + paragraphText.length) < 0) {
+    const localStart = selection.startOffset;
+    if (typeof localStart === "number") {
+      const start = paragraphStart + localStart;
+      if (markdown.slice(start, start + selectedText.length) === selectedText) {
+        return { start, end: start + selectedText.length, paragraphStart };
+      }
+    }
+  }
+  const start = markdown.indexOf(selectedText);
+  if (start < 0 || markdown.indexOf(selectedText, start + selectedText.length) >= 0) {
+    throw new Error("selected text is missing or ambiguous");
+  }
+  return { start, end: start + selectedText.length, paragraphStart: start };
+}
+
+function codePointOffset(value: string, jsOffset: number) {
+  return Array.from(value.slice(0, jsOffset)).length;
+}
+
+function jsOffsetFromCodePoints(value: string, offset: number) {
+  return Array.from(value).slice(0, offset).join("").length;
+}
+
+function replaceRange(markdown: string, start: number, end: number, replacement: string) {
+  return markdown.slice(0, start) + replacement + markdown.slice(end);
 }
 
 /** A persisted chat writing surface backed by the shared Workflow editor and diff controls. */
@@ -93,23 +119,36 @@ export default function EditableBlock({
     instruction: string,
     selection: ArtifactRewriteSelection,
   ): Promise<RewriteSelectionPreview> => {
+    const range = resolveSelectionRange(markdown, selection);
     const response = await PromptServiceApi().polishEditableSelection({
       content: selection.selectedText,
-      user_instruct: `${instruction}\nOnly return the revised selected text. Do not add explanations or Markdown fences.`,
+      user_instruct: instruction,
       allow_empty: true,
+      full_content: markdown,
+      selection_start: codePointOffset(markdown, range.start),
+      selection_end: codePointOffset(markdown, range.end),
     }, {
       timeout: 10 * 60 * 1_000,
       silentError: true,
     } as never);
     const newText = response.data.content ?? "";
-    const nextMarkdown = replaceSelectedText(markdown, selection.selectedText, newText);
+    const targetStart = typeof response.data.target_start === "number"
+      ? jsOffsetFromCodePoints(markdown, response.data.target_start) : -1;
+    const targetEnd = typeof response.data.target_end === "number"
+      ? jsOffsetFromCodePoints(markdown, response.data.target_end) : -1;
+    if (targetStart < 0 || targetEnd <= targetStart
+      || targetStart > range.start || targetEnd < range.end) {
+      throw new Error("invalid authorized block range");
+    }
+    const oldText = markdown.slice(targetStart, targetEnd);
+    const nextMarkdown = replaceRange(markdown, targetStart, targetEnd, newText);
     return {
       status: "ready",
       action: "rewrite_selection",
       base_revision: revision,
       representation: "markdown",
       target: { type: "block", block_type: "paragraph" },
-      preview: { old_text: selection.selectedText, new_text: newText },
+      preview: { old_text: oldText, new_text: newText },
       patch: { type: "string_replace_set", payload: {} },
       artifact: { content_type: "text/markdown", value: nextMarkdown },
     };
@@ -121,7 +160,7 @@ export default function EditableBlock({
     const nextMarkdown = String(preview.artifact.value);
     setRewritePreview({
       paragraph: selection.paragraph,
-      startOffset: selection.startOffset,
+      startOffset: 0,
       sessionId: "",
       slotId: "",
       listIndex: 0,

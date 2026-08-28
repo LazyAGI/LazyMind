@@ -211,6 +211,7 @@ steps:
 | `steps[step_id].prompt` | 是 | SubAgent 执行指令，支持 `{{...}}` 占位符 |
 | `steps[step_id].tools` | 否 | 自定义工具名列表（框架工具自动注入，无需写）|
 | `steps[step_id].inputs` | 否 | 有序输入列表；每项通过 `required` 区分必须/可选，必须输入可声明一层 `alternatives` |
+| `steps[step_id].inputs[].transport` | 否 | `auto`（默认）/ `value` / `path` / `reference`，控制该步骤收到素材时的物理传输形态 |
 | `steps[step_id].outputs[].material` | 条件 | 产出的素材 id |
 | `steps[step_id].acceptance_criteria` | 否 | 步骤质量标准，供 DriverAgent 评判参考 |
 | `steps[step_id].route` | 否 | `all`（默认）/ `choice`（条件路由）|
@@ -234,6 +235,15 @@ steps:
 **约束**：`{{<slot_id>}}` 只能引用该步骤 `inputs` 中声明的主素材或替代素材。
 
 输入固定为有序列表。`required: true` 的各项之间是 AND；该项的主素材与 `alternatives` 之间是 OR；`required: false` 不参与 Ready 判断且不能配置替代素材。素材 ID 全局唯一，因此不提供 `bind_as`。步骤声明的所有 outputs 均视为必产，前端不提供可选产出配置。
+
+`transport` 与 slot 的逻辑 `type` 相互独立，并且只作用于当前消费步骤：
+
+- `auto` 保持宿主默认行为：`text/json` 传值，公共图片保留引用，二进制图片和 `file` 物化为路径；
+- `value` 将标量素材解包为文本或 JSON 值；
+- `path` 将素材物化到当前 Attempt 的隔离输入目录并传递本地路径；
+- `reference` 保留图片的 durable reference 对象。
+
+同一输入声明了 `alternatives` 时，主素材与所有替代素材使用相同的 `transport`。
 
 ---
 
