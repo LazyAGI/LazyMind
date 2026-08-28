@@ -62,7 +62,7 @@ def test_chapter_publisher_matches_real_subagent_artifact_contract():
 
     previous = lazyllm.globals.get('subagent_ctx')
     with tempfile.TemporaryDirectory() as directory:
-        workspace = Path(directory)
+        workspace = Path(directory).resolve()
         chapters = []
         for index in range(2):
             chapter = workspace / f'chapter-{index + 1}.md'
