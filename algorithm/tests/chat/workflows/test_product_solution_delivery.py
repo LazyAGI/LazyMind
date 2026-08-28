@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import re
 import sys
 import types
 from pathlib import Path
@@ -591,6 +592,53 @@ def test_non_writer_stage_loader_reads_only_bound_materials(tmp_path):
     assert result['materials']['research_evidence'] == 'KB-001 已核验事实'
     assert result['materials']['direction_document'] == '# 已批准方向'
     assert 'material_digest' in result['missing_optional_slots']
+
+
+def test_non_writer_stage_loader_accepts_inline_scalar_materials(tmp_path):
+    tools = _load_contract_tools(tmp_path)
+    context = types.SimpleNamespace(
+        workspace_path=str(tmp_path),
+        params={'remote_inputs': {
+            'execution_plan': {'stage_chain': ['competitive']},
+            'research_evidence': 'WEB-001 已核验事实',
+            'material_digest': '没有额外附件。',
+        }},
+    )
+    tools.require_context = lambda: context
+
+    result = tools.load_product_stage_inputs('competitive')
+
+    assert result['materials'] == {
+        'execution_plan': {'stage_chain': ['competitive']},
+        'research_evidence': 'WEB-001 已核验事实',
+        'material_digest': '没有额外附件。',
+    }
+
+
+def test_product_workflow_keeps_scalar_inputs_as_values_and_files_as_paths():
+    root = Path(__file__).resolve().parents[4]
+    workflow_root = root / 'workflows' / 'product_solution_delivery'
+    state = (workflow_root / 'scenario' / 'state.yml').read_text(encoding='utf-8')
+    workflow = (workflow_root / 'workflow.yaml').read_text(encoding='utf-8')
+    slot_types = dict(re.findall(
+        r'^  - \{id: ([a-z][a-z0-9_]*), .* type: ([a-z_]+),',
+        workflow, flags=re.MULTILINE,
+    ))
+
+    for material, attributes in re.findall(
+        r'^      - \{material: ([a-z][a-z0-9_]*)([^}]*)\}',
+        state, flags=re.MULTILINE,
+    ):
+        transport_match = re.search(r'\btransport:\s*([a-z]+)', attributes)
+        transport = transport_match.group(1) if transport_match else 'auto'
+        if slot_types[material] in {'text', 'json'}:
+            assert transport in {'auto', 'value'}, (
+                f'{material} must remain an inline scalar for the product adapters'
+            )
+        else:
+            assert transport in {'auto', 'path'}, (
+                f'{material} must remain a file path for the product adapters'
+            )
 
 
 def test_delivery_loader_returns_metadata_without_large_document_bodies(tmp_path):

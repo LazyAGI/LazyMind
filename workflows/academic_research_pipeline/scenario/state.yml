@@ -233,8 +233,8 @@ steps:
       - academic_writer_normalize_outline
       - academic_writer_update_context
     inputs:
-      - {material: generation_parameters, required: true}
-      - {material: literature_evidence, required: true}
+      - {material: generation_parameters, required: true, transport: path}
+      - {material: literature_evidence, required: true, transport: path}
       - {material: writing_task, required: true}
       - {material: writing_context, required: true}
     outputs:
@@ -305,8 +305,8 @@ steps:
       - academic_writer_revise_markdown
     inputs:
       - {material: outline_document, required: true}
-      - {material: generation_parameters, required: true}
-      - {material: literature_evidence, required: true}
+      - {material: generation_parameters, required: true, transport: path}
+      - {material: literature_evidence, required: true, transport: path}
       - {material: writing_task, required: true}
       - {material: writing_context_after_outline, required: true}
     outputs:
@@ -357,8 +357,8 @@ steps:
     tools: [audit_academic_manuscript_from_inputs]
     inputs:
       - {material: draft_document, required: true}
-      - {material: literature_evidence, required: true}
-      - {material: generation_parameters, required: true}
+      - {material: literature_evidence, required: true, transport: path}
+      - {material: generation_parameters, required: true, transport: path}
       - {material: outline_document, required: true}
     outputs:
       - {material: pre_integrity_report}
@@ -449,7 +449,7 @@ steps:
       - {material: draft_document, required: true}
       - {material: writing_context_after_draft, required: true}
       - {material: editorial_decision, required: true}
-      - {material: revision_roadmap, required: true}
+      - {material: revision_roadmap, required: true, transport: path}
       - {material: literature_evidence, required: true}
     outputs:
       - {material: revision_task, required: false}
@@ -532,7 +532,7 @@ steps:
     inputs:
       - {material: revised_document, required: true}
       - {material: writing_context_after_revision, required: true}
-      - {material: re_review_report, required: true}
+      - {material: re_review_report, required: true, transport: path}
       - {material: re_review_decision, required: true}
     outputs:
       - {material: second_revision_task, required: false}
@@ -575,8 +575,8 @@ steps:
       - {material: draft_document, required: true}
       - {material: revised_document, required: true}
       - {material: second_revised_document, required: false}
-      - {material: literature_evidence, required: true}
-      - {material: generation_parameters, required: true}
+      - {material: literature_evidence, required: true, transport: path}
+      - {material: generation_parameters, required: true, transport: path}
       - {material: outline_document, required: true}
       - {material: pre_integrity_report, required: true}
       - {material: re_review_report, required: true}
@@ -607,7 +607,7 @@ steps:
       find_artifact, grep or list_artifacts before or after the builder call.
     tools: [compose_academic_paper_from_inputs]
     inputs:
-      - {material: generation_parameters, required: true}
+      - {material: generation_parameters, required: true, transport: path}
       - {material: draft_document, required: true}
       - {material: revised_document, required: true}
       - {material: second_revised_document, required: false}

@@ -87,6 +87,94 @@ def test_bid_outline_repairs_relative_headings_and_missing_trace_mappings():
     assert any('自动分配' in warning for warning in result['warnings'])
 
 
+def test_requirement_extractor_keeps_markdown_table_rows_separate():
+    tools = _load_pipeline_tools()
+    raw_text = '''# 技术要求
+
+| 需求编号 | 需求描述 |
+|---|---|
+| REQ-01 | 平台提供设备监控管理和告警处置功能。 |
+| PERF-01 | 提供数据备份方案并支持不少于 200 名并发用户。 |
+| SEC-01 | 关键管理操作必须进行身份鉴别与权限校验。 |
+'''
+
+    result = tools.extract_technical_requirements(raw_text)
+
+    assert result['total'] == 3
+    assert result['counts'] == {'FUNC': 1, 'PERF': 1, 'SEC': 1}
+    assert 'REQ-01 | 平台提供设备监控管理和告警处置功能。' in result['markdown']
+    assert 'PERF-01 | 提供数据备份方案并支持不少于 200 名并发用户。' in result['markdown']
+    assert 'SEC-01 | 关键管理操作必须进行身份鉴别与权限校验。' in result['markdown']
+
+
+def test_chinese_numbered_section_heading_is_recognized():
+    tools = _load_pipeline_tools()
+
+    assert tools._heading_level('三、性能与可靠性要求') == 1
+    assert tools._heading_level('第八章 验收要求') == 1
+
+
+def test_requirement_extractor_splits_wrapped_source_ids_and_list_items():
+    tools = _load_pipeline_tools()
+    raw_text = '''REQ-01
+平台提供用户管理功能，
+支持统一查询。
+REQ-02
+系统年度可用性不低于 99.9%。
+- 项目必须在 30 天内完成实施交付。
+'''
+
+    paragraphs = tools._paragraphs(raw_text)
+    result = tools.extract_technical_requirements(raw_text)
+
+    assert paragraphs == [
+        (1, 'REQ-01 平台提供用户管理功能， 支持统一查询。'),
+        (4, 'REQ-02 系统年度可用性不低于 99.9%。'),
+        (6, '- 项目必须在 30 天内完成实施交付。'),
+    ]
+    assert result['counts'] == {'FUNC': 1, 'PERF': 1, 'IMPL': 1}
+
+
+def test_disqualification_extractor_keeps_table_clauses_separate():
+    tools = _load_pipeline_tools()
+    raw_text = '''| 条款编号 | 条款内容 |
+|---|---|
+| T-01 | 必须逐项响应，否则视为无效投标。 |
+| T-02 | 系统应达到等保三级。 |
+'''
+
+    result = tools.extract_disqualification_items(raw_text)
+
+    assert result['total'] == 2
+    assert result['explicit_count'] == 1
+    assert result['risk_count'] == 1
+    assert 'T-01 | 必须逐项响应，否则视为无效投标。' in result['markdown']
+    assert 'T-02 | 系统应达到等保三级。' in result['markdown']
+
+
+def test_pdf_bullet_heading_and_wrapped_disqualification_clause_are_not_requirements():
+    tools = _load_pipeline_tools()
+    raw_text = '''# 七、废标条款
+
+DISQ-01（实质性要求）：投标文件未逐项响应 REQ-01 至 REQ-05、
+SEC-01 至 SEC-03 中任一项，按无效投标处理。
+'''
+
+    paragraphs = tools._paragraphs(raw_text)
+    requirements = tools.extract_technical_requirements(raw_text)
+    disqualification = tools.extract_disqualification_items(raw_text)
+
+    assert paragraphs == [(
+        3,
+        'DISQ-01（实质性要求）：投标文件未逐项响应 REQ-01 至 REQ-05、 '
+        'SEC-01 至 SEC-03 中任一项，按无效投标处理。',
+    )]
+    assert requirements['total'] == 0
+    assert disqualification['total'] == 1
+    assert disqualification['explicit_count'] == 1
+    assert disqualification['risk_count'] == 0
+
+
 def test_writer_image_placeholder_is_embedded_in_place_without_duplication(monkeypatch):
     builder = _load_document_builder()
     embedded_titles = []
@@ -158,6 +246,56 @@ def test_effect_images_are_placed_in_source_chapters():
     assert placed.index('门户正文。') < placed.index('IMAGE-2') < placed.index('## 工单看板功能')
     assert placed.index('工单正文。') < placed.index('IMAGE-3')
     assert '[[WORKFLOW_IMAGES]]' not in placed
+    assert '## 系统架构与功能效果' not in placed
+
+
+def test_architecture_with_plural_source_chapters_is_placed_at_common_parent():
+    builder = _load_document_builder()
+    markdown = '''# 测试技术方案
+
+## 总体技术方案
+
+### 响应承诺
+
+承诺正文。
+
+### 功能需求响应
+
+功能正文。
+
+### 性能与可靠性保障
+
+性能正文。
+
+### 安全设计
+
+安全正文。
+
+## 系统架构与功能效果
+
+[[WORKFLOW_IMAGES]]
+'''
+    images = [
+        {
+            'path': '/tmp/architecture.png', 'title': '总体架构图',
+            'type': 'architecture',
+            'source_chapters': ['1.2 功能需求响应', '1.3 性能与可靠性保障', '1.4 安全设计'],
+        },
+        {
+            'path': '/tmp/dashboard.png', 'title': '运行态势看板',
+            'type': 'effect', 'source_chapter': '1.2 功能需求响应',
+        },
+        {
+            'path': '/tmp/analytics.png', 'title': '统计分析与审计',
+            'type': 'effect', 'source_chapter': '1.2 功能需求响应 · 1.4 安全设计',
+        },
+    ]
+
+    placed = builder._place_workflow_images(markdown, images)
+
+    assert placed.index('## 总体技术方案') < placed.index('IMAGE-1') < placed.index('### 响应承诺')
+    assert placed.index('功能正文。') < placed.index('IMAGE-2') < placed.index('### 性能与可靠性保障')
+    assert placed.index('安全正文。') < placed.index('IMAGE-3')
     assert '## 系统架构与功能效果' not in placed
 
 

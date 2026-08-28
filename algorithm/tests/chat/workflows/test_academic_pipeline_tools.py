@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import re
 from pathlib import Path
 
 
@@ -21,6 +22,39 @@ def _load_document_builder():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_workflow_feedback_path_bindings_use_path_transport():
+    root = Path(__file__).resolve().parents[4]
+    workflow_root = root / 'workflows' / 'academic_research_pipeline'
+    state = (workflow_root / 'scenario' / 'state.yml').read_text(encoding='utf-8')
+    workflow = (workflow_root / 'workflow.yaml').read_text(encoding='utf-8')
+    step_blocks = dict(re.findall(
+        r'^  ([a-z][a-z0-9_]*):\n(.*?)(?=^  [a-z][a-z0-9_]*:\n|\Z)',
+        state, flags=re.MULTILINE | re.DOTALL,
+    ))
+
+    checked = set()
+    for step_id, block in step_blocks.items():
+        for material in re.findall(
+            r'\bfeedback_path\s*=\s*([a-z][a-z0-9_]*)', block,
+        ):
+            assert re.search(
+                rf'- \{{id: {re.escape(material)}, .* type: text,', workflow,
+            )
+            assert re.search(
+                rf'- \{{material: {re.escape(material)}, [^}}]*transport: path[^}}]*\}}',
+                block,
+            ), (
+                f'{step_id}.{material} is passed to a feedback_path argument and must be '
+                'materialized as a Workflow path'
+            )
+            checked.add((step_id, material))
+
+    assert checked == {
+        ('revise_paper', 'revision_roadmap'),
+        ('second_revision', 're_review_report'),
+    }
 
 
 def test_normalize_academic_parameters_preserves_explicit_preflight_values():

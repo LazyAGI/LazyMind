@@ -1046,7 +1046,11 @@ def academic_writer_revise_from_feedback(
     document_slot: str,
     user_instruction: str = '',
 ) -> dict[str, str]:
-    feedback = _read_text(feedback_path)
+    feedback_value = _json_value(_read_text(feedback_path), '')
+    feedback = (
+        feedback_value if isinstance(feedback_value, str)
+        else json.dumps(feedback_value, ensure_ascii=False)
+    )
     instruction = f"""依据以下评审材料直接修订论文正文。不得虚构新数据、方法、实验结果或
 参考文献；仅修改评审涉及的范围。无法安全落实的意见保留对应原文，不要把解释、响应表或
 修订过程写入论文；意见处理状态由工作流另行生成。

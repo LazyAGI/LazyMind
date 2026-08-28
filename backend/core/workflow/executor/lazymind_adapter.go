@@ -62,6 +62,7 @@ func (loader DBContextLoader) LoadAttemptContext(ctx context.Context, id string)
 				}
 				if node, ok := graph.Nodes[row.StepID]; ok {
 					value.Prompt, value.Acceptance = node.Prompt, node.Acceptance
+					value.DeclaredInputTransports = node.InputTransports
 					value.DeclaredOutputs, value.RequiredOutputs = node.Outputs, node.RequiredOutputs
 					value.Capabilities, value.LegacyTools = node.Capabilities, node.LegacyTools
 					value.TerminalTools = node.TerminalTools

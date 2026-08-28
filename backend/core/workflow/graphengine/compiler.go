@@ -166,7 +166,7 @@ func Compile(workflowYAML, stateYAML, scenario string, profile Profile) CompileR
 		node.Outputs, node.RequiredOutputs = parseOutputs(step.Outputs)
 		if step.Inputs != nil {
 			inputPaths[id] = "scenario/state.yml.steps." + id + ".inputs"
-			node.Input, node.OptionalInputs, stepDiags = parseUnifiedInputs(step.Inputs, id)
+			node.Input, node.OptionalInputs, node.InputTransports, stepDiags = parseUnifiedInputs(step.Inputs, id)
 			result.Diagnostics = append(result.Diagnostics, stepDiags...)
 			if step.InputExpression != nil || step.OptionalInputs != nil {
 				result.Diagnostics = append(result.Diagnostics, nodeDiag("E_INPUT_FORMAT_CONFLICT", "error", inputPaths[id], id, "use inputs only; do not combine it with input_expression or optional_inputs"))
@@ -594,17 +594,18 @@ func parseExpression(value any) (*Expression, error) {
 	return &expr, nil
 }
 
-func parseUnifiedInputs(value any, nodeID string) (*Expression, []MaterialRef, []Diagnostic) {
+func parseUnifiedInputs(value any, nodeID string) (*Expression, []MaterialRef, map[string]string, []Diagnostic) {
 	if value == nil {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 	b, _ := yaml.Marshal(value)
 	var items []any
 	if yaml.Unmarshal(b, &items) != nil {
-		return nil, nil, []Diagnostic{nodeDiag("E_INPUTS_INVALID", "error", "scenario/state.yml.steps."+nodeID+".inputs", nodeID, "inputs must be a list")}
+		return nil, nil, nil, []Diagnostic{nodeDiag("E_INPUTS_INVALID", "error", "scenario/state.yml.steps."+nodeID+".inputs", nodeID, "inputs must be a list")}
 	}
 	var required []Expression
 	var optional []MaterialRef
+	var transports map[string]string
 	var diags []Diagnostic
 	for index, item := range items {
 		path := fmt.Sprintf("scenario/state.yml.steps.%s.inputs[%d]", nodeID, index)
@@ -619,6 +620,26 @@ func parseUnifiedInputs(value any, nodeID string) (*Expression, []MaterialRef, [
 				diags = append(diags, nodeDiag("E_INPUT_MATERIAL_REQUIRED", "error", path+".material", nodeID, "input material is required"))
 				continue
 			}
+			rawTransport := strings.ToLower(strings.TrimSpace(scalar(v["transport"])))
+			transport := rawTransport
+			if transport == "" {
+				transport = "auto"
+			}
+			switch transport {
+			case "auto", "value", "path", "reference":
+			default:
+				diags = append(diags, nodeDiag(
+					"E_INPUT_TRANSPORT_INVALID", "error", path+".transport", nodeID,
+					"input transport must be auto, value, path, or reference",
+				))
+				transport = "auto"
+			}
+			if rawTransport != "" && transport != "auto" {
+				if transports == nil {
+					transports = map[string]string{}
+				}
+				transports[id] = transport
+			}
 			requiredValue, hasRequired := v["required"]
 			if !hasRequired {
 				diags = append(diags, nodeDiag("E_INPUT_REQUIRED_FLAG_MISSING", "error", path+".required", nodeID, "input must explicitly declare required: true or false"))
@@ -631,6 +652,9 @@ func parseUnifiedInputs(value any, nodeID string) (*Expression, []MaterialRef, [
 					choices := []Expression{{Material: id}}
 					for _, alternative := range alternatives {
 						choices = append(choices, Expression{Material: alternative})
+						if rawTransport != "" && transport != "auto" {
+							transports[alternative] = transport
+						}
 					}
 					required = append(required, Expression{Any: choices})
 				}
@@ -643,12 +667,12 @@ func parseUnifiedInputs(value any, nodeID string) (*Expression, []MaterialRef, [
 		}
 	}
 	if len(required) == 0 {
-		return nil, optional, diags
+		return nil, optional, transports, diags
 	}
 	if len(required) == 1 {
-		return &required[0], optional, diags
+		return &required[0], optional, transports, diags
 	}
-	return &Expression{All: required}, optional, diags
+	return &Expression{All: required}, optional, transports, diags
 }
 
 func parseMaterialList(value any) []string {
