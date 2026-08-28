@@ -195,6 +195,8 @@ make up
 
 该命令会同时启动 Docker 服务和本机「助理桥接器」。打开“设置 → 助理”即可一键连接 Codex、Cursor、WorkBuddy、TRAE Work 或 DeepSeek Harness，无需再运行 MCP 配置命令；只安装 Docker、未安装 Go 时，桥接器会由 Docker 自动交叉编译为当前宿主机版本。
 
+Windows 请在已安装 `make` 的 Git Bash 中执行该命令，不要改用裸 `docker compose up`：容器无法检测或启动 Windows 主机中安装的程序。若应用安装在自定义目录或便携目录，可在“设置 → 助理”中输入完整 Windows 路径，由本机桥接器验证后使用。
+
 ### 启动命令速查
 
 | 场景 | 命令 |

@@ -191,6 +191,8 @@ make up
 
 This starts both the Docker services and the host-side Assistant Bridge. Open **Settings → Assistants** to connect Codex, Cursor, WorkBuddy, Raccoon, TRAE Work, or DeepSeek Harness without running separate MCP configuration commands. If Docker is installed but Go is not, the bridge is cross-compiled for the host automatically inside Docker.
 
+On Windows, run this command from Git Bash with `make` available. Do not replace it with bare `docker compose up`: containers cannot inspect or launch programs installed on the Windows host. If an application uses a custom or portable location, **Settings → Assistants** accepts its full Windows path and validates it through the host-side bridge.
+
 ### Startup Command Reference
 
 | Scenario | Command |
