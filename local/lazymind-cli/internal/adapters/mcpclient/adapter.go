@@ -172,21 +172,21 @@ func requirements(kind Kind) ([]agentintegration.Requirement, error) {
 		}, "cursor_desktop", "Cursor Desktop")
 	case WorkBuddy:
 		return desktopRequirements(agentexec.DesktopApplication{
-			BindingTarget: agentexec.WorkBuddyDesktop, ExecutableNames: []string{"WorkBuddy.exe"},
-			DisplayNames: []string{"WorkBuddy"}, StatePaths: []string{userPath(".workbuddy")},
+			BindingTarget: agentexec.WorkBuddyDesktop, ExecutableNames: []string{"WorkBuddy.exe", "WorkBuddy CN.exe"},
+			DisplayNames: []string{"WorkBuddy", "WorkBuddy CN"}, StatePaths: []string{userPath(".workbuddy")},
 		}, "workbuddy_desktop", "WorkBuddy")
 	case Raccoon:
 		return desktopRequirements(agentexec.DesktopApplication{
 			BindingTarget:   agentexec.RaccoonDesktop,
-			ExecutableNames: []string{"Raccoon.exe", "OfficeRaccoon.exe", "办公小浣熊.exe"},
-			DisplayNames:    []string{"Raccoon", "办公小浣熊"},
+			ExecutableNames: []string{"Raccoon.exe", "OfficeRaccoon.exe", "办公小浣熊.exe", "商汤小浣熊.exe"},
+			DisplayNames:    []string{"Raccoon", "办公小浣熊", "商汤小浣熊"},
 			StatePaths:      []string{userPath(".box-agent", "config")},
 		}, "raccoon_desktop", "Raccoon Desktop")
 	case TRAEWork:
 		return desktopRequirements(agentexec.DesktopApplication{
 			BindingTarget:   agentexec.TRAEWorkDesktop,
-			ExecutableNames: []string{"TRAE.exe", "TRAE SOLO CN.exe", "TraeWork.exe"},
-			DisplayNames:    []string{"TRAE", "TRAE Work", "TRAE SOLO CN"},
+			ExecutableNames: []string{"TRAE.exe", "TRAE SOLO CN.exe", "TraeWork.exe", "Trae CN.exe"},
+			DisplayNames:    []string{"TRAE", "TRAE Work", "TRAE SOLO CN", "TRAE CN"},
 			StatePaths:      []string{filepath.Dir(traeWorkConfigPath())},
 		}, "trae_work_desktop", "TRAE Work")
 	case DeepSeekHarness:

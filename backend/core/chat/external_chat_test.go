@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -570,6 +571,64 @@ func TestExternalSessionCatalogAPIExposesBoundAndUnboundSessions(t *testing.T) {
 	}
 }
 
+func TestDisablingSessionAccessHidesEveryImportedProviderConversation(t *testing.T) {
+	_, db := newExternalChatTestApplication(t)
+	store.Init(db, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+	service := externalcontext.New(db)
+	for index, hostID := range []string{"host-old", "host-current"} {
+		session := externalcontext.NativeSession{
+			ThreadID: fmt.Sprintf("thread-%d", index), ProjectKey: fmt.Sprintf("project-%d", index),
+			ProjectName: "LazyRAG", DisplayName: fmt.Sprintf("Imported %d", index),
+			Turns: []externalcontext.NativeTurn{{
+				ID: fmt.Sprintf("turn-%d", index), User: "private question", Assistant: "private answer",
+			}},
+		}
+		if _, err := service.SyncSessionCatalog(
+			context.Background(), "user-1", ChatExecutorCodex, hostID,
+			[]externalcontext.NativeSession{session}, false,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	request := httptest.NewRequest(http.MethodPost, "/external-chat/providers/codex/sessions:sync", strings.NewReader(
+		`{"host_id":"host-current","sessions":[],"reset":true,"session_access_enabled":false}`,
+	))
+	request.Header.Set("X-User-Id", "user-1")
+	request = mux.SetURLVars(request, map[string]string{"provider": ChatExecutorCodex})
+	response := httptest.NewRecorder()
+	SyncExternalAgentSessions(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("disable status=%d body=%s", response.Code, response.Body.String())
+	}
+	var active int64
+	if err := db.Model(&orm.ExternalAgentSession{}).
+		Where("owner_user_id = ? AND provider = ? AND active = ?", "user-1", ChatExecutorCodex, true).
+		Count(&active).Error; err != nil || active != 0 {
+		t.Fatalf("active sessions=%d err=%v", active, err)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/conversations", nil)
+	request.Header.Set("X-User-Id", "user-1")
+	response = httptest.NewRecorder()
+	ListConversations(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", response.Code, response.Body.String())
+	}
+	var list struct {
+		Data struct {
+			Conversations []any `json:"conversations"`
+		} `json:"data"`
+	}
+	if err := json.Unmarshal(response.Body.Bytes(), &list); err != nil {
+		t.Fatal(err)
+	}
+	if len(list.Data.Conversations) != 0 {
+		t.Fatalf("disabled imported conversations remain visible: %#v", list.Data.Conversations)
+	}
+}
+
 func TestExternalConversationThreadPrefersBindingOverRunHistory(t *testing.T) {
 	app, db := newExternalChatTestApplication(t)
 	now := time.Now().UTC()
@@ -651,6 +710,45 @@ func TestFailedExternalRunStreamsProviderReasonBeforeTerminal(t *testing.T) {
 	}
 	if !strings.Contains(text, "429 Credits exhausted") || terminal == nil || terminalData.Status != "failed" {
 		t.Fatalf("text=%q terminal=%#v", text, terminal)
+	}
+}
+
+func TestCompletedExternalRunStreamsFullExecutionProjection(t *testing.T) {
+	app, db := newExternalChatTestApplication(t)
+	createExternalChatTestRun(t, app, "run-terminal-projection")
+	job, err := app.claim(context.Background(), "user-1", ChatExecutorCodex, "host-1")
+	if err != nil || job == nil {
+		t.Fatalf("claim=%#v err=%v", job, err)
+	}
+	now := time.Now().UTC()
+	if err := db.Create(&orm.AgentInvocation{
+		ID: "inv-terminal-projection", OwnerUserID: "user-1", ClientName: "cursor",
+		ConnectorName: "lazymind-mcp", ConnectorInstanceID: "connector-1",
+		Transport: "stdio", ToolName: "skill.list", Status: "succeeded",
+		RequestHash: strings.Repeat("c", 64), RequestSummary: json.RawMessage(`{}`),
+		ResultSummary: json.RawMessage(`{}`), ExternalRef: job.RunID,
+		StartedAt: now, FinishedAt: &now, CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := app.appendEvent(
+		context.Background(), "user-1", job.RunID, job.HostID, job.LeaseToken,
+		externalChatEvent{EventID: "terminal-completed", Type: "completed"},
+	); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	var terminal UpstreamStreamChunk
+	for chunk := range streamExistingExternalChat(ctx, db, "user-1", job.RunID, job.RunID) {
+		if chunk.RuntimeEvent != nil {
+			terminal = chunk
+		}
+	}
+	if terminal.Execution == nil || terminal.Execution.Status != "completed" ||
+		terminal.Execution.Invocation.Total != 1 || terminal.Execution.Invocation.Succeeded != 1 {
+		t.Fatalf("terminal execution=%#v", terminal.Execution)
 	}
 }
 

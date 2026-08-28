@@ -306,6 +306,20 @@ func (s *Service) ListNativeSessions(
 	return page, nil
 }
 
+// DisableSessionCatalog stops exposing every locally discovered session for a
+// provider. Existing imported conversations remain stored, but conversation
+// listings hide them while their source session is inactive.
+func (s *Service) DisableSessionCatalog(ctx context.Context, owner, provider string) error {
+	owner = strings.TrimSpace(owner)
+	provider = strings.ToLower(strings.TrimSpace(provider))
+	if s == nil || s.db == nil || !validIdentity(owner, 255) || !validProvider(provider) {
+		return ErrInvalidSource
+	}
+	return s.db.WithContext(ctx).Model(&orm.ExternalAgentSession{}).
+		Where("owner_user_id = ? AND provider = ? AND active = ?", owner, provider, true).
+		Updates(map[string]any{"active": false, "updated_at": s.now()}).Error
+}
+
 func (s *Service) SyncSessionCatalog(
 	ctx context.Context,
 	owner, provider, hostID string,

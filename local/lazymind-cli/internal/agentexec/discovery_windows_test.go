@@ -54,6 +54,13 @@ func TestWindowsPathMergeIncludesNewUserPathAndExecutionAliases(t *testing.T) {
 	}
 }
 
+func TestWindowsRegistryCommandKeepsUnquotedExecutablePathWithSpaces(t *testing.T) {
+	command := `C:\Program Files\LazyMind Agent\agent.exe,0`
+	if got, want := commandExecutable(command), `C:\Program Files\LazyMind Agent\agent.exe`; got != want {
+		t.Fatalf("commandExecutable(%q)=%q want %q", command, got, want)
+	}
+}
+
 func TestWindowsDesktopDiscoveryUsesRegisteredProtocol(t *testing.T) {
 	executable := filepath.Join(t.TempDir(), "Custom Cursor.exe")
 	if err := os.WriteFile(executable, []byte("test"), 0o600); err != nil {
@@ -114,12 +121,13 @@ func TestWindowsCommandDiscoveryUsesAppPaths(t *testing.T) {
 func TestWindowsDesktopDiscoveryUsesUninstallRegistration(t *testing.T) {
 	installDirectory := t.TempDir()
 	displayName := fmt.Sprintf("LazyMind Test Agent %d", time.Now().UnixNano())
-	keyPath := `SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\` + displayName
+	registeredName := displayName + " (User)"
+	keyPath := `SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\` + registeredName
 	key, _, err := registry.CreateKey(registry.CURRENT_USER, keyPath, registry.SET_VALUE)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := key.SetStringValue("DisplayName", displayName); err != nil {
+	if err := key.SetStringValue("DisplayName", registeredName); err != nil {
 		_ = key.Close()
 		t.Fatal(err)
 	}

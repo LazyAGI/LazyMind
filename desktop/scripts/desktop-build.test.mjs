@@ -34,6 +34,7 @@ const windowsWorkflow = path.join(
   "workflows",
   "windows-installer.yml",
 );
+const rootMakefile = path.join(scriptsDir, "..", "..", "Makefile");
 
 function nsisMacro(source, name) {
   const match = source.match(new RegExp(`!macro ${name}\\b([\\s\\S]*?)!macroend`));
@@ -132,6 +133,17 @@ test("macOS and Windows builds materialize builtin Skills before writing the run
     assert.match(windows, new RegExp(`skills\\\\${category}`));
   }
   assert.match(windows, /skills\\\.runtime/);
+});
+
+test("Docker startup builds a native Windows Assistant Bridge", () => {
+  const source = readFileSync(rootMakefile, "utf8");
+
+  assert.match(source, /ifeq \(\$\(OS\),Windows_NT\)[\s\S]*LAZYMIND_CLI_FILENAME := lazymind\.exe/);
+  assert.match(source, /HOST_GOOS := windows/);
+  assert.match(source, /PROCESSOR_ARCHITEW6432[\s\S]*PROCESSOR_ARCHITECTURE/);
+  assert.match(source, /_HOST_DOCKER_PREFIX := MSYS_NO_PATHCONV=1/);
+  assert.match(source, /\$\(_HOST_DOCKER_USER_FLAG\)[\s\S]*GOOS="\$\(HOST_GOOS\)"/);
+  assert.match(source, /local\/build\/bin\/\$\(LAZYMIND_CLI_FILENAME\)/);
 });
 
 test("generates a multi-resolution Windows ICO from the macOS icon", () => {
@@ -595,6 +607,26 @@ test("Desktop supervises the external Agent host until the application quits", (
     source,
     /function beginFastQuit[\s\S]*clearTimeout\(agentHostRestartTimer\)[\s\S]*agentHostProcess\?\.kill\(\)/,
     "application shutdown must disable supervision before stopping the Agent host",
+  );
+});
+
+test("Desktop Agent login returns immediately and refreshes the Host when login exits", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  assert.match(
+    source,
+    /function runAgentConnector[\s\S]*action === "login"[\s\S]*return startAgentLogin\(agent\)/,
+  );
+  assert.match(
+    source,
+    /function startAgentLogin[\s\S]*spawn\(agentConnectorPath, \["internal", "agent", agent, "login"\][\s\S]*return runConnectorJSON\([\s\S]*\["internal", "agent", agent, "status"\]/,
+  );
+  assert.match(
+    source,
+    /function startAgentLogin[\s\S]*child\.once\("close"[\s\S]*restartAgentHost\(\)/,
+  );
+  assert.match(
+    source,
+    /function beginFastQuit[\s\S]*agentLoginProcesses\.values\(\)[\s\S]*child\.kill\(\)[\s\S]*agentLoginProcesses\.clear\(\)/,
   );
 });
 

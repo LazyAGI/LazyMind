@@ -44,10 +44,10 @@ func hasInstalledApplication(displayNames []string) bool {
 	if len(displayNames) == 0 {
 		return false
 	}
-	wanted := make(map[string]bool, len(displayNames))
+	wanted := make([]string, 0, len(displayNames))
 	for _, name := range displayNames {
 		if name = strings.ToLower(strings.TrimSpace(name)); name != "" {
-			wanted[name] = true
+			wanted = append(wanted, name)
 		}
 	}
 	const uninstallPath = `SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall`
@@ -64,8 +64,8 @@ func hasInstalledApplication(displayNames []string) bool {
 			}
 			for _, name := range names {
 				entry := uninstallPath + `\` + name
-				displayName := strings.ToLower(registryString(root, entry, "DisplayName", view))
-				if !wanted[displayName] {
+				displayName := strings.ToLower(strings.TrimSpace(registryString(root, entry, "DisplayName", view)))
+				if !matchesInstalledDisplayName(displayName, wanted) {
 					continue
 				}
 				if directoryExists(registryString(root, entry, "InstallLocation", view)) ||
@@ -79,6 +79,16 @@ func hasInstalledApplication(displayNames []string) bool {
 	return false
 }
 
+func matchesInstalledDisplayName(displayName string, wanted []string) bool {
+	for _, name := range wanted {
+		if displayName == name || strings.HasPrefix(displayName, name+" ") ||
+			strings.HasPrefix(displayName, name+"(") || strings.HasPrefix(displayName, name+"-") {
+			return true
+		}
+	}
+	return false
+}
+
 func commandExecutable(command string) string {
 	command = strings.TrimSpace(command)
 	if command == "" {
@@ -87,6 +97,12 @@ func commandExecutable(command string) string {
 	if strings.HasPrefix(command, `"`) {
 		if end := strings.Index(command[1:], `"`); end >= 0 {
 			return command[1 : end+1]
+		}
+	}
+	lower := strings.ToLower(command)
+	for _, extension := range []string{".exe", ".cmd", ".bat", ".com"} {
+		if end := strings.Index(lower, extension); end >= 0 {
+			return strings.TrimSpace(command[:end+len(extension)])
 		}
 	}
 	if end := strings.IndexAny(command, " \t,"); end >= 0 {
