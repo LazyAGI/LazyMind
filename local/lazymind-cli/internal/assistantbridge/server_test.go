@@ -94,14 +94,12 @@ func TestStatusesDoNotLaunchDesktopAgentCandidates(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cursorHome, "cursor.cmd"), []byte("touch "+marker), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if runtime.GOOS == "windows" {
-		desktop := filepath.Join(home, "Cursor.exe")
-		if err := os.WriteFile(desktop, []byte("test"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := agentexec.SetExecutableBinding(agentexec.CursorDesktop, desktop); err != nil {
-			t.Fatal(err)
-		}
+	desktop := filepath.Join(home, "Cursor.exe")
+	if err := os.WriteFile(desktop, []byte("test"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := agentexec.SetExecutableBinding(agentexec.CursorDesktop, desktop); err != nil {
+		t.Fatal(err)
 	}
 
 	statuses, err := Statuses(context.Background(), &mcpbridge.Bridge{})

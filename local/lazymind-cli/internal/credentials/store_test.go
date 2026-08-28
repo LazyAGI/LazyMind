@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -37,8 +38,12 @@ func TestSaveAndClearSession(t *testing.T) {
 	if err := store.Save(value); err != nil {
 		t.Fatal(err)
 	}
-	if info, err := os.Stat(filepath.Join(home, credentialFile)); err != nil || info.Mode().Perm() != 0o600 {
-		t.Fatalf("saved credential permissions: info=%v err=%v", info, err)
+	info, err := os.Stat(filepath.Join(home, credentialFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
+		t.Fatalf("saved credential permissions=%o", info.Mode().Perm())
 	}
 	loaded, err := store.loadUnlocked()
 	if err != nil || loaded.ServerURL != "http://127.0.0.1:8090" || loaded.AccessToken != "access" {

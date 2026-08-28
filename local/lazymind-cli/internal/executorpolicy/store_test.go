@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -26,8 +27,12 @@ func TestStoreDefaultsDisabledAndPersistsExplicitEnable(t *testing.T) {
 	default:
 		t.Fatal("policy change was not broadcast")
 	}
-	if info, err := os.Stat(filepath.Join(home, "executor-policy", "codex.enabled")); err != nil || info.Mode().Perm() != 0o600 {
-		t.Fatalf("marker info=%v err=%v", info, err)
+	info, err := os.Stat(filepath.Join(home, "executor-policy", "codex.enabled"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
+		t.Fatalf("marker permissions=%o", info.Mode().Perm())
 	}
 
 	legacyDisabled := filepath.Join(home, "executor-policy", "codex.disabled")
