@@ -61,6 +61,150 @@ VALUES ('legacy-model','provider','Provider','Legacy','VLM','',CURRENT_TIMESTAMP
 	}
 }
 
+func TestFixTaskCenterWorkflowRunsMigrationBackfillsLifecycle(t *testing.T) {
+	db := openRawSQLite(t, t.TempDir()+"/task-center-workflow-runs.db")
+	if _, err := db.Exec(`
+CREATE TABLE conversations (
+  id text PRIMARY KEY,
+  display_name text,
+  create_user_id text,
+  archived_at datetime,
+  deleted_at datetime
+);
+CREATE TABLE plugin_sessions (
+  id text PRIMARY KEY,
+  conversation_id text NOT NULL,
+  plugin_id text,
+  status text NOT NULL,
+  dismissed numeric NOT NULL DEFAULT false,
+  create_user_id text,
+  created_at datetime NOT NULL,
+  updated_at datetime NOT NULL
+);
+CREATE TABLE task_center_tasks (
+  id text PRIMARY KEY,
+  user_id text NOT NULL,
+  conversation_id text NOT NULL,
+  plugin_session_id text,
+  task_type text NOT NULL,
+  title text,
+  status text NOT NULL,
+  progress_json text,
+  created_at datetime NOT NULL,
+  updated_at datetime NOT NULL,
+  finished_at datetime,
+  archived_at datetime,
+  archived_reason text NOT NULL DEFAULT ''
+);
+INSERT INTO conversations (id, display_name, create_user_id, archived_at, deleted_at) VALUES
+  ('conv-active', 'Active workflow', 'user-from-conversation', NULL, NULL),
+  ('conv-archived', 'Archived workflow', 'user-archived', '2026-08-25 12:00:00', NULL),
+  ('conv-trashed', 'Trashed workflow', 'user-trashed', '2026-08-25 11:00:00', '2026-08-25 13:00:00');
+INSERT INTO plugin_sessions
+  (id, conversation_id, plugin_id, status, dismissed, create_user_id, created_at, updated_at) VALUES
+  ('ps-active', 'conv-active', 'ppt-workflow', 'active', false, '', '2026-08-25 10:00:00', '2026-08-25 10:01:00'),
+  ('ps-archived', 'conv-archived', 'ppt-workflow', 'completed', false, 'user-session', '2026-08-25 10:00:00', '2026-08-25 10:02:00'),
+  ('ps-trashed', 'conv-trashed', 'ppt-workflow', 'waiting', false, 'user-session', '2026-08-25 10:00:00', '2026-08-25 10:03:00'),
+  ('ps-dismissed', 'conv-active', 'ppt-workflow', 'stopped', true, 'user-session', '2026-08-25 10:00:00', '2026-08-25 10:04:00'),
+  ('ps-missing', 'conv-purged', 'missing-plugin', 'failed', false, 'user-missing', '2026-08-25 10:00:00', '2026-08-25 10:05:00'),
+  ('ps-existing', 'conv-active', 'ppt-workflow', 'completed', false, 'user-session', '2026-08-25 10:00:00', '2026-08-25 10:06:00');
+INSERT INTO task_center_tasks
+  (id, user_id, conversation_id, plugin_session_id, task_type, title, status,
+   progress_json, created_at, updated_at, finished_at, archived_at, archived_reason) VALUES
+  ('existing-task', 'user-session', 'conv-active', 'ps-existing', 'plugin_run',
+   'Existing task', 'succeeded', '{}', '2026-08-25 10:00:00', '2026-08-25 10:06:00',
+   '2026-08-25 10:06:00', NULL, ''),
+  ('background-task', 'user-session', 'conv-active', NULL, 'background_chat',
+   'Background chat', 'succeeded', '{}', '2026-08-25 10:00:00', '2026-08-25 10:06:00',
+   '2026-08-25 10:06:00', NULL, '');
+`); err != nil {
+		t.Fatalf("seed task-center migration data: %v", err)
+	}
+
+	migrationDir := filepath.Join("..", "migrations", "dev_mode", "v0_3")
+	upPath := filepath.Join(migrationDir, "20260826065814_fix_task_center_workflow_runs.up.sql")
+	for attempt := 1; attempt <= 2; attempt++ {
+		execMigrationFileForDriver(t, db, upPath, "sqlite")
+	}
+
+	var workflowCount, totalCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM task_center_tasks WHERE task_type = 'workflow_run'`).Scan(&workflowCount); err != nil {
+		t.Fatalf("count workflow task rows: %v", err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM task_center_tasks`).Scan(&totalCount); err != nil {
+		t.Fatalf("count all task rows: %v", err)
+	}
+	if workflowCount != 6 || totalCount != 7 {
+		t.Fatalf("unexpected backfill counts: workflow=%d total=%d", workflowCount, totalCount)
+	}
+
+	type taskState struct {
+		status, title, userID, archivedReason string
+		finished, archived                    bool
+	}
+	readTaskState := func(sessionID string) taskState {
+		t.Helper()
+		var state taskState
+		if err := db.QueryRow(`
+SELECT status, title, user_id, archived_reason,
+       finished_at IS NOT NULL, archived_at IS NOT NULL
+FROM task_center_tasks WHERE plugin_session_id = ?`, sessionID).Scan(
+			&state.status, &state.title, &state.userID, &state.archivedReason,
+			&state.finished, &state.archived,
+		); err != nil {
+			t.Fatalf("read task state for %s: %v", sessionID, err)
+		}
+		return state
+	}
+
+	if got := readTaskState("ps-active"); got != (taskState{
+		status: "running", title: "Active workflow", userID: "user-from-conversation",
+	}) {
+		t.Fatalf("active workflow state=%#v", got)
+	}
+	if got := readTaskState("ps-archived"); got != (taskState{
+		status: "succeeded", title: "Archived workflow", userID: "user-session",
+		archivedReason: "conversation_archive", finished: true, archived: true,
+	}) {
+		t.Fatalf("archived workflow state=%#v", got)
+	}
+	if got := readTaskState("ps-trashed"); got != (taskState{
+		status: "waiting", title: "Trashed workflow", userID: "user-session",
+		archivedReason: "conversation_trash", archived: true,
+	}) {
+		t.Fatalf("trashed workflow state=%#v", got)
+	}
+	if got := readTaskState("ps-dismissed"); got.status != "canceled" || !got.finished {
+		t.Fatalf("dismissed workflow was not backfilled: %#v", got)
+	}
+	if got := readTaskState("ps-missing"); got != (taskState{
+		status: "failed", title: "missing-plugin", userID: "user-missing",
+		archivedReason: "conversation_purged", finished: true, archived: true,
+	}) {
+		t.Fatalf("purged workflow state=%#v", got)
+	}
+	var existingID string
+	if err := db.QueryRow(`SELECT id FROM task_center_tasks WHERE plugin_session_id = 'ps-existing'`).Scan(&existingID); err != nil {
+		t.Fatalf("read existing task id: %v", err)
+	}
+	if existingID != "existing-task" {
+		t.Fatalf("existing task was duplicated or replaced: %q", existingID)
+	}
+
+	downPath := filepath.Join(migrationDir, "20260826065814_fix_task_center_workflow_runs.down.sql")
+	execMigrationFileForDriver(t, db, downPath, "sqlite")
+	var legacyWorkflowCount, backgroundCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM task_center_tasks WHERE task_type = 'plugin_run'`).Scan(&legacyWorkflowCount); err != nil {
+		t.Fatalf("count reverted plugin rows: %v", err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM task_center_tasks WHERE task_type = 'background_chat'`).Scan(&backgroundCount); err != nil {
+		t.Fatalf("count preserved background rows: %v", err)
+	}
+	if legacyWorkflowCount != 6 || backgroundCount != 1 {
+		t.Fatalf("unexpected down migration counts: plugin=%d background=%d", legacyWorkflowCount, backgroundCount)
+	}
+}
+
 // TestRepositorySQLiteFreshAndUpgradePaths verifies that both fresh and legacy
 // Desktop databases reach the current schema exclusively through migrations.
 func TestRepositorySQLiteFreshAndUpgradePaths(t *testing.T) {
@@ -158,6 +302,15 @@ func openRawSQLite(t *testing.T, dsn string) *sql.DB {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	return db
+}
+
+func sqliteIndexSQL(t *testing.T, db *sql.DB, name string) string {
+	t.Helper()
+	var ddl string
+	if err := db.QueryRow(`SELECT sql FROM sqlite_master WHERE type = 'index' AND name = ?`, name).Scan(&ddl); err != nil {
+		t.Fatalf("read SQLite index %s: %v", name, err)
+	}
+	return ddl
 }
 
 func sqliteSchemaFingerprint(t *testing.T, db *sql.DB) string {
@@ -527,6 +680,77 @@ FROM conversations WHERE id = ?
 	}
 	if backupTableCount != 0 {
 		t.Fatal("conversation policy rollback table should be removed by down migration")
+	}
+}
+
+func TestSkillUniqueIndexSQLiteDownRemovesTrashedDuplicates(t *testing.T) {
+	db := openRawSQLite(t, t.TempDir()+"/skill-unique-down.db")
+	if _, err := db.Exec(`
+CREATE TABLE skills (
+  id text PRIMARY KEY,
+  owner_user_id text NOT NULL,
+  category text NOT NULL,
+  skill_name text NOT NULL,
+  relative_root text NOT NULL,
+  deleted_at datetime
+);
+CREATE UNIQUE INDEX uk_skills_owner_identity
+  ON skills(owner_user_id, category, skill_name);
+CREATE UNIQUE INDEX uk_skills_owner_relative_root
+  ON skills(owner_user_id, relative_root);
+INSERT INTO skills (id, owner_user_id, category, skill_name, relative_root, deleted_at)
+VALUES
+  ('identity-original', 'user-a', 'research', 'demo', 'research/demo-old', NULL),
+  ('root-original', 'user-b', 'research', 'alpha', 'shared/root', NULL),
+  ('keep-trashed', 'user-c', 'personal', 'archived', 'personal/archived', CURRENT_TIMESTAMP);
+`); err != nil {
+		t.Fatalf("seed pre-migration skills: %v", err)
+	}
+
+	migrationDir := filepath.Join("..", "migrations", "dev_mode", "v0_3")
+	execMigrationFileForDriver(t, db, filepath.Join(migrationDir, "20260827120000_unique_skill_name_per_owner.up.sql"), "sqlite")
+	for _, name := range []string{"uk_skills_owner_identity", "uk_skills_owner_relative_root"} {
+		if sql := sqliteIndexSQL(t, db, name); !strings.Contains(strings.ToLower(sql), "deleted_at is null") {
+			t.Fatalf("up migration did not create a partial unique index for %s: %s", name, sql)
+		}
+	}
+
+	if _, err := db.Exec(`
+UPDATE skills SET deleted_at = CURRENT_TIMESTAMP WHERE id IN ('identity-original', 'root-original');
+INSERT INTO skills (id, owner_user_id, category, skill_name, relative_root, deleted_at)
+VALUES
+  ('identity-recreated', 'user-a', 'research', 'demo', 'research/demo', NULL),
+  ('root-recreated', 'user-b', 'personal', 'beta', 'shared/root', NULL);
+`); err != nil {
+		t.Fatalf("soft-delete and recreate same-name skills: %v", err)
+	}
+
+	execMigrationFileForDriver(t, db, filepath.Join(migrationDir, "20260827120000_unique_skill_name_per_owner.down.sql"), "sqlite")
+	for _, name := range []string{"uk_skills_owner_identity", "uk_skills_owner_relative_root"} {
+		if sql := sqliteIndexSQL(t, db, name); strings.Contains(strings.ToLower(sql), "deleted_at is null") {
+			t.Fatalf("down migration did not restore a full unique index for %s: %s", name, sql)
+		}
+	}
+
+	rows, err := db.Query(`SELECT id FROM skills ORDER BY id`)
+	if err != nil {
+		t.Fatalf("list skills after down: %v", err)
+	}
+	defer rows.Close()
+	var got []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatalf("scan skill id: %v", err)
+		}
+		got = append(got, id)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate skills after down: %v", err)
+	}
+	want := []string{"identity-recreated", "keep-trashed", "root-recreated"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("skills after down=%v, want %v", got, want)
 	}
 }
 

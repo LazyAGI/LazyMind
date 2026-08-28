@@ -10,6 +10,8 @@ from .tool_registry import (
     ATTACHED_FILES_TOOL_POLICY_APPENDIX,
     ASK_USER_TOOL_POLICY_APPENDIX,
     ASK_USER_QUERY_APPENDIX,
+    SESSION_ENV_TOOL_POLICY_APPENDIX,
+    SESSION_ENV_QUERY_APPENDIX,
     IMAGE_MARKDOWN_OUTPUT_APPENDIX,
     RETRIEVAL_CITATION_OUTPUT_APPENDIX,
     KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX,
@@ -20,6 +22,7 @@ from .tool_registry import (
     filter_tools,
     get_all_tool_groups,
     normalize_tool_locale,
+    build_session_env_tool_config,
 )
 
 __all__ = [
@@ -31,6 +34,8 @@ __all__ = [
     'ATTACHED_FILES_TOOL_POLICY_APPENDIX',
     'ASK_USER_TOOL_POLICY_APPENDIX',
     'ASK_USER_QUERY_APPENDIX',
+    'SESSION_ENV_TOOL_POLICY_APPENDIX',
+    'SESSION_ENV_QUERY_APPENDIX',
     'IMAGE_MARKDOWN_OUTPUT_APPENDIX',
     'RETRIEVAL_CITATION_OUTPUT_APPENDIX',
     'KNOWLEDGE_SEARCH_TOOL_POLICY_APPENDIX',
@@ -42,5 +47,6 @@ __all__ = [
     'get_all_tool_groups',
     'normalize_tool_locale',
     'normalize_history_for_agent',
+    'build_session_env_tool_config',
     'is_workflow_rewind_action',
 ]

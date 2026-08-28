@@ -1590,6 +1590,9 @@ export interface KnowledgeMarketDetailOpenAPIResponse {
     'sort_order': number;
     'tags'?: Array<string>;
     'updated_at': string;
+    'version': string;
+    'version_date': string;
+    'version_note': string;
 }
 export interface KnowledgeMarketDomainsGroupOpenAPIResponse {
     'evaluation'?: Array<string>;
@@ -1613,6 +1616,7 @@ export interface KnowledgeMarketInstallsOpenAPIResponseItem {
     'icon': string;
     'install_state': string;
     'installed_at'?: string;
+    'installed_version': string;
     'market_item_id': string;
     'name': string;
     'updated_at': string;
@@ -1630,6 +1634,7 @@ export interface KnowledgeMarketListItemOpenAPIResponse {
     'sort_order': number;
     'tags'?: Array<string>;
     'updated_at': string;
+    'version': string;
 }
 export interface KnowledgeMarketListOpenAPIResponse {
     'items'?: Array<KnowledgeMarketListItemOpenAPIResponse>;
@@ -2331,15 +2336,11 @@ export interface ShowcaseCase {
     'image_url': string;
     'output_label': string;
     'output_type': string;
-    'prompt': string;
-    'prompt_short': string;
     'provider': string;
     'source_url': string;
-    'result_highlights'?: Array<string>;
     'result_summary': string;
-    'steps'?: Array<ShowcaseCaseStep>;
     'tags'?: Array<string>;
-    'tasks'?: Array<ShowcaseCaseTask>;
+    'tasks': Array<ShowcaseCaseTask>;
     'title': string;
     'type': string;
     'workflow_ref'?: string;
@@ -2365,6 +2366,8 @@ export interface ShowcaseCaseResult {
     'highlights'?: Array<string>;
     'image_asset'?: string;
     'image_url'?: string;
+    'html_asset'?: string;
+    'html_url'?: string;
     'product_report'?: ShowcaseCaseProductReport;
     'summary': string;
     'template': string;
@@ -27441,7 +27444,7 @@ export const KnowledgeMarketApiAxiosParamCreator = function (configuration?: Con
             };
         },
         /**
-         * Returns the full catalog entry including download package URL/revision and sample questions. Version fields are intentionally not exposed. 404 when the item does not exist or is not published.
+         * Returns the full catalog entry including its latest version, download package URL/revision and sample questions. 404 when the item does not exist or is not published.
          * @summary Get knowledge market item details
          * @param {string} marketItemId
          * @param {*} [options] Override http request option.
@@ -27707,7 +27710,7 @@ export const KnowledgeMarketApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Returns the full catalog entry including download package URL/revision and sample questions. Version fields are intentionally not exposed. 404 when the item does not exist or is not published.
+         * Returns the full catalog entry including its latest version, download package URL/revision and sample questions. 404 when the item does not exist or is not published.
          * @summary Get knowledge market item details
          * @param {string} marketItemId
          * @param {*} [options] Override http request option.
@@ -27824,7 +27827,7 @@ export const KnowledgeMarketApiFactory = function (configuration?: Configuration
             return localVarFp.apiCoreKnowledgeMarketInstallsGet(options).then((request) => request(axios, basePath));
         },
         /**
-         * Returns the full catalog entry including download package URL/revision and sample questions. Version fields are intentionally not exposed. 404 when the item does not exist or is not published.
+         * Returns the full catalog entry including its latest version, download package URL/revision and sample questions. 404 when the item does not exist or is not published.
          * @summary Get knowledge market item details
          * @param {KnowledgeMarketApiApiCoreKnowledgeMarketItemsMarketItemIdGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
@@ -27992,7 +27995,7 @@ export class KnowledgeMarketApi extends BaseAPI {
     }
 
     /**
-     * Returns the full catalog entry including download package URL/revision and sample questions. Version fields are intentionally not exposed. 404 when the item does not exist or is not published.
+     * Returns the full catalog entry including its latest version, download package URL/revision and sample questions. 404 when the item does not exist or is not published.
      * @summary Get knowledge market item details
      * @param {KnowledgeMarketApiApiCoreKnowledgeMarketItemsMarketItemIdGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
@@ -29220,8 +29223,8 @@ export const ModelProvidersApiAxiosParamCreator = function (configuration?: Conf
             };
         },
         /**
-         * Requires query model_type (e.g. llm, vlm, or embed). Returns all non-deleted user_model_provider_group_models for the current user with that model_type across all providers and groups. Each item includes nullable max_input_tokens, the catalog model\'s maximum input context window expressed as a string such as 512, 128K, or 1M; custom or unknown models return null. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.
-         * @summary List current user\'s models by model_type
+         * Optionally filters by query model_type (e.g. llm, vlm, or embed). When omitted, returns every non-deleted model in the current user\'s verified provider groups. Each item includes nullable max_input_tokens, the catalog model\'s maximum input context window expressed as a string such as 512, 128K, or 1M; custom or unknown models return null. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.
+         * @summary List current user\'s available models
          * @param {string} [modelType]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -29676,8 +29679,8 @@ export const ModelProvidersApiFp = function(configuration?: Configuration) {
             return (axios, basePath) => createRequestFunction(localVarAxiosArgs, globalAxios, BASE_PATH, configuration)(axios, localVarOperationServerBasePath || basePath);
         },
         /**
-         * Requires query model_type (e.g. llm, vlm, or embed). Returns all non-deleted user_model_provider_group_models for the current user with that model_type across all providers and groups. Each item includes nullable max_input_tokens, the catalog model\'s maximum input context window expressed as a string such as 512, 128K, or 1M; custom or unknown models return null. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.
-         * @summary List current user\'s models by model_type
+         * Optionally filters by query model_type (e.g. llm, vlm, or embed). When omitted, returns every non-deleted model in the current user\'s verified provider groups. Each item includes nullable max_input_tokens, the catalog model\'s maximum input context window expressed as a string such as 512, 128K, or 1M; custom or unknown models return null. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.
+         * @summary List current user\'s available models
          * @param {string} [modelType]
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -29899,8 +29902,8 @@ export const ModelProvidersApiFactory = function (configuration?: Configuration,
             return localVarFp.apiCoreModelProvidersModelProviderIdGroupsPost(requestParameters.modelProviderId, requestParameters.createModelProviderGroupOpenAPIRequest, options).then((request) => request(axios, basePath));
         },
         /**
-         * Requires query model_type (e.g. llm, vlm, or embed). Returns all non-deleted user_model_provider_group_models for the current user with that model_type across all providers and groups. Each item includes nullable max_input_tokens, the catalog model\'s maximum input context window expressed as a string such as 512, 128K, or 1M; custom or unknown models return null. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.
-         * @summary List current user\'s models by model_type
+         * Optionally filters by query model_type (e.g. llm, vlm, or embed). When omitted, returns every non-deleted model in the current user\'s verified provider groups. Each item includes nullable max_input_tokens, the catalog model\'s maximum input context window expressed as a string such as 512, 128K, or 1M; custom or unknown models return null. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.
+         * @summary List current user\'s available models
          * @param {ModelProvidersApiApiCoreModelProvidersModelsGetRequest} requestParameters Request parameters.
          * @param {*} [options] Override http request option.
          * @throws {RequiredError}
@@ -30249,8 +30252,8 @@ export class ModelProvidersApi extends BaseAPI {
     }
 
     /**
-     * Requires query model_type (e.g. llm, vlm, or embed). Returns all non-deleted user_model_provider_group_models for the current user with that model_type across all providers and groups. Each item includes nullable max_input_tokens, the catalog model\'s maximum input context window expressed as a string such as 512, 128K, or 1M; custom or unknown models return null. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.
-     * @summary List current user\'s models by model_type
+     * Optionally filters by query model_type (e.g. llm, vlm, or embed). When omitted, returns every non-deleted model in the current user\'s verified provider groups. Each item includes nullable max_input_tokens, the catalog model\'s maximum input context window expressed as a string such as 512, 128K, or 1M; custom or unknown models return null. Ordered by user_model_provider_id, group id, then name. Same items as GET .../groups/{group_id}/models.
+     * @summary List current user\'s available models
      * @param {ModelProvidersApiApiCoreModelProvidersModelsGetRequest} requestParameters Request parameters.
      * @param {*} [options] Override http request option.
      * @throws {RequiredError}

@@ -1,4 +1,8 @@
+import json
 from pathlib import Path
+
+import pytest
+from lazyllm.tools.agent import ToolExecutionError
 
 import lazymind.chat.engine.tools.local_file.workspace as workspace_tools
 from lazymind.chat.engine.subagent.runner import _build_subagent_tools
@@ -85,15 +89,14 @@ def test_unified_tools_resolve_file_id_and_unique_name(monkeypatch, tmp_path):
     manifest = _ingest(monkeypatch, tmp_path)
 
     searched = workspace_tools.grep(manifest['file_id'], 'omega')
-    line = searched['result']['matches'][0]['line']
+    line = searched['matches'][0]['line']
     by_id = workspace_tools.read_file(manifest['file_id'], offset=line, limit=5)
     by_name = workspace_tools.read_file('paper.pdf')
 
-    assert searched['success'] is True
-    assert searched['result']['target'] == manifest['file_id']
-    assert 'omega' in by_id['result']['text']
-    assert 'omega' in by_name['result']['text']
-    assert by_name['result']['kind'] == 'file_resource'
+    assert searched['target'] == manifest['file_id']
+    assert 'omega' in by_id['text']
+    assert 'omega' in by_name['text']
+    assert by_name['kind'] == 'file_resource'
 
 
 def test_unified_tools_resolve_workspace_and_text_attachment(monkeypatch, tmp_path):
@@ -107,10 +110,10 @@ def test_unified_tools_resolve_workspace_and_text_attachment(monkeypatch, tmp_pa
     attachment_read = workspace_tools.read_file('upload.txt')
     attachment_grep = workspace_tools.grep('upload.txt', 'needle')
 
-    assert 'workspace needle' in workspace_read['result']['text']
-    assert attachment_read['result']['kind'] == 'attachment_text'
-    assert 'attachment needle' in attachment_read['result']['text']
-    assert attachment_grep['result']['total'] == 1
+    assert 'workspace needle' in workspace_read['text']
+    assert attachment_read['kind'] == 'attachment_text'
+    assert 'attachment needle' in attachment_read['text']
+    assert attachment_grep['total'] == 1
 
 
 def test_office_attachment_parse_is_cached_by_content(monkeypatch, tmp_path):
@@ -127,8 +130,8 @@ def test_office_attachment_parse_is_cached_by_content(monkeypatch, tmp_path):
     first = workspace_tools.read_file('report.docx')
     second = workspace_tools.read_file('report.docx', offset=1)
 
-    assert first['success'] is True
-    assert second['success'] is True
+    assert 'cached office text' in first['text']
+    assert 'cached office text' in second['text']
     assert calls == [str(attachment)]
     assert list((tmp_path / 'attachment-text-cache').glob('*/parsed.txt'))
 
@@ -145,10 +148,8 @@ def test_duplicate_resource_name_is_rejected(monkeypatch, tmp_path):
     ingest_pdf_file(str(first), display_name='same.pdf', store=store)
     ingest_pdf_file(str(second), display_name='same.pdf', store=store)
 
-    result = workspace_tools.read_file('same.pdf')
-
-    assert result['success'] is False
-    assert 'ambiguous' in result['error']['reason']
+    with pytest.raises(ToolExecutionError, match='ambiguous'):
+        workspace_tools.read_file('same.pdf')
 
 
 def test_duplicate_attachment_name_across_turns_is_rejected(monkeypatch, tmp_path):
@@ -164,10 +165,8 @@ def test_duplicate_attachment_name_across_turns_is_rejected(monkeypatch, tmp_pat
         '2': [str(second)],
     }
 
-    result = workspace_tools.read_file('same.txt')
-
-    assert result['success'] is False
-    assert 'ambiguous' in result['error']['reason']
+    with pytest.raises(ToolExecutionError, match='ambiguous'):
+        workspace_tools.read_file('same.txt')
 
 
 def test_long_physical_line_is_split_and_continuable(monkeypatch, tmp_path):
@@ -179,14 +178,14 @@ def test_long_physical_line_is_split_and_continuable(monkeypatch, tmp_path):
     first = workspace_tools.read_file('long.txt', limit=1)
     second = workspace_tools.read_file(
         'long.txt',
-        offset=first['result']['next_offset'],
+        offset=first['next_offset'],
         limit=10,
     )
 
     assert [len(line) for line in lines] == [4000, 4000, 1001]
-    assert first['result']['next_offset'] == 2
-    assert second['result']['eof'] is True
-    assert first['result']['footer'].endswith('Use offset=2 to continue.')
+    assert first['next_offset'] == 2
+    assert second['eof'] is True
+    assert first['footer'].endswith('Use offset=2 to continue.')
 
 
 def test_window_budget_is_utf8_aware_and_continuable():
@@ -206,7 +205,7 @@ def test_window_budget_is_utf8_aware_and_continuable():
         assert ''.join(visited) == content
 
 
-def test_read_file_envelope_stays_below_spill_threshold(monkeypatch, tmp_path):
+def test_read_file_result_stays_below_spill_threshold(monkeypatch, tmp_path):
     _set_scope(monkeypatch, tmp_path)
     tool_spills = tmp_path / 'tool_spills'
     tool_spills.mkdir()
@@ -214,9 +213,8 @@ def test_read_file_envelope_stays_below_spill_threshold(monkeypatch, tmp_path):
         relative = f'tool_spills/{index}.txt'
         (tmp_path / relative).write_text(unit * 20_000, encoding='utf-8')
         result = workspace_tools.read_file(relative)
-        assert result['success'] is True
         assert utf8_size(str(result)) < 16 * 1024
-        assert utf8_size(result['result']['text']) <= RESULT_BYTE_BUDGET + 128
+        assert utf8_size(result['text']) <= RESULT_BYTE_BUDGET + 128
 
 
 def test_grep_zero_matches_has_explicit_footer(monkeypatch, tmp_path):
@@ -225,8 +223,8 @@ def test_grep_zero_matches_has_explicit_footer(monkeypatch, tmp_path):
 
     result = workspace_tools.grep('notes.txt', 'missing')
 
-    assert result['result']['total'] == 0
-    assert result['result']['footer'] == 'No matches.'
+    assert result['total'] == 0
+    assert result['footer'] == 'No matches.'
 
 
 def test_subagent_always_has_unified_read_tools():
@@ -244,6 +242,93 @@ def test_main_agent_always_registers_unified_read_tools():
 
     assert {'grep', 'read_file', 'write_file', 'list_dir', 'save_chat_artifact'} <= names
     assert {'grep', 'read_file'}.isdisjoint(optional)
+
+
+def test_migrated_tools_use_single_toolmanager_envelope(monkeypatch, tmp_path):
+    import lazyllm
+    from lazyllm.tools import ToolManager
+    from lazyllm.tools.agent.base import LazyLLMAgentBase
+    from lazymind.chat.engine.subagent import tools as subagent_tools
+    from lazymind.chat.engine.tools import kb
+
+    attachment = tmp_path / 'notes.txt'
+    attachment.write_text('attachment needle', encoding='utf-8')
+    lazyllm.globals['agentic_config'] = lazyllm.globals.get('agentic_config') or {}
+    monkeypatch.setitem(lazyllm.globals, 'agentic_config', {
+        'user_id': 'user-1',
+        'conversation_id': 'conversation-1',
+        'files': [str(attachment)],
+        'history_files_per_turn': {'1': [str(attachment)]},
+    })
+    monkeypatch.setattr(
+        workspace_tools,
+        'chat_agent_workspace',
+        lambda *_args: str(tmp_path),
+    )
+    monkeypatch.setattr(
+        'lazymind.chat.engine.tools.local_file.store.workspace_for_request',
+        lambda *_args, **_kwargs: str(tmp_path),
+    )
+    manager = ToolManager([
+        kb.kb_tmp_search,
+        workspace_tools.read_file,
+        workspace_tools.grep,
+        subagent_tools.read_user_attachment,
+        subagent_tools.find_user_attachment,
+    ])
+    calls = [
+        ('kb_tmp_search', {'grep_patterns': ['needle']}),
+        ('read_file', {'target': 'notes.txt'}),
+        ('grep', {'target': 'notes.txt', 'pattern': 'needle'}),
+        ('read_user_attachment', {'filename': 'notes.txt'}),
+        ('find_user_attachment', {'filename': 'notes.txt'}),
+    ]
+
+    for index, (name, arguments) in enumerate(calls, start=1):
+        tool_call = {
+            'id': f'call-{index}',
+            'type': 'function',
+            'function': {
+                'name': name,
+                'arguments': json.dumps(arguments),
+            },
+        }
+        result = manager([tool_call])[0]
+
+        assert set(result) == {'ok', 'value'}
+        assert result['ok'] is True
+        assert isinstance(result['value'], dict)
+        assert {'success', 'tool', 'result', 'error'}.isdisjoint(result['value'])
+
+        event_item = LazyLLMAgentBase._normalize_tool_results(
+            [tool_call],
+            [result],
+        )[0]
+        assert set(event_item) == {'id', 'name', 'arguments', 'result'}
+        assert event_item['id'] == tool_call['id']
+        assert event_item['name'] == name
+        assert event_item['result'] is result
+
+    failure_call = {
+        'id': 'call-failure',
+        'type': 'function',
+        'function': {'name': 'kb_tmp_search', 'arguments': '{}'},
+    }
+    failure = manager([failure_call])[0]
+
+    assert set(failure) == {'ok', 'value'}
+    assert failure['ok'] is False
+    assert failure['value'] == 'at least one of semantic_query or grep_patterns is required'
+    failure_event = LazyLLMAgentBase._normalize_tool_results(
+        [failure_call],
+        [failure],
+    )[0]
+    assert failure_event == {
+        'id': 'call-failure',
+        'name': 'kb_tmp_search',
+        'arguments': '{}',
+        'result': failure,
+    }
 
 
 def test_find_by_display_name_requires_a_unique_match(monkeypatch, tmp_path):
@@ -295,10 +380,9 @@ def test_read_user_attachment_honors_turn(monkeypatch, tmp_path):
 
     selected = subagent_tools.read_user_attachment('same.txt', turn=1)
 
-    assert selected['success'] is True
-    assert selected['result']['status'] == 'ok'
-    assert 'first-turn-body' in selected['result']['content']
-    assert 'second-turn-body' not in selected['result']['content']
+    assert selected['status'] == 'ok'
+    assert 'first-turn-body' in selected['content']
+    assert 'second-turn-body' not in selected['content']
 
 
 def test_concurrent_index_upserts_keep_both_entries(tmp_path):

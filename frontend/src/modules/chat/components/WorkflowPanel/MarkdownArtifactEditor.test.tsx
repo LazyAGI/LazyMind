@@ -28,6 +28,7 @@ vi.mock('@mdxeditor/editor', async () => {
     const plugins = props.plugins as Array<{ toolbarContents?: () => React.ReactNode }>;
     const toolbar = plugins.find((plugin) => plugin.toolbarContents)?.toolbarContents?.();
     const hasInternalReference = renderedMarkdown.includes('[beta](#block-sec-1)');
+    const hasSourceReference = renderedMarkdown.includes('[1](#source-4.1)');
     return (
       <div
         className={String(props.className ?? '')}
@@ -52,6 +53,7 @@ vi.mock('@mdxeditor/editor', async () => {
               {' gamma'}
             </p>
             <a href='https://example.com'>External link</a>
+            {hasSourceReference && <a href='#source-4.1'>1</a>}
             <span id='block-sec-1'>Target</span>
           </div>
         </div>
@@ -284,6 +286,7 @@ describe('MarkdownArtifactEditor rewrite selection highlight', () => {
     const internalLink = container.querySelector<HTMLAnchorElement>('a[href^="#block-"]');
     const externalLink = container.querySelector<HTMLAnchorElement>('a[href^="https://"]');
     const linkEditorClick = vi.fn();
+    const linkEditorMouseDown = vi.fn();
     const scrollTo = vi.fn();
 
     expect(surface).not.toBeNull();
@@ -295,6 +298,13 @@ describe('MarkdownArtifactEditor rewrite selection highlight', () => {
       event.preventDefault();
       linkEditorClick();
     });
+    editableRoot!.addEventListener('mousedown', linkEditorMouseDown);
+
+    const internalMouseDown = new MouseEvent('mousedown', { bubbles: true, cancelable: true });
+    internalLink!.dispatchEvent(internalMouseDown);
+
+    expect(internalMouseDown.defaultPrevented).toBe(true);
+    expect(linkEditorMouseDown).not.toHaveBeenCalled();
 
     const internalClick = new MouseEvent('click', { bubbles: true, cancelable: true });
     internalLink!.dispatchEvent(internalClick);
@@ -303,8 +313,65 @@ describe('MarkdownArtifactEditor rewrite selection highlight', () => {
     expect(linkEditorClick).not.toHaveBeenCalled();
     expect(scrollTo).toHaveBeenCalledTimes(1);
 
+    externalLink!.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
     externalLink!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }));
+    expect(linkEditorMouseDown).toHaveBeenCalledTimes(1);
     expect(linkEditorClick).toHaveBeenCalledTimes(1);
+  });
+
+  it('renders chat source references as non-editable badges and opens their source', () => {
+    const onOpenSourceReference = vi.fn();
+    const { container } = render(
+      <MarkdownArtifactEditor
+        markdown='Evidence [1](#source-4.1)'
+        sourceRevision={1}
+        presentation='chat'
+        onSave={async () => 1}
+        onOpenSourceReference={onOpenSourceReference}
+        sourceReferences={[{
+          citationId: '4.1',
+          faviconUrl: 'https://www.google.com/s2/favicons?domain=docs.python.org&sz=64',
+          href: 'https://docs.python.org/3/',
+          label: 'docs.python.org',
+          title: 'Python documentation',
+        }]}
+      />,
+    );
+    const editableRoot = container.querySelector<HTMLElement>('.mdxeditor-root-contenteditable');
+    const sourceLink = container.querySelector<HTMLAnchorElement>('a[href="#source-4.1"]');
+    const linkEditorClick = vi.fn();
+
+    expect(editableRoot).not.toBeNull();
+    expect(sourceLink).not.toBeNull();
+    expect(sourceLink).toHaveAttribute('data-writer-source-citation', 'true');
+    expect(sourceLink).toHaveAttribute('contenteditable', 'false');
+    expect(sourceLink).toHaveAttribute('role', 'button');
+    expect(sourceLink).toHaveAttribute('tabindex', '0');
+    expect(sourceLink).toHaveAttribute('data-writer-source-label', 'docs.python.org');
+    expect(sourceLink).toHaveAttribute('data-writer-source-initial', 'D');
+    expect(sourceLink).toHaveAttribute('data-writer-source-has-icon', 'true');
+    expect(sourceLink).toHaveAttribute('aria-label', 'chat.references docs.python.org');
+    expect(sourceLink).not.toHaveAttribute('title');
+    expect(sourceLink?.style.getPropertyValue('--writer-source-icon'))
+      .toContain('docs.python.org');
+    editableRoot!.addEventListener('click', linkEditorClick);
+
+    fireEvent.mouseOver(sourceLink!);
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Python documentation');
+    expect(screen.getByRole('tooltip')).toHaveTextContent('https://docs.python.org/3/');
+
+    fireEvent.mouseOut(sourceLink!, { relatedTarget: editableRoot });
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
+
+    const click = new MouseEvent('click', { bubbles: true, cancelable: true });
+    sourceLink!.dispatchEvent(click);
+
+    expect(click.defaultPrevented).toBe(true);
+    expect(linkEditorClick).not.toHaveBeenCalled();
+    expect(onOpenSourceReference).toHaveBeenCalledWith('4.1');
+
+    fireEvent.keyDown(sourceLink!, { key: 'Enter' });
+    expect(onOpenSourceReference).toHaveBeenCalledTimes(2);
   });
 
   it('keeps the selection highlighted while AI polish is open and clears it on close', async () => {

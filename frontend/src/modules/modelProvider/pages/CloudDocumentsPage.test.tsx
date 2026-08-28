@@ -8,6 +8,8 @@ import {
 import { MemoryRouter } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+import enUS from "../../../i18n/locales/en-US";
+import zhCN from "../../../i18n/locales/zh-CN";
 import CloudDocumentsPage from "./CloudDocumentsPage";
 
 const mocks = vi.hoisted(() => ({
@@ -33,7 +35,7 @@ const labels: Record<string, string> = {
   "modelProvider.cloudDocuments.onboardingStepBadge": "2 步完成入门",
   "modelProvider.cloudDocuments.onboardingHeading": "完成认证，选择你的使用方式",
   "modelProvider.cloudDocuments.onboardingConnectTitle": "完成云文档账号认证",
-  "modelProvider.cloudDocuments.onboardingConnectDescription": "选择数据源并配置",
+  "modelProvider.cloudDocuments.onboardingConnectDescription": "选择云文档并配置",
   "modelProvider.cloudDocuments.onboardingUseTitle": "开始使用云文档能力",
   "modelProvider.cloudDocuments.onboardingUseDescription": "在对话或知识库中使用",
   "modelProvider.cloudDocuments.onboardingCurrent": "现在进行",
@@ -43,13 +45,13 @@ const labels: Record<string, string> = {
   "modelProvider.cloudDocuments.onboardingPartiallyUnlocked": "部分可用",
   "modelProvider.cloudDocuments.onboardingPrimaryAction": "开始第 1 步：去认证",
   "modelProvider.cloudDocuments.onboardingLater": "稍后再说",
-  "modelProvider.cloudDocuments.connectAnotherSource": "连接其他数据源",
+  "modelProvider.cloudDocuments.connectAnotherSource": "连接其他云文档",
   "modelProvider.cloudDocuments.guideChatCapability": "在对话中引用云文档",
   "modelProvider.cloudDocuments.guideKnowledgeCapability": "创建知识库并定时同步",
   "modelProvider.cloudDocuments.guideKnowledgeUnavailable": "知识库同步（暂不支持）",
-  "modelProvider.cloudDocuments.sourceChoiceTitle": "选择数据源",
-  "modelProvider.cloudDocuments.sourceChoiceStep": "第 1 步 · 选择数据源",
-  "modelProvider.cloudDocuments.sourceChoiceHeading": "选择要连接的云文档数据源",
+  "modelProvider.cloudDocuments.sourceChoiceTitle": "选择云文档",
+  "modelProvider.cloudDocuments.sourceChoiceStep": "第 1 步 · 选择云文档",
+  "modelProvider.cloudDocuments.sourceChoiceHeading": "选择要连接的云文档",
   "modelProvider.cloudDocuments.sourceChoiceDescription": "选择后进入配置页面",
   "modelProvider.cloudDocuments.sourceChoicePrevious": "返回上一步",
   "modelProvider.cloudDocuments.guideSource.local.title": "本地文档",
@@ -109,6 +111,28 @@ function renderPage() {
 }
 
 describe("CloudDocumentsPage onboarding", () => {
+  it("keeps cloud document copy free of data-source terminology", () => {
+    const zhCloudDocumentCopy = JSON.stringify({
+      page: zhCN.modelProvider.cloudDocuments,
+      feishuGuide: zhCN.admin.dataSourceFeishuSetupGuide,
+      notionGuide: zhCN.admin.dataSourceNotionSetupGuide,
+      googleDriveGuide: zhCN.admin.dataSourceGoogleDriveSetupGuide,
+      googleDriveBack: zhCN.admin.dataSourceGoogleDriveBackProviders,
+      feishuDelete: zhCN.admin.dataSourceFeishuAccountDeleteContent,
+    });
+    const enCloudDocumentCopy = JSON.stringify({
+      page: enUS.modelProvider.cloudDocuments,
+      feishuGuide: enUS.admin.dataSourceFeishuSetupGuide,
+      notionGuide: enUS.admin.dataSourceNotionSetupGuide,
+      googleDriveGuide: enUS.admin.dataSourceGoogleDriveSetupGuide,
+      googleDriveBack: enUS.admin.dataSourceGoogleDriveBackProviders,
+      feishuDelete: enUS.admin.dataSourceFeishuAccountDeleteContent,
+    }).toLowerCase();
+
+    expect(zhCloudDocumentCopy).not.toContain("数据源");
+    expect(enCloudDocumentCopy).not.toContain("data source");
+  });
+
   beforeEach(() => {
     window.localStorage.clear();
     window.sessionStorage.clear();

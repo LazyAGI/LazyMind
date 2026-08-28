@@ -8,6 +8,13 @@ import {
 } from "@/api/generated/core-client";
 import { axiosInstance, BASE_URL } from "@/components/request";
 import type { RawAxiosRequestConfig } from "axios";
+export {
+  matchesShowcaseEntryType,
+  showcaseEntryType,
+  showcaseTechnologyType,
+  type ShowcaseEntryType,
+  type ShowcaseTechnologyType,
+} from "./classification";
 
 const showcaseApi = ShowcaseApiFactory(
   new Configuration({ basePath: BASE_URL }),
@@ -21,17 +28,6 @@ export type {
   ShowcaseCaseResult,
   ShowcaseCaseTask,
 };
-
-export type ShowcaseEntryType = "chat" | "work";
-
-export function matchesShowcaseEntryType(
-  capabilityType: string,
-  entryType: ShowcaseEntryType,
-) {
-  return entryType === "chat"
-    ? capabilityType === "chat"
-    : capabilityType === "work" || capabilityType === "workflow";
-}
 
 export async function listShowcaseCases(
   params: { keyword?: string; category?: string } = {},

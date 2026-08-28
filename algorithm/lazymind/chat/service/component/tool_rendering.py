@@ -5,6 +5,7 @@ import re
 from html import escape
 from typing import Any
 
+from lazymind.chat.engine.tools.session_env import redact_session_env_arguments
 from .tool_render_templates import (
     KB_EMPTY_RESULT_MESSAGES,
     TOOL_RENDER_FALLBACKS,
@@ -621,6 +622,8 @@ def _tool_call_frame_text(tool_call: dict[str, Any], language: str = 'en') -> tu
             arguments = raw_args
     else:
         arguments = raw_args
+    if isinstance(arguments, dict):
+        arguments = redact_session_env_arguments(tool_name, arguments)
     preview_value = _tool_call_preview_value(tool_name, arguments, language)
     payload = {
         'id': tool_call_id,

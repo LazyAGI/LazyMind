@@ -63,10 +63,11 @@ type checkModelProviderRequest struct {
 
 // algoModelCheckBody matches the algorithm POST /api/model/check JSON contract (lazyllm.OnlineModule).
 type algoModelCheckBody struct {
-	Model  string `json:"model,omitempty"`
-	Source string `json:"source"`
-	URL    string `json:"url"`
-	APIKey string `json:"api_key"`
+	Model    string `json:"model,omitempty"`
+	Source   string `json:"source"`
+	URL      string `json:"url"`
+	APIKey   string `json:"api_key"`
+	SkipAuth bool   `json:"skip_auth,omitempty"`
 }
 
 // modelCheckResponse mirrors the algorithm /api/model/check JSON (internal parse only).
@@ -103,10 +104,11 @@ func doCheck(ctx context.Context, category, providerName, baseURL, apiKey, model
 	}
 	upstream := common.JoinURL(common.ChatServiceEndpoint(), checkEndpoint)
 	body := algoModelCheckBody{
-		Model:  model,
-		Source: providerName,
-		URL:    baseURL,
-		APIKey: apiKey,
+		Model:    model,
+		Source:   LazyLLMSource(providerName),
+		URL:      LazyLLMBaseURL(providerName, baseURL),
+		APIKey:   apiKey,
+		SkipAuth: apiKey == "",
 	}
 	var result modelCheckResponse
 	if err := common.ApiPost(ctx, upstream, body, nil, &result, modelProviderCheckTimeout); err != nil {
@@ -578,12 +580,12 @@ func CheckGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
 		return
 	}
-	source := strings.TrimSpace(req.ProviderName)
 	urlStr := strings.TrimSpace(req.BaseURL)
+	submittedURL := urlStr
 	apiKey := strings.TrimSpace(req.APIKey)
 	model := strings.TrimSpace(req.Model)
-	if source == "" || urlStr == "" {
-		common.ReplyErr(w, "provider_name and base_url are required", http.StatusBadRequest)
+	if urlStr == "" {
+		common.ReplyErr(w, "base_url is required", http.StatusBadRequest)
 		return
 	}
 
@@ -612,6 +614,10 @@ func CheckGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "model provider not found", http.StatusNotFound)
 		return
 	}
+	// The provider in the path is authoritative. A custom Base URL may be an
+	// official API reverse proxy, so it must not change the provider source.
+	source := parent.Name
+	urlStr = LazyLLMBaseURL(parent.Name, urlStr)
 	var group orm.UserModelProviderGroup
 	if err := db.WithContext(r.Context()).
 		Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", groupID, parentID, userID).
@@ -619,7 +625,9 @@ func CheckGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "group not found", http.StatusNotFound)
 		return
 	}
-	if apiKey == "" {
+	// Official hosted endpoints require credentials. Self-hosted/custom
+	// endpoints may deliberately run without authentication.
+	if apiKey == "" && isAPIKeyRequiredForBaseURL(r.Context(), db, parent.DefaultModelProviderID, group.BaseURL) {
 		common.ReplyErr(w, "api_key is required", http.StatusBadRequest)
 		return
 	}
@@ -652,13 +660,21 @@ func CheckGroup(w http.ResponseWriter, r *http.Request) {
 
 	if algo.Success {
 		now := time.Now()
+		updates := map[string]interface{}{
+			"is_verified": true,
+			"updated_at":  now,
+		}
+		// The check request normally echoes the group's stored URL. When the
+		// official provider URL was canonicalized for verification, persist the
+		// same canonical value so runtime selection and UI display stay aligned.
+		if normalizeBaseURLForCompare(group.BaseURL) == normalizeBaseURLForCompare(submittedURL) &&
+			normalizeBaseURLForCompare(group.BaseURL) != normalizeBaseURLForCompare(urlStr) {
+			updates["base_url"] = urlStr
+		}
 		tx := db.WithContext(r.Context()).
 			Model(&orm.UserModelProviderGroup{}).
 			Where("id = ? AND user_model_provider_id = ? AND create_user_id = ? AND deleted_at IS NULL", groupID, parentID, userID).
-			Updates(map[string]interface{}{
-				"is_verified": true,
-				"updated_at":  now,
-			})
+			Updates(updates)
 		if tx.Error != nil {
 			common.ReplyErr(w, "update group verify status failed", http.StatusInternalServerError)
 			return

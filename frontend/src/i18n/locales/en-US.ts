@@ -136,12 +136,12 @@ const enUS = {
       chatUseCaseDescription: "Let AI read, create, edit, and delete Feishu documents within your account permissions.",
       chatUseCaseCapabilityNote:
         "Feishu supports create, read, update, and delete. Local documents, Notion, and Google Drive currently support read-only access.",
-      chatCapabilityHelp: "View capability notes for other data sources",
+      chatCapabilityHelp: "View capability notes for other cloud document services",
       knowledgeUseCaseTitle: "Knowledge base sync",
       knowledgeUseCaseDescription: "Sync cloud documents on a schedule to keep knowledge bases up to date.",
       knowledgeUseCaseCapabilityNote:
         "Local documents, Feishu, and Notion support sync tasks. Google Drive knowledge sync is not currently available.",
-      providerSectionTitle: "Choose and connect a data source",
+      providerSectionTitle: "Choose and connect a cloud document service",
       providerSectionSubtitle: "Once connected, the supported chat and sync capabilities become available automatically.",
       connectedNextStepsTitle: "Connected. Next, you can",
       onboardingTitle: "Cloud documents getting started",
@@ -161,14 +161,14 @@ const enUS = {
       onboardingPrimaryAction: "Start step 1: authenticate",
       onboardingLater: "Maybe later",
       onboardingGotIt: "Got it",
-      connectAnotherSource: "Connect another data source",
+      connectAnotherSource: "Connect another cloud document service",
       guideChatCapability: "Use cloud documents in chat",
       guideKnowledgeCapability: "Create and schedule a knowledge base sync",
       guideKnowledgeUnavailable: "Knowledge sync (not supported)",
-      sourceChoiceTitle: "Choose a data source",
-      sourceChoiceStep: "Step 1 · Choose a data source",
-      sourceChoiceHeading: "Choose a cloud document data source to connect",
-      sourceChoiceDescription: "Each data source uses its own credentials and authorization flow. Continue to the matching setup page.",
+      sourceChoiceTitle: "Choose a cloud document service",
+      sourceChoiceStep: "Step 1 · Choose a cloud document service",
+      sourceChoiceHeading: "Choose a cloud document service to connect",
+      sourceChoiceDescription: "Each cloud document service has its own setup flow. Continue to the matching setup page.",
       sourceChoicePrevious: "Back",
       guideSource: {
         local: { title: "Local documents", description: "Configure directories and default retrieval" },
@@ -222,7 +222,7 @@ const enUS = {
       localScanChatDisabledTag: "Default retrieval off",
       localDetailTitle: "Local Documents",
       localDetailSubtitle:
-        "Manage default local directory retrieval for new conversations and create sync tasks from the data source list.",
+        "Manage default local directory retrieval for new conversations and create knowledge base sync tasks.",
       localConnectedCountLabel: "Connected directories",
       localScanChatSettingTitle: "Default local directory retrieval in new chats",
       localScanChatSwitchHint:
@@ -236,9 +236,9 @@ const enUS = {
       localChatDirectoriesHint: "New conversations will retrieve the selected local directories by default.",
       localChatDirectoriesConfigure: "Configure directories",
       localChatDirectoriesModalTitle: "Configure directories used in chats",
-      localChatDirectoriesModalHint: "Choose which local directories from each data source are retrieved by default in new conversations.",
+      localChatDirectoriesModalHint: "Choose which connected local directories are retrieved by default in new conversations.",
       localChatDirectoriesTreeAria: "Local directories used in chat retrieval",
-      localChatDirectorySources: "Data sources: {{names}}",
+      localChatDirectorySources: "Directory sources: {{names}}",
       localChatDirectoriesEmpty: "No local directories are currently used in chat retrieval",
       localChatDirectoriesNoBindings: "No local directories are available to configure",
       localChatDirectoriesLoadFailed: "Failed to load local directory settings",
@@ -273,7 +273,7 @@ const enUS = {
       backToProviders: "Back to cloud documents",
       feishuAccountManagementTitle: "Feishu Accounts",
       feishuAccountManagementSubtitle:
-        "Manage multiple Feishu app credentials and authorization status. Select a valid authentication when creating a data source.",
+        "Manage multiple Feishu app credentials and authorization status. Select a valid authentication when connecting Feishu documents.",
       feishuAccountCreate: "Add Feishu account",
       feishuAccountSecurityHint:
         "Feishu App Secret is sensitive. Store it securely and grant only necessary permissions.",
@@ -342,8 +342,8 @@ const enUS = {
     defaultSubtitle: "Different modules can use different models. Required items must be configured before all features are available.",
     providerSetupLoading: "Checking provider configuration…",
     providerSetupLoadFailed: "Unable to check provider configuration. Try again.",
-    providerSetupEmptyTitle: "No model provider configured",
-    providerSetupEmptyDescription: "Add and verify a model provider first. Once a chat model is available, you can select models for chat and tools here.",
+    providerSetupEmptyTitle: "No models available",
+    providerSetupEmptyDescription: "Add at least one model to a verified provider connection. Once a model is available, you can configure each module here.",
     providerSetupAction: "Configure model providers",
     cloudServiceSetupLoadFailed: "Unable to check service configuration. Try again.",
     cloudParsingSetupEmpty: "No document parsing service configured",
@@ -416,6 +416,11 @@ const enUS = {
     baseUrlDefaultExtra: "Base URL is required and defaults to the provider's built-in configuration.",
     baseUrlCustomOption: "Custom (enter below)",
     baseUrlSelectPlaceholder: "Select a Base URL preset",
+    privateDeploymentRedirectTitle: "Use OpenAI for self-hosted models",
+    privateDeploymentRedirectContent: "If this is a self-hosted model service, configure it under OpenAI. If it forwards the current provider's official API, save it under the current provider to keep that provider's source.",
+    goToOpenAI: "Go to OpenAI",
+    stayHere: "Save under this provider",
+    openAINotFound: "OpenAI provider was not found. Refresh and try again.",
     sensenovaClassicMode: "Classic Mode",
     sensenovaTokenPlanMode: "Token Plan Mode",
     apiKeyCustomExtra: "API Key is optional for custom Base URLs. Existing groups can keep the masked value unchanged.",
@@ -424,6 +429,7 @@ const enUS = {
     apiKeyOptionalPlaceholder: "Optional",
     verifyGroupTitle: "Verify {{name}}",
     verifyApiKeyExtra: "Used only for this connection check. The frontend will not save or display the full key again.",
+    verifyApiKeyOptionalExtra: "API Key is optional for custom Base URLs. Leave it blank to verify without authentication.",
     verifyConfiguredApiKeyExtra: "Leave blank to use the saved key for this connection check. A newly entered key is used only for this verification.",
     verifyApiKeyPlaceholder: "Enter the API Key for this verification",
     keyConfiguredStatus: "Configured key: {{preview}}",
@@ -465,6 +471,8 @@ const enUS = {
         "MiniMax general-purpose models with strong chat, human-like speech synthesis, and image generation capabilities.\n\nGet API Key:\nhttps://platform.minimaxi.com/\n\nSetup guide:\n\n1. Open the MiniMax platform and sign in or register a developer account.\n\n2. Go to Account Management -> API Keys, or the Token Plan area if applicable.\n\n3. Create a new API Key and copy it for API calls. Pay-as-you-go keys and Token Plan keys may not be interchangeable.",
       openai:
         "OpenAI's frontier model ecosystem for advanced coding, professional workflows, multimodal tasks, embeddings, speech, and agent development.\n\nGet API Key:\nhttps://platform.openai.com/api-keys\n\nSetup guide:\n\n1. Open OpenAI Platform and sign up with an email or Google account.\n\n2. After billing is configured, open API keys from the dashboard.\n\n3. Click Create new secret key, set the desired permissions, and copy the key immediately because it is shown only once.",
+      openrouter:
+        "OpenRouter provides one OpenAI-compatible API for models from multiple providers, allowing model selection with a single API key.\n\nGet API Key:\nhttps://openrouter.ai/settings/keys",
       qwen:
         "Alibaba Cloud's Qwen model family, covering text, vision, speech, embeddings, rerank, image generation, and image editing with strong China-region ecosystem support.\n\nGet API Key:\nhttps://bailian.console.aliyun.com/?apiKey=1#/api-key\n\nSetup guide:\n\n1. Open Alibaba Cloud Bailian console and sign in with an Alibaba Cloud account.\n\n2. Click your avatar and open API-KEY management.\n\n3. Click Create API-KEY and copy the generated key.",
       sensenova:
@@ -510,13 +518,15 @@ const enUS = {
     },
     autoSelection: {
       title: "Automatic model configuration",
-      configured: "Models configured for you: {{models}}",
+      freeModelWarning: "Automatically configured models may have limited performance or may no longer be available, and most features may not work as expected. Configure a high-performance model manually.",
+      configured: "Models configured for you:",
+      modelTypeSeparator: ":",
       missing: "No {{types}} model for {{provider}} was found in the database. See the {{provider}} documentation.",
       modelType: {
         llm: "LLM",
-        vlm: "VLM",
-        embed_main: "embedding",
-        image_generator: "text-to-image",
+        vlm: "Vision model",
+        embed_main: "Embedding model",
+        image_generator: "Image generation model",
       },
     },
     noModelSelectedForShare: "Please select a model before enabling sharing",
@@ -892,6 +902,22 @@ const enUS = {
     searchLabel: "Search cases",
     searchPlaceholder: "Search cases, for example: writing, PPT, images",
     categoryLabel: "Case categories",
+    cardTagsLabel: "Capability tags",
+    filters: {
+      all: "All",
+      more: "More",
+      taskType: "Scenario",
+      capabilityType: "Goal",
+      technologyType: "Capability form",
+      capability: {
+        chat: "Chat",
+        work: "Get work done",
+      },
+      technology: {
+        skill: "Chat enhancement",
+        workflow: "Step execution",
+      },
+    },
     loading: "Loading cases…",
     loadError: "Cases are temporarily unavailable. Please try again later.",
     noMatches: "No related cases found",
@@ -916,7 +942,16 @@ const enUS = {
     capabilityPrepareFailed: "The featured capability could not be prepared. Go back and try again.",
     retryCapabilityPrepare: "Retry",
     clearCase: "Clear template",
+    chooseSkill: "Choose a featured capability",
     chooseTask: "Choose the task you want to complete",
+    quickSelectTitle: "Quick capability selection",
+    quickSelectDescription: "Choosing one fills in its prompt and suggested attachments",
+    exploreMoreCapabilities: "Explore more capabilities",
+    selectFunction: "Choose a function",
+    functionPrefix: "Function · ",
+    fullCapability: "Full capability",
+    fullCapabilityPrompt: "Use the full capabilities of \"{{title}}\" to complete the task I provide next. You may combine these functions: {{capabilities}}. Ask for any essential missing information before proceeding.",
+    capabilitySeparator: ", ",
     taskSelectionHint: "Choose a task before starting the conversation",
     selectedSkill: "Selected featured Skill",
     detail: {
@@ -1980,6 +2015,8 @@ const enUS = {
       editText: "Edit text",
       enterTextContent: "Enter text",
       identicalContent: "Content is identical",
+      beforeChange: "Before",
+      afterChange: "After",
       inProgress: "Processing…",
       itemContent: "Item content",
       manual: "Manual",
@@ -2650,6 +2687,11 @@ const enUS = {
     uninstalled: "Not installed",
     installed: "Installed",
     updateAvailable: "Update available",
+    upToDate: "Up to date",
+    latestVersion: "Latest version",
+    installedVersion: "Installed version",
+    versionUnknown: "Version unknown",
+    updateStatus: "Update status",
     domainFilter: "Domain filter",
     viewSquareDetail: "View {{name}} details",
     documentCount: "{{count}} documents",
@@ -3099,7 +3141,7 @@ const enUS = {
     dataSourceFeishuAccountSaveAndAuthorize: "Save and Authorize",
     dataSourceFeishuAccountDeleteTitle: "Delete Feishu account?",
     dataSourceFeishuAccountDeleteContent:
-      "After deleting {{name}}, data sources using this authorization can no longer reuse this account configuration.",
+      "After deleting {{name}}, Feishu document connections using this authorization can no longer reuse this account configuration.",
     dataSourceCreateProviderIntro:
       "Choose a data source type. Feishu requires valid authorization first; if missing, the authorization setup opens directly.",
     dataSourceCreateFeishuAuthRequiredHint:
@@ -3132,7 +3174,7 @@ const enUS = {
       "Authorize a Google Drive account for online chat search. Files are not imported into a knowledge base.",
     dataSourceGoogleDriveConnected: "Connected {{account}}. Used for online chat search.",
     dataSourceGoogleDriveAccountFallback: "Google Drive account",
-    dataSourceGoogleDriveBackProviders: "Back to Data Source Providers",
+    dataSourceGoogleDriveBackProviders: "Back to Cloud Documents",
     dataSourceGoogleDrivePageTitle: "Google Drive Account Authorization",
     dataSourceGoogleDrivePageDesc:
       "Manage Google Drive OAuth credentials and account connections for direct online document search in Chat.",
@@ -3344,9 +3386,9 @@ const enUS = {
     dataSourceNotionSetupGuideAction: "Setup Guide",
     dataSourceFeishuSetupGuide: {
       backAccounts: "Back to Feishu Accounts",
-      title: "Data Source Management - New Data Source - Feishu",
+      title: "Cloud Documents - Feishu Setup Guide",
       subtitle:
-        "Create an internal app in the Feishu developer platform, then complete Feishu data source authorization in LazyMind.",
+        "Create an internal app in the Feishu developer platform, then authorize Feishu cloud documents in LazyMind.",
       summaryAria: "Feishu setup process overview",
       summaryTitle: "Setup Flow",
       zoomMask: "Click to enlarge",
@@ -3360,15 +3402,15 @@ const enUS = {
         openPlatformAlt: "Feishu Open Platform homepage and Developer Console entry",
         createAppTitle: "Create an internal app",
         createAppDesc:
-          "In Developer Console, click Create internal app to create an app for Feishu data source access.",
+          "In Developer Console, click Create internal app to create an app for Feishu cloud document access.",
         createAppAlt: "Create internal app entry in Feishu Developer Console",
         appInfoTitle: "Enter app name and description",
         appInfoDesc:
-          "Enter the app name and description, then create the app. Include LazyMind or the data source purpose in the name so it is easy to identify in Feishu and LazyMind.",
+          "Enter the app name and description, then create the app. Include LazyMind or the cloud document purpose in the name so it is easy to identify in Feishu and LazyMind.",
         appInfoAlt: "Feishu internal app name and description form",
         permissionsTitle: "Enable required permissions",
         permissionsDesc:
-          "After creating the app, open Permission Management, click Enable permissions, then search and add the permissions LazyMind needs to access Feishu data sources. To access personal knowledge, configure user identity permissions (user_access_token), not app identity permissions.",
+          "After creating the app, open Permission Management, click Enable permissions, then search and add the permissions LazyMind needs to access Feishu cloud documents. To access personal knowledge, configure user identity permissions (user_access_token), not app identity permissions.",
         permissionsSimple:
           "General version: add offline_access, drive, wiki, and docx, then select the related permissions.",
         permissionsAlt: "Permission Management page and Enable permissions entry in Feishu Open Platform",
@@ -3384,13 +3426,13 @@ const enUS = {
         credentialsDesc:
           "Go back to Credentials and Basic Info, copy the App ID and App Secret, and prepare to paste them into the system.",
         credentialsAlt: "App ID and App Secret in Feishu Open Platform app credentials",
-        enterCredentialsTitle: "Enter Feishu credentials in the system",
+        enterCredentialsTitle: "Enter Feishu credentials in Cloud Documents",
         enterCredentialsDesc:
-          "Return to Data Source Management, open the Feishu App Credentials dialog, enter the App ID and App Secret, and save.",
+          "Return to the Feishu Accounts page under Cloud Documents, open the Feishu App Credentials dialog, enter the App ID and App Secret, and save.",
         enterCredentialsAlt: "Feishu App ID and App Secret dialog in the system",
-        finishTitle: "Select or enter a target path and finish authorization",
+        finishTitle: "Authorize and choose a document scope",
         finishDesc:
-          "Return to the data source creation dialog, choose the target type, complete Feishu account authorization, then select an accessible space or folder directly. You can also enter the target ID manually, then save the configuration.",
+          "Return to the Feishu Accounts page and complete account authorization. Once authorized, choose an accessible space or folder in chat or knowledge base sync. You can also enter the target ID manually.",
         finishDetail:
           "For Drive Folder access, create the target folder in Feishu Drive first. For Wiki documents, make sure the current Feishu account can access the file and obtain the file token from the document link.",
         finishManualDetail:
@@ -3491,10 +3533,10 @@ const enUS = {
       },
     },
     dataSourceNotionSetupGuide: {
-      backManagement: "Back to Data Source Management",
-      title: "Data Source Management - New Data Source - Notion",
+      backManagement: "Back to Cloud Documents",
+      title: "Cloud Documents - Notion Setup Guide",
       subtitle:
-        "Create a Public Integration in Notion Developers, get OAuth credentials, configure the HTTPS Redirect URI, then complete Notion data source authorization in LazyMind.",
+        "Create a Public Integration in Notion Developers, get OAuth credentials, configure the HTTPS Redirect URI, then authorize Notion cloud documents in LazyMind.",
       summaryAria: "Notion setup process overview",
       summaryTitle: "Setup Flow",
       openDevelopers: "Open Notion Developers",
@@ -3509,7 +3551,7 @@ const enUS = {
         createIntegrationExisting:
           "If you already have a suitable Public integration, you can reuse it.",
         createIntegrationNaming:
-          "Include LazyMind or the data source purpose in the integration name so it is easy to identify later.",
+          "Include LazyMind or the cloud document purpose in the integration name so it is easy to identify later.",
         basicInfoTitle: "Enter basic integration information",
         basicInfoDesc:
           "Enter the integration name and description, and optionally upload a logo. These details appear on the user authorization page, so use a clear name and description.",
@@ -3532,16 +3574,16 @@ const enUS = {
           "Recommended minimum: select Read content and Read user information.",
         capabilitiesWrite:
           "If writing or updating Notion content is needed, also select Insert content and Update content.",
-        enterCredentialsTitle: "Enter Notion credentials in the system",
+        enterCredentialsTitle: "Enter Notion credentials in Cloud Documents",
         enterCredentialsDesc:
-          "Return to LazyMind Data Source Management, choose the Notion data source type, open the credentials dialog, enter the Client ID and Client Secret, then save.",
+          "Return to Cloud Documents in LazyMind, choose Notion, open the credentials dialog, enter the Client ID and Client Secret, then save.",
         enterCredentialsClientId:
           "Client ID maps to the App ID field in the system dialog.",
         enterCredentialsClientSecret:
           "Client Secret maps to the App Secret field in the system dialog.",
-        finishTitle: "Paste a Notion Page/Database link and finish authorization",
+        finishTitle: "Authorize and choose Notion content",
         finishDesc:
-          "After credentials are saved, the system starts Notion OAuth authorization automatically. Once authorized, paste the Notion page or database link in the data source configuration, then save and sync.",
+          "After credentials are saved, the system starts Notion OAuth authorization automatically. Once authorized, read the authorized content in chat or paste the Notion page or database link when creating a knowledge base sync task.",
         finishPageLink: "Notion page link format: https://www.notion.so/...",
         finishDatabaseLink:
           "Notion database link format: https://www.notion.so/...",
@@ -4811,10 +4853,9 @@ const enUS = {
       "Add the skill description and usage guidance here.",
     memorySkillUploadSuccess: '"{{name}}" has been added to My Skills',
     memorySkillUploadFailed: "Failed to upload skill",
-    memorySkillUploadAlreadyExists:
-      "Skill already exists: a skill with the same name is already available, so it does not need to be uploaded again.",
+    memorySkillUploadAlreadyExists: "Skill name already exists and cannot be created",
     memorySkillUploadAlreadyExistsNamed:
-      'Skill already exists: "{{name}}" is already available, so it does not need to be uploaded again.',
+      'Skill name "{{name}}" already exists and cannot be created',
     memorySkillAdminPublishButton: "Publish skill (admin)",
     memorySkillAdminPublishTitle: "Publish skill to plaza",
     memorySkillAdminPublishDesc:

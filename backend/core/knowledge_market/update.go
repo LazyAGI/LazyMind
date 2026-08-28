@@ -216,7 +216,7 @@ func HandleUpdateJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Re
 		}
 	}
 
-	if err := setInstallState(ctx, db, payload.MarketItemID, payload.UserID, orm.InstallStateDownloading, ds.ID, nil); err != nil {
+	if err := setInstallState(ctx, db, payload.MarketItemID, payload.UserID, orm.InstallStateDownloading, ds.ID, "", nil); err != nil {
 		return asyncjob.Result{ErrorCode: asyncjob.ErrorCodeHandlerFailed}, err
 	}
 	if reporter != nil {
@@ -263,7 +263,7 @@ func HandleUpdateJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Re
 	if err != nil {
 		return failUpdate(ctx, db, payload, fmt.Errorf("clear old documents failed: %w", err))
 	}
-	if err := setInstallState(ctx, db, payload.MarketItemID, payload.UserID, orm.InstallStateImporting, ds.ID, nil); err != nil {
+	if err := setInstallState(ctx, db, payload.MarketItemID, payload.UserID, orm.InstallStateImporting, ds.ID, "", nil); err != nil {
 		return failUpdate(ctx, db, payload, err)
 	}
 	if reporter != nil {
@@ -311,7 +311,7 @@ func HandleUpdateJob(ctx context.Context, job asyncjob.Job, reporter asyncjob.Re
 			snapshot.Commit = commit
 		}
 	}
-	if err := setInstallState(ctx, db, payload.MarketItemID, payload.UserID, orm.InstallStateDone, ds.ID, &snapshot); err != nil {
+	if err := setInstallState(ctx, db, payload.MarketItemID, payload.UserID, orm.InstallStateDone, ds.ID, item.Version, &snapshot); err != nil {
 		return asyncjob.Result{ErrorCode: asyncjob.ErrorCodeHandlerFailed}, err
 	}
 	if reporter != nil {
@@ -483,7 +483,7 @@ func failUpdate(ctx context.Context, db *gorm.DB, payload updateJobPayload, err 
 		Str("market_item_id", payload.MarketItemID).
 		Str("user_id", payload.UserID).
 		Msg("knowledge market update failed")
-	_ = setInstallState(ctx, db, payload.MarketItemID, payload.UserID, orm.InstallStateFailed, "", nil)
+	_ = setInstallState(ctx, db, payload.MarketItemID, payload.UserID, orm.InstallStateFailed, "", "", nil)
 	return asyncjob.Result{ErrorCode: asyncjob.ErrorCodeHandlerFailed}, err
 }
 

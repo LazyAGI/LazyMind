@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { MarkdownArtifactEditor } from "@/modules/chat/components/WorkflowPanel/MarkdownArtifactEditor";
 import { ArtifactRewriteDialog } from "@/modules/chat/components/WorkflowPanel/ArtifactRewriteDialog";
 import type { ArtifactRewriteSelection } from "@/modules/chat/components/WorkflowPanel/ArtifactRewriteDialog";
@@ -6,6 +6,16 @@ import type {
   MarkdownRewritePreview,
 } from "@/modules/chat/components/WorkflowPanel/MarkdownArtifactEditor";
 import type { MarkdownSelection } from "@/modules/chat/components/WorkflowPanel/artifactRewriteSelection";
+import {
+  type ChatSource,
+  findSourceByCitationId,
+  getSourceCitationId,
+  getSourceFaviconUrl,
+  getSourceHref,
+  getSourceLabel,
+  getSourceSubtitle,
+  openSource,
+} from "@/modules/chat/utils/sourceAdapter";
 import {
   ChatServiceApi,
   PromptServiceApi,
@@ -16,6 +26,7 @@ interface EditableBlockProps {
   value: string;
   conversationId?: string;
   historyId?: string;
+  sources?: ChatSource[];
   onCiteSelection?: (text: string) => void;
 }
 
@@ -30,6 +41,7 @@ export default function EditableBlock({
   value,
   conversationId,
   historyId,
+  sources = [],
   onCiteSelection,
 }: EditableBlockProps) {
   const [markdown, setMarkdown] = useState(value);
@@ -63,6 +75,19 @@ export default function EditableBlock({
       startOffset: selection.startOffset,
     });
   }, []);
+
+  const openSourceReference = useCallback((citationId: string) => {
+    const source = findSourceByCitationId(sources, citationId);
+    if (source) openSource(source);
+  }, [sources]);
+
+  const sourceReferences = useMemo(() => sources.map((source) => ({
+    citationId: getSourceCitationId(source),
+    faviconUrl: getSourceFaviconUrl(source),
+    href: getSourceHref(source),
+    label: getSourceSubtitle(source).replace(/^www\./i, "") || getSourceLabel(source),
+    title: getSourceLabel(source),
+  })), [sources]);
 
   const requestRewritePreview = useCallback(async (
     instruction: string,
@@ -115,6 +140,8 @@ export default function EditableBlock({
         sourceRevision={revision}
         presentation="chat"
         onCiteSelection={onCiteSelection}
+        onOpenSourceReference={openSourceReference}
+        sourceReferences={sourceReferences}
         onSave={save}
         onRewriteSelection={openRewrite}
         rewriteDialogOpen={Boolean(rewriteSelection)}

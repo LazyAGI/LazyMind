@@ -1,5 +1,8 @@
 from types import SimpleNamespace
 
+import pytest
+from lazyllm.tools.agent import ToolExecutionError
+
 from lazymind.chat.engine.tools import kb
 from lazymind.chat.engine.tools.local_file.store import FileResourceStore
 
@@ -22,9 +25,8 @@ def _set_uploads(monkeypatch, tmp_path, files):
 
 
 def test_kb_tmp_search_requires_a_query():
-    result = kb.kb_tmp_search()
-    assert result['success'] is False
-    assert 'semantic_query' in result['error']['detail']
+    with pytest.raises(ToolExecutionError, match='semantic_query'):
+        kb.kb_tmp_search()
 
 
 def test_grep_channel_on_uploaded_text(monkeypatch, tmp_path):
@@ -36,10 +38,8 @@ def test_grep_channel_on_uploaded_text(monkeypatch, tmp_path):
     data.write_text('{"omega": true}\n', encoding='utf-8')
     _set_uploads(monkeypatch, tmp_path, [notes, skipped, data])
 
-    result = kb.kb_tmp_search(grep_patterns=['omega'])
-    payload = result['result']
+    payload = kb.kb_tmp_search(grep_patterns=['omega'])
 
-    assert result['success'] is True
     assert payload['total'] == 1
     assert payload['hits'][0]['target'] == 'notes.md'
     assert payload['hits'][0]['line'] == 3
@@ -73,8 +73,8 @@ def test_web_file_resources_are_not_in_corpus(monkeypatch, tmp_path):
     store.write_manifest(manifest)
 
     result = kb.kb_tmp_search(grep_patterns=['omega'])
-    targets = {hit['target'] for hit in result['result']['hits']}
-    corpus = {item['target'] for item in result['result']['corpus']}
+    targets = {hit['target'] for hit in result['hits']}
+    corpus = {item['target'] for item in result['corpus']}
     assert targets == {'notes.md'}
     assert 'fetched.pdf' not in corpus
 
@@ -109,7 +109,7 @@ def test_grep_hits_rank_before_semantic(monkeypatch, tmp_path):
         semantic_query='meaning',
         grep_patterns=['omega'],
     )
-    hits = result['result']['hits']
+    hits = result['hits']
     assert hits[0]['line'] == 3
     assert 'grep' in hits[0]['channels']
     assert hits[1]['line'] == 1
@@ -126,9 +126,9 @@ def test_parse_timeout_skips_file(monkeypatch, tmp_path):
 
     monkeypatch.setattr(kb, '_tmp_run_with_timeout', boom)
     result = kb.kb_tmp_search(grep_patterns=['omega'])
-    skipped = result['result']['skipped']
+    skipped = result['skipped']
     assert any(item['reason'] == 'parse_timeout' for item in skipped)
-    assert result['result']['hits'] == []
+    assert result['hits'] == []
 
 
 def test_timeout_worker_inherits_agentic_config():
@@ -173,6 +173,5 @@ def test_pdf_prepare_passes_store_from_request_thread(monkeypatch, tmp_path):
     )
     result = kb.kb_tmp_search(grep_patterns=['omega'])
     assert captured['store'] is not None
-    assert result['success'] is True
-    assert result['result']['corpus'][0]['target'] == 'paper.pdf'
-    assert result['result']['total'] == 1
+    assert result['corpus'][0]['target'] == 'paper.pdf'
+    assert result['total'] == 1

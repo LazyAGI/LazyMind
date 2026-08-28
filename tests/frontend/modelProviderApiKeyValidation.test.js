@@ -14,17 +14,18 @@ describe('Model provider API Key validation', () => {
     expect(page).toContain('verify: Boolean(apiKey)');
   });
 
-  it('requires a request-local API Key for every verification', () => {
+  it('requires a request-local API Key only for the default Base URL', () => {
     const verifyModalStart = page.indexOf('title={t("modelProvider.verifyGroupTitle"');
     const verifyModalEnd = page.indexOf('title={t("modelProvider.addCustomModelTitle"');
     const verifyModal = page.slice(verifyModalStart, verifyModalEnd);
 
-    expect(page).toContain('if (!requestApiKey) {');
-    expect(page).not.toContain('if (!requestApiKey && isDefaultProviderBaseUrl');
+    expect(page).toContain('const apiKeyRequiredForGroup = isDefaultProviderBaseUrl(provider, group.baseUrl)');
+    expect(page).toContain('if (apiKeyRequiredForGroup && !requestApiKey) {');
+    expect(page).not.toContain('if (!requestApiKey) {');
     expect(page).toContain('api_key: requestApiKey');
-    expect(verifyModal).toContain('required');
-    expect(verifyModal).toContain('required: true');
+    expect(verifyModal).toContain('required={verifyApiKeyRequired}');
+    expect(verifyModal).toContain('required: verifyApiKeyRequired');
     expect(verifyModal).toContain('modelProvider.verifyApiKeyExtra');
-    expect(verifyModal).not.toContain('verifyApiKeyCustomExtra');
+    expect(verifyModal).toContain('modelProvider.verifyApiKeyOptionalExtra');
   });
 });

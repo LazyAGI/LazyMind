@@ -139,6 +139,8 @@ export default function AppRouter() {
           <Route path="agent/chat" element={<ChatApp />}>
             <Route index element={<Navigate to="home" replace />} />
             <Route path="home" element={<Home />} />
+            {/* Conversation detail URLs survive a full browser reload. */}
+            <Route path="home/:conversationId" element={<Home />} />
             <Route path="cases" element={<ShowcaseGalleryPage />} />
             <Route path="cases/:caseId" element={<ShowcaseDetailPage />} />
           </Route>

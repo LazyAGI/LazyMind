@@ -1,5 +1,5 @@
-import { act, render, waitFor } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { act, render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import MainLayout from "./MainLayout";
@@ -89,6 +89,10 @@ vi.mock("@/modules/chat/components/RecordList", () => ({
   },
 }));
 
+function LocationProbe() {
+  return <div data-testid="location-path">{useLocation().pathname}</div>;
+}
+
 describe("MainLayout conversation removal", () => {
   beforeEach(() => {
     sessionStorage.clear();
@@ -97,7 +101,7 @@ describe("MainLayout conversation removal", () => {
     mocks.latestRecordListProps = null;
   });
 
-  it("returns to chat home when an active conversation is removed through an earlier callback", async () => {
+  it("uses a detail route for the selected conversation and returns home when it is removed", async () => {
     const selectedConversationId = "conversation-1";
     const selections: string[] = [];
     const handleSelection = (event: Event) => {
@@ -111,6 +115,7 @@ describe("MainLayout conversation removal", () => {
     render(
       <MemoryRouter initialEntries={["/agent/chat/home"]}>
         <MainLayout />
+        <LocationProbe />
       </MemoryRouter>,
     );
 
@@ -118,24 +123,54 @@ describe("MainLayout conversation removal", () => {
     expect(staleRemoveCallback).not.toBeNull();
 
     act(() => {
-      window.dispatchEvent(
-        new CustomEvent(CHAT_SELECT_CONVERSATION_EVENT, {
-          detail: { conversationId: selectedConversationId, source: "chat" },
-        }),
-      );
+      mocks.latestRecordListProps.onSelected({
+        conversation_id: selectedConversationId,
+      });
     });
 
     await waitFor(() => {
       expect(mocks.latestRecordListProps.currentSessionId).toBe(
         selectedConversationId,
       );
+      expect(screen.getByTestId("location-path")).toHaveTextContent(
+        `/agent/chat/home/${selectedConversationId}`,
+      );
     });
+    expect(selections).toEqual([]);
 
     act(() => {
       staleRemoveCallback?.({ conversation_id: selectedConversationId });
     });
 
-    expect(selections[selections.length - 1]).toBe("");
+    await waitFor(() => {
+      expect(selections[selections.length - 1]).toBe("");
+      expect(screen.getByTestId("location-path")).toHaveTextContent(
+        "/agent/chat/home",
+      );
+    });
     window.removeEventListener(CHAT_SELECT_CONVERSATION_EVENT, handleSelection);
+  });
+
+  it("replaces the home URL with the real id created by a new chat", async () => {
+    render(
+      <MemoryRouter initialEntries={["/agent/chat/home"]}>
+        <MainLayout />
+        <LocationProbe />
+      </MemoryRouter>,
+    );
+
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(CHAT_SELECT_CONVERSATION_EVENT, {
+          detail: { conversationId: "conversation-new", source: "chat" },
+        }),
+      );
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId("location-path")).toHaveTextContent(
+        "/agent/chat/home/conversation-new",
+      );
+    });
   });
 });

@@ -28,6 +28,89 @@ func makeSubAgentTask(t *testing.T, db interface {
 	t.Helper()
 }
 
+func TestLaunchWorkflowAttemptCreatesTaskCenterRowAtomically(t *testing.T) {
+	db := newTestDB(t)
+	if err := db.AutoMigrate(&orm.Conversation{}); err != nil {
+		t.Fatalf("migrate conversation: %v", err)
+	}
+	if err := db.Create(&orm.Conversation{
+		ID: "conv-task-center", DisplayName: "赛博朋克 PPT",
+		BaseModel: orm.BaseModel{CreateUserID: "user-1", CreateUserName: "User 1"},
+	}).Error; err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+
+	sessionID, taskID, completed, err := launchWorkflowAttempt(
+		context.Background(), db.DB, nil,
+		"conv-task-center", "history-1", "user-1", "workflow-task-1",
+		"fallback title", "analyze requirements",
+		WorkflowStepParams{
+			WorkflowID: "ppt-workflow", StepID: "analyze_requirements",
+			IsColdStart: true, WorkflowMode: "dynamic",
+		},
+		nil, nil, nil, nil, false, false,
+	)
+	if err != nil {
+		t.Fatalf("launch workflow attempt: %v", err)
+	}
+	if sessionID == "" || taskID != "workflow-task-1" || completed {
+		t.Fatalf("unexpected launch result session=%q task=%q completed=%v", sessionID, taskID, completed)
+	}
+
+	var task orm.TaskCenterTask
+	if err := db.Where("plugin_session_id = ?", sessionID).First(&task).Error; err != nil {
+		t.Fatalf("load task-center workflow run: %v", err)
+	}
+	if task.TaskType != "workflow_run" || task.Status != "running" || task.Title == nil || *task.Title != "赛博朋克 PPT" {
+		t.Fatalf("unexpected task-center workflow run: %#v", task)
+	}
+}
+
+func TestLaunchWorkflowAttemptRollsBackSessionWhenTaskCenterCreateFails(t *testing.T) {
+	db := newTestDB(t)
+	if err := db.AutoMigrate(&orm.Conversation{}); err != nil {
+		t.Fatalf("migrate conversation: %v", err)
+	}
+	if err := db.Create(&orm.Conversation{
+		ID: "conv-task-center-failure", DisplayName: "Failed workflow",
+		BaseModel: orm.BaseModel{CreateUserID: "user-1", CreateUserName: "User 1"},
+	}).Error; err != nil {
+		t.Fatalf("create conversation: %v", err)
+	}
+	if err := db.Migrator().DropTable(&orm.TaskCenterTask{}); err != nil {
+		t.Fatalf("drop task-center table: %v", err)
+	}
+
+	_, _, _, err := launchWorkflowAttempt(
+		context.Background(), db.DB, nil,
+		"conv-task-center-failure", "history-1", "user-1", "workflow-task-failure",
+		"workflow", "analyze requirements",
+		WorkflowStepParams{
+			WorkflowID: "ppt-workflow", StepID: "analyze_requirements",
+			IsColdStart: true, WorkflowMode: "dynamic",
+		},
+		nil, nil, nil, nil, false, false,
+	)
+	if err == nil || !strings.Contains(err.Error(), "create task-center workflow run") {
+		t.Fatalf("expected task-center creation failure, got %v", err)
+	}
+
+	var sessionCount, subAgentCount int64
+	if err := db.Model(&orm.WorkflowSession{}).
+		Where("conversation_id = ?", "conv-task-center-failure").
+		Count(&sessionCount).Error; err != nil {
+		t.Fatalf("count workflow sessions: %v", err)
+	}
+	if err := db.Model(&orm.SubAgentTask{}).
+		Where("conversation_id = ?", "conv-task-center-failure").
+		Count(&subAgentCount).Error; err != nil {
+		t.Fatalf("count sub-agent tasks: %v", err)
+	}
+	if sessionCount != 0 || subAgentCount != 0 {
+		t.Fatalf("failed cold start left orphan rows: sessions=%d subagents=%d", sessionCount, subAgentCount)
+	}
+}
+
 func TestBuildWorkflowArtifactsSummaryExecutesJoinQuery(t *testing.T) {
 	db := newTestDB(t)
 	now := time.Now().UTC()

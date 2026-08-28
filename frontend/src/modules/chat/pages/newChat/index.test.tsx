@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { forwardRef, useImperativeHandle } from "react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import NewChatPage from "./index";
@@ -8,11 +8,12 @@ import type { ShowcaseCase } from "@/modules/showcase/api";
 
 const mocks = vi.hoisted(() => ({
   setThinkingDepth: vi.fn(),
-  getShowcaseCase: vi.fn(),
+  listShowcaseCases: vi.fn(),
   getKnowledgeMarketItem: vi.fn(),
   getChatSettings: vi.fn(),
   clearFiles: vi.fn(),
   latestChatInputProps: null as any,
+  latestChatLayoutProps: null as any,
 }));
 
 const entryDefaults = {
@@ -50,9 +51,40 @@ const featuredCase: ShowcaseCase = {
   image_url: "/showcase/product.png",
   output_label: "PRD",
   output_type: "document",
-  prompt: "帮我生成一份产品方案",
-  prompt_short: "生成产品方案",
   result_summary: "产品需求文档",
+  source_url: "https://skillhub.example/product-design",
+  tasks: [
+    {
+      id: "product-plan",
+      title: "产品方案",
+      description: "生成产品方案",
+      output_label: "产品方案",
+      prompt: "帮我生成一份产品方案",
+      prompt_short: "生成产品方案",
+      steps: [],
+      result: {
+        template: "generic_report_v1",
+        eyebrow: "产品方案",
+        title: "产品方案",
+        summary: "产品方案摘要",
+      },
+    },
+    {
+      id: "product-review",
+      title: "产品评审",
+      description: "评审产品方案",
+      output_label: "评审意见",
+      prompt: "帮我评审这份产品方案",
+      prompt_short: "评审产品方案",
+      steps: [],
+      result: {
+        template: "generic_report_v1",
+        eyebrow: "产品评审",
+        title: "产品评审",
+        summary: "产品评审摘要",
+      },
+    },
+  ],
   title: "产品设计与 PRD 生成",
   type: "chat",
 };
@@ -101,7 +133,12 @@ vi.mock("@/modules/showcase/FeaturedCases", () => ({
   ),
 }));
 
-vi.mock("../chatLayout", () => ({ default: () => null }));
+vi.mock("../chatLayout", () => ({
+  default: (props: any) => {
+    mocks.latestChatLayoutProps = props;
+    return <div data-testid="chat-layout" />;
+  },
+}));
 vi.mock("@/modules/chat/components/PreferenceConfigNotice", () => ({
   default: () => null,
 }));
@@ -157,7 +194,11 @@ vi.mock("@/modules/chat/store/chatThink", () => ({
   },
 }));
 vi.mock("@/modules/showcase/api", () => ({
-  getShowcaseCase: mocks.getShowcaseCase,
+  listShowcaseCases: mocks.listShowcaseCases,
+  matchesShowcaseEntryType: (capabilityType: string, entryType: string) =>
+    entryType === "chat"
+      ? capabilityType === "chat"
+      : capabilityType === "work" || capabilityType === "workflow",
 }));
 vi.mock("@/modules/showcase/useFeaturedCapabilityBinding", () => ({
   useFeaturedCapabilityBinding: () => ({
@@ -174,12 +215,18 @@ describe("NewChatPage featured templates", () => {
   beforeEach(() => {
     window.sessionStorage.clear();
     mocks.setThinkingDepth.mockClear();
-    mocks.getShowcaseCase.mockReset();
+    mocks.listShowcaseCases.mockReset();
+    mocks.listShowcaseCases.mockResolvedValue({
+      cases: [featuredCase],
+      categories: [],
+      total: 1,
+    });
     mocks.getKnowledgeMarketItem.mockReset();
     mocks.getChatSettings.mockReset();
     mocks.getChatSettings.mockResolvedValue({ data: { data: entryDefaults } });
     mocks.clearFiles.mockReset();
     mocks.latestChatInputProps = null;
+    mocks.latestChatLayoutProps = null;
   });
 
   it("applies the configured Quick Q&A defaults to the welcome composer", async () => {
@@ -228,6 +275,94 @@ describe("NewChatPage featured templates", () => {
     });
   });
 
+  it("opens a work demo in New task mode even when Quick Q&A was active", async () => {
+    window.sessionStorage.setItem("chat_new_run_in_background", "0");
+    const workCase: ShowcaseCase = {
+      ...featuredCase,
+      id: "ppt-workflow",
+      type: "workflow",
+      tasks: [{
+        ...featuredCase.tasks[0],
+        prompt: "生成一份演示文稿",
+      }],
+    };
+    mocks.listShowcaseCases.mockResolvedValue({
+      cases: [workCase],
+      categories: [],
+      total: 1,
+    });
+
+    render(
+      <MemoryRouter initialEntries={[
+        "/agent/chat/home?showcase_case=ppt-workflow&showcase_entry=work",
+      ]}>
+        <NewChatPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "chat-input" })).toHaveValue(
+        "生成一份演示文稿",
+      );
+      expect(mocks.latestChatInputProps.runInBackground).toBe(true);
+      expect(mocks.latestChatInputProps.initialConversationSettings).toEqual(
+        entryDefaults.new_task.conversation_settings,
+      );
+    });
+    expect(window.sessionStorage.getItem("chat_new_run_in_background")).toBe("1");
+  });
+
+  it("opens a chat demo in Quick Q&A mode even when New task was active", async () => {
+    window.sessionStorage.setItem("chat_new_run_in_background", "1");
+
+    render(
+      <MemoryRouter initialEntries={[
+        "/agent/chat/home?showcase_case=aiProduct&showcase_task=product-plan&showcase_entry=chat",
+      ]}>
+        <NewChatPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByRole("textbox", { name: "chat-input" })).toHaveValue(
+        featuredCase.tasks[0].prompt,
+      );
+      expect(mocks.latestChatInputProps.runInBackground).toBe(false);
+      expect(mocks.latestChatInputProps.initialConversationSettings).toEqual(
+        entryDefaults.quick_question.conversation_settings,
+      );
+    });
+    expect(window.sessionStorage.getItem("chat_new_run_in_background")).toBe("0");
+  });
+
+  it("derives the correct mode from the case type for legacy links", async () => {
+    window.sessionStorage.setItem("chat_new_run_in_background", "0");
+    const legacyWorkflow: ShowcaseCase = {
+      ...featuredCase,
+      id: "legacy-workflow",
+      type: "workflow",
+      tasks: [featuredCase.tasks[0]],
+    };
+    mocks.listShowcaseCases.mockResolvedValue({
+      cases: [legacyWorkflow],
+      categories: [],
+      total: 1,
+    });
+
+    render(
+      <MemoryRouter initialEntries={[
+        "/agent/chat/home?showcase_case=legacy-workflow",
+      ]}>
+        <NewChatPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(mocks.latestChatInputProps.runInBackground).toBe(true);
+      expect(window.sessionStorage.getItem("chat_new_run_in_background")).toBe("1");
+    });
+  });
+
   it("blocks new conversations until failed defaults can be reloaded", async () => {
     mocks.getChatSettings.mockRejectedValueOnce(new Error("offline"));
     window.sessionStorage.setItem("chat_new_run_in_background", "1");
@@ -263,15 +398,20 @@ describe("NewChatPage featured templates", () => {
     });
   });
 
-  it("does not apply entry defaults while resuming an existing conversation", async () => {
-    window.sessionStorage.setItem("chat_resume_conversation_id", "conversation-1");
-
+  it("mounts an existing conversation from the detail route without applying entry defaults", async () => {
     render(
-      <MemoryRouter initialEntries={["/agent/chat/home"]}>
-        <NewChatPage />
+      <MemoryRouter initialEntries={["/agent/chat/home/conversation-1"]}>
+        <Routes>
+          <Route
+            path="/agent/chat/home/:conversationId"
+            element={<NewChatPage />}
+          />
+        </Routes>
       </MemoryRouter>,
     );
 
+    expect(screen.getByTestId("chat-layout")).toBeVisible();
+    expect(mocks.latestChatLayoutProps.conversationId).toBe("conversation-1");
     expect(mocks.setThinkingDepth).not.toHaveBeenCalled();
     await waitFor(() => expect(mocks.getChatSettings).toHaveBeenCalledOnce());
     await waitFor(() => expect(
@@ -307,6 +447,74 @@ describe("NewChatPage featured templates", () => {
     expect(mocks.setThinkingDepth).not.toHaveBeenCalled();
   });
 
+  it("keeps the Skill selector visible and reveals functions only after selection", async () => {
+    render(
+      <MemoryRouter initialEntries={["/agent/chat/home"]}>
+        <NewChatPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(mocks.latestChatInputProps.showcaseSelection.skill.options).toEqual([
+        {
+          value: featuredCase.id,
+          label: featuredCase.title,
+          description: "productshowcase.capabilitySeparatorPRD",
+        },
+      ]);
+    });
+    expect(mocks.latestChatInputProps.showcaseSelection.skill.value).toBeUndefined();
+    expect(mocks.latestChatInputProps.showcaseSelection.skill.placeholder).toBe(
+      "showcase.chooseSkill",
+    );
+    expect(mocks.latestChatInputProps.showcaseSelection.task).toBeUndefined();
+
+    act(() => {
+      mocks.latestChatInputProps.showcaseSelection.skill.onChange(featuredCase.id);
+    });
+
+    await waitFor(() => {
+      expect(mocks.latestChatInputProps.showcaseSelection.skill.value).toBe(featuredCase.id);
+      expect(mocks.latestChatInputProps.showcaseSelection.task).toBeDefined();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "showcase.clearCase" }));
+    await waitFor(() => {
+      expect(mocks.latestChatInputProps.showcaseSelection.skill.value).toBeUndefined();
+      expect(mocks.latestChatInputProps.showcaseSelection.task).toBeUndefined();
+    });
+  });
+
+  it("unmounts a stale chat layout when starting a new chat without a route change", async () => {
+    render(
+      <MemoryRouter initialEntries={["/agent/chat/home"]}>
+        <NewChatPage />
+      </MemoryRouter>,
+    );
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("lazymind:chat-select-conversation", {
+        detail: { conversationId: "temporary-conversation", source: "sidebar" },
+      }));
+    });
+    await waitFor(() => expect(screen.getByTestId("chat-layout")).toBeVisible());
+
+    act(() => {
+      window.dispatchEvent(new CustomEvent("lazymind:chat-select-conversation", {
+        detail: { conversationId: "", source: "sidebar" },
+      }));
+    });
+
+    await waitFor(() => expect(screen.queryByTestId("chat-layout")).not.toBeInTheDocument());
+    expect(screen.getByRole("textbox", { name: "chat-input" })).toBeVisible();
+
+    act(() => {
+      mocks.latestChatInputProps.setIsChatContent(true);
+    });
+    await waitFor(() => expect(screen.getByTestId("chat-layout")).toBeVisible());
+    expect(mocks.latestChatLayoutProps.conversationId).toBe("");
+  });
+
   it("keeps template controls and capability cards while the user edits the template", async () => {
     render(
       <MemoryRouter initialEntries={["/agent/chat/home"]}>
@@ -320,14 +528,14 @@ describe("NewChatPage featured templates", () => {
     fireEvent.click(screen.getByRole("button", { name: "试一试模板" }));
 
     expect(screen.getByRole("textbox", { name: "chat-input" })).toHaveValue(
-      featuredCase.prompt,
+      "showcase.fullCapabilityPrompt",
     );
     expect(screen.getByRole("region", { name: "featured-cases" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "showcase.clearCase" })).toBeEnabled();
     expect(screen.queryByText("prompt-suggestions")).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByRole("textbox", { name: "chat-input" }), {
-      target: { value: `${featuredCase.prompt}，补充用户要求` },
+      target: { value: "showcase.fullCapabilityPrompt，补充用户要求" },
     });
 
     expect(screen.getByRole("region", { name: "featured-cases" })).toBeInTheDocument();
@@ -353,5 +561,90 @@ describe("NewChatPage featured templates", () => {
     expect(screen.getByRole("region", { name: "featured-cases" })).toBeInTheDocument();
     expect(screen.queryByText("prompt-suggestions")).not.toBeInTheDocument();
     expect(mocks.clearFiles).toHaveBeenCalledOnce();
+  });
+
+  it("switches between the complete capability and configured functions", async () => {
+    render(
+      <MemoryRouter initialEntries={["/agent/chat/home"]}>
+        <NewChatPage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(mocks.listShowcaseCases).toHaveBeenCalledOnce());
+
+    fireEvent.click(screen.getByRole("button", { name: "试一试模板" }));
+
+    await waitFor(() => {
+      expect(mocks.latestChatInputProps.showcaseSelection.task.value).toBe(
+        "__full_capability__",
+      );
+    });
+    expect(mocks.latestChatInputProps.showcaseSelection.task.options).toEqual([
+      { value: "__full_capability__", label: "showcase.fullCapability" },
+      { value: "product-plan", label: "产品方案", description: "生成产品方案" },
+      { value: "product-review", label: "产品评审", description: "评审产品方案" },
+    ]);
+    expect(mocks.latestChatInputProps.showcaseSelection.task.disabled).toBe(false);
+
+    act(() => {
+      mocks.latestChatInputProps.showcaseSelection.task.onChange("product-review");
+    });
+    expect(screen.getByRole("textbox", { name: "chat-input" })).toHaveValue(
+      "帮我评审这份产品方案",
+    );
+  });
+
+  it("shows a fixed complete-capability selector for a single-function Skill", async () => {
+    const singleFunctionCase: ShowcaseCase = {
+      ...featuredCase,
+      id: "single-function",
+      tasks: [featuredCase.tasks[0]],
+    };
+    mocks.listShowcaseCases.mockResolvedValue({
+      cases: [singleFunctionCase],
+      categories: [],
+      total: 1,
+    });
+
+    render(
+      <MemoryRouter initialEntries={["/agent/chat/home?showcase_case=single-function"]}>
+        <NewChatPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(mocks.latestChatInputProps.showcaseSelection.task.options).toEqual([
+        { value: "__full_capability__", label: "showcase.fullCapability" },
+      ]);
+    });
+    expect(mocks.latestChatInputProps.showcaseSelection.task.disabled).toBe(true);
+    expect(screen.getByRole("textbox", { name: "chat-input" })).toHaveValue(
+      "帮我生成一份产品方案",
+    );
+  });
+
+  it("limits quick selection to the first five configured capabilities", async () => {
+    const cases = Array.from({ length: 6 }, (_, index): ShowcaseCase => ({
+      ...featuredCase,
+      id: `featured-${index + 1}`,
+      title: `精选能力 ${index + 1}`,
+      featured_order: index + 1,
+    }));
+    mocks.listShowcaseCases.mockResolvedValue({ cases, categories: [], total: cases.length });
+
+    render(
+      <MemoryRouter initialEntries={["/agent/chat/home"]}>
+        <NewChatPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(mocks.latestChatInputProps.showcaseSelection.skill.options).toHaveLength(5);
+    });
+    expect(mocks.latestChatInputProps.showcaseSelection.skill.options[4]?.value).toBe(
+      "featured-5",
+    );
+    expect(mocks.latestChatInputProps.showcaseSelection.skill.moreLabel).toBe(
+      "showcase.exploreMoreCapabilities",
+    );
   });
 });

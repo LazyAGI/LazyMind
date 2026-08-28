@@ -31,6 +31,9 @@ type catalogItem struct {
 	Icon            string         `yaml:"icon"`
 	Domain          string         `yaml:"domain"`
 	Tags            []string       `yaml:"tags"`
+	Version         string         `yaml:"version"`
+	VersionDate     string         `yaml:"version_date"`
+	VersionNote     string         `yaml:"version_note"`
 	PackageURL      string         `yaml:"package_url"`
 	PackageRevision string         `yaml:"package_revision"`
 	OnlineAccessURL string         `yaml:"online_access_url"`
@@ -140,6 +143,9 @@ func upsertItem(tx *gorm.DB, now time.Time, sortOrder int, item catalogItem) err
 		Icon:            item.Icon,
 		Domain:          item.Domain,
 		Tags:            json.RawMessage(tagsJSON),
+		Version:         strings.TrimSpace(item.Version),
+		VersionDate:     strings.TrimSpace(item.VersionDate),
+		VersionNote:     item.VersionNote,
 		PackageURL:      item.PackageURL,
 		PackageRevision: item.PackageRevision,
 		OnlineAccessURL: item.OnlineAccessURL,
@@ -174,6 +180,9 @@ func upsertItem(tx *gorm.DB, now time.Time, sortOrder int, item catalogItem) err
 			"icon":              desired.Icon,
 			"domain":            desired.Domain,
 			"tags":              desired.Tags,
+			"version":           desired.Version,
+			"version_date":      desired.VersionDate,
+			"version_note":      desired.VersionNote,
 			"package_url":       desired.PackageURL,
 			"package_revision":  desired.PackageRevision,
 			"online_access_url": desired.OnlineAccessURL,
@@ -196,6 +205,9 @@ func rowContentEqual(row, desired *orm.KnowledgeMarketItem) bool {
 		row.Icon == desired.Icon &&
 		row.Domain == desired.Domain &&
 		jsonEqual(row.Tags, desired.Tags) &&
+		row.Version == desired.Version &&
+		row.VersionDate == desired.VersionDate &&
+		row.VersionNote == desired.VersionNote &&
 		row.PackageURL == desired.PackageURL &&
 		row.PackageRevision == desired.PackageRevision &&
 		row.OnlineAccessURL == desired.OnlineAccessURL &&

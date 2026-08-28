@@ -1030,8 +1030,10 @@ const AssistantMessage = (props: any) => {
       !item.run_status &&
       item.finish_reason ===
         ChatConversationsResponseFinishReasonEnum.FinishReasonUnspecified;
-    const runFailed =
-      item.run_status === "failed" || item.run_status === "interrupted";
+    const runRetryable =
+      item.run_status === "failed" ||
+      item.run_status === "interrupted" ||
+      item.run_status === "cancelled";
     if (
       item.tool_limit_pending &&
       item.tool_limit_pending.decision_id !==
@@ -1109,8 +1111,8 @@ const AssistantMessage = (props: any) => {
         </Button>
       );
     }
-    // Show error + regenerate on unknown/failed finish.
-    if (runFailed) {
+    // Offer regeneration after any retryable terminal run state.
+    if (runRetryable) {
       return (
         <Button
           className="stop-btn"

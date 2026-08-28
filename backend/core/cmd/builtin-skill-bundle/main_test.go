@@ -527,6 +527,25 @@ func TestRunUsesFeaturedDefinitionIDForFallbackName(t *testing.T) {
 	}
 }
 
+func TestInspectEntryRejectsConfiguredCategoryMismatch(t *testing.T) {
+	files := testSkillFiles()
+	files["SKILL.md"] = []byte("---\nname: demo\ndescription: demo skill\nversion: 1.2.3\ncategory: external\n---\n# Demo\n")
+	archivePath := filepath.Join(t.TempDir(), "skill.zip")
+	if err := os.WriteFile(archivePath, makeSkillZipFromFiles(t, files), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := inspectEntry(sourceSpec{
+		SourceURL:   "https://example.test/demo.zip",
+		ResolvedURL: "https://example.test/demo.zip",
+		Key:         "demo",
+		Category:    "career",
+	}, archivePath, files, "", false)
+	if err == nil || !strings.Contains(err.Error(), `configured category "career" does not match SKILL.md frontmatter category "external"`) {
+		t.Fatalf("category mismatch error = %v", err)
+	}
+}
+
 func TestRunBuildsFeaturedCatalogAndKeepsSkillOutOfMarket(t *testing.T) {
 	archive := makeSkillZip(t)
 	client := &http.Client{Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {

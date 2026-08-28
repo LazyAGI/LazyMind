@@ -5,7 +5,11 @@ import type {
 } from "@/api/generated/core-client";
 
 export type KnowledgeSquareType = "industry" | "evaluation";
-export type KnowledgeSquareInstallStatus = "all" | "installed" | "uninstalled";
+export type KnowledgeSquareInstallStatus =
+  | "all"
+  | "installed"
+  | "uninstalled"
+  | "updatable";
 
 export interface OfficialKnowledgeBase {
   id: string;
@@ -20,6 +24,9 @@ export interface OfficialKnowledgeBase {
   questions: string[];
   onlineAccessUrl: string;
   installed: boolean;
+  latestVersion: string;
+  installedVersion: string;
+  updateAvailable: boolean;
   active: boolean;
   installState: string;
   datasetId: string;
@@ -40,6 +47,25 @@ export function mergeKnowledgeMarketItems(
 
   return catalogItems.map((item) => {
     const install = installsByItem.get(item.id);
+    const catalogUpdatedAt = Date.parse(item.updated_at);
+    const installedAt = Date.parse(install?.installed_at || "");
+    const installed = Boolean(install?.dataset_id);
+    const latestVersion = item.version?.trim() || "";
+    const recordedInstalledVersion = install?.installed_version?.trim() || "";
+    const timestampsShowLatest =
+      Number.isFinite(catalogUpdatedAt) &&
+      Number.isFinite(installedAt) &&
+      catalogUpdatedAt <= installedAt;
+    const installedVersion =
+      recordedInstalledVersion ||
+      (installed && timestampsShowLatest ? latestVersion : "");
+    const updateAvailable =
+      installed &&
+      (recordedInstalledVersion && latestVersion
+        ? recordedInstalledVersion !== latestVersion
+        : Number.isFinite(catalogUpdatedAt) &&
+          Number.isFinite(installedAt) &&
+          catalogUpdatedAt > installedAt);
     return {
       id: item.id,
       type: toSquareType(item.category),
@@ -52,7 +78,10 @@ export function mergeKnowledgeMarketItems(
       source: item.data_source,
       questions: [],
       onlineAccessUrl: item.online_access_url,
-      installed: Boolean(install?.dataset_id),
+      installed,
+      latestVersion,
+      installedVersion,
+      updateAvailable,
       active: Boolean(install?.active),
       installState: install?.install_state || "",
       datasetId: install?.dataset_id || "",
@@ -78,6 +107,7 @@ export function mergeKnowledgeMarketDetail(
     source: detail.data_source,
     questions: detail.sample_questions || [],
     onlineAccessUrl: detail.online_access_url || item.onlineAccessUrl,
+    latestVersion: detail.version || item.latestVersion,
   };
 }
 
@@ -100,7 +130,8 @@ export function filterOfficialKnowledgeBases({
     const matchesStatus =
       status === "all" ||
       (status === "installed" && item.installed) ||
-      (status === "uninstalled" && !item.installed);
+      (status === "uninstalled" && !item.installed) ||
+      (status === "updatable" && item.updateAvailable);
     const haystack = [item.name, item.desc, item.domain, ...item.tags]
       .join(" ")
       .toLocaleLowerCase();

@@ -272,76 +272,66 @@
             gap: 9px;
             max-width: 100%;
 
-            .chat-showcase-control {
-              position: relative;
+            .chat-showcase-trigger {
               display: inline-flex;
               align-items: center;
-              height: 24px;
+              gap: 6px;
+              height: 28px;
               min-width: 138px;
-              max-width: 220px;
+              max-width: 240px;
+              padding: 0 9px;
               flex: 0 1 auto;
               overflow: hidden;
-              border: 0.5px solid #dfe6ef;
-              border-radius: 4px;
+              border: 1px solid #d9e3f2;
+              border-radius: 6px;
               background: #fff;
               color: #5f6b7e;
+              font: inherit;
+              font-size: 12px;
+              cursor: pointer;
               transition:
                 border-color 0.18s ease,
                 background 0.18s ease,
                 color 0.18s ease;
 
-              &:hover,
-              &:focus-within {
-                border-color: #006ae6;
-                color: #006ae6;
-              }
-            }
-
-            .chat-showcase-control-icon {
-              position: absolute;
-              z-index: 1;
-              left: 8px;
-              flex: 0 0 auto;
-              pointer-events: none;
-            }
-
-            .chat-showcase-control-icon {
-              width: 14px;
-              height: 14px;
-              color: #a3b0c6;
-              font-size: 14px;
-            }
-
-            .chat-showcase-category-select {
-              width: 100%;
-              height: 24px;
-              min-width: 0;
-              color: inherit;
-              font-size: 12px;
-
-              .ant-select-selector {
-                height: 24px !important;
-                padding: 0 25px 0 28px !important;
-                border: 0 !important;
-                border-radius: inherit !important;
-                background: transparent !important;
-                box-shadow: none !important;
-              }
-
-              .ant-select-selection-item {
+              > span:nth-child(2) {
                 overflow: hidden;
-                color: inherit;
-                line-height: 22px !important;
+                flex: 1;
+                white-space: nowrap;
+                text-align: left;
                 text-overflow: ellipsis;
               }
 
-              .ant-select-arrow {
-                right: 8px;
-                color: #a3b0c6;
-                font-size: 10px;
+              &:hover,
+              &:focus-visible,
+              &.is-open,
+              &.is-selected {
+                border-color: #7db0ff;
+                background: #f7faff;
+                color: #0868dc;
+              }
+
+              &:focus-visible {
+                outline: 2px solid rgb(22 119 255 / 18%);
+                outline-offset: 1px;
+              }
+
+              &:disabled {
+                cursor: default;
+                opacity: 0.78;
+              }
+
+              .chat-showcase-trigger-arrow {
+                flex: 0 0 auto;
+                color: currentcolor;
+                font-size: 9px;
+                transition: transform 0.18s ease;
+              }
+
+              &.is-open .chat-showcase-trigger-arrow {
+                transform: rotate(180deg);
               }
             }
-
           }
 
           .input-bottom-actions-left-item {
@@ -1390,5 +1380,158 @@
     white-space: pre-wrap;
     word-break: break-word;
     line-height: 20px;
+  }
+}
+
+.chat-showcase-popover {
+  max-width: calc(100vw - 24px);
+
+  .ant-popover-inner {
+    overflow: hidden;
+    padding: 0;
+    border: 1px solid #dbe5f3;
+    border-radius: 16px;
+    box-shadow: 0 18px 48px rgb(44 72 112 / 16%);
+  }
+
+  &.chat-showcase-popover--skill .ant-popover-inner {
+    width: min(368px, calc(100vw - 24px));
+  }
+
+  &.chat-showcase-popover--task .ant-popover-inner {
+    width: min(292px, calc(100vw - 24px));
+  }
+}
+
+.chat-showcase-menu {
+  background: #fff;
+  color: #27364d;
+
+  .chat-showcase-menu-header {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding: 18px 20px 10px;
+
+    strong {
+      font-size: 16px;
+      line-height: 24px;
+    }
+
+    span {
+      color: #8a99b0;
+      font-size: 12px;
+      line-height: 18px;
+    }
+  }
+
+  .chat-showcase-menu-options {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 12px 10px;
+  }
+
+  .chat-showcase-menu-option {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    min-height: 48px;
+    padding: 8px 10px;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: left;
+    cursor: pointer;
+
+    &:hover,
+    &:focus-visible,
+    &.is-selected {
+      background: #edf4ff;
+      color: #0868dc;
+    }
+
+    &:focus-visible {
+      outline: 2px solid rgb(22 119 255 / 18%);
+      outline-offset: -2px;
+    }
+  }
+
+  .chat-showcase-menu-option-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    flex: 0 0 36px;
+    border-radius: 10px;
+    background: #eef4ff;
+    color: #1677ff;
+    font-size: 17px;
+  }
+
+  .chat-showcase-menu-option-copy {
+    display: flex;
+    overflow: hidden;
+    flex: 1;
+    flex-direction: column;
+    gap: 1px;
+
+    strong,
+    small {
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    strong {
+      font-size: 14px;
+      line-height: 21px;
+    }
+
+    small {
+      color: #8a99b0;
+      font-size: 12px;
+      line-height: 18px;
+    }
+  }
+
+  .chat-showcase-menu-check {
+    flex: 0 0 auto;
+    color: #1677ff;
+    font-size: 15px;
+  }
+
+  .chat-showcase-menu-more {
+    width: calc(100% - 24px);
+    margin: 0 12px;
+    padding: 12px 8px 14px;
+    border: 0;
+    border-top: 1px solid #e8edf5;
+    background: transparent;
+    color: #0868dc;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+
+    &:hover,
+    &:focus-visible {
+      color: #0057bd;
+    }
+  }
+
+  &.chat-showcase-menu--task {
+    .chat-showcase-menu-header {
+      padding-bottom: 8px;
+    }
+
+    .chat-showcase-menu-option {
+      min-height: 42px;
+      padding: 9px 12px;
+    }
   }
 }

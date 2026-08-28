@@ -146,6 +146,7 @@ let startupState = {
   status: "starting",
   phase: "Initializing",
   message: "Starting local desktop runtime...",
+  progress: null,
   startedAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
 };
@@ -255,10 +256,10 @@ function sidecarShutdownEnv() {
 function installerWarmupTimeoutSeconds(argv = process.argv) {
   const index = argv.indexOf("--timeout-seconds");
   if (index < 0 || index + 1 >= argv.length) {
-    return 900;
+    return 1800;
   }
   const value = Number.parseInt(argv[index + 1], 10);
-  return Number.isFinite(value) && value > 0 ? value : 900;
+  return Number.isFinite(value) && value > 0 ? value : 1800;
 }
 
 function currentRuntimeRoot() {
@@ -391,6 +392,36 @@ function captureSidecarChunk(source, chunk) {
       if (event?.event === "capability.ready" && event?.capability === "home") {
         publishHomeReady(Number(event.frontendPort));
       }
+      if (event?.event === "phase.progress" && event?.phase === "python-payload") {
+        const progress = {
+          stage: String(event.stage || "extracting"),
+          completedFiles: Number(event.completedFiles || 0),
+          totalFiles: Number(event.totalFiles || 0),
+          completedBytes: Number(event.completedBytes || 0),
+          totalBytes: Number(event.totalBytes || 0),
+          completedRoots: Number(event.completedRoots || 0),
+          totalRoots: Number(event.totalRoots || 0),
+          retryAttempt: Number(event.retryAttempt || 0),
+          retryElapsedMs: Number(event.retryElapsedMs || 0),
+        };
+        const waiting = progress.stage === "waiting";
+        const finalizing = progress.stage === "installing";
+        updateStartupState({
+          status: "starting",
+          phase: waiting
+            ? "Waiting for Windows"
+            : (finalizing ? "Finalizing Python" : "Preparing Python"),
+          message: waiting
+            ? "Python files are ready. Waiting for Windows to release them..."
+            : (finalizing
+              ? "Installing the bundled Python runtime..."
+              : "Preparing the bundled Python runtime for first use..."),
+          progress,
+        });
+      }
+      if (["phase.completed", "phase.failed"].includes(event?.event) && event?.phase === "python-payload") {
+        updateStartupState({ progress: null });
+      }
       if (["phase.failed", "startup.failed"].includes(event?.event) && event?.error) {
         sidecarStructuredFailure = String(event.error);
       }
@@ -421,6 +452,7 @@ function setStartupFailure(error, message = "Desktop runtime failed to start") {
     status: "failed",
     phase: "Failed",
     message,
+    progress: null,
     error: lastStartupError,
   });
   finishStartupMetrics("failed", "runtime-startup");
@@ -1015,6 +1047,7 @@ function startRuntime() {
     status: "starting",
     phase: "Starting sidecar",
     message: "Starting local desktop runtime...",
+    progress: null,
     error: null,
   });
   logStartupContext();
@@ -1148,21 +1181,28 @@ async function waitForRuntimeReady(options = {}) {
           runtimeCapabilityReady(status, targetCapability)
         )
         : desktopRuntimeReady(status, belongsToDesktop);
+      const observedStatus = runtimeProcess && !status.ownerMatched &&
+        ["failed", "stale", "stopped"].includes(status.overallStatus)
+        ? "starting"
+        : (status.overallStatus || "starting");
+      const activeProgress = startupState.progress;
       const phase = ownedReady
         ? (targetCapability ? "Interface ready" : "Ready")
-        : `Waiting (${status.overallStatus || "unknown"})`;
+        : (activeProgress ? startupState.phase : `Waiting (${observedStatus})`);
       updateStartupState({
         status: ownedReady && !targetCapability
           ? "ready"
-          : (status.overallStatus || "starting"),
+          : observedStatus,
         phase,
-        message: ownedReady
+        message: activeProgress
+          ? startupState.message
+          : (ownedReady
           ? (
             targetCapability
               ? "Opening LazyMind while AI services continue to initialize..."
               : "Desktop runtime is ready."
           )
-          : "Starting local desktop runtime...",
+          : "Starting local desktop runtime..."),
       });
       if (status.config?.portResolutions?.length) {
         for (const resolution of status.config.portResolutions) {
@@ -1255,6 +1295,7 @@ function loadingHTML() {
       color: #1f2937;
       overflow: hidden;
     }
+    ::selection { background: #bfdbfe; color: #172554; }
     main {
       height: 100vh;
       display: grid;
@@ -1266,17 +1307,36 @@ function loadingHTML() {
     h1 { font-size: 24px; font-weight: 650; margin: 0 0 12px; letter-spacing: 0; }
     p { font-size: 14px; line-height: 1.6; color: #4b5563; margin: 0; }
     .bar { height: 4px; background: #dbeafe; overflow: hidden; margin-top: 22px; border-radius: 2px; }
-    .bar::before {
-      content: "";
-      display: block;
-      width: 42%;
+    .bar-fill {
+      width: 100%;
       height: 100%;
       background: #2563eb;
+      border-radius: inherit;
+      transform-origin: left center;
+    }
+    .bar.indeterminate .bar-fill {
+      width: 42%;
       animation: move 1.2s infinite ease-in-out;
     }
+    .bar.determinate .bar-fill {
+      transform: scaleX(0);
+      transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
+    }
     body.failed .bar { background: #fee2e2; }
-    body.failed .bar::before { background: #dc2626; animation: none; width: 100%; }
+    body.failed .bar-fill { background: #dc2626; animation: none; transform: scaleX(1) !important; width: 100%; }
     @keyframes move { 0% { transform: translateX(-100%); } 100% { transform: translateX(240%); } }
+    .progress-meta {
+      display: flex;
+      justify-content: space-between;
+      gap: 20px;
+      margin-top: 9px;
+      color: #64748b;
+      font-size: 12px;
+      line-height: 1.4;
+      font-variant-numeric: tabular-nums;
+    }
+    .progress-meta[hidden] { display: none; }
+    .progress-value { flex: 0 0 auto; color: #475569; }
     .details-button {
       margin-top: 16px;
       border: 0;
@@ -1361,6 +1421,11 @@ function loadingHTML() {
       font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
     }
     .empty { color: #64748b; }
+    @media (prefers-reduced-motion: reduce) {
+      .bar.indeterminate .bar-fill { animation-duration: 2.4s; }
+      .bar.determinate .bar-fill { transition: none; }
+      .drawer { transition: none; }
+    }
   </style>
 </head>
 <body>
@@ -1368,7 +1433,13 @@ function loadingHTML() {
     <section>
       <h1>LazyMind</h1>
       <p id="message">Starting local desktop runtime...</p>
-      <div class="bar"></div>
+      <div id="progressBar" class="bar indeterminate" role="progressbar" aria-label="Startup progress">
+        <div id="progressFill" class="bar-fill"></div>
+      </div>
+      <div id="progressMeta" class="progress-meta" aria-live="polite" hidden>
+        <span id="progressLabel">Preparing Python</span>
+        <span id="progressValue" class="progress-value"></span>
+      </div>
       <button id="toggleDetails" class="details-button" type="button">Show startup log</button>
     </section>
   </main>
@@ -1397,6 +1468,11 @@ function loadingHTML() {
       toggle: document.getElementById("toggleDetails"),
       collapse: document.getElementById("collapse"),
       message: document.getElementById("message"),
+      progressBar: document.getElementById("progressBar"),
+      progressFill: document.getElementById("progressFill"),
+      progressMeta: document.getElementById("progressMeta"),
+      progressLabel: document.getElementById("progressLabel"),
+      progressValue: document.getElementById("progressValue"),
       phase: document.getElementById("phase"),
       log: document.getElementById("log"),
       steps: document.getElementById("steps"),
@@ -1406,6 +1482,7 @@ function loadingHTML() {
     };
     let expanded = false;
     let snapshot = null;
+    const numberFormat = new Intl.NumberFormat();
     const stepNames = [
       ["process-supervisor", "Process supervisor"],
       ["local-proxy", "Local gateway"],
@@ -1434,6 +1511,50 @@ function loadingHTML() {
       if (status === "starting") return "running";
       return "";
     }
+    function renderProgress(progress) {
+      if (!progress) {
+        els.progressBar.classList.remove("determinate");
+        els.progressBar.classList.add("indeterminate");
+        els.progressBar.removeAttribute("aria-valuenow");
+        els.progressBar.removeAttribute("aria-valuemin");
+        els.progressBar.removeAttribute("aria-valuemax");
+        els.progressFill.style.transform = "";
+        els.progressMeta.hidden = true;
+        return;
+      }
+      const totalBytes = Math.max(0, Number(progress.totalBytes || 0));
+      const completedBytes = Math.max(0, Number(progress.completedBytes || 0));
+      const totalFiles = Math.max(0, Number(progress.totalFiles || 0));
+      const completedFiles = Math.max(0, Number(progress.completedFiles || 0));
+      const ratio = totalBytes > 0
+        ? completedBytes / totalBytes
+        : (totalFiles > 0 ? completedFiles / totalFiles : 0);
+      const percent = Math.max(0, Math.min(100, Math.round(ratio * 100)));
+      els.progressBar.classList.remove("indeterminate");
+      els.progressBar.classList.add("determinate");
+      els.progressBar.setAttribute("aria-valuemin", "0");
+      els.progressBar.setAttribute("aria-valuemax", "100");
+      els.progressBar.setAttribute("aria-valuenow", String(percent));
+      els.progressFill.style.transform = "scaleX(" + (percent / 100) + ")";
+      els.progressMeta.hidden = false;
+      if (progress.stage === "waiting") {
+        els.progressLabel.textContent = "Waiting for Windows to release Python files";
+        els.progressValue.textContent = progress.retryAttempt > 0
+          ? "Retry " + numberFormat.format(progress.retryAttempt)
+          : "Finalizing";
+        return;
+      }
+      if (progress.stage === "installing") {
+        els.progressLabel.textContent = "Finalizing Python runtime";
+        els.progressValue.textContent = progress.totalRoots > 0
+          ? numberFormat.format(progress.completedRoots) + " / " + numberFormat.format(progress.totalRoots) + " steps"
+          : "Finalizing";
+        return;
+      }
+      els.progressLabel.textContent = "Extracting bundled Python";
+      els.progressValue.textContent = percent + "% · " +
+        numberFormat.format(completedFiles) + " / " + numberFormat.format(totalFiles) + " files";
+    }
     function render(next) {
       snapshot = next || snapshot;
       if (!snapshot) return;
@@ -1445,6 +1566,7 @@ function loadingHTML() {
       }
       els.message.textContent = startup.message || "Starting local desktop runtime...";
       els.phase.textContent = startup.phase || startup.status || "Starting";
+      renderProgress(startup.progress);
       const services = status.services || {};
       els.steps.innerHTML = stepNames.map(([key, label]) => {
         const serviceStatus = services[key]?.status || "pending";

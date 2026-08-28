@@ -425,11 +425,15 @@ interface TextDiffViewProps {
   currentText: string;
   otherText: string;
   otherLabel: string;
+  currentLabel?: string;
   /** When true, otherText is the newer version (green) and currentText is the older one (red). */
   reversed?: boolean;
 }
 
-function TextDiffView({ currentText, otherText, otherLabel, reversed }: TextDiffViewProps) {
+function TextDiffView({ currentText, otherText, otherLabel, currentLabel, reversed }: TextDiffViewProps) {
+  const resolvedCurrentLabel = currentLabel ?? tr('chat.slots.currentVersion');
+  const beforeLabel = reversed ? resolvedCurrentLabel : otherLabel;
+  const afterLabel = reversed ? otherLabel : resolvedCurrentLabel;
   const diffLines = useMemo(
     () => reversed
       ? buildDiffLinesWithInline(currentText, otherText)
@@ -440,25 +444,19 @@ function TextDiffView({ currentText, otherText, otherLabel, reversed }: TextDiff
   return (
     <div className='workflow-slot__version-diff'>
       <div className='workflow-slot__version-diff-header'>
-        {reversed ? (
-          <>
-            <span className='workflow-slot__version-diff-label workflow-slot__version-diff-label--remove'>
-              {tr('chat.slots.currentVersion')}
-            </span>
-            <span className='workflow-slot__version-diff-label workflow-slot__version-diff-label--add'>
-              {otherLabel}
-            </span>
-          </>
-        ) : (
-          <>
-            <span className='workflow-slot__version-diff-label workflow-slot__version-diff-label--remove'>
-              {otherLabel}
-            </span>
-            <span className='workflow-slot__version-diff-label workflow-slot__version-diff-label--add'>
-              {tr('chat.slots.currentVersion')}
-            </span>
-          </>
-        )}
+        <span className='workflow-slot__version-diff-side'>
+          <span className='workflow-slot__version-diff-caption'>{tr('chat.slots.beforeChange')}</span>
+          <span className='workflow-slot__version-diff-label workflow-slot__version-diff-label--remove'>
+            {beforeLabel}
+          </span>
+        </span>
+        <span className='workflow-slot__version-diff-arrow' aria-hidden='true'>→</span>
+        <span className='workflow-slot__version-diff-side'>
+          <span className='workflow-slot__version-diff-caption'>{tr('chat.slots.afterChange')}</span>
+          <span className='workflow-slot__version-diff-label workflow-slot__version-diff-label--add'>
+            {afterLabel}
+          </span>
+        </span>
       </div>
       <div className='workflow-slot__version-diff-body'>
         {diffLines.map((line, index) => (
@@ -497,14 +495,30 @@ function snapshotDiffCacheKey(snapshot: unknown): string {
   }
 }
 
-function formatPayloadForDiff(payload: unknown): string {
+function writerDocumentFromDiffPayload(payload: unknown): WriterDocument | null {
   const unwrapped = unwrapArtifactPayload(payload);
-  if (isWriterDocument(unwrapped)) {
-    return writerDocumentDiffText(unwrapped);
+  if (isWriterDocument(unwrapped)) return unwrapped;
+  if (isWriterDocument(payload)) return payload;
+  if (typeof unwrapped !== 'string') return null;
+
+  const trimmed = unwrapped.trim();
+  if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return null;
+  try {
+    const parsed = JSON.parse(trimmed);
+    const parsedPayload = unwrapArtifactPayload(parsed);
+    if (isWriterDocument(parsedPayload)) return parsedPayload;
+    if (isWriterDocument(parsed)) return parsed;
+  } catch {
+    // Keep malformed or non-Writer JSON as its original text below.
   }
-  if (isWriterDocument(payload)) {
-    return writerDocumentDiffText(payload);
-  }
+  return null;
+}
+
+function formatPayloadForDiff(payload: unknown): string {
+  const writerDocument = writerDocumentFromDiffPayload(payload);
+  if (writerDocument) return writerDocumentDiffText(writerDocument);
+
+  const unwrapped = unwrapArtifactPayload(payload);
   if (typeof unwrapped === 'string') return unwrapped;
   if (unwrapped != null) return JSON.stringify(unwrapped, null, 2);
   if (typeof payload === 'string') return payload;
@@ -515,7 +529,10 @@ function writerBlockDiffText(block: WriterBlock, headingLevel = 2): string {
   const content = block.content ?? '';
   let current = content;
   if (block.type === 'heading') {
-    const level = Math.min(6, Math.max(1, Number(block.numbering?.level ?? headingLevel)));
+    const structuralLevel = Number(block.numbering?.level);
+    const level = Math.min(6, Math.max(1,
+      Number.isFinite(structuralLevel) ? structuralLevel + 1 : headingLevel,
+    ));
     current = `${'#'.repeat(level)} ${content}`;
   } else if (block.type === 'list_item') {
     const marker = block.numbering?.ordered ? '1.' : '-';
@@ -539,7 +556,7 @@ function writerDocumentDiffText(document: WriterDocument): string {
   ].filter(Boolean).join('\n\n');
 }
 
-async function resolveSnapshotDiffText(snapshot: unknown): Promise<string> {
+export async function resolveSnapshotDiffText(snapshot: unknown): Promise<string> {
   if (snapshot == null) return '';
   if (typeof snapshot === 'string') {
     const trimmed = snapshot.trim();
@@ -551,7 +568,7 @@ async function resolveSnapshotDiffText(snapshot: unknown): Promise<string> {
         && !trimmed.startsWith('http')
         && !trimmed.startsWith('/var/'))
     ) {
-      return snapshot;
+      return formatPayloadForDiff(snapshot);
     }
     const fetchUrl = trimmed.includes('/static-files/') || trimmed.startsWith('http')
       ? resolveCoreAssetUrl(trimmed)
@@ -574,11 +591,9 @@ async function resolveSnapshotDiffText(snapshot: unknown): Promise<string> {
 
   if (typeof snapshot !== 'object') return String(snapshot);
   const record = snapshot as Record<string, unknown>;
-  if (record.text !== undefined) return String(record.text);
+  if (record.text !== undefined) return formatPayloadForDiff(record.text);
   if (record.data !== undefined) {
-    return typeof record.data === 'string'
-      ? record.data
-      : JSON.stringify(record.data, null, 2);
+    return formatPayloadForDiff(record.data);
   }
   if (isWriterDocument(record) || isWriterDocument(unwrapArtifactPayload(record))) {
     return formatPayloadForDiff(record);
@@ -676,6 +691,7 @@ interface SnapshotTextDiffViewProps {
   otherSnapshot?: unknown;
   otherText?: string;
   otherLabel: string;
+  currentLabel?: string;
   reversed?: boolean;
 }
 
@@ -684,6 +700,7 @@ function SnapshotTextDiffView({
   otherSnapshot,
   otherText,
   otherLabel,
+  currentLabel,
   reversed,
 }: SnapshotTextDiffViewProps) {
   const [currentText, setCurrentText] = useState('');
@@ -734,6 +751,7 @@ function SnapshotTextDiffView({
       currentText={currentText}
       otherText={resolvedOtherText}
       otherLabel={otherLabel}
+      currentLabel={currentLabel}
       reversed={reversed}
     />
   );
@@ -1032,6 +1050,11 @@ export function SlotVersionPopover({
     selectedRevision === DRAFT_REVISION
       ? null
       : (versions.find((v) => v.revision === (selectedRevision ?? currentVersion?.revision)) ?? currentVersion);
+  const previousSelectedVersion = effectiveSelectedVersion
+    ? (versions.find((version) => version.revision < effectiveSelectedVersion.revision) ?? null)
+    : null;
+  const effectiveSelectedSnapshot = effectiveSelectedVersion?.content_snapshot
+    ?? (effectiveSelectedVersion?.selected ? currentValue : undefined);
   // When draft is selected (DRAFT_REVISION), the right pane shows draft vs current diff.
   const isDraftSelected = selectedRevision === DRAFT_REVISION;
 
@@ -1325,33 +1348,38 @@ export function SlotVersionPopover({
                   </button>
                 </div>
               </div>
-            ) : effectiveSelectedVersion && !effectiveSelectedVersion.selected ? (
+            ) : effectiveSelectedVersion ? (
               <div className='workflow-slot__version-compare'>
-                <SnapshotTextDiffView
-                  currentSnapshot={activeCurrentValue}
-                  otherSnapshot={effectiveSelectedVersion.content_snapshot}
-                  otherLabel={tr('chat.slots.versionSourceLabel', {
-                    version: versionLabel(effectiveSelectedVersion.revision),
-                    source: changeSourceLabel(effectiveSelectedVersion),
-                  })}
-                  reversed={currentVersion !== null && effectiveSelectedVersion.revision > currentVersion.revision}
-                />
-                <button
-                  className='workflow-slot__version-apply-btn'
-                  disabled={rolling}
-                  onClick={() => handleRollback(effectiveSelectedVersion.revision)}
-                  aria-label={tr('chat.slots.applyVersionAria', { version: versionLabel(effectiveSelectedVersion.revision) })}
-                >
-                  {rolling ? tr('chat.slots.rollingBack') : tr('chat.slots.applyVersion', { version: versionLabel(effectiveSelectedVersion.revision) })}
-                </button>
+                {previousSelectedVersion ? (
+                  <SnapshotTextDiffView
+                    currentSnapshot={effectiveSelectedSnapshot}
+                    otherSnapshot={previousSelectedVersion.content_snapshot}
+                    otherLabel={tr('chat.slots.versionSourceLabel', {
+                      version: versionLabel(previousSelectedVersion.revision),
+                      source: changeSourceLabel(previousSelectedVersion),
+                    })}
+                    currentLabel={tr('chat.slots.versionSourceLabel', {
+                      version: versionLabel(effectiveSelectedVersion.revision),
+                      source: changeSourceLabel(effectiveSelectedVersion),
+                    })}
+                  />
+                ) : (
+                  <SnapshotTextPreview snapshot={effectiveSelectedSnapshot} />
+                )}
+                {!effectiveSelectedVersion.selected && (
+                  <button
+                    className='workflow-slot__version-apply-btn'
+                    disabled={rolling}
+                    onClick={() => handleRollback(effectiveSelectedVersion.revision)}
+                    aria-label={tr('chat.slots.applyVersionAria', { version: versionLabel(effectiveSelectedVersion.revision) })}
+                  >
+                    {rolling ? tr('chat.slots.rollingBack') : tr('chat.slots.applyVersion', { version: versionLabel(effectiveSelectedVersion.revision) })}
+                  </button>
+                )}
               </div>
             ) : (
               <div className='workflow-slot__version-compare workflow-slot__version-compare--same'>
-                {effectiveSelectedVersion ? (
-                  <SnapshotTextPreview snapshot={activeCurrentValue} />
-                ) : (
-                  <div className='workflow-slot__version-compare-hint'>{tr('chat.slots.selectVersionCompare')}</div>
-                )}
+                <div className='workflow-slot__version-compare-hint'>{tr('chat.slots.selectVersionCompare')}</div>
               </div>
             )}
           </div>

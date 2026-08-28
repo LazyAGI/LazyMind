@@ -2394,6 +2394,7 @@ export default function DatasetDetailPage() {
     }
     return (
       <QuestionTypeSelect
+        autoFocus
         value={drafts[record.id]?.question_type || undefined}
         placeholder={t("datasetManagement.detail.questionTypePlaceholder")}
         onChange={(value) => handleDraftChange(record, "question_type", value)}

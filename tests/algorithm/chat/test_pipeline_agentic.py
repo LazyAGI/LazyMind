@@ -125,7 +125,11 @@ def test_handle_chat_constructs_react_agent_from_runtime_context(monkeypatch):
     assert agent_calls[0]['kwargs']['workspace'] == workspace
     assert f'Use `{workspace}` as the single working directory' in agent_calls[0]['kwargs']['prompt']
     assert '## Attached Files' not in agent_calls[0]['kwargs']['prompt']
-    assert '### User Instruction\n\nhello\n\nATTENTION — `ask_user`' in agent_queries[0]
+    query = agent_queries[0]
+    instruction_idx = query.index('### User Instruction\n\nhello')
+    assert instruction_idx >= 0
+    assert query.index('ATTENTION — if this turn supplies an environment variable') > instruction_idx
+    assert query.index('ATTENTION — `ask_user`') > instruction_idx
     assert 'answer:### Runtime Context' in body
     assert 'hello' in body
     payloads = [json.loads(chunk) for chunk in body.strip().split('\n\n')]

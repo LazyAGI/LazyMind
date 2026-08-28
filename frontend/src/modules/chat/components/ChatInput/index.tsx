@@ -10,13 +10,15 @@ import {
   type ReactNode,
 } from "react";
 import { RcFile } from "antd/es/upload";
-import { Button, message, Select, Spin, Tooltip } from "antd";
+import { Button, message, Popover, Select, Spin, Tag, Tooltip } from "antd";
 import {
   AppstoreOutlined,
   BookOutlined,
   BulbOutlined,
+  CheckOutlined,
   CloseOutlined,
   CommentOutlined,
+  DownOutlined,
   EditOutlined,
   PaperClipOutlined,
   SettingOutlined,
@@ -80,7 +82,6 @@ import {
   TOOL_AVAILABILITY_CHANGED_EVENT,
   type ToolAvailabilityChange,
 } from "@/modules/memory/toolApi";
-import { Popover, Tag } from "antd";
 import type {
   ChatFileList,
   ChatInputImperativeProps,
@@ -408,10 +409,115 @@ interface ChatInputProps {
   fixedThinkingDepth?: ThinkingDepth;
 }
 
-export interface ShowcaseSelection {
-  value: string;
-  label: string;
+interface ShowcaseSelectControl {
+  value?: string;
+  selectedLabel?: string;
+  options: Array<{ value: string; label: string; description?: string }>;
   ariaLabel: string;
+  placeholder?: string;
+  heading: string;
+  subheading?: string;
+  valuePrefix?: string;
+  moreLabel?: string;
+  onMore?: () => void;
+  disabled: boolean;
+  onChange: (value: string) => void;
+}
+
+export interface ShowcaseSelection {
+  skill: ShowcaseSelectControl;
+  task?: ShowcaseSelectControl;
+}
+
+function ShowcaseSelectButton({
+  control,
+  kind,
+}: {
+  control: ShowcaseSelectControl;
+  kind: "skill" | "task";
+}) {
+  const [open, setOpen] = useState(false);
+  const selectedLabel = control.selectedLabel ?? control.placeholder ?? "";
+  const buttonLabel = control.valuePrefix
+    ? `${control.valuePrefix}${selectedLabel}`
+    : selectedLabel;
+
+  const content = (
+    <div className={`chat-showcase-menu chat-showcase-menu--${kind}`}>
+      <div className="chat-showcase-menu-header">
+        <strong>{control.heading}</strong>
+        {control.subheading ? <span>{control.subheading}</span> : null}
+      </div>
+      <div className="chat-showcase-menu-options" role="listbox" aria-label={control.ariaLabel}>
+        {control.options.map((option) => {
+          const selected = option.value === control.value;
+          return (
+            <button
+              key={option.value}
+              type="button"
+              className={`chat-showcase-menu-option${selected ? " is-selected" : ""}`}
+              role="option"
+              aria-selected={selected}
+              onClick={() => {
+                control.onChange(option.value);
+                setOpen(false);
+              }}
+            >
+              {kind === "skill" ? (
+                <span className="chat-showcase-menu-option-icon" aria-hidden="true">
+                  <AppstoreOutlined />
+                </span>
+              ) : null}
+              <span className="chat-showcase-menu-option-copy">
+                <strong>{option.label}</strong>
+                {option.description ? <small>{option.description}</small> : null}
+              </span>
+              {selected ? <CheckOutlined className="chat-showcase-menu-check" aria-hidden="true" /> : null}
+            </button>
+          );
+        })}
+      </div>
+      {control.moreLabel && control.onMore ? (
+        <button
+          type="button"
+          className="chat-showcase-menu-more"
+          onClick={() => {
+            control.onMore?.();
+            setOpen(false);
+          }}
+        >
+          {control.moreLabel} <span aria-hidden="true">→</span>
+        </button>
+      ) : null}
+    </div>
+  );
+
+  return (
+    <Popover
+      arrow={false}
+      content={content}
+      destroyOnHidden
+      open={open}
+      overlayClassName={`chat-showcase-popover chat-showcase-popover--${kind}`}
+      placement="topLeft"
+      trigger="click"
+      onOpenChange={(nextOpen) => {
+        if (!control.disabled) setOpen(nextOpen);
+      }}
+    >
+      <button
+        type="button"
+        className={`chat-showcase-trigger${control.value ? " is-selected" : ""}${open ? " is-open" : ""}`}
+        aria-label={control.ariaLabel}
+        aria-expanded={open}
+        disabled={control.disabled}
+      >
+        {kind === "skill" ? <AppstoreOutlined aria-hidden="true" /> : <BulbOutlined aria-hidden="true" />}
+        <span>{buttonLabel}</span>
+        <DownOutlined className="chat-showcase-trigger-arrow" aria-hidden="true" />
+      </button>
+    </Popover>
+  );
 }
 
 export interface SkillDepositStats {
@@ -1300,25 +1406,22 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                   </div>
                   {showcaseSelection ? (
                     <div className="chat-showcase-selection" data-testid="showcase-selection">
-                      <span className="chat-showcase-control chat-showcase-primary-control">
-                        <AppstoreOutlined
-                          className="chat-showcase-control-icon"
-                          aria-hidden="true"
+                      <ShowcaseSelectButton
+                        control={{
+                          ...showcaseSelection.skill,
+                          disabled: disabled || isStreaming || showcaseSelection.skill.disabled,
+                        }}
+                        kind="skill"
+                      />
+                      {showcaseSelection.task ? (
+                        <ShowcaseSelectButton
+                          control={{
+                            ...showcaseSelection.task,
+                            disabled: disabled || isStreaming || showcaseSelection.task.disabled,
+                          }}
+                          kind="task"
                         />
-                        <Select
-                          aria-label={showcaseSelection.ariaLabel}
-                          className="chat-showcase-category-select"
-                          size="small"
-                          value={showcaseSelection.value}
-                          disabled={disabled || isStreaming}
-                          options={[
-                            {
-                              value: showcaseSelection.value,
-                              label: showcaseSelection.label,
-                            },
-                          ]}
-                        />
-                      </span>
+                      ) : null}
                     </div>
                   ) : null}
                   {showThinkingDepth && (

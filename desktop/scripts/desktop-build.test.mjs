@@ -191,6 +191,8 @@ test("Windows installer accepts development and release package versions", () =>
 test("Windows installer force-stops LazyMind before invoking an old uninstaller", () => {
   const source = readFileSync(installerScript, "utf8");
   const check = nsisMacro(source, "customCheckAppRunning");
+  const install = nsisMacro(source, "customInstall");
+  const uninstall = nsisMacro(source, "customUnInstall");
 
   assert.match(
     check,
@@ -200,6 +202,8 @@ test("Windows installer force-stops LazyMind before invoking an old uninstaller"
   assert.match(check, /\$0 == 10[\s\S]*force-stop --install-dir "\$INSTDIR"[\s\S]*Goto LMCheckStopped/);
   assert.doesNotMatch(check, /MB_RETRYCANCEL|LMCloseApp/);
   assert.match(source, /LangString LMProcessScanFailed[\s\S]*LangString LMForceStopFailed/);
+  assert.match(install, /purge-local-data --install-dir "\$INSTDIR"/);
+  assert.match(uninstall, /purge-local-data --install-dir "\$INSTDIR"/);
 });
 
 test("Windows installer replaces legacy uninstallers with the fixed embedded uninstaller", () => {
@@ -237,9 +241,9 @@ test("Windows installer diagnoses paths and does not roll back when warmup fails
   );
   assert.match(
     install,
-    /\$InstallTypeChoice == "full"[\s\S]*ExecWait[^\n]+--installer-warmup --timeout-seconds 360[^\n]+\$3[\s\S]*LMWarmupCheckStopped:[\s\S]*check-stopped --install-dir "\$INSTDIR"/,
+    /\$InstallTypeChoice == "full"[\s\S]*ExecWait[^\n]+--installer-warmup --timeout-seconds 1800[^\n]+\$3[\s\S]*LMWarmupCheckStopped:[\s\S]*check-stopped --install-dir "\$INSTDIR"/,
   );
-  assert.match(install, /Starting Electron installer warmup \(timeout=360s\)/);
+  assert.match(install, /Starting Electron installer warmup \(timeout=1800s\)/);
   assert.match(install, /installer-nsis\.log[\s\S]*Starting Electron installer warmup/);
   assert.match(install, /Electron installer warmup returned exit code \$3/);
   assert.match(
@@ -484,6 +488,19 @@ test("macOS first-launch warmup shows preparation UI instead of only a Dock icon
     source,
     /runMacInstallationWarmupIfNeeded\(\)[\s\S]*createInstallationWarmupWindow\(\)[\s\S]*runInstallerWarmup\(\)[\s\S]*disposeInstallationWarmupWindow/,
   );
+});
+
+test("Desktop startup shows real bundled Python progress and transient Windows lock retries", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  assert.match(
+    source,
+    /event\?\.event === "phase\.progress" && event\?\.phase === "python-payload"[\s\S]*completedFiles[\s\S]*totalBytes/,
+  );
+  assert.match(source, /role="progressbar"[\s\S]*aria-label="Startup progress"/);
+  assert.match(source, /function renderProgress\(progress\)[\s\S]*Extracting bundled Python/);
+  assert.match(source, /Waiting for Windows to release Python files/);
+  assert.match(source, /style\.transform = "scaleX\("/);
+  assert.doesNotMatch(source, /transition:\s*width/);
 });
 
 test("selected Desktop folders become dynamic allowed roots without confirmation or restart", () => {

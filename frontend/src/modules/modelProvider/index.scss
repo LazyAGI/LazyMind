@@ -3302,6 +3302,40 @@
   }
 }
 
+.model-provider-auto-selection-warning {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+.model-provider-auto-selection-configured {
+  p {
+    margin-bottom: 8px;
+  }
+
+  ul {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  li {
+    display: grid;
+    grid-template-columns: minmax(84px, auto) minmax(0, 1fr);
+    gap: 6px;
+    margin-top: 6px;
+    line-height: 1.5;
+
+    span:first-child {
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    span:last-child {
+      overflow-wrap: anywhere;
+    }
+  }
+}
+
 @media (max-width: 960px) {
   .model-provider-cloud-doc-feishu-actions {
     width: 100%;

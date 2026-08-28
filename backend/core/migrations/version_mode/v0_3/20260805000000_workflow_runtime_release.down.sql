@@ -1,4 +1,14 @@
 -- +migrate Dialect postgres
+ALTER TABLE public.task_center_tasks DROP CONSTRAINT IF EXISTS chk_tct_task_type;
+UPDATE public.task_center_tasks SET task_type = 'plugin_run' WHERE task_type = 'workflow_run';
+ALTER TABLE public.task_center_tasks
+    ADD CONSTRAINT chk_tct_task_type
+    CHECK (((task_type)::text = ANY (ARRAY[
+        'plugin_run'::text,
+        'background_chat'::text,
+        'scheduled'::text
+    ])));
+
 DROP INDEX IF EXISTS public.idx_skill_revision_distributions_archive;
 DROP TABLE IF EXISTS public.skill_revision_distributions;
 DROP INDEX IF EXISTS public.idx_skill_distribution_bindings_uid;
@@ -148,6 +158,8 @@ BEGIN
 END $$;
 
 -- +migrate Dialect sqlite
+UPDATE task_center_tasks SET task_type = 'plugin_run' WHERE task_type = 'workflow_run';
+
 DROP INDEX IF EXISTS `idx_skill_revision_distributions_archive`;
 DROP TABLE IF EXISTS `skill_revision_distributions`;
 DROP INDEX IF EXISTS `idx_skill_distribution_bindings_uid`;
@@ -312,3 +324,49 @@ ALTER TABLE default_models
     DROP COLUMN free_auto_select_base_urls;
 ALTER TABLE default_models
     DROP COLUMN free_auto_select_priority;
+
+-- +migrate Dialect postgres
+DROP INDEX IF EXISTS public.uk_skills_owner_identity;
+CREATE UNIQUE INDEX uk_skills_owner_identity
+    ON public.skills(owner_user_id, category, skill_name)
+    WHERE deleted_at IS NULL;
+DROP INDEX IF EXISTS public.uk_skills_owner_relative_root;
+CREATE UNIQUE INDEX uk_skills_owner_relative_root
+    ON public.skills(owner_user_id, relative_root)
+    WHERE deleted_at IS NULL;
+
+-- +migrate Dialect sqlite
+-- Partial unique indexes allowed a live skill to reuse a trashed name or
+-- relative_root. Restore the historical full unique indexes by removing those
+-- colliding trashed rows first.
+DROP INDEX IF EXISTS uk_skills_owner_identity;
+DROP INDEX IF EXISTS uk_skills_owner_relative_root;
+DELETE FROM skills
+WHERE id IN (
+    SELECT id FROM (
+        SELECT trashed.id
+        FROM skills AS trashed
+        INNER JOIN skills AS live
+            ON live.deleted_at IS NULL
+            AND live.owner_user_id = trashed.owner_user_id
+            AND live.category = trashed.category
+            AND live.skill_name = trashed.skill_name
+        WHERE trashed.deleted_at IS NOT NULL
+    ) AS identity_conflicts
+);
+DELETE FROM skills
+WHERE id IN (
+    SELECT id FROM (
+        SELECT trashed.id
+        FROM skills AS trashed
+        INNER JOIN skills AS live
+            ON live.deleted_at IS NULL
+            AND live.owner_user_id = trashed.owner_user_id
+            AND live.relative_root = trashed.relative_root
+        WHERE trashed.deleted_at IS NOT NULL
+    ) AS relative_root_conflicts
+);
+CREATE UNIQUE INDEX uk_skills_owner_identity
+    ON skills(owner_user_id, category, skill_name);
+CREATE UNIQUE INDEX uk_skills_owner_relative_root
+    ON skills(owner_user_id, relative_root);

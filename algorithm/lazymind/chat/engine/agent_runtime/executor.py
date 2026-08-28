@@ -12,6 +12,7 @@ import lazyllm.tools.agent as _agent_mod
 from lazyllm.tools.agent.toolError import tool_failure
 from lazymind.config import config as _cfg
 from lazymind.chat.engine.tools.infra import CitationResultMiddleware
+from lazymind.chat.engine.tools.session_env import redact_session_env_arguments
 
 from .context_estimator import estimate_non_history_tokens
 from .models import AgentRole, AgentRunPlan
@@ -247,7 +248,8 @@ class ToolCallGuard:
                     'stop retrying it and synthesize from existing results or choose another tool.',
                 )
                 _log_tool_call(
-                    'blocked', name, reason='repeated_call', args=arguments,
+                    'blocked', name, reason='repeated_call',
+                    args=redact_session_env_arguments(name, arguments),
                 )
                 continue
             guarded = name in self._failure_limits
@@ -258,14 +260,16 @@ class ToolCallGuard:
                 emit_tool_call(tool_call, blocked=True, reason='repeated_failed_signature')
                 emit_tool_result(tool_call, results[index])
                 _log_tool_call(
-                    'blocked', name, reason='repeated_failure', args=arguments,
+                    'blocked', name, reason='repeated_failure',
+                    args=redact_session_env_arguments(name, arguments),
                 )
                 continue
             if guarded and signature in pending_signatures:
                 duplicate_indices[index] = pending_signatures[signature]
                 emit_tool_call(tool_call, blocked=True, reason='duplicate_merged')
                 _log_tool_call(
-                    'merged', name, reason='duplicate_in_batch', args=arguments,
+                    'merged', name, reason='duplicate_in_batch',
+                    args=redact_session_env_arguments(name, arguments),
                 )
                 continue
             failures = self._consecutive_failures.get(name, 0)
@@ -280,7 +284,8 @@ class ToolCallGuard:
                 emit_tool_result(tool_call, results[index])
                 _log_tool_call(
                     'blocked', name, reason='consecutive_failures',
-                    failures=failures, args=arguments,
+                    failures=failures,
+                    args=redact_session_env_arguments(name, arguments),
                 )
                 continue
             emit_tool_call(tool_call)
@@ -295,7 +300,10 @@ class ToolCallGuard:
                 _log_tool_call(
                     'start',
                     str(function.get('name') or ''),
-                    args=_parse_tool_arguments(function),
+                    args=redact_session_env_arguments(
+                        str(function.get('name') or ''),
+                        _parse_tool_arguments(function),
+                    ),
                 )
             started_at = time.perf_counter()
             pending_results = self._manager(

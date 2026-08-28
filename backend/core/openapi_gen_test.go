@@ -532,6 +532,9 @@ func TestOpenAPISpecIncludesKnowledgeMarketSurface(t *testing.T) {
 
 	schemas := spec["components"].(map[string]any)["schemas"].(map[string]any)
 	listProps := schemaPropertiesForTest(t, schemas, "knowledgeMarketListItemOpenAPIResponse")
+	if _, ok := listProps["version"]; !ok {
+		t.Fatalf("list item schema must document version")
+	}
 	if _, ok := listProps["doc_count"]; ok {
 		t.Fatalf("list item schema must not document doc_count")
 	}
@@ -543,6 +546,15 @@ func TestOpenAPISpecIncludesKnowledgeMarketSurface(t *testing.T) {
 	}
 	if _, ok := detailProps["package_revision"]; !ok {
 		t.Fatalf("detail schema must document package_revision")
+	}
+	for _, field := range []string{"version", "version_date", "version_note"} {
+		if _, ok := detailProps[field]; !ok {
+			t.Fatalf("detail schema must document %s", field)
+		}
+	}
+	installProps := schemaPropertiesForTest(t, schemas, "knowledgeMarketInstallsOpenAPIResponseItem")
+	if _, ok := installProps["installed_version"]; !ok {
+		t.Fatalf("install schema must document installed_version")
 	}
 }
 

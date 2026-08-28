@@ -130,8 +130,8 @@ func TestCommitDraft_NameConflictRollsBackAndKeepsDraft(t *testing.T) {
 	testutil.SeedDraftEntry(t, db, "skill1", "SKILL.md", "upsert", "file", "h_conflict")
 	service := NewService(ServiceDeps{DB: db.DB, BlobStore: NewBlobStore(db.DB, NewLocalObjectStore(t.TempDir()))})
 
-	if _, err := service.CommitDraft(context.Background(), CommitDraftRequest{SkillID: "skill1", UserID: "user_001", DraftVersion: 1}); err == nil || !strings.Contains(err.Error(), "skill name conflict") {
-		t.Fatalf("CommitDraft error = %v, want skill name conflict", err)
+	if _, err := service.CommitDraft(context.Background(), CommitDraftRequest{SkillID: "skill1", UserID: "user_001", DraftVersion: 1}); err == nil || !strings.Contains(err.Error(), "skill already exists") {
+		t.Fatalf("CommitDraft error = %v, want skill already exists", err)
 	}
 	testutil.AssertHeadRevision(t, db, "skill1", "rev1")
 	if got := testutil.CountRows(t, db, "skill_draft_entries", "skill_id = ?", "skill1"); got != 1 {

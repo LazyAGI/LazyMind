@@ -330,6 +330,7 @@ function getProviderLogoUrl(name: string) {
     [/glm|bigmodel|zhipu/, "zhipuai.cn"],
     [/kimi|moonshot/, "moonshot.cn"],
     [/minimax/, "minimaxi.com"],
+    [/openrouter/, "openrouter.ai"],
     [/openai/, "openai.com"],
     [/qwen|tongyi|通义/, "qwen.ai"],
     [/siliconflow/, "siliconflow.cn"],
@@ -425,6 +426,9 @@ const createModelProviderFallbacks = (
       defaultValue: "",
     }),
     openai: t("modelProvider.providerDescriptions.openai", {
+      defaultValue: "",
+    }),
+    openrouter: t("modelProvider.providerDescriptions.openrouter", {
       defaultValue: "",
     }),
     qwen: t("modelProvider.providerDescriptions.qwen", { defaultValue: "" }),
