@@ -61,6 +61,9 @@ func prepareBundledPythonRuntime(ctx context.Context, paths RuntimePaths, report
 	if markerErr != nil && !os.IsNotExist(markerErr) {
 		return fmt.Errorf("read bundled Python payload marker: %w", markerErr)
 	}
+	if report != nil {
+		report(pythonPayloadProgress{Stage: "opening"})
+	}
 
 	stagingRoot, err := os.MkdirTemp(paths.ResourcesRoot, ".python-runtime-staging-")
 	if err != nil {

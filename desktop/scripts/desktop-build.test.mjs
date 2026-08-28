@@ -499,6 +499,8 @@ test("Desktop startup shows real bundled Python progress and transient Windows l
   assert.match(source, /role="progressbar"[\s\S]*aria-label="Startup progress"/);
   assert.match(source, /function renderProgress\(progress\)[\s\S]*Extracting bundled Python/);
   assert.match(source, /Waiting for Windows to release Python files/);
+  assert.match(source, /Reading bundled Python archive/);
+  assert.match(source, /percent \+ "% · " \+ \(progress\.totalRoots/);
   assert.match(source, /style\.transform = "scaleX\("/);
   assert.doesNotMatch(source, /transition:\s*width/);
 });

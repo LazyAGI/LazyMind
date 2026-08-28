@@ -406,16 +406,21 @@ function captureSidecarChunk(source, chunk) {
         };
         const waiting = progress.stage === "waiting";
         const finalizing = progress.stage === "installing";
+        const opening = progress.stage === "opening";
         updateStartupState({
           status: "starting",
           phase: waiting
             ? "Waiting for Windows"
-            : (finalizing ? "Finalizing Python" : "Preparing Python"),
+            : (finalizing
+              ? "Finalizing Python"
+              : (opening ? "Reading Python archive" : "Preparing Python")),
           message: waiting
             ? "Python files are ready. Waiting for Windows to release them..."
             : (finalizing
               ? "Installing the bundled Python runtime..."
-              : "Preparing the bundled Python runtime for first use..."),
+              : (opening
+                ? "Reading the bundled Python archive..."
+                : "Preparing the bundled Python runtime for first use...")),
           progress,
         });
       }
@@ -1539,16 +1544,21 @@ function loadingHTML() {
       els.progressMeta.hidden = false;
       if (progress.stage === "waiting") {
         els.progressLabel.textContent = "Waiting for Windows to release Python files";
-        els.progressValue.textContent = progress.retryAttempt > 0
+        els.progressValue.textContent = percent + "% · " + (progress.retryAttempt > 0
           ? "Retry " + numberFormat.format(progress.retryAttempt)
-          : "Finalizing";
+          : "Finalizing");
         return;
       }
       if (progress.stage === "installing") {
         els.progressLabel.textContent = "Finalizing Python runtime";
-        els.progressValue.textContent = progress.totalRoots > 0
+        els.progressValue.textContent = percent + "% · " + (progress.totalRoots > 0
           ? numberFormat.format(progress.completedRoots) + " / " + numberFormat.format(progress.totalRoots) + " steps"
-          : "Finalizing";
+          : "Finalizing");
+        return;
+      }
+      if (progress.stage === "opening") {
+        els.progressLabel.textContent = "Reading bundled Python archive";
+        els.progressValue.textContent = "0%";
         return;
       }
       els.progressLabel.textContent = "Extracting bundled Python";

@@ -50,8 +50,12 @@ func TestPrepareBundledPythonRuntimeExtractsPayloadOnce(t *testing.T) {
 		t.Fatalf("progress updates = %#v, want extraction and installation progress", progress)
 	}
 	first := progress[0]
-	if first.Stage != "extracting" || first.CompletedFiles != 0 || first.TotalFiles != 2 {
+	if first.Stage != "opening" || first.CompletedFiles != 0 || first.TotalFiles != 0 {
 		t.Fatalf("first progress = %#v", first)
+	}
+	second := progress[1]
+	if second.Stage != "extracting" || second.CompletedFiles != 0 || second.TotalFiles != 2 {
+		t.Fatalf("second progress = %#v", second)
 	}
 	last := progress[len(progress)-1]
 	if last.Stage != "installing" || last.CompletedFiles != 2 || last.CompletedRoots != len(pythonPayloadRoots) {
