@@ -1,8 +1,8 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import DetailPage from "./DetailPage";
-import { getShowcaseCase, type ShowcaseCase } from "./api";
+import { getShowcaseCase, listShowcaseCases, type ShowcaseCase } from "./api";
 
 vi.mock("react-i18next", () => ({
   useTranslation: () => ({
@@ -12,9 +12,11 @@ vi.mock("react-i18next", () => ({
 }));
 vi.mock("./api", () => ({
   getShowcaseCase: vi.fn(),
+  listShowcaseCases: vi.fn(),
 }));
 
 const getShowcaseCaseMock = vi.mocked(getShowcaseCase);
+const listShowcaseCasesMock = vi.mocked(listShowcaseCases);
 
 function task(id: string, title: string, resultTitle: string, template = "generic_report_v1") {
   return {
@@ -72,9 +74,9 @@ function LocationProbe() {
   return <div>{`${location.pathname}${location.search}`}</div>;
 }
 
-function renderDetail() {
+function renderDetail(initialEntry = "/agent/chat/cases/demo") {
   return render(
-    <MemoryRouter initialEntries={["/agent/chat/cases/demo"]}>
+    <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
         <Route path="/agent/chat/cases/:caseId" element={<DetailPage />} />
         <Route path="/agent/chat/home" element={<LocationProbe />} />
@@ -84,8 +86,13 @@ function renderDetail() {
 }
 
 describe("Showcase DetailPage", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   beforeEach(() => {
     vi.clearAllMocks();
+    listShowcaseCasesMock.mockResolvedValue({ cases: [], categories: [], total: 0 });
     Object.defineProperty(window, "matchMedia", {
       configurable: true,
       value: vi.fn(() => ({ matches: true })),
@@ -105,6 +112,43 @@ describe("Showcase DetailPage", () => {
     expect(await screen.findByText("Single result")).toBeInTheDocument();
   });
 
+  it("shows the final result immediately while the replay runs once", async () => {
+    vi.useFakeTimers();
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: vi.fn(() => ({ matches: false })),
+    });
+    const animatedTask = task("single", "Single", "Single result");
+    animatedTask.steps = [
+      { title: "First flow", description: "First flow description" },
+      { title: "Second flow", description: "Second flow description" },
+    ];
+    getShowcaseCaseMock.mockResolvedValue(showcaseCase([animatedTask]));
+
+    renderDetail();
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("Single result")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "showcase.detail.viewResult" })).not.toBeInTheDocument();
+    const replay = screen.getByRole("list", { name: "showcase.executionFlow" });
+    const replayItems = within(replay).getAllByRole("listitem");
+    expect(replayItems[0]).toHaveClass("is-active");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(480);
+    });
+    expect(replayItems[0]).toHaveClass("is-visible");
+    expect(replayItems[1]).toHaveClass("is-active");
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(420);
+    });
+    expect(replayItems[1]).toHaveClass("is-visible");
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
   it("does not render an internal Skill source as a link", async () => {
     const item = showcaseCase([task("single", "Single", "Single result")]);
     item.source_url = "builtin://featured/market-researcher/skill";
@@ -113,6 +157,45 @@ describe("Showcase DetailPage", () => {
 
     expect(await screen.findByRole("heading", { name: "Configured detail title" })).toBeInTheDocument();
     expect(screen.queryByRole("link", { name: "Configured detail title" })).not.toBeInTheDocument();
+  });
+
+  it("navigates to the previous and next featured capabilities", async () => {
+    const firstCase = showcaseCase([task("first-task", "First task", "First result")]);
+    firstCase.id = "first-case";
+    firstCase.title = "First capability";
+    firstCase.detail_title = "First detail";
+    const secondCase = showcaseCase([task("second-task", "Second task", "Second result")]);
+    secondCase.id = "second-case";
+    secondCase.title = "Second capability";
+    secondCase.detail_title = "Second detail";
+    const casesById = new Map([
+      [firstCase.id, firstCase],
+      [secondCase.id, secondCase],
+    ]);
+    listShowcaseCasesMock.mockResolvedValue({
+      cases: [firstCase, secondCase],
+      categories: [],
+      total: 2,
+    });
+    getShowcaseCaseMock.mockImplementation(async (id) => casesById.get(id)!);
+
+    renderDetail("/agent/chat/cases/first-case");
+
+    expect(await screen.findByRole("heading", { name: "First detail" })).toBeInTheDocument();
+    const previousButton = await screen.findByRole("button", { name: "showcase.detail.previousCase" });
+    const nextButton = await screen.findByRole("button", { name: "showcase.detail.nextCase" });
+    await waitFor(() => expect(nextButton).toBeEnabled());
+    expect(previousButton).toBeDisabled();
+
+    fireEvent.click(nextButton);
+    expect(await screen.findByRole("heading", { name: "Second detail" })).toBeInTheDocument();
+    const returnButton = await screen.findByRole("button", { name: "showcase.detail.previousCase" });
+    const finalNextButton = await screen.findByRole("button", { name: "showcase.detail.nextCase" });
+    await waitFor(() => expect(returnButton).toBeEnabled());
+    expect(finalNextButton).toBeDisabled();
+
+    fireEvent.click(returnButton);
+    expect(await screen.findByRole("heading", { name: "First detail" })).toBeInTheDocument();
   });
 
   it("switches replay and result content for a multi-task experience", async () => {
