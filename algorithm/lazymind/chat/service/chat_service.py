@@ -48,6 +48,7 @@ from lazymind.chat.service.component import (
     filter_tools,
     is_workflow_rewind_action,
     normalize_history_for_agent,
+    build_session_env_tool_config,
 )
 from lazymind.chat.engine.agent_runtime import (
     AgentExecutionOptions,
@@ -81,7 +82,7 @@ from lazymind.chat.service.utils import (
 )
 from lazyllm.tools.fs.client import FS
 from lazymind.model_config import inject_model_config, summarize_model_config_for_log
-from lazyllm.tools.tool_config_inject import inject_tool_config
+from lazyllm.tools import inject_env_vars, inject_tool_config
 from lazyllm import AutoModel
 from lazyllm.tools.mcp.client import MCPClient
 from lazymind.config import config as _cfg
@@ -96,12 +97,21 @@ sensitive_filter = SensitiveFilter(
 # Maps conversation_id → session_id for active chat sessions.
 # Used by task-cancel endpoint to cancel ChatAgent by conversation_id.
 _active_sessions: dict[str, str] = {}
+_conversation_env_vars: dict[str, dict[str, str]] = {}
 
 
 def _unregister_active_session(conversation_id: str, session_id: str) -> None:
     """Remove only the request that registered this exact ChatAgent session."""
     if _active_sessions.get(conversation_id) == session_id:
         _active_sessions.pop(conversation_id, None)
+
+
+def clear_conversation_env(conversation_id: str) -> bool:
+    """Drop session env vars when the owning conversation is deleted."""
+    key = (conversation_id or '').strip()
+    if not key:
+        return False
+    return _conversation_env_vars.pop(key, None) is not None
 
 
 _CITE_MESSAGE_PATTERN = re.compile(
@@ -1000,6 +1010,8 @@ async def _handle_chat_impl(
         lazyllm.locals._init_sid(sid=lazyllm_session_id)
     inject_model_config(runtime.llm_config)
     inject_tool_config(runtime.tool_config)
+    env_scope_key = conversation_id or conversation.session_id
+    inject_env_vars(_conversation_env_vars.get(env_scope_key))
     _inject_reader_config(runtime.ocr_config)
     lazyllm.globals['agentic_config'] = agentic_config
 
@@ -1237,6 +1249,11 @@ async def _handle_chat_impl(
     )
     ask_user_tools = _build_ask_user_tool() if allow_ask_user else []
     ask_user_configs = [ASK_USER_TOOL_CONFIG] if ask_user_tools else []
+    session_env_configs = (
+        [build_session_env_tool_config(_conversation_env_vars, env_scope_key)]
+        if 'set_session_env' not in disabled else []
+    )
+    session_env_tools = [cfg.tool for cfg in session_env_configs]
     # Bound Workflows own mutation, but read-only workspace tools remain available
     # so compacted tool results and referenced attachments can still be inspected.
     workspace_read_tools = _build_chat_workspace_read_tools()
@@ -1250,7 +1267,8 @@ async def _handle_chat_impl(
     )
     intent_tools = [] if workflow_turn_is_bound else [intentwriter]
     all_tools = (intent_tools + agent_tools + artifact_tools + subagent_tools + attachment_tools
-                 + skill_listing_tools + ask_user_tools + workflow_tools + mcp_tools)
+                 + skill_listing_tools + session_env_tools + ask_user_tools
+                 + workflow_tools + mcp_tools)
     active_workflow_tool_isolation = bool(
         isinstance(effective_workflow_context, dict)
         and effective_workflow_context.get('session_id')
@@ -1265,7 +1283,13 @@ async def _handle_chat_impl(
         # The Workflow's declarative rerun_when metadata still decides the owning step.
         active_configs = []
         attachment_configs = []
-        all_tools = [intentwriter, *ask_user_tools, *workflow_tools, *workspace_read_tools]
+        all_tools = [
+            intentwriter,
+            *session_env_tools,
+            *ask_user_tools,
+            *workflow_tools,
+            *workspace_read_tools,
+        ]
         LOG.info(
             '[ChatServer] [ACTIVE_WORKFLOW_TOOL_ISOLATION] [sid=%s] '
             '[workflow_id=%s] [outcome=%s] [tools=%s]',
@@ -1389,7 +1413,7 @@ async def _handle_chat_impl(
         )
 
     prompt_builder = PromptBuilder.for_role(AgentRole.CHAT)
-    active_tool_configs = active_configs + attachment_configs + ask_user_configs
+    active_tool_configs = active_configs + attachment_configs + session_env_configs + ask_user_configs
     add_standard_system_sections(
         prompt_builder,
         bool(all_tools),

@@ -8,6 +8,7 @@ interface QuestionTypeSelectProps {
   onBlur?: () => void;
   placeholder?: string;
   allowClear?: boolean;
+  autoFocus?: boolean;
   options?: string[];
   showAllOptions?: boolean;
 }
@@ -18,6 +19,7 @@ export default function QuestionTypeSelect({
   onBlur,
   placeholder,
   allowClear,
+  autoFocus,
   options,
   showAllOptions = false,
 }: QuestionTypeSelectProps) {
@@ -27,6 +29,7 @@ export default function QuestionTypeSelect({
   return (
     <AutoComplete
       allowClear={allowClear}
+      autoFocus={autoFocus}
       value={value}
       onChange={(nextValue) => onChange?.(nextValue)}
       onBlur={onBlur}

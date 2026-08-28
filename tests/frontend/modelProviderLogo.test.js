@@ -15,6 +15,14 @@ describe('model provider logos', () => {
     expect(defaultModelPanel).toContain('[/glm|bigmodel|zhipu/, "zhipuai.cn"]');
   });
 
+  it('uses the OpenRouter favicon in both model settings views', () => {
+    const modelProvidersPage = readFrontendSource('pages/ModelProvidersPage.tsx');
+    const defaultModelPanel = readFrontendSource('components/DefaultModelConfigPanel.tsx');
+
+    expect(modelProvidersPage).toContain('[/openrouter/, "openrouter.ai"]');
+    expect(defaultModelPanel).toContain('[/openrouter/, "openrouter.ai"]');
+  });
+
   it('uses the official high-resolution MinerU favicon', () => {
     const externalServicesPage = readFrontendSource('pages/ExternalServicesPage.tsx');
 

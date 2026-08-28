@@ -1,14 +1,22 @@
 from __future__ import annotations
 
+import json
 from typing import Any, Dict, List, Optional
 from unittest.mock import patch
 
 import lazyllm
 import pytest
 import yaml
+from lazyllm.tools import ToolManager
 from lazyllm.tools.agent import ToolExecutionError
 
 from lazymind.chat.engine.tools.memory import MemoryTools
+from lazymind.common.memory.editors import (
+    apply_memory_operations,
+    delete_preference_entry,
+    validate_preference_name,
+)
+from lazymind.common.memory.exceptions import PreferenceCapacityExceededError
 from lazymind.common.memory.paths import (
     PREFERENCE_PATH,
     PROFILE_PATH,
@@ -17,6 +25,8 @@ from lazymind.common.memory.paths import (
     normalize_memory_path,
 )
 from lazymind.common.memory.store import MemoryStore
+from lazymind.common.memory.validation import PreferenceItem, append_preference_item
+from lazymind.config import config as _cfg
 
 SAMPLE_SOUL = (
     'schema_version: 2\n'
@@ -148,6 +158,35 @@ def _reset_ledger() -> list[dict[str, Any]]:
         'conversation_id': 'conversation-1',
     }
     return ledger
+
+
+def _tool_call(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    return {
+        'id': 'call-memory-test',
+        'type': 'function',
+        'function': {
+            'name': name,
+            'arguments': json.dumps(arguments, ensure_ascii=False),
+        },
+    }
+
+
+def test_common_memory_editors_use_plain_values_and_exceptions():
+    assert validate_preference_name(' pref.response.concise ') == 'pref.response.concise'
+    edited = apply_memory_operations(
+        SAMPLE_PROFILE,
+        [{'op': 'add', 'path': 'identity.aliases', 'value': 'Neo'}],
+        label='profile',
+    )
+
+    assert 'ok' not in edited
+    assert edited['operations'] == [
+        {'op': 'add', 'path': 'identity.aliases', 'value': 'Neo'},
+    ]
+    with pytest.raises(ValueError, match='preference name must match'):
+        validate_preference_name('invalid')
+    with pytest.raises(FileNotFoundError, match='not found'):
+        delete_preference_entry(SAMPLE_PREFERENCE, name='pref.missing')
 
 
 def test_soul_editor_updates_supported_field():
@@ -393,6 +432,165 @@ def test_preference_editor_add_and_delete():
         'preference_editor',
     ]
     assert all(entry['mutation'] == 'applied' for entry in ledger)
+
+
+def test_preference_editor_reports_capacity_rejection_without_eviction():
+    ledger = _reset_ledger()
+    fs = FakeRemoteFS({
+        SOUL_PATH: SAMPLE_SOUL,
+        PROFILE_PATH: SAMPLE_PROFILE,
+        PREFERENCE_PATH: SAMPLE_PREFERENCE,
+    })
+    tools, store = _tools_with_store(fs)
+    capacity_error = PreferenceCapacityExceededError(
+        current_items=20,
+        attempted_items=21,
+        max_items=20,
+    )
+
+    with (
+        patch(
+            'lazymind.chat.engine.tools.memory.MemoryStore',
+            lambda *args, **kwargs: store,
+        ),
+        patch.object(store, 'add_preference_with_reference', side_effect=capacity_error),
+        pytest.raises(ToolExecutionError) as captured,
+    ):
+        tools.preference_editor(
+            'add',
+            name='pref.development.windows',
+            summary='Use Windows for development testing',
+            scenario='Development and testing tasks',
+            details='Prefer Windows-compatible commands and paths.',
+            reason='The user explicitly requested this preference.',
+        )
+
+    message = str(captured.value)
+    assert 'capacity is full (20/20)' in message
+    assert 'new preference was not saved' in message
+    assert 'No existing preference was deleted, overwritten, or reordered' in message
+    assert ledger[-1]['status'] == 'failed'
+    assert ledger[-1]['mutation'] == 'none'
+    assert ledger[-1]['error_code'] == 'capacity_exceeded'
+    assert ledger[-1]['result'] == {
+        'current_items': 20,
+        'attempted_items': 21,
+        'max_items': 20,
+    }
+
+
+def test_memory_tools_use_only_tool_manager_envelope():
+    _reset_ledger()
+    fs = FakeRemoteFS({
+        SOUL_PATH: SAMPLE_SOUL,
+        PROFILE_PATH: SAMPLE_PROFILE,
+        PREFERENCE_PATH: SAMPLE_PREFERENCE,
+    })
+    tools, store = _tools_with_store(fs)
+    manager = ToolManager([tools])
+
+    with patch('lazymind.chat.engine.tools.memory.MemoryStore', lambda *args, **kwargs: store):
+        success = manager(_tool_call(
+            'MemoryTools_profile_editor',
+            {'operations': [
+                {'op': 'add', 'path': 'identity.aliases', 'value': 'Neo'},
+            ]},
+        ))[0]
+        fs.files[PREFERENCE_PATH] = append_preference_item(
+            SAMPLE_PREFERENCE,
+            PreferenceItem(
+                name='pref.existing',
+                summary='Existing preference',
+                ref='references/existing.md',
+                created_at='2026-08-27T00:00:00+00:00',
+                updated_at='2026-08-27T00:00:00+00:00',
+            ),
+        )
+        with _cfg.temp('preference_index_max_items', 1):
+            failure = manager(_tool_call(
+                'MemoryTools_preference_editor',
+                {
+                    'op': 'add',
+                    'name': 'pref.response.concise',
+                    'summary': '回答要简洁',
+                    'scenario': '日常问答',
+                    'details': '先给结论，再按需补充背景。',
+                    'reason': '用户明确要求',
+                },
+            ))[0]
+
+    assert set(success) == {'ok', 'value'}
+    assert success['ok'] is True
+    assert 'ok' not in success['value']
+    assert set(failure) == {'ok', 'value'}
+    assert failure['ok'] is False
+    assert isinstance(failure['value'], str)
+    assert 'new preference was not saved' in failure['value']
+
+
+def test_preference_editor_records_partial_apply():
+    ledger = _reset_ledger()
+    fs = FakeRemoteFS({PREFERENCE_PATH: SAMPLE_PREFERENCE})
+    reference_path = build_reference_path('response-concise')
+    fs.fail_write_paths.add(PREFERENCE_PATH)
+    fs.fail_rm_paths.add(reference_path)
+    tools, store = _tools_with_store(fs)
+
+    with (
+        patch('lazymind.chat.engine.tools.memory.MemoryStore', lambda *args, **kwargs: store),
+        pytest.raises(ToolExecutionError, match='partially applied'),
+    ):
+        tools.preference_editor(
+            'add',
+            name='pref.response.concise',
+            summary='回答要简洁',
+            scenario='日常问答',
+            details='先给结论，再按需补充背景。',
+            reason='用户明确要求',
+        )
+
+    assert ledger[-1]['status'] == 'failed'
+    assert ledger[-1]['mutation'] == 'applied'
+    assert ledger[-1]['error_code'] == 'partial_failure'
+    assert ledger[-1]['result']['applied'] == ['reference']
+    assert ledger[-1]['result']['failed'] == [
+        'preference_index',
+        'reference_cleanup',
+    ]
+
+
+def test_profile_editor_maps_remotefs_failure_to_storage_failed():
+    ledger = _reset_ledger()
+    fs = FakeRemoteFS({PROFILE_PATH: SAMPLE_PROFILE})
+    fs.fail_write_paths.add(PROFILE_PATH)
+    tools, store = _tools_with_store(fs)
+
+    with (
+        patch('lazymind.chat.engine.tools.memory.MemoryStore', lambda *args, **kwargs: store),
+        pytest.raises(ToolExecutionError, match='Memory storage operation failed'),
+    ):
+        tools.profile_editor([
+            {'op': 'add', 'path': 'identity.aliases', 'value': 'Neo'},
+        ])
+
+    assert ledger[-1]['status'] == 'failed'
+    assert ledger[-1]['mutation'] == 'none'
+    assert ledger[-1]['error_code'] == 'storage_failed'
+
+
+def test_preference_editor_maps_missing_item_to_invalid_arguments():
+    ledger = _reset_ledger()
+    fs = FakeRemoteFS({PREFERENCE_PATH: SAMPLE_PREFERENCE})
+    tools, store = _tools_with_store(fs)
+
+    with (
+        patch('lazymind.chat.engine.tools.memory.MemoryStore', lambda *args, **kwargs: store),
+        pytest.raises(ToolExecutionError, match='not found'),
+    ):
+        tools.preference_editor('delete', name='pref.missing')
+
+    assert ledger[-1]['mutation'] == 'none'
+    assert ledger[-1]['error_code'] == 'invalid_arguments'
 
 
 def test_preference_editor_requires_hidden_source_context_for_add():

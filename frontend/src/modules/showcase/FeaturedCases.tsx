@@ -1,49 +1,27 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import CaseCard from "./CaseCard";
-import {
-  listShowcaseCases,
-  matchesShowcaseEntryType,
-  type ShowcaseCase,
-  type ShowcaseEntryType,
-} from "./api";
+import { matchesShowcaseEntryType, type ShowcaseCase, type ShowcaseEntryType } from "./api";
 import "./index.scss";
 
 interface FeaturedCasesProps {
   type: ShowcaseEntryType;
+  items: ShowcaseCase[];
+  isLoading: boolean;
   onTry?: (item: ShowcaseCase) => void;
 }
 
 const FEATURED_HOME_LIMIT = 8;
 
-export default function FeaturedCases({ type, onTry }: FeaturedCasesProps) {
-  const { i18n, t } = useTranslation();
-  const locale = i18n.resolvedLanguage || i18n.language;
-  const [items, setItems] = useState<ShowcaseCase[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    listShowcaseCases({}, { signal: controller.signal })
-      .then((response) => setItems(response.cases ?? []))
-      .catch(() => {
-        if (!controller.signal.aborted) {
-          setItems([]);
-        }
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) {
-          setIsLoading(false);
-        }
-      });
-    return () => controller.abort();
-  }, [locale]);
+export default function FeaturedCases({ type, items, isLoading, onTry }: FeaturedCasesProps) {
+  const { t } = useTranslation();
 
   const featuredItems = useMemo(() => {
-    return items.filter(
-      (item) => item.featured && matchesShowcaseEntryType(item.type, type),
-    ).slice(0, FEATURED_HOME_LIMIT);
+    return items
+      .filter((item) => item.featured && matchesShowcaseEntryType(item.type, type))
+      .sort((left, right) => left.featured_order - right.featured_order)
+      .slice(0, FEATURED_HOME_LIMIT);
   }, [items, type]);
 
   if (!isLoading && featuredItems.length === 0) {
@@ -54,7 +32,7 @@ export default function FeaturedCases({ type, onTry }: FeaturedCasesProps) {
     <section className="showcase-featured" aria-labelledby="showcase-featured-title">
       <div className="showcase-featured-heading">
         <h2 id="showcase-featured-title">{t("showcase.featuredTitle")}</h2>
-        <Link className="showcase-more-link" to={`/agent/chat/cases?type=${type}`}>
+        <Link className="showcase-more-link" to="/agent/chat/cases">
           {t("showcase.viewMore")} <span aria-hidden="true">→</span>
         </Link>
       </div>

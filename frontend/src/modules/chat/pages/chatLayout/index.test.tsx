@@ -156,7 +156,6 @@ vi.mock("@/modules/chat/store/taskCenter", () => {
 describe("ChatLayout conversation loading", () => {
   beforeEach(() => {
     window.sessionStorage.clear();
-    window.sessionStorage.setItem("chat_resume_conversation_id", "conversation-a");
     vi.clearAllMocks();
     mocks.getChatStatus.mockResolvedValue({ data: { is_generating: false } });
     mocks.listConversations.mockResolvedValue({ data: { conversations: [] } });
@@ -165,12 +164,26 @@ describe("ChatLayout conversation loading", () => {
     );
   });
 
-  it("does not let a late initial resume overwrite a newer sidebar selection", async () => {
-    const resumeDetail = deferred<any>();
+  it("does not reset a newly mounted chat before it receives a real id", () => {
+    render(
+      <ChatLayout
+        setIsChatContent={vi.fn()}
+        initchatConfig={{}}
+        setChatConfigFn={vi.fn()}
+        canChat
+      />,
+    );
+
+    expect(mocks.createNewChat).not.toHaveBeenCalled();
+    expect(mocks.disconnectConversationStream).not.toHaveBeenCalled();
+  });
+
+  it("does not let a late route load overwrite a newer route selection", async () => {
+    const routeDetail = deferred<any>();
     mocks.getConversationDetail.mockImplementation(
       ({ conversation }: { conversation: string }) => {
         if (conversation === "conversation-a") {
-          return resumeDetail.promise;
+          return routeDetail.promise;
         }
         return Promise.resolve({
           data: {
@@ -185,11 +198,14 @@ describe("ChatLayout conversation loading", () => {
       },
     );
 
-    render(
+    const setIsChatContent = vi.fn();
+    const setChatConfigFn = vi.fn();
+    const { rerender } = render(
       <ChatLayout
-        setIsChatContent={vi.fn()}
+        conversationId="conversation-a"
+        setIsChatContent={setIsChatContent}
         initchatConfig={{}}
-        setChatConfigFn={vi.fn()}
+        setChatConfigFn={setChatConfigFn}
         canChat
       />,
     );
@@ -200,11 +216,15 @@ describe("ChatLayout conversation loading", () => {
       });
     });
 
-    act(() => {
-      window.dispatchEvent(new CustomEvent("lazymind:chat-select-conversation", {
-        detail: { conversationId: "conversation-b", source: "sidebar" },
-      }));
-    });
+    rerender(
+      <ChatLayout
+        conversationId="conversation-b"
+        setIsChatContent={setIsChatContent}
+        initchatConfig={{}}
+        setChatConfigFn={setChatConfigFn}
+        canChat
+      />,
+    );
 
     await waitFor(() => {
       expect(mocks.replaceMessageList).toHaveBeenCalledWith(
@@ -218,7 +238,7 @@ describe("ChatLayout conversation loading", () => {
     });
 
     await act(async () => {
-      resumeDetail.resolve({
+      routeDetail.resolve({
         data: {
           conversation: {
             conversation_id: "conversation-a",
@@ -228,7 +248,7 @@ describe("ChatLayout conversation loading", () => {
           },
         },
       });
-      await resumeDetail.promise;
+      await routeDetail.promise;
       await Promise.resolve();
       await Promise.resolve();
     });
@@ -246,12 +266,85 @@ describe("ChatLayout conversation loading", () => {
     expect(mocks.messageError).not.toHaveBeenCalled();
   });
 
-  it("invalidates the initial resume request when the layout unmounts", async () => {
-    const resumeDetail = deferred<any>();
-    mocks.getConversationDetail.mockReturnValue(resumeDetail.promise);
+  it("clears the previous conversation while the next route is loading", async () => {
+    const nextHistory = deferred<any>();
+    mocks.getConversationDetail.mockImplementation(
+      ({ conversation }: { conversation: string }) => Promise.resolve({
+        data: {
+          conversation: {
+            conversation_id: conversation,
+            thinking_depth: "high",
+            search_config: {},
+            settings: { chat_executor: "lazymind" },
+          },
+        },
+      }),
+    );
+    mocks.getConversationHistory.mockImplementation(
+      ({ name }: { name: string }) => name === "conversation-b"
+        ? nextHistory.promise
+        : Promise.resolve({ data: { history: [{ conversation: name }] } }),
+    );
+
+    const { rerender } = render(
+      <ChatLayout
+        conversationId="conversation-a"
+        setIsChatContent={vi.fn()}
+        initchatConfig={{}}
+        setChatConfigFn={vi.fn()}
+        canChat
+      />,
+    );
+
+    await waitFor(() => {
+      expect(mocks.replaceMessageList).toHaveBeenCalledWith(
+        "conversation-a",
+        [{ conversation: "conversation-a" }],
+      );
+    });
+    mocks.replaceMessageList.mockClear();
+
+    rerender(
+      <ChatLayout
+        conversationId="conversation-b"
+        setIsChatContent={vi.fn()}
+        initchatConfig={{}}
+        setChatConfigFn={vi.fn()}
+        canChat
+      />,
+    );
+
+    await waitFor(() => {
+      expect(mocks.disconnectConversationStream)
+        .toHaveBeenCalledWith("conversation-a");
+      expect(mocks.replaceMessageList)
+        .toHaveBeenCalledWith("conversation-b", []);
+      expect(screen.getByTestId("chat-container"))
+        .toHaveAttribute("data-session-id", "conversation-b");
+    });
+
+    await act(async () => {
+      nextHistory.resolve({
+        data: { history: [{ conversation: "conversation-b" }] },
+      });
+      await nextHistory.promise;
+    });
+
+    await waitFor(() => {
+      expect(mocks.replaceMessageList).toHaveBeenLastCalledWith(
+        "conversation-b",
+        [{ conversation: "conversation-b" }],
+      );
+    });
+  });
+
+  it("invalidates the initial route request when the layout unmounts", async () => {
+    const routeDetail = deferred<any>();
+    mocks.getConversationDetail.mockReturnValue(routeDetail.promise);
 
     const { unmount } = render(
       <ChatLayout
+        conversationId="conversation-a"
         setIsChatContent={vi.fn()}
         initchatConfig={{}}
         setChatConfigFn={vi.fn()}
@@ -268,7 +361,7 @@ describe("ChatLayout conversation loading", () => {
 
     unmount();
     await act(async () => {
-      resumeDetail.resolve({
+      routeDetail.resolve({
         data: {
           conversation: {
             conversation_id: "conversation-a",
@@ -278,15 +371,13 @@ describe("ChatLayout conversation loading", () => {
           },
         },
       });
-      await resumeDetail.promise;
+      await routeDetail.promise;
       await Promise.resolve();
       await Promise.resolve();
     });
 
     expect(mocks.setThinkingDepth).not.toHaveBeenCalled();
-    expect(window.sessionStorage.getItem("chat_resume_conversation_id")).toBe(
-      "conversation-a",
-    );
+    expect(mocks.replaceMessageList).not.toHaveBeenCalled();
     expect(mocks.messageError).not.toHaveBeenCalled();
   });
 });

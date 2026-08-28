@@ -1,7 +1,7 @@
 locale: en-US
 
 classification:
-  category: workflow
+  category: Content creation
   tags:
     - Presentations
     - HTML slides
@@ -11,73 +11,38 @@ classification:
 presentation:
   card:
     title: AI presentation planner
-    description: Start from topic, audience, and style, then collect materials and generate an editable outline with page-level HTML slides
+    description: Follow a four-slide cyberpunk League of Legends case from requirements and materials to an editable outline and final slides
     output_type: slides
-    output_label: Presentation preview
+    output_label: Interactive PPT case
     cover_asset: cover
-    result_summary: Drive free-form HTML slides from a page outline, with rich speaker notes and page-level revision
+    result_summary: Explore four cyberpunk League of Legends slides with paging, element edits, slide ordering, and speaker notes
   detail:
     title: From presentation goal to complete slides
-    description: Analyze the audience, prioritize uploads and knowledge sources, fill concrete evidence and image gaps, and generate a page outline, HTML previews, and detailed notes that remain editable after delivery.
-    attachment_hint: Briefing notes, data, brand assets, or reference documents (optional)
+    description: Follow a four-slide cyberpunk League of Legends case through requirement analysis, material collection, page outlines, and interactive slides. The preview opens directly on the final slides and keeps paging, editing, ordering, and speaker-note interactions available.
+    attachment_hint: Presentation topic, page count, target audience, and visual style (optional)
 
 tasks:
-  - id: annual-review
+  - id: cyberpunk-lol-deck
     selector:
-      title: Personal annual review
-      description: Turn yearly experiences, outcomes, and reflections into a coherent presentation
-      output_label: Annual-review slides
+      title: Cyberpunk League of Legends PPT
+      description: Generate four cyberpunk slides introducing League of Legends
+      output_label: Interactive slides
     launch:
-      prompt_short: Create a personal annual-review presentation from my yearly notes.
-      prompt: Create an eight-slide personal annual-review presentation for my team and direct manager in a light, modern business style. Build a clear narrative around annual themes, major experiences, key outcomes, capability growth, memorable moments, reflection, and next-year plans. Prefer my uploads and selected knowledge base; use the web only for a concrete gap, and distinguish facts from assumptions. Generate an editable page outline, complete HTML slides, and substantive speaker notes for every page.
+      prompt_short: Create four cyberpunk-style PPT slides introducing League of Legends.
+      prompt: Create four cyberpunk-style PPT slides introducing League of Legends.
     replay:
       steps:
-        - title: Analyze presentation needs
-          description: Lock the topic, eight-page length, audience, visual style, and constraints
-        - title: Collect content and visuals
-          description: Prefer uploads and knowledge sources, searching only for explicit gaps
+        - title: Analyze the presentation brief
+          description: Define the four-slide scope, gamer audience, content emphasis, and cyberpunk visual language
+        - title: Collect game visuals
+          description: Organize League of Legends hero, Rift, and esports imagery into a reusable material library
         - title: Build the page outline
-          description: Define each page's title, points, narrative role, and order
-        - title: Generate HTML slides
-          description: Render free-form pages from the latest outline and save speaker notes
-        - title: Preview and refine
-          description: Flip through the deck and continue with targeted page edits or deletion
+          description: Structure game overview, champion roster, Summoner's Rift, and global esports across four slides
+        - title: Generate interactive slides
+          description: Render four neon cyberpunk pages with paging, editing, ordering, and speaker notes
     result:
-      template: generic_report_v1
-      eyebrow: Presentation delivery
-      title: An annual review with a complete narrative and notes
-      summary: Turn yearly material into previewable, page-editable HTML slides
-      highlights:
-        - Audience, page-count, and style analysis
-        - Editable page-level outline
-        - Free-form HTML slides
-        - Speaker notes and page-level revisions
-
-  - id: proposal-deck
-    selector:
-      title: Customer solution deck
-      description: Organize product and solution material into a structured client proposal
-      output_label: Customer proposal deck
-    launch:
-      prompt_short: Create a customer-facing solution presentation from my product materials.
-      prompt: Using my product and customer materials, create a ten-slide solution presentation for customer business and technical stakeholders in a classic business style. Structure it around customer challenges, goals, overall solution, core capabilities, architecture, implementation path, expected value, risk controls, and next actions. Prefer uploads and the selected knowledge base, label critical gaps, and do not invent customer data. Deliver a page outline, complete HTML slides, and speaker notes.
-    replay:
-      steps:
-        - title: Define audience and objective
-          description: Extract stakeholder concerns, presentation goal, length, and business style
-        - title: Organize solution evidence
-          description: Consolidate customer context, product capabilities, architecture assets, and gaps
-        - title: Build the proposal story
-          description: Move from customer challenges through solution, value, risk, and action
-        - title: Generate and preview pages
-          description: Deliver page-level HTML and notes with targeted revision support
-    result:
-      template: generic_report_v1
-      eyebrow: Customer proposal deck
-      title: A solution story from customer challenge to implementation action
-      summary: Convert product and customer evidence into a clear, controlled proposal presentation
-      highlights:
-        - Stakeholder concerns and presentation goals
-        - Proposal story and page structure
-        - Architecture, value, and implementation pages
-        - HTML previews and speaker notes
+      template: html_preview_v1
+      eyebrow: AI PPT case
+      title: Four-slide cyberpunk League of Legends deck
+      summary: Move from requirement analysis, materials, and a page outline into the final slides, opening on step four with the complete interaction model intact.
+      html_asset: lol_ppt_preview

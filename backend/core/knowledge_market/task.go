@@ -220,15 +220,16 @@ func MarketListInstalls(w http.ResponseWriter, r *http.Request) {
 			domain = item.Domain
 		}
 		items = append(items, map[string]any{
-			"market_item_id": row.MarketItemID,
-			"name":           name,
-			"icon":           icon,
-			"domain":         domain,
-			"install_state":  row.InstallState,
-			"dataset_id":     row.DatasetID,
-			"installed_at":   row.InstalledAt,
-			"updated_at":     row.UpdatedAt,
-			"active":         activeByItem[row.MarketItemID] || batchRunning,
+			"market_item_id":    row.MarketItemID,
+			"name":              name,
+			"icon":              icon,
+			"domain":            domain,
+			"install_state":     row.InstallState,
+			"installed_version": row.InstalledVersion,
+			"dataset_id":        row.DatasetID,
+			"installed_at":      row.InstalledAt,
+			"updated_at":        row.UpdatedAt,
+			"active":            activeByItem[row.MarketItemID] || batchRunning,
 		})
 	}
 	common.ReplyOK(w, map[string]any{"items": items, "total": len(items)})

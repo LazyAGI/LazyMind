@@ -1,6 +1,6 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { SlotRevision } from '@/modules/chat/store/workflowPanel';
+import { useWorkflowStore, type SlotRevision } from '@/modules/chat/store/workflowPanel';
 
 const workflowApi = vi.hoisted(() => ({
   getSlots: vi.fn(),
@@ -32,7 +32,7 @@ vi.mock('./WriterDownloadFormat', () => ({
   writerMarkdownTitle: () => '',
 }));
 
-import { SlotRenderer } from './SlotComponents';
+import { resolveSnapshotDiffText, SlotRenderer, SlotVersionPopover } from './SlotComponents';
 
 function deferred<T>() {
   let resolve!: (value: T) => void;
@@ -121,5 +121,87 @@ describe('SlotWriterDocument render refresh', () => {
 
     expect(screen.getByText('# latest document')).toBeInTheDocument();
     expect(document.querySelector('.workflow-slot--error')).not.toBeInTheDocument();
+  });
+});
+
+describe('Writer version diff text', () => {
+  it('compares JSON-encoded Writer snapshots as readable document content', async () => {
+    const snapshot = JSON.stringify({
+      document_id: 'writer-document-1',
+      stage: 'final',
+      title: '测试文档',
+      blocks: [
+        {
+          node_id: 'heading-1',
+          type: 'heading',
+          content: '第一章',
+          numbering: { level: 1 },
+          children: [],
+          provider_payload: { raw_block: { internal: 'must not enter the diff' } },
+        },
+        {
+          node_id: 'paragraph-1',
+          type: 'paragraph',
+          content: '正文内容',
+          children: [],
+          provider_payload: { source_index: 42 },
+        },
+      ],
+    });
+
+    await expect(resolveSnapshotDiffText(snapshot)).resolves.toBe(
+      '# 测试文档\n\n## 第一章\n\n正文内容',
+    );
+  });
+
+  it('compares each revision with its predecessor and previews the first revision', async () => {
+    const getSlotVersions = vi.fn().mockResolvedValue([
+      {
+        revision: 1,
+        change_source: 'ai',
+        created_at: '2026-08-27T15:58:05Z',
+        selected: false,
+        content_snapshot: '# 初版',
+      },
+      {
+        revision: 2,
+        change_source: 'human',
+        created_at: '2026-08-27T16:26:04Z',
+        selected: true,
+        content_snapshot: '# 第二版',
+      },
+    ]);
+    useWorkflowStore.setState({ getSlotVersions });
+
+    const { container } = render(
+      <SlotVersionPopover
+        sessionId='writer-session'
+        slotId='draft_document'
+        listIndex={-1}
+        revisionCount={2}
+        currentRevision={2}
+        currentValue='# 第二版'
+      />,
+    );
+
+    fireEvent.click(container.querySelector<HTMLButtonElement>('.workflow-slot__version-btn')!);
+    await waitFor(() => expect(document.querySelector('.workflow-slot__version-diff')).not.toBeNull());
+
+    const labels = document.querySelectorAll('.workflow-slot__version-diff-label');
+    expect(labels[0]).toHaveTextContent('v1');
+    expect(labels[1]).toHaveTextContent('v2');
+    expect(document.querySelector('.workflow-slot__version-diff-header')).toHaveTextContent('修改前');
+    expect(document.querySelector('.workflow-slot__version-diff-header')).toHaveTextContent('修改后');
+    expect(document.querySelector('.workflow-slot__version-diff-arrow')).toHaveTextContent('→');
+    expect(document.querySelector('.workflow-slot__version-diff')).not.toHaveTextContent('当前版本');
+
+    const versionItems = document.querySelectorAll<HTMLElement>('.workflow-slot__version-item');
+    fireEvent.click(versionItems[1]);
+
+    await waitFor(() => {
+      expect(document.querySelector('.workflow-slot__version-diff')).toBeNull();
+      expect(document.querySelector('.workflow-slot__version-current-text')).toHaveTextContent('# 初版');
+    });
+    expect(document.querySelector('.workflow-slot__version-apply-btn')).toHaveTextContent('v1');
   });
 });

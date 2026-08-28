@@ -241,7 +241,7 @@ func restoreTrashedInstalledSkill(ctx context.Context, tx *gorm.DB, item skillMa
 		return "", err
 	}
 	if conflicts > 0 {
-		return "", fmt.Errorf("skill name conflict")
+		return "", fmt.Errorf("skill already exists")
 	}
 	if err := tx.WithContext(ctx).Model(&skillRow{}).
 		Where("id = ? AND owner_user_id = ? AND deleted_at IS NOT NULL", candidate.ID, userID).
@@ -695,7 +695,7 @@ func copyHeadRevision(ctx context.Context, tx *gorm.DB, sourceSkillID, ownerUser
 		return "", "", err
 	}
 	if conflicts > 0 {
-		return "", "", fmt.Errorf("skill name conflict")
+		return "", "", fmt.Errorf("skill already exists")
 	}
 	var sourceRev skillRevisionRow
 	if err := tx.Where("id = ? AND skill_id = ?", *source.HeadRevisionID, source.ID).Take(&sourceRev).Error; err != nil {

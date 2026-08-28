@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -238,6 +239,37 @@ func TestCreateSkillFromURL_CleansDownloadedArchiveAfterFailure(t *testing.T) {
 		t.Fatalf("downloaded archive stat error = %v, want not exist", statErr)
 	}
 	assertNoSkillTruthRows(t, db)
+}
+
+func TestCreateSkillFromURL_RejectsDuplicateName(t *testing.T) {
+	db := newSkillV2TestDB(t)
+	zipPath := filepath.Join(t.TempDir(), "url-skill.zip")
+	writeSkillZip(t, zipPath, map[string][]byte{
+		"SKILL.md": externalSkillMD("URL 导入", "URL 导入技能"),
+	})
+	svc := NewSkillService(SkillServiceDeps{
+		DB: db,
+		Downloader: NewFakeZipDownloader(map[string]string{
+			"https://example.test/skill-a.zip": zipPath,
+			"https://example.test/skill-b.zip": zipPath,
+		}),
+		BlobStore: NewBlobStore(db, NewLocalObjectStore(t.TempDir())),
+		Clock:     fixedClock(),
+	})
+	create := func(url string) error {
+		_, err := svc.CreateSkill(context.Background(), CreateSkillRequest{
+			OwnerUserID:  "user_001",
+			CreateUserID: "user_001",
+			Source:       SourceInput{Type: "url", URL: url},
+		})
+		return err
+	}
+	if err := create("https://example.test/skill-a.zip"); err != nil {
+		t.Fatalf("first URL CreateSkill returned error: %v", err)
+	}
+	if err := create("https://example.test/skill-b.zip"); !errors.Is(err, errSkillAlreadyExists) {
+		t.Fatalf("duplicate URL CreateSkill error = %v, want skill already exists", err)
+	}
 }
 
 func TestReplaceSkillContentFromUploadedZip_CreatesNewRevision(t *testing.T) {

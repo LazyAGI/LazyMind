@@ -418,6 +418,10 @@ func launchWorkflowAttempt(
 		if legacyEvent {
 			currentStepID = stepID
 		}
+		tcTitle := workflowID
+		if title != "" {
+			tcTitle = title
+		}
 		coldErr := db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 			existing, gErr := GetActiveSession(ctx, tx, convID)
 			if gErr != nil {
@@ -451,6 +455,23 @@ func launchWorkflowAttempt(
 					return fmt.Errorf("plugin: persist launch intent: %w", err)
 				}
 			}
+			var conv orm.Conversation
+			if err := tx.WithContext(ctx).
+				Select("display_name").
+				Where("id = ?", convID).
+				First(&conv).Error; err == nil && conv.DisplayName != "" {
+				tcTitle = conv.DisplayName
+			}
+			if createErr := taskcenter.CreateTask(ctx, tx, &orm.TaskCenterTask{
+				UserID:            userID,
+				ConversationID:    convID,
+				WorkflowSessionID: &psID,
+				TaskType:          "workflow_run",
+				Title:             &tcTitle,
+				Status:            "running",
+			}); createErr != nil {
+				return fmt.Errorf("plugin: create task-center workflow run: %w", createErr)
+			}
 			return consumeConversationPreflight(ctx, tx, convID, params.PreflightID)
 		})
 		if coldErr != nil {
@@ -459,30 +480,6 @@ func launchWorkflowAttempt(
 		sessionID = psID
 		fmt.Printf("[plugin] plugin session created conv=%s session=%s plugin=%s legacy_current_step=%s\n",
 			convID, sessionID, workflowID, currentStepID)
-		// Register a TaskCenter record for this plugin run so the user can track it.
-		// Prefer conversation display_name as the task title so the task center shows
-		// a human-readable conversation title instead of a raw plugin/step identifier.
-		tcTitle := workflowID
-		if title != "" {
-			tcTitle = title
-		}
-		if db != nil {
-			var conv orm.Conversation
-			if err := db.WithContext(ctx).
-				Select("display_name").
-				Where("id = ?", convID).
-				First(&conv).Error; err == nil && conv.DisplayName != "" {
-				tcTitle = conv.DisplayName
-			}
-		}
-		_ = taskcenter.CreateTask(ctx, db, &orm.TaskCenterTask{
-			UserID:            userID,
-			ConversationID:    convID,
-			WorkflowSessionID: &sessionID,
-			TaskType:          "workflow_run",
-			Title:             &tcTitle,
-			Status:            "running",
-		})
 		fmt.Printf("[plugin] taskcenter workflow_run ensured conv=%s session=%s plugin=%s\n",
 			convID, sessionID, workflowID)
 	} else {

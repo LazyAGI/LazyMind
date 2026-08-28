@@ -68,6 +68,14 @@ interface AddedProvider extends ProviderOption {
   groups: ProviderConnectionGroup[];
 }
 
+interface AddedProviderSection {
+  key: string;
+  provider: AddedProvider;
+  displayName: string;
+  groups: ProviderConnectionGroup[];
+  defaultBaseUrl: string;
+}
+
 interface ProviderConfigModalState {
   provider: ProviderOption | AddedProvider;
   group?: ProviderConnectionGroup;
@@ -189,8 +197,87 @@ function isSensenovaProvider(provider?: Pick<ProviderOption, "source" | "name"> 
   return provider.source === "sensenova" || provider.name?.toLowerCase() === "sensenova";
 }
 
+export function isOpenAIProvider(provider?: Pick<ProviderOption, "source" | "name"> | null): boolean {
+  if (!provider) return false;
+  return normalizeProviderKey(provider.source || provider.name) === "openai";
+}
+
 function isSensenovaNewBaseUrl(url?: string): boolean {
   return normalizeBaseUrlForCompare(url) === normalizeBaseUrlForCompare(SENSENOVA_NEW_BASE_URL);
+}
+
+function getAddedProviderSectionKey(
+  provider: Pick<AddedProvider, "id" | "source" | "name">,
+  baseUrl?: string
+): string {
+  if (!isSensenovaProvider(provider)) {
+    return provider.id;
+  }
+  if (isSensenovaNewBaseUrl(baseUrl)) {
+    return `${provider.id}:token-plan`;
+  }
+  if (normalizeBaseUrlForCompare(baseUrl) === normalizeBaseUrlForCompare(SENSENOVA_CLASSIC_BASE_URL)) {
+    return `${provider.id}:classic`;
+  }
+  return `${provider.id}:custom`;
+}
+
+function buildAddedProviderSections(
+  providers: AddedProvider[],
+  sensenovaClassicLabel: string,
+  sensenovaTokenPlanLabel: string
+): AddedProviderSection[] {
+  return providers.flatMap((provider) => {
+    if (!isSensenovaProvider(provider)) {
+      return [{
+        key: provider.id,
+        provider,
+        displayName: provider.name,
+        groups: provider.groups,
+        defaultBaseUrl: provider.baseUrl,
+      }];
+    }
+
+    const classicGroups = provider.groups.filter(
+      (group) => getAddedProviderSectionKey(provider, group.baseUrl) === `${provider.id}:classic`
+    );
+    const tokenPlanGroups = provider.groups.filter(
+      (group) => getAddedProviderSectionKey(provider, group.baseUrl) === `${provider.id}:token-plan`
+    );
+    const customGroups = provider.groups.filter(
+      (group) => getAddedProviderSectionKey(provider, group.baseUrl) === `${provider.id}:custom`
+    );
+    const sections: AddedProviderSection[] = [];
+
+    if (classicGroups.length) {
+      sections.push({
+        key: `${provider.id}:classic`,
+        provider,
+        displayName: `${provider.name} · ${sensenovaClassicLabel}`,
+        groups: classicGroups,
+        defaultBaseUrl: SENSENOVA_CLASSIC_BASE_URL,
+      });
+    }
+    if (tokenPlanGroups.length) {
+      sections.push({
+        key: `${provider.id}:token-plan`,
+        provider,
+        displayName: `${provider.name} · ${sensenovaTokenPlanLabel}`,
+        groups: tokenPlanGroups,
+        defaultBaseUrl: SENSENOVA_NEW_BASE_URL,
+      });
+    }
+    if (customGroups.length) {
+      sections.push({
+        key: `${provider.id}:custom`,
+        provider,
+        displayName: provider.name,
+        groups: customGroups,
+        defaultBaseUrl: customGroups[0].baseUrl,
+      });
+    }
+    return sections;
+  });
 }
 
 function createConnectionGroup(provider: ProviderOption, overrides: Partial<ProviderConnectionGroup> = {}): ProviderConnectionGroup {
@@ -259,6 +346,7 @@ function getProviderLogoUrl(name: string) {
     [/glm|bigmodel|zhipu/, "zhipuai.cn"],
     [/kimi|moonshot/, "moonshot.cn"],
     [/minimax/, "minimaxi.com"],
+    [/openrouter/, "openrouter.ai"],
     [/openai/, "openai.com"],
     [/qwen|tongyi|通义/, "qwen.ai"],
     [/siliconflow/, "siliconflow.cn"],
@@ -292,6 +380,7 @@ const createModelProviderFallbacks = (t: ReturnType<typeof useTranslation>["t"])
     kimi: t("modelProvider.providerDescriptions.kimi", { defaultValue: "" }),
     minimax: t("modelProvider.providerDescriptions.minimax", { defaultValue: "" }),
     openai: t("modelProvider.providerDescriptions.openai", { defaultValue: "" }),
+    openrouter: t("modelProvider.providerDescriptions.openrouter", { defaultValue: "" }),
     qwen: t("modelProvider.providerDescriptions.qwen", { defaultValue: "" }),
     sensenova: t("modelProvider.providerDescriptions.sensenova", { defaultValue: "" }),
     siliconflow: t("modelProvider.providerDescriptions.siliconflow", { defaultValue: "" }),
@@ -489,6 +578,22 @@ function isDefaultProviderBaseUrl(provider: Pick<ProviderOption, "baseUrl">, bas
   return normalizeBaseUrlForCompare(baseUrl) === normalizeBaseUrlForCompare(provider.baseUrl);
 }
 
+export function shouldRedirectCustomBaseUrlToOpenAI(
+  provider: Pick<ProviderOption, "source" | "name" | "baseUrl">,
+  previousBaseUrl: string | undefined,
+  nextBaseUrl: string | undefined
+) {
+  if (
+    isOpenAIProvider(provider) ||
+    normalizeBaseUrlForCompare(previousBaseUrl) === normalizeBaseUrlForCompare(nextBaseUrl) ||
+    isDefaultProviderBaseUrl(provider, nextBaseUrl)
+  ) {
+    return false;
+  }
+  // SenseNova's Token Plan endpoint is an official preset, not a private deployment.
+  return !isSensenovaProvider(provider) || !isSensenovaNewBaseUrl(nextBaseUrl);
+}
+
 interface ModelProviderPageProps {
   onConfigurationChanged?: () => void | Promise<void>;
 }
@@ -527,6 +632,9 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
     ? `${verifyGroupModal.provider.id}:${verifyGroupModal.group.id}`
     : "";
   const verifyGroupBusy = activeVerifyKey ? Boolean(verifyingGroupIds[activeVerifyKey]) : false;
+  const verifyApiKeyRequired = verifyGroupModal
+    ? isDefaultProviderBaseUrl(verifyGroupModal.provider, verifyGroupModal.group.baseUrl)
+    : true;
   const baseUrlChanged = configProvider
     ? !isDefaultProviderBaseUrl(
         configProvider,
@@ -589,15 +697,6 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
       );
 
       setAddedProviderList(addedProviders);
-      setExpandedProviderIds((current) => {
-        const next = { ...current };
-        addedProviders.forEach((provider, index) => {
-          if (next[provider.id] === undefined) {
-            next[provider.id] = index === 0;
-          }
-        });
-        return next;
-      });
     } catch (error) {
     } finally {
       initialProvidersLoadedRef.current = true;
@@ -625,16 +724,28 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
     () => new Set(addedProviderList.map((provider) => provider.id)),
     [addedProviderList]
   );
+  const addedProviderSections = useMemo(
+    () => buildAddedProviderSections(
+      addedProviderList,
+      t("modelProvider.sensenovaClassicMode"),
+      t("modelProvider.sensenovaTokenPlanMode")
+    ),
+    [addedProviderList, t]
+  );
 
   const visibleProviders = [...providerOptions].sort((a, b) => b.name.localeCompare(a.name));
 
-  const openProviderConfig = (provider: AddedProvider | ProviderOption, group?: ProviderConnectionGroup) => {
+  const openProviderConfig = (
+    provider: AddedProvider | ProviderOption,
+    group?: ProviderConnectionGroup,
+    baseUrlOverride?: string
+  ) => {
     const configuredProvider = addedProviderList.find((item) => item.id === provider.id);
     const providerDraft = configuredProvider || provider;
     const groupDraft = group || createConnectionGroup(providerDraft);
 
     setConfigModal({ provider: providerDraft, group });
-    const currentBaseUrl = groupDraft.baseUrl || providerDraft.baseUrl;
+    const currentBaseUrl = normalizeFormText(baseUrlOverride) || groupDraft.baseUrl || providerDraft.baseUrl;
     providerConfigForm.setFieldsValue({
       name: groupDraft.name,
       apiKey: "",
@@ -665,7 +776,10 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
     setSensenovaBaseUrlPreset("");
   };
 
-  const saveProviderConfig = async (values: ProviderConfigFormValues) => {
+  const saveProviderConfig = async (
+    values: ProviderConfigFormValues,
+    skipCustomBaseUrlRedirect = false
+  ): Promise<void> => {
     const activeConfigModal = configModal;
 
     if (!configProvider || !activeConfigModal || providerConfigSaving) {
@@ -680,6 +794,31 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
     const existingGroup = activeConfigModal.group
       ? existingProvider?.groups.find((group) => group.id === activeConfigModal.group?.id)
       : undefined;
+
+    const previousBaseUrl = existingGroup?.baseUrl || configProvider.baseUrl;
+    if (!skipCustomBaseUrlRedirect && shouldRedirectCustomBaseUrlToOpenAI(configProvider, previousBaseUrl, baseUrl)) {
+      Modal.confirm({
+        centered: true,
+        title: t("modelProvider.privateDeploymentRedirectTitle"),
+        content: t("modelProvider.privateDeploymentRedirectContent"),
+        okText: t("modelProvider.goToOpenAI"),
+        cancelText: t("modelProvider.stayHere"),
+        onOk: async () => {
+          let openAIProvider = [...addedProviderList, ...providerOptions].find(isOpenAIProvider);
+          if (!openAIProvider) {
+            const providers = await fetchProviderOptions("OpenAI");
+            openAIProvider = providers.find(isOpenAIProvider);
+          }
+          if (!openAIProvider) {
+            message.error(t("modelProvider.openAINotFound"));
+            return Promise.reject(new Error("OpenAI provider not found"));
+          }
+          openProviderConfig(openAIProvider, undefined, baseUrl);
+        },
+        onCancel: () => saveProviderConfig(values, true),
+      });
+      return;
+    }
 
     if (!isCustomBaseUrl && !apiKey && !existingGroup?.apiKeyConfigured) {
       providerConfigForm.setFields([{ name: "apiKey", errors: [t("modelProvider.validation.apiKeyRequired")] }]);
@@ -739,7 +878,10 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
               },
             ]
       );
-      setExpandedProviderIds((current) => ({ ...current, [configProvider.id]: true }));
+      setExpandedProviderIds((current) => ({
+        ...current,
+        [getAddedProviderSectionKey(configProvider, nextGroup.baseUrl)]: true,
+      }));
       message.success(apiKey
         ? t("modelProvider.message.groupVerifiedAndSaved", { name: nextGroup.name })
         : t("modelProvider.message.groupSaved", { name: nextGroup.name }));
@@ -760,10 +902,23 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
           title: t("modelProvider.autoSelection.title"),
           content: (
             <div className="model-provider-auto-selection-result">
+              <p className="model-provider-auto-selection-warning">
+                {t("modelProvider.autoSelection.freeModelWarning")}
+              </p>
               {autoSelection.configured.length > 0 ? (
-                <p>{t("modelProvider.autoSelection.configured", {
-                  models: autoSelection.configured.map((model) => model.name).join("、"),
-                })}</p>
+                <div className="model-provider-auto-selection-configured">
+                  <p>{t("modelProvider.autoSelection.configured")}</p>
+                  <ul>
+                    {autoSelection.configured.map((model) => (
+                      <li key={`${model.model_key}:${model.name}`}>
+                        <span>{t(`modelProvider.autoSelection.modelType.${model.model_key}`, {
+                          defaultValue: model.model_key,
+                        })}{t("modelProvider.autoSelection.modelTypeSeparator")}</span>
+                        <span>{model.name}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
               ) : null}
               {missingLabels.length > 0 ? (
                 <p>{t("modelProvider.autoSelection.missing", {
@@ -802,7 +957,8 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
     }
 
     const requestApiKey = normalizeFormText(apiKey) || normalizeFormText(verifyApiKeyInputRef.current?.input?.value);
-    if (!requestApiKey) {
+    const apiKeyRequiredForGroup = isDefaultProviderBaseUrl(provider, group.baseUrl);
+    if (apiKeyRequiredForGroup && !requestApiKey) {
       message.warning(t("modelProvider.message.fillApiKeyBeforeVerify"));
       return;
     }
@@ -853,6 +1009,7 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
         )
       );
       if (isVerified) {
+        await loadModelProviders();
         message.success(t("modelProvider.message.groupVerified"));
         void onConfigurationChanged?.();
         return;
@@ -931,30 +1088,38 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
     }
   };
 
-  const deleteProvider = async (provider: AddedProvider) => {
+  const deleteProviderSection = async (section: AddedProviderSection) => {
+    const { provider, groups, key } = section;
+    const groupIds = new Set(groups.map((group) => group.id));
     try {
       await Promise.all(
-        provider.groups.map((group) =>
+        groups.map((group) =>
           modelProvidersApi.apiCoreModelProvidersModelProviderIdGroupsGroupIdDelete({
             modelProviderId: provider.id,
             groupId: group.id,
           })
         )
       );
-      setAddedProviderList((current) => current.filter((item) => item.id !== provider.id));
+      setAddedProviderList((current) =>
+        current
+          .map((item) => item.id === provider.id
+            ? { ...item, groups: item.groups.filter((group) => !groupIds.has(group.id)) }
+            : item)
+          .filter((item) => item.groups.length > 0)
+      );
       setExpandedProviderIds((current) => {
         const next = { ...current };
-        delete next[provider.id];
+        delete next[key];
         return next;
       });
       setExpandedGroupIds((current) => {
         const next = { ...current };
-        provider.groups.forEach((group) => {
+        groups.forEach((group) => {
           delete next[`${provider.id}:${group.id}`];
         });
         return next;
       });
-      message.success(t("modelProvider.message.providerRemoved", { name: provider.name }));
+      message.success(t("modelProvider.message.providerRemoved", { name: section.displayName }));
       void onConfigurationChanged?.();
     } catch (error) {
     }
@@ -1124,23 +1289,24 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
             </div>
 
             <div className="model-provider-added-list">
-              {addedProviderList.length ? (
-                addedProviderList.map((provider) => {
-                  const isExpanded = !!expandedProviderIds[provider.id];
-                  const modelListId = `model-provider-${provider.id}-models`;
+              {addedProviderSections.length ? (
+                addedProviderSections.map((section, index) => {
+                  const { provider } = section;
+                  const isExpanded = expandedProviderIds[section.key] ?? index === 0;
+                  const modelListId = `model-provider-${normalizeProviderKey(section.key)}-models`;
 
                   return (
                     <article
                       className={`model-provider-added-card${isExpanded ? " is-expanded" : ""}`}
-                      key={provider.id}
+                      key={section.key}
                     >
                       <div className="model-provider-added-summary">
                         <div className="model-provider-added-brand">
                           <ProviderLogo provider={provider} />
                           <div>
-                            <strong>{provider.name}</strong>
+                            <strong>{section.displayName}</strong>
                             <span>
-                              {t("modelProvider.providerGroupCount", { source: provider.source, count: provider.groups.length })}
+                              {t("modelProvider.providerGroupCount", { source: provider.source, count: section.groups.length })}
                             </span>
                           </div>
                         </div>
@@ -1148,16 +1314,19 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
                         <div className="model-provider-added-actions">
                           <span className="model-provider-connection-badge">
                             <CheckCircleFilled />
-                            {t("modelProvider.availableGroupCount", { count: provider.groups.filter((group) => group.verified).length })}
+                            {t("modelProvider.availableGroupCount", { count: section.groups.filter((group) => group.verified).length })}
                           </span>
-                          <Button icon={<PlusCircleOutlined />} onClick={() => openProviderConfig(provider)}>
+                          <Button
+                            icon={<PlusCircleOutlined />}
+                            onClick={() => openProviderConfig(provider, undefined, section.defaultBaseUrl)}
+                          >
                             {t("modelProvider.addGroup")}
                           </Button>
                           <Button
                             aria-controls={modelListId}
                             aria-expanded={isExpanded}
                             className="model-provider-expand-button"
-                            onClick={() => void toggleProviderModels(provider.id)}
+                            onClick={() => void toggleProviderModels(section.key)}
                           >
                             {isExpanded ? t("modelProvider.collapseGroups") : t("modelProvider.expandGroups")}
                             {isExpanded ? <UpOutlined /> : <DownOutlined />}
@@ -1166,23 +1335,23 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
                             cancelText={t("common.cancel")}
                             okButtonProps={{ danger: true }}
                             okText={t("modelProvider.remove")}
-                            title={t("modelProvider.confirmRemoveProvider", { name: provider.name })}
+                            title={t("modelProvider.confirmRemoveProvider", { name: section.displayName })}
                             description={t("modelProvider.confirmRemoveProviderDesc")}
-                            onConfirm={() => deleteProvider(provider)}
+                            onConfirm={() => deleteProviderSection(section)}
                           >
-                            <Button aria-label={t("modelProvider.removeProviderAria", { name: provider.name })} danger icon={<DeleteOutlined />} />
+                            <Button aria-label={t("modelProvider.removeProviderAria", { name: section.displayName })} danger icon={<DeleteOutlined />} />
                           </Popconfirm>
                         </div>
                       </div>
 
                       {isExpanded ? (
                         <div
-                          aria-label={t("modelProvider.providerModelListAria", { name: provider.name })}
+                          aria-label={t("modelProvider.providerModelListAria", { name: section.displayName })}
                           className="model-provider-added-models"
                           id={modelListId}
                         >
-                          <div className="model-provider-group-rows" aria-label={t("modelProvider.providerGroupsAria", { name: provider.name })}>
-                            {provider.groups.map((group) => {
+                          <div className="model-provider-group-rows" aria-label={t("modelProvider.providerGroupsAria", { name: section.displayName })}>
+                            {section.groups.map((group) => {
                               const verifyKey = `${provider.id}:${group.id}`;
 
                               return (
@@ -1500,14 +1669,16 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
             </div>
           ) : null}
           <Form.Item
-            extra={t("modelProvider.verifyApiKeyExtra")}
+            extra={verifyApiKeyRequired
+              ? t("modelProvider.verifyApiKeyExtra")
+              : t("modelProvider.verifyApiKeyOptionalExtra")}
             label="API Key"
             name="apiKey"
             normalize={(value: string | undefined) => value?.trim()}
-            required
+            required={verifyApiKeyRequired}
             rules={[
               {
-                required: true,
+                required: verifyApiKeyRequired,
                 message: t("modelProvider.validation.apiKeyRequired"),
               },
               { max: 512, message: t("modelProvider.validation.apiKeyMax") },
@@ -1522,7 +1693,9 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
             <Input.Password
               autoComplete="off"
               maxLength={512}
-              placeholder={t("modelProvider.verifyApiKeyPlaceholder")}
+              placeholder={verifyApiKeyRequired
+                ? t("modelProvider.verifyApiKeyPlaceholder")
+                : t("modelProvider.apiKeyOptionalPlaceholder")}
               ref={verifyApiKeyInputRef}
               visibilityToggle={false}
             />

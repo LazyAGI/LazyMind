@@ -77,6 +77,33 @@ func TestPatchSkillMetadata_RewritesSkillFrontmatter(t *testing.T) {
 	}
 }
 
+func TestPatchSkill_RejectsDuplicateNameInSameCategory(t *testing.T) {
+	db := newSkillV2TestDB(t)
+	seedSkillWithHeadRevision(t, db, "skill1", "rev1")
+	seedSkillWithHeadRevision(t, db, "skill2", "rev2")
+	if err := db.Model(&testSkillV2SkillRow{}).Where("id = ?", "skill2").Updates(map[string]any{
+		"category":      "research",
+		"skill_name":    "论文精读备用",
+		"relative_root": "research/论文精读备用",
+	}).Error; err != nil {
+		t.Fatalf("rename skill2 fixture: %v", err)
+	}
+	svc := NewSkillService(SkillServiceDeps{
+		DB:        db,
+		BlobStore: NewBlobStore(db, NewLocalObjectStore(t.TempDir())),
+		Clock:     fixedClock(),
+	})
+
+	_, err := svc.PatchSkill(context.Background(), PatchSkillRequest{
+		SkillID: "skill1",
+		UserID:  "user_001",
+		Name:    stringPtr("论文精读备用"),
+	})
+	if err == nil || !strings.Contains(err.Error(), "skill already exists") {
+		t.Fatalf("PatchSkill error = %v, want skill already exists", err)
+	}
+}
+
 func TestPatchSkillMetadata_RejectsTooLongMetadata(t *testing.T) {
 	for name, req := range map[string]PatchSkillRequest{
 		"name": {

@@ -169,6 +169,7 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "query model provider failed", http.StatusInternalServerError)
 		return
 	}
+	baseURL = LazyLLMBaseURL(parent.Name, baseURL)
 
 	// Capability: single-group providers only allow one group per user.
 	if !parent.HasCapability("multi_group") {
@@ -384,6 +385,7 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "query model provider failed", http.StatusInternalServerError)
 		return
 	}
+	baseURL = LazyLLMBaseURL(parent.Name, baseURL)
 
 	var row orm.UserModelProviderGroup
 	err = db.WithContext(r.Context()).
@@ -669,6 +671,10 @@ var sensenovaNewPlatformModelNames = map[string]bool{
 	"sensenova-u1.5-lite":      true,
 }
 
+func shouldSeedSenseNovaModel(modelName string, useNewPlatform bool) bool {
+	return sensenovaNewPlatformModelNames[modelName] == useNewPlatform
+}
+
 // seedGroupModelsFromDefaults inserts user_model_provider_group_models from default_models when the group's
 // base_url matches the catalog DefaultModelProvider.base_url for parent.DefaultModelProviderID.
 // Also handles the special case of SenseNova's new platform URL.
@@ -720,7 +726,8 @@ func seedGroupModelsFromDefaults(
 
 	batch := make([]orm.UserModelProviderGroupModel, 0, len(defs))
 	for _, d := range defs {
-		if useNewPlatform && !sensenovaNewPlatformModelNames[d.Name] {
+		if strings.EqualFold(parent.Name, "SenseNova") &&
+			!shouldSeedSenseNovaModel(d.Name, useNewPlatform) {
 			continue
 		}
 		batch = append(batch, orm.UserModelProviderGroupModel{

@@ -7,7 +7,7 @@ import { listTasks, removeTask } from './api';
 import type { Task } from './api';
 import TaskDetail, { StatusTag, formatDate } from './TaskDetail';
 import { isTaskFinishedWithinDays } from './recentResults';
-import { CHAT_RESUME_CONVERSATION_KEY, selectChatConversationFilter } from '@/modules/chat/constants/chat';
+import { getChatConversationPath, selectChatConversationFilter } from '@/modules/chat/constants/chat';
 import StateGraphModal from '@/components/StateGraphModal';
 
 const SECTION_LIMIT = 5;
@@ -58,8 +58,7 @@ export default function Workbench({ active, onViewAllStatus }: WorkbenchProps) {
   const recent = completed.filter((task) => isTaskFinishedWithinDays(task, 7, recentReferenceTime));
   const openConversation = (id: string) => {
     selectChatConversationFilter('task');
-    sessionStorage.setItem(CHAT_RESUME_CONVERSATION_KEY, id);
-    navigate('/agent/chat/home');
+    navigate(getChatConversationPath(id));
   };
 
   return (

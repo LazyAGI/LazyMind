@@ -1646,6 +1646,7 @@ func DeleteConversation(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	notifySessionEnvClear(convID)
 	writeConversationJSON(w, http.StatusOK, map[string]any{})
 }
 
@@ -1782,6 +1783,7 @@ func BatchDeleteConversations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	notifySessionEnvClear(ownedIDs...)
 	writeConversationJSON(w, http.StatusOK, map[string]any{
 		"deleted_count": len(ownedIDs),
 		"deleted_ids":   ownedIDs,

@@ -362,11 +362,39 @@ func TestLoadStepsIncludesNaturalStatusContext(t *testing.T) {
 	}
 
 	conversationSteps := loadStepsForConversation(context.Background(), db.DB, subTask.ConversationID)
-	if len(conversationSteps) != 1 {
-		t.Fatalf("expected one conversation step, got %d", len(conversationSteps))
+	if len(conversationSteps) != 0 {
+		t.Fatalf("workflow attempt leaked into background task steps: %#v", conversationSteps)
 	}
-	got = conversationSteps[0]
-	if got.Title != subTask.Title || got.CurrentPhase != subTask.CurrentPhase || got.Summary != subTask.Summary {
-		t.Fatalf("conversation step lost natural status context: %#v", got)
+}
+
+func TestLoadStepsForConversationExcludesWorkflowAttempts(t *testing.T) {
+	db := newTestTaskDB(t)
+	if err := db.AutoMigrate(&orm.SubAgentTask{}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	tasks := []orm.SubAgentTask{
+		{
+			ID: "ordinary-step", ConversationID: "conv-steps", SeqInConversation: 1,
+			AgentType: "research", Title: "检索资料", Params: json.RawMessage(`{}`),
+			Mode: "auto", Status: "succeeded", LastHeartbeat: now,
+			InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`),
+			CreatedAt: now, UpdatedAt: now,
+		},
+		{
+			ID: "workflow-step", ConversationID: "conv-steps", SeqInConversation: 2,
+			AgentType: "workflow_step", Title: "生成大纲", Params: json.RawMessage(`{}`),
+			Mode: "auto", Status: "failed", LastHeartbeat: now,
+			InputSlots: json.RawMessage(`[]`), OutputSlots: json.RawMessage(`[]`),
+			CreatedAt: now, UpdatedAt: now,
+		},
+	}
+	if err := db.Create(&tasks).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	steps := loadStepsForConversation(context.Background(), db.DB, "conv-steps")
+	if len(steps) != 1 || steps[0].StepID != "检索资料" {
+		t.Fatalf("background task must exclude workflow attempts, got %#v", steps)
 	}
 }

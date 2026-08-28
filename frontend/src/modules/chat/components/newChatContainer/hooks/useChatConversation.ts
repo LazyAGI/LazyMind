@@ -15,7 +15,6 @@ import { RoleTypes } from "@/modules/chat/constants/common";
 import {
   CHAT_AUTO_ADVANCE_EVENT,
   CHAT_FFMPEG_DEPENDENCY_MISSING_EVENT,
-  CHAT_RESUME_CONVERSATION_KEY,
   type ChatAutoAdvanceDetail,
 } from "@/modules/chat/constants/chat";
 import { streamManager } from "@/modules/chat/utils/StreamManager";
@@ -157,9 +156,7 @@ export function useChatConversation({
 
       if (currentConversationIdRef.current) {
         if (streamManager.hasActiveStream(currentConversationIdRef.current)) {
-          disconnectConversationStream(currentConversationIdRef.current, {
-            persistResumeKey: true,
-          });
+          disconnectConversationStream(currentConversationIdRef.current);
         }
         streamManager.setActiveConversation(null);
       }
@@ -230,15 +227,10 @@ export function useChatConversation({
     }
   }
 
-  function disconnectConversationStream(
-    conversationId: string,
-    options?: { persistResumeKey?: boolean },
-  ) {
+  function disconnectConversationStream(conversationId: string) {
     if (!conversationId) {
       return;
     }
-    const shouldPersistResumeKey =
-      options?.persistResumeKey === true && !conversationId.startsWith("temp_");
 
     if (currentConversationIdRef.current === conversationId && sseRef.current) {
       try {
@@ -252,12 +244,6 @@ export function useChatConversation({
     activeStreamRef.current = false;
     setLoading(false);
     setIsStreaming(false);
-
-    if (shouldPersistResumeKey) {
-      sessionStorage.setItem(CHAT_RESUME_CONVERSATION_KEY, conversationId);
-    } else {
-      sessionStorage.removeItem(CHAT_RESUME_CONVERSATION_KEY);
-    }
   }
 
   function updateAssistantMessage(data: any, id?: string, index?: number) {
@@ -342,10 +328,7 @@ export function useChatConversation({
     }
   }
 
-  function stopStreamAfterReconciliation(
-    conversationId: string,
-    preserveResumeKey: boolean,
-  ) {
+  function stopStreamAfterReconciliation(conversationId: string) {
     streamManager.closeAndCleanup(conversationId);
     if (currentConversationIdRef.current === conversationId) {
       try {
@@ -354,11 +337,6 @@ export function useChatConversation({
         console.error("Error closing reconciled SSE:", error);
       }
       closeSSE();
-    }
-    if (preserveResumeKey) {
-      sessionStorage.setItem(CHAT_RESUME_CONVERSATION_KEY, conversationId);
-    } else {
-      sessionStorage.removeItem(CHAT_RESUME_CONVERSATION_KEY);
     }
   }
 
@@ -406,7 +384,7 @@ export function useChatConversation({
       applyReconciledHistory(conversationId, apiList);
       if (historyHasTerminal) {
         clearStreamRecovery(conversationId);
-        stopStreamAfterReconciliation(conversationId, false);
+        stopStreamAfterReconciliation(conversationId);
         return "terminal";
       }
     }
@@ -429,7 +407,7 @@ export function useChatConversation({
     entry.status = "failed";
     entry.attempt = STREAM_RECOVERY_MAX_ATTEMPTS;
     updateVisibleRecovery(conversationId, entry);
-    stopStreamAfterReconciliation(conversationId, true);
+    stopStreamAfterReconciliation(conversationId);
   }
 
   function scheduleStreamRecovery(conversationId: string) {
@@ -469,7 +447,7 @@ export function useChatConversation({
   ) {
     if (conversationHasAuthoritativeTerminal(conversationId)) {
       clearStreamRecovery(conversationId);
-      stopStreamAfterReconciliation(conversationId, false);
+      stopStreamAfterReconciliation(conversationId);
       return;
     }
 
@@ -518,7 +496,6 @@ export function useChatConversation({
     }
 
     if (errorConversationId) {
-      sessionStorage.setItem(CHAT_RESUME_CONVERSATION_KEY, errorConversationId);
       streamManager.removeStreamEntry(errorConversationId);
       void handleStreamRecoveryFailure(
         errorConversationId,
@@ -571,10 +548,6 @@ export function useChatConversation({
 
     if (isFirstTimeReceivingId) {
       onConversationIdChange?.(result.conversation_id);
-      sessionStorage.setItem(
-        CHAT_RESUME_CONVERSATION_KEY,
-        result.conversation_id,
-      );
 
       const previousConversationId = currentConversationIdRef.current;
       const isPreviousTempId = previousConversationId.startsWith("temp_");
@@ -703,7 +676,6 @@ export function useChatConversation({
           conversationMessagesCache.current.delete(cleanupConversationId);
         }
       }
-      sessionStorage.removeItem(CHAT_RESUME_CONVERSATION_KEY);
     }
 
     const updateMessageListInternal = (list: any[]) => {
@@ -875,8 +847,6 @@ export function useChatConversation({
     if (!conversationId) {
       conversationId = `temp_${Date.now()}_${Math.random().toString(36).substring(2, 15)}`;
       currentConversationIdRef.current = conversationId;
-    } else {
-      sessionStorage.setItem(CHAT_RESUME_CONVERSATION_KEY, conversationId);
     }
     clearStreamRecovery(conversationId);
 
@@ -919,7 +889,6 @@ export function useChatConversation({
             const realId = latest?.conversation_id;
             if (!realId) return;
             if (currentConversationIdRef.current !== tempId) return;
-            sessionStorage.setItem(CHAT_RESUME_CONVERSATION_KEY, realId);
             onConversationIdChange?.(realId);
           })
           .catch(() => {});
@@ -1015,7 +984,6 @@ export function useChatConversation({
       const currentList = messageListRef.current;
       conversationMessagesCache.current.set(conversationId, currentList);
       streamManager.saveMessageList(conversationId, currentList);
-      sessionStorage.setItem(CHAT_RESUME_CONVERSATION_KEY, conversationId);
       return true;
     } catch (error) {
       console.error("Failed to open resume SSE:", error);
@@ -1301,9 +1269,7 @@ export function useChatConversation({
           previousConversationId,
           messageListRef.current,
         );
-        disconnectConversationStream(previousConversationId, {
-          persistResumeKey: false,
-        });
+        disconnectConversationStream(previousConversationId);
       }
 
       streamManager.setActiveConversation(null);
@@ -1368,9 +1334,7 @@ export function useChatConversation({
           messageListRef.current,
         );
 
-        disconnectConversationStream(previousConversationId, {
-          persistResumeKey: false,
-        });
+        disconnectConversationStream(previousConversationId);
       }
 
       streamManager.setActiveConversation(null);
@@ -1385,7 +1349,6 @@ export function useChatConversation({
     setLoading(false);
     setIsStreaming(false);
     closeSSE();
-    sessionStorage.removeItem(CHAT_RESUME_CONVERSATION_KEY);
     onConversationIdChange?.("");
     setIsChatContent(false);
   }
@@ -1486,7 +1449,6 @@ export function useChatConversation({
     const entry = streamRecoveryRegistryRef.current.ensure(conversationId);
     entry.status = "resuming";
     updateVisibleRecovery(conversationId, entry, 1);
-    sessionStorage.setItem(CHAT_RESUME_CONVERSATION_KEY, conversationId);
 
     const result = await reconcileStreamRecovery(conversationId);
     if (result === "terminal") {

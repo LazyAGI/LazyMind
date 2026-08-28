@@ -63,11 +63,11 @@ func TestSetInstallStateUpsert(t *testing.T) {
 	payload := installJobPayload{MarketItemID: "law-cn", UserID: "u1", Revision: "master"}
 
 	// Upsert twice; the row must be updated in place (single PK pair).
-	if err := setInstallState(context.Background(), db, payload.MarketItemID, payload.UserID, orm.InstallStateDownloading, "", nil); err != nil {
+	if err := setInstallState(context.Background(), db, payload.MarketItemID, payload.UserID, orm.InstallStateDownloading, "", "", nil); err != nil {
 		t.Fatalf("first upsert: %v", err)
 	}
 	cfg := &installConfig{Revision: "master", Files: []fileSnapshot{{Path: "law.jsonl", Size: 5, SHA256: "abc"}}}
-	if err := setInstallState(context.Background(), db, payload.MarketItemID, payload.UserID, orm.InstallStateDone, "ds_1", cfg); err != nil {
+	if err := setInstallState(context.Background(), db, payload.MarketItemID, payload.UserID, orm.InstallStateDone, "ds_1", "v2.3.0", cfg); err != nil {
 		t.Fatalf("second upsert: %v", err)
 	}
 	var rows []orm.KnowledgeMarketInstall
@@ -83,6 +83,9 @@ func TestSetInstallStateUpsert(t *testing.T) {
 	}
 	if row.InstalledAt == nil {
 		t.Fatal("installed_at must be set on done")
+	}
+	if row.InstalledVersion != "v2.3.0" {
+		t.Fatalf("installed_version=%q, want v2.3.0", row.InstalledVersion)
 	}
 	if !json.Valid(row.Config) {
 		t.Fatalf("invalid config json %s", row.Config)

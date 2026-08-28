@@ -28,6 +28,10 @@ LazyMind 是面向知识密集型工作的 **AI Skill Runtime**。它在同一�
 | **知识助手** | 接入资料 → 解析/OCR → 混合检索 → 重排 → 回答 | 可回溯到组织知识的答案 |
 | **质量改进** | 收集 badcase → 评测 → 诊断 → A/B Test → 部署 | 经过验证的策略优化，而不是未经检查的 Prompt 改动 |
 
+
+https://github.com/user-attachments/assets/ebc2440e-86f8-4117-a917-62ce4e79a117
+
+
 ## LazyMind 如何工作
 
 ```mermaid

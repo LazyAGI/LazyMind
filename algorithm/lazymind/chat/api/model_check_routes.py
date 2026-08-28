@@ -12,6 +12,7 @@ async def check_model_connection(
     source: Annotated[Optional[str], Body(description='Provider name')] = None,
     url: Annotated[Optional[str], Body(description='Provider URL')] = None,
     api_key: Annotated[Optional[str], Body(description='Provider API key')] = None,
+    skip_auth: Annotated[bool, Body(description='Skip authentication for a self-hosted endpoint')] = False,
 ):
     try:
         module = lazyllm.OnlineModule(
@@ -19,6 +20,7 @@ async def check_model_connection(
             source=source,
             url=url,
             api_key=api_key,
+            skip_auth=skip_auth,
         )
         if not module._validate_api_key():
             raise RuntimeError('API key validation failed')

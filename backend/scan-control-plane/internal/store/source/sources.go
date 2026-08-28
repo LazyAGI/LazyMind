@@ -2,6 +2,7 @@ package source
 
 import (
 	"context"
+	"database/sql/driver"
 	"errors"
 	"strings"
 	"time"
@@ -60,7 +61,7 @@ func (r *SQLRepository) ListSources(ctx context.Context, req SourceListRequest) 
 		records = append(records, SourceListRecord{
 			Source:        sourceFromORM(row.source()),
 			BindingCount:  row.BindingCount,
-			LastSuccessAt: row.LastSuccessAt,
+			LastSuccessAt: row.LastSuccessAt.pointer(),
 		})
 	}
 	return records, int(total), nil
@@ -82,21 +83,80 @@ func sourceListOrderClause(orderBy string) string {
 }
 
 type sourceListORMRow struct {
-	SourceID          string     `gorm:"column:source_id"`
-	TenantID          string     `gorm:"column:tenant_id"`
-	CreatedBy         string     `gorm:"column:created_by"`
-	Name              string     `gorm:"column:name"`
-	DatasetID         string     `gorm:"column:dataset_id"`
-	Status            string     `gorm:"column:status"`
-	SourceOptions     JSON       `gorm:"column:source_options_json;type:jsonb"`
-	IncludeExtensions JSON       `gorm:"column:include_extensions_json;type:jsonb"`
-	ExcludeExtensions JSON       `gorm:"column:exclude_extensions_json;type:jsonb"`
-	ConfigVersion     int64      `gorm:"column:config_version"`
-	DeletedAt         *time.Time `gorm:"column:deleted_at"`
-	CreatedAt         time.Time  `gorm:"column:created_at"`
-	UpdatedAt         time.Time  `gorm:"column:updated_at"`
-	BindingCount      int        `gorm:"column:binding_count"`
-	LastSuccessAt     *time.Time `gorm:"column:last_success_at"`
+	SourceID          string         `gorm:"column:source_id"`
+	TenantID          string         `gorm:"column:tenant_id"`
+	CreatedBy         string         `gorm:"column:created_by"`
+	Name              string         `gorm:"column:name"`
+	DatasetID         string         `gorm:"column:dataset_id"`
+	Status            string         `gorm:"column:status"`
+	SourceOptions     JSON           `gorm:"column:source_options_json;type:jsonb"`
+	IncludeExtensions JSON           `gorm:"column:include_extensions_json;type:jsonb"`
+	ExcludeExtensions JSON           `gorm:"column:exclude_extensions_json;type:jsonb"`
+	ConfigVersion     int64          `gorm:"column:config_version"`
+	DeletedAt         *time.Time     `gorm:"column:deleted_at"`
+	CreatedAt         time.Time      `gorm:"column:created_at"`
+	UpdatedAt         time.Time      `gorm:"column:updated_at"`
+	BindingCount      int            `gorm:"column:binding_count"`
+	LastSuccessAt     sourceListTime `gorm:"column:last_success_at"`
+}
+
+type sourceListTime struct {
+	Time  time.Time
+	Valid bool
+}
+
+func (value sourceListTime) Value() (driver.Value, error) {
+	if !value.Valid {
+		return nil, nil
+	}
+	return value.Time, nil
+}
+
+func (value *sourceListTime) Scan(raw any) error {
+	value.Time = time.Time{}
+	value.Valid = false
+	switch typed := raw.(type) {
+	case nil:
+		return nil
+	case time.Time:
+		value.Time = typed
+		value.Valid = true
+		return nil
+	case string:
+		return value.scanText(typed)
+	case []byte:
+		return value.scanText(string(typed))
+	default:
+		return errors.New("invalid time token")
+	}
+}
+
+func (value *sourceListTime) scanText(raw string) error {
+	text := strings.TrimSpace(raw)
+	if text == "" {
+		return nil
+	}
+	for _, layout := range []string{
+		time.RFC3339Nano,
+		"2006-01-02 15:04:05.999999999Z07:00",
+		"2006-01-02 15:04:05.999999999",
+	} {
+		parsed, err := time.Parse(layout, text)
+		if err == nil {
+			value.Time = parsed
+			value.Valid = true
+			return nil
+		}
+	}
+	return errors.New("invalid time token")
+}
+
+func (value sourceListTime) pointer() *time.Time {
+	if !value.Valid {
+		return nil
+	}
+	parsed := value.Time
+	return &parsed
 }
 
 func (row sourceListORMRow) source() ormSource {

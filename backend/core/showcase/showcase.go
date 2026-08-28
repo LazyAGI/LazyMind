@@ -51,6 +51,8 @@ type ShowcaseCaseResult struct {
 	Summary       string                     `yaml:"summary" json:"summary"`
 	ImageAsset    string                     `yaml:"image_asset,omitempty" json:"image_asset,omitempty"`
 	ImageURL      string                     `yaml:"-" json:"image_url,omitempty"`
+	HTMLAsset     string                     `yaml:"html_asset,omitempty" json:"html_asset,omitempty"`
+	HTMLURL       string                     `yaml:"-" json:"html_url,omitempty"`
 	Highlights    []string                   `yaml:"highlights,omitempty" json:"highlights,omitempty"`
 	ProductReport *ShowcaseCaseProductReport `yaml:"product_report,omitempty" json:"product_report,omitempty"`
 }
@@ -83,11 +85,7 @@ type ShowcaseCase struct {
 	DetailTitle       string             `json:"detail_title"`
 	DetailDescription string             `json:"detail_description"`
 	AttachmentHint    string             `json:"attachment_hint,omitempty"`
-	PromptShort       string             `json:"prompt_short"`
-	Prompt            string             `json:"prompt"`
 	ResultSummary     string             `json:"result_summary"`
-	ResultHighlights  []string           `json:"result_highlights"`
-	Steps             []ShowcaseCaseStep `json:"steps"`
 	Tasks             []ShowcaseCaseTask `json:"tasks"`
 	BuiltinSkillUID   string             `json:"builtin_skill_uid,omitempty"`
 	WorkflowRef       string             `json:"workflow_ref,omitempty"`
@@ -224,7 +222,7 @@ func matchesCaseCategory(item ShowcaseCase, category string) bool {
 }
 
 func caseSearchText(item ShowcaseCase) string {
-	values := []string{item.Title, item.Description, item.DetailTitle, item.DetailDescription, item.Category, item.PromptShort}
+	values := []string{item.Title, item.Description, item.DetailTitle, item.DetailDescription, item.Category}
 	values = append(values, item.Tags...)
 	values = append(values, item.SearchAliases...)
 	for _, task := range item.Tasks {

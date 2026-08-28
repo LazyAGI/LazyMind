@@ -1,7 +1,7 @@
 locale: en-US
 
 classification:
-  category: workflow
+  category: Information analysis
   tags:
     - Academic research
     - Literature search
@@ -11,46 +11,42 @@ classification:
 presentation:
   card:
     title: Academic research and paper writing
-    description: Move from research questions and evidence to a full paper, peer review, revision, and Word delivery
+    description: Follow a real personal knowledge and AI case through research design, evidence synthesis, writing, review, revision, and Word delivery
     output_type: document
-    output_label: Academic paper
+    output_label: Interactive paper case
     cover_asset: cover
-    result_summary: Produce an editable, reviewable paper backed by a closed evidence registry and five review perspectives
+    result_summary: Explore the generated paper, thirteen workflow stages, and a versioned AI-polish interaction
   detail:
-    title: From academic research to paper delivery
-    description: Connect research design, scholarly and knowledge-base retrieval, evidence synthesis, editable outlining and drafting, integrity checks, five-perspective review, revision, and formatted delivery.
-    attachment_hint: Research materials, references, data notes, or a selected knowledge base (optional)
+    title: From research topic to reviewable paper
+    description: Follow a real “personal knowledge accumulation and AI” case through lightweight retrieval, six registered sources, full drafting, five-perspective review, two revision rounds, and DOCX delivery. The demo opens on stage 12 and includes mock AI polishing with a V1/V2 diff.
+    attachment_hint: Research topic, target length, paper type, and citation style (optional)
 
 tasks:
   - id: full-paper
     selector:
-      title: Complete academic paper
-      description: Complete retrieval, writing, review, revision, and delivery from a research topic
-      output_label: Paper and research record
+      title: Personal knowledge and AI
+      description: Complete lightweight retrieval, writing, review, revision, and delivery for a short paper
+      output_label: Interactive paper
     launch:
-      prompt_short: Write a traceable Chinese academic paper on generative AI for personalized learning.
-      prompt: Run the complete academic research and paper-writing workflow. Study “mechanisms and practical paths for generative AI to support personalized learning” as a literature review of about 8,000 Chinese characters, use GB/T 7714 citations, and export DOCX. Prefer available academic search, my supplied materials, and the selected knowledge base. Bind every external claim to a real source; when retrieval is unavailable or evidence is insufficient, preserve that limitation instead of inventing citations. Complete outline and draft approvals, five-perspective peer review, necessary revisions, final integrity checks, and delivery.
+      prompt_short: Use the academic research and paper-writing workflow to write about how personal knowledge accumulation can combine with AI, in roughly 1,000 Chinese characters.
+      prompt: Use the academic research and paper-writing workflow to write about how personal knowledge accumulation can combine with AI, in roughly 1,000 Chinese characters.
     replay:
       steps:
-        - title: Design the research question and method
-          description: Define scope, paper type, method, and unavailable checks
-        - title: Retrieve and register evidence
-          description: Build a traceable closed evidence registry from scholarly and knowledge sources
-        - title: Synthesize literature and gaps
-          description: Verify sources and expose consensus, conflicts, limitations, and gaps
-        - title: Build the outline and manuscript
-          description: Produce a full draft through an editable outline and section writing
-        - title: Review and revise
-          description: Combine five review perspectives and resolve the revision roadmap item by item
-        - title: Validate and deliver
-          description: Rerun integrity checks and deliver the paper with its process record
+        - title: Design the research question
+          description: Confirm a conceptual-research scope, short target length, and GB/T 7714 citation style
+        - title: Retrieve and synthesize evidence
+          description: Register six sources and summarize consensus, risks, boundary conditions, and gaps
+        - title: Generate the outline and first draft
+          description: Organize the paper around acquisition, organization, internalization, and application
+        - title: Run five-perspective peer review
+          description: Combine methodological, domain, interdisciplinary, and devil's-advocate feedback into 28 revision items
+        - title: Revise twice and validate integrity
+          description: Resolve feedback and recheck citations, structure, limitations, and integrity declarations
+        - title: Deliver the paper and process record
+          description: Produce final Markdown, a 42.2 KB DOCX, and the thirteen-stage execution record
     result:
-      template: generic_report_v1
-      eyebrow: Academic paper delivery
-      title: A complete, evidence-traceable academic paper
-      summary: Support the manuscript from research design through final review with registered evidence and explicit boundaries
-      highlights:
-        - Research question, methodology blueprint, and search log
-        - Annotated bibliography, evidence synthesis, and editable manuscript
-        - Five-perspective peer review and itemized revision
-        - Markdown or DOCX paper plus process record
+      template: html_preview_v1
+      eyebrow: Academic paper case
+      title: Combining personal knowledge accumulation with AI
+      summary: Open directly on stage twelve to inspect the real paper and process artifacts, then mock an AI polish and compare V1 with V2.
+      html_asset: paper_demo

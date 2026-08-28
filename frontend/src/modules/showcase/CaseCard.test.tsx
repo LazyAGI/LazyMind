@@ -10,6 +10,11 @@ vi.mock("react-i18next", () => ({
     const labels: Record<string, string> = {
       "showcase.viewDetail": "查看详情",
       "showcase.try": "试一试",
+      "showcase.cardTagsLabel": "能力标签",
+      "showcase.filters.capability.chat": "聊天",
+      "showcase.filters.capability.work": "任务",
+      "showcase.filters.technology.skill": "技能",
+      "showcase.filters.technology.workflow": "工作流",
     };
     return {
       t: (key: string, values?: { title?: string }) =>
@@ -34,10 +39,23 @@ const item: ShowcaseCase = {
   output_label: "PRD",
   output_type: "document",
   provider: "SkillHub",
-  prompt: "帮我生成一份产品方案",
-  prompt_short: "生成产品方案",
   result_summary: "产品需求文档",
   source_url: "https://skillhub.example/aiProduct",
+  tasks: [{
+    id: "product-plan",
+    title: "产品方案",
+    description: "生成产品方案",
+    output_label: "PRD",
+    prompt: "帮我生成一份产品方案",
+    prompt_short: "生成产品方案",
+    steps: [],
+    result: {
+      template: "generic_report_v1",
+      eyebrow: "产品方案",
+      title: "产品方案",
+      summary: "产品需求文档",
+    },
+  }],
   title: "产品设计与 PRD 生成",
   type: "chat",
 };
@@ -53,17 +71,32 @@ describe("CaseCard", () => {
 
     expect(screen.getByRole("link", { name: /产品设计与 PRD 生成/ })).toHaveAttribute(
       "href",
-      "/agent/chat/home?showcase_case=aiProduct",
+      "/agent/chat/home?showcase_case=aiProduct&showcase_entry=chat",
     );
     fireEvent.click(screen.getByRole("link", { name: /产品设计与 PRD 生成/ }));
     expect(onTry).toHaveBeenCalledOnce();
     expect(onTry).toHaveBeenCalledWith(item);
     expect(screen.queryByText("SkillHub")).not.toBeInTheDocument();
+    expect(screen.getByRole("img", { name: "聊天" })).toBeInTheDocument();
+    expect(screen.getByLabelText("能力标签")).toHaveTextContent("product聊天技能");
 
     expect(screen.getByRole("link", { name: /查看详情/ })).toHaveAttribute(
       "href",
       "/agent/chat/cases/aiProduct",
     );
     expect(screen.queryByText("试一试")).not.toBeInTheDocument();
+  });
+
+  it("routes task capabilities to the New task entry", () => {
+    render(
+      <MemoryRouter>
+        <CaseCard item={{ ...item, id: "ppt-workflow", type: "workflow" }} />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("link", { name: /产品设计与 PRD 生成/ })).toHaveAttribute(
+      "href",
+      "/agent/chat/home?showcase_case=ppt-workflow&showcase_entry=work",
+    );
   });
 });

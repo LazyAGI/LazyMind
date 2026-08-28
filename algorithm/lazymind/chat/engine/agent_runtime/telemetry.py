@@ -8,6 +8,7 @@ from typing import Any, Optional
 import lazyllm
 
 from lazymind.config import config
+from lazymind.chat.engine.tools.session_env import redact_session_env_arguments
 
 _PREVIEW_CHARS = 400
 
@@ -142,6 +143,12 @@ def emit_tool_call(tool_call: dict[str, Any], *, blocked: bool = False, reason: 
     function = tool_call.get('function') or {}
     name = str(function.get('name') or '')
     arguments = function.get('arguments', {})
+    if isinstance(arguments, str):
+        try:
+            arguments = json.loads(arguments)
+        except Exception:  # noqa: BLE001
+            pass
+    arguments = redact_session_env_arguments(name, arguments)
     category = classify_tool(name)
     append_event(
         'tool_call',

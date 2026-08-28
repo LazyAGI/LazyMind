@@ -108,11 +108,32 @@ func TestWaitForAuthServiceHealthyToleratesStalePIDDuringRestart(t *testing.T) {
 	probeCount := 0
 	manager.probeAuth = func(_ int, _ time.Duration) bool {
 		probeCount++
-		return probeCount >= 2
+		// The old implementation failed after three 500ms checks of the stale
+		// PID, before the replacement service had time to become healthy.
+		return probeCount >= 4
 	}
 
-	if err := manager.waitForAuthServiceHealthy(context.Background(), 18000, 2*time.Second, pidFile); err != nil {
+	if err := manager.waitForAuthServiceHealthy(context.Background(), 18000, 3*time.Second, pidFile); err != nil {
 		t.Fatalf("wait for restarted auth-service: %v", err)
+	}
+}
+
+func TestWaitForAuthServiceHealthyReportsObservedProcessExit(t *testing.T) {
+	pidFile := filepath.Join(t.TempDir(), "auth-service.pid")
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o600); err != nil {
+		t.Fatalf("write live auth-service pid: %v", err)
+	}
+
+	manager := NewRuntimeManager(&fakeRunner{t: t}, filepath.Join(t.TempDir(), "local-runtime-manager"))
+	manager.probeAuth = func(_ int, _ time.Duration) bool { return false }
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		_ = os.Remove(pidFile)
+	}()
+
+	err := manager.waitForAuthServiceHealthy(context.Background(), 18000, 3*time.Second, pidFile)
+	if err == nil || !strings.Contains(err.Error(), "auth-service process exited before becoming healthy") {
+		t.Fatalf("wait error = %v, want observed process exit", err)
 	}
 }
 

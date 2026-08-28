@@ -19,6 +19,18 @@ import { getCiteMessages } from "../utils/citeMessage";
 const ThinkIcon = new URL("../../../assets/images/think.png", import.meta.url)
   .href;
 
+function formatThinkingDuration(value: number | string | undefined): string {
+  const seconds = Math.floor(Number(value));
+  if (!Number.isFinite(seconds) || seconds <= 0) return "";
+
+  const minutes = Math.floor(seconds / 60);
+  const remainingSeconds = seconds % 60;
+  if (minutes === 0) return `${seconds}s`;
+  return remainingSeconds > 0
+    ? `${minutes}m${remainingSeconds}s`
+    : `${minutes}m`;
+}
+
 const INTENT_FIELD_LABELS: Record<string, string> = {
   goal: "chat.intentGoal",
   deliverable: "chat.intentDeliverable",
@@ -83,6 +95,9 @@ export default function ChatMessageContent({
     item.intent_updated?.scope === "conversation"
       ? item.intent_updated.intent_context
       : null;
+  const thinkingDuration = formatThinkingDuration(
+    item.thinking_duration_s || item.thinking_time_s,
+  );
   const intentTooltip = conversationIntent ? (
     <div className="chat-intent-tooltip">
       {Object.entries(INTENT_FIELD_LABELS).map(([field, labelKey]) => {
@@ -144,10 +159,7 @@ export default function ChatMessageContent({
             <span className="chat-think-title">
               {item.delta ? t("chat.thinkingDone") : t("chat.thinking")}
               {searchSummary ? ` · ${searchSummary}` : ""}
-              {(item.thinking_duration_s || item.thinking_time_s) &&
-                item.thinking_duration_s !== "0" &&
-                item.thinking_time_s !== "0" &&
-                ` (${item.thinking_duration_s || item.thinking_time_s}s)`}
+              {thinkingDuration ? ` (${thinkingDuration})` : ""}
             </span>
             {isCollapsed ? (
               <UpOutlined className="chat-arrow-icon" />

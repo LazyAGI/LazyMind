@@ -80,7 +80,7 @@ func TestAutoSelectUnconfiguredProviderModelsPrefersVerifiedFreeModels(t *testin
 
 	models := []orm.UserModelProviderGroupModel{
 		{ID: "paid-llm", Name: "deepseek-ai/DeepSeek-V4-Flash", ModelType: "llm"},
-		{ID: "free-llm", Name: "THUDM/GLM-Z1-9B-0414", ModelType: "llm", FreeAutoSelectPriority: 1},
+		{ID: "free-llm", Name: "deepseek-ai/DeepSeek-V3", ModelType: "llm", FreeAutoSelectPriority: 1},
 		{ID: "paid-vlm", Name: "Pro/moonshotai/Kimi-K2.6", ModelType: "vlm"},
 		{ID: "free-vlm", Name: "Qwen/Qwen3.5-4B", ModelType: "vlm", FreeAutoSelectPriority: 1},
 		{ID: "paid-embed", Name: "Qwen/Qwen3-Embedding-8B", ModelType: "embed"},
@@ -95,7 +95,7 @@ func TestAutoSelectUnconfiguredProviderModelsPrefersVerifiedFreeModels(t *testin
 		t.Fatalf("auto select: %v", err)
 	}
 	wantConfigured := []autoSelectedModel{
-		{ModelKey: "llm", Name: "THUDM/GLM-Z1-9B-0414"},
+		{ModelKey: "llm", Name: "deepseek-ai/DeepSeek-V3"},
 		{ModelKey: "vlm", Name: "Qwen/Qwen3.5-4B"},
 		{ModelKey: "embed_main", Name: "BAAI/bge-m3"},
 		{ModelKey: "image_generator", Name: "Kwai-Kolors/Kolors"},
@@ -122,7 +122,7 @@ func TestAutoSelectUnconfiguredProviderModelsPrefersVerifiedFreeModels(t *testin
 
 func TestPreferredAutoModelScopesSenseNovaPreferencesToTokenPlan(t *testing.T) {
 	models := []orm.UserModelProviderGroupModel{
-		{ID: "classic-first", Name: "DeepSeek V4 Flash", ModelType: "llm"},
+		{ID: "classic-first", Name: "SenseChat-5", ModelType: "llm"},
 		{
 			ID: "token-plan", Name: "sensenova-6.7-flash-lite", ModelType: "llm",
 			FreeAutoSelectPriority: 1,

@@ -36,10 +36,9 @@ def test_ask_user_query_appendix_follows_user_input_and_is_not_system_history():
     assert 'NEVER write that request as assistant prose' in bundle.current_input
     assert 'every kind of user-facing question or reply request' in bundle.current_input
     assert 'one question at a time' not in bundle.current_input
-    assert bundle.current_input.index('Active Tool Instructions') > bundle.current_input.index(
-        '### User Instruction'
+    assert bundle.current_input.index('ATTENTION') > bundle.current_input.index(
+        'Ask me one question.'
     )
-    assert '\n\nAttention:' in bundle.current_input
     assert 'ALWAYS call the registered `ask_user` function tool' not in bundle.system_prompt
     assert collect_query_appendices([]) == []
     assert collect_query_appendices([ASK_USER_TOOL_CONFIG], 'before') == []
