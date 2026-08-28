@@ -28,8 +28,9 @@ tasks:
       description: Check each answer, diagnose mistakes, and explore the explanation and reinforcement case
       output_label: Interactive mistake-tutoring case
     launch:
-      prompt_short: Help me check this homework, explain any mistakes, and give me a few word problems to practise.
-      prompt: Please check the homework I uploaded. Tell me whether each answer is right, explain any mistakes and the correct approach, then give me a few easy-to-hard practice questions written out in full words, with answers, based on what I need to improve.
+      prompt_short: Check Xiao Yu's Grade 5 fractions homework across multiple-choice, fill-in, and written-response questions, then explain the mistakes.
+      prompt: >-
+        The student is Xiao Yu, Grade 5 semester 2, People's Education Press mathematics, topic fractions and fraction addition/subtraction. Please review this homework, identify the mistakes and weak concepts, and create targeted reinforcement practice. It contains two multiple-choice, two fill-in, and two written-response questions. Questions and student answers: 1. Multiple choice: What is 3/8 + 1/4? A. 4/12 B. 5/8 C. 7/8 D. 1/2. Student chose C. 2. Multiple choice: What is 1 − 2/5? A. 3/5 B. 2/5 C. 1/5 D. 7/5. Student chose A. 3. Fill in: 2/3 + 1/6 = ( ). Student wrote 4/9. 4. Fill in: 7/8 − 1/4 = ( ). Student wrote 5/8. 5. Written response: A student reads 1/4 of a book on the first day and 3/10 on the second day. What fraction of the book is read in total? Student wrote 4/14. 6. Written response: Tomatoes cover 3/8 of a plot and cucumbers cover 1/4; what fraction is planted with greens? Student wrote 3/8.
     replay:
       steps:
         - title: Identify subject and level
@@ -55,8 +56,9 @@ tasks:
       description: Generate a foundation-to-challenge exercise case for a target topic
       output_label: Interactive tiered-practice case
     launch:
-      prompt_short: I want to practise a topic. Please give me a set of word problems from easy to hard.
-      prompt: I want to practise a topic that I have not mastered yet. Please briefly explain the method first, then give me a set of easy-to-hard practice questions written out clearly in full words, with answers and explanations.
+      prompt_short: Create a three-level Grade 5 fractions set around “find a common denominator first.”
+      prompt: >-
+        Directly create a 20-minute tiered practice set for a Grade 5 semester 2 People's Education Press mathematics student, without asking follow-up questions about the textbook or topic. The topic is fraction addition and subtraction. Teach this method first: find a common denominator, rewrite the fractions with that denominator, add or subtract the numerators, and check whether the result can be simplified. Focus on the errors “adding unlike denominators directly” and “not subtracting from the whole 1 when finding what remains.” Organize the work into foundation, intermediate, and challenge levels, covering calculations, word problems, true-or-false reasoning, and explaining why denominators must be made common; write every question in complete language and include the answer, key steps, and an error reminder for each.
     replay:
       steps:
         - title: Confirm practice scope
@@ -80,8 +82,9 @@ tasks:
       description: Turn mistakes and learning gaps into a printable student paper and answer-key case
       output_label: Interactive printable-paper case
     launch:
-      prompt_short: Turn the questions I got wrong into a clearly written printable practice paper.
-      prompt: Please turn the questions I got wrong and the topics I need to practise into a printable worksheet. Write each question out clearly in full words, and keep the questions and answers separate so I can finish it myself before checking the explanations.
+      prompt_short: Turn Xiao Yu's three latest fraction mistakes into a Grade 5 A4 practice paper.
+      prompt: >-
+        Directly create a printable A4 mathematics paper for Xiao Yu, Grade 5 semester 2, People's Education Press, without asking follow-up questions. Sync it with the three latest mistakes: multiple-choice 3/8 + 1/4, where the student chose C instead of B; fill-in 2/3 + 1/6, where the student wrote 4/9 instead of 5/6; and written-response 1/4 + 3/10, where the student wrote 4/14 instead of 11/20. Center the paper on unlike-denominator fractions and written-response setup, with two multiple-choice, two fill-in, and two written-response questions, an advised time of 20 minutes, complete wording, and separate student paper and answer key. In the explanations, connect each latest mistake to the common-denominator step and the equation setup. Prefer a Word file; if the dependency is unavailable, fall back to Markdown and say so.
     replay:
       steps:
         - title: Collect learning materials

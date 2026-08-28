@@ -29,7 +29,8 @@ tasks:
       output_label: Today's hot-topic digest
     launch:
       prompt_short: Help me see which topics are worth following today.
-      prompt: Based on what you can verify right now, help me put together a digest of the topics worth following today. Start by filtering signals across multiple platforms, then explain what happened, why it matters, and what to watch next in plain language, with sources and retrieval times. If a source is unavailable or the evidence is thin, say so clearly instead of presenting guesses as facts.
+      prompt: >-
+        Based on what can be found right now, please prepare a digest of today's hot topics. If a source is unavailable, the information is insufficient, or only a hot-list title is visible, tell me directly and do not present guesses as facts.
     replay:
       steps:
         - title: Aggregate multi-platform hot lists

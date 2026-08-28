@@ -27,8 +27,9 @@ tasks:
       description: Build reach, match, and safety choices from rank, subjects, and preferences
       output_label: Application plan
     launch:
-      prompt_short: Build a reach, match, and safety plan from my score, rank, and preferences.
-      prompt: Use my province, year, subjects, score, rank, city and major preferences to build a reach, match, and safety plan. Explain the rationale, risks, and adjustment options, and ask for essential missing information first.
+      prompt_short: "I am in Jiangsu, with a 2025 Physics-Chemistry-Geography profile, score 612, rank 18,420, and a Jiangsu-Zhejiang-Shanghai engineering preference. Build a reach, match, and safety plan."
+      prompt: >-
+        Directly generate a complete reach, match, and safety application plan from my information without asking follow-up questions: I am in Jiangsu, applying for 2025 with Physics/Chemistry/Geography subjects, score 612, and overall rank 18,420; I prefer Jiangsu-Zhejiang-Shanghai, engineering, computer science, electronic information, automation, and software engineering, and accept major reassignment. My candidate reference ranks are Donglan University · Computer Science 15,800, Jiangnan Institute of Technology · Electronic Information 16,900, Haizhou University of Technology · Automation 19,100, Ningchuan University of Science and Technology · Software Engineering 20,300, Nanpu University · Information Management 26,800, and Lingnan Applied University · Digital Media 31,500. Organize them as two reach, two match, and two safety choices in order, explain rank fit, major and city fit, reassignment and rejection risks, and official items to verify. These university and rank references have no attached official sources, so mark them for verification and do not present them as official admission probabilities or application advice.
     replay:
       steps:
         - title: Verify exam information
@@ -52,8 +53,9 @@ tasks:
       description: Estimate admission ranges for target universities and majors from score and rank
       output_label: Rank analysis report
     launch:
-      prompt_short: Use my gaokao rank to identify realistic university and major ranges.
-      prompt: Analyze my province, year, subjects, score, and rank to identify useful university levels, major ranges, and reach, match, and safety boundaries. Ask for missing targets or historical data and state the limitations.
+      prompt_short: "Use my 2025 Jiangsu Physics-Chemistry-Geography profile, score 612, and rank 18,420 to analyze reach, match, and safety boundaries for five target universities."
+      prompt: >-
+        Directly analyze my information without asking follow-up questions: I am in Jiangsu, applying for 2025 with Physics/Chemistry/Geography subjects, score 612, overall rank 18,420, and a Jiangsu-Zhejiang-Shanghai engineering preference. Compare these target programs and reference ranks: Donglan University · Computer Science 15,800, Haizhou University of Technology · Automation 19,100, Ningchuan University of Science and Technology · Software Engineering 20,300, Nanpu University · Information Management 26,800, and Lingnan Applied University · Digital Media 31,500. Divide them into reference reach, match, and safety boundaries, explain how to read rank ranges and volatility, and list the data definitions, enrollment plans, program groups, and official sources that still need verification. These schools, ranks, and judgments are not yet officially verified; do not present the illustrative ranges as real admission probabilities.
     replay:
       steps:
         - title: Confirm the rank basis
@@ -77,8 +79,9 @@ tasks:
       description: Shortlist majors using interests, academic strengths, and development goals
       output_label: Major selection advice
     launch:
-      prompt_short: Compare university majors that fit my interests and academic strengths.
-      prompt: Compare university majors using my interests, strongest subjects, personality, career direction, subject restrictions, and city preferences. Cover courses, capabilities, development paths, risks, and ways to verify the options.
+      prompt_short: Compare three university majors for my Physics/Chemistry/Geography profile, strong math foundation, problem-solving interest, and Yangtze River Delta preference.
+      prompt: >-
+        Directly compare university majors from my information without asking follow-up questions: I take Physics/Chemistry/Geography, enjoy breaking down problems, have a strong math foundation, hope to stay in the Yangtze River Delta, and value internship access and employment flexibility. Compare Computer Science and Technology, Clinical Medicine, and Industrial Design. For each, cover courses, capabilities, training length, development paths, subject or physical-condition restrictions, and official information to verify; then rank the fit and explain its limits. Treat fit scores as an explanatory tool, not an admission or employment promise, and mark information that cannot be verified.
     replay:
       steps:
         - title: Identify personal characteristics
@@ -102,8 +105,9 @@ tasks:
       description: Explain parallel applications, filing, reassignment, and rejection rules
       output_label: Admission rule guide
     launch:
-      prompt_short: Explain my province's filing rules and the admission risks to check.
-      prompt: Explain the filing and admission rules for my province and year, covering batches, parallel applications, filing, major reassignment, rejection, and special programs. Separate official rules from general experience and list restrictions to verify.
+      prompt_short: Check filing, major reassignment, and rejection risks for my 2025 Jiangsu Physics-track parallel-application case.
+      prompt: >-
+        Directly produce an admission-rule and risk checklist from my information without asking follow-up questions: I am in Jiangsu, exam year 2025, regular undergraduate batch, Physics track, parallel applications, university-program-group as the application unit, and major reassignment tentatively accepted. Walk through scope, rank-based search and filing, program-group admission and reassignment, rejection risks, and special restrictions; then provide a pre-submission verification checklist. Separate the general process from Jiangsu's admission rules and the university regulations that must be checked, and do not make a definite claim where the source cannot be verified.
     replay:
       steps:
         - title: Confirm province and year
