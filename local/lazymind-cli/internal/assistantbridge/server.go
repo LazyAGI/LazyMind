@@ -18,6 +18,7 @@ import (
 	"lazymind/agentconnector/internal/adapters/codex"
 	cursoradapter "lazymind/agentconnector/internal/adapters/cursor"
 	"lazymind/agentconnector/internal/adapters/mcpclient"
+	workbuddyadapter "lazymind/agentconnector/internal/adapters/workbuddy"
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/agentintegration"
 	"lazymind/agentconnector/internal/credentials"
@@ -25,7 +26,10 @@ import (
 	"lazymind/agentconnector/internal/mcpbridge"
 )
 
-const DefaultAddress = "127.0.0.1:19091"
+const (
+	DefaultAddress    = "127.0.0.1:19091"
+	agentLoginTimeout = 2 * time.Minute
+)
 
 type Server struct {
 	address string
@@ -34,6 +38,16 @@ type Server struct {
 	policy  *executorpolicy.Store
 	mu      sync.Mutex
 	stop    context.CancelFunc
+	loginMu sync.Mutex
+	logins  map[string]agentLogin
+	loginID uint64
+
+	loginOverride func(context.Context, string) error
+}
+
+type agentLogin struct {
+	id     uint64
+	cancel context.CancelFunc
 }
 
 func New(address string, bridge *mcpbridge.Bridge, store *credentials.Store, policy *executorpolicy.Store) (*Server, error) {
@@ -52,7 +66,10 @@ func New(address string, bridge *mcpbridge.Bridge, store *credentials.Store, pol
 	if host != "localhost" && (ip == nil || !ip.IsLoopback()) {
 		return nil, errors.New("Assistant Bridge must listen on the loopback interface")
 	}
-	return &Server{address: address, bridge: bridge, store: store, policy: policy}, nil
+	return &Server{
+		address: address, bridge: bridge, store: store, policy: policy,
+		logins: make(map[string]agentLogin),
+	}, nil
 }
 
 func Start(ctx context.Context, address string) (map[string]any, error) {
@@ -167,6 +184,7 @@ func (s *Server) Serve(ctx context.Context) error {
 	runCtx, cancel := context.WithCancel(ctx)
 	s.stop = cancel
 	defer cancel()
+	defer s.cancelAgentLogins()
 	httpServer := &http.Server{
 		Addr:              s.address,
 		Handler:           s.routes(),
@@ -189,6 +207,15 @@ func (s *Server) Serve(ctx context.Context) error {
 		return nil
 	}
 	return err
+}
+
+func (s *Server) cancelAgentLogins() {
+	s.loginMu.Lock()
+	defer s.loginMu.Unlock()
+	for _, login := range s.logins {
+		login.cancel()
+	}
+	clear(s.logins)
 }
 
 func (s *Server) routes() http.Handler {
@@ -254,12 +281,29 @@ func (s *Server) handleExecutableBinding(writer http.ResponseWriter, request *ht
 }
 
 func (s *Server) handleExecutorPolicies(writer http.ResponseWriter, _ *http.Request) {
-	statuses, err := s.policy.Statuses()
+	s.policy.Recheck()
+	statuses, err := ExecutorStatuses(s.policy)
 	if err != nil {
 		writeError(writer, err)
 		return
 	}
 	writeJSON(writer, http.StatusOK, map[string]any{"executors": statuses})
+}
+
+func ExecutorStatuses(policy *executorpolicy.Store) (map[string]executorpolicy.Status, error) {
+	statuses, err := policy.Statuses()
+	if err != nil {
+		return nil, err
+	}
+	probes := map[string]func(string) (bool, bool, string){
+		"codex": codex.Probe, "cursor": cursoradapter.Probe, "workbuddy": workbuddyadapter.Probe,
+	}
+	for provider, probe := range probes {
+		status := statuses[provider]
+		status.Installed, status.Ready, status.UnavailableReason = probe("")
+		statuses[provider] = status
+	}
+	return statuses, nil
 }
 
 func (s *Server) handleExecutorPolicyAction(writer http.ResponseWriter, request *http.Request) {
@@ -386,7 +430,14 @@ func (s *Server) agentAction(ctx context.Context, agent, action string) (agentin
 		case "disconnect":
 			return adapter.Disconnect(ctx), nil
 		case "login":
-			return adapter.Login(ctx), nil
+			s.startAgentLogin(agent, func(loginCtx context.Context) error {
+				status := adapter.Login(loginCtx)
+				if status.State == agentintegration.Failed {
+					return errors.New(status.Message)
+				}
+				return nil
+			})
+			return loginOpenedStatus(adapter.Status(ctx)), nil
 		default:
 			return agentintegration.Status{}, fmt.Errorf("unsupported Codex action %q", action)
 		}
@@ -404,13 +455,46 @@ func (s *Server) agentAction(ctx context.Context, agent, action string) (agentin
 		if agent != string(mcpclient.Cursor) {
 			return agentintegration.Status{}, fmt.Errorf("unsupported %s action %q", agent, action)
 		}
-		if err := cursoradapter.Login(ctx, ""); err != nil {
-			return agentintegration.Status{}, err
-		}
-		return adapter.Status(ctx), nil
+		s.startAgentLogin(agent, func(loginCtx context.Context) error {
+			return cursoradapter.Login(loginCtx, "")
+		})
+		return loginOpenedStatus(adapter.Status(ctx)), nil
 	default:
 		return agentintegration.Status{}, fmt.Errorf("unsupported %s action %q", agent, action)
 	}
+}
+
+func loginOpenedStatus(status agentintegration.Status) agentintegration.Status {
+	status.Message = "Login opened. Complete or close it, then return to LazyMind and check again."
+	return status
+}
+
+func (s *Server) startAgentLogin(agent string, login func(context.Context) error) {
+	s.loginMu.Lock()
+	if current, ok := s.logins[agent]; ok {
+		current.cancel()
+	}
+	loginCtx, cancel := context.WithTimeout(context.Background(), agentLoginTimeout)
+	s.loginID++
+	id := s.loginID
+	s.logins[agent] = agentLogin{id: id, cancel: cancel}
+	override := s.loginOverride
+	s.loginMu.Unlock()
+
+	go func() {
+		defer cancel()
+		defer s.policy.Recheck()
+		if override != nil {
+			_ = override(loginCtx, agent)
+		} else {
+			_ = login(loginCtx)
+		}
+		s.loginMu.Lock()
+		if current, ok := s.logins[agent]; ok && current.id == id {
+			delete(s.logins, agent)
+		}
+		s.loginMu.Unlock()
+	}()
 }
 
 func (s *Server) mcpClient(agent string) (*mcpclient.Adapter, error) {

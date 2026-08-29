@@ -215,13 +215,14 @@ func TestRemoteTaskEventsPersistStreamStateAndInvalidatePanel(t *testing.T) {
 	updates := []string{}
 	taskUpdates := []TaskEvent{}
 	EventHooks.RegisterConversationEventHook(func(_ context.Context, _ state.Store, convID, _ string,
-		eventType string, payload map[string]any) {
+		eventType string, payload map[string]any) error {
 		if convID == "conversation-1" && eventType == "workflow_runtime_updated" {
 			updates = append(updates, payload["change"].(string))
 		}
 		if convID == "conversation-1" && eventType == "task_updated" {
 			taskUpdates = append(taskUpdates, payload["event"].(TaskEvent))
 		}
+		return nil
 	})
 
 	events := []map[string]any{

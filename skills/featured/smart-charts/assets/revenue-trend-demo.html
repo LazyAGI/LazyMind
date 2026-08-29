@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>新零售收入与利润趋势</title>
+  <style>
+    *{box-sizing:border-box}html,body{margin:0;min-height:100%;font-family:Inter,"PingFang SC","Microsoft YaHei",sans-serif;background:#f4f7fb;color:#172033}
+    body{padding:24px}.shell{max-width:1180px;margin:auto;background:#fff;border:1px solid #dce4ef;border-radius:8px;overflow:hidden;box-shadow:0 18px 45px rgba(35,51,78,.12)}
+    header{display:flex;justify-content:space-between;gap:24px;align-items:flex-start;padding:24px 28px;border-bottom:1px solid #e6ebf2}
+    .eyebrow{margin:0 0 7px;color:#2873e6;font-size:12px;font-weight:700}.title{margin:0;font-size:25px}.sub{margin:7px 0 0;color:#6e788b;font-size:13px}
+    .switch{display:flex;border:1px solid #cfd9e7;border-radius:6px;overflow:hidden}.switch button{border:0;background:#fff;padding:9px 14px;color:#647084;cursor:pointer}.switch button.active{background:#172033;color:#fff}
+    .metrics{display:grid;grid-template-columns:repeat(4,1fr);border-bottom:1px solid #e6ebf2}.metric{padding:20px 26px;border-right:1px solid #e6ebf2}.metric:last-child{border:0}.metric span{display:block;color:#7a8496;font-size:12px}.metric strong{display:block;margin-top:7px;font-size:24px}.metric small{color:#14936f}
+    main{padding:24px 28px 20px}.legend{display:flex;gap:20px;justify-content:flex-end;font-size:12px;color:#647084}.dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px}.blue{background:#2f75e8}.green{background:#17a879}
+    svg{width:100%;height:auto;display:block;margin-top:10px}.grid{stroke:#e8edf4;stroke-width:1}.axis{fill:#7b8595;font-size:11px}.revenue,.profit{fill:none;stroke-width:4;stroke-linecap:round;stroke-linejoin:round}.revenue{stroke:#2f75e8}.profit{stroke:#17a879}.area{fill:#2f75e8;opacity:.08}.point{stroke:#fff;stroke-width:3;cursor:pointer}.point.revenue-point{fill:#2f75e8}.point.profit-point{fill:#17a879}
+    .note{display:flex;justify-content:space-between;align-items:center;margin-top:12px;padding:14px 16px;background:#f7f9fc;border-left:3px solid #2f75e8;font-size:13px}.note b{color:#172033}.note span{color:#667185}
+    .tooltip{position:fixed;display:none;background:#172033;color:#fff;padding:9px 11px;border-radius:5px;font-size:12px;pointer-events:none;z-index:2}
+    @media(max-width:760px){body{padding:0}.shell{border-radius:0}.metrics{grid-template-columns:repeat(2,1fr)}header{flex-direction:column}.metric:nth-child(2){border-right:0}.note{align-items:flex-start;gap:8px;flex-direction:column}}
+  </style>
+</head>
+<body>
+  <section class="shell">
+    <header>
+      <div><p class="eyebrow">SMART CHARTS · QUICK RUN</p><h1 class="title">新零售收入与利润趋势</h1><p class="sub">示例数据：2026 年 1-6 月 · 单位：万元</p></div>
+      <div class="switch" aria-label="指标切换"><button class="active" data-mode="all">双指标</button><button data-mode="revenue">仅收入</button><button data-mode="profit">仅利润</button></div>
+    </header>
+    <div class="metrics">
+      <div class="metric"><span>半年收入</span><strong>660 万</strong><small>6 月较 1 月 ↑ 76.8%</small></div>
+      <div class="metric"><span>半年利润</span><strong>205 万</strong><small>6 月较 1 月 ↑ 117.4%</small></div>
+      <div class="metric"><span>整体利润率</span><strong>31.1%</strong><small>205 ÷ 660</small></div>
+      <div class="metric"><span>最高增长月</span><strong>5 月</strong><small>收入环比 ↑ 15.2%</small></div>
+    </div>
+    <main>
+      <div class="legend"><span><i class="dot blue"></i>收入</span><span><i class="dot green"></i>利润</span></div>
+      <svg viewBox="0 0 1080 420" role="img" aria-label="收入与利润趋势折线图">
+        <g><line class="grid" x1="72" y1="42" x2="1040" y2="42"/><line class="grid" x1="72" y1="122" x2="1040" y2="122"/><line class="grid" x1="72" y1="202" x2="1040" y2="202"/><line class="grid" x1="72" y1="282" x2="1040" y2="282"/><line class="grid" x1="72" y1="362" x2="1040" y2="362"/></g>
+        <g class="axis"><text x="20" y="46">160</text><text x="20" y="126">120</text><text x="28" y="206">80</text><text x="28" y="286">40</text><text x="36" y="366">0</text><text x="68" y="398">1 月</text><text x="258" y="398">2 月</text><text x="450" y="398">3 月</text><text x="642" y="398">4 月</text><text x="834" y="398">5 月</text><text x="1024" y="398">6 月</text></g>
+        <path class="area revenue-series" d="M72 198 L266 182 L460 158 L654 138 L848 104 L1040 72 L1040 362 L72 362 Z"/>
+        <path class="revenue revenue-series" d="M72 198 L266 182 L460 158 L654 138 L848 104 L1040 72"/>
+        <path class="profit profit-series" d="M72 316 L266 310 L460 302 L654 292 L848 280 L1040 264"/>
+        <g class="revenue-series"><circle class="point revenue-point" cx="72" cy="198" r="7" data-tip="1 月收入：82 万"/><circle class="point revenue-point" cx="266" cy="182" r="7" data-tip="2 月收入：90 万"/><circle class="point revenue-point" cx="460" cy="158" r="7" data-tip="3 月收入：102 万"/><circle class="point revenue-point" cx="654" cy="138" r="7" data-tip="4 月收入：112 万"/><circle class="point revenue-point" cx="848" cy="104" r="7" data-tip="5 月收入：129 万"/><circle class="point revenue-point" cx="1040" cy="72" r="7" data-tip="6 月收入：145 万"/></g>
+        <g class="profit-series"><circle class="point profit-point" cx="72" cy="316" r="7" data-tip="1 月利润：23 万"/><circle class="point profit-point" cx="266" cy="310" r="7" data-tip="2 月利润：26 万"/><circle class="point profit-point" cx="460" cy="302" r="7" data-tip="3 月利润：30 万"/><circle class="point profit-point" cx="654" cy="292" r="7" data-tip="4 月利润：35 万"/><circle class="point profit-point" cx="848" cy="280" r="7" data-tip="5 月利润：41 万"/><circle class="point profit-point" cx="1040" cy="264" r="7" data-tip="6 月利润：50 万"/></g>
+      </svg>
+      <div class="note"><b>关键发现</b><span>收入连续增长，5-6 月增速加快；利润增幅高于收入，经营杠杆开始显现。</span></div>
+    </main>
+  </section>
+  <div class="tooltip" id="tooltip"></div>
+  <script>
+    const tip=document.querySelector('#tooltip');
+    document.querySelectorAll('.point').forEach(p=>{p.addEventListener('pointerenter',e=>{tip.textContent=p.dataset.tip;tip.style.display='block';tip.style.left=(e.clientX+12)+'px';tip.style.top=(e.clientY+12)+'px'});p.addEventListener('pointermove',e=>{tip.style.left=(e.clientX+12)+'px';tip.style.top=(e.clientY+12)+'px'});p.addEventListener('pointerleave',()=>tip.style.display='none')});
+    document.querySelectorAll('.switch button').forEach(b=>b.addEventListener('click',()=>{document.querySelectorAll('.switch button').forEach(x=>x.classList.remove('active'));b.classList.add('active');const m=b.dataset.mode;document.querySelectorAll('.revenue-series').forEach(x=>x.style.display=m==='profit'?'none':'');document.querySelectorAll('.profit-series').forEach(x=>x.style.display=m==='revenue'?'none':'')}));
+  </script>
+</body>
+</html>

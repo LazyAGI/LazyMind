@@ -424,22 +424,33 @@ func TestRealCodexHostUsesCompleteDistribution(t *testing.T) {
 	if os.Getenv("LAZYMIND_REAL_CODEX_HOST_E2E") != "1" {
 		t.Skip("set LAZYMIND_REAL_CODEX_HOST_E2E=1 with the Assistant Bridge active")
 	}
+	testRealExternalHostUsesCompleteDistribution(t, "codex", "CODEX_HOST_DISTRIBUTION_OK")
+}
+
+func TestRealCursorHostUsesCompleteDistribution(t *testing.T) {
+	if os.Getenv("LAZYMIND_REAL_CURSOR_HOST_E2E") != "1" {
+		t.Skip("set LAZYMIND_REAL_CURSOR_HOST_E2E=1 with the Assistant Bridge active")
+	}
+	testRealExternalHostUsesCompleteDistribution(t, "cursor", "CURSOR_HOST_DISTRIBUTION_OK")
+}
+
+func testRealExternalHostUsesCompleteDistribution(t *testing.T, provider, marker string) {
+	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
 	defer cancel()
 	serverURL, token := realCredentials(t)
-	conversationID := fmt.Sprintf("codex-host-%x", time.Now().UnixNano())
-	result := runExternalChatTurn(t, ctx, serverURL, token, "codex", conversationID,
-		"必须调用 lazymind MCP 的 workflow.list 一次；真实返回后只回复 CODEX_HOST_DISTRIBUTION_OK。", true)
-	if !strings.Contains(result.Message, "CODEX_HOST_DISTRIBUTION_OK") ||
-		strings.Count(result.Message, "CODEX_HOST_DISTRIBUTION_OK") != 1 {
-		t.Fatalf("Codex Host result=%q", result.Message)
+	conversationID := fmt.Sprintf("%s-host-%x", provider, time.Now().UnixNano())
+	result := runExternalChatTurn(t, ctx, serverURL, token, provider, conversationID,
+		"必须调用 lazymind MCP 的 workflow.list 一次；真实返回后只回复 "+marker+"。", true)
+	if !strings.Contains(result.Message, marker) || strings.Count(result.Message, marker) != 1 {
+		t.Fatalf("%s Host result=%q", provider, result.Message)
 	}
 	projection := realHistoryExecutionProjection(
 		t, ctx, serverURL, token, conversationID, result.HistoryID,
 	)
-	if projection.Provider != "codex" || projection.Status != "completed" ||
+	if projection.Provider != provider || projection.Status != "completed" ||
 		projection.Invocation.Total == 0 {
-		t.Fatalf("Codex Host execution=%#v", projection)
+		t.Fatalf("%s Host execution=%#v", provider, projection)
 	}
 }
 

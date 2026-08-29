@@ -260,10 +260,16 @@ func (h *Host) runFullSessionCatalog(ctx context.Context) {
 	for ctx.Err() == nil {
 		if delay > 0 {
 			timer := time.NewTimer(delay)
+			var policyChanges <-chan struct{}
+			if h.policy != nil {
+				policyChanges = h.policy.Changes()
+			}
 			select {
 			case <-ctx.Done():
 				timer.Stop()
 				return
+			case <-policyChanges:
+				timer.Stop()
 			case <-timer.C:
 			}
 		}
@@ -282,20 +288,42 @@ func (h *Host) syncSessionCatalog(ctx context.Context) bool {
 	if !ok {
 		return true
 	}
+	enabled, err := h.sessionCatalogEnabled()
+	if err != nil {
+		return false
+	}
+	if !enabled {
+		return h.syncSessionBatches(ctx, nil, false)
+	}
 	sessions, err := catalog.Sessions(ctx)
 	if err != nil {
 		return false
 	}
+	enabled, err = h.sessionCatalogEnabled()
+	if err != nil {
+		return false
+	}
+	if !enabled {
+		return h.syncSessionBatches(ctx, nil, false)
+	}
 	return h.syncSessionBatches(ctx, sessions, true)
 }
 
-func (h *Host) syncSessionBatches(ctx context.Context, sessions []NativeSession, reset bool) bool {
+func (h *Host) sessionCatalogEnabled() (bool, error) {
+	if h.policy == nil {
+		return true, nil
+	}
+	return h.policy.Enabled(h.provider)
+}
+
+func (h *Host) syncSessionBatches(ctx context.Context, sessions []NativeSession, sessionAccessEnabled bool) bool {
 	batches := sessionCatalogBatches(sessions)
 	for index, batch := range batches {
 		requestCtx, cancel := context.WithTimeout(ctx, claimRequestTimeout)
 		var response syncSessionCatalogResponse
 		err := h.api.DoJSON(requestCtx, http.MethodPost, "/external-chat/providers/"+url.PathEscape(h.provider)+"/sessions:sync", map[string]any{
-			"host_id": h.id, "sessions": batch, "reset": reset && index == 0,
+			"host_id": h.id, "sessions": batch, "reset": index == 0,
+			"session_access_enabled": sessionAccessEnabled,
 		}, &response)
 		cancel()
 		if err != nil || response.Updated != len(batch) || response.Rejected != 0 {

@@ -151,7 +151,7 @@ func TestCodexTurnSourceIgnoresInjectedContext(t *testing.T) {
 
 func TestWorkBuddySessionsUseNativeCWD(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	t.Setenv("LAZYMIND_HOME", filepath.Join(home, ".lazymind"))
 	directory := filepath.Join(home, ".codebuddy", "projects", "project")
 	if err := os.MkdirAll(directory, 0o700); err != nil {
@@ -178,7 +178,7 @@ func TestWorkBuddySessionsUseNativeCWD(t *testing.T) {
 
 func TestWorkBuddySessionsImportOnlyRealLazyMindTranscriptTurns(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	directory := filepath.Join(home, ".codebuddy", "projects", "project")
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		t.Fatal(err)
@@ -217,7 +217,7 @@ func TestWorkBuddySessionsImportOnlyRealLazyMindTranscriptTurns(t *testing.T) {
 
 func TestCursorSessionsUseTranscriptIdentityAndProjectDirectory(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("HOME", home)
+	setTestUserHome(t, home)
 	project := filepath.Join(home, ".cursor", "projects", "Users-example-LazyRAG")
 	threadID := "152fb721-65cf-40c6-a7a8-3db80c60a332"
 	directory := filepath.Join(project, "agent-transcripts", threadID)
@@ -261,7 +261,8 @@ func TestCursorSessionsUseTranscriptIdentityAndProjectDirectory(t *testing.T) {
 	if !transcriptContainsTool(path, "cursor", "workflow.list") {
 		t.Fatal("Cursor transcript tool call was not detected")
 	}
-	if chat, found, err := findCursorChat(context.Background(), threadID); err != nil || !found || chat.CWD != "/Users/example/LazyRAG" {
+	expectedCWD := filepath.Clean("/Users/example/LazyRAG")
+	if chat, found, err := findCursorChat(context.Background(), threadID); err != nil || !found || chat.CWD != expectedCWD {
 		t.Fatalf("chat=%#v found=%v err=%v", chat, found, err)
 	}
 	source, ok := ResolveInvocation("cursor", "workflow.list", time.Now())
@@ -269,7 +270,13 @@ func TestCursorSessionsUseTranscriptIdentityAndProjectDirectory(t *testing.T) {
 		t.Fatalf("source=%#v ok=%v", source, ok)
 	}
 	workspace, found, err := Workspace(context.Background(), "cursor", threadID)
-	if err != nil || !found || workspace != "/Users/example/LazyRAG" {
+	if err != nil || !found || workspace != expectedCWD {
 		t.Fatalf("workspace=%q found=%v err=%v", workspace, found, err)
 	}
+}
+
+func setTestUserHome(t *testing.T, home string) {
+	t.Helper()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
 }

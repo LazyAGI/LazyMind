@@ -122,6 +122,40 @@ describe("buildOrdinaryTaskTimeline", () => {
     expect(timeline.groups[1].mode).toBe("serial");
   });
 
+  it("reports wall-clock elapsed time separately from visible task execution time", () => {
+    const serialTimeline = buildOrdinaryTaskTimeline([
+      task("first", 1, "succeeded", 0, 10),
+      task("second", 2, "succeeded", 20, 30),
+      task("pending", 3, "pending", 31, 40),
+    ]);
+    const parallelTimeline = buildOrdinaryTaskTimeline([
+      task("parallel-a", 1, "succeeded", 0, 20),
+      task("parallel-b", 2, "succeeded", 2, 18),
+    ]);
+
+    expect(serialTimeline.elapsedSeconds).toBe(30);
+    expect(serialTimeline.cumulativeExecutionSeconds).toBe(20);
+    expect(parallelTimeline.elapsedSeconds).toBe(20);
+    expect(parallelTimeline.cumulativeExecutionSeconds).toBe(36);
+  });
+
+  it("ignores tasks without a complete timing interval", () => {
+    const partialTimeline = buildOrdinaryTaskTimeline([
+      task("missing-start", 1, "succeeded", 0, 5, { created_at: undefined }),
+      task("complete", 2, "succeeded", 10, 20),
+      task("missing-end", 3, "succeeded", 25, 30, { updated_at: undefined }),
+    ]);
+    const untimedTimeline = buildOrdinaryTaskTimeline([
+      task("missing-start", 1, "succeeded", 0, 5, { created_at: undefined }),
+      task("missing-end", 2, "succeeded", 10, 20, { updated_at: undefined }),
+    ]);
+
+    expect(partialTimeline.elapsedSeconds).toBe(10);
+    expect(partialTimeline.cumulativeExecutionSeconds).toBe(10);
+    expect(untimedTimeline.elapsedSeconds).toBeUndefined();
+    expect(untimedTimeline.cumulativeExecutionSeconds).toBeUndefined();
+  });
+
   it("shows only the latest execution instead of merging conversation turns", () => {
     const tasks = [
       task("first", 1, "succeeded", 0, 12, { agent_type: "research" }),
@@ -208,6 +242,30 @@ describe("buildOrdinaryTaskTimeline", () => {
 
     expect(taskCenterDisplayCount(tasks, steps, true)).toBe(2);
     expect(taskCenterDisplayCount(tasks, steps, false)).toBe(1);
+  });
+
+  it("counts visible workflow milestones before their task records exist", () => {
+    const tasks = [
+      task("prepare", 1, "succeeded", 0, 10),
+      task("outline", 2, "succeeded", 10, 20),
+    ];
+    const steps = [
+      step("prepare", "prepare", 1, "effective", 0, 10),
+      step("outline", "outline", 1, "effective", 10, 20),
+    ];
+
+    const timeline = buildOrdinaryTaskTimeline(
+      tasks,
+      steps,
+      BASE_TIME + 30_000,
+      3,
+    );
+
+    expect(timeline.items).toHaveLength(2);
+    expect(timeline.completedCount).toBe(2);
+    expect(timeline.totalCount).toBe(3);
+    expect(taskCenterDisplayCount(tasks, steps, false, 3)).toBe(3);
+    expect(taskCenterDisplayCount(tasks, steps, true, 3)).toBe(2);
   });
 
   it("keeps the ordinary timeline scoped to the current execution turn", () => {

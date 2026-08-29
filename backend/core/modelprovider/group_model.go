@@ -55,10 +55,21 @@ func compatibleDBModelTypes(modelType string) []string {
 		return []string{"llm", "vlm"}
 	}
 	switch modelType {
+	case "embed", "embedding", "embed_main":
+		return []string{"embed", "embedding", "embed_main"}
 	case "cross_modal_embed", "multimodal_embedding", "embed_image":
 		return []string{"cross_modal_embed", "multimodal_embedding", "embed_image"}
 	}
 	return []string{modelType}
+}
+
+func normalizeGroupModelType(modelType string) string {
+	switch modelType {
+	case "embedding", "embed_main":
+		return "embed"
+	default:
+		return modelType
+	}
 }
 
 // AddGroupModel inserts a user-defined model row under a connection group (custom model name and model_type).
@@ -88,7 +99,7 @@ func AddGroupModel(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	name := strings.TrimSpace(req.Name)
-	modelType := strings.TrimSpace(req.ModelType)
+	modelType := normalizeGroupModelType(strings.TrimSpace(req.ModelType))
 	if name == "" || modelType == "" {
 		common.ReplyErr(w, "name and model_type are required", http.StatusBadRequest)
 		return

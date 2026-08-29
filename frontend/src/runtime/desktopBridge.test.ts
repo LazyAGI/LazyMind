@@ -21,6 +21,23 @@ describe("browser Assistant Bridge session synchronization", () => {
   beforeEach(() => {
     mocks.user.mockReset();
     vi.restoreAllMocks();
+    Reflect.deleteProperty(window, "lazymindDesktop");
+  });
+
+  it("uses the Desktop bridge before attempting browser session synchronization", async () => {
+    const status = { agent: "codex", display_name: "Codex", state: "ready" };
+    const desktopStatus = vi.fn().mockResolvedValue({ agents: { codex: status } });
+    Object.defineProperty(window, "lazymindDesktop", {
+      configurable: true,
+      value: { agentIntegrationStatuses: desktopStatus },
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+
+    const result = await agentIntegrationStatuses();
+
+    expect(result).toEqual({ ok: true, data: { codex: status } });
+    expect(desktopStatus).toHaveBeenCalledOnce();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("sends the current web session before reading Agent status", async () => {

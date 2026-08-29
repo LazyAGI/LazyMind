@@ -1,7 +1,7 @@
 schema_version: 2
 id: cangjie-distill
 type: work
-version: 1.0.0
+version: 1.0.1
 status: published
 default_locale: zh-CN
 provider: SkillHub
@@ -28,57 +28,63 @@ assets:
   cover:
     file: assets/cover.png
     role: cover
+  pyramid_map:
+    file: assets/pyramid-method-map.html
+    role: result
+  chapter_method:
+    file: assets/chapter-method-card.html
+    role: result
+  skill_draft:
+    file: assets/skill-draft.html
+    role: result
 
 presentation:
   card:
     title: 仓颉拆书成技能
-    description: 从一本书中提炼可执行的方法论，并整理成可复用 Skill
+    description: 把《金字塔原理》笔记拆成结论先行、MECE 等可执行能力
     output_type: document
     output_label: Skill 方案
     cover_asset: cover
-    result_summary: 把书中的原则、框架和步骤拆成原子能力，形成可落地的 Skill 设计
+    result_summary: 用方法地图展示从读书笔记到四项原子 Skill 的拆解过程与边界
   detail:
     title: 仓颉拆书成技能
-    description: 面向完整书籍或重点章节，提炼可迁移的方法论、触发场景和执行步骤，生成结构化的可复用 Skill。
+    description: 源自 SkillHub，经 LazyMind 适配。面向完整书籍或重点章节，提炼可迁移的方法论、触发场景和执行步骤，生成结构化的可复用 Skill。
     attachment_hint: 书籍 PDF、章节文本、读书笔记或目标方法说明
 
 tasks:
   - id: distill-book
     selector:
-      title: 整本书蒸馏
-      description: 将一本书拆成一组相互衔接的可执行能力
+      title: 金字塔原理蒸馏
+      description: 将四条核心笔记拆成可组合的表达与检查能力
       output_label: Skill 能力集
     launch:
-      prompt_short: 把我提供的这本书蒸馏成一组可执行 Skill。
-      prompt: 请阅读我提供的书籍或完整笔记，识别可迁移的原则、框架和决策方法，将其拆成边界清晰、可独立触发又能组合使用的 Skill。输出每个 Skill 的适用场景、输入、步骤、约束和预期产出，不要只做内容摘要。
+      prompt_short: 把这组《金字塔原理》笔记蒸馏成 4 个可执行 Skill。
+      prompt: 请使用仓颉拆书 Skill，把以下《金字塔原理》读书笔记蒸馏成 4 个边界清晰的可执行 Skill：1）先说结论，再展开理由；2）同一层级内容必须相互独立、完全穷尽；3）纵向结构要形成问题与回答；4）每个主张必须由可核验的证据支持。请为每个 Skill 输出触发场景、输入、步骤、检查项、失败模式和预期产出，并说明四者的组合顺序。不要复述或扩写原书，只基于这些笔记设计能力。
     replay:
       steps:
-        - title: 建立全书结构
-          description: 识别核心问题、论证主线和章节关系
-        - title: 提炼方法单元
-          description: 区分观点、原则、框架和可执行动作
-        - title: 设计 Skill 边界
-          description: 定义触发条件、输入输出、步骤和约束
-        - title: 形成能力集
-          description: 输出可独立使用且相互衔接的 Skill 方案
+        - title: 校准笔记边界
+          description: 只使用四条给定原则，不扩写原书内容
+        - title: 提炼原子方法
+          description: 区分结论先行、MECE、证据支撑和逻辑检查
+        - title: 设计执行边界
+          description: 定义每项能力的触发、步骤、检查与失败模式
+        - title: 绘制组合地图
+          description: 输出四项 Skill 的依赖关系与推荐调用顺序
     result:
-      template: generic_report_v1
+      template: html_preview_v1
       eyebrow: Skill 能力集
-      title: 从书籍方法论到可执行技能
-      summary: 将核心框架拆成具有明确触发条件、步骤和交付物的能力集合
-      highlights:
-        - 全书方法论地图
-        - 原子 Skill 清单与边界
-        - 触发条件、步骤和组合关系
+      title: 金字塔表达的四项原子 Skill
+      summary: 将四条读书笔记转成可单独触发、按顺序组合的执行方法
+      html_asset: pyramid_map
 
   - id: distill-chapter
     selector:
       title: 章节方法提炼
-      description: 从重点章节提炼一项可立即使用的方法
+      description: 以“会议纪要写作”章节为例提炼一张执行卡
       output_label: 方法执行卡
     launch:
-      prompt_short: 从这个章节提炼一项可以立即使用的方法。
-      prompt: 请分析我提供的章节，找出其中最有迁移价值的方法，区分原理与操作，将其整理成包含适用场景、前置条件、逐步动作、检查项和常见误区的执行卡。
+      prompt_short: 示例：从“会议纪要写作”章节提炼一张执行卡。
+      prompt: 请用以下示例章节摘要提炼方法：“会议纪要先写结论，再按决定、待办、风险分组；每项待办必须有负责人和截止日期。”区分原理与操作，整理成包含适用场景、前置条件、逐步动作、检查项和常见误区的执行卡。
     replay:
       steps:
         - title: 识别章节目标
@@ -90,23 +96,20 @@ tasks:
         - title: 输出方法卡
           description: 形成可直接调用和复用的结构化方法
     result:
-      template: generic_report_v1
+      template: html_preview_v1
       eyebrow: 方法执行卡
       title: 章节核心方法与执行步骤
       summary: 从章节内容中提炼一项边界清晰、可立即应用的方法
-      highlights:
-        - 适用问题与触发条件
-        - 原理、步骤和检查项
-        - 常见误区与失败处理
+      html_asset: chapter_method
 
   - id: skill-draft
     selector:
       title: 生成 Skill 草案
-      description: 把已提炼的方法写成标准 SKILL.md 草案
+      description: 把“结论先行会议纪要”方法写成标准 SKILL.md
       output_label: SKILL.md 草案
     launch:
-      prompt_short: 把这套方法写成一份标准 SKILL.md 草案。
-      prompt: 请将我提供的方法论整理为标准 SKILL.md 草案，包含准确的名称、触发描述、适用和不适用范围、输入要求、执行流程、质量检查及必要参考资料。保持原方法的边界，不加入来源中没有依据的能力。
+      prompt_short: 示例：把“结论先行会议纪要”方法写成标准 SKILL.md。
+      prompt: 请将以下示例方法整理为标准 SKILL.md 草案：“会议纪要先写结论，再分决定、待办、风险；待办必须有负责人和截止日期。”包含准确名称、触发描述、适用和不适用范围、输入要求、执行流程、质量检查及必要参考资料，保持边界，不加入未提供的能力。
     replay:
       steps:
         - title: 核对方法边界
@@ -118,11 +121,8 @@ tasks:
         - title: 输出 Skill 草案
           description: 生成结构完整、可继续评审的 SKILL.md
     result:
-      template: generic_report_v1
+      template: html_preview_v1
       eyebrow: SKILL.md 草案
       title: 可复用方法 Skill 设计
       summary: 将方法论转换为具有清晰触发条件、步骤和质量标准的 Skill 草案
-      highlights:
-        - 名称与触发描述
-        - 使用边界和输入要求
-        - 执行步骤与质量检查
+      html_asset: skill_draft

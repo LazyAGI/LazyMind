@@ -474,18 +474,21 @@ func streamExistingExternalChat(
 						}
 					}
 				case "completed":
+					projection = app.executionProjection(ctx, owner, current.HistoryID, projection)
 					select {
-					case out <- UpstreamStreamChunk{RuntimeEvent: completedRunEvent(runtimeRunID, hasSemanticOutput)}:
+					case out <- UpstreamStreamChunk{RuntimeEvent: completedRunEvent(runtimeRunID, hasSemanticOutput), ExternalEventSequence: event.Sequence, Execution: &projection}:
 					case <-ctx.Done():
 					}
 					return
 				case "stopped":
+					projection = app.executionProjection(ctx, owner, current.HistoryID, projection)
 					select {
-					case out <- UpstreamStreamChunk{RuntimeEvent: cancelledRunEvent(runtimeRunID, hasSemanticOutput)}:
+					case out <- UpstreamStreamChunk{RuntimeEvent: cancelledRunEvent(runtimeRunID, hasSemanticOutput), ExternalEventSequence: event.Sequence, Execution: &projection}:
 					case <-ctx.Done():
 					}
 					return
 				case "failed":
+					projection = app.executionProjection(ctx, owner, current.HistoryID, projection)
 					if !hasSemanticOutput {
 						hasSemanticOutput = true
 						select {
@@ -502,9 +505,12 @@ func streamExistingExternalChat(
 				}
 			}
 			if externalRunTerminal(current.Status) {
+				projection := app.executionProjection(
+					ctx, owner, current.HistoryID,
+					basicExternalExecutionProjection(current, time.Now().UTC()),
+				)
 				if current.Status == "failed" && !hasSemanticOutput {
 					hasSemanticOutput = true
-					projection := basicExternalExecutionProjection(current, time.Now().UTC())
 					select {
 					case out <- UpstreamStreamChunk{Text: externalAgentFailureText(current.ErrorMessage), Execution: &projection}:
 					case <-ctx.Done():
@@ -521,7 +527,7 @@ func streamExistingExternalChat(
 					event = failedRunEvent(runtimeRunID, "external_agent_failed", hasSemanticOutput)
 				}
 				select {
-				case out <- UpstreamStreamChunk{RuntimeEvent: event}:
+				case out <- UpstreamStreamChunk{RuntimeEvent: event, ExternalEventSequence: current.NextEventSequence, Execution: &projection}:
 				case <-ctx.Done():
 				}
 				return
@@ -544,6 +550,21 @@ func streamExistingExternalChat(
 		}
 	}()
 	return out
+}
+
+func (a *externalChatApplication) executionProjection(
+	ctx context.Context,
+	owner, historyID string,
+	fallback externalExecutionProjection,
+) externalExecutionProjection {
+	projections, err := a.executionProjections(ctx, owner, []string{historyID})
+	if err != nil {
+		return fallback
+	}
+	if projection, ok := projections[historyID]; ok {
+		return projection
+	}
+	return fallback
 }
 
 func externalAgentFailureText(message string) string {

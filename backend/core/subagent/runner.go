@@ -310,7 +310,7 @@ type eventHooks struct {
 	// onConversationEvent is called when a plugin lifecycle event should be pushed to the
 	// main conversation SSE stream. convID and historyID identify the target stream;
 	// eventType is one of "step_waiting", "workflow_completed", "workflow_error".
-	onConversationEvent func(ctx context.Context, stateStore state.Store, convID, historyID, eventType string, payload map[string]any)
+	onConversationEvent func(ctx context.Context, stateStore state.Store, convID, historyID, eventType string, payload map[string]any) error
 }
 
 // RegisterArtifactHook registers a hook called on every artifact event for any SubAgent task.
@@ -325,15 +325,25 @@ func (h *eventHooks) RegisterTerminalStatusHook(fn func(ctx context.Context, db 
 
 // RegisterConversationEventHook registers a hook that pushes a plugin lifecycle event
 // to the main conversation SSE stream. Should be registered by the chat package at startup.
-func (h *eventHooks) RegisterConversationEventHook(fn func(ctx context.Context, stateStore state.Store, convID, historyID, eventType string, payload map[string]any)) {
+func (h *eventHooks) RegisterConversationEventHook(fn func(ctx context.Context, stateStore state.Store, convID, historyID, eventType string, payload map[string]any) error) {
 	h.onConversationEvent = fn
 }
 
 // CallConversationEvent invokes the registered conversation event hook if one is set.
 func (h *eventHooks) CallConversationEvent(ctx context.Context, stateStore state.Store, convID, historyID, eventType string, payload map[string]any) {
 	if h.onConversationEvent != nil {
-		h.onConversationEvent(ctx, stateStore, convID, historyID, eventType, payload)
+		_ = h.onConversationEvent(ctx, stateStore, convID, historyID, eventType, payload)
 	}
+}
+
+// CallConversationEventChecked reports delivery failures to callers that can
+// safely retry an idempotent operation. Existing lifecycle notifications keep
+// their best-effort behavior through CallConversationEvent.
+func (h *eventHooks) CallConversationEventChecked(ctx context.Context, stateStore state.Store, convID, historyID, eventType string, payload map[string]any) error {
+	if h.onConversationEvent == nil {
+		return nil
+	}
+	return h.onConversationEvent(ctx, stateStore, convID, historyID, eventType, payload)
 }
 
 func routeWorkflowStepStatus(ctx context.Context, db *gorm.DB, stateStore state.Store, taskID, status, message string) {

@@ -19,7 +19,7 @@ import "../index.scss";
 
 const SENSENOVA_LOGO_URL = "https://www.sensenova.ai/images/logo.png";
 
-type ModelCapability =
+export type ModelCapability =
   | "LLM_CHAT"
   | "EMBEDDING"
   | "VLM"
@@ -296,7 +296,7 @@ function createConnectionGroup(provider: ProviderOption, overrides: Partial<Prov
 enum ModelProviderModelType {
   VLM = "VLM",
   LLM = "llm",
-  Embedding = "embedding",
+  Embedding = "embed",
   MultimodalEmbedding = "multimodal_embedding",
   TextToImage = "text2image",
   TextToVideo = "text2video",
@@ -319,6 +319,12 @@ const modelTypeByCapability: Record<ModelCapability, ModelProviderModelType> = {
   LLM_CHAT: ModelProviderModelType.LLM,
   LLM_SELF_EVOLUTION: ModelProviderModelType.LLM,
 };
+
+export function getModelTypeForCapability(
+  capability: ModelCapability,
+): string {
+  return modelTypeByCapability[capability];
+}
 
 function normalizeProviderKey(value: string) {
   return value.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-") || "provider";
@@ -356,10 +362,10 @@ function getProviderLogoUrl(name: string) {
   return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(match[1])}&sz=96`;
 }
 
-function mapModelTypeToCapability(modelType?: string): ModelCapability {
+export function mapModelTypeToCapability(modelType?: string): ModelCapability {
   const normalized = (modelType || "").toLowerCase();
   if (normalized === ModelProviderModelType.MultimodalEmbedding) return "MULTIMODAL_EMBEDDING";
-  if (normalized.includes("embedding")) return "EMBEDDING";
+  if (normalized === ModelProviderModelType.Embedding || normalized.includes("embedding")) return "EMBEDDING";
   if (normalized.includes("rerank")) return "RERANK";
   if (normalized === ModelProviderModelType.STT || normalized === "asr") return "ASR";
   if (normalized === ModelProviderModelType.TTS) return "TTS";
@@ -1214,13 +1220,15 @@ export default function ModelProviderPage({ onConfigurationChanged }: ModelProvi
         groupId: group.id,
         addModelProviderGroupModelOpenAPIRequest: {
           name: values.name.trim(),
-          model_type: modelTypeByCapability[values.capability],
+          model_type: getModelTypeForCapability(values.capability),
         },
       })).data);
       const nextModel: ProviderModel = {
         id: createdModel.id,
         name: createdModel.name,
-        capability: mapModelTypeToCapability(createdModel.model_type || modelTypeByCapability[values.capability]),
+        capability: mapModelTypeToCapability(
+          createdModel.model_type || getModelTypeForCapability(values.capability),
+        ),
         builtIn: Boolean(createdModel.is_default),
         enabled: true,
       };

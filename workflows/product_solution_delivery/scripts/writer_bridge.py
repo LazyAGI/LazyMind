@@ -13,6 +13,7 @@ from lazyllm import AutoModel
 from lazyllm.tools.writer.data_models import StringReplaceSet
 from lazyllm.tools.writer.tools import WriterRevisionTools
 from lazymind.chat.engine.subagent.context import require_context
+from lazymind.chat.engine.subagent.tools import _save_artifact
 from lazymind.chat.engine.tools.writer import (
     DraftMarkdownStreamEventEmitter,
     WriterCreateToolkit,
@@ -816,12 +817,47 @@ def product_writer_generate_document_from_inputs(stage_id: str) -> dict[str, Any
     chapters = product_writer_write_sections(task_path, section_plan, context_path)
     document = product_writer_assemble_draft(chapters[0], context_path, outline_path)
     final_context = product_writer_update_context(document, context_path)
+    chapter_publish = _publish_chapter_artifacts(stage, chapters)
     return {
         'section_plan': section_plan,
-        'chapter_files': chapters,
+        'chapter_count': len(chapters),
+        'chapter_publish': chapter_publish,
         'document': document,
         'writing_context': final_context,
-        'warnings': list(plan.get('warnings') or []),
+        'warnings': [
+            *list(plan.get('warnings') or []),
+            *list(chapter_publish.get('warnings') or []),
+        ],
+    }
+
+
+def _publish_chapter_artifacts(stage: str, chapters: list[str]) -> dict[str, Any]:
+    """Publish optional chapter files as deterministic items without blocking the draft."""
+    slot = f'{stage}_chapters'
+    published = 0
+    warnings: list[str] = []
+    for list_index, chapter in enumerate(chapters):
+        try:
+            _save_artifact(
+                key=slot,
+                value=chapter,
+                content_type='file',
+                source_tool='product_writer_generate_document_from_inputs',
+                caption=f'{ARTIFACT_TITLES[stage]} · 第 {list_index + 1} 章',
+                internal_publish=True,
+                publisher_list_index=list_index,
+            )
+            published += 1
+        except Exception as exc:
+            warnings.append(
+                f'{slot}[{list_index + 1}] publish failed: {str(exc)[:300]}'
+            )
+    return {
+        'slot': slot,
+        'expected_count': len(chapters),
+        'published_count': published,
+        'complete': published == len(chapters),
+        'warnings': warnings,
     }
 
 

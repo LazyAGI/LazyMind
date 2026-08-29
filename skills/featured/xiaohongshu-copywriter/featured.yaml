@@ -1,7 +1,7 @@
 schema_version: 2
 id: xiaohongshu-copywriter
 type: chat
-version: 1.0.0
+version: 1.0.1
 status: published
 default_locale: zh-CN
 provider: SkillHub
@@ -28,15 +28,24 @@ assets:
   cover:
     file: assets/cover.png
     role: cover
+  blender_note:
+    file: assets/portable-blender-note.gif
+    role: result
+  blender_output:
+    file: assets/portable-blender-output.html
+    role: result
+  rewrite_output:
+    file: assets/rewrite-note-output.html
+    role: result
 
 presentation:
   card:
     title: 小红书文案生成
-    description: 根据产品、受众和风格生成标题、正文、标签与发布建议
+    description: 用便携榨汁杯案例生成真实克制、可直接发布的小红书笔记
     output_type: document
     output_label: 小红书笔记
     cover_asset: cover
-    result_summary: 输出可直接编辑的标题、六段式正文、Emoji 排版、话题标签和发布策略
+    result_summary: 动态演示从场景钩子、真实细节到标签和发布时间的完整成稿
   detail:
     title: 小红书文案生成
     description: 围绕产品卖点和目标人群生成自然可信的小红书笔记，包含标题、正文结构、Emoji、标签和发布建议。来源：SkillHub 原“小红书文案生成 Plus”（原链接已失效），经 LazyMind 适配。
@@ -45,40 +54,37 @@ presentation:
 tasks:
   - id: product-note
     selector:
-      title: 产品种草笔记
-      description: 从卖点和真实使用场景生成完整种草内容
+      title: 通勤榨汁杯种草
+      description: 围绕办公室早餐场景生成可信、不过度承诺的笔记
       output_label: 种草笔记
     launch:
-      prompt_short: 根据我的产品信息写一篇小红书种草笔记。
-      prompt: 请根据我提供的产品、核心卖点、目标人群、使用场景和语气偏好，生成一篇自然可信的小红书种草笔记。给出多个标题候选、六段式正文、适量 Emoji、话题标签和发布建议；缺少关键信息时先提问，不要虚构功效或体验。
+      prompt_short: 为一款便携榨汁杯写通勤场景的小红书种草笔记。
+      prompt: 请使用小红书文案生成 Skill，为一款便携榨汁杯写笔记。已知信息：380ml、520g、40 秒搅打、USB-C 充电、杯体可拆洗；目标人群是通勤上班族，场景是办公室早餐。请给出 5 个标题、六段式正文、克制的 Emoji、8 个话题标签、首评文案和发布时间建议。可以采用第一人称场景化示例，但必须明确它是示例文案；同时说明噪声和大块冰需要先切小等限制，不要虚构减脂、美白等功效。
     replay:
       steps:
-        - title: 梳理产品与受众
-          description: 确认卖点、目标人群、使用场景和表达边界
+        - title: 锁定通勤场景
+          description: 对齐办公室早餐、产品参数和事实边界
         - title: 设计标题钩子
-          description: 结合利益点、好奇心和具体场景生成候选标题
-        - title: 编写种草正文
-          description: 按痛点、体验、细节和建议组织自然叙述
-        - title: 完善发布元素
-          description: 补充 Emoji、标签、互动引导和发布时间建议
+          description: 围绕时间成本、便携性和具体情境生成候选标题
+        - title: 补齐真实细节
+          description: 同时表达卖点、噪声和冰块尺寸等限制
+        - title: 完善发布策略
+          description: 补充 Emoji、标签、首评和发布时间建议
     result:
-      template: generic_report_v1
+      template: html_preview_v1
       eyebrow: 小红书种草笔记
-      title: 产品体验与推荐文案
-      summary: 形成标题、正文、话题标签和发布策略齐备的可编辑笔记
-      highlights:
-        - 多个标题候选
-        - 六段式种草正文
-        - Emoji、标签和发布建议
+      title: 5 分钟办公室早餐笔记
+      summary: 兼顾具体参数、真实限制、发布节奏和平台表达的完整成稿
+      html_asset: blender_output
 
   - id: rewrite-note
     selector:
       title: 笔记改写优化
-      description: 优化现有文案的标题、节奏、可信度和互动性
+      description: 把“榨汁杯很好用”空泛原稿改成可信小红书笔记
       output_label: 优化后笔记
     launch:
-      prompt_short: 帮我优化这篇小红书笔记。
-      prompt: 请分析我提供的小红书笔记，保留事实和个人语气，优化标题吸引力、开头钩子、段落节奏、信息密度、Emoji 和话题标签。指出原稿中空泛、夸张或可能降低可信度的表达，并给出一版完整改写。
+      prompt_short: 示例：把“榨汁杯很好用，打卡早餐更方便”改成可信的小红书笔记。
+      prompt: 请使用这段示例原稿进行优化：“榨汁杯很好用，打卡早餐更方便，大家都说值得买。”已知产品事实为 380ml、520g、40 秒搅打、USB-C 充电、杯体可拆洗，目标人群是通勤上班族。保留事实和个人语气，优化标题吸引力、开头钩子、段落节奏、信息密度、Emoji 和话题标签；指出空泛或夸张表达，并给出完整改写。
     replay:
       steps:
         - title: 诊断现有文案
@@ -90,11 +96,8 @@ tasks:
         - title: 输出完整改稿
           description: 交付可直接继续编辑的优化版本
     result:
-      template: generic_report_v1
+      template: html_preview_v1
       eyebrow: 优化后笔记
       title: 更自然、更有吸引力的小红书文案
       summary: 在保留事实和个人语气的前提下提升标题、节奏和互动性
-      highlights:
-        - 原稿问题诊断
-        - 标题与开头钩子优化
-        - 完整改写和标签建议
+      html_asset: rewrite_output

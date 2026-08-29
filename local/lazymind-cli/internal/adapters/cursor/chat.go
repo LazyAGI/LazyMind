@@ -79,12 +79,32 @@ func Login(ctx context.Context, binary string) error {
 }
 
 func (r *ChatRunner) Availability() (bool, string) {
+	return availability(r.binary)
+}
+
+func Probe(binary string) (bool, bool, string) {
+	resolved, err := findBinary(binary)
+	if err != nil {
+		return false, false, err.Error()
+	}
+	ready, reason := availability(resolved)
+	return true, ready, reason
+}
+
+func availability(binary string) (bool, string) {
 	ctx, cancel := context.WithTimeout(context.Background(), statusTimeout)
 	defer cancel()
-	status, err := agentexec.Run(ctx, r.binary, "status")
-	if err != nil || strings.Contains(strings.ToLower(status), "not logged in") ||
-		strings.Contains(strings.ToLower(status), "not authenticated") {
+	status, err := agentexec.Run(ctx, binary, "status")
+	detail := strings.ToLower(strings.TrimSpace(status))
+	if err != nil {
+		detail += " " + strings.ToLower(err.Error())
+	}
+	if strings.Contains(detail, "not logged in") || strings.Contains(detail, "not authenticated") ||
+		strings.Contains(detail, "login required") || strings.Contains(detail, "authentication required") {
 		return false, "Cursor Agent CLI is not signed in; run `cursor-agent login`"
+	}
+	if err != nil {
+		return false, "Cursor Agent CLI status check failed; retry or run `cursor-agent status`"
 	}
 	return true, ""
 }
@@ -116,7 +136,7 @@ func (r *ChatRunner) Run(ctx context.Context, run chatagent.Run, emit func(chata
 	}
 	arguments := []string{
 		"-p", "--output-format", "stream-json", "--stream-partial-output",
-		"--approve-mcps", "--trust", "--auto-review", "--sandbox", "enabled", "--workspace", workspace,
+		"--approve-mcps", "--trust", "--force", "--sandbox", "enabled", "--workspace", workspace,
 	}
 	if resume {
 		arguments = append(arguments, "--resume", run.ProviderThreadID)

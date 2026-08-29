@@ -25,7 +25,12 @@ import {
   resolveConversationThinkingDepth,
   type ConversationRuntimeSettings,
 } from "@/modules/chat/utils/request";
-import { draftStore, buildWorkflowSearchConfig, useWorkflowStore } from "@/modules/chat/store/workflowPanel";
+import {
+  draftStore,
+  buildWorkflowSearchConfig,
+  filterWorkflowTabs,
+  useWorkflowStore,
+} from "@/modules/chat/store/workflowPanel";
 import { useChatMessageStore } from "@/modules/chat/store/chatMessage";
 import {
   DEVELOPER_ACTIVE_EVENT,
@@ -230,6 +235,31 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
   const workflowSession = useWorkflowStore((s) =>
     sessionId ? s.sessionByConversation[sessionId] ?? null : null,
   );
+  const workflowLanguage = i18n.language || "";
+  const workflowUI = useWorkflowStore((s) => {
+    const workflowId = workflowSession?.workflow_id;
+    return workflowId
+      ? s.workflowUIByWorkflow[`${workflowId}:${workflowLanguage}`]
+      : undefined;
+  });
+  const fetchWorkflowUI = useWorkflowStore((s) => s.fetchWorkflowUI);
+  useEffect(() => {
+    if (!workflowSession?.workflow_id) return;
+    void fetchWorkflowUI(workflowSession.workflow_id);
+  }, [fetchWorkflowUI, workflowLanguage, workflowSession?.workflow_id]);
+  const workflowMilestoneCount = useMemo(() => {
+    // Completed sessions may legitimately end on an optional earlier branch;
+    // their persisted attempts are then the authoritative final total.
+    if (workflowSession?.status === "completed" || !workflowUI?.tabs?.length) {
+      return undefined;
+    }
+    const count = filterWorkflowTabs(
+      workflowUI.tabs,
+      workflowSession?.slots ?? [],
+      workflowUI.tab_visibility_ready_material,
+    ).length;
+    return count > 0 ? count : undefined;
+  }, [workflowSession?.slots, workflowSession?.status, workflowUI]);
   const hasWorkflowSession = workflowSession !== null;
   const workflowDefinitionChanged = useWorkflowStore((s) =>
     sessionId
@@ -289,8 +319,14 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
         tasks,
         workflowSession?.steps,
         developerModeActive,
+        workflowMilestoneCount,
       ),
-    [developerModeActive, tasks, workflowSession?.steps],
+    [
+      developerModeActive,
+      tasks,
+      workflowMilestoneCount,
+      workflowSession?.steps,
+    ],
   );
   const hasTaskPanelContent =
     taskDisplayCount > 0 ||
@@ -798,6 +834,7 @@ const ChatLayout: FC<IChatLayoutProps> = (props) => {
             showHeader={!workflowPanelExpanded}
             developerMode={developerModeActive}
             workflowSteps={workflowSession?.steps}
+            plannedCount={workflowMilestoneCount}
           />
         </div>
       )}

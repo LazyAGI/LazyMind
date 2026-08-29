@@ -800,25 +800,24 @@ const NewChatPage = () => {
                 </div>
               </div>
             </div>
-          </div>
-
-          <div className="disclaimer-section">
-            <div className="tip-box">
-              <DisclaimerIcon />
-              <span className="disclaimer-text">
-                {t("chat.disclaimerAI")}
-              </span>
-            </div>
-            <div className="tip-box">
-              <WarningIcon />
-              <span className="disclaimer-text">
-                {t("chat.disclaimerSecurity")}
-                <Tooltip title={<span>{t("chat.disclaimerTooltip")}</span>}>
-                  <span style={{ cursor: "pointer", marginLeft: 4 }}>
-                    {t("chat.disclaimerSensitive")}
-                  </span>
-                </Tooltip>
-              </span>
+            <div className="disclaimer-section">
+              <div className="tip-box">
+                <DisclaimerIcon />
+                <span className="disclaimer-text">
+                  {t("chat.disclaimerAI")}
+                </span>
+              </div>
+              <div className="tip-box">
+                <WarningIcon />
+                <span className="disclaimer-text">
+                  {t("chat.disclaimerSecurity")}
+                  <Tooltip title={<span>{t("chat.disclaimerTooltip")}</span>}>
+                    <span style={{ cursor: "pointer", marginLeft: 4 }}>
+                      {t("chat.disclaimerSensitive")}
+                    </span>
+                  </Tooltip>
+                </span>
+              </div>
             </div>
           </div>
         </div>

@@ -649,11 +649,18 @@
   gap: 12px;
   padding: 12px 2px 11px;
 
-  time {
+  .ordinary-queue-durations {
     flex-shrink: 0;
+    display: grid;
+    justify-items: end;
+    gap: 3px;
+  }
+
+  time {
     color: #657286;
     font-size: 11px;
     font-style: normal;
+    white-space: nowrap;
   }
 }
 

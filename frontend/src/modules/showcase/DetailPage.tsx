@@ -362,26 +362,6 @@ export default function DetailPage() {
               <h2>{t("showcase.detail.taskReplay")}</h2>
               <span>{t("showcase.detail.demo")}</span>
             </div>
-            <nav className="showcase-case-navigation" aria-label={t("showcase.detail.caseNavigation")}>
-              <button
-                type="button"
-                disabled={!previousCase}
-                title={previousCase?.title}
-                onClick={() => previousCase && navigate(`/agent/chat/cases/${encodeURIComponent(previousCase.id)}`)}
-              >
-                <ArrowLeftOutlined aria-hidden="true" />
-                {t("showcase.detail.previousCase")}
-              </button>
-              <button
-                type="button"
-                disabled={!nextCase}
-                title={nextCase?.title}
-                onClick={() => nextCase && navigate(`/agent/chat/cases/${encodeURIComponent(nextCase.id)}`)}
-              >
-                {t("showcase.detail.nextCase")}
-                <ArrowRightOutlined aria-hidden="true" />
-              </button>
-            </nav>
           </header>
           <div className="showcase-replay-body">
             <div className="showcase-user-task">
@@ -426,6 +406,27 @@ export default function DetailPage() {
           </div>
         </article>
       </section>
+
+      <nav className="showcase-case-navigation" aria-label={t("showcase.detail.caseNavigation")}>
+        <button
+          type="button"
+          disabled={!previousCase}
+          title={previousCase?.title}
+          onClick={() => previousCase && navigate(`/agent/chat/cases/${encodeURIComponent(previousCase.id)}`)}
+        >
+          <ArrowLeftOutlined aria-hidden="true" />
+          {t("showcase.detail.previousCase")}
+        </button>
+        <button
+          type="button"
+          disabled={!nextCase}
+          title={nextCase?.title}
+          onClick={() => nextCase && navigate(`/agent/chat/cases/${encodeURIComponent(nextCase.id)}`)}
+        >
+          {t("showcase.detail.nextCase")}
+          <ArrowRightOutlined aria-hidden="true" />
+        </button>
+      </nav>
     </main>
   );
 }

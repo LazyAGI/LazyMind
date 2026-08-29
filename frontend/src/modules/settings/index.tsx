@@ -46,6 +46,7 @@ import KnowledgeToolSettings, { isKnowledgeToolView } from "./KnowledgeToolSetti
 import QuickModelSettings from "./QuickModelSettings";
 import RecoverySettings from "./RecoverySettings";
 import UserSkillWorkflowSettings, { type ResourceTab } from "./UserSkillWorkflowSettings";
+import { resolveMcpReadinessStatus } from "./mcpReadinessStatus";
 import { resolveModelNavigationStatus } from "./modelNavigationStatus";
 import {
   fetchSettingsOverview,
@@ -555,11 +556,14 @@ export default function SettingsPage() {
 
   const masterControl = (key: "mcp_enabled", title = t("settingsPage.masterSwitch", { title: controls[key].title })) => {
     const sectionInfo = overview?.sections.find((item) => item.id === controls[key].section);
+    const readinessStatus = resolveMcpReadinessStatus(sectionInfo, overview?.issues);
     const statusText = !overview?.controls[key]
       ? t("settingsPage.master.paused")
-      : sectionInfo?.effective_enabled
+      : readinessStatus === "available"
         ? t("settingsPage.master.available")
-        : t("settingsPage.master.waitVerify");
+        : readinessStatus === "needs_authorization"
+          ? t("settingsPage.master.waitAuthorize")
+          : t("settingsPage.master.waitVerify");
     return <section className="settings-integrated-master" aria-label={title}>
       <div><strong>{title}</strong><p>{controls[key].summary}</p></div>
       <div className="settings-integrated-master-action"><Tag className="settings-status-tag">{statusText}</Tag>{switchControl(key)}</div>
@@ -603,6 +607,7 @@ export default function SettingsPage() {
       : diagnosticConnections.dependencyInstalled
         ? hasLocalDependencies ? t("settingsPage.diagnostics.configured") : t("settingsPage.cloudHosted")
         : t("settingsPage.diagnostics.pendingConfig");
+    const mcpReadinessStatus = resolveMcpReadinessStatus(mcp, overview?.issues);
     const rows = [
       {
         id: "models",
@@ -625,12 +630,14 @@ export default function SettingsPage() {
         }),
         status: mcp.counts.total === 0
           ? t("settingsPage.diagnostics.notConnected")
-          : mcp.counts.verified < mcp.counts.total
+          : mcpReadinessStatus === "needs_verification"
             ? t("settingsPage.diagnostics.pendingVerify")
-            : mcp.counts.runnable > 0
-              ? t("settingsPage.diagnostics.runnable")
-              : t("settingsPage.diagnostics.verified"),
-        tone: mcp.counts.total > mcp.counts.verified ? "warning" : mcp.counts.runnable > 0 ? "success" : "neutral",
+            : mcpReadinessStatus === "needs_authorization"
+              ? t("settingsPage.diagnostics.pendingAuthorize")
+              : t("settingsPage.diagnostics.runnable"),
+        tone: mcp.counts.total === 0
+          ? "neutral"
+          : mcpReadinessStatus === "available" ? "success" : "warning",
         action: t("settingsPage.diagnostics.viewServices"),
         onClick: () => selectSection("mcp"),
       },
@@ -827,6 +834,7 @@ export default function SettingsPage() {
           <ToolManagementSection
             description={t("settingsPage.systemTools.mcpDesc")}
             layout="settings"
+            onChanged={syncOverview}
             refreshToken={mcpRefreshToken}
             title={t("settingsPage.systemTools.mcpTitle")}
             view="mcp"

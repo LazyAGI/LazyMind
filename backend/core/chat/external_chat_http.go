@@ -69,18 +69,26 @@ func SyncExternalAgentSessions(w http.ResponseWriter, r *http.Request) {
 	owner := store.UserID(r)
 	provider := strings.ToLower(strings.TrimSpace(mux.Vars(r)["provider"]))
 	var input struct {
-		HostID   string                          `json:"host_id"`
-		Sessions []externalcontext.NativeSession `json:"sessions"`
-		Reset    bool                            `json:"reset"`
+		HostID               string                          `json:"host_id"`
+		Sessions             []externalcontext.NativeSession `json:"sessions"`
+		Reset                bool                            `json:"reset"`
+		SessionAccessEnabled *bool                           `json:"session_access_enabled"`
 	}
 	if owner == "" || !isExternalChatProvider(provider) ||
 		json.NewDecoder(http.MaxBytesReader(w, r.Body, 32<<20)).Decode(&input) != nil {
 		common.ReplyErr(w, "invalid external Agent session catalog", http.StatusBadRequest)
 		return
 	}
-	updated, err := externalcontext.New(store.DB()).SyncSessionCatalog(
-		r.Context(), owner, provider, strings.TrimSpace(input.HostID), input.Sessions, input.Reset,
-	)
+	service := externalcontext.New(store.DB())
+	updated := 0
+	var err error
+	if input.SessionAccessEnabled != nil && !*input.SessionAccessEnabled {
+		err = service.DisableSessionCatalog(r.Context(), owner, provider)
+	} else {
+		updated, err = service.SyncSessionCatalog(
+			r.Context(), owner, provider, strings.TrimSpace(input.HostID), input.Sessions, input.Reset,
+		)
+	}
 	if errors.Is(err, externalcontext.ErrInvalidSource) {
 		common.ReplyErr(w, "invalid external Agent session catalog", http.StatusBadRequest)
 		return
@@ -422,11 +430,7 @@ func resumeExternalChatStream(
 				})
 				return true
 			case "completed", "stopped":
-				if projections, err := app.executionProjections(r.Context(), owner, []string{run.HistoryID}); err == nil {
-					if full, ok := projections[run.HistoryID]; ok {
-						projection = full
-					}
-				}
+				projection = app.executionProjection(r.Context(), owner, run.HistoryID, projection)
 				writeSSEChunk(w, flusher, &ChatChunkResponse{
 					ConversationID: conversationID, Seq: int32(run.Sequence), HistoryID: run.HistoryID,
 					ExternalEventSequence: event.Sequence,
@@ -437,12 +441,10 @@ func resumeExternalChatStream(
 			}
 		}
 		if externalRunTerminal(current.Status) {
-			projection := basicExternalExecutionProjection(current, time.Now().UTC())
-			if projections, err := app.executionProjections(r.Context(), owner, []string{run.HistoryID}); err == nil {
-				if full, ok := projections[run.HistoryID]; ok {
-					projection = full
-				}
-			}
+			projection := app.executionProjection(
+				r.Context(), owner, run.HistoryID,
+				basicExternalExecutionProjection(current, time.Now().UTC()),
+			)
 			if current.Status == "failed" && !hasSemanticOutput {
 				hasSemanticOutput = true
 				writeSSEChunk(w, flusher, &ChatChunkResponse{

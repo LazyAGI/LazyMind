@@ -208,7 +208,7 @@ func runInternalExecutor(args []string, stdout io.Writer) error {
 		if action != "status" {
 			return fmt.Errorf("unsupported all executor action %q", action)
 		}
-		statuses, err := policy.Statuses()
+		statuses, err := assistantbridge.ExecutorStatuses(policy)
 		if err != nil {
 			return err
 		}

@@ -38,9 +38,22 @@ func NewChatRunner(binary string) (*ChatRunner, error) {
 }
 
 func (r *ChatRunner) Availability() (bool, string) {
+	return availability(r.binary)
+}
+
+func Probe(binary string) (bool, bool, string) {
+	resolved, err := FindBinary(binary)
+	if err != nil {
+		return false, false, err.Error()
+	}
+	ready, reason := availability(resolved)
+	return true, ready, reason
+}
+
+func availability(binary string) (bool, string) {
 	ctx, cancel := context.WithTimeout(context.Background(), commandTimeout)
 	defer cancel()
-	if _, err := agentexec.Run(ctx, r.binary, "login", "status"); err != nil {
+	if _, err := agentexec.Run(ctx, binary, "login", "status"); err != nil {
 		return false, "Codex CLI is not signed in; run `codex login`"
 	}
 	return true, ""

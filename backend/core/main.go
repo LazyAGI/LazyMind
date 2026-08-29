@@ -514,7 +514,7 @@ func run(ctx context.Context) error {
 	// Wire the conversation SSE hook so plugin events reach the frontend via the
 	// conversation-level events channel (history-independent real-time push).
 	subagent.EventHooks.RegisterConversationEventHook(
-		func(_ context.Context, stateStore state.Store, convID, _ string, eventType string, payload map[string]any) {
+		func(_ context.Context, stateStore state.Store, convID, _ string, eventType string, payload map[string]any) error {
 			enriched := make(map[string]any, len(payload)+2)
 			for k, v := range payload {
 				enriched[k] = v
@@ -523,7 +523,7 @@ func run(ctx context.Context) error {
 			if _, ok := enriched["conversation_id"]; !ok {
 				enriched["conversation_id"] = convID
 			}
-			_ = chat.AppendConvEvent(runtimeCtx, stateStore, convID, &chat.ConvEvent{
+			return chat.AppendConvEvent(runtimeCtx, stateStore, convID, &chat.ConvEvent{
 				Type:    eventType,
 				Payload: enriched,
 			})

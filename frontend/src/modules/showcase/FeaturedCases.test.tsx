@@ -20,7 +20,20 @@ vi.mock("./api", () => ({
       ? capabilityType === "chat"
       : capabilityType === "work" || capabilityType === "workflow",
 }));
-vi.mock("./CaseCard", () => ({ default: ({ item }: { item: { title: string } }) => <div>{item.title}</div> }));
+vi.mock("./CaseCard", () => ({
+  default: ({
+    item,
+    showWorkflowHot,
+  }: {
+    item: { title: string; type: string };
+    showWorkflowHot?: boolean;
+  }) => (
+    <div>
+      <span>{item.title}</span>
+      {showWorkflowHot && item.type === "workflow" ? <span>HOT</span> : null}
+    </div>
+  ),
+}));
 
 const cases = [
   { id: "chat-skill", title: "Chat skill", type: "chat", featured: true, featured_order: 1 },
@@ -38,6 +51,7 @@ describe("FeaturedCases", () => {
 
     expect(screen.getByText("Chat skill")).toBeInTheDocument();
     expect(screen.queryByText("Work skill")).not.toBeInTheDocument();
+    expect(screen.queryByText("HOT")).not.toBeInTheDocument();
     expect(screen.queryByRole("radio")).not.toBeInTheDocument();
     expect(screen.getByRole("link", { name: /查看更多/ })).toHaveAttribute(
       "href",
@@ -52,6 +66,7 @@ describe("FeaturedCases", () => {
 
     expect(screen.getByText("Work skill")).toBeInTheDocument();
     expect(screen.getByText("Workflow")).toBeInTheDocument();
+    expect(screen.getByText("HOT")).toBeInTheDocument();
     expect(screen.queryByText("Chat skill")).not.toBeInTheDocument();
   });
 

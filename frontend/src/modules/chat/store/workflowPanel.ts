@@ -257,6 +257,7 @@ export interface WorkflowRuntimeProjection {
   pruned?: string[];
   bypassed?: string[];
   nodes?: Record<string, {
+    requires_approval: boolean;
     execution: string;
     validity: string;
     reachability: string;

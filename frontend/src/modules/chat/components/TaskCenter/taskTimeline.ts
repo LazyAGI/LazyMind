@@ -30,9 +30,18 @@ export interface OrdinaryTaskGroup {
 export interface OrdinaryTaskTimeline {
   items: OrdinaryTaskItem[];
   groups: OrdinaryTaskGroup[];
+  totalCount: number;
   completedCount: number;
   failedCount: number;
   elapsedSeconds?: number;
+  cumulativeExecutionSeconds?: number;
+}
+
+export function ordinaryTaskDurationSeconds(
+  item: Pick<OrdinaryTaskItem, "startedAt" | "endedAt">,
+): number | undefined {
+  if (item.startedAt === undefined || item.endedAt === undefined) return undefined;
+  return Math.max(0, Math.round((item.endedAt - item.startedAt) / 1000));
 }
 
 const TERMINAL_STATUSES = new Set<TaskStatus>([
@@ -207,6 +216,7 @@ export function buildOrdinaryTaskTimeline(
   tasks: SubAgentTask[],
   workflowSteps: WorkflowSessionStep[] = [],
   now = Date.now(),
+  plannedCount?: number,
 ): OrdinaryTaskTimeline {
   const scopedTasks = currentExecutionTasks(tasks, workflowSteps);
   const taskById = new Map(scopedTasks.map((task) => [task.task_id, task]));
@@ -267,22 +277,35 @@ export function buildOrdinaryTaskTimeline(
     item.ordinal = index + 1;
   });
 
-  const starts = items
-    .map((item) => item.startedAt)
-    .filter((value): value is number => value !== undefined);
-  const ends = items
-    .map((item) => item.endedAt)
-    .filter((value): value is number => value !== undefined);
-  const elapsedSeconds = starts.length > 0 && ends.length > 0
-    ? Math.max(0, Math.round((Math.max(...ends) - Math.min(...starts)) / 1000))
+  const timedItems = items.filter(
+    (item): item is OrdinaryTaskItem & { startedAt: number; endedAt: number } =>
+      item.startedAt !== undefined && item.endedAt !== undefined,
+  );
+  const elapsedSeconds = timedItems.length > 0
+    ? Math.max(0, Math.round((
+        Math.max(...timedItems.map((item) => item.endedAt)) -
+        Math.min(...timedItems.map((item) => item.startedAt))
+      ) / 1000))
+    : undefined;
+  const cumulativeExecutionSeconds = timedItems.length > 0
+    ? timedItems.reduce(
+        (total, item) => total + (ordinaryTaskDurationSeconds(item) ?? 0),
+        0,
+      )
     : undefined;
 
   return {
     items,
     groups: groupConcurrentItems(items),
+    // Future workflow milestones do not have task records yet. Count them in
+    // the summary after execution starts without fabricating task cards.
+    totalCount: items.length > 0
+      ? Math.max(items.length, plannedCount ?? 0)
+      : 0,
     completedCount: items.filter((item) => item.state === "complete").length,
     failedCount: items.filter((item) => item.state === "failed").length,
     elapsedSeconds,
+    cumulativeExecutionSeconds,
   };
 }
 
@@ -290,8 +313,14 @@ export function taskCenterDisplayCount(
   tasks: SubAgentTask[],
   workflowSteps: WorkflowSessionStep[] | undefined,
   developerMode: boolean,
+  plannedCount?: number,
 ): number {
   return developerMode
     ? tasks.length
-    : buildOrdinaryTaskTimeline(tasks, workflowSteps).items.length;
+    : buildOrdinaryTaskTimeline(
+        tasks,
+        workflowSteps,
+        Date.now(),
+        plannedCount,
+      ).totalCount;
 }

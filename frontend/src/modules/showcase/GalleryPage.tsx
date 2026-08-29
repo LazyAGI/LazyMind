@@ -285,7 +285,7 @@ export default function GalleryPage() {
       ) : (
         <div className="showcase-grid showcase-gallery-grid">
           {filteredItems.map((item) => (
-            <CaseCard key={item.id} item={item} />
+            <CaseCard key={item.id} item={item} primaryAction="details" />
           ))}
         </div>
       )}

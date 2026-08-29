@@ -41,7 +41,19 @@ func NewChatRunner(binary string) (*ChatRunner, error) {
 }
 
 func (r *ChatRunner) Availability() (bool, string) {
-	info, err := os.Stat(r.auth)
+	return availability(r.auth)
+}
+
+func Probe(binary string) (bool, bool, string) {
+	if _, err := findBinary(binary); err != nil {
+		return false, false, err.Error()
+	}
+	ready, reason := availability(authFile())
+	return true, ready, reason
+}
+
+func availability(auth string) (bool, string) {
+	info, err := os.Stat(auth)
 	if err != nil || info.IsDir() || info.Size() == 0 {
 		return false, "CodeBuddy Code is not signed in; start `codebuddy` and run `/login`"
 	}

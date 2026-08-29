@@ -61,6 +61,16 @@ func (catalogRunner) Sessions(context.Context) ([]NativeSession, error) {
 	}}, nil
 }
 
+type privacyCatalogRunner struct {
+	countingRunner
+	calls int
+}
+
+func (runner *privacyCatalogRunner) Sessions(context.Context) ([]NativeSession, error) {
+	runner.calls++
+	return catalogRunner{}.Sessions(context.Background())
+}
+
 type blockingCoreClient struct{}
 
 type claimBlockingCoreClient struct{ started chan struct{} }
@@ -131,6 +141,33 @@ func TestHostSynchronizesProviderNativeSessions(t *testing.T) {
 	}
 	if client.inputs[0]["host_id"] != "host-1" {
 		t.Fatalf("host identity=%#v", client.inputs[0])
+	}
+}
+
+func TestHostDoesNotReadNativeSessionsUntilExecutorIsEnabled(t *testing.T) {
+	client := &retryingCoreClient{}
+	runner := &privacyCatalogRunner{}
+	policy := newTogglePolicy(false)
+	host := &Host{
+		api: client, runner: runner, policy: policy, provider: "codex", id: "host-1",
+	}
+	if !host.syncSessionCatalog(context.Background()) {
+		t.Fatal("disabled catalog reset failed")
+	}
+	if runner.calls != 0 {
+		t.Fatalf("disabled executor read native sessions %d times", runner.calls)
+	}
+	if len(client.inputs) != 1 || client.inputs[0]["reset"] != true ||
+		client.inputs[0]["session_access_enabled"] != false || len(client.inputs[0]["sessions"].([]NativeSession)) != 0 {
+		t.Fatalf("disabled sync payload=%#v", client.inputs)
+	}
+
+	policy.setEnabled(true)
+	if !host.syncSessionCatalog(context.Background()) {
+		t.Fatal("enabled catalog sync failed")
+	}
+	if runner.calls != 1 {
+		t.Fatalf("enabled executor read native sessions %d times", runner.calls)
 	}
 }
 
