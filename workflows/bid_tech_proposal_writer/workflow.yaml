@@ -362,6 +362,7 @@ ui:
       step_id: write_chapter_contents
       label: 正文撰写与审批
       layout: list
+      composite_behavior: {hide_empty_columns: true, empty_column_scope: tab}
       slots: [{id: draft_document}, {id: chapter_contents}, {id: effective_outline_check_report}]
     - id: images
       step_id: generate_proposal_images

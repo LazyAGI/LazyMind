@@ -603,8 +603,8 @@ func init() {
 	registerAdditionalError("marshal model free_auto_select_base_urls", http.StatusInternalServerError, 2002315)
 	registerAdditionalError("selection offsets do not match content", http.StatusBadRequest, 2002316)
 	registerAdditionalError("generate endpoint returned invalid editable polish content", http.StatusBadGateway, 2002317)
-	registerAdditionalError("base_url must be an api root without a request path", http.StatusBadRequest, 2002318)
-	registerAdditionalError("restore model failed", http.StatusInternalServerError, 2002319)
+	registerAdditionalError("base_url must be an api root without a request path", http.StatusBadRequest, 2002319)
+	registerAdditionalError("restore model failed", http.StatusInternalServerError, 2002320)
 }
 
 func registerAdditionalError(message string, status, code int) {

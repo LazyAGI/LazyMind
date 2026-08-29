@@ -63,31 +63,7 @@ func SeedBuiltinWorkflows(ctx context.Context, db *gorm.DB) error {
 }
 
 func seedBuiltinWorkflow(ctx context.Context, db *gorm.DB, root string) (string, error) {
-	files := map[string][]byte{}
-	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
-		if err != nil {
-			return err
-		}
-		if entry.IsDir() {
-			if entry.Name() == "__pycache__" || strings.HasPrefix(entry.Name(), ".") && path != root {
-				return filepath.SkipDir
-			}
-			return nil
-		}
-		if ignoredBuiltinPackageFile(entry.Name()) {
-			return nil
-		}
-		relative, err := filepath.Rel(root, path)
-		if err != nil {
-			return err
-		}
-		body, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		files[filepath.ToSlash(relative)] = body
-		return nil
-	})
+	files, err := readBuiltinPackageFiles(root)
 	if err != nil {
 		return "", err
 	}
@@ -156,8 +132,14 @@ func seedBuiltinWorkflow(ctx context.Context, db *gorm.DB, root string) (string,
 				"contains_scripts": hasScriptPath(paths), "status": "active", "updated_at": now}).Error
 		}
 		revisionID := uuid.NewString()
+		var maximumRevisionNo int64
+		if err := tx.Model(&orm.WorkflowRevision{}).
+			Where("plugin_resource_id = ?", resource.ID). // workflow-naming: persistence
+			Select("COALESCE(MAX(revision_no), 0)").Scan(&maximumRevisionNo).Error; err != nil {
+			return err
+		}
 		revision := orm.WorkflowRevision{ID: revisionID, WorkflowResourceID: resource.ID,
-			ParentRevisionID: resource.HeadRevisionID, RevisionNo: resource.Version + 1,
+			ParentRevisionID: resource.HeadRevisionID, RevisionNo: maximumRevisionNo + 1,
 			TreeHash: treeHash, CompiledGraph: compiled.Graph.JSON(), GraphHash: compiled.GraphHash,
 			GraphSchemaVersion: compiled.SchemaVersion, Message: "built-in package import",
 			CreatedBy: "system", CreatedAt: now}
@@ -190,6 +172,47 @@ func seedBuiltinWorkflow(ctx context.Context, db *gorm.DB, root string) (string,
 			"status": "active", "updated_at": now}).Error
 	})
 	return ref, err
+}
+
+func readBuiltinPackageFiles(root string) (map[string][]byte, error) {
+	files := map[string][]byte{}
+	err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path != root && ignoredBuiltinPackageDir(entry.Name()) {
+			if entry.IsDir() {
+				return filepath.SkipDir
+			}
+			// Windows directory junctions can be reported as non-directories by
+			// WalkDir. Ignore the entry before attempting to read it as a file.
+			return nil
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		if ignoredBuiltinPackageFile(entry.Name()) {
+			return nil
+		}
+		relative, err := filepath.Rel(root, path)
+		if err != nil {
+			return err
+		}
+		body, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		files[filepath.ToSlash(relative)] = body
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return files, nil
+}
+
+func ignoredBuiltinPackageDir(name string) bool {
+	return name == "__pycache__" || name == "node_modules" || strings.HasPrefix(name, ".")
 }
 
 func ignoredBuiltinPackageFile(name string) bool {

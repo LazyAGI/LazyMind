@@ -29,13 +29,14 @@ type RuntimeManifestFeatures struct {
 }
 
 type RuntimeManifestPaths struct {
-	AppRoot            string `json:"appRoot"`
-	FrontendDist       string `json:"frontendDist"`
-	PythonRuntime      string `json:"pythonRuntime"`
-	AuthServiceVenv    string `json:"authServiceVenv"`
-	ChannelGatewayVenv string `json:"channelGatewayVenv"`
-	AlgorithmVenv      string `json:"algorithmVenv"`
-	LocalProxyConfig   string `json:"localProxyConfig"`
+	AppRoot                 string `json:"appRoot"`
+	FrontendDist            string `json:"frontendDist"`
+	PythonRuntime           string `json:"pythonRuntime"`
+	AuthServiceVenv         string `json:"authServiceVenv"`
+	ChannelGatewayVenv      string `json:"channelGatewayVenv"`
+	AlgorithmVenv           string `json:"algorithmVenv"`
+	LocalProxyConfig        string `json:"localProxyConfig"`
+	HistoryInjectionArchive string `json:"historyInjectionArchive,omitempty"`
 }
 
 type ManifestService struct {

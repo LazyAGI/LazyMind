@@ -16,6 +16,12 @@ func TestApplyDesktopManifestPathsLoadsTrustedLocalMode(t *testing.T) {
 		Platform: runtime.GOOS,
 		Arch:     runtime.GOARCH,
 		Features: RuntimeManifestFeatures{TrustedLocalMode: true},
+		Paths: RuntimeManifestPaths{
+			HistoryInjectionArchive: "history-injection.zip",
+		},
+		Checksums: map[string]string{
+			"history-injection.zip": "abcdef",
+		},
 	}
 	body, err := json.Marshal(manifest)
 	if err != nil {
@@ -32,5 +38,14 @@ func TestApplyDesktopManifestPathsLoadsTrustedLocalMode(t *testing.T) {
 
 	if !paths.TrustedLocalMode {
 		t.Fatal("trusted local mode was not loaded from the desktop runtime manifest")
+	}
+	if paths.HistoryInjectionArchive != filepath.Join(resourcesRoot, "history-injection.zip") {
+		t.Fatalf("history injection archive = %q", paths.HistoryInjectionArchive)
+	}
+	if paths.HistoryInjectionSHA256 != "abcdef" {
+		t.Fatalf("history injection checksum = %q", paths.HistoryInjectionSHA256)
+	}
+	if paths.HistoryInjectionRoot != filepath.Join(paths.DataDir, "history-injection") {
+		t.Fatalf("history injection root = %q", paths.HistoryInjectionRoot)
 	}
 }

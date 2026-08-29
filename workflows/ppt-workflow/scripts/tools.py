@@ -85,6 +85,9 @@ _STAGE_ORDER_HINT = 'preflight → style → outline → asset-plan → batch-pa
 _NULLISH = frozenset({'', 'null', 'none', 'undefined', 'nil'})
 _PROMPT_PLACEHOLDER_RE = re.compile(r'\{(\w+)\}')
 
+_CANONICAL_UPLOAD_ROOT = '/var/lib/lazymind/uploads'
+_CANONICAL_SUBAGENT_ROOT = '/data/subagent'
+
 _run_stage_mod: Any = None
 _model_client_mod: Any = None
 _LOG = logging.getLogger(__name__)
@@ -787,8 +790,9 @@ def _strip_ppt_source_meta(html: str) -> str:
 
 
 def _with_ppt_source_meta(html: str, source_path: Path, source_sha256: str) -> str:
+    source_path = _portable_ppt_source_path(source_path)
     payload = base64.urlsafe_b64encode(json.dumps({
-        'path': str(source_path.resolve()),
+        'path': source_path,
         'sha256': source_sha256,
     }, ensure_ascii=False, separators=(',', ':')).encode('utf-8')).decode('ascii')
     return f'<!-- lazymind-ppt-source:{payload} -->\n{_strip_ppt_source_meta(html)}'
@@ -809,6 +813,41 @@ def _read_ppt_source_meta(html: str) -> dict[str, str]:
     if not path or not re.fullmatch(r'[0-9a-f]{64}', sha256):
         raise ValueError('incomplete PPT source metadata')
     return {'path': path, 'sha256': sha256}
+
+
+def _runtime_ppt_path(value: str | Path) -> Path:
+    """Map portable Docker roots onto the active Docker/Desktop data roots."""
+    text = str(value).strip().replace('\\', '/')
+    roots = (
+        (_CANONICAL_UPLOAD_ROOT, os.getenv('LAZYMIND_UPLOAD_ROOT', '')),
+        (_CANONICAL_SUBAGENT_ROOT, os.getenv('LAZYMIND_SUBAGENT_WORKSPACE', '')),
+    )
+    for canonical, configured in roots:
+        if text != canonical and not text.startswith(canonical + '/'):
+            continue
+        runtime_root = configured.strip() or canonical
+        relative = text[len(canonical):].lstrip('/')
+        path = Path(runtime_root).expanduser()
+        if relative:
+            path = path.joinpath(*relative.split('/'))
+        return path.resolve()
+    return Path(text).expanduser()
+
+
+def _portable_ppt_source_path(source_path: Path) -> str:
+    """Persist upload paths with one portable root, independent of the host OS."""
+    resolved = source_path.expanduser().resolve()
+    configured = os.getenv('LAZYMIND_UPLOAD_ROOT', '').strip()
+    if configured:
+        upload_root = Path(configured).expanduser().resolve()
+        try:
+            relative = resolved.relative_to(upload_root)
+        except (OSError, ValueError):
+            pass
+        else:
+            suffix = relative.as_posix()
+            return _CANONICAL_UPLOAD_ROOT + (f'/{suffix}' if suffix else '')
+    return str(resolved)
 
 
 def _inline_preview_images(html: str, deck: Path, html_path: Path) -> tuple[str, int]:
@@ -4414,7 +4453,7 @@ def _artifact_html_text(artifact: Any, artifact_store: str) -> str:
             return decoded.decode('utf-8')
         except UnicodeDecodeError as exc:
             raise ValueError('preview_html data URI is not UTF-8') from exc
-    path = Path(raw_path).expanduser()
+    path = _runtime_ppt_path(raw_path)
     if not path.is_absolute():
         path = Path(artifact_store).expanduser() / path
     path = path.resolve()
@@ -4425,7 +4464,7 @@ def _artifact_html_text(artifact: Any, artifact_store: str) -> str:
 
 def _validated_action_source(artifact_html: str) -> tuple[Path, Path, str]:
     meta = _read_ppt_source_meta(artifact_html)
-    source = Path(meta['path']).expanduser().resolve()
+    source = _runtime_ppt_path(meta['path']).resolve()
     if source.parent.name != 'pages' or not re.fullmatch(r'page_\d{3}\.html', source.name):
         raise ValueError('PPT source metadata does not point to a page')
     deck = source.parent.parent
@@ -4433,12 +4472,18 @@ def _validated_action_source(artifact_html: str) -> tuple[Path, Path, str]:
         raise ValueError('PPT source page no longer exists')
     original = source.read_text(encoding='utf-8')
     current_sha = _html_sha256(original)
-    if current_sha != meta['sha256']:
+    public, _ = _inline_preview_images(_sanitize_page_html(original), deck, source)
+    artifact_matches_source = _strip_ppt_source_meta(artifact_html).strip() == public.strip()
+    # An injected bundle may have been renamed after its source metadata was
+    # produced. Exact public/source equality is a stronger freshness proof
+    # than the cached hash, so accept that safe case and let the next revision
+    # publish fresh metadata. Historical revisions whose content differs from
+    # the current source remain stale and cannot overwrite it.
+    if current_sha != meta['sha256'] and not artifact_matches_source:
         error = ValueError('The slide changed after this preview was loaded. Refresh and retry.')
         error.error_code = 'SELECTION_STALE'
         raise error
-    public, _ = _inline_preview_images(_sanitize_page_html(original), deck, source)
-    if _strip_ppt_source_meta(artifact_html).strip() != public.strip():
+    if not artifact_matches_source:
         error = ValueError('The selected artifact does not match its source slide. Refresh and retry.')
         error.error_code = 'SELECTION_STALE'
         raise error
@@ -4923,7 +4968,7 @@ def ppt_apply_selection_edit(
             raise error
         original = current_artifact
     elif mode == 'source_page':
-        source = Path(_coerce_str(manifest.get('source_path'))).resolve()
+        source = _runtime_ppt_path(_coerce_str(manifest.get('source_path'))).resolve()
         if source.parent.name != 'pages' or source.parent.parent == source.parent:
             raise ValueError('invalid PPT source page')
         if not source.is_file():
