@@ -6355,10 +6355,7 @@ export function SelfEvolutionPageController({
     }
     return "pending";
   };
-  const getArtifactStatusLabel = (
-    item: ArtifactPanelItem,
-    stepSummary?: ThreadStepSummary,
-  ) => {
+  const getArtifactStatusLabel = (item: ArtifactPanelItem) => {
     const state = workflowResults[item.kind];
     if (state.loading) {
       return t("selfEvolutionRun.artifactLoadingStatus");
@@ -6372,7 +6369,7 @@ export function SelfEvolutionPageController({
         : t("selfEvolutionRun.artifactLoaded");
     }
     return localizedGetStepStatusLabel(
-      getNavigationStepStatus(item, stepSummary),
+      getNavigationStepStatus(item),
     );
   };
   const getStepNavigationTitle = (
@@ -6431,9 +6428,7 @@ export function SelfEvolutionPageController({
                 >
                   {isStepLoading
                     ? t("selfEvolutionRun.artifactLoadingStatus")
-                    : item
-                      ? getArtifactStatusLabel(item, step)
-                      : localizedGetStepStatusLabel(stepStatus)}
+                    : localizedGetStepStatusLabel(stepStatus)}
                 </span>
               </button>
             </div>
