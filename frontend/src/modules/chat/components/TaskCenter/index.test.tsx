@@ -22,6 +22,18 @@ vi.mock("react-i18next", async (importOriginal) => ({
       if (key === "taskCenter.durationSeconds") {
         return `${values?.seconds}s`;
       }
+      if (key === "taskCenter.ordinaryTotalDuration") {
+        return `Elapsed ${values?.duration}`;
+      }
+      if (key === "taskCenter.ordinaryExecutionDuration") {
+        return `Subtasks ${values?.duration}`;
+      }
+      if (key === "taskCenter.ordinaryCompletedSummary") {
+        return `Completed ${values?.completed}/${values?.total}`;
+      }
+      if (key === "taskCenter.ordinaryIncompleteSummary") {
+        return `${values?.count} remaining`;
+      }
       return key;
     }) as TFunction,
   }),
@@ -122,6 +134,8 @@ describe("TaskCenter display modes", () => {
       name: "taskCenter.ordinaryThinking",
     })).toBeInTheDocument();
     expect(document.querySelector(".ordinary-summary-list")).not.toBeInTheDocument();
+    expect(screen.getByText("Elapsed 25s")).toBeInTheDocument();
+    expect(screen.getByText("Subtasks 10s")).toBeInTheDocument();
   });
 
   it("shows persisted workflow task names and reveals the full name on hover", async () => {
@@ -223,12 +237,30 @@ describe("TaskCenter display modes", () => {
 
     render(<TaskCenter sessionId="conversation-1" developerMode={false} />);
 
-    expect(screen.getByText("taskCenter.ordinaryIncompleteSummary"))
+    expect(screen.getByText("1 remaining"))
       .toBeInTheDocument();
     expect(screen.queryByText("taskCenter.ordinaryAllComplete"))
       .not.toBeInTheDocument();
     expect(document.querySelector(".ordinary-task-trigger"))
       .toHaveAttribute("aria-expanded", "false");
+  });
+
+  it("uses all visible workflow milestones in the completion summary", () => {
+    render(
+      <TaskCenter
+        sessionId="conversation-1"
+        developerMode={false}
+        workflowSteps={workflowSteps}
+        plannedCount={3}
+      />,
+    );
+
+    expect(document.querySelector(".ordinary-task-count")).toHaveTextContent("3");
+    expect(document.querySelectorAll(".ordinary-task-card")).toHaveLength(2);
+    expect(screen.getByText("Completed 2/3")).toBeInTheDocument();
+    expect(screen.getByText("1 remaining")).toBeInTheDocument();
+    expect(screen.queryByText("taskCenter.ordinaryAllComplete"))
+      .not.toBeInTheDocument();
   });
 
   it("keeps hosted workflow attempts visible without exposing fake details", () => {

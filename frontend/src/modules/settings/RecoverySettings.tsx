@@ -32,6 +32,7 @@ import type {
 import { useTranslation } from "react-i18next";
 import { useSearchParams } from "react-router-dom";
 import ArchiveFolderPickerModal from "@/components/ui/ArchiveFolderPickerModal";
+import { emitConversationListRefresh } from "@/modules/chat/utils/conversationActivity";
 import {
   archiveConversation,
   createArchiveFolder,
@@ -452,6 +453,7 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
     try {
       if (action === "unarchive") await unarchiveConversation(item.conversation_id);
       else await trashConversation(item.conversation_id);
+      if (action === "unarchive") emitConversationListRefresh();
       reloadArchive();
       if (action === "trash") reloadTrash();
       message.success(t(action === "unarchive" ? "settingsPage.recovery.unarchived" : "settingsPage.recovery.movedToTrash"));
@@ -512,6 +514,7 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
       } else if (asset === "conversations") {
         if (action === "restore") await restoreConversation(id); else await purgeConversation(id);
       } else if (action === "restore") await restoreWorkflow(id); else await purgeWorkflow(id);
+      if (asset === "conversations" && action === "restore") emitConversationListRefresh();
       reloadTrash();
       if (asset === "conversations") reloadArchive();
       message.success(t(action === "restore" ? "settingsPage.recovery.restored" : "settingsPage.recovery.purged"));

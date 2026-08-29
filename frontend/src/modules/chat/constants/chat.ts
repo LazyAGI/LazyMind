@@ -12,6 +12,8 @@ export const CHAT_FFMPEG_DEPENDENCY_MISSING_EVENT =
   "lazymind:chat-ffmpeg-dependency-missing";
 export const CHAT_CONVERSATION_ACTIVITY_EVENT =
   "lazymind:chat-conversation-activity";
+export const CHAT_CONVERSATION_LIST_REFRESH_EVENT =
+  "lazymind:chat-conversation-list-refresh";
 export const WORKFLOW_PANEL_EXPANDED_EVENT = "lazymind:workflow-panel-expanded";
 export const WORKFLOW_PANEL_EXPANDED_STORAGE_PREFIX =
   "lazymind:workflow-panel-expanded:";

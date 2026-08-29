@@ -42,10 +42,13 @@ import {
   isDeveloperModeActive,
   syncDeveloperModeFromServer,
 } from "@/utils/developerMode";
-import RecordList from "@/modules/chat/components/RecordList";
+import RecordList, {
+  type RecordListImperativeProps,
+} from "@/modules/chat/components/RecordList";
 import {
   CHAT_CONVERSATION_FILTER_EVENT,
   CHAT_CONVERSATION_FILTER_KEY,
+  CHAT_CONVERSATION_LIST_REFRESH_EVENT,
   type ChatConversationFilter,
   CHAT_HOME_PATH,
   CHAT_NEW_RUN_IN_BACKGROUND_KEY,
@@ -142,6 +145,7 @@ export default function MainLayout() {
   const currentSidebarConversationIdRef = useRef(
     currentSidebarConversationId,
   );
+  const recordListRef = useRef<RecordListImperativeProps>(null);
   currentSidebarConversationIdRef.current = currentSidebarConversationId;
   const [profileModalOpen, setProfileModalOpen] = useState(false);
   const [profileLoading, setProfileLoading] = useState(false);
@@ -361,6 +365,23 @@ export default function MainLayout() {
       window.removeEventListener(
         CHAT_CONVERSATION_FILTER_EVENT,
         handleFilterChange,
+      );
+    };
+  }, []);
+
+  useEffect(() => {
+    const handleConversationListRefresh = () => {
+      recordListRef.current?.refresh();
+    };
+
+    window.addEventListener(
+      CHAT_CONVERSATION_LIST_REFRESH_EVENT,
+      handleConversationListRefresh,
+    );
+    return () => {
+      window.removeEventListener(
+        CHAT_CONVERSATION_LIST_REFRESH_EVENT,
+        handleConversationListRefresh,
       );
     };
   }, []);
@@ -883,6 +904,7 @@ export default function MainLayout() {
           {shouldRenderMenuContent && (
             <div className="sider-history">
               <RecordList
+                ref={recordListRef}
                 compact
                 hideSearch
                 showBatchActions

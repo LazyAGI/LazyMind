@@ -16,11 +16,13 @@ import type { ChatSource } from "@/modules/chat/utils/sourceAdapter";
 let convReconnectTimer: ReturnType<typeof setTimeout> | null = null;
 let workflowRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 const taskReconnectTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const liveTaskIdsCreatedDuringLoad = new Map<string, Set<string>>();
 
 function scheduleWorkflowSessionRefresh(conversationId: string, delayMs = 100): void {
   if (workflowRefreshTimer) clearTimeout(workflowRefreshTimer);
   workflowRefreshTimer = setTimeout(() => {
     workflowRefreshTimer = null;
+    if (useTaskCenterStore.getState().activeConversationId !== conversationId) return;
     void useWorkflowStore.getState().loadActiveSession(conversationId, {
       silentError: true,
     });
@@ -149,6 +151,8 @@ interface TaskCenterStore {
   activeConversationId: string;
   // in-flight loadConversationTasks calls keyed by conversation_id.
   _loadingTasks: Record<string, boolean>;
+  // A refresh requested while the current task snapshot is still loading.
+  _queuedTaskLoads: Record<string, boolean>;
   _taskLoadErrors: Record<string, boolean>;
   _loadingArtifacts: Record<string, boolean>;
   // Conversation lifecycle stream plus granular execution streams keyed by task ID.
@@ -209,6 +213,7 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
   artifactsByConversation: {},
   activeConversationId: '',
   _loadingTasks: {},
+  _queuedTaskLoads: {},
   _taskLoadErrors: {},
   _loadingArtifacts: {},
   _convStream: null,
@@ -662,54 +667,85 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
     if (!conversationId) {
       return;
     }
-    // Deduplicate concurrent calls for the same conversation.
-    if (get()._loadingTasks[conversationId]) return;
+    // Do not drop a refresh requested while an older snapshot is in flight.
+    // The active loader will run one more request before it releases the lock.
+    if (get()._loadingTasks[conversationId]) {
+      set((s) => ({
+        _queuedTaskLoads: { ...s._queuedTaskLoads, [conversationId]: true },
+      }));
+      return;
+    }
     set((s) => ({
       _loadingTasks: { ...s._loadingTasks, [conversationId]: true },
+      _queuedTaskLoads: { ...s._queuedTaskLoads, [conversationId]: false },
       _taskLoadErrors: { ...s._taskLoadErrors, [conversationId]: false },
     }));
     try {
-      const res = await TaskServiceApi().listConversationTasks(conversationId);
-      const tasks = res?.data?.data?.tasks ?? res?.data?.tasks ?? [];
-      const normalized: SubAgentTask[] = tasks.map((t: any): SubAgentTask => ({
-          task_id: t.task_id,
-          conversation_id: conversationId,
-          trigger_history_id: t.trigger_history_id,
-          seq_in_conversation: t.seq_in_conversation,
-          created_at: t.created_at,
-          updated_at: t.updated_at,
-          title: t.title ?? "",
-          agent_type: t.agent_type ?? "",
-          mode: t.mode ?? "auto",
-          status: t.status ?? "pending",
-          progress_pct: t.progress_pct ?? 0,
-          current_phase: t.current_phase,
-          estimated_sec: t.estimated_sec,
-          summary: t.summary,
-          input_slots: t.input_slots,
-          output_slots: t.output_slots,
-          artifacts: t.artifacts ?? [],
-          sources: t.sources ?? [],
-          artifact_streams: t.artifact_streams ?? [],
-          execution_log: stepsToExecutionLog(t.steps ?? []),
-      }));
-      set((state) => ({
-        tasksByConversation: {
-          ...state.tasksByConversation,
-          [conversationId]: normalized,
-        },
-      }));
-      normalized.forEach((task) => {
-        if (!TERMINAL_TASK_STATUSES.has(task.status)) {
-          get().subscribeTask(conversationId, task.task_id);
+      do {
+        const liveCreatedTaskIds = new Set<string>();
+        liveTaskIdsCreatedDuringLoad.set(conversationId, liveCreatedTaskIds);
+        set((s) => ({
+          _queuedTaskLoads: { ...s._queuedTaskLoads, [conversationId]: false },
+          _taskLoadErrors: { ...s._taskLoadErrors, [conversationId]: false },
+        }));
+        try {
+          const res = await TaskServiceApi().listConversationTasks(conversationId);
+          const tasks = res?.data?.data?.tasks ?? res?.data?.tasks ?? [];
+          const normalized: SubAgentTask[] = tasks.map((t: any): SubAgentTask => ({
+            task_id: t.task_id,
+            conversation_id: conversationId,
+            trigger_history_id: t.trigger_history_id,
+            seq_in_conversation: t.seq_in_conversation,
+            created_at: t.created_at,
+            updated_at: t.updated_at,
+            title: t.title ?? "",
+            agent_type: t.agent_type ?? "",
+            mode: t.mode ?? "auto",
+            status: t.status ?? "pending",
+            progress_pct: t.progress_pct ?? 0,
+            current_phase: t.current_phase,
+            estimated_sec: t.estimated_sec,
+            summary: t.summary,
+            input_slots: t.input_slots,
+            output_slots: t.output_slots,
+            artifacts: t.artifacts ?? [],
+            sources: t.sources ?? [],
+            artifact_streams: t.artifact_streams ?? [],
+            execution_log: stepsToExecutionLog(t.steps ?? []),
+          }));
+          set((state) => {
+            const snapshotIds = new Set(normalized.map((task) => task.task_id));
+            // A task_created event can arrive after this REST request was issued
+            // but before its older snapshot resolves. Keep those live additions;
+            // the queued follow-up request below will reconcile their full state.
+            const liveAdditions = (state.tasksByConversation[conversationId] ?? [])
+              .filter((task) => (
+                liveCreatedTaskIds.has(task.task_id) && !snapshotIds.has(task.task_id)
+              ));
+            return {
+              tasksByConversation: {
+                ...state.tasksByConversation,
+                [conversationId]: [...normalized, ...liveAdditions],
+              },
+            };
+          });
+          normalized.forEach((task) => {
+            if (!TERMINAL_TASK_STATUSES.has(task.status)) {
+              get().subscribeTask(conversationId, task.task_id);
+            }
+          });
+        } catch {
+          set((s) => ({
+            _taskLoadErrors: { ...s._taskLoadErrors, [conversationId]: true },
+          }));
         }
-      });
-    } catch {
-      set((s) => ({
-        _taskLoadErrors: { ...s._taskLoadErrors, [conversationId]: true },
-      }));
+      } while (get()._queuedTaskLoads[conversationId]);
     } finally {
-      set((s) => ({ _loadingTasks: { ...s._loadingTasks, [conversationId]: false } }));
+      liveTaskIdsCreatedDuringLoad.delete(conversationId);
+      set((s) => ({
+        _loadingTasks: { ...s._loadingTasks, [conversationId]: false },
+        _queuedTaskLoads: { ...s._queuedTaskLoads, [conversationId]: false },
+      }));
     }
   },
 
@@ -760,6 +796,10 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
         ...state._taskLoadErrors,
         [conversationId]: false,
       },
+      _queuedTaskLoads: {
+        ...state._queuedTaskLoads,
+        [conversationId]: false,
+      },
     }));
   },
 
@@ -789,7 +829,13 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
           const { type, payload } = event;
           const replayed = event.replayed === true;
           if (type === 'task_created' && payload?.task_id) {
-            if (replayed) return;
+            if (replayed) {
+              if (payload.agent_type === 'workflow_step') {
+                scheduleWorkflowSessionRefresh(conversationId);
+              }
+              void get().loadConversationTasks(conversationId);
+              return;
+            }
             if (payload.agent_type === 'workflow_step') {
               scheduleWorkflowSessionRefresh(conversationId);
             }
@@ -807,9 +853,23 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
               updated_at: payload.updated_at,
             });
             get().subscribeTask(conversationId, payload.task_id);
+            // A live event that races an older REST snapshot queues an
+            // authoritative reload after preserving this newly created task.
+            if (get()._loadingTasks[conversationId]) {
+              liveTaskIdsCreatedDuringLoad.get(conversationId)?.add(payload.task_id);
+              void get().loadConversationTasks(conversationId);
+            }
           } else if (type === 'task_updated' && payload?.task_id && payload?.event) {
-            if (replayed) return;
             const taskEvent = payload.event;
+            if (replayed) {
+              // Applying replayed log/progress deltas could duplicate append-only
+              // content. Rehydrate them from the persisted task snapshot instead.
+              void get().loadConversationTasks(conversationId);
+              if (taskEvent.type === 'artifact') {
+                void get().loadConversationArtifacts(conversationId);
+              }
+              return;
+            }
             get().applyTaskEvent(conversationId, payload.task_id, taskEvent);
             if (taskEvent.type === 'artifact') {
               void get().loadArtifactStreamContent(conversationId, payload.task_id, {
@@ -827,7 +887,10 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
               void get().loadConversationArtifacts(conversationId);
             }
           } else if (type === 'artifact_created' && payload?.artifact_id) {
-            if (replayed) return;
+            if (replayed) {
+              void get().loadConversationArtifacts(conversationId);
+              return;
+            }
             get().upsertConversationArtifact(conversationId, payload as ConversationArtifact);
           } else if (type === 'driver_input') {
             if (replayed) return;
@@ -846,11 +909,12 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
             type === 'workflow_completed' ||
             type === 'workflow_error'
           ) {
-            if (replayed) return;
-            window.dispatchEvent(
-              new CustomEvent(WORKFLOW_GRAPH_REFRESH_EVENT, { detail: { conversationId } }),
-            );
-            useWorkflowStore.getState().setAutoRunning(conversationId, false);
+            if (!replayed) {
+              window.dispatchEvent(
+                new CustomEvent(WORKFLOW_GRAPH_REFRESH_EVENT, { detail: { conversationId } }),
+              );
+              useWorkflowStore.getState().setAutoRunning(conversationId, false);
+            }
             // Completion can be emitted just before its artifact transaction is
             // visible. Delay that one refresh instead of issuing an immediate
             // request followed by a second reconciliation request.
@@ -859,18 +923,28 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
               type === 'workflow_completed' ? 800 : 100,
             );
           } else if (type === 'step_partial_done') {
-            if (replayed) return;
-            window.dispatchEvent(
-              new CustomEvent(WORKFLOW_GRAPH_REFRESH_EVENT, { detail: { conversationId } }),
-            );
+            if (replayed) {
+              scheduleWorkflowSessionRefresh(conversationId);
+            } else {
+              window.dispatchEvent(
+                new CustomEvent(WORKFLOW_GRAPH_REFRESH_EVENT, { detail: { conversationId } }),
+              );
+            }
           } else if (type === 'intent_updated') {
-            if (replayed) return;
             scheduleWorkflowSessionRefresh(conversationId);
           } else if (type === 'workflow_artifact_updated') {
-            if (replayed) return;
-            window.dispatchEvent(
-              new CustomEvent(WORKFLOW_GRAPH_REFRESH_EVENT, { detail: { conversationId } }),
-            );
+            if (!replayed) {
+              window.dispatchEvent(
+                new CustomEvent(WORKFLOW_GRAPH_REFRESH_EVENT, { detail: { conversationId } }),
+              );
+            }
+            scheduleWorkflowSessionRefresh(conversationId);
+          } else if (type === 'workflow_session_created') {
+            if (!replayed) {
+              window.dispatchEvent(
+                new CustomEvent(WORKFLOW_GRAPH_REFRESH_EVENT, { detail: { conversationId } }),
+              );
+            }
             scheduleWorkflowSessionRefresh(conversationId);
           } else if (type === 'ask_pending') {
             if (replayed) return;
@@ -880,6 +954,10 @@ export const useTaskCenterStore = create<TaskCenterStore>()((set, get) => ({
               detail: { conversationId, driverMessage: '', phase: 'resume' },
             }));
           } else if (type === 'max_retries_exceeded' || type === 'driver_fallback') {
+            if (replayed) {
+              scheduleWorkflowSessionRefresh(conversationId);
+              return;
+            }
             const workflowState = useWorkflowStore.getState();
             workflowState.setAutoRunning(conversationId, false);
             scheduleWorkflowSessionRefresh(conversationId);

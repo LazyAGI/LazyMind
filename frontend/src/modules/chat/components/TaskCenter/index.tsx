@@ -43,6 +43,7 @@ import {
 import type { WorkflowSessionStep } from "@/modules/chat/store/workflowPanel";
 import {
   buildOrdinaryTaskTimeline,
+  ordinaryTaskDurationSeconds,
   type OrdinaryTaskGroup,
   type OrdinaryTaskItem,
   type OrdinaryTaskState,
@@ -56,6 +57,7 @@ interface Props {
   showHeader?: boolean;
   developerMode?: boolean;
   workflowSteps?: WorkflowSessionStep[];
+  plannedCount?: number;
 }
 
 const EMPTY_TASKS: SubAgentTask[] = [];
@@ -901,11 +903,6 @@ function OrdinaryTaskDetails({
   );
 }
 
-function itemDurationSeconds(item: OrdinaryTaskItem): number | undefined {
-  if (item.startedAt === undefined || item.endedAt === undefined) return undefined;
-  return Math.max(0, Math.round((item.endedAt - item.startedAt) / 1000));
-}
-
 function OrdinaryTaskCard({
   item,
   expanded,
@@ -944,8 +941,8 @@ function OrdinaryTaskCard({
             )}
           </span>
           <span className="ordinary-task-meta">
-            {itemDurationSeconds(item) !== undefined && (
-              <span>{formatDuration(itemDurationSeconds(item), t)}</span>
+            {ordinaryTaskDurationSeconds(item) !== undefined && (
+              <span>{formatDuration(ordinaryTaskDurationSeconds(item), t)}</span>
             )}
             <span>
               {t("taskCenter.ordinaryArtifactCount", {
@@ -981,7 +978,7 @@ function OrdinaryTaskCard({
           <OrdinaryTaskDetails
             task={item.task}
             state={item.state}
-            durationSeconds={itemDurationSeconds(item)}
+            durationSeconds={ordinaryTaskDurationSeconds(item)}
           />
         </div>
       )}
@@ -1097,7 +1094,7 @@ function OrdinaryParallelGroup({ group }: { group: OrdinaryTaskGroup }) {
             <OrdinaryTaskDetails
               task={selected.task}
               state={selected.state}
-              durationSeconds={itemDurationSeconds(selected)}
+              durationSeconds={ordinaryTaskDurationSeconds(selected)}
             />
           )}
         </div>
@@ -1162,7 +1159,7 @@ function OrdinaryTaskCenter({
         <div className="task-center-header">
           <span className="task-center-title">
             {t("taskCenter.panelTitle")}
-            <span className="ordinary-task-count">{timeline.items.length}</span>
+            <span className="ordinary-task-count">{timeline.totalCount}</span>
           </span>
           {onClose && (
             <button
@@ -1210,7 +1207,7 @@ function OrdinaryTaskCenter({
               <strong>
                 {t("taskCenter.ordinaryCompletedSummary", {
                   completed: timeline.completedCount,
-                  total: timeline.items.length,
+                  total: timeline.totalCount,
                 })}
               </strong>
               <span>
@@ -1223,20 +1220,29 @@ function OrdinaryTaskCenter({
                     : t("taskCenter.ordinaryCurrentTask", { index: activeItem.ordinal })
                   : timeline.failedCount > 0
                     ? t("taskCenter.ordinaryFailedSummary", { count: timeline.failedCount })
-                    : timeline.completedCount === timeline.items.length
+                    : timeline.completedCount === timeline.totalCount
                       ? t("taskCenter.ordinaryAllComplete")
                       : t("taskCenter.ordinaryIncompleteSummary", {
-                          count: timeline.items.length - timeline.completedCount,
+                          count: timeline.totalCount - timeline.completedCount,
                         })}
               </span>
             </span>
-            {timeline.elapsedSeconds !== undefined && (
-              <time>
-                {t("taskCenter.ordinaryTotalDuration", {
-                  duration: formatDuration(timeline.elapsedSeconds, t),
-                })}
-              </time>
-            )}
+            <span className="ordinary-queue-durations">
+              {timeline.elapsedSeconds !== undefined && (
+                <time>
+                  {t("taskCenter.ordinaryTotalDuration", {
+                    duration: formatDuration(timeline.elapsedSeconds, t),
+                  })}
+                </time>
+              )}
+              {timeline.cumulativeExecutionSeconds !== undefined && (
+                <time>
+                  {t("taskCenter.ordinaryExecutionDuration", {
+                    duration: formatDuration(timeline.cumulativeExecutionSeconds, t),
+                  })}
+                </time>
+              )}
+            </span>
           </div>
           <ol className="ordinary-task-list" aria-label={t("taskCenter.ordinaryTimelineLabel")}>
             {timeline.groups.map((group) => {
@@ -1289,6 +1295,7 @@ const TaskCenter = (props: Props) => {
     showHeader = true,
     developerMode = false,
     workflowSteps = [],
+    plannedCount,
   } = props;
   const { t } = useTranslation();
   const [filter, setFilter] = useState<FilterKey>("all");
@@ -1304,8 +1311,13 @@ const TaskCenter = (props: Props) => {
   );
   const loadConversationTasks = useTaskCenterStore((s) => s.loadConversationTasks);
   const ordinaryTimeline = useMemo(
-    () => buildOrdinaryTaskTimeline(tasks, workflowSteps),
-    [tasks, workflowSteps],
+    () => buildOrdinaryTaskTimeline(
+      tasks,
+      workflowSteps,
+      Date.now(),
+      plannedCount,
+    ),
+    [plannedCount, tasks, workflowSteps],
   );
 
   const filteredTasks = useMemo(() => {

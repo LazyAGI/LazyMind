@@ -127,10 +127,13 @@ vi.mock("@/modules/chat/store/workflowPanel", () => {
   const state = {
     autoRunningByConversation: {},
     sessionByConversation: {},
+    workflowUIByWorkflow: {},
+    fetchWorkflowUI: vi.fn(),
     syncSessionSearchConfig: vi.fn(),
   };
   return {
     buildWorkflowSearchConfig: () => ({}),
+    filterWorkflowTabs: (tabs: unknown[]) => tabs,
     draftStore: { flushAllDrafts: vi.fn() },
     useWorkflowStore: Object.assign(
       (selector: (value: typeof state) => unknown) => selector(state),

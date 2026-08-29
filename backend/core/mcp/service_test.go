@@ -58,6 +58,59 @@ func TestLoadRuntimeConfigHonorsMCPMasterSwitchWithoutHidingSharedServices(t *te
 	}
 }
 
+func TestLoadRuntimeConfigCanonicalizesLegacyDiscoveredToolIDs(t *testing.T) {
+	db := newTestDB(t)
+	now := time.Now().UTC()
+	server := orm.MCPServer{
+		ID:               "msp-legacy-tool-grants",
+		Name:             "Legacy tool grants",
+		Transport:        "http",
+		URL:              "https://mcp.example.com",
+		HeadersJSON:      json.RawMessage(`{}`),
+		AllowedToolsJSON: json.RawMessage(`["mst_search","direct-name"]`),
+		Enabled:          true,
+		IsVerified:       true,
+		BaseModel: orm.BaseModel{
+			CreateUserID:   "u1",
+			CreateUserName: "User 1",
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+	}
+	if err := db.Create(&server).Error; err != nil {
+		t.Fatalf("seed mcp server: %v", err)
+	}
+	tool := orm.MCPServerTool{
+		ID:               "mst_search",
+		MCPServerID:      server.ID,
+		ToolName:         "search",
+		InputSchemaJSON:  json.RawMessage(`{}`),
+		LastDiscoveredAt: now,
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	if err := db.Create(&tool).Error; err != nil {
+		t.Fatalf("seed discovered tool: %v", err)
+	}
+
+	runtime, err := LoadRuntimeConfig(context.Background(), db.DB, "u1")
+	if err != nil {
+		t.Fatalf("load runtime config: %v", err)
+	}
+	if len(runtime) != 1 {
+		t.Fatalf("runtime configs = %#v, want one", runtime)
+	}
+	want := []string{"direct-name", "search"}
+	if len(runtime[0].AllowedTools) != len(want) {
+		t.Fatalf("runtime allowed tools = %#v, want %#v", runtime[0].AllowedTools, want)
+	}
+	for index := range want {
+		if runtime[0].AllowedTools[index] != want[index] {
+			t.Fatalf("runtime allowed tools = %#v, want %#v", runtime[0].AllowedTools, want)
+		}
+	}
+}
+
 func TestDoRPCNon2xxHidesResponseBodyFromError(t *testing.T) {
 	appLog.InitNop()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -338,6 +391,68 @@ func TestUpdateServerRequiresVerificationBeforeEnabling(t *testing.T) {
 	}
 	if !updated.Enabled {
 		t.Fatalf("verified server should be enabled")
+	}
+}
+
+func TestUpdateServerToolsCanonicalizesDiscoveredToolIDs(t *testing.T) {
+	db := newTestDB(t)
+	now := time.Now().UTC()
+	server := orm.MCPServer{
+		ID:               "msp-tool-permissions",
+		Name:             "Tool permissions",
+		Transport:        "http",
+		URL:              "https://mcp.example.com",
+		HeadersJSON:      json.RawMessage(`{}`),
+		AllowedToolsJSON: json.RawMessage(`[]`),
+		Enabled:          true,
+		IsVerified:       true,
+		BaseModel: orm.BaseModel{
+			CreateUserID:   "u1",
+			CreateUserName: "User 1",
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+	}
+	if err := db.Create(&server).Error; err != nil {
+		t.Fatalf("seed mcp server: %v", err)
+	}
+	tools := []orm.MCPServerTool{
+		{ID: "mst_search", MCPServerID: server.ID, ToolName: "search", InputSchemaJSON: json.RawMessage(`{}`), LastDiscoveredAt: now, CreatedAt: now, UpdatedAt: now},
+		{ID: "mst_fetch", MCPServerID: server.ID, ToolName: "fetch", InputSchemaJSON: json.RawMessage(`{}`), LastDiscoveredAt: now, CreatedAt: now, UpdatedAt: now},
+		{ID: "mst_other", MCPServerID: "other-server", ToolName: "other", InputSchemaJSON: json.RawMessage(`{}`), LastDiscoveredAt: now, CreatedAt: now, UpdatedAt: now},
+	}
+	if err := db.Create(&tools).Error; err != nil {
+		t.Fatalf("seed discovered tools: %v", err)
+	}
+
+	updated, err := UpdateServerTools(context.Background(), db.DB, "u1", server.ID, UpdateToolsRequest{
+		AllowedTools: []string{"mst_search", "search", "fetch", "legacy-direct-name", "mst_search", "mst_other"},
+	})
+	if err != nil {
+		t.Fatalf("update server tools: %v", err)
+	}
+	want := []string{"fetch", "legacy-direct-name", "mst_other", "search"}
+	if len(updated.AllowedTools) != len(want) {
+		t.Fatalf("allowed tools = %#v, want %#v", updated.AllowedTools, want)
+	}
+	for index := range want {
+		if updated.AllowedTools[index] != want[index] {
+			t.Fatalf("allowed tools = %#v, want %#v", updated.AllowedTools, want)
+		}
+	}
+
+	var saved orm.MCPServer
+	if err := db.Take(&saved, "id = ?", server.ID).Error; err != nil {
+		t.Fatalf("load saved mcp server: %v", err)
+	}
+	got := parseStringJSON(saved.AllowedToolsJSON)
+	if len(got) != len(want) {
+		t.Fatalf("persisted allowed tools = %#v, want %#v", got, want)
+	}
+	for index := range want {
+		if got[index] != want[index] {
+			t.Fatalf("persisted allowed tools = %#v, want %#v", got, want)
+		}
 	}
 }
 

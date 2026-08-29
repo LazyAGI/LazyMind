@@ -302,7 +302,11 @@ func UpdateServerTools(ctx context.Context, db *gorm.DB, userID, id string, req 
 	if err != nil {
 		return nil, err
 	}
-	allowedJSON, err := json.Marshal(normalizeStringList(req.AllowedTools))
+	allowedTools, err := canonicalizeAllowedToolNames(ctx, db, row.ID, req.AllowedTools)
+	if err != nil {
+		return nil, err
+	}
+	allowedJSON, err := json.Marshal(allowedTools)
 	if err != nil {
 		return nil, err
 	}
@@ -337,7 +341,10 @@ func LoadRuntimeConfig(ctx context.Context, db *gorm.DB, userID string) ([]Runti
 	}
 	out := make([]RuntimeConfig, 0, len(rows))
 	for _, row := range dedupeServers(rows) {
-		allowedTools := parseStringJSON(row.AllowedToolsJSON)
+		allowedTools, err := canonicalizeAllowedToolNames(ctx, db, row.ID, parseStringJSON(row.AllowedToolsJSON))
+		if err != nil {
+			return nil, err
+		}
 		if len(allowedTools) == 0 {
 			// A verified service with no authorized tool remains configured but
 			// must not become callable until the user grants a tool explicitly.
@@ -411,6 +418,33 @@ func normalizeStringList(values []string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func canonicalizeAllowedToolNames(ctx context.Context, db *gorm.DB, serverID string, values []string) ([]string, error) {
+	normalized := normalizeStringList(values)
+	if len(normalized) == 0 {
+		return normalized, nil
+	}
+
+	var tools []orm.MCPServerTool
+	if err := db.WithContext(ctx).
+		Select("id", "tool_name").
+		Where("mcp_server_id = ? AND deleted_at IS NULL AND id IN ?", serverID, normalized).
+		Find(&tools).Error; err != nil {
+		return nil, err
+	}
+	namesByID := make(map[string]string, len(tools))
+	for _, tool := range tools {
+		namesByID[tool.ID] = tool.ToolName
+	}
+	// Values not matching a discovered ID may already be runtime tool names
+	// supplied by older or direct API clients, so preserve them unchanged.
+	for index, value := range normalized {
+		if toolName, ok := namesByID[value]; ok {
+			normalized[index] = toolName
+		}
+	}
+	return normalizeStringList(normalized), nil
 }
 
 func headersJSONFromAPIKey(apiKey string) (json.RawMessage, error) {

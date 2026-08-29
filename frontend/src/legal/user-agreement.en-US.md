@@ -308,4 +308,4 @@ Depending on features you use, LazyMind may process:
 
 1. This Part assumes “user-selected third-party services.” Third-party connectors and custom tools are governed by their own agreements and privacy rules. Confirm you are authorized to grant related accounts and data, choose permissions under least necessity, and promptly disconnect or revoke authorization when no longer used.
 2. If LazyMind later provides new online services or default third-party services decided by us, we will update this agreement based on actual circumstances, separately explain related data-processing rules, and obtain your consent again when legally required. Even when third-party services are selected by you, LazyMind will explain in the UI the service type about to be called and data that may be sent. For processing that law requires to be separately notified or separately consented to, acceptance of this agreement alone is not a substitute.
-3. Agreement version: V0.2; applicable client version: V0.2; publication date: July 28, 2026.
+3. Agreement version: V0.3; applicable client version: V0.2; publication date: July 28, 2026.

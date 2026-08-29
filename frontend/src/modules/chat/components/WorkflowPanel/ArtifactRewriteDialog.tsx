@@ -211,8 +211,8 @@ export function ArtifactRewriteDialog({
   }, [close, open]);
 
   const requestPreview = useCallback(async () => {
-    const trimmedInstruction = instruction.trim() || tr('defaultInstruction');
-    if (!selection || phase !== 'form') return;
+    const trimmedInstruction = instruction.trim();
+    if (!trimmedInstruction || !selection || phase !== 'form') return;
 
     const requestId = ++requestIdRef.current;
     setPhase('previewing');
@@ -279,7 +279,7 @@ export function ArtifactRewriteDialog({
 
   if (!open || !selection) return null;
   const busy = phase === 'previewing';
-  const canPreview = phase === 'form';
+  const canPreview = phase === 'form' && instruction.trim().length > 0;
 
   return ReactDOM.createPortal(
     <div

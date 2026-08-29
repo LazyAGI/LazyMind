@@ -205,6 +205,7 @@ const ChatContainerComponent = forwardRef<ChatImperativeProps, ChatContainerProp
         const targetElement =
           target instanceof Element ? target : target.parentElement;
         if (
+          targetElement?.closest(".input-wrapper") ||
           targetElement?.closest(".chat-source-panel") ||
           targetElement?.closest(".conversation-trail") ||
           targetElement?.closest(".writer-markdown-editor")

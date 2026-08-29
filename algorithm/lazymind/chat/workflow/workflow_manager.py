@@ -6,9 +6,11 @@ public Workflow SDK into ChatAgent tools and applies LazyMind's handoff rule.
 """
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
+import uuid
 from dataclasses import asdict, dataclass
 from typing import Any, Callable, Dict, List, Optional, Union
 
@@ -1499,7 +1501,399 @@ def _build_chat_agent_task_context(conversation_id: str) -> str:
     return TaskQueryDB().build_chat_agent_task_context(conversation_id.strip())
 
 
-async def guard_workflow_agent_stream(initial_stream: Any, **_: Any):
-    """LazyMind handoff is enforced by declaring its tool as a stop tool."""
+def _workflow_guard_recovery_requested(query: str) -> bool:
+    text = str(query or '').strip().lower().strip(' ，。！？,.!')
+    if not text:
+        return False
+    zh_command = (
+        r'(?:请|请你|麻烦|帮我)?\s*'
+        r'(?:继续(?:执行)?|恢复|接着(?:执行)?)\s*'
+        r'(?:工作流|流程|任务|步骤)?\s*(?:吧|一下)?'
+    )
+    en_command = (
+        r'(?:please\s+)?(?:continue|resume)'
+        r'(?:\s+(?:the\s+)?(?:workflow|flow|task|step))?(?:\s+please)?'
+    )
+    return bool(re.fullmatch(zh_command, text) or re.fullmatch(en_command, text))
+
+
+def _workflow_guard_retry_requested(query: str) -> bool:
+    text = str(query or '').strip().lower().strip(' ，。！？,.!')
+    zh_command = (
+        r'(?:请|请你|麻烦|帮我)?\s*'
+        r'(?:重试|再试|重新执行)\s*'
+        r'(?:工作流|流程|任务|步骤)?\s*(?:吧|一下)?'
+    )
+    en_command = (
+        r'(?:please\s+)?(?:retry|recover)'
+        r'(?:\s+(?:the\s+)?(?:workflow|flow|task|step))?(?:\s+please)?'
+    )
+    return bool(re.fullmatch(zh_command, text) or re.fullmatch(en_command, text))
+
+
+def _workflow_guard_has_user_boundary(query: str) -> bool:
+    text = str(query or '').strip().lower()
+    if re.search(
+        r'(?:执行|运行|完成|做).{0,48}(?:就|后|到|完).{0,24}'
+        r'(?:停|暂停|结束|为止|不要(?:再)?(?:继续|跑|执行))',
+        text,
+    ):
+        return True
+    if re.search(r'(?:执行|运行).{0,48}(?:为止|就停)', text):
+        return True
+    if re.search(r'(?:后续|下一步).{0,12}(?:不要|不再|无需).{0,8}(?:跑|执行|继续)', text):
+        return True
+    if re.search(
+        r'(?:先)?(?:只|仅)(?:需|要|先)?\s*(?:执行|运行|做).{0,24}'
+        r'(?:一步|第一步|一个步骤|步骤|阶段|prepare|outline|write_document|[a-z][a-z0-9_-]*)',
+        text,
+    ):
+        return True
+    return bool(re.search(
+        r'\b(?:stop\s+after|do\s+not\s+continue|don[’\']t\s+continue|'
+        r'only\s+(?:run|execute))\b',
+        text,
+    ))
+
+
+def _workflow_guard_negative_execution_requested(query: str) -> bool:
+    text = str(query or '').strip().lower()
+    if re.search(
+        r'(?:不要|别|无需|不必|先不|先别).{0,12}(?:启动|执行|运行|继续|推进|跑)',
+        text,
+    ):
+        return True
+    if re.fullmatch(r'(?:请)?\s*(?:停止|暂停)(?:\s*(?:工作流|流程|执行))?', text):
+        return True
+    return bool(re.search(
+        r"\b(?:do\s+not|don['’]t|never)\s+(?:start|run|execute|continue)\b|"
+        r'^\s*(?:stop|pause)(?:\s+(?:the\s+)?(?:workflow|flow|execution))?\s*$',
+        text,
+    ))
+
+
+def _workflow_guard_continuous_requested(query: str) -> bool:
+    text = str(query or '').strip().lower()
+    if re.search(r'(?:连续|自动|一直).{0,16}(?:执行|运行|推进|完成)', text):
+        return True
+    if re.search(r'(?:执行|运行|推进|完成).{0,12}(?:全部|所有)\s*(?:步骤|流程)', text):
+        return True
+    if re.search(r'(?:执行|运行|推进|完成)?\s*(?:完整|整个|全流程)\s*(?:工作流|流程)', text):
+        return True
+    if re.search(r'(?:直到|直至).{0,20}(?:完成|结束|终态|成稿)', text):
+        return True
+    if re.search(r'(?:不要|无需|不必).{0,8}(?:停|暂停)', text):
+        return True
+    return bool(re.search(
+        r'\b(?:continuously|end[- ]to[- ]end|all\s+steps|entire\s+workflow|'
+        r'full\s+workflow|until\s+(?:complete|completed|finished)|do\s+not\s+stop)\b',
+        text,
+    ))
+
+
+def _workflow_guard_result(result: Any) -> tuple[Any, bool]:
+    if isinstance(result, dict) and result.get('ok') is False:
+        return result.get('value') or result.get('msg'), False
+    value = result.get('value') if (
+        isinstance(result, dict) and result.get('ok') is True and 'value' in result
+    ) else result
+    return value, True
+
+
+def _workflow_guard_step_succeeded(value: Any) -> bool:
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return False
+    if not isinstance(value, dict):
+        return False
+    return (
+        str(value.get('outcome') or '') in {'step_succeeded', 'workflow_completed'}
+        or str(value.get('status') or '') in {'succeeded', 'completed'}
+    )
+
+
+def _workflow_guard_handoff_accepted(value: Any) -> bool:
+    if _workflow_guard_step_succeeded(value):
+        return True
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except (TypeError, ValueError, json.JSONDecodeError):
+            return False
+    if not isinstance(value, dict) or value.get('accepted') is not True:
+        return False
+    return bool(str(value.get('task_id') or '').strip() or value.get('tasks'))
+
+
+def _workflow_guard_frontier(frontier: Any) -> tuple[bool, List[str], str]:
+    if not isinstance(frontier, dict):
+        return False, [], ''
+    projection = frontier.get('projection')
+    if isinstance(projection, dict) and isinstance(projection.get('projection'), dict):
+        projection = projection['projection']
+    projection = projection if isinstance(projection, dict) else frontier
+    completed = bool(projection.get('completed')) or frontier.get('status') == 'completed'
+    ready = [str(value).strip() for value in frontier.get('ready_steps') or [] if str(value).strip()]
+    if completed or len(ready) != 1:
+        return completed, ready, ''
+    detail = next((
+        item for item in frontier.get('ready_step_details') or []
+        if isinstance(item, dict) and str(item.get('step_id') or '') == ready[0]
+    ), None)
+    if not detail:
+        return completed, ready, ''
+    mode = str(detail.get('mode') or '')
+    execution_tool = str(detail.get('execution_tool') or '')
+    approval = str(detail.get('default_approval') or '')
+    auto = mode == 'auto' or execution_tool == 'advance_step' or approval == 'not_required'
+    unsafe = (
+        detail.get('requires_approval') is True or mode == 'human'
+        or execution_tool == 'advance_step_and_hand_off' or approval == 'required'
+    )
+    return completed, ready, ready[0] if auto and not unsafe else ''
+
+
+async def guard_workflow_agent_stream(
+    initial_stream: Any,
+    *,
+    all_tools: Any = None,
+    runtime_prompt: str = '',
+    query: str = '',
+    **_: Any,
+):
+    """Ground active Workflow conclusions in durable Runtime tool results.
+
+    A model can occasionally print a tool-shaped JSON object as ordinary text,
+    then continue as if that text had executed.  Once a Workflow is selected or
+    initialized, buffer its prose until the Runtime frontier is checked.  If the
+    model ended with one unambiguous automatic Ready target, dispatch that exact
+    target and continue over equally unambiguous automatic targets.  Otherwise
+    replace the ungrounded prose with the authoritative waiting/failure state.
+    """
+    tools = {
+        str(getattr(tool, '__name__', '')): tool
+        for tool in all_tools or [] if callable(tool) and getattr(tool, '__name__', '')
+    }
+    get_ready_steps = tools.get('get_ready_steps')
+    advance_step = tools.get('advance_step')
+    prompt = str(runtime_prompt or '')
+    explicitly_selected = '## Explicit Workflow Selection [AUTHORITATIVE]' in prompt
+    existing_session_recovery = (
+        '## Workflow Runtime [AUTHORITATIVE]' in prompt
+        and (_workflow_guard_recovery_requested(query) or _workflow_guard_retry_requested(query))
+    )
+    recovery_authorized = explicitly_selected or existing_session_recovery
+    trigger_succeeded = False
+    explicit_user_boundary = _workflow_guard_has_user_boundary(query)
+    negative_execution = _workflow_guard_negative_execution_requested(query)
+    continuous_execution = _workflow_guard_continuous_requested(query)
+    retry_requested = _workflow_guard_retry_requested(query)
+    ask_pending = False
+    model_step_succeeded = False
+    handoff_seen = False
+    handoff_succeeded = False
+    buffered_text_events: List[Any] = []
+    final_item: Any = None
+
     async for item in initial_stream:
+        kind, payload = item
+        if kind == 'final':
+            final_item = item
+            continue
+        if kind != 'event' or not isinstance(payload, dict):
+            yield item
+            continue
+
+        if payload.get('tag') == 'tool_results':
+            for tool_result in payload.get('tool_results') or []:
+                if not isinstance(tool_result, dict):
+                    continue
+                name = str(tool_result.get('name') or '')
+                result = tool_result.get('result')
+                value, succeeded = _workflow_guard_result(result)
+                if (
+                    name.startswith('trigger_') and name.endswith('_workflow')
+                    and succeeded and isinstance(value, dict) and value.get('session_id')
+                ):
+                    trigger_succeeded = True
+                    recovery_authorized = True
+                if name in {'advance_step', 'advance_step_and_hand_off'}:
+                    model_step_succeeded = model_step_succeeded or (
+                        succeeded and _workflow_guard_step_succeeded(value)
+                    )
+                if name == 'advance_step_and_hand_off':
+                    handoff_seen = True
+                    handoff_succeeded = handoff_succeeded or (
+                        succeeded and _workflow_guard_handoff_accepted(value)
+                    )
+
+        if payload.get('tag') == 'ask_pending':
+            ask_pending = True
+
+        if payload.get('tag') in {'text', 'think'} and recovery_authorized:
+            buffered_text_events.append(item)
+            continue
         yield item
+
+    if not recovery_authorized:
+        for item in buffered_text_events:
+            yield item
+        if final_item is not None:
+            yield final_item
+        return
+
+    if ask_pending:
+        if final_item is not None:
+            yield final_item
+        return
+
+    if negative_execution and not explicit_user_boundary and not continuous_execution:
+        notice = '已遵循当前请求，未自动启动或推进工作流。'
+        yield 'event', {'tag': 'text', 'delta': notice}
+        yield 'final', notice
+        return
+
+    if handoff_seen:
+        notice = (
+            '工作流已在人工交接边界停止，未自动推进后续步骤。'
+            if handoff_succeeded else
+            '人工交接调用未成功，未自动推进后续步骤。'
+        )
+        yield 'event', {'tag': 'text', 'delta': notice}
+        yield 'final', notice
+        return
+
+    if explicit_user_boundary and model_step_succeeded:
+        notice = '工作流已执行当前请求中的边界步骤，未自动推进后续步骤。'
+        yield 'event', {'tag': 'text', 'delta': notice}
+        yield 'final', notice
+        return
+
+    if retry_requested:
+        notice = (
+            '工作流重试已通过真实工具调用执行，未自动推进其他步骤。'
+            if model_step_succeeded else
+            '重试必须使用 Runtime 返回的可重试目标；未自动推进普通 Ready 步骤。'
+        )
+        yield 'event', {'tag': 'text', 'delta': notice}
+        yield 'final', notice
+        return
+
+    auto_dispatch_authorized = (
+        trigger_succeeded
+        or existing_session_recovery
+        or model_step_succeeded
+        or (explicitly_selected and continuous_execution)
+    )
+    if not auto_dispatch_authorized:
+        notice = '工作流尚未通过真实触发器初始化，未自动启动。'
+        yield 'event', {'tag': 'text', 'delta': notice}
+        yield 'final', notice
+        return
+
+    if not callable(get_ready_steps) or not callable(advance_step):
+        for item in buffered_text_events:
+            yield item
+        if final_item is not None:
+            yield final_item
+        return
+
+    advanced_steps: List[str] = []
+    attempted_steps: set[str] = set()
+    frontier: Any = None
+    failure = ''
+    max_auto_steps = 1 if explicit_user_boundary else (
+        None if continuous_execution or _workflow_guard_recovery_requested(query) else 1
+    )
+    try:
+        frontier = await asyncio.to_thread(get_ready_steps)
+    except Exception as exc:
+        LOG.warning('Workflow stream guard could not read the Runtime frontier: %s', exc)
+        failure = str(exc)
+
+    while not failure:
+        if max_auto_steps is not None and len(advanced_steps) >= max_auto_steps:
+            break
+        completed, ready_steps, step_id = _workflow_guard_frontier(frontier)
+        if completed:
+            break
+        if not step_id:
+            break
+        if step_id in attempted_steps:
+            failure = f'Runtime 重复返回步骤 {step_id}，已停止自动推进以避免循环。'
+            break
+        attempted_steps.add(step_id)
+        call_id = f'workflow_guard_{uuid.uuid4().hex}'
+        yield 'event', {
+            'tag': 'tool_calls',
+            'tool_calls': [{
+                'id': call_id,
+                'function': {'name': 'advance_step', 'arguments': {'step_ids': [step_id]}},
+            }],
+        }
+        try:
+            result = await asyncio.to_thread(advance_step, [step_id])
+        except Exception as exc:
+            LOG.exception('Workflow stream guard failed to advance step=%s', step_id)
+            result = None
+            failure = str(exc)
+        value, result_ok = _workflow_guard_result(result)
+        step_succeeded = not failure and result_ok and _workflow_guard_step_succeeded(value)
+        wrapped_result = {'ok': step_succeeded, 'value': value if result_ok else value or failure}
+        yield 'event', {
+            'tag': 'tool_results',
+            'tool_results': [{
+                'id': call_id,
+                'name': 'advance_step',
+                'arguments': {'step_ids': [step_id]},
+                'result': wrapped_result,
+            }],
+        }
+        if failure:
+            break
+        if not step_succeeded:
+            if isinstance(value, dict):
+                failure = str(
+                    value.get('user_notice') or value.get('reason')
+                    or value.get('outcome') or '步骤执行失败。'
+                )
+            else:
+                failure = str(value or '步骤执行失败。')
+            break
+        advanced_steps.append(step_id)
+        try:
+            frontier = await asyncio.to_thread(get_ready_steps)
+        except Exception as exc:
+            LOG.warning(
+                'Workflow stream guard advanced step=%s but could not refresh frontier: %s',
+                step_id, exc,
+            )
+            failure = f'步骤 {step_id} 已执行，但无法读取最新工作流状态：{exc}'
+            break
+
+    completed, ready_steps, _ = _workflow_guard_frontier(frontier)
+    if not advanced_steps and not failure and completed:
+        for item in buffered_text_events:
+            yield item
+        if final_item is not None:
+            yield final_item
+        return
+
+    if failure:
+        notice = f'工作流未能继续执行：{failure}'
+    elif completed:
+        notice = '工作流已通过真实工具调用完成。'
+    elif ready_steps:
+        suffix = f'，已实际执行：{"、".join(advanced_steps)}' if advanced_steps else ''
+        notice = (
+            f'工作流当前停在可执行步骤 {"、".join(ready_steps)}{suffix}；'
+            '需要按当前审批策略继续。'
+        )
+    elif advanced_steps:
+        notice = f'工作流已实际执行步骤：{"、".join(advanced_steps)}，当前没有新的可执行步骤。'
+    else:
+        notice = '工作流当前没有可安全执行的步骤，请查看工作流面板中的真实状态。'
+    yield 'event', {'tag': 'text', 'delta': notice}
+    yield 'final', notice

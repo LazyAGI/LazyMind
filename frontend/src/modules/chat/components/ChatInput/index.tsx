@@ -1344,7 +1344,11 @@ const ChatInput = forwardRef<ChatInputImperativeProps, ChatInputProps>(
                                 disabled={!knowledgeBaseEnabled}
                                 onClick={() => {
                                   setAddMenuOpen(false);
-                                  knowledgeSelectorRef.current?.open(document.body);
+                                  // Let the menu click finish before opening the next Popover;
+                                  // otherwise its outside-click handler closes it immediately.
+                                  window.setTimeout(() => {
+                                    knowledgeSelectorRef.current?.open(document.body);
+                                  }, 0);
                                 }}
                               >
                                 <BookOutlined />

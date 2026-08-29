@@ -207,6 +207,58 @@ func TestCreateHostSessionArchivesDuplicateTerminalHistoryAtomically(t *testing.
 	}
 }
 
+func TestCreateInitializedHostSessionRollsBackSessionIntentAndBindings(t *testing.T) {
+	repo := testRepo(t)
+	createTestConversation(t, repo, "conversation", "u1")
+	now := time.Now().UTC()
+	existing := orm.WorkflowSession{
+		ID: "completed", ConversationID: "conversation", WorkflowID: "old-workflow",
+		Status: "completed", CreateUserID: "u1", CreatedAt: now, UpdatedAt: now,
+	}
+	if err := repo.db.Create(&existing).Error; err != nil {
+		t.Fatal(err)
+	}
+	resource, _, err := repo.ImportInputResource(
+		t.Context(), "u1", "source.txt", "text/plain", "sha256:valid", []byte("source"),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, created, err := repo.CreateInitializedHostSession(
+		t.Context(), "u1", "new-session", "conversation", "lazymind", "conversation", "lazymind",
+		WorkflowPackage{WorkflowID: "writer", WorkflowRef: "builtin:writer", RevisionID: "rev-1"},
+		`{"text":"draft carefully"}`,
+		[]InputBinding{
+			{MaterialID: "valid", ResourceType: "input_resource", ResourceID: resource.ID,
+				ResourceRevision: resource.Revision, ContentHash: resource.ContentHash,
+				CreatedByCommandID: "prepare:1"},
+			{MaterialID: "invalid", ResourceType: "input_resource", ResourceID: resource.ID,
+				ResourceRevision: resource.Revision, ContentHash: "sha256:wrong",
+				CreatedByCommandID: "prepare:1"},
+		},
+	)
+	if !errors.Is(err, ErrIdempotencyConflict) || created {
+		t.Fatalf("invalid initialization created a Session: created=%v err=%v", created, err)
+	}
+	var newSessionCount, bindingCount int64
+	if err := repo.db.Model(&orm.WorkflowSession{}).Where("id = ?", "new-session").Count(&newSessionCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := repo.db.Model(&InputBinding{}).Where("workflow_session_id = ?", "new-session").Count(&bindingCount).Error; err != nil {
+		t.Fatal(err)
+	}
+	var preserved orm.WorkflowSession
+	if err := repo.db.First(&preserved, "id = ?", existing.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if newSessionCount != 0 || bindingCount != 0 || preserved.Dismissed {
+		t.Fatalf(
+			"initialization rollback incomplete: sessions=%d bindings=%d old_dismissed=%v",
+			newSessionCount, bindingCount, preserved.Dismissed,
+		)
+	}
+}
+
 func TestCreateHostSessionRejectsInvocationConversationMismatch(t *testing.T) {
 	repo := testRepo(t)
 	createTestConversation(t, repo, "conversation-1", "u1")

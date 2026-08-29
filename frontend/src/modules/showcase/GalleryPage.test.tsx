@@ -18,7 +18,15 @@ vi.mock("./classification", () => ({
   showcaseEntryType: (type: string) => type === "chat" ? "chat" : "work",
   showcaseTechnologyType: (type: string) => type === "workflow" ? "workflow" : "skill",
 }));
-vi.mock("./CaseCard", () => ({ default: ({ item }: { item: { title: string } }) => <div>{item.title}</div> }));
+vi.mock("./CaseCard", () => ({
+  default: ({
+    item,
+    primaryAction,
+  }: {
+    item: { title: string };
+    primaryAction?: string;
+  }) => <div data-primary-action={primaryAction}>{item.title}</div>,
+}));
 
 const listShowcaseCasesMock = vi.mocked(listShowcaseCases);
 
@@ -43,6 +51,7 @@ describe("GalleryPage", () => {
     );
 
     expect(await screen.findByText("Work skill")).toBeInTheDocument();
+    expect(screen.getByText("Work skill")).toHaveAttribute("data-primary-action", "details");
     expect(screen.getByText("Workflow")).toBeInTheDocument();
     expect(screen.getByText("Chat skill")).toBeInTheDocument();
   });

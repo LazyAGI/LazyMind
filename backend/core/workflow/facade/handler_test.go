@@ -2,12 +2,15 @@ package facade
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -17,6 +20,8 @@ import (
 	"gorm.io/gorm"
 	"lazymind/core/common"
 	"lazymind/core/common/orm"
+	"lazymind/core/state"
+	"lazymind/core/subagent"
 	"lazymind/core/workflow/graphengine"
 	workflowstore "lazymind/core/workflow/store"
 )
@@ -326,6 +331,156 @@ func TestConsumeHTTPRejectsOversizedSessionIDBeforePersistence(t *testing.T) {
 	}
 	if got := decodeEnvelope(t, w).Error; got == nil || got.Code != "INVALID_REQUEST" {
 		t.Fatalf("unexpected error: %#v", got)
+	}
+}
+
+func TestConsumeRetriesSessionEventWithPreparedSessionAndIdempotentBindings(t *testing.T) {
+	h, db := testHandler(t)
+	if err := db.AutoMigrate(
+		&orm.Conversation{},
+		&orm.WorkflowSession{},
+		&orm.WorkflowResource{},
+		&orm.WorkflowRevision{},
+		&orm.WorkflowRevisionEntry{},
+		&orm.WorkflowBlob{},
+	); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	if err := db.Create(&orm.Conversation{ID: "conversation-1", BaseModel: orm.BaseModel{
+		CreateUserID: "owner", CreatedAt: now, UpdatedAt: now,
+	}}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowResource{
+		ID: "workflow-resource-1", WorkflowRef: "builtin:writer", WorkflowID: "writer",
+		OwnerUserID: "owner", OwnerScope: "owner", RelativeRoot: "writer", HeadRevisionID: "revision-1",
+		Version: 1, Status: "active", CreatedAt: now, UpdatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&orm.WorkflowRevision{
+		ID: "revision-1", WorkflowResourceID: "workflow-resource-1", RevisionNo: 1,
+		TreeHash: "tree-1", GraphHash: "graph-1", GraphSchemaVersion: "3",
+		CompiledGraph: json.RawMessage(`{"nodes":{}}`), CreatedAt: now,
+	}).Error; err != nil {
+		t.Fatal(err)
+	}
+	inputContent := []byte("source material")
+	inputHashBytes := sha256.Sum256(inputContent)
+	inputHash := "sha256:" + hex.EncodeToString(inputHashBytes[:])
+	inputResource, _, err := h.Store.ImportInputResource(
+		t.Context(), "owner", "source.txt", "text/plain", inputHash, inputContent,
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	requestJSON, err := json.Marshal(map[string]any{
+		"workflow_id":     "writer",
+		"conversation_id": "conversation-1",
+		"origin_host":     "lazymind",
+		"origin_ref":      "conversation-1",
+		"controller_host": "lazymind",
+		"request_context": "draft carefully",
+		"input_bindings": map[string]any{
+			"source": map[string]any{
+				"resource_id":  inputResource.ID,
+				"content_hash": inputResource.ContentHash,
+				"revision":     inputResource.Revision,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	prepared, _, err := h.Store.Prepare(
+		t.Context(), "owner", "prepare-writer", "writer", ContractVersion, requestJSON,
+		json.RawMessage(`{"status":"ready","workflow_revision":"revision-1"}`),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	type publishedEvent struct {
+		conversationID string
+		eventType      string
+		payload        map[string]any
+	}
+	var events []publishedEvent
+	deliveryAttempts := 0
+	subagent.EventHooks.RegisterConversationEventHook(func(
+		_ context.Context, _ state.Store, conversationID, _ string, eventType string, payload map[string]any,
+	) error {
+		var session orm.WorkflowSession
+		if err := db.First(&session, "id = ?", "session-1").Error; err != nil {
+			t.Fatal(err)
+		}
+		if session.IntentContext != `{"text":"draft carefully"}` {
+			t.Fatalf("event published before intent initialization: %q", session.IntentContext)
+		}
+		var bindingCount int64
+		if err := db.Table("workflow_input_bindings").
+			Where("workflow_session_id = ? AND resource_id = ?", "session-1", inputResource.ID).
+			Count(&bindingCount).Error; err != nil {
+			t.Fatal(err)
+		}
+		if bindingCount != 1 {
+			t.Fatalf("event published before input binding initialization: count=%d", bindingCount)
+		}
+		events = append(events, publishedEvent{conversationID: conversationID, eventType: eventType, payload: payload})
+		deliveryAttempts++
+		if deliveryAttempts == 1 {
+			return errors.New("conversation event store unavailable")
+		}
+		return nil
+	})
+	t.Cleanup(func() { subagent.EventHooks.RegisterConversationEventHook(nil) })
+
+	consume := func(sessionID string) *httptest.ResponseRecorder {
+		r := request(http.MethodPost, "/workflow-preparations/"+prepared.ID+"/consume", "owner",
+			[]byte(`{"session_id":"`+sessionID+`"}`))
+		r = mux.SetURLVars(r, map[string]string{"preparation_id": prepared.ID})
+		w := httptest.NewRecorder()
+		h.Consume(w, r)
+		return w
+	}
+	first := consume("session-1")
+	if first.Code != http.StatusServiceUnavailable || decodeEnvelope(t, first).Error.Code != "WORKFLOW_SESSION_EVENT_FAILED" {
+		t.Fatalf("first consume: status=%d body=%s", first.Code, first.Body.String())
+	}
+	second := consume("different-session-id")
+	if second.Code != http.StatusOK {
+		t.Fatalf("retry consume: status=%d body=%s", second.Code, second.Body.String())
+	}
+	encodedResponse, _ := json.Marshal(decodeEnvelope(t, second).Data)
+	if !bytes.Contains(encodedResponse, []byte(`"session_id":"session-1"`)) {
+		t.Fatalf("retry did not reuse prepared session: %s", encodedResponse)
+	}
+	if len(events) != 2 {
+		t.Fatalf("workflow_session_created attempts=%d, want 2: %#v", len(events), events)
+	}
+	wantPayload := map[string]any{
+		"conversation_id": "conversation-1",
+		"session_id":      "session-1",
+		"workflow_id":     "writer",
+		"status":          "active",
+		"state_version":   int64(1),
+	}
+	for _, event := range events {
+		if event.conversationID != "conversation-1" || event.eventType != "workflow_session_created" {
+			t.Fatalf("unexpected event routing: %#v", event)
+		}
+		if !reflect.DeepEqual(event.payload, wantPayload) {
+			t.Fatalf("payload=%#v, want %#v", event.payload, wantPayload)
+		}
+	}
+	var sessionCount, bindingCount int64
+	if err := db.Model(&orm.WorkflowSession{}).Count(&sessionCount).Error; err != nil || sessionCount != 1 {
+		t.Fatalf("session count=%d err=%v", sessionCount, err)
+	}
+	if err := db.Table("workflow_input_bindings").
+		Where("workflow_session_id = ?", "session-1").Count(&bindingCount).Error; err != nil || bindingCount != 1 {
+		t.Fatalf("binding count after retry=%d err=%v", bindingCount, err)
 	}
 }
 
