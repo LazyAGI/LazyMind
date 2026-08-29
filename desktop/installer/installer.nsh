@@ -315,7 +315,7 @@
 
 !macro customInstall
   ${If} $InstallDataChoice == "purge"
-    nsExec::ExecToStack '"$InstallerHelper" purge-local-data'
+    nsExec::ExecToStack '"$InstallerHelper" purge-local-data --install-dir "$INSTDIR"'
     Pop $0
     Pop $1
     ${If} $0 != 0
@@ -329,10 +329,10 @@
     CreateDirectory "$LOCALAPPDATA\LazyMind\logs"
     StrCpy $5 "$LOCALAPPDATA\LazyMind\logs\installer-nsis.log"
     FileOpen $6 "$5" a
-    FileWrite $6 "Starting Electron installer warmup (timeout=360s).$\r$\n"
+    FileWrite $6 "Starting Electron installer warmup (timeout=1800s).$\r$\n"
     FileClose $6
     DetailPrint "Starting Electron installer warmup; log: $LOCALAPPDATA\LazyMind\logs\installer-warmup.log"
-    ExecWait '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" --installer-warmup --timeout-seconds 360' $3
+    ExecWait '"$INSTDIR\${APP_EXECUTABLE_FILENAME}" --installer-warmup --timeout-seconds 1800' $3
     FileOpen $6 "$5" a
     FileWrite $6 "Electron installer warmup returned exit code $3.$\r$\n"
     FileClose $6
@@ -410,7 +410,7 @@
 
 !macro customUnInstall
   ${If} $UninstallDataChoice == "purge"
-    nsExec::ExecToStack '"$InstallerHelper" purge-local-data'
+    nsExec::ExecToStack '"$InstallerHelper" purge-local-data --install-dir "$INSTDIR"'
     Pop $0
     Pop $1
     ${If} $0 != 0

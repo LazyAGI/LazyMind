@@ -36,6 +36,22 @@ def _strip_heading_number(text: str) -> str:
     return re.sub(r'^\s*\d+(?:\.\d+){0,3}[、.．\s　]+', '', _clean_inline(text)).strip()
 
 
+def _chapter_key(text: str) -> str:
+    """Normalize a manifest chapter reference and a Markdown heading for matching."""
+    return re.sub(r'[\W_]+', '', _strip_heading_number(text), flags=re.UNICODE).casefold()
+
+
+def _source_chapter_references(image: dict[str, Any]) -> list[str]:
+    values: list[str] = []
+    source_chapters = image.get('source_chapters')
+    if isinstance(source_chapters, list):
+        values.extend(str(item) for item in source_chapters)
+    source_chapter = str(image.get('source_chapter') or '').strip()
+    if source_chapter:
+        values.extend(re.split(r'\s*(?:[·；;|]|\n)\s*', source_chapter))
+    return list(dict.fromkeys(value.strip() for value in values if value.strip()))
+
+
 def _safe_output_name(value: str) -> str:
     name = Path(str(value or '')).name
     name = re.sub(r'[\\/:*?"<>|\r\n\t]+', '_', name).strip(' ._') or '投标技术方案.docx'
@@ -116,7 +132,7 @@ def _canonical_output_format(value: Any) -> str:
     raise ValueError('generation_parameters.output_format must be md or docx.')
 
 
-def _place_workflow_images(markdown_text: str, images: list[dict[str, str]]) -> str:
+def _place_workflow_images(markdown_text: str, images: list[dict[str, Any]]) -> str:
     """Add Writer image placeholders to their source chapters before DOCX rendering."""
     lines = str(markdown_text or '').replace('\r\n', '\n').replace('\r', '\n').split('\n')
     headings: list[tuple[int, int, str]] = []
@@ -131,6 +147,36 @@ def _place_workflow_images(markdown_text: str, images: list[dict[str, str]]) -> 
             if placeholder:
                 existing.add(int(placeholder.group(1)) - 1)
 
+    def matching_headings(image: dict[str, Any]) -> list[tuple[int, int, str]]:
+        matched: list[tuple[int, int, str]] = []
+        for reference in _source_chapter_references(image):
+            reference_key = _chapter_key(reference)
+            if not reference_key:
+                continue
+            exact = [heading for heading in headings if _chapter_key(heading[2]) == reference_key]
+            compatible = exact or [
+                heading for heading in headings
+                if min(len(reference_key), len(_chapter_key(heading[2]))) >= 4
+                and (
+                    reference_key in _chapter_key(heading[2])
+                    or _chapter_key(heading[2]) in reference_key
+                )
+            ]
+            for heading in compatible:
+                if heading not in matched:
+                    matched.append(heading)
+        return matched
+
+    matched_by_image = {
+        image_index: matching_headings(image)
+        for image_index, image in enumerate(images)
+        if image_index not in existing
+    }
+    chapter_load: dict[int, int] = {}
+    for image_index, matched in matched_by_image.items():
+        if str(images[image_index].get('type') or '') != 'architecture' and len(matched) == 1:
+            chapter_load[matched[0][0]] = chapter_load.get(matched[0][0], 0) + 1
+
     insertions: dict[int, list[tuple[int, str]]] = {}
     unresolved: list[tuple[int, str]] = []
     for image_index, image in enumerate(images):
@@ -141,23 +187,49 @@ def _place_workflow_images(markdown_text: str, images: list[dict[str, str]]) -> 
             str(image.get('title') or f'方案配图 {image_index + 1}'),
         ).strip()
         placeholder_line = f'![{title}](media-placeholder://IMAGE-{image_index + 1})'
-        source_chapter = str(image.get('source_chapter') or '').strip()
-        candidates = [
-            (source_chapter.find(title_text), -len(title_text), heading_index, level)
-            for heading_index, level, title_text in headings
-            if title_text and title_text in source_chapter
-        ]
-        if not candidates:
+        matched_headings = matched_by_image.get(image_index, [])
+        if not matched_headings:
             unresolved.append((image_index, placeholder_line))
             continue
-        _, _, heading_index, level = min(candidates)
-        boundary = len(lines)
-        for next_index, next_level, _ in headings:
-            if next_index > heading_index and next_level <= level:
-                boundary = next_index
-                break
-        while boundary > heading_index + 1 and not lines[boundary - 1].strip():
-            boundary -= 1
+
+        image_type = str(image.get('type') or '')
+        if image_type != 'architecture' and len(matched_headings) > 1:
+            selected_heading = min(
+                matched_headings,
+                key=lambda item: (chapter_load.get(item[0], 0), matched_headings.index(item)),
+            )
+            chapter_load[selected_heading[0]] = chapter_load.get(selected_heading[0], 0) + 1
+        else:
+            selected_heading = matched_headings[0]
+        heading_index, level, _ = selected_heading
+        if image_type == 'architecture' and len(matched_headings) > 1:
+            first_match = min(item[0] for item in matched_headings)
+            last_match = max(item[0] for item in matched_headings)
+            ancestors: list[tuple[int, int, str]] = []
+            for candidate in headings:
+                candidate_index, candidate_level, _ = candidate
+                if candidate_index >= first_match or candidate_level >= min(item[1] for item in matched_headings):
+                    continue
+                candidate_end = len(lines)
+                for next_index, next_level, _ in headings:
+                    if next_index > candidate_index and next_level <= candidate_level:
+                        candidate_end = next_index
+                        break
+                if candidate_end > last_match:
+                    ancestors.append(candidate)
+            if ancestors:
+                heading_index, level, _ = max(ancestors, key=lambda item: (item[1], item[0]))
+                boundary = heading_index + 1
+            else:
+                boundary = first_match
+        else:
+            boundary = len(lines)
+            for next_index, next_level, _ in headings:
+                if next_index > heading_index and next_level <= level:
+                    boundary = next_index
+                    break
+            while boundary > heading_index + 1 and not lines[boundary - 1].strip():
+                boundary -= 1
         insertions.setdefault(boundary, []).append((image_index, placeholder_line))
 
     marker_index = next((index for index, line in enumerate(lines) if line.strip() == IMAGE_MARKER), None)
@@ -653,11 +725,15 @@ def compose_proposal_from_inputs(output_name: str = '') -> dict[str, Any]:
         raise ValueError('effect_images must contain one or more ordered local paths.')
     effects = manifest.get('effects') if isinstance(manifest.get('effects'), list) else []
     architecture = manifest.get('architecture') if isinstance(manifest.get('architecture'), dict) else {}
-    images: list[dict[str, str]] = [{
+    architecture_sources = architecture.get('source_chapters')
+    if not isinstance(architecture_sources, list):
+        architecture_sources = []
+    images: list[dict[str, Any]] = [{
         'path': architecture_path,
         'title': str(architecture.get('title') or architecture.get('caption') or '系统总体架构图'),
         'type': 'architecture',
         'source_chapter': str(architecture.get('source_chapter') or ''),
+        'source_chapters': [str(item) for item in architecture_sources if str(item).strip()],
     }]
     for index, path in enumerate(effect_paths):
         metadata = effects[index] if index < len(effects) and isinstance(effects[index], dict) else {}

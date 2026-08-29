@@ -30,6 +30,7 @@ import type {
   WorkflowTrashItem,
 } from "@/api/generated/core-client";
 import { useTranslation } from "react-i18next";
+import { useSearchParams } from "react-router-dom";
 import ArchiveFolderPickerModal from "@/components/ui/ArchiveFolderPickerModal";
 import {
   archiveConversation,
@@ -56,8 +57,12 @@ import {
   type RecoveryKind,
   type RecoverySkillItem,
 } from "./recoveryApi";
+import {
+  recoveryViewFromSearchParams,
+  searchParamsForRecoveryView,
+  type RecoveryView,
+} from "./recoveryRoute";
 
-type RecoveryView = "archive" | "trash";
 type TrashAsset = "skills" | "conversations" | "workflows";
 
 interface RecoverySettingsProps {
@@ -90,7 +95,13 @@ function ActionSet({ children, menuItems, busy, moreLabel }: { children: ReactNo
 
 export default function RecoverySettings({ headingRef }: RecoverySettingsProps) {
   const { t, i18n } = useTranslation();
-  const [view, setView] = useState<RecoveryView>("trash");
+  const [searchParams, setSearchParams] = useSearchParams();
+  const view = recoveryViewFromSearchParams(searchParams);
+  const selectView = (nextView: RecoveryView) => {
+    setSearchParams(searchParamsForRecoveryView(searchParams, nextView), {
+      replace: true,
+    });
+  };
   const [archiveKind, setArchiveKind] = useState<RecoveryKind>("dialog");
   const [archiveKeyword, setArchiveKeyword] = useState("");
   const debouncedArchiveKeyword = useDebouncedValue(archiveKeyword);
@@ -613,8 +624,8 @@ export default function RecoverySettings({ headingRef }: RecoverySettingsProps) 
   return <>
     <header className="settings-detail-header recovery-heading"><div><h1 ref={headingRef} tabIndex={-1}>{t("settingsPage.recovery.title")}</h1><p>{t("settingsPage.recovery.description")}</p></div></header>
     <div className="recovery-view-tabs" role="tablist" aria-label={t("settingsPage.recovery.viewTabs")}>
-      <button type="button" role="tab" aria-selected={view === "trash"} className={view === "trash" ? "is-active" : ""} onClick={() => setView("trash")}><DeleteOutlined /><span><strong>{t("settingsPage.recovery.trash")}</strong><small>{t("settingsPage.recovery.trashSubtitle")}</small></span></button>
-      <button type="button" role="tab" aria-selected={view === "archive"} className={view === "archive" ? "is-active" : ""} onClick={() => setView("archive")}><InboxOutlined /><span><strong>{t("settingsPage.recovery.archive")}</strong><small>{t("settingsPage.recovery.archiveSubtitle")}</small></span></button>
+      <button type="button" role="tab" aria-selected={view === "trash"} className={view === "trash" ? "is-active" : ""} onClick={() => selectView("trash")}><DeleteOutlined /><span><strong>{t("settingsPage.recovery.trash")}</strong><small>{t("settingsPage.recovery.trashSubtitle")}</small></span></button>
+      <button type="button" role="tab" aria-selected={view === "archive"} className={view === "archive" ? "is-active" : ""} onClick={() => selectView("archive")}><InboxOutlined /><span><strong>{t("settingsPage.recovery.archive")}</strong><small>{t("settingsPage.recovery.archiveSubtitle")}</small></span></button>
     </div>
     <section className="recovery-surface" aria-label={t(view === "archive" ? "settingsPage.recovery.archive" : "settingsPage.recovery.trash")}>{view === "archive" ? archivePanel : trashPanel}</section>
     <Modal title={t("settingsPage.recovery.newFolder")} open={folderModalOpen} confirmLoading={folderSaving} okText={t("settingsPage.recovery.create")} cancelText={t("common.cancel")} onOk={() => void saveFolder()} onCancel={() => setFolderModalOpen(false)} destroyOnHidden><Input autoFocus maxLength={30} showCount value={folderName} onChange={(event: ChangeEvent<HTMLInputElement>) => setFolderName(event.target.value)} onPressEnter={() => void saveFolder()} placeholder={t("settingsPage.recovery.folderPlaceholder")} aria-label={t("settingsPage.recovery.folderName")} /></Modal>

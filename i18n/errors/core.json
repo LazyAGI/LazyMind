@@ -1450,5 +1450,7 @@
   "2002312": { "en-US": "Free-model auto-selection priority cannot be negative", "zh-CN": "免费模型自动选择优先级不能为负数" },
   "2002313": { "en-US": "Free-model endpoint scope requires a positive auto-selection priority", "zh-CN": "免费模型端点范围要求配置正数自动选择优先级" },
   "2002314": { "en-US": "Free-model endpoint scope cannot contain an empty URL", "zh-CN": "免费模型端点范围不能包含空 URL" },
-  "2002315": { "en-US": "Failed to encode free-model endpoint scope", "zh-CN": "编码免费模型端点范围失败" }
+  "2002315": { "en-US": "Failed to encode free-model endpoint scope", "zh-CN": "编码免费模型端点范围失败" },
+  "2002316": { "en-US": "The selected range no longer matches the editable content", "zh-CN": "所选范围与可编辑内容不一致" },
+  "2002317": { "en-US": "The AI returned invalid editable content", "zh-CN": "AI 返回的可编辑内容无效" }
 }

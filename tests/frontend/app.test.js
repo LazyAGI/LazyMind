@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  appSource,
   defaultModelConfigPanelSource,
   formRulesSource,
   frontendDockerfileSource,
@@ -28,6 +29,10 @@ describe('Vite entrypoint', () => {
 });
 
 describe('router contract', () => {
+  it('keeps route rendering synchronous with browser URL changes', () => {
+    expect(appSource).not.toContain('v7_startTransition: true');
+  });
+
   it('keeps public auth routes available', () => {
     expect(routePaths).toContain('/login');
     expect(routePaths).toContain('/register');

@@ -70,3 +70,36 @@ func TestLoadSelectedModelsRequiresVerifiedEvoGroup(t *testing.T) {
 		t.Fatalf("verified Evo selection must be visible, got %#v", items)
 	}
 }
+
+func TestOpenCodeModelEligibleAllowsCustomChatModel(t *testing.T) {
+	db := orm.MigrateTestDB(t,
+		&orm.UserModelProviderGroupModel{},
+		&orm.UserModelProviderGroup{},
+	)
+	now := time.Now().UTC()
+	group := orm.UserModelProviderGroup{
+		ID: "group-custom", UserModelProviderID: "provider-openai",
+		Name: "Custom gateway", BaseURL: "https://gateway.example.com/v1",
+		APIKey: "secret", IsVerified: true,
+		BaseModel: orm.BaseModel{CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now},
+	}
+	model := orm.UserModelProviderGroupModel{
+		ID: "model-custom", UserModelProviderID: group.UserModelProviderID,
+		UserModelProviderGroupID: group.ID, ProviderName: "OpenAI",
+		Name: "deepseek-v4-flash", ModelType: "llm", IsDefault: false,
+		BaseModel: orm.BaseModel{CreateUserID: "user-1", CreatedAt: now, UpdatedAt: now},
+	}
+	for _, row := range []any{&group, &model} {
+		if err := db.DB.Create(row).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	eligible, err := openCodeModelEligible(context.Background(), db.DB, model.ID, "user-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !eligible {
+		t.Fatal("verified custom chat model must be eligible for Evo selection")
+	}
+}

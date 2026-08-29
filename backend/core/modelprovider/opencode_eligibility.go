@@ -104,8 +104,10 @@ var openCodeProviders = map[string]openCodeProviderSpec{
 }
 
 // ResolveOpenCodeModel returns a descriptor only for production model rows
-// that OpenCode can execute. Unknown providers fail closed.
-func ResolveOpenCodeModel(providerName, modelName, baseURL, technicalType string) (OpenCodeModelDescriptor, bool) {
+// that OpenCode can execute. Built-in rows stay restricted to the curated
+// model allowlist, while user-added chat models may reuse a known provider's
+// OpenCode adapter after their connection group has been verified.
+func ResolveOpenCodeModel(providerName, modelName, baseURL, technicalType string, isDefault bool) (OpenCodeModelDescriptor, bool) {
 	technicalType = strings.ToLower(strings.TrimSpace(technicalType))
 	if technicalType != "llm" && technicalType != "vlm" {
 		return OpenCodeModelDescriptor{}, false
@@ -116,8 +118,13 @@ func ResolveOpenCodeModel(providerName, modelName, baseURL, technicalType string
 		return OpenCodeModelDescriptor{}, false
 	}
 	modelName = strings.TrimSpace(modelName)
-	if _, ok := spec.models[strings.ToLower(modelName)]; !ok {
+	if modelName == "" {
 		return OpenCodeModelDescriptor{}, false
+	}
+	if isDefault {
+		if _, ok := spec.models[strings.ToLower(modelName)]; !ok {
+			return OpenCodeModelDescriptor{}, false
+		}
 	}
 	baseURL = strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if baseURL == "" {

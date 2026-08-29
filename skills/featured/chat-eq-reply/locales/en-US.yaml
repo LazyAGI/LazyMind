@@ -1,51 +1,102 @@
 locale: en-US
 
 classification:
-  category: Content creation
+  category: Communication
   tags:
-    - High-EQ replies
-    - Chat
-    - Relationship communication
-    - Messaging
+    - empathetic reply
+    - chat
+    - workplace communication
+    - boundaries
 
 presentation:
   card:
-    title: High-EQ chat reply assistant
-    description: Generate natural, composed, well-judged replies in multiple tones from the conversation context
+    title: High-EQ chat replies
+    description: Generate natural replies for relationships, workplace pressure, and personal boundaries
     output_type: document
     output_label: Reply suggestions
     cover_asset: cover
-    result_summary: Offer multiple tone options so you can respond appropriately across relationships and situations
+    result_summary: "Preview three scenarios: late replies, manager pressure, and last-minute friend requests"
   detail:
-    title: High-EQ chat reply assistant
-    description: "Read the other person's tone, relationship distance, and situational goal, then generate gentle, humorous, direct, or high-EQ chat replies. Source: https://skillhub.cn/skills/chat-eq-reply; adapted for LazyMind."
-    attachment_hint: The other person's message, chat background, your goal, and the relationship type
+    title: Multi-scenario high-EQ reply cases
+    description: Three realistic cases show how to identify emotion and subtext before writing sincere, non-template replies.
+    attachment_hint: Original message, relationship, context, and your communication goal
 
 tasks:
-  - id: eq-reply
+  - id: late-reply-reassurance
     selector:
-      title: High-EQ replies
-      description: Generate suitable replies for dating, work, friends, and family conversations
-      output_label: Chat reply suggestions
+      title: Reassure after a late reply
+      description: Calm the other person's insecurity while explaining you were busy
+      output_label: 3 reply options
     launch:
-      prompt_short: Help me write high-EQ replies from this chat.
-      prompt: Generate multiple high-EQ chat replies from the other person's message, chat background, relationship type, and the outcome I want. First judge their emotion and subtext, then provide gentle, humorous, and direct versions, and explain when each reply fits. If key context is missing, ask first.
+      prompt_short: "They messaged: “Why are you replying so late again? Do you not want to talk to me?” Please generate 3 sincere, natural replies that reassure them and explain I was busy."
+      prompt: "They messaged: “Why are you replying so late again? Do you not want to talk to me?” Please generate 3 sincere, natural replies that reassure them and explain I was busy."
     replay:
       steps:
-        - title: Understand the context
-          description: Analyze the message, emotion, relationship distance, and communication goal
-        - title: Choose a style
-          description: Match gentle, humorous, direct, or reassuring reply strategies
+        - title: Read the emotional cue
+          description: Identify insecurity and the feeling of being ignored behind “again” and “do you not want to talk”
+        - title: Set the reply goal
+          description: Acknowledge the wait, explain the busy moment, and show care
+        - title: Match tones
+          description: Prepare gentle, humorous, and direct versions
         - title: Generate replies
-          description: Produce multiple natural, send-ready options that avoid awkwardness
-        - title: Flag risks
-          description: Mark wording that should not be sent and suggest next communication steps
+          description: Produce ready-to-send wording with a short rationale for each style
+        - title: Add follow-up advice
+          description: Suggest sharing what you were busy with and warning ahead next time
     result:
-      template: generic_report_v1
-      eyebrow: Chat reply suggestions
-      title: High-EQ replies in multiple tones
-      summary: Generate chat replies matched to the relationship, emotion, and goal
-      highlights:
-        - Emotion and subtext assessment
-        - Multiple tone options to choose from
-        - Sending advice and communication-risk notes
+      template: html_preview_v1
+      eyebrow: Relationship communication case
+      title: Reassuring someone after a late reply
+      summary: Frontend-style chat mock showing the tense message, three reply styles, and follow-up advice.
+      html_asset: late_reply_demo
+  - id: leader-deadline-reply
+    selector:
+      title: Reply to a manager's deadline pressure
+      description: Explain changed requirements and data validation without sounding like blame-shifting
+      output_label: 4 workplace replies
+    launch:
+      prompt_short: "My manager says: “Why isn't this proposal revised yet? We need it for the afternoon meeting.” The requirement changed last night and I still need to confirm data. Help me reply tactfully and ask for a bit more time."
+      prompt: "My manager says: “Why isn't this proposal revised yet? We need it for the afternoon meeting.” The requirement changed last night and I still need to confirm data. Help me reply tactfully and ask for a bit more time."
+    replay:
+      steps:
+        - title: Identify the workplace need
+          description: Recognize that the manager needs certainty before the meeting
+        - title: Clarify constraints
+          description: State the requirement change and data-validation risk
+        - title: Split delivery
+          description: Turn the delay into a staged delivery plan
+        - title: Draft tones
+          description: Produce gentle, assertive, direct, and structured versions
+        - title: Add execution advice
+          description: Suggest naming blocked data and owners when needed
+    result:
+      template: html_preview_v1
+      eyebrow: Workplace communication case
+      title: Giving certainty when a manager is chasing a proposal
+      summary: Shows how to avoid blame-shifting and convert time pressure into clear delivery checkpoints.
+      html_asset: leader_deadline_demo
+  - id: boundary-help-reply
+    selector:
+      title: Politely decline a last-minute favor
+      description: Keep the relationship warm while protecting your evening plans
+      output_label: 3 boundary replies
+    launch:
+      prompt_short: "A friend often asks for last-minute help and now says: “Can you help me revise my PPT tonight? It is urgent and due tomorrow morning.” I already have plans. Help me decline politely with boundaries."
+      prompt: "A friend often asks for last-minute help and now says: “Can you help me revise my PPT tonight? It is urgent and due tomorrow morning.” I already have plans. Help me decline politely with boundaries."
+    replay:
+      steps:
+        - title: Recognize the pattern
+          description: Identify the repeated last-minute request behind this single PPT ask
+        - title: Define the boundary
+          description: Explain that you cannot take the full task tonight
+        - title: Preserve warmth
+          description: Offer limited support only where it is realistic
+        - title: Draft replies
+          description: Generate gentle, sincere, and light versions
+        - title: Add boundary advice
+          description: Avoid over-explaining personal plans and make the support limit specific
+    result:
+      template: html_preview_v1
+      eyebrow: Friendship boundary case
+      title: Declining a last-minute PPT request without hurting the relationship
+      summary: Frontend mock showing polite refusal, limited alternatives, and boundary-setting advice.
+      html_asset: boundary_help_demo

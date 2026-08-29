@@ -1,0 +1,940 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>智析工单 — AI 客服工单智能分析平台</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Noto+Sans+SC:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    /* ===== Design Tokens ===== */
+    :root {
+      /* Primary */
+      --color-primary: #1E40AF;
+      --color-primary-light: #3B82F6;
+      --color-primary-bg: #EFF6FF;
+      --color-primary-border: #BFDBFE;
+
+      /* Neutral */
+      --color-bg: #FFFFFF;
+      --color-bg-alt: #F8FAFC;
+      --color-bg-card: #FFFFFF;
+      --color-border: #E2E8F0;
+      --color-border-light: #F1F5F9;
+
+      /* Text */
+      --color-text: #0F172A;
+      --color-text-secondary: #475569;
+      --color-text-tertiary: #94A3B8;
+      --color-text-inverse: #FFFFFF;
+
+      /* Accent */
+      --color-accent: #0EA5E9;
+      --color-success: #10B981;
+      --color-warning: #F59E0B;
+
+      /* Spacing */
+      --space-xs: 4px;
+      --space-sm: 8px;
+      --space-md: 16px;
+      --space-lg: 24px;
+      --space-xl: 32px;
+      --space-2xl: 48px;
+      --space-3xl: 64px;
+      --space-4xl: 96px;
+      --space-5xl: 128px;
+
+      /* Radius */
+      --radius-sm: 6px;
+      --radius-md: 10px;
+      --radius-lg: 14px;
+      --radius-xl: 20px;
+
+      /* Shadow */
+      --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
+      --shadow-md: 0 1px 3px rgba(0,0,0,0.06), 0 4px 12px rgba(0,0,0,0.04);
+      --shadow-lg: 0 4px 6px rgba(0,0,0,0.04), 0 12px 32px rgba(0,0,0,0.06);
+
+      /* Typography */
+      --font-display: 'Inter', 'Noto Sans SC', sans-serif;
+      --font-body: 'Noto Sans SC', 'Inter', system-ui, sans-serif;
+
+      /* Animation */
+      --ease-out: cubic-bezier(0, 0, 0.2, 1);
+      --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+    }
+
+    /* ===== Reset ===== */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--font-body);
+      color: var(--color-text);
+      background: var(--color-bg);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* ===== Container ===== */
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 0 var(--space-lg);
+    }
+
+    /* ===== Buttons ===== */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: var(--space-sm);
+      height: 48px;
+      padding: 0 28px;
+      font-family: var(--font-display);
+      font-size: 15px;
+      font-weight: 600;
+      border: none;
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      text-decoration: none;
+      transition: all 150ms var(--ease-out);
+      white-space: nowrap;
+    }
+    .btn-primary {
+      background: var(--color-primary);
+      color: var(--color-text-inverse);
+    }
+    .btn-primary:hover { background: #1E3A8A; transform: translateY(-1px); box-shadow: var(--shadow-md); }
+    .btn-primary:active { transform: translateY(0); }
+
+    .btn-outline {
+      background: transparent;
+      color: var(--color-primary);
+      border: 1.5px solid var(--color-primary-border);
+    }
+    .btn-outline:hover { background: var(--color-primary-bg); border-color: var(--color-primary); }
+
+    .btn-lg { height: 54px; padding: 0 36px; font-size: 16px; border-radius: var(--radius-lg); }
+
+    /* ===== Header ===== */
+    .header {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      background: rgba(255,255,255,0.88);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      border-bottom: 1px solid var(--color-border-light);
+    }
+    .header__inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 64px;
+    }
+    .header__brand {
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+      font-family: var(--font-display);
+      font-size: 20px;
+      font-weight: 700;
+      color: var(--color-text);
+      text-decoration: none;
+    }
+    .header__brand-icon {
+      width: 34px;
+      height: 34px;
+      background: var(--color-primary);
+      border-radius: var(--radius-sm);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 16px;
+      font-weight: 800;
+    }
+    .header__nav { display: flex; align-items: center; gap: var(--space-xl); }
+    .header__link {
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--color-text-secondary);
+      text-decoration: none;
+      transition: color 150ms;
+    }
+    .header__link:hover { color: var(--color-primary); }
+
+    /* ===== Sections ===== */
+    .section { padding: var(--space-5xl) 0; }
+    .section--alt { background: var(--color-bg-alt); }
+
+    .section__label {
+      display: inline-block;
+      font-size: 13px;
+      font-weight: 600;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      color: var(--color-primary);
+      background: var(--color-primary-bg);
+      padding: 4px 12px;
+      border-radius: 20px;
+      margin-bottom: var(--space-md);
+    }
+    .section__title {
+      font-family: var(--font-display);
+      font-size: clamp(28px, 4vw, 40px);
+      font-weight: 700;
+      line-height: 1.2;
+      letter-spacing: -0.02em;
+      color: var(--color-text);
+      margin-bottom: var(--space-md);
+    }
+    .section__desc {
+      font-size: 17px;
+      color: var(--color-text-secondary);
+      line-height: 1.7;
+      max-width: 640px;
+    }
+    .section__header { text-align: center; margin-bottom: var(--space-3xl); }
+    .section__header .section__desc { margin: 0 auto; }
+
+    /* ===== Hero ===== */
+    .hero {
+      padding: calc(64px + var(--space-5xl)) 0 var(--space-4xl);
+      background: linear-gradient(180deg, #F0F5FF 0%, #FFFFFF 100%);
+      overflow: hidden;
+    }
+    .hero__inner {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: var(--space-4xl);
+      align-items: center;
+    }
+    .hero__content { max-width: 560px; }
+    .hero__badge {
+      display: inline-flex;
+      align-items: center;
+      gap: var(--space-sm);
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--color-primary);
+      background: rgba(30,64,175,0.08);
+      padding: 6px 14px;
+      border-radius: 20px;
+      margin-bottom: var(--space-lg);
+    }
+    .hero__badge-dot {
+      width: 6px;
+      height: 6px;
+      background: var(--color-success);
+      border-radius: 50%;
+      animation: pulse-dot 2s infinite;
+    }
+    @keyframes pulse-dot {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+    .hero__title {
+      font-family: var(--font-display);
+      font-size: clamp(36px, 5vw, 52px);
+      font-weight: 800;
+      line-height: 1.1;
+      letter-spacing: -0.03em;
+      color: var(--color-text);
+      margin-bottom: var(--space-lg);
+    }
+    .hero__title span {
+      background: linear-gradient(135deg, var(--color-primary), var(--color-accent));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero__subtitle {
+      font-size: 18px;
+      color: var(--color-text-secondary);
+      line-height: 1.7;
+      margin-bottom: var(--space-xl);
+    }
+    .hero__actions {
+      display: flex;
+      gap: var(--space-md);
+      align-items: center;
+    }
+    .hero__trust {
+      margin-top: var(--space-xl);
+      display: flex;
+      align-items: center;
+      gap: var(--space-md);
+      font-size: 13px;
+      color: var(--color-text-tertiary);
+    }
+    .hero__trust-avatars {
+      display: flex;
+    }
+    .hero__trust-avatars span {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--color-primary-light);
+      border: 2px solid white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: white;
+      font-size: 10px;
+      font-weight: 700;
+      margin-right: -6px;
+    }
+
+    /* Hero Visual */
+    .hero__visual {
+      position: relative;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .hero__dashboard {
+      width: 100%;
+      max-width: 520px;
+      background: white;
+      border-radius: var(--radius-xl);
+      box-shadow: var(--shadow-lg);
+      border: 1px solid var(--color-border-light);
+      overflow: hidden;
+    }
+    .hero__dashboard-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 12px 16px;
+      background: #F8FAFC;
+      border-bottom: 1px solid var(--color-border-light);
+    }
+    .hero__db-dot { width: 8px; height: 8px; border-radius: 50%; }
+    .hero__db-dot:nth-child(1) { background: #EF4444; }
+    .hero__db-dot:nth-child(2) { background: #F59E0B; }
+    .hero__db-dot:nth-child(3) { background: #10B981; }
+    .hero__db-title {
+      flex: 1;
+      text-align: center;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--color-text-tertiary);
+      font-family: var(--font-display);
+    }
+    .hero__dashboard-body { padding: var(--space-lg); }
+    .hero__stat-row {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: var(--space-md);
+      margin-bottom: var(--space-lg);
+    }
+    .hero__stat {
+      background: var(--color-bg-alt);
+      border-radius: var(--radius-md);
+      padding: var(--space-md);
+      text-align: center;
+    }
+    .hero__stat-value {
+      font-family: var(--font-display);
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--color-primary);
+    }
+    .hero__stat-label {
+      font-size: 11px;
+      color: var(--color-text-tertiary);
+      margin-top: 2px;
+    }
+    .hero__chart {
+      background: var(--color-bg-alt);
+      border-radius: var(--radius-md);
+      padding: var(--space-md);
+    }
+    .hero__chart-bars {
+      display: flex;
+      align-items: flex-end;
+      gap: var(--space-sm);
+      height: 100px;
+    }
+    .hero__bar {
+      flex: 1;
+      border-radius: 4px 4px 0 0;
+      transition: height 600ms var(--ease-out);
+    }
+    .hero__bar:nth-child(1) { height: 60%; background: var(--color-primary-light); }
+    .hero__bar:nth-child(2) { height: 75%; background: var(--color-primary-light); }
+    .hero__bar:nth-child(3) { height: 45%; background: var(--color-primary-light); }
+    .hero__bar:nth-child(4) { height: 85%; background: var(--color-primary); }
+    .hero__bar:nth-child(5) { height: 70%; background: var(--color-primary); }
+    .hero__bar:nth-child(6) { height: 55%; background: var(--color-primary-light); }
+    .hero__bar:nth-child(7) { height: 90%; background: var(--color-accent); }
+    .hero__chart-labels {
+      display: flex;
+      justify-content: space-between;
+      margin-top: var(--space-sm);
+      font-size: 10px;
+      color: var(--color-text-tertiary);
+    }
+
+    /* ===== Features ===== */
+    .features__grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: var(--space-lg);
+    }
+    .feature-card {
+      background: var(--color-bg-card);
+      border: 1px solid var(--color-border-light);
+      border-radius: var(--radius-lg);
+      padding: var(--space-xl) var(--space-xl) var(--space-lg);
+      transition: all 200ms var(--ease-out);
+    }
+    .feature-card:hover {
+      border-color: var(--color-primary-border);
+      box-shadow: var(--shadow-md);
+      transform: translateY(-2px);
+    }
+    .feature-card__icon {
+      width: 44px;
+      height: 44px;
+      background: var(--color-primary-bg);
+      border-radius: var(--radius-md);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-bottom: var(--space-md);
+    }
+    .feature-card__icon svg { width: 22px; height: 22px; color: var(--color-primary); }
+    .feature-card__title {
+      font-family: var(--font-display);
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: var(--space-sm);
+      color: var(--color-text);
+    }
+    .feature-card__desc {
+      font-size: 14px;
+      color: var(--color-text-secondary);
+      line-height: 1.65;
+    }
+
+    /* ===== Workflow ===== */
+    .workflow__steps {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: var(--space-xl);
+      position: relative;
+    }
+    .workflow__steps::before {
+      content: '';
+      position: absolute;
+      top: 60px;
+      left: calc(16.67% + 60px);
+      right: calc(16.67% + 60px);
+      height: 1.5px;
+      background: var(--color-border);
+      z-index: 0;
+    }
+    .workflow-step {
+      text-align: center;
+      position: relative;
+      z-index: 1;
+    }
+    .workflow-step__number {
+      width: 48px;
+      height: 48px;
+      background: white;
+      border: 2px solid var(--color-primary-border);
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto var(--space-md);
+      font-family: var(--font-display);
+      font-size: 18px;
+      font-weight: 700;
+      color: var(--color-primary);
+    }
+    .workflow-step__title {
+      font-family: var(--font-display);
+      font-size: 17px;
+      font-weight: 700;
+      margin-bottom: var(--space-sm);
+    }
+    .workflow-step__desc {
+      font-size: 14px;
+      color: var(--color-text-secondary);
+      line-height: 1.6;
+      max-width: 260px;
+      margin: 0 auto;
+    }
+
+    /* ===== Value ===== */
+    .value__grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: var(--space-lg);
+    }
+    .value-card {
+      text-align: center;
+      padding: var(--space-xl) var(--space-lg);
+    }
+    .value-card__number {
+      font-family: var(--font-display);
+      font-size: clamp(36px, 5vw, 48px);
+      font-weight: 800;
+      line-height: 1;
+      background: linear-gradient(135deg, var(--color-primary), var(--color-accent));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      margin-bottom: var(--space-sm);
+    }
+    .value-card__label {
+      font-size: 14px;
+      color: var(--color-text-secondary);
+      font-weight: 500;
+    }
+
+    /* ===== Pricing ===== */
+    .pricing__grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: var(--space-lg);
+      align-items: start;
+    }
+    .pricing-card {
+      background: var(--color-bg-card);
+      border: 1px solid var(--color-border-light);
+      border-radius: var(--radius-lg);
+      padding: var(--space-2xl);
+      transition: all 200ms var(--ease-out);
+    }
+    .pricing-card:hover {
+      border-color: var(--color-primary-border);
+      box-shadow: var(--shadow-md);
+    }
+    .pricing-card--featured {
+      border-color: var(--color-primary);
+      border-width: 2px;
+      box-shadow: var(--shadow-lg);
+      position: relative;
+    }
+    .pricing-card__badge {
+      position: absolute;
+      top: -12px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: var(--color-primary);
+      color: white;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 4px 16px;
+      border-radius: 20px;
+    }
+    .pricing-card__name {
+      font-family: var(--font-display);
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: var(--space-sm);
+    }
+    .pricing-card__desc {
+      font-size: 13px;
+      color: var(--color-text-secondary);
+      margin-bottom: var(--space-lg);
+    }
+    .pricing-card__price {
+      font-family: var(--font-display);
+      font-size: 40px;
+      font-weight: 800;
+      color: var(--color-text);
+      margin-bottom: var(--space-xs);
+    }
+    .pricing-card__period {
+      font-size: 14px;
+      color: var(--color-text-tertiary);
+      margin-bottom: var(--space-lg);
+    }
+    .pricing-card__features {
+      list-style: none;
+      margin-bottom: var(--space-xl);
+    }
+    .pricing-card__features li {
+      font-size: 14px;
+      color: var(--color-text-secondary);
+      padding: 6px 0;
+      display: flex;
+      align-items: center;
+      gap: var(--space-sm);
+    }
+    .pricing-card__features li::before {
+      content: '';
+      width: 16px;
+      height: 16px;
+      background: var(--color-success);
+      border-radius: 50%;
+      flex-shrink: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'%3E%3C/polyline%3E%3C/svg%3E");
+      background-size: 10px;
+      background-position: center;
+      background-repeat: no-repeat;
+    }
+    .pricing-card .btn { width: 100%; }
+
+    /* ===== CTA ===== */
+    .cta {
+      background: linear-gradient(135deg, var(--color-primary), #1E3A8A);
+      color: white;
+      text-align: center;
+      padding: var(--space-5xl) var(--space-lg);
+      border-radius: var(--radius-xl);
+      margin: var(--space-3xl) 0;
+    }
+    .cta__title {
+      font-family: var(--font-display);
+      font-size: clamp(28px, 4vw, 38px);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: var(--space-md);
+    }
+    .cta__desc {
+      font-size: 17px;
+      opacity: 0.85;
+      max-width: 500px;
+      margin: 0 auto var(--space-xl);
+      line-height: 1.7;
+    }
+    .cta .btn-primary {
+      background: white;
+      color: var(--color-primary);
+    }
+    .cta .btn-primary:hover { background: #F0F5FF; }
+    .cta .btn-outline {
+      color: white;
+      border-color: rgba(255,255,255,0.4);
+    }
+    .cta .btn-outline:hover { background: rgba(255,255,255,0.1); border-color: white; }
+
+    /* ===== Footer ===== */
+    .footer {
+      padding: var(--space-2xl) 0;
+      border-top: 1px solid var(--color-border-light);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      color: var(--color-text-tertiary);
+    }
+    .footer__links { display: flex; gap: var(--space-lg); }
+    .footer__links a { color: var(--color-text-tertiary); text-decoration: none; }
+    .footer__links a:hover { color: var(--color-text-secondary); }
+
+    /* ===== Responsive ===== */
+    @media (max-width: 768px) {
+      .header__nav { display: none; }
+      .hero__inner { grid-template-columns: 1fr; }
+      .hero__visual { order: -1; }
+      .features__grid { grid-template-columns: 1fr; }
+      .workflow__steps { grid-template-columns: 1fr; }
+      .workflow__steps::before { display: none; }
+      .value__grid { grid-template-columns: repeat(2, 1fr); }
+      .pricing__grid { grid-template-columns: 1fr; max-width: 400px; margin: 0 auto; }
+      .footer { flex-direction: column; gap: var(--space-md); text-align: center; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ===== Header ===== -->
+  <header class="header">
+    <div class="container header__inner">
+      <a href="#" class="header__brand">
+        <div class="header__brand-icon">智</div>
+        智析工单
+      </a>
+      <nav class="header__nav">
+        <a href="#features" class="header__link">核心功能</a>
+        <a href="#workflow" class="header__link">使用流程</a>
+        <a href="#pricing" class="header__link">价格方案</a>
+        <a href="#cta" class="btn btn-primary" style="height:38px;padding:0 20px;font-size:13px;">免费试用</a>
+      </nav>
+    </div>
+  </header>
+
+  <!-- ===== Hero ===== -->
+  <section class="hero">
+    <div class="container hero__inner">
+      <div class="hero__content">
+        <div class="hero__badge">
+          <span class="hero__badge-dot"></span>
+          已服务 500+ 中小企业
+        </div>
+        <h1 class="hero__title">
+          让每一条客服工单<br><span>都变成增长洞察</span>
+        </h1>
+        <p class="hero__subtitle">
+          智析工单通过 AI 自动分析海量客服数据，10 分钟发现产品问题、客户情绪与业务风险，无需数据团队，开箱即用。
+        </p>
+        <div class="hero__actions">
+          <a href="#" class="btn btn-primary btn-lg">免费试用 14 天</a>
+          <a href="#" class="btn btn-outline btn-lg">预约演示</a>
+        </div>
+        <div class="hero__trust">
+          <div class="hero__trust-avatars">
+            <span>李</span><span>张</span><span>王</span><span>陈</span>
+          </div>
+          已有 2,300+ 团队信任使用
+        </div>
+      </div>
+      <div class="hero__visual">
+        <div class="hero__dashboard">
+          <div class="hero__dashboard-header">
+            <span class="hero__db-dot"></span>
+            <span class="hero__db-dot"></span>
+            <span class="hero__db-dot"></span>
+            <span class="hero__db-title">工单分析面板</span>
+          </div>
+          <div class="hero__dashboard-body">
+            <div class="hero__stat-row">
+              <div class="hero__stat">
+                <div class="hero__stat-value">3,284</div>
+                <div class="hero__stat-label">本周工单</div>
+              </div>
+              <div class="hero__stat">
+                <div class="hero__stat-value">92%</div>
+                <div class="hero__stat-label">自动分类准确率</div>
+              </div>
+              <div class="hero__stat">
+                <div class="hero__stat-value">4.2min</div>
+                <div class="hero__stat-label">平均响应</div>
+              </div>
+            </div>
+            <div class="hero__chart">
+              <div style="font-size:11px;color:var(--color-text-tertiary);margin-bottom:8px;">工单趋势（近 7 天）</div>
+              <div class="hero__chart-bars">
+                <div class="hero__bar"></div>
+                <div class="hero__bar"></div>
+                <div class="hero__bar"></div>
+                <div class="hero__bar"></div>
+                <div class="hero__bar"></div>
+                <div class="hero__bar"></div>
+                <div class="hero__bar"></div>
+              </div>
+              <div class="hero__chart-labels">
+                <span>周一</span><span>周二</span><span>周三</span><span>周四</span><span>周五</span><span>周六</span><span>周日</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Features ===== -->
+  <section class="section" id="features">
+    <div class="container">
+      <div class="section__header">
+        <span class="section__label">核心功能</span>
+        <h2 class="section__title">四大 AI 引擎，全面读懂您的工单</h2>
+        <p class="section__desc">不需要数据科学家，不需要复杂配置。接入即用，自动洞察。</p>
+      </div>
+      <div class="features__grid">
+
+        <div class="feature-card">
+          <div class="feature-card__icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M22 12h-4l-3 9L9 3l-3 9H2"/>
+            </svg>
+          </div>
+          <h3 class="feature-card__title">智能自动分类</h3>
+          <p class="feature-card__desc">AI 自动将工单归类为「产品缺陷」「使用咨询」「投诉建议」「退款问题」等 20+ 类别，准确率 92%+。告别人工打标，分类一致性提升 4 倍。</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-card__icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>
+            </svg>
+          </div>
+          <h3 class="feature-card__title">客户情绪分析</h3>
+          <p class="feature-card__desc">实时监测每条对话的情绪倾向，自动标记愤怒、焦虑、满意等 8 种情绪维度。第一时间发现客诉激增，在大规模负面舆情形成前主动预警。</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-card__icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/>
+            </svg>
+          </div>
+          <h3 class="feature-card__title">趋势洞察报告</h3>
+          <p class="feature-card__desc">每周/每月自动生成分析报告，Top 问题排行、高频关键词、变化趋势一目了然。支持一键分享给产品、运营、管理层，让数据驱动决策。</p>
+        </div>
+
+        <div class="feature-card">
+          <div class="feature-card__icon">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 00-3-3.87"/><path d="M16 3.13a4 4 0 010 7.75"/>
+            </svg>
+          </div>
+          <h3 class="feature-card__title">智能工单路由</h3>
+          <p class="feature-card__desc">基于工单内容、紧急程度和客服专长，自动将工单分配给最合适的人。减少 60% 的无效转派，客户问题在第一时间到达正确的人手中。</p>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Workflow ===== -->
+  <section class="section section--alt" id="workflow">
+    <div class="container">
+      <div class="section__header">
+        <span class="section__label">使用流程</span>
+        <h2 class="section__title">三步上手，当天见效</h2>
+        <p class="section__desc">无需 IT 团队支持，30 分钟完成对接，当天即可产出第一份分析报告。</p>
+      </div>
+      <div class="workflow__steps">
+        <div class="workflow-step">
+          <div class="workflow-step__number">1</div>
+          <h3 class="workflow-step__title">连接数据源</h3>
+          <p class="workflow-step__desc">一键对接飞书、钉钉、企业微信等主流客服平台，也支持 API 和 CSV 文件导入。</p>
+        </div>
+        <div class="workflow-step">
+          <div class="workflow-step__number">2</div>
+          <h3 class="workflow-step__title">AI 自动分析</h3>
+          <p class="workflow-step__desc">大语言模型自动理解工单内容，完成分类、情绪标记、关键词提取和趋势聚合。</p>
+        </div>
+        <div class="workflow-step">
+          <div class="workflow-step__number">3</div>
+          <h3 class="workflow-step__title">获取洞察报告</h3>
+          <p class="workflow-step__desc">实时看板 + 周期性报告，支持按团队、产品线、时间段灵活筛选，随时导出分享。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Value ===== -->
+  <section class="section">
+    <div class="container">
+      <div class="section__header">
+        <span class="section__label">客户价值</span>
+        <h2 class="section__title">数据说话，效果可见</h2>
+      </div>
+      <div class="value__grid">
+        <div class="value-card">
+          <div class="value-card__number">87%</div>
+          <div class="value-card__label">工单处理效率提升</div>
+        </div>
+        <div class="value-card">
+          <div class="value-card__number">3.2x</div>
+          <div class="value-card__label">问题发现速度加快</div>
+        </div>
+        <div class="value-card">
+          <div class="value-card__number">40%</div>
+          <div class="value-card__label">重复工单减少</div>
+        </div>
+        <div class="value-card">
+          <div class="value-card__number">4.8/5</div>
+          <div class="value-card__label">客户满意度评分</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Pricing ===== -->
+  <section class="section section--alt" id="pricing">
+    <div class="container">
+      <div class="section__header">
+        <span class="section__label">价格方案</span>
+        <h2 class="section__title">灵活定价，按需选择</h2>
+        <p class="section__desc">所有方案均包含 14 天免费试用，无需信用卡。</p>
+      </div>
+      <div class="pricing__grid">
+
+        <div class="pricing-card">
+          <h3 class="pricing-card__name">基础版</h3>
+          <p class="pricing-card__desc">适合初创团队，快速上手</p>
+          <div class="pricing-card__price">¥299</div>
+          <div class="pricing-card__period">/月 · 最多 3 个坐席</div>
+          <ul class="pricing-card__features">
+            <li>每月 2,000 条工单分析</li>
+            <li>智能分类 + 情绪分析</li>
+            <li>基础看板与周报</li>
+            <li>飞书 / 钉钉 集成</li>
+            <li>邮件技术支持</li>
+          </ul>
+          <a href="#" class="btn btn-outline">免费试用</a>
+        </div>
+
+        <div class="pricing-card pricing-card--featured">
+          <div class="pricing-card__badge">最受欢迎</div>
+          <h3 class="pricing-card__name">专业版</h3>
+          <p class="pricing-card__desc">适合成长型团队，深度洞察</p>
+          <div class="pricing-card__price">¥799</div>
+          <div class="pricing-card__period">/月 · 最多 15 个坐席</div>
+          <ul class="pricing-card__features">
+            <li>每月 10,000 条工单分析</li>
+            <li>全部 AI 分析引擎</li>
+            <li>高级看板与自定义报表</li>
+            <li>全平台集成 + API 开放</li>
+            <li>智能工单路由</li>
+            <li>专属客户成功经理</li>
+          </ul>
+          <a href="#" class="btn btn-primary">免费试用</a>
+        </div>
+
+        <div class="pricing-card">
+          <h3 class="pricing-card__name">企业版</h3>
+          <p class="pricing-card__desc">适合成熟组织，定制方案</p>
+          <div class="pricing-card__price">¥1,999</div>
+          <div class="pricing-card__period">/月 · 不限坐席</div>
+          <ul class="pricing-card__features">
+            <li>无限工单分析量</li>
+            <li>全部 AI 引擎 + 自定义模型</li>
+            <li>私有化部署可选</li>
+            <li>SLA 99.9% 保障</li>
+            <li>专属技术支持团队</li>
+            <li>SSO + 权限管理</li>
+          </ul>
+          <a href="#" class="btn btn-outline">联系我们</a>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== CTA ===== -->
+  <section id="cta">
+    <div class="container">
+      <div class="cta">
+        <h2 class="cta__title">从今天开始，让数据驱动每一次客服决策</h2>
+        <p class="cta__desc">14 天免费试用，无需信用卡，无需技术团队。接入您的第一个工单系统，看 AI 如何改变您的客服团队。</p>
+        <div class="hero__actions" style="justify-content:center;">
+          <a href="#" class="btn btn-primary btn-lg">免费试用 14 天</a>
+          <a href="#" class="btn btn-outline btn-lg">预约演示</a>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== Footer ===== -->
+  <footer class="footer container">
+    <span>&copy; 2026 智析工单. All rights reserved.</span>
+    <div class="footer__links">
+      <a href="#">隐私政策</a>
+      <a href="#">服务条款</a>
+      <a href="#">帮助中心</a>
+      <a href="#">联系我们</a>
+    </div>
+  </footer>
+
+</body>
+</html>

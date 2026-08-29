@@ -339,6 +339,40 @@ def test_json_artifact_wrappers_are_recursively_unwrapped():
     }) == {'word_target': 100}
 
 
+def test_feedback_revision_reads_materialized_text_artifact(monkeypatch, tmp_path):
+    bridge = _load_writer_bridge()
+    feedback = tmp_path / 'revision_roadmap.json'
+    feedback.write_text(json.dumps({
+        'text': '# 修订路线图\n\n- R-001：补充研究边界。',
+    }, ensure_ascii=False), encoding='utf-8')
+    captured = {}
+
+    def revise(base_document_path, writing_context_path, instruction, document_slot):
+        captured.update({
+            'base_document_path': base_document_path,
+            'writing_context_path': writing_context_path,
+            'instruction': instruction,
+            'document_slot': document_slot,
+        })
+        return {'revised_document': '/output/revised.md'}
+
+    monkeypatch.setattr(bridge, 'academic_writer_revise_markdown', revise)
+
+    result = bridge.academic_writer_revise_from_feedback(
+        '/inputs/draft.md', '/inputs/context.json', str(feedback),
+        'revised_document', '保留原有标题结构',
+    )
+
+    assert result == {'revised_document': '/output/revised.md'}
+    assert captured['base_document_path'] == '/inputs/draft.md'
+    assert captured['writing_context_path'] == '/inputs/context.json'
+    assert captured['document_slot'] == 'revised_document'
+    assert '# 修订路线图' in captured['instruction']
+    assert 'R-001：补充研究边界' in captured['instruction']
+    assert '保留原有标题结构' in captured['instruction']
+    assert '"text"' not in captured['instruction']
+
+
 def test_full_document_revision_uses_one_model_call_and_accepts_outer_fence(
     monkeypatch, tmp_path,
 ):

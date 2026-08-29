@@ -46,22 +46,23 @@ type ProducerRef struct {
 }
 
 type CompiledNode struct {
-	ID              string        `json:"id"`
-	Label           string        `json:"label,omitempty"`
-	Route           string        `json:"route"`
-	Input           *Expression   `json:"input_expression,omitempty"`
-	OptionalInputs  []MaterialRef `json:"optional_inputs,omitempty"`
-	Outputs         []string      `json:"outputs,omitempty"`
-	RequiredOutputs []string      `json:"required_outputs,omitempty"`
-	SkipIf          *Expression   `json:"skip_if,omitempty"`
-	Prompt          string        `json:"prompt,omitempty"`
-	Acceptance      []string      `json:"acceptance_criteria,omitempty"`
-	Capabilities    []string      `json:"capabilities,omitempty"`
-	LegacyTools     []string      `json:"legacy_tools,omitempty"`
-	TerminalTools   []string      `json:"terminal_tools,omitempty"`
-	ToolsOnly       bool          `json:"tools_only,omitempty"`
-	StreamHeartbeat bool          `json:"stream_heartbeat,omitempty"`
-	Mode            string        `json:"mode,omitempty"`
+	ID              string            `json:"id"`
+	Label           string            `json:"label,omitempty"`
+	Route           string            `json:"route"`
+	Input           *Expression       `json:"input_expression,omitempty"`
+	OptionalInputs  []MaterialRef     `json:"optional_inputs,omitempty"`
+	InputTransports map[string]string `json:"input_transports,omitempty"`
+	Outputs         []string          `json:"outputs,omitempty"`
+	RequiredOutputs []string          `json:"required_outputs,omitempty"`
+	SkipIf          *Expression       `json:"skip_if,omitempty"`
+	Prompt          string            `json:"prompt,omitempty"`
+	Acceptance      []string          `json:"acceptance_criteria,omitempty"`
+	Capabilities    []string          `json:"capabilities,omitempty"`
+	LegacyTools     []string          `json:"legacy_tools,omitempty"`
+	TerminalTools   []string          `json:"terminal_tools,omitempty"`
+	ToolsOnly       bool              `json:"tools_only,omitempty"`
+	StreamHeartbeat bool              `json:"stream_heartbeat,omitempty"`
+	Mode            string            `json:"mode,omitempty"`
 }
 
 type CompiledEdge struct {

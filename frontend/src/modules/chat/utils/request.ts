@@ -888,10 +888,16 @@ export function PromptServiceApi() {
         content: string;
         user_instruct: string;
         allow_empty: true;
+        full_content?: string;
+        selection_start?: number;
+        selection_end?: number;
       },
       options?: RawAxiosRequestConfig,
     ) {
-      return axiosInstance.post<PromptPolishOpenAPIResponse>(
+      return axiosInstance.post<PromptPolishOpenAPIResponse & {
+        target_start?: number;
+        target_end?: number;
+      }>(
         `${coreApiBaseUrl}/prompts:polish`,
         payload,
         withJsonOptions(options),

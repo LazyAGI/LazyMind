@@ -25,6 +25,13 @@ HAN = re.compile(r'[\u3400-\u4dbf\u4e00-\u9fff]')
 REQ_ID = re.compile(r'\b(?:BG|FUNC|PERF|SEC|SVC|IMPL)-\d{3}\b')
 DISQ_ID = re.compile(r'\bD-\d{3}\b')
 MARKDOWN_HEADING = re.compile(r'^(#{1,6})\s+(.+?)\s*$')
+SOURCE_ITEM_ID = re.compile(
+    r'^(?P<code>REQ|BG|FUNC|PERF|SEC|SVC|IMPL|DISQ|D)[-_]?\d+(?:\.\d+)*\b', re.I,
+)
+LIST_ITEM = re.compile(
+    r'^(?:[-*+•\uf0b7]\s+|\d+(?:\.\d+)*[、.．)]\s*|[（(]?[一二三四五六七八九十]+[）)、.．]\s*)',
+)
+BULLET_ONLY = re.compile(r'^[•●▪◦‣·\uf0b7]+$')
 NUMBER_PATTERN = re.compile(
     r'(?:[<>≤≥]=?\s*)?\d+(?:\.\d+)?\s*(?:%|秒|毫秒|分钟|小时|天|个|人|台|套|年|月|'
     r'MB|GB|TB|Mbps|Gbps|TPS|QPS|万元|元|级|次|并发|工作日)?', re.I,
@@ -69,6 +76,9 @@ def _heading_level(text: str, style: str = '') -> int | None:
         return min(4, int(style_match.group(1)))
     stripped = text.strip()
     if re.match(r'^第[一二三四五六七八九十百零〇\d]+章(?:\s|　|$)', stripped):
+        return 1
+    if re.match(r'^[一二三四五六七八九十百零〇]+[、.．]\s*\S', stripped) \
+            and len(stripped) <= 80:
         return 1
     numeric = re.match(r'^(\d+(?:\.\d+){0,3})[、.．\s　]+\S', stripped)
     if numeric and len(stripped) <= 80:
@@ -283,28 +293,69 @@ def parse_bid_document(input_path: str) -> dict[str, Any]:
 def _paragraphs(raw_text: str) -> list[tuple[int, str]]:
     result: list[tuple[int, str]] = []
     buffer: list[str] = []
+    buffer_is_heading = False
     first_line = 1
+
+    def flush() -> None:
+        nonlocal buffer, buffer_is_heading
+        if buffer and not (buffer_is_heading and len(buffer) == 1):
+            result.append((first_line, ' '.join(buffer)))
+        buffer = []
+        buffer_is_heading = False
+
     for line_no, raw in enumerate(str(raw_text or '').splitlines(), 1):
         line = raw.strip()
-        if not line or line.startswith('<!--') or re.fullmatch(r'\|?\s*:?-{3,}.*', line):
-            if buffer:
-                result.append((first_line, ' '.join(buffer)))
-                buffer = []
+        if (not line or line.startswith('<!--') or BULLET_ONLY.fullmatch(line)
+                or re.fullmatch(r'\|?\s*:?-{3,}.*', line)):
+            flush()
             continue
+
+        # DOCX/HTML tables are normalized to Markdown. Each data row is one source
+        # requirement and must not be merged with adjacent rows before classification.
+        if line.startswith('|') and line.endswith('|'):
+            flush()
+            cells = [cell.strip() for cell in line.strip('|').split('|') if cell.strip()]
+            if cells:
+                result.append((line_no, ' | '.join(cells)))
+            continue
+
+        normalized = line.lstrip('# ').strip() if line.startswith('#') else line
+        source_item = SOURCE_ITEM_ID.match(normalized)
+        starts_item = bool(line.startswith('#') or source_item or LIST_ITEM.match(normalized))
+        if starts_item:
+            buffered_source = SOURCE_ITEM_ID.match(buffer[0]) if buffer else None
+            if (source_item and buffered_source
+                    and buffered_source.group('code').upper() in {'DISQ', 'D'}):
+                buffer.append(normalized)
+                buffer_is_heading = False
+                continue
+            flush()
+            first_line = line_no
+            buffer = [normalized]
+            buffer_is_heading = line.startswith('#')
+            continue
+
+        if buffer and len(' '.join(buffer)) + len(line) > 700:
+            flush()
         if not buffer:
             first_line = line_no
-        if line.startswith('#') or len(' '.join(buffer)) + len(line) > 700:
-            if buffer:
-                result.append((first_line, ' '.join(buffer)))
-            buffer, first_line = [line.lstrip('# ').strip()], line_no
-        else:
-            buffer.append(line.strip('| '))
-    if buffer:
-        result.append((first_line, ' '.join(buffer)))
+        buffer.append(line.strip('| '))
+        buffer_is_heading = False
+    flush()
     return [(line, re.sub(r'\s+', ' ', text).strip()) for line, text in result if len(text) >= 8]
 
 
 def _topic(text: str) -> tuple[str, str, list[str]] | None:
+    source_id = SOURCE_ITEM_ID.match(text)
+    source_code = source_id.group('code').upper() if source_id else ''
+    if source_code in {'DISQ', 'D'}:
+        return None
+    if source_code in {code for code, _, _ in TOPICS}:
+        for code, label, keywords in TOPICS:
+            if code == source_code:
+                hits = [keyword for keyword in keywords if keyword in text]
+                return code, label, hits
+
     candidates: list[tuple[int, int, str, str, list[str]]] = []
     for priority, (code, label, keywords) in enumerate(TOPICS):
         hits = [keyword for keyword in keywords if keyword in text]
@@ -378,7 +429,9 @@ def extract_technical_requirements(raw_text: str) -> dict[str, Any]:
     return {'markdown': '\n'.join(lines).strip(), 'counts': dict(counters), 'total': len(records)}
 
 
-PRIMARY_DISQ = ('废标', '否决', '否则视为', '不接受偏离', '不得偏离', '实质性不响应', '★', '▲')
+PRIMARY_DISQ = (
+    '废标', '否决', '无效投标', '否则视为', '不接受偏离', '不得偏离', '实质性不响应', '★', '▲',
+)
 RISK_DISQ = ('必须', '应当', '不得', '严禁', '资格要求', '资质要求', '项目经理', '工期',
              '质保', '响应时间', '等保', '信创', '国密', '本地化部署', '源代码', '知识产权')
 

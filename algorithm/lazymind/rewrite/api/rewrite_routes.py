@@ -14,6 +14,7 @@ from lazymind.rewrite import (
     RewriteTaskType,
     UnprocessableContentError,
     rewrite_content,
+    rewrite_editable_selection,
 )
 
 router = APIRouter()
@@ -29,6 +30,9 @@ class RewritePayload(BaseModel):
         ...,
         description='Per-request model configuration loaded by core for the current user',
     )
+    full_content: str | None = None
+    selection_start: int | None = None
+    selection_end: int | None = None
 
     @model_validator(mode='after')
     def validate_inputs(self) -> 'RewritePayload':
@@ -49,6 +53,16 @@ def _init_session(task_type: RewriteTaskType, model_config: Dict[str, Any]) -> N
 async def rewrite(payload: RewritePayload):
     try:
         _init_session(payload.task_type, payload.llm_config)
+        if payload.task_type == 'polish' and payload.full_content is not None:
+            start = payload.selection_start
+            end = payload.selection_end
+            if start is None or end is None or not (0 <= start < end <= len(payload.full_content)):
+                raise BadRequestError('valid selection_start and selection_end are required')
+            if payload.full_content[start:end] != payload.content:
+                raise BadRequestError('selection offsets do not match content')
+            return rewrite_editable_selection(
+                payload.full_content, start, end, payload.user_instruct,
+            )
         generated = rewrite_content(
             task_type=payload.task_type,
             content=payload.content,

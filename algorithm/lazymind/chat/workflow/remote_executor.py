@@ -133,12 +133,17 @@ class RemoteWorkflowExecutor:
             if output_types:
                 params['output_slot_types'] = output_types
             input_types = dict(context.get('declared_input_types') or {})
-            direct_value_slots = sorted(self._direct_input_value_slots(context))
-            # Workflow bindings are typed execution inputs, not user uploads. Scalar
-            # values and public image references stay typed values; only binary inputs
-            # use fenced local paths. Keep all forms out of attachment-only tools.
+            input_transports = self._resolved_input_transports(context, inputs)
+            direct_value_slots = sorted(
+                slot for slot, transport in input_transports.items()
+                if transport in {'value', 'reference'}
+            )
+            # Workflow bindings are typed execution inputs, not user uploads. The
+            # compiled step may request values, references, or fenced local paths.
+            # Keep every form out of attachment-only tools.
             params['remote_inputs'] = inputs
             params['remote_input_types'] = input_types
+            params['remote_input_transports'] = input_transports
             params['remote_input_value_slots'] = direct_value_slots
             task.update({
                 'id': task_id,
@@ -281,14 +286,42 @@ class RemoteWorkflowExecutor:
     @classmethod
     def _direct_input_value_slots(cls, context: Dict[str, Any]) -> set[str]:
         input_types = context.get('declared_input_types') or {}
+        input_transports = context.get('declared_input_transports') or {}
         bindings = context.get('inputs') or {}
         if not isinstance(input_types, dict) or not isinstance(bindings, dict):
             return set()
         return {
             str(material) for material in bindings
+            if str(input_transports.get(str(material)) or 'auto').strip().lower() != 'path'
             if str(input_types.get(str(material)) or '').strip().lower()
             in {'text', 'json', 'image'}
         }
+
+    @staticmethod
+    def _resolved_input_transports(
+        context: Dict[str, Any], inputs: Dict[str, Any],
+    ) -> Dict[str, str]:
+        input_types = context.get('declared_input_types') or {}
+        declared = context.get('declared_input_transports') or {}
+        result: Dict[str, str] = {}
+        for material, value in inputs.items():
+            material_type = str(input_types.get(str(material)) or '').strip().lower()
+            transport = str(declared.get(str(material)) or 'auto').strip().lower()
+            if transport != 'auto':
+                result[str(material)] = transport
+                continue
+            if material_type in {'text', 'json'}:
+                result[str(material)] = 'value'
+                continue
+            if material_type == 'image':
+                items = value if isinstance(value, list) else [value]
+                result[str(material)] = (
+                    'reference' if items and all(isinstance(item, dict) for item in items)
+                    else 'path'
+                )
+                continue
+            result[str(material)] = 'path'
+        return result
 
     @staticmethod
     def _decode_input_value(item: Dict[str, Any], material_type: str) -> Any:
@@ -341,8 +374,11 @@ class RemoteWorkflowExecutor:
         root = pathlib.Path(workspace) / 'inputs'
         direct_slots = self._direct_input_value_slots(context)
         input_types = context.get('declared_input_types') or {}
+        input_transports = context.get('declared_input_transports') or {}
         if not isinstance(input_types, dict):
             input_types = {}
+        if not isinstance(input_transports, dict):
+            input_transports = {}
         bindings = context.get('inputs') or {}
         for material, binding in bindings.items():
             value = await self.runtime.input(client, attempt, lease, str(material))
@@ -356,15 +392,22 @@ class RemoteWorkflowExecutor:
                     material_type = inferred_type
                     input_types[str(material)] = inferred_type
                     context['declared_input_types'] = input_types
-            if (str(material) in direct_slots or inferred_type) and material_type in {'text', 'json'}:
+            transport = str(input_transports.get(str(material)) or 'auto').strip().lower()
+            if transport != 'path' and (
+                transport == 'value' or str(material) in direct_slots or inferred_type
+            ) and material_type in {'text', 'json'}:
                 values = [self._decode_input_value(item, material_type) for item in items]
                 result[str(material)] = values if is_list else values[0]
                 continue
-            if material_type == 'image':
+            if transport != 'path' and material_type == 'image':
                 references = [self._decode_input_value(item, material_type) for item in items]
                 if all(reference is not None for reference in references):
                     result[str(material)] = references if is_list else references[0]
                     continue
+                if transport == 'reference':
+                    raise ValueError(
+                        f'image Workflow input {material!r} does not contain a durable reference'
+                    )
             paths = []
             list_root = root
             if is_list:

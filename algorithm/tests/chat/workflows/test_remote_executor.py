@@ -2,6 +2,7 @@ import base64
 import json
 import os
 import threading
+from pathlib import Path
 
 import httpx
 import pytest
@@ -164,6 +165,9 @@ async def test_remote_executor_unwraps_upstream_artifacts_by_declared_type(tmp_p
         'declared_input_types': {
             'workflow_routing': 'text', 'source_image': 'image',
         },
+        'declared_input_transports': {
+            'workflow_routing': 'value', 'source_image': 'reference',
+        },
         'inputs': {
             'workflow_routing': {'source_type': 'artifact'},
             'source_image': {'source_type': 'artifact'},
@@ -180,6 +184,9 @@ async def test_remote_executor_unwraps_upstream_artifacts_by_declared_type(tmp_p
     }
     assert worker._direct_input_value_slots(context) == {
         'workflow_routing', 'source_image',
+    }
+    assert worker._resolved_input_transports(context, values) == {
+        'workflow_routing': 'value', 'source_image': 'reference',
     }
     assert not (tmp_path / 'inputs').exists()
 
@@ -231,6 +238,48 @@ async def test_remote_executor_infers_artifact_types_when_core_omits_them(tmp_pa
 
 
 @pytest.mark.asyncio
+async def test_remote_executor_materializes_scalar_artifacts_when_transport_is_path(tmp_path):
+    worker = RemoteWorkflowExecutor()
+
+    class Runtime:
+        async def input(self, _client, _attempt, _lease, material):
+            payloads = {
+                'brief': {'text': 'approved brief'},
+                'parameters': {'data': {'output_format': 'docx'}},
+            }
+            raw = json.dumps(payloads[material]).encode('utf-8')
+            return {
+                'name': material + '.json',
+                'mime_type': 'application/json',
+                'content_base64': base64.b64encode(raw).decode('ascii'),
+            }
+
+    worker.runtime = Runtime()
+    context = {
+        'declared_input_types': {'brief': 'text', 'parameters': 'json'},
+        'declared_input_transports': {'brief': 'path', 'parameters': 'path'},
+        'inputs': {
+            'brief': {'source_type': 'artifact'},
+            'parameters': {'source_type': 'artifact'},
+        },
+    }
+    values = await worker._resolve_inputs(
+        object(), 'attempt-1', 'lease-1', context, str(tmp_path),
+    )
+
+    assert json.loads(Path(values['brief']).read_text(encoding='utf-8')) == {
+        'text': 'approved brief',
+    }
+    assert json.loads(Path(values['parameters']).read_text(encoding='utf-8')) == {
+        'data': {'output_format': 'docx'},
+    }
+    assert worker._direct_input_value_slots(context) == set()
+    assert worker._resolved_input_transports(context, values) == {
+        'brief': 'path', 'parameters': 'path',
+    }
+
+
+@pytest.mark.asyncio
 async def test_remote_executor_materializes_binary_image_inputs(tmp_path):
     worker = RemoteWorkflowExecutor()
 
@@ -254,6 +303,7 @@ async def test_remote_executor_materializes_binary_image_inputs(tmp_path):
     path = tmp_path / 'inputs' / 'upload.png'
     assert values['source_image'] == str(path)
     assert path.read_bytes() == b'\x89PNG\r\n'
+    assert worker._resolved_input_transports(context, values) == {'source_image': 'path'}
 
 
 @pytest.mark.asyncio
@@ -342,6 +392,7 @@ async def test_remote_executor_keeps_workflow_inputs_out_of_user_attachments(
 
     assert captured['remote_inputs']['brief'] == 'hello'
     assert captured['remote_input_types'] == {'brief': 'text'}
+    assert captured['remote_input_transports'] == {'brief': 'value'}
     assert captured['remote_input_value_slots'] == ['brief']
     assert '_attachment_context' not in captured
     agentic = runner._build_agentic_config(
@@ -368,9 +419,15 @@ def test_workflow_material_prompt_forbids_attachment_tools():
         'remote_inputs': {
             'topic': '人工智能辅助软件测试',
             'outline_document': '/workspace/inputs/outline_document.md',
+            'source_image': {'path': 'https://images.example.test/source.png'},
         },
-        'remote_input_types': {'topic': 'text', 'outline_document': 'file'},
-        'remote_input_value_slots': ['topic'],
+        'remote_input_types': {
+            'topic': 'text', 'outline_document': 'file', 'source_image': 'image',
+        },
+        'remote_input_transports': {
+            'topic': 'value', 'outline_document': 'path', 'source_image': 'reference',
+        },
+        'remote_input_value_slots': ['source_image', 'topic'],
     }
     prompt = _workflow_material_bindings_section(params)
 
@@ -378,6 +435,8 @@ def test_workflow_material_prompt_forbids_attachment_tools():
     assert 'kind=value' in prompt
     assert '"value": "人工智能辅助软件测试"' in prompt
     assert '"path": "/workspace/inputs/outline_document.md"' in prompt
+    assert '"kind": "reference"' in prompt
+    assert '"reference": {"path": "https://images.example.test/source.png"}' in prompt
     assert 'read_user_attachment' in prompt
     assert _resolve_attachment_configs({}, 'workflow_step', params) == []
     assert _resolve_attachment_configs(

@@ -7,7 +7,6 @@ function App() {
     <BrowserRouter
       basename={BASENAME || undefined}
       future={{
-        v7_startTransition: true,
         v7_relativeSplatPath: true,
       }}
     >

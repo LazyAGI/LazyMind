@@ -128,9 +128,13 @@ steps:
       pass guessed kb_ids, and never use web search. Search only the implicit selected scope.
 
       Read raw_bid_text, technical_requirements, and disqualification_items. If one or more
-      knowledge bases were selected for this conversation, perform multiple complementary
-      kb_search calls as needed, normally 2–4, to cover distinct evidence needs derived from
-      the tender requirements. Each query must express one natural-language intent, such as
+      knowledge bases were selected for this conversation, start with two complementary
+      kb_search calls to cover distinct evidence needs derived from the tender requirements.
+      Compare their returned evidence/document identifiers and source labels before searching
+      again. Add at most two more queries only when they can cover a requirement area not
+      represented by the retrieved evidence. Stop when a new query returns no new evidence or
+      only the same documents as earlier queries; never issue all possible queries up front.
+      Each query must express one natural-language intent, such as
       relevant reference solutions, matching product capabilities, implementation practices,
       or service and security evidence. Base every query on the project name, construction
       objective, and requirement IDs rather than a comma-separated keyword/topic list. Keep
@@ -148,16 +152,19 @@ steps:
       explaining that no knowledge base was specified and that this run will use the tender
       document only. If an individual search fails, record that failure, continue with other
       distinct evidence queries, and retry the same query at most once only when the error is
-      transient. In every branch save the combined successful evidence and any failure notes
-      as knowledge_evidence with content_type="text"; this output must always exist so the
-      pipeline remains deterministic.
+      transient. In every branch build exactly one combined Markdown string from successful
+      evidence and any failure notes. Save that string as knowledge_evidence with
+      content_type="text"; this output must always exist so the pipeline remains deterministic.
 
       Then call bid_writer_prepare_context(user_request="{{user_input}}",
       requirements_markdown=<technical_requirements artifact path>,
       disqualification_markdown=<disqualification_items artifact path>,
       word_target=<generation_parameters artifact path>,
-      knowledge_text=<knowledge_evidence artifact path>). Pass the bound paths directly;
-      do not copy large artifact bodies or manually parse generation_parameters in the Agent.
+      knowledge_text=<the exact combined Markdown string already built above>). Reuse that
+      in-memory string directly: knowledge_evidence is a same-step text output and therefore
+      has no resolvable artifact path. Never call find_artifact, get_artifact, list_artifacts or
+      read_file to rediscover it. Pass the other bound paths directly; do not copy large artifact
+      bodies or manually parse generation_parameters in the Agent.
       The business bridge accepts both paths and inline values for backward compatibility. This is the only
       preparation path for later outline and drafting: it delegates task construction,
       resource profiling, and writing context to LazyMind's shared Writer capability.
@@ -168,12 +175,16 @@ steps:
     inputs:
       - material: raw_bid_text
         required: true
+        transport: path
       - material: technical_requirements
         required: true
+        transport: path
       - material: disqualification_items
         required: true
+        transport: path
       - material: generation_parameters
         required: true
+        transport: path
     outputs:
       - material: knowledge_evidence
       - material: writing_task
@@ -242,12 +253,16 @@ steps:
         required: true
       - material: knowledge_evidence
         required: true
+        transport: path
       - material: technical_requirements
         required: true
+        transport: path
       - material: disqualification_items
         required: true
+        transport: path
       - material: generation_parameters
         required: true
+        transport: path
     outputs:
       - material: outline_document
       - material: outline
@@ -374,12 +389,16 @@ steps:
         required: true
       - material: knowledge_evidence
         required: true
+        transport: path
       - material: technical_requirements
         required: true
+        transport: path
       - material: disqualification_items
         required: true
+        transport: path
       - material: generation_parameters
         required: true
+        transport: path
     outputs:
       - material: effective_outline
       - material: effective_outline_check_report
@@ -420,23 +439,30 @@ steps:
 
       First call render_proposal_image once with image_type="architecture" for a
       4–6-layer system architecture and save its real PNG path as architecture_image.
-      Then select 5–10 effect types that match actual project functions from dashboard,
-      workbench, list, form, approval, analytics, mobile, admin, login and flow. Use at
-      least five distinct types; every image's main block, information density and visual
-      focus must differ from the others. Call render_proposal_image once per effect.
+      Then select effect types that match actual project functions from dashboard,
+      workbench, list, form, approval, analytics, mobile, admin, login and flow. Use five
+      distinct types for drafts below 5000 Chinese characters, 6–8 for drafts from 5000
+      to 20000 characters, and at most 10 only for longer drafts with enough distinct
+      functions. Every image's main block, information density and visual focus must differ
+      from the others. Call render_proposal_image once per effect.
 
       All specs use color_scheme="blue", 1920x1080, concise Chinese labels and only
       source-grounded metrics. Save every returned effect PNG as one ordered effect_images
       item with a distinct caption. Save image_manifest as JSON containing architecture
-      metadata and the ordered effect entries (type, title, source_chapter, filename).
+      metadata with source_chapters as an array of exact Markdown heading titles, and the
+      ordered effect entries with type, title, filename and exactly one primary
+      source_chapter equal to an exact Markdown heading title. Do not join multiple chapter
+      names into one effect source_chapter value.
       PNG paths must be saved with content_type="image" and source_tool="render_proposal_image";
       never save spec JSON, HTML, SVG or placeholder text in an image slot.
     tools: [bid_writer_read_markdown, render_proposal_image]
     inputs:
       - material: effective_outline
         required: true
+        transport: path
       - material: technical_requirements
         required: true
+        transport: path
       - material: draft_document
         required: true
     outputs:
@@ -467,6 +493,7 @@ steps:
     inputs:
       - material: effective_outline
         required: true
+        transport: path
       - material: draft_document
         required: true
       - material: architecture_image
@@ -475,12 +502,16 @@ steps:
         required: true
       - material: image_manifest
         required: true
+        transport: path
       - material: technical_requirements
         required: true
+        transport: path
       - material: disqualification_items
         required: true
+        transport: path
       - material: generation_parameters
         required: true
+        transport: path
     outputs:
       - material: final_proposal_markdown
       - material: final_proposal
@@ -518,14 +549,19 @@ steps:
         required: true
       - material: effective_outline
         required: true
+        transport: path
       - material: technical_requirements
         required: true
+        transport: path
       - material: disqualification_items
         required: true
+        transport: path
       - material: generation_parameters
         required: true
+        transport: path
       - material: image_manifest
         required: true
+        transport: path
     outputs:
       - material: validation_report
       - material: validation_summary

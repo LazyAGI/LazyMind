@@ -1,14 +1,14 @@
 schema_version: 2
 id: market-researcher
 type: work
-version: 1.0.0
+version: 1.0.2
 status: published
 default_locale: zh-CN
 provider: WorkBuddy / 千问办公
 
 skill:
   source_url: featured/market-researcher/skill
-  required_version: 1.0.0
+  required_version: 1.0.2
 
 placement:
   home: true
@@ -20,135 +20,81 @@ classification:
   tags:
     - 行业研究
     - 竞争分析
-    - 可比公司
+    - 来源核验
 
 assets:
   cover:
     file: assets/cover.png
     role: cover
+  sector_demo:
+    file: assets/sector-research-demo.html
+    role: result
+  competition_demo:
+    file: assets/competitive-landscape-demo.html
+    role: result
 
 presentation:
   card:
     title: 市场与行业研究专家
-    description: 通过联网检索或用户资料完成行业全景、竞争格局、可比公司与机会风险分析
+    description: 通过联网检索与来源核验，完成行业全景和竞争格局研究
     output_type: report
-    output_label: 市场研究报告
+    output_label: 行业与竞争研究报告
     cover_asset: cover
-    result_summary: 以来源、数据日期和可复核计算支撑研究结论，并明确证据边界
+    result_summary: 以直接来源、数据日期和证据边界支撑可追溯的研究结论
   detail:
     title: 市场与行业研究专家
-    description: 面向行业研究、竞争监测和公司比较，完成资料检索、来源核验、确定性计算、Mermaid 图表与结构化报告交付。来源：WorkBuddy 与千问办公，经 LazyMind 融合适配。
-    attachment_hint: 行业说明、研究报告、公司名单、财务数据表或来源链接（可选）
+    description: 面向行业研究与竞争监测，完成范围界定、联网检索、来源核验、参与者比较和结构化报告交付。来源：WorkBuddy 与千问办公，经 LazyMind 融合适配。
+    attachment_hint: 行业说明、研究报告、公司名单或来源链接（可选）
 
 tasks:
   - id: sector-research
     selector:
       title: 行业全景研究
-      description: 分析行业边界、市场规模、产业链、增长驱动、竞争格局与风险
-      output_label: 行业研究报告
+      description: 联网研究目标行业的发展阶段、产业链、主要玩家、机会与风险
+      output_label: 行业机会速览
     launch:
-      prompt_short: 帮我完成一份证据可追溯的行业全景研究报告。
-      prompt: 请根据我提供的行业或细分赛道、地区、目标期间和研究目的，完成行业全景研究。请明确行业定义和统计口径，分析市场规模与趋势、细分市场、产业链与利润池、增长驱动、竞争格局、主要风险和待验证问题；优先核验可靠来源并标注数据日期。信息不足时只询问会显著改变结论的关键条件；当前联网或结构化数据能力不足时，请如实降级并列出待取证证据，不要补造数字。
+      prompt_short: 调研中国具身智能机器人行业，梳理产业格局、机会、风险与关键证据。
+      prompt: |
+        请调研【中国具身智能机器人】行业，范围为【中国大陆】，重点关注【近三年及未来两年】。我想了解这个行业目前处于什么发展阶段，产业链和主要玩家有哪些，接下来存在哪些机会与风险。请基于最新公开资料形成一份来源可追溯的行业研究报告。
     replay:
       steps:
-        - title: 明确研究范围
-          description: 确认行业边界、地区、期间、研究目的和统计口径
-        - title: 检索并核验证据
-          description: 按证据问题查找直接来源，记录日期、口径与冲突数据
-        - title: 分析产业与竞争
-          description: 串联市场规模、产业链、利润池、驱动、壁垒和风险
-        - title: 形成研究报告
-          description: 输出关键结论、来源、数据缺口和后续跟踪指标
+        - title: 锁定产业边界
+          description: 区分具身智能与相邻机器人市场，明确地区、期间和统计口径
+        - title: 四组证据检索
+          description: 先完成四组核心检索，再按证据缺口补证，记录原始来源、口径和日期
+        - title: 搭建机会地图
+          description: 串联细分、价值链、参与者、增长驱动和关键瓶颈
+        - title: 形成决策速览
+          description: 完整输出判断、证据链、边界和未来 12—24 个月跟踪信号
     result:
-      template: generic_report_v1
-      eyebrow: 行业研究报告
-      title: 行业全景、竞争格局与机会风险分析
-      summary: 从行业边界和证据口径出发，形成可追溯、可复核的完整研究判断
-      highlights:
-        - 市场边界、规模、趋势与细分结构
-        - 产业链、利润池、驱动因素与风险
-        - 竞争格局、证据来源与待验证问题
+      template: html_preview_v1
+      eyebrow: 行业全景案例
+      title: 中国具身智能机器人行业机会速览
+      summary: 从产业边界和原始来源口径出发，系统梳理市场信号、价值链、机会与关键风险
+      html_asset: sector_demo
 
   - id: competitive-landscape
     selector:
       title: 竞争格局分析
-      description: 识别参与者、战略分组、份额口径、竞争壁垒与变化信号
-      output_label: 竞争格局报告
+      description: 联网比较目标产品或企业的定位、能力、适用场景与选择风险
+      output_label: 平台选型速览
     launch:
-      prompt_short: 分析一个市场的主要参与者、定位、壁垒和竞争变化。
-      prompt: 请根据我提供的行业、地区、目标期间和公司范围完成竞争格局分析。请区分直接竞争者、替代方案和价值链控制者，建立参与者地图与战略分组，核验份额或已覆盖样本口径，比较产品、客户、渠道、成本、技术和资本强度，并为每项潜在壁垒给出支持证据和证伪信号。不要根据搜索排名推断市场排名；资料不足时保留缺口并降低结论强度。
+      prompt_short: 对比百炼、千帆与腾讯云智能体开发平台，给出有证据的选型建议。
+      prompt: |
+        请对比【阿里云百炼、百度智能云千帆、腾讯云智能体开发平台】，帮助【正在进行平台选型的企业产品与技术团队】判断它们分别适合什么场景、存在哪些限制，以及应该如何选择。请基于最新官方资料形成一份来源可追溯的对比报告。
     replay:
       steps:
-        - title: 确认竞争单元
-          description: 核对客户需求、价值链环节、地区、期间和可比边界
-        - title: 建立参与者地图
-          description: 识别直接竞争者、替代方案、潜在进入者与控制节点
-        - title: 比较定位与壁垒
-          description: 分析战略分组、竞争机制、优势证据和证伪信号
-        - title: 输出竞争判断
-          description: 总结格局变化、关键风险和需要持续监控的指标
+        - title: 定义可比边界
+          description: 明确企业级 Agent 开发平台的竞争单元、目标客户和比较期间
+        - title: 定额核验官方资料
+          description: 核验三家产品页与官方文档，并按比较缺口补证，记录日期、未披露项和口径差异
+        - title: 建立能力矩阵
+          description: 从五个维度比较定位、产品能力、适配场景与选择限制
+        - title: 形成选型速览
+          description: 输出三条判断、证据边界和后续监控指标
     result:
-      template: generic_report_v1
-      eyebrow: 竞争格局报告
-      title: 市场参与者、战略分组与竞争壁垒
-      summary: 用统一边界和可核验证据解释参与者定位、竞争机制与格局变化
-      highlights:
-        - 参与者地图与战略分组
-        - 份额口径、竞争机制与比较矩阵
-        - 壁垒证据、证伪信号与监控指标
-
-  - id: comparable-companies
-    selector:
-      title: 可比公司分析
-      description: 统一样本、期间和指标口径，比较经营数据与估值倍数
-      output_label: 可比公司分析
-    launch:
-      prompt_short: 对我指定的公司进行同口径经营与估值比较。
-      prompt: 请根据我提供的公司范围、估值日期、财务期间和指标完成可比公司分析。先说明核心可比组与排除逻辑，统一币种、单位、期间和会计口径；对至少两家公司的结构化数值执行确定性统计，披露有效样本与排除项，并分别比较经营指标、估值与预期、风险和证据完整度。除非我给定排序口径和权重，否则不要强行形成综合投资排名；所有外部数字都要标注直接来源和数据日期。
-    replay:
-      steps:
-        - title: 选择可比样本
-          description: 按业务、地区、商业模式、阶段和风险解释入选与排除
-        - title: 统一数据口径
-          description: 对齐估值日期、财务期间、币种、单位和调整项目
-        - title: 执行确定性计算
-          description: 计算样本统计并保留有效样本、排除项和原始输入
-        - title: 形成分维度结论
-          description: 比较经营、估值、风险与证据完整度并说明限制
-    result:
-      template: generic_report_v1
-      eyebrow: 可比公司分析
-      title: 同口径经营指标与估值比较
-      summary: 在统一样本和数据口径下完成可复核计算，并避免无依据的综合排序
-      highlights:
-        - 可比组选择与数据标准化
-        - 样本统计、经营指标与估值倍数
-        - 风险、证据完整度与结论边界
-
-  - id: closed-data-analysis
-    selector:
-      title: 封闭数据分析
-      description: 只依据用户给定数据完成确定性计算、分维度比较和受控图表
-      output_label: 受控数据分析
-    launch:
-      prompt_short: 只依据我提供的数据完成可复核分析，不补充外部事实。
-      prompt: 请把我提供的数据视为封闭数据集，不联网、不补充外部事实，只做输入复述、确定性计算、逐列比较和数据缺口说明。若至少有两家公司和结构化数值，请运行可比统计脚本；若我要求图表，只在数据满足条件时输出与邻近表格逐项一致的受控 Mermaid。不得根据横截面顺序推断相关性、因果或市场定价逻辑，不得在缺少用户认可权重时生成综合排名。
-    replay:
-      steps:
-        - title: 锁定允许数据
-          description: 仅收录用户输入及成功脚本返回的确定性计算结果
-        - title: 执行可复核计算
-          description: 计算样本统计，保留原始输入、有效样本与排除项
-        - title: 分维度比较
-          description: 如实报告各列顺序，不推断相关性、因果或综合优劣
-        - title: 交付受限结论
-          description: 区分事实、计算、定性假设和仍需补充的数据字段
-    result:
-      template: generic_report_v1
-      eyebrow: 受控数据分析
-      title: 封闭数据的确定性计算与比较
-      summary: 仅依据给定数据形成可复核结果，明确禁止外推的结论边界
-      highlights:
-        - 输入事实与确定性样本统计
-        - 分维度顺序与受控 Mermaid 图表
-        - 定性情景、数据缺口与受限结论
+      template: html_preview_v1
+      eyebrow: 竞争格局案例
+      title: 中国企业级 AI Agent 开发平台选型速览
+      summary: 基于官方产品与文档页面，系统比较三家平台的定位、能力、适配场景与证据边界
+      html_asset: competition_demo

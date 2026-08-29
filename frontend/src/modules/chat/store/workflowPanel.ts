@@ -285,6 +285,11 @@ export interface SlotWidgetConfig {
   widgetType?: string;
   readOnly?: boolean;
   maxHeight?: number;
+  collapsed?: boolean;
+  itemLayout?: 'scroll' | 'grid';
+  gridMaxCols?: number;
+  itemWidth?: number;
+  itemHeight?: number;
   [key: string]: unknown;
 }
 

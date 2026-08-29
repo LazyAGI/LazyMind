@@ -11,6 +11,7 @@ import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import {
   getShowcaseCase,
+  listShowcaseCases,
   type ShowcaseCase,
   type ShowcaseCaseResult,
   type ShowcaseCaseTask,
@@ -48,26 +49,6 @@ function scrollTaskListHorizontally(taskList: HTMLDivElement, event: WheelEvent)
 
   event.preventDefault();
   taskList.scrollLeft = nextScrollLeft;
-}
-
-function ResultSkeleton({ label }: { label: string }) {
-  return (
-    <div className="showcase-result-document showcase-result-skeleton" role="status" aria-live="polite">
-      <span className="sr-only">{label}</span>
-      <div className="showcase-result-skeleton-content" aria-hidden="true">
-        <span className="showcase-skeleton-line is-short" />
-        <span className="showcase-skeleton-line is-title" />
-        <span className="showcase-skeleton-line is-subtitle" />
-        <div className="showcase-skeleton-metrics">
-          <span /><span /><span />
-        </div>
-        <div className="showcase-skeleton-columns">
-          <span /><span />
-        </div>
-        <span className="showcase-skeleton-line is-footer" />
-      </div>
-    </div>
-  );
 }
 
 function ProductReportResult({ result }: { result: ShowcaseCaseResult }) {
@@ -196,10 +177,10 @@ export default function DetailPage() {
   const locale = i18n.resolvedLanguage || i18n.language;
   const { caseId = "" } = useParams();
   const navigate = useNavigate();
-  const resultPanelRef = useRef<HTMLElement>(null);
   const taskSectionRef = useRef<HTMLElement>(null);
   const taskListRef = useRef<HTMLDivElement>(null);
   const [item, setItem] = useState<ShowcaseCase | null>(null);
+  const [galleryCases, setGalleryCases] = useState<ShowcaseCase[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [hasError, setHasError] = useState(false);
   const [visibleSteps, setVisibleSteps] = useState(0);
@@ -233,6 +214,20 @@ export default function DetailPage() {
       });
     return () => controller.abort();
   }, [caseId, locale]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    listShowcaseCases({}, { signal: controller.signal })
+      .then((response) => {
+        setGalleryCases((response.cases || []).filter((entry) => entry.gallery));
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setGalleryCases([]);
+        }
+      });
+    return () => controller.abort();
+  }, [locale]);
 
   useEffect(() => {
     const taskSection = taskSectionRef.current;
@@ -280,23 +275,16 @@ export default function DetailPage() {
   const startCase = () => {
     navigate(buildShowcaseLaunchPath(item.id, item.type, selectedTaskId));
   };
-  const showFullResult = () => {
-    setVisibleSteps(replaySteps.length);
-    setIsAnimationSkipped(true);
-    resultPanelRef.current?.scrollIntoView?.({
-      behavior: prefersReducedMotion() ? "auto" : "smooth",
-      block: "nearest",
-    });
-  };
   const toggleResultExpanded = () => {
-    if (visibleSteps < replaySteps.length) {
-      setVisibleSteps(replaySteps.length);
-      setIsAnimationSkipped(true);
-    }
     setIsResultExpanded((current) => !current);
   };
   const isReplayComplete = visibleSteps >= replaySteps.length;
   const activeResult = selectedTask.result;
+  const currentCaseIndex = galleryCases.findIndex((entry) => entry.id === item.id);
+  const previousCase = currentCaseIndex > 0 ? galleryCases[currentCaseIndex - 1] : undefined;
+  const nextCase = currentCaseIndex >= 0 && currentCaseIndex < galleryCases.length - 1
+    ? galleryCases[currentCaseIndex + 1]
+    : undefined;
   const sourceURL = item.source_url.trim();
   const hasExternalSource = /^https?:\/\//i.test(sourceURL);
 
@@ -374,10 +362,26 @@ export default function DetailPage() {
               <h2>{t("showcase.detail.taskReplay")}</h2>
               <span>{t("showcase.detail.demo")}</span>
             </div>
-            <button type="button" onClick={showFullResult}>
-              {t("showcase.detail.viewResult")}
-              <ArrowRightOutlined aria-hidden="true" />
-            </button>
+            <nav className="showcase-case-navigation" aria-label={t("showcase.detail.caseNavigation")}>
+              <button
+                type="button"
+                disabled={!previousCase}
+                title={previousCase?.title}
+                onClick={() => previousCase && navigate(`/agent/chat/cases/${encodeURIComponent(previousCase.id)}`)}
+              >
+                <ArrowLeftOutlined aria-hidden="true" />
+                {t("showcase.detail.previousCase")}
+              </button>
+              <button
+                type="button"
+                disabled={!nextCase}
+                title={nextCase?.title}
+                onClick={() => nextCase && navigate(`/agent/chat/cases/${encodeURIComponent(nextCase.id)}`)}
+              >
+                {t("showcase.detail.nextCase")}
+                <ArrowRightOutlined aria-hidden="true" />
+              </button>
+            </nav>
           </header>
           <div className="showcase-replay-body">
             <div className="showcase-user-task">
@@ -404,11 +408,7 @@ export default function DetailPage() {
           </div>
         </article>
 
-        <article
-          className="showcase-workbench-panel showcase-result-panel"
-          ref={resultPanelRef}
-          aria-busy={!isReplayComplete}
-        >
+        <article className="showcase-workbench-panel showcase-result-panel">
           <header className="showcase-panel-header">
             <div>
               <h2>{t("showcase.detail.finalOutput")}</h2>
@@ -420,13 +420,9 @@ export default function DetailPage() {
             </button>
           </header>
           <div className={`showcase-result-body${activeResult.template === "html_preview_v1" ? " is-html-preview" : ""}`}>
-            {isReplayComplete ? (
-              <div className={`showcase-result-document showcase-result-document-enter${activeResult.template === "html_preview_v1" ? " is-html-preview" : ""}`}>
-                <ResultContent result={activeResult} steps={replaySteps} />
-              </div>
-            ) : (
-              <ResultSkeleton label={t("showcase.detail.generatingResult")} />
-            )}
+            <div className={`showcase-result-document showcase-result-document-enter${activeResult.template === "html_preview_v1" ? " is-html-preview" : ""}`}>
+              <ResultContent result={activeResult} steps={replaySteps} />
+            </div>
           </div>
         </article>
       </section>

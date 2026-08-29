@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="referrer" content="no-referrer">
+    <title>爆款封面分析报告</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; line-height: 1.6; color: #333; background: #f5f5f5; padding: 20px; }
+        .container { max-width: 1200px; margin: 0 auto; background: #fff; border-radius: 12px; padding: 30px; box-shadow: 0 2px 12px rgba(0,0,0,0.08); }
+        h1.report-title { color: #1a1a1a; margin-bottom: 30px; font-size: 28px; border-bottom: 3px solid #1890ff; padding-bottom: 15px; }
+        .info-bar { background: #e6f7ff; padding: 12px 16px; border-radius: 8px; margin-bottom: 20px; }
+        .info-bar strong { color: #1a1a1a; }
+        .style-card { background: #fafafa; border-radius: 12px; padding: 24px; margin: 20px 0; border: 1px solid #e8e8e8; }
+        .style-name { font-size: 20px; font-weight: 600; color: #1890ff; margin-bottom: 8px; }
+        .style-freq { display: inline-block; background: #e6f7ff; padding: 4px 12px; border-radius: 4px; font-size: 14px; color: #1890ff; margin-bottom: 12px; }
+        .style-core { color: #52c41a; font-weight: 500; margin: 12px 0; }
+        .style-features { color: #666; font-size: 15px; line-height: 1.8; margin-bottom: 16px; }
+        .cover-grid { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 16px; }
+        .cover-grid a { width: 180px; height: 77px; border-radius: 6px; overflow: hidden; display: block; }
+        .cover-grid img { width: 100%; height: 100%; object-fit: cover; object-position: center; }
+        .divider { border: none; border-top: 2px dashed #e8e8e8; margin: 40px 0; }
+        .plan-card { background: #fafafa; border-radius: 12px; padding: 24px; margin: 25px 0; border: 2px solid #1890ff; }
+        .plan-card h2 { font-size: 20px; font-weight: 600; color: #1890ff; margin-bottom: 12px; }
+        .plan-core { color: #52c41a; font-weight: 500; margin: 10px 0; font-size: 16px; }
+        .plan-card h3 { color: #333; margin: 20px 0 15px; font-size: 18px; }
+        .case-ref { background: #fff; border: 1px solid #e8e8e8; border-radius: 8px; padding: 20px; margin: 15px 0; display: flex; gap: 20px; align-items: flex-start; }
+        .case-ref .cover-wrap { width: 300px; height: 128px; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 8px rgba(0,0,0,0.1); display: block; flex-shrink: 0; }
+        .case-ref .cover-wrap img { width: 100%; height: 100%; object-fit: cover; object-position: center; display: block; }
+        .case-ref .info { flex: 1; }
+        .case-ref .info .title a { color: #1890ff; text-decoration: none; font-weight: 500; font-size: 18px; }
+        .case-ref .info .author { color: #666; font-size: 14px; margin: 8px 0; }
+        .case-ref .info .reads { display: inline-block; background: #fff7e6; color: #fa8c16; padding: 4px 12px; border-radius: 4px; font-size: 13px; font-weight: 500; }
+        .prompt-box { background: #f6ffed; border: 1px solid #b7eb8f; border-radius: 8px; padding: 16px; margin: 20px 0; }
+        .prompt-box .label { color: #52c41a; font-weight: 600; margin-bottom: 8px; }
+        .prompt-box .content { color: #333; font-size: 14px; line-height: 1.8; background: #fff; padding: 12px; border-radius: 4px; word-break: break-all; }
+        .select-area { background: #fafafa; border-radius: 12px; padding: 24px; margin: 20px 0; border: 1px solid #e8e8e8; }
+        .select-area h2 { margin: 0 0 16px; font-size: 20px; color: #1890ff; }
+        .select-area .options { font-size: 15px; line-height: 2; color: #333; }
+        .select-area .options .option { margin-bottom: 8px; }
+        .select-area .options .hint { color: #666; margin-top: 8px; }
+    </style>
+</head>
+<body>
+<div class="container" id="app"></div>
+
+<script>
+// ====== 数据注入区域（Agent 只需替换此处的 JSON） ======
+var __REPORT_DATA__ = {
+  "keyword": "秋冬,敏感肌,护肤",
+  "analysisCount": 20,
+  "styles": [
+    {
+      "name": "🧴 高端静物·治愈自然",
+      "count": 4,
+      "coreVisual": "白色/米色自然背景，产品平拍或置于自然场景中，温暖柔和光线，金属与玻璃质感",
+      "features": "极简留白、高级质感、无文字或极少文字、治愈安心氛围，通过精致静物传递专业与信任感",
+      "covers": [
+        "https://mmbiz.qpic.cn/mmbiz_jpg/GkQibvRYABLyaX2VozZmwG05grUmCVvMNwpN6CZj3UqMiacO46TOOBDY0n4Td3oTqQEr2O4Y02zsd6ibFnXyxayLw/0?wx_fmt=jpeg",
+        "https://mmbiz.qpic.cn/mmbiz_jpg/QticP7vnAcNSabasFRBEaXgTw4IdeMnPPIAo77780fhia6xL3Vib5j5MdOCOLYmP8dgR4SwDZciclokcP9Fmzzd0icw/0?wx_fmt=jpeg",
+        "https://mmbiz.qpic.cn/mmbiz_jpg/QticP7vnAcNTf9aic8o9qaGJa4Nsh8nmflUteVKubvFByib6upKsxmdFIYvKqsG7HT3bXBZdjFtJ3xKjZ55lMnDuQ/0?wx_fmt=jpeg",
+        "https://mmbiz.qpic.cn/mmbiz_jpg/GkQibvRYABLzpOYlsNMTt2V9qUalUbVpK7ic4NbfmygQsyHmD7Ds25b91fwrqGaXiaGz86WFf4cRkGxa6LJF8nichw/0?wx_fmt=jpeg"
+      ]
+    },
+    {
+      "name": "🔬 科技权威·数据背书",
+      "count": 3,
+      "coreVisual": "白底/淡蓝专业背景，机构logo/证书/数据文字，实验室水滴或医学元素",
+      "features": "红白/白蓝配色简洁有力，权威机构标识（央视/医院/沙利文证书）强化信任，数据化表达（NO.1、连续5年）提升说服力",
+      "covers": [
+        "https://mmbiz.qpic.cn/sz_mmbiz_jpg/KdAStmiazbnicj2vwTYRf2P9E7ZKrDT0nIdVKch3YbDKicoSHK46qFpn9VPWXkiaz0oHiaDjmd4t345APWzbdib0wLicQ/0?wx_fmt=jpeg",
+        "https://mmbiz.qpic.cn/mmbiz_jpg/jHJk65f7CTzM0Ve0dg9WgDAhwVEVm9yiciaHsBNrstWtRx2yoCtbvlUw7cQUwBDeKOfXmSkvhfpp0FmxplZ3F62g/0?wx_fmt=jpeg",
+        "https://mmbiz.qpic.cn/sz_mmbiz_jpg/WVp11KtDs46eFuibfBian5H1tfSFNjwRgkxMb7ib1JYJjwRMVXXDjJWptvPmYj5VdF6NJuDetddQzlhRyWsbojiblQ/0?wx_fmt=jpeg"
+      ]
+    },
+    {
+      "name": "😱 痛点直击·情绪共鸣",
+      "count": 2,
+      "coreVisual": "真实皮肤问题特写、左右前后对比、泛红受损微距，无多余元素",
+      "features": "无文字纯画面冲击，引发恐惧与共鸣，直击敏感肌人群最大焦虑，点击率极高但需后续内容承接解决方案",
+      "covers": [
+        "https://mmbiz.qpic.cn/sz_mmbiz_jpg/DEeiaXibVh1ViahiajICE9R6OTAkOVNwxJqYxHhjEXCkZvRVMY7CNJriaQPFPWMgqib3Ew94icLJaT58gqmOsMvjol9ug/0?wx_fmt=jpeg",
+        "https://mmbiz.qpic.cn/sz_mmbiz_jpg/Gq0eecD4aMOs7AGUWBdnGgEHibPCUxRjrViaw4sKtViaqpjsmicT2ua7MzVztsvIcUehZ9nvCGiaJLH9HKXqlLSQ1HQ/0?wx_fmt=jpeg"
+      ]
+    },
+    {
+      "name": "🛍️ 合集清单·信息密度",
+      "count": 2,
+      "coreVisual": "多产品网格排列或多人拼贴，大号标题+分类标签，信息丰富",
+      "features": "信息量大满足比较欲，色彩丰富吸睛，标题直接点题（秋冬水乳、Top8），实用导向，适合清单类种草",
+      "covers": [
+        "https://mmbiz.qpic.cn/mmbiz_jpg/9icpwY1xqVlJtc8ytrowsNby5Miagv72FukgllXaOZ9BN2PbT30Xw71ML0muPheo9icWwIIicH4PyG9GDq2Qnh9SWQ/0?wx_fmt=jpeg",
+        "https://mmbiz.qpic.cn/mmbiz_jpg/v1Mibs3svXruLPMZzvA3N0OQpicd102TvfscXibM5A6lJvC6huNFpJYgWZpNsCD6iaqK2ia7o4zq78HCqSq3aN8XRZg/0?wx_fmt=jpeg"
+      ]
+    },
+    {
+      "name": "💧 大牌精修·水光广告",
+      "count": 2,
+      "coreVisual": "品牌产品居中，搭配水花飞溅/透明气泡/光晕特效，高级CG精修感",
+      "features": "品牌名醒目、水元素传达滋润补水概念，适合大牌种草，视觉冲击力强但制作门槛高",
+      "covers": [
+        "https://mmbiz.qpic.cn/mmbiz_jpg/zyyGcjcjCaNjxKrDabcvOIgklIJeQCZ8yiao3LIiaV4NoDExkaMicHNjBlI7pqn8rg0V4r5yKRib3pWBjVa2MdK8GQ/0?wx_fmt=jpeg",
+        "https://mmbiz.qpic.cn/mmbiz_jpg/KOSURIWKTMrK0jlUib8uTGlf5UXjLSaVXrp6dOkibSeyphQHSsyfryU0ZLpibcEot9xAIDnOnxUBib15qokuOEtqCg/0?wx_fmt=jpeg"
+      ]
+    }
+  ],
+  "plans": [
+    {
+      "name": "治愈清单·高端静物",
+      "coreVisual": "米色亚麻布背景，5款秋冬敏感肌护肤品错落平拍，搭配白色纯棉毛巾一角与干尤加利叶，自然侧光，极简留白",
+      "case": {
+        "imageUrl": "https://mmbiz.qpic.cn/mmbiz_jpg/GkQibvRYABLyaX2VozZmwG05grUmCVvMNwpN6CZj3UqMiacO46TOOBDY0n4Td3oTqQEr2O4Y02zsd6ibFnXyxayLw/0?wx_fmt=jpeg",
+        "url": "https://mp.weixin.qq.com/s?__biz=MjM5NTAzNzA5NQ==&mid=2651104205&idx=1&sn=f6407ed4ad087c6bbf6e0befd9754cc4#rd",
+        "title": "顶奢英伦SPA护肤，原来是用对了这两个单品！",
+        "author": "拔草吧NANA",
+        "reads": "8.0w"
+      },
+      "prompt": "2.35:1横版比例（900x383像素）。参考封面：https://mmbiz.qpic.cn/mmbiz_jpg/GkQibvRYABLyaX2VozZmwG05grUmCVvMNwpN6CZj3UqMiacO46TOOBDY0n4Td3oTqQEr2O4Y02zsd6ibFnXyxayLw/0?wx_fmt=jpeg 。米色亚麻布背景，5款秋冬敏感肌护肤品（精华、面霜、喷雾、面膜、修护油）错落平拍，产品材质为透明玻璃和磨砂质感，瓶身设计简约，左侧一条白色纯棉毛巾自然折叠一角，散落几片干尤加利叶和一颗白色棉花球，自然侧光从左上方打下来，温暖柔和色调，极简留白，无文字，高级治愈静物摄影风格，专业干净有信任感，适合敏感肌种草清单封面。"
+    },
+    {
+      "name": "专业清单·科技背书",
+      "coreVisual": "淡蓝白色渐变医学背景，左侧透明水滴与神经酰胺分子球，中央3-4款敏感肌修护产品，右侧竖排大号标题文字",
+      "case": {
+        "imageUrl": "https://mmbiz.qpic.cn/sz_mmbiz_jpg/KdAStmiazbnicj2vwTYRf2P9E7ZKrDT0nIdVKch3YbDKicoSHK46qFpn9VPWXkiaz0oHiaDjmd4t345APWzbdib0wLicQ/0?wx_fmt=jpeg",
+        "url": "https://mp.weixin.qq.com/s?__biz=MjM5NzI1MTY0MQ==&mid=2655424605&idx=2&sn=5b6fe74b8958f1a5255f553fb4937054#rd",
+        "title": "科研引领色素管理新纪元：优色林精准破解中国敏感肌美白难题的创新实践",
+        "author": "央视网",
+        "reads": "6.6w"
+      },
+      "prompt": "2.35:1横版比例（900x383像素）。参考封面：https://mmbiz.qpic.cn/sz_mmbiz_jpg/KdAStmiazbnicj2vwTYRf2P9E7ZKrDT0nIdVKch3YbDKicoSHK46qFpn9VPWXkiaz0oHiaDjmd4t345APWzbdib0wLicQ/0?wx_fmt=jpeg 。淡蓝白色渐变医学实验室风格背景，左侧半透明水滴与神经酰胺分子结构球体悬浮，中央摆放3-4款秋冬敏感肌修护产品（白色磨砂瓶身+浅蓝标签），右侧竖排白色衬线体大字\"秋冬敏感肌护肤清单\"，下方小字\"皮肤科实测·无广推荐\"，整体色调为淡蓝、白、银，光影柔和通透，科技感与专业感兼具，干净清爽，权威信任感强。"
+    },
+    {
+      "name": "种草清单·秋冬拼贴",
+      "coreVisual": "暖米色背景，6款产品网格排列，顶部大号标题\"秋冬敏感肌护肤清单\"，底部散落橙黄枫叶与白色毛衣纹理",
+      "case": {
+        "imageUrl": "https://mmbiz.qpic.cn/mmbiz_jpg/v1Mibs3svXruLPMZzvA3N0OQpicd102TvfscXibM5A6lJvC6huNFpJYgWZpNsCD6iaqK2ia7o4zq78HCqSq3aN8XRZg/0?wx_fmt=jpeg",
+        "url": "http://mp.weixin.qq.com/s?__biz=MzUyMzMyODU4OA==&mid=2248102398&idx=1&sn=6adff2be7da2732df7e7ebcc532a0c1e&chksm=fb486a36429e0c16205c8cf071690c19701725f6acf671d6b639b1e96196410459447cc734e8#rd",
+        "title": "用了100套秋冬水乳，最好用的居然是这9套！干皮、油皮、敏感肌全包了！",
+        "author": "Miya种草",
+        "reads": "3.3w"
+      },
+      "prompt": "2.35:1横版比例（900x383像素）。参考封面：https://mmbiz.qpic.cn/mmbiz_jpg/v1Mibs3svXruLPMZzvA3N0OQpicd102TvfscXibM5A6lJvC6huNFpJYgWZpNsCD6iaqK2ia7o4zq78HCqSq3aN8XRZg/0?wx_fmt=jpeg 。暖米色背景，6款秋冬敏感肌护肤品整齐网格排列（2行3列），产品包含精华、面霜、喷雾、面膜、卸妆膏、修护油，每款下方有极简品牌标签小字，顶部大号深棕色衬线字体标题\"秋冬敏感肌护肤清单\"，底部散落几片橙黄色枫叶和一角白色粗针织毛衣纹理，整体温暖柔和，信息清晰有序，小红书转公众号种草风格，专业且亲和。"
+    }
+  ]
+};
+// ====== 数据注入区域结束 ======
+
+(function() {
+    var d = __REPORT_DATA__;
+    if (!d.keyword) { document.getElementById('app').innerHTML = '<p style="text-align:center;padding:60px;color:#999">等待数据注入...</p>'; return; }
+
+    var html = '';
+
+    // 标题
+    html += '<h1 class="report-title">📊 爆款封面分析报告</h1>';
+
+    // 信息栏
+    html += '<div class="info-bar"><strong>关键词：</strong>' + esc(d.keyword) + ' | <strong>数据来源：</strong>公众号爆款雷达接口 | <strong>分析数量：</strong>' + d.analysisCount + '张封面</div>';
+
+    // 风格类型
+    for (var i = 0; i < d.styles.length; i++) {
+        var s = d.styles[i];
+        html += '<div class="style-card">';
+        html += '<div class="style-name">' + esc(s.name) + '</div>';
+        html += '<span class="style-freq">出现频次：' + s.count + '/' + d.analysisCount + '</span>';
+        html += '<div class="style-core">核心视觉：' + esc(s.coreVisual) + '</div>';
+        html += '<div class="style-features">关键特征：' + esc(s.features) + '</div>';
+        if (s.covers && s.covers.length > 0) {
+            html += '<div class="cover-grid">';
+            var maxCovers = Math.min(s.covers.length, 5);
+            for (var j = 0; j < maxCovers; j++) {
+                var url = esc(s.covers[j]);
+                html += '<a href="' + url + '" target="_blank"><img src="' + url + '" alt="封面示例"></a>';
+            }
+            html += '</div>';
+        }
+        html += '</div>';
+    }
+
+    // 分隔线
+    html += '<hr class="divider">';
+    html += '<h1 class="report-title">🎯 爆款封面设计方案</h1>';
+
+    // 设计方案
+    for (var i = 0; i < d.plans.length; i++) {
+        var p = d.plans[i];
+        var n = i + 1;
+        html += '<div class="plan-card">';
+        html += '<h2>方案' + n + '：' + esc(p.name) + '</h2>';
+        html += '<div class="plan-core">核心视觉：' + esc(p.coreVisual) + '</div>';
+
+        // 案例参考
+        html += '<h3>案例参考</h3>';
+        html += '<div class="case-ref">';
+        html += '<a href="' + esc(p.case.imageUrl) + '" target="_blank" class="cover-wrap"><img src="' + esc(p.case.imageUrl) + '" alt="封面图"></a>';
+        html += '<div class="info">';
+        html += '<div class="title"><a href="' + esc(p.case.url) + '" target="_blank">' + esc(p.case.title) + '</a></div>';
+        html += '<div class="author">作者：' + esc(p.case.author) + '</div>';
+        html += '<span class="reads">阅读：' + esc(p.case.reads) + '</span>';
+        html += '</div></div>';
+
+        // 生图提示词
+        html += '<h3>生图提示词</h3>';
+        html += '<div class="prompt-box">';
+        html += '<div class="label">公众号封面图</div>';
+        html += '<div class="content">' + esc(p.prompt) + '</div>';
+        html += '</div>';
+
+        html += '</div>';
+    }
+
+    // 方案选择区域
+    html += '<hr class="divider">';
+    html += '<div class="select-area">';
+    html += '<h2>🎯 请选择您想要的封面设计方案</h2>';
+    html += '<div class="options">';
+    var labels = ['一', '二', '三'];
+    for (var i = 0; i < d.plans.length; i++) {
+        html += '<div class="option"><strong>方案' + labels[i] + '：</strong>' + esc(d.plans[i].name) + ' - ' + esc(d.plans[i].coreVisual) + '</div>';
+    }
+    html += '<div class="hint">';
+    html += '<strong>💡 请选择：</strong><br>';
+    html += 'A. 回复"方案1"、"方案2"或"方案3"直接选择方案<br>';
+    html += 'B. 如果您有产品图、人物图或场景图想作为参考，可以和方案编号一起发送<br>';
+    html += '<span style="margin-left:24px">例如：直接发送图片 + "方案1"</span>';
+    html += '</div></div></div>';
+
+    // 实际生成封面结果
+    html += '<hr class="divider">';
+    html += '<div class="style-card">';
+    html += '<div class="style-name">实际封面效果</div>';
+    html += '<p class="summary">基于「秋冬敏感肌护肤清单」同类爆款规律，按方案顺序输出了三张适合公众号横版封面的视觉成品。</p>';
+    html += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:22px;margin-top:24px;">';
+    html += '<figure style="margin:0;background:#fff;border:1px solid #e8e8e8;border-radius:12px;overflow:hidden;box-shadow:0 8px 24px rgba(0,0,0,0.08);"><img src="{{asset_url:sensitive_skincare_1}}" alt="秋冬敏感肌护肤清单方案一封面" style="display:block;width:100%;height:auto;"><figcaption style="padding:12px 14px;font-size:14px;color:#555;">方案一：治愈清单·高端静物</figcaption></figure>';
+    html += '<figure style="margin:0;background:#fff;border:1px solid #e8e8e8;border-radius:12px;overflow:hidden;box-shadow:0 8px 24px rgba(0,0,0,0.08);"><img src="{{asset_url:sensitive_skincare_2}}" alt="秋冬敏感肌护肤清单方案二封面" style="display:block;width:100%;height:auto;"><figcaption style="padding:12px 14px;font-size:14px;color:#555;">方案二：专业清单·科技背书</figcaption></figure>';
+    html += '<figure style="margin:0;background:#fff;border:1px solid #e8e8e8;border-radius:12px;overflow:hidden;box-shadow:0 8px 24px rgba(0,0,0,0.08);"><img src="{{asset_url:sensitive_skincare_3}}" alt="秋冬敏感肌护肤清单方案三封面" style="display:block;width:100%;height:auto;"><figcaption style="padding:12px 14px;font-size:14px;color:#555;">方案三：种草清单·秋冬拼贴</figcaption></figure>';
+    html += '</div></div>';
+
+    document.title = '爆款封面分析报告 - ' + d.keyword + '主题';
+    document.getElementById('app').innerHTML = html;
+
+    function esc(s) { if (!s) return ''; return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+})();
+</script>
+</body>
+</html>
