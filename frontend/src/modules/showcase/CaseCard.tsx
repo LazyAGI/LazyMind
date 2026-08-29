@@ -1,7 +1,12 @@
 import type { MouseEvent } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ArrowRightOutlined, MessageOutlined, ScheduleOutlined } from "@ant-design/icons";
+import {
+  ArrowRightOutlined,
+  FireTwoTone,
+  MessageOutlined,
+  ScheduleOutlined,
+} from "@ant-design/icons";
 import {
   buildShowcaseLaunchPath,
   showcaseEntryType,
@@ -66,6 +71,18 @@ export default function CaseCard({
               alt=""
               loading="lazy"
             />
+            {showWorkflowHot && technologyType === "workflow" ? (
+              <span
+                className="showcase-workflow-hot"
+                role="img"
+                aria-label={t("showcase.workflowHotBadge")}
+              >
+                <FireTwoTone
+                  aria-hidden="true"
+                  twoToneColor={["#f97316", "#ffedd5"]}
+                />
+              </span>
+            ) : null}
           </div>
         </div>
       </Link>
@@ -79,11 +96,6 @@ export default function CaseCard({
             onClick={isDetailPrimary ? undefined : handleTry}
           >
             <h3>{item.title}</h3>
-            {showWorkflowHot && technologyType === "workflow" ? (
-              <span className="showcase-workflow-hot">
-                {t("showcase.workflowHotBadge")}
-              </span>
-            ) : null}
             <span
               className={`showcase-capability-icon is-${entryType}`}
               role="img"

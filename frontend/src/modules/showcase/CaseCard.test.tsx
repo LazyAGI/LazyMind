@@ -130,20 +130,26 @@ describe("CaseCard", () => {
       </MemoryRouter>,
     );
 
-    expect(screen.getByText("HOT")).toBeInTheDocument();
+    const hotBadge = screen.getByRole("img", { name: "HOT" });
+    expect(hotBadge).toBeInTheDocument();
+    expect(hotBadge).toHaveClass("showcase-workflow-hot");
+    expect(hotBadge.parentElement).toHaveClass("showcase-card-image-stage");
+    expect(screen.getByRole("link", { name: /产品设计与 PRD 生成/ })).not.toContainElement(
+      hotBadge,
+    );
 
     rerender(
       <MemoryRouter>
         <CaseCard item={{ ...item, type: "work" }} showWorkflowHot />
       </MemoryRouter>,
     );
-    expect(screen.queryByText("HOT")).not.toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "HOT" })).not.toBeInTheDocument();
 
     rerender(
       <MemoryRouter>
         <CaseCard item={{ ...item, type: "workflow" }} />
       </MemoryRouter>,
     );
-    expect(screen.queryByText("HOT")).not.toBeInTheDocument();
+    expect(screen.queryByRole("img", { name: "HOT" })).not.toBeInTheDocument();
   });
 });
