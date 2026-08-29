@@ -2,8 +2,11 @@ package scheduler
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -14,6 +17,14 @@ import (
 func newTestSchedulerDB(t *testing.T) *orm.DB {
 	t.Helper()
 	return orm.MigrateTestDB(t, &orm.UserSchedule{}, &orm.TaskCenterTask{}, &orm.UserUIPreferences{})
+}
+
+func newDependencyRuntimeTestDB(t *testing.T) *orm.DB {
+	t.Helper()
+	return orm.MigrateTestDB(t,
+		&orm.UserSchedule{}, &orm.ScheduleDependency{}, &orm.TaskCenterTask{}, &orm.UserUIPreferences{},
+		&orm.TaskRunInput{}, &orm.Conversation{},
+	)
 }
 
 func TestCreateTaskConversationPersistsHighThinkingDepth(t *testing.T) {
@@ -93,6 +104,411 @@ func TestResumeWaitingTasksKeepsTaskWaitingWhileSchedulesArePaused(t *testing.T)
 	}
 	if saved.Status != "waiting_inputs" || saved.DependencyStatus != "waiting" || saved.ConversationID != "" {
 		t.Fatalf("paused schedules must not launch a waiting task: %#v", saved)
+	}
+	if saved.Attempt != 2 {
+		t.Fatalf("successful claim must advance attempt to 2, got %d", saved.Attempt)
+	}
+}
+
+func TestResumeWaitingTasksReclaimsStaleCheckingTask(t *testing.T) {
+	db := newDependencyRuntimeTestDB(t)
+	now := time.Now().UTC()
+	if err := db.Model(&orm.UserUIPreferences{}).Create(map[string]any{
+		"user_id": "user-stale", "task_center_enabled": true, "schedules_enabled": false,
+		"skills_enabled": true, "workflows_enabled": true, "mcp_enabled": true,
+		"created_at": now, "updated_at": now,
+	}).Error; err != nil {
+		t.Fatalf("seed controls: %v", err)
+	}
+	scheduleID := "schedule-stale"
+	windowStart := now.Add(-time.Hour)
+	windowEnd := now
+	task := orm.TaskCenterTask{
+		ID: "stale-checking", UserID: "user-stale", ConversationID: "", TaskType: "scheduled",
+		Status: "waiting_inputs", ScheduleID: &scheduleID, WindowStart: &windowStart, WindowEnd: &windowEnd,
+		DependencyStatus: "checking", Attempt: 4, TriggerType: "scheduled",
+		CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-dependencyClaimTimeout - time.Second),
+	}
+	if err := db.Create(&task).Error; err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+
+	resumeWaitingTasks(t.Context(), db.DB)
+
+	var saved orm.TaskCenterTask
+	if err := db.First(&saved, "id = ?", task.ID).Error; err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	if saved.Status != "waiting_inputs" || saved.DependencyStatus != "waiting" {
+		t.Fatalf("stale claim must be reclaimed and released while schedules are paused: %#v", saved)
+	}
+	if saved.Attempt != 5 {
+		t.Fatalf("reclaimed task attempt = %d, want 5", saved.Attempt)
+	}
+}
+
+func TestResumeWaitingTasksDoesNotStealFreshCheckingTask(t *testing.T) {
+	db := newDependencyRuntimeTestDB(t)
+	now := time.Now().UTC()
+	scheduleID := "schedule-fresh"
+	windowStart := now.Add(-time.Hour)
+	windowEnd := now
+	task := orm.TaskCenterTask{
+		ID: "fresh-checking", UserID: "user-fresh", ConversationID: "", TaskType: "scheduled",
+		Status: "waiting_inputs", ScheduleID: &scheduleID, WindowStart: &windowStart, WindowEnd: &windowEnd,
+		DependencyStatus: "checking", Attempt: 4, TriggerType: "scheduled", CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&task).Error; err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+
+	resumeWaitingTasks(t.Context(), db.DB)
+
+	var saved orm.TaskCenterTask
+	if err := db.First(&saved, "id = ?", task.ID).Error; err != nil {
+		t.Fatalf("load task: %v", err)
+	}
+	if saved.DependencyStatus != "checking" || saved.Attempt != 4 {
+		t.Fatalf("fresh claim was unexpectedly stolen: %#v", saved)
+	}
+}
+
+func TestResumeWaitingTasksPrioritizesStaleClaimsAheadOfWaitingPage(t *testing.T) {
+	db := newDependencyRuntimeTestDB(t)
+	now := time.Now().UTC()
+	if err := db.Model(&orm.UserUIPreferences{}).Create(map[string]any{
+		"user_id": "user-page", "task_center_enabled": true, "schedules_enabled": false,
+		"skills_enabled": true, "workflows_enabled": true, "mcp_enabled": true,
+		"created_at": now, "updated_at": now,
+	}).Error; err != nil {
+		t.Fatalf("seed controls: %v", err)
+	}
+	scheduleID := "schedule-page"
+	windowStart := now.Add(-time.Hour)
+	windowEnd := now
+	tasks := make([]orm.TaskCenterTask, 0, 102)
+	for i := 0; i < 101; i++ {
+		tasks = append(tasks, orm.TaskCenterTask{
+			ID: fmt.Sprintf("waiting-page-%03d", i), UserID: "user-page", ConversationID: "", TaskType: "scheduled",
+			Status: "waiting_inputs", ScheduleID: &scheduleID, WindowStart: &windowStart, WindowEnd: &windowEnd,
+			DependencyStatus: "waiting", Attempt: 1, TriggerType: "scheduled",
+			CreatedAt: now.Add(-2 * time.Hour), UpdatedAt: now,
+		})
+	}
+	stale := orm.TaskCenterTask{
+		ID: "stale-after-page", UserID: "user-page", ConversationID: "", TaskType: "scheduled",
+		Status: "waiting_inputs", ScheduleID: &scheduleID, WindowStart: &windowStart, WindowEnd: &windowEnd,
+		DependencyStatus: "checking", Attempt: 4, TriggerType: "scheduled",
+		CreatedAt: now, UpdatedAt: now.Add(-dependencyClaimTimeout - time.Second),
+	}
+	tasks = append(tasks, stale)
+	if err := db.Create(&tasks).Error; err != nil {
+		t.Fatalf("seed tasks: %v", err)
+	}
+
+	resumeWaitingTasks(t.Context(), db.DB)
+
+	var saved orm.TaskCenterTask
+	if err := db.First(&saved, "id = ?", stale.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if saved.DependencyStatus != "waiting" || saved.Attempt != 5 {
+		t.Fatalf("stale claim was starved behind waiting page: %#v", saved)
+	}
+}
+
+func TestDependencyClaimAttemptFencesStaleOwner(t *testing.T) {
+	db := newDependencyRuntimeTestDB(t)
+	now := time.Now().UTC()
+	task := orm.TaskCenterTask{
+		ID: "fenced-checking", UserID: "user-fenced", ConversationID: "", TaskType: "scheduled",
+		Status: "waiting_inputs", DependencyStatus: "checking", Attempt: 7,
+		CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-dependencyClaimTimeout - time.Second),
+	}
+	if err := db.Create(&task).Error; err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+
+	claimAttempt, claimed, err := claimDependencyTask(t.Context(), db.DB, task, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !claimed || claimAttempt != 8 {
+		t.Fatalf("claim result = (%d, %v), want (8, true)", claimAttempt, claimed)
+	}
+	if _, claimedAgain, err := claimDependencyTask(t.Context(), db.DB, task, now); err != nil || claimedAgain {
+		t.Fatalf("same snapshot claimed twice: claimed=%v err=%v", claimedAgain, err)
+	}
+	if released, err := releaseDependencyClaim(t.Context(), db.DB, task.ID, 7); err != nil || released {
+		t.Fatalf("stale attempt released current claim: released=%v err=%v", released, err)
+	}
+	if released, err := releaseDependencyClaim(t.Context(), db.DB, task.ID, claimAttempt); err != nil || !released {
+		t.Fatalf("current attempt failed to release claim: released=%v err=%v", released, err)
+	}
+
+	var saved orm.TaskCenterTask
+	if err := db.First(&saved, "id = ?", task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if saved.DependencyStatus != "waiting" || saved.Attempt != claimAttempt {
+		t.Fatalf("unexpected released task: %#v", saved)
+	}
+}
+
+func TestRenewDependencyClaimRequiresCurrentAttempt(t *testing.T) {
+	db := newDependencyRuntimeTestDB(t)
+	now := time.Now().UTC()
+	task := orm.TaskCenterTask{
+		ID: "renew-checking", UserID: "user-renew", ConversationID: "", TaskType: "scheduled",
+		Status: "waiting_inputs", DependencyStatus: "checking", Attempt: 3,
+		CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-time.Minute),
+	}
+	if err := db.Create(&task).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if renewed, err := renewDependencyClaim(t.Context(), db.DB, task.ID, 2); err != nil || renewed {
+		t.Fatalf("stale attempt renewed claim: renewed=%v err=%v", renewed, err)
+	}
+	if renewed, err := renewDependencyClaim(t.Context(), db.DB, task.ID, 3); err != nil || !renewed {
+		t.Fatalf("current attempt failed to renew claim: renewed=%v err=%v", renewed, err)
+	}
+
+	var saved orm.TaskCenterTask
+	if err := db.First(&saved, "id = ?", task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if !saved.UpdatedAt.After(task.UpdatedAt) || saved.Attempt != 3 {
+		t.Fatalf("unexpected renewed task: %#v", saved)
+	}
+}
+
+func TestDependencyClaimHeartbeatKeepsActiveClaimFresh(t *testing.T) {
+	db := newDependencyRuntimeTestDB(t)
+	now := time.Now().UTC()
+	task := orm.TaskCenterTask{
+		ID: "heartbeat-checking", UserID: "user-heartbeat", ConversationID: "", TaskType: "scheduled",
+		Status: "waiting_inputs", DependencyStatus: "checking", Attempt: 3,
+		CreatedAt: now.Add(-time.Hour), UpdatedAt: now.Add(-dependencyClaimTimeout - time.Second),
+	}
+	if err := db.Create(&task).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	stop := startDependencyClaimHeartbeat(t.Context(), db.DB, task.ID, task.Attempt, time.Millisecond)
+	deadline := time.Now().Add(time.Second)
+	var saved orm.TaskCenterTask
+	for {
+		if err := db.First(&saved, "id = ?", task.ID).Error; err != nil {
+			stop()
+			t.Fatal(err)
+		}
+		if saved.UpdatedAt.After(task.UpdatedAt) {
+			break
+		}
+		if time.Now().After(deadline) {
+			stop()
+			t.Fatal("dependency claim heartbeat did not renew the claim")
+		}
+		time.Sleep(time.Millisecond)
+	}
+	stop()
+	stop() // Stopping is deliberately idempotent for terminal write paths plus defer.
+
+	if _, claimed, err := claimDependencyTask(t.Context(), db.DB, saved, time.Now().UTC()); err != nil || claimed {
+		t.Fatalf("fresh heartbeat claim was reclaimed: claimed=%v err=%v", claimed, err)
+	}
+}
+
+func TestResumeWaitingTasksFailsMalformedClaimInsteadOfStrandingIt(t *testing.T) {
+	db := newDependencyRuntimeTestDB(t)
+	now := time.Now().UTC()
+	task := orm.TaskCenterTask{
+		ID: "malformed-waiting", UserID: "user-malformed", ConversationID: "", TaskType: "scheduled",
+		Status: "waiting_inputs", DependencyStatus: "waiting", Attempt: 1,
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&task).Error; err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+
+	resumeWaitingTasks(t.Context(), db.DB)
+
+	var saved orm.TaskCenterTask
+	if err := db.First(&saved, "id = ?", task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if saved.Status != "failed" || saved.DependencyStatus != "failed" || saved.FinishedAt == nil {
+		t.Fatalf("malformed task was not failed cleanly: %#v", saved)
+	}
+	if saved.Attempt != 2 {
+		t.Fatalf("malformed task attempt = %d, want 2", saved.Attempt)
+	}
+}
+
+func TestPrepareDependentTaskLaunchCommitsOnlyForCurrentAttempt(t *testing.T) {
+	db := newDependencyRuntimeTestDB(t)
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	windowStart := now.Add(-time.Hour)
+	windowEnd := now
+	schedule := orm.UserSchedule{
+		ID: "launch-schedule", UserID: "user-launch", Name: "aggregate", CronExpr: "0 9 * * *",
+		Timezone: "UTC", PromptTemplate: "build report", KbIDs: "[]", FileIDs: "[]",
+		Enabled: true, NextRunAt: now.Add(time.Hour), CreatedAt: now.Add(-time.Hour),
+	}
+	if err := db.Create(&schedule).Error; err != nil {
+		t.Fatalf("seed schedule: %v", err)
+	}
+	task := orm.TaskCenterTask{
+		ID: "launch-task", UserID: schedule.UserID, ConversationID: "", TaskType: "scheduled",
+		Status: "waiting_inputs", ScheduleID: &schedule.ID, WindowStart: &windowStart, WindowEnd: &windowEnd,
+		DependencyStatus: "checking", Attempt: 3, TriggerType: "scheduled", CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&task).Error; err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+	input := orm.TaskRunInput{
+		ID: "launch-input", DownstreamTaskID: task.ID, UpstreamTaskID: "upstream-task", DependencyID: "dependency",
+		OutputID: "output", OutputContentHash: "hash", Position: 0, SnapshotJSON: []byte(`{"source_name":"source"}`), CreatedAt: now,
+	}
+	collection := dependencyInputCollection{contextText: "collected context", inputs: []orm.TaskRunInput{input}}
+
+	if _, _, err := prepareDependentTaskLaunch(t.Context(), db.DB, schedule, task, 2, collection); !errors.Is(err, errDependencyClaimLost) {
+		t.Fatalf("stale launch error = %v, want claim lost", err)
+	}
+	var count int64
+	if err := db.Model(&orm.Conversation{}).Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("stale launch persisted conversations: count=%d err=%v", count, err)
+	}
+	if err := db.Model(&orm.TaskRunInput{}).Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("stale launch persisted inputs: count=%d err=%v", count, err)
+	}
+
+	convID, reqBody, err := prepareDependentTaskLaunch(t.Context(), db.DB, schedule, task, 3, collection)
+	if err != nil {
+		t.Fatalf("prepare launch: %v", err)
+	}
+	if convID == "" || !strings.Contains(reqBody["query"].(string), collection.contextText) {
+		t.Fatalf("unexpected prepared request: conversation=%q body=%#v", convID, reqBody)
+	}
+	var saved orm.TaskCenterTask
+	if err := db.First(&saved, "id = ?", task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if saved.Status != "running" || saved.DependencyStatus != "ready" || saved.Attempt != 3 || saved.ConversationID != convID {
+		t.Fatalf("unexpected launched task: %#v", saved)
+	}
+	if err := db.Model(&orm.TaskRunInput{}).Where("downstream_task_id = ?", task.ID).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("launch input count=%d err=%v", count, err)
+	}
+	if err := db.Model(&orm.Conversation{}).Where("id = ?", convID).Count(&count).Error; err != nil || count != 1 {
+		t.Fatalf("launch conversation count=%d err=%v", count, err)
+	}
+	var savedSchedule orm.UserSchedule
+	if err := db.First(&savedSchedule, "id = ?", schedule.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if savedSchedule.RunCount != 1 || savedSchedule.LastRunAt == nil || !savedSchedule.LastRunAt.Equal(windowEnd) {
+		t.Fatalf("unexpected schedule counters: %#v", savedSchedule)
+	}
+}
+
+func TestPrepareDependentTaskLaunchBatchesLargeInputSet(t *testing.T) {
+	db := newDependencyRuntimeTestDB(t)
+	now := time.Now().UTC()
+	windowStart := now.Add(-time.Hour)
+	windowEnd := now
+	schedule := orm.UserSchedule{
+		ID: "large-input-schedule", UserID: "user-large-input", Name: "aggregate", CronExpr: "0 9 * * *",
+		Timezone: "UTC", PromptTemplate: "build report", KbIDs: "[]", FileIDs: "[]",
+		Enabled: true, NextRunAt: now.Add(time.Hour), CreatedAt: now.Add(-time.Hour),
+	}
+	if err := db.Create(&schedule).Error; err != nil {
+		t.Fatalf("seed schedule: %v", err)
+	}
+	task := orm.TaskCenterTask{
+		ID: "large-input-task", UserID: schedule.UserID, ConversationID: "", TaskType: "scheduled",
+		Status: "waiting_inputs", ScheduleID: &schedule.ID, WindowStart: &windowStart, WindowEnd: &windowEnd,
+		DependencyStatus: "checking", Attempt: 3, TriggerType: "scheduled", CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&task).Error; err != nil {
+		t.Fatalf("seed task: %v", err)
+	}
+
+	const inputCount = 3277
+	inputs := make([]orm.TaskRunInput, inputCount)
+	for i := range inputs {
+		inputs[i] = orm.TaskRunInput{
+			ID:                   fmt.Sprintf("large-input-%04d", i),
+			DownstreamTaskID:     task.ID,
+			UpstreamTaskID:       fmt.Sprintf("upstream-%04d", i),
+			DependencyID:         fmt.Sprintf("dependency-%04d", i),
+			OutputID:             fmt.Sprintf("output-%04d", i),
+			OutputContentHash:    fmt.Sprintf("hash-%04d", i),
+			Position:             i,
+			SnapshotJSON:         []byte(`{}`),
+			SourceLogicalSlotKey: fmt.Sprintf("slot-%04d", i),
+			CreatedAt:            now,
+		}
+	}
+	collection := dependencyInputCollection{contextText: "large collected context", inputs: inputs}
+
+	convID, _, err := prepareDependentTaskLaunch(t.Context(), db.DB, schedule, task, task.Attempt, collection)
+	if err != nil {
+		t.Fatalf("large input launch failed: %v", err)
+	}
+	if convID == "" {
+		t.Fatal("expected a conversation for the launched task")
+	}
+
+	var saved orm.TaskCenterTask
+	if err := db.First(&saved, "id = ?", task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if saved.Status != "running" || saved.DependencyStatus != "ready" || saved.ConversationID != convID {
+		t.Fatalf("unexpected large input task: %#v", saved)
+	}
+	var persisted int64
+	if err := db.Model(&orm.TaskRunInput{}).Where("downstream_task_id = ?", task.ID).Count(&persisted).Error; err != nil {
+		t.Fatal(err)
+	}
+	if persisted != inputCount {
+		t.Fatalf("persisted input count = %d, want %d", persisted, inputCount)
+	}
+}
+
+func TestFailDependentTaskClaimRejectsStaleAttempt(t *testing.T) {
+	db := newDependencyRuntimeTestDB(t)
+	now := time.Now().UTC()
+	task := orm.TaskCenterTask{
+		ID: "fail-fenced", UserID: "user-fail", ConversationID: "", TaskType: "scheduled",
+		Status: "waiting_inputs", DependencyStatus: "checking", Attempt: 9, CreatedAt: now, UpdatedAt: now,
+	}
+	if err := db.Create(&task).Error; err != nil {
+		t.Fatal(err)
+	}
+	input := orm.TaskRunInput{ID: "existing-input", DownstreamTaskID: task.ID, UpstreamTaskID: "upstream", DependencyID: "dep", OutputID: "output", OutputContentHash: "hash", CreatedAt: now}
+	if err := db.Create(&input).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	if failed, err := failDependentTaskClaim(t.Context(), db.DB, task, 8, "no_inputs", "no inputs"); err != nil || failed {
+		t.Fatalf("stale attempt failed task: failed=%v err=%v", failed, err)
+	}
+	if failed, err := failDependentTaskClaim(t.Context(), db.DB, task, 9, "no_inputs", "no inputs"); err != nil || !failed {
+		t.Fatalf("current attempt failed to fail task: failed=%v err=%v", failed, err)
+	}
+
+	var saved orm.TaskCenterTask
+	if err := db.First(&saved, "id = ?", task.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if saved.Status != "failed" || saved.DependencyStatus != "no_inputs" {
+		t.Fatalf("unexpected failed task: %#v", saved)
+	}
+	var count int64
+	if err := db.Model(&orm.TaskRunInput{}).Where("downstream_task_id = ?", task.ID).Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("failed task retained inputs: count=%d err=%v", count, err)
 	}
 }
 
