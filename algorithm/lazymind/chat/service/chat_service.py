@@ -1622,8 +1622,8 @@ async def _handle_chat_impl(
                 guarded_agent_stream = guard_workflow_agent_stream(
                     initial_agent_stream,
                     all_tools=all_tools,
-                    query=language_query,
-                    runtime_prompt=workflow_contribution.runtime_context,
+                    query=query,
+                    runtime_prompt=prompt_bundle.system_prompt,
                     agent=agent,
                     runtime_config=_cfg,
                     fs=FS,
