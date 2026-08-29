@@ -436,6 +436,70 @@ describe('MarkdownArtifactEditor rewrite selection highlight', () => {
     fireEvent.click(bold);
   });
 
+  it('positions the selection toolbar in the scrollable editor surface', async () => {
+    const { container } = render(<Harness />);
+    const editor = container.querySelector<HTMLElement>('.writer-markdown-editor');
+    const surface = container.querySelector<HTMLElement>('.writer-markdown-editor__surface');
+    const toolbar = container.querySelector<HTMLElement>('.mdxeditor-toolbar');
+    const paragraph = container.querySelector('p');
+    const textNode = paragraph?.firstChild;
+    expect(editor).not.toBeNull();
+    expect(surface).not.toBeNull();
+    expect(toolbar).not.toBeNull();
+    expect(textNode).not.toBeNull();
+
+    vi.spyOn(surface!, 'getBoundingClientRect').mockReturnValue({
+      ...rect(),
+      top: 80,
+      right: 800,
+      bottom: 500,
+      left: 300,
+      width: 500,
+      height: 420,
+    });
+    Object.defineProperty(surface!, 'clientTop', { configurable: true, value: 3 });
+    Object.defineProperty(surface!, 'clientLeft', { configurable: true, value: 2 });
+    Object.defineProperty(surface!, 'scrollTop', { configurable: true, value: 20 });
+    Object.defineProperty(surface!, 'scrollLeft', { configurable: true, value: 5 });
+    vi.spyOn(toolbar!, 'getBoundingClientRect').mockReturnValue({
+      ...rect(),
+      top: 0,
+      right: 320,
+      bottom: 42,
+      left: 0,
+      width: 320,
+      height: 42,
+    });
+
+    const range = document.createRange();
+    range.setStart(textNode!, 0);
+    range.setEnd(textNode!, 5);
+    const selectedRect = {
+      ...rect(),
+      top: 200,
+      right: 740,
+      bottom: 220,
+      left: 620,
+      width: 120,
+      height: 20,
+    };
+    Object.defineProperty(range, 'getBoundingClientRect', { value: () => selectedRect });
+    Object.defineProperty(range, 'getClientRects', { value: () => [selectedRect] });
+    const browserSelection = window.getSelection();
+    browserSelection?.removeAllRanges();
+    browserSelection?.addRange(range);
+    fireEvent.mouseUp(paragraph!);
+
+    await waitFor(() => {
+      expect(editor!.style.getPropertyValue('--writer-markdown-selection-toolbar-top'))
+        .toBe('87px');
+      expect(editor!.style.getPropertyValue('--writer-markdown-selection-toolbar-left'))
+        .toBe('175px');
+      expect(editor!.style.getPropertyValue('--writer-markdown-selection-toolbar-max-width'))
+        .toBe('484px');
+    });
+  });
+
   it('offers the chat citation action inside the selection toolbar', async () => {
     const onCiteSelection = vi.fn();
     const { container } = render(

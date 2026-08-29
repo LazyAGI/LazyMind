@@ -382,3 +382,72 @@ func TestCreateGroupVerifiesSubmittedAPIKeyBeforeSaving(t *testing.T) {
 		t.Fatalf("expected failed verification to create no group, got %d groups", count)
 	}
 }
+
+func TestUpdateGroupRejectsOpenAIRequestPathWithoutChangingStoredBaseURL(t *testing.T) {
+	db := setupListProviderTestDB(t)
+	store.Init(db, db, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	now := time.Now()
+	provider := orm.UserModelProvider{
+		ID:                     "user-openai-request-path",
+		DefaultModelProviderID: "default-openai-request-path",
+		Name:                   "OpenAI",
+		Description:            "OpenAI provider",
+		BaseURL:                "https://api.openai.com/v1/",
+		Category:               defaultProviderCategory,
+		Capabilities:           "multi_group,custom_base_url,has_models",
+		BaseModel: orm.BaseModel{
+			CreateUserID:   "user-1",
+			CreateUserName: "User 1",
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+	}
+	group := orm.UserModelProviderGroup{
+		ID:                  "group-openai-request-path",
+		UserModelProviderID: provider.ID,
+		Name:                "OpenAI",
+		BaseURL:             provider.BaseURL,
+		APIKey:              "",
+		APIKeyCiphertext:    "",
+		IsVerified:          false,
+		BaseModel: orm.BaseModel{
+			CreateUserID:   "user-1",
+			CreateUserName: "User 1",
+			CreatedAt:      now,
+			UpdatedAt:      now,
+		},
+	}
+	if err := db.Create(&provider).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Create(&group).Error; err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPatch,
+		"/api/core/model_providers/"+provider.ID+"/groups/"+group.ID,
+		strings.NewReader(`{"name":"OpenAI","base_url":"https://api.openai.com/v1/chat/completions","verify":false}`),
+	)
+	req.Header.Set("X-User-Id", "user-1")
+	req = mux.SetURLVars(req, map[string]string{
+		"model_provider_id": provider.ID,
+		"group_id":          group.ID,
+	})
+	rec := httptest.NewRecorder()
+
+	UpdateGroup(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	var stored orm.UserModelProviderGroup
+	if err := db.Take(&stored, "id = ?", group.ID).Error; err != nil {
+		t.Fatal(err)
+	}
+	if stored.BaseURL != group.BaseURL {
+		t.Fatalf("stored base URL = %q, want unchanged %q", stored.BaseURL, group.BaseURL)
+	}
+}

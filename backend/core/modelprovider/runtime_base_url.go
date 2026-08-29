@@ -43,6 +43,25 @@ func LazyLLMBaseURL(providerName, baseURL string) string {
 	return parsed.String()
 }
 
+func hasOpenAIRequestPath(providerName, baseURL string) bool {
+	if normalizeProviderName(providerName) != "openai" {
+		return false
+	}
+
+	parsed, err := url.Parse(strings.TrimSpace(baseURL))
+	if err != nil || parsed.Scheme == "" || parsed.Host == "" {
+		return false
+	}
+
+	segments := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	for index, segment := range segments {
+		if strings.EqualFold(segment, "v1") {
+			return index < len(segments)-1
+		}
+	}
+	return false
+}
+
 // canonicalOpenRouterBaseURL removes request-path suffixes only from the
 // official OpenRouter API origin. Reverse proxies keep their configured path.
 func canonicalOpenRouterBaseURL(baseURL string) string {

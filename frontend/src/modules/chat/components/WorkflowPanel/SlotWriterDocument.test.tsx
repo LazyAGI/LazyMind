@@ -195,6 +195,15 @@ describe('Writer version diff text', () => {
     expect(document.querySelector('.workflow-slot__version-diff-arrow')).toHaveTextContent('→');
     expect(document.querySelector('.workflow-slot__version-diff')).not.toHaveTextContent('当前版本');
 
+    await waitFor(() => {
+      const removed = document.querySelector('.memory-diff-inline-remove');
+      const added = document.querySelector('.memory-diff-inline-add');
+      expect(removed).toHaveTextContent('初');
+      expect(removed?.closest('.memory-diff-line')).toHaveClass('is-remove');
+      expect(added).toHaveTextContent('第二');
+      expect(added?.closest('.memory-diff-line')).toHaveClass('is-add');
+    });
+
     const versionItems = document.querySelectorAll<HTMLElement>('.workflow-slot__version-item');
     fireEvent.click(versionItems[1]);
 

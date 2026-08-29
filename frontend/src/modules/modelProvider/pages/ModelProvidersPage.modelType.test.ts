@@ -14,4 +14,10 @@ describe("custom model type mapping", () => {
     expect(mapModelTypeToCapability("embed")).toBe("EMBEDDING");
     expect(mapModelTypeToCapability("embedding")).toBe("EMBEDDING");
   });
+
+  it("submits and reads the canonical lowercase type for vision-language models", () => {
+    expect(getModelTypeForCapability("VLM")).toBe("vlm");
+    expect(mapModelTypeToCapability("vlm")).toBe("VLM");
+    expect(mapModelTypeToCapability("VLM")).toBe("VLM");
+  });
 });

@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" role="img" aria-labelledby="title">
+  <title id="title">SenseNova</title>
+  <defs>
+    <pattern id="sensenova-stripes" width="10" height="10" patternUnits="userSpaceOnUse">
+      <path d="M-2-2 12 12M-12-2 2 12M8-2 12 2" fill="none" stroke="#00e8b2" stroke-width="3.4"/>
+    </pattern>
+    <mask id="sensenova-cutout">
+      <rect width="96" height="96" fill="#fff"/>
+      <rect x="34" y="34" width="29" height="29" fill="#000"/>
+    </mask>
+  </defs>
+  <g mask="url(#sensenova-cutout)">
+    <rect x="5" y="5" width="58" height="58" fill="#5927dc"/>
+    <rect x="20" y="20" width="43" height="43" fill="url(#sensenova-stripes)"/>
+  </g>
+  <rect x="63" y="34" width="28" height="29" fill="#00e8b2"/>
+  <rect x="34" y="63" width="29" height="28" fill="#00e8b2"/>
+  <rect x="63" y="63" width="28" height="28" fill="#5927dc"/>
+</svg>

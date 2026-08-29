@@ -74,11 +74,17 @@ function LocationProbe() {
   return <div>{`${location.pathname}${location.search}`}</div>;
 }
 
-function renderDetail(initialEntry = "/agent/chat/cases/demo") {
+type DetailInitialEntry = string | {
+  pathname: string;
+  state?: { showcaseReturnTo?: string };
+};
+
+function renderDetail(initialEntry: DetailInitialEntry = "/agent/chat/cases/demo") {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
         <Route path="/agent/chat/cases/:caseId" element={<DetailPage />} />
+        <Route path="/agent/chat/cases" element={<LocationProbe />} />
         <Route path="/agent/chat/home" element={<LocationProbe />} />
       </Routes>
     </MemoryRouter>,
@@ -110,6 +116,28 @@ describe("Showcase DetailPage", () => {
     expect(sourceLink).toHaveAttribute("rel", "noreferrer");
     expect(screen.queryByText("showcase.chooseTask")).not.toBeInTheDocument();
     expect(await screen.findByText("Single result")).toBeInTheDocument();
+  });
+
+  it("keeps a visible back button and returns to the capability entry route", async () => {
+    getShowcaseCaseMock.mockResolvedValue(showcaseCase([task("single", "Single", "Single result")]));
+    renderDetail({
+      pathname: "/agent/chat/cases/demo",
+      state: { showcaseReturnTo: "/agent/chat/home?from=featured" },
+    });
+
+    const backButton = await screen.findByRole("button", { name: "showcase.detail.back" });
+    fireEvent.click(backButton);
+
+    expect(await screen.findByText("/agent/chat/home?from=featured")).toBeInTheDocument();
+  });
+
+  it("falls back to the capability center when opened directly", async () => {
+    getShowcaseCaseMock.mockResolvedValue(showcaseCase([task("single", "Single", "Single result")]));
+    renderDetail();
+
+    fireEvent.click(await screen.findByRole("button", { name: "showcase.detail.back" }));
+
+    expect(await screen.findByText("/agent/chat/cases")).toBeInTheDocument();
   });
 
   it("shows the final result immediately while the replay runs once", async () => {

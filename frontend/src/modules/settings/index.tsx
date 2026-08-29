@@ -417,7 +417,9 @@ export default function SettingsPage() {
       title: t("settingsPage.confirm.developerTitle", {
         action: enabled ? t("settingsPage.enable") : t("settingsPage.disable"),
       }),
-      content: t("settingsPage.confirm.developerContent"),
+      content: t(enabled
+        ? "settingsPage.confirm.developerEnableContent"
+        : "settingsPage.confirm.developerDisableContent"),
       okText: enabled ? t("settingsPage.confirmEnable") : t("settingsPage.confirmDisable"),
       cancelText: t("settingsPage.cancel"),
       okButtonProps: enabled ? undefined : { danger: true },

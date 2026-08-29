@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { isOpenAIProvider, shouldRedirectCustomBaseUrlToOpenAI } from "./ModelProvidersPage";
+import {
+  hasOpenAIRequestPath,
+  isOpenAIProvider,
+  shouldRedirectCustomBaseUrlToOpenAI,
+} from "./ModelProvidersPage";
 
 const provider = (name: string, baseUrl: string) => ({ name, source: name, baseUrl });
 
@@ -27,5 +31,14 @@ describe("self-hosted model provider redirect", () => {
         "https://token.sensenova.cn/v1/chat/completions/"
       )
     ).toBe(false);
+  });
+
+  it("rejects OpenAI request paths while allowing API roots", () => {
+    const openAI = provider("OpenAI", "https://api.openai.com/v1/");
+
+    expect(hasOpenAIRequestPath(openAI, "https://api.openai.com/v1/chat/completions")).toBe(true);
+    expect(hasOpenAIRequestPath(openAI, "https://proxy.example.com/openai/v1/responses")).toBe(true);
+    expect(hasOpenAIRequestPath(openAI, "https://proxy.example.com/openai/v1/")).toBe(false);
+    expect(hasOpenAIRequestPath(openAI, "http://127.0.0.1:8000")).toBe(false);
   });
 });

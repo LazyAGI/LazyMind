@@ -169,6 +169,10 @@ func CreateGroup(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "query model provider failed", http.StatusInternalServerError)
 		return
 	}
+	if hasOpenAIRequestPath(parent.Name, baseURL) {
+		common.ReplyErr(w, "base_url must be an API root without a request path", http.StatusBadRequest)
+		return
+	}
 	baseURL = LazyLLMBaseURL(parent.Name, baseURL)
 
 	// Capability: single-group providers only allow one group per user.
@@ -383,6 +387,10 @@ func UpdateGroup(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		common.ReplyErr(w, "query model provider failed", http.StatusInternalServerError)
+		return
+	}
+	if hasOpenAIRequestPath(parent.Name, baseURL) {
+		common.ReplyErr(w, "base_url must be an API root without a request path", http.StatusBadRequest)
 		return
 	}
 	baseURL = LazyLLMBaseURL(parent.Name, baseURL)

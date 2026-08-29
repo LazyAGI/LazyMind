@@ -893,7 +893,12 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
   color: #738197;
+  cursor: pointer;
+  font-family: inherit;
   font-size: 13px;
   text-decoration: none;
   white-space: nowrap;
@@ -1295,6 +1300,10 @@
   min-height: 0;
   flex: 1;
   padding: 18px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   background: #fff;
 }
 
