@@ -22,14 +22,14 @@ const catalogItem = {
 };
 
 describe("knowledgeSquareData", () => {
-  it("merges catalog metadata with the current user's install", () => {
+  it("keeps a submitted dataset uninstalled while parsing is active", () => {
     const [item] = mergeKnowledgeMarketItems([catalogItem], [
       {
         active: true,
         dataset_id: "dataset-1",
         domain: "Law",
         icon: "⚖️",
-        install_state: "parsing",
+        install_state: "vectorizing",
         installed_version: "v2.0.0",
         market_item_id: "law",
         name: "Legal Knowledge",
@@ -39,7 +39,7 @@ describe("knowledgeSquareData", () => {
 
     expect(item).toMatchObject({
       id: "law",
-      installed: true,
+      installed: false,
       active: true,
       datasetId: "dataset-1",
       installedVersion: "v2.0.0",
@@ -55,7 +55,7 @@ describe("knowledgeSquareData", () => {
         dataset_id: "dataset-1",
         domain: "Law",
         icon: "⚖️",
-        install_state: "ready",
+        install_state: "done",
         installed_version: "v1.0.0",
         market_item_id: "law",
         name: "Legal Knowledge",
@@ -102,7 +102,7 @@ describe("knowledgeSquareData", () => {
         dataset_id: "dataset-1",
         domain: "Law",
         icon: "⚖️",
-        install_state: "ready",
+        install_state: "done",
         installed_version: "v2.0.0",
         installed_at: "2026-02-02T00:00:00Z",
         market_item_id: "law",
@@ -121,7 +121,7 @@ describe("knowledgeSquareData", () => {
         dataset_id: "dataset-1",
         domain: "Law",
         icon: "⚖️",
-        install_state: "ready",
+        install_state: "done",
         installed_version: "",
         installed_at: "2026-02-02T00:00:00Z",
         market_item_id: "law",
@@ -135,5 +135,44 @@ describe("knowledgeSquareData", () => {
       latestVersion: "v2.0.0",
       updateAvailable: false,
     });
+  });
+
+  it("keeps a partially failed but usable knowledge base installed", () => {
+    const [installed] = mergeKnowledgeMarketItems([catalogItem], [
+      {
+        active: false,
+        dataset_id: "dataset-1",
+        domain: "Law",
+        icon: "⚖️",
+        install_state: "partial_failed",
+        installed_version: "v2.0.0",
+        market_item_id: "law",
+        name: "Legal Knowledge",
+        updated_at: "2026-02-02T00:00:00Z",
+      },
+    ]);
+
+    expect(installed).toMatchObject({
+      installed: true,
+      installState: "partial_failed",
+    });
+  });
+
+  it("does not treat an entirely failed dataset as installed", () => {
+    const [failed] = mergeKnowledgeMarketItems([catalogItem], [
+      {
+        active: false,
+        dataset_id: "dataset-1",
+        domain: "Law",
+        icon: "⚖️",
+        install_state: "failed",
+        installed_version: "v2.0.0",
+        market_item_id: "law",
+        name: "Legal Knowledge",
+        updated_at: "2026-02-02T00:00:00Z",
+      },
+    ]);
+
+    expect(failed).toMatchObject({ installed: false, installState: "failed" });
   });
 });

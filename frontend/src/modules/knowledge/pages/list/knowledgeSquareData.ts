@@ -49,7 +49,9 @@ export function mergeKnowledgeMarketItems(
     const install = installsByItem.get(item.id);
     const catalogUpdatedAt = Date.parse(item.updated_at);
     const installedAt = Date.parse(install?.installed_at || "");
-    const installed = Boolean(install?.dataset_id);
+    const installed =
+      Boolean(install?.dataset_id) &&
+      ["done", "partial_failed"].includes(install?.install_state || "");
     const latestVersion = item.version?.trim() || "";
     const recordedInstalledVersion = install?.installed_version?.trim() || "";
     const timestampsShowLatest =

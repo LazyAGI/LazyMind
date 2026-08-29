@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   isKnowledgeMarketTaskCompleted,
+  isKnowledgeMarketTaskPartiallyFailed,
   isKnowledgeMarketTaskTerminal,
 } from "./knowledgeMarketTaskState";
 
@@ -37,6 +38,19 @@ describe("knowledgeMarketTaskState", () => {
       overallPercent: 42,
     };
 
+    expect(isKnowledgeMarketTaskTerminal(task)).toBe(true);
+    expect(isKnowledgeMarketTaskCompleted(task)).toBe(false);
+  });
+
+  it("keeps partial failures terminal but distinct from full failure", () => {
+    const task = {
+      jobType: "knowledge_market_install",
+      jobStatus: "succeeded",
+      stage: "partial_failed",
+      overallPercent: 96,
+    };
+
+    expect(isKnowledgeMarketTaskPartiallyFailed(task)).toBe(true);
     expect(isKnowledgeMarketTaskTerminal(task)).toBe(true);
     expect(isKnowledgeMarketTaskCompleted(task)).toBe(false);
   });

@@ -93,6 +93,25 @@ func TestBuiltinPackageIgnoresPythonRuntimeCacheFiles(t *testing.T) {
 	}
 }
 
+func TestBuiltinSeedIgnoresRuntimeDependencyDirectorySymlink(t *testing.T) {
+	root := t.TempDir()
+	exporterDir := filepath.Join(root, "runtime", "scripts", "export_pptx")
+	if err := os.MkdirAll(exporterDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	dependencyDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dependencyDir, "package.json"), []byte("{}\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(dependencyDir, filepath.Join(exporterDir, "node_modules")); err != nil {
+		t.Skipf("directory symlinks are unavailable: %v", err)
+	}
+
+	if _, err := seedBuiltinWorkflow(context.Background(), nil, root); err != nil {
+		t.Fatalf("runtime dependency symlink must not be read as a package file: %v", err)
+	}
+}
+
 func TestBuiltinSeedPublishesNewRevisionWhenCompilerGraphChanges(t *testing.T) {
 	db := newHandlerTestDB(t)
 	root := t.TempDir()

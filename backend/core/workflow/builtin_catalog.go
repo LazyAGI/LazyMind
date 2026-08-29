@@ -68,8 +68,12 @@ func seedBuiltinWorkflow(ctx context.Context, db *gorm.DB, root string) (string,
 		if err != nil {
 			return err
 		}
+		if entry.Type()&fs.ModeSymlink != 0 {
+			return nil
+		}
 		if entry.IsDir() {
-			if entry.Name() == "__pycache__" || strings.HasPrefix(entry.Name(), ".") && path != root {
+			if entry.Name() == "__pycache__" || entry.Name() == "node_modules" ||
+				strings.HasPrefix(entry.Name(), ".") && path != root {
 				return filepath.SkipDir
 			}
 			return nil

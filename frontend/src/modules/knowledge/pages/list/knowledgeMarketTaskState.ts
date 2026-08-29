@@ -21,8 +21,19 @@ export function isKnowledgeMarketTaskFailed(task: KnowledgeMarketTaskState) {
   );
 }
 
+export function isKnowledgeMarketTaskPartiallyFailed(
+  task: KnowledgeMarketTaskState,
+) {
+  return task.stage === "partial_failed";
+}
+
 export function isKnowledgeMarketTaskTerminal(task: KnowledgeMarketTaskState) {
-  if (isKnowledgeMarketTaskFailed(task)) return true;
+  if (
+    isKnowledgeMarketTaskFailed(task) ||
+    isKnowledgeMarketTaskPartiallyFailed(task)
+  ) {
+    return true;
+  }
   if (["updateAll", "knowledge_market_update_all"].includes(task.jobType)) {
     return task.jobStatus === "succeeded";
   }
@@ -33,6 +44,8 @@ export function isKnowledgeMarketTaskTerminal(task: KnowledgeMarketTaskState) {
 
 export function isKnowledgeMarketTaskCompleted(task: KnowledgeMarketTaskState) {
   return (
-    isKnowledgeMarketTaskTerminal(task) && !isKnowledgeMarketTaskFailed(task)
+    isKnowledgeMarketTaskTerminal(task) &&
+    !isKnowledgeMarketTaskFailed(task) &&
+    !isKnowledgeMarketTaskPartiallyFailed(task)
   );
 }

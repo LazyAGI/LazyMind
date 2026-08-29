@@ -15,6 +15,7 @@ import {
   getKnowledgeMarketTaskPercent,
   isKnowledgeMarketTaskCompleted,
   isKnowledgeMarketTaskFailed,
+  isKnowledgeMarketTaskPartiallyFailed,
   isKnowledgeMarketTaskTerminal,
 } from "./knowledgeMarketTaskState";
 
@@ -145,14 +146,27 @@ export default function KnowledgeMarketTaskModal({
       render: (_, task) => {
         const taskState = toTaskState(task);
         const failed = isKnowledgeMarketTaskFailed(taskState);
+        const partiallyFailed = isKnowledgeMarketTaskPartiallyFailed(taskState);
         const done = isKnowledgeMarketTaskCompleted(taskState);
         return (
-          <Tag color={failed ? "error" : done ? "success" : "processing"}>
-            {failed
-              ? t("knowledge.failed")
-              : done
-                ? t("knowledge.processed")
-                : t("knowledge.processing")}
+          <Tag
+            color={
+              failed
+                ? "error"
+                : partiallyFailed
+                  ? "warning"
+                  : done
+                    ? "success"
+                    : "processing"
+            }
+          >
+            {partiallyFailed
+              ? t("knowledge.partialFailed")
+              : failed
+                ? t("knowledge.failed")
+                : done
+                  ? t("knowledge.processed")
+                  : t("knowledge.processing")}
           </Tag>
         );
       },
@@ -168,7 +182,11 @@ export default function KnowledgeMarketTaskModal({
             Math.max(0, getKnowledgeMarketTaskPercent(toTaskState(task))),
           )}
           size="small"
-          status={isKnowledgeMarketTaskFailed(toTaskState(task)) ? "exception" : undefined}
+          status={
+            isKnowledgeMarketTaskFailed(toTaskState(task))
+              ? "exception"
+              : undefined
+          }
         />
       ),
     },

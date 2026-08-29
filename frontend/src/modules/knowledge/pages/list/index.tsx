@@ -102,6 +102,7 @@ import {
 } from "./knowledgeMineFilters";
 import {
   isKnowledgeMarketTaskFailed,
+  isKnowledgeMarketTaskPartiallyFailed,
   isKnowledgeMarketTaskTerminal,
 } from "./knowledgeMarketTaskState";
 import {
@@ -965,7 +966,18 @@ const KnowledgePage: FC<KnowledgePageProps> = ({
           overallPercent: result.detail.overall_percent,
           progress: result.detail.progress,
         });
-        if (failed) {
+        const partiallyFailed = isKnowledgeMarketTaskPartiallyFailed({
+          jobType: result.job.jobType,
+          jobStatus: result.detail.job_status,
+          stage: result.detail.stage,
+          overallPercent: result.detail.overall_percent,
+          progress: result.detail.progress,
+        });
+        if (partiallyFailed) {
+          message.warning(
+            t("knowledge.marketTaskPartiallyFailed", { name: result.job.name }),
+          );
+        } else if (failed) {
           message.error(
             t("knowledge.marketTaskFailed", { name: result.job.name }),
           );
