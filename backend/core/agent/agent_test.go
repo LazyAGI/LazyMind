@@ -203,9 +203,13 @@ func TestCreateThreadRequiresConfiguredThreadLLMs(t *testing.T) {
 		},
 		"inputs": {"kb_id": "kb-1", "num_cases": 1}
 	}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/core/agent/threads", bytes.NewReader(body))
-	req.Header.Set("X-User-Id", "user-1")
-	req.Header.Set("X-User-Name", "User One")
+	newRequest := func() *http.Request {
+		req := httptest.NewRequest(http.MethodPost, "/api/core/agent/threads", bytes.NewReader(body))
+		req.Header.Set("X-User-Id", "user-1")
+		req.Header.Set("X-User-Name", "User One")
+		return req
+	}
+	req := newRequest()
 	rec := httptest.NewRecorder()
 
 	CreateThread(rec, req)
@@ -229,6 +233,23 @@ func TestCreateThreadRequiresConfiguredThreadLLMs(t *testing.T) {
 	}
 	if activeCount != 0 {
 		t.Fatalf("expected validation to happen before active thread reservation, got %d rows", activeCount)
+	}
+
+	for _, role := range []string{"llm", "embed_main"} {
+		seedAgentRuntimeModelConfig(t, db, "user-1", role)
+	}
+	req = newRequest()
+	rec = httptest.NewRecorder()
+	CreateThread(rec, req)
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected missing evo model to return 422, status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	response = map[string]any{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode missing evo response: %v", err)
+	}
+	if int(response["code"].(float64)) != evoModelNotConfiguredCode || response["message"] != "未配置自进化模型" {
+		t.Fatalf("expected specific missing evo model error, body=%s", rec.Body.String())
 	}
 }
 

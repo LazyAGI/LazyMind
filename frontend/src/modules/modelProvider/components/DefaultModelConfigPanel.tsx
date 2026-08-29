@@ -259,6 +259,7 @@ const moduleConfigs: ModuleConfig[] = [
     key: "evo_llm",
     titleKey: "modelProvider.module.selfEvolutionTitle",
     subtitleKey: "modelProvider.module.selfEvolutionSubtitle",
+    required: true,
   },
 ];
 

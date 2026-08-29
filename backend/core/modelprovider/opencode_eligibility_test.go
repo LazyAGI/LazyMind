@@ -15,6 +15,7 @@ func TestResolveOpenCodeModel(t *testing.T) {
 		{"namespaced id preserved", "SiliconFlow", "Pro/moonshotai/Kimi-K2.6", "https://api.siliconflow.cn/v1/", "vlm", true, true, "siliconflow-cn/Pro/moonshotai/Kimi-K2.6", "https://api.siliconflow.cn/v1"},
 		{"custom chat model uses known provider adapter", "OpenAI", "deepseek-v4-flash", "https://gateway.example.com/v1/", "llm", false, true, "openai/deepseek-v4-flash", "https://gateway.example.com/v1"},
 		{"unknown built-in model rejected", "OpenAI", "deepseek-v4-flash", "https://gateway.example.com/v1/", "llm", true, false, "", ""},
+		{"unsupported siliconflow built-in rejected", "SiliconFlow", "Qwen/Qwen3-8B", "https://api.siliconflow.cn/v1/", "llm", true, false, "", ""},
 		{"unknown namespace rejected", "SiliconFlow", "Other/Kimi-K2.6", "https://api.siliconflow.cn/v1/", "llm", true, false, "", ""},
 		{"unknown provider rejected", "Custom", "gpt-4o-mini", "https://example.com/v1", "llm", false, false, "", ""},
 		{"non chat model rejected", "Qwen", "qwen-plus", "https://dashscope.aliyuncs.com/", "embed", false, false, "", ""},
