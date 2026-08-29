@@ -15,6 +15,7 @@ import {
   workflowTabAllowsDownload,
   useWorkflowStore,
 } from '@/modules/chat/store/workflowPanel';
+import { isWorkflowReadyToStart } from '@/modules/chat/store/workflowStatus';
 import { useTaskCenterStore, type SubAgentTask, type TaskArtifactStream } from '@/modules/chat/store/taskCenter';
 import { uploadFileInChunks } from '@/modules/chat/utils/chunkUpload';
 import { WorkflowSessionApi } from '@/modules/chat/utils/request';
@@ -1808,6 +1809,13 @@ export function WorkflowPanel({
     [footerActions],
   );
   const displayStatus = autoRunning ? 'active' : session.status;
+  const displayStatusKey = isWorkflowReadyToStart(
+    displayStatus,
+    session.projection,
+    session.steps?.length ?? 0,
+  )
+    ? 'chat.workflowStatusReady'
+    : STATUS_KEY[displayStatus] ?? displayStatus;
   // Only block footer actions while the plugin is actually running (or flush-in-progress).
   // Dirty editors no longer disable retry — click flushes saves first, then proceeds.
   const sessionBusy = displayStatus === 'active' || autoRunning;
@@ -1889,7 +1897,7 @@ export function WorkflowPanel({
           <span className='workflow-panel__title'>{ui.name || session.workflow_id}</span>
           <span
             className={`workflow-panel__status workflow-panel__status--${displayStatus}`}
-            aria-label={t('chat.workflowStatusAria', { status: t(STATUS_KEY[displayStatus] ?? displayStatus) })}
+            aria-label={t('chat.workflowStatusAria', { status: t(displayStatusKey) })}
             onClick={() => session && setStateGraphOpen(true)}
             style={{ cursor: 'pointer' }}
             title={t('chat.workflowViewWorkflow')}
@@ -1897,7 +1905,7 @@ export function WorkflowPanel({
             tabIndex={0}
             onKeyDown={(e) => e.key === 'Enter' && session && setStateGraphOpen(true)}
           >
-            {t(STATUS_KEY[displayStatus] ?? displayStatus)}
+            {t(displayStatusKey)}
           </span>
         </div>
         <div className='workflow-panel__header-right'>

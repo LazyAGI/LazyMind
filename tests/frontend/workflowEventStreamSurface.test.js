@@ -47,7 +47,9 @@ describe('Workflow Panel live update surface', () => {
     );
     expect(taskStore).toContain('get().upsertTask(conversationId');
     expect(taskPanel).toContain('if (filter === "all") return tasks;');
-    expect(taskPanel).toContain('buildOrdinaryTaskTimeline(tasks, workflowSteps)');
+    expect(taskPanel).toMatch(
+      /buildOrdinaryTaskTimeline\(\s*tasks,\s*workflowSteps,\s*Date\.now\(\),\s*plannedCount,\s*\)/,
+    );
     expect(chatLayout).toContain('taskCenterDisplayCount(');
   });
 });

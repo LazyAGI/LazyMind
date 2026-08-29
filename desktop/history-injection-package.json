@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "url": "https://modelscope.cn/datasets/CarlosShaoting/lazymind-cst/resolve/master/lazymind-history-injection-five-samples-20260829.zip",
+  "fileName": "lazymind-history-injection-five-samples-20260829.zip",
+  "sha256": "cbe7774ff2b64ceb7083fa0edfa62d2e0ed59d283c37ade6f210b87267979e9f",
+  "size": 74408904,
+  "runtimeFileName": "history-injection.zip",
+  "conversationIds": [
+    "e97d6394-5b7c-4bab-8757-3f04c9aefdde",
+    "a3b1d442-7a49-4225-a806-13fc162f7745",
+    "bcea6551-d6a2-4dec-83bb-1ccf9fa11f51",
+    "e3096625-c245-45a0-bc32-ce203f3c94f3",
+    "3ecbcfdc-2e2a-4c38-ae75-060ba6bd02e4"
+  ]
+}

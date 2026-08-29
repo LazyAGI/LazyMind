@@ -165,7 +165,8 @@ jobs:
           path: |
             desktop/cache/electron
             desktop/cache/electron-builder
-          key: windows-x64-electron-${{ hashFiles('desktop/electron/pnpm-lock.yaml') }}
+            desktop/cache/history-injection
+          key: windows-x64-electron-${{ hashFiles('desktop/electron/pnpm-lock.yaml', 'desktop/history-injection-package.json') }}
           restore-keys: |
             windows-x64-electron-
 

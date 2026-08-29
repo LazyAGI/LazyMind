@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
+	"time"
 
 	"lazymind/agentconnector/internal/agentexec"
 	"lazymind/agentconnector/internal/agentintegration"
@@ -80,6 +82,7 @@ func TestStatusesDoNotLaunchDesktopAgentCandidates(t *testing.T) {
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	t.Setenv("USERPROFILE", home)
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
 	t.Setenv("PATH", "")
 	t.Setenv("LAZYMIND_HOME", filepath.Join(home, ".lazymind"))
 	t.Setenv("LAZYMIND_CODEX_BIN", "")
@@ -91,14 +94,12 @@ func TestStatusesDoNotLaunchDesktopAgentCandidates(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(cursorHome, "cursor.cmd"), []byte("touch "+marker), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if runtime.GOOS == "windows" {
-		desktop := filepath.Join(home, "Cursor.exe")
-		if err := os.WriteFile(desktop, []byte("test"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		if _, err := agentexec.SetExecutableBinding(agentexec.CursorDesktop, desktop); err != nil {
-			t.Fatal(err)
-		}
+	desktop := filepath.Join(home, "Cursor.exe")
+	if err := os.WriteFile(desktop, []byte("test"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := agentexec.SetExecutableBinding(agentexec.CursorDesktop, desktop); err != nil {
+		t.Fatal(err)
 	}
 
 	statuses, err := Statuses(context.Background(), &mcpbridge.Bridge{})
@@ -114,6 +115,59 @@ func TestStatusesDoNotLaunchDesktopAgentCandidates(t *testing.T) {
 	}
 	if _, err := os.Stat(marker); !os.IsNotExist(err) {
 		t.Fatalf("status inspection launched Cursor: %v", err)
+	}
+	traeConfig := filepath.Join(home, ".config", "TRAE SOLO CN", "User", "mcp.json")
+	if runtime.GOOS == "darwin" {
+		traeConfig = filepath.Join(home, "Library", "Application Support", "TRAE SOLO CN", "User", "mcp.json")
+	} else if runtime.GOOS == "windows" {
+		traeConfig = filepath.Join(home, "AppData", "Roaming", "TRAE SOLO CN", "User", "mcp.json")
+	}
+	for _, path := range []string{
+		filepath.Join(home, ".codex", "config.toml"),
+		filepath.Join(home, ".cursor", "mcp.json"),
+		filepath.Join(home, ".workbuddy", "mcp.json"),
+		filepath.Join(home, ".box-agent", "config", "mcp.json"),
+		traeConfig,
+		filepath.Join(home, ".dsh", "profiles", "web", "cordis.patch.yml"),
+	} {
+		if _, err := os.Stat(path); !os.IsNotExist(err) {
+			t.Errorf("status inspection wrote Agent configuration %s: %v", path, err)
+		}
+	}
+}
+
+func TestCursorLoginActionReturnsBeforeExternalLoginCompletes(t *testing.T) {
+	server := newTestServer(t, t.TempDir())
+	changes := server.policy.Changes()
+	started := make(chan struct{})
+	release := make(chan struct{})
+	server.loginOverride = func(context.Context, string) error {
+		close(started)
+		<-release
+		return nil
+	}
+
+	start := time.Now()
+	status, err := server.agentAction(context.Background(), "cursor", "login")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("login action blocked for %s", elapsed)
+	}
+	if !strings.Contains(status.Message, "return to LazyMind and check again") {
+		t.Fatalf("status=%#v", status)
+	}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("background login did not start")
+	}
+	close(release)
+	select {
+	case <-changes:
+	case <-time.After(time.Second):
+		t.Fatal("completed login did not trigger an executor recheck")
 	}
 }
 
@@ -169,7 +223,7 @@ func TestExecutorPolicyCanBeDisabledAndEnabled(t *testing.T) {
 	request = httptest.NewRequest(http.MethodGet, "/v1/executors", nil)
 	response = httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
-	if response.Code != http.StatusOK || !bytes.Contains(response.Body.Bytes(), []byte(`"codex":{"provider":"codex","enabled":false}`)) {
+	if response.Code != http.StatusOK || !bytes.Contains(response.Body.Bytes(), []byte(`"codex":{"provider":"codex","enabled":false`)) {
 		t.Fatalf("statuses status=%d body=%s", response.Code, response.Body.String())
 	}
 
@@ -178,5 +232,35 @@ func TestExecutorPolicyCanBeDisabledAndEnabled(t *testing.T) {
 	handler.ServeHTTP(response, request)
 	if response.Code != http.StatusOK || !bytes.Contains(response.Body.Bytes(), []byte(`"enabled":true`)) {
 		t.Fatalf("enable status=%d body=%s", response.Code, response.Body.String())
+	}
+}
+
+func TestExecutorStatusesProbePrerequisitesWithoutEnablingExecution(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("fixture uses a POSIX script")
+	}
+	home := t.TempDir()
+	binary := filepath.Join(home, "agent-cli")
+	if err := os.WriteFile(binary, []byte(`#!/bin/sh
+if [ "$1" = "--version" ]; then exit 0; fi
+if [ "$1" = "status" ]; then exit 0; fi
+if [ "$1" = "login" ] && [ "$2" = "status" ]; then exit 0; fi
+exit 1
+`), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("LAZYMIND_CODEX_BIN", binary)
+	t.Setenv("LAZYMIND_CURSOR_AGENT_BIN", binary)
+	server := newTestServer(t, filepath.Join(home, "lazymind"))
+
+	statuses, err := ExecutorStatuses(server.policy)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, provider := range []string{"codex", "cursor"} {
+		status := statuses[provider]
+		if status.Enabled || !status.Installed || !status.Ready || status.UnavailableReason != "" {
+			t.Fatalf("%s status=%#v", provider, status)
+		}
 	}
 }

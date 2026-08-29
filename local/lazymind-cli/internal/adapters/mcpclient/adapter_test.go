@@ -238,9 +238,6 @@ func writeTestFile(t *testing.T, path, value string) {
 
 func bindDesktopForTest(t *testing.T, target agentexec.BindingTarget) {
 	t.Helper()
-	if runtime.GOOS != "windows" {
-		return
-	}
 	path := filepath.Join(t.TempDir(), string(target)+".exe")
 	if err := os.WriteFile(path, []byte("test"), 0o600); err != nil {
 		t.Fatal(err)

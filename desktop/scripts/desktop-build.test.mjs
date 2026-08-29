@@ -34,6 +34,9 @@ const windowsWorkflow = path.join(
   "workflows",
   "windows-installer.yml",
 );
+const coreDockerfile = path.join(scriptsDir, "..", "..", "backend", "core", "Dockerfile");
+const dockerCompose = path.join(scriptsDir, "..", "..", "docker-compose.yml");
+const rootMakefile = path.join(scriptsDir, "..", "..", "Makefile");
 
 function nsisMacro(source, name) {
   const match = source.match(new RegExp(`!macro ${name}\\b([\\s\\S]*?)!macroend`));
@@ -50,6 +53,7 @@ function writeOfflineSkillFixtures(root) {
   mkdirSync(featured, { recursive: true });
   mkdirSync(path.join(featured, "assets"), { recursive: true });
   writeFileSync(path.join(featured, "catalog.json"), '{"schema_version":1,"cases":[]}\n');
+  writeFileSync(path.join(root, "history-injection.zip"), "history-injection-fixture");
 }
 
 for (const target of [
@@ -83,6 +87,8 @@ for (const target of [
       assert.ok(manifest.checksums[`bin/core${target.suffix}`]);
       assert.ok(manifest.checksums["builtin-skills/catalog.json"]);
       assert.ok(manifest.checksums["featured-skills/catalog.json"]);
+      assert.equal(manifest.paths.historyInjectionArchive, "history-injection.zip");
+      assert.ok(manifest.checksums["history-injection.zip"]);
       assert.equal(Object.keys(manifest.checksums).some((key) => key.includes("\\")), false);
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -112,14 +118,17 @@ test("writes trusted local mode into the desktop runtime manifest", () => {
   }
 });
 
-test("macOS and Windows builds materialize builtin Skills before writing the runtime manifest", () => {
+test("macOS and Windows builds materialize offline assets before writing the runtime manifest", () => {
   const darwin = readFileSync(darwinBuildScript, "utf8");
   const windows = readFileSync(windowsBuildScript, "utf8");
   for (const source of [darwin, windows]) {
     const bundle = source.indexOf("builtin-skill-bundle");
+    const historyPackage = source.indexOf("stage-history-injection-package.mjs");
     const manifest = source.indexOf("write-runtime-manifest.mjs");
     assert.ok(bundle >= 0, "build script must invoke the shared builtin Skill bundler");
+    assert.ok(historyPackage >= 0, "build script must stage the ModelScope history package");
     assert.ok(manifest > bundle, "builtin Skills must be materialized before the runtime manifest is written");
+    assert.ok(manifest > historyPackage, "history samples must be downloaded before the runtime manifest is written");
     assert.match(source, /builtin-sources\.yaml/);
     assert.match(source, /builtin-skills\.lock\.json/);
     assert.match(source, /featured-sources/);
@@ -132,6 +141,39 @@ test("macOS and Windows builds materialize builtin Skills before writing the run
     assert.match(windows, new RegExp(`skills\\\\${category}`));
   }
   assert.match(windows, /skills\\\.runtime/);
+  assert.match(darwin, /"\$\{ROOT\}\/" "\$\{RUNTIME_ROOT\}\/app\/"/);
+  assert.match(windows, /robocopy\.exe \$repoRoot \$appRoot \/MIR/);
+  assert.match(darwin, /--exclude "\/history-injection"/);
+  assert.match(darwin, /--exclude "lazymind-history-injection\*\.zip"/);
+  assert.match(windows, /\$excludedDirs = @\(\s*'node_modules',/);
+  assert.match(windows, /Join-Path \$repoRoot 'history-injection'/);
+  assert.match(windows, /lazymind-history-injection\*\.zip/);
+});
+
+test("Docker prepares history samples at runtime without coupling the Core image build to ModelScope", () => {
+  const dockerfile = readFileSync(coreDockerfile, "utf8");
+  const compose = readFileSync(dockerCompose, "utf8");
+  const completedInitDependency = /history-injection-init:\r?\n\s+condition: service_completed_successfully/;
+  assert.doesNotMatch(dockerfile, /history-injection-package/);
+  assert.doesNotMatch(dockerfile, /COPY history-injection \/app\/history-injection/);
+  assert.match(compose, /history-injection-init:/);
+  assert.match(compose, /lazymind-algorithm:/);
+  assert.match(compose, /\.\/scripts\/prepare_history_injection\.py:.*:ro/);
+  assert.match(compose, /\.\/desktop\/history-injection-package\.json:.*:ro/);
+  assert.match(compose, /LAZYMIND_HISTORY_INJECTION_ROOT: \/var\/lib\/lazymind\/uploads\/\.history-injection\/bundles/);
+  assert.match(compose, completedInitDependency);
+  assert.match(compose.replace(/\r?\n/g, "\r\n"), completedInitDependency);
+});
+
+test("Docker startup builds a native Windows Assistant Bridge", () => {
+  const source = readFileSync(rootMakefile, "utf8");
+
+  assert.match(source, /ifeq \(\$\(OS\),Windows_NT\)[\s\S]*LAZYMIND_CLI_FILENAME := lazymind\.exe/);
+  assert.match(source, /HOST_GOOS := windows/);
+  assert.match(source, /PROCESSOR_ARCHITEW6432[\s\S]*PROCESSOR_ARCHITECTURE/);
+  assert.match(source, /_HOST_DOCKER_PREFIX := MSYS_NO_PATHCONV=1/);
+  assert.match(source, /\$\(_HOST_DOCKER_USER_FLAG\)[\s\S]*GOOS="\$\(HOST_GOOS\)"/);
+  assert.match(source, /local\/build\/bin\/\$\(LAZYMIND_CLI_FILENAME\)/);
 });
 
 test("generates a multi-resolution Windows ICO from the macOS icon", () => {
@@ -508,6 +550,20 @@ test("Desktop startup shows real bundled Python progress and transient Windows l
   assert.doesNotMatch(source, /transition:\s*width/);
 });
 
+test("Desktop allows slow first-launch Chat rendering", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  assert.match(source, /const rendererReadyTimeoutMs = 120 \* 1000;/);
+  assert.match(source, /rendererReadyTimeoutMs \/ 1000/);
+  assert.doesNotMatch(source, /did not render within 30 seconds/);
+});
+
+test("Desktop warmup reports bundled history extraction before Core starts", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  assert.match(source, /history-injection-payload/);
+  assert.match(source, /Preparing sample conversations/);
+  assert.match(source, /Verifying and unpacking the bundled sample conversations/);
+});
+
 test("selected Desktop folders become dynamic allowed roots without confirmation or restart", () => {
   const source = readFileSync(electronMainScript, "utf8");
   const start = source.indexOf('ipcMain.handle("lazymind:authorizeLocalFolders"');
@@ -617,6 +673,26 @@ test("Desktop supervises the external Agent host until the application quits", (
     source,
     /function beginFastQuit[\s\S]*clearTimeout\(agentHostRestartTimer\)[\s\S]*agentHostProcess\?\.kill\(\)/,
     "application shutdown must disable supervision before stopping the Agent host",
+  );
+});
+
+test("Desktop Agent login returns immediately and refreshes the Host when login exits", () => {
+  const source = readFileSync(electronMainScript, "utf8");
+  assert.match(
+    source,
+    /function runAgentConnector[\s\S]*action === "login"[\s\S]*return startAgentLogin\(agent\)/,
+  );
+  assert.match(
+    source,
+    /function startAgentLogin[\s\S]*spawn\(agentConnectorPath, \["internal", "agent", agent, "login"\][\s\S]*return runConnectorJSON\([\s\S]*\["internal", "agent", agent, "status"\]/,
+  );
+  assert.match(
+    source,
+    /function startAgentLogin[\s\S]*child\.once\("close"[\s\S]*restartAgentHost\(\)/,
+  );
+  assert.match(
+    source,
+    /function beginFastQuit[\s\S]*agentLoginProcesses\.values\(\)[\s\S]*child\.kill\(\)[\s\S]*agentLoginProcesses\.clear\(\)/,
   );
 });
 

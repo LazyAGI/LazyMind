@@ -156,20 +156,50 @@ func (r *Repository) ImportInputResource(ctx context.Context, owner, name, mime,
 }
 
 func (r *Repository) BindInput(ctx context.Context, owner string, binding InputBinding) error {
-	if err := r.AuthorizeSession(ctx, binding.WorkflowSessionID, owner); err != nil {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		return r.bindInputTx(tx, owner, binding)
+	})
+}
+
+func (r *Repository) bindInputTx(tx *gorm.DB, owner string, binding InputBinding) error {
+	var session orm.WorkflowSession
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ?", binding.WorkflowSessionID).
+		First(&session).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrNotFound
+		}
 		return err
 	}
+	if session.CreateUserID != owner {
+		return ErrPermissionDenied
+	}
 	var resource InputResource
-	if err := r.db.WithContext(ctx).Where("id = ? AND owner_user_id = ?", binding.ResourceID, owner).First(&resource).Error; err != nil {
+	if err := tx.Where("id = ? AND owner_user_id = ?", binding.ResourceID, owner).First(&resource).Error; err != nil {
 		return ErrPermissionDenied
 	}
 	if resource.Revision != binding.ResourceRevision || resource.ContentHash != binding.ContentHash {
 		return ErrIdempotencyConflict
 	}
+	var existing InputBinding
+	err := tx.Where(
+		"workflow_session_id = ? AND material_id = ? AND created_by_command_id = ?",
+		binding.WorkflowSessionID, binding.MaterialID, binding.CreatedByCommandID,
+	).First(&existing).Error
+	if err == nil {
+		if existing.ResourceType != binding.ResourceType || existing.ResourceID != binding.ResourceID ||
+			existing.ResourceRevision != binding.ResourceRevision || existing.ContentHash != binding.ContentHash {
+			return ErrIdempotencyConflict
+		}
+		return nil
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
 	binding.ID = uuid.NewString()
 	binding.CreatedAt = time.Now().UTC()
 	binding.Validity = "effective"
-	return r.db.WithContext(ctx).Create(&binding).Error
+	return tx.Create(&binding).Error
 }
 
 func (r *Repository) GetInputResource(ctx context.Context, owner, id string) (InputResource, error) {
@@ -470,6 +500,23 @@ func (r *Repository) SetSessionStopped(ctx context.Context, owner, sessionID, co
 
 func (r *Repository) CreateHostSession(ctx context.Context, owner, sessionID, conversationID, originHost,
 	originRef, controllerHost string, workflow WorkflowPackage) (orm.WorkflowSession, bool, error) {
+	return r.createHostSession(ctx, owner, sessionID, conversationID, originHost, originRef, controllerHost,
+		workflow, "", nil)
+}
+
+// CreateInitializedHostSession atomically creates a Host Session and persists
+// the preparation-derived intent and input bindings. A validation failure must
+// not leave an active, partially initialized Session behind.
+func (r *Repository) CreateInitializedHostSession(ctx context.Context, owner, sessionID, conversationID, originHost,
+	originRef, controllerHost string, workflow WorkflowPackage, intentContext string,
+	bindings []InputBinding) (orm.WorkflowSession, bool, error) {
+	return r.createHostSession(ctx, owner, sessionID, conversationID, originHost, originRef, controllerHost,
+		workflow, intentContext, bindings)
+}
+
+func (r *Repository) createHostSession(ctx context.Context, owner, sessionID, conversationID, originHost,
+	originRef, controllerHost string, workflow WorkflowPackage, intentContext string,
+	bindings []InputBinding) (orm.WorkflowSession, bool, error) {
 	if scope := ConversationScope(ctx); scope != "" && scope != strings.TrimSpace(conversationID) {
 		return orm.WorkflowSession{}, false, ErrPermissionDenied
 	}
@@ -500,41 +547,54 @@ func (r *Repository) CreateHostSession(ctx context.Context, owner, sessionID, co
 				return ErrIdempotencyConflict
 			}
 			created = existing
-			return nil
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return err
-		}
-		now := time.Now().UTC()
-		if conversationID != "" {
-			var current []orm.WorkflowSession
-			if err := tx.Where("conversation_id = ? AND dismissed = false", conversationID).
-				Order("created_at ASC").Find(&current).Error; err != nil {
-				return err
-			}
-			if len(current) > 0 {
-				if !allTerminalSessions(current) {
-					return ErrSessionConflict
-				}
-				ids := make([]string, 0, len(current))
-				for _, session := range current {
-					ids = append(ids, session.ID)
-				}
-				if err := tx.Model(&orm.WorkflowSession{}).Where("id IN ?", ids).
-					Updates(map[string]any{"dismissed": true, "updated_at": now}).Error; err != nil {
+		} else {
+			now := time.Now().UTC()
+			if conversationID != "" {
+				var current []orm.WorkflowSession
+				if err := tx.Where("conversation_id = ? AND dismissed = false", conversationID).
+					Order("created_at ASC").Find(&current).Error; err != nil {
 					return err
 				}
+				if len(current) > 0 {
+					if !allTerminalSessions(current) {
+						return ErrSessionConflict
+					}
+					ids := make([]string, 0, len(current))
+					for _, session := range current {
+						ids = append(ids, session.ID)
+					}
+					if err := tx.Model(&orm.WorkflowSession{}).Where("id IN ?", ids).
+						Updates(map[string]any{"dismissed": true, "updated_at": now}).Error; err != nil {
+						return err
+					}
+				}
+			}
+			created = orm.WorkflowSession{ID: sessionID, ConversationID: conversationID, OriginHost: originHost,
+				OriginRef: originRef, ControllerHost: controllerHost, WorkflowID: workflow.WorkflowID,
+				WorkflowRef: workflow.WorkflowRef, WorkflowRevisionID: workflow.RevisionID,
+				WorkflowRevisionNo: workflow.RevisionNo, WorkflowTreeHash: workflow.TreeHash,
+				StateVersion: 1, GraphHash: workflow.GraphHash, GraphSchemaVersion: workflow.GraphVersion,
+				Status: "active", CreateUserID: owner, CreatedAt: now, UpdatedAt: now}
+			if err := tx.Create(&created).Error; err != nil {
+				return err
+			}
+			createdNow = true
+		}
+		if intentContext != "" {
+			if err := tx.Model(&orm.WorkflowSession{}).Where("id = ?", created.ID).
+				Update("intent_context", intentContext).Error; err != nil {
+				return err
+			}
+			created.IntentContext = intentContext
+		}
+		for _, binding := range bindings {
+			binding.WorkflowSessionID = created.ID
+			if err := r.bindInputTx(tx, owner, binding); err != nil {
+				return err
 			}
 		}
-		created = orm.WorkflowSession{ID: sessionID, ConversationID: conversationID, OriginHost: originHost,
-			OriginRef: originRef, ControllerHost: controllerHost, WorkflowID: workflow.WorkflowID,
-			WorkflowRef: workflow.WorkflowRef, WorkflowRevisionID: workflow.RevisionID,
-			WorkflowRevisionNo: workflow.RevisionNo, WorkflowTreeHash: workflow.TreeHash,
-			StateVersion: 1, GraphHash: workflow.GraphHash, GraphSchemaVersion: workflow.GraphVersion,
-			Status: "active", CreateUserID: owner, CreatedAt: now, UpdatedAt: now}
-		if err := tx.Create(&created).Error; err != nil {
-			return err
-		}
-		createdNow = true
 		return nil
 	})
 	if err != nil {
@@ -543,9 +603,9 @@ func (r *Repository) CreateHostSession(ctx context.Context, owner, sessionID, co
 	if !createdNow {
 		return created, false, nil
 	}
-	payload, _ := json.Marshal(map[string]any{"session_id": sessionID, "status": "active", "state_version": 1})
-	_ = r.AppendEvent(ctx, &Event{SessionID: sessionID, OwnerUserID: owner, EventType: "workflow.snapshot",
-		EntityID: sessionID, StateVersion: 1, PayloadJSON: payload})
+	payload, _ := json.Marshal(map[string]any{"session_id": created.ID, "status": "active", "state_version": 1})
+	_ = r.AppendEvent(ctx, &Event{SessionID: created.ID, OwnerUserID: owner, EventType: "workflow.snapshot",
+		EntityID: created.ID, StateVersion: 1, PayloadJSON: payload})
 	return created, true, nil
 }
 

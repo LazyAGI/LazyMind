@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -120,7 +121,7 @@ func (s *Store) AccessToken(ctx context.Context) (string, error) {
 			return err
 		}
 		if tokenExpiredSoon(value, time.Now(), 90*time.Second) {
-			value, err = s.refreshUnlocked(ctx, value)
+			value, err = s.refreshOrBootstrapUnlocked(ctx, value)
 			if err != nil {
 				return err
 			}
@@ -132,7 +133,21 @@ func (s *Store) AccessToken(ctx context.Context) (string, error) {
 }
 
 func (s *Store) bootstrapLocalSessionUnlocked(ctx context.Context) (Credentials, error) {
-	for _, server := range runtimeServerCandidates() {
+	return s.bootstrapLocalSessionForServerUnlocked(ctx, "", false)
+}
+
+func (s *Store) bootstrapLocalSessionForServerUnlocked(ctx context.Context, preferredServer string, force bool) (Credentials, error) {
+	servers := runtimeServerCandidates()
+	if preferredServer = normalizeServerURL(preferredServer); preferredServer != "" {
+		servers = append([]string{preferredServer}, servers...)
+	}
+	seen := make(map[string]struct{}, len(servers))
+	for _, server := range servers {
+		server = normalizeServerURL(server)
+		if _, ok := seen[server]; server == "" || ok {
+			continue
+		}
+		seen[server] = struct{}{}
 		requestCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 		var session struct {
 			Token        string `json:"token"`
@@ -141,7 +156,11 @@ func (s *Store) bootstrapLocalSessionUnlocked(ctx context.Context) (Credentials,
 			Role         string `json:"role"`
 			TenantID     string `json:"tenantId"`
 		}
-		err := s.requestJSON(requestCtx, http.MethodPost, server+localSessionPath, "", map[string]any{}, &session)
+		endpoint := server + localSessionPath
+		if force {
+			endpoint += "?force=true"
+		}
+		err := s.requestJSON(requestCtx, http.MethodPost, endpoint, "", map[string]any{}, &session)
 		cancel()
 		if err != nil || strings.TrimSpace(session.Token) == "" || strings.TrimSpace(session.RefreshToken) == "" {
 			continue
@@ -173,7 +192,7 @@ func (s *Store) ForceRefresh(ctx context.Context, rejectedAccessToken string) (s
 			token = value.AccessToken
 			return nil
 		}
-		value, err = s.refreshUnlocked(ctx, value)
+		value, err = s.refreshOrBootstrapUnlocked(ctx, value)
 		if err != nil {
 			return err
 		}
@@ -249,6 +268,35 @@ func (s *Store) refreshUnlocked(ctx context.Context, current Credentials) (Crede
 		return Credentials{}, fmt.Errorf("save refreshed credentials: %w", err)
 	}
 	return current, nil
+}
+
+func (s *Store) refreshOrBootstrapUnlocked(ctx context.Context, current Credentials) (Credentials, error) {
+	refreshed, err := s.refreshUnlocked(ctx, current)
+	if err == nil || !localSessionCanRecover(current.ServerURL, err) {
+		return refreshed, err
+	}
+	bootstrapped, bootstrapErr := s.bootstrapLocalSessionForServerUnlocked(ctx, current.ServerURL, true)
+	if bootstrapErr != nil {
+		return Credentials{}, fmt.Errorf("%v; restore local LazyMind session: %w", err, bootstrapErr)
+	}
+	return bootstrapped, nil
+}
+
+func localSessionCanRecover(serverURL string, err error) bool {
+	var responseErr *apiError
+	if !errors.As(err, &responseErr) || responseErr.StatusCode != http.StatusUnauthorized {
+		return false
+	}
+	parsed, parseErr := url.Parse(normalizeServerURL(serverURL))
+	if parseErr != nil {
+		return false
+	}
+	host := strings.ToLower(parsed.Hostname())
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func (s *Store) loadUnlocked() (Credentials, error) {

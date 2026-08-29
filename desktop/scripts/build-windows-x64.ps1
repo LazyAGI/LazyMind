@@ -235,12 +235,14 @@ function Copy-RuntimeApp {
     $appRoot = Join-Path $runtimeRoot 'app'
     New-Item -ItemType Directory -Force -Path $appRoot | Out-Null
     $excludedDirs = @(
+        'node_modules',
         (Join-Path $repoRoot '.git'),
         (Join-Path $repoRoot 'local\build'),
         (Join-Path $repoRoot 'local\runtime'),
         (Join-Path $repoRoot 'desktop\build'),
         (Join-Path $repoRoot 'desktop\cache'),
         (Join-Path $repoRoot 'desktop\dist'),
+        (Join-Path $repoRoot 'history-injection'),
         (Join-Path $repoRoot 'skills\.runtime'),
         (Join-Path $repoRoot 'skills\research'),
         (Join-Path $repoRoot 'skills\review'),
@@ -256,7 +258,7 @@ function Copy-RuntimeApp {
     )
     $releaseBuild = $env:LAZYMIND_RELEASE_BUILD -eq 'true'
     if ($releaseBuild) { $excludedDirs += (Join-Path $repoRoot 'algorithm\lazyllm') }
-    & robocopy.exe $repoRoot $appRoot /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /NP /XD @excludedDirs /XF '*.pyc' '*.pyo' '.DS_Store' '.env' 'config.env' 'config.win.env'
+    & robocopy.exe $repoRoot $appRoot /MIR /R:2 /W:1 /NFL /NDL /NJH /NJS /NP /XD @excludedDirs /XF '*.pyc' '*.pyo' '.DS_Store' '.env' 'config.env' 'config.win.env' 'lazymind-history-injection*.zip'
     if ($LASTEXITCODE -gt 7) { throw "robocopy runtime app staging failed with code $LASTEXITCODE" }
     foreach ($relativePath in @('skills\research', 'skills\review', 'skills\search')) {
         Remove-GeneratedPath (Join-Path $appRoot $relativePath)
@@ -340,6 +342,11 @@ function Finalize-Desktop([ValidateSet('zip', 'installer')][string]$PackageKind 
     Copy-RuntimeApp
     Write-Host '==> Materializing offline Skill packages and featured catalog'
     Materialize-OfflineSkills
+    Write-Host '==> Downloading verified history injection package'
+    Invoke-Native 'node.exe' @(
+        (Join-Path $repoRoot 'desktop\scripts\stage-history-injection-package.mjs'),
+        $runtimeRoot
+    )
     $trustedLocalMode = if ($env:LAZYMIND_TRUSTED_LOCAL_MODE -eq 'true') { 'true' } else { 'false' }
     if ($trustedLocalMode -eq 'true') {
         Write-Host '==> Trusted local mode enabled for this desktop package'

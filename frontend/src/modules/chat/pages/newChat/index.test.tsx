@@ -244,6 +244,27 @@ describe("NewChatPage featured templates", () => {
     });
   });
 
+  it("keeps the disclaimer inside the scrollable welcome content", async () => {
+    const { container } = render(
+      <MemoryRouter initialEntries={["/agent/chat/home"]}>
+        <NewChatPage />
+      </MemoryRouter>,
+    );
+
+    await waitFor(() => {
+      expect(mocks.latestChatInputProps.showcaseSelection.skill.options).toHaveLength(1);
+      expect(
+        screen.queryByText("settingsPage.tasks.entryDefaultsLoading"),
+      ).not.toBeInTheDocument();
+    });
+
+    const mainContent = container.querySelector(".new-chat-main");
+    const disclaimer = container.querySelector(".disclaimer-section");
+
+    expect(mainContent).not.toBeNull();
+    expect(disclaimer?.closest(".new-chat-main")).toBe(mainContent);
+  });
+
   it("applies the configured New task defaults and switches profiles without mixing values", async () => {
     window.sessionStorage.setItem("chat_new_run_in_background", "1");
     render(

@@ -92,6 +92,9 @@ export type DesktopAgentBindingTarget =
 export interface DesktopExecutorPolicy {
   provider: DesktopExecutorProvider;
   enabled: boolean;
+  installed?: boolean;
+  ready?: boolean;
+  unavailable_reason?: string;
 }
 
 export type DesktopRuntimeStatusResult =

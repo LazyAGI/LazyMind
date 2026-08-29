@@ -1,7 +1,7 @@
 schema_version: 2
 id: poster-design
 type: chat
-version: 1.0.0
+version: 1.0.1
 status: published
 default_locale: zh-CN
 provider: SkillHub
@@ -28,57 +28,63 @@ assets:
   cover:
     file: assets/cover.png
     role: cover
+  build_beyond_poster:
+    file: assets/poster-ai-conference.png
+    role: result
+  poster_concept_output:
+    file: assets/poster-concept.html
+    role: result
+  poster_critique_output:
+    file: assets/poster-critique.html
+    role: result
 
 presentation:
   card:
     title: 海报设计技巧
-    description: 先建立视觉哲学，再将版式、字体、色彩和节奏落实为海报方案
+    description: 为 AI 开发者大会建立视觉哲学并输出黑白现代主义竖版海报
     output_type: images
     output_label: 海报设计方案
     cover_asset: cover
-    result_summary: 从概念和设计原则出发，形成包含视觉层级、版式与成品方向的系统方案
+    result_summary: 从 BUILD BEYOND 概念、网格和字阶推演到 1200×1600 成品海报
   detail:
     title: 海报设计技巧
-    description: 围绕主题建立一套一致的设计哲学，并据此规划信息层级、排版、色彩、留白和视觉节奏，形成可执行的海报方案。
+    description: 围绕主题建立一套一致的设计哲学，并据此规划信息层级、排版、色彩、留白和视觉节奏，形成可执行的海报方案。来源：https://skillhub.cn/skills/user_865e3592/poster，经 LazyMind 适配。
     attachment_hint: 主题、文案、尺寸、品牌素材或参考海报
 
 tasks:
   - id: poster-concept
     selector:
-      title: 海报概念设计
-      description: 从主题和文案建立完整的视觉哲学与版式方向
+      title: AI 大会主题海报
+      description: 用黑白现代主义系统呈现 BUILD BEYOND 主题
       output_label: 海报设计方案
     launch:
-      prompt_short: 根据我的主题和文案设计一张海报。
-      prompt: 请根据我提供的主题、核心文案、尺寸、受众和使用场景，先提出一套清晰的设计哲学，再据此设计信息层级、网格、字体、色彩、留白和视觉节奏。给出可执行的成品方案；信息不足时先询问，不要堆砌无关装饰。
+      prompt_short: 为 AI 开发者大会 2026 设计 BUILD BEYOND 主题海报。
+      prompt: 请使用海报设计技巧 Skill，为“AI 开发者大会 2026”设计一张 1200×1600 竖版海报。核心主题为 BUILD BEYOND，必要信息为“08.28 / SHANGHAI”。采用黑白现代主义风格，先给出一句设计哲学，再建立信息层级、模块网格、字体比例、留白和视觉节奏，最后输出可渲染的 SVG 或 PNG 成品。不要加入未提供的品牌标志、演讲嘉宾或赞助商。
     replay:
       steps:
         - title: 提炼主题张力
-          description: 明确海报要传达的核心观念、情绪和受众
-        - title: 建立设计哲学
-          description: 形成统一的视觉原则、对比关系和表达逻辑
-        - title: 构建版式系统
-          description: 设计信息层级、网格、字体、色彩和留白
-        - title: 输出成品方向
-          description: 整理可渲染的视觉规范与海报方案
+          description: 将 BUILD BEYOND 转成突破边界的视觉命题
+        - title: 建立黑白系统
+          description: 用尺度、留白和方向性形成现代主义对比
+        - title: 构建模块网格
+          description: 安排主题、日期、城市与大会名称的字阶关系
+        - title: 渲染竖版成品
+          description: 核验 1200×1600 尺寸、信息完整性和远读效果
     result:
-      template: generic_report_v1
+      template: html_preview_v1
       eyebrow: 海报设计方案
-      title: 主题视觉哲学与版式系统
-      summary: 从核心概念出发形成统一、清晰且可执行的海报视觉方向
-      highlights:
-        - 核心概念与设计哲学
-        - 信息层级、网格和排版
-        - 色彩、留白和成品方向
+      title: BUILD BEYOND 大会海报
+      summary: 用黑白、模块网格与强字阶呈现 AI 开发者大会主题
+      html_asset: poster_concept_output
 
   - id: poster-critique
     selector:
       title: 海报诊断优化
-      description: 分析现有海报的层级、排版、色彩和视觉一致性
+      description: 诊断“周末市集”手机海报的层级、排版与色彩
       output_label: 海报优化建议
     launch:
-      prompt_short: 帮我诊断并优化这张海报。
-      prompt: 请分析我提供的海报和使用场景，从主题表达、信息层级、对齐、字体、色彩、留白、节奏和可读性逐项诊断。说明最影响效果的问题、原因和修改优先级，并给出一套保持核心内容不变的具体优化方案。
+      prompt_short: 示例：诊断一张“周末市集 10:00-18:00”手机海报。
+      prompt: 请以这张示例海报为对象进行诊断：标题“周末市集”，副标题“10:00-18:00”，地点“上海静安嘉里中心”，画布 1080×1440，目标是在手机信息流中吸引年轻上班族。请从主题表达、信息层级、对齐、字体、色彩、留白、节奏和可读性逐项诊断，并给出保持文案不变的修改优先级。
     replay:
       steps:
         - title: 识别传播目标
@@ -90,11 +96,8 @@ tasks:
         - title: 给出优化顺序
           description: 按影响程度整理可执行的修改方案
     result:
-      template: generic_report_v1
+      template: html_preview_v1
       eyebrow: 海报优化建议
       title: 视觉问题诊断与修改优先级
       summary: 在保留核心内容的前提下提升层级、可读性和整体一致性
-      highlights:
-        - 传播目标与视觉焦点
-        - 排版、色彩和留白问题
-        - 分优先级的具体修改方案
+      html_asset: poster_critique_output

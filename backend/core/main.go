@@ -27,6 +27,7 @@ import (
 	"lazymind/core/episode"
 	"lazymind/core/evalset"
 	"lazymind/core/externallease"
+	"lazymind/core/historyinjection"
 	"lazymind/core/knowledge_market"
 	"lazymind/core/log"
 	"lazymind/core/migrate"
@@ -44,6 +45,7 @@ import (
 	"github.com/gorilla/mux"
 	"golang.org/x/sync/errgroup"
 	"gopkg.in/yaml.v3"
+	"gorm.io/gorm"
 )
 
 //go:embed docs.html
@@ -63,6 +65,57 @@ func openAPIArtifactExportEnabled() bool {
 		return true
 	}
 	return raw != "0" && raw != "false" && raw != "no" && raw != "off"
+}
+
+func historyInjectionEnabled() bool {
+	raw := strings.TrimSpace(strings.ToLower(os.Getenv("LAZYMIND_HISTORY_INJECTION_ENABLED")))
+	return raw == "" || (raw != "0" && raw != "false" && raw != "no" && raw != "off")
+}
+
+func runHistoryInjections(ctx context.Context, db *gorm.DB) error {
+	if !historyInjectionEnabled() {
+		return nil
+	}
+	root := strings.TrimSpace(os.Getenv("LAZYMIND_HISTORY_INJECTION_ROOT"))
+	if root == "" {
+		root = "history-injection"
+	}
+	sources, err := historyinjection.Discover(root)
+	if err != nil {
+		return err
+	}
+	if len(sources) == 0 {
+		return nil
+	}
+	owner, imported, err := historyinjection.ResolveImportedOwner(ctx, db, sources)
+	if err != nil {
+		return err
+	}
+	if !imported {
+		owner, err = historyinjection.ResolveBootstrapOwner(ctx, 90*time.Second)
+		if err != nil {
+			return err
+		}
+	}
+	uploadRoot := strings.TrimSpace(os.Getenv("LAZYMIND_UPLOAD_ROOT"))
+	if uploadRoot == "" {
+		uploadRoot = "/var/lib/lazymind/uploads"
+	}
+	subagentRoot := strings.TrimSpace(os.Getenv("LAZYMIND_SUBAGENT_WORKSPACE"))
+	if subagentRoot == "" {
+		subagentRoot = "/data/subagent"
+	}
+	results, err := historyinjection.ApplyAll(ctx, db, root, owner,
+		historyinjection.RuntimeRoots{Uploads: uploadRoot, Subagent: subagentRoot})
+	if err != nil {
+		return err
+	}
+	for _, result := range results {
+		log.Logger.Info().Str("bundle_id", result.BundleID).Str("conversation_id", result.ConversationID).
+			Int("files_copied", result.FilesCopied).Bool("already_present", result.AlreadyPresent).
+			Msg("history injection applied")
+	}
+	return nil
 }
 
 func buildCapabilityRuntime() (*capabilitybootstrap.Runtime, error) {
@@ -451,6 +504,9 @@ func run(ctx context.Context) error {
 	if err := workflow.SeedBuiltinWorkflows(ctx, store.DB()); err != nil {
 		return &startupError{msg: "seed built-in workflows", err: err}
 	}
+	if err := runHistoryInjections(ctx, store.DB()); err != nil {
+		return &startupError{msg: "inject bundled history", err: err}
+	}
 	evalset.RegisterAsyncJobs()
 	knowledge_market.RegisterAsyncJobs()
 	workflow.RegisterWorkflowDraftGenerateJob()
@@ -514,7 +570,7 @@ func run(ctx context.Context) error {
 	// Wire the conversation SSE hook so plugin events reach the frontend via the
 	// conversation-level events channel (history-independent real-time push).
 	subagent.EventHooks.RegisterConversationEventHook(
-		func(_ context.Context, stateStore state.Store, convID, _ string, eventType string, payload map[string]any) {
+		func(_ context.Context, stateStore state.Store, convID, _ string, eventType string, payload map[string]any) error {
 			enriched := make(map[string]any, len(payload)+2)
 			for k, v := range payload {
 				enriched[k] = v
@@ -523,7 +579,7 @@ func run(ctx context.Context) error {
 			if _, ok := enriched["conversation_id"]; !ok {
 				enriched["conversation_id"] = convID
 			}
-			_ = chat.AppendConvEvent(runtimeCtx, stateStore, convID, &chat.ConvEvent{
+			return chat.AppendConvEvent(runtimeCtx, stateStore, convID, &chat.ConvEvent{
 				Type:    eventType,
 				Payload: enriched,
 			})

@@ -5,8 +5,11 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/gorilla/mux"
 
 	"lazymind/core/common/orm"
 	"lazymind/core/store"
@@ -22,6 +25,21 @@ func TestCompatibleDBModelTypes(t *testing.T) {
 			name:      "cross-modal embedding includes legacy aliases",
 			modelType: "cross_modal_embed",
 			want:      []string{"cross_modal_embed", "multimodal_embedding", "embed_image"},
+		},
+		{
+			name:      "embedding includes legacy aliases",
+			modelType: "embed",
+			want:      []string{"embed", "embedding", "embed_main"},
+		},
+		{
+			name:      "legacy embedding includes current aliases",
+			modelType: "embedding",
+			want:      []string{"embed", "embedding", "embed_main"},
+		},
+		{
+			name:      "runtime embedding includes persisted aliases",
+			modelType: "embed_main",
+			want:      []string{"embed", "embedding", "embed_main"},
 		},
 		{
 			name:      "evo includes text and vision chat models",
@@ -49,6 +67,82 @@ func TestCompatibleDBModelTypes(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := compatibleDBModelTypes(tt.modelType); !reflect.DeepEqual(got, tt.want) {
 				t.Fatalf("compatibleDBModelTypes(%q) = %v, want %v", tt.modelType, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAddGroupModelNormalizesEmbeddingAliases(t *testing.T) {
+	for _, modelType := range []string{"embedding", "embed_main"} {
+		t.Run(modelType, func(t *testing.T) {
+			db := setupListProviderTestDB(t)
+			store.Init(db, db, nil)
+			t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+			now := time.Now().UTC()
+			provider := orm.UserModelProvider{
+				ID:                     "provider-openai",
+				DefaultModelProviderID: "default-openai",
+				Name:                   "OpenAI",
+				Description:            "OpenAI provider",
+				BaseURL:                "https://api.openai.com/v1",
+				Category:               "model",
+				Capabilities:           "multi_group,custom_base_url,has_models",
+				BaseModel: orm.BaseModel{
+					CreateUserID: "user-1",
+					CreatedAt:    now,
+					UpdatedAt:    now,
+				},
+			}
+			group := orm.UserModelProviderGroup{
+				ID:                  "group-openai",
+				UserModelProviderID: provider.ID,
+				Name:                "OpenAI",
+				BaseURL:             provider.BaseURL,
+				APIKey:              "secret",
+				IsVerified:          true,
+				BaseModel: orm.BaseModel{
+					CreateUserID: "user-1",
+					CreatedAt:    now,
+					UpdatedAt:    now,
+				},
+			}
+			for _, row := range []any{&provider, &group} {
+				if err := db.Create(row).Error; err != nil {
+					t.Fatal(err)
+				}
+			}
+
+			body := `{"name":"custom-embedding","model_type":"` + modelType + `"}`
+			req := httptest.NewRequest(http.MethodPost, "/api/core/model_providers/provider-openai/groups/group-openai/models", strings.NewReader(body))
+			req.Header.Set("X-User-Id", "user-1")
+			req = mux.SetURLVars(req, map[string]string{
+				"model_provider_id": provider.ID,
+				"group_id":          group.ID,
+			})
+			rec := httptest.NewRecorder()
+
+			AddGroupModel(rec, req)
+
+			if rec.Code != http.StatusOK {
+				t.Fatalf("expected status 200, got %d: %s", rec.Code, rec.Body.String())
+			}
+			var payload struct {
+				Data addGroupModelResponse `json:"data"`
+			}
+			if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+				t.Fatal(err)
+			}
+			if payload.Data.ModelType != "embed" {
+				t.Fatalf("response model_type = %q, want embed", payload.Data.ModelType)
+			}
+
+			var stored orm.UserModelProviderGroupModel
+			if err := db.Take(&stored, "id = ?", payload.Data.ID).Error; err != nil {
+				t.Fatal(err)
+			}
+			if stored.ModelType != "embed" {
+				t.Fatalf("stored model_type = %q, want embed", stored.ModelType)
 			}
 		})
 	}

@@ -1,9 +1,11 @@
 import { createRef } from "react";
+import { Modal } from "antd";
 import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import RecoverySettings from "./RecoverySettings";
+import { CHAT_CONVERSATION_LIST_REFRESH_EVENT } from "@/modules/chat/constants/chat";
 import { RECOVERY_ARCHIVE_PATH } from "./recoveryRoute";
 
 const mocks = vi.hoisted(() => ({
@@ -16,6 +18,8 @@ const mocks = vi.hoisted(() => ({
   listTrashedConversations: vi.fn(),
   listSkillTrash: vi.fn(),
   listWorkflowTrash: vi.fn(),
+  restoreConversation: vi.fn(),
+  unarchiveConversation: vi.fn(),
 }));
 
 vi.mock("react-i18next", () => ({
@@ -72,6 +76,11 @@ vi.mock("react-i18next", () => ({
         "settingsPage.recovery.unarchive": "取消归档",
         "settingsPage.recovery.moveToTrash": "移入回收站",
         "settingsPage.recovery.moreActions": "更多操作",
+        "settingsPage.recovery.restore": "恢复",
+        "settingsPage.recovery.restoreNamed": `恢复“${values?.name}”？`,
+        "settingsPage.recovery.restoreConversationDescription": "恢复后会重新出现在历史对话中。",
+        "settingsPage.recovery.restored": "已恢复",
+        "settingsPage.recovery.unarchived": "已取消归档",
         "settingsPage.recovery.emptyTrash": "清空回收站",
         "settingsPage.recovery.allCategories": "全部分类",
         "settingsPage.recovery.trashEmpty": "当前分类的回收站为空",
@@ -104,11 +113,11 @@ vi.mock("./recoveryApi", () => ({
   purgeConversation: vi.fn(),
   purgeSkillAsset: vi.fn(),
   purgeWorkflow: vi.fn(),
-  restoreConversation: vi.fn(),
+  restoreConversation: mocks.restoreConversation,
   restoreSkillAsset: vi.fn(),
   restoreWorkflow: vi.fn(),
   trashConversation: vi.fn(),
-  unarchiveConversation: vi.fn(),
+  unarchiveConversation: mocks.unarchiveConversation,
 }));
 
 function RecoveryLocation() {
@@ -169,6 +178,8 @@ describe("RecoverySettings", () => {
       updated_at: "2026-08-18T09:00:00Z",
     });
     mocks.archiveConversation.mockResolvedValue(undefined);
+    mocks.restoreConversation.mockResolvedValue(undefined);
+    mocks.unarchiveConversation.mockResolvedValue(undefined);
     mocks.updateArchiveFolder.mockResolvedValue(undefined);
     mocks.deleteArchiveFolder.mockResolvedValue(1);
   });
@@ -196,6 +207,94 @@ describe("RecoverySettings", () => {
 
     fireEvent.click(screen.getByRole("tab", { name: /回收站/ }));
     expect(screen.getByTestId("recovery-location")).not.toHaveTextContent("view=archive");
+  });
+
+  it("refreshes the conversation sidebar after unarchiving a conversation", async () => {
+    const handleRefresh = vi.fn();
+    window.addEventListener(
+      CHAT_CONVERSATION_LIST_REFRESH_EVENT,
+      handleRefresh,
+    );
+
+    try {
+      renderRecoverySettings(RECOVERY_ARCHIVE_PATH);
+      const itemName = await screen.findByText("设置页信息架构整理");
+      const row = itemName.closest(".recovery-row");
+      expect(row).not.toBeNull();
+
+      fireEvent.click(
+        within(row as HTMLElement).getByRole("button", { name: "取消归档" }),
+      );
+
+      await waitFor(() =>
+        expect(mocks.unarchiveConversation).toHaveBeenCalledWith(
+          "conversation-1",
+        ),
+      );
+      expect(handleRefresh).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener(
+        CHAT_CONVERSATION_LIST_REFRESH_EVENT,
+        handleRefresh,
+      );
+    }
+  });
+
+  it("refreshes the conversation sidebar after restoring a deleted conversation", async () => {
+    mocks.listTrashedConversations.mockResolvedValue({
+      items: [{
+        conversation_id: "conversation-trash",
+        display_name: "待恢复对话",
+        kind: "dialog",
+        deleted_at: "2026-08-18T08:00:00Z",
+        trash_expires_at: "2026-09-17T08:00:00Z",
+        create_time: "2026-08-18T07:00:00Z",
+        update_time: "2026-08-18T08:00:00Z",
+      }],
+      total: 1,
+      page: 1,
+      pageSize: 20,
+    });
+    const handleRefresh = vi.fn();
+    const confirmSpy = vi.spyOn(Modal, "confirm").mockReturnValue({
+      destroy: vi.fn(),
+      update: vi.fn(),
+    });
+    window.addEventListener(
+      CHAT_CONVERSATION_LIST_REFRESH_EVENT,
+      handleRefresh,
+    );
+
+    try {
+      renderRecoverySettings();
+      fireEvent.click(screen.getByRole("tab", { name: "会话" }));
+      const itemName = await screen.findByText("待恢复对话");
+      const row = itemName.closest(".recovery-row");
+      expect(row).not.toBeNull();
+
+      fireEvent.click(
+        within(row as HTMLElement).getByRole("button", { name: /恢\s*复/ }),
+      );
+      expect(confirmSpy).toHaveBeenCalledWith(expect.objectContaining({
+        title: "恢复“待恢复对话”？",
+      }));
+      await act(async () => {
+        await confirmSpy.mock.calls[0][0].onOk?.();
+      });
+
+      await waitFor(() =>
+        expect(mocks.restoreConversation).toHaveBeenCalledWith(
+          "conversation-trash",
+        ),
+      );
+      expect(handleRefresh).toHaveBeenCalledTimes(1);
+    } finally {
+      window.removeEventListener(
+        CHAT_CONVERSATION_LIST_REFRESH_EVENT,
+        handleRefresh,
+      );
+      confirmSpy.mockRestore();
+    }
   });
 
   it("updates the remaining retention days without reloading the page", async () => {

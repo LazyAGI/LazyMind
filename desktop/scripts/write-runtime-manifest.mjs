@@ -52,6 +52,11 @@ if (!existsSync(featuredSkillAssets)) {
   console.error(`featured Skill assets are missing: ${featuredSkillAssets}`);
   process.exit(1);
 }
+const historyInjectionArchive = path.join(runtimeRoot, "history-injection.zip");
+if (!existsSync(historyInjectionArchive)) {
+  console.error(`history injection package is missing: ${historyInjectionArchive}`);
+  process.exit(1);
+}
 
 function sha256(file) {
   return createHash("sha256").update(readFileSync(file)).digest("hex");
@@ -100,7 +105,8 @@ const manifest = {
     authServiceVenv: "deps/python/auth-service",
     channelGatewayVenv: "deps/python/channel-gateway",
     algorithmVenv: "deps/python/algorithm",
-    localProxyConfig: "app/local/local-proxy/configs/cloud-replace-kong.yaml"
+    localProxyConfig: "app/local/local-proxy/configs/cloud-replace-kong.yaml",
+    historyInjectionArchive: "history-injection.zip"
   },
   services: {
     "local-proxy": { healthPath: "/_local/healthz" },
@@ -117,7 +123,8 @@ const manifest = {
   checksums: {
     ...walk(path.join(runtimeRoot, "bin"), runtimeRoot),
     ...walk(path.join(runtimeRoot, "builtin-skills"), runtimeRoot),
-    ...walk(path.join(runtimeRoot, "featured-skills"), runtimeRoot)
+    ...walk(path.join(runtimeRoot, "featured-skills"), runtimeRoot),
+    "history-injection.zip": sha256(historyInjectionArchive)
   }
 };
 

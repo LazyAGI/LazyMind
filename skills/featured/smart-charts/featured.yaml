@@ -1,7 +1,7 @@
 schema_version: 2
 id: smart-charts
 type: work
-version: 7.0.0
+version: 7.0.1
 status: published
 default_locale: zh-CN
 provider: SkillHub
@@ -28,15 +28,24 @@ assets:
   cover:
     file: assets/cover.png
     role: cover
+  revenue_demo:
+    file: assets/revenue-trend-demo.html
+    role: result
+  comparison_output:
+    file: assets/comparison-chart.html
+    role: result
+  distribution_output:
+    file: assets/distribution-chart.html
+    role: result
 
 presentation:
   card:
     title: 智能图表
-    description: 上传 CSV 或 Excel，自动生成适合数据特征的可交互图表
+    description: 从半年经营数据生成双指标趋势图，交互查看增长与利润变化
     output_type: dashboard
     output_label: 可视化图表
     cover_asset: cover
-    result_summary: 识别字段与指标关系，生成可编辑、可下载的交互式 HTML 图表
+    result_summary: 用收入与利润的具体案例演示指标识别、趋势洞察和交互式 HTML 交付
   detail:
     title: 智能图表
     description: 源自 SkillHub。读取 CSV、Excel 或 JSON 数据，自动推荐图表并生成可交互、可下载的 HTML 可视化。
@@ -45,40 +54,37 @@ presentation:
 tasks:
   - id: trend-chart
     selector:
-      title: 趋势图表
-      description: 展示时间序列变化、增长和周期波动
+      title: 新零售半年趋势
+      description: 用 1-6 月收入与利润演示双指标趋势分析
       output_label: 趋势分析图
     launch:
-      prompt_short: 根据我上传的数据生成一份趋势分析图表。
-      prompt: 请读取我上传的表格，识别时间字段和核心指标，选择合适的折线图或组合图展示趋势、增长和异常变化，并生成可交互、可下载的 HTML 图表。若字段含义不明确，请先向我确认。
+      prompt_short: 用示例数据生成 2026 年 1-6 月收入与利润趋势图。
+      prompt: 请使用智能图表 Skill 分析以下新零售示例数据：2026 年 1-6 月收入分别为 82、90、102、112、129、145 万元，利润分别为 23、26、30、35、41、50 万元。生成一个自包含、无需外部 CDN 的交互式 HTML：用双折线展示收入与利润，提供指标切换和悬停提示，计算累计收入、累计利润、整体利润率与增长最快月份，并给出 3 条有数据依据的经营洞察。
     replay:
       steps:
-        - title: 读取数据结构
-          description: 识别字段类型、时间范围、指标和缺失值
-        - title: 选择图表方案
-          description: 根据时间序列和指标关系确定图表类型与编码
-        - title: 生成交互图表
-          description: 构建带图例、提示和必要标注的 ECharts 页面
-        - title: 核验与交付
-          description: 检查数值映射、视觉可读性和下载能力
+        - title: 校验半年数据
+          description: 对齐 1-6 月收入、利润、单位与时间顺序
+        - title: 计算经营指标
+          description: 汇总累计值、利润率、增速和关键拐点
+        - title: 构建双指标趋势
+          description: 生成可切换、可悬停查看的收入与利润折线图
+        - title: 输出经营洞察
+          description: 核验数值映射并说明增长与利润变化
     result:
-      template: generic_report_v1
+      template: html_preview_v1
       eyebrow: 趋势分析图
-      title: 核心指标趋势与变化
-      summary: 以交互图表呈现时间趋势、增长幅度和需要关注的异常节点
-      highlights:
-        - 时间序列与核心指标
-        - 增长、波动和异常节点
-        - 可交互与可下载 HTML
+      title: 2026 上半年收入与利润趋势
+      summary: 交互查看六个月双指标变化、累计表现和增长最快月份
+      html_asset: revenue_demo
 
   - id: comparison-chart
     selector:
       title: 对比图表
-      description: 比较多个类别、区域或产品的指标差异
+      description: 比较华东、华南、华北三地区的收入与订单量
       output_label: 对比分析图
     launch:
-      prompt_short: 根据我上传的数据生成一份分类对比图表。
-      prompt: 请读取我上传的表格，识别分类维度和数值指标，选择合适的柱状图、堆叠图或组合图进行对比，突出排名、差距和关键结论，并生成可交互、可下载的 HTML 图表。
+      prompt_short: 示例：比较华东、华南、华北三地区的收入和订单量。
+      prompt: 请用这组示例数据生成分类对比图表：地区=华东、华南、华北；收入（万元）=320、280、210；订单量=8400、7600、5900。识别分类维度和数值指标，选择合适的柱状图或组合图，突出排名、差距和关键结论，并生成可交互、可下载的 HTML 图表。
     replay:
       steps:
         - title: 识别比较维度
@@ -90,23 +96,20 @@ tasks:
         - title: 输出结论
           description: 总结排名、差距和业务上值得关注的发现
     result:
-      template: generic_report_v1
+      template: html_preview_v1
       eyebrow: 对比分析图
       title: 分类指标对比与排名
       summary: 用交互图表呈现各分组的指标差异、排名和重点发现
-      highlights:
-        - 分类与指标映射
-        - 排名和差距对比
-        - 可交互与可下载 HTML
+      html_asset: comparison_output
 
   - id: distribution-chart
     selector:
       title: 分布与构成
-      description: 分析数据分布、占比和结构特征
+      description: 分析 12 笔订单金额分布与四个渠道的构成占比
       output_label: 分布分析图
     launch:
-      prompt_short: 根据我上传的数据分析分布和构成。
-      prompt: 请读取我上传的数据，判断适合分析的分布或构成关系，选择直方图、散点图、饼图或树图等合适形式，说明主要集中区间、占比和异常点，并生成可交互、可下载的 HTML 图表。
+      prompt_short: 示例：分析 12 笔订单金额的分布和渠道构成。
+      prompt: 请用这组示例数据分析分布和构成：订单金额（元）=89、95、102、110、118、125、130、142、155、168、420、560；渠道订单数=自然搜索 42、直播 28、社群 18、广告 12。判断适合的直方图和构成图，说明集中区间、占比和异常点，并生成可交互、可下载的 HTML 图表。
     replay:
       steps:
         - title: 检查数据特征
@@ -118,11 +121,8 @@ tasks:
         - title: 生成交付文件
           description: 输出自包含的交互式 HTML 图表
     result:
-      template: generic_report_v1
+      template: html_preview_v1
       eyebrow: 分布分析图
       title: 数据分布与结构洞察
       summary: 展示主要分布区间、类别构成和异常数据点
-      highlights:
-        - 分布区间与集中程度
-        - 类别构成和占比
-        - 异常点与进一步分析线索
+      html_asset: distribution_output

@@ -183,25 +183,25 @@ ui:
     material_digest: {widgetType: text-markdown, readOnly: true, maxHeight: 680}
     direction_outline: {widgetType: file-card, readOnly: false}
     direction_outline_report: {widgetType: text-markdown, readOnly: true}
-    direction_chapters: {widgetType: file-card, readOnly: true}
+    direction_chapters: {widgetType: file-card, readOnly: true, collapsed: true}
     direction_document: {widgetType: file-card, readOnly: false}
     competitive_analysis: {widgetType: html-preview, readOnly: true}
     design_outline: {widgetType: file-card, readOnly: false}
     design_outline_report: {widgetType: text-markdown, readOnly: true}
-    design_chapters: {widgetType: file-card, readOnly: true}
+    design_chapters: {widgetType: file-card, readOnly: true, collapsed: true}
     design_document: {widgetType: file-card, readOnly: false}
     prd_outline: {widgetType: file-card, readOnly: false}
     prd_outline_report: {widgetType: text-markdown, readOnly: true}
-    prd_chapters: {widgetType: file-card, readOnly: true}
+    prd_chapters: {widgetType: file-card, readOnly: true, collapsed: true}
     prd_document: {widgetType: file-card, readOnly: false}
     prototype: {widgetType: html-preview, readOnly: true}
     review_outline: {widgetType: file-card, readOnly: false}
     review_outline_report: {widgetType: text-markdown, readOnly: true}
-    review_chapters: {widgetType: file-card, readOnly: true}
+    review_chapters: {widgetType: file-card, readOnly: true, collapsed: true}
     review_document: {widgetType: file-card, readOnly: false}
     handoff_outline: {widgetType: file-card, readOnly: false}
     handoff_outline_report: {widgetType: text-markdown, readOnly: true}
-    handoff_chapters: {widgetType: file-card, readOnly: true}
+    handoff_chapters: {widgetType: file-card, readOnly: true, collapsed: true}
     handoff_document: {widgetType: file-card, readOnly: false}
     delivery_summary: {widgetType: text-markdown, readOnly: true}
   tabs:
@@ -226,7 +226,7 @@ ui:
       layout: composite
       slots: [{id: direction_outline}, {id: direction_outline_report}]
       composite_layout: {direction: row, children: [{slot: direction_outline, weight: 2}, {slot: direction_outline_report, weight: 1}]}
-    - {id: direction_document, step_id: write_direction_document, label: 产品方向, hide_when_material: skip_direction, layout: composite, slots: [{id: direction_document}, {id: direction_chapters}], composite_layout: {direction: column, children: [{slot: direction_document, weight: 3}, {slot: direction_chapters, weight: 1}]}}
+    - {id: direction_document, step_id: write_direction_document, label: 产品方向, hide_when_material: skip_direction, layout: list, slots: [{id: direction_document}, {id: direction_chapters}]}
     - {id: competitive, step_id: analyze_competitive_position, label: 竞品生态位, hide_when_material: skip_competitive, layout: list, slots: [{id: competitive_analysis}]}
     - id: design_outline
       step_id: build_design_outline
@@ -235,7 +235,7 @@ ui:
       layout: composite
       slots: [{id: design_outline}, {id: design_outline_report}]
       composite_layout: {direction: row, children: [{slot: design_outline, weight: 2}, {slot: design_outline_report, weight: 1}]}
-    - {id: design_document, step_id: write_design_document, label: 产品方案, hide_when_material: skip_design, layout: composite, slots: [{id: design_document}, {id: design_chapters}], composite_layout: {direction: column, children: [{slot: design_document, weight: 3}, {slot: design_chapters, weight: 1}]}}
+    - {id: design_document, step_id: write_design_document, label: 产品方案, hide_when_material: skip_design, layout: list, slots: [{id: design_document}, {id: design_chapters}]}
     - id: prd_outline
       step_id: build_prd_outline
       label: PRD 大纲
@@ -243,7 +243,7 @@ ui:
       layout: composite
       slots: [{id: prd_outline}, {id: prd_outline_report}]
       composite_layout: {direction: row, children: [{slot: prd_outline, weight: 2}, {slot: prd_outline_report, weight: 1}]}
-    - {id: prd_document, step_id: write_prd_document, label: PRD, hide_when_material: skip_prd, layout: composite, slots: [{id: prd_document}, {id: prd_chapters}], composite_layout: {direction: column, children: [{slot: prd_document, weight: 3}, {slot: prd_chapters, weight: 1}]}}
+    - {id: prd_document, step_id: write_prd_document, label: PRD, hide_when_material: skip_prd, layout: list, slots: [{id: prd_document}, {id: prd_chapters}]}
     - {id: prototype, step_id: build_interactive_prototype, label: 交互原型, hide_when_material: skip_prototype, layout: list, slots: [{id: prototype}]}
     - id: review_outline
       step_id: build_review_outline
@@ -252,7 +252,7 @@ ui:
       layout: composite
       slots: [{id: review_outline}, {id: review_outline_report}]
       composite_layout: {direction: row, children: [{slot: review_outline, weight: 2}, {slot: review_outline_report, weight: 1}]}
-    - {id: review_document, step_id: write_review_document, label: 方案评审, hide_when_material: skip_review, layout: composite, slots: [{id: review_document}, {id: review_chapters}], composite_layout: {direction: column, children: [{slot: review_document, weight: 3}, {slot: review_chapters, weight: 1}]}}
+    - {id: review_document, step_id: write_review_document, label: 方案评审, hide_when_material: skip_review, layout: list, slots: [{id: review_document}, {id: review_chapters}]}
     - id: handoff_outline
       step_id: build_handoff_outline
       label: 交付大纲
@@ -260,7 +260,7 @@ ui:
       layout: composite
       slots: [{id: handoff_outline}, {id: handoff_outline_report}]
       composite_layout: {direction: row, children: [{slot: handoff_outline, weight: 2}, {slot: handoff_outline_report, weight: 1}]}
-    - {id: handoff_document, step_id: write_handoff_document, label: 研发交付, hide_when_material: skip_handoff, layout: composite, slots: [{id: handoff_document}, {id: handoff_chapters}], composite_layout: {direction: column, children: [{slot: handoff_document, weight: 3}, {slot: handoff_chapters, weight: 1}]}}
+    - {id: handoff_document, step_id: write_handoff_document, label: 研发交付, hide_when_material: skip_handoff, layout: list, slots: [{id: handoff_document}, {id: handoff_chapters}]}
     - {id: delivery, step_id: finalize_product_delivery, label: 交付总结, layout: list, slots: [{id: delivery_summary}]}
 
 i18n:

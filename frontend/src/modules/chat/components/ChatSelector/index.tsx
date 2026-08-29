@@ -1,4 +1,4 @@
-import { Button, Input, Popover, Tooltip } from "antd";
+import { Button, Input, message, Popover, Tooltip } from "antd";
 import {
   SearchOutlined,
   CheckOutlined,
@@ -150,11 +150,14 @@ const ChatSelector = forwardRef<ChatSelectorImperativeProps, ChatSelectorProps>(
 
     useImperativeHandle(ref, () => ({
       open: () => {
-        if (isSelectorDisabled) return;
+        if (isSelectorDisabled) {
+          message.warning(selectorDisabledReason ?? t("chat.knowledgeBase"));
+          return;
+        }
         setOpen(true);
       },
       close: () => setOpen(false),
-    }), [isSelectorDisabled]);
+    }), [isSelectorDisabled, selectorDisabledReason, t]);
 
     useEffect(() => {
       getKnowledgeBaseList();

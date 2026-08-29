@@ -3,11 +3,15 @@ import { MemoryRouter, useLocation } from "react-router-dom";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import MainLayout from "./MainLayout";
-import { CHAT_SELECT_CONVERSATION_EVENT } from "@/modules/chat/constants/chat";
+import {
+  CHAT_CONVERSATION_LIST_REFRESH_EVENT,
+  CHAT_SELECT_CONVERSATION_EVENT,
+} from "@/modules/chat/constants/chat";
 
 const mocks = vi.hoisted(() => ({
   initialOnRemove: null as null | ((conversation: { conversation_id?: string }) => void),
   latestRecordListProps: null as any,
+  refreshRecordList: vi.fn(),
 }));
 
 vi.mock("react-i18next", async (importOriginal) => ({
@@ -81,13 +85,19 @@ vi.mock("@/modules/channelGateway/components/TerminalConnectionQuickPanel", () =
   default: () => null,
 }));
 
-vi.mock("@/modules/chat/components/RecordList", () => ({
-  default: (props: any) => {
+vi.mock("@/modules/chat/components/RecordList", async () => {
+  const React = await import("react");
+  const MockRecordList = React.forwardRef((props: any, ref) => {
     mocks.latestRecordListProps = props;
     mocks.initialOnRemove ??= props.onRemove;
+    React.useImperativeHandle(ref, () => ({
+      refresh: mocks.refreshRecordList,
+    }));
     return <div data-testid="record-list" />;
-  },
-}));
+  });
+  MockRecordList.displayName = "MockRecordList";
+  return { default: MockRecordList };
+});
 
 function LocationProbe() {
   return <div data-testid="location-path">{useLocation().pathname}</div>;
@@ -99,6 +109,7 @@ describe("MainLayout conversation removal", () => {
     localStorage.clear();
     mocks.initialOnRemove = null;
     mocks.latestRecordListProps = null;
+    mocks.refreshRecordList.mockReset();
   });
 
   it("uses a detail route for the selected conversation and returns home when it is removed", async () => {
@@ -172,5 +183,22 @@ describe("MainLayout conversation removal", () => {
         "/agent/chat/home/conversation-new",
       );
     });
+  });
+
+  it("refreshes the sidebar list when recovery invalidates conversation history", () => {
+    render(
+      <MemoryRouter initialEntries={["/settings?section=recovery"]}>
+        <MainLayout />
+      </MemoryRouter>,
+    );
+    expect(screen.getByTestId("record-list")).toBeInTheDocument();
+
+    act(() => {
+      window.dispatchEvent(
+        new Event(CHAT_CONVERSATION_LIST_REFRESH_EVENT),
+      );
+    });
+
+    expect(mocks.refreshRecordList).toHaveBeenCalledTimes(1);
   });
 });

@@ -11,11 +11,11 @@ classification:
 presentation:
   card:
     title: Xiaohongshu copywriter
-    description: Generate titles, body copy, tags, and publishing advice from a product, audience, and style
+    description: Create a credible, publish-ready commute post for a portable blender
     output_type: document
     output_label: Xiaohongshu post
     cover_asset: cover
-    result_summary: Deliver editable titles, six-part body copy, emoji formatting, topic tags, and publishing strategy
+    result_summary: Animate the path from a scenario hook and truthful details to tags and publishing time
   detail:
     title: Xiaohongshu copywriter
     description: "Create a natural, credible Xiaohongshu post around product benefits and a target audience, including titles, body structure, emojis, tags, and publishing advice. Source: the former 'Xiaohongshu Copywriter Plus' listing on SkillHub (the original link is no longer available), adapted for LazyMind."
@@ -24,40 +24,39 @@ presentation:
 tasks:
   - id: product-note
     selector:
-      title: Product recommendation post
-      description: Turn selling points and real usage scenarios into a complete post
+      title: Portable blender commute post
+      description: Create credible copy for an office-breakfast scenario without overclaiming
       output_label: Recommendation post
     launch:
-      prompt_short: Write a Xiaohongshu product recommendation post from my product details.
-      prompt: Based on the product, key benefits, audience, usage scenarios, and preferred voice I provide, write a natural and credible Xiaohongshu recommendation post. Include several title options, a six-part body, restrained emojis, topic tags, and publishing advice. Ask for missing details and do not invent effects or personal experience.
+      prompt_short: Write a commute-focused Xiaohongshu post for a portable blender.
+      prompt: >-
+        Use the Xiaohongshu Copywriter Skill for a portable blender with these facts: 380 ml, 520 g, 40-second blending, USB-C charging, and a detachable cup for cleaning. The audience is commuters and the scenario is office breakfast. Provide five titles, a six-part body, restrained emojis, eight topic tags, a first-comment draft, and posting-time advice. A first-person scenario is allowed only when clearly labelled as sample copy. State the noise and need to cut large ice into smaller pieces, and do not invent weight-loss or skincare claims.
     replay:
       steps:
-        - title: Understand product and audience
-          description: Confirm benefits, audience, usage scenarios, and factual boundaries
+        - title: Lock the commute scenario
+          description: Align office breakfast, product specifications, and factual boundaries
         - title: Design title hooks
-          description: Generate titles from concrete benefits, curiosity, and situations
-        - title: Write the recommendation
-          description: Organize pain points, experience, details, and advice naturally
-        - title: Complete publishing elements
-          description: Add emojis, tags, engagement prompts, and timing advice
+          description: Use time savings, portability, and concrete situations
+        - title: Add truthful details
+          description: Present benefits alongside noise and ice-size limitations
+        - title: Complete publishing strategy
+          description: Add emojis, tags, a first comment, and timing advice
     result:
-      template: generic_report_v1
+      template: html_preview_v1
       eyebrow: Xiaohongshu recommendation post
-      title: Product experience and recommendation copy
-      summary: Deliver an editable post with titles, body copy, tags, and publishing strategy
-      highlights:
-        - Multiple title options
-        - Six-part recommendation copy
-        - Emojis, tags, and publishing advice
+      title: Five-minute office breakfast post
+      summary: Balance concrete specifications, honest limitations, and platform-native publishing details
+      html_asset: blender_output
 
   - id: rewrite-note
     selector:
       title: Rewrite and optimize a post
-      description: Improve the title, pacing, credibility, and engagement of existing copy
+      description: Turn a vague "the blender is great" draft into a credible post
       output_label: Optimized post
     launch:
-      prompt_short: Improve this Xiaohongshu post.
-      prompt: Analyze the Xiaohongshu post I provide, preserve its facts and personal voice, and improve the title, opening hook, pacing, information density, emojis, and topic tags. Identify vague or exaggerated claims that reduce credibility and provide a complete rewrite.
+      prompt_short: 'Example: turn "the blender cup is great, breakfast is easier" into a credible Xiaohongshu post.'
+      prompt: >-
+        Optimize this sample draft: "The blender cup works great, breakfast check-ins are more convenient, and everyone says it is worth buying." Known product facts: 380 ml, 520 g, 40-second blending, USB-C charging, and a detachable cup for cleaning; the audience is commuting office workers. Preserve the facts and personal voice while improving the title hook, opening, pacing, information density, emojis, and topic tags. Point out vague or exaggerated claims and deliver a complete rewrite.
     replay:
       steps:
         - title: Diagnose the draft
@@ -69,11 +68,8 @@ tasks:
         - title: Deliver the rewrite
           description: Produce a complete version ready for further editing
     result:
-      template: generic_report_v1
+      template: html_preview_v1
       eyebrow: Optimized post
       title: More natural and engaging Xiaohongshu copy
       summary: Improve the title, pacing, and engagement while preserving facts and personal voice
-      highlights:
-        - Draft diagnosis
-        - Title and opening-hook improvements
-        - Complete rewrite and tag suggestions
+      html_asset: rewrite_output

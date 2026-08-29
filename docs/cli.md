@@ -666,7 +666,7 @@ tests/test_cli.py
 
 桥接器只监听 `127.0.0.1`，只接受本机 LazyMind 页面来源。Desktop 使用本地会话；标准 Docker 网页在用户登录后把同源会话同步到桥接器的 `0600` 凭证文件，网页退出时同步清除。同步接口拒绝与页面 Origin 不一致的服务地址。写入外部 Agent 配置的内容始终只有 connector 绝对路径、`mcp proxy` 参数以及可选的 `LAZYMIND_HOME`，不会把 access token 或 refresh token 写入任何 Agent 配置。
 
-直接执行裸 `docker compose up` 无法启动宿主机进程，因此标准用户入口是 `make up`。
+直接执行裸 `docker compose up` 无法启动宿主机进程，因此标准用户入口是 `make up`。Windows 必须从 Git Bash 执行该入口；构建会生成原生 `lazymind.exe`，且不会把 Unix 用户参数传给 Docker Desktop。已经用裸 compose 启动服务时，可在仓库根目录补充运行 `make assistant-bridge-start`。
 
 ### 16.1 Codex CLI
 
@@ -750,7 +750,7 @@ Cursor IDE 和 WorkBuddy 已登录，不代表 Cursor Agent CLI 或 CodeBuddy Co
 
 LazyMind Desktop 和 Docker Assistant Bridge 都会自动托管本机已经安装的三个 CLI；用户不需要另起 `agent host` 进程。缺失的 CLI 只会把自身注册为不可用，不影响其他 provider。然后可在 LazyMind 的对话配置中选择 Codex、Cursor 或 WorkBuddy；若对应 Host 尚未连接，界面会拒绝切换并给出提示。`lazymind agent host ...` 仅保留为开发诊断入口。
 
-Windows 自动发现会使用当前进程 PATH、最新的用户/系统 PATH、`PATHEXT`、App Execution Alias 和 App Paths，因此 LazyMind 启动后安装 CLI 也无需重启。对于自定义盘符、便携版或企业部署未注册路径的情况，Desktop 设置页可以明确定位桌面应用或 CLI；验证成功后路径保存在当前主机的 `LAZYMIND_HOME/agent-bindings.json`，可随时恢复自动检测。该文件不保存账号凭证，也不进入 Core 数据库。
+Windows 自动发现会使用当前进程 PATH、最新的用户/系统 PATH、`PATHEXT`、App Execution Alias 和 App Paths，因此 LazyMind 启动后安装 CLI 也无需重启。对于自定义盘符、便携版或企业部署未注册路径的情况，Desktop 可通过原生文件选择器定位程序；Docker 网页可输入 Windows 主机上的完整路径。本机桥接器验证成功后将路径保存到当前主机的 `LAZYMIND_HOME/agent-bindings.json`，可随时恢复自动检测。该文件不保存账号凭证，也不进入 Core 数据库。
 
 设置页中每个受支持的执行器都有独立的“停用/启用”开关。停用只撤销本机 LazyMind 调用该 CLI 的权限，不会退出外部 Agent、修改其登录状态或删除其凭证；再次启用后仍以该 CLI 自身的安装和登录状态为准。该权限保存在当前主机的 `~/.lazymind/executor-policy`，不进入 LazyMind 数据库，也不会在设备间同步。
 

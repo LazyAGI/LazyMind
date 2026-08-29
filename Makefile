@@ -24,11 +24,23 @@ LOCAL_BUILD_DIR := $(CURDIR)/local/build
 override export LAZYMIND_LOCAL_BUILD_ROOT := $(LOCAL_BUILD_DIR)
 override LOCAL_RUNTIME_MANAGER_BIN := $(LOCAL_BUILD_DIR)/bin/local-runtime-manager
 override LOCAL_RUNTIME_MANAGER_WIN_BIN := $(LOCAL_BUILD_DIR)/bin/local-runtime-manager.exe
-override LAZYMIND_CLI_BIN := $(LOCAL_BUILD_DIR)/bin/lazymind
+ifeq ($(OS),Windows_NT)
+LAZYMIND_CLI_FILENAME := lazymind.exe
+HOST_GOOS := windows
+HOST_WINDOWS_ARCH := $(strip $(if $(PROCESSOR_ARCHITEW6432),$(PROCESSOR_ARCHITEW6432),$(PROCESSOR_ARCHITECTURE)))
+HOST_GOARCH := $(if $(filter AMD64 amd64 x86_64,$(HOST_WINDOWS_ARCH)),amd64,$(if $(filter ARM64 arm64 aarch64,$(HOST_WINDOWS_ARCH)),arm64,unsupported))
+_HOST_DOCKER_USER_FLAG :=
+_HOST_DOCKER_PREFIX := MSYS_NO_PATHCONV=1
+else
+LAZYMIND_CLI_FILENAME := lazymind
 HOST_UNAME_S := $(shell uname -s 2>/dev/null)
 HOST_UNAME_M := $(shell uname -m 2>/dev/null)
 HOST_GOOS := $(if $(filter Darwin,$(HOST_UNAME_S)),darwin,$(if $(filter Linux,$(HOST_UNAME_S)),linux,unsupported))
 HOST_GOARCH := $(if $(filter arm64 aarch64,$(HOST_UNAME_M)),arm64,$(if $(filter x86_64 amd64,$(HOST_UNAME_M)),amd64,unsupported))
+_HOST_DOCKER_USER_FLAG := --user "$$(id -u):$$(id -g)"
+_HOST_DOCKER_PREFIX :=
+endif
+override LAZYMIND_CLI_BIN := $(LOCAL_BUILD_DIR)/bin/$(LAZYMIND_CLI_FILENAME)
 LOCAL_WIN_SCRIPT := $(CURDIR)/local/scripts/local-win.ps1
 DESKTOP_WIN_SCRIPT := $(CURDIR)/desktop/scripts/build-windows-x64.ps1
 LAZYMIND_LOCAL_DOWN_TIMEOUT ?= 150s
@@ -75,12 +87,7 @@ export $(_ENV_EXPORT_VARS)
 _COMPOSE_PROJECT_FLAG := $(if $(COMPOSE_PROJECT),-p $(COMPOSE_PROJECT),)
 _COMPOSE_DEFAULT := DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker compose $(_COMPOSE_PROJECT_FLAG)
 _COMPOSE := DOCKER_BUILDKIT=$(DOCKER_BUILDKIT) docker compose $(_COMPOSE_PROJECT_FLAG)
-ifeq ($(OS),Windows_NT)
-_SKILL_BUNDLER_USER_FLAG :=
-else
-_SKILL_BUNDLER_USER_FLAG := --user "$$(id -u):$$(id -g)"
-endif
-_SKILL_BUNDLER_RUN := $(_COMPOSE_DEFAULT) --profile tools run --rm --build $(_SKILL_BUNDLER_USER_FLAG) skill-bundler
+_SKILL_BUNDLER_RUN := $(_COMPOSE_DEFAULT) --profile tools run --rm --build $(_HOST_DOCKER_USER_FLAG) skill-bundler
 _SKILL_BUNDLER_ARGS := \
 	--sources /workspace/skills/builtin-sources.yaml \
 	--lock /workspace/skills/builtin-skills.lock.json \
@@ -498,14 +505,14 @@ lazymind-cli-build:
 		cd local/lazymind-cli && $(GO) build -buildvcs=false -o "$(LAZYMIND_CLI_BIN)" ./cmd/lazymind; \
 	elif [ "$(HOST_GOOS)" != "unsupported" ] && [ "$(HOST_GOARCH)" != "unsupported" ]; then \
 		echo "🔨 Building the host Assistant Bridge with Docker ($(HOST_GOOS)/$(HOST_GOARCH))..."; \
-		docker run --rm \
-			--user "$$(id -u):$$(id -g)" \
+		$(_HOST_DOCKER_PREFIX) docker run --rm \
+			$(_HOST_DOCKER_USER_FLAG) \
 			-e CGO_ENABLED=0 -e GOOS="$(HOST_GOOS)" -e GOARCH="$(HOST_GOARCH)" \
 			-e GOCACHE=/tmp/go-cache -e GOMODCACHE=/tmp/go-mod \
 			-e GOPROXY="$(GOPROXY)" -e GOSUMDB="$(GOSUMDB)" \
 			-v "$(CURDIR):/src" -w /src/local/lazymind-cli \
 			"$(DOCKER_MIRROR)golang:1.25.11" \
-			go build -buildvcs=false -o /src/local/build/bin/lazymind ./cmd/lazymind; \
+			go build -buildvcs=false -o "/src/local/build/bin/$(LAZYMIND_CLI_FILENAME)" ./cmd/lazymind; \
 	else \
 		echo "❌ This host platform is not supported by the Docker Assistant Bridge builder."; \
 		exit 1; \
@@ -513,6 +520,7 @@ lazymind-cli-build:
 
 assistant-bridge-start: lazymind-cli-build
 	@"$(LAZYMIND_CLI_BIN)" assistant stop >/dev/null
+	@if [ "$(LAZYMIND_CLI_FILENAME)" = "lazymind.exe" ]; then rm -f "$(LOCAL_BUILD_DIR)/bin/lazymind"; fi
 	@"$(LAZYMIND_CLI_BIN)" assistant start >/dev/null
 	@echo "✅ LazyMind 助理桥接器已启动；可在设置 → 外部 Agent 集成中启用本机能力"
 

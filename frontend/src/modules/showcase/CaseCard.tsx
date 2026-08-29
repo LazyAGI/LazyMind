@@ -1,6 +1,12 @@
+import type { MouseEvent } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { ArrowRightOutlined, MessageOutlined, ScheduleOutlined } from "@ant-design/icons";
+import {
+  ArrowRightOutlined,
+  FireTwoTone,
+  MessageOutlined,
+  ScheduleOutlined,
+} from "@ant-design/icons";
 import {
   buildShowcaseLaunchPath,
   showcaseEntryType,
@@ -11,6 +17,8 @@ import type { ShowcaseCase } from "./api";
 interface CaseCardProps {
   item: ShowcaseCase;
   onTry?: (item: ShowcaseCase) => void;
+  primaryAction?: "try" | "details";
+  showWorkflowHot?: boolean;
 }
 
 const COVER_CLASS_BY_OUTPUT_TYPE: Record<string, string> = {
@@ -24,26 +32,36 @@ const COVER_CLASS_BY_OUTPUT_TYPE: Record<string, string> = {
   table: "table",
 };
 
-export default function CaseCard({ item, onTry }: CaseCardProps) {
+export default function CaseCard({
+  item,
+  onTry,
+  primaryAction = "try",
+  showWorkflowHot = false,
+}: CaseCardProps) {
   const { t } = useTranslation();
   const coverClass = COVER_CLASS_BY_OUTPUT_TYPE[item.output_type] || "report";
   const entryType = showcaseEntryType(item.type);
   const technologyType = showcaseTechnologyType(item.type);
   const entryTypeLabel = t(`showcase.filters.capability.${entryType}`);
   const technologyTypeLabel = t(`showcase.filters.technology.${technologyType}`);
+  const detailPath = `/agent/chat/cases/${encodeURIComponent(item.id)}`;
+  const launchPath = buildShowcaseLaunchPath(item.id, item.type);
+  const isDetailPrimary = primaryAction === "details";
+  const primaryPath = isDetailPrimary ? detailPath : launchPath;
+  const secondaryPath = isDetailPrimary ? launchPath : detailPath;
+  const handleTry = (event: MouseEvent<HTMLAnchorElement>) => {
+    if (!onTry) return;
+    event.preventDefault();
+    onTry(item);
+  };
 
   return (
     <article className="showcase-card">
       <Link
         className="showcase-card-image-link"
-        aria-label={t("showcase.try")}
-        to={buildShowcaseLaunchPath(item.id, item.type)}
-        onClick={(event) => {
-          if (onTry) {
-            event.preventDefault();
-            onTry(item);
-          }
-        }}
+        aria-label={t(isDetailPrimary ? "showcase.viewDetail" : "showcase.try")}
+        to={primaryPath}
+        onClick={isDetailPrimary ? undefined : handleTry}
       >
         <div className={`showcase-card-image-wrap showcase-card-cover-${coverClass}`}>
           <div className="showcase-card-image-stage">
@@ -53,6 +71,18 @@ export default function CaseCard({ item, onTry }: CaseCardProps) {
               alt=""
               loading="lazy"
             />
+            {showWorkflowHot && technologyType === "workflow" ? (
+              <span
+                className="showcase-workflow-hot"
+                role="img"
+                aria-label={t("showcase.workflowHotBadge")}
+              >
+                <FireTwoTone
+                  aria-hidden="true"
+                  twoToneColor={["#f97316", "#ffedd5"]}
+                />
+              </span>
+            ) : null}
           </div>
         </div>
       </Link>
@@ -62,13 +92,8 @@ export default function CaseCard({ item, onTry }: CaseCardProps) {
         <div className="showcase-card-title-row">
           <Link
             className="showcase-card-title-link"
-            to={buildShowcaseLaunchPath(item.id, item.type)}
-            onClick={(event) => {
-              if (onTry) {
-                event.preventDefault();
-                onTry(item);
-              }
-            }}
+            to={primaryPath}
+            onClick={isDetailPrimary ? undefined : handleTry}
           >
             <h3>{item.title}</h3>
             <span
@@ -83,9 +108,10 @@ export default function CaseCard({ item, onTry }: CaseCardProps) {
           </Link>
           <Link
             className="showcase-detail-link"
-            to={`/agent/chat/cases/${encodeURIComponent(item.id)}`}
+            to={secondaryPath}
+            onClick={isDetailPrimary ? handleTry : undefined}
           >
-            {t("showcase.viewDetail")}
+            {t(isDetailPrimary ? "showcase.experienceNow" : "showcase.viewDetail")}
             <ArrowRightOutlined aria-hidden="true" />
           </Link>
         </div>

@@ -184,6 +184,9 @@ describe("Showcase DetailPage", () => {
     expect(await screen.findByRole("heading", { name: "First detail" })).toBeInTheDocument();
     const previousButton = await screen.findByRole("button", { name: "showcase.detail.previousCase" });
     const nextButton = await screen.findByRole("button", { name: "showcase.detail.nextCase" });
+    const navigation = screen.getByRole("navigation", { name: "showcase.detail.caseNavigation" });
+    expect(navigation.parentElement).toHaveClass("showcase-detail-page");
+    expect(navigation.previousElementSibling).toHaveClass("showcase-detail-workbench");
     await waitFor(() => expect(nextButton).toBeEnabled());
     expect(previousButton).toBeDisabled();
 

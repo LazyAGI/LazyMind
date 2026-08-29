@@ -11,11 +11,11 @@ classification:
 presentation:
   card:
     title: Visual data reports
-    description: Upload Excel or CSV data and generate a report with metrics, charts, and insights
+    description: Turn operating data into a KPI dashboard with trends, efficiency, and recommended actions
     output_type: dashboard
     output_label: Data analysis report
     cover_asset: cover
-    result_summary: Turn a raw table into browsable KPIs, trends, structural analysis, and business findings
+    result_summary: Demonstrate the complete path from data validation to a management dashboard with an e-commerce example
   detail:
     title: Visual data reports
     description: Originally built into Qwen Office. Upload an Excel or CSV table and generate a visual report with KPIs, charts, detail tables, and analytical insights.
@@ -24,40 +24,39 @@ presentation:
 tasks:
   - id: executive-report
     selector:
-      title: Executive performance report
-      description: Summarize core metrics, trends, composition, and anomalies
+      title: E-commerce performance cockpit
+      description: Build a management report from six months of revenue, profit, and orders
       output_label: Performance analysis report
     launch:
-      prompt_short: Create an executive performance report from my uploaded data.
-      prompt: Read the uploaded Excel or CSV file, identify the business definitions and key metrics, and produce a visual HTML report with KPI cards, trends, structural comparisons, anomaly notes, and recommended actions. Do not invent missing data; ask me to clarify ambiguous fields.
+      prompt_short: Create an H1 2026 e-commerce performance report from the sample data.
+      prompt: >-
+        Use the Data Report Skill to analyze this January-June 2026 e-commerce data. Revenue in CNY 10k: 185, 196, 204, 218, 230, 250; profit in CNY 10k: 52, 56, 59, 64, 70, 82; orders: 7100, 7520, 7810, 8260, 8750, 10275. Produce a single-file HTML management report with KPI cards, revenue and profit trends, order changes, margin, notable anomalies, and three actionable recommendations. Use only the supplied data, state calculation definitions, and do not fabricate year-over-year values.
     replay:
       steps:
-        - title: Read and validate data
-          description: Check fields, types, date range, missing values, and outliers
+        - title: Align metric definitions
+          description: Validate six months of revenue, profit, orders, and units
         - title: Calculate core metrics
-          description: Summarize scale, growth, efficiency, and structural metrics
-        - title: Build the visual report
-          description: Arrange KPI, trend, comparison, and detail modules
-        - title: Extract business insights
-          description: Explain important changes, risks, and actionable recommendations
+          description: Summarize scale, growth, margin, and revenue per order
+        - title: Build the performance cockpit
+          description: Arrange KPI, dual-metric trend, and order modules
+        - title: Recommend business actions
+          description: Explain key changes, analytical limits, and next actions
     result:
-      template: generic_report_v1
+      template: html_preview_v1
       eyebrow: Performance analysis report
-      title: Core metrics and business insights
-      summary: Convert table data into a browsable dashboard, trend analysis, and recommended actions
-      highlights:
-        - KPIs and period-over-period changes
-        - Trend, composition, and anomaly analysis
-        - Business conclusions and recommended actions
+      title: H1 2026 e-commerce performance
+      summary: Turn six months of operating data into a KPI dashboard, trends, and recommended actions
+      html_asset: cockpit_output
 
   - id: trend-report
     selector:
       title: Trend analysis report
-      description: Focus on time series, growth rates, and anomalous inflection points
+      description: Analyze Jan-Jun 2026 DAU and conversion-rate trends and inflections
       output_label: Trend analysis report
     launch:
-      prompt_short: Analyze trends, growth, and anomalies in my uploaded data.
-      prompt: Read the uploaded data and analyze metric trends, growth rates, cycles, and anomalous inflection points over time. Use appropriate charts, produce a browsable HTML report, and state the data scope and analytical limits.
+      prompt_short: 'Example: analyze Jan-Jun 2026 DAU and conversion-rate trends.'
+      prompt: >-
+        Generate a trend analysis report from this sample data. Months: 2026-01 to 2026-06. Daily active users: 1200, 1350, 1320, 1510, 1690, 1820. Conversion rate (percent): 3.2, 3.5, 3.1, 3.9, 4.2, 4.0. Analyze trends, growth rates, and anomalous inflection points, produce a browsable HTML report, and state the data scope and analytical limits.
     replay:
       steps:
         - title: Align time definitions
@@ -69,23 +68,21 @@ tasks:
         - title: Summarize trend findings
           description: Explain growth, decline, volatility, and what to monitor next
     result:
-      template: generic_report_v1
+      template: html_preview_v1
       eyebrow: Trend analysis report
       title: Metric trends, growth, and anomalies
       summary: Focus on time-series changes, growth intervals, inflection points, and anomalies
-      highlights:
-        - Date range and metric definitions
-        - Growth rates and key inflection points
-        - Anomalies and monitoring recommendations
+      html_asset: trend_output
 
   - id: dimension-report
     selector:
       title: Multi-dimensional comparison
-      description: Compare performance across regions, channels, products, or audiences
+      description: Compare organic search, livestream, and community channel contribution
       output_label: Multi-dimensional report
     launch:
-      prompt_short: Compare my uploaded data across multiple dimensions.
-      prompt: Read the uploaded table, identify dimensions such as region, channel, product, or audience, aggregate and rank key metrics, and produce a visual HTML report with comparisons, details, and conclusions.
+      prompt_short: 'Example: compare revenue, orders, and average order value across three channels.'
+      prompt: >-
+        Generate a multi-dimensional analysis report from this sample data. Channels: organic search, livestream, community. Revenue (CNY 10k): 180, 150, 90. Orders: 4200, 3900, 2100. Users: 3000, 2800, 1600. Aggregate by channel, rank the groups, calculate contribution shares, and produce a visual HTML report with comparison charts, details, and conclusions.
     replay:
       steps:
         - title: Identify analysis dimensions
@@ -97,11 +94,8 @@ tasks:
         - title: Form recommendations
           description: Identify high and low performers and potential improvements
     result:
-      template: generic_report_v1
+      template: html_preview_v1
       eyebrow: Multi-dimensional report
       title: Group performance and contribution
       summary: Compare business dimensions by performance, contribution, and improvement opportunities
-      highlights:
-        - Group metrics and rankings
-        - Contribution structure and performance gaps
-        - Actions for high and low performers
+      html_asset: dimension_output

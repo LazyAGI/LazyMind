@@ -19,7 +19,8 @@ type DesktopApplicationState struct {
 }
 
 func InspectDesktopApplication(spec DesktopApplication) (DesktopApplicationState, error) {
-	state := DesktopApplicationState{Initialized: anyPathExists(spec.StatePaths)}
+	state := DesktopApplicationState{}
+	initialized := anyPathExists(spec.StatePaths)
 	if spec.BindingTarget != "" {
 		path, found, err := ExecutableBinding(spec.BindingTarget)
 		if err != nil {
@@ -32,8 +33,9 @@ func InspectDesktopApplication(spec DesktopApplication) (DesktopApplicationState
 		}
 	}
 	if !state.Installed {
-		state.Installed = platformDesktopInstalled(spec, state.Initialized)
+		state.Installed = platformDesktopInstalled(spec, initialized)
 	}
+	state.Initialized = state.Installed && initialized
 	return state, nil
 }
 

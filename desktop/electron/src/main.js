@@ -87,13 +87,12 @@ const maxStartupLogEntries = 1200;
 const maxSidecarFailureBytes = 32 * 1024;
 const desktopShutdownTimeout = process.env.LAZYMIND_DESKTOP_SHUTDOWN_TIMEOUT || "20s";
 const forceExitDelayMs = 1500;
-const rendererReadyTimeoutMs = 30 * 1000;
+const rendererReadyTimeoutMs = 120 * 1000;
 const runtimeOwnershipHandoffTimeoutMs = 30 * 1000;
 const agentHostRestartMaxDelayMs = 30 * 1000;
 const agentHostStableAfterMs = 60 * 1000;
 const agentConnectorActionTimeoutMs = 15 * 1000;
 const agentConnectorBindingTimeoutMs = 30 * 1000;
-const agentConnectorLoginTimeoutMs = 125 * 1000;
 const macInstallationWarmupMarker = macWarmupMarkerPath(app.getPath("userData"));
 const startupMetricsHistoryPath = path.join(desktopLogsDir, "startup-metrics.jsonl");
 const startupMetricsRecorder = createStartupMetricsRecorder({
@@ -124,6 +123,7 @@ let agentHostProcess;
 let agentHostRestartTimer;
 let agentHostStableTimer;
 let agentHostRestartAttempts = 0;
+const agentLoginProcesses = new Map();
 let runtimeProcessExit = null;
 let sidecarStderrTail = "";
 let sidecarStructuredFailure = "";
@@ -427,6 +427,22 @@ function captureSidecarChunk(source, chunk) {
       if (["phase.completed", "phase.failed"].includes(event?.event) && event?.phase === "python-payload") {
         updateStartupState({ progress: null });
       }
+      if (event?.phase === "history-injection-payload" && event?.event === "phase.started") {
+        updateStartupState({
+          status: "starting",
+          phase: "Preparing sample conversations",
+          message: "Verifying and unpacking the bundled sample conversations...",
+          progress: null,
+        });
+      }
+      if (event?.phase === "history-injection-payload" && event?.event === "phase.completed") {
+        updateStartupState({
+          status: "starting",
+          phase: "Sample conversations ready",
+          message: "Starting the local services and importing sample conversations...",
+          progress: null,
+        });
+      }
       if (["phase.failed", "startup.failed"].includes(event?.event) && event?.error) {
         sidecarStructuredFailure = String(event.error);
       }
@@ -527,9 +543,40 @@ function runAgentConnector(agent, action) {
   if (!allowedActions[agent]?.has(action)) {
     return Promise.reject(new Error(`Unsupported external Agent action: ${agent}/${action}`));
   }
+  if (action === "login") {
+    return startAgentLogin(agent);
+  }
   return runConnectorJSON(
     ["internal", "agent", agent, action],
-    action === "login" ? agentConnectorLoginTimeoutMs : agentConnectorActionTimeoutMs,
+    agentConnectorActionTimeoutMs,
+  );
+}
+
+function startAgentLogin(agent) {
+  agentLoginProcesses.get(agent)?.kill();
+  const child = spawn(agentConnectorPath, ["internal", "agent", agent, "login"], {
+    env: sidecarEnv(),
+    stdio: ["ignore", "ignore", "pipe"],
+    detached: false,
+    windowsHide: isWindows,
+  });
+  agentLoginProcesses.set(agent, child);
+  child.stderr?.on("data", (chunk) => appendStartupLog(`agent-login:${agent}`, chunk));
+  child.once("error", (error) => {
+    appendStartupLog(`agent-login:${agent}`, serializeError(error));
+  });
+  child.once("close", (code, signal) => {
+    if (agentLoginProcesses.get(agent) === child) {
+      agentLoginProcesses.delete(agent);
+    }
+    appendStartupLog(`agent-login:${agent}`, `exited with code ${code ?? "null"} signal ${signal ?? "null"}`);
+    if (!isQuitting) {
+      restartAgentHost();
+    }
+  });
+  return runConnectorJSON(
+    ["internal", "agent", agent, "status"],
+    agentConnectorActionTimeoutMs,
   );
 }
 
@@ -548,12 +595,7 @@ async function runExecutorConnector(provider, action) {
     agentConnectorActionTimeoutMs,
   );
   if (action !== "status") {
-    agentHostRestartAttempts = 0;
-    if (agentHostProcess) {
-      agentHostProcess.kill();
-    } else {
-      startAgentHost();
-    }
+    restartAgentHost();
   }
   return result;
 }
@@ -574,18 +616,22 @@ async function runAgentBinding(target, action, executablePath = "") {
   }
   const result = await runConnectorJSON(args, agentConnectorBindingTimeoutMs);
   if (action !== "status" && target.endsWith("-cli")) {
-    agentHostRestartAttempts = 0;
-    if (agentHostProcess) {
-      agentHostProcess.kill();
-    } else {
-      startAgentHost();
-    }
+    restartAgentHost();
   }
   return result;
 }
 
 function readAgentBindings() {
   return runConnectorJSON(["internal", "binding", "all", "status"], agentConnectorActionTimeoutMs);
+}
+
+function restartAgentHost() {
+  agentHostRestartAttempts = 0;
+  if (agentHostProcess) {
+    agentHostProcess.kill();
+  } else {
+    startAgentHost();
+  }
 }
 
 function runConnectorJSON(args, timeout) {
@@ -1101,6 +1147,10 @@ function beginFastQuit(reason = "quit") {
   agentHostStableTimer = undefined;
   agentHostProcess?.kill();
   agentHostProcess = undefined;
+  for (const child of agentLoginProcesses.values()) {
+    child.kill();
+  }
+  agentLoginProcesses.clear();
   const guardWillCleanUp = Boolean(guardPID || (!isWindows && guardProcess));
   if (!guardWillCleanUp) {
     spawnDetachedShutdownHelper(reason);
@@ -1769,7 +1819,9 @@ function createRendererReadyWait(window) {
   const timer = setTimeout(() => {
     if (settled) return;
     settled = true;
-    rejectPromise(new Error("LazyMind Chat did not render within 30 seconds"));
+    rejectPromise(
+      new Error(`LazyMind Chat did not render within ${rendererReadyTimeoutMs / 1000} seconds`),
+    );
   }, rendererReadyTimeoutMs);
   return {
     window,

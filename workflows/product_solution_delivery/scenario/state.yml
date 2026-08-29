@@ -124,10 +124,11 @@ steps:
       Use the latest approved direction_outline as the only structure. On first generation call
       product_writer_generate_document_from_inputs(stage_id="direction"). The business bridge reads
       immutable bound inputs, plans sections, streams/resumes Writer checkpoints, assembles the
-      draft and refreshes context. Do not call generic file/Artifact lookup tools or reconstruct
-      intermediate paths. Save its section_plan, chapter_files, document and writing_context paths
-      respectively as direction_section_plan, direction_chapters, direction_document and
-      direction_context_final. On rerun use targeted revision only with
+      draft and refreshes context. It publishes each optional chapter directly to direction_chapters;
+      do not save that slot again. Do not call generic file/Artifact lookup tools or reconstruct
+      intermediate paths. Save its section_plan, document and writing_context paths respectively as
+      direction_section_plan, direction_document and direction_context_final. Chapter publish
+      warnings are non-blocking; do not retry generation or call another tool for them. On rerun use targeted revision only with
       document_slot="direction_document". Stop for user editing and Continue approval.
     tools: [product_writer_generate_document_from_inputs, product_writer_revise_markdown]
     inputs:
@@ -215,9 +216,11 @@ steps:
       {{runtime_instruction}}
 
       Use the latest approved design_outline as the only structure. On first generation call
-      product_writer_generate_document_from_inputs(stage_id="design"). Save its section_plan,
-      chapter_files, document and writing_context paths respectively as design_section_plan,
-      design_chapters, design_document and design_context_final. The bridge owns file binding,
+      product_writer_generate_document_from_inputs(stage_id="design"). It publishes each optional
+      chapter directly to design_chapters; do not save that slot again. Save its section_plan,
+      document and writing_context paths respectively as design_section_plan, design_document and
+      design_context_final. Chapter publish warnings are non-blocking; do not retry generation or
+      call another tool for them. The bridge owns file binding,
       section planning, checkpoint streaming, assembly and context refresh; do not call generic
       file/Artifact tools or reconstruct intermediate paths. On rerun use targeted revision only
       with document_slot="design_document". Stop for user editing and Continue approval.
@@ -272,9 +275,11 @@ steps:
       {{runtime_instruction}}
 
       Use the latest approved prd_outline as the only structure. On first generation call
-      product_writer_generate_document_from_inputs(stage_id="prd"). Save its section_plan,
-      chapter_files, document and writing_context paths respectively as prd_section_plan,
-      prd_chapters, prd_document and prd_context_final. The bridge owns file binding, section
+      product_writer_generate_document_from_inputs(stage_id="prd"). It publishes each optional
+      chapter directly to prd_chapters; do not save that slot again. Save its section_plan, document
+      and writing_context paths respectively as prd_section_plan, prd_document and prd_context_final.
+      Chapter publish warnings are non-blocking; do not retry generation or call another tool for
+      them. The bridge owns file binding, section
       planning, checkpoint streaming, assembly and context refresh; do not call generic
       file/Artifact tools. Do not turn unknown product rules into facts. On rerun use targeted
       revision only with document_slot="prd_document". Stop for user editing and Continue approval.
@@ -362,9 +367,11 @@ steps:
       {{runtime_instruction}}
 
       Use the latest approved review_outline as the only structure. On first generation call
-      product_writer_generate_document_from_inputs(stage_id="review"). Save its section_plan,
-      chapter_files, document and writing_context paths respectively as review_section_plan,
-      review_chapters, review_document and review_context_final. The bridge owns file binding,
+      product_writer_generate_document_from_inputs(stage_id="review"). It publishes each optional
+      chapter directly to review_chapters; do not save that slot again. Save its section_plan,
+      document and writing_context paths respectively as review_section_plan, review_document and
+      review_context_final. Chapter publish warnings are non-blocking; do not retry generation or
+      call another tool for them. The bridge owns file binding,
       section planning, checkpoint streaming, assembly and context refresh; do not call generic
       file/Artifact tools. Preserve severity, evidence, affected layer and recommended action, and
       never silently modify reviewed upstream artifacts. On rerun use targeted revision only with
@@ -424,9 +431,11 @@ steps:
       {{runtime_instruction}}
 
       Use the latest approved handoff_outline as the only structure. On first generation call
-      product_writer_generate_document_from_inputs(stage_id="handoff"). Save its section_plan,
-      chapter_files, document and writing_context paths respectively as handoff_section_plan,
-      handoff_chapters, handoff_document and handoff_context_final. The bridge owns file binding,
+      product_writer_generate_document_from_inputs(stage_id="handoff"). It publishes each optional
+      chapter directly to handoff_chapters; do not save that slot again. Save its section_plan,
+      document and writing_context paths respectively as handoff_section_plan, handoff_document and
+      handoff_context_final. Chapter publish warnings are non-blocking; do not retry generation or
+      call another tool for them. The bridge owns file binding,
       section planning, checkpoint streaming, assembly and context refresh; do not call generic
       file/Artifact tools. On rerun use targeted revision only with
       document_slot="handoff_document". Readiness

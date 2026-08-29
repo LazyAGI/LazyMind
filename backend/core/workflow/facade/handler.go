@@ -17,6 +17,8 @@ import (
 	"github.com/gorilla/mux"
 	"gorm.io/gorm"
 	"lazymind/core/common"
+	corestore "lazymind/core/store"
+	"lazymind/core/subagent"
 	"lazymind/core/workflow/artifactfile"
 	workflowexecutor "lazymind/core/workflow/executor"
 	"lazymind/core/workflow/graphengine"
@@ -745,6 +747,10 @@ func (h Handler) Consume(w http.ResponseWriter, r *http.Request) {
 		fail(w, 503, "PREPARATION_CONSUME_FAILED", err.Error(), true)
 		return
 	}
+	sessionID := strings.TrimSpace(prepared.SessionID)
+	if sessionID == "" {
+		sessionID = req.SessionID
+	}
 	var preparedResult map[string]any
 	_ = json.Unmarshal(prepared.ResponseJSON, &preparedResult)
 	if status, _ := preparedResult["status"].(string); status != "" && status != "ready" {
@@ -768,26 +774,12 @@ func (h Handler) Consume(w http.ResponseWriter, r *http.Request) {
 		} else if original.OriginHost == "lazymind" {
 			conversationID = original.OriginRef
 		}
-		session, _, createErr := h.Store.CreateHostSession(r.Context(), owner, req.SessionID, conversationID,
-			original.OriginHost, original.OriginRef, original.ControllerHost, workflowPackage)
-		if createErr != nil {
-			code := "SESSION_CREATE_FAILED"
-			if errors.Is(createErr, workflowstore.ErrSessionConflict) {
-				code = "WORKFLOW_SESSION_CONFLICT"
-			}
-			fail(w, http.StatusConflict, code, createErr.Error(), false)
-			return
-		}
+		intentContext := ""
 		if strings.TrimSpace(original.RequestContext) != "" {
 			intentJSON, _ := json.Marshal(map[string]string{"text": original.RequestContext})
-			if intentErr := h.Store.UpdateSessionIntent(
-				r.Context(), session.ID, string(intentJSON),
-			); intentErr != nil {
-				fail(w, http.StatusServiceUnavailable, "SESSION_INTENT_STORE_FAILED", intentErr.Error(), true)
-				return
-			}
-			session.IntentContext = string(intentJSON)
+			intentContext = string(intentJSON)
 		}
+		bindings := make([]workflowstore.InputBinding, 0, len(original.InputBindings))
 		for materialID, raw := range original.InputBindings {
 			value, _ := raw.(map[string]any)
 			resourceID, _ := value["resource_id"].(string)
@@ -796,11 +788,35 @@ func (h Handler) Consume(w http.ResponseWriter, r *http.Request) {
 			if resourceID == "" {
 				continue
 			}
-			binding := workflowstore.InputBinding{WorkflowSessionID: session.ID, MaterialID: materialID,
-				ResourceType: "input_resource", ResourceID: resourceID, ResourceRevision: int64(revision),
-				ContentHash: hash, CreatedByCommandID: "prepare:" + prepared.ID}
-			if bindErr := h.Store.BindInput(r.Context(), owner, binding); bindErr != nil {
-				fail(w, http.StatusConflict, "INPUT_BINDING_CONFLICT", bindErr.Error(), false)
+			bindings = append(bindings, workflowstore.InputBinding{
+				MaterialID: materialID, ResourceType: "input_resource", ResourceID: resourceID,
+				ResourceRevision: int64(revision), ContentHash: hash,
+				CreatedByCommandID: "prepare:" + prepared.ID,
+			})
+		}
+		session, _, createErr := h.Store.CreateInitializedHostSession(
+			r.Context(), owner, sessionID, conversationID, original.OriginHost, original.OriginRef,
+			original.ControllerHost, workflowPackage, intentContext, bindings,
+		)
+		if createErr != nil {
+			code := "SESSION_CREATE_FAILED"
+			if errors.Is(createErr, workflowstore.ErrSessionConflict) {
+				code = "WORKFLOW_SESSION_CONFLICT"
+			}
+			fail(w, http.StatusConflict, code, createErr.Error(), false)
+			return
+		}
+		if session.ConversationID != "" && subagent.EventHooks != nil {
+			if eventErr := subagent.EventHooks.CallConversationEventChecked(
+				r.Context(), corestore.State(), session.ConversationID, "", "workflow_session_created", map[string]any{
+					"conversation_id": session.ConversationID,
+					"session_id":      session.ID,
+					"workflow_id":     session.WorkflowID,
+					"status":          session.Status,
+					"state_version":   session.StateVersion,
+				},
+			); eventErr != nil {
+				fail(w, http.StatusServiceUnavailable, "WORKFLOW_SESSION_EVENT_FAILED", eventErr.Error(), true)
 				return
 			}
 		}
