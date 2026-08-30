@@ -125,7 +125,8 @@ steps:
 
       {{runtime_instruction}}
 
-      Collect facts AND visual assets that should guide the presentation.
+      Collect facts and, when readily available and useful, optional visual
+      assets that should guide the presentation.
       Use the conversation, uploaded files, requirement analysis, and KB/web
       retrieval subject to the KB-first gate below.
 
@@ -181,15 +182,21 @@ steps:
          intent per query. Do not call web_search merely because it is available,
          because the topic is public, or to duplicate facts already found in KB.
          Use wikipedia only as a thin fallback under the same gate.
-      3. Images for slides (required when visuals would help, or the user /
-         analysis asks for photos/diagrams/产品图):
+      3. Images for slides (optional unless the user explicitly requires
+         specific photos/diagrams/产品图):
+         A deck may complete with zero material_images. CSS, SVG, and ECharts
+         are valid visual alternatives. Do not treat a generic desire for a
+         polished or visual deck as a hard image requirement.
          a) Register KB image hits first via ppt_register_material_images with
             [{"local_path":..., "caption":..., "source":"kb"}, ...]
             (image_url also works if local_path is absent).
-         b) Call ppt_search_web_images only when required slide visuals are still
+         b) Call ppt_search_web_images only when a useful slide visual is still
             missing after KB image retrieval, or when no applicable KB is available.
             Then register only the necessary results with
             [{"url":..., "caption":..., "source":"web"}, ...] for 2–6 chosen URLs.
+            If image search is unavailable or returns no usable URL, do not
+            retry repeatedly and do not fail the step. Record the gap in
+            material_summary and continue without material_images.
          c) AI-generated material images — ONLY when the user explicitly asks
             to generate/create material images for the deck (e.g. "生成素材图",
             "用 AI 画几张参考图", "AI generate reference images"). Then call:
@@ -239,11 +246,15 @@ steps:
         required: false
     outputs:
       - material: material_summary
+        required: true
       - material: material_images
+        required: false
     acceptance_criteria: |
       material_summary must be saved and must identify uploaded-file findings
       when files are present, references, useful evidence, gaps, and assumptions.
-      When KB/web/AI material images were needed, material_images should be
+      material_images is optional. Its absence must never fail or retry this
+      step; a text-only material_summary is sufficient. When usable KB/web/AI
+      material images were found, they should be
       registered via ppt_register_material_images / ppt_generate_material_images
       as individual image-list artifacts so the Materials tab can preview them
       and later steps can embed them in HTML.

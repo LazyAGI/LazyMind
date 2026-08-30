@@ -152,6 +152,7 @@ vi.mock('./ArtifactRewriteSelectionHighlight', () => ({
 }));
 
 import { MarkdownArtifactEditor } from './MarkdownArtifactEditor';
+import { SlotEditingContext } from './slotEditingContext';
 
 function rect(): DOMRect {
   return {
@@ -625,6 +626,7 @@ describe('MarkdownArtifactEditor rewrite selection highlight', () => {
         '![图1 雨后山间溪流图](https://example.com/rain.png)',
       ].join('\n'),
       11,
+      'draft',
     );
   });
 
@@ -682,6 +684,38 @@ describe('MarkdownArtifactEditor rewrite selection highlight', () => {
 });
 
 describe('MarkdownArtifactEditor autosave', () => {
+  it('uses a checkpoint when pending edits are flushed at a version boundary', async () => {
+    const onSave = vi.fn(async () => 8);
+    let flush: (() => Promise<boolean>) | undefined;
+    render(
+      <SlotEditingContext.Provider value={{
+        setEditing: vi.fn(),
+        registerFlush: (_key, callback) => {
+          flush = callback;
+          return () => undefined;
+        },
+        registerFooterAction: () => () => undefined,
+      }}>
+        <MarkdownArtifactEditor
+          markdown='Initial draft'
+          sourceRevision={7}
+          editingKey='writer:document'
+          onSave={onSave}
+        />
+      </SlotEditingContext.Provider>,
+    );
+    const editable = screen.getByTestId('markdown-editable');
+    editable.textContent = 'Checkpoint edit';
+    fireEvent.input(editable);
+
+    await waitFor(() => expect(flush).toBeDefined());
+    await act(async () => {
+      expect(await flush?.()).toBe(true);
+    });
+
+    expect(onSave).toHaveBeenCalledWith('Checkpoint edit', 7, 'checkpoint');
+  });
+
   it('replaces clean backend updates without remounting or moving the viewport', async () => {
     vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
       callback(0);
@@ -735,7 +769,7 @@ describe('MarkdownArtifactEditor autosave', () => {
       await act(async () => {
         vi.advanceTimersByTime(1_000);
       });
-      expect(onSave).toHaveBeenCalledWith('Local draft', 7);
+      expect(onSave).toHaveBeenCalledWith('Local draft', 7, 'draft');
       await act(async () => {
         resolveSave?.({ markdown: 'Backend normalized draft', revision: 8 });
         await Promise.resolve();
@@ -786,7 +820,7 @@ describe('MarkdownArtifactEditor autosave', () => {
         await Promise.resolve();
       });
       expect(onSave).toHaveBeenCalledTimes(1);
-      expect(onSave).toHaveBeenCalledWith('Final edit', 7);
+      expect(onSave).toHaveBeenCalledWith('Final edit', 7, 'draft');
       expect(screen.queryByText('chat.writerMarkdown.saved')).toBeNull();
     } finally {
       vi.useRealTimers();
@@ -816,7 +850,7 @@ describe('MarkdownArtifactEditor autosave', () => {
       await act(async () => {
         vi.advanceTimersByTime(1_000);
       });
-      expect(onSave).toHaveBeenCalledWith('First edit', 7);
+      expect(onSave).toHaveBeenCalledWith('First edit', 7, 'draft');
 
       editable.textContent = 'Second edit';
       fireEvent.input(editable);
@@ -834,7 +868,7 @@ describe('MarkdownArtifactEditor autosave', () => {
         await Promise.resolve();
       });
       expect(onSave).toHaveBeenCalledTimes(2);
-      expect(onSave).toHaveBeenLastCalledWith('Second edit', 8);
+      expect(onSave).toHaveBeenLastCalledWith('Second edit', 8, 'draft');
     } finally {
       vi.useRealTimers();
     }

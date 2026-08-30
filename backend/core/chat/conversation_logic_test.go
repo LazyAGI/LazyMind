@@ -87,6 +87,97 @@ func TestEphemeralConversationIsHiddenUntilPromoted(t *testing.T) {
 	}
 }
 
+func TestConversationPinningOrdersHistoryWithoutChangingUpdatedAt(t *testing.T) {
+	database := newPromptTestDB(t)
+	db := database.DB
+	store.Init(db, nil, nil)
+	t.Cleanup(func() { store.Init(nil, nil, nil) })
+
+	baseTime := time.Date(2026, time.August, 30, 8, 0, 0, 0, time.UTC)
+	for _, conversation := range []orm.Conversation{
+		{
+			ID: "older", DisplayName: "Older conversation",
+			BaseModel: orm.BaseModel{CreateUserID: "u1", CreateUserName: "User 1", CreatedAt: baseTime, UpdatedAt: baseTime},
+		},
+		{
+			ID: "newer", DisplayName: "Newer conversation",
+			BaseModel: orm.BaseModel{CreateUserID: "u1", CreateUserName: "User 1", CreatedAt: baseTime.Add(time.Hour), UpdatedAt: baseTime.Add(time.Hour)},
+		},
+		{
+			ID: "other-user", DisplayName: "Other user's conversation",
+			BaseModel: orm.BaseModel{CreateUserID: "u2", CreateUserName: "User 2", CreatedAt: baseTime, UpdatedAt: baseTime},
+		},
+	} {
+		if err := db.Create(&conversation).Error; err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	callPin := func(conversationID string, pinned bool) *httptest.ResponseRecorder {
+		action := PinConversation
+		if !pinned {
+			action = UnpinConversation
+		}
+		req := httptest.NewRequest(http.MethodPost, "/api/core/conversations/"+conversationID, nil)
+		req = mux.SetURLVars(req, map[string]string{"conversation_id": conversationID})
+		req.Header.Set("X-User-Id", "u1")
+		rec := httptest.NewRecorder()
+		action(rec, req)
+		return rec
+	}
+	list := func() []struct {
+		ID       string     `json:"conversation_id"`
+		IsPinned bool       `json:"is_pinned"`
+		PinnedAt *time.Time `json:"pinned_at"`
+	} {
+		req := httptest.NewRequest(http.MethodGet, "/api/core/conversations?is_task_conv=false", nil)
+		req.Header.Set("X-User-Id", "u1")
+		rec := httptest.NewRecorder()
+		ListConversations(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("list status=%d body=%s", rec.Code, rec.Body.String())
+		}
+		var response struct {
+			Conversations []struct {
+				ID       string     `json:"conversation_id"`
+				IsPinned bool       `json:"is_pinned"`
+				PinnedAt *time.Time `json:"pinned_at"`
+			} `json:"conversations"`
+		}
+		if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+			t.Fatal(err)
+		}
+		return response.Conversations
+	}
+
+	if rec := callPin("older", true); rec.Code != http.StatusOK {
+		t.Fatalf("pin status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	var older orm.Conversation
+	if err := db.First(&older, "id = ?", "older").Error; err != nil {
+		t.Fatal(err)
+	}
+	if older.PinnedAt == nil {
+		t.Fatal("expected pinned_at to be set")
+	}
+	if !older.UpdatedAt.Equal(baseTime) {
+		t.Fatalf("pin changed updated_at: got %v want %v", older.UpdatedAt, baseTime)
+	}
+	if got := list(); len(got) != 2 || got[0].ID != "older" || !got[0].IsPinned || got[0].PinnedAt == nil {
+		t.Fatalf("pinned conversation was not first: %#v", got)
+	}
+
+	if rec := callPin("other-user", true); rec.Code != http.StatusNotFound {
+		t.Fatalf("pin other user's conversation status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if rec := callPin("older", false); rec.Code != http.StatusOK {
+		t.Fatalf("unpin status=%d body=%s", rec.Code, rec.Body.String())
+	}
+	if got := list(); len(got) != 2 || got[0].ID != "newer" || got[1].ID != "older" || got[1].IsPinned || got[1].PinnedAt != nil {
+		t.Fatalf("unpinned conversation did not return to chronological order: %#v", got)
+	}
+}
+
 func TestPersistentEphemeralConversationHasNoExpiry(t *testing.T) {
 	database := newPromptTestDB(t)
 	db := database.DB

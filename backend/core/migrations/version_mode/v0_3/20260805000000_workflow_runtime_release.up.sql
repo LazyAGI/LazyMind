@@ -483,6 +483,7 @@ ALTER TABLE conversations ADD COLUMN IF NOT EXISTS source_type VARCHAR(32) NOT N
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS source_dataset_id VARCHAR(255) NOT NULL DEFAULT '';
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS source_document_id VARCHAR(255) NOT NULL DEFAULT '';
 ALTER TABLE conversations ADD COLUMN IF NOT EXISTS source_display_name VARCHAR(255) NOT NULL DEFAULT '';
+ALTER TABLE conversations ADD COLUMN IF NOT EXISTS pinned_at TIMESTAMP NULL;
 CREATE TABLE IF NOT EXISTS conversation_archive_folders (
     id VARCHAR(36) PRIMARY KEY,
     user_id VARCHAR(255) NOT NULL,
@@ -499,6 +500,9 @@ CREATE INDEX IF NOT EXISTS idx_conversations_user_archive_folder
     ON conversations(create_user_id, archive_folder_id, archived_at);
 CREATE INDEX IF NOT EXISTS idx_conversations_user_ephemeral_history
     ON conversations(create_user_id, is_ephemeral, deleted_at, archived_at, is_task_conv, updated_at);
+CREATE INDEX IF NOT EXISTS idx_conversations_user_pinned_history
+    ON conversations(create_user_id, pinned_at DESC, updated_at DESC)
+    WHERE deleted_at IS NULL AND archived_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_conversations_user_source
     ON conversations(create_user_id, source_type, source_document_id, is_ephemeral, updated_at);
 CREATE INDEX IF NOT EXISTS idx_conversations_ephemeral_expiry
@@ -530,6 +534,7 @@ ALTER TABLE conversations ADD COLUMN source_type VARCHAR(32) NOT NULL DEFAULT ''
 ALTER TABLE conversations ADD COLUMN source_dataset_id VARCHAR(255) NOT NULL DEFAULT '';
 ALTER TABLE conversations ADD COLUMN source_document_id VARCHAR(255) NOT NULL DEFAULT '';
 ALTER TABLE conversations ADD COLUMN source_display_name VARCHAR(255) NOT NULL DEFAULT '';
+ALTER TABLE conversations ADD COLUMN pinned_at DATETIME NULL;
 CREATE TABLE IF NOT EXISTS conversation_archive_folders (
     id VARCHAR(36) PRIMARY KEY,
     user_id VARCHAR(255) NOT NULL,
@@ -546,6 +551,9 @@ CREATE INDEX IF NOT EXISTS idx_conversations_user_archive_folder
     ON conversations(create_user_id, archive_folder_id, archived_at);
 CREATE INDEX IF NOT EXISTS idx_conversations_user_ephemeral_history
     ON conversations(create_user_id, is_ephemeral, deleted_at, archived_at, is_task_conv, updated_at);
+CREATE INDEX IF NOT EXISTS idx_conversations_user_pinned_history
+    ON conversations(create_user_id, pinned_at DESC, updated_at DESC)
+    WHERE deleted_at IS NULL AND archived_at IS NULL;
 CREATE INDEX IF NOT EXISTS idx_conversations_user_source
     ON conversations(create_user_id, source_type, source_document_id, is_ephemeral, updated_at);
 CREATE INDEX IF NOT EXISTS idx_conversations_ephemeral_expiry

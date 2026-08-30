@@ -22,7 +22,7 @@ type TaskCenterTask struct {
 	WindowStart       *time.Time `gorm:"column:window_start"`
 	WindowEnd         *time.Time `gorm:"column:window_end"`
 	TriggerType       string     `gorm:"column:trigger_type;type:varchar(32);not null;default:'manual'"`
-	Attempt           int        `gorm:"column:attempt;not null;default:1"`
+	Attempt           int        `gorm:"column:attempt;not null;default:1"` // Dependency scheduler increments this to fence stale claims.
 	DefinitionVersion int        `gorm:"column:definition_version;not null;default:1"`
 	DependencyStatus  string     `gorm:"column:dependency_status;type:varchar(32);not null;default:'none'"`
 	HasLateInputs     bool       `gorm:"column:has_late_inputs;not null;default:false"`

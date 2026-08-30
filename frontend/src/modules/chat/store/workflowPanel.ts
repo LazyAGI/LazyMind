@@ -199,7 +199,11 @@ export interface SlotRevision {
   provider_document_id?: string;
   /** Most recent local revision confirmed equal to the cloud document. */
   last_synced_revision?: number;
-  /** Number of revisions for this (slot_id, list_index) — used to show version badge. */
+  /** User-visible version number for the selected revision. Mutable drafts reuse the previous number. */
+  version_number?: number;
+  /** User-visible version number most recently confirmed equal to the cloud document. */
+  last_synced_version?: number;
+  /** Number of user-visible versions for this (slot_id, list_index). */
   revision_count?: number;
 }
 
@@ -472,6 +476,8 @@ export function hydrateWorkflowUI(raw: unknown, fallbackName?: string): Workflow
 
 export interface SlotVersionEntry {
   revision: number;
+  /** User-visible version number. Writer working drafts are excluded from this sequence. */
+  version?: number;
   change_source: "ai" | "human" | "provider_sync";
   created_at: string;
   selected: boolean;

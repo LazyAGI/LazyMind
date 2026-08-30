@@ -46,6 +46,10 @@ specific file into `runtime/` and note it here.
 uses web tools only for a concrete gap; it can complete without web access when
 the request, uploads, or KB are sufficient:
 
+`material_images` is optional. An unavailable image-search backend or an empty
+image result does not fail collection or block outline/page generation; the deck
+can use CSS, SVG, and ECharts instead.
+
 1. KB/web hits → `ppt_register_material_images`
 2. **Only if the user explicitly asks** for AI-generated material images →
    `ppt_generate_material_images` (framework `image_generator`) → same Pool B

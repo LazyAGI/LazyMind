@@ -6,6 +6,8 @@ import {
   FolderOutlined,
   FilePdfOutlined,
   MoreOutlined,
+  PushpinFilled,
+  PushpinOutlined,
 } from "@ant-design/icons";
 import classnames from "classnames";
 import {
@@ -109,7 +111,41 @@ export interface RecordListImperativeProps {
 
 const { Search } = Input;
 
-type ConversationGroup = "today" | "recentWeek" | "earlier";
+type SidebarConversation = Conversation & {
+  pinned_at?: string | null;
+  is_pinned?: boolean;
+  source_type?: string;
+  source_display_name?: string;
+};
+
+type ConversationGroup = "pinned" | "today" | "recentWeek" | "earlier";
+
+function isConversationPinned(conversation: SidebarConversation) {
+  return conversation.is_pinned === true || Boolean(conversation.pinned_at);
+}
+
+function conversationTime(value?: string | null) {
+  const parsed = dayjs(value);
+  return parsed.isValid() ? parsed.valueOf() : 0;
+}
+
+function sortConversationHistory(conversations: SidebarConversation[]) {
+  return [...conversations].sort((left, right) => {
+    const leftPinned = isConversationPinned(left);
+    const rightPinned = isConversationPinned(right);
+    if (leftPinned !== rightPinned) {
+      return leftPinned ? -1 : 1;
+    }
+    if (leftPinned) {
+      return (
+        conversationTime(right.pinned_at) - conversationTime(left.pinned_at)
+      );
+    }
+    return (
+      conversationTime(right.update_time) - conversationTime(left.update_time)
+    );
+  });
+}
 
 function getConversationGroup(updateTime?: string): ConversationGroup {
   const parsedTime = dayjs(updateTime);
@@ -141,13 +177,14 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
       searchText,
       title,
     } = props;
-    const [historyList, setHistoryList] = useState<Conversation[]>([]);
+    const [historyList, setHistoryList] = useState<SidebarConversation[]>([]);
     const [keyword, setKeyword] = useState("");
     const [pageToken, setPageToken] = useState("");
     const [checkedList, setCheckedList] = useState<string[]>([]);
     const [showBatchExport, setShowBatchExport] = useState(false);
     const [isHistoryLoading, setIsHistoryLoading] = useState(true);
     const [archiveItem, setArchiveItem] = useState<Conversation | null>(null);
+    const [pinningConversationId, setPinningConversationId] = useState("");
     // convTypeFilter: which conversation types to show. Default = normal only (no task convs).
     // Values: 'normal' = non-task, 'task' = task. Multiple values allowed.
     const [convTypeFilter, setConvTypeFilter] = useState<string[]>(() => {
@@ -166,6 +203,7 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     const deleteHistoryInFlightRef = useRef(false);
     const deleteHistoryLastInvokeRef = useRef(0);
     const batchDeleteInFlightRef = useRef(false);
+    const pinningConversationRef = useRef(false);
     const { setThink } = useChatThinkStore();
     const { setNewMessage } = useChatNewMessageStore();
 
@@ -192,15 +230,25 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
     }, [keyword]);
 
     const groupedHistoryList = useMemo(() => {
-      const groups: Record<ConversationGroup, Conversation[]> = {
+      const groups: Record<ConversationGroup, SidebarConversation[]> = {
+        pinned: [],
         today: [],
         recentWeek: [],
         earlier: [],
       };
       historyList.forEach((item) => {
+        if (isConversationPinned(item)) {
+          groups.pinned.push(item);
+          return;
+        }
         groups[getConversationGroup(item.update_time)].push(item);
       });
       return [
+        {
+          key: "pinned" as const,
+          title: t("chat.conversationGroupPinned"),
+          items: groups.pinned,
+        },
         {
           key: "today" as const,
           title: t("chat.conversationGroupToday"),
@@ -257,14 +305,14 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
 
           const next = bumpConversationToTop(prev, conversationId, {
             displayName: detail.displayName,
-          });
+          }) as SidebarConversation[];
           window.requestAnimationFrame(() => {
             document.getElementById(scrollableTargetId)?.scrollTo({
               top: 0,
               behavior: "smooth",
             });
           });
-          return next;
+          return sortConversationHistory(next);
         });
       };
 
@@ -324,11 +372,14 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
             : undefined,
         )
         .then((res) => {
-          const conversations: Conversation[] = res?.data?.conversations ?? [];
+          const conversations: SidebarConversation[] =
+            res?.data?.conversations ?? [];
           setHistoryList(
-            isMore
-              ? [...(historyList || []), ...(conversations || [])]
-              : conversations,
+            sortConversationHistory(
+              isMore
+                ? [...(historyList || []), ...(conversations || [])]
+                : conversations,
+            ),
           );
           setPageToken(res.data.next_page_token || "");
         })
@@ -359,6 +410,52 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         })
         .finally(() => {
           deleteHistoryInFlightRef.current = false;
+        });
+    }
+
+    function setConversationPinned(
+      conversation: SidebarConversation,
+      pinned: boolean,
+    ) {
+      if (pinningConversationRef.current) {
+        return;
+      }
+      const conversationId = conversation.conversation_id || "";
+      if (!conversationId) {
+        return;
+      }
+      pinningConversationRef.current = true;
+      setPinningConversationId(conversationId);
+      return ChatServiceApi()
+        .conversationServiceSetPinned(conversationId, pinned)
+        .then((res) => {
+          const pinnedAt = pinned
+            ? res.data?.pinned_at || new Date().toISOString()
+            : null;
+          setHistoryList((previous) =>
+            sortConversationHistory(
+              previous.map((item) =>
+                item.conversation_id === conversationId
+                  ? { ...item, is_pinned: pinned, pinned_at: pinnedAt }
+                  : item,
+              ),
+            ),
+          );
+          message.success(
+            t(
+              pinned
+                ? "chat.pinConversationSuccess"
+                : "chat.unpinConversationSuccess",
+            ),
+          );
+          document.getElementById(scrollableTargetId)?.scrollTo({ top: 0 });
+        })
+        .catch(() => {
+          message.error(t("chat.pinConversationFailed"));
+        })
+        .finally(() => {
+          pinningConversationRef.current = false;
+          setPinningConversationId("");
         });
     }
 
@@ -510,12 +607,13 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
         });
     }
 
-    function renderItemText(params: { item: Conversation; selected: boolean }) {
+    function renderItemText(params: {
+      item: SidebarConversation;
+      selected: boolean;
+    }) {
       const { item, selected } = params;
-      const source = item as Conversation & {
-        source_type?: string;
-        source_display_name?: string;
-      };
+      const source = item;
+      const pinned = isConversationPinned(item);
       return (
         <div
           className={classnames("record", { selected })}
@@ -547,10 +645,34 @@ const RecordList = forwardRef<RecordListImperativeProps, IRecordList>(
           {!showBatchExport ? (
             <Dropdown
               trigger={["click"]}
-              menu={{ items: [
-                { key: "archive", icon: <FolderOutlined />, label: t("settingsPage.recovery.archiveAction"), onClick: () => setArchiveItem(item) },
-                { key: "trash", icon: <DeleteOutlined />, danger: true, label: t("settingsPage.recovery.moveToTrash"), onClick: () => confirmDeleteHistory(item) },
-              ] }}
+              menu={{
+                items: [
+                  {
+                    key: pinned ? "unpin" : "pin",
+                    icon: pinned ? <PushpinFilled /> : <PushpinOutlined />,
+                    label: t(
+                      pinned
+                        ? "chat.unpinConversation"
+                        : "chat.pinConversation",
+                    ),
+                    disabled: Boolean(pinningConversationId),
+                    onClick: () => setConversationPinned(item, !pinned),
+                  },
+                  {
+                    key: "archive",
+                    icon: <FolderOutlined />,
+                    label: t("settingsPage.recovery.archiveAction"),
+                    onClick: () => setArchiveItem(item),
+                  },
+                  {
+                    key: "trash",
+                    icon: <DeleteOutlined />,
+                    danger: true,
+                    label: t("settingsPage.recovery.moveToTrash"),
+                    onClick: () => confirmDeleteHistory(item),
+                  },
+                ],
+              }}
             >
               <Button
                 type="text"

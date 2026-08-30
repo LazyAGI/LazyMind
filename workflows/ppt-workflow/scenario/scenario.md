@@ -17,10 +17,11 @@ Workflow:
 
 1. `analyze_requirements` — goal, audience, length, visual style, constraints.
 2. `collect_materials` — always runs after analysis; uses supplied KB first and
-   calls web tools only for a concrete remaining gap; collects facts and
-   registers images (`ppt_search_web_images` +
+   calls web tools only for a concrete remaining gap; collects facts and may
+   optionally register images (`ppt_search_web_images` +
    `ppt_register_material_images`, or `ppt_generate_material_images` only when
-   the user explicitly asks for AI material images) so later HTML embeds them.
+   the user explicitly asks for AI material images) so later HTML can embed them.
+   Missing images never block the workflow; slides can use CSS/SVG/ECharts.
 3. `build_outline` — one call: `ppt_build_outline` → `slide_outline[page1..]`.
 4. `generate_ppt` — one call: `ppt_generate_pages`; no outline rewrite.
 

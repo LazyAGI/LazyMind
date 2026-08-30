@@ -9,10 +9,30 @@ import (
 	"testing"
 )
 
+func TestLazyLLMVersionUsesRepositoryPin(t *testing.T) {
+	t.Setenv("LAZYMIND_LAZYLLM_VERSION", "")
+	repo := t.TempDir()
+	const pinnedVersion = "9.8.7a6"
+	if err := os.WriteFile(filepath.Join(repo, "LAZYLLM_VERSION"), []byte(pinnedVersion+"\n"), 0o644); err != nil {
+		t.Fatalf("write LazyLLM version: %v", err)
+	}
+	version, err := lazyLLMVersion(repo)
+	if err != nil {
+		t.Fatalf("read LazyLLM version: %v", err)
+	}
+	if version != pinnedVersion {
+		t.Fatalf("LazyLLM version = %q, want %q", version, pinnedVersion)
+	}
+}
+
 func TestAlgorithmPreparePythonPinsSetuptoolsForLocalVenv(t *testing.T) {
 	installFakeUVOnPath(t)
 	repo := t.TempDir()
 	writeComposeFixture(t, repo)
+	const pinnedVersion = "9.8.7a6"
+	if err := os.WriteFile(filepath.Join(repo, "LAZYLLM_VERSION"), []byte(pinnedVersion+"\n"), 0o644); err != nil {
+		t.Fatalf("write LazyLLM version: %v", err)
+	}
 	if err := os.MkdirAll(filepath.Join(repo, "algorithm", "lazyllm", "lazyllm"), 0o755); err != nil {
 		t.Fatalf("mkdir lazyllm submodule fixture: %v", err)
 	}
@@ -63,7 +83,7 @@ func TestAlgorithmPreparePythonPinsSetuptoolsForLocalVenv(t *testing.T) {
 			return CommandResult{}, nil
 		},
 		func(cmd Command) (CommandResult, error) {
-			assertCommand(t, cmd, "uv", "pip", "install", "--python", paths.AlgorithmPython, "--link-mode", "copy", "--strict", "lazyllm==1.3.0a1")
+			assertCommand(t, cmd, "uv", "pip", "install", "--python", paths.AlgorithmPython, "--link-mode", "copy", "--strict", "lazyllm=="+pinnedVersion)
 			return CommandResult{}, nil
 		},
 		func(cmd Command) (CommandResult, error) {

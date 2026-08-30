@@ -60,6 +60,27 @@ def test_ppt_analysis_has_one_deterministic_kb_first_collection_route():
     assert 'Do not call web_search merely because it is available' in prompt
 
 
+def test_ppt_material_images_are_optional_and_search_failure_can_continue():
+    state = yaml.safe_load(
+        (_repo_root() / 'workflows' / 'ppt-workflow' / 'scenario' / 'state.yml').read_text(
+            encoding='utf-8'))
+
+    collect = state['steps']['collect_materials']
+    outputs = {
+        output['material']: output.get('required', True)
+        for output in collect['outputs']
+    }
+
+    assert outputs == {
+        'material_summary': True,
+        'material_images': False,
+    }
+    assert 'A deck may complete with zero material_images' in collect['prompt']
+    assert 'do not fail the step' in collect['prompt']
+    criteria = ' '.join(collect['acceptance_criteria'].split())
+    assert 'Its absence must never fail or retry this step' in criteria
+
+
 def test_register_material_images_publishes_one_previewable_image_per_new_file(
     monkeypatch, tmp_path,
 ):

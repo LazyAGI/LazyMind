@@ -45,6 +45,9 @@ type writerDocumentSaveBody struct {
 	BaseRevision int             `json:"base_revision"`
 	Document     json.RawMessage `json:"document"`
 	Slot         string          `json:"slot"`
+	// Mode controls versioning: "draft" updates the selected human artifact in
+	// place when possible; "checkpoint" (default) creates a new revision.
+	Mode string `json:"mode"`
 }
 
 type writerDocumentRenderBody struct {
@@ -299,8 +302,8 @@ func RenderWriterDocument(w http.ResponseWriter, r *http.Request) {
 	common.ReplyOK(w, result)
 }
 
-// SaveWriterDocument saves an IR or Markdown edit as a new revision.
-// It returns the re-materialized document and its representation.
+// SaveWriterDocument persists an IR or Markdown edit as a mutable draft or a
+// versioned checkpoint. It returns the re-materialized document and representation.
 func SaveWriterDocument(w http.ResponseWriter, r *http.Request) {
 	sessionID := common.PathVar(r, "session_id")
 	if sessionID == "" {
@@ -311,6 +314,14 @@ func SaveWriterDocument(w http.ResponseWriter, r *http.Request) {
 	if json.NewDecoder(r.Body).Decode(&body) != nil || body.BaseRevision <= 0 ||
 		len(body.Document) == 0 {
 		common.ReplyErr(w, "invalid body", http.StatusBadRequest)
+		return
+	}
+	mode := body.Mode
+	if mode == "" {
+		mode = "checkpoint"
+	}
+	if mode != "draft" && mode != "checkpoint" {
+		common.ReplyErr(w, "invalid mode: must be draft or checkpoint", http.StatusBadRequest)
 		return
 	}
 	slot, ok := writerDocumentSlot(body.Slot)
@@ -400,12 +411,26 @@ func SaveWriterDocument(w http.ResponseWriter, r *http.Request) {
 		common.ReplyErr(w, "marshal writerdocument artifact failed", http.StatusInternalServerError)
 		return
 	}
-	revision, err := workflow.WriteSlotRevisionWithHumanArtifact(
-		ctx, db, sessionID, draft.Revision.SlotID, draft.Revision.Slot,
-		draft.Revision.StepID, draft.Revision.Attempt, "single", nil,
-		"json", artifact, nil,
-		&body.BaseRevision,
-	)
+	var revision *orm.WorkflowSlotRevision
+	if mode == "draft" {
+		updated, updatedInPlace, updateErr := workflow.UpdateSelectedHumanArtifactValue(
+			ctx, db, sessionID, draft.Revision.SlotID, nil,
+			"json", artifact, nil, &body.BaseRevision,
+		)
+		if updateErr != nil {
+			err = updateErr
+		} else if updatedInPlace {
+			revision = updated
+		}
+	}
+	if revision == nil && err == nil {
+		revision, err = workflow.WriteSlotRevisionWithHumanArtifact(
+			ctx, db, sessionID, draft.Revision.SlotID, draft.Revision.Slot,
+			draft.Revision.StepID, draft.Revision.Attempt, "single", nil,
+			"json", artifact, nil,
+			&body.BaseRevision,
+		)
+	}
 	if err != nil {
 		if errors.Is(err, workflow.ErrConflict) || errors.Is(err, gorm.ErrRecordNotFound) {
 			currentRevision := 0

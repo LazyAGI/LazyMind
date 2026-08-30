@@ -541,7 +541,7 @@ services:
           - doc-server
 
   # ---------- Algorithm stack: MinerU/PaddleOCR -> Processor (server + worker) <-> Parsing (Document) <- Chat ----------
-  # Base image (lazyllm[rag]==1.3.0a1) is shared; mineru extra/backend are configured by env.
+  # The shared base image uses the LazyLLM version pinned in LAZYLLM_VERSION.
   mineru:
     profiles:
       - mineru

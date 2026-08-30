@@ -5,6 +5,7 @@ import { useWorkflowStore, type SlotRevision } from '@/modules/chat/store/workfl
 const workflowApi = vi.hoisted(() => ({
   getSlots: vi.fn(),
   renderWriterDocument: vi.fn(),
+  saveWriterDocument: vi.fn(),
 }));
 
 vi.mock('@/modules/chat/utils/request', async (importOriginal) => ({
@@ -21,7 +22,17 @@ vi.mock('./FilePreviewDrawer', () => ({
 }));
 
 vi.mock('./MarkdownArtifactEditor', () => ({
-  MarkdownArtifactEditor: () => null,
+  MarkdownArtifactEditor: ({
+    onSave,
+    sourceRevision,
+  }: {
+    onSave: (markdown: string, revision: number, mode: 'draft') => Promise<unknown>;
+    sourceRevision: number;
+  }) => (
+    <button type='button' onClick={() => void onSave('# Edited draft', sourceRevision, 'draft')}>
+      save markdown draft
+    </button>
+  ),
 }));
 
 vi.mock('./WriterDownloadFormat', () => ({
@@ -52,6 +63,9 @@ function writerSlot(revision: number): SlotRevision {
     slot: 'draft_document',
     created_at: '2026-08-18T00:00:00Z',
     artifact_value: { path: 'draft_document.lmd' },
+    change_source: 'ai',
+    revision_count: 1,
+    version_number: 1,
   };
 }
 
@@ -74,6 +88,49 @@ describe('SlotWriterDocument render refresh', () => {
     workflowApi.getSlots.mockReset();
     workflowApi.getSlots.mockResolvedValue({ data: { data: { slots: [] } } });
     workflowApi.renderWriterDocument.mockReset();
+    workflowApi.saveWriterDocument.mockReset();
+  });
+
+  it('persists Markdown autosaves as drafts without creating checkpoints', async () => {
+    workflowApi.renderWriterDocument.mockResolvedValue(renderedMarkdown('# Initial draft'));
+    workflowApi.saveWriterDocument.mockResolvedValue({
+      data: {
+        code: 0,
+        message: 'ok',
+        data: {
+          title: 'Writer document',
+          representation: 'markdown',
+          document: '# Edited draft',
+          revision: 3,
+        },
+      },
+    });
+
+    render(
+      <SlotRenderer
+        slot={writerSlot(3)}
+        widget={{ widgetType: 'writer-document' }}
+        sessionId='writer-session'
+        slotId='draft_document'
+      />,
+    );
+
+    fireEvent.click(await screen.findByRole('button', { name: 'save markdown draft' }));
+
+    await waitFor(() => {
+      expect(workflowApi.saveWriterDocument).toHaveBeenCalledWith(
+        'writer-session',
+        3,
+        '# Edited draft',
+        'draft_document',
+        'draft',
+        { silentError: true },
+      );
+    });
+    await waitFor(() => {
+      expect(document.querySelector('.workflow-slot__writer-writeback-summary')).toHaveTextContent('草稿');
+      expect(document.querySelector('.workflow-slot__writer-writeback-summary')).not.toHaveTextContent('v3');
+    });
   });
 
   it('does not let a canceled stale request replace the latest successful render', async () => {
@@ -167,6 +224,15 @@ describe('Writer version diff text', () => {
         revision: 2,
         change_source: 'human',
         created_at: '2026-08-27T16:26:04Z',
+        selected: false,
+        content_snapshot: '# 工作草稿',
+      },
+      {
+        revision: 3,
+        version: 2,
+        change_source: 'provider_sync',
+        provider_synced: true,
+        created_at: '2026-08-27T16:28:04Z',
         selected: true,
         content_snapshot: '# 第二版',
       },
@@ -179,8 +245,10 @@ describe('Writer version diff text', () => {
         slotId='draft_document'
         listIndex={-1}
         revisionCount={2}
-        currentRevision={2}
+        currentRevision={3}
+        currentVersionNumber={2}
         currentValue='# 第二版'
+        currentChangeSource='provider_sync'
       />,
     );
 
@@ -212,5 +280,108 @@ describe('Writer version diff text', () => {
       expect(document.querySelector('.workflow-slot__version-current-text')).toHaveTextContent('# 初版');
     });
     expect(document.querySelector('.workflow-slot__version-apply-btn')).toHaveTextContent('v1');
+  });
+
+  it('shows the first manual edit as a draft instead of a numbered version', async () => {
+    const getSlotVersions = vi.fn().mockResolvedValue([
+      {
+        revision: 1,
+        version: 1,
+        change_source: 'ai',
+        created_at: '2026-08-30T03:12:00Z',
+        selected: false,
+        content_snapshot: '# AI 初稿',
+      },
+      {
+        revision: 2,
+        change_source: 'human',
+        created_at: '2026-08-30T03:14:03Z',
+        selected: true,
+        content_snapshot: '# 人工草稿',
+      },
+    ]);
+    useWorkflowStore.setState({ getSlotVersions });
+
+    const { container } = render(
+      <SlotVersionPopover
+        sessionId='writer-session'
+        slotId='draft_document'
+        listIndex={-1}
+        revisionCount={1}
+        currentRevision={2}
+        currentVersionNumber={1}
+        currentValue='# 人工草稿'
+        currentChangeSource='human'
+      />,
+    );
+
+    const versionButton = container.querySelector<HTMLButtonElement>('.workflow-slot__version-btn')!;
+    expect(versionButton).toHaveClass('workflow-slot__version-btn--draft');
+    expect(versionButton).not.toHaveTextContent('v2');
+
+    fireEvent.click(versionButton);
+    await waitFor(() => expect(document.querySelector('.workflow-slot__version-diff')).not.toBeNull());
+
+    const versionItems = Array.from(document.querySelectorAll('.workflow-slot__version-item'));
+    expect(versionItems).toHaveLength(2);
+    expect(versionItems[0]).toHaveClass('workflow-slot__version-item--draft');
+    expect(versionItems[1]).toHaveTextContent('v1');
+    expect(document.querySelector('.workflow-slot__version-popover')).not.toHaveTextContent('v2');
+  });
+
+  it('does not show an unchanged final paragraph as a full remove/add pair', async () => {
+    const retainedParagraph = '这一段内容没有修改，应该保持为普通上下文。';
+    const removedParagraph = '这一句才是实际被删除的内容。';
+    const getSlotVersions = vi.fn().mockResolvedValue([
+      {
+        revision: 1,
+        change_source: 'ai',
+        created_at: '2026-08-30T03:12:00Z',
+        selected: false,
+        content_snapshot: `# 标题\n\n${retainedParagraph}\n\n${removedParagraph}`,
+      },
+      {
+        revision: 2,
+        change_source: 'human',
+        created_at: '2026-08-30T03:14:03Z',
+        selected: false,
+        content_snapshot: `# 标题\n\n${retainedParagraph}`,
+      },
+      {
+        revision: 3,
+        version: 2,
+        change_source: 'provider_sync',
+        provider_synced: true,
+        created_at: '2026-08-30T03:15:03Z',
+        selected: true,
+        content_snapshot: `# 标题\n\n${retainedParagraph}`,
+      },
+    ]);
+    useWorkflowStore.setState({ getSlotVersions });
+
+    const { container } = render(
+      <SlotVersionPopover
+        sessionId='writer-session'
+        slotId='draft_document'
+        listIndex={-1}
+        revisionCount={2}
+        currentRevision={3}
+        currentVersionNumber={2}
+        currentValue={`# 标题\n\n${retainedParagraph}`}
+        currentChangeSource='provider_sync'
+      />,
+    );
+
+    fireEvent.click(container.querySelector<HTMLButtonElement>('.workflow-slot__version-btn')!);
+    await waitFor(() => expect(document.querySelector('.workflow-slot__version-diff')).not.toBeNull());
+
+    const unchangedLines = Array.from(document.querySelectorAll('.memory-diff-line.is-same'));
+    const removedLines = Array.from(document.querySelectorAll('.memory-diff-line.is-remove'));
+    const addedLines = Array.from(document.querySelectorAll('.memory-diff-line.is-add'));
+
+    expect(unchangedLines.some((line) => line.textContent?.includes(retainedParagraph))).toBe(true);
+    expect(removedLines.some((line) => line.textContent?.includes(retainedParagraph))).toBe(false);
+    expect(addedLines.some((line) => line.textContent?.includes(retainedParagraph))).toBe(false);
+    expect(removedLines.some((line) => line.textContent?.includes(removedParagraph))).toBe(true);
   });
 });

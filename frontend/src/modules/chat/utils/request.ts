@@ -493,11 +493,13 @@ export function WorkflowSessionApi() {
       baseRevision: number,
       document: RenderedWriterDocument,
       slot: WriterDocumentSlot,
+      mode: SlotSaveMode,
       options?: RawAxiosRequestConfig,
     ) {
       const payload: Record<string, unknown> = {
         base_revision: baseRevision,
         document,
+        mode,
       };
       if (slot !== 'draft_document') payload.slot = slot;
       return axiosInstance.post<{
@@ -700,6 +702,21 @@ export function ChatServiceApi() {
             keyword: requestParameters.keyword,
           },
         },
+      );
+    },
+    conversationServiceSetPinned(
+      conversationId: string,
+      pinned: boolean,
+      options?: RawAxiosRequestConfig,
+    ) {
+      return axiosInstance.post<{
+        conversation_id: string;
+        is_pinned: boolean;
+        pinned_at?: string | null;
+      }>(
+        `${coreApiBaseUrl}/conversations/${encodeURIComponent(conversationId)}:${pinned ? "pin" : "unpin"}`,
+        undefined,
+        options,
       );
     },
     conversationServiceDeleteConversation(

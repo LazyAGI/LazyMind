@@ -1558,6 +1558,8 @@ func GetConversationDetail(w http.ResponseWriter, r *http.Request) {
 			"total_feedback_unlike": unlikeCnt,
 			"create_time":           c.CreatedAt.UTC().Format(time.RFC3339),
 			"update_time":           c.UpdatedAt.UTC().Format(time.RFC3339),
+			"pinned_at":             c.PinnedAt,
+			"is_pinned":             c.PinnedAt != nil,
 			"models":                models,
 			"enable_workflow":       c.EnableWorkflow,
 			"workflow_mode":         c.WorkflowMode,
@@ -1681,6 +1683,54 @@ func PromoteConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeConversationJSON(w, http.StatusOK, map[string]any{"conversation_id": convID})
+}
+
+// PinConversation keeps a conversation at the top of its owner's active history.
+func PinConversation(w http.ResponseWriter, r *http.Request) {
+	setConversationPinned(w, r, true)
+}
+
+// UnpinConversation restores a conversation to chronological history ordering.
+func UnpinConversation(w http.ResponseWriter, r *http.Request) {
+	setConversationPinned(w, r, false)
+}
+
+func setConversationPinned(w http.ResponseWriter, r *http.Request, pinned bool) {
+	conversationID := strings.TrimSpace(mux.Vars(r)["conversation_id"])
+	if conversationID == "" {
+		common.ReplyErr(w, "invalid conversation name", http.StatusBadRequest)
+		return
+	}
+	userID := store.UserID(r)
+	if userID == "" {
+		userID = "0"
+	}
+
+	var pinnedAt any
+	if pinned {
+		pinnedAt = time.Now().UTC()
+	}
+	result := store.DB().WithContext(r.Context()).Model(&orm.Conversation{}).
+		Where(
+			"id = ? AND create_user_id = ? AND deleted_at IS NULL AND archived_at IS NULL",
+			conversationID,
+			userID,
+		).
+		UpdateColumn("pinned_at", pinnedAt)
+	if result.Error != nil {
+		common.ReplyErr(w, result.Error.Error(), http.StatusInternalServerError)
+		return
+	}
+	if result.RowsAffected == 0 {
+		common.ReplyErr(w, "conversation not found", http.StatusNotFound)
+		return
+	}
+
+	writeConversationJSON(w, http.StatusOK, map[string]any{
+		"conversation_id": conversationID,
+		"is_pinned":       pinned,
+		"pinned_at":       pinnedAt,
+	})
 }
 
 func archiveConversation(
@@ -1863,7 +1913,12 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 	var total int64
 	q.Count(&total)
 	var list []orm.Conversation
-	q.Order("updated_at DESC").Offset(offset).Limit(pageSize).Find(&list)
+	q.Order("CASE WHEN pinned_at IS NULL THEN 1 ELSE 0 END ASC").
+		Order("pinned_at DESC").
+		Order("updated_at DESC").
+		Offset(offset).
+		Limit(pageSize).
+		Find(&list)
 	conversationIDs := make([]string, 0, len(list))
 	for _, conversation := range list {
 		conversationIDs = append(conversationIDs, conversation.ID)
@@ -1909,6 +1964,8 @@ func ListConversations(w http.ResponseWriter, r *http.Request) {
 			"total_feedback_unlike": unlikeCnt,
 			"create_time":           c.CreatedAt.UTC().Format(time.RFC3339),
 			"update_time":           c.UpdatedAt.UTC().Format(time.RFC3339),
+			"pinned_at":             c.PinnedAt,
+			"is_pinned":             c.PinnedAt != nil,
 			"models":                models,
 			"is_task_conv":          c.IsTaskConv,
 			"chat_executor":         c.ChatExecutor,

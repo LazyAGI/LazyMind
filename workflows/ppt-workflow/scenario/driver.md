@@ -26,7 +26,9 @@ Allowed verdicts: PASS, RETRY, DONE, FAIL.
 - When the brief needed real photos/diagrams, prefer that
   `ppt_register_material_images` ran (one previewable `material_images` image
   list item per registered visual, rather than a text/path inventory) so
-  later steps can embed them in HTML — but do not FAIL solely for missing images
+  later steps can embed them in HTML
+- `material_images` is optional. Zero images is valid even when image search was
+  unavailable or returned no result; never RETRY or FAIL for missing images
 - Missing material_summary -> RETRY
 - 2 consecutive failures -> FAIL
 - This step must not be skipped. It may finish without web calls when user/KB

@@ -19,9 +19,24 @@ import (
 
 const (
 	algorithmHealthTimeout = 15 * time.Minute
-	defaultLazyLLMVersion  = "1.3.0a1"
 	tiktokenReadyFileName  = "tiktoken-gpt2.ready"
 )
+
+func lazyLLMVersion(repoRoot string) (string, error) {
+	if version := strings.TrimSpace(os.Getenv("LAZYMIND_LAZYLLM_VERSION")); version != "" {
+		return version, nil
+	}
+	path := filepath.Join(repoRoot, "LAZYLLM_VERSION")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("read LazyLLM version from %s: %w", path, err)
+	}
+	version := strings.TrimSpace(string(data))
+	if version == "" {
+		return "", fmt.Errorf("LazyLLM version file %s is empty", path)
+	}
+	return version, nil
+}
 
 type AlgorithmServiceSpec struct {
 	Name       string
@@ -333,6 +348,10 @@ func (m *AlgorithmServiceManager) ensureTiktokenCache(ctx context.Context, paths
 }
 
 func (m *AlgorithmServiceManager) installAlgorithmPythonDeps(ctx context.Context, paths RuntimePaths, includeEvo bool) error {
+	version, err := lazyLLMVersion(paths.RepoRoot)
+	if err != nil {
+		return err
+	}
 	lazyllm := venvExecutable(paths.AlgorithmVenv, "lazyllm")
 	uv, ok := uvCommand()
 	if !ok {
@@ -340,7 +359,7 @@ func (m *AlgorithmServiceManager) installAlgorithmPythonDeps(ctx context.Context
 	}
 	installSteps := []Command{
 		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "setuptools<81"), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
-		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "lazyllm=="+envText("LAZYMIND_LAZYLLM_VERSION", defaultLazyLLMVersion)), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
+		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "lazyllm=="+version), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
 		{Name: lazyllm, Args: []string{"install", "rag"}, Dir: paths.RepoRoot, Env: pythonDependencyCacheEnv(paths)},
 		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "-r", filepath.Join(paths.RepoRoot, "algorithm", "requirements.txt")), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
 		{Name: uv, Args: localPythonPipInstallArgs(paths.AlgorithmPython, "-r", filepath.Join(paths.RepoRoot, "algorithm", "requirements-local.txt")), Dir: paths.RepoRoot, Env: pythonRuntimeEnv(paths)},
@@ -358,8 +377,12 @@ func (m *AlgorithmServiceManager) installAlgorithmPythonDeps(ctx context.Context
 }
 
 func algorithmReadyStamp(paths RuntimePaths, includeEvo bool) (string, error) {
+	version, err := lazyLLMVersion(paths.RepoRoot)
+	if err != nil {
+		return "", err
+	}
 	hash := sha256.New()
-	_, _ = hash.Write([]byte("lazyllm==" + envText("LAZYMIND_LAZYLLM_VERSION", defaultLazyLLMVersion)))
+	_, _ = hash.Write([]byte("lazyllm==" + version))
 	_, _ = hash.Write([]byte{0})
 	files := []string{
 		filepath.Join(paths.RepoRoot, "algorithm", "requirements.txt"),

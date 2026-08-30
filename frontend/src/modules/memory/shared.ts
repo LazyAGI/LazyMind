@@ -503,7 +503,17 @@ export const serializeStructuredAsset = (
 };
 
 export const buildDiffLines = (beforeText: string, afterText: string): DiffLine[] => {
-  const segments = diffLines(beforeText, afterText);
+  // diffLines treats a missing final newline as part of the last line. When a
+  // later paragraph is deleted, that can make an unchanged final paragraph
+  // appear as a full remove/add pair. Normalize non-empty snapshots to the
+  // same EOF convention so only the actual content change is highlighted.
+  const stableBeforeText = beforeText && !beforeText.endsWith("\n")
+    ? `${beforeText}\n`
+    : beforeText;
+  const stableAfterText = afterText && !afterText.endsWith("\n")
+    ? `${afterText}\n`
+    : afterText;
+  const segments = diffLines(stableBeforeText, stableAfterText);
   const lines: DiffLine[] = [];
 
   segments.forEach((segment) => {
