@@ -859,7 +859,7 @@
 }
 .settings-system-tools-stack.has-local-dependencies {
   display: grid;
-  grid-template-rows: minmax(420px, 2fr) minmax(220px, 1fr);
+  grid-template-rows: minmax(0, 2fr) minmax(220px, 1fr);
 }
 .settings-system-tools-stack > .model-provider-service-category { margin: 0; }
 .settings-integrated-surface.is-system-tools .model-provider-tool-management-section {
